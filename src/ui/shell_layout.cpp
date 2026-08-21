@@ -550,7 +550,8 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         add_action("diagnostics-backup", L"CREATE INI BACKUP",
                    model.status().game_detected);
         add_action("diagnostics-flex-restore", L"RESTORE ORIGINAL FLEX");
-        add_action("diagnostics-repair-package", L"IMPORT REQUIRED FILES");
+        add_action("diagnostics-auto-repair", L"AUTO REPAIR FROM GITHUB");
+        add_action("diagnostics-repair-package", L"IMPORT LOCAL PACKAGE");
         cursor = grid_base + kActionStride + 8.0F;
         add_section("diagnostics-reports-section", L"REPORTS", cursor);
         cursor += 34.0F;
@@ -654,6 +655,9 @@ std::optional<std::wstring> action_help_text(std::string_view action_id) {
     }
     if (action_id == "diagnostics-repair-package") {
         return L"Select a complete matching KF2OptimizerNext folder. Only missing or damaged files with verified SHA-256 values are imported; the running EXE is never replaced.";
+    }
+    if (action_id == "diagnostics-auto-repair") {
+        return L"Downloads only the GitHub release matching this exact installed version, then replaces missing or damaged files after build-identity and SHA-256 verification. The running EXE is never replaced.";
     }
     if (action_id == "diagnostics-export-support") {
         return L"Exports a bounded local support package. Nothing is uploaded.";

@@ -10,15 +10,16 @@ explicit runtime acknowledgements and automatic restoration.
 ## Download
 
 The current ready-to-run Windows package is
-<a href="../../releases/tag/v0.0.1-alpha">Alpha 0.0.1</a>.
+<a href="../../releases/tag/v0.0.2-alpha">Alpha 0.0.2</a>.
 Download the ZIP, extract the complete `KF2OptimizerNext` folder, and start
 `KF2Optimizer.exe`. Building from source is only required for development.
 
 If a required companion file is later missing or damaged, open
-**Diagnostics & Backup** and choose **Import Required Files**. Select another
-complete, extracted package of the same version. The app verifies the build
-identity and every SHA-256 value before importing only the files that need
-repair, then asks for a restart. It never replaces the running executable.
+**Diagnostics & Backup** and choose **Auto Repair from GitHub**. The app
+downloads only the release asset for its exact installed version, verifies the
+build identity and every SHA-256 value, replaces only missing or damaged files,
+and then asks for a restart. It never replaces the running executable. Use
+**Import Local Package** as the offline fallback.
 
 The executable is currently unsigned, so Windows SmartScreen may display a
 warning on first launch. The release page publishes the ZIP checksum.

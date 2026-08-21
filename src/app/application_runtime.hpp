@@ -19,6 +19,7 @@
 #include <system_error>
 #include <utility>
 #include <vector>
+#include <memory>
 
 #include "kf2/app/build_identity.hpp"
 #include "kf2/backup/restore_transaction.hpp"
@@ -55,6 +56,8 @@ struct TelemetryFrame;
 }
 
 namespace kf2::app {
+
+struct PackageRepairAsyncState;
 
 optimizer::AdaptivePolicy adaptive_policy_from(
     const config::Settings& settings) noexcept;
@@ -155,6 +158,7 @@ struct UiRuntime {
     bool flex_adaptive_constrained{false};
     bool high_resolution_animation_timer{false};
     StartMode start_mode{StartMode::normal};
+    std::shared_ptr<PackageRepairAsyncState> package_repair_state;
 
     void append_gameplay_report_fields(
         diagnostics::ProductReport& report) const noexcept;
@@ -186,6 +190,10 @@ struct UiRuntime {
     void update_overlay_scene_gate();
 
     void runtime_tick();
+
+    void start_auto_package_repair();
+
+    void poll_auto_package_repair();
 
     void system_resume();
 

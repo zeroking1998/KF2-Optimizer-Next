@@ -1,7 +1,7 @@
 #include "kf2/app/build_identity.hpp"
 
 #ifndef KF2_VERSION
-#define KF2_VERSION "0.0.1-alpha"
+#define KF2_VERSION "0.0.2-alpha"
 #endif
 
 #ifndef KF2_BUILD_COMMIT

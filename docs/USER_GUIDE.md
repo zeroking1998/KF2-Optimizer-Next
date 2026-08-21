@@ -15,17 +15,22 @@ Normal release packages already contain every required runtime companion file.
 If one is removed or damaged, the app starts in Safe Mode instead of trusting
 an incomplete package.
 
-1. Download and fully extract another copy of the same release.
-2. Open **Diagnostics & Backup** in the running app.
-3. Select **Import Required Files**.
-4. Select the complete extracted `KF2OptimizerNext` folder. Selecting its
-   parent folder also works when it contains exactly that folder.
-5. Restart KF2 Optimizer after the verified import completes.
+1. Open **Diagnostics & Backup** in the running app.
+2. Select **Auto Repair from GitHub**.
+3. Wait for the exact installed release to be downloaded and verified in the
+   background.
+4. Restart KF2 Optimizer after the verified repair completes.
 
-The repair accepts only a package with the same build identity and an
+Auto Repair never uses a generic latest-release address. An installation with
+version `0.0.2-alpha` requests only tag `v0.0.2-alpha` and its identically
+versioned Windows ZIP. The repair accepts only the same build identity and an
 identical verified executable. Every imported companion file must match the
-package SHA-256 manifest. Writes are atomic, the running executable is never
-replaced, and no file is downloaded or uploaded by the app.
+package SHA-256 manifest. Writes are atomic and the running executable is
+never replaced.
+
+If the PC is offline, select **Import Local Package** and choose a complete
+extracted package of the same version. Selecting its parent folder also works
+when it contains exactly the `KF2OptimizerNext` folder.
 
 No KF2 SDK or compilation is required for the ready-to-run ZIP. The executable
 is currently unsigned, so Windows SmartScreen may display a warning on first

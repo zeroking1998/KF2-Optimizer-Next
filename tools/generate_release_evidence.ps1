@@ -96,7 +96,7 @@ $metadata | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evide
 $sbom = [ordered]@{
     bomFormat = 'CycloneDX'; specVersion = '1.5'; version = 1
     metadata = [ordered]@{ component = [ordered]@{
-        type='application'; name='KF2 Optimizer Next'; version='0.0.1-alpha'
+        type='application'; name='KF2 Optimizer Next'; version='0.0.2-alpha'
         licenses=@([ordered]@{ license=[ordered]@{ id='GPL-3.0-only' } })
     } }
     components = @(

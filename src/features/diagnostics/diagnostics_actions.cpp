@@ -418,6 +418,12 @@ app::runtime::DispatchResult repair_package(
     return app::runtime::DispatchResult::handled;
 }
 
+app::runtime::DispatchResult auto_repair_package(
+    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
+    runtime.start_auto_package_repair();
+    return app::runtime::DispatchResult::handled;
+}
+
 app::runtime::DispatchResult flex_audit(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
     if (!runtime.installation) {
