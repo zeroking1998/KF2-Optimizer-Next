@@ -28,7 +28,7 @@ that binary.
 
 ## Public binary release
 
-The project owner authorized the free public `v0.1.0-beta.1` portable package.
+The project owner authorized the free public `v0.1.0-beta.2` portable package.
 It contains the project executable, the project-built FleX laboratory
 forwarder, the hash-pinned telemetry module compiled from the published
 UnrealScript source, integrity metadata, and license documentation.

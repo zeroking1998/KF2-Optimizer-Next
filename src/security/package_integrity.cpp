@@ -15,11 +15,18 @@
 namespace kf2::security {
 namespace {
 
-constexpr std::array<std::string_view, 6> kPayloadPaths{
+constexpr std::array<std::string_view, 13> kPayloadPaths{
     "KF2Optimizer.exe",
     "Data/Lab/flexRelease_x64.forwarder-lab.dll",
     "Data/Lab/KF2OptimizerTelemetry.u",
     "Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md",
+    "Data/Documentation/README.md",
+    "Data/Documentation/USER_GUIDE.md",
+    "Data/Documentation/FEATURE_REFERENCE.md",
+    "Data/Documentation/SAFETY.md",
+    "Data/Documentation/SUPPORT.md",
+    "Data/Documentation/LICENSE",
+    "Data/Documentation/THIRD_PARTY_NOTICES.md",
     "Data/Documentation/issue72-feature-inventory.json",
     "Data/Documentation/PresentMon-LICENSE.txt",
 };
@@ -158,10 +165,13 @@ Result<PackageIntegrityAudit> audit_package_integrity(
             invalid(document.error().message));
     }
     const auto lines = split_lines(document.value());
-    if (lines.size() != 10 || lines[0] != "schema_version=1" ||
+    const std::string expected_file_count =
+        "file_count=" + std::to_string(kPayloadPaths.size());
+    if (lines.size() != kPayloadPaths.size() + 4 ||
+        lines[0] != "schema_version=1" ||
         lines[1] != "product=KF2OptimizerNext" ||
         !lines[2].starts_with("source_identity=") ||
-        lines[3] != "file_count=6") {
+        lines[3] != expected_file_count) {
         return Result<PackageIntegrityAudit>::success(
             invalid(L"Package integrity document has an incompatible schema"));
     }
