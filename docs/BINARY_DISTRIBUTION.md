@@ -28,11 +28,21 @@ that binary.
 
 ## Public binary release
 
-Do not upload the portable package as a GitHub Release until an independent
-review confirms that every binary and asset may be distributed together under
-compatible terms. At minimum, review the installed KF2/UDK agreement, the
-compiled telemetry package, the optional FleX forwarder/runtime relationship,
-and corresponding-source obligations.
+The project owner authorized the free public `v0.1.0-beta.1` portable package.
+It contains the project executable, the project-built FleX laboratory
+forwarder, the hash-pinned telemetry module compiled from the published
+UnrealScript source, integrity metadata, and license documentation.
+
+It does not contain the KF2 game or SDK, original KF2 assets or binaries, or
+KF2's original NVIDIA FleX runtime. Users must provide a legitimate installed
+copy of Killing Floor 2. The release remains an unsigned beta and is clearly
+identified as an unofficial community project.
+
+An independent redistribution and GPL-compatibility review remains recommended
+before treating binary publication policy as final. Review the installed
+KF2/UDK agreement, the compiled telemetry module, the project forwarder's
+relationship to the separately installed FleX runtime, and corresponding-source
+obligations before changing the release contents.
 
 This document records a conservative publication boundary; it is not legal
 advice.

@@ -21,12 +21,18 @@ decisions that require an owner.
 - [x] Locally SDK-compiled telemetry package excluded from the public source
   repository
 
-## Required before calling the project open source
+## Current publication state
 
-- [ ] Confirm the chosen project name and public repository owner
+- [x] Confirm project name `KF2 Optimizer Next` and public repository owner
+- [x] Configure repository topics, description, issues, and Windows CI
+- [x] Publish the source repository with a fresh, reviewed history
+- [x] Publish the owner-authorized `v0.1.0-beta.1` portable pre-release
+
+## Remaining release-hardening work
+
 - [ ] Complete independent binary-release redistribution review
 - [ ] Configure branch protection and required Windows CI checks
-- [ ] Add repository topics, description, and a first signed release
+- [ ] Obtain a trusted code-signing certificate and publish a signed release
 
 ## Publication boundary
 
@@ -35,9 +41,9 @@ enclosing workspace Git history: its removed historical objects include
 old ZIP/EXE releases, an original FleX runtime, large audit datasets, and
 German-only legacy planning documents that are not part of the active product.
 
-The initial GitHub repository is source-only. Do not upload the portable binary
-package as a public Release until the
-[binary distribution review](BINARY_DISTRIBUTION.md) is complete.
+Generated binaries remain outside source control. The owner-authorized portable
+beta is distributed only through GitHub Releases and follows the documented
+[binary distribution boundary](BINARY_DISTRIBUTION.md).
 
 ## License decision
 

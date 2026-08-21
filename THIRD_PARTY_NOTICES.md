@@ -25,8 +25,10 @@ The public source repository does not include the KF2 game, the KF2 SDK,
 original game assets, or the locally compiled
 `assets/offline_telemetry/KF2OptimizerTelemetry.u` package. That package is
 generated from the adjacent project-authored UnrealScript source and requires a
-separately installed official KF2 SDK. It is intentionally ignored until its
-public binary-distribution terms receive an independent review. See
+separately installed official KF2 SDK. It remains ignored in source control;
+ready-to-run releases may include the hash-pinned compiled module and its
+corresponding published source. Releases still contain no KF2 game, SDK, or
+original game asset. See
 [`docs/BINARY_DISTRIBUTION.md`](docs/BINARY_DISTRIBUTION.md).
 
 ## NVIDIA FleX

@@ -7,6 +7,16 @@ explicit runtime acknowledgements and automatic restoration.
 
 > This project is not affiliated with or endorsed by Tripwire Interactive.
 
+## Download
+
+The current ready-to-run Windows package is
+<a href="../../releases/tag/v0.1.0-beta.1">v0.1.0 Beta 1</a>.
+Download the ZIP, extract the complete `KF2OptimizerNext` folder, and start
+`KF2Optimizer.exe`. Building from source is only required for development.
+
+The executable is currently unsigned, so Windows SmartScreen may display a
+warning on first launch. The release page publishes the ZIP checksum.
+
 ## What it does
 
 - Measures live FPS, average FPS, 1% low FPS, frame time, CPU, GPU, and memory.
@@ -49,7 +59,9 @@ the control remains unavailable instead of pretending to work.
 
 ## Quick start
 
-1. Download or build the portable package.
+1. Download the portable ZIP from the
+   <a href="../../releases">Releases page</a>,
+   or build it from source if you are contributing.
 2. Keep `KF2Optimizer.exe` beside its `Data` directory.
 3. Start the optimizer, review the detected game and configuration paths, and
    select a target FPS.
@@ -107,7 +119,9 @@ KF2 Optimizer Next is free and open-source software licensed under the
 [GNU General Public License v3.0 only](LICENSE), SPDX identifier
 `GPL-3.0-only`. Modified and redistributed versions must preserve the freedoms
 and obligations of that license. Third-party components retain their own
-licenses. The initial public repository is source-only: the locally compiled
-KF2 telemetry package is excluded pending a separate binary-distribution
-review. See [Binary distribution](docs/BINARY_DISTRIBUTION.md) and
+licenses. Generated binaries, including `KF2OptimizerTelemetry.u`, remain
+excluded from source control. Ready-to-run release packages may include the
+hash-pinned telemetry module built from the published UnrealScript source; they
+do not include the KF2 game, SDK, or original NVIDIA FleX runtime. See
+[Binary distribution](docs/BINARY_DISTRIBUTION.md) and
 [Third-party notices](THIRD_PARTY_NOTICES.md).
