@@ -1,8 +1,8 @@
 # KF2 Optimizer Next - current project status
 
-**Date:** 2026-08-20
-**Active source:** `KF2Optimizer/`
-**Active branch:** `codex/recover-r24-engine2`
+- Updated: 2026-08-21
+- Default branch: `main`
+- Current release: [`v0.1.0-beta.1`](../README.md#download)
 
 The current rewrite is a portable native Windows application. The authoritative
 feature inventory is generated from the source and contains all 149 individual
@@ -78,7 +78,7 @@ requirements from GitHub Issue 72.
 The in-tree Debug, Visual Studio Release and clean Ninja Release regressions are
 complete for the General-Adaptive source at 72/72 tests each. Two clean Release
 builds produced byte-identical EXEs and FleX laboratory forwarders.
-The portable package is validated separately with seven managed payload hashes
+The portable package is validated separately with fourteen managed payload hashes
 and user-data-preserving update semantics. The UI exposes one Adaptive control
 plane and the fail-closed safety policy.
 

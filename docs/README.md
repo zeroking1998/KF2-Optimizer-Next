@@ -3,6 +3,11 @@
 This index separates everyday use from implementation detail so readers can
 enter at the right level.
 
+## Get the application
+
+- [Download the current Windows release](../README.md#download)
+- [Install and use the application](USER_GUIDE.md)
+
 ## Use the application
 
 - [User guide](USER_GUIDE.md): installation, first launch, controls, and normal

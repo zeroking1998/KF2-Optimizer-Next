@@ -6,6 +6,12 @@ KF2 Optimizer Next is portable. Extract the complete package to a writable
 folder and keep the executable beside the `Data` directory. Do not copy only
 the executable: the package also contains runtime assets and integrity data.
 
+Download the current package from the
+[Download section](../README.md#download).
+No KF2 SDK or compilation is required for the ready-to-run ZIP. The executable
+is currently unsigned, so Windows SmartScreen may display a warning on first
+launch.
+
 ## 2. Check detection
 
 Start the optimizer and open **Game**. Confirm that the KF2 installation and
