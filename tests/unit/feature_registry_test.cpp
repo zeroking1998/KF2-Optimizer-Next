@@ -32,7 +32,7 @@ constexpr std::array<std::string_view, 7> kFeatureNames{{
 }};
 
 struct CompleteRegistryFixture {
-    std::array<std::array<ActionImplementation, 60>, 7> implementations{};
+    std::array<std::array<ActionImplementation, 61>, 7> implementations{};
     std::array<std::size_t, 7> counts{};
     std::array<FeatureDefinition, 7> features{};
 
@@ -59,7 +59,7 @@ int main() {
     CHECK(!valid_feature_registry({}));
 
     CompleteRegistryFixture complete;
-    CHECK(action_definitions().size() == 60);
+    CHECK(action_definitions().size() == 61);
     CHECK(complete.features.size() == 7);
     CHECK(valid_feature_registry(complete.features));
 

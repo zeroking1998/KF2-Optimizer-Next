@@ -19,7 +19,7 @@ int main() {
     fs::path record_path;
     {
         auto armed = kf2::diagnostics::CrashRecorder::arm(
-            root, "0.0.1-alpha+test (debug)");
+            root, "0.0.2-alpha+test (debug)");
         CHECK(armed.has_value());
         record_path = armed.value().pending_path();
         CHECK(fs::exists(record_path));

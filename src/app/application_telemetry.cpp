@@ -123,6 +123,7 @@ std::uint64_t UiRuntime::monotonic_ns() const {
 
 
 void UiRuntime::runtime_tick() {
+    poll_auto_package_repair();
     const auto now = monotonic_ns();
     constexpr std::uint64_t kTelemetryIntervalNs = 120'000'000ULL;
     if (last_telemetry_tick_ns == 0 || now < last_telemetry_tick_ns ||

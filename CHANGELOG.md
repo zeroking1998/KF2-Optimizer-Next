@@ -1,10 +1,57 @@
 # Changelog
 
-All notable user-visible changes are documented here.
+User-visible changes are grouped by release. Each entry explains what changed,
+what it means for users, and any important limitation.
 
 ## Unreleased
 
+No user-visible changes are pending.
+
+## 0.0.2-alpha - 2026-08-22
+
+### Summary
+
+Alpha 0.0.2 adds one-click package repair while keeping the existing local
+repair path for offline recovery.
+
+### Added
+
+- **Auto Repair from GitHub** downloads only the Windows asset attached to the
+  exact installed version tag. For example, `0.0.2-alpha` can use only
+  `v0.0.2-alpha`; it never follows a generic latest-release link.
+- The GitHub download and ZIP extraction run in the background so the main UI
+  remains responsive.
+- **Import Local Package** remains available when the PC is offline or GitHub
+  cannot be reached.
+
+### Security
+
+- Auto Repair accepts HTTPS redirects only to GitHub release hosts, limits the
+  archive to 64 MiB, extracts into an isolated temporary directory, verifies
+  the build identity and every managed SHA-256 value, and performs a final
+  full-package audit.
+- The running executable is never replaced. A different version, build,
+  executable, malformed archive, or unverified file is rejected.
+
+### Upgrade notes
+
+- Replace the complete old folder with the Alpha 0.0.2 package. Portable user
+  settings in `Data` remain preserved by the supported package update flow.
+- After a successful repair, restart KF2 Optimizer to leave Safe Mode.
+
+### Known limitations
+
+- The executable is not code-signed yet, so Windows SmartScreen may warn on
+  first launch.
+- Auto Repair requires internet access to GitHub. Local package import remains
+  the offline fallback.
+
 ## 0.0.1-alpha - 2026-08-21
+
+### Summary
+
+Alpha 0.0.1 established public Alpha versioning and verified local package
+repair.
 
 ### Added
 
@@ -23,6 +70,11 @@ All notable user-visible changes are documented here.
 - Public versioning now uses `Alpha 0.0.x`: this release is displayed as
   `Alpha 0.0.1` and tagged `v0.0.1-alpha`. Future alpha builds increment the
   patch number instead of using labels such as Alpha 2 or Alpha 3.
+
+### Known limitations
+
+- Repair required a second complete package already extracted on the PC.
+- The executable was not code-signed.
 
 ## 0.1.0-beta.2 - 2026-08-21
 

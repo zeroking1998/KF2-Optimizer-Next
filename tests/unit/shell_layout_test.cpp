@@ -44,7 +44,7 @@ int main() {
     using namespace kf2::ui;
     UiModel model;
     model.set_state_path(L"C:\\Portable\\Data");
-    model.set_build_identity(L"0.0.1-alpha+test");
+    model.set_build_identity(L"0.0.2-alpha+test");
 
     const auto dashboard = layout_shell(model, 1440, 900);
     CHECK((dashboard.header == DipRect{0, 0, 1440, 72}));
@@ -170,6 +170,10 @@ int main() {
     CHECK(action(diagnostics, "diagnostics-flex-restore") != nullptr);
     CHECK(action(diagnostics, "diagnostics-repair-package") != nullptr);
     CHECK(action_help_text("diagnostics-repair-package").has_value());
+    CHECK(action(diagnostics, "diagnostics-auto-repair") != nullptr);
+    CHECK(action(diagnostics, "diagnostics-auto-repair")->text ==
+          L"AUTO REPAIR FROM GITHUB");
+    CHECK(action_help_text("diagnostics-auto-repair").has_value());
     CHECK(node(diagnostics, "diagnostics-check-section") != nullptr);
     CHECK(node(diagnostics, "diagnostics-recovery-section") != nullptr);
     CHECK(node(diagnostics, "diagnostics-reports-section") != nullptr);

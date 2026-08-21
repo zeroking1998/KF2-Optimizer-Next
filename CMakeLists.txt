@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(KF2OptimizerNext VERSION 0.0.1 LANGUAGES CXX RC)
+project(KF2OptimizerNext VERSION 0.0.2 LANGUAGES CXX RC)
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "KF2 Optimizer Next supports x64 only")
@@ -13,6 +13,23 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(KF2_VERSION "${PROJECT_VERSION}-alpha" CACHE STRING "Product version")
 set(KF2_BUILD_COMMIT "unknown" CACHE STRING "Source commit identity")
 set(KF2_BUILD_CHANNEL "dev" CACHE STRING "Build channel")
+set(KF2_RELEASE_REPOSITORY "" CACHE STRING "HTTPS GitHub repository used for exact-version release repair")
+if(KF2_RELEASE_REPOSITORY STREQUAL "")
+    execute_process(
+        COMMAND git -C "${PROJECT_SOURCE_DIR}" config --get remote.origin.url
+        OUTPUT_VARIABLE KF2_ORIGIN_URL
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    string(REGEX REPLACE "\\.git$" "" KF2_ORIGIN_URL "${KF2_ORIGIN_URL}")
+    if(KF2_ORIGIN_URL MATCHES "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+        set(KF2_RELEASE_REPOSITORY "${KF2_ORIGIN_URL}" CACHE STRING
+            "HTTPS GitHub repository used for exact-version release repair" FORCE)
+    endif()
+endif()
+if(NOT KF2_RELEASE_REPOSITORY STREQUAL "" AND
+   NOT KF2_RELEASE_REPOSITORY MATCHES "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+    message(FATAL_ERROR "KF2_RELEASE_REPOSITORY must be an HTTPS GitHub repository URL")
+endif()
 
 add_compile_definitions(
     UNICODE
@@ -98,6 +115,7 @@ add_executable(KF2Optimizer WIN32
     src/backup/restore_transaction.cpp
     src/app/main.cpp
     src/app/application.cpp
+    src/app/application_package_repair.cpp
     ${KF2_APP_ACTION_SOURCES}
     src/app/application_runtime.cpp
     ${KF2_APP_TELEMETRY_SOURCES}
@@ -147,6 +165,7 @@ add_executable(KF2Optimizer WIN32
     src/platform/windows/window.cpp
     src/security/sha256.cpp
     src/security/package_integrity.cpp
+    src/security/release_package_repair.cpp
     src/telemetry/telemetry_snapshot.cpp
     src/telemetry/system_metrics.cpp
     src/telemetry/present_source.cpp
@@ -166,6 +185,7 @@ target_compile_definitions(KF2Optimizer PRIVATE
     KF2_VERSION="${KF2_VERSION}"
     KF2_BUILD_COMMIT="${KF2_BUILD_COMMIT}"
     KF2_BUILD_CHANNEL="${KF2_BUILD_CHANNEL}"
+    KF2_RELEASE_REPOSITORY="${KF2_RELEASE_REPOSITORY}"
 )
 if(MSVC)
     set_source_files_properties(assets/app.manifest PROPERTIES
@@ -177,7 +197,7 @@ if(MSVC)
 endif()
 target_link_libraries(KF2Optimizer PRIVATE
     presentmon_data
-    user32 gdi32 shell32 ole32 uuid d2d1 dwrite windowscodecs winmm uiautomationcore bcrypt dwmapi psapi advapi32 pdh dxgi tdh version
+    user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs winmm uiautomationcore bcrypt dwmapi psapi advapi32 pdh dxgi tdh version winhttp
 )
 
 add_executable(KF2ConfigRoundtrip EXCLUDE_FROM_ALL

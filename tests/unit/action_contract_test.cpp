@@ -18,7 +18,7 @@
 int main() {
     using namespace kf2::app::runtime;
 
-    constexpr std::array<std::string_view, 68> kExistingActions{{
+    constexpr std::array<std::string_view, 69> kExistingActions{{
         "dashboard-diagnostics", "dashboard-launch",
         "dashboard-overlay", "dashboard-refresh", "dashboard-settings",
         "diagnostics-backup", "diagnostics-benchmark-baseline",
@@ -27,6 +27,7 @@ int main() {
         "diagnostics-export-support", "diagnostics-flex-audit",
         "diagnostics-flex-restore", "diagnostics-full-check",
         "diagnostics-open-data", "diagnostics-open-log",
+        "diagnostics-auto-repair",
         "diagnostics-repair-package",
         "diagnostics-refresh", "game-launch", "game-offline-telemetry",
         "game-open-config", "game-open-install", "game-open-logs",
@@ -59,7 +60,7 @@ int main() {
         "settings-target-slider",
     }};
 
-    constexpr std::array<ActionId, 84> kStableActionIds{{
+    constexpr std::array<ActionId, 85> kStableActionIds{{
         ActionId::navigate_diagnostics,
         ActionId::retired_navigate_guide,
         ActionId::navigate_settings,
@@ -144,14 +145,15 @@ int main() {
         ActionId::settings_target_up,
         ActionId::settings_adaptive_online,
         ActionId::diagnostics_repair_package,
+        ActionId::diagnostics_auto_repair,
     }};
 
     for (std::size_t index = 0; index < kStableActionIds.size(); ++index) {
         CHECK(static_cast<std::uint16_t>(kStableActionIds[index]) == index);
     }
 
-    CHECK(action_bindings().size() == 68);
-    CHECK(action_definitions().size() == 60);
+    CHECK(action_bindings().size() == 69);
+    CHECK(action_definitions().size() == 61);
     CHECK(control_definitions().size() == kExistingControls.size());
 
     for (const auto name : kExistingActions) {
@@ -200,7 +202,7 @@ int main() {
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::game)] == 6);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::settings)] == 20);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::overlay)] == 10);
-    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::diagnostics)] == 13);
+    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::diagnostics)] == 14);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::optimizer)] == 4);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::backup)] == 3);
 
@@ -263,6 +265,7 @@ int main() {
     CHECK(!requires_normal_mode(ActionId::diagnostics_export, {}));
     CHECK(!requires_normal_mode(ActionId::diagnostics_benchmark_baseline, {}));
     CHECK(!requires_normal_mode(ActionId::diagnostics_repair_package, {}));
+    CHECK(!requires_normal_mode(ActionId::diagnostics_auto_repair, {}));
 
     const auto launch = resolve_action(
         "header-launch", {.protected_game_launch = true});

@@ -58,7 +58,7 @@ add_executable(kf2_build_identity_test
 )
 target_include_directories(kf2_build_identity_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_build_identity_test PRIVATE
-    KF2_VERSION="0.0.1-alpha"
+    KF2_VERSION="0.0.2-alpha"
     KF2_BUILD_COMMIT="unknown"
     KF2_BUILD_CHANNEL="dev"
 )
@@ -97,6 +97,22 @@ target_compile_definitions(kf2_package_integrity_test PRIVATE
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/package-integrity")
 target_link_libraries(kf2_package_integrity_test PRIVATE bcrypt)
 add_test(NAME kf2_package_integrity_test COMMAND kf2_package_integrity_test)
+
+add_executable(kf2_release_package_repair_test
+    windows/release_package_repair_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
+    "${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp"
+    "${PROJECT_SOURCE_DIR}/src/security/release_package_repair.cpp"
+    "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp"
+)
+target_include_directories(kf2_release_package_repair_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_release_package_repair_test PRIVATE
+    KF2_RELEASE_REPOSITORY="${KF2_RELEASE_REPOSITORY}")
+target_link_libraries(kf2_release_package_repair_test PRIVATE
+    bcrypt ole32 oleaut32 shell32 winhttp)
+add_test(NAME kf2_release_package_repair_test
+    COMMAND kf2_release_package_repair_test)
 
 add_executable(kf2_state_paths_test
     unit/state_paths_test.cpp
@@ -268,6 +284,7 @@ add_executable(kf2_application_lifecycle_test
     ${KF2_APP_ACTION_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/benchmark/benchmark.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application.cpp"
+    "${PROJECT_SOURCE_DIR}/src/app/application_package_repair.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application_runtime.cpp"
     ${KF2_APP_TELEMETRY_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/app/application_window.cpp"
@@ -315,6 +332,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/platform/windows/single_instance.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp"
+    "${PROJECT_SOURCE_DIR}/src/security/release_package_repair.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/gpu_metrics.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
@@ -333,14 +351,15 @@ target_include_directories(kf2_application_lifecycle_test PRIVATE
 )
 target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/application-lifecycle"
-    KF2_VERSION="0.0.1-alpha"
+    KF2_VERSION="0.0.2-alpha"
     KF2_BUILD_COMMIT="unknown"
     KF2_BUILD_CHANNEL="dev"
+    KF2_RELEASE_REPOSITORY="${KF2_RELEASE_REPOSITORY}"
 )
 target_link_libraries(kf2_application_lifecycle_test PRIVATE
     presentmon_data
-    user32 gdi32 shell32 ole32 uuid d2d1 dwrite windowscodecs winmm uiautomationcore bcrypt
-    dwmapi psapi advapi32 pdh dxgi tdh version
+    user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs winmm uiautomationcore bcrypt
+    dwmapi psapi advapi32 pdh dxgi tdh version winhttp
 )
 add_test(NAME kf2_application_lifecycle_test COMMAND kf2_application_lifecycle_test)
 set_tests_properties(kf2_application_lifecycle_test PROPERTIES

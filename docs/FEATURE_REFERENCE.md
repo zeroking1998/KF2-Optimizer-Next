@@ -21,12 +21,15 @@
 
 ### Required-file repair
 
-`Diagnostics & Backup > Import Required Files` is available even in Safe Mode.
-It imports missing or damaged companion files from a complete matching
-extracted package selected by the user. Build identity, executable identity,
-safe single-link file identity, size limits, SHA-256 values, atomic writes and
-a final full-package audit are mandatory. A different executable or release is
-rejected and must be extracted into a new folder instead.
+`Diagnostics & Backup > Auto Repair from GitHub` is available even in Safe
+Mode. It derives an exact tag and asset name from the installed version, never
+from a latest-release alias, and performs the download on a background worker.
+HTTPS host restrictions, a 64 MiB archive limit, isolated extraction, build
+identity, executable identity, safe single-link file identity, SHA-256 values,
+atomic writes and a final full-package audit are mandatory.
+
+`Import Local Package` provides the same verification path without network
+access. A different executable, build, or release is rejected.
 
 - A selected setting is not proof that KF2 accepted it.
 - A decision is not proof that an action ran.
