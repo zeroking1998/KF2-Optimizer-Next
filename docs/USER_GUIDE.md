@@ -8,6 +8,25 @@ the executable: the package also contains runtime assets and integrity data.
 
 Download the current package from the
 [Download section](../README.md#download).
+
+## Repair missing required files
+
+Normal release packages already contain every required runtime companion file.
+If one is removed or damaged, the app starts in Safe Mode instead of trusting
+an incomplete package.
+
+1. Download and fully extract another copy of the same release.
+2. Open **Diagnostics & Backup** in the running app.
+3. Select **Import Required Files**.
+4. Select the complete extracted `KF2OptimizerNext` folder. Selecting its
+   parent folder also works when it contains exactly that folder.
+5. Restart KF2 Optimizer after the verified import completes.
+
+The repair accepts only a package with the same build identity and an
+identical verified executable. Every imported companion file must match the
+package SHA-256 manifest. Writes are atomic, the running executable is never
+replaced, and no file is downloaded or uploaded by the app.
+
 No KF2 SDK or compilation is required for the ready-to-run ZIP. The executable
 is currently unsigned, so Windows SmartScreen may display a warning on first
 launch.

@@ -28,7 +28,7 @@ decisions that require an owner.
 - [x] Protect `main` with required pull requests, current Debug/Release checks,
   resolved review conversations, linear history, and blocked force-push/delete
 - [x] Publish the source repository with a fresh, reviewed history
-- [x] Publish the owner-authorized `v0.1.0-beta.2` portable pre-release
+- [x] Publish the owner-authorized `v0.0.1-alpha` portable pre-release
 
 ## Remaining release-hardening work
 
@@ -43,7 +43,7 @@ old ZIP/EXE releases, an original FleX runtime, large audit datasets, and
 German-only legacy planning documents that are not part of the active product.
 
 Generated binaries remain outside source control. The owner-authorized portable
-beta is distributed only through GitHub Releases and follows the documented
+alpha is distributed only through GitHub Releases and follows the documented
 [binary distribution boundary](BINARY_DISTRIBUTION.md).
 
 ## License decision

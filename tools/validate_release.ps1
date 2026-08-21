@@ -89,6 +89,7 @@ if (-not (Test-Path -LiteralPath $packageManifestPath -PathType Leaf)) {
 $packageManifest = Get-Content -LiteralPath $packageManifestPath -Raw |
     ConvertFrom-Json -ErrorAction Stop
 if ($packageManifest.schema_version -ne 2 -or
+    $packageManifest.package_version -cne '0.0.1-alpha' -or
     $packageManifest.license -cne 'GPL-3.0-only' -or
     @($packageManifest.managed_files).Count -ne 15) {
     throw 'Portable package manifest is incomplete or incompatible'

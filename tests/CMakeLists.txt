@@ -58,7 +58,7 @@ add_executable(kf2_build_identity_test
 )
 target_include_directories(kf2_build_identity_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_build_identity_test PRIVATE
-    KF2_VERSION="0.1.0"
+    KF2_VERSION="0.0.1-alpha"
     KF2_BUILD_COMMIT="unknown"
     KF2_BUILD_CHANNEL="dev"
 )
@@ -87,6 +87,7 @@ add_test(NAME kf2_process_security_test COMMAND kf2_process_security_test)
 
 add_executable(kf2_package_integrity_test
     windows/package_integrity_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp"
 )
@@ -313,6 +314,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/platform/windows/process_security.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/single_instance.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
+    "${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/gpu_metrics.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
@@ -331,7 +333,7 @@ target_include_directories(kf2_application_lifecycle_test PRIVATE
 )
 target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/application-lifecycle"
-    KF2_VERSION="0.1.0"
+    KF2_VERSION="0.0.1-alpha"
     KF2_BUILD_COMMIT="unknown"
     KF2_BUILD_CHANNEL="dev"
 )

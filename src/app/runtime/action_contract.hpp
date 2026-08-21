@@ -102,6 +102,7 @@ enum class ActionId : std::uint16_t {
     settings_target_down = 80,
     settings_target_up = 81,
     settings_adaptive_online = 82,
+    diagnostics_repair_package = 83,
 };
 
 enum class ControlId : std::uint8_t {

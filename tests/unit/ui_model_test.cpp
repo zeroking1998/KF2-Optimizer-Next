@@ -56,7 +56,7 @@ int main() {
     CHECK(model.scroll_offset() == 0.0F);
 
     model.set_state_path(L"C:\\Portable\\Data");
-    model.set_build_identity(L"0.1.0+test");
+    model.set_build_identity(L"0.0.1-alpha+test");
     model.set_recovery_required(true);
     CHECK(model.page_heading() == L"Home");
 

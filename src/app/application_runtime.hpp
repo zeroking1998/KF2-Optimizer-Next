@@ -66,6 +66,8 @@ Result<config::Settings> load_or_create_settings(
     const std::filesystem::path& path);
 std::wstring format_gib(std::uint64_t bytes);
 Result<bool> open_local_directory(const std::filesystem::path& path);
+std::optional<std::filesystem::path> choose_directory(
+    HWND owner, std::wstring_view title);
 std::optional<std::filesystem::path> choose_game_directory(HWND owner);
 std::optional<std::string> path_utf8(const std::filesystem::path& path);
 Result<std::string> read_verified_local_file(

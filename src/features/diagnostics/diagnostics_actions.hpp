@@ -30,8 +30,10 @@ app::runtime::DispatchResult open_data(
     app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult open_log(
     app::UiRuntime&, const app::runtime::NoPayload&);
+app::runtime::DispatchResult repair_package(
+    app::UiRuntime&, const app::runtime::NoPayload&);
 
-inline constexpr std::array<app::runtime::ActionImplementation, 12> kActions{{
+inline constexpr std::array<app::runtime::ActionImplementation, 13> kActions{{
     {app::runtime::ActionId::refresh_status,
      &app::runtime::bind_no_payload<&refresh>},
     {app::runtime::ActionId::diagnostics_benchmark_baseline,
@@ -56,6 +58,8 @@ inline constexpr std::array<app::runtime::ActionImplementation, 12> kActions{{
      &app::runtime::bind_no_payload<&open_data>},
     {app::runtime::ActionId::diagnostics_open_log,
      &app::runtime::bind_no_payload<&open_log>},
+    {app::runtime::ActionId::diagnostics_repair_package,
+     &app::runtime::bind_no_payload<&repair_package>},
 }};
 
 inline constexpr app::runtime::FeatureDefinition kFeature{
