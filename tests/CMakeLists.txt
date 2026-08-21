@@ -234,6 +234,8 @@ if(TARGET KF2FlexForwarder)
     add_test(NAME kf2_flex_forwarder_loader_test COMMAND kf2_flex_forwarder_loader_test
         "${PROJECT_SOURCE_DIR}/out/tests/flex-forwarder"
         "${KF2_FLEX_FORWARDER}")
+    set_tests_properties(kf2_flex_forwarder_loader_test PROPERTIES
+        SKIP_RETURN_CODE 77)
 
     add_executable(kf2_flex_forwarder_adaptive_test
         windows/flex_forwarder_adaptive_test.cpp)
@@ -339,6 +341,8 @@ target_link_libraries(kf2_application_lifecycle_test PRIVATE
     dwmapi psapi advapi32 pdh dxgi tdh version
 )
 add_test(NAME kf2_application_lifecycle_test COMMAND kf2_application_lifecycle_test)
+set_tests_properties(kf2_application_lifecycle_test PROPERTIES
+    LABELS "requires-desktop")
 
 add_executable(kf2_state_environment_test
     windows/state_environment_test.cpp
@@ -397,6 +401,8 @@ target_link_libraries(kf2_direct2d_renderer_test PRIVATE
     user32 ole32 d2d1 dwrite windowscodecs
 )
 add_test(NAME kf2_direct2d_renderer_test COMMAND kf2_direct2d_renderer_test)
+set_tests_properties(kf2_direct2d_renderer_test PROPERTIES
+    LABELS "requires-desktop")
 
 add_executable(kf2_system_sound_absence_test
     windows/system_sound_absence_test.cpp
@@ -692,6 +698,8 @@ target_link_libraries(kf2_presentmon_dxgi_present_test PRIVATE
     presentmon_data advapi32 tdh d3d11 dxgi user32 gdi32 d2d1 dwrite dwmapi
 )
 add_test(NAME kf2_presentmon_dxgi_present_test COMMAND kf2_presentmon_dxgi_present_test)
+set_tests_properties(kf2_presentmon_dxgi_present_test PROPERTIES
+    LABELS "requires-desktop")
 
 add_executable(kf2_gpu_metrics_test
     windows/gpu_metrics_test.cpp

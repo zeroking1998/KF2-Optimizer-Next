@@ -30,4 +30,4 @@ jobs:
 
       - name: Build and test
         shell: pwsh
-        run: ./tools/test.ps1 -Configuration ${{ matrix.configuration }}
+        run: ./tools/test.ps1 -Configuration ${{ matrix.configuration }} -PublicCI

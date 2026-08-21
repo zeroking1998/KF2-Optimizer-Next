@@ -10,6 +10,10 @@ int main() {
     const std::filesystem::path active{KF2_FLEX_RUNTIME};
     const auto preserved = active.parent_path() / L"flexRelease_original.dll";
     const auto source = std::filesystem::exists(preserved) ? preserved : active;
+    if (!std::filesystem::exists(source)) {
+        std::cout << "SKIP: installed KF2 FleX runtime not available\n";
+        return 77;
+    }
     const auto sandbox = std::filesystem::temp_directory_path() /
         (L"kf2-flex-audit-" + std::to_wstring(GetCurrentProcessId()));
     std::error_code ec;
@@ -20,10 +24,6 @@ int main() {
     std::filesystem::copy_file(source, runtime,
         std::filesystem::copy_options::overwrite_existing, ec);
     if (ec) return 78;
-    if (!std::filesystem::exists(runtime)) {
-        std::cout << "SKIP: installed KF2 FleX runtime not available\n";
-        return 77;
-    }
     const auto audit = kf2::flex::audit_runtime(runtime);
     if (!audit.has_value() || !audit.value().abi_compatible ||
         !audit.value().exact_known_runtime ||

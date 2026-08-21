@@ -2,7 +2,10 @@
 param(
     [Parameter()]
     [ValidateSet('Debug', 'Release')]
-    [string] $Configuration = 'Debug'
+    [string] $Configuration = 'Debug',
+
+    [Parameter()]
+    [switch] $PublicCI
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,7 +19,11 @@ if ($LASTEXITCODE -ne 0) {
 
 Push-Location -LiteralPath $projectRoot
 try {
-    & ctest --preset $preset --output-on-failure
+    $ctestArguments = @('--preset', $preset, '--output-on-failure')
+    if ($PublicCI) {
+        $ctestArguments += @('--label-exclude', 'requires-desktop')
+    }
+    & ctest @ctestArguments
     exit $LASTEXITCODE
 }
 finally {

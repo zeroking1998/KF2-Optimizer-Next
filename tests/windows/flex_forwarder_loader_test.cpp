@@ -13,10 +13,15 @@ int wmain(int argc, wchar_t** argv) {
     auto source_runtime = std::filesystem::path{KF2_FLEX_RUNTIME};
     const auto preserved = source_runtime.parent_path() / L"flexRelease_original.dll";
     if (std::filesystem::exists(preserved)) source_runtime = preserved;
+    const auto runtime_dir = source_runtime.parent_path();
+    if (!std::filesystem::exists(source_runtime) ||
+        !std::filesystem::exists(runtime_dir / L"cudart64_75.dll")) {
+        std::cout << "SKIP: installed KF2 FleX runtime not available\n";
+        return 77;
+    }
     std::filesystem::copy_file(source_runtime, sandbox / L"flexRelease_original.dll",
                                std::filesystem::copy_options::overwrite_existing, ec);
     if (ec) return 4;
-    const auto runtime_dir = source_runtime.parent_path();
     std::filesystem::copy_file(runtime_dir / L"cudart64_75.dll",
                                sandbox / L"cudart64_75.dll",
                                std::filesystem::copy_options::overwrite_existing, ec);
