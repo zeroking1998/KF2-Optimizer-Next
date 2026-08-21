@@ -2,7 +2,7 @@
 
 - Updated: 2026-08-21
 - Default branch: `main`
-- Current release: [`v0.1.0-beta.1`](../README.md#download)
+- Current release: [`v0.1.0-beta.2`](../README.md#download)
 
 The current rewrite is a portable native Windows application. The authoritative
 feature inventory is generated from the source and contains all 149 individual

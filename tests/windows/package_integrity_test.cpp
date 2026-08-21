@@ -39,12 +39,19 @@ int main() {
         {L"Data/Lab/flexRelease_x64.forwarder-lab.dll", "test forwarder"},
         {L"Data/Lab/KF2OptimizerTelemetry.u", "test telemetry module"},
         {L"Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md", "test matrix"},
+        {L"Data/Documentation/README.md", "test documentation index"},
+        {L"Data/Documentation/USER_GUIDE.md", "test user guide"},
+        {L"Data/Documentation/FEATURE_REFERENCE.md", "test feature reference"},
+        {L"Data/Documentation/SAFETY.md", "test safety guide"},
+        {L"Data/Documentation/SUPPORT.md", "test support guide"},
+        {L"Data/Documentation/LICENSE", "test license"},
+        {L"Data/Documentation/THIRD_PARTY_NOTICES.md", "test notices"},
         {L"Data/Documentation/issue72-feature-inventory.json", "test inventory"},
         {L"Data/Documentation/PresentMon-LICENSE.txt", "test license"},
     };
     std::string manifest =
         "schema_version=1\nproduct=KF2OptimizerNext\n"
-        "source_identity=test-build\nfile_count=6\n";
+        "source_identity=test-build\nfile_count=13\n";
     for (const auto& [relative, content] : files) {
         const auto path = root / relative;
         write_file(path, content);
@@ -63,7 +70,7 @@ int main() {
     CHECK(verified.has_value());
     CHECK(verified.value().managed_package);
     CHECK(verified.value().verified);
-    CHECK(verified.value().verified_files == 6);
+    CHECK(verified.value().verified_files == 13);
 
     write_file(root / L"Data/Documentation/PresentMon-LICENSE.txt", "damaged");
     const auto damaged =

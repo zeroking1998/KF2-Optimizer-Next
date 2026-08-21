@@ -4,6 +4,15 @@ All notable user-visible changes are documented here.
 
 ## Unreleased
 
+## 0.1.0-beta.2 - 2026-08-21
+
+### Fixed
+
+- Portable packages with the complete 13-file integrity manifest now start in
+  normal mode instead of incorrectly falling back to Safe Mode.
+- Release GUI validation now fails if a freshly packaged build rejects its own
+  integrity manifest.
+
 ## 0.1.0-beta.1 - 2026-08-21
 
 ### Added

@@ -10,7 +10,7 @@ explicit runtime acknowledgements and automatic restoration.
 ## Download
 
 The current ready-to-run Windows package is
-<a href="../../releases/tag/v0.1.0-beta.1">v0.1.0 Beta 1</a>.
+<a href="../../releases/tag/v0.1.0-beta.2">v0.1.0 Beta 2</a>.
 Download the ZIP, extract the complete `KF2OptimizerNext` folder, and start
 `KF2Optimizer.exe`. Building from source is only required for development.
 

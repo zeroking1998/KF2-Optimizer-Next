@@ -63,7 +63,15 @@ try {
     if (-not [KF2GuiNative]::GetExitCodeProcess($process.Handle,[ref]$nativeExit) -or $nativeExit -ne 0) {
         throw "Native GUI exit code was $nativeExit"
     }
-    Write-Host 'PASS: fresh portable GUI start, single-instance gate, visible window and clean native exit'
+    $eventLog = Join-Path (Split-Path -Parent $exe) 'Data\logs\session-events.json'
+    if (-not (Test-Path -LiteralPath $eventLog -PathType Leaf)) {
+        throw 'Fresh release did not create its lifecycle event log'
+    }
+    $events = Get-Content -LiteralPath $eventLog -Raw | ConvertFrom-Json
+    if (@($events.events | Where-Object { $_.code -ceq 'PACKAGE_INTEGRITY_FAILED' }).Count -ne 0) {
+        throw 'Fresh release entered Safe Mode because its own package integrity check failed'
+    }
+    Write-Host 'PASS: verified portable GUI started normally, enforced single instance, showed a visible window and exited cleanly'
 }
 finally {
     if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
