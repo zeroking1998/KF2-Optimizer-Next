@@ -11,7 +11,7 @@ permissions:
 jobs:
   test:
     name: Test ${{ matrix.configuration }}
-    runs-on: windows-latest
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Validate documentation
         if: matrix.configuration == 'Debug'

@@ -84,11 +84,11 @@ foreach ($file in $files | Where-Object {
 }
 
 $ignoreText = Get-Content -LiteralPath (Join-Path $projectRoot '.gitignore') -Raw
-if ($ignoreText -notmatch '(?m)^/out/$') {
+if ($ignoreText -notmatch '(?m)^/out/\r?$') {
     $failures.Add('.gitignore must exclude /out/.')
 }
 if ($ignoreText -notmatch
-        '(?m)^/assets/offline_telemetry/KF2OptimizerTelemetry\.u$') {
+        '(?m)^/assets/offline_telemetry/KF2OptimizerTelemetry\.u\r?$') {
     $failures.Add('.gitignore must exclude the locally SDK-compiled telemetry package.')
 }
 
