@@ -160,7 +160,7 @@ $workingTreeChanges = @(& git -C $projectRoot status --porcelain `
 if ($workingTreeChanges.Count -ne 0) { $commit = "$commit.dirty" }
 $inventoryJson = Join-Path $documentationDirectory `
     'issue72-feature-inventory.json'
-& $inventoryExporter $inventoryJson "0.1.0+$commit (release)"
+& $inventoryExporter $inventoryJson "0.0.1-alpha+$commit (release)"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $integrityPayloadFiles = @(
@@ -210,7 +210,7 @@ $payloadHashes = @($payloadFiles | ForEach-Object {
 $packageManifest = [ordered]@{
     schema_version = 2
     product = 'KF2 Optimizer Next'
-    package_version = '0.1.0'
+    package_version = '0.0.1-alpha'
     license = 'GPL-3.0-only'
     source_identity = $commit
     managed_files = $managedFiles

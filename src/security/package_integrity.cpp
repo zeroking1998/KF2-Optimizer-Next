@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "kf2/platform/windows/atomic_file.hpp"
 #include "kf2/security/sha256.hpp"
 
 namespace kf2::security {
@@ -125,6 +126,170 @@ std::vector<std::string_view> split_lines(std::string_view document) {
     return result;
 }
 
+struct ParsedManifest {
+    std::string document;
+    std::string source_identity;
+    std::array<std::string, kPayloadPaths.size()> hashes;
+};
+
+Result<ParsedManifest> parse_manifest(
+    const std::filesystem::path& executable_directory,
+    std::string_view expected_source_identity) {
+    const auto manifest =
+        executable_directory / L"Data" / L"package-integrity.ini";
+    const auto document = read_manifest(manifest);
+    if (!document.has_value()) {
+        return Result<ParsedManifest>::failure(document.error());
+    }
+    const auto lines = split_lines(document.value());
+    const std::string expected_file_count =
+        "file_count=" + std::to_string(kPayloadPaths.size());
+    if (lines.size() != kPayloadPaths.size() + 4 ||
+        lines[0] != "schema_version=1" ||
+        lines[1] != "product=KF2OptimizerNext" ||
+        !lines[2].starts_with("source_identity=") ||
+        lines[3] != expected_file_count) {
+        return Result<ParsedManifest>::failure(
+            {ErrorCode::access_denied,
+             L"Package integrity document has an incompatible schema", 0});
+    }
+    const auto source_identity = lines[2].substr(
+        std::string_view{"source_identity="}.size());
+    if (!safe_identity(source_identity) ||
+        source_identity != expected_source_identity) {
+        return Result<ParsedManifest>::failure(
+            {ErrorCode::access_denied,
+             L"Package files and executable have different build identities", 0});
+    }
+
+    ParsedManifest parsed{
+        .document = document.value(),
+        .source_identity = std::string{source_identity}};
+    std::set<std::string> seen;
+    for (std::size_t index = 4; index < lines.size(); ++index) {
+        if (!lines[index].starts_with("file=")) {
+            return Result<ParsedManifest>::failure(
+                {ErrorCode::access_denied,
+                 L"Package integrity entry is malformed", 0});
+        }
+        const auto entry = lines[index].substr(5);
+        const auto separator = entry.find('|');
+        if (separator == std::string_view::npos ||
+            entry.find('|', separator + 1) != std::string_view::npos) {
+            return Result<ParsedManifest>::failure(
+                {ErrorCode::access_denied,
+                 L"Package integrity entry is malformed", 0});
+        }
+        const auto relative = entry.substr(0, separator);
+        const auto expected_hash = entry.substr(separator + 1);
+        const auto known = std::ranges::find(kPayloadPaths, relative);
+        if (known == kPayloadPaths.end() || !valid_hex(expected_hash) ||
+            !seen.emplace(relative).second) {
+            return Result<ParsedManifest>::failure(
+                {ErrorCode::access_denied,
+                 L"Package integrity entry is unknown or duplicated", 0});
+        }
+        parsed.hashes[static_cast<std::size_t>(
+            std::distance(kPayloadPaths.begin(), known))] = expected_hash;
+    }
+    if (seen.size() != kPayloadPaths.size()) {
+        return Result<ParsedManifest>::failure(
+            {ErrorCode::access_denied,
+             L"Package integrity document is incomplete", 0});
+    }
+    return Result<ParsedManifest>::success(std::move(parsed));
+}
+
+Result<std::string> read_repair_source(
+    const std::filesystem::path& path) {
+    constexpr std::uint64_t kMaximumBytes = 64ULL * 1024ULL * 1024ULL;
+    HANDLE file = CreateFileW(
+        path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN |
+            FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return Result<std::string>::failure(
+            {ErrorCode::not_found,
+             L"A required file is missing from the selected package",
+             GetLastError()});
+    }
+    struct CloseFile {
+        HANDLE value;
+        ~CloseFile() { CloseHandle(value); }
+    } close_file{file};
+    BY_HANDLE_FILE_INFORMATION before{};
+    if (!GetFileInformationByHandle(file, &before) ||
+        (before.dwFileAttributes &
+         (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+        before.nNumberOfLinks != 1) {
+        return Result<std::string>::failure(
+            {ErrorCode::access_denied,
+             L"A selected package file has an unsafe identity", 0});
+    }
+    const std::uint64_t size =
+        (static_cast<std::uint64_t>(before.nFileSizeHigh) << 32U) |
+        before.nFileSizeLow;
+    if (size > kMaximumBytes || size >
+        static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+        return Result<std::string>::failure(
+            {ErrorCode::access_denied,
+             L"A selected package file exceeds the repair size limit", 0});
+    }
+    std::string bytes(static_cast<std::size_t>(size), '\0');
+    std::size_t total = 0;
+    while (total < bytes.size()) {
+        const DWORD requested = static_cast<DWORD>(std::min<std::size_t>(
+            bytes.size() - total, std::numeric_limits<DWORD>::max()));
+        DWORD read = 0;
+        if (!ReadFile(file, bytes.data() + total, requested, &read, nullptr) ||
+            read == 0) {
+            return Result<std::string>::failure(
+                {ErrorCode::io_failure,
+                 L"A selected package file could not be read completely",
+                 GetLastError()});
+        }
+        total += read;
+    }
+    BY_HANDLE_FILE_INFORMATION after{};
+    if (!GetFileInformationByHandle(file, &after) ||
+        after.nFileIndexHigh != before.nFileIndexHigh ||
+        after.nFileIndexLow != before.nFileIndexLow ||
+        after.nFileSizeHigh != before.nFileSizeHigh ||
+        after.nFileSizeLow != before.nFileSizeLow ||
+        after.ftLastWriteTime.dwHighDateTime !=
+            before.ftLastWriteTime.dwHighDateTime ||
+        after.ftLastWriteTime.dwLowDateTime !=
+            before.ftLastWriteTime.dwLowDateTime) {
+        return Result<std::string>::failure(
+            {ErrorCode::stale_data,
+             L"A selected package file changed while being imported", 0});
+    }
+    return Result<std::string>::success(std::move(bytes));
+}
+
+Result<bool> ensure_repair_parent(const std::filesystem::path& path) {
+    std::error_code error;
+    std::filesystem::create_directories(path, error);
+    if (error) {
+        return Result<bool>::failure(
+            {ErrorCode::io_failure,
+             L"A required package directory could not be created",
+             static_cast<std::uint32_t>(error.value())});
+    }
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES ||
+        (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+        (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::access_denied,
+             L"A required package directory has an unsafe identity",
+             GetLastError()});
+    }
+    return Result<bool>::success(true);
+}
+
 PackageIntegrityAudit invalid(std::wstring message) {
     return {.managed_package = true, .verified = false,
             .message = std::move(message)};
@@ -159,54 +324,19 @@ Result<PackageIntegrityAudit> audit_package_integrity(
             invalid(L"Package integrity document cannot be inspected"));
     }
 
-    const auto document = read_manifest(manifest);
-    if (!document.has_value()) {
+    const auto parsed = parse_manifest(
+        executable_directory, expected_source_identity);
+    if (!parsed.has_value()) {
         return Result<PackageIntegrityAudit>::success(
-            invalid(document.error().message));
+            invalid(parsed.error().message));
     }
-    const auto lines = split_lines(document.value());
-    const std::string expected_file_count =
-        "file_count=" + std::to_string(kPayloadPaths.size());
-    if (lines.size() != kPayloadPaths.size() + 4 ||
-        lines[0] != "schema_version=1" ||
-        lines[1] != "product=KF2OptimizerNext" ||
-        !lines[2].starts_with("source_identity=") ||
-        lines[3] != expected_file_count) {
-        return Result<PackageIntegrityAudit>::success(
-            invalid(L"Package integrity document has an incompatible schema"));
-    }
-    const auto source_identity = lines[2].substr(
-        std::string_view{"source_identity="}.size());
-    if (!safe_identity(source_identity) ||
-        source_identity != expected_source_identity) {
-        return Result<PackageIntegrityAudit>::success(
-            invalid(L"Package files and executable have different build identities"));
-    }
-
-    std::set<std::string> seen;
     PackageIntegrityAudit audit{
         .managed_package = true,
         .verified = false,
-        .source_identity = std::string{source_identity}};
-    for (std::size_t index = 4; index < lines.size(); ++index) {
-        if (!lines[index].starts_with("file=")) {
-            return Result<PackageIntegrityAudit>::success(
-                invalid(L"Package integrity entry is malformed"));
-        }
-        const auto entry = lines[index].substr(5);
-        const auto separator = entry.find('|');
-        if (separator == std::string_view::npos ||
-            entry.find('|', separator + 1) != std::string_view::npos) {
-            return Result<PackageIntegrityAudit>::success(
-                invalid(L"Package integrity entry is malformed"));
-        }
-        const auto relative = entry.substr(0, separator);
-        const auto expected_hash = entry.substr(separator + 1);
-        if (std::ranges::find(kPayloadPaths, relative) == kPayloadPaths.end() ||
-            !valid_hex(expected_hash) || !seen.emplace(relative).second) {
-            return Result<PackageIntegrityAudit>::success(
-                invalid(L"Package integrity entry is unknown or duplicated"));
-        }
+        .source_identity = parsed.value().source_identity};
+    for (std::size_t index = 0; index < kPayloadPaths.size(); ++index) {
+        const auto relative = kPayloadPaths[index];
+        const auto& expected_hash = parsed.value().hashes[index];
         const std::filesystem::path path = executable_directory /
             std::filesystem::path{std::u8string{
                 reinterpret_cast<const char8_t*>(relative.data()),
@@ -219,13 +349,115 @@ Result<PackageIntegrityAudit> audit_package_integrity(
         }
         ++audit.verified_files;
     }
-    if (seen.size() != kPayloadPaths.size()) {
-        return Result<PackageIntegrityAudit>::success(
-            invalid(L"Package integrity document is incomplete"));
-    }
     audit.verified = true;
     audit.message = L"All managed package files match their SHA-256 values";
     return Result<PackageIntegrityAudit>::success(std::move(audit));
+}
+
+Result<PackageRepairResult> repair_package_from_directory(
+    const std::filesystem::path& executable_directory,
+    const std::filesystem::path& source_directory,
+    std::string_view expected_source_identity) {
+    if (executable_directory.empty() || source_directory.empty() ||
+        !executable_directory.is_absolute() || !source_directory.is_absolute() ||
+        !safe_identity(expected_source_identity)) {
+        return Result<PackageRepairResult>::failure(
+            {ErrorCode::invalid_argument,
+             L"Package repair request is invalid", 0});
+    }
+    const auto source = parse_manifest(
+        source_directory, expected_source_identity);
+    if (!source.has_value()) {
+        return Result<PackageRepairResult>::failure({
+            source.error().code,
+            L"The selected folder is not a complete matching package: " +
+                source.error().message,
+            source.error().native_code});
+    }
+
+    PackageRepairResult result;
+    std::array<std::string, kPayloadPaths.size()> source_files;
+    for (std::size_t index = 0; index < kPayloadPaths.size(); ++index) {
+        const auto relative = kPayloadPaths[index];
+        const auto relative_path = std::filesystem::path{std::u8string{
+            reinterpret_cast<const char8_t*>(relative.data()),
+            relative.size()}};
+        const auto source_bytes = read_repair_source(
+            source_directory / relative_path);
+        if (!source_bytes.has_value()) {
+            return Result<PackageRepairResult>::failure(source_bytes.error());
+        }
+        const auto source_hash = sha256_hex(source_bytes.value());
+        if (!source_hash.has_value() ||
+            !equal_ascii_case_insensitive(
+                source_hash.value(), source.value().hashes[index])) {
+            return Result<PackageRepairResult>::failure(
+                {ErrorCode::access_denied,
+                 L"A selected package file does not match its SHA-256 value",
+                 0});
+        }
+        source_files[index] = source_bytes.value();
+    }
+
+    for (std::size_t index = 0; index < kPayloadPaths.size(); ++index) {
+        const auto relative = kPayloadPaths[index];
+        const auto relative_path = std::filesystem::path{std::u8string{
+            reinterpret_cast<const char8_t*>(relative.data()),
+            relative.size()}};
+        const auto target = executable_directory / relative_path;
+        const auto current_hash = sha256_file_hex(target);
+        if (current_hash.has_value() && equal_ascii_case_insensitive(
+                current_hash.value(), source.value().hashes[index])) {
+            ++result.already_valid_files;
+            continue;
+        }
+        if (relative == std::string_view{"KF2Optimizer.exe"}) {
+            return Result<PackageRepairResult>::failure(
+                {ErrorCode::access_denied,
+                 L"The running executable does not match the selected package. "
+                 L"Extract the complete package into a new folder instead.",
+                 0});
+        }
+        const auto parent = ensure_repair_parent(target.parent_path());
+        if (!parent.has_value()) {
+            return Result<PackageRepairResult>::failure(parent.error());
+        }
+        const auto written = platform::windows::atomic_replace_utf8(
+            target, source_files[index]);
+        if (!written.has_value()) {
+            return Result<PackageRepairResult>::failure(written.error());
+        }
+        ++result.repaired_files;
+    }
+
+    const auto target_manifest = executable_directory / L"Data" /
+        L"package-integrity.ini";
+    const auto current_manifest = read_manifest(target_manifest);
+    if (!current_manifest.has_value() ||
+        current_manifest.value() != source.value().document) {
+        const auto parent = ensure_repair_parent(target_manifest.parent_path());
+        if (!parent.has_value()) {
+            return Result<PackageRepairResult>::failure(parent.error());
+        }
+        const auto written = platform::windows::atomic_replace_utf8(
+            target_manifest, source.value().document);
+        if (!written.has_value()) {
+            return Result<PackageRepairResult>::failure(written.error());
+        }
+        ++result.repaired_files;
+    }
+
+    const auto verified = audit_package_integrity(
+        executable_directory, expected_source_identity);
+    if (!verified.has_value() || !verified.value().managed_package ||
+        !verified.value().verified) {
+        return Result<PackageRepairResult>::failure(
+            {ErrorCode::io_failure,
+             L"The repaired package did not pass final integrity verification",
+             0});
+    }
+    result.restart_required = result.repaired_files != 0;
+    return Result<PackageRepairResult>::success(result);
 }
 
 }  // namespace kf2::security

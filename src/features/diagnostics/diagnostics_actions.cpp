@@ -1,6 +1,7 @@
 #include "features/diagnostics/diagnostics_actions.hpp"
 
 #include "app/application_runtime.hpp"
+#include "kf2/security/package_integrity.hpp"
 
 namespace kf2::features::diagnostics {
 namespace {
@@ -350,6 +351,70 @@ app::runtime::DispatchResult open_data(
                                    : L"DATA_FOLDER_UNAVAILABLE",
                 opened.has_value() ? L"The portable Data folder was opened."
                                    : opened.error().message);
+    return app::runtime::DispatchResult::handled;
+}
+
+app::runtime::DispatchResult repair_package(
+    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
+    const auto selected = app::choose_directory(
+        runtime.window
+            ? static_cast<HWND>(runtime.window->native_handle_for_testing())
+            : nullptr,
+        L"Select a complete KF2OptimizerNext package folder");
+    if (!selected) {
+        show_notice(runtime, ui::NoticeSeverity::info,
+                    L"PACKAGE_REPAIR_CANCELLED",
+                    L"Required-file import was cancelled. No files were changed.");
+        return app::runtime::DispatchResult::handled;
+    }
+
+    std::filesystem::path source = *selected;
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(
+            source / L"Data" / L"package-integrity.ini", error)) {
+        error.clear();
+        const auto nested = source / L"KF2OptimizerNext";
+        if (std::filesystem::is_regular_file(
+                nested / L"Data" / L"package-integrity.ini", error)) {
+            source = nested;
+        }
+    }
+    const auto repaired = security::repair_package_from_directory(
+        runtime.executable_root, source,
+        app::current_build_identity().commit);
+    if (!repaired.has_value()) {
+        runtime.events->append(
+            {0, product_diagnostics::Severity::error,
+             "PACKAGE_REPAIR_REJECTED", repaired.error().message,
+             L"package"});
+        show_notice(runtime, ui::NoticeSeverity::error,
+                    L"PACKAGE_REPAIR_REJECTED",
+                    repaired.error().message);
+        return app::runtime::DispatchResult::handled;
+    }
+    if (repaired.value().repaired_files == 0) {
+        runtime.events->append(
+            {0, product_diagnostics::Severity::info,
+             "PACKAGE_REPAIR_NOT_NEEDED",
+             L"All required package files already matched their SHA-256 values",
+             L"package"});
+        show_notice(runtime, ui::NoticeSeverity::info,
+                    L"PACKAGE_REPAIR_NOT_NEEDED",
+                    L"All required files are already present and verified.");
+        return app::runtime::DispatchResult::handled;
+    }
+
+    runtime.events->append(
+        {0, product_diagnostics::Severity::info,
+         "PACKAGE_REPAIR_APPLIED",
+         L"The user selected a matching complete package; " +
+             std::to_wstring(repaired.value().repaired_files) +
+             L" missing or damaged required files were imported atomically and verified",
+         L"package"});
+    show_notice(
+        runtime, ui::NoticeSeverity::info, L"PACKAGE_REPAIR_APPLIED",
+        std::to_wstring(repaired.value().repaired_files) +
+            L" required files were imported and verified. Restart KF2 Optimizer to leave Safe Mode.");
     return app::runtime::DispatchResult::handled;
 }
 

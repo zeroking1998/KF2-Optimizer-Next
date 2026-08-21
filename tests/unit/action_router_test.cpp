@@ -36,7 +36,7 @@ constexpr std::array<std::string_view, 7> kFeatureNames{{
 }};
 
 struct CompleteRegistryFixture {
-    std::array<std::array<ActionImplementation, 59>, 7> implementations{};
+    std::array<std::array<ActionImplementation, 60>, 7> implementations{};
     std::array<std::size_t, 7> counts{};
     std::array<FeatureDefinition, 7> features{};
 
@@ -65,8 +65,8 @@ ActionRequest request(ActionId id, std::string_view received_name,
 int main() {
     using namespace kf2::app::runtime;
 
-    CHECK(action_definitions().size() == 59);
-    CHECK(action_bindings().size() == 67);
+    CHECK(action_definitions().size() == 60);
+    CHECK(action_bindings().size() == 68);
 
     CompleteRegistryFixture complete;
     CHECK(valid_feature_registry(complete.features));

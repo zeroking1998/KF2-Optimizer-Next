@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(KF2OptimizerNext VERSION 0.1.0 LANGUAGES CXX RC)
+project(KF2OptimizerNext VERSION 0.0.1 LANGUAGES CXX RC)
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "KF2 Optimizer Next supports x64 only")
@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(KF2_VERSION "${PROJECT_VERSION}" CACHE STRING "Product version")
+set(KF2_VERSION "${PROJECT_VERSION}-alpha" CACHE STRING "Product version")
 set(KF2_BUILD_COMMIT "unknown" CACHE STRING "Source commit identity")
 set(KF2_BUILD_CHANNEL "dev" CACHE STRING "Build channel")
 

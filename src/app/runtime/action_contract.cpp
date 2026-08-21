@@ -10,7 +10,7 @@ namespace {
 constexpr AccessPolicy kRestricted = AccessPolicy::restricted_mode_allowed;
 constexpr AccessPolicy kNormal = AccessPolicy::normal_mode_required;
 
-constexpr std::array<ActionDefinition, 59> kActions{{
+constexpr std::array<ActionDefinition, 60> kActions{{
     {ActionId::navigate_diagnostics, "header-diagnostics", FeatureId::navigation, kRestricted},
     {ActionId::navigate_settings, "dashboard-settings", FeatureId::navigation, kRestricted},
     {ActionId::navigate_overlay, "dashboard-overlay", FeatureId::navigation, kRestricted},
@@ -27,6 +27,7 @@ constexpr std::array<ActionDefinition, 59> kActions{{
     {ActionId::diagnostics_full_check, "diagnostics-full-check", FeatureId::diagnostics, kRestricted},
     {ActionId::diagnostics_open_data, "diagnostics-open-data", FeatureId::diagnostics, kRestricted},
     {ActionId::diagnostics_open_log, "diagnostics-open-log", FeatureId::diagnostics, kRestricted},
+    {ActionId::diagnostics_repair_package, "diagnostics-repair-package", FeatureId::diagnostics, kRestricted},
     {ActionId::game_launch, "game-launch", FeatureId::game, AccessPolicy::conditional_game_launch},
     {ActionId::game_offline_telemetry, "game-offline-telemetry", FeatureId::game, kNormal},
     {ActionId::game_open_config, "game-open-config", FeatureId::game, kRestricted},
@@ -72,7 +73,7 @@ constexpr std::array<ActionDefinition, 59> kActions{{
     {ActionId::settings_target_up, "settings-target-up", FeatureId::settings, kNormal},
 }};
 
-constexpr std::array<ActionBinding, 67> kBindings{{
+constexpr std::array<ActionBinding, 68> kBindings{{
     {"dashboard-diagnostics", ActionId::navigate_diagnostics},
     {"dashboard-launch", ActionId::game_launch}, {"dashboard-overlay", ActionId::navigate_overlay},
     {"dashboard-refresh", ActionId::refresh_status}, {"dashboard-settings", ActionId::navigate_settings},
@@ -82,7 +83,8 @@ constexpr std::array<ActionBinding, 67> kBindings{{
     {"diagnostics-export-support", ActionId::diagnostics_export_support}, {"diagnostics-flex-audit", ActionId::diagnostics_flex_audit},
     {"diagnostics-flex-restore", ActionId::diagnostics_flex_restore}, {"diagnostics-full-check", ActionId::diagnostics_full_check},
     {"diagnostics-open-data", ActionId::diagnostics_open_data}, {"diagnostics-open-log", ActionId::diagnostics_open_log},
-    {"diagnostics-refresh", ActionId::refresh_status}, {"game-launch", ActionId::game_launch},
+    {"diagnostics-refresh", ActionId::refresh_status}, {"diagnostics-repair-package", ActionId::diagnostics_repair_package},
+    {"game-launch", ActionId::game_launch},
     {"game-offline-telemetry", ActionId::game_offline_telemetry}, {"game-open-config", ActionId::game_open_config},
     {"game-open-install", ActionId::game_open_install}, {"game-open-logs", ActionId::game_open_logs},
     {"game-select-install", ActionId::game_select_install},

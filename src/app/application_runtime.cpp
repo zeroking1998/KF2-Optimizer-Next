@@ -133,7 +133,8 @@ Result<bool> open_local_directory(const std::filesystem::path& path) {
     return Result<bool>::success(true);
 }
 
-std::optional<std::filesystem::path> choose_game_directory(HWND owner) {
+std::optional<std::filesystem::path> choose_directory(
+    HWND owner, std::wstring_view title) {
     Microsoft::WRL::ComPtr<IFileDialog> dialog;
     if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr,
                                 CLSCTX_INPROC_SERVER,
@@ -147,7 +148,8 @@ std::optional<std::filesystem::path> choose_game_directory(HWND owner) {
                                   FOS_DONTADDTORECENT))) {
         return std::nullopt;
     }
-    dialog->SetTitle(L"Select the Killing Floor 2 folder");
+    const std::wstring owned_title{title};
+    dialog->SetTitle(owned_title.c_str());
     if (dialog->Show(owner) != S_OK) return std::nullopt;
     Microsoft::WRL::ComPtr<IShellItem> selected;
     if (FAILED(dialog->GetResult(&selected))) return std::nullopt;
@@ -158,6 +160,10 @@ std::optional<std::filesystem::path> choose_game_directory(HWND owner) {
     std::filesystem::path path{raw};
     CoTaskMemFree(raw);
     return path;
+}
+
+std::optional<std::filesystem::path> choose_game_directory(HWND owner) {
+    return choose_directory(owner, L"Select the Killing Floor 2 folder");
 }
 
 std::optional<std::string> path_utf8(const std::filesystem::path& path) {

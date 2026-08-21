@@ -4,6 +4,26 @@ All notable user-visible changes are documented here.
 
 ## Unreleased
 
+## 0.0.1-alpha - 2026-08-21
+
+### Added
+
+- Diagnostics now provides an `IMPORT REQUIRED FILES` repair action. The user
+  selects a complete matching extracted package, and the app imports only
+  missing or damaged companion files after build-identity and SHA-256 checks.
+
+### Security
+
+- Package repair never replaces the running executable, rejects mismatched
+  builds and unsafe files, writes atomically, and requires a restart before
+  leaving Safe Mode.
+
+### Changed
+
+- Public versioning now uses `Alpha 0.0.x`: this release is displayed as
+  `Alpha 0.0.1` and tagged `v0.0.1-alpha`. Future alpha builds increment the
+  patch number instead of using labels such as Alpha 2 or Alpha 3.
+
 ## 0.1.0-beta.2 - 2026-08-21
 
 ### Fixed

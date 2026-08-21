@@ -19,6 +19,15 @@
 
 ## Important distinctions
 
+### Required-file repair
+
+`Diagnostics & Backup > Import Required Files` is available even in Safe Mode.
+It imports missing or damaged companion files from a complete matching
+extracted package selected by the user. Build identity, executable identity,
+safe single-link file identity, size limits, SHA-256 values, atomic writes and
+a final full-package audit are mandatory. A different executable or release is
+rejected and must be extracted into a new folder instead.
+
 - A selected setting is not proof that KF2 accepted it.
 - A decision is not proof that an action ran.
 - Native KF2 state is not an optimizer action.
