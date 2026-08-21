@@ -1,0 +1,33 @@
+name: Windows CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test ${{ matrix.configuration }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate documentation
+        if: matrix.configuration == 'Debug'
+        shell: pwsh
+        run: |
+          ./tools/validate_documentation.ps1
+          ./tools/validate_publication.ps1
+
+      - name: Build and test
+        shell: pwsh
+        run: ./tools/test.ps1 -Configuration ${{ matrix.configuration }}

@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "kind": "focused_high_performance_gameplay_acceptance",
+  "acceptance": "PASS",
+  "date": "2026-08-13",
+  "tested_package_sha256": "F3FBE2E15E041A981A275076D8F4B682A4760F60B8F70E1E13658CC7AD6572B5",
+  "profile": {
+    "optimizer_profile": "high_performance",
+    "quality_policy": "performance",
+    "target_fps": 60,
+    "active_ini_sha256": {
+      "KFEngine.ini": "9F44B327714EE85ED42A7B261F609EFEE729DF436D3C76EF597743E8B82A6AE4",
+      "KFGame.ini": "D6AD7516391F71DEC646550F85217712A3038BC30D4208068EEE5CEDBE6960E7",
+      "KFSystemSettings.ini": "9FBBCCBFD768A389A788D2765D9FE85713BFBD9B8992EFC1E1DF6E2E6FBE2786"
+    }
+  },
+  "session": {
+    "log_open_local": "2026-08-13T07:58:16+02:00",
+    "log_closed_local": "2026-08-13T08:02:50+02:00",
+    "map": "KF-BioticsLab",
+    "mode": "KFGameInfo_Survival",
+    "difficulty_code": 2,
+    "length_code": 1,
+    "normal_exit": true,
+    "launch_log_sha256": "104C7285E2195F0C9CDD7201BBFEDFCEA8DE1F13EAD3ADAB383C3FC953AB7EAE",
+    "user_completed_without_new_problem_report": true
+  },
+  "diagnostics": {
+    "event_count": 9,
+    "warning_count": 0,
+    "error_count": 0,
+    "report_sha256": "021E9D17B263F3F90547A7EE7D7023BB2A2B332300B352C19E2EB387640BD3B3",
+    "required_events": [
+      "GAME_SESSION_MAP",
+      "SESSION_CONFIG_CAPTURED",
+      "SESSION_CONFIG_RESTORED",
+      "KF2_SESSION_ENDED"
+    ]
+  },
+  "windows_event_log": {
+    "kf2_or_optimizer_crash_hang_count": 0,
+    "display_driver_reset_count": 0
+  },
+  "postconditions": {
+    "optimizer_responsive_during_post_run_evaluation": true,
+    "optimizer_clean_shutdown_after_evaluation": true,
+    "session_marker_clean_shutdown": true,
+    "session_config_directory_empty": true,
+    "original_flex_runtime_restored": true,
+    "original_flex_runtime_sha256": "BC5BDB62250281455CF753FF9B7FFF599E3E4EE2CFC4C406F4E7C9E99F21172F"
+  }
+}

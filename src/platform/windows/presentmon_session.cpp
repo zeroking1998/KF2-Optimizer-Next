@@ -1,0 +1,159 @@
+#include "kf2/platform/windows/presentmon_session.hpp"
+
+#include <Windows.h>
+#include <evntrace.h>
+
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "PresentMonTraceConsumer.hpp"
+#include "PresentMonTraceSession.hpp"
+
+namespace kf2::platform::windows {
+namespace {
+std::uint64_t qpc_to_ns(std::uint64_t ticks, std::uint64_t frequency) {
+    return static_cast<std::uint64_t>(static_cast<long double>(ticks) *
+        1'000'000'000.0L / static_cast<long double>(frequency));
+}
+
+bool process_is_alive(DWORD pid) {
+    if (pid == 0 || pid == GetCurrentProcessId()) return true;
+    const HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    // Access denied is not proof that a process is dead; preserve its session.
+    if (!process) return GetLastError() == ERROR_ACCESS_DENIED;
+    const bool alive = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+    CloseHandle(process);
+    return alive;
+}
+
+void stop_stale_presentmon_sessions() {
+    constexpr ULONG kMaximumSessions = 64;
+    constexpr wchar_t kPrefix[] = L"KF2OptimizerNext-PresentMon-";
+    std::vector<std::vector<std::byte>> storage(
+        kMaximumSessions,
+        std::vector<std::byte>(sizeof(EVENT_TRACE_PROPERTIES) +
+                               2 * MAX_PATH * sizeof(wchar_t)));
+    std::vector<EVENT_TRACE_PROPERTIES*> sessions;
+    sessions.reserve(kMaximumSessions);
+    for (auto& bytes : storage) {
+        auto* properties = reinterpret_cast<EVENT_TRACE_PROPERTIES*>(bytes.data());
+        properties->Wnode.BufferSize = static_cast<ULONG>(bytes.size());
+        properties->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
+        properties->LogFileNameOffset = sizeof(EVENT_TRACE_PROPERTIES) +
+                                        MAX_PATH * sizeof(wchar_t);
+        sessions.push_back(properties);
+    }
+    ULONG count = kMaximumSessions;
+    if (QueryAllTracesW(sessions.data(), kMaximumSessions, &count) != ERROR_SUCCESS)
+        return;
+    const std::wstring_view prefix{kPrefix};
+    for (ULONG index = 0; index < count; ++index) {
+        auto* properties = sessions[index];
+        const auto* name = reinterpret_cast<const wchar_t*>(
+            reinterpret_cast<const std::byte*>(properties) +
+            properties->LoggerNameOffset);
+        const std::wstring_view session_name{name};
+        if (!session_name.starts_with(prefix)) continue;
+        const std::wstring_view pid_text = session_name.substr(prefix.size());
+        wchar_t* end = nullptr;
+        const unsigned long pid = std::wcstoul(std::wstring{pid_text}.c_str(), &end, 10);
+        if (pid == 0 || process_is_alive(static_cast<DWORD>(pid))) continue;
+        EVENT_TRACE_PROPERTIES stop_properties{};
+        stop_properties.Wnode.BufferSize = sizeof(stop_properties);
+        static_cast<void>(ControlTraceW(0, std::wstring{session_name}.c_str(),
+                                        &stop_properties, EVENT_TRACE_CONTROL_STOP));
+    }
+}
+}  // namespace
+
+struct PresentMonSession::Impl {
+    telemetry::SampleIdentity identity;
+    telemetry::PresentSource* sink{};
+    std::wstring name;
+    PMTraceConsumer consumer;
+    PMTraceSession session;
+    std::thread trace_worker;
+    std::thread flush_worker;
+    std::atomic<bool> running{false};
+    std::uint64_t qpc_frequency{};
+
+    void process_trace() {
+        TRACEHANDLE handle = session.mTraceHandle;
+        static_cast<void>(ProcessTrace(&handle, 1, nullptr, nullptr));
+    }
+    void flush_trace() {
+        while (running.load(std::memory_order_acquire)) {
+            EVENT_TRACE_PROPERTIES properties{};
+            properties.Wnode.BufferSize = sizeof(properties);
+            static_cast<void>(FlushTraceW(session.mSessionHandle, nullptr,
+                                          &properties));
+            std::this_thread::sleep_for(std::chrono::milliseconds{100});
+        }
+    }
+};
+
+PresentMonSession::PresentMonSession(std::unique_ptr<Impl> implementation)
+    : implementation_{std::move(implementation)} {}
+PresentMonSession::~PresentMonSession() { static_cast<void>(stop()); }
+
+Result<std::unique_ptr<PresentMonSession>> PresentMonSession::start(
+    telemetry::SampleIdentity identity, telemetry::PresentSource& sink) {
+    stop_stale_presentmon_sessions();
+    LARGE_INTEGER frequency{};
+    if (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0) {
+        return Result<std::unique_ptr<PresentMonSession>>::failure(
+            {ErrorCode::platform_failure, L"High-resolution clock is unavailable",
+             GetLastError()});
+    }
+    auto impl = std::make_unique<Impl>();
+    impl->identity = identity;
+    impl->sink = &sink;
+    impl->name = L"KF2OptimizerNext-PresentMon-" +
+                 std::to_wstring(GetCurrentProcessId());
+    impl->qpc_frequency = static_cast<std::uint64_t>(frequency.QuadPart);
+    impl->consumer.mFilteredProcessIds = true;
+    impl->consumer.mTrackDisplay = false;
+    impl->consumer.mTrackGPU = false;
+    impl->consumer.mTrackGPUVideo = false;
+    impl->consumer.mTrackInput = false;
+    impl->consumer.mRuntimePresentStartOnly = true;
+    impl->consumer.AddTrackedProcessForFiltering(identity.pid);
+    impl->consumer.mRuntimePresentStartCallback =
+        [pointer = impl.get()](std::uint32_t pid, std::uint64_t timestamp) {
+            if (pid != pointer->identity.pid || timestamp == 0 ||
+                !pointer->running.load(std::memory_order_acquire)) return;
+            static_cast<void>(pointer->sink->ingest(
+                {pointer->identity,
+                 qpc_to_ns(timestamp, pointer->qpc_frequency), 1, true, 0}));
+        };
+    impl->session.mPMConsumer = &impl->consumer;
+    impl->session.mTimestampType = PMTraceSession::TIMESTAMP_TYPE_QPC;
+    const ULONG status = impl->session.Start(nullptr, impl->name.c_str());
+    if (status != ERROR_SUCCESS) {
+        return Result<std::unique_ptr<PresentMonSession>>::failure(
+            {ErrorCode::platform_failure,
+             L"Embedded PresentMon session cannot start", status});
+    }
+    impl->running.store(true, std::memory_order_release);
+    impl->trace_worker = std::thread{[pointer = impl.get()] { pointer->process_trace(); }};
+    impl->flush_worker = std::thread{[pointer = impl.get()] { pointer->flush_trace(); }};
+    return Result<std::unique_ptr<PresentMonSession>>::success(
+        std::unique_ptr<PresentMonSession>{new PresentMonSession{std::move(impl)}});
+}
+
+Result<bool> PresentMonSession::stop() {
+    if (!implementation_ ||
+        !implementation_->running.exchange(false, std::memory_order_acq_rel)) {
+        return Result<bool>::success(true);
+    }
+    implementation_->session.Stop();
+    if (implementation_->trace_worker.joinable()) implementation_->trace_worker.join();
+    if (implementation_->flush_worker.joinable()) implementation_->flush_worker.join();
+    return Result<bool>::success(true);
+}
+}  // namespace kf2::platform::windows

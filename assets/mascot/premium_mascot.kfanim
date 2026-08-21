@@ -1,0 +1,16 @@
+format=kf2-skeletal-horror-creature-v1
+sample_rate_fps=120
+design=original_dark_mutant
+rig=head,torso,left_upper_arm,left_forearm,left_hand,right_upper_arm,right_forearm,right_hand,left_thigh,left_shin,left_foot,right_thigh,right_shin,right_foot,left_eye,right_eye,left_brow,right_brow,mouth
+states=idle,fps_drop,fps_rise,dock_catch,dock_grip,dock_slip,dock_regrip,dock_hang,dock_climb,dock_lean
+idle_period_ms=5000
+idle_body_amplitude=0.32
+idle_hand_amplitude=0.65
+dock_transition_ms=900
+dock_reach=8.0
+dock_impact_reach=2.0
+grip_micro_amplitude=0.55
+leg_step_amplitude=0.45
+variant_count=6
+blend_in_fast=0.24
+blend_out_soft=0.075

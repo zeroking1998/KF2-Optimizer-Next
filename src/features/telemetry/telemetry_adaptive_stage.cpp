@@ -1,0 +1,512 @@
+#include "features/telemetry/telemetry_adaptive_stage.hpp"
+
+#include "app/application_runtime.hpp"
+#include "features/telemetry/telemetry_effect_stage.hpp"
+
+namespace kf2::telemetry_pipeline {
+
+void run_adaptive_stage(app::UiRuntime& runtime,
+                        const TelemetryFrame& frame) {
+    runtime.update_adaptive_controller(frame);
+}
+
+}  // namespace kf2::telemetry_pipeline
+
+namespace kf2::app {
+
+void UiRuntime::update_adaptive_controller(
+    const telemetry_pipeline::TelemetryFrame& frame) {
+    const auto& frames = frame.frames;
+    const auto now_ns = frame.observed_at_ns;
+    const bool active_gameplay = frame.active_gameplay;
+    auto status = model.status();
+    if (!game_process || !adaptive_locks_valid || adaptive_overhead_frozen) {
+        status.adaptive_state = adaptive_locks_valid && !adaptive_overhead_frozen
+                ? L"ready" : L"frozen";
+        status.adaptive_bottleneck = L"unknown";
+        status.adaptive_cpu_parallelism = L"not available";
+        status.adaptive_action = L"blocked";
+        status.adaptive_reason = adaptive_overhead_frozen
+            ? L"Controller iteration budget repeatedly exceeded; Adaptive remains frozen until a safe reset"
+            : adaptive_locks_valid
+                ? L"Waiting for a verified KF2 process"
+                : L"Per-setting locks are invalid; Adaptive fails closed";
+        status.adaptive_confidence_percent = 0;
+        status.adaptive_drop_risk_percent = 0;
+        status.adaptive_quality_score =
+            optimizer_settings.adaptive_maximum_quality;
+        status.adaptive_headroom_available_percent = 0;
+        status.adaptive_data_quality = L"NOT_AVAILABLE";
+        status.adaptive_prediction = L"not available";
+        status.adaptive_session = L"SESSION_UNKNOWN";
+        status.adaptive_source = L"not selected";
+        status.adaptive_safety = L"no actuator";
+        status.adaptive_evidence = L"NOT_AVAILABLE";
+        status.adaptive_runtime_corpse_limit.reset();
+        status.adaptive_corpse_capability = L"UNAVAILABLE";
+        status.adaptive_corpse_action_status = L"NONE";
+        status.adaptive_flex_requested_substeps.reset();
+        status.adaptive_flex_effective_substeps.reset();
+        status.adaptive_flex_action_status = L"NONE";
+        status.adaptive_flex_capability = L"UNAVAILABLE";
+        status.adaptive_particle_capability = L"UNAVAILABLE";
+        status.adaptive_restore_generation = 0;
+        status.adaptive_shadow_mode = optimizer_settings.adaptive_shadow_mode;
+        const auto launch_profile = optimizer::bound_adaptive_profile(
+            stored_adaptive_profile(optimizer_settings),
+            optimizer_settings.adaptive_minimum_quality,
+            optimizer_settings.adaptive_maximum_quality);
+        status.recommended_profile = launch_profile
+            ? std::wstring{optimizer::adaptive_profile_label(*launch_profile)}
+            : L"not available";
+        status.recommendation_ready = launch_profile.has_value() &&
+            adaptive_locks_valid && !adaptive_overhead_frozen;
+        status.recommendation_reason = launch_profile
+                ? L"Automatic launch profile is ready; live telemetry will refine the next session"
+                : L"No verified named profile fits the selected quality limits";
+        model.set_status(std::move(status));
+        return;
+    }
+
+    if (!active_gameplay) {
+        if (adaptive_gameplay_active) {
+            adaptive_gameplay_active = false;
+            adaptive_governor.reset();
+            adaptive_profile_gate.reset();
+            adaptive_decision = {};
+            events->append({0, diagnostics::Severity::info,
+                "ADAPTIVE_GAMEPLAY_PAUSED",
+                L"Adaptive stopped evaluating menu/loading frames and preserved the last stable next-launch profile",
+                L"optimizer"});
+        }
+        status.adaptive_state = L"observing";
+        status.adaptive_bottleneck = L"unknown";
+        status.adaptive_cpu_parallelism = L"waiting for active gameplay";
+        status.adaptive_action = L"hold";
+        status.adaptive_reason =
+            L"Waiting for active gameplay; menu and loading frames are excluded";
+        status.adaptive_confidence_percent = 0;
+        status.adaptive_drop_risk_percent = 0;
+        status.adaptive_quality_score =
+            optimizer_settings.adaptive_maximum_quality;
+        status.adaptive_headroom_available_percent = 0;
+        status.adaptive_data_quality = L"NOT_AVAILABLE";
+        status.adaptive_prediction = L"not available";
+        status.adaptive_session = L"SESSION_UNKNOWN";
+        status.adaptive_source = L"not selected";
+        status.adaptive_safety = L"no actuator";
+        status.adaptive_evidence = L"NOT_AVAILABLE";
+        status.adaptive_restore_generation = 0;
+        status.adaptive_shadow_mode = optimizer_settings.adaptive_shadow_mode;
+        const auto launch_profile = optimizer::bound_adaptive_profile(
+            stored_adaptive_profile(optimizer_settings),
+            optimizer_settings.adaptive_minimum_quality,
+            optimizer_settings.adaptive_maximum_quality);
+        status.recommended_profile = launch_profile
+            ? std::wstring{optimizer::adaptive_profile_label(*launch_profile)}
+            : L"not available";
+        status.recommendation_ready = false;
+        status.recommendation_reason = status.adaptive_reason;
+        last_adaptive_state = optimizer::AdaptiveControllerState::observing;
+        last_adaptive_disposition = optimizer::AdaptiveDisposition::hold;
+        last_adaptive_bottleneck = optimizer::AdaptiveBottleneck::unknown;
+        model.set_status(std::move(status));
+        return;
+    }
+
+    if (!adaptive_gameplay_active) {
+        adaptive_gameplay_active = true;
+        adaptive_governor.reset();
+        adaptive_profile_gate.reset();
+        adaptive_decision = {};
+        events->append({0, diagnostics::Severity::info,
+            "ADAPTIVE_GAMEPLAY_STARTED",
+            L"Adaptive began a fresh controller window after verified active gameplay was detected",
+            L"optimizer"});
+    }
+
+    const int current_quality = optimizer::adaptive_profile_quality(
+        stored_adaptive_profile(optimizer_settings));
+    const bool flex_pressure_candidate = frame.flex && frame.flex->fresh &&
+        frame.flex->aggregate_particles_fresh &&
+        frame.flex->particle_capacity > 0 &&
+        frame.flex->aggregate_active_particles >= 0 &&
+        frame.flex->last_update_tick != 0;
+    const auto sample_build = telemetry_pipeline::build_adaptive_sample(
+        frame,
+        {.current_quality = current_quality,
+         .minimum_quality = optimizer_settings.adaptive_minimum_quality,
+         .user_max_dead_bodies = optimizer_settings.corpse_limit,
+         .current_map = adaptive_map,
+         .map_generation = adaptive_map_generation,
+         .last_telemetry_sample = adaptive_telemetry_sample,
+         .flex_now_ms =
+             flex_pressure_candidate ? GetTickCount64() : 0});
+    adaptive_map = sample_build.map;
+    adaptive_map_generation = sample_build.map_generation;
+    adaptive_telemetry_sample = sample_build.telemetry_sample;
+    const auto& sample = sample_build.sample;
+    if (sample.map_changed && present_source) {
+        present_source->reset_statistics();
+    }
+
+    const auto policy = adaptive_policy_from(optimizer_settings);
+    const auto controller_started_ns = monotonic_ns();
+    adaptive_decision = adaptive_governor.evaluate(
+        policy, sample, now_ns, adaptive_lock_cache);
+    const auto controller_finished_ns = monotonic_ns();
+    const auto controller_cost_ns =
+        controller_finished_ns >= controller_started_ns
+            ? controller_finished_ns - controller_started_ns
+            : policy.controller_iteration_budget_ns + 1;
+    if (controller_cost_ns > policy.controller_iteration_budget_ns) {
+        ++adaptive_overhead_breaches;
+        adaptive_decision.disposition =
+            optimizer::AdaptiveDisposition::shadow;
+        adaptive_decision.reason = "controller_overhead_budget_shadow";
+        if (adaptive_overhead_breaches >= 3) {
+            adaptive_overhead_frozen = true;
+            adaptive_decision.state =
+                optimizer::AdaptiveControllerState::frozen;
+            adaptive_decision.disposition =
+                optimizer::AdaptiveDisposition::blocked;
+            adaptive_decision.reason =
+                "controller_iteration_budget_repeatedly_exceeded";
+            adaptive_decision.watchdog_frozen = true;
+        }
+    } else if (adaptive_overhead_breaches > 0) {
+        --adaptive_overhead_breaches;
+    }
+
+    const auto widen = [](std::string_view value) {
+        return std::wstring{value.begin(), value.end()};
+    };
+    status.adaptive_corpse_capability = widen(
+        optimizer::adaptive_capability_state_name(
+            sample.capabilities.corpse_control));
+    status.adaptive_flex_capability = widen(
+        optimizer::adaptive_capability_state_name(
+            sample.capabilities.flex_solver_substep_control));
+    status.adaptive_particle_capability = widen(
+        optimizer::adaptive_capability_state_name(
+            sample.capabilities.flex_particle_budget_control));
+    status.adaptive_runtime_corpse_limit =
+        sample.adaptive_corpse_runtime_limit;
+    if (sample.adaptive_corpse_runtime_limit &&
+        sample.capabilities.corpse_control ==
+            optimizer::AdaptiveCapabilityState::available) {
+        const auto control = optimizer::AdaptiveControlId::corpse_runtime_limit;
+        const double observed = static_cast<double>(
+            *sample.adaptive_corpse_runtime_limit);
+        const auto previous = adaptive_actuation.effective_value(control);
+        if (!previous) {
+            adaptive_actuation.establish_effective(control, observed);
+        } else if (*previous != observed) {
+            const auto& action = adaptive_actuation.propose(
+                control, observed, previous,
+                optimizer::AdaptiveCapabilityState::available,
+                now_ns, "corpse_autonomous_provider");
+            if (action.status == optimizer::AdaptiveActionStatus::proposed &&
+                adaptive_actuation.dispatch(control, now_ns)) {
+                static_cast<void>(adaptive_actuation.receive({
+                    action.action_id,
+                    action.control,
+                    optimizer::AdaptiveActionStatus::applied,
+                    action.requested_value,
+                    observed,
+                    action.generation,
+                    now_ns,
+                    "corpse_telemetry_readback",
+                    {},
+                    true,
+                    previous}));
+            }
+        }
+    }
+    if (const auto* corpse_action = adaptive_actuation.current(
+            optimizer::AdaptiveControlId::corpse_runtime_limit)) {
+        status.adaptive_corpse_action_status = widen(
+            optimizer::adaptive_action_status_name(corpse_action->status));
+    } else {
+        status.adaptive_corpse_action_status = L"NONE";
+    }
+    status.adaptive_state = std::wstring{
+        optimizer::adaptive_stability_state_name(
+            adaptive_decision.stability_state)};
+    status.adaptive_bottleneck = std::wstring{
+        optimizer::adaptive_bottleneck_name(
+            adaptive_decision.bottleneck.type)};
+    {
+        std::wostringstream cpu;
+        cpu << optimizer::adaptive_cpu_workload_name(
+            adaptive_decision.cpu.workload);
+        if (adaptive_decision.cpu.effective_core_usage) {
+            cpu << L" | " << std::fixed << std::setprecision(2)
+                << *adaptive_decision.cpu.effective_core_usage
+                << L" core equivalents";
+        }
+        if (adaptive_decision.cpu.active_threads) {
+            cpu << L" | " << *adaptive_decision.cpu.active_threads
+                << L" active threads";
+        }
+        if (adaptive_decision.cpu.critical_thread_percent) {
+            cpu << L" | main " << std::fixed << std::setprecision(1)
+                << *adaptive_decision.cpu.critical_thread_percent << L"%";
+        }
+        if (adaptive_decision.cpu.dominant_thread_share_percent) {
+            cpu << L" / " << std::fixed << std::setprecision(1)
+                << *adaptive_decision.cpu.dominant_thread_share_percent
+                << L"% CPU-time share";
+        }
+        if (adaptive_decision.cpu.affinity_physical_cores ||
+            adaptive_decision.cpu.affinity_logical_processors) {
+            cpu << L" | affinity ";
+            if (adaptive_decision.cpu.affinity_physical_cores) {
+                cpu << *adaptive_decision.cpu.affinity_physical_cores
+                    << L"C/";
+            }
+            cpu << adaptive_decision.cpu.affinity_logical_processors
+                       .value_or(0) << L"T";
+            if (adaptive_decision.cpu.affinity_limited) {
+                cpu << L" (subset)";
+            }
+        }
+        status.adaptive_cpu_parallelism = cpu.str();
+    }
+    status.adaptive_action = adaptive_decision.selected_setting.empty()
+        ? std::wstring{optimizer::adaptive_disposition_name(
+              adaptive_decision.disposition)}
+        : widen(adaptive_decision.selected_setting) + L" (" +
+              std::wstring{optimizer::adaptive_disposition_name(
+                  adaptive_decision.disposition)} + L")";
+    status.adaptive_reason = widen(adaptive_decision.reason);
+    status.adaptive_confidence_percent = static_cast<int>(std::clamp(
+        adaptive_decision.bottleneck.confidence * 100.0, 0.0, 100.0));
+    status.adaptive_drop_risk_percent = static_cast<int>(std::clamp(
+        adaptive_decision.drop_risk * 100.0, 0.0, 100.0));
+    status.adaptive_quality_score = static_cast<int>(std::clamp(
+        adaptive_decision.quality_score, 0.0, 100.0));
+    status.adaptive_headroom_available_percent = static_cast<int>(
+        std::clamp(adaptive_decision.headroom * 100.0, 0.0, 100.0));
+    status.adaptive_data_quality =
+        adaptive_decision.data.quality ==
+                optimizer::AdaptiveDataQuality::valid
+            ? L"VALID"
+            : adaptive_decision.data.quality ==
+                      optimizer::AdaptiveDataQuality::degraded
+                ? L"DEGRADED" : L"NOT_AVAILABLE";
+    if (adaptive_decision.predicted_frame_time_ms) {
+        std::wostringstream prediction;
+        prediction << std::fixed << std::setprecision(2)
+                   << *adaptive_decision.predicted_frame_time_ms
+                   << L" ms (" << static_cast<int>(std::clamp(
+                          adaptive_decision.prediction_confidence * 100.0,
+                          0.0, 100.0)) << L"%)";
+        status.adaptive_prediction = prediction.str();
+    } else {
+        status.adaptive_prediction = L"not available";
+    }
+    status.adaptive_session =
+        sample.session_class == optimizer::AdaptiveSessionClass::verified_offline
+            ? L"VERIFIED_OFFLINE"
+            : sample.session_class == optimizer::AdaptiveSessionClass::verified_online
+                ? L"VERIFIED_ONLINE"
+                : sample.session_class ==
+                          optimizer::AdaptiveSessionClass::host_or_listen_server
+                    ? L"HOST_OR_LISTEN_SERVER" : L"SESSION_UNKNOWN";
+    status.adaptive_restore_generation =
+        adaptive_decision.restore_generation;
+    const auto* selected_record = adaptive_decision.selected_setting.empty()
+        ? nullptr
+        : optimizer::find_adaptive_setting(
+              adaptive_decision.selected_setting);
+    if (adaptive_decision.selected_setting ==
+        "AdaptiveCorpseRuntimeLimit") {
+        status.adaptive_source = L"protected autonomous corpse provider";
+        status.adaptive_safety = L"PROTECTED / AUTONOMOUS_RUNTIME";
+        status.adaptive_evidence = widen(
+            optimizer::adaptive_capability_state_name(
+                sample.capabilities.corpse_control));
+    } else if (selected_record) {
+        status.adaptive_source = widen(selected_record->source);
+        status.adaptive_safety = widen(
+            optimizer::adaptive_safety_class_name(
+                selected_record->safety_class)) + L" / " + widen(
+            optimizer::adaptive_actuation_class_name(
+                selected_record->actuation_class));
+        status.adaptive_evidence = widen(
+            optimizer::adaptive_evidence_state_name(
+                selected_record->evidence_state));
+    } else {
+        status.adaptive_source = L"not selected";
+        status.adaptive_safety = L"no actuator";
+        status.adaptive_evidence = L"NOT_AVAILABLE";
+    }
+    status.adaptive_shadow_mode = optimizer_settings.adaptive_shadow_mode;
+
+    const auto bounded_profile = optimizer::bound_adaptive_profile(
+        adaptive_decision.recommended_profile,
+        optimizer_settings.adaptive_minimum_quality,
+        optimizer_settings.adaptive_maximum_quality);
+    status.recommended_profile = bounded_profile
+        ? std::wstring{optimizer::adaptive_profile_label(*bounded_profile)}
+        : L"not available";
+    status.recommendation_ready =
+        bounded_profile.has_value() &&
+        adaptive_decision.data.quality !=
+            optimizer::AdaptiveDataQuality::not_available &&
+        adaptive_decision.state !=
+            optimizer::AdaptiveControllerState::observing &&
+        adaptive_decision.state != optimizer::AdaptiveControllerState::frozen;
+    status.recommendation_reason = bounded_profile
+        ? adaptive_profile_reason(adaptive_decision)
+        : L"No verified named profile fits the selected quality limits";
+
+    std::optional<optimizer::Profile> profile_to_persist;
+    if (start_mode == StartMode::normal &&
+        adaptive_locks_valid &&
+        adaptive_decision.data.quality ==
+            optimizer::AdaptiveDataQuality::valid &&
+        adaptive_decision.state !=
+            optimizer::AdaptiveControllerState::observing &&
+        adaptive_decision.state !=
+            optimizer::AdaptiveControllerState::frozen &&
+        bounded_profile) {
+        profile_to_persist = adaptive_profile_gate.evaluate({
+            .current = stored_adaptive_profile(optimizer_settings),
+            .recommended = *bounded_profile,
+            .active_gameplay = active_gameplay,
+            .telemetry_valid = true,
+            .recovery_eligible =
+                adaptive_decision.quality_recovery_eligible,
+            .now_ns = now_ns});
+    } else {
+        adaptive_profile_gate.reset();
+    }
+    if (profile_to_persist) {
+        telemetry_pipeline::apply_adaptive_profile_effect(
+            *this, {*profile_to_persist}, status);
+    }
+
+    const bool decision_changed =
+        adaptive_decision.state != last_adaptive_state ||
+        adaptive_decision.disposition != last_adaptive_disposition ||
+        adaptive_decision.bottleneck.type != last_adaptive_bottleneck;
+    if (decision_changed && optimizer_settings.adaptive_logging) {
+        std::wostringstream decision_log;
+        decision_log << L"State=" << status.adaptive_state
+                     << L"; target=" << optimizer_settings.target_fps
+                     << L" FPS; bands_ms="
+                     << adaptive_decision.warning_frame_time_ms << L"/"
+                     << adaptive_decision.corrective_frame_time_ms << L"/"
+                     << adaptive_decision.critical_frame_time_ms
+                     << L"; current=";
+        if (frames.fps) {
+            decision_log << std::fixed << std::setprecision(2)
+                         << *frames.fps << L" FPS / "
+                         << frames.frame_time_ms.value_or(0.0) << L" ms";
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; avg3s=";
+        if (frames.average_fps) {
+            decision_log << *frames.average_fps << L" FPS";
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; p95=";
+        if (frames.p95_ms) {
+            decision_log << *frames.p95_ms << L" ms";
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; stutters5s=" << frames.stutter_count;
+        decision_log << L"; 1%low=";
+        if (frames.one_percent_low_fps) {
+            decision_log << *frames.one_percent_low_fps << L" FPS";
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; CPU=";
+        if (frame.evidence.cpu_percent) {
+            decision_log << *frame.evidence.cpu_percent << L"%";
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; criticalThread=";
+        if (frame.evidence.critical_core_percent) {
+            decision_log << *frame.evidence.critical_core_percent
+                         << L"%";
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; effectiveCores=";
+        if (frame.evidence.effective_core_usage) {
+            decision_log << *frame.evidence.effective_core_usage;
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; activeCpuThreads=";
+        if (frame.evidence.active_cpu_threads) {
+            decision_log << *frame.evidence.active_cpu_threads;
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; dominantThreadShare=";
+        if (frame.evidence.dominant_thread_share_percent) {
+            decision_log << *frame.evidence.dominant_thread_share_percent
+                         << L"%";
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; cpuWorkload="
+                     << status.adaptive_cpu_parallelism;
+        decision_log << L"; GPU=";
+        if (frame.evidence.gpu_percent) {
+            decision_log << *frame.evidence.gpu_percent << L"%";
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; prediction=" << status.adaptive_prediction
+                     << L"; dropRisk="
+                     << status.adaptive_drop_risk_percent << L"%"
+                     << L"; bottleneck=" << status.adaptive_bottleneck
+                     << L"; confidence="
+                     << status.adaptive_confidence_percent << L"%"
+                     << L"; action=" << status.adaptive_action
+                     << L"; corpseUserMax=" << optimizer_settings.corpse_limit
+                     << L"; corpseRuntime=";
+        if (status.adaptive_runtime_corpse_limit) {
+            decision_log << *status.adaptive_runtime_corpse_limit;
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; corpseCapability="
+                     << status.adaptive_corpse_capability
+                     << L"; corpseAction="
+                     << status.adaptive_corpse_action_status
+                     << L"; flexCapability="
+                     << status.adaptive_flex_capability
+                     << L"; particleCapability="
+                     << status.adaptive_particle_capability
+                     << L"; reason=" << status.adaptive_reason
+                     << L"; source=" << status.adaptive_source
+                     << L"; safety=" << status.adaptive_safety
+                     << L"; evidence=" << status.adaptive_evidence
+                     << L"; session=" << status.adaptive_session
+                     << L"; quality=" << status.adaptive_quality_score
+                     << L"%; measuredEffect=NOT_AVAILABLE"
+                     << L"; restoreGeneration="
+                     << status.adaptive_restore_generation;
+        events->append({0, diagnostics::Severity::info,
+            "ADAPTIVE_DECISION",
+            decision_log.str(),
+            L"optimizer"});
+    }
+    last_adaptive_state = adaptive_decision.state;
+    last_adaptive_disposition = adaptive_decision.disposition;
+    last_adaptive_bottleneck = adaptive_decision.bottleneck.type;
+    model.set_status(std::move(status));
+}
+
+}  // namespace kf2::app

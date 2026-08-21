@@ -1,0 +1,5 @@
+#include "resource.h"
+
+IDR_PREMIUM_MASCOT_ANIMATION RCDATA "premium_mascot.kfanim"
+IDR_PREMIUM_MUTANT_RIG_PNG RCDATA "generated/premium_mutant_idle_sheet.png"
+IDR_PREMIUM_MUTANT_LOW_IDLE_PNG RCDATA "generated/premium_mutant_low_idle_sheet.png"
