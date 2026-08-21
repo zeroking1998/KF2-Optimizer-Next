@@ -25,13 +25,14 @@ decisions that require an owner.
 
 - [x] Confirm project name `KF2 Optimizer Next` and public repository owner
 - [x] Configure repository topics, description, issues, and Windows CI
+- [x] Protect `main` with required pull requests, current Debug/Release checks,
+  resolved review conversations, linear history, and blocked force-push/delete
 - [x] Publish the source repository with a fresh, reviewed history
 - [x] Publish the owner-authorized `v0.1.0-beta.1` portable pre-release
 
 ## Remaining release-hardening work
 
 - [ ] Complete independent binary-release redistribution review
-- [ ] Configure branch protection and required Windows CI checks
 - [ ] Obtain a trusted code-signing certificate and publish a signed release
 
 ## Publication boundary
