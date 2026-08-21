@@ -16,6 +16,9 @@ large architectural or runtime-provider change in an issue first.
 
 ## Pull-request requirements
 
+- `main` is protected. Every change must use a pull request with a current
+  branch, successful `Test Debug` and `Test Release` checks, and resolved review
+  conversations.
 - Use clear English in code, comments, UI, logs, tests, and documentation.
 - Keep the change focused; do not mix unrelated cleanup with behavior changes.
 - Add a regression test for changed behavior and relevant failure paths.
