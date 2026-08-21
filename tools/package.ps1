@@ -107,7 +107,6 @@ if (-not (Test-Path -LiteralPath $telemetryModule -PathType Leaf)) {
         $telemetryBuild.SeedModule = $TelemetrySeedModule
     }
     & (Join-Path $PSScriptRoot 'build_kf2_telemetry.ps1') @telemetryBuild
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 $expectedTelemetryHash = `
     '89F441307624239A2D169ABAB79F9F3DAEBABB6E2EA86120E429691D4035063F'
