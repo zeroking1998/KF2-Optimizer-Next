@@ -100,6 +100,8 @@ int main() {
     CHECK(game::advanced_value_label(
               game::AdvancedOption::floating_point_render_targets, defaults) ==
           L"Off");
+    CHECK(game::advanced_value_label(
+              game::AdvancedOption::temporal_aa, defaults) == L"Off");
     CHECK(game::advanced_slider_value(
               game::AdvancedOption::screen_percentage, defaults) == 100);
     CHECK(game::advanced_slider_value(

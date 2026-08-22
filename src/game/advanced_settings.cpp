@@ -193,7 +193,7 @@ AdvancedGameSettings recommended_advanced_defaults() {
         true,   // texture streaming
         true,   // priority texture streaming
         true,   // dynamic texture streaming
-        true,   // temporal anti-aliasing
+        false,  // temporal anti-aliasing; avoids frame-history ghosting
         true,   // hardware shadow filtering
         true,   // downsampled translucency
         false,  // floating-point render targets

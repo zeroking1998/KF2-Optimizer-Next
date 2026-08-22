@@ -48,7 +48,7 @@ constexpr TooltipEntry kTooltips[]{
     {"graphics-texture-filtering", L"Controls texture sharpness at oblique angles from Bilinear up to 16x Anisotropic, with a small GPU cost."},
     {"graphics-shadow-quality", L"Controls shadow resolution and distance. Higher levels improve shadows and increase CPU/GPU load."},
     {"graphics-realtime-reflections", L"On adds dynamic reflections and raises GPU cost. Off reduces reflection detail and saves GPU time."},
-    {"graphics-anti-aliasing", L"On smooths jagged edges with a small GPU cost and may soften the image. Off is sharper but shows more aliasing."},
+    {"graphics-anti-aliasing", L"On smooths jagged edges with a small GPU cost and may soften the image. Off is sharper but shows more aliasing. Temporal anti-aliasing is controlled separately in Advanced settings."},
     {"graphics-bloom", L"Controls the glow around bright lights. Higher levels strengthen the glow and add post-processing cost."},
     {"graphics-motion-blur", L"Blurs the image during camera or object movement. Turning it off gives a clearer moving image and lowers post-processing work."},
     {"graphics-ambient-occlusion", L"Adds contact shadows where objects meet. SSAO and HBAO+ improve depth but increase GPU load."},
@@ -78,7 +78,7 @@ constexpr TooltipEntry kTooltips[]{
     {"advanced-texture-streaming", L"On loads texture detail as needed, limiting VRAM use but allowing pop-in. Off may use much more VRAM and can stutter when VRAM fills."},
     {"advanced-priority-streaming", L"On gives urgent textures priority, improving nearby texture loading but increasing short I/O and VRAM pressure. Off uses normal streaming order."},
     {"advanced-dynamic-streaming", L"On continually adapts texture loading to the scene, helping control VRAM use with possible pop-in. Off uses less responsive streaming decisions."},
-    {"advanced-temporal-aa", L"On blends previous frames to smooth edges, adding GPU history buffers and possible blur or ghosting. Off avoids that memory cost and keeps motion sharper."},
+    {"advanced-temporal-aa", L"On blends previous frames to smooth edges. At lower FPS it can leave visible double images or flicker during mouse and camera movement. Off keeps moving images clear and is the recommended default."},
     {"advanced-hardware-shadow-filtering", L"On uses GPU filtering for smoother shadow edges and adds some GPU work. Off uses simpler shadow filtering."},
     {"advanced-downsampled-translucency", L"On renders translucent effects at lower resolution, saving GPU time and VRAM bandwidth but making them softer. Off keeps full-resolution effects."},
     {"advanced-floating-point-render-targets", L"On uses higher-precision lighting buffers and can noticeably increase VRAM use and bandwidth. Off uses lower-cost buffers and is recommended unless required."},
@@ -88,7 +88,7 @@ constexpr TooltipEntry kTooltips[]{
     {"advanced-particle-percentage-slider", L"Controls how many configured particles are emitted. Higher values increase effect density and can raise CPU, GPU, and VRAM use during combat."},
     {"advanced-decal-lifetime-slider", L"Controls how long blood and impact marks remain. Longer times keep more decals in RAM and VRAM and add draw work, which can cause stutter in long fights."},
     {"advanced-apply", L"Backs up the KF2 INIs, writes these settings atomically, and verifies the result. Adaptive does not control them."},
-    {"advanced-reset", L"Returns the controls to balanced defaults: 100% render scale, 100% particles, 30-second decals, and low-cost render buffers."},
+    {"advanced-reset", L"Returns the controls to balanced defaults: Temporal anti-aliasing off, 100% render scale, 100% particles, 30-second decals, and low-cost render buffers."},
 };
 
 }  // namespace
