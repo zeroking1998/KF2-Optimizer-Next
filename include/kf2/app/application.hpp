@@ -29,6 +29,14 @@ enum class StartMode { normal, read_only, safe };
     return mode == StartMode::normal;
 }
 
+[[nodiscard]] constexpr bool should_prepare_adaptive_flex_runtime(
+    StartMode mode, int configured_physx_level) noexcept {
+    return mode == StartMode::normal && configured_physx_level > 0;
+}
+
+void preserve_user_flex_activation(
+    std::vector<config::RequestedChange>& changes) noexcept;
+
 struct StartOptions {
     std::filesystem::path state_root;
     std::filesystem::path executable_root;

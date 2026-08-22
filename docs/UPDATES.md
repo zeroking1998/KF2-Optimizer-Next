@@ -9,15 +9,21 @@ background process.
 Select **Updates** in the upper-right corner to run a manual check. When a
 newer version is available, the same button changes to **Update available**,
 receives a visible highlight, and starts the consent-based installation flow.
-**Optimization → Version & Updates** shows the installed version, available
-version, last check and current status. Automatic checks are enabled by default
-and run at startup no more than once in 24 hours. Turning them off does not
-disable the upper-right manual button.
+**Home → Version & Updates** shows the installed version, available version,
+last check and current status. The automatic-check toggle is in the upper-right
+corner. Automatic checks are enabled by default and run at startup no more than
+once in 24 hours. Turning them off does not disable the manual Updates button.
+The last completed result is kept locally, so reopening the app within that
+24-hour interval still shows **No newer version available** or the exact newer
+version without another network request.
 
 When a newer semantic version exists, the page shows its publication date,
-download size and concise release notes. Nothing is downloaded or installed
-until **Install update** is selected. **Later** hides the offer for the current
-session.
+download size and concise release notes in a quiet in-app dialog. Nothing is
+downloaded or installed until **Install update** is selected. **Later** hides
+the dialog for the current run. **Don't show again** remembers that exact
+version and suppresses its dialog on later starts; a newer release still opens
+a new dialog. The available version remains visible in Home and in the
+highlighted Update button.
 
 Internet and GitHub errors do not stop the optimizer. They remain quiet in the
 Updates status and can be retried manually.

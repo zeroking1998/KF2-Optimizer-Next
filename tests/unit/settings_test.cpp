@@ -35,14 +35,12 @@ int main() {
     CHECK(parsed.has_value());
     CHECK(parsed.value().target_fps == 120);
     CHECK(parsed.value().corpse_limit == 9);
-    CHECK(!parsed.value().animations_enabled);
     CHECK(parsed.value().overlay_enabled);
     CHECK(!parsed.value().overlay_show_fps);
     CHECK(parsed.value().overlay_show_frame_time);
     CHECK(!parsed.value().overlay_show_cpu);
     CHECK(parsed.value().overlay_show_gpu);
     CHECK(parsed.value().overlay_show_memory);
-    CHECK(parsed.value().offline_gameplay_telemetry);
     CHECK(parsed.value().overlay_position == "bottom_left");
     CHECK(parsed.value().overlay_scale_percent == 175);
     CHECK(parsed.value().quality_policy == "invisible");
@@ -50,10 +48,13 @@ int main() {
     CHECK(parsed.value().manual_game_path == "D:\\Steam\\KillingFloor2");
     CHECK(parsed.value().extras.at("custom_key") == "preserved");
     const auto migrated_serialized = serialize_settings(parsed.value());
+    CHECK(migrated_serialized.find("offline_gameplay_telemetry") ==
+          std::string::npos);
     CHECK(migrated_serialized.find("guide_completed") == std::string::npos);
     CHECK(migrated_serialized.find("guide_step") == std::string::npos);
     CHECK(migrated_serialized.find("adaptive_flex_max_substeps") ==
           std::string::npos);
+    CHECK(migrated_serialized.find("animations_enabled") == std::string::npos);
 
     CHECK(!parse_settings("schema_version=9\ntarget_fps=120\n").has_value());
     CHECK(!parse_settings("schema_version=1\ntarget_fps=9999\n").has_value());
@@ -125,7 +126,11 @@ int main() {
     CHECK(!parse_settings("schema_version=1\noverlay_show_memory=maybe\n").has_value());
     CHECK(!parse_settings(
         "schema_version=1\noffline_gameplay_telemetry=maybe\n").has_value());
-    CHECK(!parse_settings("schema_version=1\nanimations_enabled=maybe\n").has_value());
+    const auto legacy_animations = parse_settings(
+        "schema_version=1\nanimations_enabled=maybe\n");
+    CHECK(legacy_animations.has_value());
+    CHECK(serialize_settings(legacy_animations.value()).find(
+              "animations_enabled") == std::string::npos);
     CHECK(!parse_settings("schema_version=1\nguide_step=25\n").has_value());
     CHECK(!parse_settings("schema_version=1\nquality_policy=magic\n").has_value());
     CHECK(!parse_settings("schema_version=1\noptimizer_profile=turbo\n").has_value());
@@ -168,11 +173,10 @@ int main() {
 
     CHECK(serialize_settings(Settings{}) ==
           "schema_version=1\noptimizer_mode=adaptive\n"
-          "animations_enabled=true\n"
           "automatic_update_checks=true\n"
-          "overlay_enabled=false\noverlay_show_fps=true\noverlay_show_frame_time=true\n"
-          "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=false\n"
-          "restore_config_after_game=true\noffline_gameplay_telemetry=false\n"
+          "overlay_enabled=true\noverlay_show_fps=true\noverlay_show_frame_time=true\n"
+          "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=true\n"
+          "restore_config_after_game=true\n"
           "adaptive_aggressiveness=balanced\n"
           "adaptive_minimum_quality=70\nadaptive_maximum_quality=100\n"
           "adaptive_quality_change_budget=2\nadaptive_headroom_percent=8\n"

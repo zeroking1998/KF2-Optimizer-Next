@@ -7,7 +7,6 @@ namespace kf2::ui {
 struct ThemeInput {
     bool high_contrast{false};
     bool dark{true};
-    bool reduced_motion{false};
     std::uint32_t system_background{0xFF000000};
     std::uint32_t system_text{0xFFFFFFFF};
     std::uint32_t system_accent{0xFFFFFF00};

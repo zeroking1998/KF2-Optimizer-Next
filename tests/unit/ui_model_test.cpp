@@ -17,12 +17,12 @@ int main() {
     UiModel model;
     CHECK(model.selected() == Destination::dashboard);
     CHECK((kDestinations == std::array{
-        Destination::dashboard, Destination::settings, Destination::overlay,
-        Destination::diagnostics}));
+        Destination::dashboard, Destination::graphics, Destination::overlay,
+        Destination::advanced, Destination::diagnostics}));
     CHECK(destination_label(Destination::dashboard) == L"Home");
-    CHECK(destination_label(Destination::settings) == L"Optimization");
-    CHECK(destination_label(Destination::optimizer) == L"Advanced tools");
     CHECK(destination_label(Destination::diagnostics) == L"Help & Repair");
+    CHECK(destination_label(Destination::graphics) == L"Game graphics");
+    CHECK(destination_label(Destination::advanced) == L"Advanced settings");
 
     UiModel navigation_model;
     CHECK(navigation_model.navigate(NavigationCommand::home).changed == false);
@@ -69,19 +69,6 @@ int main() {
     model.set_status(status);
     CHECK(model.page_body().empty());
 
-    static_cast<void>(model.focus_destination(Destination::game));
-    static_cast<void>(model.activate_focused());
-    status.offline_gameplay_telemetry = true;
-    status.restore_config_after_game = true;
-    status.game_session = L"KF-BioticsLab";
-    status.flex_telemetry = L"FleX: 2 Solver aktiv";
-    model.set_status(status);
-    CHECK(model.page_body().find(L"KF-BioticsLab") != std::wstring::npos);
-    CHECK(model.page_body().find(
-              L"Protected corpse provider: automatic on Adaptive launch") !=
-          std::wstring::npos);
-    CHECK(model.page_body().find(L"restore") != std::wstring::npos);
-
     static_cast<void>(model.focus_destination(Destination::overlay));
     static_cast<void>(model.activate_focused());
     status.overlay_enabled = true;
@@ -96,19 +83,15 @@ int main() {
     model.set_status(status);
     CHECK(model.page_body().empty());
 
-    static_cast<void>(model.focus_destination(Destination::settings));
-    static_cast<void>(model.activate_focused());
     status.corpse_limit = 2000;
     model.set_status(status);
     CHECK(model.page_body().empty());
 
-    static_cast<void>(model.focus_destination(Destination::optimizer));
+    static_cast<void>(model.focus_destination(Destination::advanced));
     static_cast<void>(model.activate_focused());
-    status.config = ConfigWorkflowState::preview_ready;
+    status.advanced_available = true;
     model.set_status(status);
-    model.set_preview_summary(L"Preview: MaxDeadBodies 15 -> 2000");
-    CHECK(model.page_body().find(L"MaxDeadBodies") != std::wstring::npos);
-    CHECK(model.page_body().find(L"Recommended profile") != std::wstring::npos);
+    CHECK(model.page_body().empty());
 
     model.set_notice({NoticeSeverity::warning, L"TEST", L"Warning", L""});
     CHECK(model.notice().has_value());

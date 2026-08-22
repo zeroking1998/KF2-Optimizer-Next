@@ -10,16 +10,14 @@ namespace kf2::config {
 
 struct Settings {
     int schema_version{1};
-    bool animations_enabled{true};
     bool automatic_update_checks{true};
-    bool overlay_enabled{false};
+    bool overlay_enabled{true};
     bool overlay_show_fps{true};
     bool overlay_show_frame_time{true};
     bool overlay_show_cpu{true};
     bool overlay_show_gpu{true};
-    bool overlay_show_memory{false};
+    bool overlay_show_memory{true};
     bool restore_config_after_game{true};
-    bool offline_gameplay_telemetry{false};
     std::string adaptive_aggressiveness{"balanced"};
     int adaptive_minimum_quality{70};
     int adaptive_maximum_quality{100};

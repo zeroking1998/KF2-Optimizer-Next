@@ -2,11 +2,11 @@
 
 #include <array>
 
+#include "features/advanced/advanced_actions.hpp"
 #include "features/backup/backup_actions.hpp"
 #include "features/diagnostics/diagnostics_actions.hpp"
 #include "features/game/game_actions.hpp"
-#include "features/navigation/navigation_actions.hpp"
-#include "features/optimizer/optimizer_actions.hpp"
+#include "features/graphics/graphics_actions.hpp"
 #include "features/overlay/overlay_actions.hpp"
 #include "features/settings/settings_actions.hpp"
 
@@ -14,13 +14,13 @@ namespace kf2::app::runtime {
 namespace {
 
 constexpr std::array<FeatureDefinition, 7> kFeatures{{
-    ::kf2::features::navigation::kFeature,
     ::kf2::features::overlay::kFeature,
     ::kf2::features::diagnostics::kFeature,
     ::kf2::features::backup::kFeature,
-    ::kf2::features::optimizer::kFeature,
     ::kf2::features::settings::kFeature,
     ::kf2::features::game::kFeature,
+    ::kf2::features::graphics::kFeature,
+    ::kf2::features::advanced::kFeature,
 }};
 
 }  // namespace

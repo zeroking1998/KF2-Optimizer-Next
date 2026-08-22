@@ -37,6 +37,9 @@ struct UpdateSnapshot {
     std::int64_t last_check_unix_seconds{};
     UpdatePhase phase{UpdatePhase::idle};
     std::optional<ReleaseInfo> available_release;
+    bool cached_check_completed{false};
+    std::optional<std::string> cached_available_version;
+    std::string ignored_version;
     std::wstring status{L"Not checked yet"};
     bool dismissed{false};
 };
@@ -45,7 +48,10 @@ class UpdateController final {
 public:
     explicit UpdateController(std::string installed_version);
     void restore_preferences(bool automatic_checks_enabled,
-                             std::int64_t last_check_unix_seconds) noexcept;
+                             std::int64_t last_check_unix_seconds,
+                             bool cached_check_completed = false,
+                             std::string cached_available_version = {},
+                             std::string ignored_version = {}) noexcept;
     [[nodiscard]] CheckStart begin_check(CheckTrigger trigger,
                                          std::int64_t now_unix_seconds) noexcept;
     void complete_check(Result<std::optional<ReleaseInfo>> result);
@@ -53,6 +59,7 @@ public:
     [[nodiscard]] bool begin_install_with_user_consent() noexcept;
     void complete_install_failure(std::wstring message);
     void dismiss() noexcept;
+    void ignore_available_version() noexcept;
     [[nodiscard]] const UpdateSnapshot& snapshot() const noexcept;
 
 private:

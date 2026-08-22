@@ -85,10 +85,11 @@ int main() {
     CHECK(SUCCEEDED(root->FindAll(TreeScope_Children, condition.Get(), &navigation)));
     int count = 0;
     CHECK(SUCCEEDED(navigation->get_Length(&count)));
-    CHECK(count == 4);
+    CHECK(count == 5);
 
     constexpr const wchar_t* expected[] = {
-        L"Home", L"Optimization", L"Overlay", L"Help & Repair"};
+        L"Home", L"Game graphics", L"Overlay", L"Advanced settings",
+        L"Help & Repair"};
     for (int index = 0; index < count; ++index) {
         ComPtr<IUIAutomationElement> item;
         CHECK(SUCCEEDED(navigation->GetElement(index, &item)));
@@ -101,13 +102,13 @@ int main() {
         CHECK(focusable == TRUE);
     }
 
-    ComPtr<IUIAutomationElement> settings_item;
-    CHECK(SUCCEEDED(navigation->GetElement(1, &settings_item)));
-    ComPtr<IUIAutomationInvokePattern> settings_invoke;
-    CHECK(SUCCEEDED(settings_item->GetCurrentPatternAs(
-        UIA_InvokePatternId, IID_PPV_ARGS(&settings_invoke))));
-    CHECK(SUCCEEDED(settings_invoke->Invoke()));
-    CHECK(model.selected() == kf2::ui::Destination::settings);
+    ComPtr<IUIAutomationElement> home_item;
+    CHECK(SUCCEEDED(navigation->GetElement(0, &home_item)));
+    ComPtr<IUIAutomationInvokePattern> home_invoke;
+    CHECK(SUCCEEDED(home_item->GetCurrentPatternAs(
+        UIA_InvokePatternId, IID_PPV_ARGS(&home_invoke))));
+    CHECK(SUCCEEDED(home_invoke->Invoke()));
+    CHECK(model.selected() == kf2::ui::Destination::dashboard);
     auto status = model.status();
     status.mode = L"Adaptive / Automatic";
     model.set_status(status);

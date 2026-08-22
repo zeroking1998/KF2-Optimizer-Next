@@ -54,6 +54,21 @@ std::wstring format_size(std::uint64_t bytes) {
         std::to_wstring(tenths % 10ULL) + L" MiB";
 }
 
+update::PersistedUpdateState persisted_state(
+    const update::UpdateSnapshot& snapshot) {
+    update::PersistedUpdateState state{
+        .last_check_unix_seconds = snapshot.last_check_unix_seconds,
+        .ignored_version = snapshot.ignored_version};
+    if (!snapshot.cached_check_completed) return state;
+    if (snapshot.cached_available_version) {
+        state.last_result = update::PersistedCheckResult::available;
+        state.available_version = *snapshot.cached_available_version;
+    } else {
+        state.last_result = update::PersistedCheckResult::current;
+    }
+    return state;
+}
+
 }  // namespace
 
 struct UpdateCheckAsyncState {
@@ -71,15 +86,22 @@ void UiRuntime::refresh_update_presentation() {
     const auto& snapshot = update_controller.snapshot();
     status.update_installed_version = widen_utf8(snapshot.installed_version);
     status.update_available_version = snapshot.available_release
-        ? widen_utf8(snapshot.available_release->version) : L"None";
+        ? widen_utf8(snapshot.available_release->version)
+        : snapshot.cached_available_version
+            ? widen_utf8(*snapshot.cached_available_version) : L"None";
     status.update_last_check = format_last_check(
         snapshot.last_check_unix_seconds);
     status.update_status = snapshot.status;
     status.automatic_update_checks = snapshot.automatic_checks_enabled;
     status.update_checking = snapshot.phase == update::UpdatePhase::checking;
     status.update_installing = snapshot.phase == update::UpdatePhase::installing;
-    status.update_available = snapshot.available_release.has_value() &&
+    status.update_available = snapshot.available_release.has_value();
+    status.update_newer_version_known =
+        snapshot.available_release.has_value() ||
+        snapshot.cached_available_version.has_value();
+    status.update_prompt_visible = status.update_newer_version_known &&
         !snapshot.dismissed;
+    status.update_check_completed = snapshot.cached_check_completed;
     status.update_installable = status.update_available &&
         snapshot.available_release->asset.has_value() &&
         snapshot.available_release->install_block_reason.empty();
@@ -107,9 +129,7 @@ void UiRuntime::start_update_check(update::CheckTrigger trigger) {
         return;
     }
     static_cast<void>(update::save_update_state(
-        update_state_path,
-        {.last_check_unix_seconds =
-             update_controller.snapshot().last_check_unix_seconds}));
+        update_state_path, persisted_state(update_controller.snapshot())));
     const auto state = std::make_shared<UpdateCheckAsyncState>();
     update_check_state = state;
     const std::string installed = update_controller.snapshot().installed_version;
@@ -131,6 +151,8 @@ void UiRuntime::poll_update_check() {
     }
     update_check_state.reset();
     update_controller.complete_check(std::move(*outcome));
+    static_cast<void>(update::save_update_state(
+        update_state_path, persisted_state(update_controller.snapshot())));
     refresh_update_presentation();
 }
 
@@ -159,6 +181,13 @@ void UiRuntime::toggle_automatic_update_checks() {
 
 void UiRuntime::dismiss_update() {
     update_controller.dismiss();
+    refresh_update_presentation();
+}
+
+void UiRuntime::ignore_update() {
+    update_controller.ignore_available_version();
+    static_cast<void>(update::save_update_state(
+        update_state_path, persisted_state(update_controller.snapshot())));
     refresh_update_presentation();
 }
 

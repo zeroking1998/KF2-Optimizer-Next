@@ -217,8 +217,6 @@ void UiRuntime::detach_telemetry() {
     status.recommendation_reason = launch_profile
         ? L"Saved automatic profile is ready for the next protected launch"
         : L"No verified named profile fits the selected quality limits";
-    status.recommendation_ready =
-        launch_profile.has_value();
     model.set_status(std::move(status));
     overlay_scene_ready = false;
     game_window = nullptr;

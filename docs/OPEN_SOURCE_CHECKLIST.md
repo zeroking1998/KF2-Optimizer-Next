@@ -28,7 +28,7 @@ decisions that require an owner.
 - [x] Protect `main` with required pull requests, current Debug/Release checks,
   resolved review conversations, linear history, and blocked force-push/delete
 - [x] Publish the source repository with a fresh, reviewed history
-- [x] Publish the owner-authorized `v0.0.2-alpha` portable pre-release
+- [x] Publish the owner-authorized `v0.0.4-alpha` portable pre-release
 
 ## Remaining release-hardening work
 

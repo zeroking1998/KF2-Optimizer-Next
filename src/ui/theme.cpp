@@ -31,12 +31,12 @@ Theme resolve_theme(const ThemeInput& input) noexcept {
         return {0xFF050A11, 0xFF09131F, 0xFF0D1A29, 0xFFF2F5FA,
                 0xFFA8B3C2, 0xFFE3262E, 0xFFFF3740, 0xFF213348,
                 0xFF25D978, 0xFF3DA5FF, 0xFFFFB02E, 0xFFFF4651,
-                !input.reduced_motion};
+                true};
     }
     return {0xFFF4F6FA, 0xFFFFFFFF, 0xFFF8FAFD, 0xFF151925,
             0xFF4D5668, 0xFFC91E27, 0xFFE3262E, 0xFFD5DAE4,
             0xFF08783F, 0xFF1168B5, 0xFF8A5700, 0xFFB42318,
-            !input.reduced_motion};
+            true};
 }
 
 double contrast_ratio(std::uint32_t foreground,

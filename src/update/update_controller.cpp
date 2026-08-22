@@ -10,10 +10,27 @@ UpdateController::UpdateController(std::string installed_version) {
 
 void UpdateController::restore_preferences(
     bool automatic_checks_enabled,
-    std::int64_t last_check_unix_seconds) noexcept {
+    std::int64_t last_check_unix_seconds,
+    bool cached_check_completed,
+    std::string cached_available_version,
+    std::string ignored_version) noexcept {
     snapshot_.automatic_checks_enabled = automatic_checks_enabled;
     snapshot_.last_check_unix_seconds = last_check_unix_seconds > 0
         ? last_check_unix_seconds : 0;
+    snapshot_.cached_check_completed = cached_check_completed &&
+        snapshot_.last_check_unix_seconds > 0;
+    snapshot_.ignored_version = std::move(ignored_version);
+    if (snapshot_.cached_check_completed &&
+        !cached_available_version.empty()) {
+        snapshot_.cached_available_version =
+            std::move(cached_available_version);
+        snapshot_.status = L"A new version was found during the last check.";
+        snapshot_.dismissed =
+            *snapshot_.cached_available_version == snapshot_.ignored_version;
+    } else if (snapshot_.cached_check_completed) {
+        snapshot_.cached_available_version.reset();
+        snapshot_.status = L"No newer version was available at the last check.";
+    }
 }
 
 CheckStart UpdateController::begin_check(
@@ -32,6 +49,9 @@ CheckStart UpdateController::begin_check(
         ? now_unix_seconds : snapshot_.last_check_unix_seconds;
     snapshot_.phase = UpdatePhase::checking;
     snapshot_.status = L"Checking official GitHub Releases...";
+    snapshot_.available_release.reset();
+    snapshot_.cached_check_completed = false;
+    snapshot_.cached_available_version.reset();
     snapshot_.dismissed = false;
     return CheckStart::started;
 }
@@ -45,6 +65,12 @@ void UpdateController::complete_check(
         return;
     }
     snapshot_.available_release = std::move(result.value());
+    snapshot_.cached_check_completed = true;
+    snapshot_.cached_available_version = snapshot_.available_release
+        ? std::optional<std::string>{snapshot_.available_release->version}
+        : std::nullopt;
+    snapshot_.dismissed = snapshot_.cached_available_version &&
+        *snapshot_.cached_available_version == snapshot_.ignored_version;
     if (snapshot_.available_release) {
         snapshot_.phase = UpdatePhase::available;
         snapshot_.status = snapshot_.available_release->install_block_reason.empty()
@@ -78,7 +104,16 @@ void UpdateController::complete_install_failure(std::wstring message) {
 }
 
 void UpdateController::dismiss() noexcept {
-    if (snapshot_.phase == UpdatePhase::available) snapshot_.dismissed = true;
+    if (snapshot_.phase == UpdatePhase::available ||
+        snapshot_.cached_available_version) {
+        snapshot_.dismissed = true;
+    }
+}
+
+void UpdateController::ignore_available_version() noexcept {
+    if (!snapshot_.cached_available_version) return;
+    snapshot_.ignored_version = *snapshot_.cached_available_version;
+    snapshot_.dismissed = true;
 }
 
 const UpdateSnapshot& UpdateController::snapshot() const noexcept {

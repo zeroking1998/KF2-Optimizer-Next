@@ -66,9 +66,6 @@ app::runtime::DispatchResult create(
                      L" older verified backups; eight newest are retained",
                  L"backup"});
         }
-        auto status = runtime.model.status();
-        status.config = ui::ConfigWorkflowState::restore_available;
-        runtime.model.set_status(std::move(status));
         runtime.events->append(
             {0, product_diagnostics::Severity::info,
              "CONFIG_BACKUP_CREATED",
@@ -82,27 +79,6 @@ app::runtime::DispatchResult create(
                 created.has_value()
                     ? L"The three verified KF2 INI files were backed up and hash-verified."
                     : created.error().message);
-    return app::runtime::DispatchResult::handled;
-}
-
-app::runtime::DispatchResult open_folder(
-    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
-    std::error_code error;
-    const auto directory = runtime.settings_path.parent_path() / L"backups";
-    std::filesystem::create_directories(directory, error);
-    const auto opened = !error
-        ? app::open_local_directory(directory)
-        : Result<bool>::failure(
-              {ErrorCode::io_failure,
-               L"Backup directory cannot be created",
-               static_cast<std::uint32_t>(error.value())});
-    show_notice(runtime,
-                opened.has_value() ? ui::NoticeSeverity::info
-                                   : ui::NoticeSeverity::warning,
-                opened.has_value() ? L"BACKUP_FOLDER_OPENED"
-                                   : L"BACKUP_FOLDER_UNAVAILABLE",
-                opened.has_value() ? L"The portable backup folder was opened."
-                                   : opened.error().message);
     return app::runtime::DispatchResult::handled;
 }
 

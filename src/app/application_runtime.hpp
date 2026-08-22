@@ -31,6 +31,8 @@
 #include "kf2/diagnostics/feature_inventory.hpp"
 #include "kf2/diagnostics/crash_recorder.hpp"
 #include "kf2/game/game_session.hpp"
+#include "kf2/game/advanced_settings.hpp"
+#include "kf2/game/video_settings.hpp"
 #include "kf2/game/gameplay_log_lab.hpp"
 #include "kf2/game/game_log_session.hpp"
 #include "kf2/flex/flex_audit.hpp"
@@ -166,6 +168,10 @@ struct UiRuntime {
     std::filesystem::path update_state_path;
     std::shared_ptr<UpdateCheckAsyncState> update_check_state;
     std::shared_ptr<UpdateInstallAsyncState> update_install_state;
+    std::optional<game::VideoSettings> video_saved;
+    std::optional<game::VideoSettings> video_pending;
+    std::optional<game::AdvancedGameSettings> advanced_saved;
+    std::optional<game::AdvancedGameSettings> advanced_pending;
 
     void append_gameplay_report_fields(
         diagnostics::ProductReport& report) const noexcept;
@@ -208,7 +214,19 @@ struct UiRuntime {
     void start_update_install();
     void poll_update_install();
     void dismiss_update();
+    void ignore_update();
     void refresh_update_presentation();
+    void reload_video_settings();
+    void refresh_video_presentation();
+    void cycle_video_option(game::VideoOption option);
+    void reset_video_settings();
+    Result<config::ApplyResult> apply_video_settings();
+    void reload_advanced_settings();
+    void refresh_advanced_presentation();
+    void cycle_advanced_option(game::AdvancedOption option);
+    void stage_advanced_slider(game::AdvancedOption option, int value);
+    void reset_advanced_settings();
+    Result<config::ApplyResult> apply_advanced_settings();
 
     void system_resume();
 

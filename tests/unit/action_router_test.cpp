@@ -31,12 +31,12 @@ DispatchResult handled(kf2::app::UiRuntime& runtime, const ActionPayload&) {
 }
 
 constexpr std::array<std::string_view, 7> kFeatureNames{{
-    "navigation", "game", "settings", "overlay",
-    "diagnostics", "optimizer", "backup",
+    "game", "settings", "overlay", "diagnostics", "backup", "graphics",
+    "advanced",
 }};
 
 struct CompleteRegistryFixture {
-    std::array<std::array<ActionImplementation, 65>, 7> implementations{};
+    std::array<std::array<ActionImplementation, 90>, 7> implementations{};
     std::array<std::size_t, 7> counts{};
     std::array<FeatureDefinition, 7> features{};
 
@@ -65,8 +65,8 @@ ActionRequest request(ActionId id, std::string_view received_name,
 int main() {
     using namespace kf2::app::runtime;
 
-    CHECK(action_definitions().size() == 65);
-    CHECK(action_bindings().size() == 76);
+    CHECK(action_definitions().size() == 90);
+    CHECK(action_bindings().size() == 99);
 
     CompleteRegistryFixture complete;
     CHECK(valid_feature_registry(complete.features));
@@ -136,20 +136,20 @@ int main() {
     runtime = {};
     CHECK(dispatch_action(
               runtime,
-              request(ActionId::navigate_diagnostics, "header-diagnostics"),
+              request(ActionId::game_launch, "game-launch"),
               duplicate_feature_fixture.features) ==
           DispatchResult::invalid_registry);
     CHECK(runtime.calls == 0);
 
     CompleteRegistryFixture wrong_owner_fixture;
     auto wrong_owner_actions = wrong_owner_fixture.implementations[0];
-    wrong_owner_actions[0].id = ActionId::game_launch;
+    wrong_owner_actions[0].id = ActionId::settings_updates_check;
     wrong_owner_fixture.features[0].actions = {
         wrong_owner_actions.data(), wrong_owner_fixture.counts[0]};
     runtime = {};
     CHECK(dispatch_action(
               runtime,
-              request(ActionId::navigate_diagnostics, "header-diagnostics"),
+              request(ActionId::game_launch, "game-launch"),
               wrong_owner_fixture.features) ==
           DispatchResult::invalid_registry);
     CHECK(runtime.calls == 0);
@@ -161,7 +161,7 @@ int main() {
     runtime = {};
     CHECK(dispatch_action(
               runtime,
-              request(ActionId::navigate_diagnostics, "header-diagnostics"),
+              request(ActionId::game_launch, "game-launch"),
               partial_fixture.features) == DispatchResult::invalid_registry);
     CHECK(runtime.calls == 0);
 

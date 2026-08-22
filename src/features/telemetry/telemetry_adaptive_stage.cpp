@@ -59,8 +59,6 @@ void UiRuntime::update_adaptive_controller(
         status.recommended_profile = launch_profile
             ? std::wstring{optimizer::adaptive_profile_label(*launch_profile)}
             : L"not available";
-        status.recommendation_ready = launch_profile.has_value() &&
-            adaptive_locks_valid && !adaptive_overhead_frozen;
         status.recommendation_reason = launch_profile
                 ? L"Automatic launch profile is ready; live telemetry will refine the next session"
                 : L"No verified named profile fits the selected quality limits";
@@ -105,7 +103,6 @@ void UiRuntime::update_adaptive_controller(
         status.recommended_profile = launch_profile
             ? std::wstring{optimizer::adaptive_profile_label(*launch_profile)}
             : L"not available";
-        status.recommendation_ready = false;
         status.recommendation_reason = status.adaptive_reason;
         last_adaptive_state = optimizer::AdaptiveControllerState::observing;
         last_adaptive_disposition = optimizer::AdaptiveDisposition::hold;
@@ -351,13 +348,6 @@ void UiRuntime::update_adaptive_controller(
     status.recommended_profile = bounded_profile
         ? std::wstring{optimizer::adaptive_profile_label(*bounded_profile)}
         : L"not available";
-    status.recommendation_ready =
-        bounded_profile.has_value() &&
-        adaptive_decision.data.quality !=
-            optimizer::AdaptiveDataQuality::not_available &&
-        adaptive_decision.state !=
-            optimizer::AdaptiveControllerState::observing &&
-        adaptive_decision.state != optimizer::AdaptiveControllerState::frozen;
     status.recommendation_reason = bounded_profile
         ? adaptive_profile_reason(adaptive_decision)
         : L"No verified named profile fits the selected quality limits";

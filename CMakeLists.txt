@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(KF2OptimizerNext VERSION 0.0.3 LANGUAGES CXX RC)
+project(KF2OptimizerNext VERSION 0.0.4 LANGUAGES CXX RC)
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "KF2 Optimizer Next supports x64 only")
@@ -68,15 +68,16 @@ endif()
 target_link_libraries(presentmon_data PUBLIC advapi32 tdh)
 
 set(KF2_FEATURE_ACTION_SOURCES
+    "${PROJECT_SOURCE_DIR}/src/features/advanced/advanced_actions.cpp"
     "${PROJECT_SOURCE_DIR}/src/features/backup/backup_actions.cpp"
     "${PROJECT_SOURCE_DIR}/src/features/diagnostics/diagnostics_actions.cpp"
     "${PROJECT_SOURCE_DIR}/src/features/game/game_actions.cpp"
-    "${PROJECT_SOURCE_DIR}/src/features/navigation/navigation_actions.cpp"
-    "${PROJECT_SOURCE_DIR}/src/features/optimizer/optimizer_actions.cpp"
+    "${PROJECT_SOURCE_DIR}/src/features/graphics/graphics_actions.cpp"
     "${PROJECT_SOURCE_DIR}/src/features/overlay/overlay_actions.cpp"
     "${PROJECT_SOURCE_DIR}/src/features/settings/settings_actions.cpp"
 )
 set(KF2_APP_ACTION_SOURCES
+    "${PROJECT_SOURCE_DIR}/src/app/application_advanced.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application_actions.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/runtime/action_contract.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/runtime/action_router.cpp"
@@ -147,6 +148,8 @@ add_executable(KF2Optimizer WIN32
     src/game/game_log_session.cpp
     src/game/game_log_telemetry.cpp
     src/game/game_session.cpp
+    src/game/advanced_settings.cpp
+    src/game/video_settings.cpp
     src/overlay/overlay_mascot.cpp
     src/overlay/overlay_policy.cpp
     src/overlay/overlay_window_animation.cpp
@@ -183,7 +186,10 @@ add_executable(KF2Optimizer WIN32
     src/ui/automation_provider.cpp
     src/ui/shell_controller.cpp
     src/ui/shell_layout.cpp
+    src/ui/tooltip_text.cpp
     src/ui/theme.cpp
+    src/ui/ui_animation.cpp
+    src/ui/numeric_presentation.cpp
     src/ui/ui_model.cpp
 )
 target_include_directories(KF2Optimizer PRIVATE

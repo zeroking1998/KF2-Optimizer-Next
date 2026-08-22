@@ -20,21 +20,25 @@ constexpr float kFooterHeight = 0.0F;
 constexpr float kActionGap = 12.0F;
 constexpr float kActionHeight = 44.0F;
 constexpr float kActionStride = kActionHeight + kActionGap;
-constexpr float kTooltipHeight = 44.0F;
+constexpr float kTooltipHeight = 64.0F;
 constexpr float kSliderHeight = 88.0F;
 
-std::wstring status_text(const UiStatus& status) {
+std::wstring status_text(const UiModel& model) {
+    const auto& status = model.status();
     if (!status.game_detected) {
         return L"Choose your Killing Floor 2 folder to get started";
     }
     const std::wstring mode = status.mode == L"Adaptive / Automatic"
         ? L"Adaptive on" : status.mode;
     std::wstring text = L"Ready   •   " + mode + L"   •   Target " +
-                        std::to_wstring(status.target_fps) + L" FPS";
-    if (status.live_fps && status.live_frame_time_ms) {
+                        std::to_wstring(model.presented_target_fps()) +
+                        L" FPS   •   Maximum corpses " +
+                        std::to_wstring(model.presented_corpse_limit());
+    const auto presented_fps = model.presented_live_fps();
+    if (presented_fps && model.presented_live_frame_time_ms()) {
         std::wostringstream live;
         live << L"   •   Live " << std::fixed << std::setprecision(1)
-             << *status.live_fps << L" FPS";
+             << *presented_fps << L" FPS";
         text += live.str();
     }
     return text;
@@ -52,27 +56,31 @@ std::wstring metric(std::wstring_view label, std::optional<double> value,
     return text.str();
 }
 
-std::wstring corpse_metric(const UiStatus& status) {
+std::wstring corpse_metric(const UiModel& model) {
+    const auto active = model.presented_live_active_corpses();
+    const auto sleeping = model.presented_live_sleeping_corpses();
     std::wstring value = L"—";
-    if (status.live_active_corpses || status.live_sleeping_corpses) {
-        value = std::to_wstring(status.live_active_corpses.value_or(0)) + L" / " +
-                std::to_wstring(status.live_sleeping_corpses.value_or(0));
+    if (active || sleeping) {
+        value = std::to_wstring(active.value_or(0)) + L" / " +
+                std::to_wstring(sleeping.value_or(0));
     }
     return L"CORPSES\nMoving / sleeping: " + value;
 }
 
-std::wstring load_metric(const UiStatus& status) {
+std::wstring load_metric(const UiModel& model) {
+    const auto cpu = model.presented_live_cpu_percent();
+    const auto gpu = model.presented_live_gpu_percent();
     std::wostringstream text;
     text << L"GAME LOAD\nCPU ";
-    if (status.live_cpu_percent) {
-        text << std::fixed << std::setprecision(0) << *status.live_cpu_percent
+    if (cpu) {
+        text << std::fixed << std::setprecision(0) << *cpu
              << L"%";
     } else {
         text << L"—";
     }
     text << L"  •  GPU ";
-    if (status.live_gpu_percent) {
-        text << std::fixed << std::setprecision(0) << *status.live_gpu_percent
+    if (gpu) {
+        text << std::fixed << std::setprecision(0) << *gpu
              << L"%";
     } else {
         text << L"—";
@@ -140,12 +148,15 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
     result.nodes.push_back({"root", SemanticRole::root, result.root,
                             L"KF2 Optimizer Next"});
     constexpr float header_action_gap = 8.0F;
-    constexpr std::array<float, 2> header_action_widths{148.0F, 118.0F};
-    const bool show_global_actions = width >= 430.0F &&
+    constexpr std::array<float, 3> header_action_widths{
+        148.0F, 160.0F, 118.0F};
+    const bool show_global_actions = width >= 760.0F &&
                                      result.header.height >= 64.0F;
     const float header_actions_width = show_global_actions
         ? std::accumulate(header_action_widths.begin(),
-                          header_action_widths.end(), 0.0F) + header_action_gap
+                          header_action_widths.end(), 0.0F) +
+              header_action_gap *
+                  static_cast<float>(header_action_widths.size() - 1)
         : 0.0F;
     const float header_actions_left = show_global_actions
         ? width - 12.0F - header_actions_width
@@ -160,34 +171,45 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
 
     if (show_global_actions) {
         const auto& status = model.status();
-        const std::string update_id = status.update_available
+        const bool install_action = status.update_available;
+        const std::string update_id = install_action
             ? "header-update-install" : "header-update-check";
         const std::wstring update_text = status.update_installing
             ? L"UPDATING..."
             : status.update_checking ? L"CHECKING..."
-            : status.update_available ? L"UPDATE AVAILABLE"
-                                      : L"UPDATES";
+            : status.update_newer_version_known ? L"UPDATE AVAILABLE"
+                                                : L"UPDATES";
         const bool update_enabled = !status.update_checking &&
             !status.update_installing &&
-            (!status.update_available || status.update_installable);
+            (!install_action || status.update_installable);
         float x = header_actions_left;
         result.nodes.push_back({
             "header-update", SemanticRole::action,
             {x, 14.0F, header_action_widths[0], 42.0F}, update_text,
             std::nullopt, false, model.focused_action() == update_id,
             update_enabled, update_id, std::nullopt,
-            status.update_available});
+            status.update_newer_version_known});
         x += header_action_widths[0] + header_action_gap;
         result.nodes.push_back({
+            "header-auto-updates", SemanticRole::action,
+            {x, 14.0F, header_action_widths[1], 42.0F},
+            status.automatic_update_checks
+                ? L"✓ UPDATE CHECK" : L"UPDATE CHECK",
+            std::nullopt, status.automatic_update_checks,
+            model.focused_action() == "settings-updates-automatic",
+            !status.update_checking && !status.update_installing,
+            "settings-updates-automatic"});
+        x += header_action_widths[1] + header_action_gap;
+        result.nodes.push_back({
             "header-repair", SemanticRole::action,
-            {x, 14.0F, header_action_widths[1], 42.0F}, L"REPAIR",
+            {x, 14.0F, header_action_widths[2], 42.0F}, L"REPAIR",
             std::nullopt, false,
             model.focused_action() == "header-repair",
             !status.update_installing, "header-repair"});
     }
 
     result.nodes.push_back({"status", SemanticRole::status, result.status_strip,
-                            status_text(model.status())});
+                            status_text(model)});
 
     constexpr std::size_t metric_count = 4;
     constexpr float metric_gap = 8.0F;
@@ -199,10 +221,10 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
     const float metric_y = result.metrics_strip.y + 8.0F;
     const float metric_height = std::max(0.0F, result.metrics_strip.height - 16.0F);
     const std::array<std::wstring, metric_count> metric_texts{
-        metric(L"LIVE FPS", model.status().live_fps, 1, L" FPS"),
-        metric(L"FRAME TIME", model.status().live_frame_time_ms, 1, L" ms"),
-        load_metric(model.status()),
-        corpse_metric(model.status())};
+        metric(L"LIVE FPS", model.presented_live_fps(), 1, L" FPS"),
+        metric(L"FRAME TIME", model.presented_live_frame_time_ms(), 1, L" ms"),
+        load_metric(model),
+        corpse_metric(model)};
     for (std::size_t index = 0; index < metric_count; ++index) {
         result.nodes.push_back({
             "metric-" + std::to_string(index), SemanticRole::metric_card,
@@ -227,11 +249,12 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         nav_cursor += nav_stride;
     }
 
+    const auto scrolling_nodes_begin = result.nodes.size();
     float banner_y = result.content.y;
     float banner_offset = 0.0F;
     if (model.recovery_required()) {
         result.nodes.push_back({"recovery", SemanticRole::recovery_banner,
-                                {result.content.x, banner_y,
+                                {result.content.x, banner_y - scroll,
                                  result.content.width, 44.0F},
                                 L"The previous session will be checked safely."});
         banner_y += 52.0F;
@@ -239,7 +262,7 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
     }
     if (model.notice().has_value()) {
         result.nodes.push_back({"notice", SemanticRole::notice,
-                                {result.content.x, banner_y,
+                                {result.content.x, banner_y - scroll,
                                  result.content.width, 44.0F},
                                 model.notice()->message});
         banner_offset += 52.0F;
@@ -287,10 +310,11 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
              grid_base + static_cast<float>(row) * kActionStride,
              action_width, kActionHeight}, enabled, selected);
     };
-    const auto add_section = [&](std::string id, std::wstring text, float y) {
+    const auto add_section = [&](std::string id, std::wstring text, float y,
+                                 float height = 28.0F) {
         result.nodes.push_back({std::move(id), SemanticRole::section_heading,
                                 {result.content.x, y - scroll,
-                                 result.content.width, 28.0F}, std::move(text)});
+                                 result.content.width, height}, std::move(text)});
     };
     const auto add_slider = [&](std::string id, std::wstring label, float y,
                                 SliderInfo slider, bool enabled = true) {
@@ -304,6 +328,50 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
     };
     if (model.selected() == Destination::dashboard) {
         float cursor = grid_base;
+        const auto& status = model.status();
+        if (status.update_prompt_visible) {
+            add_section("update-dialog-title", L"UPDATE AVAILABLE", cursor);
+            cursor += 34.0F;
+            std::wstring release =
+                L"Installed " + status.update_installed_version +
+                L"  •  New " + status.update_available_version;
+            if (status.update_available) {
+                release += L"  •  Published " + status.update_published_at +
+                           L"  •  " + status.update_download_size;
+            } else {
+                release += L"  •  Last checked " + status.update_last_check;
+            }
+            add_section("update-dialog-release", std::move(release), cursor,
+                        34.0F);
+            cursor += 42.0F;
+            if (status.update_available && !status.update_changelog.empty()) {
+                add_section("update-dialog-changelog",
+                            status.update_changelog, cursor, 88.0F);
+                cursor += 96.0F;
+            } else if (!status.update_available) {
+                add_section(
+                    "update-dialog-cached-note",
+                    L"Select Load update details to refresh the verified release information.",
+                    cursor, 34.0F);
+                cursor += 42.0F;
+            }
+            grid_base = cursor;
+            action_index = 0;
+            if (status.update_available) {
+                add_action("settings-updates-install", L"INSTALL UPDATE",
+                           status.update_installable, true);
+            } else {
+                add_action("settings-updates-check",
+                           L"LOAD UPDATE DETAILS", true, true);
+            }
+            add_action("settings-updates-later", L"LATER",
+                       !status.update_installing);
+            add_action("settings-updates-ignore", L"DON'T SHOW AGAIN",
+                       !status.update_installing);
+            cursor = grid_base +
+                static_cast<float>((action_index + action_columns - 1) /
+                                   action_columns) * kActionStride + 12.0F;
+        }
         add_section("dashboard-quick-section", L"START", cursor);
         cursor += 34.0F;
         grid_base = cursor;
@@ -316,77 +384,134 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         cursor = grid_base +
             static_cast<float>((action_index + action_columns - 1) /
                                action_columns) * kActionStride + 8.0F;
-        add_section("dashboard-support-section", L"SETTINGS", cursor);
+        add_section("dashboard-goals-section", L"GOALS", cursor);
         cursor += 34.0F;
-        grid_base = cursor;
-        action_index = 0;
-        add_action("dashboard-settings", L"SET UP OPTIMIZATION");
-        add_action("dashboard-overlay", L"SET UP OVERLAY");
-        add_action("dashboard-diagnostics", L"HELP & REPAIR");
-    } else if (model.selected() == Destination::game) {
-        float cursor = grid_base;
-        add_section("game-start-section", L"GAME LAUNCH", cursor);
+        add_slider("settings-target-slider", L"Target FPS", cursor,
+                   {optimizer::kTargetFpsMinimum,
+                    optimizer::kTargetFpsMaximum,
+                    model.status().target_fps, 1, 10, L" FPS"});
+        cursor += kSliderHeight + 12.0F;
+        add_slider("settings-corpses-slider", L"Maximum corpses",
+                   cursor, {4, 2000, model.status().corpse_limit,
+                             1, 50, L" corpses"});
+        cursor += kSliderHeight + 12.0F;
+        add_section("dashboard-updates-section", L"VERSION & UPDATES", cursor);
         cursor += 34.0F;
-        grid_base = cursor;
-        action_index = 0;
-        add_action("game-launch", L"LAUNCH KF2 ADAPTIVELY",
-                   model.status().game_detected, true);
-        add_action("game-select-install",
-                   model.status().game_detected
-                       ? L"CHANGE GAME FOLDER" : L"SELECT GAME FOLDER");
-        cursor = grid_base +
-            static_cast<float>((action_index + action_columns - 1) /
-                               action_columns) * kActionStride + 8.0F;
-        add_section("game-folders-section", L"LOCAL FOLDERS", cursor);
-        cursor += 34.0F;
-        grid_base = cursor;
-        action_index = 0;
-        add_action("game-open-install", L"OPEN GAME FOLDER",
-                   model.status().game_detected);
-        add_action("game-open-config", L"OPEN SETTINGS",
-                   model.status().game_detected);
-        add_action("game-open-logs", L"OPEN GAME LOG",
-                   model.status().game_detected);
-    } else if (model.selected() == Destination::optimizer) {
-        const auto config = model.status().config;
-        float cursor = grid_base;
-        add_section("optimizer-plan-section", L"SAFE CHANGE PLAN", cursor);
-        cursor += 34.0F;
-        grid_base = cursor;
-        action_index = 0;
-        add_action("optimizer-preview", L"SHOW AUTOMATIC PLAN");
-        add_action("optimizer-apply", L"APPLY PREVIEW",
-                   config == ConfigWorkflowState::preview_ready ||
-                       config == ConfigWorkflowState::applied ||
-                       config == ConfigWorkflowState::restore_available);
-        add_action("optimizer-backup", L"CREATE INI BACKUP",
-                   config != ConfigWorkflowState::unavailable);
-        add_action("optimizer-restore", L"RESTORE LATEST BACKUP",
-                   config == ConfigWorkflowState::restore_available ||
-                       config == ConfigWorkflowState::recovery_required);
-        cursor = grid_base +
-            static_cast<float>((action_index + action_columns - 1) /
-                               action_columns) * kActionStride + 8.0F;
-        add_section("optimizer-transfer-section", L"IMPORT, EXPORT & STORAGE", cursor);
-        cursor += 34.0F;
-        grid_base = cursor;
-        action_index = 0;
-        add_action("optimizer-export", L"EXPORT PREVIEW",
-                   config == ConfigWorkflowState::preview_ready ||
-                       config == ConfigWorkflowState::applied ||
-                       config == ConfigWorkflowState::restore_available);
-        add_action("optimizer-import", L"IMPORT PREVIEW");
-        add_action("optimizer-open-backups", L"OPEN BACKUP FOLDER");
-        cursor = grid_base +
-            static_cast<float>((action_index + action_columns - 1) /
-                               action_columns) * kActionStride + 8.0F;
-        add_section("optimizer-adaptive-note-section",
-                    L"ADAPTIVE HANDLES FINE-TUNING AUTOMATICALLY",
+        const std::wstring availability = status.update_checking
+            ? status.update_status
+            : status.update_newer_version_known
+                ? L"Available version: " + status.update_available_version
+                : status.update_check_completed
+                    ? L"No newer version available"
+                    : status.update_status;
+        add_section("dashboard-updates-installed",
+                    L"Installed " + status.update_installed_version +
+                        L"  •  " + availability +
+                        L"  •  Last checked " +
+                        status.update_last_check,
                     cursor);
-        cursor += 34.0F;
+    } else if (model.selected() == Destination::graphics) {
+        const auto& status = model.status();
+        const bool editable = status.graphics_available &&
+                               !status.graphics_game_running;
+        constexpr float graphics_action_gap = 10.0F;
+        constexpr float graphics_action_stride =
+            kActionHeight + graphics_action_gap;
+        constexpr float graphics_section_advance = 28.0F;
+        const std::size_t graphics_columns = std::max<std::size_t>(
+            std::size_t{1}, std::min(std::size_t{4}, available_columns));
+        const float graphics_action_width = std::max(
+            0.0F, (result.content.width - graphics_action_gap *
+                static_cast<float>(graphics_columns - 1)) /
+                static_cast<float>(graphics_columns));
+        const auto graphics_value = [&](std::size_t option) {
+            return option < status.graphics_values.size() &&
+                   !status.graphics_values[option].empty()
+                ? status.graphics_values[option] : std::wstring{L"Unavailable"};
+        };
+        const auto graphics_action = [&](std::string id,
+                                         std::wstring_view label,
+                                         std::size_t option) {
+            const auto column = action_index % graphics_columns;
+            const auto row = action_index / graphics_columns;
+            ++action_index;
+            add_action_at(
+                std::move(id),
+                std::wstring{label} + L":  " + graphics_value(option),
+                {result.content.x + static_cast<float>(column) *
+                     (graphics_action_width + graphics_action_gap),
+                 grid_base + static_cast<float>(row) * graphics_action_stride,
+                 graphics_action_width, kActionHeight},
+                editable);
+        };
+        float cursor = grid_base;
+        add_section("graphics-basic-section", L"BASIC", cursor);
+        cursor += graphics_section_advance;
         grid_base = cursor;
         action_index = 0;
-        add_action("optimizer-open-settings", L"SET UP OPTIMIZATION");
+        graphics_action("graphics-display", L"Display", 0);
+        graphics_action("graphics-resolution", L"Resolution", 1);
+        graphics_action("graphics-vsync", L"Vertical sync", 3);
+        graphics_action("graphics-variable-frame-rate",
+                        L"Variable frame rate", 4);
+        cursor = grid_base +
+            static_cast<float>((action_index + graphics_columns - 1) /
+                               graphics_columns) * graphics_action_stride + 4.0F;
+        add_section("graphics-display-info",
+                    L"Aspect ratio:  " + status.graphics_aspect_ratio,
+                    cursor);
+        cursor += 26.0F;
+        add_slider("graphics-film-grain-slider", L"Film grain intensity", cursor,
+                   {0, 200, status.graphics_film_grain_percent,
+                    5, 25, L"%"});
+        cursor += kSliderHeight + 10.0F;
+
+        add_section("graphics-quality-section", L"QUALITY", cursor);
+        cursor += graphics_section_advance;
+        grid_base = cursor;
+        action_index = 0;
+        graphics_action("graphics-overall-quality", L"Graphics quality", 2);
+        graphics_action("graphics-environment-detail", L"Environment detail", 5);
+        graphics_action("graphics-character-detail", L"Character detail", 6);
+        graphics_action("graphics-fx", L"FX", 7);
+        graphics_action("graphics-texture-resolution", L"Texture resolution", 8);
+        graphics_action("graphics-texture-filtering", L"Texture filtering", 9);
+        graphics_action("graphics-shadow-quality", L"Shadow quality", 10);
+        graphics_action("graphics-realtime-reflections", L"Realtime reflections", 11);
+        graphics_action("graphics-anti-aliasing", L"Anti-aliasing", 12);
+        cursor = grid_base +
+            static_cast<float>((action_index + graphics_columns - 1) /
+                               graphics_columns) * graphics_action_stride + 4.0F;
+
+        add_section("graphics-effects-section", L"EFFECTS", cursor);
+        cursor += graphics_section_advance;
+        grid_base = cursor;
+        action_index = 0;
+        graphics_action("graphics-bloom", L"Bloom", 13);
+        graphics_action("graphics-motion-blur", L"Motion blur", 14);
+        graphics_action("graphics-ambient-occlusion", L"Ambient occlusion", 15);
+        graphics_action("graphics-depth-of-field", L"Depth of field", 16);
+        graphics_action("graphics-volumetric-lighting", L"Volumetric lighting FX", 17);
+        graphics_action("graphics-lens-flares", L"Lens flares", 18);
+        graphics_action("graphics-light-shafts", L"Light shafts", 19);
+        graphics_action("graphics-flex", L"NVIDIA FleX", 20);
+        cursor = grid_base +
+            static_cast<float>((action_index + graphics_columns - 1) /
+                               graphics_columns) * graphics_action_stride + 4.0F;
+        add_section("graphics-save-section",
+                    status.graphics_game_running
+                        ? L"CLOSE KF2 TO APPLY CHANGES"
+                        : status.graphics_dirty ? L"UNSAVED CHANGES"
+                                                 : L"NO UNSAVED CHANGES",
+                    cursor);
+        cursor += graphics_section_advance;
+        grid_base = cursor;
+        action_index = 0;
+        add_action("graphics-apply", L"APPLY GRAPHICS",
+                   editable && status.graphics_dirty, true);
+        add_action("graphics-reset", L"RESET TO DEFAULTS", editable);
+        add_action("game-open-config", L"OPEN KF2 SETTINGS FOLDER",
+                   status.graphics_available);
     } else if (model.selected() == Destination::overlay) {
         float cursor = grid_base;
         add_section("overlay-main-section", L"OVERLAY", cursor);
@@ -433,71 +558,96 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                    model.status().overlay_show_memory
                        ? L"✓ RAM / VRAM" : L"RAM / VRAM",
                    true, model.status().overlay_show_memory);
-    } else if (model.selected() == Destination::settings) {
+    } else if (model.selected() == Destination::advanced) {
+        const auto& status = model.status();
+        const bool editable = status.advanced_available &&
+                              !status.advanced_game_running;
+        const auto value = [&](std::size_t option) -> std::wstring {
+            return option < status.advanced_values.size()
+                ? status.advanced_values[option] : L"Unavailable";
+        };
+        const auto advanced_action = [&](std::string id,
+                                         std::wstring_view label,
+                                         std::size_t option) {
+            const auto current = value(option);
+            add_action(std::move(id),
+                       std::wstring{label} + L":  " + current,
+                       editable, current == L"On");
+        };
+
         float cursor = grid_base;
-        add_section("settings-goals-section", L"PERFORMANCE", cursor);
-        cursor += 34.0F;
-        add_slider("settings-target-slider", L"Target FPS", cursor,
-                   {optimizer::kTargetFpsMinimum,
-                    optimizer::kTargetFpsMaximum,
-                    model.status().target_fps, 1, 10, L" FPS"});
-        cursor += kSliderHeight + 12.0F;
-        add_slider("settings-corpses-slider", L"Maximum corpses",
-                   cursor, {4, 2000, model.status().corpse_limit,
-                             1, 50, L" corpses"});
-        cursor += kSliderHeight + 12.0F;
-        add_section("settings-adaptive-section",
-                    L"AUTOMATIC: QUALITY • PHYSICS • LOD • FLEX • CORPSES",
-                    cursor);
-        cursor += 42.0F;
-        add_section("settings-safety-section",
-                    L"APP", cursor);
+        add_section("advanced-engine-section", L"ENGINE & STREAMING", cursor);
         cursor += 34.0F;
         grid_base = cursor;
         action_index = 0;
-        add_action("settings-animations",
-                   model.status().animations_enabled
-                       ? L"✓ ANIMATIONS" : L"REDUCE ANIMATIONS",
-                   true, model.status().animations_enabled);
-        add_action("settings-updates-automatic",
-                   model.status().automatic_update_checks
-                       ? L"✓ AUTOMATIC UPDATE CHECKS"
-                       : L"AUTOMATIC UPDATE CHECKS OFF",
-                   !model.status().update_checking &&
-                       !model.status().update_installing,
-                   model.status().automatic_update_checks);
+        advanced_action("advanced-one-frame-thread-lag",
+                        L"One-frame thread lag", 0);
+        advanced_action("advanced-per-frame-sleep",
+                        L"Per-frame sleep", 1);
+        advanced_action("advanced-per-frame-yield",
+                        L"Per-frame yield", 2);
+        advanced_action("advanced-background-level-streaming",
+                        L"Background level streaming", 3);
+        advanced_action("advanced-texture-streaming",
+                        L"Texture streaming", 4);
+        advanced_action("advanced-priority-streaming",
+                        L"Priority texture streaming", 5);
+        advanced_action("advanced-dynamic-streaming",
+                        L"Dynamic texture streaming", 6);
         cursor = grid_base +
             static_cast<float>((action_index + action_columns - 1) /
                                action_columns) * kActionStride + 8.0F;
-        add_section("settings-updates-section", L"VERSION & UPDATES", cursor);
+
+        add_section("advanced-rendering-section", L"RENDERING", cursor);
         cursor += 34.0F;
-        add_section("settings-updates-installed",
-                    L"Installed " + model.status().update_installed_version +
-                        L"  •  Last checked " +
-                        model.status().update_last_check + L"  •  " +
-                        model.status().update_status,
+        grid_base = cursor;
+        action_index = 0;
+        advanced_action("advanced-temporal-aa",
+                        L"Temporal anti-aliasing", 7);
+        advanced_action("advanced-hardware-shadow-filtering",
+                        L"Hardware shadow filtering", 8);
+        advanced_action("advanced-downsampled-translucency",
+                        L"Downsampled translucency", 9);
+        advanced_action("advanced-floating-point-render-targets",
+                        L"Floating-point render targets", 10);
+        advanced_action("advanced-max-multisamples",
+                        L"Multisampling", 11);
+        cursor = grid_base +
+            static_cast<float>((action_index + action_columns - 1) /
+                               action_columns) * kActionStride + 8.0F;
+        add_slider("advanced-screen-percentage-slider", L"Render scale",
+                   cursor, {50, 200, status.advanced_screen_percentage,
+                            1, 10, L"%"}, editable);
+        cursor += kSliderHeight + 10.0F;
+
+        add_section("advanced-effects-section", L"EFFECTS", cursor);
+        cursor += 34.0F;
+        grid_base = cursor;
+        action_index = 0;
+        advanced_action("advanced-gore-level",
+                        L"Gore level", 12);
+        cursor = grid_base + kActionStride + 4.0F;
+        add_slider("advanced-particle-percentage-slider", L"Particle amount",
+                   cursor, {0, 100, status.advanced_particle_percentage,
+                            1, 10, L"%"}, editable);
+        cursor += kSliderHeight + 10.0F;
+        add_slider("advanced-decal-lifetime-slider", L"Decal lifetime",
+                   cursor, {0, 120, status.advanced_decal_lifetime,
+                            1, 10, L" s"}, editable);
+        cursor += kSliderHeight + 10.0F;
+
+        add_section("advanced-save-section",
+                    status.advanced_game_running
+                        ? L"CLOSE KF2 TO APPLY CHANGES"
+                        : status.advanced_dirty ? L"UNSAVED CHANGES"
+                                                : L"NO UNSAVED CHANGES",
                     cursor);
         cursor += 34.0F;
-        if (model.status().update_available) {
-            add_section("settings-updates-release",
-                        L"New version " +
-                            model.status().update_available_version +
-                            L"  •  Published " +
-                            model.status().update_published_at +
-                            L"  •  " +
-                            model.status().update_download_size,
-                        cursor);
-            cursor += 34.0F;
-            if (!model.status().update_changelog.empty()) {
-                add_section("settings-updates-changelog",
-                            model.status().update_changelog, cursor);
-                cursor += 96.0F;
-            }
-            grid_base = cursor;
-            action_index = 0;
-            add_action("settings-updates-later", L"REMIND ME LATER",
-                       !model.status().update_installing);
-        }
+        grid_base = cursor;
+        action_index = 0;
+        add_action("advanced-apply", L"APPLY ADVANCED SETTINGS",
+                   editable && status.advanced_dirty, true);
+        add_action("advanced-reset", L"RESET TO DEFAULTS", editable);
     } else if (model.selected() == Destination::diagnostics) {
         float cursor = grid_base;
         add_section("diagnostics-check-section", L"FIX A PROBLEM", cursor);
@@ -538,7 +688,7 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                                            result.scroll_extent);
     const float scroll_delta = actual_scroll - scroll;
     if (scroll_delta != 0.0F) {
-        for (auto index = page_nodes_begin; index < result.nodes.size(); ++index) {
+        for (auto index = scrolling_nodes_begin; index < result.nodes.size(); ++index) {
             result.nodes[index].bounds.y -= scroll_delta;
         }
     }
@@ -551,7 +701,7 @@ const SemanticNode* hit_test(const ShellLayoutResult& layout,
     for (auto iterator = layout.nodes.rbegin(); iterator != layout.nodes.rend();
          ++iterator) {
         const bool header_action = iterator->role == SemanticRole::action &&
-            iterator->action_id && iterator->action_id->starts_with("header-");
+            iterator->id.starts_with("header-");
         const bool page_node = iterator->role == SemanticRole::page_heading ||
             iterator->role == SemanticRole::page_body ||
             iterator->role == SemanticRole::section_heading ||
@@ -565,95 +715,8 @@ const SemanticNode* hit_test(const ShellLayoutResult& layout,
     return contains(layout.root, point) ? &layout.nodes.front() : nullptr;
 }
 
-std::optional<std::wstring> action_help_text(std::string_view action_id) {
-    if (action_id == "header-launch" || action_id == "dashboard-launch") {
-        return L"Launches KF2 with the safe Adaptive profile.";
-    }
-    if (action_id == "dashboard-settings") {
-        return L"Opens the main settings for target FPS, corpse ceiling, and Adaptive FleX.";
-    }
-    if (action_id == "dashboard-overlay") {
-        return L"Opens the focused overlay settings.";
-    }
-    if (action_id == "dashboard-diagnostics") {
-        return L"Opens checks, restoration, backups, and local reports.";
-    }
-    if (action_id == "header-restore") {
-        return L"Restores the last verified INI state. KF2 must be closed.";
-    }
-    if (action_id == "header-backup") {
-        return L"Immediately creates a local, verified backup of important KF2 configuration.";
-    }
-    if (action_id == "header-diagnostics") {
-        return L"Opens diagnostics, self-checks, and local reports.";
-    }
-    if (action_id == "header-update-check") {
-        return L"Checks the official GitHub Releases page for a newer version.";
-    }
-    if (action_id == "header-update-install") {
-        return L"Installs the displayed verified update after your confirmation.";
-    }
-    if (action_id == "header-repair") {
-        return L"Repairs this exact installed version from its verified official GitHub release.";
-    }
-    if (action_id == "optimizer-preview") {
-        return L"Shows the protected before/after plan. Adaptive mode prepares the verified plan automatically at launch.";
-    }
-    if (action_id == "optimizer-apply") {
-        return L"Creates a verified backup first, then applies only the visible preview.";
-    }
-    if (action_id == "optimizer-restore" ||
-        action_id == "diagnostics-flex-restore") {
-        return L"Restores the last verified original state. KF2 must be closed.";
-    }
-    if (action_id == "game-offline-telemetry") {
-        return L"Enables local offline gameplay data only for solo sessions launched through this app.";
-    }
-    if (action_id == "diagnostics-full-check") {
-        return L"Checks the package, paths, backups, telemetry, and runtime locally without changing gameplay.";
-    }
-    if (action_id == "diagnostics-repair-package") {
-        return L"Select a complete matching KF2OptimizerNext folder. Only missing or damaged files with verified SHA-256 values are imported; the running EXE is never replaced.";
-    }
-    if (action_id == "diagnostics-auto-repair") {
-        return L"Downloads only the GitHub release matching this exact installed version, then replaces missing or damaged files after build-identity and SHA-256 verification. The running EXE is never replaced.";
-    }
-    if (action_id == "diagnostics-export-support") {
-        return L"Exports a bounded local support package. Nothing is uploaded.";
-    }
-    if (action_id == "settings-advanced-toggle") {
-        return L"Shows or hides less common Adaptive settings. This view does not change game values.";
-    }
-    if (action_id == "settings-finetuning" ||
-        action_id == "optimizer-open-settings") {
-        return L"Switches between simple optimization targets and detailed verified values.";
-    }
-    if (action_id.starts_with("settings-adaptive-")) {
-        return L"Changes only bounded Adaptive control. All safety rules remain active.";
-    }
-    if (action_id == "overlay-toggle") {
-        return L"Shows or hides the local overlay. F10 works while KF2 is running.";
-    }
-    if (action_id.starts_with("overlay-")) {
-        return L"Changes only the portable overlay display and does not write into the KF2 process.";
-    }
-    if (action_id.starts_with("diagnostics-")) {
-        return L"Runs bounded local diagnostics. No data is uploaded.";
-    }
-    if (action_id == "settings-target-slider") {
-        return L"Drag, use the mouse wheel, or press arrow keys to change target FPS. The value is stored locally and atomically.";
-    }
-    if (action_id == "settings-corpses-slider") {
-        return L"Sets a ceiling of up to 2000 corpses. Adaptive uses it on the next protected KF2 launch and lowers it only under confirmed frame-time pressure.";
-    }
-    if (action_id.ends_with("-slider")) {
-        return L"Fine-tune with mouse, wheel, or keyboard. Changes are stored locally.";
-    }
-    return std::nullopt;
-}
-
 void set_hover_tooltip(ShellLayoutResult& layout,
-                       const SemanticNode* target) {
+                       const SemanticNode* target, float opacity) {
     const std::optional<SemanticNode> target_copy = target
         ? std::optional<SemanticNode>{*target} : std::nullopt;
     layout.nodes.erase(
@@ -685,6 +748,7 @@ void set_hover_tooltip(ShellLayoutResult& layout,
                                 kTooltipHeight));
     layout.nodes.push_back({"hover-tooltip", SemanticRole::tooltip,
                             {x, y, width, kTooltipHeight}, *help});
+    layout.nodes.back().opacity = std::clamp(opacity, 0.0F, 1.0F);
 }
 
 }  // namespace kf2::ui

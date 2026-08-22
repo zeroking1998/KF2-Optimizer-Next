@@ -25,21 +25,12 @@ std::wstring_view friendly_mode(std::wstring_view mode) {
     return mode;
 }
 
-std::wstring_view friendly_profile(std::wstring_view profile) {
-    if (profile == L"high_performance") return L"Maximum performance";
-    if (profile == L"balanced") return L"Balanced";
-    if (profile == L"stability") return L"Stability";
-    if (profile == L"custom") return L"Custom";
-    if (profile == L"waiting") return L"Waiting for measurements";
-    return profile;
-}
-
 }  // namespace
 
 std::wstring_view destination_label(Destination destination) {
-    static constexpr std::array<std::wstring_view, 6> labels{
-        L"Home", L"Game", L"Advanced tools", L"Overlay",
-        L"Help & Repair", L"Optimization"};
+    static constexpr std::array<std::wstring_view, 5> labels{
+        L"Home", L"Game graphics", L"Overlay", L"Advanced settings",
+        L"Help & Repair"};
     return labels.at(enum_index(destination));
 }
 
@@ -115,10 +106,6 @@ void UiModel::set_recovery_required(bool required) noexcept {
     recovery_required_ = required;
 }
 void UiModel::set_status(UiStatus status) { status_ = std::move(status); }
-void UiModel::set_preview_summary(std::wstring summary) {
-    preview_summary_ = std::move(summary);
-}
-void UiModel::clear_preview_summary() noexcept { preview_summary_.clear(); }
 void UiModel::set_notice(Notice notice) { notice_ = std::move(notice); }
 void UiModel::clear_notice() noexcept { notice_.reset(); }
 const std::wstring& UiModel::state_path() const noexcept { return state_path_; }
@@ -127,6 +114,57 @@ const std::wstring& UiModel::build_identity() const noexcept {
 }
 bool UiModel::recovery_required() const noexcept { return recovery_required_; }
 const UiStatus& UiModel::status() const noexcept { return status_; }
+int UiModel::presented_target_fps() const noexcept {
+    return numeric_presentation_.target_fps(status_.target_fps);
+}
+int UiModel::presented_corpse_limit() const noexcept {
+    return numeric_presentation_.corpse_limit(status_.corpse_limit);
+}
+void UiModel::preview_target_fps(int value) noexcept {
+    numeric_presentation_.preview_target_fps(value);
+}
+void UiModel::preview_corpse_limit(int value) noexcept {
+    numeric_presentation_.preview_corpse_limit(value);
+}
+void UiModel::commit_target_fps_presentation(int value) noexcept {
+    numeric_presentation_.commit_target_fps(value);
+}
+void UiModel::commit_corpse_limit_presentation(int value) noexcept {
+    numeric_presentation_.commit_corpse_limit(value);
+}
+std::optional<double> UiModel::presented_live_fps() const noexcept {
+    return numeric_presentation_.live_fps(status_.live_fps);
+}
+std::optional<double> UiModel::presented_live_frame_time_ms() const noexcept {
+    return numeric_presentation_.live_frame_time_ms(
+        status_.live_frame_time_ms);
+}
+std::optional<double> UiModel::presented_live_cpu_percent() const noexcept {
+    return numeric_presentation_.live_cpu_percent(status_.live_cpu_percent);
+}
+std::optional<double> UiModel::presented_live_gpu_percent() const noexcept {
+    return numeric_presentation_.live_gpu_percent(status_.live_gpu_percent);
+}
+std::optional<int> UiModel::presented_live_active_corpses() const noexcept {
+    return numeric_presentation_.live_active_corpses(
+        status_.live_active_corpses);
+}
+std::optional<int> UiModel::presented_live_sleeping_corpses() const noexcept {
+    return numeric_presentation_.live_sleeping_corpses(
+        status_.live_sleeping_corpses);
+}
+bool UiModel::advance_numeric_presentation(bool animate) noexcept {
+    return numeric_presentation_.advance(
+        {.target_fps = status_.target_fps,
+         .corpse_limit = status_.corpse_limit,
+         .live_fps = status_.live_fps,
+         .live_frame_time_ms = status_.live_frame_time_ms,
+         .live_cpu_percent = status_.live_cpu_percent,
+         .live_gpu_percent = status_.live_gpu_percent,
+         .live_active_corpses = status_.live_active_corpses,
+         .live_sleeping_corpses = status_.live_sleeping_corpses},
+        animate);
+}
 const std::optional<Notice>& UiModel::notice() const noexcept { return notice_; }
 
 std::wstring UiModel::page_heading() const {
@@ -137,53 +175,18 @@ std::wstring UiModel::page_body() const {
     if (selected_ == Destination::dashboard) {
         return L"";
     }
-    if (selected_ == Destination::game) {
-        const auto session = status_.game_session.empty()
-            ? status_.game
-            : status_.game + L". " + status_.game_session;
-        const std::wstring flex_requested =
-            status_.adaptive_flex_requested_substeps
-                ? std::to_wstring(*status_.adaptive_flex_requested_substeps)
-                : L"unavailable";
-        const std::wstring flex_effective =
-            status_.adaptive_flex_effective_substeps
-                ? std::to_wstring(*status_.adaptive_flex_effective_substeps)
-                : L"not confirmed";
-        return session + L". " + status_.flex_telemetry + L".\n" +
-               L"FleX capability: " + status_.adaptive_flex_capability +
-               L" | Requested: " + flex_requested +
-               L" | Effective: " + flex_effective +
-               L" | Status: " + status_.adaptive_flex_action_status + L".\n" +
-               L"Protected corpse provider: automatic on Adaptive launch" +
-               L" | Game configuration protection: " +
-               std::wstring{status_.restore_config_after_game ? L"restore"
-                                                               : L"keep"};
-    }
     if (selected_ == Destination::overlay) {
         return L"";
     }
-    if (selected_ == Destination::optimizer) {
-        std::wstring workflow;
-        switch (status_.config) {
-            case ConfigWorkflowState::unavailable: workflow = L"Game not detected"; break;
-            case ConfigWorkflowState::detected:
-                workflow = L"Game detected; the verified change catalog is available";
-                break;
-            case ConfigWorkflowState::preview_ready:
-                workflow = preview_summary_.empty() ? L"Preview ready" : preview_summary_;
-                break;
-            case ConfigWorkflowState::apply_blocked: workflow = L"Apply blocked"; break;
-            case ConfigWorkflowState::applied: workflow = L"Configuration applied"; break;
-            case ConfigWorkflowState::restore_available: workflow = L"Restore available"; break;
-            case ConfigWorkflowState::recovery_required: workflow = L"Recovery required"; break;
-        }
-        return L"Verified change plan: " + workflow + L".\n" +
-               L"Recommended profile: " +
-               std::wstring{friendly_profile(status_.recommended_profile)} +
-               L". Every change remains visible, backed up, and reversible.";
+    if (selected_ == Destination::graphics) {
+        return status_.graphics_available
+            ? L""
+            : L"Select a valid Killing Floor 2 installation to edit video settings.";
     }
-    if (selected_ == Destination::settings) {
-        return L"";
+    if (selected_ == Destination::advanced) {
+        return status_.advanced_available
+            ? L""
+            : L"Select a valid Killing Floor 2 installation to edit advanced INI settings.";
     }
     if (selected_ == Destination::diagnostics) {
         return L"";

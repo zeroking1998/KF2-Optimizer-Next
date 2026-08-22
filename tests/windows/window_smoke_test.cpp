@@ -68,6 +68,7 @@ int main() {
              .sink = &sink,
              .renderer_owns_background = true});
         CHECK(created.has_value());
+        CHECK(sink.theme_changes == 1);
         CHECK(created.value().native_handle_for_testing() != nullptr);
         const auto window = static_cast<HWND>(
             created.value().native_handle_for_testing());
@@ -84,7 +85,7 @@ int main() {
         CHECK(sink.keys == 3);
         CHECK(sink.last_key == kf2::platform::windows::WindowKey::f10);
         SendMessageW(window, WM_THEMECHANGED, 0, 0);
-        CHECK(sink.theme_changes == 1);
+        CHECK(sink.theme_changes == 2);
         CHECK(SendMessageW(window, WM_POWERBROADCAST,
                            PBT_APMRESUMEAUTOMATIC, 0) == TRUE);
         CHECK(sink.resumes == 1);
