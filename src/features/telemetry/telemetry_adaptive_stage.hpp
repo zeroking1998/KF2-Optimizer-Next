@@ -69,6 +69,7 @@ struct AdaptiveSampleBuildResult final {
         frame.evidence.affinity_physical_cores;
     sample.system_logical_processors =
         frame.evidence.system_logical_processors;
+    sample.process_gpu_percent = frame.evidence.process_gpu_percent;
     sample.gpu_percent = frame.evidence.gpu_percent;
     if (frame.evidence.cpu_percent ||
         frame.evidence.critical_core_percent ||
@@ -80,13 +81,19 @@ struct AdaptiveSampleBuildResult final {
         sample.capabilities.gpu_telemetry =
             optimizer::AdaptiveCapabilityState::available;
     }
-    if (frame.evidence.dedicated_vram_bytes) {
+    const auto vram_used = frame.evidence.adapter_vram_used_bytes
+        ? frame.evidence.adapter_vram_used_bytes
+        : frame.evidence.dedicated_vram_bytes;
+    const auto vram_budget = frame.evidence.adapter_vram_budget_bytes
+        ? frame.evidence.adapter_vram_budget_bytes
+        : frame.evidence.dedicated_vram_budget_bytes;
+    if (vram_used) {
         sample.vram_used_bytes = static_cast<double>(
-            *frame.evidence.dedicated_vram_bytes);
+            *vram_used);
     }
-    if (frame.evidence.dedicated_vram_budget_bytes) {
+    if (vram_budget) {
         sample.vram_budget_bytes = static_cast<double>(
-            *frame.evidence.dedicated_vram_budget_bytes);
+            *vram_budget);
     }
     if (frame.evidence.system_ram_used_bytes) {
         sample.ram_used_bytes = static_cast<double>(
@@ -95,6 +102,18 @@ struct AdaptiveSampleBuildResult final {
     if (frame.evidence.system_ram_budget_bytes) {
         sample.ram_budget_bytes = static_cast<double>(
             *frame.evidence.system_ram_budget_bytes);
+    }
+    if (frame.evidence.system_commit_used_bytes) {
+        sample.commit_used_bytes = static_cast<double>(
+            *frame.evidence.system_commit_used_bytes);
+    }
+    if (frame.evidence.system_commit_budget_bytes) {
+        sample.commit_budget_bytes = static_cast<double>(
+            *frame.evidence.system_commit_budget_bytes);
+    }
+    if (frame.evidence.process_private_bytes) {
+        sample.process_private_bytes = static_cast<double>(
+            *frame.evidence.process_private_bytes);
     }
     sample.sample_loss = frame.frames.loss_count > 0;
     sample.discontinuity = frame.frames.reason ==

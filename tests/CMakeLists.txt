@@ -444,6 +444,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_actuation.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_governor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/optimizer/resource_pressure.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/optimizer_engine.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/presentmon_session.cpp"
@@ -987,12 +988,21 @@ add_test(NAME kf2_adaptive_locks_test COMMAND kf2_adaptive_locks_test)
 add_executable(kf2_adaptive_governor_test
     unit/adaptive_governor_test.cpp
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_governor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/optimizer/resource_pressure.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
 )
 target_include_directories(kf2_adaptive_governor_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_adaptive_governor_test COMMAND kf2_adaptive_governor_test)
+
+add_executable(kf2_resource_pressure_test
+    unit/resource_pressure_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/optimizer/resource_pressure.cpp"
+)
+target_include_directories(kf2_resource_pressure_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+add_test(NAME kf2_resource_pressure_test COMMAND kf2_resource_pressure_test)
 
 add_executable(kf2_benchmark_test
     unit/benchmark_test.cpp

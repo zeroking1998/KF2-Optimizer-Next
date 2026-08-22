@@ -52,16 +52,22 @@ Result<TelemetryFrame> build_telemetry_frame(
             frame.process->affinity_physical_cores;
         evidence.system_logical_processors =
             frame.process->system_logical_processors;
+        evidence.process_private_bytes = frame.process->private_bytes;
     }
     const std::optional<double> adapter_percent = frame.adapter_gpu
         ? frame.adapter_gpu->adapter_gpu_percent : std::nullopt;
     evidence.gpu_percent = ::kf2::telemetry::choose_total_gpu_percent(
         frame.driver_gpu_percent, adapter_percent);
     if (frame.adapter_gpu) {
+        evidence.process_gpu_percent = frame.adapter_gpu->gpu_percent;
         evidence.dedicated_vram_bytes =
             frame.adapter_gpu->dedicated_bytes;
         evidence.dedicated_vram_budget_bytes =
             frame.adapter_vram_budget_bytes;
+        evidence.adapter_vram_used_bytes =
+            frame.adapter_gpu->adapter_local_usage_bytes;
+        evidence.adapter_vram_budget_bytes =
+            frame.adapter_gpu->adapter_local_budget_bytes;
     }
     if (frame.system_memory) {
         evidence.system_ram_budget_bytes =
@@ -69,6 +75,14 @@ Result<TelemetryFrame> build_telemetry_frame(
         evidence.system_ram_used_bytes =
             frame.system_memory->total_physical_bytes -
             frame.system_memory->available_physical_bytes;
+        evidence.system_commit_budget_bytes =
+            frame.system_memory->commit_limit_bytes;
+        if (frame.system_memory->available_commit_bytes <=
+            frame.system_memory->commit_limit_bytes) {
+            evidence.system_commit_used_bytes =
+                frame.system_memory->commit_limit_bytes -
+                frame.system_memory->available_commit_bytes;
+        }
     }
     return Result<TelemetryFrame>::success(std::move(frame));
 }

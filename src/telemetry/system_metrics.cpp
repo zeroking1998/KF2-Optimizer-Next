@@ -141,6 +141,7 @@ Result<SystemMemoryMetrics> query_system_memory_metrics() {
     const auto used = memory.ullTotalPhys - memory.ullAvailPhys;
     return Result<SystemMemoryMetrics>::success({
         memory.ullTotalPhys, memory.ullAvailPhys,
+        memory.ullTotalPageFile, memory.ullAvailPageFile,
         static_cast<double>(used) * 100.0 /
             static_cast<double>(memory.ullTotalPhys)});
 }

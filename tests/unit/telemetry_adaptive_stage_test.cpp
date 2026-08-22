@@ -46,11 +46,17 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     frame.evidence.affinity_logical_processors = 16;
     frame.evidence.affinity_physical_cores = 8;
     frame.evidence.system_logical_processors = 24;
+    frame.evidence.process_gpu_percent = 52.0;
     frame.evidence.gpu_percent = 70.0;
     frame.evidence.dedicated_vram_bytes = 6ULL << 30U;
     frame.evidence.dedicated_vram_budget_bytes = 12ULL << 30U;
+    frame.evidence.adapter_vram_used_bytes = 7ULL << 30U;
+    frame.evidence.adapter_vram_budget_bytes = 10ULL << 30U;
     frame.evidence.system_ram_used_bytes = 24ULL << 30U;
     frame.evidence.system_ram_budget_bytes = 32ULL << 30U;
+    frame.evidence.system_commit_used_bytes = 30ULL << 30U;
+    frame.evidence.system_commit_budget_bytes = 48ULL << 30U;
+    frame.evidence.process_private_bytes = 5ULL << 30U;
 
     game::GameLogSession session;
     session.map = "KF-Outpost";
@@ -125,15 +131,23 @@ int main() {
           frame.evidence.affinity_physical_cores);
     CHECK(sample.system_logical_processors ==
           frame.evidence.system_logical_processors);
+    CHECK(sample.process_gpu_percent ==
+          frame.evidence.process_gpu_percent);
     CHECK(sample.gpu_percent == frame.evidence.gpu_percent);
     CHECK(sample.vram_used_bytes ==
-          static_cast<double>(*frame.evidence.dedicated_vram_bytes));
+          static_cast<double>(*frame.evidence.adapter_vram_used_bytes));
     CHECK(sample.vram_budget_bytes ==
-          static_cast<double>(*frame.evidence.dedicated_vram_budget_bytes));
+          static_cast<double>(*frame.evidence.adapter_vram_budget_bytes));
     CHECK(sample.ram_used_bytes ==
           static_cast<double>(*frame.evidence.system_ram_used_bytes));
     CHECK(sample.ram_budget_bytes ==
           static_cast<double>(*frame.evidence.system_ram_budget_bytes));
+    CHECK(sample.commit_used_bytes ==
+          static_cast<double>(*frame.evidence.system_commit_used_bytes));
+    CHECK(sample.commit_budget_bytes ==
+          static_cast<double>(*frame.evidence.system_commit_budget_bytes));
+    CHECK(sample.process_private_bytes ==
+          static_cast<double>(*frame.evidence.process_private_bytes));
     CHECK(sample.session_class ==
           optimizer::AdaptiveSessionClass::verified_offline);
     CHECK(sample.capabilities.frame_timing ==

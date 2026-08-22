@@ -108,7 +108,17 @@ point threshold, while broadly parallel saturation is evaluated against the
 observed affinity capacity. Confirmed CPU classifications use a two-second
 evidence hold to avoid CPU/unknown threshold flapping, while another proven
 bottleneck replaces the hold immediately. Explicit manual values and
-locks replace Adaptive values per key. Config-only Adaptive plans run before an app-started session through
+locks replace Adaptive values per key. A separate deterministic resource
+pressure estimator fuses process CPU, busiest-thread occupancy, effective
+core use, KF2-attributed GPU engines, whole-adapter GPU contention, live DXGI
+local-memory usage/budget, physical RAM and Windows commit reserve. Each
+resource reports raw and asymmetric-smoothed pressure, confidence and trend.
+The estimator expresses current and two-second projected frame-budget deficits
+in milliseconds, resets across telemetry boundaries, and permits quality
+recovery only while every resource has measured reserve. Whole-adapter load
+without matching KF2 GPU work remains visible but cannot by itself become a
+confirmed KF2 GPU cause.
+Config-only Adaptive plans run before an app-started session through
 snapshot, compare-and-swap backup, atomic apply and readback; the exact pre-game
 INIs are restored afterward. General Adaptive has no broad Online/Offline
 actuation gate: each source and actuator independently reports its runtime

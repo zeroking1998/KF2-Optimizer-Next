@@ -457,6 +457,38 @@ void UiRuntime::update_adaptive_controller(
         } else {
             decision_log << L"NOT_AVAILABLE";
         }
+        decision_log << L"; KF2GPU=";
+        if (frame.evidence.process_gpu_percent) {
+            decision_log << *frame.evidence.process_gpu_percent << L"%";
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        const auto primary_resource = [&]() -> const wchar_t* {
+            switch (adaptive_decision.resources.primary) {
+                case optimizer::ResourceKind::cpu: return L"CPU";
+                case optimizer::ResourceKind::gpu: return L"GPU";
+                case optimizer::ResourceKind::vram: return L"VRAM";
+                case optimizer::ResourceKind::ram: return L"RAM";
+                case optimizer::ResourceKind::unknown: return L"UNKNOWN";
+            }
+            return L"UNKNOWN";
+        }();
+        decision_log << L"; resourcePressure=" << std::setprecision(0)
+                     << L"CPU:"
+                     << adaptive_decision.resources.cpu.smoothed * 100.0
+                     << L"%,GPU:"
+                     << adaptive_decision.resources.gpu.smoothed * 100.0
+                     << L"%,VRAM:"
+                     << adaptive_decision.resources.vram.smoothed * 100.0
+                     << L"%,RAM:"
+                     << adaptive_decision.resources.ram.smoothed * 100.0
+                     << L"%; resourcePrimary=" << primary_resource
+                     << L"; resourceConfidence="
+                     << adaptive_decision.resources.primary_confidence * 100.0
+                     << L"%; frameDeficitMs=" << std::setprecision(2)
+                     << adaptive_decision.resources.frame_budget_deficit_ms
+                     << L"; predictedDeficitMs="
+                     << adaptive_decision.resources.predicted_deficit_ms;
         decision_log << L"; prediction=" << status.adaptive_prediction
                      << L"; dropRisk="
                      << status.adaptive_drop_risk_percent << L"%"
