@@ -195,7 +195,10 @@ void UiRuntime::detach_telemetry() {
     game_log_offset = 0;
     game_log_volume_serial = 0;
     game_log_file_index = 0;
+    game_log_process_start_id = 0;
     game_log_bound_to_process = false;
+    game_log_startup_exited = false;
+    game_log_startup_exit_announced = false;
     game_log_marker_tail.clear();
     game_log_session_parser.reset();
     auto status = model.status();
@@ -258,20 +261,26 @@ void UiRuntime::update_overlay_scene_gate() {
         information.nFileIndexLow;
     const bool identity_changed = game_log_bound_to_process &&
         (game_log_volume_serial != information.dwVolumeSerialNumber ||
-         game_log_file_index != file_index);
+         game_log_file_index != file_index ||
+         game_log_process_start_id != game_process->process_start_id);
     if (!game_log_bound_to_process || identity_changed) {
         game_log_volume_serial = information.dwVolumeSerialNumber;
         game_log_file_index = file_index;
+        game_log_process_start_id = game_process->process_start_id;
         game_log_bound_to_process = true;
         game_log_offset = 0;
         game_log_marker_tail.clear();
         overlay_scene_ready = false;
+        game_log_startup_exited = false;
+        game_log_startup_exit_announced = false;
         game_log_session_parser.reset();
     }
     if (size < game_log_offset) {
         game_log_offset = 0;
         game_log_marker_tail.clear();
         overlay_scene_ready = false;
+        game_log_startup_exited = false;
+        game_log_startup_exit_announced = false;
         game_log_session_parser.reset();
     }
     if (size == game_log_offset) {
@@ -303,7 +312,22 @@ void UiRuntime::update_overlay_scene_gate() {
     const bool menu_ready =
         marker_input.find("WidgetInitialized - WidgetName:  StartMenu") !=
         std::string::npos;
-    if (menu_ready) overlay_scene_ready = true;
+    if (menu_ready) {
+        overlay_scene_ready = true;
+        game_log_startup_exited = false;
+    } else if (!overlay_scene_ready &&
+               game::game_log_reports_engine_exit(marker_input)) {
+        game_log_startup_exited = true;
+        if (!game_log_startup_exit_announced) {
+            game_log_startup_exit_announced = true;
+            events->append({0, diagnostics::Severity::warning,
+                "KF2_STARTUP_EXITED_BEFORE_MENU",
+                L"KF2's engine exited before reaching the main menu; "
+                L"waiting for the remaining process to close",
+                L"telemetry"});
+            invalidate();
+        }
+    }
     constexpr std::size_t kMarkerTailBytes = 96;
     game_log_marker_tail = marker_input.substr(
         marker_input.size() > kMarkerTailBytes
@@ -398,7 +422,9 @@ void UiRuntime::try_attach_telemetry() {
     // as well.
     update_overlay_scene_gate();
     if (!overlay_scene_ready) {
-        telemetry_failure = L"Waiting for KF2 main menu";
+        telemetry_failure = game_log_startup_exited
+            ? L"KF2 engine exited before the main menu; waiting for process cleanup"
+            : L"Waiting for KF2 main menu";
         return;
     }
     const telemetry::SampleIdentity identity{

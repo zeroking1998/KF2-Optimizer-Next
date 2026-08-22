@@ -186,6 +186,8 @@ private:
     const std::optional<int>& value, std::uint64_t observed_at_ns,
     std::uint64_t now_ns,
     std::uint64_t maximum_age_ns = kGameLogObservationFreshnessNs) noexcept;
+[[nodiscard]] bool game_log_reports_engine_exit(
+    std::string_view text) noexcept;
 [[nodiscard]] constexpr bool game_log_belongs_to_process(
     std::uint64_t last_write_filetime,
     std::uint64_t process_start_filetime) noexcept {

@@ -116,7 +116,10 @@ struct UiRuntime {
     std::uintmax_t game_log_offset{0};
     std::uint32_t game_log_volume_serial{0};
     std::uint64_t game_log_file_index{0};
+    std::uint64_t game_log_process_start_id{0};
     bool game_log_bound_to_process{false};
+    bool game_log_startup_exited{false};
+    bool game_log_startup_exit_announced{false};
     std::string game_log_marker_tail;
     game::GameLogSessionParser game_log_session_parser;
     bool overlay_scene_ready{false};

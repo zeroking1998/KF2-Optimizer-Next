@@ -13,6 +13,11 @@ void add_saturated(std::uint64_t& value, std::uint64_t amount = 1) noexcept {
 
 }  // namespace
 
+bool game_log_reports_engine_exit(std::string_view text) noexcept {
+    return text.find("] Exit: Exiting.") != std::string_view::npos ||
+           text.find("Log: Log file closed,") != std::string_view::npos;
+}
+
 std::optional<GameLogSession> GameLogSessionParser::feed(
     std::string_view bytes, std::uint64_t observed_at_ns) {
     if (bytes.empty()) return std::nullopt;

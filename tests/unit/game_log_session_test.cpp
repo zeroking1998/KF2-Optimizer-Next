@@ -422,5 +422,13 @@ int main() {
     CHECK(!game_log_belongs_to_process(999, 1'000));
     CHECK(!game_log_belongs_to_process(0, 1'000));
     CHECK(!game_log_belongs_to_process(1'000, 0));
+    CHECK(game_log_reports_engine_exit(
+        "[0004.29] Exit: Exiting.\n"));
+    CHECK(game_log_reports_engine_exit(
+        "[0004.29] Log: Log file closed, 08/22/26 22:34:02\n"));
+    CHECK(!game_log_reports_engine_exit(
+        "[0004.29] Exit: Preparing to exit.\n"));
+    CHECK(!game_log_reports_engine_exit(
+        "WidgetInitialized - WidgetName:  StartMenu\n"));
     return EXIT_SUCCESS;
 }
