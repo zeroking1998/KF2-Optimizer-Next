@@ -9,13 +9,12 @@ explicit runtime acknowledgements and automatic restoration.
 
 ## Download
 
-The current ready-to-run Windows package is
-<a href="../../releases/tag/v0.0.2-alpha">Alpha 0.0.2</a>.
+The current development version is **Alpha 0.0.3**.
 Download the ZIP, extract the complete `KF2OptimizerNext` folder, and start
 `KF2Optimizer.exe`. Building from source is only required for development.
 
-If a required companion file is later missing or damaged, open
-**Diagnostics & Backup** and choose **Auto Repair from GitHub**. The app
+If a required companion file is later missing or damaged, choose **Repair**
+in the upper-right corner. The app
 downloads only the release asset for its exact installed version, verifies the
 build identity and every SHA-256 value, replaces only missing or damaged files,
 and then asks for a restart. It never replaces the running executable. Use
@@ -70,9 +69,8 @@ the control remains unavailable instead of pretending to work.
    <a href="../../releases">Releases page</a>,
    or build it from source if you are contributing.
 2. Keep `KF2Optimizer.exe` beside its `Data` directory.
-3. Start the optimizer, review the detected game and configuration paths, and
-   select a target FPS.
-4. Use **Preview** before applying a configuration plan.
+3. On **Home**, confirm or choose the KF2 folder.
+4. Under **Optimization**, select the target FPS and maximum corpse count.
 5. Start KF2 through the optimizer when you want session restoration and
    verified runtime capabilities.
 

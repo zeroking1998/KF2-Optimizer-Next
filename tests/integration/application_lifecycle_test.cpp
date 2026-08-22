@@ -272,6 +272,7 @@ int main() {
         CHECK(read_bytes(options.state_root / L"settings.ini") ==
         "schema_version=1\noptimizer_mode=adaptive\n"
         "animations_enabled=true\n"
+        "automatic_update_checks=true\n"
         "overlay_enabled=false\noverlay_show_fps=true\noverlay_show_frame_time=true\n"
         "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=false\n"
         "restore_config_after_game=true\noffline_gameplay_telemetry=false\n"
@@ -371,15 +372,8 @@ int main() {
         const auto missing_hwnd =
             missing_game.value().native_window_handle();
         CHECK(missing_hwnd != nullptr);
-        const auto missing_game_navigation = node_center(
-            missing_hwnd, missing_game.value().ui_model(), "nav-1");
-        CHECK(missing_game_navigation.has_value());
-        SendMessageW(
-            missing_hwnd, WM_LBUTTONUP, 0,
-            MAKELPARAM(missing_game_navigation->x,
-                       missing_game_navigation->y));
         const auto unavailable_launch = node_center(
-            missing_hwnd, missing_game.value().ui_model(), "game-launch");
+            missing_hwnd, missing_game.value().ui_model(), "dashboard-launch");
         CHECK(unavailable_launch.has_value());
         SendMessageW(missing_hwnd, WM_LBUTTONUP, 0,
                      MAKELPARAM(unavailable_launch->x,
@@ -413,35 +407,21 @@ int main() {
     CHECK(!graphical.value().overlay_enabled());
     CHECK(graphical.value().ui_model().selected() ==
           kf2::ui::Destination::dashboard);
-    const auto header_diagnostics =
-        node_center(hwnd, graphical.value().ui_model(), "header-diagnostics");
-    CHECK(header_diagnostics.has_value());
+    const auto dashboard_diagnostics =
+        node_center(hwnd, graphical.value().ui_model(), "dashboard-diagnostics");
+    CHECK(dashboard_diagnostics.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(header_diagnostics->x, header_diagnostics->y));
+                 MAKELPARAM(dashboard_diagnostics->x,
+                            dashboard_diagnostics->y));
     CHECK(graphical.value().ui_model().selected() ==
           kf2::ui::Destination::diagnostics);
-    const auto dashboard_navigation =
-        node_center(hwnd, graphical.value().ui_model(), "nav-0");
-    CHECK(dashboard_navigation.has_value());
+    const auto settings_navigation =
+        node_center(hwnd, graphical.value().ui_model(), "nav-1");
+    CHECK(settings_navigation.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(dashboard_navigation->x, dashboard_navigation->y));
-    const auto dashboard_settings =
-        node_center(hwnd, graphical.value().ui_model(), "dashboard-settings");
-    CHECK(dashboard_settings.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(dashboard_settings->x, dashboard_settings->y));
+                 MAKELPARAM(settings_navigation->x, settings_navigation->y));
     CHECK(graphical.value().ui_model().selected() ==
           kf2::ui::Destination::settings);
-    for (int page = 0; page < 8; ++page) {
-        SendMessageW(hwnd, WM_KEYDOWN, VK_NEXT, 0);
-    }
-    const auto settings_finetuning =
-        node_center(hwnd, graphical.value().ui_model(), "settings-finetuning");
-    CHECK(settings_finetuning.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(settings_finetuning->x, settings_finetuning->y));
-    CHECK(graphical.value().ui_model().selected() ==
-          kf2::ui::Destination::optimizer);
     const auto dashboard_again =
         node_center(hwnd, graphical.value().ui_model(), "nav-0");
     CHECK(dashboard_again.has_value());
@@ -501,15 +481,6 @@ int main() {
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(dashboard_after_overlay->x,
                             dashboard_after_overlay->y));
-    const auto hardware_refresh =
-        node_center(hwnd, graphical.value().ui_model(), "dashboard-refresh");
-    CHECK(hardware_refresh.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(hardware_refresh->x, hardware_refresh->y));
-    CHECK(graphical.value().ui_model().notice().has_value());
-    CHECK(graphical.value().ui_model().notice()->code == L"DIAGNOSTICS_STATUS");
-    CHECK(graphical.value().ui_model().status().hardware_summary.starts_with(
-        L"Hardware:"));
     Sleep(450);
     SendMessageW(hwnd, WM_HOTKEY, 0x4B46, 0);
     CHECK(graphical.value().overlay_enabled());
@@ -519,85 +490,20 @@ int main() {
     Sleep(450);
     SendMessageW(hwnd, WM_HOTKEY, 0x4B46, 0);
     CHECK(!graphical.value().overlay_enabled());
-    const auto game_navigation_for_telemetry =
-        node_center(hwnd, graphical.value().ui_model(), "nav-1");
-    CHECK(game_navigation_for_telemetry.has_value());
-    SendMessageW(
-        hwnd, WM_LBUTTONUP, 0,
-        MAKELPARAM(game_navigation_for_telemetry->x,
-                   game_navigation_for_telemetry->y));
     CHECK(!scroll_to_node(
         hwnd, graphical.value().ui_model(),
         "game-offline-telemetry").has_value());
     const auto settings_for_manual =
-        node_center(hwnd, graphical.value().ui_model(), "nav-2");
+        node_center(hwnd, graphical.value().ui_model(), "nav-1");
     CHECK(settings_for_manual.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(settings_for_manual->x, settings_for_manual->y));
-    const auto settings_before_advanced =
-        read_bytes(options.state_root / L"settings.ini");
-    const auto advanced_toggle = scroll_to_node(
-        hwnd, graphical.value().ui_model(), "settings-advanced-toggle");
-    CHECK(advanced_toggle.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(advanced_toggle->x, advanced_toggle->y));
-    CHECK(graphical.value().ui_model().status().advanced_settings_visible);
-    CHECK(read_bytes(options.state_root / L"settings.ini") ==
-          settings_before_advanced);
     CHECK(!scroll_to_node(
         hwnd, graphical.value().ui_model(),
         "settings-adaptive-online").has_value());
 
-    const auto optimizer_navigation =
-        node_center(hwnd, graphical.value().ui_model(), "nav-4");
-    CHECK(optimizer_navigation.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(optimizer_navigation->x, optimizer_navigation->y));
-    CHECK(graphical.value().ui_model().selected() ==
-          kf2::ui::Destination::optimizer);
-    const auto optimizer_preview = scroll_to_node(
-        hwnd, graphical.value().ui_model(), "optimizer-preview");
-    CHECK(optimizer_preview.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(optimizer_preview->x, optimizer_preview->y));
-    CHECK(graphical.value().ui_model().notice().has_value());
-    CHECK(graphical.value().ui_model().notice()->code ==
-          L"PREVIEW_READY");
-
-    const auto optimizer_export = scroll_to_node(
-        hwnd, graphical.value().ui_model(), "optimizer-export");
-    CHECK(optimizer_export.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(optimizer_export->x, optimizer_export->y));
-    CHECK(graphical.value().ui_model().notice().has_value());
-    CHECK(graphical.value().ui_model().notice()->code == L"PREVIEW_EXPORTED");
-    const auto optimizer_preview_path =
-        options.state_root / L"optimizer-preview.json";
-    const auto exported_preview = read_bytes(optimizer_preview_path);
-    CHECK(exported_preview.starts_with("{\"version\":1,\"changes\":["));
-
-    const auto optimizer_import = scroll_to_node(
-        hwnd, graphical.value().ui_model(), "optimizer-import");
-    CHECK(optimizer_import.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(optimizer_import->x, optimizer_import->y));
-    CHECK(graphical.value().ui_model().notice().has_value());
-    CHECK(graphical.value().ui_model().notice()->code ==
-          L"IMPORT_PREVIEW_READY");
-    const auto config_before_rejected_import =
-        graphical.value().ui_model().status().config;
-    write_bytes(optimizer_preview_path,
-                "{\"version\":1,\"changes\":[{\"id\":\"unknown\",\"value\":1}]}");
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(optimizer_import->x, optimizer_import->y));
-    CHECK(graphical.value().ui_model().notice().has_value());
-    CHECK(graphical.value().ui_model().notice()->code == L"IMPORT_REJECTED");
-    CHECK(graphical.value().ui_model().status().config ==
-          config_before_rejected_import);
-    write_bytes(optimizer_preview_path, exported_preview);
-
     const auto settings_for_adaptive =
-        node_center(hwnd, graphical.value().ui_model(), "nav-2");
+        node_center(hwnd, graphical.value().ui_model(), "nav-1");
     CHECK(settings_for_adaptive.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(settings_for_adaptive->x,
@@ -606,73 +512,8 @@ int main() {
           L"Adaptive / Automatic");
     CHECK(read_bytes(options.state_root / L"settings.ini").find(
               "optimizer_mode=adaptive\n") != std::string::npos);
-    const auto adaptive_shadow = scroll_to_node(
-        hwnd, graphical.value().ui_model(), "settings-adaptive-shadow");
-    CHECK(adaptive_shadow.has_value());
-    const bool shadow_before =
-        graphical.value().ui_model().status().adaptive_shadow_mode;
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(adaptive_shadow->x, adaptive_shadow->y));
-    CHECK(graphical.value().ui_model().notice().has_value());
-    CHECK(graphical.value().ui_model().notice()->code ==
-          L"ADAPTIVE_POLICY_CHANGED");
-    CHECK(graphical.value().ui_model().status().adaptive_shadow_mode !=
-          shadow_before);
-    const auto settings_after_shadow =
-        read_bytes(options.state_root / L"settings.ini");
-    const auto settings_hardlink =
-        options.state_root / L"settings-hardlink.ini";
-    CHECK(CreateHardLinkW(settings_hardlink.c_str(),
-                          (options.state_root / L"settings.ini").c_str(),
-                          nullptr) != FALSE);
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(adaptive_shadow->x, adaptive_shadow->y));
-    CHECK(graphical.value().ui_model().notice().has_value());
-    CHECK(graphical.value().ui_model().notice()->code ==
-          L"SETTINGS_SAVE_FAILED");
-    CHECK(graphical.value().ui_model().status().adaptive_shadow_mode !=
-          shadow_before);
-    CHECK(read_bytes(options.state_root / L"settings.ini") ==
-          settings_after_shadow);
-    CHECK(fs::remove(settings_hardlink));
-    const auto optimizer_after_manual =
-        node_center(hwnd, graphical.value().ui_model(), "nav-4");
-    CHECK(optimizer_after_manual.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(optimizer_after_manual->x,
-                            optimizer_after_manual->y));
-    // No recovery banner is shown for a merely interrupted app marker, so the
-    // first Optimizer action retains its normal, unshifted position.
-    const auto preview_action =
-        node_center(hwnd, graphical.value().ui_model(), "optimizer-preview");
-    CHECK(preview_action.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(preview_action->x, preview_action->y));
-    CHECK(graphical.value().ui_model().notice().has_value());
-    CHECK(graphical.value().ui_model().notice()->code == L"PREVIEW_READY");
-    CHECK(graphical.value().ui_model().status().config ==
-          kf2::ui::ConfigWorkflowState::preview_ready);
-    const auto apply_action =
-        node_center(hwnd, graphical.value().ui_model(), "optimizer-apply");
-    CHECK(apply_action.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(apply_action->x, apply_action->y));
-    CHECK(graphical.value().ui_model().notice().has_value());
-    CHECK(graphical.value().ui_model().notice()->code == L"CONFIG_APPLIED");
-    CHECK(graphical.value().ui_model().status().config ==
-          kf2::ui::ConfigWorkflowState::restore_available);
-    const auto restore_action =
-        node_center(hwnd, graphical.value().ui_model(), "optimizer-restore");
-    CHECK(restore_action.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(restore_action->x, restore_action->y));
-    CHECK(graphical.value().ui_model().notice().has_value());
-    CHECK(graphical.value().ui_model().notice()->code == L"CONFIG_RESTORED");
-    CHECK(graphical.value().ui_model().status().config ==
-          kf2::ui::ConfigWorkflowState::detected);
-
     const auto diagnostics_navigation =
-        node_center(hwnd, graphical.value().ui_model(), "nav-5");
+        node_center(hwnd, graphical.value().ui_model(), "nav-3");
     CHECK(diagnostics_navigation.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(diagnostics_navigation->x,
@@ -682,13 +523,15 @@ int main() {
     CHECK(diagnostics_backup.has_value());
     const auto engine_before_failed_backup =
         read_bytes(config_root / L"KFEngine.ini");
+    const auto config_before_failed_backup =
+        graphical.value().ui_model().status().config;
     CHECK(fs::remove(config_root / L"KFEngine.ini"));
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(diagnostics_backup->x, diagnostics_backup->y));
     CHECK(graphical.value().ui_model().notice().has_value());
     CHECK(graphical.value().ui_model().notice()->code == L"BACKUP_BLOCKED");
     CHECK(graphical.value().ui_model().status().config ==
-          kf2::ui::ConfigWorkflowState::detected);
+          config_before_failed_backup);
     write_bytes(config_root / L"KFEngine.ini", engine_before_failed_backup);
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(diagnostics_backup->x, diagnostics_backup->y));
@@ -703,34 +546,6 @@ int main() {
     CHECK(graphical.value().ui_model().notice().has_value());
     CHECK(graphical.value().ui_model().notice()->code == L"FULL_CHECK_FAILED" ||
           graphical.value().ui_model().notice()->code == L"FULL_CHECK_PASSED");
-    const auto diagnostics_export =
-        node_center(hwnd, graphical.value().ui_model(), "diagnostics-export");
-    CHECK(diagnostics_export.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(diagnostics_export->x, diagnostics_export->y));
-    const auto diagnostic_report =
-        read_bytes(options.state_root / L"diagnostics-report.json");
-    CHECK(diagnostic_report.find("KF2_OPTIMIZER_DIAGNOSTICS_V2") !=
-          std::string::npos);
-    CHECK(diagnostic_report.find("\"target_fps\":60") != std::string::npos);
-    CHECK(diagnostic_report.find("CONFIG_PREVIEW_READY") != std::string::npos);
-    CHECK(diagnostic_report.find("Adaptive optimizer profile balanced, quality exact, target 60 FPS") !=
-          std::string::npos);
-    CHECK(diagnostic_report.find("CONFIG_APPLIED") != std::string::npos);
-    CHECK(diagnostic_report.find("CONFIG_RESTORED") != std::string::npos);
-    const auto inventory_export = node_center(
-        hwnd, graphical.value().ui_model(), "diagnostics-export-inventory");
-    CHECK(inventory_export.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(inventory_export->x, inventory_export->y));
-    const auto inventory_report =
-        read_bytes(options.state_root / L"issue72-feature-inventory.json");
-    CHECK(inventory_report.find("KF2_ISSUE72_INVENTORY_V3") !=
-          std::string::npos);
-    CHECK(inventory_report.find("\"function_count\":149") !=
-          std::string::npos);
-    CHECK(inventory_report.find("\"id\":\"I72-A18-F08\"") !=
-          std::string::npos);
     const auto support_export = node_center(
         hwnd, graphical.value().ui_model(), "diagnostics-export-support");
     CHECK(support_export.has_value());
@@ -746,28 +561,6 @@ int main() {
           std::string::npos);
     CHECK(support_report.find("\"content_included\":false") !=
           std::string::npos);
-    for (int page = 0; page < 4; ++page) {
-        SendMessageW(hwnd, WM_KEYDOWN, VK_NEXT, 0);
-    }
-    const auto benchmark_baseline = node_center(
-        hwnd, graphical.value().ui_model(),
-        "diagnostics-benchmark-baseline");
-    CHECK(benchmark_baseline.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(benchmark_baseline->x, benchmark_baseline->y));
-    CHECK(graphical.value().ui_model().notice().has_value());
-    CHECK(graphical.value().ui_model().notice()->code ==
-          L"BENCHMARK_UNAVAILABLE");
-    const auto diagnostics_clear =
-        node_center(hwnd, graphical.value().ui_model(), "diagnostics-clear");
-    CHECK(diagnostics_clear.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(diagnostics_clear->x, diagnostics_clear->y));
-    CHECK(graphical.value().ui_model().notice().has_value());
-    CHECK(graphical.value().ui_model().notice()->code ==
-          L"DIAGNOSTICS_CLEARED");
-    CHECK(read_bytes(options.state_root / L"logs/session-events.json").find(
-              "DIAGNOSTICS_CLEARED") != std::string::npos);
     SendMessageW(hwnd, WM_KEYDOWN, VK_END, 0);
     SendMessageW(hwnd, WM_KEYDOWN, VK_RETURN, 0);
     CHECK(graphical.value().ui_model().selected() ==

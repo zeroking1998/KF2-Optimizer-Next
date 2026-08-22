@@ -16,13 +16,14 @@
 namespace kf2::security {
 namespace {
 
-constexpr std::array<std::string_view, 13> kPayloadPaths{
+constexpr std::array<std::string_view, 14> kPayloadPaths{
     "KF2Optimizer.exe",
     "Data/Lab/flexRelease_x64.forwarder-lab.dll",
     "Data/Lab/KF2OptimizerTelemetry.u",
     "Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md",
     "Data/Documentation/README.md",
     "Data/Documentation/USER_GUIDE.md",
+    "Data/Documentation/UPDATES.md",
     "Data/Documentation/FEATURE_REFERENCE.md",
     "Data/Documentation/SAFETY.md",
     "Data/Documentation/SUPPORT.md",
@@ -296,6 +297,40 @@ PackageIntegrityAudit invalid(std::wstring message) {
 }
 
 }  // namespace
+
+std::span<const std::string_view> managed_package_payload_paths() noexcept {
+    return kPayloadPaths;
+}
+
+Result<std::string> package_source_identity(
+    const std::filesystem::path& executable_directory) {
+    if (executable_directory.empty() || !executable_directory.is_absolute()) {
+        return Result<std::string>::failure(
+            {ErrorCode::invalid_argument, L"Package root is invalid", 0});
+    }
+    const auto document = read_manifest(
+        executable_directory / L"Data" / L"package-integrity.ini");
+    if (!document.has_value()) return Result<std::string>::failure(document.error());
+    constexpr std::string_view key{"source_identity="};
+    const auto begin = document.value().find(key);
+    if (begin == std::string::npos ||
+        (begin != 0 && document.value()[begin - 1] != '\n')) {
+        return Result<std::string>::failure(
+            {ErrorCode::invalid_argument,
+             L"Package source identity is missing", 0});
+    }
+    const auto value_begin = begin + key.size();
+    const auto end = document.value().find('\n', value_begin);
+    const std::string identity = document.value().substr(
+        value_begin, end == std::string::npos
+                         ? std::string::npos : end - value_begin);
+    if (!safe_identity(identity)) {
+        return Result<std::string>::failure(
+            {ErrorCode::invalid_argument,
+             L"Package source identity is invalid", 0});
+    }
+    return Result<std::string>::success(identity);
+}
 
 Result<PackageIntegrityAudit> audit_package_integrity(
     const std::filesystem::path& executable_directory,

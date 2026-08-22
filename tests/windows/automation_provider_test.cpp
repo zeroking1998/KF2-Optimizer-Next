@@ -85,11 +85,10 @@ int main() {
     CHECK(SUCCEEDED(root->FindAll(TreeScope_Children, condition.Get(), &navigation)));
     int count = 0;
     CHECK(SUCCEEDED(navigation->get_Length(&count)));
-    CHECK(count == 6);
+    CHECK(count == 4);
 
     constexpr const wchar_t* expected[] = {
-        L"Home", L"Game", L"Optimization", L"Overlay",
-        L"Fine-tuning", L"Diagnostics & Backup"};
+        L"Home", L"Optimization", L"Overlay", L"Help & Repair"};
     for (int index = 0; index < count; ++index) {
         ComPtr<IUIAutomationElement> item;
         CHECK(SUCCEEDED(navigation->GetElement(index, &item)));
@@ -102,51 +101,8 @@ int main() {
         CHECK(focusable == TRUE);
     }
 
-    ComPtr<IUIAutomationElement> optimizer;
-    CHECK(SUCCEEDED(navigation->GetElement(4, &optimizer)));
-    ComPtr<IUIAutomationInvokePattern> invoke;
-    CHECK(SUCCEEDED(optimizer->GetCurrentPatternAs(
-        UIA_InvokePatternId, IID_PPV_ARGS(&invoke))));
-    CHECK(SUCCEEDED(invoke->Invoke()));
-    CHECK(model.selected() == kf2::ui::Destination::optimizer);
-    provider.value().update_layout(kf2::ui::layout_shell(model, 800.0F, 520.0F));
-
-    VARIANT button_type{};
-    button_type.vt = VT_I4;
-    button_type.lVal = UIA_ButtonControlTypeId;
-    ComPtr<IUIAutomationCondition> button_condition;
-    CHECK(SUCCEEDED(automation->CreatePropertyCondition(
-        UIA_ControlTypePropertyId, button_type, &button_condition)));
-    ComPtr<IUIAutomationElementArray> buttons;
-    CHECK(SUCCEEDED(root->FindAll(TreeScope_Children, button_condition.Get(), &buttons)));
-    int button_count = 0;
-    CHECK(SUCCEEDED(buttons->get_Length(&button_count)));
-    CHECK(button_count >= 8);
-
-    VARIANT preview_name{};
-    preview_name.vt = VT_BSTR;
-    preview_name.bstrVal = SysAllocString(L"SHOW AUTOMATIC PLAN");
-    CHECK(preview_name.bstrVal != nullptr);
-    ComPtr<IUIAutomationCondition> preview_condition;
-    CHECK(SUCCEEDED(automation->CreatePropertyCondition(
-        UIA_NamePropertyId, preview_name, &preview_condition)));
-    VariantClear(&preview_name);
-    ComPtr<IUIAutomationElement> preview_button;
-    CHECK(SUCCEEDED(root->FindFirst(
-        TreeScope_Children, preview_condition.Get(), &preview_button)));
-    CHECK(preview_button != nullptr);
-    BOOL button_focusable = FALSE;
-    CHECK(SUCCEEDED(preview_button->get_CurrentIsKeyboardFocusable(&button_focusable)));
-    CHECK(button_focusable == TRUE);
-    ComPtr<IUIAutomationInvokePattern> preview_invoke;
-    CHECK(SUCCEEDED(preview_button->GetCurrentPatternAs(
-        UIA_InvokePatternId, IID_PPV_ARGS(&preview_invoke))));
-    CHECK(SUCCEEDED(preview_invoke->Invoke()));
-    CHECK(invoked_action == "optimizer-preview");
-    CHECK(model.focused_action() == "optimizer-preview");
-
     ComPtr<IUIAutomationElement> settings_item;
-    CHECK(SUCCEEDED(navigation->GetElement(2, &settings_item)));
+    CHECK(SUCCEEDED(navigation->GetElement(1, &settings_item)));
     ComPtr<IUIAutomationInvokePattern> settings_invoke;
     CHECK(SUCCEEDED(settings_item->GetCurrentPatternAs(
         UIA_InvokePatternId, IID_PPV_ARGS(&settings_invoke))));

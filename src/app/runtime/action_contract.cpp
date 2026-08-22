@@ -10,7 +10,7 @@ namespace {
 constexpr AccessPolicy kRestricted = AccessPolicy::restricted_mode_allowed;
 constexpr AccessPolicy kNormal = AccessPolicy::normal_mode_required;
 
-constexpr std::array<ActionDefinition, 61> kActions{{
+constexpr std::array<ActionDefinition, 65> kActions{{
     {ActionId::navigate_diagnostics, "header-diagnostics", FeatureId::navigation, kRestricted},
     {ActionId::navigate_settings, "dashboard-settings", FeatureId::navigation, kRestricted},
     {ActionId::navigate_overlay, "dashboard-overlay", FeatureId::navigation, kRestricted},
@@ -72,9 +72,13 @@ constexpr std::array<ActionDefinition, 61> kActions{{
     {ActionId::settings_corpses_up, "settings-corpses-up", FeatureId::settings, kNormal},
     {ActionId::settings_target_down, "settings-target-down", FeatureId::settings, kNormal},
     {ActionId::settings_target_up, "settings-target-up", FeatureId::settings, kNormal},
+    {ActionId::settings_updates_automatic, "settings-updates-automatic", FeatureId::settings, kRestricted},
+    {ActionId::settings_updates_check, "settings-updates-check", FeatureId::settings, kRestricted},
+    {ActionId::settings_updates_install, "settings-updates-install", FeatureId::settings, kRestricted},
+    {ActionId::settings_updates_later, "settings-updates-later", FeatureId::settings, kRestricted},
 }};
 
-constexpr std::array<ActionBinding, 69> kBindings{{
+constexpr std::array<ActionBinding, 76> kBindings{{
     {"dashboard-diagnostics", ActionId::navigate_diagnostics},
     {"dashboard-launch", ActionId::game_launch}, {"dashboard-overlay", ActionId::navigate_overlay},
     {"dashboard-refresh", ActionId::refresh_status}, {"dashboard-settings", ActionId::navigate_settings},
@@ -92,7 +96,11 @@ constexpr std::array<ActionBinding, 69> kBindings{{
     {"game-select-install", ActionId::game_select_install},
     {"header-backup", ActionId::optimizer_backup}, {"header-diagnostics", ActionId::navigate_diagnostics},
     {"header-launch", ActionId::game_launch},
-    {"header-restore", ActionId::optimizer_restore}, {"optimizer-apply", ActionId::optimizer_apply},
+    {"header-repair", ActionId::diagnostics_auto_repair},
+    {"header-restore", ActionId::optimizer_restore},
+    {"header-update-check", ActionId::settings_updates_check},
+    {"header-update-install", ActionId::settings_updates_install},
+    {"optimizer-apply", ActionId::optimizer_apply},
     {"optimizer-backup", ActionId::optimizer_backup}, {"optimizer-export", ActionId::optimizer_export},
     {"optimizer-import", ActionId::optimizer_import}, {"optimizer-open-backups", ActionId::optimizer_open_backups},
     {"optimizer-open-settings", ActionId::navigate_settings}, {"optimizer-preview", ActionId::optimizer_preview},
@@ -113,6 +121,10 @@ constexpr std::array<ActionBinding, 69> kBindings{{
     {"settings-animations", ActionId::settings_animations}, {"settings-corpses-down", ActionId::settings_corpses_down},
     {"settings-corpses-up", ActionId::settings_corpses_up}, {"settings-finetuning", ActionId::navigate_optimizer},
     {"settings-target-down", ActionId::settings_target_down}, {"settings-target-up", ActionId::settings_target_up},
+    {"settings-updates-automatic", ActionId::settings_updates_automatic},
+    {"settings-updates-check", ActionId::settings_updates_check},
+    {"settings-updates-install", ActionId::settings_updates_install},
+    {"settings-updates-later", ActionId::settings_updates_later},
 }};
 
 constexpr std::array<ControlDefinition, 6> kControls{{

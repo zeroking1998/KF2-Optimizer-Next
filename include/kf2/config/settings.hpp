@@ -11,6 +11,7 @@ namespace kf2::config {
 struct Settings {
     int schema_version{1};
     bool animations_enabled{true};
+    bool automatic_update_checks{true};
     bool overlay_enabled{false};
     bool overlay_show_fps{true};
     bool overlay_show_frame_time{true};

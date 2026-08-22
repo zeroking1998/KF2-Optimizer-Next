@@ -12,6 +12,8 @@ enter at the right level.
 
 - [User guide](USER_GUIDE.md): installation, first launch, controls, and normal
   recovery.
+- [Portable updates](UPDATES.md): update checks, user consent, verification,
+  restart, rollback, and preserved data.
 - [Feature reference](FEATURE_REFERENCE.md): what each major feature does and
   what evidence confirms it.
 - [Support](../SUPPORT.md): questions, bug reports, logs, and sensitive data.

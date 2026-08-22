@@ -18,9 +18,9 @@ enum class Destination : std::size_t {
     settings,
 };
 
-inline constexpr std::array<Destination, 6> kDestinations{
-    Destination::dashboard, Destination::game, Destination::settings,
-    Destination::overlay, Destination::optimizer, Destination::diagnostics,
+inline constexpr std::array<Destination, 4> kDestinations{
+    Destination::dashboard, Destination::settings, Destination::overlay,
+    Destination::diagnostics,
 };
 
 enum class NavigationCommand { next, previous, home, end };
@@ -104,6 +104,18 @@ struct UiStatus {
     bool adaptive_calibration_enabled{true};
     bool adaptive_logging{true};
     bool advanced_settings_visible{false};
+    std::wstring update_installed_version{L"unknown"};
+    std::wstring update_available_version{L"None"};
+    std::wstring update_last_check{L"Never"};
+    std::wstring update_status{L"Not checked yet"};
+    std::wstring update_published_at;
+    std::wstring update_download_size;
+    std::wstring update_changelog;
+    bool automatic_update_checks{true};
+    bool update_checking{false};
+    bool update_available{false};
+    bool update_installable{false};
+    bool update_installing{false};
     std::wstring profile{L"balanced"};
     std::wstring quality{L"exact"};
     std::wstring diagnostics_summary{L"No local diagnostic events"};

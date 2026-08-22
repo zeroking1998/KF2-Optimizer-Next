@@ -1,8 +1,8 @@
 # KF2 Optimizer Next - current project status
 
-- Updated: 2026-08-21
+- Updated: 2026-08-22
 - Default branch: `main`
-- Current release: [`Alpha 0.0.2`](../README.md#download)
+- Current development release: [`Alpha 0.0.3`](../README.md#download)
 
 The current rewrite is a portable native Windows application. The authoritative
 feature inventory is generated from the source and contains all 149 individual
@@ -10,9 +10,11 @@ requirements from GitHub Issue 72.
 
 ## Current verified state
 
-- The complete current Debug, Visual Studio Release and clean Ninja Release
-  suites pass 72/72 tests after the General-Adaptive implementation. Two clean
-  Release builds are byte-identical.
+- The complete current Visual Studio Debug and Release suites pass 81/81
+  tests, including updater rollback and native Windows UI coverage.
+- The normal interface has four areas: Home, Optimization, Overlay, and Help &
+  Repair. Update and Repair stay visible in the upper-right corner, and an
+  available update is highlighted without a disruptive pop-up.
 - Adaptive / Automatic is the only user mode. Legacy `smart_mode`,
   `optimizer_mode=smart` and `optimizer_mode=manual` are accepted only during
   migration and are atomically rewritten to the canonical Adaptive schema.
@@ -78,7 +80,7 @@ requirements from GitHub Issue 72.
 The in-tree Debug, Visual Studio Release and clean Ninja Release regressions are
 complete for the General-Adaptive source at 72/72 tests each. Two clean Release
 builds produced byte-identical EXEs and FleX laboratory forwarders.
-The portable package is validated separately with fourteen managed payload hashes
+The portable package is validated separately with fifteen managed payload hashes
 and user-data-preserving update semantics. The UI exposes one Adaptive control
 plane and the fail-closed safety policy.
 

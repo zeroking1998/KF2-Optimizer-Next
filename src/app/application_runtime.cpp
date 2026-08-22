@@ -1,5 +1,7 @@
 #include "application_runtime.hpp"
 
+#include "kf2/update/update_state.hpp"
+
 namespace kf2::app {
 
 optimizer::AdaptivePolicy adaptive_policy_from(
@@ -393,7 +395,9 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
       settings_path{state_root / L"settings.ini"},
       executable_root{std::move(executable_directory)},
       optimizer_settings{settings},
-      backups{state_root}, discovery_input{discovery}, start_mode{mode} {
+      backups{state_root}, discovery_input{discovery}, start_mode{mode},
+      update_controller{current_build_identity().version},
+      update_state_path{state_root / L"update-state.ini"} {
     // Build the immutable target registry during startup. No first-use
     // allocation is then possible in the measurement/control hot path.
     static_cast<void>(optimizer::adaptive_target_registry());
@@ -565,8 +569,18 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
     }
     model.set_recovery_required(recovery_required);
     model.set_status(std::move(status));
+    const auto persisted_update = update::load_update_state(update_state_path);
+    update_controller.restore_preferences(
+        settings.automatic_update_checks,
+        persisted_update.has_value()
+            ? persisted_update.value().last_check_unix_seconds
+            : 0);
+    refresh_update_presentation();
     controller.set_animations_enabled(settings.animations_enabled);
     callbacks_ready = true;
+    if (current_build_identity().channel == "release") {
+        start_update_check(update::CheckTrigger::automatic);
+    }
     invalidate();
 }
 

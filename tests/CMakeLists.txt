@@ -8,6 +8,122 @@ add_executable(kf2_result_test unit/result_test.cpp)
 target_include_directories(kf2_result_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_result_test COMMAND kf2_result_test)
 
+add_executable(kf2_semantic_version_test
+    unit/semantic_version_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp")
+target_include_directories(kf2_semantic_version_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+add_test(NAME kf2_semantic_version_test COMMAND kf2_semantic_version_test)
+
+add_executable(kf2_update_controller_test
+    unit/update_controller_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/update/update_controller.cpp")
+target_include_directories(kf2_update_controller_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+add_test(NAME kf2_update_controller_test COMMAND kf2_update_controller_test)
+
+add_executable(kf2_github_release_client_test
+    unit/github_release_client_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/update/github_release_client.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/release_notes.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp")
+target_include_directories(kf2_github_release_client_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_github_release_client_test PRIVATE
+    KF2_RELEASE_REPOSITORY="https://github.com/example/KF2-Optimizer-Next")
+target_link_libraries(kf2_github_release_client_test PRIVATE winhttp)
+add_test(NAME kf2_github_release_client_test
+    COMMAND kf2_github_release_client_test)
+
+add_executable(kf2_update_state_test
+    windows/update_state_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/update_state.cpp")
+target_include_directories(kf2_update_state_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_update_state_test PRIVATE
+    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/update-state")
+add_test(NAME kf2_update_state_test COMMAND kf2_update_state_test)
+
+add_executable(kf2_update_transaction_test
+    windows/update_transaction_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp
+    ${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp
+    ${PROJECT_SOURCE_DIR}/src/security/sha256.cpp
+    ${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp
+    ${PROJECT_SOURCE_DIR}/src/update/update_transaction.cpp
+)
+target_include_directories(kf2_update_transaction_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+)
+target_compile_definitions(kf2_update_transaction_test PRIVATE
+    UNICODE
+    _UNICODE
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/update-transaction"
+)
+target_link_libraries(kf2_update_transaction_test PRIVATE bcrypt)
+add_test(NAME kf2_update_transaction_test COMMAND kf2_update_transaction_test)
+
+add_executable(kf2_release_notes_test
+    unit/release_notes_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/update/release_notes.cpp
+)
+target_include_directories(kf2_release_notes_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+)
+add_test(NAME kf2_release_notes_test COMMAND kf2_release_notes_test)
+
+add_executable(kf2_update_package_test
+    windows/update_package_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp
+    ${PROJECT_SOURCE_DIR}/src/security/sha256.cpp
+    ${PROJECT_SOURCE_DIR}/src/update/github_release_client.cpp
+    ${PROJECT_SOURCE_DIR}/src/update/release_notes.cpp
+    ${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp
+    ${PROJECT_SOURCE_DIR}/src/update/update_package.cpp
+    ${PROJECT_SOURCE_DIR}/src/update/update_transaction.cpp
+    ${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp
+)
+target_include_directories(kf2_update_package_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+)
+target_compile_definitions(kf2_update_package_test PRIVATE
+    UNICODE
+    _UNICODE
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+    KF2_RELEASE_REPOSITORY="https://github.com/example/KF2-Optimizer-Next"
+    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/update-package"
+)
+target_link_libraries(kf2_update_package_test PRIVATE
+    bcrypt winhttp shell32 ole32 oleaut32 uuid
+)
+add_test(NAME kf2_update_package_test COMMAND kf2_update_package_test)
+
+add_executable(kf2_update_helper_test
+    windows/update_helper_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp
+    ${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp
+    ${PROJECT_SOURCE_DIR}/src/security/sha256.cpp
+    ${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp
+    ${PROJECT_SOURCE_DIR}/src/update/update_helper.cpp
+    ${PROJECT_SOURCE_DIR}/src/update/update_transaction.cpp
+)
+target_include_directories(kf2_update_helper_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+)
+target_compile_definitions(kf2_update_helper_test PRIVATE
+    UNICODE
+    _UNICODE
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/update-helper"
+)
+target_link_libraries(kf2_update_helper_test PRIVATE bcrypt)
+add_test(NAME kf2_update_helper_test COMMAND kf2_update_helper_test)
+
 add_executable(kf2_action_contract_test
     unit/action_contract_test.cpp
 )
@@ -58,7 +174,7 @@ add_executable(kf2_build_identity_test
 )
 target_include_directories(kf2_build_identity_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_build_identity_test PRIVATE
-    KF2_VERSION="0.0.2-alpha"
+    KF2_VERSION="0.0.3-alpha"
     KF2_BUILD_COMMIT="unknown"
     KF2_BUILD_CHANNEL="dev"
 )
@@ -286,6 +402,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/app/application.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application_package_repair.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application_runtime.cpp"
+    "${PROJECT_SOURCE_DIR}/src/app/application_update.cpp"
     ${KF2_APP_TELEMETRY_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/app/application_window.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/build_identity.cpp"
@@ -338,6 +455,14 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/system_metrics.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/telemetry_snapshot.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/github_release_client.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/release_notes.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/update_controller.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/update_helper.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/update_package.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/update_state.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/update_transaction.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/automation_provider.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/direct2d_renderer.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/shell_controller.cpp"
@@ -351,7 +476,7 @@ target_include_directories(kf2_application_lifecycle_test PRIVATE
 )
 target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/application-lifecycle"
-    KF2_VERSION="0.0.2-alpha"
+    KF2_VERSION="0.0.3-alpha"
     KF2_BUILD_COMMIT="unknown"
     KF2_BUILD_CHANNEL="dev"
     KF2_RELEASE_REPOSITORY="${KF2_RELEASE_REPOSITORY}"

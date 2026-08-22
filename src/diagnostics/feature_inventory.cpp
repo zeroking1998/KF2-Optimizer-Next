@@ -47,7 +47,7 @@ constexpr std::array area01_items{
     ItemSpec{FeatureStatus::present, "single-instance protection", "A named mutex and second-launch test enforce one instance."},
     ItemSpec{FeatureStatus::present, "UAC and permissions", "The embedded manifest requests asInvoker and uiAccess=false; no elevation is attempted."},
     ItemSpec{FeatureStatus::present, "path, package, and build validation", "Canonical paths, embedded build identity, PE contract and package validation are active."},
-    ItemSpec{FeatureStatus::present, "installation, repair, update, and migration", "The portable package replaces only manifest-owned files, preserves user Data byte-for-byte, verifies fourteen managed payload hashes and falls back to Safe Mode when damaged. Auto Repair downloads only the exact installed GitHub release on a background worker; GitHub-host, archive-size, build, executable, file-identity and SHA-256 checks precede atomic companion-file repair. A verified local package remains the offline fallback, and the running executable is never replaced."},
+    ItemSpec{FeatureStatus::present, "installation, repair, update, and migration", "The portable package replaces only manifest-owned program files, preserves settings, logs, backups and profiles byte-for-byte, verifies fifteen managed payload hashes and falls back to Safe Mode when damaged. Auto Repair downloads only the exact installed GitHub release for companion-file recovery. The consent-only updater separately checks newer published versions, verifies repository, asset name, size, SHA-256, build and package identity, then uses a temporary helper for backup, atomic replacement, restart acknowledgement, rollback and cleanup. A verified local package remains the offline repair fallback."},
     ItemSpec{FeatureStatus::present, "launching KF2", "Only the verified Steam/KF2 executable is launched."},
     ItemSpec{FeatureStatus::present, "shutdown, removal, and restoration", "Clean app stop and verified restore exist; portable removal needs no uninstaller, and the app deliberately never force-stops KF2."},
     ItemSpec{FeatureStatus::present, "crash, cancellation, restart, and recovery paths", "Unclean sessions and interrupted config/backup/FleX operations recover; privacy-bounded local crash records identify the failing build and exception without dumps or user content."},
@@ -326,7 +326,7 @@ constexpr AreaContract area14{
     "renderer, automation, shell, lifecycle and overlay tests; validate_gui.ps1"};
 
 constexpr std::array area14_items{
-    ItemSpec{FeatureStatus::present, "main window, dashboard, and navigation", "Native window, seven destinations and status/footer are tested."},
+    ItemSpec{FeatureStatus::present, "main window, dashboard, and navigation", "Native window, four visible destinations, status, and global Update/Repair actions are tested."},
     ItemSpec{FeatureStatus::present, "Adaptive control", "The single Adaptive mode is explicit, persistent and accessible."},
     ItemSpec{FeatureStatus::present, "effective values, source, and status", "Status, source/reason and active settings are visible in UI/report/preview."},
     ItemSpec{FeatureStatus::present, "preview, confirmation, and error messages", "Typed notices and explicit apply workflow are implemented."},

@@ -1,11 +1,17 @@
 #include <Windows.h>
 
 #include <cstdint>
+#include <cerrno>
+#include <cstdlib>
+#include <cwchar>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <fstream>
 #include <iterator>
 #include <shellapi.h>
+#include <tuple>
+#include <vector>
 
 #include "kf2/app/application.hpp"
 #include "kf2/app/build_identity.hpp"
@@ -17,6 +23,7 @@
 #include "kf2/platform/windows/state_environment.hpp"
 #include "kf2/platform/windows/process_security.hpp"
 #include "kf2/security/package_integrity.hpp"
+#include "kf2/update/update_helper.hpp"
 
 namespace {
 
@@ -47,6 +54,62 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int show_command) {
     const auto secured_search = windows::harden_process_dll_search();
     if (!secured_search.has_value()) {
         return show_fatal(secured_search.error(), 9);
+    }
+
+    std::vector<std::wstring> arguments;
+    int argument_count = 0;
+    if (wchar_t** argv = CommandLineToArgvW(GetCommandLineW(),
+                                            &argument_count)) {
+        for (int index = 1; index < argument_count; ++index) {
+            arguments.emplace_back(argv[index]);
+        }
+        LocalFree(argv);
+    }
+    if (arguments.size() == 2 &&
+        arguments[0] == L"--portable-update-helper") {
+        return kf2::update::run_update_helper(arguments[1]);
+    }
+
+    const auto parse_process_id = [](std::wstring_view value)
+        -> std::optional<std::uint32_t> {
+        if (value.empty()) return std::nullopt;
+        const std::wstring owned{value};
+        wchar_t* end = nullptr;
+        errno = 0;
+        const auto parsed = std::wcstoul(owned.c_str(), &end, 10);
+        if (errno != 0 || parsed == 0 || parsed > UINT32_MAX || end == nullptr ||
+            *end != L'\0') return std::nullopt;
+        return static_cast<std::uint32_t>(parsed);
+    };
+    const auto narrow_token = [](std::wstring_view value)
+        -> std::optional<std::string> {
+        std::string result;
+        for (const wchar_t character : value) {
+            if (character > 127) return std::nullopt;
+            result.push_back(static_cast<char>(character));
+        }
+        return result;
+    };
+    std::optional<kf2::update::UpdateReadyArguments> update_ready;
+    std::optional<std::tuple<std::uint32_t, std::filesystem::path,
+                             std::string>> update_cleanup;
+    if (!arguments.empty() && arguments[0] == L"--portable-update-ready") {
+        if (arguments.size() != 5) return 18;
+        const auto process_id = parse_process_id(arguments[2]);
+        const auto token = narrow_token(arguments[4]);
+        if (!process_id || !token) return 18;
+        update_ready = kf2::update::UpdateReadyArguments{
+            .receipt_path = arguments[1],
+            .helper_process_id = *process_id,
+            .work_root = arguments[3],
+            .token = *token};
+    } else if (!arguments.empty() &&
+               arguments[0] == L"--portable-update-cleanup") {
+        if (arguments.size() != 4) return 19;
+        const auto process_id = parse_process_id(arguments[1]);
+        const auto token = narrow_token(arguments[3]);
+        if (!process_id || !token) return 19;
+        update_cleanup.emplace(*process_id, arguments[2], *token);
     }
 
     const auto executable_directory = windows::executable_directory();
@@ -107,14 +170,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int show_command) {
     }
 
     kf2::app::StartMode mode = kf2::app::StartMode::normal;
-    int argc = 0;
-    if (wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc)) {
-        for (int i = 1; i < argc; ++i) {
-            const std::wstring_view argument{argv[i]};
+    {
+        for (const auto& stored_argument : arguments) {
+            const std::wstring_view argument{stored_argument};
             if (argument == L"--read-only") mode = kf2::app::StartMode::read_only;
             else if (argument == L"--safe-mode") mode = kf2::app::StartMode::safe;
         }
-        LocalFree(argv);
     }
     if (damaged_package) mode = kf2::app::StartMode::safe;
     auto discovery = kf2::game::default_game_discovery_input();
@@ -166,6 +227,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int show_command) {
             return 0;
         }
         return show_fatal(application.error(), 13);
+    }
+
+    if (update_ready) {
+        const auto signaled =
+            kf2::update::signal_update_ready_and_schedule_cleanup(*update_ready);
+        if (!signaled.has_value()) {
+            static_cast<void>(application.value().shutdown_cleanly());
+            return 18;
+        }
+    } else if (update_cleanup) {
+        static_cast<void>(kf2::update::schedule_update_cleanup(
+            std::get<0>(*update_cleanup), std::get<1>(*update_cleanup),
+            std::get<2>(*update_cleanup)));
     }
 
     const auto run_result = application.value().run(show_command);

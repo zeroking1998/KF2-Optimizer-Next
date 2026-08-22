@@ -239,19 +239,29 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
                  *node.action_id == "dashboard-launch" ||
                  *node.action_id == "optimizer-apply" ||
                  *node.action_id == "diagnostics-full-check");
-            const bool emphasized = primary || node.selected;
+            const bool emphasized = primary;
+            if (node.attention && node.enabled) {
+                brush->SetColor(color(theme.warning));
+                target->DrawRoundedRectangle(
+                    {rectangle({node.bounds.x - 3.0F, node.bounds.y - 3.0F,
+                                node.bounds.width + 6.0F,
+                                node.bounds.height + 6.0F}), 8.0F, 8.0F},
+                    brush.Get(), 3.0F);
+            }
             brush->SetColor(color(!node.enabled ? theme.surface_raised
+                                                : node.attention ? theme.warning
                                                 : emphasized ? theme.accent
                                                           : theme.surface_raised));
             target->FillRoundedRectangle(
                 {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get());
             brush->SetColor(color(node.focused ? theme.accent_hover :
-                                  node.enabled ? (emphasized ? theme.accent_hover
-                                                          : theme.border)
+                                  node.enabled ? (node.selected ? theme.success
+                                                : emphasized ? theme.accent_hover
+                                                             : theme.border)
                                                : theme.border));
             target->DrawRoundedRectangle(
                 {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get(),
-                node.focused ? 2.0F : 1.0F);
+                node.focused || node.selected ? 2.0F : 1.0F);
         } else if (node.role == SemanticRole::tooltip) {
             brush->SetColor(color(theme.surface_raised));
             target->FillRoundedRectangle(

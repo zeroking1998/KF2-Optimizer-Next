@@ -50,30 +50,33 @@ int main() {
     CHECK((dashboard.header == DipRect{0, 0, 1440, 72}));
     CHECK((dashboard.status_strip == DipRect{0, 72, 1440, 34}));
     CHECK((dashboard.metrics_strip == DipRect{0, 106, 1440, 100}));
-    CHECK((dashboard.sidebar == DipRect{0, 206, 210, 662}));
-    CHECK((dashboard.footer == DipRect{0, 868, 1440, 32}));
+    CHECK((dashboard.sidebar == DipRect{0, 206, 210, 694}));
+    CHECK((dashboard.footer == DipRect{0, 900, 1440, 0}));
+    CHECK(node(dashboard, "footer") == nullptr);
     CHECK(node(dashboard, "dashboard-quick-section") != nullptr);
     CHECK(node(dashboard, "dashboard-support-section") != nullptr);
     CHECK(action(dashboard, "dashboard-launch") != nullptr);
     CHECK(action(dashboard, "dashboard-settings") != nullptr);
     CHECK(action(dashboard, "dashboard-overlay") != nullptr);
     CHECK(action(dashboard, "dashboard-diagnostics") != nullptr);
-    CHECK(action(dashboard, "dashboard-refresh") != nullptr);
-    CHECK(action(dashboard, "header-launch") != nullptr);
-    CHECK(!action(dashboard, "header-launch")->enabled);
-    CHECK(action(dashboard, "header-diagnostics") != nullptr);
+    CHECK(action(dashboard, "dashboard-refresh") == nullptr);
+    CHECK(action(dashboard, "game-select-install") != nullptr);
+    CHECK(action(dashboard, "header-launch") == nullptr);
+    CHECK(action(dashboard, "header-update-check") != nullptr);
+    CHECK(action(dashboard, "header-repair") != nullptr);
+    CHECK(!action(dashboard, "header-update-check")->attention);
     CHECK(action(dashboard, "header-guide") == nullptr);
     CHECK(action(dashboard, "dashboard-guide") == nullptr);
     CHECK(std::count_if(dashboard.nodes.begin(), dashboard.nodes.end(),
                         [](const auto& item) {
                             return item.role == SemanticRole::metric_card;
-                        }) == 5);
-    CHECK(node(dashboard, "metric-3") != nullptr);
-    CHECK(node(dashboard, "metric-3")->text.find(L"GPU – TOTAL") !=
+                         }) == 4);
+    CHECK(node(dashboard, "metric-2") != nullptr);
+    CHECK(node(dashboard, "metric-2")->text.find(L"GAME LOAD") !=
           std::wstring::npos);
 
     std::set<std::string> ids;
-    std::array<DipRect, 6> navigation{};
+    std::array<DipRect, 4> navigation{};
     std::size_t navigation_index = 0;
     for (const auto& item : dashboard.nodes) {
         CHECK(ids.insert(item.id).second);
@@ -86,16 +89,18 @@ int main() {
     for (std::size_t index = 1; index < navigation.size(); ++index) {
         CHECK(!intersects(navigation[index - 1], navigation[index]));
     }
-    const DipPoint nav_point{navigation[2].x + navigation[2].width / 2.0F,
-                             navigation[2].y + navigation[2].height / 2.0F};
+    const DipPoint nav_point{navigation[1].x + navigation[1].width / 2.0F,
+                             navigation[1].y + navigation[1].height / 2.0F};
     const auto* nav_hit = hit_test(dashboard, nav_point);
     CHECK(nav_hit != nullptr);
     CHECK(nav_hit->destination == Destination::settings);
 
     const auto compact_dashboard = layout_shell(model, 800, 520);
-    CHECK(action(compact_dashboard, "header-launch") != nullptr);
-    CHECK(node(compact_dashboard, "navigation-main-group") != nullptr);
-    CHECK(node(compact_dashboard, "navigation-tools-group") != nullptr);
+    CHECK(action(compact_dashboard, "header-launch") == nullptr);
+    CHECK(action(compact_dashboard, "header-update-check") != nullptr);
+    CHECK(action(compact_dashboard, "header-repair") != nullptr);
+    CHECK(node(compact_dashboard, "navigation-main-group") == nullptr);
+    CHECK(node(compact_dashboard, "navigation-tools-group") == nullptr);
 
     constexpr std::array<float, 5> dpis{96, 120, 144, 168, 192};
     for (const float dpi : dpis) {
@@ -165,14 +170,13 @@ int main() {
     static_cast<void>(model.focus_destination(Destination::diagnostics));
     static_cast<void>(model.activate_focused());
     const auto diagnostics = layout_shell(model, 1440, 900);
-    CHECK(action(diagnostics, "diagnostics-flex-audit") != nullptr);
+    CHECK(action(diagnostics, "diagnostics-flex-audit") == nullptr);
     CHECK(action(diagnostics, "diagnostics-flex-install") == nullptr);
     CHECK(action(diagnostics, "diagnostics-flex-restore") != nullptr);
     CHECK(action(diagnostics, "diagnostics-repair-package") != nullptr);
     CHECK(action_help_text("diagnostics-repair-package").has_value());
-    CHECK(action(diagnostics, "diagnostics-auto-repair") != nullptr);
-    CHECK(action(diagnostics, "diagnostics-auto-repair")->text ==
-          L"AUTO REPAIR FROM GITHUB");
+    CHECK(action(diagnostics, "diagnostics-auto-repair") == nullptr);
+    CHECK(action(diagnostics, "settings-finetuning") == nullptr);
     CHECK(action_help_text("diagnostics-auto-repair").has_value());
     CHECK(node(diagnostics, "diagnostics-check-section") != nullptr);
     CHECK(node(diagnostics, "diagnostics-recovery-section") != nullptr);
@@ -187,14 +191,17 @@ int main() {
     const auto settings = layout_shell(model, 1440, 900);
     CHECK(action(settings, "settings-mode-manual") == nullptr);
     CHECK(action(settings, "settings-mode-adaptive") == nullptr);
-    CHECK(node(settings, "settings-adaptive-active-section") != nullptr);
-    CHECK(action(settings, "settings-advanced-toggle") != nullptr);
+    CHECK(node(settings, "settings-adaptive-active-section") == nullptr);
+    CHECK(action(settings, "settings-advanced-toggle") == nullptr);
     CHECK(action(settings, "settings-adaptive-aggressiveness") == nullptr);
     CHECK(action(settings, "settings-adaptive-flex") == nullptr);
     CHECK(action(settings, "settings-animations") != nullptr);
     CHECK(action(settings, "settings-guide-reset") == nullptr);
-    CHECK(action(settings, "settings-finetuning") != nullptr);
-    CHECK(action(settings, "settings-finetuning")->text == L"OPEN FINE-TUNING");
+    CHECK(action(settings, "settings-finetuning") == nullptr);
+    CHECK(node(settings, "settings-updates-section") != nullptr);
+    CHECK(action(settings, "settings-updates-automatic") != nullptr);
+    CHECK(action(settings, "settings-updates-check") == nullptr);
+    CHECK(action(settings, "settings-updates-install") == nullptr);
     CHECK(action(settings, "settings-target-up") == nullptr);
     CHECK(action(settings, "settings-corpses-up") == nullptr);
 
@@ -211,6 +218,32 @@ int main() {
     CHECK(node(settings, "settings-adaptive-maximum-slider") == nullptr);
     CHECK(node(settings, "settings-adaptive-headroom-slider") == nullptr);
     CHECK(node(settings, "settings-flex-slider") == nullptr);
+
+    auto checking_status = settings_status;
+    checking_status.update_checking = true;
+    model.set_status(checking_status);
+    const auto checking_updates = layout_shell(model, 1440, 900);
+    CHECK(!action(checking_updates, "header-update-check")->enabled);
+    CHECK(action(checking_updates, "header-update-check")->text ==
+          L"CHECKING...");
+
+    auto available_status = settings_status;
+    available_status.update_available = true;
+    available_status.update_installable = true;
+    available_status.update_available_version = L"0.0.4-alpha";
+    available_status.update_published_at = L"2026-08-23";
+    available_status.update_download_size = L"5.0 MiB";
+    available_status.update_changelog =
+        L"WHAT'S NEW\n- Portable update.\n\nBUG FIXES\n- Rollback.";
+    model.set_status(available_status);
+    const auto available_updates = layout_shell(model, 1440, 900);
+    CHECK(action(available_updates, "header-update-check") == nullptr);
+    CHECK(action(available_updates, "header-update-install") != nullptr);
+    CHECK(action(available_updates, "header-update-install")->attention);
+    CHECK(action(available_updates, "settings-updates-install") == nullptr);
+    CHECK(action(available_updates, "settings-updates-later") != nullptr);
+
+    model.set_status(settings_status);
     for (const auto& item : settings.nodes) {
         if (item.role != SemanticRole::action &&
             item.role != SemanticRole::slider) {
@@ -225,12 +258,13 @@ int main() {
     settings_status.advanced_settings_visible = true;
     model.set_status(settings_status);
     const auto advanced_settings = layout_shell(model, 1440, 900);
-    CHECK(action(advanced_settings, "settings-adaptive-aggressiveness") != nullptr);
+    CHECK(action(advanced_settings, "settings-advanced-toggle") == nullptr);
+    CHECK(action(advanced_settings, "settings-adaptive-aggressiveness") == nullptr);
     CHECK(action(advanced_settings, "settings-adaptive-online") == nullptr);
-    CHECK(node(advanced_settings, "settings-adaptive-minimum-slider") != nullptr);
-    CHECK(node(advanced_settings, "settings-adaptive-maximum-slider") != nullptr);
-    CHECK(node(advanced_settings, "settings-adaptive-headroom-slider") != nullptr);
-    CHECK(advanced_settings.scroll_extent > settings.scroll_extent);
+    CHECK(node(advanced_settings, "settings-adaptive-minimum-slider") == nullptr);
+    CHECK(node(advanced_settings, "settings-adaptive-maximum-slider") == nullptr);
+    CHECK(node(advanced_settings, "settings-adaptive-headroom-slider") == nullptr);
+    CHECK(advanced_settings.scroll_extent == settings.scroll_extent);
 
     settings_status.advanced_settings_visible = false;
     model.set_status(settings_status);
@@ -239,7 +273,7 @@ int main() {
     model.set_scroll_extent(compact.scroll_extent);
     static_cast<void>(model.set_scroll(compact.scroll_extent));
     const auto scrolled = layout_shell(model, 800, 520);
-    const auto* last = action(scrolled, "settings-finetuning");
+    const auto* last = action(scrolled, "settings-updates-automatic");
     CHECK(last != nullptr);
     CHECK(last->bounds.y + last->bounds.height <=
           scrolled.content.y + scrolled.content.height + 0.01F);

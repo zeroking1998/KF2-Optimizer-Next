@@ -21,7 +21,7 @@
 
 ### Required-file repair
 
-`Diagnostics & Backup > Auto Repair from GitHub` is available even in Safe
+The upper-right **Repair** action is available even in Safe
 Mode. It derives an exact tag and asset name from the installed version, never
 from a latest-release alias, and performs the download on a background worker.
 HTTPS host restrictions, a 64 MiB archive limit, isolated extraction, build

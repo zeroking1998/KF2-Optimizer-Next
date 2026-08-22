@@ -48,6 +48,7 @@
 #include "kf2/ui/automation_provider.hpp"
 #include "kf2/ui/direct2d_renderer.hpp"
 #include "kf2/ui/shell_controller.hpp"
+#include "kf2/update/update_controller.hpp"
 #include "kf2/telemetry/gpu_metrics.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
 
@@ -58,6 +59,8 @@ struct TelemetryFrame;
 namespace kf2::app {
 
 struct PackageRepairAsyncState;
+struct UpdateCheckAsyncState;
+struct UpdateInstallAsyncState;
 
 optimizer::AdaptivePolicy adaptive_policy_from(
     const config::Settings& settings) noexcept;
@@ -159,6 +162,10 @@ struct UiRuntime {
     bool high_resolution_animation_timer{false};
     StartMode start_mode{StartMode::normal};
     std::shared_ptr<PackageRepairAsyncState> package_repair_state;
+    update::UpdateController update_controller;
+    std::filesystem::path update_state_path;
+    std::shared_ptr<UpdateCheckAsyncState> update_check_state;
+    std::shared_ptr<UpdateInstallAsyncState> update_install_state;
 
     void append_gameplay_report_fields(
         diagnostics::ProductReport& report) const noexcept;
@@ -194,6 +201,14 @@ struct UiRuntime {
     void start_auto_package_repair();
 
     void poll_auto_package_repair();
+
+    void start_update_check(update::CheckTrigger trigger);
+    void poll_update_check();
+    void toggle_automatic_update_checks();
+    void start_update_install();
+    void poll_update_install();
+    void dismiss_update();
+    void refresh_update_presentation();
 
     void system_resume();
 

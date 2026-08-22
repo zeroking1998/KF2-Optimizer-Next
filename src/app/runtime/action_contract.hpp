@@ -104,6 +104,10 @@ enum class ActionId : std::uint16_t {
     settings_adaptive_online = 82,
     diagnostics_repair_package = 83,
     diagnostics_auto_repair = 84,
+    settings_updates_automatic = 85,
+    settings_updates_check = 86,
+    settings_updates_install = 87,
+    settings_updates_later = 88,
 };
 
 enum class ControlId : std::uint8_t {

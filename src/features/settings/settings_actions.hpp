@@ -46,8 +46,16 @@ app::runtime::DispatchResult corpses_down(
     app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult corpses_up(
     app::UiRuntime&, const app::runtime::NoPayload&);
+app::runtime::DispatchResult updates_automatic(
+    app::UiRuntime&, const app::runtime::NoPayload&);
+app::runtime::DispatchResult updates_check(
+    app::UiRuntime&, const app::runtime::NoPayload&);
+app::runtime::DispatchResult updates_install(
+    app::UiRuntime&, const app::runtime::NoPayload&);
+app::runtime::DispatchResult updates_later(
+    app::UiRuntime&, const app::runtime::NoPayload&);
 
-inline constexpr std::array<app::runtime::ActionImplementation, 20> kActions{{
+inline constexpr std::array<app::runtime::ActionImplementation, 24> kActions{{
     {app::runtime::ActionId::settings_advanced_toggle,
      &app::runtime::bind_no_payload<&advanced_toggle>},
     {app::runtime::ActionId::settings_adaptive_aggressiveness,
@@ -88,6 +96,14 @@ inline constexpr std::array<app::runtime::ActionImplementation, 20> kActions{{
      &app::runtime::bind_no_payload<&corpses_down>},
     {app::runtime::ActionId::settings_corpses_up,
      &app::runtime::bind_no_payload<&corpses_up>},
+    {app::runtime::ActionId::settings_updates_automatic,
+     &app::runtime::bind_no_payload<&updates_automatic>},
+    {app::runtime::ActionId::settings_updates_check,
+     &app::runtime::bind_no_payload<&updates_check>},
+    {app::runtime::ActionId::settings_updates_install,
+     &app::runtime::bind_no_payload<&updates_install>},
+    {app::runtime::ActionId::settings_updates_later,
+     &app::runtime::bind_no_payload<&updates_later>},
 }};
 
 inline constexpr app::runtime::FeatureDefinition kFeature{

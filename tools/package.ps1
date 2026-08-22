@@ -31,6 +31,7 @@ $knownManagedPaths = [Collections.Generic.HashSet[string]]::new(
     'Data/Documentation/README.md',
     'Data/Documentation/USER_GUIDE.md',
     'Data/Documentation/FEATURE_REFERENCE.md',
+    'Data/Documentation/UPDATES.md',
     'Data/Documentation/SAFETY.md',
     'Data/Documentation/SUPPORT.md',
     'Data/Documentation/LICENSE',
@@ -122,6 +123,7 @@ New-Item -ItemType Directory -Path $documentationDirectory -Force | Out-Null
 $packageDocumentation = [ordered]@{
     'README.md' = 'README.md'
     'docs\USER_GUIDE.md' = 'USER_GUIDE.md'
+    'docs\UPDATES.md' = 'UPDATES.md'
     'docs\FEATURE_REFERENCE.md' = 'FEATURE_REFERENCE.md'
     'docs\SAFETY.md' = 'SAFETY.md'
     'SUPPORT.md' = 'SUPPORT.md'
@@ -160,7 +162,7 @@ $workingTreeChanges = @(& git -C $projectRoot status --porcelain `
 if ($workingTreeChanges.Count -ne 0) { $commit = "$commit.dirty" }
 $inventoryJson = Join-Path $documentationDirectory `
     'issue72-feature-inventory.json'
-& $inventoryExporter $inventoryJson "0.0.2-alpha+$commit (release)"
+& $inventoryExporter $inventoryJson "0.0.3-alpha+$commit (release)"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $integrityPayloadFiles = @(
@@ -170,6 +172,7 @@ $integrityPayloadFiles = @(
     'Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md',
     'Data/Documentation/README.md',
     'Data/Documentation/USER_GUIDE.md',
+    'Data/Documentation/UPDATES.md',
     'Data/Documentation/FEATURE_REFERENCE.md',
     'Data/Documentation/SAFETY.md',
     'Data/Documentation/SUPPORT.md',
@@ -210,7 +213,7 @@ $payloadHashes = @($payloadFiles | ForEach-Object {
 $packageManifest = [ordered]@{
     schema_version = 2
     product = 'KF2 Optimizer Next'
-    package_version = '0.0.2-alpha'
+    package_version = '0.0.3-alpha'
     license = 'GPL-3.0-only'
     source_identity = $commit
     managed_files = $managedFiles
@@ -218,7 +221,7 @@ $packageManifest = [ordered]@{
     preserved_user_data = @('settings.ini',
         'adaptive-locks.ini', 'logs',
         'backups', 'benchmarks', 'session-config', 'flex-lab',
-        'offline-telemetry-lab')
+        'offline-telemetry-lab', 'update-state.ini')
 }
 New-Item -ItemType Directory -Path (Split-Path -Parent $manifestPath) -Force |
     Out-Null

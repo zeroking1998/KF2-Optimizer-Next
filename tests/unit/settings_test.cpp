@@ -169,6 +169,7 @@ int main() {
     CHECK(serialize_settings(Settings{}) ==
           "schema_version=1\noptimizer_mode=adaptive\n"
           "animations_enabled=true\n"
+          "automatic_update_checks=true\n"
           "overlay_enabled=false\noverlay_show_fps=true\noverlay_show_frame_time=true\n"
           "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=false\n"
           "restore_config_after_game=true\noffline_gameplay_telemetry=false\n"
@@ -197,5 +198,13 @@ int main() {
     with_extras.manual_game_path = "D:\\Steam\\KillingFloor2";
     CHECK(serialize_settings(with_extras).ends_with(
         "manual_game_path=D:\\Steam\\KillingFloor2\n"));
+    const auto updates_off = parse_settings(
+        "schema_version=1\nautomatic_update_checks=false\n");
+    CHECK(updates_off.has_value());
+    CHECK(!updates_off.value().automatic_update_checks);
+    CHECK(serialize_settings(updates_off.value()).find(
+              "automatic_update_checks=false\n") != std::string::npos);
+    CHECK(!parse_settings(
+        "schema_version=1\nautomatic_update_checks=maybe\n").has_value());
     return EXIT_SUCCESS;
 }

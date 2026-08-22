@@ -104,6 +104,12 @@ Result<Settings> parse_settings(std::string_view text) {
                 const auto parsed = parse_boolean(value);
                 if (!parsed.has_value()) return invalid_settings(L"animations_enabled is invalid");
                 settings.animations_enabled = parsed.value();
+            } else if (key == "automatic_update_checks") {
+                const auto parsed = parse_boolean(value);
+                if (!parsed.has_value()) {
+                    return invalid_settings(L"automatic_update_checks is invalid");
+                }
+                settings.automatic_update_checks = parsed.value();
             } else if (key == "guide_completed") {
                 const auto parsed = parse_boolean(value);
                 if (!parsed.has_value()) return invalid_settings(L"guide_completed is invalid");
@@ -353,6 +359,8 @@ std::string serialize_settings(const Settings& settings) {
     output << "schema_version=" << settings.schema_version << '\n'
            << "optimizer_mode=adaptive\n"
            << "animations_enabled=" << (settings.animations_enabled ? "true" : "false") << '\n'
+           << "automatic_update_checks="
+           << (settings.automatic_update_checks ? "true" : "false") << '\n'
            << "overlay_enabled=" << (settings.overlay_enabled ? "true" : "false") << '\n'
            << "overlay_show_fps=" << (settings.overlay_show_fps ? "true" : "false") << '\n'
            << "overlay_show_frame_time=" << (settings.overlay_show_frame_time ? "true" : "false") << '\n'

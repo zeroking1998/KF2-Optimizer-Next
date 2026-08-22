@@ -140,6 +140,24 @@ int wmain(int argument_count, wchar_t** arguments) {
     CHECK(settings_png.height == 900);
     CHECK(settings_png.distinct_colors > 16);
 
+    status.update_available = true;
+    status.update_installable = true;
+    status.update_available_version = L"0.0.4-alpha";
+    status.update_published_at = L"2026-08-23";
+    status.update_download_size = L"5.0 MiB";
+    status.update_changelog = L"WHAT'S NEW\n- Simpler interface.";
+    model.set_status(status);
+    const auto update_layout =
+        kf2::ui::layout_shell(model, 1440.0F, 900.0F);
+    const auto update_path = output / L"update-available-96.png";
+    CHECK(renderer.value().capture_wic_png(
+        update_path, update_layout, theme, {1440, 900}, 96.0F)
+              .has_value());
+    const auto update_png = decode_png(update_path);
+    CHECK(update_png.width == 1440);
+    CHECK(update_png.height == 900);
+    CHECK(update_png.distinct_colors > 16);
+
     CoUninitialize();
     return EXIT_SUCCESS;
 }
