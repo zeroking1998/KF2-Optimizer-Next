@@ -38,8 +38,8 @@ std::wstring_view friendly_profile(std::wstring_view profile) {
 
 std::wstring_view destination_label(Destination destination) {
     static constexpr std::array<std::wstring_view, 6> labels{
-        L"Home", L"Game", L"Fine-tuning", L"Overlay",
-        L"Diagnostics & Backup", L"Optimization"};
+        L"Home", L"Game", L"Advanced tools", L"Overlay",
+        L"Help & Repair", L"Optimization"};
     return labels.at(enum_index(destination));
 }
 
@@ -135,16 +135,7 @@ std::wstring UiModel::page_heading() const {
 
 std::wstring UiModel::page_body() const {
     if (selected_ == Destination::dashboard) {
-        if (!status_.game_detected) {
-            return L"KF2 is not ready yet. Select the game folder on the Game "
-                   L"page or refresh discovery.\n"
-                   L"All settings remain portable and local.";
-        }
-        return L"Ready to play. Mode: " +
-               std::wstring{friendly_mode(status_.mode)} + L" | Target: " +
-               std::to_wstring(status_.target_fps) + L" FPS | Profile: " +
-               std::wstring{friendly_profile(status_.profile)} + L".\n" +
-               status_.game + L" | " + status_.telemetry;
+        return L"";
     }
     if (selected_ == Destination::game) {
         const auto session = status_.game_session.empty()
@@ -169,11 +160,7 @@ std::wstring UiModel::page_body() const {
                                                                : L"keep"};
     }
     if (selected_ == Destination::overlay) {
-        return L"Press F10 to toggle. Status: " +
-               std::wstring{status_.overlay_enabled ? L"ON" : L"OFF"} +
-               L" | Position: " + status_.overlay_position + L" | Scale: " +
-               std::to_wstring(status_.overlay_scale_percent) + L" %.\n" +
-               L"The overlay remains bound to the verified KF2 process.";
+        return L"";
     }
     if (selected_ == Destination::optimizer) {
         std::wstring workflow;
@@ -196,34 +183,10 @@ std::wstring UiModel::page_body() const {
                L". Every change remains visible, backed up, and reversible.";
     }
     if (selected_ == Destination::settings) {
-        const std::wstring policy_effect =
-            L"Adaptive controls the verified profile and restores the original INIs after the game";
-        const std::wstring mode_values =
-            L" | Next profile: " + status_.recommended_profile;
-        const std::wstring activation =
-            L"Launching through this app prepares the safe plan automatically.";
-        const std::wstring runtime_corpses =
-            status_.adaptive_runtime_corpse_limit
-                ? std::to_wstring(*status_.adaptive_runtime_corpse_limit)
-                : L"not observed yet";
-        return L"Mode: " + std::wstring{friendly_mode(status_.mode)} +
-               L" | Target: " +
-               std::to_wstring(status_.target_fps) + L" FPS" + mode_values +
-               L" | Corpse ceiling: " +
-               std::to_wstring(status_.corpse_limit) +
-               L" | Adaptive runtime limit: " + runtime_corpses + L".\n" +
-               L"Corpse capability: " + status_.adaptive_corpse_capability +
-               L" | Action status: " + status_.adaptive_corpse_action_status +
-               L" | Particle actor: " + status_.adaptive_particle_capability +
-               L".\n" +
-               policy_effect + L". " + activation;
+        return L"";
     }
     if (selected_ == Destination::diagnostics) {
-        return L"Check, back up, and restore entirely locally. No data is "
-               L"uploaded. The most important actions are grouped by task.\n" +
-               status_.flex_telemetry + L" | " + status_.hardware_summary +
-               L".\nLicense: GPL-3.0-only, without warranty. Full terms: "
-               L"Data\\Documentation\\LICENSE";
+        return L"";
     }
     return L"Feature unavailable";
 }

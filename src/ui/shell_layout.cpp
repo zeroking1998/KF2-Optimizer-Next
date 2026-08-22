@@ -16,7 +16,7 @@ constexpr float kHeaderHeight = 72.0F;
 constexpr float kStatusHeight = 34.0F;
 constexpr float kMetricsHeight = 100.0F;
 constexpr float kSidebarWidth = 210.0F;
-constexpr float kFooterHeight = 32.0F;
+constexpr float kFooterHeight = 0.0F;
 constexpr float kActionGap = 12.0F;
 constexpr float kActionHeight = 44.0F;
 constexpr float kActionStride = kActionHeight + kActionGap;
@@ -24,20 +24,18 @@ constexpr float kTooltipHeight = 44.0F;
 constexpr float kSliderHeight = 88.0F;
 
 std::wstring status_text(const UiStatus& status) {
+    if (!status.game_detected) {
+        return L"Choose your Killing Floor 2 folder to get started";
+    }
     const std::wstring mode = status.mode == L"Adaptive / Automatic"
-        ? L"ADAPTIVE" : status.mode;
-    std::wstring text = status.game_detected
-        ? L"READY   •   GAME DETECTED"
-        : L"SETUP   •   KF2 NOT DETECTED YET";
-    text += L"   •   MODE: " + mode;
+        ? L"Adaptive on" : status.mode;
+    std::wstring text = L"Ready   •   " + mode + L"   •   Target " +
+                        std::to_wstring(status.target_fps) + L" FPS";
     if (status.live_fps && status.live_frame_time_ms) {
         std::wostringstream live;
-        live << L"   •   LIVE: " << std::fixed << std::setprecision(1)
-             << *status.live_fps << L" FPS / " << *status.live_frame_time_ms
-             << L" ms";
+        live << L"   •   Live " << std::fixed << std::setprecision(1)
+             << *status.live_fps << L" FPS";
         text += live.str();
-    } else {
-        text += L"   •   WAITING FOR MEASUREMENTS";
     }
     return text;
 }
@@ -60,7 +58,26 @@ std::wstring corpse_metric(const UiStatus& status) {
         value = std::to_wstring(status.live_active_corpses.value_or(0)) + L" / " +
                 std::to_wstring(status.live_sleeping_corpses.value_or(0));
     }
-    return L"CORPSES MOVING / SLEEPING\n" + value;
+    return L"CORPSES\nMoving / sleeping: " + value;
+}
+
+std::wstring load_metric(const UiStatus& status) {
+    std::wostringstream text;
+    text << L"GAME LOAD\nCPU ";
+    if (status.live_cpu_percent) {
+        text << std::fixed << std::setprecision(0) << *status.live_cpu_percent
+             << L"%";
+    } else {
+        text << L"—";
+    }
+    text << L"  •  GPU ";
+    if (status.live_gpu_percent) {
+        text << std::fixed << std::setprecision(0) << *status.live_gpu_percent
+             << L"%";
+    } else {
+        text << L"—";
+    }
+    return text.str();
 }
 
 }  // namespace
@@ -117,67 +134,62 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                         static_cast<double>(preferred_action_width + kActionGap))));
     const std::size_t action_columns = std::max<std::size_t>(
         std::size_t{1}, std::min(maximum_columns, available_columns));
-    const float action_base = 132.0F;
     const float scroll = std::max(0.0F, model.scroll_offset());
     result.scroll_offset = scroll;
 
     result.nodes.push_back({"root", SemanticRole::root, result.root,
                             L"KF2 Optimizer Next"});
     constexpr float header_action_gap = 8.0F;
-    constexpr std::array<float, 4> header_action_widths{
-        146.0F, 166.0F, 94.0F, 104.0F};
-    const bool show_header_actions = width >= 1180.0F && result.header.height >= 64.0F;
-    const bool show_compact_launch = !show_header_actions && width >= 700.0F &&
+    constexpr std::array<float, 2> header_action_widths{148.0F, 118.0F};
+    const bool show_global_actions = width >= 430.0F &&
                                      result.header.height >= 64.0F;
-    const float header_actions_width = std::accumulate(
-        header_action_widths.begin(), header_action_widths.end(), 0.0F) +
-        header_action_gap * static_cast<float>(header_action_widths.size() - 1);
-    const float header_actions_left = show_header_actions
+    const float header_actions_width = show_global_actions
+        ? std::accumulate(header_action_widths.begin(),
+                          header_action_widths.end(), 0.0F) + header_action_gap
+        : 0.0F;
+    const float header_actions_left = show_global_actions
         ? width - 12.0F - header_actions_width
-        : show_compact_launch ? width - 158.0F : width;
+        : width;
     result.nodes.push_back({"brand-mark", SemanticRole::brand,
                             {22.0F, 8.0F, 58.0F, 54.0F}, L"///"});
-    std::wstring brand = L"KF2 OPTIMIZER\nAUTOMATIC • PORTABLE • SAFE";
+    std::wstring brand = L"KF2 OPTIMIZER";
     result.nodes.push_back({"brand", SemanticRole::brand,
-                            {92.0F, 12.0F,
-                             std::max(0.0F, header_actions_left - 108.0F), 50.0F},
+                            {92.0F, 18.0F,
+                             std::max(0.0F, header_actions_left - 108.0F), 36.0F},
                             std::move(brand)});
 
-    if (show_header_actions) {
-        const auto config = model.status().config;
-        const std::array<std::wstring, 4> labels{
-            L"LAUNCH KF2", L"RESTORE", L"BACKUP", L"DIAGNOSTICS"};
-        const std::array<std::string, 4> ids{
-            "header-launch", "header-restore", "header-backup",
-            "header-diagnostics"};
-        const std::array<bool, 4> enabled{
-            model.status().game_detected,
-            config == ConfigWorkflowState::restore_available ||
-                config == ConfigWorkflowState::recovery_required,
-            config != ConfigWorkflowState::unavailable,
-            true};
+    if (show_global_actions) {
+        const auto& status = model.status();
+        const std::string update_id = status.update_available
+            ? "header-update-install" : "header-update-check";
+        const std::wstring update_text = status.update_installing
+            ? L"UPDATING..."
+            : status.update_checking ? L"CHECKING..."
+            : status.update_available ? L"UPDATE AVAILABLE"
+                                      : L"UPDATES";
+        const bool update_enabled = !status.update_checking &&
+            !status.update_installing &&
+            (!status.update_available || status.update_installable);
         float x = header_actions_left;
-        for (std::size_t index = 0; index < ids.size(); ++index) {
-            result.nodes.push_back({
-                ids[index], SemanticRole::action,
-                {x, 14.0F, header_action_widths[index], 42.0F}, labels[index],
-                std::nullopt, false,
-                model.focused_action() == ids[index], enabled[index], ids[index]});
-            x += header_action_widths[index] + header_action_gap;
-        }
-    } else if (show_compact_launch) {
         result.nodes.push_back({
-            "header-launch", SemanticRole::action,
-            {width - 146.0F, 14.0F, 134.0F, 42.0F}, L"LAUNCH KF2",
+            "header-update", SemanticRole::action,
+            {x, 14.0F, header_action_widths[0], 42.0F}, update_text,
+            std::nullopt, false, model.focused_action() == update_id,
+            update_enabled, update_id, std::nullopt,
+            status.update_available});
+        x += header_action_widths[0] + header_action_gap;
+        result.nodes.push_back({
+            "header-repair", SemanticRole::action,
+            {x, 14.0F, header_action_widths[1], 42.0F}, L"REPAIR",
             std::nullopt, false,
-            model.focused_action() == "header-launch",
-            model.status().game_detected, "header-launch"});
+            model.focused_action() == "header-repair",
+            !status.update_installing, "header-repair"});
     }
 
     result.nodes.push_back({"status", SemanticRole::status, result.status_strip,
                             status_text(model.status())});
 
-    constexpr std::size_t metric_count = 5;
+    constexpr std::size_t metric_count = 4;
     constexpr float metric_gap = 8.0F;
     constexpr float metric_margin = 12.0F;
     const float metric_width = std::max(
@@ -189,8 +201,7 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
     const std::array<std::wstring, metric_count> metric_texts{
         metric(L"LIVE FPS", model.status().live_fps, 1, L" FPS"),
         metric(L"FRAME TIME", model.status().live_frame_time_ms, 1, L" ms"),
-        metric(L"CPU – KF2", model.status().live_cpu_percent, 0, L" %"),
-        metric(L"GPU – TOTAL", model.status().live_gpu_percent, 0, L" %"),
+        load_metric(model.status()),
         corpse_metric(model.status())};
     for (std::size_t index = 0; index < metric_count; ++index) {
         result.nodes.push_back({
@@ -202,19 +213,8 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
     const bool compact_navigation = result.sidebar.height < 360.0F;
     const float nav_height = compact_navigation ? 26.0F : 38.0F;
     const float nav_stride = nav_height + (compact_navigation ? 4.0F : 6.0F);
-    const float group_height = compact_navigation ? 14.0F : 18.0F;
-    float nav_cursor = result.sidebar.y + (compact_navigation ? 6.0F : 10.0F);
+    float nav_cursor = result.sidebar.y + (compact_navigation ? 10.0F : 16.0F);
     for (std::size_t index = 0; index < kDestinations.size(); ++index) {
-        if (index == 0 || index == 4) {
-            const bool main = index == 0;
-            result.nodes.push_back({
-                main ? "navigation-main-group" : "navigation-tools-group",
-                SemanticRole::navigation_group,
-                {12.0F, nav_cursor, std::max(0.0F, sidebar_width - 24.0F),
-                 group_height},
-                main ? L"START & CONTROL" : L"TOOLS & HELP"});
-            nav_cursor += group_height + (compact_navigation ? 3.0F : 6.0F);
-        }
         const Destination destination = kDestinations[index];
         result.nodes.push_back({
             "nav-" + std::to_string(index), SemanticRole::navigation_item,
@@ -250,16 +250,21 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                             {result.content.x, result.content.y + banner_offset - scroll,
                              result.content.width, 38.0F},
                             model.page_heading()});
-    result.nodes.push_back({"page-body", SemanticRole::page_body,
-                            {result.content.x, result.content.y + banner_offset + 42.0F - scroll,
-                             result.content.width, 76.0F},
-                            model.page_body()});
+    const auto page_body = model.page_body();
+    if (!page_body.empty()) {
+        result.nodes.push_back({
+            "page-body", SemanticRole::page_body,
+            {result.content.x,
+             result.content.y + banner_offset + 42.0F - scroll,
+             result.content.width, 52.0F}, page_body});
+    }
     const float action_width = std::max(
         0.0F, (result.content.width - kActionGap *
             static_cast<float>(action_columns - 1)) /
             static_cast<float>(action_columns));
     std::size_t action_index = 0;
-    float grid_base = result.content.y + banner_offset + action_base;
+    const float page_action_base = page_body.empty() ? 58.0F : 108.0F;
+    float grid_base = result.content.y + banner_offset + page_action_base;
     const auto add_action_at = [&](std::string id, std::wstring text,
                                    DipRect bounds, bool enabled = true,
                                    bool selected = false) {
@@ -299,23 +304,25 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
     };
     if (model.selected() == Destination::dashboard) {
         float cursor = grid_base;
-        add_section("dashboard-quick-section", L"QUICK START", cursor);
+        add_section("dashboard-quick-section", L"START", cursor);
         cursor += 34.0F;
         grid_base = cursor;
         action_index = 0;
-        add_action("dashboard-launch", L"LAUNCH KF2 SAFELY",
+        add_action("dashboard-launch", L"LAUNCH KF2",
                    model.status().game_detected, true);
-        add_action("dashboard-settings", L"SET UP OPTIMIZATION");
-        add_action("dashboard-overlay", L"SET UP OVERLAY");
+        add_action("game-select-install",
+                   model.status().game_detected
+                       ? L"CHANGE GAME FOLDER" : L"SELECT GAME FOLDER");
         cursor = grid_base +
             static_cast<float>((action_index + action_columns - 1) /
                                action_columns) * kActionStride + 8.0F;
-        add_section("dashboard-support-section", L"STATUS & HELP", cursor);
+        add_section("dashboard-support-section", L"SETTINGS", cursor);
         cursor += 34.0F;
         grid_base = cursor;
         action_index = 0;
-        add_action("dashboard-refresh", L"REFRESH STATUS");
-        add_action("dashboard-diagnostics", L"DIAGNOSTICS & BACKUP");
+        add_action("dashboard-settings", L"SET UP OPTIMIZATION");
+        add_action("dashboard-overlay", L"SET UP OVERLAY");
+        add_action("dashboard-diagnostics", L"HELP & REPAIR");
     } else if (model.selected() == Destination::game) {
         float cursor = grid_base;
         add_section("game-start-section", L"GAME LAUNCH", cursor);
@@ -428,148 +435,94 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                    true, model.status().overlay_show_memory);
     } else if (model.selected() == Destination::settings) {
         float cursor = grid_base;
-        add_section("settings-adaptive-active-section",
-                    L"ADAPTIVE CONTROL ACTIVE", cursor);
-        cursor += 34.0F;
-        add_section("settings-goals-section", L"1. PERFORMANCE TARGETS", cursor);
+        add_section("settings-goals-section", L"PERFORMANCE", cursor);
         cursor += 34.0F;
         add_slider("settings-target-slider", L"Target FPS", cursor,
                    {optimizer::kTargetFpsMinimum,
                     optimizer::kTargetFpsMaximum,
                     model.status().target_fps, 1, 10, L" FPS"});
         cursor += kSliderHeight + 12.0F;
-        add_slider("settings-corpses-slider", L"Corpse ceiling",
+        add_slider("settings-corpses-slider", L"Maximum corpses",
                    cursor, {4, 2000, model.status().corpse_limit,
-                            1, 50, L" corpses"});
+                             1, 50, L" corpses"});
         cursor += kSliderHeight + 12.0F;
         add_section("settings-adaptive-section",
-                    L"2. ADAPTIVE CONTROL (FLEX 1–5 AUTOMATIC)", cursor);
-            cursor += 34.0F;
-            grid_base = cursor;
-            action_index = 0;
-            add_action("settings-advanced-toggle",
-                       model.status().advanced_settings_visible
-                           ? L"SHOW FEWER SETTINGS"
-                           : L"SHOW ADVANCED SETTINGS",
-                       true, model.status().advanced_settings_visible);
-            cursor = grid_base + kActionStride + 8.0F;
-            if (model.status().advanced_settings_visible) {
-                add_slider("settings-adaptive-minimum-slider",
-                           L"Minimum quality", cursor,
-                           {0, 100,
-                            model.status().adaptive_minimum_quality,
-                            5, 10, L" %"});
-                cursor += kSliderHeight + 12.0F;
-                add_slider("settings-adaptive-maximum-slider",
-                           L"Maximum quality", cursor,
-                           {0, 100,
-                            model.status().adaptive_maximum_quality,
-                            5, 10, L" %"});
-                cursor += kSliderHeight + 12.0F;
-                add_slider("settings-adaptive-headroom-slider",
-                           L"Performance headroom", cursor,
-                           {0, 50, model.status().adaptive_headroom_percent,
-                            1, 5, L" %"});
-                cursor += kSliderHeight + 12.0F;
-                grid_base = cursor;
-                action_index = 0;
-                add_action("settings-adaptive-aggressiveness",
-                           L"CONTROL STRENGTH: " +
-                               model.status().adaptive_aggressiveness);
-                add_action("settings-adaptive-shadow",
-                           model.status().adaptive_shadow_mode
-                               ? L"✓ OBSERVE UNVERIFIED SIGNALS ONLY"
-                               : L"VERIFIED CONTROLS ONLY",
-                           true, model.status().adaptive_shadow_mode);
-                add_action("settings-adaptive-budget",
-                           L"QUALITY STEPS: " +
-                               std::to_wstring(model.status()
-                                                  .adaptive_quality_change_budget));
-                add_action("settings-adaptive-emergency",
-                           model.status().adaptive_emergency_enabled
-                               ? L"✓ EMERGENCY CONTROL"
-                               : L"EMERGENCY CONTROL",
-                           true, model.status().adaptive_emergency_enabled);
-                add_action("settings-adaptive-recovery",
-                           model.status().adaptive_quality_recovery_enabled
-                               ? L"✓ QUALITY RECOVERY"
-                               : L"QUALITY RECOVERY",
-                           true,
-                           model.status().adaptive_quality_recovery_enabled);
-                add_action("settings-adaptive-locks",
-                           model.status().adaptive_manual_locks_enabled
-                               ? L"✓ INDIVIDUAL LOCKS"
-                               : L"INDIVIDUAL LOCKS",
-                           true,
-                           model.status().adaptive_manual_locks_enabled);
-                add_action("settings-adaptive-calibration",
-                           model.status().adaptive_calibration_enabled
-                               ? L"✓ MEASUREMENT CALIBRATION"
-                               : L"MEASUREMENT CALIBRATION",
-                           true,
-                           model.status().adaptive_calibration_enabled);
-                add_action("settings-adaptive-logging",
-                           model.status().adaptive_logging
-                               ? L"✓ DECISION HISTORY"
-                               : L"DECISION HISTORY",
-                           true, model.status().adaptive_logging);
-                cursor = grid_base +
-                    static_cast<float>((action_index + action_columns - 1) /
-                                       action_columns) * kActionStride + 8.0F;
-            }
+                    L"AUTOMATIC: QUALITY • PHYSICS • LOD • FLEX • CORPSES",
+                    cursor);
+        cursor += 42.0F;
         add_section("settings-safety-section",
-                    L"3. SAFETY & OPERATION", cursor);
-        cursor += 34.0F;
-        grid_base = cursor;
-        action_index = 0;
-        add_section("settings-session-config-note",
-                    L"✓ AUTOMATIC INI PROTECTION", cursor);
+                    L"APP", cursor);
         cursor += 34.0F;
         grid_base = cursor;
         action_index = 0;
         add_action("settings-animations",
                    model.status().animations_enabled
-                       ? L"✓ ANIMATIONS" : L"REDUCED ANIMATIONS",
+                       ? L"✓ ANIMATIONS" : L"REDUCE ANIMATIONS",
                    true, model.status().animations_enabled);
-        add_action("settings-finetuning", L"OPEN FINE-TUNING");
+        add_action("settings-updates-automatic",
+                   model.status().automatic_update_checks
+                       ? L"✓ AUTOMATIC UPDATE CHECKS"
+                       : L"AUTOMATIC UPDATE CHECKS OFF",
+                   !model.status().update_checking &&
+                       !model.status().update_installing,
+                   model.status().automatic_update_checks);
+        cursor = grid_base +
+            static_cast<float>((action_index + action_columns - 1) /
+                               action_columns) * kActionStride + 8.0F;
+        add_section("settings-updates-section", L"VERSION & UPDATES", cursor);
+        cursor += 34.0F;
+        add_section("settings-updates-installed",
+                    L"Installed " + model.status().update_installed_version +
+                        L"  •  Last checked " +
+                        model.status().update_last_check + L"  •  " +
+                        model.status().update_status,
+                    cursor);
+        cursor += 34.0F;
+        if (model.status().update_available) {
+            add_section("settings-updates-release",
+                        L"New version " +
+                            model.status().update_available_version +
+                            L"  •  Published " +
+                            model.status().update_published_at +
+                            L"  •  " +
+                            model.status().update_download_size,
+                        cursor);
+            cursor += 34.0F;
+            if (!model.status().update_changelog.empty()) {
+                add_section("settings-updates-changelog",
+                            model.status().update_changelog, cursor);
+                cursor += 96.0F;
+            }
+            grid_base = cursor;
+            action_index = 0;
+            add_action("settings-updates-later", L"REMIND ME LATER",
+                       !model.status().update_installing);
+        }
     } else if (model.selected() == Destination::diagnostics) {
         float cursor = grid_base;
-        add_section("diagnostics-check-section", L"CHECK", cursor);
+        add_section("diagnostics-check-section", L"FIX A PROBLEM", cursor);
         cursor += 34.0F;
         grid_base = cursor;
         action_index = 0;
-        add_action("diagnostics-refresh", L"REFRESH STATUS");
-        add_action("diagnostics-full-check", L"RUN FULL CHECK");
-        add_action("diagnostics-flex-audit", L"FLEX-RUNTIME CHECK");
+        add_action("diagnostics-full-check", L"CHECK EVERYTHING");
+        add_action("diagnostics-repair-package", L"IMPORT REPAIR PACKAGE");
         cursor = grid_base + kActionStride + 8.0F;
         add_section("diagnostics-recovery-section",
-                    L"BACK UP & RESTORE", cursor);
+                    L"BACKUP & RESTORE", cursor);
         cursor += 34.0F;
         grid_base = cursor;
         action_index = 0;
-        add_action("diagnostics-backup", L"CREATE INI BACKUP",
+        add_action("diagnostics-backup", L"BACK UP GAME SETTINGS",
                    model.status().game_detected);
-        add_action("diagnostics-flex-restore", L"RESTORE ORIGINAL FLEX");
-        add_action("diagnostics-auto-repair", L"AUTO REPAIR FROM GITHUB");
-        add_action("diagnostics-repair-package", L"IMPORT LOCAL PACKAGE");
+        add_action("diagnostics-flex-restore", L"RESTORE ORIGINAL GAME FILES");
         cursor = grid_base + kActionStride + 8.0F;
-        add_section("diagnostics-reports-section", L"REPORTS", cursor);
+        add_section("diagnostics-reports-section", L"GET HELP", cursor);
         cursor += 34.0F;
         grid_base = cursor;
         action_index = 0;
-        add_action("diagnostics-export", L"EXPORT DIAGNOSTICS REPORT");
-        add_action("diagnostics-export-inventory", L"EXPORT FEATURE LIST");
-        add_action("diagnostics-export-support", L"EXPORT SUPPORT PACKAGE");
-        cursor = grid_base + kActionStride + 8.0F;
-        add_section("diagnostics-tools-section", L"MORE TOOLS", cursor);
-        cursor += 34.0F;
-        grid_base = cursor;
-        action_index = 0;
+        add_action("diagnostics-export-support", L"CREATE SUPPORT PACKAGE");
         add_action("diagnostics-open-data", L"OPEN PORTABLE DATA");
         add_action("diagnostics-open-log", L"OPEN SESSION LOG");
-        add_action("diagnostics-benchmark-baseline", L"CAPTURE A/B BASELINE");
-        add_action("diagnostics-benchmark-compare", L"COMPARE WITH BASELINE");
-        add_action("diagnostics-clear", L"CLEAR LOCAL NOTICES");
     }
     float content_bottom = result.content.y;
     for (auto index = page_nodes_begin; index < result.nodes.size(); ++index) {
@@ -590,9 +543,6 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         }
     }
     result.scroll_offset = actual_scroll;
-    result.nodes.push_back({"footer", SemanticRole::footer, result.footer,
-                            L"STORED LOCALLY • PORTABLE • NO UPLOAD  |  " +
-                                model.build_identity()});
     return result;
 }
 
@@ -636,6 +586,15 @@ std::optional<std::wstring> action_help_text(std::string_view action_id) {
     }
     if (action_id == "header-diagnostics") {
         return L"Opens diagnostics, self-checks, and local reports.";
+    }
+    if (action_id == "header-update-check") {
+        return L"Checks the official GitHub Releases page for a newer version.";
+    }
+    if (action_id == "header-update-install") {
+        return L"Installs the displayed verified update after your confirmation.";
+    }
+    if (action_id == "header-repair") {
+        return L"Repairs this exact installed version from its verified official GitHub release.";
     }
     if (action_id == "optimizer-preview") {
         return L"Shows the protected before/after plan. Adaptive mode prepares the verified plan automatically at launch.";

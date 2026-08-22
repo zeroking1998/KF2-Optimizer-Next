@@ -18,7 +18,7 @@
 int main() {
     using namespace kf2::app::runtime;
 
-    constexpr std::array<std::string_view, 69> kExistingActions{{
+    constexpr std::array<std::string_view, 73> kExistingActions{{
         "dashboard-diagnostics", "dashboard-launch",
         "dashboard-overlay", "dashboard-refresh", "dashboard-settings",
         "diagnostics-backup", "diagnostics-benchmark-baseline",
@@ -51,6 +51,8 @@ int main() {
         "settings-corpses-down", "settings-corpses-up",
         "settings-finetuning",
         "settings-target-down", "settings-target-up",
+        "settings-updates-automatic", "settings-updates-check",
+        "settings-updates-install", "settings-updates-later",
     }};
 
     constexpr std::array<std::string_view, 6> kExistingControls{{
@@ -60,7 +62,7 @@ int main() {
         "settings-target-slider",
     }};
 
-    constexpr std::array<ActionId, 85> kStableActionIds{{
+    constexpr std::array<ActionId, 89> kStableActionIds{{
         ActionId::navigate_diagnostics,
         ActionId::retired_navigate_guide,
         ActionId::navigate_settings,
@@ -146,14 +148,18 @@ int main() {
         ActionId::settings_adaptive_online,
         ActionId::diagnostics_repair_package,
         ActionId::diagnostics_auto_repair,
+        ActionId::settings_updates_automatic,
+        ActionId::settings_updates_check,
+        ActionId::settings_updates_install,
+        ActionId::settings_updates_later,
     }};
 
     for (std::size_t index = 0; index < kStableActionIds.size(); ++index) {
         CHECK(static_cast<std::uint16_t>(kStableActionIds[index]) == index);
     }
 
-    CHECK(action_bindings().size() == 69);
-    CHECK(action_definitions().size() == 61);
+    CHECK(action_bindings().size() == 76);
+    CHECK(action_definitions().size() == 65);
     CHECK(control_definitions().size() == kExistingControls.size());
 
     for (const auto name : kExistingActions) {
@@ -200,7 +206,7 @@ int main() {
 
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::navigation)] == 4);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::game)] == 6);
-    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::settings)] == 20);
+    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::settings)] == 24);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::overlay)] == 10);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::diagnostics)] == 14);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::optimizer)] == 4);
@@ -247,6 +253,12 @@ int main() {
           parse_action("optimizer-backup")->id);
     CHECK(parse_action("header-restore")->id ==
           parse_action("optimizer-restore")->id);
+    CHECK(parse_action("header-update-check")->id ==
+          parse_action("settings-updates-check")->id);
+    CHECK(parse_action("header-update-install")->id ==
+          parse_action("settings-updates-install")->id);
+    CHECK(parse_action("header-repair")->id ==
+          parse_action("diagnostics-auto-repair")->id);
     CHECK(parse_action("dashboard-refresh")->id ==
           parse_action("diagnostics-refresh")->id);
     CHECK(parse_action("dashboard-diagnostics")->id ==

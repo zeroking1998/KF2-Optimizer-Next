@@ -13,12 +13,12 @@
     } while (false)
 
 int main() {
-    const kf2::app::BuildIdentity identity{"0.0.2-alpha", "abcdef12", "dev"};
+    const kf2::app::BuildIdentity identity{"0.0.3-alpha", "abcdef12", "dev"};
     CHECK(kf2::app::format_build_identity(identity) ==
-          "0.0.2-alpha+abcdef12 (dev)");
+          "0.0.3-alpha+abcdef12 (dev)");
 
     const auto current = kf2::app::current_build_identity();
-    CHECK(current.version == "0.0.2-alpha");
+    CHECK(current.version == "0.0.3-alpha");
     CHECK(current.commit == "unknown");
     CHECK(current.channel == "dev");
     return EXIT_SUCCESS;

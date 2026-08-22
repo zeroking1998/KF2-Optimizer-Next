@@ -61,6 +61,7 @@ struct SemanticNode {
     bool enabled{true};
     std::optional<std::string> action_id;
     std::optional<SliderInfo> slider;
+    bool attention{false};
 };
 
 struct ShellLayoutResult {

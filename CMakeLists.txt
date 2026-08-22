@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(KF2OptimizerNext VERSION 0.0.2 LANGUAGES CXX RC)
+project(KF2OptimizerNext VERSION 0.0.3 LANGUAGES CXX RC)
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "KF2 Optimizer Next supports x64 only")
@@ -118,6 +118,7 @@ add_executable(KF2Optimizer WIN32
     src/app/application_package_repair.cpp
     ${KF2_APP_ACTION_SOURCES}
     src/app/application_runtime.cpp
+    src/app/application_update.cpp
     ${KF2_APP_TELEMETRY_SOURCES}
     src/app/application_window.cpp
     src/app/build_identity.cpp
@@ -170,6 +171,14 @@ add_executable(KF2Optimizer WIN32
     src/telemetry/system_metrics.cpp
     src/telemetry/present_source.cpp
     src/telemetry/gpu_metrics.cpp
+    src/update/semantic_version.cpp
+    src/update/github_release_client.cpp
+    src/update/release_notes.cpp
+    src/update/update_controller.cpp
+    src/update/update_state.cpp
+    src/update/update_package.cpp
+    src/update/update_helper.cpp
+    src/update/update_transaction.cpp
     src/ui/direct2d_renderer.cpp
     src/ui/automation_provider.cpp
     src/ui/shell_controller.cpp

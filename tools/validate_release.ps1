@@ -46,6 +46,7 @@ if (-not (Test-Path -LiteralPath $inventory -PathType Leaf)) {
 $publicDocumentation = @(
     'README.md',
     'USER_GUIDE.md',
+    'UPDATES.md',
     'FEATURE_REFERENCE.md',
     'SAFETY.md',
     'SUPPORT.md',
@@ -89,9 +90,9 @@ if (-not (Test-Path -LiteralPath $packageManifestPath -PathType Leaf)) {
 $packageManifest = Get-Content -LiteralPath $packageManifestPath -Raw |
     ConvertFrom-Json -ErrorAction Stop
 if ($packageManifest.schema_version -ne 2 -or
-    $packageManifest.package_version -cne '0.0.2-alpha' -or
+    $packageManifest.package_version -cne '0.0.3-alpha' -or
     $packageManifest.license -cne 'GPL-3.0-only' -or
-    @($packageManifest.managed_files).Count -ne 15) {
+    @($packageManifest.managed_files).Count -ne 16) {
     throw 'Portable package manifest is incomplete or incompatible'
 }
 foreach ($relative in @($packageManifest.managed_files)) {
@@ -101,8 +102,8 @@ foreach ($relative in @($packageManifest.managed_files)) {
     }
 }
 $payloadHashes = @($packageManifest.payload_hashes)
-if ($payloadHashes.Count -ne 14) {
-    throw 'Portable package hash manifest must cover all fourteen payload files'
+if ($payloadHashes.Count -ne 15) {
+    throw 'Portable package hash manifest must cover all fifteen payload files'
 }
 $seenPayload = @{}
 foreach ($entry in $payloadHashes) {
@@ -134,15 +135,15 @@ foreach ($entry in $payloadHashes) {
 }
 $integrityPath = Join-Path $root 'Data\package-integrity.ini'
 $integrityLines = @(Get-Content -LiteralPath $integrityPath)
-if ($integrityLines.Count -ne 17 -or
+if ($integrityLines.Count -ne 18 -or
     $integrityLines[0] -cne 'schema_version=1' -or
     $integrityLines[1] -cne 'product=KF2OptimizerNext' -or
     $integrityLines[2] -notmatch '^source_identity=[A-Za-z0-9._-]{1,128}$' -or
-    $integrityLines[3] -cne 'file_count=13' -or
-    @($integrityLines | Where-Object { $_ -match '^file=' }).Count -ne 13) {
+    $integrityLines[3] -cne 'file_count=14' -or
+    @($integrityLines | Where-Object { $_ -match '^file=' }).Count -ne 14) {
     throw 'Runtime package integrity document is invalid'
 }
 Write-Host "PASS: package has exactly one portable executable"
-Write-Host "PASS: all fourteen managed payload hashes match"
+Write-Host "PASS: all fifteen managed payload hashes match"
 Write-Host "SHA256: $((Get-FileHash -LiteralPath $executables[0].FullName -Algorithm SHA256).Hash)"
 & (Join-Path $PSScriptRoot 'validate_acceptance_ledger.ps1')

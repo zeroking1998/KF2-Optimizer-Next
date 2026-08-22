@@ -53,42 +53,42 @@ int main() {
     controller.on_key({WindowKey::enter});
     CHECK(model.selected() == Destination::diagnostics);
     controller.on_key({WindowKey::tab});
-    CHECK(model.focused_action() == "diagnostics-refresh");
+    CHECK(model.focused_action() == "diagnostics-full-check");
     controller.on_key({WindowKey::shift_tab});
     CHECK(!model.focused_action());
     controller.on_key({WindowKey::home});
     CHECK(model.focused_destination() == Destination::dashboard);
     controller.on_key({WindowKey::right});
-    CHECK(model.focused_destination() == Destination::game);
+    CHECK(model.focused_destination() == Destination::settings);
     controller.on_key({WindowKey::left});
     CHECK(model.focused_destination() == Destination::dashboard);
 
-    const auto optimizer_nav = std::find_if(
+    const auto help_nav = std::find_if(
         controller.layout().nodes.begin(), controller.layout().nodes.end(),
         [](const SemanticNode& item) {
-            return item.destination == Destination::optimizer;
+            return item.destination == Destination::diagnostics;
         });
-    CHECK(optimizer_nav != controller.layout().nodes.end());
+    CHECK(help_nav != controller.layout().nodes.end());
     controller.on_pointer({PointerKind::activate,
-        {optimizer_nav->bounds.x + 4, optimizer_nav->bounds.y + 4}, 0});
-    CHECK(model.selected() == Destination::optimizer);
+        {help_nav->bounds.x + 4, help_nav->bounds.y + 4}, 0});
+    CHECK(model.selected() == Destination::diagnostics);
     controller.on_key({WindowKey::tab});
-    CHECK(model.focused_action() == "optimizer-preview");
+    CHECK(model.focused_action() == "diagnostics-full-check");
     controller.on_key({WindowKey::enter});
-    CHECK(last_action == "optimizer-preview");
+    CHECK(last_action == "diagnostics-full-check");
     controller.on_key({WindowKey::tab});
-    CHECK(model.focused_action() == "optimizer-import");
+    CHECK(model.focused_action() == "diagnostics-repair-package");
     controller.on_key({WindowKey::shift_tab});
-    CHECK(model.focused_action() == "optimizer-preview");
+    CHECK(model.focused_action() == "diagnostics-full-check");
 
-    const auto preview = std::find_if(
+    const auto full_check = std::find_if(
         controller.layout().nodes.begin(), controller.layout().nodes.end(),
         [](const SemanticNode& item) {
-            return item.action_id == "optimizer-preview";
+            return item.action_id == "diagnostics-full-check";
         });
-    CHECK(preview != controller.layout().nodes.end());
+    CHECK(full_check != controller.layout().nodes.end());
     controller.on_pointer({PointerKind::move,
-        {preview->bounds.x + 4, preview->bounds.y + 4}, 0});
+        {full_check->bounds.x + 4, full_check->bounds.y + 4}, 0});
     CHECK(std::any_of(controller.layout().nodes.begin(),
                       controller.layout().nodes.end(),
                       [](const SemanticNode& item) {
@@ -128,15 +128,11 @@ int main() {
     CHECK(last_slider_value >= 235);
     CHECK(last_slider_value <= 240);
 
-    controller.focus_target(Destination::settings, "settings-advanced-toggle");
-    controller.on_key({WindowKey::enter});
-    CHECK(last_action == "settings-advanced-toggle");
-
     controller.focus_target(Destination::dashboard, "dashboard-settings");
     controller.on_key({WindowKey::enter});
     CHECK(last_action == "dashboard-settings");
 
-    controller.focus_target(Destination::optimizer);
+    controller.focus_target(Destination::diagnostics);
     controller.on_resize({800, 520});
     CHECK(model.scroll_extent() > 0);
     controller.on_pointer({PointerKind::wheel, {400, 400}, -120});

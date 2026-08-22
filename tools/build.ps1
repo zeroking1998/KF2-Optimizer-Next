@@ -16,7 +16,7 @@ $channel = if ($Configuration -eq 'Release') { 'release' } else { 'dev' }
 
 Push-Location -LiteralPath $projectRoot
 try {
-    & cmake --preset $preset "-DKF2_VERSION=0.0.2-alpha" `
+    & cmake --preset $preset "-DKF2_VERSION=0.0.3-alpha" `
         "-DKF2_BUILD_COMMIT=$commit" "-DKF2_BUILD_CHANNEL=$channel"
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE

@@ -17,13 +17,12 @@ int main() {
     UiModel model;
     CHECK(model.selected() == Destination::dashboard);
     CHECK((kDestinations == std::array{
-        Destination::dashboard, Destination::game, Destination::settings,
-        Destination::overlay, Destination::optimizer,
+        Destination::dashboard, Destination::settings, Destination::overlay,
         Destination::diagnostics}));
     CHECK(destination_label(Destination::dashboard) == L"Home");
     CHECK(destination_label(Destination::settings) == L"Optimization");
-    CHECK(destination_label(Destination::optimizer) == L"Fine-tuning");
-    CHECK(destination_label(Destination::diagnostics) == L"Diagnostics & Backup");
+    CHECK(destination_label(Destination::optimizer) == L"Advanced tools");
+    CHECK(destination_label(Destination::diagnostics) == L"Help & Repair");
 
     UiModel navigation_model;
     CHECK(navigation_model.navigate(NavigationCommand::home).changed == false);
@@ -44,7 +43,7 @@ int main() {
     CHECK(model.navigate(NavigationCommand::end).changed);
     CHECK(model.focused_destination() == Destination::diagnostics);
     CHECK(model.activate_focused().changed);
-    CHECK(model.page_heading() == L"Diagnostics & Backup");
+    CHECK(model.page_heading() == L"Help & Repair");
 
     CHECK(model.navigate(NavigationCommand::next).changed);
     CHECK(model.focused_destination() == Destination::dashboard);
@@ -68,9 +67,7 @@ int main() {
     status.game_detected = true;
     status.telemetry = L"143.8 FPS, 7.0 ms";
     model.set_status(status);
-    CHECK(model.page_body().find(L"144 FPS") != std::wstring::npos);
-    CHECK(model.page_body().find(L"Maximum performance") != std::wstring::npos);
-    CHECK(model.page_body().find(L"Ready to play") != std::wstring::npos);
+    CHECK(model.page_body().empty());
 
     static_cast<void>(model.focus_destination(Destination::game));
     static_cast<void>(model.activate_focused());
@@ -91,28 +88,19 @@ int main() {
     status.overlay_scale_percent = 125;
     status.overlay_position = L"top right";
     model.set_status(status);
-    CHECK(model.page_body().find(L"F10") != std::wstring::npos);
-    CHECK(model.page_body().find(L"125 %") != std::wstring::npos);
+    CHECK(model.page_body().empty());
 
     static_cast<void>(model.focus_destination(Destination::diagnostics));
     static_cast<void>(model.activate_focused());
     status.hardware_summary = L"CPU 16 Threads | GPU RTX";
     model.set_status(status);
-    CHECK(model.page_body().find(L"No data is uploaded") !=
-          std::wstring::npos);
-    CHECK(model.page_body().find(L"GPU RTX") != std::wstring::npos);
-    CHECK(model.page_body().find(L"GPL-3.0-only") != std::wstring::npos);
-    CHECK(model.page_body().find(L"Data\\Documentation\\LICENSE") !=
-          std::wstring::npos);
+    CHECK(model.page_body().empty());
 
     static_cast<void>(model.focus_destination(Destination::settings));
     static_cast<void>(model.activate_focused());
     status.corpse_limit = 2000;
     model.set_status(status);
-    CHECK(model.page_body().find(L"Corpse ceiling: 2000") !=
-          std::wstring::npos);
-    CHECK(model.page_body().find(L"original INIs") !=
-          std::wstring::npos);
+    CHECK(model.page_body().empty());
 
     static_cast<void>(model.focus_destination(Destination::optimizer));
     static_cast<void>(model.activate_focused());
