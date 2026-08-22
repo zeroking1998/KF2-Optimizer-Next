@@ -165,6 +165,23 @@ Result<Application> Application::start(const StartOptions& options) {
             options.startup_warning,
             L"Re-extract the complete portable package before enabling changes."});
     }
+    if (!runtime->model.recovery_required() &&
+        options.mode == StartMode::normal &&
+        options.startup_warning.empty()) {
+        const auto prepared =
+            runtime->prepare_automatic_external_launch_profile();
+        if (!prepared.has_value()) {
+            events->append({0, diagnostics::Severity::error,
+                "ADAPTIVE_EXTERNAL_LAUNCH_PREPARE_FAILED",
+                prepared.error().message, L"optimizer"});
+            runtime->model.set_notice({
+                ui::NoticeSeverity::error,
+                L"ADAPTIVE_EXTERNAL_LAUNCH_PREPARE_FAILED",
+                L"Target FPS could not be prepared safely: " +
+                    prepared.error().message,
+                L"No game files were left partially changed."});
+        }
+    }
     if (options.create_window) {
         auto created = runtime->create_window(options.window_title);
         if (!created.has_value()) {

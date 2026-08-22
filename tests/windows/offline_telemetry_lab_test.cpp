@@ -60,11 +60,13 @@ int main() {
     }
     CHECK(installed.has_value());
     CHECK(installed.value());
-    const auto target = root / L"profile" / L"KFGame" / L"Unpublished" /
-        L"BrewedPC" / L"Script" / L"KF2OptimizerTelemetry.u";
+    const auto target = root / L"profile" / L"KFGame" / L"Published" /
+        L"BrewedPC" / L"KF2OptimizerTelemetry.u";
     CHECK(fs::exists(target));
     CHECK(read_bytes(target) == read_bytes(asset));
     CHECK(fs::exists(state / L"offline-telemetry-lab" / L"module.marker"));
+    CHECK(read_bytes(state / L"offline-telemetry-lab" / L"module.marker")
+              .starts_with("schema=2\n"));
     CHECK(!install_offline_telemetry_lab(options).has_value());
 
     const auto retained = recover_offline_telemetry_lab(config, state, true);

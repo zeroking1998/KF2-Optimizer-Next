@@ -21,10 +21,11 @@ struct OfflineTelemetryRecovery {
     bool cleaned{false};
 };
 
-// Installs the pinned UnrealScript package into KF2's per-user Unpublished
-// directory for one protected app-started offline session. Telemetry is
-// read-only; its distance/density and frame-pressure corpse actuator is
-// separately policy-gated.
+// Installs the pinned UnrealScript package into KF2's normal per-user
+// Published/BrewedPC directory for one protected session, regardless of
+// whether KF2 is then started from the optimizer, Steam or a shortcut.
+// Telemetry is read-only; its distance/density and frame-pressure corpse
+// actuator is separately policy-gated.
 [[nodiscard]] Result<bool> install_offline_telemetry_lab(
     const OfflineTelemetryLabOptions& options);
 

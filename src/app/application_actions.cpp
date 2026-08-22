@@ -1,4 +1,5 @@
 #include "application_runtime.hpp"
+#include "kf2/config/setting_catalog.hpp"
 #include "runtime/action_contract.hpp"
 #include "runtime/action_router.hpp"
 #include "runtime/feature_composition.hpp"
@@ -269,6 +270,128 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
             : L"General Adaptive applied frame pacing while preserving the user's FleX setting; the exact pre-game snapshot remains protected",
         L"optimizer"});
     return applied;
+}
+
+Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
+    if (!installation || !session_config_snapshot) {
+        return Result<bool>::failure({
+            ErrorCode::invalid_argument,
+            L"A protected KF2 configuration snapshot is required before launch capabilities are prepared",
+            0});
+    }
+
+    const auto captured_values = config::read_catalog_values(
+        session_config_snapshot->snapshot_root / L"files");
+    if (!captured_values.has_value()) {
+        return Result<bool>::failure(captured_values.error());
+    }
+    const auto physx = captured_values.value().find(
+        config::SettingId::physx_level);
+    const auto* configured_physx_level =
+        physx == captured_values.value().end()
+            ? nullptr : std::get_if<int>(&physx->second);
+    if (!configured_physx_level) {
+        return Result<bool>::failure({
+            ErrorCode::stale_data,
+            L"The user's captured KF2 FleX setting could not be verified",
+            0});
+    }
+
+    if (should_prepare_adaptive_flex_runtime(
+            start_mode, *configured_physx_level)) {
+        const auto prepared = ensure_automatic_flex_lab();
+        if (!prepared.has_value()) {
+            return Result<bool>::failure(prepared.error());
+        }
+    } else {
+        events->append({0, diagnostics::Severity::info,
+            "FLEX_USER_SETTING_PRESERVED",
+            L"FleX remains disabled because the user did not enable it in KF2; no FleX runtime hook was installed",
+            L"flex"});
+    }
+
+    if (!should_prepare_protected_gameplay_provider(start_mode)) {
+        return Result<bool>::success(true);
+    }
+    const auto telemetry_module = game::install_offline_telemetry_lab({
+        .config_root = installation->config_root,
+        .state_root = settings_path.parent_path(),
+        .module_asset = executable_root / L"Data" / L"Lab" /
+            L"KF2OptimizerTelemetry.u",
+        .game_running = false});
+    if (!telemetry_module.has_value()) {
+        return Result<bool>::failure(telemetry_module.error());
+    }
+    const auto enabled = game::enable_offline_gameplay_logging(
+        installation->config_root, true, optimizer_settings.corpse_limit,
+        optimizer_settings.target_fps, true,
+        optimizer_settings.adaptive_quality_change_budget);
+    if (!enabled.has_value()) {
+        return Result<bool>::failure(enabled.error());
+    }
+    events->append({0, diagnostics::Severity::info,
+        "GAMEPLAY_LOG_LAB_READY",
+        L"The protected published provider is ready for KF2 started from the optimizer, Steam or a shortcut and exposes verified AI, wave, corpse, physics, LOD and ragdoll capabilities",
+        L"game"});
+    return Result<bool>::success(true);
+}
+
+Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
+    if (start_mode != StartMode::normal || !installation) {
+        return Result<bool>::success(false);
+    }
+    if (session_config_snapshot) {
+        return Result<bool>::success(
+            session_config_waiting_for_launch &&
+            session_config_launch_deadline_ns == 0);
+    }
+    if (game::find_running_game_process(
+            installation->executable).has_value()) {
+        events->append({0, diagnostics::Severity::warning,
+            "ADAPTIVE_EXTERNAL_LAUNCH_TOO_LATE",
+            L"KF2 was already running before the protected Adaptive profile could be prepared; restart KF2 while the optimizer remains open to apply Target FPS",
+            L"optimizer"});
+        return Result<bool>::success(false);
+    }
+
+    auto captured = config::capture_session_config(
+        installation->config_root, settings_path.parent_path());
+    if (!captured.has_value()) {
+        return Result<bool>::failure(captured.error());
+    }
+    session_config_snapshot = std::move(captured.value());
+    events->append({0, diagnostics::Severity::info,
+        "SESSION_CONFIG_CAPTURED",
+        L"The exact pre-game KF2 INI state was captured before automatic external-launch preparation",
+        L"config"});
+
+    const auto applied = apply_adaptive_launch_profile();
+    if (!applied.has_value()) {
+        const auto error = applied.error();
+        static_cast<void>(restore_protected_session_config(
+            L"Automatic external-launch preparation failed"));
+        return Result<bool>::failure(error);
+    }
+    const auto capabilities =
+        prepare_automatic_protected_launch_capabilities();
+    if (!capabilities.has_value()) {
+        const auto error = capabilities.error();
+        static_cast<void>(restore_protected_session_config(
+            L"Automatic external-launch capability preparation failed"));
+        return Result<bool>::failure(error);
+    }
+
+    // A zero deadline deliberately means that the verified profile remains
+    // staged while the optimizer is open.  The exact snapshot is restored on
+    // app shutdown, or after the next observed KF2 process exits.
+    session_config_waiting_for_launch = true;
+    session_config_launch_deadline_ns = 0;
+    telemetry_failure = L"Adaptive profile ready; waiting for KF2";
+    events->append({0, diagnostics::Severity::info,
+        "ADAPTIVE_EXTERNAL_LAUNCH_READY",
+        L"The protected Adaptive profile, telemetry provider and user-authorized FleX state are ready for KF2 started from the optimizer, Steam or a shortcut",
+        L"optimizer"});
+    return Result<bool>::success(true);
 }
 
 void UiRuntime::set_slider_value(std::string_view id, int requested_value) {

@@ -260,6 +260,10 @@ struct UiRuntime {
 
     Result<config::ApplyResult> apply_adaptive_launch_profile();
 
+    Result<bool> prepare_automatic_protected_launch_capabilities();
+
+    Result<bool> prepare_automatic_external_launch_profile();
+
     void set_slider_value(std::string_view id, int requested_value);
 
     void execute_action(std::string_view action);

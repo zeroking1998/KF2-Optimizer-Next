@@ -35,7 +35,7 @@ struct DirectoryIdentity {
 struct Marker {
     std::string state;
     DirectoryIdentity root;
-    std::array<bool, 3> created{};
+    std::array<bool, 2> created{};
 };
 
 template <typename Integer>
@@ -177,25 +177,25 @@ Result<bool> validate_roots(const std::filesystem::path& config_root,
     return Result<bool>::success(true);
 }
 
-Result<std::array<bool, 3>> ensure_target_directories(
+Result<std::array<bool, 2>> ensure_target_directories(
     const std::filesystem::path& config_root) {
-    std::array<bool, 3> created{};
+    std::array<bool, 2> created{};
     auto current = config_root.parent_path();
-    constexpr std::array<std::wstring_view, 3> components{
-        L"Unpublished", L"BrewedPC", L"Script"};
+    constexpr std::array<std::wstring_view, 2> components{
+        L"Published", L"BrewedPC"};
     for (std::size_t index = 0; index < components.size(); ++index) {
         current /= components[index];
         const DWORD attributes = GetFileAttributesW(current.c_str());
         if (attributes == INVALID_FILE_ATTRIBUTES) {
             const DWORD native = GetLastError();
             if (native != ERROR_FILE_NOT_FOUND && native != ERROR_PATH_NOT_FOUND) {
-                return Result<std::array<bool, 3>>::failure(
+                return Result<std::array<bool, 2>>::failure(
                     {ErrorCode::io_failure,
                      L"Offline telemetry target directory cannot be inspected",
                      native});
             }
             if (!CreateDirectoryW(current.c_str(), nullptr)) {
-                return Result<std::array<bool, 3>>::failure(
+                return Result<std::array<bool, 2>>::failure(
                     {ErrorCode::io_failure,
                      L"Offline telemetry target directory cannot be created",
                      GetLastError()});
@@ -204,15 +204,15 @@ Result<std::array<bool, 3>> ensure_target_directories(
         }
         auto identity = directory_identity(current);
         if (!identity.has_value()) {
-            return Result<std::array<bool, 3>>::failure(identity.error());
+            return Result<std::array<bool, 2>>::failure(identity.error());
         }
     }
-    return Result<std::array<bool, 3>>::success(created);
+    return Result<std::array<bool, 2>>::success(created);
 }
 
 std::filesystem::path target_module(const std::filesystem::path& config_root) {
-    return config_root.parent_path() / L"Unpublished" / L"BrewedPC" /
-           L"Script" / kModuleName;
+    return config_root.parent_path() / L"Published" / L"BrewedPC" /
+           kModuleName;
 }
 
 std::filesystem::path marker_path(const std::filesystem::path& state_root) {
@@ -221,14 +221,14 @@ std::filesystem::path marker_path(const std::filesystem::path& state_root) {
 
 std::string marker_bytes(std::string_view state,
                          const DirectoryIdentity& root,
-                         const std::array<bool, 3>& created) {
-    return "schema=1\nstate=" + std::string{state} +
+                         const std::array<bool, 2>& created) {
+    return "schema=2\nstate=" + std::string{state} +
         "\nsha256=" + kOfflineTelemetryModuleSha256 +
         "\nroot_volume=" + std::to_string(root.volume) +
         "\nroot_file=" + std::to_string(root.file) +
-        "\ncreated_unpublished=" + (created[0] ? "1" : "0") +
+        "\ncreated_published=" + (created[0] ? "1" : "0") +
         "\ncreated_brewedpc=" + (created[1] ? "1" : "0") +
-        "\ncreated_script=" + (created[2] ? "1" : "0") + "\n";
+        "\n";
 }
 
 Result<Marker> parse_marker(const std::filesystem::path& path) {
@@ -237,14 +237,14 @@ Result<Marker> parse_marker(const std::filesystem::path& path) {
     Marker marker;
     bool schema = false, state = false, hash = false, volume = false,
          file = false;
-    std::array<bool, 3> created_seen{};
+    std::array<bool, 2> created_seen{};
     std::size_t offset = 0;
     while (offset < bytes.value().size()) {
         const auto end = bytes.value().find('\n', offset);
         const auto line = std::string_view{bytes.value()}.substr(
             offset, end == std::string::npos
                         ? bytes.value().size() - offset : end - offset);
-        if (line == "schema=1" && !schema) {
+        if (line == "schema=2" && !schema) {
             schema = true;
         } else if (line.starts_with("state=") && !state) {
             marker.state = std::string{line.substr(6)};
@@ -257,9 +257,8 @@ Result<Marker> parse_marker(const std::filesystem::path& path) {
         } else if (line.starts_with("root_file=") && !file) {
             file = parse_integer(line.substr(10), marker.root.file);
         } else {
-            constexpr std::array<std::string_view, 3> names{
-                "created_unpublished=", "created_brewedpc=",
-                "created_script="};
+            constexpr std::array<std::string_view, 2> names{
+                "created_published=", "created_brewedpc="};
             bool matched = false;
             for (std::size_t index = 0; index < names.size(); ++index) {
                 if (!line.starts_with(names[index]) || created_seen[index]) {
@@ -286,7 +285,7 @@ Result<Marker> parse_marker(const std::filesystem::path& path) {
         offset = end + 1;
     }
     if (!schema || !state || !hash || !volume || !file ||
-        !std::ranges::all_of(created_seen, [](bool value) { return value; })) {
+        !created_seen[0] || !created_seen[1]) {
         return Result<Marker>::failure(
             {ErrorCode::invalid_argument,
              L"Offline telemetry marker is incomplete or invalid", 0});
@@ -315,14 +314,15 @@ Result<bool> ensure_state_directory(const std::filesystem::path& state_root) {
 
 void remove_created_empty_directories(
     const std::filesystem::path& config_root,
-    const std::array<bool, 3>& created) noexcept {
-    const auto unpublished = config_root.parent_path() / L"Unpublished";
-    const auto brewed = unpublished / L"BrewedPC";
-    const auto script = brewed / L"Script";
-    const std::array<std::filesystem::path, 3> paths{script, brewed, unpublished};
-    const std::array<bool, 3> flags{created[2], created[1], created[0]};
+    const std::array<bool, 2>& created) noexcept {
+    const auto root = config_root.parent_path() / L"Published";
+    const auto brewed = root / L"BrewedPC";
+    const std::array<std::filesystem::path, 2> paths{brewed, root};
+    const std::array<bool, 2> flags{created[1], created[0]};
     for (std::size_t index = 0; index < paths.size(); ++index) {
-        if (flags[index]) static_cast<void>(RemoveDirectoryW(paths[index].c_str()));
+        if (flags[index]) {
+            static_cast<void>(RemoveDirectoryW(paths[index].c_str()));
+        }
     }
 }
 

@@ -126,25 +126,35 @@ app::runtime::DispatchResult launch(
                     L"Killing Floor 2 is already running.");
         return app::runtime::DispatchResult::handled;
     }
-    if (runtime.session_config_snapshot) {
+    const bool automatic_external_profile_ready =
+        runtime.session_config_snapshot &&
+        runtime.session_config_waiting_for_launch &&
+        runtime.session_config_launch_deadline_ns == 0;
+    if (runtime.session_config_snapshot &&
+        !automatic_external_profile_ready) {
         show_notice(
             runtime, ui::NoticeSeverity::error,
             L"SESSION_CONFIG_RECOVERY_REQUIRED",
             L"A protected KF2 INI snapshot is still active. Restore it before starting another session.");
         return app::runtime::DispatchResult::handled;
     }
-    const bool protected_gameplay_provider =
-        app::should_prepare_protected_gameplay_provider(runtime.start_mode);
-    auto captured = config::capture_session_config(
-        runtime.installation->config_root,
-        runtime.settings_path.parent_path());
-    if (!captured.has_value()) {
-        show_notice(runtime, ui::NoticeSeverity::error,
-                    L"SESSION_CONFIG_SNAPSHOT_FAILED",
-                    captured.error().message);
-        return app::runtime::DispatchResult::handled;
+    if (!automatic_external_profile_ready) {
+        auto captured = config::capture_session_config(
+            runtime.installation->config_root,
+            runtime.settings_path.parent_path());
+        if (!captured.has_value()) {
+            show_notice(runtime, ui::NoticeSeverity::error,
+                        L"SESSION_CONFIG_SNAPSHOT_FAILED",
+                        captured.error().message);
+            return app::runtime::DispatchResult::handled;
+        }
+        runtime.session_config_snapshot = std::move(captured.value());
+        runtime.events->append(
+            {0, product_diagnostics::Severity::info,
+             "SESSION_CONFIG_CAPTURED",
+             L"The exact pre-game KF2 INI state was captured before automatic launch actions",
+             L"config"});
     }
-    runtime.session_config_snapshot = std::move(captured.value());
     const auto captured_values = config::read_catalog_values(
         runtime.session_config_snapshot->snapshot_root / L"files");
     if (!captured_values.has_value()) {
@@ -173,75 +183,36 @@ app::runtime::DispatchResult launch(
     const bool automatic_flex_launch =
         app::should_prepare_adaptive_flex_runtime(
             runtime.start_mode, *configured_physx_level);
-    runtime.events->append(
-        {0, product_diagnostics::Severity::info,
-         "SESSION_CONFIG_CAPTURED",
-         L"The exact pre-game KF2 INI state was captured before automatic launch actions",
-         L"config"});
-    const auto automatic = runtime.apply_adaptive_launch_profile();
-    if (!automatic.has_value()) {
-        const auto detail = automatic.error().message;
-        if (runtime.restore_protected_session_config(
-                L"Adaptive automatic launch setup failed")) {
-            show_notice(runtime, ui::NoticeSeverity::error,
-                        L"ADAPTIVE_LAUNCH_SETUP_FAILED", detail);
-        }
-        return app::runtime::DispatchResult::handled;
-    }
-    if (automatic_flex_launch) {
-        const auto prepared = runtime.ensure_automatic_flex_lab();
-        if (!prepared.has_value()) {
-            const auto detail = prepared.error().message;
+    if (!automatic_external_profile_ready) {
+        const auto automatic = runtime.apply_adaptive_launch_profile();
+        if (!automatic.has_value()) {
+            const auto detail = automatic.error().message;
             if (runtime.restore_protected_session_config(
-                    L"Automatic FleX hook setup failed")) {
+                    L"Adaptive automatic launch setup failed")) {
                 show_notice(runtime, ui::NoticeSeverity::error,
-                            L"FLEX_AUTO_HOOK_FAILED", detail);
+                            L"ADAPTIVE_LAUNCH_SETUP_FAILED", detail);
             }
             return app::runtime::DispatchResult::handled;
         }
     } else {
         runtime.events->append(
             {0, product_diagnostics::Severity::info,
-             "FLEX_USER_SETTING_PRESERVED",
-             L"FleX remains disabled because the user did not enable it in KF2; no FleX runtime hook was installed",
-             L"flex"});
+             "ADAPTIVE_EXTERNAL_LAUNCH_REUSED",
+             L"The already verified external-launch profile was reused for the app-started KF2 session",
+             L"optimizer"});
     }
-    if (protected_gameplay_provider) {
-        const auto telemetry_module =
-            product_game::install_offline_telemetry_lab({
-                .config_root = runtime.installation->config_root,
-                .state_root = runtime.settings_path.parent_path(),
-                .module_asset = runtime.executable_root / L"Data" / L"Lab" /
-                    L"KF2OptimizerTelemetry.u",
-                .game_running = false});
-        if (!telemetry_module.has_value()) {
-            const auto detail = telemetry_module.error().message;
+    if (!automatic_external_profile_ready) {
+        const auto capabilities =
+            runtime.prepare_automatic_protected_launch_capabilities();
+        if (!capabilities.has_value()) {
+            const auto detail = capabilities.error().message;
             if (runtime.restore_protected_session_config(
-                    L"Offline telemetry package setup failed")) {
+                    L"Automatic launch capability setup failed")) {
                 show_notice(runtime, ui::NoticeSeverity::error,
-                            L"GAMEPLAY_TELEMETRY_INSTALL_FAILED", detail);
+                            L"AUTOMATIC_LAUNCH_CAPABILITY_FAILED", detail);
             }
             return app::runtime::DispatchResult::handled;
         }
-        const auto enabled = product_game::enable_offline_gameplay_logging(
-            runtime.installation->config_root, true,
-            runtime.optimizer_settings.corpse_limit,
-            runtime.optimizer_settings.target_fps, true,
-            runtime.optimizer_settings.adaptive_quality_change_budget);
-        if (!enabled.has_value()) {
-            const auto detail = enabled.error().message;
-            if (runtime.restore_protected_session_config(
-                    L"Offline gameplay data setup failed")) {
-                show_notice(runtime, ui::NoticeSeverity::error,
-                            L"GAMEPLAY_LOG_ENABLE_FAILED", detail);
-            }
-            return app::runtime::DispatchResult::handled;
-        }
-        runtime.events->append(
-            {0, product_diagnostics::Severity::info,
-             "GAMEPLAY_LOG_LAB_READY",
-             L"The protected standalone provider exposes verified KF2 AI/wave telemetry, bounded corpse cleanup, physics, LOD and ragdoll capabilities, plus temporary per-action corpse ID markers; other General Adaptive capabilities remain independent",
-             L"game"});
     }
     SHELLEXECUTEINFOW launch_request{};
     launch_request.cbSize = sizeof(launch_request);
@@ -252,10 +223,6 @@ app::runtime::DispatchResult launch(
         runtime.installation->executable.parent_path().wstring();
     launch_request.lpFile = executable.c_str();
     launch_request.lpDirectory = working_directory.c_str();
-    constexpr wchar_t offline_telemetry_parameters[] = L"-useunpublished";
-    if (protected_gameplay_provider) {
-        launch_request.lpParameters = offline_telemetry_parameters;
-    }
     launch_request.nShow = SW_SHOWNORMAL;
     // ShellExecuteExW may pump this UI thread while Steam displays its
     // launch-arguments confirmation. Arm the protected-session wait first so

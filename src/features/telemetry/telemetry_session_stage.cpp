@@ -380,7 +380,9 @@ void UiRuntime::try_attach_telemetry() {
                     : L"KF2 closed"));
         }
         telemetry_failure = session_config_waiting_for_launch
-            ? L"Waiting for app-started KF2 process"
+            ? (session_config_launch_deadline_ns == 0
+                   ? L"Adaptive profile ready; waiting for KF2 process"
+                   : L"Waiting for app-started KF2 process")
             : L"Waiting for KF2 process";
         return;
     }

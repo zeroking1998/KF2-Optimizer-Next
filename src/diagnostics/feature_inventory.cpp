@@ -129,7 +129,7 @@ constexpr AreaContract area05{
     "Useful session context without touching gameplay.",
     "The probe reports aggregate states, not per-actor identifiers or exact decal creation events; FleX counters remain non-semantic.",
     "Telemetry remains observation-only; the separately reported protected corpse capability is explicit, bounded and never a guessed input.",
-    "Parser reset on file/session/process change; temporary logs, viewport substitution and -useunpublished package are protected by whole-INI snapshot, pinned hash, marker and exact cleanup after KF2 exits.",
+    "Parser reset on file/session/process change; temporary logs, viewport substitution and the Published telemetry package are protected by whole-INI snapshot, pinned hash, marker and exact cleanup after KF2 exits. The same prepared session is used when KF2 starts from the optimizer, Steam or a shortcut.",
     "Official KF2 SDK, KF2 Launch.log, protected KFGame/KFEngine session switches, PresentMon and known FleX ABI.",
     "Bounded parser, truncation, rotation, identity, freshness, negative inference and real gameplay tests.",
     "kf2_game_log_session_test; kf2_gameplay_log_lab_test; kf2_offline_telemetry_lab_test; official KFEditor 0-error/0-warning compile; target gameplay evidence"};

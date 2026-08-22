@@ -155,8 +155,8 @@ foreach(feature IN LISTS feature_names)
     endforeach()
 endforeach()
 
-# ShellExecuteExW can re-enter the UI thread while Steam confirms custom launch
-# arguments. The protected-session wait must already be armed at that point.
+# ShellExecuteExW can re-enter the UI thread while Steam handles the launch.
+# The protected-session wait must already be armed at that point.
 set(game_actions
     "${project_root}/src/features/game/game_actions.cpp")
 file(READ "${game_actions}" game_actions_content)
@@ -164,10 +164,13 @@ string(FIND "${game_actions_content}"
     "runtime.session_config_waiting_for_launch = true" launch_wait_armed)
 string(FIND "${game_actions_content}"
     "ShellExecuteExW(&launch_request)" shell_execute)
-string(FIND "${game_actions_content}"
+set(application_actions
+    "${project_root}/src/app/application_actions.cpp")
+file(READ "${application_actions}" application_actions_content)
+string(FIND "${application_actions_content}"
     "should_prepare_protected_gameplay_provider" protected_provider_policy)
 string(FIND "${game_actions_content}"
-    "if (protected_gameplay_provider)" protected_provider_install)
+    "prepare_automatic_protected_launch_capabilities" protected_provider_install)
 if(launch_wait_armed EQUAL -1 OR shell_execute EQUAL -1 OR
    NOT launch_wait_armed LESS shell_execute)
     message(FATAL_ERROR
