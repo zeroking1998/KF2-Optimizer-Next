@@ -8,14 +8,9 @@ namespace kf2::features::backup {
 
 app::runtime::DispatchResult create(
     app::UiRuntime&, const app::runtime::NoPayload&);
-app::runtime::DispatchResult restore(
-    app::UiRuntime&, const app::runtime::NoPayload&);
-
-inline constexpr std::array<app::runtime::ActionImplementation, 2> kActions{{
+inline constexpr std::array<app::runtime::ActionImplementation, 1> kActions{{
     {app::runtime::ActionId::optimizer_backup,
      &app::runtime::bind_no_payload<&create>},
-    {app::runtime::ActionId::optimizer_restore,
-     &app::runtime::bind_no_payload<&restore>},
 }};
 
 inline constexpr app::runtime::FeatureDefinition kFeature{

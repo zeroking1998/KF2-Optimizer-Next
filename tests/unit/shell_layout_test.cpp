@@ -73,7 +73,6 @@ int main() {
     CHECK(action(dashboard, "settings-updates-automatic") != nullptr);
     CHECK(node(dashboard, "header-auto-updates") != nullptr);
     CHECK(node(dashboard, "header-auto-updates")->text == L"✓ UPDATE CHECK");
-    CHECK(action(dashboard, "header-launch") == nullptr);
     CHECK(action(dashboard, "header-update-check") != nullptr);
     CHECK(action(dashboard, "header-repair") != nullptr);
     CHECK(!action(dashboard, "header-update-check")->attention);
@@ -108,7 +107,6 @@ int main() {
     CHECK(nav_hit->destination == Destination::graphics);
 
     const auto compact_dashboard = layout_shell(model, 800, 520);
-    CHECK(action(compact_dashboard, "header-launch") == nullptr);
     CHECK(action(compact_dashboard, "header-update-check") != nullptr);
     CHECK(action(compact_dashboard, "settings-updates-automatic") != nullptr);
     CHECK(action(compact_dashboard, "header-repair") != nullptr);
@@ -256,9 +254,7 @@ int main() {
     CHECK(action(diagnostics, "diagnostics-flex-restore") != nullptr);
     CHECK(action(diagnostics, "diagnostics-repair-package") != nullptr);
     CHECK(action_help_text("diagnostics-repair-package").has_value());
-    CHECK(action(diagnostics, "diagnostics-auto-repair") == nullptr);
     CHECK(action(diagnostics, "settings-finetuning") == nullptr);
-    CHECK(action_help_text("diagnostics-auto-repair").has_value());
     CHECK(node(diagnostics, "diagnostics-check-section") != nullptr);
     CHECK(node(diagnostics, "diagnostics-recovery-section") != nullptr);
     CHECK(node(diagnostics, "diagnostics-reports-section") != nullptr);
@@ -346,9 +342,9 @@ int main() {
     CHECK(action(cached_available, "settings-updates-check") != nullptr);
     CHECK(action(cached_available, "settings-updates-install") == nullptr);
 
-    const std::array<const ShellLayoutResult*, 6> tooltip_layouts{
+    const std::array<const ShellLayoutResult*, 7> tooltip_layouts{
         &home, &graphics, &overlay, &advanced, &diagnostics,
-        &available_updates};
+        &available_updates, &cached_available};
     for (const auto* tooltip_layout : tooltip_layouts) {
         for (const auto& item : tooltip_layout->nodes) {
             if ((item.role != SemanticRole::action &&
@@ -364,7 +360,20 @@ int main() {
             CHECK(help->size() >= 24);
         }
     }
+    std::set<std::string> visible_action_ids;
+    for (const auto* candidate_layout : tooltip_layouts) {
+        for (const auto& item : candidate_layout->nodes) {
+            if (item.role == SemanticRole::action && item.action_id) {
+                visible_action_ids.insert(*item.action_id);
+            }
+        }
+    }
     for (const auto& binding : kf2::app::runtime::action_bindings()) {
+        if (!visible_action_ids.contains(std::string{binding.name})) {
+            std::cerr << "binding has no visible control: " << binding.name
+                      << '\n';
+        }
+        CHECK(visible_action_ids.contains(std::string{binding.name}));
         const auto help = action_help_text(binding.name);
         if (!help) {
             std::cerr << "missing contract tooltip for " << binding.name

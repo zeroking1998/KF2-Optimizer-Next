@@ -36,7 +36,7 @@ constexpr std::array<std::string_view, 7> kFeatureNames{{
 }};
 
 struct CompleteRegistryFixture {
-    std::array<std::array<ActionImplementation, 90>, 7> implementations{};
+    std::array<std::array<ActionImplementation, 62>, 7> implementations{};
     std::array<std::size_t, 7> counts{};
     std::array<FeatureDefinition, 7> features{};
 
@@ -65,8 +65,8 @@ ActionRequest request(ActionId id, std::string_view received_name,
 int main() {
     using namespace kf2::app::runtime;
 
-    CHECK(action_definitions().size() == 90);
-    CHECK(action_bindings().size() == 99);
+    CHECK(action_definitions().size() == 62);
+    CHECK(action_bindings().size() == 64);
 
     CompleteRegistryFixture complete;
     CHECK(valid_feature_registry(complete.features));
@@ -118,7 +118,7 @@ int main() {
     runtime = {};
     CHECK(dispatch_action(
               runtime,
-              request(ActionId::game_launch, "game-launch",
+              request(ActionId::game_launch, "dashboard-launch",
                       std::monostate{}),
               complete.features) == DispatchResult::invalid_payload);
     CHECK(runtime.calls == 0);
@@ -126,7 +126,7 @@ int main() {
     runtime = {};
     CHECK(dispatch_action(
               runtime,
-              request(ActionId::game_launch, "game-launch"), {}) ==
+              request(ActionId::game_launch, "dashboard-launch"), {}) ==
           DispatchResult::invalid_registry);
     CHECK(runtime.calls == 0);
 
@@ -136,7 +136,7 @@ int main() {
     runtime = {};
     CHECK(dispatch_action(
               runtime,
-              request(ActionId::game_launch, "game-launch"),
+              request(ActionId::game_launch, "dashboard-launch"),
               duplicate_feature_fixture.features) ==
           DispatchResult::invalid_registry);
     CHECK(runtime.calls == 0);
@@ -149,7 +149,7 @@ int main() {
     runtime = {};
     CHECK(dispatch_action(
               runtime,
-              request(ActionId::game_launch, "game-launch"),
+              request(ActionId::game_launch, "dashboard-launch"),
               wrong_owner_fixture.features) ==
           DispatchResult::invalid_registry);
     CHECK(runtime.calls == 0);
@@ -161,7 +161,7 @@ int main() {
     runtime = {};
     CHECK(dispatch_action(
               runtime,
-              request(ActionId::game_launch, "game-launch"),
+              request(ActionId::game_launch, "dashboard-launch"),
               partial_fixture.features) == DispatchResult::invalid_registry);
     CHECK(runtime.calls == 0);
 

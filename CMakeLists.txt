@@ -111,7 +111,6 @@ string(JOIN "|" KF2_APP_TELEMETRY_SOURCES_PIPE
 add_executable(KF2Optimizer WIN32
     assets/app.manifest
     assets/mascot/mascot_resources.rc
-    src/benchmark/benchmark.cpp
     src/backup/backup_store.cpp
     src/backup/restore_transaction.cpp
     src/app/main.cpp
