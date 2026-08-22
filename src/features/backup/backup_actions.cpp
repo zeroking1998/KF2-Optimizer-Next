@@ -82,28 +82,4 @@ app::runtime::DispatchResult create(
     return app::runtime::DispatchResult::handled;
 }
 
-app::runtime::DispatchResult restore(
-    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
-    if (runtime.last_backup_id.empty()) {
-        show_notice(runtime, ui::NoticeSeverity::warning,
-                    L"RESTORE_UNAVAILABLE",
-                    L"No backup from this session is available to restore.");
-        return app::runtime::DispatchResult::handled;
-    }
-    const bool running = runtime.installation &&
-        game::find_running_game_process(
-            runtime.installation->executable).has_value();
-    const auto result = runtime.restore(
-        runtime.last_backup_id, {.game_running = running});
-    show_notice(runtime,
-                result.has_value() ? ui::NoticeSeverity::info
-                                   : ui::NoticeSeverity::warning,
-                result.has_value() ? L"CONFIG_RESTORED"
-                                   : L"RESTORE_BLOCKED",
-                result.has_value()
-                    ? L"Configuration restored from verified backup."
-                    : result.error().message);
-    return app::runtime::DispatchResult::handled;
-}
-
 }  // namespace kf2::features::backup

@@ -23,7 +23,6 @@
 
 #include "kf2/app/build_identity.hpp"
 #include "kf2/backup/restore_transaction.hpp"
-#include "kf2/benchmark/benchmark.hpp"
 #include "kf2/config/ini_document.hpp"
 #include "kf2/config/adaptive_locks.hpp"
 #include "kf2/config/session_guard.hpp"

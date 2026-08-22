@@ -6,21 +6,7 @@
 
 namespace kf2::features::diagnostics {
 
-app::runtime::DispatchResult refresh(
-    app::UiRuntime&, const app::runtime::NoPayload&);
-app::runtime::DispatchResult benchmark_baseline(
-    app::UiRuntime&, const app::runtime::NoPayload&);
-app::runtime::DispatchResult benchmark_compare(
-    app::UiRuntime&, const app::runtime::NoPayload&);
-app::runtime::DispatchResult clear(
-    app::UiRuntime&, const app::runtime::NoPayload&);
-app::runtime::DispatchResult export_report(
-    app::UiRuntime&, const app::runtime::NoPayload&);
-app::runtime::DispatchResult export_inventory(
-    app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult export_support(
-    app::UiRuntime&, const app::runtime::NoPayload&);
-app::runtime::DispatchResult flex_audit(
     app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult flex_restore(
     app::UiRuntime&, const app::runtime::NoPayload&);
@@ -35,23 +21,9 @@ app::runtime::DispatchResult repair_package(
 app::runtime::DispatchResult auto_repair_package(
     app::UiRuntime&, const app::runtime::NoPayload&);
 
-inline constexpr std::array<app::runtime::ActionImplementation, 14> kActions{{
-    {app::runtime::ActionId::refresh_status,
-     &app::runtime::bind_no_payload<&refresh>},
-    {app::runtime::ActionId::diagnostics_benchmark_baseline,
-     &app::runtime::bind_no_payload<&benchmark_baseline>},
-    {app::runtime::ActionId::diagnostics_benchmark_compare,
-     &app::runtime::bind_no_payload<&benchmark_compare>},
-    {app::runtime::ActionId::diagnostics_clear,
-     &app::runtime::bind_no_payload<&clear>},
-    {app::runtime::ActionId::diagnostics_export,
-     &app::runtime::bind_no_payload<&export_report>},
-    {app::runtime::ActionId::diagnostics_export_inventory,
-     &app::runtime::bind_no_payload<&export_inventory>},
+inline constexpr std::array<app::runtime::ActionImplementation, 7> kActions{{
     {app::runtime::ActionId::diagnostics_export_support,
      &app::runtime::bind_no_payload<&export_support>},
-    {app::runtime::ActionId::diagnostics_flex_audit,
-     &app::runtime::bind_no_payload<&flex_audit>},
     {app::runtime::ActionId::diagnostics_flex_restore,
      &app::runtime::bind_no_payload<&flex_restore>},
     {app::runtime::ActionId::diagnostics_full_check,

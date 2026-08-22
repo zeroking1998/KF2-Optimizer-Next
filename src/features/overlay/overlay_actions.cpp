@@ -137,19 +137,9 @@ app::runtime::DispatchResult position(
     return app::runtime::DispatchResult::handled;
 }
 
-app::runtime::DispatchResult scale_down(
-    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
-    return set_scale(runtime, -1, false);
-}
-
 app::runtime::DispatchResult scale_reset(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
     return set_scale(runtime, 0, true);
-}
-
-app::runtime::DispatchResult scale_up(
-    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
-    return set_scale(runtime, 1, false);
 }
 
 app::runtime::DispatchResult show_cpu(

@@ -323,9 +323,7 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
                 {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get(), 2.0F);
         } else if (node.role == SemanticRole::action) {
             const bool primary = node.action_id &&
-                (*node.action_id == "game-launch" ||
-                 *node.action_id == "header-launch" ||
-                 *node.action_id == "dashboard-launch" ||
+                (*node.action_id == "dashboard-launch" ||
                  *node.action_id == "diagnostics-full-check");
             const bool emphasized = primary;
             if (node.attention && node.enabled &&
