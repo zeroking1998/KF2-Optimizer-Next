@@ -6,8 +6,6 @@
 
 namespace kf2::features::settings {
 
-app::runtime::DispatchResult advanced_toggle(
-    app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult adaptive_aggressiveness(
     app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult adaptive_budget(
@@ -36,8 +34,6 @@ app::runtime::DispatchResult adaptive_recovery(
     app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult adaptive_shadow(
     app::UiRuntime&, const app::runtime::NoPayload&);
-app::runtime::DispatchResult animations(
-    app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult target_down(
     app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult target_up(
@@ -54,10 +50,10 @@ app::runtime::DispatchResult updates_install(
     app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult updates_later(
     app::UiRuntime&, const app::runtime::NoPayload&);
+app::runtime::DispatchResult updates_ignore(
+    app::UiRuntime&, const app::runtime::NoPayload&);
 
-inline constexpr std::array<app::runtime::ActionImplementation, 24> kActions{{
-    {app::runtime::ActionId::settings_advanced_toggle,
-     &app::runtime::bind_no_payload<&advanced_toggle>},
+inline constexpr std::array<app::runtime::ActionImplementation, 23> kActions{{
     {app::runtime::ActionId::settings_adaptive_aggressiveness,
      &app::runtime::bind_no_payload<&adaptive_aggressiveness>},
     {app::runtime::ActionId::settings_adaptive_budget,
@@ -86,8 +82,6 @@ inline constexpr std::array<app::runtime::ActionImplementation, 24> kActions{{
      &app::runtime::bind_no_payload<&adaptive_recovery>},
     {app::runtime::ActionId::settings_adaptive_shadow,
      &app::runtime::bind_no_payload<&adaptive_shadow>},
-    {app::runtime::ActionId::settings_animations,
-     &app::runtime::bind_no_payload<&animations>},
     {app::runtime::ActionId::settings_target_down,
      &app::runtime::bind_no_payload<&target_down>},
     {app::runtime::ActionId::settings_target_up,
@@ -104,6 +98,8 @@ inline constexpr std::array<app::runtime::ActionImplementation, 24> kActions{{
      &app::runtime::bind_no_payload<&updates_install>},
     {app::runtime::ActionId::settings_updates_later,
      &app::runtime::bind_no_payload<&updates_later>},
+    {app::runtime::ActionId::settings_updates_ignore,
+     &app::runtime::bind_no_payload<&updates_ignore>},
 }};
 
 inline constexpr app::runtime::FeatureDefinition kFeature{

@@ -1,6 +1,7 @@
 #include "features/game/game_actions.hpp"
 
 #include "app/application_runtime.hpp"
+#include "kf2/config/setting_catalog.hpp"
 
 namespace kf2::features::game {
 namespace {
@@ -85,11 +86,12 @@ app::runtime::DispatchResult select_install(
         return app::runtime::DispatchResult::handled;
     }
     runtime.installation = std::move(validated.value());
+    runtime.reload_video_settings();
+    runtime.reload_advanced_settings();
     auto status = runtime.model.status();
     status.game_detected = true;
     status.game = L"Game detected: " +
         runtime.installation->install_root.wstring();
-    status.config = ui::ConfigWorkflowState::detected;
     runtime.model.set_status(std::move(status));
     runtime.events->append(
         {0, product_diagnostics::Severity::info,
@@ -102,69 +104,11 @@ app::runtime::DispatchResult select_install(
     return app::runtime::DispatchResult::handled;
 }
 
-app::runtime::DispatchResult open_install(
-    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
-    return runtime.installation
-        ? open_directory(runtime, runtime.installation->install_root)
-        : open_directory(runtime, {});
-}
-
 app::runtime::DispatchResult open_config(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
     return runtime.installation
         ? open_directory(runtime, runtime.installation->config_root)
         : open_directory(runtime, {});
-}
-
-app::runtime::DispatchResult open_logs(
-    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
-    return runtime.installation
-        ? open_directory(
-              runtime,
-              runtime.installation->config_root.parent_path() / L"Logs")
-        : open_directory(runtime, {});
-}
-
-app::runtime::DispatchResult offline_telemetry(
-    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
-    if (!runtime.installation) {
-        show_notice(runtime, ui::NoticeSeverity::warning,
-                    L"GAMEPLAY_LOG_UNAVAILABLE",
-                    L"A verified KF2 installation was not found.");
-        return app::runtime::DispatchResult::handled;
-    }
-    if (product_game::find_running_game_process(
-            runtime.installation->executable).has_value() ||
-        runtime.session_config_snapshot) {
-        show_notice(
-            runtime, ui::NoticeSeverity::warning,
-            L"GAMEPLAY_LOG_GAME_RUNNING",
-            L"Close KF2 and finish the protected session before changing offline gameplay data collection.");
-        return app::runtime::DispatchResult::handled;
-    }
-    const bool previous =
-        runtime.optimizer_settings.offline_gameplay_telemetry;
-    runtime.optimizer_settings.offline_gameplay_telemetry = !previous;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        runtime.settings_path,
-        config::serialize_settings(runtime.optimizer_settings));
-    if (!saved.has_value()) {
-        runtime.optimizer_settings.offline_gameplay_telemetry = previous;
-        show_notice(runtime, ui::NoticeSeverity::error,
-                    L"SETTINGS_SAVE_FAILED", saved.error().message);
-        return app::runtime::DispatchResult::handled;
-    }
-    auto status = runtime.model.status();
-    status.offline_gameplay_telemetry =
-        runtime.optimizer_settings.offline_gameplay_telemetry;
-    runtime.model.set_status(std::move(status));
-    show_notice(
-        runtime, ui::NoticeSeverity::info,
-        L"GAMEPLAY_LOG_MODE_CHANGED",
-        runtime.optimizer_settings.offline_gameplay_telemetry
-            ? L"Offline gameplay data is enabled for the next session started by this app. The complete INI state is restored automatically."
-            : L"Offline gameplay data is disabled. No game INI was changed.");
-    return app::runtime::DispatchResult::handled;
 }
 
 app::runtime::DispatchResult launch(
@@ -189,8 +133,6 @@ app::runtime::DispatchResult launch(
             L"A protected KF2 INI snapshot is still active. Restore it before starting another session.");
         return app::runtime::DispatchResult::handled;
     }
-    const bool automatic_flex_launch =
-        runtime.start_mode == app::StartMode::normal;
     const bool protected_gameplay_provider =
         app::should_prepare_protected_gameplay_provider(runtime.start_mode);
     auto captured = config::capture_session_config(
@@ -203,6 +145,34 @@ app::runtime::DispatchResult launch(
         return app::runtime::DispatchResult::handled;
     }
     runtime.session_config_snapshot = std::move(captured.value());
+    const auto captured_values = config::read_catalog_values(
+        runtime.session_config_snapshot->snapshot_root / L"files");
+    if (!captured_values.has_value()) {
+        const auto detail = captured_values.error().message;
+        if (runtime.restore_protected_session_config(
+                L"The captured FleX setting could not be verified")) {
+            show_notice(runtime, ui::NoticeSeverity::error,
+                        L"FLEX_SETTING_VERIFICATION_FAILED", detail);
+        }
+        return app::runtime::DispatchResult::handled;
+    }
+    const auto physx = captured_values.value().find(
+        config::SettingId::physx_level);
+    const auto* configured_physx_level =
+        physx == captured_values.value().end()
+            ? nullptr : std::get_if<int>(&physx->second);
+    if (!configured_physx_level) {
+        if (runtime.restore_protected_session_config(
+                L"The captured FleX setting was unavailable")) {
+            show_notice(runtime, ui::NoticeSeverity::error,
+                        L"FLEX_SETTING_VERIFICATION_FAILED",
+                        L"The user's KF2 FleX setting could not be verified.");
+        }
+        return app::runtime::DispatchResult::handled;
+    }
+    const bool automatic_flex_launch =
+        app::should_prepare_adaptive_flex_runtime(
+            runtime.start_mode, *configured_physx_level);
     runtime.events->append(
         {0, product_diagnostics::Severity::info,
          "SESSION_CONFIG_CAPTURED",
@@ -229,6 +199,12 @@ app::runtime::DispatchResult launch(
             }
             return app::runtime::DispatchResult::handled;
         }
+    } else {
+        runtime.events->append(
+            {0, product_diagnostics::Severity::info,
+             "FLEX_USER_SETTING_PRESERVED",
+             L"FleX remains disabled because the user did not enable it in KF2; no FleX runtime hook was installed",
+             L"flex"});
     }
     if (protected_gameplay_provider) {
         const auto telemetry_module =
@@ -312,7 +288,9 @@ app::runtime::DispatchResult launch(
     }
     show_notice(
         runtime, ui::NoticeSeverity::info, L"GAME_LAUNCH_STARTED",
-        L"Killing Floor 2 start was requested with the automatic protected Adaptive plan, corpse provider and adaptive FleX. The verified providers and exact original INIs will be restored after the session.");
+        automatic_flex_launch
+            ? L"Killing Floor 2 start was requested with the protected Adaptive plan, corpse provider and user-enabled FleX. The verified providers and exact original INIs will be restored after the session."
+            : L"Killing Floor 2 start was requested with the protected Adaptive plan and corpse provider. FleX remains off because the user did not enable it in KF2. The verified provider and exact original INIs will be restored after the session.");
     return app::runtime::DispatchResult::handled;
 }
 

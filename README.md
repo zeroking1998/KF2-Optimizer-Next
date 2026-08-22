@@ -9,7 +9,7 @@ explicit runtime acknowledgements and automatic restoration.
 
 ## Download
 
-The current development version is **Alpha 0.0.3**.
+The current development version is **Alpha 0.0.4**.
 Download the ZIP, extract the complete `KF2OptimizerNext` folder, and start
 `KF2Optimizer.exe`. Building from source is only required for development.
 
@@ -32,6 +32,16 @@ warning on first launch. The release page publishes the ZIP checksum.
 - Provides an external overlay that does not draw inside the game process.
 - Protects optional corpse-physics and FleX laboratory actions with capability
   checks, actor correlation, acknowledgements, and cleanup.
+- Mirrors KF2's video options in a dedicated **Game graphics** page. Changes
+  remain staged until the user applies them, KF2 must be closed, and every
+  apply creates a verified restore backup.
+- Keeps NVIDIA FleX user-controlled: Adaptive never enables it. The dedicated
+  graphics control changes Off / Gibs / Gibs and fluids only after an explicit
+  user selection and **Apply graphics**.
+- Provides a separate **Advanced settings** page for verified KF2 INI-only
+  engine, streaming, rendering and effects values. These manual game settings
+  are independent of Adaptive and are staged, backed up, and applied only with
+  explicit user approval while KF2 is closed.
 
 It does **not** change damage, health, weapons, enemy AI, spawning, networking,
 or competitive gameplay. An action is never reported as applied unless the
@@ -70,7 +80,7 @@ the control remains unavailable instead of pretending to work.
    or build it from source if you are contributing.
 2. Keep `KF2Optimizer.exe` beside its `Data` directory.
 3. On **Home**, confirm or choose the KF2 folder.
-4. Under **Optimization**, select the target FPS and maximum corpse count.
+4. On **Home**, select the target FPS and maximum corpse count.
 5. Start KF2 through the optimizer when you want session restoration and
    verified runtime capabilities.
 

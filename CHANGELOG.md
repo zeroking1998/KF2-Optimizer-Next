@@ -4,6 +4,57 @@ Release notes stay short and user-focused. Every release uses only **What's
 new**, **Bug fixes**, and optional **Important notes** so the important changes
 are visible immediately.
 
+## Unreleased
+
+## 0.0.4-alpha - 2026-08-22
+
+### What's new
+
+- Added a subtle startup fade and a short closing fade for the portable app.
+- Tooltips now fade in and out, while navigation, buttons, and sliders use a compact
+  press-and-release animation.
+- Slider tracks, thumbs, and live values animate together while dragging.
+- UI animation behavior now lives in a dedicated, testable animation module.
+- Home now contains Target FPS, Maximum corpses, and concise update details.
+- Automatic update checks are directly accessible in the upper-right corner.
+- Added a dedicated Game graphics page using KF2's own video-option names and
+  values, with staged changes, verified backup, atomic apply and restore.
+- Added an explicit NVIDIA FleX control to Game graphics. Overall quality and
+  Adaptive never enable FleX; only the dedicated user selection plus Apply can
+  change it.
+- Added a separate Advanced settings page for verified KF2 INI-only engine,
+  streaming, rendering and effects options. These manual game settings are not
+  Adaptive controls; changes remain staged until the user applies them.
+- Every button and slider now has a specific tooltip explaining its effect and
+  performance trade-off, including clear RAM and VRAM warnings where relevant.
+- Graphics and Advanced settings now provide Reset to defaults buttons. The
+  recommended values are prepared first and are saved only after Apply.
+- The automatic startup check now restores its last verified result, clearly
+  shows whether a newer version exists, and opens an in-app update dialog with
+  Update, Later, and Don't show again actions.
+
+### Bug fixes
+
+- Windows high-contrast colors are now detected during startup, and animation
+  timer cadence follows later theme changes.
+- Scrollbars now fade together with the rest of the interface during startup
+  and shutdown animations.
+- Applied/verified status messages now scroll with their page and can no longer
+  cover headings, buttons, or Advanced settings at intermediate scroll positions.
+- Mouse-wheel scrolling over a slider no longer changes its value accidentally.
+- Tooltips now explain the practical On and Off behavior and no longer repeat
+  workflow phrases such as "manual" or "staged until Apply".
+- Removed the misleading Optimization destination and Animations button from
+  the normal interface.
+- Removed the confusing Home summary that grouped Quality, Physics, LOD, FleX,
+  and corpses under Adaptive even though availability and user control differ.
+- Adaptive launch now preserves the user's native KF2 FleX setting. FleX stays
+  off unless the user has already enabled it in the game.
+- Advanced INI changes are blocked while KF2 runs and now create a verified
+  restore backup before atomic application.
+- A restart within the 24-hour check interval no longer loses the last known
+  update result or incorrectly asks the user to run a manual check.
+
 ## 0.0.3-alpha - 2026-08-22
 
 ### What's new

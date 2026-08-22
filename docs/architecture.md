@@ -167,7 +167,7 @@ implemented.
 `platform/windows` owns raw Windows handles and translates documented messages
 into typed events. `ui` owns the platform-independent semantic layout in DIPs,
 Direct2D/DirectWrite rendering, and UI Automation nodes backed by the same
-layout. High contrast and reduced motion are resolved by the theme boundary.
+layout. High contrast is resolved by the theme boundary.
 No legacy implementation is linked or copied.
 
 The optional FleX/runtime laboratory is integrated but default-off. Its

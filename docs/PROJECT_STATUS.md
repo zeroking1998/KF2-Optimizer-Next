@@ -2,7 +2,7 @@
 
 - Updated: 2026-08-22
 - Default branch: `main`
-- Current development release: [`Alpha 0.0.3`](../README.md#download)
+- Current development release: [`Alpha 0.0.4`](../README.md#download)
 
 The current rewrite is a portable native Windows application. The authoritative
 feature inventory is generated from the source and contains all 149 individual
@@ -12,9 +12,10 @@ requirements from GitHub Issue 72.
 
 - The complete current Visual Studio Debug and Release suites pass 81/81
   tests, including updater rollback and native Windows UI coverage.
-- The normal interface has four areas: Home, Optimization, Overlay, and Help &
-  Repair. Update and Repair stay visible in the upper-right corner, and an
-  available update is highlighted without a disruptive pop-up.
+- The normal interface has three areas: Home, Overlay, and Help & Repair. Home
+  contains the two user goals, while Updates, automatic checks, and Repair stay
+  visible in the upper-right corner. An available update is highlighted without
+  a disruptive pop-up.
 - Adaptive / Automatic is the only user mode. Legacy `smart_mode`,
   `optimizer_mode=smart` and `optimizer_mode=manual` are accepted only during
   migration and are atomically rewritten to the canonical Adaptive schema.

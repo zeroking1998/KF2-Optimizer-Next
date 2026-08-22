@@ -143,7 +143,6 @@ app::runtime::DispatchResult change_adaptive_policy(
         ? std::wstring{product_optimizer::adaptive_profile_label(
               *bounded_profile)}
         : L"not available";
-    status.recommendation_ready = bounded_profile.has_value();
     status.recommendation_reason = bounded_profile
         ? L"Automatic profile is ready; fresh telemetry will refine it"
         : L"No verified named profile fits the selected quality limits";
@@ -218,22 +217,6 @@ app::runtime::DispatchResult change_corpse_limit(
 
 }  // namespace
 
-app::runtime::DispatchResult advanced_toggle(
-    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
-    auto status = runtime.model.status();
-    status.advanced_settings_visible = !status.advanced_settings_visible;
-    runtime.model.set_status(std::move(status));
-    const auto* focus_action = app::runtime::find_action(
-        app::runtime::ActionId::settings_advanced_toggle);
-    runtime.controller.focus_target(
-        ui::Destination::settings,
-        focus_action == nullptr
-            ? std::nullopt
-            : std::optional<std::string_view>{focus_action->canonical_name});
-    runtime.invalidate();
-    return app::runtime::DispatchResult::handled;
-}
-
 app::runtime::DispatchResult adaptive_aggressiveness(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
     return change_adaptive_policy(runtime, AdaptiveChange::aggressiveness);
@@ -304,34 +287,6 @@ app::runtime::DispatchResult adaptive_shadow(
     return change_adaptive_policy(runtime, AdaptiveChange::shadow);
 }
 
-app::runtime::DispatchResult animations(
-    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
-    const bool previous = runtime.optimizer_settings.animations_enabled;
-    runtime.optimizer_settings.animations_enabled = !previous;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        runtime.settings_path,
-        config::serialize_settings(runtime.optimizer_settings));
-    if (!saved.has_value()) {
-        runtime.optimizer_settings.animations_enabled = previous;
-        show_notice(runtime, ui::NoticeSeverity::error,
-                    L"SETTINGS_SAVE_FAILED", saved.error().message);
-        return app::runtime::DispatchResult::handled;
-    }
-    runtime.controller.set_animations_enabled(
-        runtime.optimizer_settings.animations_enabled);
-    runtime.update_animation_cadence();
-    auto status = runtime.model.status();
-    status.animations_enabled =
-        runtime.optimizer_settings.animations_enabled;
-    runtime.model.set_status(std::move(status));
-    show_notice(
-        runtime, ui::NoticeSeverity::info, L"ANIMATIONS_CHANGED",
-        runtime.optimizer_settings.animations_enabled
-            ? L"Full UI and overlay animations are enabled."
-            : L"Animations are reduced; metric values remain live and readable.");
-    return app::runtime::DispatchResult::handled;
-}
-
 app::runtime::DispatchResult target_down(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
     return change_target(runtime, -1);
@@ -373,6 +328,12 @@ app::runtime::DispatchResult updates_install(
 app::runtime::DispatchResult updates_later(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
     runtime.dismiss_update();
+    return app::runtime::DispatchResult::handled;
+}
+
+app::runtime::DispatchResult updates_ignore(
+    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
+    runtime.ignore_update();
     return app::runtime::DispatchResult::handled;
 }
 

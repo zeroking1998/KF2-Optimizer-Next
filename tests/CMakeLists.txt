@@ -174,7 +174,7 @@ add_executable(kf2_build_identity_test
 )
 target_include_directories(kf2_build_identity_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_build_identity_test PRIVATE
-    KF2_VERSION="0.0.3-alpha"
+    KF2_VERSION="0.0.4-alpha"
     KF2_BUILD_COMMIT="unknown"
     KF2_BUILD_CHANNEL="dev"
 )
@@ -432,6 +432,8 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/game/game_log_session.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_log_telemetry.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_session.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/advanced_settings.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/video_settings.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_mascot.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_policy.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_animation.cpp"
@@ -467,7 +469,10 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/ui/direct2d_renderer.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/shell_controller.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/shell_layout.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/tooltip_text.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/theme.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/ui_animation.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/ui_model.cpp"
 )
 target_include_directories(kf2_application_lifecycle_test PRIVATE
@@ -476,7 +481,7 @@ target_include_directories(kf2_application_lifecycle_test PRIVATE
 )
 target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/application-lifecycle"
-    KF2_VERSION="0.0.3-alpha"
+    KF2_VERSION="0.0.4-alpha"
     KF2_BUILD_COMMIT="unknown"
     KF2_BUILD_CHANNEL="dev"
     KF2_RELEASE_REPOSITORY="${KF2_RELEASE_REPOSITORY}"
@@ -501,8 +506,26 @@ target_compile_definitions(kf2_state_environment_test PRIVATE
 target_link_libraries(kf2_state_environment_test PRIVATE shell32 ole32)
 add_test(NAME kf2_state_environment_test COMMAND kf2_state_environment_test)
 
+add_executable(kf2_numeric_presentation_test
+    unit/numeric_presentation_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
+)
+target_include_directories(kf2_numeric_presentation_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+add_test(NAME kf2_numeric_presentation_test
+    COMMAND kf2_numeric_presentation_test)
+
+add_executable(kf2_ui_animation_test
+    unit/ui_animation_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/ui/ui_animation.cpp"
+)
+target_include_directories(kf2_ui_animation_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+add_test(NAME kf2_ui_animation_test COMMAND kf2_ui_animation_test)
+
 add_executable(kf2_ui_model_test
     unit/ui_model_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/ui_model.cpp"
 )
 target_include_directories(kf2_ui_model_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
@@ -511,8 +534,10 @@ add_test(NAME kf2_ui_model_test COMMAND kf2_ui_model_test)
 add_executable(kf2_shell_layout_test
     unit/shell_layout_test.cpp
     "${PROJECT_SOURCE_DIR}/src/app/runtime/action_contract.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/ui_model.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/shell_layout.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/tooltip_text.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/theme.cpp"
 )
 target_include_directories(kf2_shell_layout_test PRIVATE
@@ -523,9 +548,12 @@ add_test(NAME kf2_shell_layout_test COMMAND kf2_shell_layout_test)
 
 add_executable(kf2_shell_controller_test
     unit/shell_controller_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/ui_model.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/shell_layout.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/tooltip_text.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/theme.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/ui_animation.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/shell_controller.cpp"
 )
 target_include_directories(kf2_shell_controller_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
@@ -534,9 +562,12 @@ add_test(NAME kf2_shell_controller_test COMMAND kf2_shell_controller_test)
 add_executable(kf2_direct2d_renderer_test
     windows/direct2d_renderer_test.cpp
     "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/ui_model.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/shell_layout.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/tooltip_text.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/theme.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/ui_animation.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/direct2d_renderer.cpp"
 )
 target_include_directories(kf2_direct2d_renderer_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
@@ -561,8 +592,10 @@ add_executable(kf2_automation_provider_test
     windows/automation_provider_test.cpp
     "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/automation_provider.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/ui_model.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/shell_layout.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ui/tooltip_text.cpp"
 )
 target_include_directories(kf2_automation_provider_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_automation_provider_test PRIVATE user32 ole32 uiautomationcore)
@@ -578,6 +611,28 @@ target_compile_definitions(kf2_game_discovery_test PRIVATE
 )
 target_link_libraries(kf2_game_discovery_test PRIVATE user32)
 add_test(NAME kf2_game_discovery_test COMMAND kf2_game_discovery_test)
+
+add_executable(kf2_video_settings_test
+    integration/video_settings_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/game/video_settings.cpp"
+    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp")
+target_include_directories(kf2_video_settings_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_video_settings_test PRIVATE
+    UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN
+    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/video-settings")
+add_test(NAME kf2_video_settings_test COMMAND kf2_video_settings_test)
+
+add_executable(kf2_advanced_settings_test
+    integration/advanced_settings_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/game/advanced_settings.cpp"
+    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp"
+    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp")
+target_include_directories(kf2_advanced_settings_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_advanced_settings_test PRIVATE
+    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/advanced-settings")
+add_test(NAME kf2_advanced_settings_test COMMAND kf2_advanced_settings_test)
 
 add_executable(kf2_game_log_session_test
     unit/game_log_session_test.cpp

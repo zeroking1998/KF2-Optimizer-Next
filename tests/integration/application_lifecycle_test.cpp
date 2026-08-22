@@ -161,10 +161,25 @@ int main() {
         kf2::app::StartMode::safe));
     CHECK(!kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::read_only));
+    CHECK(!kf2::app::should_prepare_adaptive_flex_runtime(
+        kf2::app::StartMode::normal, 0));
+    CHECK(kf2::app::should_prepare_adaptive_flex_runtime(
+        kf2::app::StartMode::normal, 1));
+    CHECK(kf2::app::should_prepare_adaptive_flex_runtime(
+        kf2::app::StartMode::normal, 2));
+    CHECK(!kf2::app::should_prepare_adaptive_flex_runtime(
+        kf2::app::StartMode::safe, 2));
+    std::vector<kf2::config::RequestedChange> flex_preservation_changes{
+        {kf2::config::SettingId::target_fps, 120,
+         kf2::config::ChangeSource::adaptive, L"test"},
+        {kf2::config::SettingId::physx_level, 2,
+         kf2::config::ChangeSource::adaptive, L"must be removed"}};
+    kf2::app::preserve_user_flex_activation(flex_preservation_changes);
+    CHECK(flex_preservation_changes.size() == 1);
+    CHECK(flex_preservation_changes.front().id ==
+          kf2::config::SettingId::target_fps);
     namespace fs = std::filesystem;
     CHECK(kf2::app::runtime::feature_definitions().size() == 7);
-    CHECK(kf2::app::runtime::find_feature(
-              kf2::app::runtime::FeatureId::navigation) != nullptr);
     CHECK(kf2::app::runtime::find_feature(
               kf2::app::runtime::FeatureId::overlay) != nullptr);
     CHECK(kf2::app::runtime::find_feature(
@@ -172,11 +187,13 @@ int main() {
     CHECK(kf2::app::runtime::find_feature(
               kf2::app::runtime::FeatureId::backup) != nullptr);
     CHECK(kf2::app::runtime::find_feature(
-              kf2::app::runtime::FeatureId::optimizer) != nullptr);
-    CHECK(kf2::app::runtime::find_feature(
               kf2::app::runtime::FeatureId::settings) != nullptr);
     CHECK(kf2::app::runtime::find_feature(
               kf2::app::runtime::FeatureId::game) != nullptr);
+    CHECK(kf2::app::runtime::find_feature(
+              kf2::app::runtime::FeatureId::graphics) != nullptr);
+    CHECK(kf2::app::runtime::find_feature(
+              kf2::app::runtime::FeatureId::advanced) != nullptr);
     CHECK(kf2::app::runtime::valid_feature_registry(
         kf2::app::runtime::feature_definitions()));
     const fs::path root{KF2_TEST_ROOT};
@@ -212,8 +229,6 @@ int main() {
         CHECK(read_bytes(options.state_root / L"settings.ini").starts_with(
             "schema_version=1\n"));
         CHECK(first.value().game_installation().has_value());
-        CHECK(first.value().ui_model().status().config ==
-              kf2::ui::ConfigWorkflowState::detected);
         kf2::optimizer::OptimizerInput optimizer_input;
         optimizer_input.target_fps = 90;
         optimizer_input.profile_preview_requested = true;
@@ -231,8 +246,6 @@ int main() {
             {kf2::config::SettingId::target_fps, 90,
              kf2::config::ChangeSource::explicit_user, L"integration"}});
         CHECK(preview.has_value());
-        CHECK(first.value().ui_model().status().config ==
-              kf2::ui::ConfigWorkflowState::preview_ready);
         const auto applied = first.value().apply_prepared_config(
             {.game_running = false});
         CHECK(applied.has_value());
@@ -271,11 +284,10 @@ int main() {
         CHECK(fs::exists(options.state_root / L"settings.ini.corrupt"));
         CHECK(read_bytes(options.state_root / L"settings.ini") ==
         "schema_version=1\noptimizer_mode=adaptive\n"
-        "animations_enabled=true\n"
         "automatic_update_checks=true\n"
-        "overlay_enabled=false\noverlay_show_fps=true\noverlay_show_frame_time=true\n"
-        "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=false\n"
-        "restore_config_after_game=true\noffline_gameplay_telemetry=false\n"
+        "overlay_enabled=true\noverlay_show_fps=true\noverlay_show_frame_time=true\n"
+        "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=true\n"
+        "restore_config_after_game=true\n"
         "adaptive_aggressiveness=balanced\n"
         "adaptive_minimum_quality=70\nadaptive_maximum_quality=100\n"
         "adaptive_quality_change_budget=2\nadaptive_headroom_percent=8\n"
@@ -393,6 +405,17 @@ int main() {
 
     options.identity.process_start_id = 1004;
     options.create_window = true;
+    {
+        std::ofstream cached_update(
+            options.state_root / L"update-state.ini",
+            std::ios::binary | std::ios::trunc);
+        cached_update <<
+            "schema_version=2\n"
+            "last_check_unix_seconds=1765000000\n"
+            "last_result=available\n"
+            "available_version=0.0.4-alpha\n"
+            "ignored_version=\n";
+    }
     auto graphical = kf2::app::Application::start(options);
     if (!graphical.has_value()) {
         std::wcerr << L"Graphical application start failed: "
@@ -404,34 +427,77 @@ int main() {
     CHECK(!graphical.value().ui_model().recovery_required());
     const auto hwnd = graphical.value().native_window_handle();
     CHECK(hwnd != nullptr);
-    CHECK(!graphical.value().overlay_enabled());
+    CHECK(graphical.value().overlay_enabled());
+    CHECK(graphical.value().ui_model().status().overlay_show_fps);
+    CHECK(graphical.value().ui_model().status().overlay_show_frame_time);
+    CHECK(graphical.value().ui_model().status().overlay_show_cpu);
+    CHECK(graphical.value().ui_model().status().overlay_show_gpu);
+    CHECK(graphical.value().ui_model().status().overlay_show_memory);
+    CHECK(graphical.value().ui_model().status().update_newer_version_known);
+    CHECK(graphical.value().ui_model().status().update_prompt_visible);
+    CHECK(graphical.value().ui_model().status().update_available_version ==
+          L"0.0.4-alpha");
     CHECK(graphical.value().ui_model().selected() ==
           kf2::ui::Destination::dashboard);
-    const auto dashboard_diagnostics =
-        node_center(hwnd, graphical.value().ui_model(), "dashboard-diagnostics");
-    CHECK(dashboard_diagnostics.has_value());
+    const auto ignore_update = node_center(
+        hwnd, graphical.value().ui_model(), "settings-updates-ignore");
+    CHECK(ignore_update.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(dashboard_diagnostics->x,
-                            dashboard_diagnostics->y));
+                 MAKELPARAM(ignore_update->x, ignore_update->y));
+    CHECK(!graphical.value().ui_model().status().update_prompt_visible);
+    CHECK(read_bytes(options.state_root / L"update-state.ini").find(
+              "ignored_version=0.0.4-alpha\n") != std::string::npos);
+    const auto auto_update =
+        node_center(hwnd, graphical.value().ui_model(), "header-auto-updates");
+    CHECK(auto_update.has_value());
+    SendMessageW(hwnd, WM_LBUTTONUP, 0,
+                 MAKELPARAM(auto_update->x, auto_update->y));
+    CHECK(!graphical.value().ui_model().status().automatic_update_checks);
+    CHECK(read_bytes(options.state_root / L"settings.ini").find(
+              "automatic_update_checks=false\n") != std::string::npos);
+    SendMessageW(hwnd, WM_LBUTTONUP, 0,
+                 MAKELPARAM(auto_update->x, auto_update->y));
+    CHECK(graphical.value().ui_model().status().automatic_update_checks);
+    const auto advanced_navigation =
+        node_center(hwnd, graphical.value().ui_model(), "nav-3");
+    CHECK(advanced_navigation.has_value());
+    SendMessageW(hwnd, WM_LBUTTONUP, 0,
+                 MAKELPARAM(advanced_navigation->x,
+                            advanced_navigation->y));
+    CHECK(graphical.value().ui_model().selected() ==
+          kf2::ui::Destination::advanced);
+    CHECK(graphical.value().ui_model().status().advanced_available);
+    const auto thread_lag = node_center(
+        hwnd, graphical.value().ui_model(), "advanced-one-frame-thread-lag");
+    CHECK(thread_lag.has_value());
+    SendMessageW(hwnd, WM_LBUTTONUP, 0,
+                 MAKELPARAM(thread_lag->x, thread_lag->y));
+    CHECK(graphical.value().ui_model().status().advanced_dirty);
+    CHECK(graphical.value().ui_model().status().advanced_values[0] == L"Off");
+    for (int step = 0; step < 24 &&
+         graphical.value().ui_model().focused_action() !=
+             std::optional<std::string>{"advanced-apply"}; ++step) {
+        SendMessageW(hwnd, WM_KEYDOWN, VK_TAB, 0);
+    }
+    CHECK(graphical.value().ui_model().focused_action() ==
+          std::optional<std::string>{"advanced-apply"});
+    SendMessageW(hwnd, WM_KEYDOWN, VK_RETURN, 0);
+    CHECK(!graphical.value().ui_model().status().advanced_dirty);
+    CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
+              "OneFrameThreadLag=False") != std::string::npos);
+    const auto diagnostics_navigation =
+        node_center(hwnd, graphical.value().ui_model(), "nav-4");
+    CHECK(diagnostics_navigation.has_value());
+    SendMessageW(hwnd, WM_LBUTTONUP, 0,
+                 MAKELPARAM(diagnostics_navigation->x,
+                            diagnostics_navigation->y));
     CHECK(graphical.value().ui_model().selected() ==
           kf2::ui::Destination::diagnostics);
-    const auto settings_navigation =
-        node_center(hwnd, graphical.value().ui_model(), "nav-1");
-    CHECK(settings_navigation.has_value());
+    const auto overlay_navigation =
+        node_center(hwnd, graphical.value().ui_model(), "nav-2");
+    CHECK(overlay_navigation.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(settings_navigation->x, settings_navigation->y));
-    CHECK(graphical.value().ui_model().selected() ==
-          kf2::ui::Destination::settings);
-    const auto dashboard_again =
-        node_center(hwnd, graphical.value().ui_model(), "nav-0");
-    CHECK(dashboard_again.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(dashboard_again->x, dashboard_again->y));
-    const auto dashboard_overlay =
-        node_center(hwnd, graphical.value().ui_model(), "dashboard-overlay");
-    CHECK(dashboard_overlay.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(dashboard_overlay->x, dashboard_overlay->y));
+                 MAKELPARAM(overlay_navigation->x, overlay_navigation->y));
     CHECK(graphical.value().ui_model().selected() ==
           kf2::ui::Destination::overlay);
     const auto overlay_toggle =
@@ -439,14 +505,14 @@ int main() {
     CHECK(overlay_toggle.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(overlay_toggle->x, overlay_toggle->y));
-    CHECK(graphical.value().overlay_enabled());
+    CHECK(!graphical.value().overlay_enabled());
     Sleep(450);
     const auto overlay_toggle_off =
         node_center(hwnd, graphical.value().ui_model(), "overlay-toggle");
     CHECK(overlay_toggle_off.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(overlay_toggle_off->x, overlay_toggle_off->y));
-    CHECK(!graphical.value().overlay_enabled());
+    CHECK(graphical.value().overlay_enabled());
     const auto overlay_position =
         node_center(hwnd, graphical.value().ui_model(), "overlay-position");
     CHECK(overlay_position.has_value());
@@ -468,10 +534,10 @@ int main() {
     CHECK(overlay_memory.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(overlay_memory->x, overlay_memory->y));
-    CHECK(graphical.value().ui_model().status().overlay_show_memory);
+    CHECK(!graphical.value().ui_model().status().overlay_show_memory);
     const auto overlay_settings_bytes =
         read_bytes(options.state_root / L"settings.ini");
-    CHECK(overlay_settings_bytes.find("overlay_show_memory=true\n") !=
+    CHECK(overlay_settings_bytes.find("overlay_show_memory=false\n") !=
           std::string::npos);
     CHECK(overlay_settings_bytes.find("overlay_position=bottom_right\n") !=
           std::string::npos);
@@ -483,55 +549,44 @@ int main() {
                             dashboard_after_overlay->y));
     Sleep(450);
     SendMessageW(hwnd, WM_HOTKEY, 0x4B46, 0);
-    CHECK(graphical.value().overlay_enabled());
+    CHECK(!graphical.value().overlay_enabled());
     graphical.value().telemetry_tick_for_testing();
     SendMessageW(hwnd, WM_HOTKEY, 0x4B46, 0);
-    CHECK(graphical.value().overlay_enabled());
+    CHECK(!graphical.value().overlay_enabled());
     Sleep(450);
     SendMessageW(hwnd, WM_HOTKEY, 0x4B46, 0);
-    CHECK(!graphical.value().overlay_enabled());
+    CHECK(graphical.value().overlay_enabled());
     CHECK(!scroll_to_node(
         hwnd, graphical.value().ui_model(),
         "game-offline-telemetry").has_value());
-    const auto settings_for_manual =
-        node_center(hwnd, graphical.value().ui_model(), "nav-1");
-    CHECK(settings_for_manual.has_value());
+    const auto home_for_goals =
+        node_center(hwnd, graphical.value().ui_model(), "nav-0");
+    CHECK(home_for_goals.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(settings_for_manual->x, settings_for_manual->y));
+                 MAKELPARAM(home_for_goals->x, home_for_goals->y));
     CHECK(!scroll_to_node(
         hwnd, graphical.value().ui_model(),
         "settings-adaptive-online").has_value());
-
-    const auto settings_for_adaptive =
-        node_center(hwnd, graphical.value().ui_model(), "nav-1");
-    CHECK(settings_for_adaptive.has_value());
-    SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(settings_for_adaptive->x,
-                            settings_for_adaptive->y));
     CHECK(graphical.value().ui_model().status().mode ==
           L"Adaptive / Automatic");
     CHECK(read_bytes(options.state_root / L"settings.ini").find(
               "optimizer_mode=adaptive\n") != std::string::npos);
-    const auto diagnostics_navigation =
-        node_center(hwnd, graphical.value().ui_model(), "nav-3");
-    CHECK(diagnostics_navigation.has_value());
+    const auto diagnostics_again =
+        node_center(hwnd, graphical.value().ui_model(), "nav-4");
+    CHECK(diagnostics_again.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
-                 MAKELPARAM(diagnostics_navigation->x,
-                            diagnostics_navigation->y));
+                 MAKELPARAM(diagnostics_again->x,
+                            diagnostics_again->y));
     const auto diagnostics_backup =
         node_center(hwnd, graphical.value().ui_model(), "diagnostics-backup");
     CHECK(diagnostics_backup.has_value());
     const auto engine_before_failed_backup =
         read_bytes(config_root / L"KFEngine.ini");
-    const auto config_before_failed_backup =
-        graphical.value().ui_model().status().config;
     CHECK(fs::remove(config_root / L"KFEngine.ini"));
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(diagnostics_backup->x, diagnostics_backup->y));
     CHECK(graphical.value().ui_model().notice().has_value());
     CHECK(graphical.value().ui_model().notice()->code == L"BACKUP_BLOCKED");
-    CHECK(graphical.value().ui_model().status().config ==
-          config_before_failed_backup);
     write_bytes(config_root / L"KFEngine.ini", engine_before_failed_backup);
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(diagnostics_backup->x, diagnostics_backup->y));

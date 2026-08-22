@@ -31,7 +31,27 @@ if ($LASTEXITCODE -ne 0) { throw 'First GUI capture failed' }
 $first = Get-ChildItem -LiteralPath $outputRoot -Filter '*.png' |
     Sort-Object Name |
     ForEach-Object { "{0} {1}" -f $_.Name, (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash }
-if ($first.Count -ne 4) { throw "Expected 4 GUI captures, found $($first.Count)" }
+$expectedCaptures = @(
+    'advanced-settings-96.png'
+    'advanced-settings-save-96.png'
+    'dashboard-144.png'
+    'dashboard-192.png'
+    'dashboard-96.png'
+    'game-graphics-96.png'
+    'game-graphics-flex-96.png'
+    'game-graphics-flex-tooltip-96.png'
+    'home-goals-96.png'
+    'motion-page-nav-mid-96.png'
+    'motion-startup-mid-96.png'
+    'update-available-96.png'
+)
+$actualCaptures = Get-ChildItem -LiteralPath $outputRoot -Filter '*.png' |
+    Sort-Object Name |
+    Select-Object -ExpandProperty Name
+$captureDifference = Compare-Object $expectedCaptures $actualCaptures
+if ($captureDifference.Count -ne 0) {
+    throw "GUI capture set is incomplete or unexpected: $($captureDifference | Out-String)"
+}
 
 & $testExe $outputRoot
 if ($LASTEXITCODE -ne 0) { throw 'Second GUI capture failed' }

@@ -18,7 +18,7 @@ int main() {
           "0.0.3-alpha+abcdef12 (dev)");
 
     const auto current = kf2::app::current_build_identity();
-    CHECK(current.version == "0.0.3-alpha");
+    CHECK(current.version == "0.0.4-alpha");
     CHECK(current.commit == "unknown");
     CHECK(current.channel == "dev");
     return EXIT_SUCCESS;

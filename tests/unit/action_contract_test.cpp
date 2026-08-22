@@ -18,9 +18,8 @@
 int main() {
     using namespace kf2::app::runtime;
 
-    constexpr std::array<std::string_view, 73> kExistingActions{{
-        "dashboard-diagnostics", "dashboard-launch",
-        "dashboard-overlay", "dashboard-refresh", "dashboard-settings",
+    constexpr std::array<std::string_view, 58> kExistingActions{{
+        "dashboard-launch", "dashboard-refresh",
         "diagnostics-backup", "diagnostics-benchmark-baseline",
         "diagnostics-benchmark-compare", "diagnostics-clear",
         "diagnostics-export", "diagnostics-export-inventory",
@@ -29,13 +28,10 @@ int main() {
         "diagnostics-open-data", "diagnostics-open-log",
         "diagnostics-auto-repair",
         "diagnostics-repair-package",
-        "diagnostics-refresh", "game-launch", "game-offline-telemetry",
-        "game-open-config", "game-open-install", "game-open-logs",
+        "diagnostics-refresh", "game-launch", "game-open-config",
         "game-select-install", "header-backup",
-        "header-diagnostics", "header-launch",
-        "header-restore", "optimizer-apply", "optimizer-backup",
-        "optimizer-export", "optimizer-import", "optimizer-open-backups",
-        "optimizer-open-settings", "optimizer-preview", "optimizer-restore",
+        "header-launch",
+        "header-restore", "optimizer-backup", "optimizer-restore",
         "overlay-position", "overlay-scale-down", "overlay-scale-reset",
         "overlay-scale-up", "overlay-show-cpu", "overlay-show-fps",
         "overlay-show-frame-time", "overlay-show-gpu",
@@ -47,12 +43,11 @@ int main() {
         "settings-adaptive-maximum-down", "settings-adaptive-maximum-up",
         "settings-adaptive-minimum-down", "settings-adaptive-minimum-up",
         "settings-adaptive-recovery", "settings-adaptive-shadow",
-        "settings-advanced-toggle", "settings-animations",
         "settings-corpses-down", "settings-corpses-up",
-        "settings-finetuning",
         "settings-target-down", "settings-target-up",
         "settings-updates-automatic", "settings-updates-check",
         "settings-updates-install", "settings-updates-later",
+        "settings-updates-ignore",
     }};
 
     constexpr std::array<std::string_view, 6> kExistingControls{{
@@ -62,12 +57,8 @@ int main() {
         "settings-target-slider",
     }};
 
-    constexpr std::array<ActionId, 89> kStableActionIds{{
-        ActionId::navigate_diagnostics,
+    constexpr std::array<ActionId, 76> kStableActionIds{{
         ActionId::retired_navigate_guide,
-        ActionId::navigate_settings,
-        ActionId::navigate_overlay,
-        ActionId::navigate_optimizer,
         ActionId::refresh_status,
         ActionId::diagnostics_benchmark_baseline,
         ActionId::diagnostics_benchmark_compare,
@@ -81,20 +72,14 @@ int main() {
         ActionId::diagnostics_open_data,
         ActionId::diagnostics_open_log,
         ActionId::game_launch,
-        ActionId::game_offline_telemetry,
         ActionId::game_open_config,
-        ActionId::game_open_install,
-        ActionId::game_open_logs,
         ActionId::game_select_install,
         ActionId::retired_guide_finish,
         ActionId::retired_guide_next,
         ActionId::retired_guide_previous,
         ActionId::retired_guide_reset,
         ActionId::retired_guide_reset_completion,
-        ActionId::optimizer_apply,
         ActionId::optimizer_backup,
-        ActionId::optimizer_export,
-        ActionId::optimizer_import,
         ActionId::retired_optimizer_manual_create,
         ActionId::retired_optimizer_manual_decrease,
         ActionId::retired_optimizer_manual_increase,
@@ -105,8 +90,6 @@ int main() {
         ActionId::retired_optimizer_manual_previous,
         ActionId::retired_optimizer_manual_previous_group,
         ActionId::retired_optimizer_manual_reset,
-        ActionId::optimizer_open_backups,
-        ActionId::optimizer_preview,
         ActionId::optimizer_restore,
         ActionId::overlay_position,
         ActionId::overlay_scale_down,
@@ -132,8 +115,6 @@ int main() {
         ActionId::settings_adaptive_minimum_up,
         ActionId::settings_adaptive_recovery,
         ActionId::settings_adaptive_shadow,
-        ActionId::settings_advanced_toggle,
-        ActionId::settings_animations,
         ActionId::settings_corpses_down,
         ActionId::settings_corpses_up,
         ActionId::retired_settings_flex_down,
@@ -152,15 +133,18 @@ int main() {
         ActionId::settings_updates_check,
         ActionId::settings_updates_install,
         ActionId::settings_updates_later,
+        ActionId::settings_updates_ignore,
     }};
 
-    for (std::size_t index = 0; index < kStableActionIds.size(); ++index) {
-        CHECK(static_cast<std::uint16_t>(kStableActionIds[index]) == index);
+    std::set<std::uint16_t> stable_action_ids;
+    for (const auto id : kStableActionIds) {
+        CHECK(stable_action_ids.insert(
+                  static_cast<std::uint16_t>(id)).second);
     }
 
-    CHECK(action_bindings().size() == 76);
-    CHECK(action_definitions().size() == 65);
-    CHECK(control_definitions().size() == kExistingControls.size());
+    CHECK(action_bindings().size() == 99);
+    CHECK(action_definitions().size() == 90);
+    CHECK(control_definitions().size() == kExistingControls.size() + 4);
 
     for (const auto name : kExistingActions) {
         const auto request = parse_action(name);
@@ -181,6 +165,23 @@ int main() {
     CHECK(!parse_action("header-guide").has_value());
     CHECK(!parse_action("guide-next").has_value());
     CHECK(!parse_action("settings-flex-down").has_value());
+    CHECK(!parse_action("settings-animations").has_value());
+    CHECK(!parse_action("settings-advanced-toggle").has_value());
+    CHECK(!parse_action("dashboard-settings").has_value());
+    CHECK(!parse_action("settings-finetuning").has_value());
+    CHECK(!parse_action("optimizer-open-settings").has_value());
+    CHECK(!parse_action("game-offline-telemetry").has_value());
+    CHECK(!parse_action("game-open-install").has_value());
+    CHECK(!parse_action("game-open-logs").has_value());
+    CHECK(!parse_action("optimizer-apply").has_value());
+    CHECK(!parse_action("optimizer-export").has_value());
+    CHECK(!parse_action("optimizer-import").has_value());
+    CHECK(!parse_action("optimizer-open-backups").has_value());
+    CHECK(!parse_action("optimizer-preview").has_value());
+    CHECK(!parse_action("dashboard-diagnostics").has_value());
+    CHECK(!parse_action("dashboard-overlay").has_value());
+    CHECK(!parse_action("dashboard-graphics").has_value());
+    CHECK(!parse_action("header-diagnostics").has_value());
     CHECK(find_control("unknown-slider") == nullptr);
 
     std::set<std::string_view> binding_names;
@@ -204,25 +205,13 @@ int main() {
         CHECK(parsed->id == definition.id);
     }
 
-    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::navigation)] == 4);
-    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::game)] == 6);
-    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::settings)] == 24);
+    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::game)] == 3);
+    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::settings)] == 23);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::overlay)] == 10);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::diagnostics)] == 14);
-    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::optimizer)] == 4);
-    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::backup)] == 3);
-
-    constexpr std::array<ActionId, 4> kNavigationIds{{
-        ActionId::navigate_diagnostics,
-        ActionId::navigate_settings,
-        ActionId::navigate_overlay,
-        ActionId::navigate_optimizer,
-    }};
-    for (const auto id : kNavigationIds) {
-        const auto* definition = find_action(id);
-        CHECK(definition != nullptr);
-        CHECK(definition->feature == FeatureId::navigation);
-    }
+    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::backup)] == 2);
+    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::graphics)] == 23);
+    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::advanced)] == 15);
 
     CHECK(find_action(ActionId::retired_settings_mode_manual) == nullptr);
     CHECK(find_action(ActionId::retired_settings_mode_adaptive) == nullptr);
@@ -242,6 +231,14 @@ int main() {
     }
     CHECK(overlay_controls == 1);
     CHECK(settings_controls == 5);
+    CHECK(find_control("graphics-film-grain-slider") != nullptr);
+    CHECK(find_control("graphics-film-grain-slider")->minimum == 0);
+    CHECK(find_control("graphics-film-grain-slider")->maximum == 200);
+    CHECK(find_control("advanced-screen-percentage-slider") != nullptr);
+    CHECK(find_control("advanced-screen-percentage-slider")->minimum == 50);
+    CHECK(find_control("advanced-screen-percentage-slider")->maximum == 200);
+    CHECK(find_control("advanced-particle-percentage-slider") != nullptr);
+    CHECK(find_control("advanced-decal-lifetime-slider") != nullptr);
 
     CHECK(parse_action("header-launch")->id ==
           parse_action("game-launch")->id);
@@ -261,11 +258,6 @@ int main() {
           parse_action("diagnostics-auto-repair")->id);
     CHECK(parse_action("dashboard-refresh")->id ==
           parse_action("diagnostics-refresh")->id);
-    CHECK(parse_action("dashboard-diagnostics")->id ==
-          parse_action("header-diagnostics")->id);
-    CHECK(parse_action("optimizer-open-settings")->id ==
-          parse_action("dashboard-settings")->id);
-
     CHECK(!requires_normal_mode(ActionId::game_launch, {.protected_game_launch = false}));
     CHECK(requires_normal_mode(ActionId::game_launch, {.protected_game_launch = true}));
     CHECK(requires_normal_mode(ActionId::optimizer_backup, {}));

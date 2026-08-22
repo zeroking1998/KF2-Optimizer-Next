@@ -27,12 +27,12 @@ DispatchResult handled(kf2::app::UiRuntime&, const ActionPayload&) {
 }
 
 constexpr std::array<std::string_view, 7> kFeatureNames{{
-    "navigation", "game", "settings", "overlay",
-    "diagnostics", "optimizer", "backup",
+    "game", "settings", "overlay", "diagnostics", "backup", "graphics",
+    "advanced",
 }};
 
 struct CompleteRegistryFixture {
-    std::array<std::array<ActionImplementation, 65>, 7> implementations{};
+    std::array<std::array<ActionImplementation, 90>, 7> implementations{};
     std::array<std::size_t, 7> counts{};
     std::array<FeatureDefinition, 7> features{};
 
@@ -59,12 +59,12 @@ int main() {
     CHECK(!valid_feature_registry({}));
 
     CompleteRegistryFixture complete;
-    CHECK(action_definitions().size() == 65);
+    CHECK(action_definitions().size() == 90);
     CHECK(complete.features.size() == 7);
     CHECK(valid_feature_registry(complete.features));
 
-    const std::array navigation_only{complete.features[0]};
-    CHECK(!valid_feature_registry(navigation_only));
+    const std::array game_only{complete.features[0]};
+    CHECK(!valid_feature_registry(game_only));
 
     const std::array duplicate_feature{
         complete.features[0], complete.features[0]};
@@ -98,7 +98,7 @@ int main() {
 
     CompleteRegistryFixture wrong_owner_fixture;
     auto wrong_owner_actions = wrong_owner_fixture.implementations[0];
-    wrong_owner_actions[0].id = ActionId::game_launch;
+    wrong_owner_actions[0].id = ActionId::settings_updates_check;
     wrong_owner_fixture.features[0].actions = {
         wrong_owner_actions.data(), wrong_owner_fixture.counts[0]};
     CHECK(!valid_feature_registry(wrong_owner_fixture.features));
@@ -110,9 +110,9 @@ int main() {
     CHECK(!valid_feature_registry(partial_fixture.features));
 
     CHECK(find_action_implementation(
-              ActionId::navigate_diagnostics, navigation_only) != nullptr);
+              ActionId::game_launch, game_only) != nullptr);
     CHECK(find_action_implementation(
-              ActionId::game_launch, navigation_only) == nullptr);
+              ActionId::overlay_toggle, game_only) == nullptr);
 
     return EXIT_SUCCESS;
 }

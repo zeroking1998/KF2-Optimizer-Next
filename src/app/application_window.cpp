@@ -32,8 +32,8 @@ Result<bool> UiRuntime::create_window(const std::wstring& title) {
         events->append({0, diagnostics::Severity::warning, "OVERLAY_UNAVAILABLE",
                         overlay_created.error().message, L"overlay"});
     }
-    // Reduced-motion mode uses a low-frequency maintenance tick and does
-    // not request the global 1 ms multimedia timer resolution.
+    // High-contrast mode uses a low-frequency maintenance tick and does not
+    // request the global 1 ms multimedia timer resolution.
     update_animation_cadence();
 
     auto graphics = ui::Direct2DShellRenderer::create(hwnd);
@@ -62,50 +62,6 @@ Result<bool> UiRuntime::create_window(const std::wstring& title) {
 
 void UiRuntime::invalidate() {
     if (!callbacks_ready) return;
-    const auto diagnostic_events = events->snapshot();
-    std::size_t warning_count = 0;
-    std::size_t error_count = 0;
-    for (const auto& event : diagnostic_events) {
-        if (event.severity == diagnostics::Severity::warning) ++warning_count;
-        if (event.severity == diagnostics::Severity::error) ++error_count;
-    }
-    std::wstring diagnostic_summary =
-        L"Events: " + std::to_wstring(diagnostic_events.size()) +
-        L" | warnings: " + std::to_wstring(warning_count) +
-        L" | errors: " + std::to_wstring(error_count);
-    const auto feature_counts = diagnostics::feature_status_counts();
-    const auto remaining_counts = diagnostics::remaining_scope_counts();
-    diagnostic_summary +=
-        L" | Issue 72: " + std::to_wstring(feature_counts.present) +
-        L" complete | " + std::to_wstring(feature_counts.partial) +
-        L" open evidence boundaries: " +
-        std::to_wstring(remaining_counts.engine_contract) +
-        L" engine/ABI, " +
-        std::to_wstring(remaining_counts.external_validation) +
-        L" external, " +
-        std::to_wstring(remaining_counts.user_authority) +
-        L" user authority, " +
-        std::to_wstring(remaining_counts.safety_boundary) +
-        L" safety | " + std::to_wstring(feature_counts.discarded) +
-        L" rejected unsafe changes | " +
-        std::to_wstring(feature_counts.planned +
-                        feature_counts.implementation_ready) +
-        L" locally implementation-ready";
-    if (!diagnostic_events.empty()) {
-        const auto& latest = diagnostic_events.back();
-        diagnostic_summary += L" | latest: " +
-            std::wstring{latest.code.begin(), latest.code.end()} + L" - " +
-            latest.message;
-        if (latest.repeat_count > 1) {
-            diagnostic_summary += L" (x" +
-                std::to_wstring(latest.repeat_count) + L")";
-        }
-    }
-    if (model.status().diagnostics_summary != diagnostic_summary) {
-        auto status = model.status();
-        status.diagnostics_summary = std::move(diagnostic_summary);
-        model.set_status(std::move(status));
-    }
     controller.synchronize_model();
     if (automation) automation->update_layout(controller.layout());
     if (window) window->invalidate();

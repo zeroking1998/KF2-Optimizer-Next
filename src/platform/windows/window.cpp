@@ -57,15 +57,10 @@ ThemeChangedEvent system_theme() {
         SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) !=
             FALSE &&
         (contrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
-    ANIMATIONINFO animation{sizeof(animation)};
-    const bool animations =
-        SystemParametersInfoW(SPI_GETANIMATION, sizeof(animation), &animation, 0) !=
-            FALSE &&
-        animation.iMinAnimate != 0;
     const COLORREF background = GetSysColor(COLOR_WINDOW);
     const unsigned brightness = GetRValue(background) + GetGValue(background) +
                                 GetBValue(background);
-    return {high_contrast, brightness < 384U, !animations};
+    return {high_contrast, brightness < 384U};
 }
 
 bool translate_key(WPARAM key, WindowKey& translated) {
@@ -331,6 +326,9 @@ Result<Window> Window::create(const WindowOptions& options) {
         }
     }
     state->dpi = static_cast<float>(GetDpiForWindow(window));
+    if (options.sink != nullptr) {
+        options.sink->on_theme_changed(system_theme());
+    }
     return Result<Window>::success(Window{window, state});
 }
 

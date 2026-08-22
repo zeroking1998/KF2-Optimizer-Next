@@ -1,6 +1,8 @@
 #include "kf2/ui/direct2d_renderer.hpp"
+#include "kf2/ui/ui_animation.hpp"
 
 #include <d2d1_1.h>
+#include <d2d1helper.h>
 #include <dwrite.h>
 #include <wincodec.h>
 #include <wrl/client.h>
@@ -101,6 +103,12 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
 
     target->BeginDraw();
     target->Clear(color(theme.background));
+    if (layout.exit_progress >= 1.0F) {
+        return target->EndDraw();
+    }
+    const float exit_visibility =
+        1.0F - smooth_motion(layout.exit_progress);
+    brush->SetOpacity(1.0F);
     brush->SetColor(color(theme.surface));
     target->FillRectangle(rectangle(layout.header), brush.Get());
     target->FillRectangle(rectangle(layout.sidebar), brush.Get());
@@ -113,27 +121,91 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
     target->DrawRectangle(rectangle(layout.metrics_strip), brush.Get(), 1.0F);
     target->DrawRectangle(rectangle(layout.sidebar), brush.Get(), 1.0F);
 
+    if (layout.navigation_indicator) {
+        DipRect rail = *layout.navigation_indicator;
+        rail.width = std::min(4.0F, rail.width);
+        brush->SetOpacity(exit_visibility);
+        brush->SetColor(color(theme.accent));
+        target->FillRoundedRectangle(
+            {rectangle(rail), 2.0F, 2.0F},
+            brush.Get());
+    }
+
     for (const auto& node : layout.nodes) {
         if (node.role == SemanticRole::root) continue;
+        float node_opacity =
+            std::clamp(node.opacity, 0.0F, 1.0F) * exit_visibility;
         const bool header_action = node.role == SemanticRole::action &&
-            node.action_id && node.action_id->starts_with("header-");
+            node.id.starts_with("header-");
         const bool page_node = node.role == SemanticRole::page_heading ||
             node.role == SemanticRole::page_body ||
             node.role == SemanticRole::section_heading ||
+            node.role == SemanticRole::recovery_banner ||
+            node.role == SemanticRole::notice ||
             (node.role == SemanticRole::action && !header_action) ||
             node.role == SemanticRole::slider;
+        if (page_node) {
+            node_opacity *= page_motion_opacity(
+                layout.page_transition_progress);
+        }
+        brush->SetOpacity(node_opacity);
         if (page_node) {
             target->PushAxisAlignedClip(rectangle(layout.content),
                                         D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         }
+        D2D1_MATRIX_3X2_F original_transform{};
+        bool animated_transform = false;
+        D2D1_MATRIX_3X2_F motion_transform =
+            D2D1::Matrix3x2F::Identity();
+        if (page_node) {
+            motion_transform = motion_transform * D2D1::Matrix3x2F::Translation(
+                page_motion_offset_x(layout.page_transition_progress), 0.0F);
+            animated_transform = true;
+        }
+        if (node.role == SemanticRole::tooltip) {
+            motion_transform = motion_transform * D2D1::Matrix3x2F::Translation(
+                0.0F, tooltip_motion_offset_y(node.opacity));
+            animated_transform = true;
+        }
+        if ((node.role == SemanticRole::navigation_item ||
+             node.role == SemanticRole::action ||
+             node.role == SemanticRole::slider) &&
+            node.interaction > 0.0F) {
+            const float scale = control_press_scale(node.interaction);
+            const D2D1_POINT_2F center{
+                node.bounds.x + node.bounds.width / 2.0F,
+                node.bounds.y + node.bounds.height / 2.0F};
+            motion_transform = motion_transform *
+                D2D1::Matrix3x2F::Scale(scale, scale, center);
+            animated_transform = true;
+        }
+        if (animated_transform) {
+            target->GetTransform(&original_transform);
+            target->SetTransform(motion_transform * original_transform);
+        }
 
         if (node.role == SemanticRole::brand) {
             const bool mark = node.id == "brand-mark";
+            const float brand_progress = std::min(
+                layout.startup_progress, 1.0F - layout.exit_progress);
+            target->GetTransform(&original_transform);
+            const D2D1_POINT_2F center{
+                node.bounds.x + node.bounds.width / 2.0F,
+                node.bounds.y + node.bounds.height / 2.0F};
+            const auto brand_transform = mark
+                ? D2D1::Matrix3x2F::Scale(
+                      startup_logo_scale(brand_progress),
+                      startup_logo_scale(brand_progress), center)
+                : D2D1::Matrix3x2F::Translation(
+                      startup_title_offset_x(brand_progress), 0.0F);
+            target->SetTransform(brand_transform * original_transform);
+            brush->SetOpacity(smooth_motion(brand_progress));
             brush->SetColor(color(mark ? theme.accent : theme.text));
             target->DrawTextW(node.text.c_str(), static_cast<UINT32>(node.text.size()),
                               mark ? brand_mark_format.Get() : brand_format.Get(),
                               rectangle(node.bounds), brush.Get(),
                               D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            target->SetTransform(original_transform);
             continue;
         }
 
@@ -155,10 +227,24 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
             brush->SetColor(color(theme.surface_raised));
             target->FillRoundedRectangle(
                 {rectangle(node.bounds), 7.0F, 7.0F}, brush.Get());
+            if (node.hover > 0.0F) {
+                brush->SetOpacity(node_opacity * node.hover * 0.12F);
+                brush->SetColor(color(theme.info));
+                target->FillRoundedRectangle(
+                    {rectangle(node.bounds), 7.0F, 7.0F}, brush.Get());
+                brush->SetOpacity(node_opacity);
+            }
             brush->SetColor(color(node.focused ? theme.accent : theme.border));
             target->DrawRoundedRectangle(
                 {rectangle(node.bounds), 7.0F, 7.0F}, brush.Get(),
                 node.focused ? 2.0F : 1.0F);
+            if (node.interaction > 0.0F) {
+                brush->SetOpacity(node_opacity * node.interaction);
+                brush->SetColor(color(theme.info));
+                target->DrawRoundedRectangle(
+                    {rectangle(node.bounds), 7.0F, 7.0F}, brush.Get(), 3.0F);
+                brush->SetOpacity(node_opacity);
+            }
 
             brush->SetColor(color(node.enabled ? theme.text : theme.muted_text));
             const D2D1_RECT_F label_bounds{
@@ -205,25 +291,28 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
             brush->SetColor(color(node.enabled ? theme.accent : theme.muted_text));
             target->DrawEllipse({{thumb_x, track_y}, 8.0F, 8.0F},
                                 brush.Get(), 2.0F);
+            if (animated_transform) target->SetTransform(original_transform);
             if (page_node) target->PopAxisAlignedClip();
             continue;
         }
 
         if (node.role == SemanticRole::navigation_item &&
             (node.selected || node.focused)) {
-            brush->SetColor(color(node.selected ? theme.accent : theme.surface_raised));
+            brush->SetColor(color(theme.surface_raised));
             target->FillRoundedRectangle(
                 {rectangle(node.bounds), 6.0F, 6.0F}, brush.Get());
             brush->SetColor(color(node.selected ? theme.accent_hover : theme.border));
             target->DrawRoundedRectangle(
                 {rectangle(node.bounds), 6.0F, 6.0F}, brush.Get(), 1.0F);
         } else if (node.role == SemanticRole::navigation_item) {
-            brush->SetColor(color(theme.surface_raised));
-            target->FillRoundedRectangle(
-                {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get());
-            brush->SetColor(color(theme.border));
-            target->DrawRoundedRectangle(
-                {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get(), 1.0F);
+            if (!node.selected) {
+                brush->SetColor(color(theme.surface_raised));
+                target->FillRoundedRectangle(
+                    {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get());
+                brush->SetColor(color(theme.border));
+                target->DrawRoundedRectangle(
+                    {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get(), 1.0F);
+            }
         } else if (node.role == SemanticRole::recovery_banner ||
                    node.role == SemanticRole::notice) {
             brush->SetColor(color(theme.surface_raised));
@@ -237,16 +326,19 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
                 (*node.action_id == "game-launch" ||
                  *node.action_id == "header-launch" ||
                  *node.action_id == "dashboard-launch" ||
-                 *node.action_id == "optimizer-apply" ||
                  *node.action_id == "diagnostics-full-check");
             const bool emphasized = primary;
-            if (node.attention && node.enabled) {
+            if (node.attention && node.enabled &&
+                layout.update_glow_progress < 1.0F) {
+                brush->SetOpacity(node_opacity *
+                    update_glow_opacity(layout.update_glow_progress));
                 brush->SetColor(color(theme.warning));
                 target->DrawRoundedRectangle(
                     {rectangle({node.bounds.x - 3.0F, node.bounds.y - 3.0F,
                                 node.bounds.width + 6.0F,
                                 node.bounds.height + 6.0F}), 8.0F, 8.0F},
                     brush.Get(), 3.0F);
+                brush->SetOpacity(node_opacity);
             }
             brush->SetColor(color(!node.enabled ? theme.surface_raised
                                                 : node.attention ? theme.warning
@@ -254,7 +346,7 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
                                                           : theme.surface_raised));
             target->FillRoundedRectangle(
                 {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get());
-            brush->SetColor(color(node.focused ? theme.accent_hover :
+            brush->SetColor(color(node.focused ? theme.info :
                                   node.enabled ? (node.selected ? theme.success
                                                 : emphasized ? theme.accent_hover
                                                              : theme.border)
@@ -262,6 +354,13 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
             target->DrawRoundedRectangle(
                 {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get(),
                 node.focused || node.selected ? 2.0F : 1.0F);
+            if (node.interaction > 0.0F) {
+                brush->SetOpacity(node_opacity * node.interaction);
+                brush->SetColor(color(theme.info));
+                target->DrawRoundedRectangle(
+                    {rectangle(node.bounds), 6.0F, 6.0F}, brush.Get(), 3.0F);
+                brush->SetOpacity(node_opacity);
+            }
         } else if (node.role == SemanticRole::tooltip) {
             brush->SetColor(color(theme.surface_raised));
             target->FillRoundedRectangle(
@@ -269,6 +368,15 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
             brush->SetColor(color(theme.border));
             target->DrawRoundedRectangle(
                 {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get(), 1.0F);
+        }
+
+        if ((node.role == SemanticRole::navigation_item ||
+             node.role == SemanticRole::action) && node.hover > 0.0F) {
+            brush->SetOpacity(node_opacity * node.hover * 0.12F);
+            brush->SetColor(color(theme.info));
+            target->FillRoundedRectangle(
+                {rectangle(node.bounds), 6.0F, 6.0F}, brush.Get());
+            brush->SetOpacity(node_opacity);
         }
 
         const bool heading = node.role == SemanticRole::page_heading;
@@ -282,10 +390,7 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
                                   : node.role == SemanticRole::page_body ||
                                             node.role == SemanticRole::footer
                                       ? theme.muted_text
-                                  : (node.selected &&
-                                             node.role == SemanticRole::navigation_item
-                                         ? theme.surface
-                                         : theme.text)));
+                                  : theme.text));
         const auto bounds = rectangle(node.bounds);
         target->DrawTextW(node.text.c_str(), static_cast<UINT32>(node.text.size()),
                           heading ? heading_format.Get()
@@ -293,8 +398,10 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
                                       ? action_format.Get()
                                       : body_format.Get(),
                           bounds, brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        if (animated_transform) target->SetTransform(original_transform);
         if (page_node) target->PopAxisAlignedClip();
     }
+    brush->SetOpacity(exit_visibility);
     if (layout.scroll_extent > 0.0F && layout.content.height > 0.0F) {
         const float track_x = layout.content.x + layout.content.width + 5.0F;
         const float track_top = layout.content.y;

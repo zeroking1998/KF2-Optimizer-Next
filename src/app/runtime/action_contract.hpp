@@ -9,7 +9,7 @@
 namespace kf2::app::runtime {
 
 enum class FeatureId : std::uint8_t {
-    navigation, game, settings, overlay, diagnostics, optimizer, backup
+    game, settings, overlay, diagnostics, backup, graphics, advanced
 };
 
 enum class AccessPolicy : std::uint8_t {
@@ -19,11 +19,7 @@ enum class AccessPolicy : std::uint8_t {
 };
 
 enum class ActionId : std::uint16_t {
-    navigate_diagnostics = 0,
     retired_navigate_guide = 1,
-    navigate_settings = 2,
-    navigate_overlay = 3,
-    navigate_optimizer = 4,
     refresh_status = 5,
     diagnostics_benchmark_baseline = 6,
     diagnostics_benchmark_compare = 7,
@@ -37,20 +33,14 @@ enum class ActionId : std::uint16_t {
     diagnostics_open_data = 15,
     diagnostics_open_log = 16,
     game_launch = 17,
-    game_offline_telemetry = 18,
     game_open_config = 19,
-    game_open_install = 20,
-    game_open_logs = 21,
     game_select_install = 22,
     retired_guide_finish = 23,
     retired_guide_next = 24,
     retired_guide_previous = 25,
     retired_guide_reset = 26,
     retired_guide_reset_completion = 27,
-    optimizer_apply = 28,
     optimizer_backup = 29,
-    optimizer_export = 30,
-    optimizer_import = 31,
     retired_optimizer_manual_create = 32,
     retired_optimizer_manual_decrease = 33,
     retired_optimizer_manual_increase = 34,
@@ -61,8 +51,6 @@ enum class ActionId : std::uint16_t {
     retired_optimizer_manual_previous = 39,
     retired_optimizer_manual_previous_group = 40,
     retired_optimizer_manual_reset = 41,
-    optimizer_open_backups = 42,
-    optimizer_preview = 43,
     optimizer_restore = 44,
     overlay_position = 45,
     overlay_scale_down = 46,
@@ -88,8 +76,6 @@ enum class ActionId : std::uint16_t {
     settings_adaptive_minimum_up = 66,
     settings_adaptive_recovery = 67,
     settings_adaptive_shadow = 68,
-    settings_advanced_toggle = 69,
-    settings_animations = 70,
     settings_corpses_down = 71,
     settings_corpses_up = 72,
     retired_settings_flex_down = 73,
@@ -108,11 +94,52 @@ enum class ActionId : std::uint16_t {
     settings_updates_check = 86,
     settings_updates_install = 87,
     settings_updates_later = 88,
+    settings_updates_ignore = 89,
+    graphics_display = 90,
+    graphics_resolution = 91,
+    graphics_overall_quality = 92,
+    graphics_vsync = 93,
+    graphics_variable_frame_rate = 94,
+    graphics_environment_detail = 95,
+    graphics_character_detail = 96,
+    graphics_fx = 97,
+    graphics_texture_resolution = 98,
+    graphics_texture_filtering = 99,
+    graphics_shadow_quality = 100,
+    graphics_realtime_reflections = 101,
+    graphics_anti_aliasing = 102,
+    graphics_bloom = 103,
+    graphics_motion_blur = 104,
+    graphics_ambient_occlusion = 105,
+    graphics_depth_of_field = 106,
+    graphics_volumetric_lighting = 107,
+    graphics_lens_flares = 108,
+    graphics_light_shafts = 109,
+    graphics_flex = 110,
+    graphics_apply = 111,
+    graphics_reset = 112,
+    advanced_one_frame_thread_lag = 113,
+    advanced_per_frame_sleep = 114,
+    advanced_per_frame_yield = 115,
+    advanced_background_level_streaming = 116,
+    advanced_texture_streaming = 117,
+    advanced_priority_streaming = 118,
+    advanced_dynamic_streaming = 119,
+    advanced_temporal_aa = 120,
+    advanced_hardware_shadow_filtering = 121,
+    advanced_downsampled_translucency = 122,
+    advanced_floating_point_render_targets = 123,
+    advanced_max_multisamples = 124,
+    advanced_gore_level = 125,
+    advanced_apply = 126,
+    advanced_reset = 127,
 };
 
 enum class ControlId : std::uint8_t {
     overlay_scale, adaptive_headroom, adaptive_maximum, adaptive_minimum,
-    corpse_limit, retired_gore_effect_limit, target_fps,
+    corpse_limit, retired_gore_effect_limit, target_fps, film_grain,
+    advanced_screen_percentage, advanced_particle_percentage,
+    advanced_decal_lifetime,
 };
 
 struct NoPayload final {};

@@ -101,9 +101,8 @@ Result<Settings> parse_settings(std::string_view text) {
                     return invalid_settings(L"sound_enabled is invalid");
                 }
             } else if (key == "animations_enabled") {
-                const auto parsed = parse_boolean(value);
-                if (!parsed.has_value()) return invalid_settings(L"animations_enabled is invalid");
-                settings.animations_enabled = parsed.value();
+                // Retired preference. Accept any legacy value so older
+                // portable settings migrate without retaining the switch.
             } else if (key == "automatic_update_checks") {
                 const auto parsed = parse_boolean(value);
                 if (!parsed.has_value()) {
@@ -158,7 +157,6 @@ Result<Settings> parse_settings(std::string_view text) {
                     return invalid_settings(
                         L"offline_gameplay_telemetry is invalid");
                 }
-                settings.offline_gameplay_telemetry = parsed.value();
             } else if (key == "adaptive_enabled") {
                 const auto parsed = parse_boolean(value);
                 if (!parsed.has_value()) {
@@ -358,7 +356,6 @@ std::string serialize_settings(const Settings& settings) {
     std::ostringstream output;
     output << "schema_version=" << settings.schema_version << '\n'
            << "optimizer_mode=adaptive\n"
-           << "animations_enabled=" << (settings.animations_enabled ? "true" : "false") << '\n'
            << "automatic_update_checks="
            << (settings.automatic_update_checks ? "true" : "false") << '\n'
            << "overlay_enabled=" << (settings.overlay_enabled ? "true" : "false") << '\n'
@@ -369,8 +366,6 @@ std::string serialize_settings(const Settings& settings) {
            << "overlay_show_memory=" << (settings.overlay_show_memory ? "true" : "false") << '\n'
            << "restore_config_after_game="
            << (settings.restore_config_after_game ? "true" : "false") << '\n'
-           << "offline_gameplay_telemetry="
-           << (settings.offline_gameplay_telemetry ? "true" : "false") << '\n'
            << "adaptive_aggressiveness="
            << settings.adaptive_aggressiveness << '\n'
            << "adaptive_minimum_quality="

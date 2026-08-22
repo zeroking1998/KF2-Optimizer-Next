@@ -50,7 +50,6 @@ struct PointerEvent {
 struct ThemeChangedEvent {
     bool high_contrast{false};
     bool dark{false};
-    bool reduced_motion{false};
 };
 
 class WindowEventSink {

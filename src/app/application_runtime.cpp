@@ -390,6 +390,15 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
                    },
                    .set_slider_value = [this](std::string_view id, int value) {
                        set_slider_value(id, value);
+                   },
+                   .request_close = [this] {
+                       if (!window) return;
+                       const auto handle = static_cast<HWND>(
+                           window->native_handle_for_testing());
+                       if (handle) PostMessageW(handle, WM_CLOSE, 0, 0);
+                   },
+                   .theme_changed = [this] {
+                       update_animation_cadence();
                    }}},
       events{&event_log},
       settings_path{state_root / L"settings.ini"},
@@ -429,10 +438,7 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
     status.target_fps = settings.target_fps;
     status.corpse_limit = settings.corpse_limit;
     update_adaptive_policy_status(status);
-    status.animations_enabled = settings.animations_enabled;
     status.restore_config_after_game = settings.restore_config_after_game;
-    status.offline_gameplay_telemetry =
-        settings.offline_gameplay_telemetry;
     status.overlay_enabled = overlay_enabled;
     status.overlay_show_fps = settings.overlay_show_fps;
     status.overlay_show_frame_time = settings.overlay_show_frame_time;
@@ -458,14 +464,12 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
     status.recommendation_reason = initial_profile
         ? L"Automatic profile is ready; gameplay telemetry will refine later launches"
         : L"No verified named profile fits the selected quality limits";
-    status.recommendation_ready = initial_profile.has_value();
     if (discovery) {
         auto found = game::discover_game_installation(*discovery);
         if (found.has_value()) {
             installation = std::move(found.value());
             status.game = L"Game detected: " + installation->install_root.wstring();
             status.game_detected = true;
-            status.config = ui::ConfigWorkflowState::detected;
             const auto game_running =
                 game::find_running_game_process(installation->executable).has_value();
             const auto telemetry_recovered =
@@ -547,13 +551,10 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
                               L"discovery"});
         }
     }
-    if (recovery_required) {
-        status.config = ui::ConfigWorkflowState::recovery_required;
-    } else {
+    if (!recovery_required) {
         const auto existing = backups.list_backups();
         if (existing.has_value() && !existing.value().empty()) {
             last_backup_id = existing.value().front().id;
-            status.config = ui::ConfigWorkflowState::restore_available;
         }
     }
     const auto loaded_locks = load_adaptive_locks();
@@ -569,14 +570,19 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
     }
     model.set_recovery_required(recovery_required);
     model.set_status(std::move(status));
+    reload_video_settings();
+    reload_advanced_settings();
     const auto persisted_update = update::load_update_state(update_state_path);
+    const auto cached_update = persisted_update.has_value()
+        ? persisted_update.value() : update::PersistedUpdateState{};
     update_controller.restore_preferences(
         settings.automatic_update_checks,
-        persisted_update.has_value()
-            ? persisted_update.value().last_check_unix_seconds
-            : 0);
+        cached_update.last_check_unix_seconds,
+        cached_update.last_result != update::PersistedCheckResult::unknown,
+        cached_update.last_result == update::PersistedCheckResult::available
+            ? cached_update.available_version : std::string{},
+        cached_update.ignored_version);
     refresh_update_presentation();
-    controller.set_animations_enabled(settings.animations_enabled);
     callbacks_ready = true;
     if (current_build_identity().channel == "release") {
         start_update_check(update::CheckTrigger::automatic);
@@ -606,56 +612,9 @@ Result<config::ConfigPreview> UiRuntime::prepare(
         documents.emplace(definition->relative_path, std::move(parsed.value()));
     }
     auto built = config::build_preview(*installation, requests, documents);
-    if (!built.has_value()) {
-        auto status = model.status();
-        status.config = ui::ConfigWorkflowState::apply_blocked;
-        model.set_status(std::move(status));
-        return built;
-    }
+    if (!built.has_value()) return built;
     preview = built.value();
     preview_context = std::move(context);
-    const auto value_text = [](const config::SettingValue& value) {
-        if (const auto* integer = std::get_if<int>(&value)) {
-            return std::to_wstring(*integer);
-        }
-        if (const auto* boolean = std::get_if<bool>(&value)) {
-            return std::wstring{*boolean ? L"On" : L"Off"};
-        }
-        std::wostringstream output;
-        output.imbue(std::locale::classic());
-        output << std::fixed << std::setprecision(2) << std::get<double>(value);
-        auto text = output.str();
-        while (text.size() > 2 && text.back() == L'0') text.pop_back();
-        if (!text.empty() && text.back() == L'.') text.pop_back();
-        return text;
-    };
-    std::wstring summary = L"Preview: " +
-        std::to_wstring(preview->items.size()) + L" settings in " +
-        std::to_wstring(preview->files.size()) + L" file(s).\n";
-    constexpr std::size_t kVisibleItems = 7;
-    for (std::size_t index = 0;
-         index < preview->items.size() && index < kVisibleItems; ++index) {
-        const auto& item = preview->items[index];
-        summary += item.key + L": " + value_text(item.before) + L" -> " +
-            value_text(item.after) + L" [" +
-            (item.source == config::ChangeSource::explicit_user
-                 ? L"Explicit"
-                 : L"Adaptive") +
-            (item.reason.empty() ? L"]" : L": " + item.reason + L"]") +
-            (item.state == config::PreviewState::unchanged
-                 ? L" (unchanged)\n" : L"\n");
-    }
-    if (preview->items.size() > kVisibleItems) {
-        summary += L"+ " +
-            std::to_wstring(preview->items.size() - kVisibleItems) +
-            L" more; Export preview shows the complete list.";
-    } else {
-        summary += L"Review these values before Apply.";
-    }
-    model.set_preview_summary(std::move(summary));
-    auto status = model.status();
-    status.config = ui::ConfigWorkflowState::preview_ready;
-    model.set_status(std::move(status));
     events->append({0, diagnostics::Severity::info,
                     "CONFIG_PREVIEW_READY",
                     preview_context + L": " +

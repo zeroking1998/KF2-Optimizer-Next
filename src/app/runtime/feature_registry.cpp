@@ -6,13 +6,13 @@ namespace kf2::app::runtime {
 namespace {
 
 constexpr std::array<FeatureId, 7> kFeatureIds{{
-    FeatureId::navigation,
     FeatureId::game,
     FeatureId::settings,
     FeatureId::overlay,
     FeatureId::diagnostics,
-    FeatureId::optimizer,
     FeatureId::backup,
+    FeatureId::graphics,
+    FeatureId::advanced,
 }};
 
 bool known_feature(FeatureId id) noexcept {

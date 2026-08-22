@@ -14,7 +14,7 @@ string(REPLACE "|" ";" feature_sources
 string(REPLACE "|" ";" app_sources "${KF2_APP_ACTION_SOURCES_PIPE}")
 
 set(feature_names
-    backup diagnostics game navigation optimizer overlay settings)
+    advanced backup diagnostics game graphics overlay settings)
 list(LENGTH feature_sources feature_source_count)
 if(NOT feature_source_count EQUAL 7)
     message(FATAL_ERROR
@@ -56,9 +56,9 @@ foreach(expected IN LISTS canonical_feature_sources)
 endforeach()
 
 list(LENGTH app_sources app_source_count)
-if(NOT app_source_count EQUAL 12)
+if(NOT app_source_count EQUAL 13)
     message(FATAL_ERROR
-        "Shared app action list must contain five runtime plus seven feature sources")
+        "Shared app action list must contain six runtime plus seven feature sources")
 endif()
 set(unique_app_sources ${app_sources})
 list(REMOVE_DUPLICATES unique_app_sources)
@@ -113,7 +113,7 @@ set(action_literals)
 foreach(literal IN LISTS contract_literals)
     string(REGEX REPLACE "^\"|\"$" "" name "${literal}")
     if(name MATCHES
-       "^(dashboard|diagnostics|game|header|optimizer|overlay|settings)-" AND
+       "^(dashboard|diagnostics|game|graphics|header|optimizer|overlay|settings)-" AND
        NOT name MATCHES "-slider$")
         list(APPEND action_literals "${name}")
     endif()
@@ -179,4 +179,4 @@ if(protected_provider_policy EQUAL -1 OR protected_provider_install EQUAL -1)
 endif()
 
 message(STATUS
-    "Action architecture verified: 7 feature sources, one shared source list, no migration or raw action-name drift")
+    "Action architecture verified: 6 feature sources, one shared source list, no migration or raw action-name drift")

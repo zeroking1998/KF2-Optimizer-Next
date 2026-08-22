@@ -3,6 +3,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 #include "kf2/platform/windows/window_events.hpp"
 #include "kf2/ui/shell_layout.hpp"
@@ -21,6 +22,8 @@ struct ShellControllerCallbacks {
     std::function<void()> toggle_overlay;
     std::function<void(std::string_view)> activate_action;
     std::function<void(std::string_view, int)> set_slider_value;
+    std::function<void()> request_close;
+    std::function<void()> theme_changed;
 };
 
 class ShellController final : public platform::windows::WindowEventSink {
@@ -44,7 +47,6 @@ public:
     void synchronize_model();
     void focus_target(Destination destination,
                       std::optional<std::string_view> action = std::nullopt);
-    void set_animations_enabled(bool enabled);
 
 private:
     void apply(UiAction action);
@@ -54,6 +56,14 @@ private:
     void activate_keyboard_focus();
     void update_hover_tooltip(const SemanticNode* node);
     void clear_hover_tooltip();
+    [[nodiscard]] bool render_active_tooltip();
+    void begin_interaction(std::string_view node_id);
+    void end_interaction();
+    [[nodiscard]] bool render_active_interaction();
+    [[nodiscard]] bool advance_hover_states();
+    void render_hover_states();
+    void apply_motion_state();
+    [[nodiscard]] std::optional<DipRect> selected_navigation_bounds() const;
     [[nodiscard]] bool adjust_focused_slider(
         platform::windows::WindowKey key);
     [[nodiscard]] std::optional<int> slider_value_at(
@@ -66,10 +76,26 @@ private:
     platform::windows::WindowSize client_size_{1440, 900};
     float dpi_{96};
     ThemeInput theme_input_{};
-    bool user_animations_enabled_{true};
     Theme theme_{resolve_theme(theme_input_)};
     ShellLayoutResult layout_;
     std::optional<std::string> hovered_node_id_;
+    std::optional<std::string> tooltip_target_id_;
+    float tooltip_opacity_{0.0F};
+    std::optional<std::string> interaction_target_id_;
+    float interaction_strength_{0.0F};
+    bool interaction_held_{false};
+    std::unordered_map<std::string, float> hover_strengths_;
+    float startup_progress_{0.0F};
+    float page_transition_progress_{0.0F};
+    float navigation_transition_progress_{1.0F};
+    float navigation_from_y_{0.0F};
+    float navigation_to_y_{0.0F};
+    float update_glow_progress_{1.0F};
+    bool update_was_available_{false};
+    std::optional<Destination> rendered_destination_;
+    float exit_progress_{0.0F};
+    bool closing_{false};
+    bool close_ready_{false};
     std::optional<std::string> pressed_node_id_;
     std::optional<std::string> dragged_slider_id_;
     std::optional<int> dragged_slider_value_;

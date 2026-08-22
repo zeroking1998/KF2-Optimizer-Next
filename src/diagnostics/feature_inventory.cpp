@@ -285,7 +285,7 @@ constexpr std::array area12_items{
     ItemSpec{FeatureStatus::partial, "rigid bodies, shapes, shape matching, and collision shapes", "KF2's shipped high-level rigid-body collision switch is catalogued but protected from Adaptive writes; per-shape gameplay-neutral mutation remains unavailable."},
     ItemSpec{FeatureStatus::partial, "filters, containers, multiple solvers, and generations", "Multiple solver lifecycles and generations are tracked; filter/container semantics are not."},
     ItemSpec{FeatureStatus::partial, "neighbor, contact, and timer data when exported", "The pinned 1.0.5 runtime exports flexGetContacts at ordinal 16 and the laboratory DLL preserves it as an exact direct PE forwarder. No timer export exists, and no ABI-proven non-invasive semantic observation is added."},
-    ItemSpec{FeatureStatus::partial, "feature modes and selective functions", "Adaptive owns the bounded FleX policy without a second mode switch; unproved global FleX sleep/fluid/rigid controls remain protected from automatic mutation."},
+    ItemSpec{FeatureStatus::partial, "feature modes and selective functions", "Adaptive uses the bounded FleX policy only when the user already enabled FleX in KF2; PhysXLevel and unproved global FleX sleep/fluid/rigid controls remain protected from automatic mutation."},
     ItemSpec{FeatureStatus::partial, "asynchronous computation and synchronization points", "The exported set/wait fence calls are counted after exact relay; no wait or synchronization is added by the optimizer."},
     ItemSpec{FeatureStatus::partial, "subrange updates, mapping, and memory transfers", "All six full-buffer particle/phase/velocity upload and download entry points are relayed exactly and measured; the pinned 1.0.5 ABI exposes no verified subrange or mapping entry point, so none is invented."},
     ItemSpec{FeatureStatus::partial, "GPU context loss, TDR, driver changes, and error states", "Stale/failed observations fall back; physical TDR/driver matrices remain target-system tests."},
@@ -317,7 +317,7 @@ constexpr std::array area13_items{
 constexpr AreaContract area14{
     "UI and operation", "src/ui; src/overlay; src/platform/windows/window.cpp",
     "Win32, Direct2D, DirectWrite and UI Automation", "A APIs/B tests",
-    "Semantic navigation/actions, scrolling, focus, clipping-safe layout, overlay corners and reduced motion are implemented.",
+    "Semantic navigation/actions, scrolling, focus, clipping-safe layout and overlay corners are implemented.",
     "Clear portable operation without a secondary runtime.",
     "HDR, mixed-DPI and physical multi-monitor visuals require target systems.",
     "All product modes with mutation guards.", "Local settings can be reset/quarantined; overlay never edits game memory.",
@@ -326,7 +326,7 @@ constexpr AreaContract area14{
     "renderer, automation, shell, lifecycle and overlay tests; validate_gui.ps1"};
 
 constexpr std::array area14_items{
-    ItemSpec{FeatureStatus::present, "main window, dashboard, and navigation", "Native window, four visible destinations, status, and global Update/Repair actions are tested."},
+    ItemSpec{FeatureStatus::present, "main window, dashboard, and navigation", "Native window, three visible destinations, Home goals, status, and global Update/automatic-check/Repair actions are tested."},
     ItemSpec{FeatureStatus::present, "Adaptive control", "The single Adaptive mode is explicit, persistent and accessible."},
     ItemSpec{FeatureStatus::present, "effective values, source, and status", "Status, source/reason and active settings are visible in UI/report/preview."},
     ItemSpec{FeatureStatus::present, "preview, confirmation, and error messages", "Typed notices and explicit apply workflow are implemented."},

@@ -1,6 +1,7 @@
 #include <Windows.h>
 #include <wincodec.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -118,6 +119,7 @@ int wmain(int argument_count, wchar_t** arguments) {
     auto status = model.status();
     status.mode = L"Adaptive / Automatic";
     status.game = L"Game detected: D:\\Steam\\KillingFloor2";
+    status.game_detected = true;
     status.telemetry = L"143.2 FPS, 7.0 ms";
     status.live_fps = 143.2;
     status.live_frame_time_ms = 7.0;
@@ -127,28 +129,191 @@ int wmain(int argument_count, wchar_t** arguments) {
     status.live_sleeping_corpses = 42;
     status.corpse_limit = 2000;
     model.set_status(status);
-    static_cast<void>(model.focus_destination(kf2::ui::Destination::settings));
-    static_cast<void>(model.activate_focused());
-    const auto settings_layout =
+    const auto home_layout =
         kf2::ui::layout_shell(model, 1440.0F, 900.0F);
-    const auto settings_path = output / L"settings-96.png";
+    const auto home_path = output / L"home-goals-96.png";
     CHECK(renderer.value().capture_wic_png(
-        settings_path, settings_layout, theme, {1440, 900}, 96.0F)
+        home_path, home_layout, theme, {1440, 900}, 96.0F)
               .has_value());
-    const auto settings_png = decode_png(settings_path);
-    CHECK(settings_png.width == 1440);
-    CHECK(settings_png.height == 900);
-    CHECK(settings_png.distinct_colors > 16);
+    const auto home_png = decode_png(home_path);
+    CHECK(home_png.width == 1440);
+    CHECK(home_png.height == 900);
+    CHECK(home_png.distinct_colors > 16);
+
+    auto startup_layout = home_layout;
+    startup_layout.startup_progress = 0.5F;
+    startup_layout.page_transition_progress = 0.5F;
+    const auto startup_path = output / L"motion-startup-mid-96.png";
+    CHECK(renderer.value().capture_wic_png(
+        startup_path, startup_layout, theme, {1440, 900}, 96.0F)
+              .has_value());
+    CHECK(decode_png(startup_path).distinct_colors > 16);
+
+    status.graphics_available = true;
+    status.graphics_values = {
+        L"Borderless", L"2560 × 1440", L"Custom", L"Off", L"On",
+        L"Ultra", L"Ultra", L"High", L"Ultra", L"16× Anisotropic",
+        L"Ultra", L"On", L"FXAA", L"High", L"Off", L"HBAO+",
+        L"On", L"On", L"On", L"On", L"Off"};
+    status.graphics_aspect_ratio = L"16:9";
+    status.graphics_film_grain_percent = 50;
+    model.set_status(status);
+    static_cast<void>(model.focus_destination(kf2::ui::Destination::graphics));
+    static_cast<void>(model.activate_focused());
+    const auto graphics_layout =
+        kf2::ui::layout_shell(model, 1440.0F, 900.0F);
+    const auto graphics_path = output / L"game-graphics-96.png";
+    CHECK(renderer.value().capture_wic_png(
+        graphics_path, graphics_layout, theme, {1440, 900}, 96.0F)
+              .has_value());
+    const auto graphics_png = decode_png(graphics_path);
+    CHECK(graphics_png.width == 1440);
+    CHECK(graphics_png.height == 900);
+    CHECK(graphics_png.distinct_colors > 16);
+
+    auto page_motion_layout = graphics_layout;
+    page_motion_layout.page_transition_progress = 0.5F;
+    const auto first_navigation = std::find_if(
+        page_motion_layout.nodes.begin(), page_motion_layout.nodes.end(),
+        [](const auto& item) {
+            return item.role == kf2::ui::SemanticRole::navigation_item;
+        });
+    const auto selected_navigation = std::find_if(
+        page_motion_layout.nodes.begin(), page_motion_layout.nodes.end(),
+        [](const auto& item) {
+            return item.role == kf2::ui::SemanticRole::navigation_item &&
+                   item.selected;
+        });
+    CHECK(first_navigation != page_motion_layout.nodes.end());
+    CHECK(selected_navigation != page_motion_layout.nodes.end());
+    auto moving_indicator = selected_navigation->bounds;
+    moving_indicator.y = (first_navigation->bounds.y +
+                          selected_navigation->bounds.y) / 2.0F;
+    page_motion_layout.navigation_indicator = moving_indicator;
+    const auto page_motion_path = output / L"motion-page-nav-mid-96.png";
+    CHECK(renderer.value().capture_wic_png(
+        page_motion_path, page_motion_layout, theme, {1440, 900}, 96.0F)
+              .has_value());
+    CHECK(decode_png(page_motion_path).distinct_colors > 16);
+
+    model.set_scroll_extent(graphics_layout.scroll_extent);
+    static_cast<void>(model.set_scroll(graphics_layout.scroll_extent));
+    const auto graphics_flex_layout =
+        kf2::ui::layout_shell(model, 1440.0F, 900.0F);
+    const auto graphics_flex_path = output / L"game-graphics-flex-96.png";
+    CHECK(renderer.value().capture_wic_png(
+        graphics_flex_path, graphics_flex_layout, theme, {1440, 900}, 96.0F)
+              .has_value());
+    const auto graphics_flex_png = decode_png(graphics_flex_path);
+    CHECK(graphics_flex_png.width == 1440);
+    CHECK(graphics_flex_png.height == 900);
+    CHECK(graphics_flex_png.distinct_colors > 16);
+
+    auto hidden_layout = graphics_flex_layout;
+    hidden_layout.exit_progress = 1.0F;
+    const auto hidden_path = output / L"animation-hidden.png";
+    CHECK(renderer.value().capture_wic_png(
+        hidden_path, hidden_layout, theme, {1440, 900}, 96.0F)
+              .has_value());
+    const auto hidden_png = decode_png(hidden_path);
+    CHECK(hidden_png.width == 1440);
+    CHECK(hidden_png.height == 900);
+    CHECK(hidden_png.distinct_colors == 1);
+    CHECK(std::filesystem::remove(hidden_path));
+
+    auto graphics_tooltip_layout = graphics_flex_layout;
+    const auto flex_action = std::find_if(
+        graphics_tooltip_layout.nodes.begin(),
+        graphics_tooltip_layout.nodes.end(), [](const auto& item) {
+            return item.action_id == "graphics-flex";
+        });
+    CHECK(flex_action != graphics_tooltip_layout.nodes.end());
+    flex_action->interaction = 0.5F;
+    flex_action->hover = 0.75F;
+    set_hover_tooltip(graphics_tooltip_layout, &*flex_action, 0.5F);
+    CHECK(std::any_of(
+        graphics_tooltip_layout.nodes.begin(),
+        graphics_tooltip_layout.nodes.end(), [](const auto& item) {
+            return item.role == kf2::ui::SemanticRole::tooltip &&
+                   item.text.find(L"Adaptive never") != std::wstring::npos;
+        }));
+    const auto fading_tooltip = std::find_if(
+        graphics_tooltip_layout.nodes.begin(),
+        graphics_tooltip_layout.nodes.end(), [](const auto& item) {
+            return item.role == kf2::ui::SemanticRole::tooltip;
+        });
+    CHECK(fading_tooltip != graphics_tooltip_layout.nodes.end());
+    CHECK(fading_tooltip->opacity == 0.5F);
+    const auto graphics_tooltip_path =
+        output / L"game-graphics-flex-tooltip-96.png";
+    CHECK(renderer.value().capture_wic_png(
+        graphics_tooltip_path, graphics_tooltip_layout, theme,
+        {1440, 900}, 96.0F).has_value());
+    const auto graphics_tooltip_png = decode_png(graphics_tooltip_path);
+    CHECK(graphics_tooltip_png.width == 1440);
+    CHECK(graphics_tooltip_png.height == 900);
+    CHECK(graphics_tooltip_png.distinct_colors > 16);
+
+    status.advanced_available = true;
+    status.advanced_dirty = true;
+    status.advanced_game_running = false;
+    status.advanced_values = {
+        L"On", L"On", L"On", L"On", L"On", L"On", L"On", L"Off",
+        L"On", L"Off", L"On", L"Off", L"Full", L"100%", L"100%", L"10 seconds"};
+    status.advanced_screen_percentage = 100;
+    status.advanced_particle_percentage = 100;
+    status.advanced_decal_lifetime = 10;
+    model.set_status(status);
+    model.set_notice({
+        kf2::ui::NoticeSeverity::info, L"ADVANCED_APPLIED",
+        L"Advanced settings were applied and verified. A restore backup is available.",
+        L""});
+    static_cast<void>(model.focus_destination(kf2::ui::Destination::advanced));
+    static_cast<void>(model.activate_focused());
+    model.set_scroll_extent(0.0F);
+    const auto advanced_layout =
+        kf2::ui::layout_shell(model, 1440.0F, 900.0F);
+    const auto advanced_path = output / L"advanced-settings-96.png";
+    CHECK(renderer.value().capture_wic_png(
+        advanced_path, advanced_layout, theme, {1440, 900}, 96.0F)
+              .has_value());
+    const auto advanced_png = decode_png(advanced_path);
+    CHECK(advanced_png.width == 1440);
+    CHECK(advanced_png.height == 900);
+    CHECK(advanced_png.distinct_colors > 16);
+
+    model.set_scroll_extent(advanced_layout.scroll_extent);
+    static_cast<void>(model.set_scroll(advanced_layout.scroll_extent));
+    const auto advanced_save_layout =
+        kf2::ui::layout_shell(model, 1440.0F, 900.0F);
+    const auto advanced_save_path = output / L"advanced-settings-save-96.png";
+    CHECK(renderer.value().capture_wic_png(
+        advanced_save_path, advanced_save_layout, theme, {1440, 900}, 96.0F)
+              .has_value());
+    const auto advanced_save_png = decode_png(advanced_save_path);
+    CHECK(advanced_save_png.width == 1440);
+    CHECK(advanced_save_png.height == 900);
+    CHECK(advanced_save_png.distinct_colors > 16);
+
+    model.clear_notice();
+    static_cast<void>(model.focus_destination(kf2::ui::Destination::dashboard));
+    static_cast<void>(model.activate_focused());
+    model.set_scroll_extent(0.0F);
 
     status.update_available = true;
+    status.update_newer_version_known = true;
+    status.update_prompt_visible = true;
+    status.update_check_completed = true;
+    status.update_installed_version = L"0.0.3-alpha";
     status.update_installable = true;
     status.update_available_version = L"0.0.4-alpha";
     status.update_published_at = L"2026-08-23";
     status.update_download_size = L"5.0 MiB";
     status.update_changelog = L"WHAT'S NEW\n- Simpler interface.";
     model.set_status(status);
-    const auto update_layout =
+    auto update_layout =
         kf2::ui::layout_shell(model, 1440.0F, 900.0F);
+    update_layout.update_glow_progress = 0.5F;
     const auto update_path = output / L"update-available-96.png";
     CHECK(renderer.value().capture_wic_png(
         update_path, update_layout, theme, {1440, 900}, 96.0F)

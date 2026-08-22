@@ -62,6 +62,10 @@ struct SemanticNode {
     std::optional<std::string> action_id;
     std::optional<SliderInfo> slider;
     bool attention{false};
+    float opacity{1.0F};
+    float hover{0.0F};
+    float interaction{0.0F};
+    bool pressed{false};
 };
 
 struct ShellLayoutResult {
@@ -74,6 +78,11 @@ struct ShellLayoutResult {
     DipRect footer;
     float scroll_offset{0};
     float scroll_extent{0};
+    float startup_progress{1.0F};
+    float page_transition_progress{1.0F};
+    std::optional<DipRect> navigation_indicator;
+    float update_glow_progress{1.0F};
+    float exit_progress{0.0F};
     std::vector<SemanticNode> nodes;
 };
 
@@ -89,6 +98,7 @@ struct ShellLayoutResult {
 [[nodiscard]] std::optional<std::wstring> action_help_text(
     std::string_view action_id);
 void set_hover_tooltip(ShellLayoutResult& layout,
-                       const SemanticNode* target);
+                       const SemanticNode* target,
+                       float opacity = 1.0F);
 
 }  // namespace kf2::ui

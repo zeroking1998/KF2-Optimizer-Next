@@ -21,7 +21,7 @@ an incomplete package.
 3. Restart KF2 Optimizer after the verified repair completes.
 
 Auto Repair never uses a generic latest-release address. An installation with
-version `0.0.3-alpha` requests only tag `v0.0.3-alpha` and its identically
+version `0.0.4-alpha` requests only tag `v0.0.4-alpha` and its identically
 versioned Windows ZIP. The repair accepts only the same build identity and an
 identical verified executable. Every imported companion file must match the
 package SHA-256 manifest. Writes are atomic and the running executable is
@@ -42,7 +42,7 @@ Select **Updates** in the upper-right corner to check for a newer official
 release. The button changes to **Update available** and receives a visible
 highlight when a verified newer version is ready. Automatic
 checks run at startup no more than once every 24 hours. The manual check works
-even when automatic checks are disabled. **Optimization → Version & Updates**
+even when automatic checks are disabled. **Home → Version & Updates**
 shows the installed version, last check, release date,
 download size and short changelog before asking you to choose **Install
 update** or **Later**. It never downloads or installs an update without your
@@ -57,7 +57,7 @@ unavailable.
 
 ## 3. Choose the performance target
 
-Open **Optimization** and choose any target between 30 and 240 FPS. The target
+On **Home**, choose any target between 30 and 240 FPS. The target
 is not restricted to common refresh rates: values such as 86, 122, 211, and
 233 are valid.
 
@@ -73,13 +73,57 @@ Adaptive automatically manages verified quality, physics, LOD, FleX, and
 corpse-runtime controls while the game is running. Unsupported controls remain
 unchanged.
 
-## 5. Start a protected session
+Adaptive never enables FleX. If FleX is off in KF2, it remains off and no FleX
+runtime hook is installed. If the user has enabled FleX in the game, Adaptive
+may use only the verified controls available for that existing setting.
+
+## 5. Game graphics
+
+Open **Game graphics** to view and stage KF2's display, resolution, frame-rate,
+quality and effects options. Click an option to move to its next KF2 value, then
+select **Apply graphics**. KF2 must be closed. The app creates and verifies a
+backup before atomically replacing the managed INI files. **Discard changes**
+returns to the values currently stored by KF2.
+
+NVIDIA FleX is an explicit user control with **Off**, **Gibs**, and
+**Gibs and fluids**. It starts at the value already stored by KF2. Neither
+opening the page, selecting an overall graphics preset, nor Adaptive enables
+FleX. Only changing this dedicated value and selecting **Apply graphics** may
+write `PhysXLevel`.
+
+The Home-page maximum-corpse goal is preserved when Character Detail changes;
+the graphics page does not silently replace that separate user choice.
+Aspect ratio is derived from the selected resolution. Gamma remains in KF2
+because KF2 stores it in the player profile rather than the protected video
+INIs. The shipped PC menu source contains a Foliage label but exposes no
+Foliage setting to apply, so the app reports that honestly instead of writing
+an invented value.
+
+## 6. Advanced game settings
+
+Open **Advanced settings** for verified KF2 options that exist in the game's
+INI files but are not exposed by its normal video menu. The page groups engine
+and streaming, rendering, and effects values. These are explicit manual KF2
+settings and are independent of Adaptive.
+
+Click an On/Off or enumerated option to stage its next value, or use the
+sliders for render scale, particle amount, and decal lifetime. Nothing is
+written until **Apply advanced settings** is selected. KF2 must be closed, and
+the app creates and verifies a restore backup before applying the changes.
+**Discard changes** reloads the values currently stored by KF2.
+
+Hover over any button or slider to see what it changes, the visual or
+performance trade-off, and whether the value is staged until Apply or saved
+immediately. These descriptions also distinguish manual Advanced settings from
+Adaptive controls.
+
+## 7. Start a protected session
 
 Start KF2 through the optimizer when you want session-scoped telemetry,
 restoration, and optional protected corpse-physics or FleX controls. Controls
 appear only when their provider and acknowledgement path are available.
 
-## 6. Read the status correctly
+## 8. Read the status correctly
 
 - **Proposed** means the optimizer selected a possible change.
 - **Applied** means a matching receipt or verified readback exists.
@@ -95,13 +139,13 @@ are actor-scoped and must carry a correlated actor identifier and receipt.
 For FleX, effective levels are 1 through 5. Level 0 means release/passthrough;
 it does not mean that a zero-step solver is applied.
 
-## 7. Overlay
+## 9. Overlay
 
 The overlay is a separate, game-bound Windows surface. It displays verified
 telemetry without injecting a renderer into KF2. Use F10 to toggle it. Scale,
 position, and metric visibility are stored in the portable `Data` directory.
 
-## 8. Recovery
+## 10. Recovery
 
 If KF2 or the optimizer ends unexpectedly, reopen the optimizer and use the
 recovery status on **Help & Repair**. Recovery restores protected INIs,
@@ -110,7 +154,7 @@ snapshot. Do not delete the `Data` directory before recovery is complete.
 
 See [Support](../SUPPORT.md) before sharing logs publicly.
 
-## 9. License
+## 11. License
 
 KF2 Optimizer Next is distributed under `GPL-3.0-only` and without warranty.
 The complete terms are in the root `LICENSE` file and, in a portable package,

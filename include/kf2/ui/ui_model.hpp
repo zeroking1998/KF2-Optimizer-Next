@@ -7,29 +7,25 @@
 #include <string>
 #include <string_view>
 
+#include "kf2/ui/numeric_presentation.hpp"
+
 namespace kf2::ui {
 
 enum class Destination : std::size_t {
     dashboard,
-    game,
-    optimizer,
+    graphics,
     overlay,
+    advanced,
     diagnostics,
-    settings,
 };
 
-inline constexpr std::array<Destination, 4> kDestinations{
-    Destination::dashboard, Destination::settings, Destination::overlay,
-    Destination::diagnostics,
+inline constexpr std::array<Destination, 5> kDestinations{
+    Destination::dashboard, Destination::graphics,
+    Destination::overlay, Destination::advanced, Destination::diagnostics,
 };
 
 enum class NavigationCommand { next, previous, home, end };
 enum class NoticeSeverity { info, warning, error };
-enum class ConfigWorkflowState {
-    unavailable, detected, preview_ready, apply_blocked, applied,
-    restore_available, recovery_required
-};
-
 struct Notice {
     NoticeSeverity severity{NoticeSeverity::info};
     std::wstring code;
@@ -45,7 +41,6 @@ struct UiStatus {
     std::wstring performance_analysis{L"Performance analysis unavailable"};
     std::wstring recommended_profile{L"waiting"};
     std::wstring recommendation_reason{L"Fresh stable telemetry is required"};
-    bool recommendation_ready{false};
     std::wstring hardware_summary{L"Hardware not refreshed"};
     std::wstring flex_telemetry{L"FleX telemetry not observed"};
     bool game_detected{false};
@@ -55,15 +50,13 @@ struct UiStatus {
     std::optional<double> live_gpu_percent;
     std::optional<int> live_active_corpses;
     std::optional<int> live_sleeping_corpses;
-    bool animations_enabled{true};
     bool restore_config_after_game{true};
-    bool offline_gameplay_telemetry{false};
-    bool overlay_enabled{false};
+    bool overlay_enabled{true};
     bool overlay_show_fps{true};
     bool overlay_show_frame_time{true};
     bool overlay_show_cpu{true};
     bool overlay_show_gpu{true};
-    bool overlay_show_memory{false};
+    bool overlay_show_memory{true};
     std::wstring overlay_position{L"top right"};
     int overlay_scale_percent{100};
     int target_fps{60};
@@ -103,7 +96,6 @@ struct UiStatus {
     bool adaptive_manual_locks_enabled{true};
     bool adaptive_calibration_enabled{true};
     bool adaptive_logging{true};
-    bool advanced_settings_visible{false};
     std::wstring update_installed_version{L"unknown"};
     std::wstring update_available_version{L"None"};
     std::wstring update_last_check{L"Never"};
@@ -114,12 +106,26 @@ struct UiStatus {
     bool automatic_update_checks{true};
     bool update_checking{false};
     bool update_available{false};
+    bool update_newer_version_known{false};
+    bool update_prompt_visible{false};
+    bool update_check_completed{false};
     bool update_installable{false};
     bool update_installing{false};
+    bool graphics_available{false};
+    bool graphics_dirty{false};
+    bool graphics_game_running{false};
+    std::array<std::wstring, 21> graphics_values{};
+    std::wstring graphics_aspect_ratio{L"Unknown"};
+    int graphics_film_grain_percent{50};
+    bool advanced_available{false};
+    bool advanced_dirty{false};
+    bool advanced_game_running{false};
+    std::array<std::wstring, 16> advanced_values{};
+    int advanced_screen_percentage{100};
+    int advanced_particle_percentage{100};
+    int advanced_decal_lifetime{30};
     std::wstring profile{L"balanced"};
     std::wstring quality{L"exact"};
-    std::wstring diagnostics_summary{L"No local diagnostic events"};
-    ConfigWorkflowState config{ConfigWorkflowState::unavailable};
 };
 
 struct UiAction {
@@ -147,8 +153,6 @@ public:
     void set_build_identity(std::wstring identity);
     void set_recovery_required(bool required) noexcept;
     void set_status(UiStatus status);
-    void set_preview_summary(std::wstring summary);
-    void clear_preview_summary() noexcept;
     void set_notice(Notice notice);
     void clear_notice() noexcept;
 
@@ -156,6 +160,19 @@ public:
     [[nodiscard]] const std::wstring& build_identity() const noexcept;
     [[nodiscard]] bool recovery_required() const noexcept;
     [[nodiscard]] const UiStatus& status() const noexcept;
+    [[nodiscard]] int presented_target_fps() const noexcept;
+    [[nodiscard]] int presented_corpse_limit() const noexcept;
+    void preview_target_fps(int value) noexcept;
+    void preview_corpse_limit(int value) noexcept;
+    void commit_target_fps_presentation(int value) noexcept;
+    void commit_corpse_limit_presentation(int value) noexcept;
+    [[nodiscard]] std::optional<double> presented_live_fps() const noexcept;
+    [[nodiscard]] std::optional<double> presented_live_frame_time_ms() const noexcept;
+    [[nodiscard]] std::optional<double> presented_live_cpu_percent() const noexcept;
+    [[nodiscard]] std::optional<double> presented_live_gpu_percent() const noexcept;
+    [[nodiscard]] std::optional<int> presented_live_active_corpses() const noexcept;
+    [[nodiscard]] std::optional<int> presented_live_sleeping_corpses() const noexcept;
+    [[nodiscard]] bool advance_numeric_presentation(bool animate) noexcept;
     [[nodiscard]] const std::optional<Notice>& notice() const noexcept;
     [[nodiscard]] std::wstring page_heading() const;
     [[nodiscard]] std::wstring page_body() const;
@@ -170,8 +187,8 @@ private:
     std::wstring build_identity_;
     bool recovery_required_{false};
     UiStatus status_;
+    NumericPresentation numeric_presentation_;
     std::optional<Notice> notice_;
-    std::wstring preview_summary_;
 };
 
 }  // namespace kf2::ui
