@@ -398,7 +398,6 @@ add_test(NAME kf2_flex_adaptive_policy_test COMMAND kf2_flex_adaptive_policy_tes
 add_executable(kf2_application_lifecycle_test
     integration/application_lifecycle_test.cpp
     ${KF2_APP_ACTION_SOURCES}
-    "${PROJECT_SOURCE_DIR}/src/benchmark/benchmark.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application_package_repair.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application_runtime.cpp"
@@ -993,10 +992,3 @@ add_executable(kf2_adaptive_governor_test
 target_include_directories(kf2_adaptive_governor_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_adaptive_governor_test COMMAND kf2_adaptive_governor_test)
-
-add_executable(kf2_benchmark_test
-    unit/benchmark_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/benchmark/benchmark.cpp"
-)
-target_include_directories(kf2_benchmark_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
-add_test(NAME kf2_benchmark_test COMMAND kf2_benchmark_test)

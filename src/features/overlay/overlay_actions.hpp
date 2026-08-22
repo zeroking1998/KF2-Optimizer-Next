@@ -8,11 +8,7 @@ namespace kf2::features::overlay {
 
 app::runtime::DispatchResult position(
     app::UiRuntime&, const app::runtime::NoPayload&);
-app::runtime::DispatchResult scale_down(
-    app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult scale_reset(
-    app::UiRuntime&, const app::runtime::NoPayload&);
-app::runtime::DispatchResult scale_up(
     app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult show_cpu(
     app::UiRuntime&, const app::runtime::NoPayload&);
@@ -27,15 +23,11 @@ app::runtime::DispatchResult show_memory(
 app::runtime::DispatchResult toggle(
     app::UiRuntime&, const app::runtime::NoPayload&);
 
-inline constexpr std::array<app::runtime::ActionImplementation, 10> kActions{{
+inline constexpr std::array<app::runtime::ActionImplementation, 8> kActions{{
     {app::runtime::ActionId::overlay_position,
      &app::runtime::bind_no_payload<&position>},
-    {app::runtime::ActionId::overlay_scale_down,
-     &app::runtime::bind_no_payload<&scale_down>},
     {app::runtime::ActionId::overlay_scale_reset,
      &app::runtime::bind_no_payload<&scale_reset>},
-    {app::runtime::ActionId::overlay_scale_up,
-     &app::runtime::bind_no_payload<&scale_up>},
     {app::runtime::ActionId::overlay_show_cpu,
      &app::runtime::bind_no_payload<&show_cpu>},
     {app::runtime::ActionId::overlay_show_fps,

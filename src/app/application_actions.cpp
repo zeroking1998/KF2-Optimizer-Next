@@ -338,30 +338,6 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
         message = L"Adaptive corpse ceiling: " +
             std::to_wstring(optimizer_settings.corpse_limit) +
             L" (from the next protected KF2 launch)";
-    } else if (control->id == runtime::ControlId::adaptive_minimum) {
-        optimizer_settings.adaptive_minimum_quality = value;
-        optimizer_settings.adaptive_maximum_quality = std::max(
-            optimizer_settings.adaptive_maximum_quality,
-            optimizer_settings.adaptive_minimum_quality);
-        adaptive_policy_changed = true;
-        code = L"ADAPTIVE_MINIMUM_CHANGED";
-        message = L"Minimum adaptive quality: " +
-            std::to_wstring(optimizer_settings.adaptive_minimum_quality) + L" %";
-    } else if (control->id == runtime::ControlId::adaptive_maximum) {
-        optimizer_settings.adaptive_maximum_quality = value;
-        optimizer_settings.adaptive_minimum_quality = std::min(
-            optimizer_settings.adaptive_minimum_quality,
-            optimizer_settings.adaptive_maximum_quality);
-        adaptive_policy_changed = true;
-        code = L"ADAPTIVE_MAXIMUM_CHANGED";
-        message = L"Maximum adaptive quality: " +
-            std::to_wstring(optimizer_settings.adaptive_maximum_quality) + L" %";
-    } else if (control->id == runtime::ControlId::adaptive_headroom) {
-        optimizer_settings.adaptive_headroom_percent = value;
-        adaptive_policy_changed = true;
-        code = L"ADAPTIVE_HEADROOM_CHANGED";
-        message = L"Adaptive performance headroom: " +
-            std::to_wstring(optimizer_settings.adaptive_headroom_percent) + L" %";
     } else if (control->id == runtime::ControlId::overlay_scale) {
         optimizer_settings.overlay_scale_percent = value;
         overlay_scale = static_cast<float>(

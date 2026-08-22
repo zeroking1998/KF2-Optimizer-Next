@@ -32,7 +32,7 @@ struct ItemSpec {
 constexpr AreaContract area01{
     "Start, installation and lifecycle",
     "src/app; src/platform/windows; src/game/game_discovery.cpp",
-    "Windows process, filesystem and Steam metadata APIs", "A/B local verified",
+    "Windows process, filesystem and Steam metadata APIs", "Locally verified",
     "The native x64 portable app runs as standard user, binds KF2 by path and file identity, and recovers bounded local transactions.",
     "Predictable portable startup and recoverable local state.",
     "External execution policy can still block an unsigned portable binary.",
@@ -339,15 +339,15 @@ constexpr std::array area14_items{
 };
 
 constexpr AreaContract area15{
-    "Diagnostics and logging", "src/diagnostics; src/benchmark; diagnostics actions; src/flex/forwarder_stub.cpp",
-    "Bounded product events, verified metrics and shared-memory FleX counters", "B local",
+    "Diagnostics and logging", "src/diagnostics; diagnostics actions; src/flex/forwarder_stub.cpp",
+    "Bounded product events, verified metrics and shared-memory FleX counters", "Local",
     "Current and previous session logs are bounded; reports carry build, process, telemetry, profile and recovery context.",
-    "Faster diagnosis with privacy and reproducible A/B records.",
+    "Faster diagnosis with privacy-safe reproducible reports.",
     "Logs cannot prove unobserved gameplay semantics and may be unavailable on I/O failure.",
     "Read-only in every mode.", "Atomic local files, one previous log and bounded histories.",
     "Portable Data directory and identity-bound shared memory.",
-    "Dedup, bounds, concurrency, corruption, inventory, history, hot-path and report-schema tests.",
-    "kf2_event_log_test; kf2_feature_inventory_test; kf2_benchmark_test; FleX forwarder tests"};
+    "Dedup, bounds, concurrency, corruption, inventory, hot-path and report-schema tests.",
+    "kf2_event_log_test; kf2_feature_inventory_test; FleX forwarder tests"};
 
 constexpr std::array area15_items{
     ItemSpec{FeatureStatus::present, "structured logs and correlation", "Typed severity/code/source/sequence records are persisted and correlated with process/session context."},
