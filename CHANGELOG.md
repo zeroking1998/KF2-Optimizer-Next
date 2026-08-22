@@ -4,7 +4,7 @@ Release notes stay short and user-focused. Every release uses only **What's
 new**, **Bug fixes**, and optional **Important notes** so the important changes
 are visible immediately.
 
-## 0.0.3-alpha - Unreleased
+## 0.0.3-alpha - 2026-08-22
 
 ### What's new
 
