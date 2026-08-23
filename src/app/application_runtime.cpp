@@ -522,6 +522,24 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
                         L"Deferred KF2 INI session snapshot was restored and verified; temporal anti-aliasing remains disabled",
                         L"config"});
                 }
+                if (ini_recovered.has_value() &&
+                    telemetry_recovered.has_value() &&
+                    !telemetry_recovered.value().active) {
+                    const auto stale_configuration =
+                        game::cleanup_stale_offline_gameplay_configuration(
+                            installation->config_root, false);
+                    if (!stale_configuration.has_value()) {
+                        event_log.append({0, diagnostics::Severity::error,
+                            "STALE_TELEMETRY_CONFIG_RECOVERY_BLOCKED",
+                            stale_configuration.error().message, L"config"});
+                        recovery_required = true;
+                    } else if (stale_configuration.value()) {
+                        event_log.append({0, diagnostics::Severity::warning,
+                            "STALE_TELEMETRY_CONFIG_RECOVERED",
+                            L"Stale optimizer-owned KF2 telemetry configuration was removed before the next protected snapshot",
+                            L"config"});
+                    }
+                }
             }
         } else {
             event_log.append({0, diagnostics::Severity::warning,

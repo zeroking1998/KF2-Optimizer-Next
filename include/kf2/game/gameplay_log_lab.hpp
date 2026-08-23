@@ -23,4 +23,10 @@ namespace kf2::game {
     int adaptive_quality_change_budget = 1,
     std::string_view adaptive_control_token = {});
 
+// Removes only unmistakably optimizer-owned INI residue from an interrupted
+// or historically broken session. Native KF2 logging choices are preserved.
+// KF2 must be stopped before this repair is called.
+[[nodiscard]] Result<bool> cleanup_stale_offline_gameplay_configuration(
+    const std::filesystem::path& config_root, bool game_running);
+
 }  // namespace kf2::game

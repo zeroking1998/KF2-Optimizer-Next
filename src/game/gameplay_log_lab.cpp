@@ -30,6 +30,8 @@ constexpr std::wstring_view kEngineSection = L"Engine.Engine";
 constexpr std::wstring_view kViewportClientKey = L"GameViewportClientClassName";
 constexpr std::wstring_view kTelemetryViewportClient =
     L"KF2OptimizerTelemetry.KF2OptimizerTelemetryViewport";
+constexpr std::wstring_view kNativeViewportClient =
+    L"KFGame.KFGameViewportClient";
 constexpr std::wstring_view kTelemetrySection =
     L"KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe";
 constexpr std::wstring_view kAdaptiveCorpseStaggerKey =
@@ -351,6 +353,65 @@ Result<bool> enable_offline_gameplay_logging(
         return Result<bool>::failure(
             {ErrorCode::io_failure,
              L"KF2 offline telemetry viewport policy could not be verified after writing",
+             0});
+    }
+    return Result<bool>::success(true);
+}
+
+Result<bool> cleanup_stale_offline_gameplay_configuration(
+    const std::filesystem::path& config_root, bool game_running) {
+    if (game_running) {
+        return Result<bool>::failure(
+            {ErrorCode::access_denied,
+             L"Running KF2 configuration cannot be repaired", 0});
+    }
+    if (config_root.empty() || !config_root.is_absolute()) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"Offline gameplay configuration root is invalid", 0});
+    }
+
+    const auto engine_ini = config_root / L"KFEngine.ini";
+    auto engine = parse_verified(engine_ini);
+    if (!engine.has_value()) return Result<bool>::failure(engine.error());
+
+    bool changed = false;
+    const auto viewport = engine.value().find(
+        kEngineSection, kViewportClientKey);
+    if (viewport && *viewport == kTelemetryViewportClient) {
+        const auto restored = engine.value().replace(
+            kEngineSection, kViewportClientKey, kNativeViewportClient);
+        if (restored.shadowed_occurrences != 0) {
+            return Result<bool>::failure(
+                {ErrorCode::invalid_argument,
+                 L"KF2 viewport-client setting is ambiguous", 0});
+        }
+        changed = changed || restored.changed;
+    }
+
+    const auto removed = engine.value().remove_section(kTelemetrySection);
+    if (removed.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"KF2 Optimizer telemetry section is ambiguous", 0});
+    }
+    changed = changed || removed.changed;
+    if (!changed) return Result<bool>::success(false);
+
+    const auto written = platform::windows::atomic_replace_utf8(
+        engine_ini, engine.value().serialize());
+    if (!written.has_value()) return Result<bool>::failure(written.error());
+
+    auto verified = parse_verified(engine_ini);
+    if (!verified.has_value()) return Result<bool>::failure(verified.error());
+    const auto verified_viewport = verified.value().find(
+        kEngineSection, kViewportClientKey);
+    if ((verified_viewport && *verified_viewport == kTelemetryViewportClient) ||
+        verified.value().find(kTelemetrySection, kAdaptiveControlTokenKey) ||
+        verified.value().find(kTelemetrySection, kAdaptiveTargetFpsKey)) {
+        return Result<bool>::failure(
+            {ErrorCode::io_failure,
+             L"Stale KF2 Optimizer telemetry configuration remains after repair",
              0});
     }
     return Result<bool>::success(true);

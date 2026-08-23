@@ -300,6 +300,27 @@ ReplaceResult IniDocument::append_unique(std::wstring_view section,
     return {true, 0};
 }
 
+ReplaceResult IniDocument::remove_section(std::wstring_view section) {
+    const auto wanted_section = normalized(section);
+    std::vector<std::size_t> matches;
+    for (std::size_t index = 0; index < lines_.size(); ++index) {
+        if (lines_[index].section_header &&
+            lines_[index].section == wanted_section) {
+            matches.push_back(index);
+        }
+    }
+    if (matches.size() != 1) {
+        return {false, matches.size() > 1 ? matches.size() - 1 : 0};
+    }
+
+    const std::size_t begin = matches.front();
+    std::size_t end = begin + 1;
+    while (end < lines_.size() && !lines_[end].section_header) ++end;
+    lines_.erase(lines_.begin() + static_cast<std::ptrdiff_t>(begin),
+                 lines_.begin() + static_cast<std::ptrdiff_t>(end));
+    return {true, 0};
+}
+
 std::string IniDocument::serialize() const {
     std::string output = encoding_ == TextEncoding::utf8_bom ? "\xEF\xBB\xBF" : "";
     for (const auto& line : lines_) output += line.bytes + line.ending;

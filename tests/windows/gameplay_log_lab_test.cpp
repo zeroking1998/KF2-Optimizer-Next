@@ -491,6 +491,55 @@ int main() {
     CHECK(adaptive_unchanged.has_value());
     CHECK(!adaptive_unchanged.value());
 
+    CHECK(!kf2::game::cleanup_stale_offline_gameplay_configuration(
+        root, true).has_value());
+    const auto stale_cleaned =
+        kf2::game::cleanup_stale_offline_gameplay_configuration(root, false);
+    CHECK(stale_cleaned.has_value());
+    CHECK(stale_cleaned.value());
+    const auto cleaned_engine = read_bytes(engine_ini);
+    CHECK(cleaned_engine.find(
+        "GameViewportClientClassName=KFGame.KFGameViewportClient") !=
+        std::string::npos);
+    CHECK(cleaned_engine.find("[KF2OptimizerTelemetry.") ==
+          std::string::npos);
+    CHECK(cleaned_engine.find("AdaptiveControlToken=") == std::string::npos);
+    const auto already_clean =
+        kf2::game::cleanup_stale_offline_gameplay_configuration(root, false);
+    CHECK(already_clean.has_value());
+    CHECK(!already_clean.value());
+
+    const std::string foreign_viewport_engine =
+        "[Engine.Engine]\r\n"
+        "GameViewportClientClassName=Example.CustomViewport\r\n"
+        "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\r\n"
+        "AdaptiveControlToken=0123456789abcdef0123456789abcdef\r\n";
+    write_bytes(engine_ini, foreign_viewport_engine);
+    const auto foreign_viewport_cleaned =
+        kf2::game::cleanup_stale_offline_gameplay_configuration(root, false);
+    CHECK(foreign_viewport_cleaned.has_value());
+    CHECK(foreign_viewport_cleaned.value());
+    const auto foreign_viewport_after = read_bytes(engine_ini);
+    CHECK(foreign_viewport_after.find(
+        "GameViewportClientClassName=Example.CustomViewport") !=
+          std::string::npos);
+    CHECK(foreign_viewport_after.find("[KF2OptimizerTelemetry.") ==
+          std::string::npos);
+
+    const std::string ambiguous_engine =
+        "[Engine.Engine]\r\n"
+        "GameViewportClientClassName=KF2OptimizerTelemetry."
+        "KF2OptimizerTelemetryViewport\r\n"
+        "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\r\n"
+        "AdaptiveControlToken=0123456789abcdef0123456789abcdef\r\n"
+        "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\r\n"
+        "AdaptiveTargetFPS=60\r\n";
+    write_bytes(engine_ini, ambiguous_engine);
+    CHECK(!kf2::game::cleanup_stale_offline_gameplay_configuration(
+        root, false).has_value());
+    CHECK(read_bytes(engine_ini) == ambiguous_engine);
+    write_bytes(engine_ini, adaptive_engine);
+
     write_bytes(engine_ini,
         "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\n"
         "bAdaptiveCorpseStagger=Maybe\n");

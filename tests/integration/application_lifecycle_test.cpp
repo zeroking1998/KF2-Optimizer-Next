@@ -302,6 +302,39 @@ int main() {
     CHECK(read_bytes(options.state_root / L"session.marker").ends_with(
         "clean_shutdown=true\n"));
 
+    // A historically poisoned snapshot can leave the optimizer viewport and
+    // token behind after the module marker is already gone. Startup must
+    // remove that owned residue before capturing the next protected snapshot.
+    auto poisoned_engine = read_bytes(config_root / L"KFEngine.ini");
+    const std::string native_viewport =
+        "GameViewportClientClassName=KFGame.KFGameViewportClient";
+    const auto viewport_offset = poisoned_engine.find(native_viewport);
+    CHECK(viewport_offset != std::string::npos);
+    poisoned_engine.replace(
+        viewport_offset, native_viewport.size(),
+        "GameViewportClientClassName=KF2OptimizerTelemetry."
+        "KF2OptimizerTelemetryViewport");
+    poisoned_engine +=
+        "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\r\n"
+        "AdaptiveTargetFPS=120\r\n"
+        "AdaptiveControlToken=0123456789abcdef0123456789abcdef\r\n";
+    write_bytes(config_root / L"KFEngine.ini", poisoned_engine);
+    options.identity.process_start_id = 10011;
+    {
+        auto stale_recovered = kf2::app::Application::start(options);
+        CHECK(stale_recovered.has_value());
+        CHECK(stale_recovered.value().shutdown_cleanly().has_value());
+    }
+    const auto recovered_engine = read_bytes(config_root / L"KFEngine.ini");
+    CHECK(recovered_engine.find(
+        "GameViewportClientClassName=KFGame.KFGameViewportClient") !=
+        std::string::npos);
+    CHECK(recovered_engine.find("[KF2OptimizerTelemetry.") ==
+          std::string::npos);
+    CHECK(recovered_engine.find("AdaptiveControlToken=") == std::string::npos);
+    CHECK(read_bytes(options.state_root / L"logs/session-events.json").find(
+        "STALE_TELEMETRY_CONFIG_RECOVERED") != std::string::npos);
+
     {
         std::ofstream corrupt(options.state_root / L"settings.ini",
                               std::ios::binary | std::ios::trunc);
