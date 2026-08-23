@@ -290,14 +290,6 @@ OptimizerDecision evaluate(const OptimizerInput& input) {
     if (valid_target &&
         (decision.bottleneck != Bottleneck::unavailable ||
          explicit_profile_preview)) {
-        put(changes, config::SettingId::target_fps, input.target_fps,
-            config::ChangeSource::adaptive, L"Match the verified KF2 frame cap to target FPS");
-        put(changes, config::SettingId::minimum_smooth_frame_rate, 22,
-            config::ChangeSource::adaptive,
-            L"Keep KF2's smoothing floor below every supported target FPS");
-        put(changes, config::SettingId::smooth_frame_rate, true,
-            config::ChangeSource::adaptive, L"Use KF2 frame smoothing for stable pacing");
-
         if (input.quality == QualityPolicy::performance &&
             (explicit_profile_preview ||
              decision.bottleneck != Bottleneck::frame_cap)) {

@@ -251,6 +251,21 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
         }
     }
     if (!restore_automatic_flex_lab(reason)) complete = false;
+    if (installation) {
+        const auto capped = synchronize_frame_rate_cap();
+        if (!capped.has_value()) {
+            events->append({0, diagnostics::Severity::error,
+                "TARGET_FPS_PERSIST_FAILED", capped.error().message,
+                L"config"});
+        } else if (capped.value().changed) {
+            events->append({0, diagnostics::Severity::info,
+                "TARGET_FPS_PERSISTED",
+                std::wstring{reason} +
+                    L"; KF2's native startup cap was restored to " +
+                    std::to_wstring(capped.value().target_fps) + L" FPS",
+                L"config"});
+        }
+    }
     invalidate();
     return complete;
 }

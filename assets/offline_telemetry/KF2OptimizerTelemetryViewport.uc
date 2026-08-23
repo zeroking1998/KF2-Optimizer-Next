@@ -5,51 +5,6 @@
 // retain an obsolete map during server travel.
 class KF2OptimizerTelemetryViewport extends KFGameViewportClient;
 
-var transient int RuntimeTargetFPS;
-
-function bool ApplyAdaptiveTargetFPS(int TargetFPS)
-{
-    local Engine CurrentEngine;
-    local bool PreviousSmoothFrameRate;
-    local float PreviousMinSmoothedFrameRate;
-    local float PreviousMaxSmoothedFrameRate;
-
-    if (TargetFPS < 30 || TargetFPS > 240)
-    {
-        return false;
-    }
-    CurrentEngine = class'Engine'.static.GetEngine();
-    if (CurrentEngine == None)
-    {
-        return false;
-    }
-    PreviousSmoothFrameRate = CurrentEngine.bSmoothFrameRate;
-    PreviousMinSmoothedFrameRate = CurrentEngine.MinSmoothedFrameRate;
-    PreviousMaxSmoothedFrameRate = CurrentEngine.MaxSmoothedFrameRate;
-    CurrentEngine.bSmoothFrameRate = true;
-    CurrentEngine.MinSmoothedFrameRate = 22.0;
-    CurrentEngine.MaxSmoothedFrameRate = float(TargetFPS);
-    if (!CurrentEngine.bSmoothFrameRate ||
-        Abs(CurrentEngine.MinSmoothedFrameRate - 22.0) > 0.01 ||
-        Abs(CurrentEngine.MaxSmoothedFrameRate - float(TargetFPS)) > 0.01)
-    {
-        CurrentEngine.bSmoothFrameRate = PreviousSmoothFrameRate;
-        CurrentEngine.MinSmoothedFrameRate = PreviousMinSmoothedFrameRate;
-        CurrentEngine.MaxSmoothedFrameRate = PreviousMaxSmoothedFrameRate;
-        `log("KF2OPT_TARGET_FPS state=failed target="$TargetFPS$
-             " reason=readback_mismatch");
-        return false;
-    }
-
-    RuntimeTargetFPS = TargetFPS;
-    `log("KF2OPT_TARGET_FPS state=configured target="$TargetFPS$
-         " effective="$int(CurrentEngine.MaxSmoothedFrameRate)$
-         " minimum="$int(CurrentEngine.MinSmoothedFrameRate)$
-         " provider=engine_smoothing readback=property_only");
-    return true;
-}
-
-
 function bool GetStandaloneGameplayContext(
     out PlayerController PrimaryController,
     out WorldInfo CurrentWorld)
@@ -87,25 +42,6 @@ event Tick(float DeltaTime)
     local WorldInfo CurrentWorld;
 
     Super.Tick(DeltaTime);
-
-    if (RuntimeTargetFPS == 0 &&
-        class'KF2OptimizerTelemetryProbe'.default.AdaptiveTargetFPS >= 30 &&
-        class'KF2OptimizerTelemetryProbe'.default.AdaptiveTargetFPS <= 240)
-    {
-        ApplyAdaptiveTargetFPS(
-            class'KF2OptimizerTelemetryProbe'.default.AdaptiveTargetFPS);
-    }
-    else if (RuntimeTargetFPS >= 30 && RuntimeTargetFPS <= 240 &&
-             (!class'Engine'.static.GetEngine().bSmoothFrameRate ||
-              Abs(class'Engine'.static.GetEngine().MinSmoothedFrameRate -
-                  22.0) > 0.01 ||
-              Abs(class'Engine'.static.GetEngine().MaxSmoothedFrameRate -
-                  float(RuntimeTargetFPS)) > 0.01))
-    {
-        // KF2's profile can rewrite this after startup. Reassert only when
-        // the exact owned value changed, then verify it again.
-        ApplyAdaptiveTargetFPS(RuntimeTargetFPS);
-    }
 
     if (!GetStandaloneGameplayContext(PrimaryController, CurrentWorld))
     {

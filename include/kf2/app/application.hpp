@@ -51,11 +51,6 @@ struct StartOptions {
     std::wstring startup_warning;
 };
 
-struct OptimizerPreview {
-    optimizer::OptimizerDecision decision;
-    config::ConfigPreview preview;
-};
-
 class Application final {
 public:
     Application(const Application&) = delete;
@@ -74,9 +69,6 @@ public:
         game_installation() const noexcept;
     [[nodiscard]] Result<config::ConfigPreview> prepare_config_changes(
         const std::vector<config::RequestedChange>& requests);
-    [[nodiscard]] Result<OptimizerPreview> prepare_optimizer(
-        const optimizer::OptimizerInput& input);
-    [[nodiscard]] Result<OptimizerPreview> prepare_current_optimizer();
     [[nodiscard]] Result<config::ApplyResult> apply_prepared_config(
         const config::ApplyPreconditions& preconditions);
     [[nodiscard]] Result<backup::RestoreResult> restore_config(

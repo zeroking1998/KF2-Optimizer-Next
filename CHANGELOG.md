@@ -6,6 +6,15 @@ are visible immediately.
 
 ## Unreleased
 
+### Bug fixes
+
+- Target FPS now uses KF2's native startup cap independently of telemetry and
+  Adaptive runtime capabilities, including Steam and shortcut launches.
+- Removed the redundant telemetry-side FPS actuator and its unused application
+  preview path.
+- Fixed low or unstable overlay FPS values caused by mixing multiple KF2
+  swapchains and excluding successful presents later discarded by Windows.
+
 ## 0.0.4-alpha - 2026-08-22
 
 ### What's new

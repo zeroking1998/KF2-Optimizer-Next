@@ -8,7 +8,7 @@ namespace kf2::game {
 
 #ifndef KF2_OFFLINE_TELEMETRY_SHA256
 #define KF2_OFFLINE_TELEMETRY_SHA256 \
-    "8fab8160bd0d8cacc458187d990d036227d20df103a19cdfdeeefdc736d16d74"
+    "e8979fc9b0daf6104ebb7e4027aabf5e048aa1c49d386f29373253eabca27933"
 #endif
 inline constexpr char kOfflineTelemetryModuleSha256[] =
     KF2_OFFLINE_TELEMETRY_SHA256;

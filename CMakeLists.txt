@@ -14,7 +14,7 @@ set(KF2_VERSION "${PROJECT_VERSION}-alpha" CACHE STRING "Product version")
 set(KF2_BUILD_COMMIT "unknown" CACHE STRING "Source commit identity")
 set(KF2_BUILD_CHANNEL "dev" CACHE STRING "Build channel")
 set(KF2_OFFLINE_TELEMETRY_SHA256
-    "8fab8160bd0d8cacc458187d990d036227d20df103a19cdfdeeefdc736d16d74"
+    "e8979fc9b0daf6104ebb7e4027aabf5e048aa1c49d386f29373253eabca27933"
     CACHE STRING "SHA-256 of the exact locally compiled offline telemetry module")
 string(LENGTH "${KF2_OFFLINE_TELEMETRY_SHA256}" KF2_TELEMETRY_HASH_LENGTH)
 if(NOT KF2_TELEMETRY_HASH_LENGTH EQUAL 64 OR
@@ -151,6 +151,7 @@ add_executable(KF2Optimizer WIN32
     src/flex/flex_lab.cpp
     src/flex/flex_observation.cpp
     src/game/adaptive_control_client.cpp
+    src/game/frame_rate_cap.cpp
     src/game/game_discovery.cpp
     src/game/gameplay_log_lab.cpp
     src/game/offline_telemetry_lab.cpp

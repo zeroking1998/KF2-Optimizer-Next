@@ -58,28 +58,6 @@ struct AdaptiveRuntimeControlSelection final {
     int quality{100};
 };
 
-struct TargetFpsRuntimeControlInput final {
-    int target_fps{60};
-    std::optional<int> applied_target_fps;
-    bool bridge_available{false};
-    std::uint64_t now_ns{0};
-    std::uint64_t last_dispatch_ns{0};
-};
-
-[[nodiscard]] inline std::optional<int> select_target_fps_runtime_control(
-    const TargetFpsRuntimeControlInput& input) noexcept {
-    constexpr std::uint64_t kRetryIntervalNs = 5'000'000'000ULL;
-    if (!input.bridge_available || input.target_fps < 30 ||
-        input.target_fps > 240 || input.now_ns == 0 ||
-        input.applied_target_fps == input.target_fps ||
-        (input.last_dispatch_ns != 0 &&
-         (input.now_ns < input.last_dispatch_ns ||
-          input.now_ns - input.last_dispatch_ns < kRetryIntervalNs))) {
-        return std::nullopt;
-    }
-    return input.target_fps;
-}
-
 [[nodiscard]] inline int adaptive_runtime_quality_level(int quality) noexcept {
     if (quality >= 88) return 3;
     if (quality >= 63) return 2;

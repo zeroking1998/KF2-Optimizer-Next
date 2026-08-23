@@ -54,7 +54,6 @@ std::optional<AdaptiveResourceControl> parse_resource(
     if (value == "ram") return AdaptiveResourceControl::ram;
     if (value == "mixed") return AdaptiveResourceControl::mixed;
     if (value == "recover") return AdaptiveResourceControl::recover;
-    if (value == "target_fps") return AdaptiveResourceControl::target_fps;
     return std::nullopt;
 }
 
@@ -136,7 +135,6 @@ std::string_view adaptive_resource_control_name(
         case AdaptiveResourceControl::ram: return "ram";
         case AdaptiveResourceControl::mixed: return "mixed";
         case AdaptiveResourceControl::recover: return "recover";
-        case AdaptiveResourceControl::target_fps: return "target_fps";
     }
     return "mixed";
 }
@@ -174,10 +172,7 @@ Result<std::string> generate_adaptive_control_token() {
 
 Result<std::string> build_adaptive_control_command(
     const AdaptiveControlRequest& request) {
-    const bool valid_value =
-        request.resource == AdaptiveResourceControl::target_fps
-            ? request.quality >= 30 && request.quality <= 240
-            : request.quality >= 10 && request.quality <= 100;
+    const bool valid_value = request.quality >= 10 && request.quality <= 100;
     if (request.port == 0 || !valid_adaptive_control_token(request.token) ||
         request.sequence == 0 || !valid_value || request.timeout_ms < 25 ||
         request.timeout_ms > 2000) {
@@ -219,10 +214,7 @@ std::optional<AdaptiveControlReceipt> parse_adaptive_control_receipt(
         return std::nullopt;
     }
     receipt.resource = *resource;
-    const bool valid_value =
-        receipt.resource == AdaptiveResourceControl::target_fps
-            ? receipt.quality >= 30 && receipt.quality <= 240
-            : receipt.quality >= 10 && receipt.quality <= 100;
+    const bool valid_value = receipt.quality >= 10 && receipt.quality <= 100;
     if (!valid_value) return std::nullopt;
     return receipt;
 }

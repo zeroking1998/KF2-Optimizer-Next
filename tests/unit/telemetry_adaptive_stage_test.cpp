@@ -91,26 +91,6 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
 int main() {
     using namespace kf2;
     using namespace kf2::telemetry_pipeline;
-    TargetFpsRuntimeControlInput target_control{
-        .target_fps = 122,
-        .bridge_available = true,
-        .now_ns = 10'000'000'000ULL};
-    CHECK(select_target_fps_runtime_control(target_control) == 122);
-    target_control.applied_target_fps = 122;
-    CHECK(!select_target_fps_runtime_control(target_control));
-    target_control.applied_target_fps = 120;
-    target_control.last_dispatch_ns = 9'000'000'000ULL;
-    CHECK(!select_target_fps_runtime_control(target_control));
-    target_control.now_ns = 14'000'000'000ULL;
-    CHECK(select_target_fps_runtime_control(target_control) == 122);
-    target_control.target_fps = 29;
-    CHECK(!select_target_fps_runtime_control(target_control));
-    target_control.target_fps = 241;
-    CHECK(!select_target_fps_runtime_control(target_control));
-    target_control.target_fps = 86;
-    target_control.bridge_available = false;
-    CHECK(!select_target_fps_runtime_control(target_control));
-
     auto frame = complete_frame();
     AdaptiveSampleContext context;
     context.current_quality = 80;

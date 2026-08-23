@@ -283,13 +283,22 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
     events->append({0, diagnostics::Severity::info,
         "ADAPTIVE_LAUNCH_PROFILE_APPLIED",
         protected_profile_capability_requested
-            ? L"General Adaptive applied frame pacing plus the available bounded " +
+            ? L"General Adaptive applied the available bounded " +
                   std::wstring{
                       optimizer::adaptive_profile_label(selected_profile)} +
                   L" protected-provider profile capability; individual locks were preserved and the exact pre-game snapshot remains protected"
-            : L"General Adaptive applied frame pacing while preserving the user's FleX setting; the exact pre-game snapshot remains protected",
+            : L"General Adaptive preserved the user's FleX setting; the exact pre-game snapshot remains protected",
         L"optimizer"});
     return applied;
+}
+
+Result<game::FrameRateCapResult> UiRuntime::synchronize_frame_rate_cap() {
+    if (!installation) {
+        return Result<game::FrameRateCapResult>::failure(
+            {ErrorCode::not_found, L"Game not detected", 0});
+    }
+    return game::persist_frame_rate_cap(
+        *installation, optimizer_settings.target_fps);
 }
 
 Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
@@ -379,7 +388,7 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
             installation->executable).has_value()) {
         events->append({0, diagnostics::Severity::warning,
             "ADAPTIVE_EXTERNAL_LAUNCH_TOO_LATE",
-            L"KF2 was already running before the protected Adaptive profile could be prepared; restart KF2 while the optimizer remains open to apply Target FPS",
+            L"KF2 was already running before the protected Adaptive runtime capabilities could be prepared; the native FPS cap remains independent and uses the saved value after restart",
             L"optimizer"});
         return Result<bool>::success(false);
     }
@@ -479,7 +488,6 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
 
     if (control->id == runtime::ControlId::target_fps) {
         optimizer_settings.target_fps = value;
-        adaptive_target_fps_last_dispatch_ns = 0;
         adaptive_policy_changed = true;
         code = L"TARGET_FPS_CHANGED";
         message = L"Target FPS: " +
@@ -543,6 +551,27 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     status.overlay_scale_percent = optimizer_settings.overlay_scale_percent;
     update_adaptive_policy_status(status);
     model.set_status(std::move(status));
+
+    if (optimizer_settings.target_fps != previous.target_fps && installation) {
+        const bool game_running = game::find_running_game_process(
+            installation->executable).has_value();
+        if (game_running) {
+            message += L"; the native cap will use this value after KF2 restarts";
+        } else {
+            const auto synchronized = synchronize_frame_rate_cap();
+            if (!synchronized.has_value()) {
+                events->append({0, diagnostics::Severity::error,
+                    "TARGET_FPS_PERSIST_FAILED",
+                    synchronized.error().message, L"config"});
+                show_notice(ui::NoticeSeverity::error,
+                            L"TARGET_FPS_PERSIST_FAILED",
+                            L"Target FPS was saved, but KF2's native cap could not be updated: " +
+                                synchronized.error().message);
+                return;
+            }
+            message += L"; KF2's native startup cap is ready";
+        }
+    }
 
     if (overlay_changed) telemetry_tick();
     show_notice(ui::NoticeSeverity::info, std::move(code),
@@ -614,6 +643,12 @@ Result<backup::RestoreResult> UiRuntime::restore(
     auto restored = backup::restore_backup(
         backups, id, installation->config_root, preconditions);
     if (restored.has_value()) {
+        const auto capped = synchronize_frame_rate_cap();
+        if (!capped.has_value()) {
+            events->append({0, diagnostics::Severity::error,
+                "TARGET_FPS_PERSIST_FAILED", capped.error().message,
+                L"config"});
+        }
         events->append({0, diagnostics::Severity::info, "CONFIG_RESTORED",
                         L"Restored " +
                             std::to_wstring(restored.value().files_restored) +

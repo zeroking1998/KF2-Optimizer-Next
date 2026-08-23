@@ -112,6 +112,19 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
     if (runtime.session_config_snapshot) {
         static_cast<void>(runtime.restore_protected_session_config(
             L"KF2 closed"));
+    } else if (runtime.installation) {
+        const auto capped = runtime.synchronize_frame_rate_cap();
+        if (!capped.has_value()) {
+            runtime.events->append({0, diagnostics::Severity::error,
+                "TARGET_FPS_PERSIST_FAILED", capped.error().message,
+                L"config"});
+        } else if (capped.value().changed) {
+            runtime.events->append({0, diagnostics::Severity::info,
+                "TARGET_FPS_PERSISTED",
+                L"KF2 closed; the native startup cap was updated to " +
+                    std::to_wstring(capped.value().target_fps) + L" FPS",
+                L"config"});
+        }
     }
     runtime.telemetry_failure = L"KF2 session ended";
     runtime.model.set_notice(
@@ -228,8 +241,6 @@ void UiRuntime::detach_telemetry() {
     adaptive_control_token.clear();
     adaptive_control_sequence = 0;
     adaptive_quality_last_dispatch_ns = 0;
-    adaptive_target_fps_last_dispatch_ns = 0;
-    adaptive_target_fps_applied.reset();
     adaptive_runtime_quality = optimizer_settings.adaptive_maximum_quality;
     adaptive_profile_gate.reset();
     adaptive_gameplay_active = false;

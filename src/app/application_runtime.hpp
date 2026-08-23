@@ -31,6 +31,7 @@
 #include "kf2/diagnostics/crash_recorder.hpp"
 #include "kf2/game/game_session.hpp"
 #include "kf2/game/advanced_settings.hpp"
+#include "kf2/game/frame_rate_cap.hpp"
 #include "kf2/game/video_settings.hpp"
 #include "kf2/game/gameplay_log_lab.hpp"
 #include "kf2/game/game_log_session.hpp"
@@ -64,13 +65,7 @@ struct PackageRepairAsyncState;
 struct UpdateCheckAsyncState;
 struct UpdateInstallAsyncState;
 
-enum class AdaptiveRuntimeRequestKind : std::uint8_t {
-    quality,
-    target_fps,
-};
-
 struct AdaptiveRuntimePendingRequest final {
-    AdaptiveRuntimeRequestKind kind{AdaptiveRuntimeRequestKind::quality};
     std::uint64_t action_id{0};
     optimizer::AdaptiveGeneration generation;
     int previous_quality{100};
@@ -94,8 +89,6 @@ std::optional<std::string> path_utf8(const std::filesystem::path& path);
 Result<std::string> read_verified_local_file(
     const std::filesystem::path& path, std::uintmax_t maximum_bytes);
 std::wstring query_hardware_summary();
-std::wstring optimizer_preview_context(
-    const optimizer::OptimizerInput& input);
 
 struct UiRuntime {
     ~UiRuntime();
@@ -155,8 +148,6 @@ struct UiRuntime {
     std::string adaptive_control_token;
     std::uint64_t adaptive_control_sequence{0};
     std::uint64_t adaptive_quality_last_dispatch_ns{0};
-    std::uint64_t adaptive_target_fps_last_dispatch_ns{0};
-    std::optional<int> adaptive_target_fps_applied;
     int adaptive_runtime_quality{100};
     std::uint64_t adaptive_settings_generation{1};
     optimizer::AdaptiveProfilePersistenceGate adaptive_profile_gate;
@@ -263,6 +254,8 @@ struct UiRuntime {
 
     bool restore_automatic_flex_lab(std::wstring_view reason);
 
+    Result<game::FrameRateCapResult> synchronize_frame_rate_cap();
+
     bool restore_protected_session_config(std::wstring_view reason);
 
     void try_attach_telemetry();
@@ -279,9 +272,6 @@ struct UiRuntime {
     Result<config::ConfigPreview> prepare(
         const std::vector<config::RequestedChange>& requests,
         std::wstring context = L"Verified configuration changes");
-
-    Result<OptimizerPreview> prepare_optimizer(
-        const optimizer::OptimizerInput& input);
 
     Result<config::ApplyResult> apply_adaptive_launch_profile();
 

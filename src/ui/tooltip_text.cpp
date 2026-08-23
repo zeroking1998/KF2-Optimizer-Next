@@ -33,7 +33,7 @@ constexpr TooltipEntry kTooltips[]{
     {"diagnostics-open-data", L"Opens the portable Data folder containing settings, backups, reports, and logs. Nothing is uploaded."},
     {"diagnostics-open-log", L"Opens the local JSON session-event log used to explain Optimizer decisions, receipts, warnings, and errors."},
 
-    {"settings-target-slider", L"Sets the FPS goal from 30 to 240 and saves it immediately. Adaptive compares live, average, and 1% low FPS against this target."},
+    {"settings-target-slider", L"Sets KF2's native FPS limit from 30 to 240. Steam and shortcut launches use the same limit from the next game start; Adaptive also uses it as its performance target."},
     {"settings-corpses-slider", L"Sets the maximum corpse ceiling and saves it immediately. Adaptive may use fewer corpses under confirmed scene or frame-time pressure."},
 
     {"graphics-display", L"Windowed is easy to switch away from, Borderless fills the desktop, and Fullscreen can reduce presentation overhead."},

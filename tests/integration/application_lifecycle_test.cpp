@@ -207,6 +207,8 @@ int main() {
     const auto config_root = documents / L"My Games/KillingFloor2/KFGame/Config";
     const auto install_root = root / L"Steam/steamapps/common/KillingFloor2";
     write_test_pe(install_root / L"Binaries/Win64/KFGame.exe");
+    write_bytes(install_root / L"Engine/Config/ConsoleVariables.ini",
+                "; native startup variables\r\n[Startup]\r\n");
     CHECK(write_complete_config_catalog(config_root));
     write_bytes(config_root / L"KFGame.ini",
                 read_bytes(config_root / L"KFGame.ini") +
@@ -264,19 +266,6 @@ int main() {
         CHECK(read_bytes(options.state_root / L"settings.ini").starts_with(
             "schema_version=1\n"));
         CHECK(first.value().game_installation().has_value());
-        kf2::optimizer::OptimizerInput optimizer_input;
-        optimizer_input.target_fps = 90;
-        optimizer_input.profile_preview_requested = true;
-        const auto optimized = first.value().prepare_optimizer(optimizer_input);
-        CHECK(optimized.has_value());
-        CHECK(optimized.value().decision.changes.size() == 3);
-        CHECK(read_bytes(config_root / L"KFGame.ini").find(
-            "MaxSmoothedFrameRate=60") != std::string::npos);
-        const auto current = first.value().prepare_current_optimizer();
-        CHECK(current.has_value());
-        CHECK(current.value().decision.changes.size() == 3);
-        CHECK(current.value().decision.bottleneck ==
-              kf2::optimizer::Bottleneck::unavailable);
         const auto preview = first.value().prepare_config_changes({
             {kf2::config::SettingId::target_fps, 90,
              kf2::config::ChangeSource::explicit_user, L"integration"}});
@@ -296,8 +285,18 @@ int main() {
         CHECK(!duplicate.has_value());
         CHECK(duplicate.error().code == kf2::ErrorCode::already_running);
         CHECK(first.value().shutdown_cleanly().has_value());
-        CHECK(read_bytes(config_root / L"KFGame.ini") == original_game_config);
+        auto expected_game_config = original_game_config;
+        const auto original_cap = expected_game_config.find(
+            "MaxSmoothedFrameRate=62.000000");
+        CHECK(original_cap != std::string::npos);
+        expected_game_config.replace(
+            original_cap, std::strlen("MaxSmoothedFrameRate=62.000000"),
+            "MaxSmoothedFrameRate=60.000000");
+        CHECK(read_bytes(config_root / L"KFGame.ini") == expected_game_config);
         CHECK(read_bytes(config_root / L"KFEngine.ini") == original_engine_config);
+        CHECK(read_bytes(install_root /
+            L"Engine/Config/ConsoleVariables.ini").find(
+                "t.MaxFPS=60") != std::string::npos);
         CHECK(!fs::exists(published_telemetry));
     }
     CHECK(read_bytes(options.state_root / L"session.marker").ends_with(
@@ -383,7 +382,7 @@ int main() {
         CHECK(!blocked.has_value());
         CHECK(blocked.error().code == kf2::ErrorCode::access_denied);
         CHECK(read_bytes(config_root / L"KFGame.ini").find(
-            "MaxSmoothedFrameRate=62.000000") != std::string::npos);
+            "MaxSmoothedFrameRate=60.000000") != std::string::npos);
         const auto overlay_blocked =
             read_only.value().set_overlay_enabled(true);
         CHECK(!overlay_blocked.has_value());
