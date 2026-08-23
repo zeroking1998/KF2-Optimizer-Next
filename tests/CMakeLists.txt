@@ -246,6 +246,7 @@ add_test(NAME kf2_settings_test COMMAND kf2_settings_test)
 
 add_executable(kf2_session_config_guard_test
     integration/session_config_guard_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/session_guard.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp")

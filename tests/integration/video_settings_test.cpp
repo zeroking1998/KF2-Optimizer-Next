@@ -40,6 +40,7 @@ int main() {
         "MaxDeadBodies=550\r\nMaxShadowResolution=1536\r\nShadowTexelsPerPixel=2.0\r\n"
         "Bloom=True\r\nBloomQuality=2\r\nMotionBlur=True\r\nAmbientOcclusion=True\r\n"
         "HBAO=True\r\nDepthOfField=True\r\nLightCones=True\r\n"
+        "bAllowTemporalAA=True\r\n"
         "bAllowLensFlares=True\r\nbAllowLightShafts=True\r\n"
         "TEXTUREGROUP_World=(LODBias=0,MinMagFilter=Aniso,MipFilter=Linear)\r\n"
         "TEXTUREGROUP_Character=(LODBias=0,MinMagFilter=Aniso,MipFilter=Linear)\r\n";
@@ -111,6 +112,9 @@ int main() {
           L"550");
     CHECK(proposed_system.value().find(
               L"SystemSettings", L"MaxAnisotropy") == L"16");
+    CHECK(proposed_system.value().find(
+              L"SystemSettings", L"bAllowTemporalAA") == L"False");
+
     auto defaults_preview = kf2::game::build_video_preview(root, defaults);
     CHECK(defaults_preview.has_value());
     const auto default_system = kf2::config::IniDocument::parse(

@@ -208,8 +208,8 @@ int main() {
     advanced_status.advanced_available = true;
     advanced_status.advanced_values.fill(L"Off");
     advanced_status.advanced_values[0] = L"On";
-    advanced_status.advanced_values[11] = L"4×";
-    advanced_status.advanced_values[12] = L"Full";
+    advanced_status.advanced_values[10] = L"4×";
+    advanced_status.advanced_values[11] = L"Full";
     advanced_status.advanced_screen_percentage = 110;
     advanced_status.advanced_particle_percentage = 85;
     advanced_status.advanced_decal_lifetime = 45;
@@ -223,7 +223,7 @@ int main() {
     CHECK(action(advanced, "advanced-one-frame-thread-lag") != nullptr);
     CHECK(action(advanced, "advanced-one-frame-thread-lag")->selected);
     CHECK(action(advanced, "advanced-texture-streaming") != nullptr);
-    CHECK(action(advanced, "advanced-temporal-aa") != nullptr);
+    CHECK(action(advanced, "advanced-temporal-aa") == nullptr);
     CHECK(action(advanced, "advanced-max-multisamples")->text.find(L"4×") !=
           std::wstring::npos);
     CHECK(action(advanced, "advanced-gore-level")->text.find(L"Full") !=

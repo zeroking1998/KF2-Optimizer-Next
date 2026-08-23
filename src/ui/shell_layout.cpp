@@ -602,16 +602,14 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         cursor += 34.0F;
         grid_base = cursor;
         action_index = 0;
-        advanced_action("advanced-temporal-aa",
-                        L"Temporal anti-aliasing", 7);
         advanced_action("advanced-hardware-shadow-filtering",
-                        L"Hardware shadow filtering", 8);
+                        L"Hardware shadow filtering", 7);
         advanced_action("advanced-downsampled-translucency",
-                        L"Downsampled translucency", 9);
+                        L"Downsampled translucency", 8);
         advanced_action("advanced-floating-point-render-targets",
-                        L"Floating-point render targets", 10);
+                        L"Floating-point render targets", 9);
         advanced_action("advanced-max-multisamples",
-                        L"Multisampling", 11);
+                        L"Multisampling", 10);
         cursor = grid_base +
             static_cast<float>((action_index + action_columns - 1) /
                                action_columns) * kActionStride + 8.0F;
@@ -625,7 +623,7 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         grid_base = cursor;
         action_index = 0;
         advanced_action("advanced-gore-level",
-                        L"Gore level", 12);
+                        L"Gore level", 11);
         cursor = grid_base + kActionStride + 4.0F;
         add_slider("advanced-particle-percentage-slider", L"Particle amount",
                    cursor, {0, 100, status.advanced_particle_percentage,

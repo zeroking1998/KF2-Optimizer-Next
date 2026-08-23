@@ -23,8 +23,8 @@ int main() {
         "settings-target-slider",
     }};
 
-    CHECK(action_bindings().size() == 64);
-    CHECK(action_definitions().size() == 62);
+    CHECK(action_bindings().size() == 63);
+    CHECK(action_definitions().size() == 61);
     CHECK(control_definitions().size() == kExistingControls.size() + 4);
 
     for (const auto name : kExistingControls) {
@@ -42,6 +42,7 @@ int main() {
     CHECK(!parse_action("settings-flex-down").has_value());
     CHECK(!parse_action("settings-animations").has_value());
     CHECK(!parse_action("settings-advanced-toggle").has_value());
+    CHECK(!parse_action("advanced-temporal-aa").has_value());
     CHECK(!parse_action("dashboard-settings").has_value());
     CHECK(!parse_action("settings-finetuning").has_value());
     CHECK(!parse_action("optimizer-open-settings").has_value());
@@ -86,7 +87,7 @@ int main() {
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::diagnostics)] == 7);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::backup)] == 1);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::graphics)] == 23);
-    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::advanced)] == 15);
+    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::advanced)] == 14);
 
 
     std::set<ControlId> control_ids;

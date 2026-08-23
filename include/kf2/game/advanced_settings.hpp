@@ -19,7 +19,6 @@ enum class AdvancedOption : std::size_t {
     texture_streaming,
     priority_streaming,
     dynamic_streaming,
-    temporal_aa,
     hardware_shadow_filtering,
     downsampled_translucency,
     floating_point_render_targets,

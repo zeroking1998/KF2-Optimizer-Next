@@ -675,6 +675,7 @@ Result<config::ConfigPreview> build_video_preview(
     const int ao = selected(VideoOption::ambient_occlusion);
     if (!apply_result(put_bool(document, L"bAllowScreenSpaceReflections", selected(VideoOption::realtime_reflections) != 0)) ||
         !apply_result(put_bool(document, L"PostProcessAA", selected(VideoOption::anti_aliasing) != 0)) ||
+        !apply_result(put_bool(document, L"bAllowTemporalAA", false)) ||
         !apply_result(put_bool(document, L"Bloom", bloom != 0)) ||
         !apply_result(put_int(document, L"BloomQuality", bloom)) ||
         !apply_result(put_bool(document, L"MotionBlur", selected(VideoOption::motion_blur) != 0)) ||

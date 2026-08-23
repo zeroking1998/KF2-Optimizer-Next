@@ -178,6 +178,15 @@ int main() {
     CHECK(flex_preservation_changes.size() == 1);
     CHECK(flex_preservation_changes.front().id ==
           kf2::config::SettingId::target_fps);
+    kf2::app::enforce_temporal_aa_disabled(flex_preservation_changes);
+    CHECK(flex_preservation_changes.size() == 2);
+    CHECK(flex_preservation_changes.back().id ==
+          kf2::config::SettingId::temporal_aa);
+    CHECK(std::get<bool>(flex_preservation_changes.back().value) == false);
+    flex_preservation_changes.back().value = true;
+    kf2::app::enforce_temporal_aa_disabled(flex_preservation_changes);
+    CHECK(flex_preservation_changes.size() == 2);
+    CHECK(std::get<bool>(flex_preservation_changes.back().value) == false);
     namespace fs = std::filesystem;
     CHECK(kf2::app::runtime::feature_definitions().size() == 7);
     CHECK(kf2::app::runtime::find_feature(

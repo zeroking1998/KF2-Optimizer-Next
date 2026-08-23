@@ -36,6 +36,8 @@ enum class StartMode { normal, read_only, safe };
 
 void preserve_user_flex_activation(
     std::vector<config::RequestedChange>& changes) noexcept;
+void enforce_temporal_aa_disabled(
+    std::vector<config::RequestedChange>& changes) noexcept;
 
 struct StartOptions {
     std::filesystem::path state_root;

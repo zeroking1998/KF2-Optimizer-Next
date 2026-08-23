@@ -22,7 +22,6 @@ constexpr std::array<config::SettingId, kAdvancedOptionCount> kSettingIds{{
     config::SettingId::texture_streaming,
     config::SettingId::priority_streaming,
     config::SettingId::dynamic_streaming,
-    config::SettingId::temporal_aa,
     config::SettingId::hardware_shadow_filtering,
     config::SettingId::downsampled_translucency,
     config::SettingId::floating_point_render_targets,
@@ -41,7 +40,6 @@ constexpr std::array<std::wstring_view, kAdvancedOptionCount> kLabels{{
     L"Texture streaming",
     L"Priority texture streaming",
     L"Dynamic texture streaming",
-    L"Temporal anti-aliasing",
     L"Hardware shadow filtering",
     L"Downsampled translucency",
     L"Floating-point render targets",
@@ -193,7 +191,6 @@ AdvancedGameSettings recommended_advanced_defaults() {
         true,   // texture streaming
         true,   // priority texture streaming
         true,   // dynamic texture streaming
-        false,  // temporal anti-aliasing; avoids frame-history ghosting
         true,   // hardware shadow filtering
         true,   // downsampled translucency
         false,  // floating-point render targets
@@ -257,6 +254,10 @@ std::vector<config::RequestedChange> advanced_setting_changes(
             config::ChangeSource::explicit_user,
             L"Explicit user-selected advanced KF2 setting"});
     }
+    changes.push_back({
+        config::SettingId::temporal_aa, false,
+        config::ChangeSource::explicit_user,
+        L"Disable temporal frame-history anti-aliasing to prevent ghosting"});
     return changes;
 }
 

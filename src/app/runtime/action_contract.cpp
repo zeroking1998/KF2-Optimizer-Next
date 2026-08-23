@@ -10,7 +10,7 @@ namespace {
 constexpr AccessPolicy kRestricted = AccessPolicy::restricted_mode_allowed;
 constexpr AccessPolicy kNormal = AccessPolicy::normal_mode_required;
 
-constexpr std::array<ActionDefinition, 62> kActions{{
+constexpr std::array<ActionDefinition, 61> kActions{{
     {ActionId::diagnostics_export_support, "diagnostics-export-support", FeatureId::diagnostics, kRestricted},
     {ActionId::diagnostics_flex_restore, "diagnostics-flex-restore", FeatureId::diagnostics, kNormal},
     {ActionId::diagnostics_full_check, "diagnostics-full-check", FeatureId::diagnostics, kRestricted},
@@ -65,7 +65,6 @@ constexpr std::array<ActionDefinition, 62> kActions{{
     {ActionId::advanced_texture_streaming, "advanced-texture-streaming", FeatureId::advanced, kNormal},
     {ActionId::advanced_priority_streaming, "advanced-priority-streaming", FeatureId::advanced, kNormal},
     {ActionId::advanced_dynamic_streaming, "advanced-dynamic-streaming", FeatureId::advanced, kNormal},
-    {ActionId::advanced_temporal_aa, "advanced-temporal-aa", FeatureId::advanced, kNormal},
     {ActionId::advanced_hardware_shadow_filtering, "advanced-hardware-shadow-filtering", FeatureId::advanced, kNormal},
     {ActionId::advanced_downsampled_translucency, "advanced-downsampled-translucency", FeatureId::advanced, kNormal},
     {ActionId::advanced_floating_point_render_targets, "advanced-floating-point-render-targets", FeatureId::advanced, kNormal},
@@ -75,7 +74,7 @@ constexpr std::array<ActionDefinition, 62> kActions{{
     {ActionId::advanced_reset, "advanced-reset", FeatureId::advanced, kNormal},
 }};
 
-constexpr std::array<ActionBinding, 64> kBindings{{
+constexpr std::array<ActionBinding, 63> kBindings{{
     {"dashboard-launch", ActionId::game_launch},
     {"diagnostics-backup", ActionId::optimizer_backup},
     {"diagnostics-export-support", ActionId::diagnostics_export_support},
@@ -128,7 +127,6 @@ constexpr std::array<ActionBinding, 64> kBindings{{
     {"advanced-texture-streaming", ActionId::advanced_texture_streaming},
     {"advanced-priority-streaming", ActionId::advanced_priority_streaming},
     {"advanced-dynamic-streaming", ActionId::advanced_dynamic_streaming},
-    {"advanced-temporal-aa", ActionId::advanced_temporal_aa},
     {"advanced-hardware-shadow-filtering", ActionId::advanced_hardware_shadow_filtering},
     {"advanced-downsampled-translucency", ActionId::advanced_downsampled_translucency},
     {"advanced-floating-point-render-targets", ActionId::advanced_floating_point_render_targets},

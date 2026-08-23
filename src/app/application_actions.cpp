@@ -4,6 +4,8 @@
 #include "runtime/action_router.hpp"
 #include "runtime/feature_composition.hpp"
 
+#include <algorithm>
+
 namespace kf2::app {
 
 void preserve_user_flex_activation(
@@ -11,6 +13,23 @@ void preserve_user_flex_activation(
     std::erase_if(changes, [](const config::RequestedChange& change) {
         return change.id == config::SettingId::physx_level;
     });
+}
+
+void enforce_temporal_aa_disabled(
+    std::vector<config::RequestedChange>& changes) noexcept {
+    const auto existing = std::find_if(
+        changes.begin(), changes.end(), [](const config::RequestedChange& change) {
+            return change.id == config::SettingId::temporal_aa;
+        });
+    const config::RequestedChange required{
+        config::SettingId::temporal_aa, false,
+        config::ChangeSource::explicit_user,
+        L"Disable temporal frame-history anti-aliasing to prevent ghosting"};
+    if (existing == changes.end()) {
+        changes.push_back(required);
+    } else {
+        *existing = required;
+    }
 }
 
 Result<bool> UiRuntime::set_overlay(bool enabled) {
@@ -242,6 +261,7 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
     auto changes = optimizer::filter_adaptive_locked_changes(
         decision.changes, adaptive_locks);
     preserve_user_flex_activation(changes);
+    enforce_temporal_aa_disabled(changes);
     if (changes.empty()) {
         return Result<config::ApplyResult>::failure({
             ErrorCode::access_denied,
@@ -382,8 +402,9 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
     }
 
     // A zero deadline deliberately means that the verified profile remains
-    // staged while the optimizer is open.  The exact snapshot is restored on
-    // app shutdown, or after the next observed KF2 process exits.
+    // staged while the optimizer is open. The snapshot is restored on app
+    // shutdown, or after the next observed KF2 process exits, while the fixed
+    // temporal-AA safety override remains disabled.
     session_config_waiting_for_launch = true;
     session_config_launch_deadline_ns = 0;
     telemetry_failure = L"Adaptive profile ready; waiting for KF2";

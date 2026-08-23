@@ -120,7 +120,7 @@ struct UiStatus {
     bool advanced_available{false};
     bool advanced_dirty{false};
     bool advanced_game_running{false};
-    std::array<std::wstring, 16> advanced_values{};
+    std::array<std::wstring, 15> advanced_values{};
     int advanced_screen_percentage{100};
     int advanced_particle_percentage{100};
     int advanced_decal_lifetime{30};

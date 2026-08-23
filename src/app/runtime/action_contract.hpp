@@ -73,7 +73,6 @@ enum class ActionId : std::uint16_t {
     advanced_texture_streaming = 117,
     advanced_priority_streaming = 118,
     advanced_dynamic_streaming = 119,
-    advanced_temporal_aa = 120,
     advanced_hardware_shadow_filtering = 121,
     advanced_downsampled_translucency = 122,
     advanced_floating_point_render_targets = 123,
