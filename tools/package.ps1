@@ -70,8 +70,8 @@ if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
 }
 $executableText = [Text.Encoding]::ASCII.GetString(
     [IO.File]::ReadAllBytes($source))
-if (-not $executableText.Contains(
-        $actualTelemetryHash, [StringComparison]::Ordinal)) {
+if ($executableText.IndexOf(
+        $actualTelemetryHash, [StringComparison]::Ordinal) -lt 0) {
     throw 'Release executable is not bound to the exact locally compiled telemetry module; rebuild without -SkipBuild'
 }
 if (-not (Test-Path -LiteralPath $destinationRoot)) {

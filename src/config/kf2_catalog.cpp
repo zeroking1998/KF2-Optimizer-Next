@@ -36,7 +36,7 @@ const std::array<SettingDefinition, 213> kSettings{{
      optimizer::kTargetFpsMinimum, optimizer::kTargetFpsMaximum, true, {}, 1},
     {SettingId::minimum_smooth_frame_rate, L"KFGame.ini",
      L"KFGame.KFGameEngine", L"MinSmoothedFrameRate",
-     SettingType::integer, 1, 360, false, {}, 1},
+     SettingType::integer, 1, 360, true, {}, 1},
     {SettingId::smooth_frame_rate, L"KFGame.ini", L"KFGame.KFGameEngine",
      L"bSmoothFrameRate", SettingType::boolean, 0, 1},
     {SettingId::corpse_limit, L"KFGame.ini", L"KFGame.KFGoreManager",

@@ -24,7 +24,24 @@ void UiRuntime::update_adaptive_controller(
         if (adaptive_control_pending) {
             const auto pending = *adaptive_control_pending;
             const auto completed_ns = monotonic_ns();
-            if (outcome->has_value()) {
+            if (pending.kind == AdaptiveRuntimeRequestKind::target_fps) {
+                if (outcome->has_value()) {
+                    adaptive_target_fps_applied = pending.requested_quality;
+                    events->append({
+                        0, diagnostics::Severity::info,
+                        "TARGET_FPS_RUNTIME_CONFIGURED",
+                        L"KF2 confirmed its GPU-independent engine frame-pacing properties for " +
+                            std::to_wstring(pending.requested_quality) +
+                            L" FPS; actual enforcement is measured separately and is not inferred from this property readback",
+                        L"optimizer"});
+                } else {
+                    events->append({
+                        0, diagnostics::Severity::warning,
+                        "TARGET_FPS_RUNTIME_FAILED",
+                        L"KF2 did not change its engine frame-pacing properties because the authenticated bridge returned no exact property readback; a safe retry is scheduled",
+                        L"optimizer"});
+                }
+            } else if (outcome->has_value()) {
                 static_cast<void>(adaptive_actuation.receive({
                     pending.action_id,
                     optimizer::AdaptiveControlId::runtime_quality,
@@ -164,6 +181,8 @@ void UiRuntime::update_adaptive_controller(
         adaptive_runtime_quality =
             optimizer_settings.adaptive_maximum_quality;
         adaptive_quality_last_dispatch_ns = 0;
+        adaptive_target_fps_last_dispatch_ns = 0;
+        adaptive_target_fps_applied.reset();
         events->append({0, diagnostics::Severity::info,
             "ADAPTIVE_GAMEPLAY_STARTED",
             L"Adaptive began a fresh controller window after verified active gameplay was detected",
@@ -282,10 +301,44 @@ void UiRuntime::update_adaptive_controller(
         optimizer::AdaptiveControlId::runtime_quality;
     adaptive_actuation.establish_effective(
         runtime_control, static_cast<double>(adaptive_runtime_quality));
-    const bool bridge_available = frame.gameplay &&
+    bool bridge_available = frame.gameplay &&
         frame.gameplay->telemetry_control_port.has_value() &&
         game::valid_adaptive_control_token(adaptive_control_token) &&
         !adaptive_control_dispatcher.busy();
+    const auto target_fps_selection =
+        telemetry_pipeline::select_target_fps_runtime_control({
+            .target_fps = optimizer_settings.target_fps,
+            .applied_target_fps = adaptive_target_fps_applied,
+            .bridge_available = bridge_available,
+            .now_ns = now_ns,
+            .last_dispatch_ns = adaptive_target_fps_last_dispatch_ns});
+    if (target_fps_selection) {
+        const auto next_sequence =
+            adaptive_control_sequence ==
+                    std::numeric_limits<std::uint64_t>::max()
+                ? 1 : adaptive_control_sequence + 1;
+        const auto started = adaptive_control_dispatcher.start({
+            .port = *frame.gameplay->telemetry_control_port,
+            .token = adaptive_control_token,
+            .sequence = next_sequence,
+            .resource = game::AdaptiveResourceControl::target_fps,
+            .quality = *target_fps_selection,
+            .timeout_ms = 200});
+        adaptive_target_fps_last_dispatch_ns = now_ns;
+        if (started.has_value() && started.value()) {
+            adaptive_control_sequence = next_sequence;
+            adaptive_control_pending = AdaptiveRuntimePendingRequest{
+                .kind = AdaptiveRuntimeRequestKind::target_fps,
+                .requested_quality = *target_fps_selection};
+            bridge_available = false;
+        } else {
+            events->append({
+                0, diagnostics::Severity::warning,
+                "TARGET_FPS_RUNTIME_FAILED",
+                L"The live FPS-limit worker could not start; a safe retry is scheduled",
+                L"optimizer"});
+        }
+    }
     const auto runtime_selection =
         telemetry_pipeline::select_adaptive_runtime_control({
             .state = adaptive_decision.state,
@@ -333,8 +386,11 @@ void UiRuntime::update_adaptive_controller(
                 adaptive_control_sequence = next_sequence;
                 adaptive_quality_last_dispatch_ns = now_ns;
                 adaptive_control_pending = AdaptiveRuntimePendingRequest{
-                    proposed.action_id, proposed.generation,
-                    previous_quality, runtime_selection->quality};
+                    .kind = AdaptiveRuntimeRequestKind::quality,
+                    .action_id = proposed.action_id,
+                    .generation = proposed.generation,
+                    .previous_quality = previous_quality,
+                    .requested_quality = runtime_selection->quality};
             } else {
                 static_cast<void>(adaptive_actuation.receive({
                     proposed.action_id,

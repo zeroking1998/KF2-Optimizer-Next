@@ -40,11 +40,29 @@ int main() {
     CHECK(command.has_value());
     CHECK(command.value() ==
           "KF2OPT 0123456789abcdef0123456789abcdef 42 vram 50\n");
+    const auto target_command = build_adaptive_control_command({
+        .port = 17777,
+        .token = token,
+        .sequence = 43,
+        .resource = AdaptiveResourceControl::target_fps,
+        .quality = 122,
+        .timeout_ms = 200});
+    CHECK(target_command.has_value());
+    CHECK(target_command.value() ==
+          "KF2OPT 0123456789abcdef0123456789abcdef 43 target_fps 122\n");
     CHECK(!build_adaptive_control_command({
         .port = 0, .token = token, .sequence = 1}).has_value());
     CHECK(!build_adaptive_control_command({
         .port = 1, .token = token, .sequence = 1,
         .quality = 9}).has_value());
+    CHECK(!build_adaptive_control_command({
+        .port = 1, .token = token, .sequence = 1,
+        .resource = AdaptiveResourceControl::target_fps,
+        .quality = 29}).has_value());
+    CHECK(!build_adaptive_control_command({
+        .port = 1, .token = token, .sequence = 1,
+        .resource = AdaptiveResourceControl::target_fps,
+        .quality = 241}).has_value());
 
     const auto receipt = parse_adaptive_control_receipt(
         "KF2OPT_ACK 42 applied vram 50\r\n");
@@ -52,6 +70,11 @@ int main() {
     CHECK(receipt->sequence == 42);
     CHECK(receipt->resource == AdaptiveResourceControl::vram);
     CHECK(receipt->quality == 50);
+    const auto target_receipt = parse_adaptive_control_receipt(
+        "KF2OPT_ACK 43 applied target_fps 122\r\n");
+    CHECK(target_receipt.has_value());
+    CHECK(target_receipt->resource == AdaptiveResourceControl::target_fps);
+    CHECK(target_receipt->quality == 122);
     CHECK(!parse_adaptive_control_receipt(
         "KF2OPT_ACK 42 failed rejected").has_value());
     CHECK(!parse_adaptive_control_receipt(

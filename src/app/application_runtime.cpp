@@ -421,9 +421,7 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
             L"The legacy 70% Adaptive quality floor was expanded to 10%",
             L"optimizer"});
     }
-    // Safe mode must start without optional overlay/telemetry side effects,
-    // regardless of the persisted normal-mode preference.
-    overlay_enabled = mode == StartMode::safe ? false : settings.overlay_enabled;
+    overlay_enabled = settings.overlay_enabled;
     overlay_scale = static_cast<float>(settings.overlay_scale_percent) / 100.0F;
     if (settings.overlay_position == "top_left") {
         overlay_corner = overlay::OverlayCorner::top_left;
@@ -437,9 +435,8 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
     model.set_build_identity(std::wstring{identity.begin(), identity.end()});
     model.set_recovery_required(recovery_required);
     ui::UiStatus status;
-    status.mode = mode == StartMode::read_only ? L"Read-only" :
-                  mode == StartMode::safe ? L"Safe mode" :
-                  L"Adaptive / Automatic";
+    status.mode = mode == StartMode::read_only
+        ? L"Read-only" : L"Adaptive / Automatic";
     status.target_fps = settings.target_fps;
     status.corpse_limit = settings.corpse_limit;
     update_adaptive_policy_status(status);

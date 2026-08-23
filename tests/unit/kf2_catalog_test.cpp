@@ -105,7 +105,7 @@ int main() {
     CHECK(minimum->relative_path == L"KFGame.ini");
     CHECK(minimum->section == L"KFGame.KFGameEngine");
     CHECK(minimum->key == L"MinSmoothedFrameRate");
-    CHECK(!minimum->adaptive_allowed);
+    CHECK(minimum->adaptive_allowed);
     const auto* smoothing = find_setting(SettingId::smooth_frame_rate);
     CHECK(smoothing != nullptr);
     CHECK(smoothing->relative_path == L"KFGame.ini");

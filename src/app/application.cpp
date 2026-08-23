@@ -163,11 +163,10 @@ Result<Application> Application::start(const StartOptions& options) {
         runtime->model.set_notice({
             ui::NoticeSeverity::error, L"PACKAGE_INTEGRITY_FAILED",
             options.startup_warning,
-            L"Re-extract the complete portable package before enabling changes."});
+            L"Use Repair to restore the affected component; unrelated controls remain available."});
     }
     if (!runtime->model.recovery_required() &&
-        options.mode == StartMode::normal &&
-        options.startup_warning.empty()) {
+        options.mode == StartMode::normal) {
         const auto prepared =
             runtime->prepare_automatic_external_launch_profile();
         if (!prepared.has_value()) {

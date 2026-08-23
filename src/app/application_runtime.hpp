@@ -64,7 +64,13 @@ struct PackageRepairAsyncState;
 struct UpdateCheckAsyncState;
 struct UpdateInstallAsyncState;
 
+enum class AdaptiveRuntimeRequestKind : std::uint8_t {
+    quality,
+    target_fps,
+};
+
 struct AdaptiveRuntimePendingRequest final {
+    AdaptiveRuntimeRequestKind kind{AdaptiveRuntimeRequestKind::quality};
     std::uint64_t action_id{0};
     optimizer::AdaptiveGeneration generation;
     int previous_quality{100};
@@ -149,6 +155,8 @@ struct UiRuntime {
     std::string adaptive_control_token;
     std::uint64_t adaptive_control_sequence{0};
     std::uint64_t adaptive_quality_last_dispatch_ns{0};
+    std::uint64_t adaptive_target_fps_last_dispatch_ns{0};
+    std::optional<int> adaptive_target_fps_applied;
     int adaptive_runtime_quality{100};
     std::uint64_t adaptive_settings_generation{1};
     optimizer::AdaptiveProfilePersistenceGate adaptive_profile_gate;

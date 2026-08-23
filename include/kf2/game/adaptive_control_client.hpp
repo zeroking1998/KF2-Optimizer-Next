@@ -17,6 +17,7 @@ enum class AdaptiveResourceControl : std::uint8_t {
     ram,
     mixed,
     recover,
+    target_fps,
 };
 
 struct AdaptiveControlRequest final {

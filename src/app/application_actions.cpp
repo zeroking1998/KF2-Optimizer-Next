@@ -36,7 +36,7 @@ Result<bool> UiRuntime::set_overlay(bool enabled) {
     if (start_mode != StartMode::normal) {
         return Result<bool>::failure(
             {ErrorCode::access_denied,
-             L"This start mode does not permit persistent overlay changes", 0});
+             L"This action is unavailable", 0});
     }
     if (enabled == overlay_enabled) {
         return Result<bool>::success(overlay_enabled);
@@ -434,8 +434,6 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
         invalidate();
     };
     if (start_mode != StartMode::normal) {
-        show_notice(ui::NoticeSeverity::warning, L"MODE_READ_ONLY",
-                    L"Settings cannot be changed in this start mode.");
         return;
     }
 
@@ -481,6 +479,7 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
 
     if (control->id == runtime::ControlId::target_fps) {
         optimizer_settings.target_fps = value;
+        adaptive_target_fps_last_dispatch_ns = 0;
         adaptive_policy_changed = true;
         code = L"TARGET_FPS_CHANGED";
         message = L"Target FPS: " +
@@ -551,22 +550,12 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
 }
 
 void UiRuntime::execute_action(std::string_view action) {
-    const auto notice = [this](ui::NoticeSeverity severity,
-                               std::wstring code,
-                               std::wstring message) {
-        model.set_notice(
-            {severity, std::move(code), std::move(message), L""});
-        invalidate();
-    };
-
     constexpr bool protected_game_launch = true;
     const auto resolved = runtime::resolve_action(
         action, {.protected_game_launch = protected_game_launch});
     if (!resolved) return;
     if (resolved->normal_mode_required &&
         start_mode != StartMode::normal) {
-        notice(ui::NoticeSeverity::warning, L"MODE_READ_ONLY",
-               L"This start mode does not permit persistent changes. Restart normally to modify files.");
         return;
     }
 
@@ -582,7 +571,7 @@ Result<config::ApplyResult> UiRuntime::apply(
     if (start_mode != StartMode::normal) {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::access_denied,
-             L"This start mode does not permit persistent configuration changes", 0});
+             L"This action is unavailable", 0});
     }
     if (!preview) return Result<config::ApplyResult>::failure(
         {ErrorCode::invalid_argument, L"No configuration preview is ready", 0});
@@ -615,7 +604,7 @@ Result<backup::RestoreResult> UiRuntime::restore(
     if (start_mode != StartMode::normal) {
         return Result<backup::RestoreResult>::failure(
             {ErrorCode::access_denied,
-             L"This start mode does not permit persistent configuration changes", 0});
+             L"This action is unavailable", 0});
     }
     if (!installation) {
         return Result<backup::RestoreResult>::failure(

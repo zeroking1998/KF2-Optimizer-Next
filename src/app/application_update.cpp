@@ -158,9 +158,6 @@ void UiRuntime::poll_update_check() {
 
 void UiRuntime::toggle_automatic_update_checks() {
     if (start_mode != StartMode::normal) {
-        model.set_notice({ui::NoticeSeverity::warning, L"MODE_READ_ONLY",
-                          L"Restart normally to change update settings.", L""});
-        invalidate();
         return;
     }
     const bool previous = optimizer_settings.automatic_update_checks;

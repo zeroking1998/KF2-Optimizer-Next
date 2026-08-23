@@ -119,7 +119,7 @@ void UiRuntime::poll_auto_package_repair() {
             ui::NoticeSeverity::info, L"PACKAGE_AUTO_REPAIR_APPLIED",
             std::to_wstring(repaired.repaired_files) +
                 L" required files were restored and verified.",
-            L"Restart KF2 Optimizer to leave Safe Mode."});
+            L"Restart KF2 Optimizer to load the repaired components."});
     }
     invalidate();
 }

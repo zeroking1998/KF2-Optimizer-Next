@@ -158,8 +158,6 @@ int main() {
     CHECK(kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::normal));
     CHECK(!kf2::app::should_prepare_protected_gameplay_provider(
-        kf2::app::StartMode::safe));
-    CHECK(!kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::read_only));
     CHECK(!kf2::app::should_prepare_adaptive_flex_runtime(
         kf2::app::StartMode::normal, 0));
@@ -167,8 +165,6 @@ int main() {
         kf2::app::StartMode::normal, 1));
     CHECK(kf2::app::should_prepare_adaptive_flex_runtime(
         kf2::app::StartMode::normal, 2));
-    CHECK(!kf2::app::should_prepare_adaptive_flex_runtime(
-        kf2::app::StartMode::safe, 2));
     std::vector<kf2::config::RequestedChange> flex_preservation_changes{
         {kf2::config::SettingId::target_fps, 120,
          kf2::config::ChangeSource::adaptive, L"test"},
@@ -253,6 +249,8 @@ int main() {
         CHECK(automatically_prepared.find(
                   "MaxSmoothedFrameRate=60") != std::string::npos);
         CHECK(automatically_prepared.find(
+                  "MinSmoothedFrameRate=22") != std::string::npos);
+        CHECK(automatically_prepared.find(
                   "bSmoothFrameRate=True") != std::string::npos);
         CHECK(fs::exists(published_telemetry));
         CHECK(read_bytes(published_telemetry) == read_bytes(telemetry_asset));
@@ -271,12 +269,12 @@ int main() {
         optimizer_input.profile_preview_requested = true;
         const auto optimized = first.value().prepare_optimizer(optimizer_input);
         CHECK(optimized.has_value());
-        CHECK(optimized.value().decision.changes.size() == 2);
+        CHECK(optimized.value().decision.changes.size() == 3);
         CHECK(read_bytes(config_root / L"KFGame.ini").find(
             "MaxSmoothedFrameRate=60") != std::string::npos);
         const auto current = first.value().prepare_current_optimizer();
         CHECK(current.has_value());
-        CHECK(current.value().decision.changes.size() == 2);
+        CHECK(current.value().decision.changes.size() == 3);
         CHECK(current.value().decision.bottleneck ==
               kf2::optimizer::Bottleneck::unavailable);
         const auto preview = first.value().prepare_config_changes({
@@ -394,17 +392,31 @@ int main() {
               settings_before_read_only);
         CHECK(read_only.value().shutdown_cleanly().has_value());
     }
-    options.mode = kf2::app::StartMode::safe;
-    options.identity.process_start_id = 10028;
-    {
-        auto safe = kf2::app::Application::start(options);
-        CHECK(safe.has_value());
-        CHECK(safe.value().ui_model().status().mode == L"Safe mode");
-        CHECK(!safe.value().overlay_enabled());
-        CHECK(!safe.value().set_overlay_enabled(true).has_value());
-        CHECK(safe.value().shutdown_cleanly().has_value());
-    }
     options.mode = kf2::app::StartMode::normal;
+
+    {
+        auto degraded_options = options;
+        degraded_options.state_root = root / L"Data-component-warning";
+        degraded_options.instance_name =
+            L"Local\\KF2OptimizerNext-ComponentWarning-" +
+            std::to_wstring(GetCurrentProcessId());
+        degraded_options.identity.process_start_id = 10028;
+        degraded_options.game_discovery.reset();
+        degraded_options.startup_warning =
+            L"A managed companion component does not match its package hash.";
+        auto degraded = kf2::app::Application::start(degraded_options);
+        CHECK(degraded.has_value());
+        CHECK(degraded.value().ui_model().status().mode ==
+              L"Adaptive / Automatic");
+        CHECK(degraded.value().ui_model().notice().has_value());
+        CHECK(degraded.value().ui_model().notice()->code ==
+              L"PACKAGE_INTEGRITY_FAILED");
+        const auto overlay_changed =
+            degraded.value().set_overlay_enabled(true);
+        CHECK(overlay_changed.has_value());
+        CHECK(overlay_changed.value());
+        CHECK(degraded.value().shutdown_cleanly().has_value());
+    }
 
     {
         auto missing_options = options;

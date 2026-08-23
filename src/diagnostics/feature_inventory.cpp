@@ -36,18 +36,18 @@ constexpr AreaContract area01{
     "The native x64 portable app runs as standard user, binds KF2 by path and file identity, and recovers bounded local transactions.",
     "Predictable portable startup and recoverable local state.",
     "External execution policy can still block an unsigned portable binary.",
-    "All start modes; mutations only in normal mode.",
+    "Adaptive/Automatic plus an explicit read-only diagnostics mode; package damage is handled per component.",
     "Atomic state/session files, verified transaction recovery and replaceable package files.",
     "Windows 10+, Steam metadata and a supported KF2 installation.",
-    "Lifecycle, single-instance, PE, package integrity/update/Safe-Mode, GUI launch and clean-exit tests.",
+    "Lifecycle, single-instance, PE, package integrity/update, degraded-package GUI launch and clean-exit tests.",
     "kf2_application_lifecycle_test; kf2_single_instance_test; kf2_pe_contract_test; kf2_package_integrity_test; validate_package_update.ps1; validate_package_safe_mode.ps1; validate_release_gui.ps1"};
 
 constexpr std::array area01_items{
-    ItemSpec{FeatureStatus::present, "normal and safe startup", "Normal, read-only and safe starts are explicit and tested."},
+    ItemSpec{FeatureStatus::present, "normal and read-only startup", "Adaptive/Automatic startup and the explicit read-only diagnostics mode are tested; package damage does not create a global UI lock."},
     ItemSpec{FeatureStatus::present, "single-instance protection", "A named mutex and second-launch test enforce one instance."},
     ItemSpec{FeatureStatus::present, "UAC and permissions", "The embedded manifest requests asInvoker and uiAccess=false; no elevation is attempted."},
     ItemSpec{FeatureStatus::present, "path, package, and build validation", "Canonical paths, embedded build identity, PE contract and package validation are active."},
-    ItemSpec{FeatureStatus::present, "installation, repair, update, and migration", "The portable package replaces only manifest-owned program files, preserves settings, logs, backups and profiles byte-for-byte, verifies fifteen managed payload hashes and falls back to Safe Mode when damaged. Auto Repair downloads only the exact installed GitHub release for companion-file recovery. The consent-only updater separately checks newer published versions, verifies repository, asset name, size, SHA-256, build and package identity, then uses a temporary helper for backup, atomic replacement, restart acknowledgement, rollback and cleanup. A verified local package remains the offline repair fallback."},
+    ItemSpec{FeatureStatus::present, "installation, repair, update, and migration", "The portable package replaces only manifest-owned program files, preserves settings, logs, backups and profiles byte-for-byte, and verifies fifteen managed payload hashes. A missing or damaged component is reported for repair without disabling unrelated controls. Auto Repair downloads only the exact installed GitHub release for companion-file recovery. The consent-only updater separately checks newer published versions, verifies repository, asset name, size, SHA-256, build and package identity, then uses a temporary helper for backup, atomic replacement, restart acknowledgement, rollback and cleanup. A verified local package remains the offline repair fallback."},
     ItemSpec{FeatureStatus::present, "launching KF2", "Only the verified Steam/KF2 executable is launched."},
     ItemSpec{FeatureStatus::present, "shutdown, removal, and restoration", "Clean app stop and verified restore exist; portable removal needs no uninstaller, and the app deliberately never force-stops KF2."},
     ItemSpec{FeatureStatus::present, "crash, cancellation, restart, and recovery paths", "Unclean sessions and interrupted config/backup/FleX operations recover; privacy-bounded local crash records identify the failing build and exception without dumps or user content."},

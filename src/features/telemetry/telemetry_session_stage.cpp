@@ -228,6 +228,8 @@ void UiRuntime::detach_telemetry() {
     adaptive_control_token.clear();
     adaptive_control_sequence = 0;
     adaptive_quality_last_dispatch_ns = 0;
+    adaptive_target_fps_last_dispatch_ns = 0;
+    adaptive_target_fps_applied.reset();
     adaptive_runtime_quality = optimizer_settings.adaptive_maximum_quality;
     adaptive_profile_gate.reset();
     adaptive_gameplay_active = false;

@@ -40,8 +40,12 @@ int main() {
     CHECK(explicit_preview.confidence == Confidence::unavailable);
     CHECK(explicit_preview.reason.find(L"Explicit selected-profile preview") !=
           std::wstring::npos);
-    CHECK(explicit_preview.changes.size() == 69);
+    CHECK(explicit_preview.changes.size() == 70);
     CHECK(find_change(explicit_preview, config::SettingId::target_fps) != nullptr);
+    const auto* smoothing_floor = find_change(
+        explicit_preview, config::SettingId::minimum_smooth_frame_rate);
+    CHECK(smoothing_floor != nullptr);
+    CHECK(std::get<int>(smoothing_floor->value) == 22);
     CHECK(find_change(explicit_preview, config::SettingId::dynamic_shadows) != nullptr);
     CHECK(find_change(explicit_preview,
                       config::SettingId::corpse_collision_with_living) == nullptr);
@@ -67,7 +71,7 @@ int main() {
     gpu_bound.quality = QualityPolicy::performance;
     gpu_bound.profile = Profile::high_performance;
     auto performance = evaluate(gpu_bound);
-    CHECK(performance.changes.size() == 69);
+    CHECK(performance.changes.size() == 70);
     for (const auto& change : performance.changes) {
         const auto* definition = config::find_setting(change.id);
         CHECK(definition != nullptr);
@@ -193,7 +197,7 @@ int main() {
     auto stability_input = gpu_bound;
     stability_input.profile = Profile::stability;
     auto stability = evaluate(stability_input);
-    CHECK(stability.changes.size() == 69);
+    CHECK(stability.changes.size() == 70);
     CHECK(std::get<int>(find_change(stability,
               config::SettingId::corpse_limit)->value) == 15);
     CHECK(std::get<bool>(find_change(stability,
@@ -214,7 +218,7 @@ int main() {
     auto balanced_input = gpu_bound;
     balanced_input.profile = Profile::balanced;
     auto balanced = evaluate(balanced_input);
-    CHECK(balanced.changes.size() == 69);
+    CHECK(balanced.changes.size() == 70);
     CHECK(std::get<int>(find_change(balanced,
               config::SettingId::corpse_limit)->value) == 12);
     CHECK(std::get<bool>(find_change(balanced,
@@ -234,7 +238,7 @@ int main() {
     auto custom_input = gpu_bound;
     custom_input.profile = Profile::custom;
     auto custom = evaluate(custom_input);
-    CHECK(custom.changes.size() == 2);
+    CHECK(custom.changes.size() == 3);
     CHECK(find_change(custom, config::SettingId::corpse_limit) == nullptr);
     CHECK(find_change(custom, config::SettingId::dynamic_shadows) == nullptr);
 

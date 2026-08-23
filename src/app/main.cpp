@@ -133,9 +133,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int show_command) {
         package_warning = (missing_release_manifest
                 ? L"The Release executable is outside its verified portable package"
                 : package_audit.value().message) +
-            L". The program started in Safe Mode. Re-extract the complete "
-            L"portable package; existing Data settings, logs and backups can "
-            L"be kept.";
+            L". Repair the matching portable package to restore unavailable "
+            L"components. Existing Data settings, logs and backups are kept.";
     }
 
     std::filesystem::path local_app_data;
@@ -158,7 +157,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int show_command) {
     auto crash_recorder = kf2::diagnostics::CrashRecorder::arm(
         state_location.value().root / L"logs" / L"crashes", identity);
     // Crash diagnostics are deliberately best-effort: a blocked diagnostic
-    // directory must not prevent safe-mode or recovery startup.
+    // directory must not prevent recovery startup.
     static_cast<void>(crash_recorder);
     const std::wstring wide_identity(identity.begin(), identity.end());
     const std::uint64_t process_start_id = current_process_start_id();
@@ -174,10 +173,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int show_command) {
         for (const auto& stored_argument : arguments) {
             const std::wstring_view argument{stored_argument};
             if (argument == L"--read-only") mode = kf2::app::StartMode::read_only;
-            else if (argument == L"--safe-mode") mode = kf2::app::StartMode::safe;
         }
     }
-    if (damaged_package) mode = kf2::app::StartMode::safe;
     auto discovery = kf2::game::default_game_discovery_input();
     if (discovery.has_value()) {
         const auto settings_path = state_location.value().root / L"settings.ini";

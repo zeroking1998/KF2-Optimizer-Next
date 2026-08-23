@@ -66,6 +66,8 @@ int main() {
     CHECK(connection_source.find("KF2OPT_ACK ") != std::string::npos);
     CHECK(connection_source.find("Probe.ApplyAdaptiveResourceControl") !=
           std::string::npos);
+    CHECK(connection_source.find("Probe.ApplyAdaptiveTargetFPSControl") !=
+          std::string::npos);
     CHECK(connection_source.find(
         "Left(Peer, 10) != \"127.0.0.1:\"") != std::string::npos);
     CHECK(connection_source.find("reason=non_loopback") !=
@@ -103,6 +105,23 @@ int main() {
         "var globalconfig int AdaptiveCorpseMaximum") != std::string::npos);
     CHECK(telemetry_source.find(
         "var globalconfig int AdaptiveTargetFPS") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "function bool ApplyAdaptiveTargetFPSControl") != std::string::npos);
+    CHECK(viewport_source.find(
+        "CurrentEngine.MaxSmoothedFrameRate = float(TargetFPS)") !=
+          std::string::npos);
+    CHECK(viewport_source.find(
+        "KF2OPT_TARGET_FPS state=configured") != std::string::npos);
+    CHECK(viewport_source.find(
+        "provider=engine_smoothing readback=property_only") !=
+        std::string::npos);
+    CHECK(viewport_source.find(
+        "CurrentEngine.MinSmoothedFrameRate = 22.0") !=
+        std::string::npos);
+    CHECK(viewport_source.find(
+        "KF2OPT_TARGET_FPS state=applied") == std::string::npos);
+    CHECK(viewport_source.find(
+        "ApplyAdaptiveTargetFPS(RuntimeTargetFPS)") != std::string::npos);
     CHECK(telemetry_source.find(
         "var globalconfig int AdaptiveQualityChangeBudget") !=
           std::string::npos);

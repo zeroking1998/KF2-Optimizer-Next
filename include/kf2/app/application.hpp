@@ -22,7 +22,7 @@
 
 namespace kf2::app {
 
-enum class StartMode { normal, read_only, safe };
+enum class StartMode { normal, read_only };
 
 [[nodiscard]] constexpr bool should_prepare_protected_gameplay_provider(
     StartMode mode) noexcept {

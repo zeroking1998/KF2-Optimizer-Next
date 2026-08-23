@@ -121,6 +121,29 @@ function bool ApplyAdaptiveResourceControl(
     return true;
 }
 
+function bool ApplyAdaptiveTargetFPSControl(
+    string Token, int Sequence, int TargetFPS)
+{
+    local KF2OptimizerTelemetryViewport CurrentViewport;
+
+    if (!ValidAdaptiveControlToken(Token) || Sequence <= 0 ||
+        Sequence <= AdaptiveLastControlSequence ||
+        TargetFPS < 30 || TargetFPS > 240)
+    {
+        return false;
+    }
+    CurrentViewport = KF2OptimizerTelemetryViewport(
+        class'Engine'.static.GetEngine().GameViewport);
+    if (CurrentViewport == None ||
+        !CurrentViewport.ApplyAdaptiveTargetFPS(TargetFPS))
+    {
+        return false;
+    }
+    AdaptiveLastControlSequence = Sequence;
+    AdaptiveTargetFPS = TargetFPS;
+    return true;
+}
+
 function RestoreAdaptiveGraphics()
 {
     if (!class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(

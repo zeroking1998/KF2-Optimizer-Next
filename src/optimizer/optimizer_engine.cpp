@@ -292,6 +292,9 @@ OptimizerDecision evaluate(const OptimizerInput& input) {
          explicit_profile_preview)) {
         put(changes, config::SettingId::target_fps, input.target_fps,
             config::ChangeSource::adaptive, L"Match the verified KF2 frame cap to target FPS");
+        put(changes, config::SettingId::minimum_smooth_frame_rate, 22,
+            config::ChangeSource::adaptive,
+            L"Keep KF2's smoothing floor below every supported target FPS");
         put(changes, config::SettingId::smooth_frame_rate, true,
             config::ChangeSource::adaptive, L"Use KF2 frame smoothing for stable pacing");
 

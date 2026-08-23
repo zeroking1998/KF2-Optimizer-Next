@@ -69,8 +69,16 @@ event ReceivedLine(string Line)
     {
         if (Probe != None && !Probe.bDeleteMe)
         {
-            Applied = Probe.ApplyAdaptiveResourceControl(
-                Token, Sequence, Resource, Quality);
+            if (Resource ~= "target_fps")
+            {
+                Applied = Probe.ApplyAdaptiveTargetFPSControl(
+                    Token, Sequence, Quality);
+            }
+            else
+            {
+                Applied = Probe.ApplyAdaptiveResourceControl(
+                    Token, Sequence, Resource, Quality);
+            }
             break;
         }
     }

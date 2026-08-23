@@ -110,7 +110,7 @@ int main() {
         categories.insert(setting_category(setting.id));
         CHECK(!setting_category_label(setting.id).empty());
     }
-    CHECK(adaptive_protected_count == 143);
+    CHECK(adaptive_protected_count == 142);
     CHECK(categories.size() == all_setting_categories().size());
     CHECK(all_settings().size() == 213);
     const auto* physics_substeps = find_setting_by_token("MaxPhysicsSubsteps");
