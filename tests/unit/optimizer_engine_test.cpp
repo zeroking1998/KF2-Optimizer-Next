@@ -84,6 +84,8 @@ int main() {
     CHECK(find_change(performance, config::SettingId::explosion_decal_limit) != nullptr);
     CHECK(find_change(performance, config::SettingId::impact_decal_limit) != nullptr);
     CHECK(find_change(performance, config::SettingId::wound_decal_limit) != nullptr);
+    CHECK(std::get<int>(find_change(performance,
+              config::SettingId::wound_decal_limit)->value) == 5);
     CHECK(find_change(performance, config::SettingId::blood_splatter_decal_limit) != nullptr);
     CHECK(find_change(performance, config::SettingId::blood_pool_decal_limit) != nullptr);
     CHECK(find_change(performance, config::SettingId::blood_effect_limit) != nullptr);
@@ -140,7 +142,7 @@ int main() {
               config::SettingId::secondary_blood_effects)->value));
     CHECK(std::get<bool>(find_change(performance,
               config::SettingId::static_decals)->value));
-    CHECK(!std::get<bool>(find_change(performance,
+    CHECK(std::get<bool>(find_change(performance,
               config::SettingId::dynamic_decals)->value));
     CHECK(std::get<double>(find_change(performance,
               config::SettingId::decal_cull_distance_scale)->value) == 0.5);

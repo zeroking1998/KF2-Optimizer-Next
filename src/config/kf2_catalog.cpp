@@ -48,7 +48,7 @@ const std::array<SettingDefinition, 213> kSettings{{
     {SettingId::impact_decal_limit, L"KFGame.ini", L"KFGame.KFImpactEffectManager",
      L"MaxImpactEffectDecals", SettingType::integer, 0, 128},
     {SettingId::wound_decal_limit, L"KFGame.ini", L"KFGame.KFGoreManager",
-     L"MaxBodyWoundDecals", SettingType::integer, 2, 64},
+     L"MaxBodyWoundDecals", SettingType::integer, 5, 64},
     {SettingId::blood_splatter_decal_limit, L"KFGame.ini", L"KFGame.KFGoreManager",
      L"MaxBloodSplatterDecals", SettingType::integer, 0, 128},
     {SettingId::blood_pool_decal_limit, L"KFGame.ini", L"KFGame.KFGoreManager",
