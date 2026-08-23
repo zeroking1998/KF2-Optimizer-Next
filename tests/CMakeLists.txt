@@ -929,7 +929,8 @@ target_link_libraries(kf2_presentmon_dxgi_present_test PRIVATE
 )
 add_test(NAME kf2_presentmon_dxgi_present_test COMMAND kf2_presentmon_dxgi_present_test)
 set_tests_properties(kf2_presentmon_dxgi_present_test PROPERTIES
-    LABELS "requires-desktop")
+    LABELS "requires-desktop"
+    SKIP_RETURN_CODE 77)
 
 add_executable(kf2_gpu_metrics_test
     windows/gpu_metrics_test.cpp
