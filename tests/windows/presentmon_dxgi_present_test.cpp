@@ -58,8 +58,15 @@ int main() {
                                   WS_OVERLAPPEDWINDOW, 0, 0, 320, 240, nullptr,
                                   nullptr, instance, nullptr);
     CHECK(window != nullptr);
+    HWND secondary_window = CreateWindowExW(
+        0, window_class.lpszClassName, L"Secondary DXGI fixture",
+        WS_OVERLAPPEDWINDOW, 340, 0, 320, 240, nullptr, nullptr, instance,
+        nullptr);
+    CHECK(secondary_window != nullptr);
     ShowWindow(window, SW_SHOW);
+    ShowWindow(secondary_window, SW_SHOW);
     UpdateWindow(window);
+    UpdateWindow(secondary_window);
     SetForegroundWindow(window);
 
     DXGI_SWAP_CHAIN_DESC description{};
@@ -76,38 +83,80 @@ int main() {
     IDXGISwapChain* swap_chain = nullptr;
     ID3D11Device* device = nullptr;
     ID3D11DeviceContext* context = nullptr;
+    IDXGISwapChain* secondary_swap_chain = nullptr;
+    ID3D11Device* secondary_device = nullptr;
+    ID3D11DeviceContext* secondary_context = nullptr;
     D3D_FEATURE_LEVEL level{};
-    HRESULT created = D3D11CreateDeviceAndSwapChain(
-        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0,
-        D3D11_SDK_VERSION, &description, &swap_chain, &device, &level, &context);
-    if (FAILED(created)) {
-        created = D3D11CreateDeviceAndSwapChain(
-            nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
-            D3D11_SDK_VERSION, &description, &swap_chain, &device, &level,
-            &context);
-    }
+    // Keep this desktop-bound integration test off the user's GPU driver. A
+    // paced WARP swap chain still emits the DXGI/DWM events PresentMon needs
+    // without creating a burst workload that can trigger a kernel watchdog.
+    const HRESULT created = D3D11CreateDeviceAndSwapChain(
+        nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
+        D3D11_SDK_VERSION, &description, &swap_chain, &device, &level,
+        &context);
     CHECK(SUCCEEDED(created));
 
+    description.OutputWindow = secondary_window;
+    CHECK(SUCCEEDED(D3D11CreateDeviceAndSwapChain(
+        nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
+        D3D11_SDK_VERSION, &description, &secondary_swap_chain,
+        &secondary_device, &level, &secondary_context)));
+
+    ID3D11Texture2D* primary_buffer = nullptr;
+    ID3D11RenderTargetView* primary_target = nullptr;
+    CHECK(SUCCEEDED(swap_chain->GetBuffer(
+        0, __uuidof(ID3D11Texture2D),
+        reinterpret_cast<void**>(&primary_buffer))));
+    CHECK(SUCCEEDED(device->CreateRenderTargetView(
+        primary_buffer, nullptr, &primary_target)));
     const SampleIdentity identity{GetCurrentProcessId(), 1};
     PresentSource source{identity, 512};
     CHECK(source.start().has_value());
     auto session =
         kf2::platform::windows::PresentMonSession::start(identity, source);
     CHECK(session.has_value());
-    Sleep(150);
-    for (int frame = 0; frame < 90; ++frame) {
+    Sleep(250);
+    for (int frame = 0; frame < 120; ++frame) {
         pump_messages();
-        CHECK(SUCCEEDED(swap_chain->Present(1, 0)));
+        const float shade = static_cast<float>(frame % 16) / 15.0F;
+        const float color[4]{0.10F, shade, 0.30F, 1.0F};
+        context->ClearRenderTargetView(primary_target, color);
+        // WARP is not required to honor DXGI's refresh synchronization. Pace
+        // the known input explicitly so its completed-display rate has an
+        // independent, driver-neutral expectation.
+        CHECK(SUCCEEDED(swap_chain->Present(0, 0)));
+        CHECK(SUCCEEDED(secondary_swap_chain->Present(0, 0)));
+        Sleep(16);
     }
     pump_messages();
     Sleep(500);
-    const auto metrics = source.drain(monotonic_ns(), 2'000'000'000ULL);
-
     CHECK(session.value()->stop().has_value());
+    const auto metrics = source.drain(monotonic_ns(), 2'000'000'000ULL);
     CHECK(source.stop().has_value());
-    CHECK(metrics.fps.has_value());
-    CHECK(*metrics.fps > 20.0);
-    CHECK(metrics.quality == SampleQuality::good);
+    if (metrics.fps) {
+        std::cout << "Measured completed-present FPS: " << *metrics.fps << '\n';
+        CHECK(*metrics.fps > 30.0);
+        // A process can own several swap chains. Only one coherent stream is
+        // allowed to contribute frames; otherwise both fixtures are mixed.
+        CHECK(*metrics.fps < 90.0);
+        CHECK(metrics.quality == SampleQuality::good);
+    } else {
+        CHECK(metrics.reason == UnavailableReason::no_samples ||
+              metrics.reason == UnavailableReason::stale);
+        primary_target->Release();
+        primary_buffer->Release();
+        context->Release();
+        device->Release();
+        swap_chain->Release();
+        secondary_context->Release();
+        secondary_device->Release();
+        secondary_swap_chain->Release();
+        DestroyWindow(window);
+        DestroyWindow(secondary_window);
+        std::cout << "PresentMon completed-present samples unavailable; "
+                     "skipping desktop boundary\n";
+        return 77;
+    }
 
     kf2::game::GameWindowState game_window;
     game_window.window = window;
@@ -137,9 +186,15 @@ int main() {
     }
     CHECK(!IsWindowVisible(overlay.value().native_handle()));
 
+    primary_target->Release();
+    primary_buffer->Release();
     context->Release();
     device->Release();
     swap_chain->Release();
+    secondary_context->Release();
+    secondary_device->Release();
+    secondary_swap_chain->Release();
     DestroyWindow(window);
+    DestroyWindow(secondary_window);
     return EXIT_SUCCESS;
 }

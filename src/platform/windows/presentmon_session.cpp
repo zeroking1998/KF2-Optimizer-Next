@@ -86,12 +86,35 @@ struct PresentMonSession::Impl {
         TRACEHANDLE handle = session.mTraceHandle;
         static_cast<void>(ProcessTrace(&handle, 1, nullptr, nullptr));
     }
+    void ingest_completed_presents() {
+        std::vector<std::shared_ptr<PresentEvent>> presents;
+        consumer.DequeuePresentEvents(presents);
+        for (const auto& present : presents) {
+            const bool completed_application_present = present &&
+                (present->FinalState == PresentResult::Presented ||
+                 present->FinalState == PresentResult::Discarded);
+            if (!present || present->ProcessId != identity.pid ||
+                present->PresentStartTime == 0 || present->PresentFailed ||
+                present->IsLost || !completed_application_present) {
+                continue;
+            }
+            // MSI Afterburner reports KF2's application-present cadence. A
+            // successful Present remains an application frame when the display
+            // pipeline later discards it; excluding those frames under-reports
+            // the same running game by roughly the discard rate.
+            static_cast<void>(sink->ingest(
+                {identity,
+                 qpc_to_ns(present->PresentStartTime, qpc_frequency),
+                 1, true, 0, present->SwapChainAddress}));
+        }
+    }
     void flush_trace() {
         while (running.load(std::memory_order_acquire)) {
             EVENT_TRACE_PROPERTIES properties{};
             properties.Wnode.BufferSize = sizeof(properties);
             static_cast<void>(FlushTraceW(session.mSessionHandle, nullptr,
                                           &properties));
+            ingest_completed_presents();
             std::this_thread::sleep_for(std::chrono::milliseconds{100});
         }
     }
@@ -117,20 +140,14 @@ Result<std::unique_ptr<PresentMonSession>> PresentMonSession::start(
                  std::to_wstring(GetCurrentProcessId());
     impl->qpc_frequency = static_cast<std::uint64_t>(frequency.QuadPart);
     impl->consumer.mFilteredProcessIds = true;
-    impl->consumer.mTrackDisplay = false;
+    // Display tracking supplies the final state needed to reject discarded
+    // runtime presents instead of treating every API call as a visible frame.
+    impl->consumer.mTrackDisplay = true;
     impl->consumer.mTrackGPU = false;
     impl->consumer.mTrackGPUVideo = false;
     impl->consumer.mTrackInput = false;
-    impl->consumer.mRuntimePresentStartOnly = true;
+    impl->consumer.mRuntimePresentStartOnly = false;
     impl->consumer.AddTrackedProcessForFiltering(identity.pid);
-    impl->consumer.mRuntimePresentStartCallback =
-        [pointer = impl.get()](std::uint32_t pid, std::uint64_t timestamp) {
-            if (pid != pointer->identity.pid || timestamp == 0 ||
-                !pointer->running.load(std::memory_order_acquire)) return;
-            static_cast<void>(pointer->sink->ingest(
-                {pointer->identity,
-                 qpc_to_ns(timestamp, pointer->qpc_frequency), 1, true, 0}));
-        };
     impl->session.mPMConsumer = &impl->consumer;
     impl->session.mTimestampType = PMTraceSession::TIMESTAMP_TYPE_QPC;
     const ULONG status = impl->session.Start(nullptr, impl->name.c_str());
@@ -154,6 +171,10 @@ Result<bool> PresentMonSession::stop() {
     implementation_->session.Stop();
     if (implementation_->trace_worker.joinable()) implementation_->trace_worker.join();
     if (implementation_->flush_worker.joinable()) implementation_->flush_worker.join();
+    // Stopping the real-time trace can complete presents whose display state
+    // was still pending during the last periodic flush. Preserve those final
+    // samples instead of silently dropping them.
+    implementation_->ingest_completed_presents();
     return Result<bool>::success(true);
 }
 }  // namespace kf2::platform::windows
