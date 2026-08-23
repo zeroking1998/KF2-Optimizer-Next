@@ -12,7 +12,7 @@ int adaptive_profile_quality(Profile profile) noexcept {
     switch (profile) {
         case Profile::stability: return 100;
         case Profile::balanced: return 85;
-        case Profile::high_performance: return 70;
+        case Profile::high_performance: return 10;
         case Profile::custom: return -1;
     }
     return -1;
@@ -48,7 +48,7 @@ std::optional<Profile> parse_adaptive_profile(
 
 std::optional<Profile> bound_adaptive_profile(
     Profile requested, int minimum_quality, int maximum_quality) noexcept {
-    if (minimum_quality < 0 || maximum_quality > 100 ||
+    if (minimum_quality < 10 || maximum_quality > 100 ||
         minimum_quality > maximum_quality) {
         return std::nullopt;
     }

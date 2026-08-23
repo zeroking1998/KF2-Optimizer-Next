@@ -38,6 +38,25 @@ bool equals_ascii_case_insensitive(std::string_view left,
     return true;
 }
 
+std::optional<std::uint16_t> parse_adaptive_bridge_line(
+    std::string_view line) {
+    constexpr std::string_view marker =
+        "KF2OPT_ADAPTIVE_BRIDGE state=ready port=";
+    const auto marker_offset = line.find(marker);
+    if (marker_offset == std::string_view::npos) return std::nullopt;
+    auto value = line.substr(marker_offset + marker.size());
+    const auto delimiter = value.find_first_of(" \t\r\n");
+    if (delimiter != std::string_view::npos) value = value.substr(0, delimiter);
+    unsigned int port = 0;
+    const auto [end, error] = std::from_chars(
+        value.data(), value.data() + value.size(), port);
+    if (error != std::errc{} || end != value.data() + value.size() ||
+        port == 0 || port > 65535) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint16_t>(port);
+}
+
 std::optional<double> parse_real(std::string_view text) {
     double value = 0.0;
     const auto parsed = std::from_chars(

@@ -18,10 +18,9 @@
 namespace kf2::game {
 namespace {
 
-// The current schema-6 package is about 161 KiB. Keep a bounded
-// ceiling with ample compiler-metadata headroom while rejecting unrelated
-// large files.
-constexpr std::uintmax_t kMaximumModuleBytes = 256U * 1024U;
+// The current SDK-compiled package is about 262 KiB. Keep a bounded ceiling
+// with compiler-metadata headroom while rejecting unrelated large files.
+constexpr std::uintmax_t kMaximumModuleBytes = 384U * 1024U;
 constexpr std::uintmax_t kMaximumMarkerBytes = 1024U;
 constexpr wchar_t kModuleName[] = L"KF2OptimizerTelemetry.u";
 constexpr wchar_t kStateDirectoryName[] = L"offline-telemetry-lab";

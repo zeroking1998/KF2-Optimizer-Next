@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <string_view>
 
 #include "kf2/core/result.hpp"
 
@@ -19,6 +20,7 @@ namespace kf2::game {
     int adaptive_corpse_maximum = 0,
     int adaptive_target_fps = 0,
     bool adaptive_corpse_debug_markers = false,
-    int adaptive_quality_change_budget = 1);
+    int adaptive_quality_change_budget = 1,
+    std::string_view adaptive_control_token = {});
 
 }  // namespace kf2::game

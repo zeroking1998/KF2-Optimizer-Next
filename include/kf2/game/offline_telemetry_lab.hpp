@@ -6,8 +6,12 @@
 
 namespace kf2::game {
 
+#ifndef KF2_OFFLINE_TELEMETRY_SHA256
+#define KF2_OFFLINE_TELEMETRY_SHA256 \
+    "589aa708392e2c26abc753ce272c6e146f274623181015e8f6bdc201ccb8e2f0"
+#endif
 inline constexpr char kOfflineTelemetryModuleSha256[] =
-    "89f441307624239a2d169abab79f9f3daebabb6e2ea86120e429691d4035063f";
+    KF2_OFFLINE_TELEMETRY_SHA256;
 
 struct OfflineTelemetryLabOptions {
     std::filesystem::path config_root;

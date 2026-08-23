@@ -5,6 +5,7 @@
 // retain an obsolete map during server travel.
 class KF2OptimizerTelemetryViewport extends KFGameViewportClient;
 
+
 function bool GetStandaloneGameplayContext(
     out PlayerController PrimaryController,
     out WorldInfo CurrentWorld)
@@ -37,6 +38,7 @@ function bool GetStandaloneGameplayContext(
 event Tick(float DeltaTime)
 {
     local KF2OptimizerTelemetryProbe CurrentProbe;
+    local KF2OptimizerAdaptiveControlListener CurrentListener;
     local PlayerController PrimaryController;
     local WorldInfo CurrentWorld;
 
@@ -52,11 +54,30 @@ event Tick(float DeltaTime)
     {
         if (CurrentProbe != None && !CurrentProbe.bDeleteMe)
         {
-            return;
+            break;
         }
     }
 
-    PrimaryController.Spawn(class'KF2OptimizerTelemetryProbe');
+    if (CurrentProbe == None || CurrentProbe.bDeleteMe)
+    {
+        CurrentProbe = PrimaryController.Spawn(
+            class'KF2OptimizerTelemetryProbe');
+    }
+    if (CurrentProbe == None || CurrentProbe.bDeleteMe ||
+        Len(CurrentProbe.AdaptiveControlToken) < 32)
+    {
+        return;
+    }
+
+    foreach CurrentWorld.DynamicActors(
+        class'KF2OptimizerAdaptiveControlListener', CurrentListener)
+    {
+        if (CurrentListener != None && !CurrentListener.bDeleteMe)
+        {
+            return;
+        }
+    }
+    PrimaryController.Spawn(class'KF2OptimizerAdaptiveControlListener');
 }
 
 event PostRender(Canvas MarkerCanvas)

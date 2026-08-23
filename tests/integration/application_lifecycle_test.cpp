@@ -329,7 +329,7 @@ int main() {
         "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=true\n"
         "restore_config_after_game=true\n"
         "adaptive_aggressiveness=balanced\n"
-        "adaptive_minimum_quality=70\nadaptive_maximum_quality=100\n"
+        "adaptive_minimum_quality=10\nadaptive_maximum_quality=100\n"
         "adaptive_quality_change_budget=2\nadaptive_headroom_percent=8\n"
         "adaptive_emergency_enabled=true\n"
         "adaptive_quality_recovery_enabled=true\n"

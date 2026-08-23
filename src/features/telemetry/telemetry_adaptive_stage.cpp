@@ -20,6 +20,51 @@ void UiRuntime::update_adaptive_controller(
     const auto now_ns = frame.observed_at_ns;
     const bool active_gameplay = frame.active_gameplay;
     auto status = model.status();
+    if (auto outcome = adaptive_control_dispatcher.poll()) {
+        if (adaptive_control_pending) {
+            const auto pending = *adaptive_control_pending;
+            const auto completed_ns = monotonic_ns();
+            if (outcome->has_value()) {
+                static_cast<void>(adaptive_actuation.receive({
+                    pending.action_id,
+                    optimizer::AdaptiveControlId::runtime_quality,
+                    optimizer::AdaptiveActionStatus::applied,
+                    static_cast<double>(pending.requested_quality),
+                    static_cast<double>(outcome->value().quality),
+                    pending.generation,
+                    completed_ns,
+                    "kf2_loopback_readback",
+                    {},
+                    true,
+                    static_cast<double>(pending.previous_quality)}));
+                adaptive_runtime_quality = outcome->value().quality;
+                events->append({
+                    0, diagnostics::Severity::info,
+                    "ADAPTIVE_RUNTIME_QUALITY_APPLIED",
+                    L"Live KF2 quality changed to " +
+                        std::to_wstring(adaptive_runtime_quality) +
+                        L"% after an exact authenticated APPLIED readback",
+                    L"optimizer"});
+            } else {
+                static_cast<void>(adaptive_actuation.receive({
+                    pending.action_id,
+                    optimizer::AdaptiveControlId::runtime_quality,
+                    optimizer::AdaptiveActionStatus::failed,
+                    static_cast<double>(pending.requested_quality),
+                    {},
+                    pending.generation,
+                    completed_ns,
+                    "kf2_loopback_readback",
+                    "bridge_send_or_readback_failed"}));
+                events->append({
+                    0, diagnostics::Severity::warning,
+                    "ADAPTIVE_RUNTIME_QUALITY_FAILED",
+                    L"Live KF2 quality was not changed because the authenticated bridge did not return an exact APPLIED readback",
+                    L"optimizer"});
+            }
+            adaptive_control_pending.reset();
+        }
+    }
     if (!game_process || !adaptive_locks_valid || adaptive_overhead_frozen) {
         status.adaptive_state = adaptive_locks_valid && !adaptive_overhead_frozen
                 ? L"ready" : L"frozen";
@@ -116,14 +161,19 @@ void UiRuntime::update_adaptive_controller(
         adaptive_governor.reset();
         adaptive_profile_gate.reset();
         adaptive_decision = {};
+        adaptive_runtime_quality =
+            optimizer_settings.adaptive_maximum_quality;
+        adaptive_quality_last_dispatch_ns = 0;
         events->append({0, diagnostics::Severity::info,
             "ADAPTIVE_GAMEPLAY_STARTED",
             L"Adaptive began a fresh controller window after verified active gameplay was detected",
             L"optimizer"});
     }
 
-    const int current_quality = optimizer::adaptive_profile_quality(
-        stored_adaptive_profile(optimizer_settings));
+    const int current_quality = std::clamp(
+        adaptive_runtime_quality,
+        optimizer_settings.adaptive_minimum_quality,
+        optimizer_settings.adaptive_maximum_quality);
     const bool flex_pressure_candidate = frame.flex && frame.flex->fresh &&
         frame.flex->aggregate_particles_fresh &&
         frame.flex->particle_capacity > 0 &&
@@ -227,6 +277,85 @@ void UiRuntime::update_adaptive_controller(
     } else {
         status.adaptive_corpse_action_status = L"NONE";
     }
+
+    const auto runtime_control =
+        optimizer::AdaptiveControlId::runtime_quality;
+    adaptive_actuation.establish_effective(
+        runtime_control, static_cast<double>(adaptive_runtime_quality));
+    const bool bridge_available = frame.gameplay &&
+        frame.gameplay->telemetry_control_port.has_value() &&
+        game::valid_adaptive_control_token(adaptive_control_token) &&
+        !adaptive_control_dispatcher.busy();
+    const auto runtime_selection =
+        telemetry_pipeline::select_adaptive_runtime_control({
+            .state = adaptive_decision.state,
+            .data_quality = adaptive_decision.data.quality,
+            .primary_resource = adaptive_decision.resources.primary,
+            .primary_confidence =
+                adaptive_decision.resources.primary_confidence,
+            .current_quality = adaptive_runtime_quality,
+            .minimum_quality =
+                optimizer_settings.adaptive_minimum_quality,
+            .maximum_quality =
+                optimizer_settings.adaptive_maximum_quality,
+            .recovery_eligible =
+                adaptive_decision.quality_recovery_eligible,
+            .active_gameplay = active_gameplay,
+            .verified_offline = sample.session_class ==
+                optimizer::AdaptiveSessionClass::verified_offline,
+            .bridge_available = bridge_available,
+            .zed_time_active = sample.zed_time_protected,
+            .shadow_mode = optimizer_settings.adaptive_shadow_mode,
+            .now_ns = now_ns,
+            .last_dispatch_ns = adaptive_quality_last_dispatch_ns});
+    if (runtime_selection) {
+        const auto previous_quality = adaptive_runtime_quality;
+        const auto& proposed = adaptive_actuation.propose(
+            runtime_control,
+            static_cast<double>(runtime_selection->quality),
+            static_cast<double>(previous_quality),
+            optimizer::AdaptiveCapabilityState::available,
+            now_ns, "kf2_loopback_readback");
+        if (proposed.status == optimizer::AdaptiveActionStatus::proposed &&
+            adaptive_actuation.dispatch(runtime_control, now_ns)) {
+            const auto next_sequence =
+                adaptive_control_sequence ==
+                        std::numeric_limits<std::uint64_t>::max()
+                    ? 1 : adaptive_control_sequence + 1;
+            const auto started = adaptive_control_dispatcher.start({
+                .port = *frame.gameplay->telemetry_control_port,
+                .token = adaptive_control_token,
+                .sequence = next_sequence,
+                .resource = runtime_selection->resource,
+                .quality = runtime_selection->quality,
+                .timeout_ms = 200});
+            if (started.has_value() && started.value()) {
+                adaptive_control_sequence = next_sequence;
+                adaptive_quality_last_dispatch_ns = now_ns;
+                adaptive_control_pending = AdaptiveRuntimePendingRequest{
+                    proposed.action_id, proposed.generation,
+                    previous_quality, runtime_selection->quality};
+            } else {
+                static_cast<void>(adaptive_actuation.receive({
+                    proposed.action_id,
+                    runtime_control,
+                    optimizer::AdaptiveActionStatus::failed,
+                    static_cast<double>(runtime_selection->quality),
+                    {},
+                    proposed.generation,
+                    monotonic_ns(),
+                    "kf2_loopback_readback",
+                    "bridge_worker_start_failed"}));
+                events->append({
+                    0, diagnostics::Severity::warning,
+                    "ADAPTIVE_RUNTIME_QUALITY_FAILED",
+                    L"Live KF2 quality was not changed because the background bridge worker could not start",
+                    L"optimizer"});
+            }
+        }
+    }
+    adaptive_decision.quality_score =
+        static_cast<double>(adaptive_runtime_quality);
     status.adaptive_state = std::wstring{
         optimizer::adaptive_stability_state_name(
             adaptive_decision.stability_state)};
@@ -317,7 +446,14 @@ void UiRuntime::update_adaptive_controller(
         ? nullptr
         : optimizer::find_adaptive_setting(
               adaptive_decision.selected_setting);
-    if (adaptive_decision.selected_setting ==
+    const auto* runtime_record =
+        adaptive_actuation.current(runtime_control);
+    if (runtime_record) {
+        status.adaptive_source = L"authenticated KF2 loopback";
+        status.adaptive_safety = L"VERIFIED_OFFLINE / EXACT_READBACK";
+        status.adaptive_evidence = widen(
+            optimizer::adaptive_action_status_name(runtime_record->status));
+    } else if (adaptive_decision.selected_setting ==
         "AdaptiveCorpseRuntimeLimit") {
         status.adaptive_source = L"protected autonomous corpse provider";
         status.adaptive_safety = L"PROTECTED / AUTONOMOUS_RUNTIME";

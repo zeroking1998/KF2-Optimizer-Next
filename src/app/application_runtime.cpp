@@ -75,7 +75,8 @@ Result<config::Settings> load_or_create_settings(
                 bytes.find("manual_gore_effect_limit=") != std::string::npos ||
                 bytes.find("adaptive_enabled=") != std::string::npos ||
                 bytes.find("adaptive_online_allowed=") != std::string::npos ||
-                parsed.value().target_fps_migrated;
+                parsed.value().target_fps_migrated ||
+                parsed.value().adaptive_quality_range_migrated;
             if (canonicalization_needed) {
                 const auto migrated =
                     platform::windows::atomic_replace_utf8(
@@ -281,12 +282,10 @@ std::wstring optimizer_preview_context(
 }
 
 UiRuntime::~UiRuntime() {
-    if (installation &&
-        !game::find_running_game_process(
-             installation->executable).has_value()) {
-        static_cast<void>(restore_protected_session_config(
-            L"KF2 Optimizer closed"));
-    }
+    static_cast<void>(restore_live_adaptive_quality(
+        L"KF2 Optimizer closed"));
+    static_cast<void>(restore_protected_session_config(
+        L"KF2 Optimizer closed"));
     if (window) {
         KillTimer(static_cast<HWND>(window->native_handle_for_testing()), 1);
     }
@@ -416,6 +415,12 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
             L"Legacy TargetFPS above 240 was normalized and saved as 240",
             L"optimizer"});
     }
+    if (settings.adaptive_quality_range_migrated) {
+        events->append({0, diagnostics::Severity::info,
+            "ADAPTIVE_QUALITY_RANGE_MIGRATED",
+            L"The legacy 70% Adaptive quality floor was expanded to 10%",
+            L"optimizer"});
+    }
     // Safe mode must start without optional overlay/telemetry side effects,
     // regardless of the persisted normal-mode preference.
     overlay_enabled = mode == StartMode::safe ? false : settings.overlay_enabled;
@@ -541,7 +546,7 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
                 } else if (ini_recovered.value() > 0) {
                     event_log.append({0, diagnostics::Severity::warning,
                         "SESSION_CONFIG_RECOVERED",
-                        L"Deferred KF2 INI session snapshot was restored and verified",
+                        L"Deferred KF2 INI session snapshot was restored and verified; temporal anti-aliasing remains disabled",
                         L"config"});
                 }
             }

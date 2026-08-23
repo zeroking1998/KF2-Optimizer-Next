@@ -21,6 +21,11 @@ var globalconfig bool bAdaptiveCorpseDebugMarkers;
 var globalconfig int AdaptiveCorpseMaximum;
 var globalconfig int AdaptiveTargetFPS;
 var globalconfig int AdaptiveQualityChangeBudget;
+var globalconfig string AdaptiveControlToken;
+var transient KF2OptimizerAdaptiveGraphicsState AdaptiveGraphicsState;
+var int AdaptiveGraphicsQuality;
+var string AdaptiveGraphicsResource;
+var int AdaptiveLastControlSequence;
 var bool bAdaptiveCorpseStaggerInitialized;
 var int AdaptiveCorpseTarget;
 var int AdaptiveCorpseOriginalLimit;
@@ -57,6 +62,78 @@ var int AdaptiveVisibleLivingZeds;
 var float AdaptiveVisibleLivingObservedRealTime;
 var int AdaptiveCorpseScenePressureLevel;
 var array<AdaptiveCorpseDebugMarkerEntry> AdaptiveCorpseDebugMarkers;
+
+function bool ValidAdaptiveControlToken(string Candidate)
+{
+    return Len(AdaptiveControlToken) == 32 && Candidate == AdaptiveControlToken;
+}
+
+function int AdaptivePresetIndex(int Quality)
+{
+    if (Quality >= 88) return 3;
+    if (Quality >= 63) return 2;
+    if (Quality >= 38) return 1;
+    return 0;
+}
+
+function bool ApplyAdaptiveResourceControl(
+    string Token, int Sequence, string Resource, int Quality)
+{
+    local int PresetIndex;
+
+    if (!ValidAdaptiveControlToken(Token) || Sequence <= 0 ||
+        Sequence <= AdaptiveLastControlSequence ||
+        Quality < 10 || Quality > 100 ||
+        !((Resource ~= "gpu") || (Resource ~= "vram") ||
+          (Resource ~= "cpu") || (Resource ~= "ram") ||
+          (Resource ~= "mixed") || (Resource ~= "recover")))
+    {
+        return false;
+    }
+
+    PresetIndex = AdaptivePresetIndex(Quality);
+    if (Quality >= 95)
+    {
+        Resource = "recover";
+        PresetIndex = 3;
+    }
+    if (AdaptiveGraphicsState == None)
+    {
+        AdaptiveGraphicsState = new(self)
+            class'KF2OptimizerAdaptiveGraphicsState';
+    }
+    if (AdaptiveGraphicsState == None ||
+        !class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
+            AdaptiveGraphicsState, Resource, PresetIndex))
+    {
+        `log("KF2OPT_ADAPTIVE_QUALITY state=failed seq="$Sequence$
+             " resource="$Resource$" quality="$Quality$
+             " reason=readback_mismatch");
+        return false;
+    }
+
+    AdaptiveGraphicsQuality = Quality;
+    AdaptiveGraphicsResource = Resource;
+    AdaptiveLastControlSequence = Sequence;
+    `log("KF2OPT_ADAPTIVE_QUALITY state=applied seq="$Sequence$
+         " resource="$Resource$" quality="$Quality$
+         " preset="$PresetIndex$" readback=verified");
+    return true;
+}
+
+function RestoreAdaptiveGraphics()
+{
+    if (!class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
+            AdaptiveGraphicsState))
+    {
+        `log("KF2OPT_ADAPTIVE_QUALITY state=restore_failed reason=readback_mismatch");
+        return;
+    }
+    AdaptiveGraphicsQuality = 100;
+    AdaptiveGraphicsResource = "recover";
+    AdaptiveGraphicsState = None;
+    `log("KF2OPT_ADAPTIVE_QUALITY state=restored readback=verified");
+}
 
 function int SelectStaggeredCorpse(KFGoreManager GoreManager)
 {
@@ -2441,6 +2518,7 @@ function SampleTelemetry()
 
 event Destroyed()
 {
+    RestoreAdaptiveGraphics();
     ClearTimer(nameof(SampleTelemetry), self);
     ClearTimer(nameof(StaggerCorpseCleanup), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);

@@ -59,7 +59,7 @@ enum class AdaptiveBottleneck {
 struct AdaptivePolicy {
     int target_fps{60};
     AdaptiveAggressiveness aggressiveness{AdaptiveAggressiveness::balanced};
-    int minimum_quality{70};
+    int minimum_quality{10};
     int maximum_quality{100};
     int quality_change_budget{2};
     double performance_headroom{0.08};

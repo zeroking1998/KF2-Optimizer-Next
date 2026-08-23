@@ -426,6 +426,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_discovery.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/gameplay_log_lab.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/adaptive_control_client.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/offline_telemetry_lab.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_log_description.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_log_parsing.cpp"
@@ -491,7 +492,7 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
 target_link_libraries(kf2_application_lifecycle_test PRIVATE
     presentmon_data
     user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs winmm uiautomationcore bcrypt
-    dwmapi psapi advapi32 pdh dxgi tdh version winhttp
+    dwmapi psapi advapi32 pdh dxgi tdh version winhttp ws2_32
 )
 add_test(NAME kf2_application_lifecycle_test COMMAND kf2_application_lifecycle_test)
 set_tests_properties(kf2_application_lifecycle_test PROPERTIES
@@ -649,6 +650,7 @@ add_test(NAME kf2_game_log_session_test COMMAND kf2_game_log_session_test)
 add_executable(kf2_gameplay_log_lab_test
     windows/gameplay_log_lab_test.cpp
     "${PROJECT_SOURCE_DIR}/src/game/gameplay_log_lab.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/adaptive_control_client.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
 )
@@ -657,8 +659,21 @@ target_include_directories(kf2_gameplay_log_lab_test PRIVATE
 target_compile_definitions(kf2_gameplay_log_lab_test PRIVATE
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/gameplay-log-lab"
     KF2_TELEMETRY_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetryProbe.uc"
-    KF2_TELEMETRY_VIEWPORT_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetryViewport.uc")
+    KF2_TELEMETRY_VIEWPORT_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetryViewport.uc"
+    KF2_ADAPTIVE_LISTENER_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerAdaptiveControlListener.uc"
+    KF2_ADAPTIVE_CONNECTION_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerAdaptiveControlConnection.uc"
+    KF2_ADAPTIVE_GRAPHICS_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerAdaptiveGraphics.uc")
+target_link_libraries(kf2_gameplay_log_lab_test PRIVATE bcrypt ws2_32)
 add_test(NAME kf2_gameplay_log_lab_test COMMAND kf2_gameplay_log_lab_test)
+
+add_executable(kf2_adaptive_control_client_test
+    unit/adaptive_control_client_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/game/adaptive_control_client.cpp")
+target_include_directories(kf2_adaptive_control_client_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(kf2_adaptive_control_client_test PRIVATE bcrypt ws2_32)
+add_test(NAME kf2_adaptive_control_client_test
+    COMMAND kf2_adaptive_control_client_test)
 
 add_executable(kf2_ini_document_test
     unit/ini_document_test.cpp

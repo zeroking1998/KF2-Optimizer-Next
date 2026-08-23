@@ -21,10 +21,12 @@ when the module is absent and refuses to create a reduced-function package.
 
 ## Local package
 
-The local packaging and runtime-validation flow requires the locally compiled,
-hash-pinned telemetry package. It never produces a reduced-function package.
-This preserves complete local testing and does not grant permission to publish
-that binary.
+The local packaging and runtime-validation flow requires the locally compiled
+telemetry package. KFEditor can emit binary differences between equivalent
+source builds, so the Release executable embeds the SHA-256 of the exact local
+module selected for that package. Packaging rejects a mismatched executable
+and module and never produces a reduced-function package. This preserves
+complete local testing and does not grant permission to publish that binary.
 
 ## Public binary release
 

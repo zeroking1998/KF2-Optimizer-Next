@@ -178,6 +178,15 @@ int main() {
         "[0048.43] ScriptLog: WI.NetMode:  NM_Standalone\n").has_value());
     CHECK(!stream.feed(
         "[0048.44] ScriptLog: WI.NetMode:  NM_Unknown\n").has_value());
+    const auto bridge = stream.feed(
+        "[0048.45] ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready "
+        "port=49152\n");
+    CHECK(bridge.has_value());
+    CHECK(bridge->telemetry_control_port == 49152);
+    CHECK(!stream.feed(
+        "[0048.46] ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready "
+        "port=0\n").has_value());
+    CHECK(stream.current()->telemetry_control_port == 49152);
 
     const auto remaining = stream.feed(
         "[0060.10] ScriptLog: @@@@ ZED COUNT DEBUG: "

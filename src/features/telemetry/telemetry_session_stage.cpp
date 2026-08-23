@@ -135,7 +135,61 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
 
 namespace kf2::app {
 
+bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
+    if (!installation ||
+        !game::valid_adaptive_control_token(adaptive_control_token) ||
+        !game::find_running_game_process(
+             installation->executable).has_value()) {
+        return true;
+    }
+    std::optional<std::uint16_t> port;
+    if (last_report_gameplay_session &&
+        last_report_gameplay_session->telemetry_control_port) {
+        port = last_report_gameplay_session->telemetry_control_port;
+    } else if (game_log_session_parser.current() &&
+               game_log_session_parser.current()->telemetry_control_port) {
+        port = game_log_session_parser.current()->telemetry_control_port;
+    }
+    if (!port) {
+        events->append({0, diagnostics::Severity::warning,
+            "ADAPTIVE_RUNTIME_RESTORE_UNAVAILABLE",
+            std::wstring{reason} +
+                L"; KF2 is running but its authenticated restore endpoint is unavailable",
+            L"optimizer"});
+        return false;
+    }
+    const auto next_sequence =
+        adaptive_control_sequence == std::numeric_limits<std::uint64_t>::max()
+            ? 1 : adaptive_control_sequence + 1;
+    const auto restored = game::send_adaptive_control({
+        .port = *port,
+        .token = adaptive_control_token,
+        .sequence = next_sequence,
+        .resource = game::AdaptiveResourceControl::recover,
+        .quality = 100,
+        .timeout_ms = 500});
+    adaptive_control_sequence = next_sequence;
+    if (!restored.has_value()) {
+        events->append({0, diagnostics::Severity::error,
+            "ADAPTIVE_RUNTIME_RESTORE_FAILED",
+            std::wstring{reason} +
+                L"; KF2 did not confirm the authenticated full-quality restore",
+            L"optimizer"});
+        return false;
+    }
+    adaptive_control_pending.reset();
+    adaptive_runtime_quality = 100;
+    events->append({0, diagnostics::Severity::info,
+        "ADAPTIVE_RUNTIME_RESTORED",
+        std::wstring{reason} +
+            L"; KF2 confirmed the full-quality restore with an exact APPLIED readback",
+        L"optimizer"});
+    return true;
+}
+
 void UiRuntime::detach_telemetry() {
+    static_cast<void>(restore_live_adaptive_quality(
+        L"Adaptive telemetry detached"));
     if (last_flex_observation && last_flex_observation->update_calls > 0) {
         const auto& observed = *last_flex_observation;
         const bool saved = save_flex_report(observed);
@@ -170,6 +224,11 @@ void UiRuntime::detach_telemetry() {
     adaptive_governor.reset();
     adaptive_actuation.disable(monotonic_ns());
     adaptive_actuation.rebase({}, monotonic_ns());
+    adaptive_control_pending.reset();
+    adaptive_control_token.clear();
+    adaptive_control_sequence = 0;
+    adaptive_quality_last_dispatch_ns = 0;
+    adaptive_runtime_quality = optimizer_settings.adaptive_maximum_quality;
     adaptive_profile_gate.reset();
     adaptive_gameplay_active = false;
     adaptive_overhead_breaches = 0;

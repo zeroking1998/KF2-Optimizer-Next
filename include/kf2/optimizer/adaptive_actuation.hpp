@@ -22,6 +22,7 @@ enum class AdaptiveActionStatus {
 
 enum class AdaptiveControlId : std::uint8_t {
     corpse_runtime_limit,
+    runtime_quality,
     flex_solver_substeps,
     flex_particle_budget,
     flex_particle_spawn,

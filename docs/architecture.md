@@ -124,6 +124,16 @@ INIs are restored afterward. General Adaptive has no broad Online/Offline
 actuation gate: each source and actuator independently reports its runtime
 capability, while unproved live knobs remain unavailable or shadow-only.
 
+Verified standalone gameplay also exposes a session-scoped loopback actuator.
+The optimizer sends a monotonically sequenced command with a random 128-bit
+token and a CPU, GPU, VRAM, RAM, mixed or recovery group. KF2 rebuilds the
+requested group from its current graphics settings, changes only the owned
+fields and returns `APPLIED` only after exact readback. Intervention lowers one
+native tier, emergency may lower two and stable recovery raises one. Missing or
+stale telemetry, Zed Time, an online/unknown session, shadow mode, missing bridge
+capability or a readback mismatch prevents the change. Display mode, resolution,
+VSync, variable frame rate, anti-aliasing and FleX are not owned by this path.
+
 For a protected app-started standalone session, the optional telemetry
 package can also enable a narrowly bounded corpse-stagger actuator. The chosen
 `MaxDeadBodies` value from 4-2000 is the stable user ceiling. Merely reaching or

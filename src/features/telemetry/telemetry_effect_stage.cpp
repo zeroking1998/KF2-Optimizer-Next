@@ -191,11 +191,10 @@ bool UiRuntime::restore_automatic_flex_lab(std::wstring_view reason) {
 }
 
 bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
-    if (!restore_automatic_flex_lab(reason)) return false;
-    if (!session_config_snapshot) return true;
-    // Remove the exact hash-bound module before consuming the INI
-    // snapshot. If cleanup is blocked, the intact snapshot remains
-    // available for a later recovery attempt.
+    bool complete = true;
+    // Restore the native viewport/INI state even if Windows still has a
+    // runtime file open. Each recovery surface is independent, so one busy
+    // file must not prevent the remaining protected state from being fixed.
     if (installation) {
         const auto module_restored =
             game::restore_offline_telemetry_lab(
@@ -211,8 +210,7 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
                 L"OFFLINE_TELEMETRY_CLEANUP_FAILED",
                 module_restored.error().message,
                 L"Do not start KF2 again until the telemetry package is safely removed."});
-            invalidate();
-            return false;
+            complete = false;
         }
         if (module_restored.has_value() && module_restored.value()) {
             events->append({0, diagnostics::Severity::info,
@@ -221,35 +219,40 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
                 L"game"});
         }
     }
-    const auto restored =
-        config::restore_session_config(*session_config_snapshot);
-    if (!restored.has_value()) {
-        events->append({0, diagnostics::Severity::error,
-            "SESSION_CONFIG_RESTORE_FAILED", restored.error().message,
-            L"config"});
-        model.set_recovery_required(true);
-        model.set_notice({ui::NoticeSeverity::error,
-            L"SESSION_CONFIG_RESTORE_FAILED", restored.error().message,
-            L"Do not start KF2 again until the protected INI snapshot is restored."});
-        invalidate();
-        return false;
+    if (session_config_snapshot) {
+        const auto restored =
+            config::restore_session_config(*session_config_snapshot);
+        if (!restored.has_value()) {
+            events->append({0, diagnostics::Severity::error,
+                "SESSION_CONFIG_RESTORE_FAILED", restored.error().message,
+                L"config"});
+            model.set_recovery_required(true);
+            model.set_notice({ui::NoticeSeverity::error,
+                L"SESSION_CONFIG_RESTORE_FAILED", restored.error().message,
+                L"Do not start KF2 again until the protected INI snapshot is restored."});
+            complete = false;
+        } else {
+            events->append({0, diagnostics::Severity::info,
+                "SESSION_CONFIG_RESTORED",
+                std::wstring{reason} + L"; " +
+                    std::to_wstring(restored.value()) +
+                    L" protected INI files were restored and verified; temporal anti-aliasing remains disabled",
+                L"config"});
+            if (complete) {
+                model.set_notice({ui::NoticeSeverity::info,
+                    L"SESSION_CONFIG_RESTORED",
+                    std::wstring{reason} + L"; " +
+                        std::to_wstring(restored.value()) +
+                        L" protected INI files were restored and verified.", L""});
+            }
+            session_config_snapshot.reset();
+            session_config_waiting_for_launch = false;
+            session_config_launch_deadline_ns = 0;
+        }
     }
-    events->append({0, diagnostics::Severity::info,
-        "SESSION_CONFIG_RESTORED",
-        std::wstring{reason} + L"; " +
-            std::to_wstring(restored.value()) +
-            L" protected INI files were restored and verified",
-        L"config"});
-    model.set_notice({ui::NoticeSeverity::info,
-        L"SESSION_CONFIG_RESTORED",
-        std::wstring{reason} + L"; " +
-            std::to_wstring(restored.value()) +
-            L" protected INI files were restored and verified.", L""});
-    session_config_snapshot.reset();
-    session_config_waiting_for_launch = false;
-    session_config_launch_deadline_ns = 0;
+    if (!restore_automatic_flex_lab(reason)) complete = false;
     invalidate();
-    return true;
+    return complete;
 }
 
 }  // namespace kf2::app

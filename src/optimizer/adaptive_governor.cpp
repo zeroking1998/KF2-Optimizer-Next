@@ -466,7 +466,7 @@ AdaptiveDataQualityReport validate_adaptive_sample(
     std::uint64_t now_ns) noexcept {
     AdaptiveDataQualityReport report;
     if (!valid_target_fps(policy.target_fps) ||
-        policy.minimum_quality < 0 || policy.maximum_quality > 100 ||
+        policy.minimum_quality < 10 || policy.maximum_quality > 100 ||
         policy.minimum_quality > policy.maximum_quality ||
         policy.quality_change_budget < 1 || policy.quality_change_budget > 5 ||
         !std::isfinite(policy.performance_headroom) ||

@@ -87,7 +87,7 @@ struct UiStatus {
     std::uint64_t adaptive_restore_generation{0};
     bool adaptive_shadow_mode{true};
     std::wstring adaptive_aggressiveness{L"balanced"};
-    int adaptive_minimum_quality{70};
+    int adaptive_minimum_quality{10};
     int adaptive_maximum_quality{100};
     int adaptive_quality_change_budget{2};
     int adaptive_headroom_percent{8};

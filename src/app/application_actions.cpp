@@ -333,6 +333,14 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
     if (!should_prepare_protected_gameplay_provider(start_mode)) {
         return Result<bool>::success(true);
     }
+    const auto control_token = game::generate_adaptive_control_token();
+    if (!control_token.has_value()) {
+        return Result<bool>::failure(control_token.error());
+    }
+    adaptive_control_token = control_token.value();
+    adaptive_control_sequence = 0;
+    adaptive_quality_last_dispatch_ns = 0;
+    adaptive_runtime_quality = optimizer_settings.adaptive_maximum_quality;
     const auto telemetry_module = game::install_offline_telemetry_lab({
         .config_root = installation->config_root,
         .state_root = settings_path.parent_path(),
@@ -345,8 +353,10 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
     const auto enabled = game::enable_offline_gameplay_logging(
         installation->config_root, true, optimizer_settings.corpse_limit,
         optimizer_settings.target_fps, true,
-        optimizer_settings.adaptive_quality_change_budget);
+        optimizer_settings.adaptive_quality_change_budget,
+        adaptive_control_token);
     if (!enabled.has_value()) {
+        adaptive_control_token.clear();
         return Result<bool>::failure(enabled.error());
     }
     events->append({0, diagnostics::Severity::info,

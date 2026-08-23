@@ -45,8 +45,55 @@ std::size_t count_occurrences(std::string_view text, std::string_view needle) {
 
 int main() {
     namespace fs = std::filesystem;
+    constexpr std::string_view control_token =
+        "0123456789abcdef0123456789abcdef";
     const auto telemetry_source = read_bytes(KF2_TELEMETRY_SOURCE);
     const auto viewport_source = read_bytes(KF2_TELEMETRY_VIEWPORT_SOURCE);
+    const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
+    const auto connection_source = read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE);
+    const auto graphics_source = read_bytes(KF2_ADAPTIVE_GRAPHICS_SOURCE);
+    CHECK(telemetry_source.find("AdaptiveControlToken") != std::string::npos);
+    CHECK(telemetry_source.find("ValidAdaptiveControlToken") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("KF2OPT_ADAPTIVE_QUALITY state=applied") !=
+          std::string::npos);
+    CHECK(viewport_source.find(
+        "class'KF2OptimizerAdaptiveControlListener'") != std::string::npos);
+    CHECK(viewport_source.find("var transient WorldInfo ActiveWorld") ==
+          std::string::npos);
+    CHECK(listener_source.find("BindPort(0, false)") != std::string::npos);
+    CHECK(listener_source.find("state=ready port=") != std::string::npos);
+    CHECK(connection_source.find("KF2OPT_ACK ") != std::string::npos);
+    CHECK(connection_source.find("Probe.ApplyAdaptiveResourceControl") !=
+          std::string::npos);
+    CHECK(connection_source.find(
+        "Left(Peer, 10) != \"127.0.0.1:\"") != std::string::npos);
+    CHECK(connection_source.find("reason=non_loopback") !=
+          std::string::npos);
+    CHECK(connection_source.find("Len(Line) > 128") != std::string::npos);
+    CHECK(graphics_source.find("Requested.Flex") == std::string::npos);
+    CHECK(graphics_source.find("KinematicUpdateDistFactorScale = FMax") !=
+          std::string::npos);
+    CHECK(graphics_source.find("RestoreOwnedSettings") != std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.GpuLevel = Max(Snapshot.GpuLevel, Level)") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.CpuLevel = Max(Snapshot.CpuLevel, Level)") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.VramLevel = Max(Snapshot.VramLevel, Level)") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.RamLevel = Max(Snapshot.RamLevel, Level)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "Resource ~= \"recover\" || Quality >= 95") ==
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "KF2OPT_ADAPTIVE_ROLLBACK state=applied") != std::string::npos);
+    CHECK(graphics_source.find(
+        "KF2OPT_ADAPTIVE_ROLLBACK state=failed") != std::string::npos);
     CHECK(telemetry_source.find(
         "WorldInfo.NetMode != NM_Standalone") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -410,7 +457,7 @@ int main() {
 
     const auto adaptive_enabled =
         kf2::game::enable_offline_gameplay_logging(
-            root, true, 350, 137, true, 2);
+            root, true, 350, 137, true, 2, control_token);
     CHECK(adaptive_enabled.has_value());
     CHECK(adaptive_enabled.value());
     const auto adaptive_engine = read_bytes(engine_ini);
@@ -423,36 +470,46 @@ int main() {
     CHECK(adaptive_engine.find("AdaptiveTargetFPS=137\r\n") !=
           std::string::npos);
     CHECK(adaptive_engine.find("AdaptiveQualityChangeBudget=2\r\n") !=
+           std::string::npos);
+    CHECK(adaptive_engine.find(
+        "AdaptiveControlToken=0123456789abcdef0123456789abcdef\r\n") !=
           std::string::npos);
     const auto adaptive_unchanged =
         kf2::game::enable_offline_gameplay_logging(
-            root, true, 350, 137, true, 2);
+            root, true, 350, 137, true, 2, control_token);
     CHECK(adaptive_unchanged.has_value());
     CHECK(!adaptive_unchanged.value());
 
     write_bytes(engine_ini,
         "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\n"
         "bAdaptiveCorpseStagger=Maybe\n");
-    CHECK(!kf2::game::enable_offline_gameplay_logging(root, true, 350, 137).has_value());
+    CHECK(!kf2::game::enable_offline_gameplay_logging(
+        root, true, 350, 137, false, 1, control_token).has_value());
     write_bytes(engine_ini,
         "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\n"
         "bAdaptiveCorpseDebugMarkers=Maybe\n");
     CHECK(!kf2::game::enable_offline_gameplay_logging(
-        root, true, 350, 137, true).has_value());
+        root, true, 350, 137, true, 1, control_token).has_value());
     write_bytes(engine_ini, adaptive_engine);
 
-    CHECK(!kf2::game::enable_offline_gameplay_logging(root, true, 3, 60).has_value());
-    CHECK(!kf2::game::enable_offline_gameplay_logging(root, true, 2001, 60).has_value());
-    CHECK(!kf2::game::enable_offline_gameplay_logging(root, true, 350, 29).has_value());
-    CHECK(!kf2::game::enable_offline_gameplay_logging(root, true, 350, 241).has_value());
     CHECK(!kf2::game::enable_offline_gameplay_logging(
-        root, true, 350, 60, false, 0).has_value());
+        root, true, 3, 60, false, 1, control_token).has_value());
     CHECK(!kf2::game::enable_offline_gameplay_logging(
-        root, true, 350, 60, false, 6).has_value());
+        root, true, 2001, 60, false, 1, control_token).has_value());
+    CHECK(!kf2::game::enable_offline_gameplay_logging(
+        root, true, 350, 29, false, 1, control_token).has_value());
+    CHECK(!kf2::game::enable_offline_gameplay_logging(
+        root, true, 350, 241, false, 1, control_token).has_value());
+    CHECK(!kf2::game::enable_offline_gameplay_logging(
+        root, true, 350, 60, false, 0, control_token).has_value());
+    CHECK(!kf2::game::enable_offline_gameplay_logging(
+        root, true, 350, 60, false, 6, control_token).has_value());
     CHECK(!kf2::game::enable_offline_gameplay_logging(root, false, 350, 0).has_value());
     CHECK(!kf2::game::enable_offline_gameplay_logging(root, false, 0, 60).has_value());
     CHECK(!kf2::game::enable_offline_gameplay_logging(
         root, false, 0, 0, true).has_value());
+    CHECK(!kf2::game::enable_offline_gameplay_logging(
+        root, true, 350, 60, false, 2, "invalid").has_value());
 
     write_bytes(game_ini,
         "[KFGameContent.KFGameInfo_Survival]\n"

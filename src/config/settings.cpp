@@ -171,12 +171,15 @@ Result<Settings> parse_settings(std::string_view text) {
                 settings.adaptive_aggressiveness = value;
             } else if (key == "adaptive_minimum_quality") {
                 const auto parsed = parse_integer(value);
-                if (!parsed.has_value() || parsed.value() < 0 ||
+                if (!parsed.has_value() || parsed.value() < 10 ||
                     parsed.value() > 100) {
                     return invalid_settings(
-                        L"adaptive_minimum_quality is outside 0..100");
+                        L"adaptive_minimum_quality is outside 10..100");
                 }
-                settings.adaptive_minimum_quality = parsed.value();
+                settings.adaptive_minimum_quality =
+                    parsed.value() == 70 ? 10 : parsed.value();
+                settings.adaptive_quality_range_migrated =
+                    parsed.value() == 70;
             } else if (key == "adaptive_maximum_quality") {
                 const auto parsed = parse_integer(value);
                 if (!parsed.has_value() || parsed.value() < 0 ||

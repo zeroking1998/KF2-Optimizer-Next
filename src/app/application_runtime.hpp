@@ -34,6 +34,7 @@
 #include "kf2/game/video_settings.hpp"
 #include "kf2/game/gameplay_log_lab.hpp"
 #include "kf2/game/game_log_session.hpp"
+#include "kf2/game/adaptive_control_client.hpp"
 #include "kf2/flex/flex_audit.hpp"
 #include "kf2/flex/flex_adaptive_policy.hpp"
 #include "kf2/flex/flex_lab.hpp"
@@ -62,6 +63,13 @@ namespace kf2::app {
 struct PackageRepairAsyncState;
 struct UpdateCheckAsyncState;
 struct UpdateInstallAsyncState;
+
+struct AdaptiveRuntimePendingRequest final {
+    std::uint64_t action_id{0};
+    optimizer::AdaptiveGeneration generation;
+    int previous_quality{100};
+    int requested_quality{100};
+};
 
 optimizer::AdaptivePolicy adaptive_policy_from(
     const config::Settings& settings) noexcept;
@@ -135,6 +143,13 @@ struct UiRuntime {
     optimizer::PerformanceEvidence optimizer_evidence;
     optimizer::AdaptiveGovernor adaptive_governor;
     optimizer::AdaptiveActuationTracker adaptive_actuation;
+    game::AdaptiveControlDispatcher adaptive_control_dispatcher;
+    std::optional<AdaptiveRuntimePendingRequest>
+        adaptive_control_pending;
+    std::string adaptive_control_token;
+    std::uint64_t adaptive_control_sequence{0};
+    std::uint64_t adaptive_quality_last_dispatch_ns{0};
+    int adaptive_runtime_quality{100};
     std::uint64_t adaptive_settings_generation{1};
     optimizer::AdaptiveProfilePersistenceGate adaptive_profile_gate;
     optimizer::AdaptiveDecision adaptive_decision;
@@ -201,6 +216,8 @@ struct UiRuntime {
     bool save_flex_report(const flex::ObservationSnapshot& observed);
 
     void detach_telemetry();
+
+    bool restore_live_adaptive_quality(std::wstring_view reason);
 
     void update_overlay_scene_gate();
 

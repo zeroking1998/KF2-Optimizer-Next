@@ -67,29 +67,41 @@ if ([string]::IsNullOrWhiteSpace($SeedModule)) {
 $resolvedSeed = [IO.Path]::GetFullPath($SeedModule)
 $editorPath = Join-Path $resolvedSdkRoot 'Binaries\Win64\KFEditor.exe'
 $configPath = Join-Path $resolvedUserRoot 'KFGame\Config\KFEngine.ini'
-$packageRoot = Join-Path $resolvedSdkRoot `
-    'Development\Src\KF2OptimizerTelemetry'
+$editorConfigPath = Join-Path $resolvedUserRoot 'KFGame\Config\KFEditor.ini'
+$packageRoot = Join-Path $resolvedUserRoot `
+    'KFGame\Src\KF2OptimizerTelemetry'
 $classesRoot = Join-Path $packageRoot 'Classes'
 $compiledPath = Join-Path $resolvedUserRoot `
     'KFGame\Unpublished\BrewedPC\Script\KF2OptimizerTelemetry.u'
+$shippingSeedPath = Join-Path $resolvedSdkRoot `
+    'KFGame\BrewedPC\KF2OptimizerTelemetry.u'
 $probeSource = Join-Path $projectRoot `
     'assets\offline_telemetry\kf2optimizertelemetryprobe.uc'
 $viewportSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerTelemetryViewport.uc'
+$adaptiveListenerSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerAdaptiveControlListener.uc'
+$adaptiveConnectionSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerAdaptiveControlConnection.uc'
+$adaptiveGraphicsSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerAdaptiveGraphics.uc'
+$adaptiveGraphicsStateSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerAdaptiveGraphicsState.uc'
 
-foreach ($required in @($editorPath, $configPath, $probeSource,
-                         $viewportSource)) {
+foreach ($required in @($editorPath, $configPath, $editorConfigPath, $probeSource,
+                         $viewportSource, $adaptiveListenerSource,
+                         $adaptiveConnectionSource, $adaptiveGraphicsSource,
+                         $adaptiveGraphicsStateSource)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Required KF2 telemetry build input is missing: $required"
     }
 }
-if (-not (Test-Path -LiteralPath $resolvedSeed -PathType Leaf)) {
-    throw ('The KF2 compiler requires a previous telemetry module as its ' +
-        'bootstrap seed. Download it from the latest complete release and ' +
-        'pass -SeedModule <path>.')
-}
 if (Test-Path -LiteralPath $packageRoot) {
     throw "The SDK staging package already exists and was preserved: $packageRoot"
+}
+if (-not (Test-Path -LiteralPath $resolvedSeed -PathType Leaf)) {
+    throw ('The KF2 compiler requires the previous telemetry module as a ' +
+        'shipping bootstrap. Pass -SeedModule <path>.')
 }
 if (Get-Process -Name KFGame, KFEditor -ErrorAction SilentlyContinue) {
     throw 'Close KF2 and KFEditor before compiling the telemetry module.'
@@ -98,15 +110,24 @@ if (Get-Process -Name KFGame, KFEditor -ErrorAction SilentlyContinue) {
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) `
     ('KF2OptimizerTelemetry-' + [Guid]::NewGuid().ToString('N'))
 $configBackup = Join-Path $temporaryRoot 'KFEngine.ini'
+$editorConfigBackup = Join-Path $temporaryRoot 'KFEditor.ini'
 $compiledBackup = Join-Path $temporaryRoot 'KF2OptimizerTelemetry.u'
+$shippingSeedBackup = Join-Path $temporaryRoot 'shipping-KF2OptimizerTelemetry.u'
 $hadCompiledPackage = Test-Path -LiteralPath $compiledPath -PathType Leaf
+$hadShippingSeed = Test-Path -LiteralPath $shippingSeedPath -PathType Leaf
 $configHashBefore = (Get-FileHash -LiteralPath $configPath `
+    -Algorithm SHA256).Hash
+$editorConfigHashBefore = (Get-FileHash -LiteralPath $editorConfigPath `
     -Algorithm SHA256).Hash
 
 New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
 Copy-Item -LiteralPath $configPath -Destination $configBackup
+Copy-Item -LiteralPath $editorConfigPath -Destination $editorConfigBackup
 if ($hadCompiledPackage) {
     Copy-Item -LiteralPath $compiledPath -Destination $compiledBackup
+}
+if ($hadShippingSeed) {
+    Copy-Item -LiteralPath $shippingSeedPath -Destination $shippingSeedBackup
 }
 
 $buildSucceeded = $false
@@ -116,8 +137,19 @@ try {
         (Join-Path $classesRoot 'KF2OptimizerTelemetryProbe.uc')
     Copy-Item -LiteralPath $viewportSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerTelemetryViewport.uc')
+    Copy-Item -LiteralPath $adaptiveGraphicsSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerAdaptiveGraphics.uc')
+    Copy-Item -LiteralPath $adaptiveGraphicsStateSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerAdaptiveGraphicsState.uc')
+    Copy-Item -LiteralPath $adaptiveListenerSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerAdaptiveControlListener.uc')
+    Copy-Item -LiteralPath $adaptiveConnectionSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerAdaptiveControlConnection.uc')
     # KFEditor uses source timestamps for its incremental make decision. Touch
     # only the disposable staging copies so a missing output is really rebuilt.
+    # Copying the bootstrap package can give it the current timestamp on some
+    # Windows filesystems. Keep staged sources unambiguously newer so KFEditor
+    # cannot silently treat the seed module as an up-to-date build.
     $stagedTimestamp = [DateTime]::UtcNow.AddSeconds(2)
     Get-ChildItem -LiteralPath $classesRoot -File -Filter '*.uc' |
         ForEach-Object { $_.LastWriteTimeUtc = $stagedTimestamp }
@@ -139,14 +171,42 @@ try {
             $configPath, $configText, [Text.UTF8Encoding]::new($false))
     }
 
+    $editorConfigText = [IO.File]::ReadAllText($editorConfigPath)
+    if ($editorConfigText -notmatch `
+        '(?m)^ModPackages=KF2OptimizerTelemetry\s*$') {
+        $editorNewline = if ($editorConfigText.Contains("`r`n")) {
+            "`r`n"
+        } else {
+            "`n"
+        }
+        $editorAnchor = '[ModPackages]'
+        $editorAnchorIndex = $editorConfigText.IndexOf(
+            $editorAnchor, [StringComparison]::OrdinalIgnoreCase)
+        if ($editorAnchorIndex -lt 0) {
+            throw 'KFEditor.ini has no ModPackages section.'
+        }
+        $editorInsertIndex = $editorAnchorIndex + $editorAnchor.Length
+        $editorConfigText = $editorConfigText.Insert(
+            $editorInsertIndex,
+            $editorNewline + 'ModPackages=KF2OptimizerTelemetry')
+        [IO.File]::WriteAllText(
+            $editorConfigPath, $editorConfigText,
+            [Text.UTF8Encoding]::new($false))
+    }
+
     if (Test-Path -LiteralPath $compiledPath -PathType Leaf) {
         Remove-Item -LiteralPath $compiledPath -Force
     }
     New-Item -ItemType Directory -Path (Split-Path -Parent $compiledPath) `
         -Force | Out-Null
+    Copy-Item -LiteralPath $resolvedSeed -Destination $shippingSeedPath -Force
+    (Get-Item -LiteralPath $shippingSeedPath).LastWriteTimeUtc =
+        [DateTime]::UtcNow.AddDays(-1)
     Copy-Item -LiteralPath $resolvedSeed -Destination $compiledPath -Force
+    (Get-Item -LiteralPath $compiledPath).LastWriteTimeUtc =
+        [DateTime]::UtcNow.AddDays(-1)
     $process = Start-Process -FilePath $editorPath -ArgumentList @(
-        'make', '-useunpublished', '-unattended', '-nopause'
+        'make', '-full', '-useunpublished', '-unattended', '-nopause'
     ) -WorkingDirectory (Split-Path -Parent $editorPath) -Wait -PassThru `
         -WindowStyle Hidden
     if ($process.ExitCode -ne 0) {
@@ -155,7 +215,14 @@ try {
     if (-not (Test-Path -LiteralPath $compiledPath -PathType Leaf)) {
         throw "KFEditor reported success but did not create: $compiledPath"
     }
-
+    $compiledHash = (Get-FileHash -LiteralPath $compiledPath `
+        -Algorithm SHA256).Hash
+    $seedHash = (Get-FileHash -LiteralPath $resolvedSeed `
+        -Algorithm SHA256).Hash
+    if ($compiledHash -eq $seedHash) {
+        throw ('KFEditor did not recompile the staged telemetry sources; ' +
+            'the output still matches the bootstrap seed.')
+    }
     $outputDirectory = Split-Path -Parent $resolvedOutput
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
     Copy-Item -LiteralPath $compiledPath -Destination $resolvedOutput -Force
@@ -163,6 +230,7 @@ try {
 }
 finally {
     Copy-Item -LiteralPath $configBackup -Destination $configPath -Force
+    Copy-Item -LiteralPath $editorConfigBackup -Destination $editorConfigPath -Force
     if (Test-Path -LiteralPath $packageRoot) {
         Remove-Item -LiteralPath $packageRoot -Recurse -Force
     }
@@ -172,6 +240,12 @@ finally {
     elseif (Test-Path -LiteralPath $compiledPath -PathType Leaf) {
         Remove-Item -LiteralPath $compiledPath -Force
     }
+    if ($hadShippingSeed) {
+        Copy-Item -LiteralPath $shippingSeedBackup -Destination $shippingSeedPath -Force
+    }
+    elseif (Test-Path -LiteralPath $shippingSeedPath -PathType Leaf) {
+        Remove-Item -LiteralPath $shippingSeedPath -Force
+    }
     if (Test-Path -LiteralPath $temporaryRoot) {
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
     }
@@ -179,8 +253,11 @@ finally {
 
 $configHashAfter = (Get-FileHash -LiteralPath $configPath `
     -Algorithm SHA256).Hash
-if ($configHashAfter -ne $configHashBefore) {
-    throw 'KFEngine.ini was not restored byte-for-byte after compilation.'
+$editorConfigHashAfter = (Get-FileHash -LiteralPath $editorConfigPath `
+    -Algorithm SHA256).Hash
+if ($configHashAfter -ne $configHashBefore -or
+    $editorConfigHashAfter -ne $editorConfigHashBefore) {
+    throw 'KF2 compiler INIs were not restored byte-for-byte after compilation.'
 }
 if (-not $buildSucceeded) {
     throw 'KF2 telemetry compilation did not complete.'
@@ -189,4 +266,4 @@ if (-not $buildSucceeded) {
 $hash = (Get-FileHash -LiteralPath $resolvedOutput -Algorithm SHA256).Hash
 Write-Host "PASS: KF2 telemetry module compiled: $resolvedOutput"
 Write-Host "SHA256: $hash"
-Write-Host 'PASS: KFEngine.ini and SDK staging state restored'
+Write-Host 'PASS: KF2 compiler INIs and staging state restored'
