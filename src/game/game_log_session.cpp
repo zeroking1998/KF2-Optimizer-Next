@@ -13,6 +13,11 @@ void add_saturated(std::uint64_t& value, std::uint64_t amount = 1) noexcept {
 
 }  // namespace
 
+bool game_log_reports_engine_exit(std::string_view text) noexcept {
+    return text.find("] Exit: Exiting.") != std::string_view::npos ||
+           text.find("Log: Log file closed,") != std::string_view::npos;
+}
+
 std::optional<GameLogSession> GameLogSessionParser::feed(
     std::string_view bytes, std::uint64_t observed_at_ns) {
     if (bytes.empty()) return std::nullopt;
@@ -54,7 +59,14 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                     changed = *current_;
                 }
             } else if (current_ && current_->net_mode == "NM_Standalone") {
-                if (const auto count = detail::parse_zed_count_line(line); count) {
+                if (const auto port = detail::parse_adaptive_bridge_line(line);
+                    port) {
+                    if (current_->telemetry_control_port != port) {
+                        current_->telemetry_control_port = port;
+                        changed = *current_;
+                    }
+                } else if (const auto count = detail::parse_zed_count_line(line);
+                           count) {
                     auto& target = count->first ? current_->zeds_remaining
                                                 : current_->zeds_alive;
                     auto& observed = count->first

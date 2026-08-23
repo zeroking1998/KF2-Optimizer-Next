@@ -112,6 +112,19 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
     if (runtime.session_config_snapshot) {
         static_cast<void>(runtime.restore_protected_session_config(
             L"KF2 closed"));
+    } else if (runtime.installation) {
+        const auto capped = runtime.synchronize_frame_rate_cap();
+        if (!capped.has_value()) {
+            runtime.events->append({0, diagnostics::Severity::error,
+                "TARGET_FPS_PERSIST_FAILED", capped.error().message,
+                L"config"});
+        } else if (capped.value().changed) {
+            runtime.events->append({0, diagnostics::Severity::info,
+                "TARGET_FPS_PERSISTED",
+                L"KF2 closed; the native startup cap was updated to " +
+                    std::to_wstring(capped.value().target_fps) + L" FPS",
+                L"config"});
+        }
     }
     runtime.telemetry_failure = L"KF2 session ended";
     runtime.model.set_notice(
@@ -135,7 +148,61 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
 
 namespace kf2::app {
 
+bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
+    if (!installation ||
+        !game::valid_adaptive_control_token(adaptive_control_token) ||
+        !game::find_running_game_process(
+             installation->executable).has_value()) {
+        return true;
+    }
+    std::optional<std::uint16_t> port;
+    if (last_report_gameplay_session &&
+        last_report_gameplay_session->telemetry_control_port) {
+        port = last_report_gameplay_session->telemetry_control_port;
+    } else if (game_log_session_parser.current() &&
+               game_log_session_parser.current()->telemetry_control_port) {
+        port = game_log_session_parser.current()->telemetry_control_port;
+    }
+    if (!port) {
+        events->append({0, diagnostics::Severity::warning,
+            "ADAPTIVE_RUNTIME_RESTORE_UNAVAILABLE",
+            std::wstring{reason} +
+                L"; KF2 is running but its authenticated restore endpoint is unavailable",
+            L"optimizer"});
+        return false;
+    }
+    const auto next_sequence =
+        adaptive_control_sequence == std::numeric_limits<std::uint64_t>::max()
+            ? 1 : adaptive_control_sequence + 1;
+    const auto restored = game::send_adaptive_control({
+        .port = *port,
+        .token = adaptive_control_token,
+        .sequence = next_sequence,
+        .resource = game::AdaptiveResourceControl::recover,
+        .quality = 100,
+        .timeout_ms = 500});
+    adaptive_control_sequence = next_sequence;
+    if (!restored.has_value()) {
+        events->append({0, diagnostics::Severity::error,
+            "ADAPTIVE_RUNTIME_RESTORE_FAILED",
+            std::wstring{reason} +
+                L"; KF2 did not confirm the authenticated full-quality restore",
+            L"optimizer"});
+        return false;
+    }
+    adaptive_control_pending.reset();
+    adaptive_runtime_quality = 100;
+    events->append({0, diagnostics::Severity::info,
+        "ADAPTIVE_RUNTIME_RESTORED",
+        std::wstring{reason} +
+            L"; KF2 confirmed the full-quality restore with an exact APPLIED readback",
+        L"optimizer"});
+    return true;
+}
+
 void UiRuntime::detach_telemetry() {
+    static_cast<void>(restore_live_adaptive_quality(
+        L"Adaptive telemetry detached"));
     if (last_flex_observation && last_flex_observation->update_calls > 0) {
         const auto& observed = *last_flex_observation;
         const bool saved = save_flex_report(observed);
@@ -170,6 +237,11 @@ void UiRuntime::detach_telemetry() {
     adaptive_governor.reset();
     adaptive_actuation.disable(monotonic_ns());
     adaptive_actuation.rebase({}, monotonic_ns());
+    adaptive_control_pending.reset();
+    adaptive_control_token.clear();
+    adaptive_control_sequence = 0;
+    adaptive_quality_last_dispatch_ns = 0;
+    adaptive_runtime_quality = optimizer_settings.adaptive_maximum_quality;
     adaptive_profile_gate.reset();
     adaptive_gameplay_active = false;
     adaptive_overhead_breaches = 0;
@@ -195,7 +267,10 @@ void UiRuntime::detach_telemetry() {
     game_log_offset = 0;
     game_log_volume_serial = 0;
     game_log_file_index = 0;
+    game_log_process_start_id = 0;
     game_log_bound_to_process = false;
+    game_log_startup_exited = false;
+    game_log_startup_exit_announced = false;
     game_log_marker_tail.clear();
     game_log_session_parser.reset();
     auto status = model.status();
@@ -258,20 +333,26 @@ void UiRuntime::update_overlay_scene_gate() {
         information.nFileIndexLow;
     const bool identity_changed = game_log_bound_to_process &&
         (game_log_volume_serial != information.dwVolumeSerialNumber ||
-         game_log_file_index != file_index);
+         game_log_file_index != file_index ||
+         game_log_process_start_id != game_process->process_start_id);
     if (!game_log_bound_to_process || identity_changed) {
         game_log_volume_serial = information.dwVolumeSerialNumber;
         game_log_file_index = file_index;
+        game_log_process_start_id = game_process->process_start_id;
         game_log_bound_to_process = true;
         game_log_offset = 0;
         game_log_marker_tail.clear();
         overlay_scene_ready = false;
+        game_log_startup_exited = false;
+        game_log_startup_exit_announced = false;
         game_log_session_parser.reset();
     }
     if (size < game_log_offset) {
         game_log_offset = 0;
         game_log_marker_tail.clear();
         overlay_scene_ready = false;
+        game_log_startup_exited = false;
+        game_log_startup_exit_announced = false;
         game_log_session_parser.reset();
     }
     if (size == game_log_offset) {
@@ -303,7 +384,22 @@ void UiRuntime::update_overlay_scene_gate() {
     const bool menu_ready =
         marker_input.find("WidgetInitialized - WidgetName:  StartMenu") !=
         std::string::npos;
-    if (menu_ready) overlay_scene_ready = true;
+    if (menu_ready) {
+        overlay_scene_ready = true;
+        game_log_startup_exited = false;
+    } else if (!overlay_scene_ready &&
+               game::game_log_reports_engine_exit(marker_input)) {
+        game_log_startup_exited = true;
+        if (!game_log_startup_exit_announced) {
+            game_log_startup_exit_announced = true;
+            events->append({0, diagnostics::Severity::warning,
+                "KF2_STARTUP_EXITED_BEFORE_MENU",
+                L"KF2's engine exited before reaching the main menu; "
+                L"waiting for the remaining process to close",
+                L"telemetry"});
+            invalidate();
+        }
+    }
     constexpr std::size_t kMarkerTailBytes = 96;
     game_log_marker_tail = marker_input.substr(
         marker_input.size() > kMarkerTailBytes
@@ -356,7 +452,9 @@ void UiRuntime::try_attach_telemetry() {
                     : L"KF2 closed"));
         }
         telemetry_failure = session_config_waiting_for_launch
-            ? L"Waiting for app-started KF2 process"
+            ? (session_config_launch_deadline_ns == 0
+                   ? L"Adaptive profile ready; waiting for KF2 process"
+                   : L"Waiting for app-started KF2 process")
             : L"Waiting for KF2 process";
         return;
     }
@@ -398,7 +496,9 @@ void UiRuntime::try_attach_telemetry() {
     // as well.
     update_overlay_scene_gate();
     if (!overlay_scene_ready) {
-        telemetry_failure = L"Waiting for KF2 main menu";
+        telemetry_failure = game_log_startup_exited
+            ? L"KF2 engine exited before the main menu; waiting for process cleanup"
+            : L"Waiting for KF2 main menu";
         return;
     }
     const telemetry::SampleIdentity identity{

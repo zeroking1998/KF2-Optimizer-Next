@@ -53,6 +53,8 @@ kf2::telemetry_pipeline::TelemetryFrameInput complete_input() {
     gpu.adapter_gpu_percent = 31.0;
     gpu.dedicated_bytes = 6ULL << 30U;
     gpu.shared_bytes = 1ULL << 30U;
+    gpu.adapter_local_usage_bytes = 7ULL << 30U;
+    gpu.adapter_local_budget_bytes = 10ULL << 30U;
     gpu.quality = telemetry::SampleQuality::good;
     gpu.reason = telemetry::UnavailableReason::none;
     input.adapter_gpu = gpu;
@@ -63,6 +65,8 @@ kf2::telemetry_pipeline::TelemetryFrameInput complete_input() {
     telemetry::SystemMemoryMetrics memory;
     memory.total_physical_bytes = 32ULL << 30U;
     memory.available_physical_bytes = 8ULL << 30U;
+    memory.commit_limit_bytes = 48ULL << 30U;
+    memory.available_commit_bytes = 16ULL << 30U;
     memory.used_percent = 75.0;
     input.system_memory = memory;
 
@@ -131,16 +135,26 @@ int main() {
           input.process->affinity_physical_cores);
     CHECK(frame.evidence.system_logical_processors ==
           input.process->system_logical_processors);
+    CHECK(frame.evidence.process_gpu_percent ==
+          input.adapter_gpu->gpu_percent);
     CHECK(frame.evidence.gpu_percent.has_value());
     CHECK(approximately_equal(*frame.evidence.gpu_percent, 36.0));
     CHECK(frame.evidence.dedicated_vram_bytes ==
           input.adapter_gpu->dedicated_bytes);
     CHECK(frame.evidence.dedicated_vram_budget_bytes ==
           input.adapter_vram_budget_bytes);
+    CHECK(frame.evidence.adapter_vram_used_bytes ==
+          input.adapter_gpu->adapter_local_usage_bytes);
+    CHECK(frame.evidence.adapter_vram_budget_bytes ==
+          input.adapter_gpu->adapter_local_budget_bytes);
     CHECK(frame.evidence.system_ram_budget_bytes ==
           input.system_memory->total_physical_bytes);
     CHECK(frame.evidence.system_ram_used_bytes.has_value());
     CHECK(*frame.evidence.system_ram_used_bytes == 24ULL << 30U);
+    CHECK(frame.evidence.system_commit_budget_bytes == 48ULL << 30U);
+    CHECK(frame.evidence.system_commit_used_bytes == 32ULL << 30U);
+    CHECK(frame.evidence.process_private_bytes ==
+          input.process->private_bytes);
 
     // Frame construction is observational and does not mutate its input.
     CHECK(input.driver_gpu_percent == 36.0);

@@ -19,7 +19,7 @@ struct Settings {
     bool overlay_show_memory{true};
     bool restore_config_after_game{true};
     std::string adaptive_aggressiveness{"balanced"};
-    int adaptive_minimum_quality{70};
+    int adaptive_minimum_quality{10};
     int adaptive_maximum_quality{100};
     int adaptive_quality_change_budget{2};
     int adaptive_headroom_percent{8};
@@ -34,6 +34,7 @@ struct Settings {
     int target_fps{60};
     // Transient load evidence. It is intentionally not serialized.
     bool target_fps_migrated{false};
+    bool adaptive_quality_range_migrated{false};
     int corpse_limit{20};
     std::string quality_policy{"exact"};
     std::string optimizer_profile{"balanced"};

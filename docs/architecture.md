@@ -108,11 +108,31 @@ point threshold, while broadly parallel saturation is evaluated against the
 observed affinity capacity. Confirmed CPU classifications use a two-second
 evidence hold to avoid CPU/unknown threshold flapping, while another proven
 bottleneck replaces the hold immediately. Explicit manual values and
-locks replace Adaptive values per key. Config-only Adaptive plans run before an app-started session through
+locks replace Adaptive values per key. A separate deterministic resource
+pressure estimator fuses process CPU, busiest-thread occupancy, effective
+core use, KF2-attributed GPU engines, whole-adapter GPU contention, live DXGI
+local-memory usage/budget, physical RAM and Windows commit reserve. Each
+resource reports raw and asymmetric-smoothed pressure, confidence and trend.
+The estimator expresses current and two-second projected frame-budget deficits
+in milliseconds, resets across telemetry boundaries, and permits quality
+recovery only while every resource has measured reserve. Whole-adapter load
+without matching KF2 GPU work remains visible but cannot by itself become a
+confirmed KF2 GPU cause.
+Config-only Adaptive plans run before an app-started session through
 snapshot, compare-and-swap backup, atomic apply and readback; the exact pre-game
 INIs are restored afterward. General Adaptive has no broad Online/Offline
 actuation gate: each source and actuator independently reports its runtime
 capability, while unproved live knobs remain unavailable or shadow-only.
+
+Verified standalone gameplay also exposes a session-scoped loopback actuator.
+The optimizer sends a monotonically sequenced command with a random 128-bit
+token and a CPU, GPU, VRAM, RAM, mixed or recovery group. KF2 rebuilds the
+requested group from its current graphics settings, changes only the owned
+fields and returns `APPLIED` only after exact readback. Intervention lowers one
+native tier, emergency may lower two and stable recovery raises one. Missing or
+stale telemetry, Zed Time, an online/unknown session, shadow mode, missing bridge
+capability or a readback mismatch prevents the change. Display mode, resolution,
+VSync, variable frame rate, anti-aliasing and FleX are not owned by this path.
 
 For a protected app-started standalone session, the optional telemetry
 package can also enable a narrowly bounded corpse-stagger actuator. The chosen

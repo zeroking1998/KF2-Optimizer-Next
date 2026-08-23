@@ -40,6 +40,8 @@ struct ProcessMetrics {
 struct SystemMemoryMetrics {
     std::uint64_t total_physical_bytes{0};
     std::uint64_t available_physical_bytes{0};
+    std::uint64_t commit_limit_bytes{0};
+    std::uint64_t available_commit_bytes{0};
     double used_percent{0.0};
 };
 [[nodiscard]] Result<HardwareInventory> query_hardware_inventory();

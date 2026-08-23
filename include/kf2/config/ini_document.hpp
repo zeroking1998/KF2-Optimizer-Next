@@ -34,6 +34,9 @@ public:
     [[nodiscard]] ReplaceResult append_unique(std::wstring_view section,
                                               std::wstring_view key,
                                               std::wstring_view value);
+    // Removes one unambiguous section, including its comments and assignments.
+    // Duplicate section headers are rejected through shadowed_occurrences.
+    [[nodiscard]] ReplaceResult remove_section(std::wstring_view section);
     [[nodiscard]] std::string serialize() const;
     [[nodiscard]] TextEncoding encoding() const noexcept;
     [[nodiscard]] LineEnding line_ending() const noexcept;

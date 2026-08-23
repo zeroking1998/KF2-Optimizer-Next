@@ -31,9 +31,11 @@
 #include "kf2/diagnostics/crash_recorder.hpp"
 #include "kf2/game/game_session.hpp"
 #include "kf2/game/advanced_settings.hpp"
+#include "kf2/game/frame_rate_cap.hpp"
 #include "kf2/game/video_settings.hpp"
 #include "kf2/game/gameplay_log_lab.hpp"
 #include "kf2/game/game_log_session.hpp"
+#include "kf2/game/adaptive_control_client.hpp"
 #include "kf2/flex/flex_audit.hpp"
 #include "kf2/flex/flex_adaptive_policy.hpp"
 #include "kf2/flex/flex_lab.hpp"
@@ -63,6 +65,13 @@ struct PackageRepairAsyncState;
 struct UpdateCheckAsyncState;
 struct UpdateInstallAsyncState;
 
+struct AdaptiveRuntimePendingRequest final {
+    std::uint64_t action_id{0};
+    optimizer::AdaptiveGeneration generation;
+    int previous_quality{100};
+    int requested_quality{100};
+};
+
 optimizer::AdaptivePolicy adaptive_policy_from(
     const config::Settings& settings) noexcept;
 optimizer::Profile stored_adaptive_profile(
@@ -80,8 +89,6 @@ std::optional<std::string> path_utf8(const std::filesystem::path& path);
 Result<std::string> read_verified_local_file(
     const std::filesystem::path& path, std::uintmax_t maximum_bytes);
 std::wstring query_hardware_summary();
-std::wstring optimizer_preview_context(
-    const optimizer::OptimizerInput& input);
 
 struct UiRuntime {
     ~UiRuntime();
@@ -116,7 +123,10 @@ struct UiRuntime {
     std::uintmax_t game_log_offset{0};
     std::uint32_t game_log_volume_serial{0};
     std::uint64_t game_log_file_index{0};
+    std::uint64_t game_log_process_start_id{0};
     bool game_log_bound_to_process{false};
+    bool game_log_startup_exited{false};
+    bool game_log_startup_exit_announced{false};
     std::string game_log_marker_tail;
     game::GameLogSessionParser game_log_session_parser;
     bool overlay_scene_ready{false};
@@ -132,6 +142,13 @@ struct UiRuntime {
     optimizer::PerformanceEvidence optimizer_evidence;
     optimizer::AdaptiveGovernor adaptive_governor;
     optimizer::AdaptiveActuationTracker adaptive_actuation;
+    game::AdaptiveControlDispatcher adaptive_control_dispatcher;
+    std::optional<AdaptiveRuntimePendingRequest>
+        adaptive_control_pending;
+    std::string adaptive_control_token;
+    std::uint64_t adaptive_control_sequence{0};
+    std::uint64_t adaptive_quality_last_dispatch_ns{0};
+    int adaptive_runtime_quality{100};
     std::uint64_t adaptive_settings_generation{1};
     optimizer::AdaptiveProfilePersistenceGate adaptive_profile_gate;
     optimizer::AdaptiveDecision adaptive_decision;
@@ -199,6 +216,8 @@ struct UiRuntime {
 
     void detach_telemetry();
 
+    bool restore_live_adaptive_quality(std::wstring_view reason);
+
     void update_overlay_scene_gate();
 
     void runtime_tick();
@@ -235,6 +254,8 @@ struct UiRuntime {
 
     bool restore_automatic_flex_lab(std::wstring_view reason);
 
+    Result<game::FrameRateCapResult> synchronize_frame_rate_cap();
+
     bool restore_protected_session_config(std::wstring_view reason);
 
     void try_attach_telemetry();
@@ -252,10 +273,11 @@ struct UiRuntime {
         const std::vector<config::RequestedChange>& requests,
         std::wstring context = L"Verified configuration changes");
 
-    Result<OptimizerPreview> prepare_optimizer(
-        const optimizer::OptimizerInput& input);
-
     Result<config::ApplyResult> apply_adaptive_launch_profile();
+
+    Result<bool> prepare_automatic_protected_launch_capabilities();
+
+    Result<bool> prepare_automatic_external_launch_profile();
 
     void set_slider_value(std::string_view id, int requested_value);
 

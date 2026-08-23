@@ -44,6 +44,21 @@ $knownManagedPaths = [Collections.Generic.HashSet[string]]::new(
     'Data/package-manifest.json'
 ) | ForEach-Object { [void]$knownManagedPaths.Add($_) }
 
+$telemetryModule = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerTelemetry.u'
+if (-not (Test-Path -LiteralPath $telemetryModule -PathType Leaf)) {
+    Write-Host 'Telemetry module is missing; compiling it with the installed KF2 SDK.'
+    $telemetryBuild = @{
+        OutputPath = $telemetryModule
+    }
+    if (-not [string]::IsNullOrWhiteSpace($TelemetrySeedModule)) {
+        $telemetryBuild.SeedModule = $TelemetrySeedModule
+    }
+    & (Join-Path $PSScriptRoot 'build_kf2_telemetry.ps1') @telemetryBuild
+}
+$actualTelemetryHash = (Get-FileHash -LiteralPath $telemetryModule `
+    -Algorithm SHA256).Hash.ToLowerInvariant()
+
 if (-not $SkipBuild) {
     & (Join-Path $PSScriptRoot 'build.ps1') -Configuration Release
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -52,6 +67,12 @@ if (-not $SkipBuild) {
 $source = Join-Path $projectRoot 'out\build\windows-x64-release\Release\KF2Optimizer.exe'
 if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
     throw "Release executable is missing: $source"
+}
+$executableText = [Text.Encoding]::ASCII.GetString(
+    [IO.File]::ReadAllBytes($source))
+if ($executableText.IndexOf(
+        $actualTelemetryHash, [StringComparison]::Ordinal) -lt 0) {
+    throw 'Release executable is not bound to the exact locally compiled telemetry module; rebuild without -SkipBuild'
 }
 if (-not (Test-Path -LiteralPath $destinationRoot)) {
     New-Item -ItemType Directory -Path $destinationRoot | Out-Null
@@ -97,25 +118,6 @@ if (-not (Test-Path -LiteralPath $forwarder -PathType Leaf)) {
     throw "Offline FleX laboratory forwarder is missing: $forwarder"
 }
 Copy-Item -LiteralPath $forwarder -Destination (Join-Path $labDirectory 'flexRelease_x64.forwarder-lab.dll') -Force
-$telemetryModule = Join-Path $projectRoot `
-    'assets\offline_telemetry\KF2OptimizerTelemetry.u'
-if (-not (Test-Path -LiteralPath $telemetryModule -PathType Leaf)) {
-    Write-Host 'Telemetry module is missing; compiling it with the installed KF2 SDK.'
-    $telemetryBuild = @{
-        OutputPath = $telemetryModule
-    }
-    if (-not [string]::IsNullOrWhiteSpace($TelemetrySeedModule)) {
-        $telemetryBuild.SeedModule = $TelemetrySeedModule
-    }
-    & (Join-Path $PSScriptRoot 'build_kf2_telemetry.ps1') @telemetryBuild
-}
-$expectedTelemetryHash = `
-    '89F441307624239A2D169ABAB79F9F3DAEBABB6E2EA86120E429691D4035063F'
-$actualTelemetryHash = (Get-FileHash -LiteralPath $telemetryModule `
-    -Algorithm SHA256).Hash
-if ($actualTelemetryHash -ne $expectedTelemetryHash) {
-    throw 'Offline telemetry module does not match its pinned compiled build'
-}
 Copy-Item -LiteralPath $telemetryModule -Destination `
     (Join-Path $labDirectory 'KF2OptimizerTelemetry.u') -Force
 $documentationDirectory = Join-Path $destinationRoot 'Data\Documentation'

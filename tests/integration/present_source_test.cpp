@@ -20,6 +20,33 @@ int main() {
     CHECK(*fresh.fps > 62.0 && *fresh.fps < 63.0);
     CHECK(fresh.quality == SampleQuality::good);
 
+    PresentSource reordered{game, 16};
+    CHECK(reordered.start().has_value());
+    CHECK(reordered.ingest({game, 1'000'000'000ULL, 1, true, 0}));
+    CHECK(reordered.ingest({game, 1'032'000'000ULL, 1, true, 0}));
+    CHECK(reordered.ingest({game, 1'016'000'000ULL, 1, true, 0}));
+    const auto reordered_metrics = reordered.drain(
+        1'032'000'000ULL, 500'000'000ULL);
+    CHECK(reordered_metrics.fps.has_value());
+    CHECK(*reordered_metrics.fps > 62.0 && *reordered_metrics.fps < 63.0);
+    CHECK(reordered_metrics.quality == SampleQuality::good);
+
+    PresentSource multiple_streams{game, 64};
+    CHECK(multiple_streams.start().has_value());
+    for (std::uint64_t index = 0; index <= 32; ++index) {
+        CHECK(multiple_streams.ingest(
+            {game, 2'000'000'000ULL + index * 16'000'000ULL,
+             1, true, 0, 101}));
+        CHECK(multiple_streams.ingest(
+            {game, 2'001'000'000ULL + index * 16'000'000ULL,
+             1, true, 0, 202}));
+    }
+    const auto isolated_stream = multiple_streams.drain(
+        2'513'000'000ULL, 500'000'000ULL);
+    CHECK(isolated_stream.fps.has_value());
+    CHECK(*isolated_stream.fps > 62.0 && *isolated_stream.fps < 63.0);
+    CHECK(isolated_stream.quality == SampleQuality::good);
+
     CHECK(!source.ingest({{99, 88}, 2'922'000'000ULL, 1, true, 0}));
     CHECK(source.ingest({game, 2'936'000'000ULL, 1, true, 4}));
     auto lossy = source.drain(2'936'000'000ULL, 500'000'000ULL);

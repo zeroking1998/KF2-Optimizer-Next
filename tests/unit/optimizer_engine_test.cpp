@@ -40,8 +40,12 @@ int main() {
     CHECK(explicit_preview.confidence == Confidence::unavailable);
     CHECK(explicit_preview.reason.find(L"Explicit selected-profile preview") !=
           std::wstring::npos);
-    CHECK(explicit_preview.changes.size() == 69);
-    CHECK(find_change(explicit_preview, config::SettingId::target_fps) != nullptr);
+    CHECK(explicit_preview.changes.size() == 67);
+    CHECK(find_change(explicit_preview, config::SettingId::target_fps) == nullptr);
+    CHECK(find_change(explicit_preview,
+                      config::SettingId::minimum_smooth_frame_rate) == nullptr);
+    CHECK(find_change(explicit_preview,
+                      config::SettingId::smooth_frame_rate) == nullptr);
     CHECK(find_change(explicit_preview, config::SettingId::dynamic_shadows) != nullptr);
     CHECK(find_change(explicit_preview,
                       config::SettingId::corpse_collision_with_living) == nullptr);
@@ -59,15 +63,15 @@ int main() {
     auto exact = evaluate(gpu_bound);
     CHECK(exact.bottleneck == Bottleneck::gpu);
     CHECK(exact.confidence == Confidence::high);
-    CHECK(find_change(exact, config::SettingId::target_fps) != nullptr);
-    CHECK(find_change(exact, config::SettingId::smooth_frame_rate) != nullptr);
+    CHECK(find_change(exact, config::SettingId::target_fps) == nullptr);
+    CHECK(find_change(exact, config::SettingId::smooth_frame_rate) == nullptr);
     CHECK(find_change(exact, config::SettingId::corpse_limit) == nullptr);
     CHECK(find_change(exact, config::SettingId::gore_effect_limit) == nullptr);
 
     gpu_bound.quality = QualityPolicy::performance;
     gpu_bound.profile = Profile::high_performance;
     auto performance = evaluate(gpu_bound);
-    CHECK(performance.changes.size() == 69);
+    CHECK(performance.changes.size() == 67);
     for (const auto& change : performance.changes) {
         const auto* definition = config::find_setting(change.id);
         CHECK(definition != nullptr);
@@ -80,6 +84,8 @@ int main() {
     CHECK(find_change(performance, config::SettingId::explosion_decal_limit) != nullptr);
     CHECK(find_change(performance, config::SettingId::impact_decal_limit) != nullptr);
     CHECK(find_change(performance, config::SettingId::wound_decal_limit) != nullptr);
+    CHECK(std::get<int>(find_change(performance,
+              config::SettingId::wound_decal_limit)->value) == 5);
     CHECK(find_change(performance, config::SettingId::blood_splatter_decal_limit) != nullptr);
     CHECK(find_change(performance, config::SettingId::blood_pool_decal_limit) != nullptr);
     CHECK(find_change(performance, config::SettingId::blood_effect_limit) != nullptr);
@@ -136,7 +142,7 @@ int main() {
               config::SettingId::secondary_blood_effects)->value));
     CHECK(std::get<bool>(find_change(performance,
               config::SettingId::static_decals)->value));
-    CHECK(!std::get<bool>(find_change(performance,
+    CHECK(std::get<bool>(find_change(performance,
               config::SettingId::dynamic_decals)->value));
     CHECK(std::get<double>(find_change(performance,
               config::SettingId::decal_cull_distance_scale)->value) == 0.5);
@@ -193,7 +199,7 @@ int main() {
     auto stability_input = gpu_bound;
     stability_input.profile = Profile::stability;
     auto stability = evaluate(stability_input);
-    CHECK(stability.changes.size() == 69);
+    CHECK(stability.changes.size() == 67);
     CHECK(std::get<int>(find_change(stability,
               config::SettingId::corpse_limit)->value) == 15);
     CHECK(std::get<bool>(find_change(stability,
@@ -214,7 +220,7 @@ int main() {
     auto balanced_input = gpu_bound;
     balanced_input.profile = Profile::balanced;
     auto balanced = evaluate(balanced_input);
-    CHECK(balanced.changes.size() == 69);
+    CHECK(balanced.changes.size() == 67);
     CHECK(std::get<int>(find_change(balanced,
               config::SettingId::corpse_limit)->value) == 12);
     CHECK(std::get<bool>(find_change(balanced,
@@ -234,7 +240,7 @@ int main() {
     auto custom_input = gpu_bound;
     custom_input.profile = Profile::custom;
     auto custom = evaluate(custom_input);
-    CHECK(custom.changes.size() == 2);
+    CHECK(custom.changes.empty());
     CHECK(find_change(custom, config::SettingId::corpse_limit) == nullptr);
     CHECK(find_change(custom, config::SettingId::dynamic_shadows) == nullptr);
 

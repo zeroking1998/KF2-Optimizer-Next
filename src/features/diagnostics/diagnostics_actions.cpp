@@ -170,7 +170,7 @@ app::runtime::DispatchResult repair_package(
     show_notice(
         runtime, ui::NoticeSeverity::info, L"PACKAGE_REPAIR_APPLIED",
         std::to_wstring(repaired.value().repaired_files) +
-            L" required files were imported and verified. Restart KF2 Optimizer to leave Safe Mode.");
+            L" required files were imported and verified. Restart KF2 Optimizer to load them.");
     return app::runtime::DispatchResult::handled;
 }
 

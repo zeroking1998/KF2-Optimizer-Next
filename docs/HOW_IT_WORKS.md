@@ -61,6 +61,12 @@ A control is enabled only when all required parts are present:
 
 Missing capability produces **Unavailable**, not a simulated success.
 
+Target FPS uses KF2's own GPU-independent `bSmoothFrameRate`,
+`MinSmoothedFrameRate`, and `MaxSmoothedFrameRate` controls. The protected
+offline provider reapplies them if KF2's graphics menu changes Variable Frame
+Rate during a session. A property readback proves that those engine values were
+configured; actual PresentMon FPS remains the final runtime evidence.
+
 ## 5. Configuration actions
 
 Configuration changes are transactional: preview, backup, write, verify, and

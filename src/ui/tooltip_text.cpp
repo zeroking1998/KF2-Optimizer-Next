@@ -33,7 +33,7 @@ constexpr TooltipEntry kTooltips[]{
     {"diagnostics-open-data", L"Opens the portable Data folder containing settings, backups, reports, and logs. Nothing is uploaded."},
     {"diagnostics-open-log", L"Opens the local JSON session-event log used to explain Optimizer decisions, receipts, warnings, and errors."},
 
-    {"settings-target-slider", L"Sets the FPS goal from 30 to 240 and saves it immediately. Adaptive compares live, average, and 1% low FPS against this target."},
+    {"settings-target-slider", L"Sets KF2's native FPS limit from 30 to 240. Steam and shortcut launches use the same limit from the next game start; Adaptive also uses it as its performance target."},
     {"settings-corpses-slider", L"Sets the maximum corpse ceiling and saves it immediately. Adaptive may use fewer corpses under confirmed scene or frame-time pressure."},
 
     {"graphics-display", L"Windowed is easy to switch away from, Borderless fills the desktop, and Fullscreen can reduce presentation overhead."},
@@ -78,7 +78,6 @@ constexpr TooltipEntry kTooltips[]{
     {"advanced-texture-streaming", L"On loads texture detail as needed, limiting VRAM use but allowing pop-in. Off may use much more VRAM and can stutter when VRAM fills."},
     {"advanced-priority-streaming", L"On gives urgent textures priority, improving nearby texture loading but increasing short I/O and VRAM pressure. Off uses normal streaming order."},
     {"advanced-dynamic-streaming", L"On continually adapts texture loading to the scene, helping control VRAM use with possible pop-in. Off uses less responsive streaming decisions."},
-    {"advanced-temporal-aa", L"On blends previous frames to smooth edges, adding GPU history buffers and possible blur or ghosting. Off avoids that memory cost and keeps motion sharper."},
     {"advanced-hardware-shadow-filtering", L"On uses GPU filtering for smoother shadow edges and adds some GPU work. Off uses simpler shadow filtering."},
     {"advanced-downsampled-translucency", L"On renders translucent effects at lower resolution, saving GPU time and VRAM bandwidth but making them softer. Off keeps full-resolution effects."},
     {"advanced-floating-point-render-targets", L"On uses higher-precision lighting buffers and can noticeably increase VRAM use and bandwidth. Off uses lower-cost buffers and is recommended unless required."},

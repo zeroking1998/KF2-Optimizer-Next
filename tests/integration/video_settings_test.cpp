@@ -35,13 +35,15 @@ int main() {
     const std::string system =
         "[SystemSettings]\r\n"
         "Fullscreen=False\r\nBorderless=True\r\nResX=2560\r\nResY=1440\r\n"
-        "UseVsync=False\r\nImageGrainScaler=0.5\r\n"
+        "UseVsync=False\r\nImageGrainScaler=0.5\r\nMaxAnisotropy=16\r\n"
         "DetailMode=2\r\nSkeletalMeshLODBias=0\r\nAllowSubsurfaceScattering=True\r\n"
         "MaxDeadBodies=550\r\nMaxShadowResolution=1536\r\nShadowTexelsPerPixel=2.0\r\n"
         "Bloom=True\r\nBloomQuality=2\r\nMotionBlur=True\r\nAmbientOcclusion=True\r\n"
         "HBAO=True\r\nDepthOfField=True\r\nLightCones=True\r\n"
+        "bAllowTemporalAA=True\r\n"
         "bAllowLensFlares=True\r\nbAllowLightShafts=True\r\n"
-        "TEXTUREGROUP_World=(LODBias=0,MinMagFilter=Aniso,MipFilter=Linear)\r\n";
+        "TEXTUREGROUP_World=(LODBias=0,MinMagFilter=Aniso,MipFilter=Linear)\r\n"
+        "TEXTUREGROUP_Character=(LODBias=0,MinMagFilter=Aniso,MipFilter=Linear)\r\n";
     const std::string engine = "[Engine.Engine]\r\nPhysXLevel=0\r\n";
     const std::string game =
         "[KFGame.KFGameEngine]\r\nbSmoothFrameRate=False\r\n";
@@ -108,6 +110,48 @@ int main() {
     CHECK(proposed_system.has_value());
     CHECK(proposed_system.value().find(L"SystemSettings", L"MaxDeadBodies") ==
           L"550");
+    CHECK(proposed_system.value().find(
+              L"SystemSettings", L"MaxAnisotropy") == L"16");
+    CHECK(proposed_system.value().find(
+              L"SystemSettings", L"bAllowTemporalAA") == L"False");
+
+    auto defaults_preview = kf2::game::build_video_preview(root, defaults);
+    CHECK(defaults_preview.has_value());
+    const auto default_system = kf2::config::IniDocument::parse(
+        defaults_preview.value().files[0].proposed_bytes);
+    CHECK(default_system.has_value());
+    CHECK(default_system.value().find(
+              L"SystemSettings", L"MaxAnisotropy") == L"4");
+    for (const auto& file : defaults_preview.value().files) {
+        write_file(root / file.relative_path, file.proposed_bytes);
+    }
+    const auto reloaded_defaults = kf2::game::read_video_settings(root);
+    CHECK(reloaded_defaults.has_value());
+    CHECK(reloaded_defaults.value().choices[static_cast<std::size_t>(
+              kf2::game::VideoOption::texture_resolution)] == 2);
+    CHECK(reloaded_defaults.value().choices[static_cast<std::size_t>(
+              kf2::game::VideoOption::texture_filtering)] == 2);
+    CHECK(reloaded_defaults.value().choices[static_cast<std::size_t>(
+              kf2::game::VideoOption::overall_quality)] == 2);
+
+    for (int level = 0; level < 4; ++level) {
+        auto desired = reloaded_defaults.value();
+        desired.choices[static_cast<std::size_t>(
+            kf2::game::VideoOption::texture_resolution)] = level;
+        desired.choices[static_cast<std::size_t>(
+            kf2::game::VideoOption::texture_filtering)] = level;
+        const auto level_preview = kf2::game::build_video_preview(root, desired);
+        CHECK(level_preview.has_value());
+        for (const auto& file : level_preview.value().files) {
+            write_file(root / file.relative_path, file.proposed_bytes);
+        }
+        const auto reloaded_level = kf2::game::read_video_settings(root);
+        CHECK(reloaded_level.has_value());
+        CHECK(reloaded_level.value().choices[static_cast<std::size_t>(
+                  kf2::game::VideoOption::texture_resolution)] == level);
+        CHECK(reloaded_level.value().choices[static_cast<std::size_t>(
+                  kf2::game::VideoOption::texture_filtering)] == level);
+    }
 
     fs::remove_all(root, error);
     return EXIT_SUCCESS;

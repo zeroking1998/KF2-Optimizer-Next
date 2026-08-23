@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iterator>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <tuple>
@@ -26,6 +27,22 @@ constexpr std::wstring_view kGameEngine = L"KFGame.KFGameEngine";
 const std::filesystem::path kSystemFile{L"KFSystemSettings.ini"};
 const std::filesystem::path kEngineFile{L"KFEngine.ini"};
 const std::filesystem::path kGameFile{L"KFGame.ini"};
+constexpr std::array<std::wstring_view, 30> kTextureGroups{{
+    L"TEXTUREGROUP_World", L"TEXTUREGROUP_WorldNormalMap",
+    L"TEXTUREGROUP_WorldSpecular", L"TEXTUREGROUP_Character",
+    L"TEXTUREGROUP_CharacterNormalMap", L"TEXTUREGROUP_CharacterSpecular",
+    L"TEXTUREGROUP_Weapon", L"TEXTUREGROUP_WeaponNormalMap",
+    L"TEXTUREGROUP_WeaponSpecular", L"TEXTUREGROUP_Vehicle",
+    L"TEXTUREGROUP_VehicleNormalMap", L"TEXTUREGROUP_VehicleSpecular",
+    L"TEXTUREGROUP_Cinematic", L"TEXTUREGROUP_Effects",
+    L"TEXTUREGROUP_EffectsNotFiltered", L"TEXTUREGROUP_Skybox",
+    L"TEXTUREGROUP_UI", L"TEXTUREGROUP_Lightmap",
+    L"TEXTUREGROUP_Shadowmap", L"TEXTUREGROUP_RenderTarget",
+    L"TEXTUREGROUP_MobileFlattened", L"TEXTUREGROUP_ProcBuilding_Face",
+    L"TEXTUREGROUP_ProcBuilding_LightMap", L"TEXTUREGROUP_Terrain_Heightmap",
+    L"TEXTUREGROUP_Terrain_Weightmap", L"TEXTUREGROUP_ImageBasedReflection",
+    L"TEXTUREGROUP_Bokeh", L"TEXTUREGROUP_UIWithMips",
+    L"TEXTUREGROUP_UIStreamable", L"TEXTUREGROUP_Creature"}};
 
 std::size_t index(VideoOption option) noexcept {
     return static_cast<std::size_t>(option);
@@ -146,26 +163,92 @@ bool update_tuple_field(std::wstring& tuple, std::wstring_view field,
     return true;
 }
 
+std::optional<std::wstring> tuple_field(
+    std::wstring_view tuple, std::wstring_view field) {
+    const auto normalized = lower(std::wstring{tuple});
+    const auto needle = lower(std::wstring{field}) + L"=";
+    auto start = normalized.find(needle);
+    if (start == std::wstring::npos) return std::nullopt;
+    start += needle.size();
+    const auto end = normalized.find_first_of(L",)", start);
+    auto value = std::wstring{tuple.substr(start, end - start)};
+    const auto first = value.find_first_not_of(L" \t");
+    if (first == std::wstring::npos) return std::nullopt;
+    const auto last = value.find_last_not_of(L" \t");
+    return value.substr(first, last - first + 1);
+}
+
+std::optional<int> tuple_integer(
+    std::wstring_view tuple, std::wstring_view field) {
+    const auto value = tuple_field(tuple, field);
+    if (!value) return std::nullopt;
+    wchar_t* end{};
+    const long parsed = std::wcstol(value->c_str(), &end, 10);
+    if (end == value->c_str()) return std::nullopt;
+    return static_cast<int>(parsed);
+}
+
+std::optional<std::array<int, 4>> texture_bias_profile(
+    std::wstring_view group) {
+    const auto name = lower(std::wstring{group});
+    if (name.rfind(L"texturegroup_ui", 0) == 0) return std::nullopt;
+    if (name.find(L"character") != std::wstring::npos ||
+        name.find(L"creature") != std::wstring::npos) {
+        return std::array<int, 4>{3, 2, 1, 0};
+    }
+    if (name.find(L"world") != std::wstring::npos ||
+        name.find(L"terrain") != std::wstring::npos) {
+        return std::array<int, 4>{2, 2, 1, 0};
+    }
+    if (name.find(L"shadowmap") != std::wstring::npos) {
+        return std::array<int, 4>{1, 0, 0, 0};
+    }
+    return std::array<int, 4>{1, 1, 0, 0};
+}
+
+int texture_resolution_choice(const config::IniDocument& document) {
+    std::array<int, 4> scores{};
+    int samples = 0;
+    for (const auto group : kTextureGroups) {
+        const auto profile = texture_bias_profile(group);
+        const auto tuple = document.find(kSystem, group);
+        if (!profile || !tuple) continue;
+        const auto bias = tuple_integer(*tuple, L"LODBias");
+        if (!bias) continue;
+        ++samples;
+        const int bounded_bias = std::clamp(*bias, -1000, 1000);
+        for (std::size_t level = 0; level < scores.size(); ++level) {
+            scores[level] += std::abs(bounded_bias - (*profile)[level]);
+        }
+    }
+    if (samples == 0) return 3;
+    return static_cast<int>(std::distance(
+        scores.begin(), std::min_element(scores.begin(), scores.end())));
+}
+
+int texture_filtering_choice(const config::IniDocument& document) {
+    const int anisotropy = std::clamp(
+        integer(document, L"MaxAnisotropy", 16), 1, 16);
+    for (const auto group : kTextureGroups) {
+        const auto tuple = document.find(kSystem, group);
+        if (!tuple) continue;
+        const auto minmag = tuple_field(*tuple, L"MinMagFilter");
+        const auto mip = tuple_field(*tuple, L"MipFilter");
+        if (same(minmag, L"linear")) {
+            if (same(mip, L"point")) return 0;
+            if (same(mip, L"linear")) return 1;
+        }
+        if (same(minmag, L"aniso")) return anisotropy >= 16 ? 3 : 2;
+    }
+    if (anisotropy >= 16) return 3;
+    if (anisotropy >= 4) return 2;
+    return 1;
+}
+
 Result<bool> update_texture_groups(
     config::IniDocument& document, int resolution, int filtering) {
-    constexpr std::array<std::wstring_view, 30> groups{{
-        L"TEXTUREGROUP_World", L"TEXTUREGROUP_WorldNormalMap",
-        L"TEXTUREGROUP_WorldSpecular", L"TEXTUREGROUP_Character",
-        L"TEXTUREGROUP_CharacterNormalMap", L"TEXTUREGROUP_CharacterSpecular",
-        L"TEXTUREGROUP_Weapon", L"TEXTUREGROUP_WeaponNormalMap",
-        L"TEXTUREGROUP_WeaponSpecular", L"TEXTUREGROUP_Vehicle",
-        L"TEXTUREGROUP_VehicleNormalMap", L"TEXTUREGROUP_VehicleSpecular",
-        L"TEXTUREGROUP_Cinematic", L"TEXTUREGROUP_Effects",
-        L"TEXTUREGROUP_EffectsNotFiltered", L"TEXTUREGROUP_Skybox",
-        L"TEXTUREGROUP_UI", L"TEXTUREGROUP_Lightmap",
-        L"TEXTUREGROUP_Shadowmap", L"TEXTUREGROUP_RenderTarget",
-        L"TEXTUREGROUP_MobileFlattened", L"TEXTUREGROUP_ProcBuilding_Face",
-        L"TEXTUREGROUP_ProcBuilding_LightMap", L"TEXTUREGROUP_Terrain_Heightmap",
-        L"TEXTUREGROUP_Terrain_Weightmap", L"TEXTUREGROUP_ImageBasedReflection",
-        L"TEXTUREGROUP_Bokeh", L"TEXTUREGROUP_UIWithMips",
-        L"TEXTUREGROUP_UIStreamable", L"TEXTUREGROUP_Creature"}};
     bool changed = false;
-    for (const auto group : groups) {
+    for (const auto group : kTextureGroups) {
         auto tuple = document.find(kSystem, group);
         if (!tuple) continue;
         int bias = 0;
@@ -190,11 +273,8 @@ Result<bool> update_texture_groups(
             L"Linear", L"Linear", L"Aniso", L"Aniso"};
         constexpr std::array<std::wstring_view, 4> mip{
             L"Point", L"Linear", L"Linear", L"Linear"};
-        constexpr std::array<std::wstring_view, 4> anisotropy{
-            L"1", L"1", L"4", L"16"};
         update_tuple_field(*tuple, L"MinMagFilter", minmag[filtering]);
         update_tuple_field(*tuple, L"MipFilter", mip[filtering]);
-        update_tuple_field(*tuple, L"MaxAnisotropy", anisotropy[filtering]);
         const auto result = put(document, group, *tuple);
         if (!result.has_value()) return result;
         changed = changed || result.value();
@@ -401,8 +481,10 @@ Result<VideoSettings> read_video_settings(const std::filesystem::path& config_ro
     settings.choices[index(VideoOption::fx_quality)] =
         std::clamp(integer(document, L"DistanceFogQuality", 1) +
                    (number(document, L"EmitterPoolScale", 1.0) > 1.0 ? 2 : 1), 0, 3);
-    settings.choices[index(VideoOption::texture_resolution)] = 3;
-    settings.choices[index(VideoOption::texture_filtering)] = 3;
+    settings.choices[index(VideoOption::texture_resolution)] =
+        texture_resolution_choice(document);
+    settings.choices[index(VideoOption::texture_filtering)] =
+        texture_filtering_choice(document);
     settings.choices[index(VideoOption::shadow_quality)] =
         integer(document, L"MaxShadowResolution", 1024) >= 1536 ? 3 :
         number(document, L"ShadowTexelsPerPixel", 1.0) >= 1.3 ? 2 :
@@ -593,6 +675,7 @@ Result<config::ConfigPreview> build_video_preview(
     const int ao = selected(VideoOption::ambient_occlusion);
     if (!apply_result(put_bool(document, L"bAllowScreenSpaceReflections", selected(VideoOption::realtime_reflections) != 0)) ||
         !apply_result(put_bool(document, L"PostProcessAA", selected(VideoOption::anti_aliasing) != 0)) ||
+        !apply_result(put_bool(document, L"bAllowTemporalAA", false)) ||
         !apply_result(put_bool(document, L"Bloom", bloom != 0)) ||
         !apply_result(put_int(document, L"BloomQuality", bloom)) ||
         !apply_result(put_bool(document, L"MotionBlur", selected(VideoOption::motion_blur) != 0)) ||
@@ -606,6 +689,13 @@ Result<config::ConfigPreview> build_video_preview(
         !apply_result(put_bool(document, L"bAllowLightShafts", selected(VideoOption::light_shafts) != 0))) {
         return Result<config::ConfigPreview>::failure(
             {ErrorCode::stale_data, L"Effects settings contain duplicates", 0});
+    }
+    constexpr std::array<int, 4> anisotropy{1, 1, 4, 16};
+    if (!apply_result(put_int(
+            document, L"MaxAnisotropy",
+            anisotropy[selected(VideoOption::texture_filtering)]))) {
+        return Result<config::ConfigPreview>::failure(
+            {ErrorCode::stale_data, L"Texture filtering setting contains duplicates", 0});
     }
     auto textures = update_texture_groups(
         document, selected(VideoOption::texture_resolution),

@@ -21,7 +21,6 @@ std::size_t navigation_index(Destination destination) {
 std::wstring_view friendly_mode(std::wstring_view mode) {
     if (mode == L"Adaptive / Automatic") return L"Adaptive";
     if (mode == L"Read-only") return L"Read-only";
-    if (mode == L"Safe mode") return L"Safe mode";
     return mode;
 }
 

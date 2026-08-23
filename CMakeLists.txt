@@ -13,6 +13,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(KF2_VERSION "${PROJECT_VERSION}-alpha" CACHE STRING "Product version")
 set(KF2_BUILD_COMMIT "unknown" CACHE STRING "Source commit identity")
 set(KF2_BUILD_CHANNEL "dev" CACHE STRING "Build channel")
+set(KF2_OFFLINE_TELEMETRY_SHA256
+    "e8979fc9b0daf6104ebb7e4027aabf5e048aa1c49d386f29373253eabca27933"
+    CACHE STRING "SHA-256 of the exact locally compiled offline telemetry module")
+string(LENGTH "${KF2_OFFLINE_TELEMETRY_SHA256}" KF2_TELEMETRY_HASH_LENGTH)
+if(NOT KF2_TELEMETRY_HASH_LENGTH EQUAL 64 OR
+   NOT KF2_OFFLINE_TELEMETRY_SHA256 MATCHES "^[0-9A-Fa-f]+$")
+    message(FATAL_ERROR "KF2_OFFLINE_TELEMETRY_SHA256 must be exactly 64 hexadecimal characters")
+endif()
+string(TOLOWER "${KF2_OFFLINE_TELEMETRY_SHA256}"
+    KF2_OFFLINE_TELEMETRY_SHA256)
 set(KF2_RELEASE_REPOSITORY "" CACHE STRING "HTTPS GitHub repository used for exact-version release repair")
 if(KF2_RELEASE_REPOSITORY STREQUAL "")
     execute_process(
@@ -37,6 +47,7 @@ add_compile_definitions(
     WIN32_LEAN_AND_MEAN
     NOMINMAX
     _WIN32_WINNT=0x0A00
+    KF2_OFFLINE_TELEMETRY_SHA256="${KF2_OFFLINE_TELEMETRY_SHA256}"
 )
 
 if(MSVC)
@@ -139,6 +150,8 @@ add_executable(KF2Optimizer WIN32
     src/flex/flex_adaptive_policy.cpp
     src/flex/flex_lab.cpp
     src/flex/flex_observation.cpp
+    src/game/adaptive_control_client.cpp
+    src/game/frame_rate_cap.cpp
     src/game/game_discovery.cpp
     src/game/gameplay_log_lab.cpp
     src/game/offline_telemetry_lab.cpp
@@ -159,6 +172,7 @@ add_executable(KF2Optimizer WIN32
     src/optimizer/adaptive_registry.cpp
     src/optimizer/adaptive_actuation.cpp
     src/optimizer/adaptive_governor.cpp
+    src/optimizer/resource_pressure.cpp
     src/optimizer/optimizer_engine.cpp
     src/platform/windows/atomic_file.cpp
     src/platform/windows/presentmon_session.cpp
@@ -211,7 +225,7 @@ if(MSVC)
 endif()
 target_link_libraries(KF2Optimizer PRIVATE
     presentmon_data
-    user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs winmm uiautomationcore bcrypt dwmapi psapi advapi32 pdh dxgi tdh version winhttp
+    user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs winmm uiautomationcore bcrypt dwmapi psapi advapi32 pdh dxgi tdh version winhttp ws2_32
 )
 
 add_executable(KF2ConfigRoundtrip EXCLUDE_FROM_ALL

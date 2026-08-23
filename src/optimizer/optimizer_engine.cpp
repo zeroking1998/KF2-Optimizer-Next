@@ -116,7 +116,7 @@ void apply_effect_profile(
     put(changes, config::SettingId::impact_decal_limit,
         select(15, 20, 40), source, reason);
     put(changes, config::SettingId::wound_decal_limit,
-        select(2, 5, 5), source, reason);
+        5, source, reason);
     put(changes, config::SettingId::blood_splatter_decal_limit,
         20, source, reason);
     put(changes, config::SettingId::blood_pool_decal_limit,
@@ -161,7 +161,7 @@ void apply_render_profile(
 
     put(changes, config::SettingId::static_decals, true, source, reason);
     put(changes, config::SettingId::dynamic_decals,
-        !high_performance, source, reason);
+        true, source, reason);
     put(changes, config::SettingId::decal_cull_distance_scale,
         select(0.5, 0.6, 0.8), source, reason);
     put(changes, config::SettingId::dynamic_shadows,
@@ -290,11 +290,6 @@ OptimizerDecision evaluate(const OptimizerInput& input) {
     if (valid_target &&
         (decision.bottleneck != Bottleneck::unavailable ||
          explicit_profile_preview)) {
-        put(changes, config::SettingId::target_fps, input.target_fps,
-            config::ChangeSource::adaptive, L"Match the verified KF2 frame cap to target FPS");
-        put(changes, config::SettingId::smooth_frame_rate, true,
-            config::ChangeSource::adaptive, L"Use KF2 frame smoothing for stable pacing");
-
         if (input.quality == QualityPolicy::performance &&
             (explicit_profile_preview ||
              decision.bottleneck != Bottleneck::frame_cap)) {

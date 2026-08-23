@@ -258,8 +258,8 @@ int wmain(int argument_count, wchar_t** arguments) {
     status.advanced_dirty = true;
     status.advanced_game_running = false;
     status.advanced_values = {
-        L"On", L"On", L"On", L"On", L"On", L"On", L"On", L"Off",
-        L"On", L"Off", L"On", L"Off", L"Full", L"100%", L"100%", L"10 seconds"};
+        L"On", L"On", L"On", L"On", L"On", L"On", L"On", L"On",
+        L"Off", L"On", L"Off", L"Full", L"100%", L"100%", L"10 seconds"};
     status.advanced_screen_percentage = 100;
     status.advanced_particle_percentage = 100;
     status.advanced_decal_lifetime = 10;

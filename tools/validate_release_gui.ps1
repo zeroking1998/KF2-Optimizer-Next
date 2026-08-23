@@ -69,7 +69,7 @@ try {
     }
     $events = Get-Content -LiteralPath $eventLog -Raw | ConvertFrom-Json
     if (@($events.events | Where-Object { $_.code -ceq 'PACKAGE_INTEGRITY_FAILED' }).Count -ne 0) {
-        throw 'Fresh release entered Safe Mode because its own package integrity check failed'
+        throw 'Fresh release reported a package-integrity failure against its own managed files'
     }
     Write-Host 'PASS: verified portable GUI started normally, enforced single instance, showed a visible window and exited cleanly'
 }

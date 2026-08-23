@@ -35,6 +35,7 @@ int main() {
     CHECK(physical[0].luid == 1);
     CHECK(physical[1].luid == 3);
     CHECK(!adapter_luid_for_window(nullptr).has_value());
+    CHECK(!query_gpu_memory_budget(0).has_value());
     const auto parsed = parse_gpu_instance(
         L"pid_4242_luid_0x00000001_0x00000002_phys_0_eng_3_engtype_3D");
     CHECK(parsed.has_value());
@@ -87,6 +88,12 @@ int main() {
     CHECK(!choose_total_gpu_percent(101.0, std::nullopt).has_value());
 
     for (const auto& adapter : unique_physical_gpu_adapters(adapters.value())) {
+        const auto memory = query_gpu_memory_budget(adapter.luid);
+        if (memory.has_value()) {
+            CHECK(memory.value().budget_bytes > 0);
+            CHECK(memory.value().current_usage_bytes <=
+                  memory.value().budget_bytes * 2);
+        }
         if (adapter.vendor_id != 0x10DE) continue;
         auto driver = NvidiaGpuSampler::create(adapter.name);
         if (driver.has_value()) {

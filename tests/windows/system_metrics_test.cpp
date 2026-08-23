@@ -22,6 +22,9 @@ int main() {
     CHECK(memory.value().total_physical_bytes > 0);
     CHECK(memory.value().available_physical_bytes <=
           memory.value().total_physical_bytes);
+    CHECK(memory.value().commit_limit_bytes > 0);
+    CHECK(memory.value().available_commit_bytes <=
+          memory.value().commit_limit_bytes);
     CHECK(memory.value().used_percent >= 0.0 &&
           memory.value().used_percent <= 100.0);
 

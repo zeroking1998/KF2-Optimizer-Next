@@ -42,7 +42,7 @@ pwsh -NoProfile -File tools/build_kf2_telemetry.ps1
 ```
 
 The script discovers the normal Steam SDK location or accepts `-SdkRoot`. It
-temporarily stages only this project's two `.uc` files in the installed SDK,
+temporarily stages only this project's six `.uc` files in the installed SDK,
 invokes `KFEditor.exe make -useunpublished`, copies the generated module into
 the local ignored asset path, and restores `KFEngine.ini`, any previous
 unpublished module, and SDK staging state. KFEditor requires the previous
@@ -73,10 +73,13 @@ pwsh -NoProfile -File tools/validate_release.ps1
 ```
 
 Packaging must preserve portable user data, include third-party notices, record
-hashes, and never silently replace protected user state. If the ignored local
-telemetry module is absent, packaging invokes the telemetry build and fails
-closed when the official SDK is unavailable or the resulting module does not
-match the pinned build.
+hashes, and never silently replace protected user state. KFEditor output can
+contain compiler-generated binary differences between otherwise equivalent
+builds. Therefore packaging compiles or selects the local module first, embeds
+that exact module's SHA-256 into the Release executable, and rejects any
+executable/module mismatch. If the ignored local module is absent, packaging
+invokes the telemetry build and fails closed when the official SDK is
+unavailable.
 
 ## Change workflow
 

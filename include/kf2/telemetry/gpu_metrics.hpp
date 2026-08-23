@@ -30,8 +30,15 @@ struct GpuMetrics {
     std::optional<double> adapter_gpu_percent;
     std::uint64_t dedicated_bytes{0};
     std::uint64_t shared_bytes{0};
+    std::optional<std::uint64_t> adapter_local_usage_bytes;
+    std::optional<std::uint64_t> adapter_local_budget_bytes;
     SampleQuality quality{SampleQuality::unavailable};
     UnavailableReason reason{UnavailableReason::no_samples};
+};
+struct GpuMemoryBudget final {
+    std::uint64_t current_usage_bytes{0};
+    std::uint64_t budget_bytes{0};
+    std::uint64_t available_for_reservation_bytes{0};
 };
 struct GpuAdapter {
     std::uint64_t luid{0};
@@ -47,6 +54,8 @@ struct GpuAdapter {
     std::wstring physical_device_key;
 };
 [[nodiscard]] Result<std::vector<GpuAdapter>> enumerate_gpu_adapters();
+[[nodiscard]] Result<GpuMemoryBudget> query_gpu_memory_budget(
+    std::uint64_t adapter_luid);
 [[nodiscard]] std::vector<GpuAdapter> unique_physical_gpu_adapters(
     const std::vector<GpuAdapter>& adapters);
 [[nodiscard]] std::wstring format_gpu_driver_version(std::uint64_t version);

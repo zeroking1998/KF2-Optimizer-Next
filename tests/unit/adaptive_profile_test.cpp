@@ -14,18 +14,19 @@ int main() {
 
     CHECK(adaptive_profile_quality(Profile::stability) == 100);
     CHECK(adaptive_profile_quality(Profile::balanced) == 85);
-    CHECK(adaptive_profile_quality(Profile::high_performance) == 70);
+    CHECK(adaptive_profile_quality(Profile::high_performance) == 10);
     CHECK(adaptive_profile_token(Profile::balanced) == "balanced");
     CHECK(parse_adaptive_profile("stability") == Profile::stability);
     CHECK(!parse_adaptive_profile("custom"));
 
-    CHECK(bound_adaptive_profile(Profile::high_performance, 70, 100) ==
+    CHECK(bound_adaptive_profile(Profile::high_performance, 10, 100) ==
           Profile::high_performance);
     CHECK(bound_adaptive_profile(Profile::high_performance, 80, 100) ==
           Profile::balanced);
     CHECK(bound_adaptive_profile(Profile::stability, 70, 90) ==
           Profile::balanced);
     CHECK(!bound_adaptive_profile(Profile::balanced, 90, 95));
+    CHECK(!bound_adaptive_profile(Profile::balanced, 9, 100));
     CHECK(!bound_adaptive_profile(Profile::balanced, 100, 90));
 
     constexpr std::uint64_t start = 10'000'000'000ULL;

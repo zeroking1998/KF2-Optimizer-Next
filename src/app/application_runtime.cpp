@@ -75,7 +75,8 @@ Result<config::Settings> load_or_create_settings(
                 bytes.find("manual_gore_effect_limit=") != std::string::npos ||
                 bytes.find("adaptive_enabled=") != std::string::npos ||
                 bytes.find("adaptive_online_allowed=") != std::string::npos ||
-                parsed.value().target_fps_migrated;
+                parsed.value().target_fps_migrated ||
+                parsed.value().adaptive_quality_range_migrated;
             if (canonicalization_needed) {
                 const auto migrated =
                     platform::windows::atomic_replace_utf8(
@@ -256,37 +257,11 @@ std::wstring query_hardware_summary() {
     return result;
 }
 
-std::wstring optimizer_preview_context(
-    const optimizer::OptimizerInput& input) {
-    std::wstring profile;
-    switch (input.profile) {
-        case optimizer::Profile::balanced: profile = L"balanced"; break;
-        case optimizer::Profile::stability: profile = L"stability"; break;
-        case optimizer::Profile::high_performance:
-            profile = L"high_performance";
-            break;
-        case optimizer::Profile::custom: profile = L"custom"; break;
-    }
-
-    std::wstring quality;
-    switch (input.quality) {
-        case optimizer::QualityPolicy::exact: quality = L"exact"; break;
-        case optimizer::QualityPolicy::invisible: quality = L"invisible"; break;
-        case optimizer::QualityPolicy::performance:
-            quality = L"performance";
-            break;
-    }
-    return L"Adaptive optimizer profile " + profile + L", quality " + quality +
-        L", target " + std::to_wstring(input.target_fps) + L" FPS";
-}
-
 UiRuntime::~UiRuntime() {
-    if (installation &&
-        !game::find_running_game_process(
-             installation->executable).has_value()) {
-        static_cast<void>(restore_protected_session_config(
-            L"KF2 Optimizer closed"));
-    }
+    static_cast<void>(restore_live_adaptive_quality(
+        L"KF2 Optimizer closed"));
+    static_cast<void>(restore_protected_session_config(
+        L"KF2 Optimizer closed"));
     if (window) {
         KillTimer(static_cast<HWND>(window->native_handle_for_testing()), 1);
     }
@@ -416,9 +391,13 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
             L"Legacy TargetFPS above 240 was normalized and saved as 240",
             L"optimizer"});
     }
-    // Safe mode must start without optional overlay/telemetry side effects,
-    // regardless of the persisted normal-mode preference.
-    overlay_enabled = mode == StartMode::safe ? false : settings.overlay_enabled;
+    if (settings.adaptive_quality_range_migrated) {
+        events->append({0, diagnostics::Severity::info,
+            "ADAPTIVE_QUALITY_RANGE_MIGRATED",
+            L"The legacy 70% Adaptive quality floor was expanded to 10%",
+            L"optimizer"});
+    }
+    overlay_enabled = settings.overlay_enabled;
     overlay_scale = static_cast<float>(settings.overlay_scale_percent) / 100.0F;
     if (settings.overlay_position == "top_left") {
         overlay_corner = overlay::OverlayCorner::top_left;
@@ -432,9 +411,8 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
     model.set_build_identity(std::wstring{identity.begin(), identity.end()});
     model.set_recovery_required(recovery_required);
     ui::UiStatus status;
-    status.mode = mode == StartMode::read_only ? L"Read-only" :
-                  mode == StartMode::safe ? L"Safe mode" :
-                  L"Adaptive / Automatic";
+    status.mode = mode == StartMode::read_only
+        ? L"Read-only" : L"Adaptive / Automatic";
     status.target_fps = settings.target_fps;
     status.corpse_limit = settings.corpse_limit;
     update_adaptive_policy_status(status);
@@ -541,8 +519,26 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
                 } else if (ini_recovered.value() > 0) {
                     event_log.append({0, diagnostics::Severity::warning,
                         "SESSION_CONFIG_RECOVERED",
-                        L"Deferred KF2 INI session snapshot was restored and verified",
+                        L"Deferred KF2 INI session snapshot was restored and verified; temporal anti-aliasing remains disabled",
                         L"config"});
+                }
+                if (ini_recovered.has_value() &&
+                    telemetry_recovered.has_value() &&
+                    !telemetry_recovered.value().active) {
+                    const auto stale_configuration =
+                        game::cleanup_stale_offline_gameplay_configuration(
+                            installation->config_root, false);
+                    if (!stale_configuration.has_value()) {
+                        event_log.append({0, diagnostics::Severity::error,
+                            "STALE_TELEMETRY_CONFIG_RECOVERY_BLOCKED",
+                            stale_configuration.error().message, L"config"});
+                        recovery_required = true;
+                    } else if (stale_configuration.value()) {
+                        event_log.append({0, diagnostics::Severity::warning,
+                            "STALE_TELEMETRY_CONFIG_RECOVERED",
+                            L"Stale optimizer-owned KF2 telemetry configuration was removed before the next protected snapshot",
+                            L"config"});
+                    }
                 }
             }
         } else {
@@ -624,24 +620,6 @@ Result<config::ConfigPreview> UiRuntime::prepare(
                     L"config"});
     invalidate();
     return built;
-}
-
-Result<OptimizerPreview> UiRuntime::prepare_optimizer(
-    const optimizer::OptimizerInput& input) {
-    auto decision = optimizer::evaluate(input);
-    decision.changes = optimizer::filter_adaptive_locked_changes(
-        decision.changes, adaptive_locks);
-    if (decision.changes.empty()) {
-        return Result<OptimizerPreview>::failure(
-            {ErrorCode::stale_data, decision.reason, 0});
-    }
-    auto prepared = prepare(decision.changes,
-                            optimizer_preview_context(input));
-    if (!prepared.has_value()) {
-        return Result<OptimizerPreview>::failure(prepared.error());
-    }
-    return Result<OptimizerPreview>::success(
-        {std::move(decision), std::move(prepared.value())});
 }
 
 }  // namespace kf2::app

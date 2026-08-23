@@ -277,7 +277,8 @@ AdaptiveCpuReport analyze_cpu_parallelism(
 
 AdaptiveBottleneckReport classify_bottleneck(
     const AdaptiveSample& sample, const AdaptiveDataQualityReport& data,
-    const AdaptiveCpuReport& cpu, AdaptivePressure pressure) noexcept {
+    const AdaptiveCpuReport& cpu, AdaptivePressure pressure,
+    const ResourcePressureSnapshot& resources) noexcept {
     AdaptiveBottleneckReport report;
     report.data_quality = data.quality;
     report.sample_age_ns = data.sample_age_ns;
@@ -291,9 +292,8 @@ AdaptiveBottleneckReport classify_bottleneck(
                "sustained_frame_time_pressure");
     const double vram_ratio = ratio(sample.vram_used_bytes,
                                     sample.vram_budget_bytes);
-    const double ram_ratio = ratio(sample.ram_used_bytes,
-                                   sample.ram_budget_bytes);
-    const bool gpu_high = sample.gpu_percent && *sample.gpu_percent >= 90.0;
+    const bool gpu_high = resources.gpu.smoothed >= 0.70 &&
+        resources.primary == ResourceKind::gpu;
     const bool process_cpu_high = sample.cpu_percent &&
                                   *sample.cpu_percent >= 85.0;
     const bool critical_thread_high = sample.critical_core_percent &&
@@ -315,6 +315,12 @@ AdaptiveBottleneckReport classify_bottleneck(
         report.confidence = 0.70;
         add_signal(report.supporting_signals, report.supporting_count,
                    "verified_thermal_or_power_pressure");
+    } else if (resources.primary == ResourceKind::vram &&
+               resources.vram.smoothed >= 0.70) {
+        report.type = AdaptiveBottleneck::vram;
+        report.confidence = std::max(0.70, resources.vram.confidence);
+        add_signal(report.supporting_signals, report.supporting_count,
+                   "sustained_vram_reserve_pressure");
     } else if (vram_ratio >= 0.95 &&
                (sample.streaming_pressure.value_or(0.0) >= 0.50 ||
                 sample.copy_engine_percent.value_or(0.0) >= 70.0)) {
@@ -322,14 +328,17 @@ AdaptiveBottleneckReport classify_bottleneck(
         report.confidence = 0.78;
         add_signal(report.supporting_signals, report.supporting_count,
                    "vram_budget_and_transfer_pressure");
-    } else if (ram_ratio >= 0.92 && sample.paging_pressure.value_or(0.0) >= 0.35) {
+    } else if (resources.primary == ResourceKind::ram &&
+               resources.ram.smoothed >= 0.70 &&
+               sample.paging_pressure.value_or(0.0) >= 0.35) {
         report.type = AdaptiveBottleneck::paging;
         report.confidence = 0.78;
         add_signal(report.supporting_signals, report.supporting_count,
                    "ram_and_paging_pressure");
-    } else if (ram_ratio >= 0.94) {
+    } else if (resources.primary == ResourceKind::ram &&
+               resources.ram.smoothed >= 0.70) {
         report.type = AdaptiveBottleneck::ram;
-        report.confidence = 0.64;
+        report.confidence = std::max(0.64, resources.ram.confidence);
         add_signal(report.supporting_signals, report.supporting_count,
                    "physical_ram_budget_pressure");
     } else if (gpu_high && cpu_high) {
@@ -457,7 +466,7 @@ AdaptiveDataQualityReport validate_adaptive_sample(
     std::uint64_t now_ns) noexcept {
     AdaptiveDataQualityReport report;
     if (!valid_target_fps(policy.target_fps) ||
-        policy.minimum_quality < 0 || policy.maximum_quality > 100 ||
+        policy.minimum_quality < 10 || policy.maximum_quality > 100 ||
         policy.minimum_quality > policy.maximum_quality ||
         policy.quality_change_budget < 1 || policy.quality_change_budget > 5 ||
         !std::isfinite(policy.performance_headroom) ||
@@ -487,6 +496,7 @@ AdaptiveDataQualityReport validate_adaptive_sample(
         !valid_percent(sample.critical_core_percent) ||
         !valid_core_usage(sample.effective_core_usage) ||
         !valid_percent(sample.dominant_thread_share_percent) ||
+        !valid_percent(sample.process_gpu_percent) ||
         !valid_percent(sample.gpu_percent) ||
         !valid_percent(sample.graphics_engine_percent) ||
         !valid_percent(sample.compute_engine_percent) ||
@@ -531,7 +541,13 @@ AdaptiveDataQualityReport validate_adaptive_sample(
     if ((sample.vram_used_bytes && !finite_nonnegative(sample.vram_used_bytes)) ||
         (sample.vram_budget_bytes && !finite_positive(sample.vram_budget_bytes)) ||
         (sample.ram_used_bytes && !finite_nonnegative(sample.ram_used_bytes)) ||
-        (sample.ram_budget_bytes && !finite_positive(sample.ram_budget_bytes))) {
+        (sample.ram_budget_bytes && !finite_positive(sample.ram_budget_bytes)) ||
+        (sample.commit_used_bytes &&
+         !finite_nonnegative(sample.commit_used_bytes)) ||
+        (sample.commit_budget_bytes &&
+         !finite_positive(sample.commit_budget_bytes)) ||
+        (sample.process_private_bytes &&
+         !finite_nonnegative(sample.process_private_bytes))) {
         report.reason = "invalid_memory_telemetry";
         return report;
     }
@@ -561,7 +577,8 @@ AdaptiveDataQualityReport validate_adaptive_sample(
         return report;
     }
 
-    const bool adapter_bound_signals = sample.gpu_percent ||
+    const bool adapter_bound_signals = sample.process_gpu_percent ||
+        sample.gpu_percent ||
         sample.graphics_engine_percent || sample.compute_engine_percent ||
         sample.copy_engine_percent || sample.vram_used_bytes ||
         sample.vram_budget_bytes;
@@ -645,6 +662,7 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
         history_next_ = 0;
         smoothed_frame_time_ms_.reset();
         smoothed_p95_ms_.reset();
+        resource_pressure_estimator_.reset();
         active_pressure_ = AdaptivePressure::observing;
         candidate_pressure_ = AdaptivePressure::observing;
         candidate_since_ns_ = now_ns;
@@ -834,32 +852,41 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
             static_cast<double>(policy.maximum_quality)),
         static_cast<double>(policy.minimum_quality),
         static_cast<double>(policy.maximum_quality));
-    const double logical_capacity = static_cast<double>(
-        sample.affinity_logical_processors.value_or(0));
-    const double parallel_cpu_pressure = logical_capacity > 0.0
-        ? std::clamp(sample.effective_core_usage.value_or(0.0) * 100.0 /
-                         logical_capacity,
-                     0.0, 100.0)
-        : 0.0;
-    const double cpu_resource_pressure = std::max({
-        sample.cpu_percent.value_or(0.0),
-        sample.critical_core_percent.value_or(0.0),
-        parallel_cpu_pressure});
-    const double resource_pressure = std::max(
-        cpu_resource_pressure,
-        sample.gpu_percent.value_or(100.0)) / 100.0;
-    decision.headroom = std::clamp(1.0 - resource_pressure, 0.0, 1.0);
+    decision.resources = resource_pressure_estimator_.evaluate({
+        .timestamp_ns = sample.timestamp_ns,
+        .target_fps = policy.target_fps,
+        .frame_time_ms = frame_time,
+        .p95_frame_time_ms = p95,
+        .process_cpu_percent = sample.cpu_percent,
+        .critical_thread_percent = sample.critical_core_percent,
+        .effective_core_usage = sample.effective_core_usage,
+        .affinity_logical_processors =
+            sample.affinity_logical_processors,
+        .process_gpu_percent = sample.process_gpu_percent,
+        .adapter_gpu_percent = sample.gpu_percent,
+        .vram_used_bytes = sample.vram_used_bytes,
+        .vram_budget_bytes = sample.vram_budget_bytes,
+        .ram_used_bytes = sample.ram_used_bytes,
+        .ram_budget_bytes = sample.ram_budget_bytes,
+        .commit_used_bytes = sample.commit_used_bytes,
+        .commit_budget_bytes = sample.commit_budget_bytes,
+        .process_private_bytes = sample.process_private_bytes,
+        .paging_pressure = sample.paging_pressure,
+    });
+    decision.headroom = decision.resources.headroom;
     decision.quality_recovery_eligible =
         active_pressure_ == AdaptivePressure::healthy &&
         desired_level == FrameSignalLevel::healthy &&
         !long_low_unhealthy &&
+        decision.resources.recovery_safe &&
         decision.headroom >= policy.performance_headroom &&
         decision.quality_score < static_cast<double>(policy.maximum_quality);
     if (decision.quality_recovery_eligible) {
         decision.stability_state = AdaptiveStabilityState::recovering;
     }
     decision.bottleneck = classify_bottleneck(
-        sample, decision.data, decision.cpu, active_pressure_);
+        sample, decision.data, decision.cpu, active_pressure_,
+        decision.resources);
     // A busy KF2 main thread naturally moves above and below a point threshold
     // over adjacent 500 ms samples. Once high-confidence CPU pressure is
     // established, retain that explanation briefly while GPU reserve and a
@@ -1053,6 +1080,7 @@ void AdaptiveGovernor::reset() noexcept {
     quality_debt_size_ = 0;
     smoothed_frame_time_ms_.reset();
     smoothed_p95_ms_.reset();
+    resource_pressure_estimator_.reset();
     active_pressure_ = AdaptivePressure::observing;
     candidate_pressure_ = AdaptivePressure::observing;
     candidate_since_ns_ = 0;

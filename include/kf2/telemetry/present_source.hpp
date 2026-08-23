@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <unordered_map>
 #include "kf2/core/result.hpp"
 #include "kf2/telemetry/telemetry_snapshot.hpp"
 
@@ -13,6 +14,7 @@ struct PresentEvent {
     std::uint16_t schema_version{0};
     bool completed{false};
     std::uint64_t events_lost{0};
+    std::uint64_t stream_id{0};
 };
 class PresentSource final {
 public:
@@ -30,7 +32,7 @@ private:
     bool running_{false};
     bool schema_failure_{false};
     std::uint64_t reported_loss_{0};
-    std::deque<PresentTimestamp> presents_;
+    std::unordered_map<std::uint64_t, std::deque<PresentTimestamp>> streams_;
     mutable std::mutex mutex_;
 };
 }  // namespace kf2::telemetry

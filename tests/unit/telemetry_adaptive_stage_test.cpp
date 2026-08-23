@@ -46,11 +46,17 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     frame.evidence.affinity_logical_processors = 16;
     frame.evidence.affinity_physical_cores = 8;
     frame.evidence.system_logical_processors = 24;
+    frame.evidence.process_gpu_percent = 52.0;
     frame.evidence.gpu_percent = 70.0;
     frame.evidence.dedicated_vram_bytes = 6ULL << 30U;
     frame.evidence.dedicated_vram_budget_bytes = 12ULL << 30U;
+    frame.evidence.adapter_vram_used_bytes = 7ULL << 30U;
+    frame.evidence.adapter_vram_budget_bytes = 10ULL << 30U;
     frame.evidence.system_ram_used_bytes = 24ULL << 30U;
     frame.evidence.system_ram_budget_bytes = 32ULL << 30U;
+    frame.evidence.system_commit_used_bytes = 30ULL << 30U;
+    frame.evidence.system_commit_budget_bytes = 48ULL << 30U;
+    frame.evidence.process_private_bytes = 5ULL << 30U;
 
     game::GameLogSession session;
     session.map = "KF-Outpost";
@@ -125,15 +131,23 @@ int main() {
           frame.evidence.affinity_physical_cores);
     CHECK(sample.system_logical_processors ==
           frame.evidence.system_logical_processors);
+    CHECK(sample.process_gpu_percent ==
+          frame.evidence.process_gpu_percent);
     CHECK(sample.gpu_percent == frame.evidence.gpu_percent);
     CHECK(sample.vram_used_bytes ==
-          static_cast<double>(*frame.evidence.dedicated_vram_bytes));
+          static_cast<double>(*frame.evidence.adapter_vram_used_bytes));
     CHECK(sample.vram_budget_bytes ==
-          static_cast<double>(*frame.evidence.dedicated_vram_budget_bytes));
+          static_cast<double>(*frame.evidence.adapter_vram_budget_bytes));
     CHECK(sample.ram_used_bytes ==
           static_cast<double>(*frame.evidence.system_ram_used_bytes));
     CHECK(sample.ram_budget_bytes ==
           static_cast<double>(*frame.evidence.system_ram_budget_bytes));
+    CHECK(sample.commit_used_bytes ==
+          static_cast<double>(*frame.evidence.system_commit_used_bytes));
+    CHECK(sample.commit_budget_bytes ==
+          static_cast<double>(*frame.evidence.system_commit_budget_bytes));
+    CHECK(sample.process_private_bytes ==
+          static_cast<double>(*frame.evidence.process_private_bytes));
     CHECK(sample.session_class ==
           optimizer::AdaptiveSessionClass::verified_offline);
     CHECK(sample.capabilities.frame_timing ==
@@ -233,5 +247,73 @@ int main() {
     CHECK(!empty.sample.flex_pressure.has_value());
     CHECK(empty.sample.session_class ==
           optimizer::AdaptiveSessionClass::unknown);
+
+    AdaptiveRuntimeControlInput control;
+    control.state = optimizer::AdaptiveControllerState::intervention;
+    control.data_quality = optimizer::AdaptiveDataQuality::valid;
+    control.primary_resource = optimizer::ResourceKind::cpu;
+    control.primary_confidence = 0.80;
+    control.current_quality = 100;
+    control.minimum_quality = 10;
+    control.maximum_quality = 100;
+    control.active_gameplay = true;
+    control.verified_offline = true;
+    control.bridge_available = true;
+    control.now_ns = 10'000'000'000ULL;
+    auto selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::cpu);
+    CHECK(selected->quality == 75);
+
+    control.last_dispatch_ns = 9'000'000'000ULL;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
+    control.last_dispatch_ns = 8'000'000'000ULL;
+    CHECK(select_adaptive_runtime_control(control).has_value());
+
+    control.last_dispatch_ns = 0;
+    control.state = optimizer::AdaptiveControllerState::emergency;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->quality == 50);
+    control.current_quality = 75;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->quality == 10);
+    control.minimum_quality = 70;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
+
+    control.minimum_quality = 10;
+    control.state = optimizer::AdaptiveControllerState::stable;
+    control.recovery_eligible = true;
+    control.current_quality = 10;
+    control.primary_confidence = 0.1;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::recover);
+    CHECK(selected->quality == 50);
+    control.current_quality = 75;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::recover);
+    CHECK(selected->quality == 100);
+
+    control.maximum_quality = 75;
+    control.current_quality = 50;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::recover);
+    CHECK(selected->quality == 75);
+
+    control.zed_time_active = true;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
+    control.zed_time_active = false;
+    control.shadow_mode = true;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
+    control.shadow_mode = false;
+    control.verified_offline = false;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
+    control.verified_offline = true;
+    control.data_quality = optimizer::AdaptiveDataQuality::degraded;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
     return EXIT_SUCCESS;
 }

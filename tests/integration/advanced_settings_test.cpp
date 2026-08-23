@@ -64,6 +64,7 @@ void write_selected_catalog(const std::filesystem::path& root) {
 int main() {
     using namespace kf2;
     namespace fs = std::filesystem;
+    static_assert(game::kAdvancedOptionCount == 15);
     const fs::path root{KF2_TEST_ROOT};
     fs::remove_all(root);
     fs::create_directories(root);
@@ -109,10 +110,15 @@ int main() {
 
     const auto changes = game::advanced_setting_changes(
         loaded.value(), pending);
-    CHECK(changes.size() == 5);
+    CHECK(changes.size() == 6);
+    bool disables_temporal_aa = false;
     for (const auto& change : changes) {
         CHECK(change.source == config::ChangeSource::explicit_user);
+        if (change.id == config::SettingId::temporal_aa) {
+            disables_temporal_aa = std::get<bool>(change.value) == false;
+        }
     }
+    CHECK(disables_temporal_aa);
 
     fs::remove_all(root);
     return EXIT_SUCCESS;

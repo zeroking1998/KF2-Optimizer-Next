@@ -10,6 +10,7 @@
 #include <string>
 
 #include "kf2/config/ini_document.hpp"
+#include "kf2/game/adaptive_control_client.hpp"
 #include "kf2/optimizer/adaptive_stability.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
 
@@ -29,6 +30,8 @@ constexpr std::wstring_view kEngineSection = L"Engine.Engine";
 constexpr std::wstring_view kViewportClientKey = L"GameViewportClientClassName";
 constexpr std::wstring_view kTelemetryViewportClient =
     L"KF2OptimizerTelemetry.KF2OptimizerTelemetryViewport";
+constexpr std::wstring_view kNativeViewportClient =
+    L"KFGame.KFGameViewportClient";
 constexpr std::wstring_view kTelemetrySection =
     L"KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe";
 constexpr std::wstring_view kAdaptiveCorpseStaggerKey =
@@ -40,6 +43,7 @@ constexpr std::wstring_view kAdaptiveCorpseMaximumKey =
 constexpr std::wstring_view kAdaptiveTargetFpsKey = L"AdaptiveTargetFPS";
 constexpr std::wstring_view kAdaptiveQualityChangeBudgetKey =
     L"AdaptiveQualityChangeBudget";
+constexpr std::wstring_view kAdaptiveControlTokenKey = L"AdaptiveControlToken";
 
 Result<std::string> read_verified_ini(const std::filesystem::path& path) {
     HANDLE file = CreateFileW(
@@ -116,7 +120,8 @@ Result<bool> enable_offline_gameplay_logging(
     int adaptive_corpse_maximum,
     int adaptive_target_fps,
     bool adaptive_corpse_debug_markers,
-    int adaptive_quality_change_budget) {
+    int adaptive_quality_change_budget,
+    std::string_view adaptive_control_token) {
     if (config_root.empty() || !config_root.is_absolute()) {
         return Result<bool>::failure(
             {ErrorCode::invalid_argument,
@@ -126,10 +131,12 @@ Result<bool> enable_offline_gameplay_logging(
          (adaptive_corpse_maximum < 4 || adaptive_corpse_maximum > 2000 ||
            !optimizer::valid_target_fps(adaptive_target_fps) ||
            adaptive_quality_change_budget < 1 ||
-           adaptive_quality_change_budget > 5)) ||
+           adaptive_quality_change_budget > 5 ||
+           !valid_adaptive_control_token(adaptive_control_token))) ||
         (!adaptive_corpse_stagger &&
          (adaptive_corpse_maximum != 0 || adaptive_target_fps != 0 ||
-          adaptive_corpse_debug_markers))) {
+          adaptive_corpse_debug_markers ||
+          !adaptive_control_token.empty()))) {
         return Result<bool>::failure(
             {ErrorCode::invalid_argument,
              L"Adaptive corpse maximum must be 4..2000 and target FPS 30..240 when Adaptive is active",
@@ -255,10 +262,20 @@ Result<bool> enable_offline_gameplay_logging(
             {ErrorCode::invalid_argument,
              L"Adaptive quality-change budget setting is ambiguous", 0});
     }
+    const std::wstring control_token(
+        adaptive_control_token.begin(), adaptive_control_token.end());
+    const auto control_token_replaced = engine.value().upsert(
+        kTelemetrySection, kAdaptiveControlTokenKey, control_token);
+    if (control_token_replaced.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"Adaptive control-token setting is ambiguous", 0});
+    }
     if (!replaced.changed && !wave_changed && !viewport_replaced.changed &&
         !stagger_replaced.changed && !markers_replaced.changed &&
         !maximum_replaced.changed &&
-        !target_replaced.changed && !quality_budget_replaced.changed) {
+        !target_replaced.changed && !quality_budget_replaced.changed &&
+        !control_token_replaced.changed) {
         return Result<bool>::success(false);
     }
 
@@ -269,7 +286,8 @@ Result<bool> enable_offline_gameplay_logging(
     }
     if (viewport_replaced.changed || stagger_replaced.changed ||
         markers_replaced.changed || maximum_replaced.changed ||
-        target_replaced.changed || quality_budget_replaced.changed) {
+        target_replaced.changed || quality_budget_replaced.changed ||
+        control_token_replaced.changed) {
         const auto written = platform::windows::atomic_replace_utf8(
             engine_ini, engine.value().serialize());
         if (!written.has_value()) return Result<bool>::failure(written.error());
@@ -313,6 +331,10 @@ Result<bool> enable_offline_gameplay_logging(
         ? verified_engine.value().find(
               kTelemetrySection, kAdaptiveQualityChangeBudgetKey)
         : std::optional<std::wstring>{};
+    const auto verified_control_token = verified_engine.has_value()
+        ? verified_engine.value().find(
+              kTelemetrySection, kAdaptiveControlTokenKey)
+        : std::optional<std::wstring>{};
     if (!verified_engine.has_value() || !verified_viewport ||
         *verified_viewport != kTelemetryViewportClient || !verified_stagger ||
         normalized_boolean(*verified_stagger) !=
@@ -326,10 +348,70 @@ Result<bool> enable_offline_gameplay_logging(
         *verified_target != std::to_wstring(adaptive_target_fps) ||
         !verified_quality_budget ||
         *verified_quality_budget !=
-            std::to_wstring(adaptive_quality_change_budget)) {
+            std::to_wstring(adaptive_quality_change_budget) ||
+        !verified_control_token || *verified_control_token != control_token) {
         return Result<bool>::failure(
             {ErrorCode::io_failure,
              L"KF2 offline telemetry viewport policy could not be verified after writing",
+             0});
+    }
+    return Result<bool>::success(true);
+}
+
+Result<bool> cleanup_stale_offline_gameplay_configuration(
+    const std::filesystem::path& config_root, bool game_running) {
+    if (game_running) {
+        return Result<bool>::failure(
+            {ErrorCode::access_denied,
+             L"Running KF2 configuration cannot be repaired", 0});
+    }
+    if (config_root.empty() || !config_root.is_absolute()) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"Offline gameplay configuration root is invalid", 0});
+    }
+
+    const auto engine_ini = config_root / L"KFEngine.ini";
+    auto engine = parse_verified(engine_ini);
+    if (!engine.has_value()) return Result<bool>::failure(engine.error());
+
+    bool changed = false;
+    const auto viewport = engine.value().find(
+        kEngineSection, kViewportClientKey);
+    if (viewport && *viewport == kTelemetryViewportClient) {
+        const auto restored = engine.value().replace(
+            kEngineSection, kViewportClientKey, kNativeViewportClient);
+        if (restored.shadowed_occurrences != 0) {
+            return Result<bool>::failure(
+                {ErrorCode::invalid_argument,
+                 L"KF2 viewport-client setting is ambiguous", 0});
+        }
+        changed = changed || restored.changed;
+    }
+
+    const auto removed = engine.value().remove_section(kTelemetrySection);
+    if (removed.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"KF2 Optimizer telemetry section is ambiguous", 0});
+    }
+    changed = changed || removed.changed;
+    if (!changed) return Result<bool>::success(false);
+
+    const auto written = platform::windows::atomic_replace_utf8(
+        engine_ini, engine.value().serialize());
+    if (!written.has_value()) return Result<bool>::failure(written.error());
+
+    auto verified = parse_verified(engine_ini);
+    if (!verified.has_value()) return Result<bool>::failure(verified.error());
+    const auto verified_viewport = verified.value().find(
+        kEngineSection, kViewportClientKey);
+    if ((verified_viewport && *verified_viewport == kTelemetryViewportClient) ||
+        verified.value().find(kTelemetrySection, kAdaptiveControlTokenKey) ||
+        verified.value().find(kTelemetrySection, kAdaptiveTargetFpsKey)) {
+        return Result<bool>::failure(
+            {ErrorCode::io_failure,
+             L"Stale KF2 Optimizer telemetry configuration remains after repair",
              0});
     }
     return Result<bool>::success(true);

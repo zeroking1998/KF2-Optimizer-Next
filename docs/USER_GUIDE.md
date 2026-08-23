@@ -12,8 +12,8 @@ Download the current package from the
 ## Repair missing required files
 
 Normal release packages already contain every required runtime companion file.
-If one is removed or damaged, the app starts in Safe Mode instead of trusting
-an incomplete package.
+If one is removed or damaged, the app reports that component and keeps
+unrelated controls available.
 
 1. Select **Repair** in the upper-right corner.
 2. Wait for the exact installed release to be downloaded and verified in the
@@ -65,6 +65,12 @@ The adaptive controller uses three absolute tolerance bands. At a 60 FPS
 target, warning begins below 59, correction below 58, and critical pressure
 below 57. The same one-, two-, and three-FPS offsets are calculated for every
 other target.
+
+Target FPS uses KF2's own engine frame-pacing controls and does not depend on a
+specific GPU vendor or display driver. The optimizer prepares the same settings
+for KF2 launched from the optimizer, Steam, or a desktop shortcut, and its
+published offline provider reapplies and verifies the value during a running
+offline session.
 
 ## 4. Adaptive control
 

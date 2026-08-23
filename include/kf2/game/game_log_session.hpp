@@ -134,6 +134,7 @@ struct GameLogSession {
     std::optional<bool> telemetry_flex_surrogate_visible;
     std::optional<int> telemetry_flex_surrogate_lod;
     std::optional<bool> telemetry_zed_time_active;
+    std::optional<std::uint16_t> telemetry_control_port;
     std::optional<int> telemetry_sample;
     std::uint64_t zeds_remaining_observed_ns{0};
     std::uint64_t zeds_alive_observed_ns{0};
@@ -186,6 +187,8 @@ private:
     const std::optional<int>& value, std::uint64_t observed_at_ns,
     std::uint64_t now_ns,
     std::uint64_t maximum_age_ns = kGameLogObservationFreshnessNs) noexcept;
+[[nodiscard]] bool game_log_reports_engine_exit(
+    std::string_view text) noexcept;
 [[nodiscard]] constexpr bool game_log_belongs_to_process(
     std::uint64_t last_write_filetime,
     std::uint64_t process_start_filetime) noexcept {

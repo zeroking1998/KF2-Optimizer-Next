@@ -15,35 +15,51 @@ PresentSource::PresentSource(SampleIdentity identity, std::size_t capacity)
 
 Result<bool> PresentSource::start() {
     std::scoped_lock lock{mutex_};
-    presents_.clear(); reported_loss_ = 0; schema_failure_ = false;
+    streams_.clear(); reported_loss_ = 0; schema_failure_ = false;
     running_ = true;
     return Result<bool>::success(true);
 }
 Result<bool> PresentSource::stop() {
     std::scoped_lock lock{mutex_};
-    running_ = false; presents_.clear(); reported_loss_ = 0;
+    running_ = false; streams_.clear(); reported_loss_ = 0;
     return Result<bool>::success(true);
 }
 void PresentSource::bind(SampleIdentity identity) {
     std::scoped_lock lock{mutex_};
-    identity_ = identity; presents_.clear(); reported_loss_ = 0;
+    identity_ = identity; streams_.clear(); reported_loss_ = 0;
     schema_failure_ = false;
 }
 void PresentSource::reset_statistics() {
     std::scoped_lock lock{mutex_};
-    presents_.clear();
+    streams_.clear();
     reported_loss_ = 0;
 }
 bool PresentSource::ingest(const PresentEvent& event) {
     std::scoped_lock lock{mutex_};
     if (!running_ || event.identity != identity_) return false;
     if (event.schema_version != 1) {
-        schema_failure_ = true; presents_.clear(); return false;
+        schema_failure_ = true; streams_.clear(); return false;
     }
     if (!event.completed) { ++reported_loss_; return false; }
     reported_loss_ += event.events_lost;
-    presents_.push_back({event.identity, event.monotonic_ns});
-    while (presents_.size() > capacity_) presents_.pop_front();
+    constexpr std::size_t kMaximumStreams = 16;
+    auto stream = streams_.find(event.stream_id);
+    if (stream == streams_.end()) {
+        if (streams_.size() >= kMaximumStreams) return false;
+        stream = streams_.try_emplace(event.stream_id).first;
+    }
+    auto& presents = stream->second;
+    const auto position = std::lower_bound(
+        presents.begin(), presents.end(), event.monotonic_ns,
+        [](const PresentTimestamp& present, std::uint64_t timestamp) {
+            return present.monotonic_ns < timestamp;
+        });
+    if (position != presents.end() &&
+        position->monotonic_ns == event.monotonic_ns) {
+        return false;
+    }
+    presents.insert(position, {event.identity, event.monotonic_ns});
+    while (presents.size() > capacity_) presents.pop_front();
     return true;
 }
 FrameMetrics PresentSource::drain(std::uint64_t now_ns,
@@ -58,13 +74,35 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
     std::vector<PresentTimestamp> sustained;
     std::vector<PresentTimestamp> tail;
     std::vector<PresentTimestamp> long_term;
-    if (!presents_.empty()) {
-        const auto newest = presents_.back().monotonic_ns;
+    const std::deque<PresentTimestamp>* selected = nullptr;
+    std::size_t selected_fast_count = 0;
+    std::uint64_t selected_newest = 0;
+    for (const auto& [stream_id, presents] : streams_) {
+        static_cast<void>(stream_id);
+        if (presents.empty()) continue;
+        const auto newest = presents.back().monotonic_ns;
+        const auto cutoff = newest > kFastWindowNs ? newest - kFastWindowNs : 0;
+        const auto first = std::lower_bound(
+            presents.begin(), presents.end(), cutoff,
+            [](const PresentTimestamp& present, std::uint64_t timestamp) {
+                return present.monotonic_ns < timestamp;
+            });
+        const auto fast_count = static_cast<std::size_t>(
+            std::distance(first, presents.end()));
+        if (!selected || fast_count > selected_fast_count ||
+            (fast_count == selected_fast_count && newest > selected_newest)) {
+            selected = &presents;
+            selected_fast_count = fast_count;
+            selected_newest = newest;
+        }
+    }
+    if (selected) {
+        const auto newest = selected->back().monotonic_ns;
         const auto copy_window = [&](std::uint64_t duration,
                                      std::vector<PresentTimestamp>& output) {
             const auto cutoff = newest > duration ? newest - duration : 0;
-            output.reserve(presents_.size());
-            std::copy_if(presents_.begin(), presents_.end(),
+            output.reserve(selected->size());
+            std::copy_if(selected->begin(), selected->end(),
                          std::back_inserter(output),
                          [cutoff](const PresentTimestamp& present) {
                              return present.monotonic_ns >= cutoff;

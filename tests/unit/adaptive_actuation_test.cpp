@@ -48,6 +48,22 @@ int main() {
            AdaptiveReceiptResult::accepted);
     assert(tracker.effective_value(AdaptiveControlId::corpse_runtime_limit) == 143.0);
 
+    // Live quality control also requires an exact APPLIED readback before the
+    // governor may treat a requested tier as effective.
+    auto quality_action = tracker.propose(AdaptiveControlId::runtime_quality,
+        75.0, 100.0, AdaptiveCapabilityState::available, 350,
+        "adaptive_loopback");
+    assert(tracker.effective_value(AdaptiveControlId::runtime_quality) == 100.0);
+    assert(tracker.dispatch(AdaptiveControlId::runtime_quality, 351));
+    quality_action = *tracker.current(AdaptiveControlId::runtime_quality);
+    assert(tracker.receive(success(quality_action, 75.0, 352)) ==
+           AdaptiveReceiptResult::accepted);
+    assert(tracker.effective_value(AdaptiveControlId::runtime_quality) == 75.0);
+    assert(tracker.current(
+        AdaptiveControlId::runtime_quality)->owns_temporary_value);
+    assert(tracker.current(
+        AdaptiveControlId::runtime_quality)->previous_owned_value == 100.0);
+
     // A5: duplicate receipt is harmless and idempotent.
     assert(tracker.receive(success(action, 143.0, 301)) ==
            AdaptiveReceiptResult::duplicate);

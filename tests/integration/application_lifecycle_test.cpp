@@ -158,8 +158,6 @@ int main() {
     CHECK(kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::normal));
     CHECK(!kf2::app::should_prepare_protected_gameplay_provider(
-        kf2::app::StartMode::safe));
-    CHECK(!kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::read_only));
     CHECK(!kf2::app::should_prepare_adaptive_flex_runtime(
         kf2::app::StartMode::normal, 0));
@@ -167,8 +165,6 @@ int main() {
         kf2::app::StartMode::normal, 1));
     CHECK(kf2::app::should_prepare_adaptive_flex_runtime(
         kf2::app::StartMode::normal, 2));
-    CHECK(!kf2::app::should_prepare_adaptive_flex_runtime(
-        kf2::app::StartMode::safe, 2));
     std::vector<kf2::config::RequestedChange> flex_preservation_changes{
         {kf2::config::SettingId::target_fps, 120,
          kf2::config::ChangeSource::adaptive, L"test"},
@@ -178,6 +174,15 @@ int main() {
     CHECK(flex_preservation_changes.size() == 1);
     CHECK(flex_preservation_changes.front().id ==
           kf2::config::SettingId::target_fps);
+    kf2::app::enforce_temporal_aa_disabled(flex_preservation_changes);
+    CHECK(flex_preservation_changes.size() == 2);
+    CHECK(flex_preservation_changes.back().id ==
+          kf2::config::SettingId::temporal_aa);
+    CHECK(std::get<bool>(flex_preservation_changes.back().value) == false);
+    flex_preservation_changes.back().value = true;
+    kf2::app::enforce_temporal_aa_disabled(flex_preservation_changes);
+    CHECK(flex_preservation_changes.size() == 2);
+    CHECK(std::get<bool>(flex_preservation_changes.back().value) == false);
     namespace fs = std::filesystem;
     CHECK(kf2::app::runtime::feature_definitions().size() == 7);
     CHECK(kf2::app::runtime::find_feature(
@@ -202,7 +207,22 @@ int main() {
     const auto config_root = documents / L"My Games/KillingFloor2/KFGame/Config";
     const auto install_root = root / L"Steam/steamapps/common/KillingFloor2";
     write_test_pe(install_root / L"Binaries/Win64/KFGame.exe");
+    write_bytes(install_root / L"Engine/Config/ConsoleVariables.ini",
+                "; native startup variables\r\n[Startup]\r\n");
     CHECK(write_complete_config_catalog(config_root));
+    write_bytes(config_root / L"KFGame.ini",
+                read_bytes(config_root / L"KFGame.ini") +
+                    "[KFGameContent.KFGameInfo_Survival]\r\n"
+                    "bLogAICount=False\r\n");
+    write_bytes(config_root / L"KFEngine.ini",
+                read_bytes(config_root / L"KFEngine.ini") +
+                    "[Engine.Engine]\r\n"
+                    "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n");
+    const fs::path telemetry_asset{KF2_TELEMETRY_ASSET};
+    CHECK(fs::exists(telemetry_asset));
+    const auto portable_telemetry = root / L"portable" / L"Data" / L"Lab" /
+        L"KF2OptimizerTelemetry.u";
+    write_bytes(portable_telemetry, read_bytes(telemetry_asset));
     const std::wstring instance_name = L"Local\\KF2OptimizerNext-AppTest-" +
                                        std::to_wstring(GetCurrentProcessId());
 
@@ -220,8 +240,25 @@ int main() {
     };
 
     {
+        const auto original_game_config = read_bytes(config_root / L"KFGame.ini");
+        const auto original_engine_config = read_bytes(config_root / L"KFEngine.ini");
+        const auto published_telemetry = config_root.parent_path() /
+            L"Published" / L"BrewedPC" / L"KF2OptimizerTelemetry.u";
         auto first = kf2::app::Application::start(options);
         CHECK(first.has_value());
+        const auto automatically_prepared =
+            read_bytes(config_root / L"KFGame.ini");
+        CHECK(automatically_prepared.find(
+                  "MaxSmoothedFrameRate=60") != std::string::npos);
+        CHECK(automatically_prepared.find(
+                  "MinSmoothedFrameRate=22") != std::string::npos);
+        CHECK(automatically_prepared.find(
+                  "bSmoothFrameRate=True") != std::string::npos);
+        CHECK(fs::exists(published_telemetry));
+        CHECK(read_bytes(published_telemetry) == read_bytes(telemetry_asset));
+        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                  "GameViewportClientClassName=KF2OptimizerTelemetry."
+                  "KF2OptimizerTelemetryViewport") != std::string::npos);
         CHECK(fs::exists(options.state_root / L"settings.ini"));
         CHECK(fs::exists(options.state_root / L"session.marker"));
         CHECK(fs::is_directory(options.state_root / L"logs"));
@@ -229,19 +266,6 @@ int main() {
         CHECK(read_bytes(options.state_root / L"settings.ini").starts_with(
             "schema_version=1\n"));
         CHECK(first.value().game_installation().has_value());
-        kf2::optimizer::OptimizerInput optimizer_input;
-        optimizer_input.target_fps = 90;
-        optimizer_input.profile_preview_requested = true;
-        const auto optimized = first.value().prepare_optimizer(optimizer_input);
-        CHECK(optimized.has_value());
-        CHECK(optimized.value().decision.changes.size() == 2);
-        CHECK(read_bytes(config_root / L"KFGame.ini").find(
-            "MaxSmoothedFrameRate=62.000000") != std::string::npos);
-        const auto current = first.value().prepare_current_optimizer();
-        CHECK(current.has_value());
-        CHECK(current.value().decision.changes.size() == 2);
-        CHECK(current.value().decision.bottleneck ==
-              kf2::optimizer::Bottleneck::unavailable);
         const auto preview = first.value().prepare_config_changes({
             {kf2::config::SettingId::target_fps, 90,
              kf2::config::ChangeSource::explicit_user, L"integration"}});
@@ -255,15 +279,61 @@ int main() {
             applied.value().backup.id, {.game_running = false});
         CHECK(restored.has_value());
         CHECK(read_bytes(config_root / L"KFGame.ini").find(
-            "MaxSmoothedFrameRate=62.000000") != std::string::npos);
+            "MaxSmoothedFrameRate=60") != std::string::npos);
 
         auto duplicate = kf2::app::Application::start(options);
         CHECK(!duplicate.has_value());
         CHECK(duplicate.error().code == kf2::ErrorCode::already_running);
         CHECK(first.value().shutdown_cleanly().has_value());
+        auto expected_game_config = original_game_config;
+        const auto original_cap = expected_game_config.find(
+            "MaxSmoothedFrameRate=62.000000");
+        CHECK(original_cap != std::string::npos);
+        expected_game_config.replace(
+            original_cap, std::strlen("MaxSmoothedFrameRate=62.000000"),
+            "MaxSmoothedFrameRate=60.000000");
+        CHECK(read_bytes(config_root / L"KFGame.ini") == expected_game_config);
+        CHECK(read_bytes(config_root / L"KFEngine.ini") == original_engine_config);
+        CHECK(read_bytes(install_root /
+            L"Engine/Config/ConsoleVariables.ini").find(
+                "t.MaxFPS=60") != std::string::npos);
+        CHECK(!fs::exists(published_telemetry));
     }
     CHECK(read_bytes(options.state_root / L"session.marker").ends_with(
         "clean_shutdown=true\n"));
+
+    // A historically poisoned snapshot can leave the optimizer viewport and
+    // token behind after the module marker is already gone. Startup must
+    // remove that owned residue before capturing the next protected snapshot.
+    auto poisoned_engine = read_bytes(config_root / L"KFEngine.ini");
+    const std::string native_viewport =
+        "GameViewportClientClassName=KFGame.KFGameViewportClient";
+    const auto viewport_offset = poisoned_engine.find(native_viewport);
+    CHECK(viewport_offset != std::string::npos);
+    poisoned_engine.replace(
+        viewport_offset, native_viewport.size(),
+        "GameViewportClientClassName=KF2OptimizerTelemetry."
+        "KF2OptimizerTelemetryViewport");
+    poisoned_engine +=
+        "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\r\n"
+        "AdaptiveTargetFPS=120\r\n"
+        "AdaptiveControlToken=0123456789abcdef0123456789abcdef\r\n";
+    write_bytes(config_root / L"KFEngine.ini", poisoned_engine);
+    options.identity.process_start_id = 10011;
+    {
+        auto stale_recovered = kf2::app::Application::start(options);
+        CHECK(stale_recovered.has_value());
+        CHECK(stale_recovered.value().shutdown_cleanly().has_value());
+    }
+    const auto recovered_engine = read_bytes(config_root / L"KFEngine.ini");
+    CHECK(recovered_engine.find(
+        "GameViewportClientClassName=KFGame.KFGameViewportClient") !=
+        std::string::npos);
+    CHECK(recovered_engine.find("[KF2OptimizerTelemetry.") ==
+          std::string::npos);
+    CHECK(recovered_engine.find("AdaptiveControlToken=") == std::string::npos);
+    CHECK(read_bytes(options.state_root / L"logs/session-events.json").find(
+        "STALE_TELEMETRY_CONFIG_RECOVERED") != std::string::npos);
 
     {
         std::ofstream corrupt(options.state_root / L"settings.ini",
@@ -289,7 +359,7 @@ int main() {
         "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=true\n"
         "restore_config_after_game=true\n"
         "adaptive_aggressiveness=balanced\n"
-        "adaptive_minimum_quality=70\nadaptive_maximum_quality=100\n"
+        "adaptive_minimum_quality=10\nadaptive_maximum_quality=100\n"
         "adaptive_quality_change_budget=2\nadaptive_headroom_percent=8\n"
         "adaptive_emergency_enabled=true\n"
         "adaptive_quality_recovery_enabled=true\n"
@@ -345,7 +415,7 @@ int main() {
         CHECK(!blocked.has_value());
         CHECK(blocked.error().code == kf2::ErrorCode::access_denied);
         CHECK(read_bytes(config_root / L"KFGame.ini").find(
-            "MaxSmoothedFrameRate=62.000000") != std::string::npos);
+            "MaxSmoothedFrameRate=60.000000") != std::string::npos);
         const auto overlay_blocked =
             read_only.value().set_overlay_enabled(true);
         CHECK(!overlay_blocked.has_value());
@@ -354,17 +424,31 @@ int main() {
               settings_before_read_only);
         CHECK(read_only.value().shutdown_cleanly().has_value());
     }
-    options.mode = kf2::app::StartMode::safe;
-    options.identity.process_start_id = 10028;
-    {
-        auto safe = kf2::app::Application::start(options);
-        CHECK(safe.has_value());
-        CHECK(safe.value().ui_model().status().mode == L"Safe mode");
-        CHECK(!safe.value().overlay_enabled());
-        CHECK(!safe.value().set_overlay_enabled(true).has_value());
-        CHECK(safe.value().shutdown_cleanly().has_value());
-    }
     options.mode = kf2::app::StartMode::normal;
+
+    {
+        auto degraded_options = options;
+        degraded_options.state_root = root / L"Data-component-warning";
+        degraded_options.instance_name =
+            L"Local\\KF2OptimizerNext-ComponentWarning-" +
+            std::to_wstring(GetCurrentProcessId());
+        degraded_options.identity.process_start_id = 10028;
+        degraded_options.game_discovery.reset();
+        degraded_options.startup_warning =
+            L"A managed companion component does not match its package hash.";
+        auto degraded = kf2::app::Application::start(degraded_options);
+        CHECK(degraded.has_value());
+        CHECK(degraded.value().ui_model().status().mode ==
+              L"Adaptive / Automatic");
+        CHECK(degraded.value().ui_model().notice().has_value());
+        CHECK(degraded.value().ui_model().notice()->code ==
+              L"PACKAGE_INTEGRITY_FAILED");
+        const auto overlay_changed =
+            degraded.value().set_overlay_enabled(true);
+        CHECK(overlay_changed.has_value());
+        CHECK(overlay_changed.value());
+        CHECK(degraded.value().shutdown_cleanly().has_value());
+    }
 
     {
         auto missing_options = options;

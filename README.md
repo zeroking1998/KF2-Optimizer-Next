@@ -84,6 +84,10 @@ the control remains unavailable instead of pretending to work.
 5. Start KF2 through the optimizer when you want session restoration and
    verified runtime capabilities.
 
+Target FPS is a native, vendor-independent KF2 startup limit. It also applies
+when KF2 is started through Steam or a shortcut; changing it while KF2 is
+running takes effect after the next game start.
+
 The packaged executable is written to
 `out/package/KF2OptimizerNext/KF2Optimizer.exe`. The adjacent `Data` directory
 contains portable user state and is preserved when the application is updated.

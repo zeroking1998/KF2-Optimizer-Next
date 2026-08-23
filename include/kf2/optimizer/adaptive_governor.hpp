@@ -10,6 +10,7 @@
 #include "kf2/config/settings.hpp"
 #include "kf2/optimizer/adaptive_registry.hpp"
 #include "kf2/optimizer/optimizer_engine.hpp"
+#include "kf2/optimizer/resource_pressure.hpp"
 
 namespace kf2::optimizer {
 
@@ -58,7 +59,7 @@ enum class AdaptiveBottleneck {
 struct AdaptivePolicy {
     int target_fps{60};
     AdaptiveAggressiveness aggressiveness{AdaptiveAggressiveness::balanced};
-    int minimum_quality{70};
+    int minimum_quality{10};
     int maximum_quality{100};
     int quality_change_budget{2};
     double performance_headroom{0.08};
@@ -124,6 +125,7 @@ struct AdaptiveSample {
     std::optional<std::uint32_t> affinity_logical_processors;
     std::optional<std::uint32_t> affinity_physical_cores;
     std::optional<std::uint32_t> system_logical_processors;
+    std::optional<double> process_gpu_percent;
     std::optional<double> gpu_percent;
     std::optional<double> graphics_engine_percent;
     std::optional<double> compute_engine_percent;
@@ -133,6 +135,9 @@ struct AdaptiveSample {
     std::optional<double> vram_budget_bytes;
     std::optional<double> ram_used_bytes;
     std::optional<double> ram_budget_bytes;
+    std::optional<double> commit_used_bytes;
+    std::optional<double> commit_budget_bytes;
+    std::optional<double> process_private_bytes;
     std::optional<double> paging_pressure;
     std::optional<double> io_pressure;
     std::optional<double> thermal_power_pressure;
@@ -209,6 +214,7 @@ struct AdaptiveDecision {
     AdaptivePressure pressure{AdaptivePressure::observing};
     AdaptiveBottleneckReport bottleneck;
     AdaptiveCpuReport cpu;
+    ResourcePressureSnapshot resources;
     Profile recommended_profile{Profile::balanced};
     std::string_view selected_setting;
     std::string_view reason{"disabled"};
@@ -266,6 +272,7 @@ private:
     std::size_t quality_debt_size_{0};
     std::optional<double> smoothed_frame_time_ms_;
     std::optional<double> smoothed_p95_ms_;
+    ResourcePressureEstimator resource_pressure_estimator_;
     AdaptivePressure active_pressure_{AdaptivePressure::observing};
     AdaptivePressure candidate_pressure_{AdaptivePressure::observing};
     std::uint64_t candidate_since_ns_{0};

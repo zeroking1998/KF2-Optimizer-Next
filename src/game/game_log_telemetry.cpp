@@ -681,6 +681,7 @@ std::optional<bool> apply_offline_telemetry_line(
 }
 
 void clear_offline_telemetry_snapshot(GameLogSession& session) noexcept {
+    session.telemetry_control_port.reset();
     session.telemetry_sample.reset();
     session.telemetry_living_zeds.reset();
     session.telemetry_living_classes.reset();

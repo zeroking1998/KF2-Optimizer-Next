@@ -1,7 +1,10 @@
 #include "application_runtime.hpp"
+#include "kf2/config/setting_catalog.hpp"
 #include "runtime/action_contract.hpp"
 #include "runtime/action_router.hpp"
 #include "runtime/feature_composition.hpp"
+
+#include <algorithm>
 
 namespace kf2::app {
 
@@ -12,11 +15,28 @@ void preserve_user_flex_activation(
     });
 }
 
+void enforce_temporal_aa_disabled(
+    std::vector<config::RequestedChange>& changes) noexcept {
+    const auto existing = std::find_if(
+        changes.begin(), changes.end(), [](const config::RequestedChange& change) {
+            return change.id == config::SettingId::temporal_aa;
+        });
+    const config::RequestedChange required{
+        config::SettingId::temporal_aa, false,
+        config::ChangeSource::explicit_user,
+        L"Disable temporal frame-history anti-aliasing to prevent ghosting"};
+    if (existing == changes.end()) {
+        changes.push_back(required);
+    } else {
+        *existing = required;
+    }
+}
+
 Result<bool> UiRuntime::set_overlay(bool enabled) {
     if (start_mode != StartMode::normal) {
         return Result<bool>::failure(
             {ErrorCode::access_denied,
-             L"This start mode does not permit persistent overlay changes", 0});
+             L"This action is unavailable", 0});
     }
     if (enabled == overlay_enabled) {
         return Result<bool>::success(overlay_enabled);
@@ -241,6 +261,7 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
     auto changes = optimizer::filter_adaptive_locked_changes(
         decision.changes, adaptive_locks);
     preserve_user_flex_activation(changes);
+    enforce_temporal_aa_disabled(changes);
     if (changes.empty()) {
         return Result<config::ApplyResult>::failure({
             ErrorCode::access_denied,
@@ -262,13 +283,155 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
     events->append({0, diagnostics::Severity::info,
         "ADAPTIVE_LAUNCH_PROFILE_APPLIED",
         protected_profile_capability_requested
-            ? L"General Adaptive applied frame pacing plus the available bounded " +
+            ? L"General Adaptive applied the available bounded " +
                   std::wstring{
                       optimizer::adaptive_profile_label(selected_profile)} +
                   L" protected-provider profile capability; individual locks were preserved and the exact pre-game snapshot remains protected"
-            : L"General Adaptive applied frame pacing while preserving the user's FleX setting; the exact pre-game snapshot remains protected",
+            : L"General Adaptive preserved the user's FleX setting; the exact pre-game snapshot remains protected",
         L"optimizer"});
     return applied;
+}
+
+Result<game::FrameRateCapResult> UiRuntime::synchronize_frame_rate_cap() {
+    if (!installation) {
+        return Result<game::FrameRateCapResult>::failure(
+            {ErrorCode::not_found, L"Game not detected", 0});
+    }
+    return game::persist_frame_rate_cap(
+        *installation, optimizer_settings.target_fps);
+}
+
+Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
+    if (!installation || !session_config_snapshot) {
+        return Result<bool>::failure({
+            ErrorCode::invalid_argument,
+            L"A protected KF2 configuration snapshot is required before launch capabilities are prepared",
+            0});
+    }
+
+    const auto captured_values = config::read_catalog_values(
+        session_config_snapshot->snapshot_root / L"files");
+    if (!captured_values.has_value()) {
+        return Result<bool>::failure(captured_values.error());
+    }
+    const auto physx = captured_values.value().find(
+        config::SettingId::physx_level);
+    const auto* configured_physx_level =
+        physx == captured_values.value().end()
+            ? nullptr : std::get_if<int>(&physx->second);
+    if (!configured_physx_level) {
+        return Result<bool>::failure({
+            ErrorCode::stale_data,
+            L"The user's captured KF2 FleX setting could not be verified",
+            0});
+    }
+
+    if (should_prepare_adaptive_flex_runtime(
+            start_mode, *configured_physx_level)) {
+        const auto prepared = ensure_automatic_flex_lab();
+        if (!prepared.has_value()) {
+            return Result<bool>::failure(prepared.error());
+        }
+    } else {
+        events->append({0, diagnostics::Severity::info,
+            "FLEX_USER_SETTING_PRESERVED",
+            L"FleX remains disabled because the user did not enable it in KF2; no FleX runtime hook was installed",
+            L"flex"});
+    }
+
+    if (!should_prepare_protected_gameplay_provider(start_mode)) {
+        return Result<bool>::success(true);
+    }
+    const auto control_token = game::generate_adaptive_control_token();
+    if (!control_token.has_value()) {
+        return Result<bool>::failure(control_token.error());
+    }
+    adaptive_control_token = control_token.value();
+    adaptive_control_sequence = 0;
+    adaptive_quality_last_dispatch_ns = 0;
+    adaptive_runtime_quality = optimizer_settings.adaptive_maximum_quality;
+    const auto telemetry_module = game::install_offline_telemetry_lab({
+        .config_root = installation->config_root,
+        .state_root = settings_path.parent_path(),
+        .module_asset = executable_root / L"Data" / L"Lab" /
+            L"KF2OptimizerTelemetry.u",
+        .game_running = false});
+    if (!telemetry_module.has_value()) {
+        return Result<bool>::failure(telemetry_module.error());
+    }
+    const auto enabled = game::enable_offline_gameplay_logging(
+        installation->config_root, true, optimizer_settings.corpse_limit,
+        optimizer_settings.target_fps, true,
+        optimizer_settings.adaptive_quality_change_budget,
+        adaptive_control_token);
+    if (!enabled.has_value()) {
+        adaptive_control_token.clear();
+        return Result<bool>::failure(enabled.error());
+    }
+    events->append({0, diagnostics::Severity::info,
+        "GAMEPLAY_LOG_LAB_READY",
+        L"The protected published provider is ready for KF2 started from the optimizer, Steam or a shortcut and exposes verified AI, wave, corpse, physics, LOD and ragdoll capabilities",
+        L"game"});
+    return Result<bool>::success(true);
+}
+
+Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
+    if (start_mode != StartMode::normal || !installation) {
+        return Result<bool>::success(false);
+    }
+    if (session_config_snapshot) {
+        return Result<bool>::success(
+            session_config_waiting_for_launch &&
+            session_config_launch_deadline_ns == 0);
+    }
+    if (game::find_running_game_process(
+            installation->executable).has_value()) {
+        events->append({0, diagnostics::Severity::warning,
+            "ADAPTIVE_EXTERNAL_LAUNCH_TOO_LATE",
+            L"KF2 was already running before the protected Adaptive runtime capabilities could be prepared; the native FPS cap remains independent and uses the saved value after restart",
+            L"optimizer"});
+        return Result<bool>::success(false);
+    }
+
+    auto captured = config::capture_session_config(
+        installation->config_root, settings_path.parent_path());
+    if (!captured.has_value()) {
+        return Result<bool>::failure(captured.error());
+    }
+    session_config_snapshot = std::move(captured.value());
+    events->append({0, diagnostics::Severity::info,
+        "SESSION_CONFIG_CAPTURED",
+        L"The exact pre-game KF2 INI state was captured before automatic external-launch preparation",
+        L"config"});
+
+    const auto applied = apply_adaptive_launch_profile();
+    if (!applied.has_value()) {
+        const auto error = applied.error();
+        static_cast<void>(restore_protected_session_config(
+            L"Automatic external-launch preparation failed"));
+        return Result<bool>::failure(error);
+    }
+    const auto capabilities =
+        prepare_automatic_protected_launch_capabilities();
+    if (!capabilities.has_value()) {
+        const auto error = capabilities.error();
+        static_cast<void>(restore_protected_session_config(
+            L"Automatic external-launch capability preparation failed"));
+        return Result<bool>::failure(error);
+    }
+
+    // A zero deadline deliberately means that the verified profile remains
+    // staged while the optimizer is open. The snapshot is restored on app
+    // shutdown, or after the next observed KF2 process exits, while the fixed
+    // temporal-AA safety override remains disabled.
+    session_config_waiting_for_launch = true;
+    session_config_launch_deadline_ns = 0;
+    telemetry_failure = L"Adaptive profile ready; waiting for KF2";
+    events->append({0, diagnostics::Severity::info,
+        "ADAPTIVE_EXTERNAL_LAUNCH_READY",
+        L"The protected Adaptive profile, telemetry provider and user-authorized FleX state are ready for KF2 started from the optimizer, Steam or a shortcut",
+        L"optimizer"});
+    return Result<bool>::success(true);
 }
 
 void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
@@ -280,8 +443,6 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
         invalidate();
     };
     if (start_mode != StartMode::normal) {
-        show_notice(ui::NoticeSeverity::warning, L"MODE_READ_ONLY",
-                    L"Settings cannot be changed in this start mode.");
         return;
     }
 
@@ -391,28 +552,39 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     update_adaptive_policy_status(status);
     model.set_status(std::move(status));
 
+    if (optimizer_settings.target_fps != previous.target_fps && installation) {
+        const bool game_running = game::find_running_game_process(
+            installation->executable).has_value();
+        if (game_running) {
+            message += L"; the native cap will use this value after KF2 restarts";
+        } else {
+            const auto synchronized = synchronize_frame_rate_cap();
+            if (!synchronized.has_value()) {
+                events->append({0, diagnostics::Severity::error,
+                    "TARGET_FPS_PERSIST_FAILED",
+                    synchronized.error().message, L"config"});
+                show_notice(ui::NoticeSeverity::error,
+                            L"TARGET_FPS_PERSIST_FAILED",
+                            L"Target FPS was saved, but KF2's native cap could not be updated: " +
+                                synchronized.error().message);
+                return;
+            }
+            message += L"; KF2's native startup cap is ready";
+        }
+    }
+
     if (overlay_changed) telemetry_tick();
     show_notice(ui::NoticeSeverity::info, std::move(code),
                 std::move(message));
 }
 
 void UiRuntime::execute_action(std::string_view action) {
-    const auto notice = [this](ui::NoticeSeverity severity,
-                               std::wstring code,
-                               std::wstring message) {
-        model.set_notice(
-            {severity, std::move(code), std::move(message), L""});
-        invalidate();
-    };
-
     constexpr bool protected_game_launch = true;
     const auto resolved = runtime::resolve_action(
         action, {.protected_game_launch = protected_game_launch});
     if (!resolved) return;
     if (resolved->normal_mode_required &&
         start_mode != StartMode::normal) {
-        notice(ui::NoticeSeverity::warning, L"MODE_READ_ONLY",
-               L"This start mode does not permit persistent changes. Restart normally to modify files.");
         return;
     }
 
@@ -428,7 +600,7 @@ Result<config::ApplyResult> UiRuntime::apply(
     if (start_mode != StartMode::normal) {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::access_denied,
-             L"This start mode does not permit persistent configuration changes", 0});
+             L"This action is unavailable", 0});
     }
     if (!preview) return Result<config::ApplyResult>::failure(
         {ErrorCode::invalid_argument, L"No configuration preview is ready", 0});
@@ -461,7 +633,7 @@ Result<backup::RestoreResult> UiRuntime::restore(
     if (start_mode != StartMode::normal) {
         return Result<backup::RestoreResult>::failure(
             {ErrorCode::access_denied,
-             L"This start mode does not permit persistent configuration changes", 0});
+             L"This action is unavailable", 0});
     }
     if (!installation) {
         return Result<backup::RestoreResult>::failure(
@@ -471,6 +643,12 @@ Result<backup::RestoreResult> UiRuntime::restore(
     auto restored = backup::restore_backup(
         backups, id, installation->config_root, preconditions);
     if (restored.has_value()) {
+        const auto capped = synchronize_frame_rate_cap();
+        if (!capped.has_value()) {
+            events->append({0, diagnostics::Severity::error,
+                "TARGET_FPS_PERSIST_FAILED", capped.error().message,
+                L"config"});
+        }
         events->append({0, diagnostics::Severity::info, "CONFIG_RESTORED",
                         L"Restored " +
                             std::to_wstring(restored.value().files_restored) +

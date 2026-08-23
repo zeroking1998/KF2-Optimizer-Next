@@ -97,15 +97,15 @@ int main() {
     CHECK(!parse_setting_value(*corpses, L"2001").has_value());
     const auto* wounds = find_setting(SettingId::wound_decal_limit);
     CHECK(wounds != nullptr);
-    CHECK(wounds->minimum == 2);
-    CHECK(!parse_setting_value(*wounds, L"0").has_value());
+    CHECK(wounds->minimum == 5);
+    CHECK(!parse_setting_value(*wounds, L"4").has_value());
     const auto* minimum = find_setting(
         SettingId::minimum_smooth_frame_rate);
     CHECK(minimum != nullptr);
     CHECK(minimum->relative_path == L"KFGame.ini");
     CHECK(minimum->section == L"KFGame.KFGameEngine");
     CHECK(minimum->key == L"MinSmoothedFrameRate");
-    CHECK(!minimum->adaptive_allowed);
+    CHECK(minimum->adaptive_allowed);
     const auto* smoothing = find_setting(SettingId::smooth_frame_rate);
     CHECK(smoothing != nullptr);
     CHECK(smoothing->relative_path == L"KFGame.ini");

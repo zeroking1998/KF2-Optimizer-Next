@@ -36,18 +36,18 @@ constexpr AreaContract area01{
     "The native x64 portable app runs as standard user, binds KF2 by path and file identity, and recovers bounded local transactions.",
     "Predictable portable startup and recoverable local state.",
     "External execution policy can still block an unsigned portable binary.",
-    "All start modes; mutations only in normal mode.",
+    "Adaptive/Automatic plus an explicit read-only diagnostics mode; package damage is handled per component.",
     "Atomic state/session files, verified transaction recovery and replaceable package files.",
     "Windows 10+, Steam metadata and a supported KF2 installation.",
-    "Lifecycle, single-instance, PE, package integrity/update/Safe-Mode, GUI launch and clean-exit tests.",
+    "Lifecycle, single-instance, PE, package integrity/update, degraded-package GUI launch and clean-exit tests.",
     "kf2_application_lifecycle_test; kf2_single_instance_test; kf2_pe_contract_test; kf2_package_integrity_test; validate_package_update.ps1; validate_package_safe_mode.ps1; validate_release_gui.ps1"};
 
 constexpr std::array area01_items{
-    ItemSpec{FeatureStatus::present, "normal and safe startup", "Normal, read-only and safe starts are explicit and tested."},
+    ItemSpec{FeatureStatus::present, "normal and read-only startup", "Adaptive/Automatic startup and the explicit read-only diagnostics mode are tested; package damage does not create a global UI lock."},
     ItemSpec{FeatureStatus::present, "single-instance protection", "A named mutex and second-launch test enforce one instance."},
     ItemSpec{FeatureStatus::present, "UAC and permissions", "The embedded manifest requests asInvoker and uiAccess=false; no elevation is attempted."},
     ItemSpec{FeatureStatus::present, "path, package, and build validation", "Canonical paths, embedded build identity, PE contract and package validation are active."},
-    ItemSpec{FeatureStatus::present, "installation, repair, update, and migration", "The portable package replaces only manifest-owned program files, preserves settings, logs, backups and profiles byte-for-byte, verifies fifteen managed payload hashes and falls back to Safe Mode when damaged. Auto Repair downloads only the exact installed GitHub release for companion-file recovery. The consent-only updater separately checks newer published versions, verifies repository, asset name, size, SHA-256, build and package identity, then uses a temporary helper for backup, atomic replacement, restart acknowledgement, rollback and cleanup. A verified local package remains the offline repair fallback."},
+    ItemSpec{FeatureStatus::present, "installation, repair, update, and migration", "The portable package replaces only manifest-owned program files, preserves settings, logs, backups and profiles byte-for-byte, and verifies fifteen managed payload hashes. A missing or damaged component is reported for repair without disabling unrelated controls. Auto Repair downloads only the exact installed GitHub release for companion-file recovery. The consent-only updater separately checks newer published versions, verifies repository, asset name, size, SHA-256, build and package identity, then uses a temporary helper for backup, atomic replacement, restart acknowledgement, rollback and cleanup. A verified local package remains the offline repair fallback."},
     ItemSpec{FeatureStatus::present, "launching KF2", "Only the verified Steam/KF2 executable is launched."},
     ItemSpec{FeatureStatus::present, "shutdown, removal, and restoration", "Clean app stop and verified restore exist; portable removal needs no uninstaller, and the app deliberately never force-stops KF2."},
     ItemSpec{FeatureStatus::present, "crash, cancellation, restart, and recovery paths", "Unclean sessions and interrupted config/backup/FleX operations recover; privacy-bounded local crash records identify the failing build and exception without dumps or user content."},
@@ -61,7 +61,7 @@ constexpr AreaContract area02{
     "Automatic operation with explicit bounded safety locks.",
     "Telemetry loss must retain the last bounded safe profile instead of guessing.",
     "Adaptive automation respects every explicit bounded safety lock.",
-    "Automatic launch application requires an exact session snapshot, verified backup, readback and restore.",
+    "Automatic launch application requires a verified session snapshot, backup, readback and safe restore.",
     "PresentMon, system telemetry, settings and verified KF2 catalog.",
     "Adaptive migration, freshness, bounds, lock priority, cooldown, restart and fallback tests.",
     "kf2_adaptive_profile_test; kf2_adaptive_governor_test; kf2_optimizer_engine_test; kf2_settings_test; lifecycle test"};
@@ -129,7 +129,7 @@ constexpr AreaContract area05{
     "Useful session context without touching gameplay.",
     "The probe reports aggregate states, not per-actor identifiers or exact decal creation events; FleX counters remain non-semantic.",
     "Telemetry remains observation-only; the separately reported protected corpse capability is explicit, bounded and never a guessed input.",
-    "Parser reset on file/session/process change; temporary logs, viewport substitution and -useunpublished package are protected by whole-INI snapshot, pinned hash, marker and exact cleanup after KF2 exits.",
+    "Parser reset on file/session/process change; temporary logs, viewport substitution and the Published telemetry package are protected by whole-INI snapshot, pinned hash, marker and exact cleanup after KF2 exits. The same prepared session is used when KF2 starts from the optimizer, Steam or a shortcut.",
     "Official KF2 SDK, KF2 Launch.log, protected KFGame/KFEngine session switches, PresentMon and known FleX ABI.",
     "Bounded parser, truncation, rotation, identity, freshness, negative inference and real gameplay tests.",
     "kf2_game_log_session_test; kf2_gameplay_log_lab_test; kf2_offline_telemetry_lab_test; official KFEditor 0-error/0-warning compile; target gameplay evidence"};
@@ -148,7 +148,7 @@ constexpr std::array area05_items{
 constexpr AreaContract area06{
     "Enemy rendering and culling", "src/config/kf2_catalog.cpp; assets/offline_telemetry; src/game/game_log_session.cpp",
     "KF2 global INI keys plus official-SDK read-only skeletal-mesh samples", "A official SDK/B partial",
-    "Global rendering controls are reversible; the offline probe observes actual living-enemy LOD, render recency, material slots and mesh attachments without changing them.",
+    "Global rendering controls are reversible; the offline probe observes actual living-enemy LOD, render recency, material slots and mesh attachments, while the protected live actuator may raise only the global skeletal-mesh LOD bias under verified CPU pressure.",
     "Potential GPU and draw-call reduction after proof.",
     "Enemy-specific hiding can remove readable threats and violate gameplay neutrality.",
     "Only explicit Performance proposals for verified global keys.", "Preview and full INI restore.",
@@ -157,7 +157,7 @@ constexpr AreaContract area06{
     "Catalog tests prove only global settings; no enemy-specific production contract"};
 
 constexpr std::array area06_items{
-    ItemSpec{FeatureStatus::partial, "skeletal-mesh LOD", "The shipped global SkeletalMeshLODBias is typed and protected from Adaptive writes. Living-enemy LOD remains read-only; the protected corpse-LOD capability may temporarily raise MinLodModel only for distant confirmed monster corpses under sustained pressure, with near/recovery/exit restore."},
+    ItemSpec{FeatureStatus::partial, "skeletal-mesh LOD", "The catalog protects SkeletalMeshLODBias from pre-launch profile writes. During verified offline gameplay, the authenticated live actuator may temporarily raise the global bias under CPU pressure and requires exact readback; distant confirmed corpse MinLodModel remains separately reversible."},
     ItemSpec{FeatureStatus::partial, "material, texture, and shader complexity", "Verified global material/detail/render controls exist and actual living-enemy material-slot totals are observed; shader complexity and per-enemy mutation remain unavailable."},
     ItemSpec{FeatureStatus::partial, "draw distance, frustum culling, and occlusion culling", "KF2/UE3 already culls living-enemy primitives outside the view frustum or behind occluders. Verified global distance scales and authoritative LastRenderTime-derived visible/offscreen aggregates exist; the probe never hides a living enemy or alters native culling."},
     ItemSpec{FeatureStatus::partial, "shadows and additional render passes", "Verified global shadow resolution, filtering, bias, pre-shadow, per-object/grouped and reflection settings are reversible."},
@@ -257,7 +257,7 @@ constexpr AreaContract area11{
 
 constexpr std::array area11_items{
     ItemSpec{FeatureStatus::partial, "spawn rate, lifetime, and capacity", "Verified cosmetic lifetimes, FleX aggregate capacity and official emitter-pool capacities are reported. Active emitter templates expose a bounded constant spawn-rate sum, dynamic/unknown source count, burst entries and peak-particle capacity; dynamic distributions and unspawned content remain explicitly unknown."},
-    ItemSpec{FeatureStatus::partial, "LOD and distance", "Global ParticleLODBias/distance controls are typed and actual gore/world ParticleSystemComponent LOD totals are reported; no per-system mutation is applied."},
+    ItemSpec{FeatureStatus::partial, "LOD and distance", "Global ParticleLODBias/distance controls are typed and actual gore/world ParticleSystemComponent LOD totals are reported. The verified offline CPU actuator may temporarily raise only the global bias; no per-system mutation is applied."},
     ItemSpec{FeatureStatus::present, "bounding boxes and visibility", "The official probe reports bounded-component and recently-rendered counts separately for gore and world particle systems; FleX bounds calls remain exact pass-through observations."},
     ItemSpec{FeatureStatus::partial, "CPU/GPU simulation", "Official emitter templates distinguish FleX-backed from non-FleX components; exact execution device for every non-FleX type and safe migration controls are not exposed."},
     ItemSpec{FeatureStatus::present, "fluid and non-fluid particles", "Active engine particle components are classified read-only from their official emitter FlexContainerTemplate and bFluid contract, with mixed and unclassified buckets; no phase payload is inspected or changed."},
@@ -289,29 +289,29 @@ constexpr std::array area12_items{
     ItemSpec{FeatureStatus::partial, "asynchronous computation and synchronization points", "The exported set/wait fence calls are counted after exact relay; no wait or synchronization is added by the optimizer."},
     ItemSpec{FeatureStatus::partial, "subrange updates, mapping, and memory transfers", "All six full-buffer particle/phase/velocity upload and download entry points are relayed exactly and measured; the pinned 1.0.5 ABI exposes no verified subrange or mapping entry point, so none is invented."},
     ItemSpec{FeatureStatus::partial, "GPU context loss, TDR, driver changes, and error states", "Stale/failed observations fall back; physical TDR/driver matrices remain target-system tests."},
-    ItemSpec{FeatureStatus::partial, "safe solver/particle LOD only with a proven KF2 contract", "Official ParticleSystemComponent and FleX-surrogate LOD values are observed and global ParticleLODBias is protected from Adaptive writes; no semantic solver-to-effect write contract is invented."},
+    ItemSpec{FeatureStatus::partial, "safe solver/particle LOD only with a proven KF2 contract", "Official ParticleSystemComponent and FleX-surrogate LOD values are observed. The verified offline graphics actuator can use KF2's global ParticleLODBias, but no semantic FleX solver-to-effect write contract is invented."},
     ItemSpec{FeatureStatus::partial, "LIVE8, RDX3, RFT4, session, build ID, and lifecycle", "Process/session/build/solver lifecycle is bound; legacy protocol names are not treated as proof by themselves."},
 };
 
 constexpr AreaContract area13{
     "Adaptive performance and profiles", "src/optimizer/adaptive_governor.cpp; src/optimizer/adaptive_profile.cpp; src/optimizer/optimizer_engine.cpp",
     "Fresh frame, CPU, GPU, VRAM and RAM evidence", "B measured",
-    "Validated sampling, hysteresis, dwell, bounded profiles, recovery and explicit safety-lock priority are deterministic.",
+    "Validated sampling, hysteresis, dwell, bounded profiles, recovery, resource attribution and explicit safety-lock priority are deterministic.",
     "Stable automatic profile control without rapid quality oscillation.",
-    "Config-only values change only before an app-started session and are restored exactly afterward.",
-    "Adaptive automatic profile with bounded safety locks.", "Automatic protected launch transaction plus optional transparent preview and backup/restore.",
+    "Live changes require verified offline gameplay, an authenticated loopback command and exact engine readback; owned values restore to their captured originals.",
+    "Adaptive automatic profile with bounded safety locks.", "Automatic protected launch transaction, session token, exact runtime readback and backup/restore.",
     "Telemetry and catalog profiles.", "Degrade, recover, neutral band, stale, safety-lock and quality-policy tests.",
-    "kf2_adaptive_profile_test; kf2_adaptive_governor_test; kf2_optimizer_engine_test"};
+    "kf2_adaptive_profile_test; kf2_adaptive_governor_test; kf2_telemetry_adaptive_stage_test; kf2_adaptive_control_client_test"};
 
 constexpr std::array area13_items{
     ItemSpec{FeatureStatus::present, "target FPS and frame-time budget", "Every integer target from 30 through 240 drives exact relative frame-time bands."},
     ItemSpec{FeatureStatus::present, "hysteresis, cooldown, and stable measurement windows", "Implemented with EMA, dwell, cooldown and hysteresis."},
-    ItemSpec{FeatureStatus::present, "CPU, GPU, VRAM, and RAM limits", "Fresh available evidence contributes to bottleneck reasons; unavailable metrics remain absent."},
-    ItemSpec{FeatureStatus::present, "gradual changes instead of jumps", "Recommendations move one adjacent profile step."},
+    ItemSpec{FeatureStatus::present, "CPU, GPU, VRAM, and RAM limits", "Fresh available evidence selects a resource-specific live quality group; low-confidence pressure uses the mixed group and unavailable metrics remain absent."},
+    ItemSpec{FeatureStatus::present, "gradual changes instead of jumps", "Intervention moves one native tier, emergency moves up to two, and stable recovery restores one tier at a time."},
     ItemSpec{FeatureStatus::partial, "profile limits by hardware class", "Telemetry-driven bounds exist; a static hardware-class database is intentionally absent."},
     ItemSpec{FeatureStatus::present, "minimum and maximum visual quality", "Exact, Invisible and Performance policies bound visible changes."},
-    ItemSpec{FeatureStatus::present, "anti-oscillation and return to better values", "Dwell/cooldown/hysteresis and symmetric recovery are tested."},
-    ItemSpec{FeatureStatus::present, "user priority and complete traceability", "Explicit safety locks win; recommendation reason/confidence/source are visible and logged."},
+    ItemSpec{FeatureStatus::present, "anti-oscillation and return to better values", "Dwell, cooldown, hysteresis, a two-second actuation interval and bounded recovery are tested."},
+    ItemSpec{FeatureStatus::present, "user priority and complete traceability", "Explicit safety locks win; every live change requires an authenticated APPLIED receipt and exact engine readback."},
 };
 
 constexpr AreaContract area14{

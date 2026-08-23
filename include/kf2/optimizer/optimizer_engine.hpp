@@ -33,11 +33,19 @@ struct PerformanceEvidence {
     std::optional<std::uint32_t> affinity_logical_processors;
     std::optional<std::uint32_t> affinity_physical_cores;
     std::optional<std::uint32_t> system_logical_processors;
+    // KF2-attributed GPU engine occupancy. gpu_percent remains the whole
+    // physical adapter load used to detect contention from any process.
+    std::optional<double> process_gpu_percent;
     std::optional<double> gpu_percent;
     std::optional<std::uint64_t> dedicated_vram_bytes;
     std::optional<std::uint64_t> dedicated_vram_budget_bytes;
+    std::optional<std::uint64_t> adapter_vram_used_bytes;
+    std::optional<std::uint64_t> adapter_vram_budget_bytes;
     std::optional<std::uint64_t> system_ram_used_bytes;
     std::optional<std::uint64_t> system_ram_budget_bytes;
+    std::optional<std::uint64_t> system_commit_used_bytes;
+    std::optional<std::uint64_t> system_commit_budget_bytes;
+    std::optional<std::uint64_t> process_private_bytes;
 };
 
 struct OptimizerInput {

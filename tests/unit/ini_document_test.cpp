@@ -82,6 +82,29 @@ int main() {
     CHECK(!rejected.changed);
     CHECK(rejected.shadowed_occurrences == 1);
 
+    auto removable = IniDocument::parse(
+        "[Keep]\r\nValue=1\r\n"
+        "[Owned.Section]\r\n; owned comment\r\nToken=secret\r\n\r\n"
+        "[After]\r\nValue=2\r\n");
+    CHECK(removable.has_value());
+    const auto section_removed = removable.value().remove_section(
+        L"owned.section");
+    CHECK(section_removed.changed);
+    CHECK(section_removed.shadowed_occurrences == 0);
+    CHECK(removable.value().serialize() ==
+        "[Keep]\r\nValue=1\r\n[After]\r\nValue=2\r\n");
+    CHECK(!removable.value().remove_section(L"Missing").changed);
+
+    auto duplicate_removal = IniDocument::parse(
+        "[Owned]\nA=1\n[Owned]\nB=2\n");
+    CHECK(duplicate_removal.has_value());
+    const auto removal_rejected = duplicate_removal.value().remove_section(
+        L"Owned");
+    CHECK(!removal_rejected.changed);
+    CHECK(removal_rejected.shadowed_occurrences == 1);
+    CHECK(duplicate_removal.value().serialize() ==
+        "[Owned]\nA=1\n[Owned]\nB=2\n");
+
     CHECK(!IniDocument::parse(std::string{"[X]\nA=1\0bad", 13}).has_value());
     CHECK(!IniDocument::parse("[broken\nA=1\n").has_value());
     return EXIT_SUCCESS;

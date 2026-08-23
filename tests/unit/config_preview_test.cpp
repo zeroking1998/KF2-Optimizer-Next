@@ -98,14 +98,15 @@ int main() {
     CHECK(invalid_smoothing_range.error().code ==
           kf2::ErrorCode::invalid_argument);
 
-    const auto blocked_smoothing_floor_smart = build_preview(
+    const auto adaptive_smoothing_floor = build_preview(
         installation,
         {{SettingId::minimum_smooth_frame_rate, SettingValue{30},
-          ChangeSource::adaptive, L"Must remain protected"}},
+          ChangeSource::adaptive, L"Keep the floor below the target"}},
         documents);
-    CHECK(!blocked_smoothing_floor_smart.has_value());
-    CHECK(blocked_smoothing_floor_smart.error().code ==
-          kf2::ErrorCode::access_denied);
+    CHECK(adaptive_smoothing_floor.has_value());
+    CHECK(adaptive_smoothing_floor.value().items.size() == 1);
+    CHECK(std::get<int>(
+              adaptive_smoothing_floor.value().items[0].after) == 30);
 
     const auto cosmetic = build_preview(
         installation,

@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "kf2/config/ini_document.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
 #include "kf2/security/sha256.hpp"
 
@@ -23,6 +24,47 @@ constexpr std::size_t maximum_tree_entries = maximum_files * 2 + 8;
 constexpr std::uintmax_t maximum_file_bytes = 16U * 1024U * 1024U;
 constexpr std::uintmax_t maximum_total_bytes = 128U * 1024U * 1024U;
 constexpr std::uintmax_t maximum_manifest_bytes = 1024U * 1024U;
+
+Result<std::string> read_verified_file(
+    const std::filesystem::path& path, std::uintmax_t limit);
+
+Result<bool> keep_temporal_aa_disabled(
+    const std::filesystem::path& config_root) {
+    const auto target = config_root / L"KFSystemSettings.ini";
+    if (!std::filesystem::exists(target)) {
+        return Result<bool>::success(false);
+    }
+    auto bytes = read_verified_file(target, maximum_file_bytes);
+    if (!bytes.has_value()) return Result<bool>::failure(bytes.error());
+    auto parsed = IniDocument::parse(bytes.value());
+    if (!parsed.has_value()) return Result<bool>::failure(parsed.error());
+    auto document = std::move(parsed.value());
+    const auto replaced = document.upsert(
+        L"SystemSettings", L"bAllowTemporalAA", L"False");
+    if (replaced.shadowed_occurrences != 0) {
+        return Result<bool>::failure({
+            ErrorCode::stale_data,
+            L"Duplicate temporal anti-aliasing settings block safe restore", 0});
+    }
+    if (replaced.changed) {
+        auto written = platform::windows::atomic_replace_utf8(
+            target, document.serialize());
+        if (!written.has_value()) return Result<bool>::failure(written.error());
+    }
+    auto verified = read_verified_file(target, maximum_file_bytes);
+    if (!verified.has_value()) return Result<bool>::failure(verified.error());
+    auto verified_document = IniDocument::parse(verified.value());
+    if (!verified_document.has_value()) {
+        return Result<bool>::failure(verified_document.error());
+    }
+    if (verified_document.value().find(
+            L"SystemSettings", L"bAllowTemporalAA") != L"False") {
+        return Result<bool>::failure({
+            ErrorCode::io_failure,
+            L"Temporal anti-aliasing disable verification failed", 0});
+    }
+    return Result<bool>::success(replaced.changed);
+}
 
 struct FileRecord {
     std::filesystem::path relative;
@@ -539,6 +581,10 @@ Result<std::size_t> restore_session_config(const SessionConfigSnapshot& snapshot
                  L"Restored configuration verification failed", 0});
         }
         ++restored;
+    }
+    auto temporal_aa_disabled = keep_temporal_aa_disabled(snapshot.config_root);
+    if (!temporal_aa_disabled.has_value()) {
+        return Result<std::size_t>::failure(temporal_aa_disabled.error());
     }
     auto removed = remove_snapshot_tree(snapshot.snapshot_root);
     if (!removed.has_value()) return Result<std::size_t>::failure(removed.error());

@@ -22,7 +22,7 @@
 
 namespace kf2::app {
 
-enum class StartMode { normal, read_only, safe };
+enum class StartMode { normal, read_only };
 
 [[nodiscard]] constexpr bool should_prepare_protected_gameplay_provider(
     StartMode mode) noexcept {
@@ -36,6 +36,8 @@ enum class StartMode { normal, read_only, safe };
 
 void preserve_user_flex_activation(
     std::vector<config::RequestedChange>& changes) noexcept;
+void enforce_temporal_aa_disabled(
+    std::vector<config::RequestedChange>& changes) noexcept;
 
 struct StartOptions {
     std::filesystem::path state_root;
@@ -47,11 +49,6 @@ struct StartOptions {
     std::optional<game::GameDiscoveryInput> game_discovery;
     StartMode mode{StartMode::normal};
     std::wstring startup_warning;
-};
-
-struct OptimizerPreview {
-    optimizer::OptimizerDecision decision;
-    config::ConfigPreview preview;
 };
 
 class Application final {
@@ -72,9 +69,6 @@ public:
         game_installation() const noexcept;
     [[nodiscard]] Result<config::ConfigPreview> prepare_config_changes(
         const std::vector<config::RequestedChange>& requests);
-    [[nodiscard]] Result<OptimizerPreview> prepare_optimizer(
-        const optimizer::OptimizerInput& input);
-    [[nodiscard]] Result<OptimizerPreview> prepare_current_optimizer();
     [[nodiscard]] Result<config::ApplyResult> apply_prepared_config(
         const config::ApplyPreconditions& preconditions);
     [[nodiscard]] Result<backup::RestoreResult> restore_config(

@@ -6,6 +6,7 @@
 #include <string>
 
 #include "features/telemetry/telemetry_frame.hpp"
+#include "kf2/game/adaptive_control_client.hpp"
 #include "kf2/optimizer/adaptive_governor.hpp"
 
 namespace kf2::app {
@@ -16,7 +17,7 @@ namespace kf2::telemetry_pipeline {
 
 struct AdaptiveSampleContext final {
     int current_quality{-1};
-    int minimum_quality{0};
+    int minimum_quality{10};
     int user_max_dead_bodies{20};
     std::string current_map;
     std::uint64_t map_generation{0};
@@ -30,6 +31,111 @@ struct AdaptiveSampleBuildResult final {
     std::uint64_t map_generation{0};
     int telemetry_sample{0};
 };
+
+struct AdaptiveRuntimeControlInput final {
+    optimizer::AdaptiveControllerState state{
+        optimizer::AdaptiveControllerState::observing};
+    optimizer::AdaptiveDataQuality data_quality{
+        optimizer::AdaptiveDataQuality::not_available};
+    optimizer::ResourceKind primary_resource{optimizer::ResourceKind::unknown};
+    double primary_confidence{0.0};
+    int current_quality{100};
+    int minimum_quality{10};
+    int maximum_quality{100};
+    bool recovery_eligible{false};
+    bool active_gameplay{false};
+    bool verified_offline{false};
+    bool bridge_available{false};
+    bool zed_time_active{false};
+    bool shadow_mode{false};
+    std::uint64_t now_ns{0};
+    std::uint64_t last_dispatch_ns{0};
+};
+
+struct AdaptiveRuntimeControlSelection final {
+    game::AdaptiveResourceControl resource{
+        game::AdaptiveResourceControl::mixed};
+    int quality{100};
+};
+
+[[nodiscard]] inline int adaptive_runtime_quality_level(int quality) noexcept {
+    if (quality >= 88) return 3;
+    if (quality >= 63) return 2;
+    if (quality >= 38) return 1;
+    return 0;
+}
+
+[[nodiscard]] inline game::AdaptiveResourceControl adaptive_runtime_resource(
+    optimizer::ResourceKind resource, double confidence) noexcept {
+    if (confidence < 0.55) return game::AdaptiveResourceControl::mixed;
+    switch (resource) {
+        case optimizer::ResourceKind::cpu:
+            return game::AdaptiveResourceControl::cpu;
+        case optimizer::ResourceKind::gpu:
+            return game::AdaptiveResourceControl::gpu;
+        case optimizer::ResourceKind::vram:
+            return game::AdaptiveResourceControl::vram;
+        case optimizer::ResourceKind::ram:
+            return game::AdaptiveResourceControl::ram;
+        case optimizer::ResourceKind::unknown:
+            return game::AdaptiveResourceControl::mixed;
+    }
+    return game::AdaptiveResourceControl::mixed;
+}
+
+[[nodiscard]] inline std::optional<AdaptiveRuntimeControlSelection>
+select_adaptive_runtime_control(
+    const AdaptiveRuntimeControlInput& input) noexcept {
+    constexpr std::uint64_t kMinimumDispatchIntervalNs = 2'000'000'000ULL;
+    if (!input.active_gameplay || !input.verified_offline ||
+        !input.bridge_available || input.zed_time_active || input.shadow_mode ||
+        input.data_quality != optimizer::AdaptiveDataQuality::valid ||
+        input.minimum_quality < 10 || input.maximum_quality > 100 ||
+        input.minimum_quality > input.maximum_quality ||
+        input.current_quality < input.minimum_quality ||
+        input.current_quality > input.maximum_quality || input.now_ns == 0 ||
+        (input.last_dispatch_ns != 0 &&
+         (input.now_ns < input.last_dispatch_ns ||
+          input.now_ns - input.last_dispatch_ns <
+              kMinimumDispatchIntervalNs))) {
+        return std::nullopt;
+    }
+
+    const int current_level = adaptive_runtime_quality_level(
+        input.current_quality);
+    int desired = input.current_quality;
+    bool recovery = false;
+    if (input.state == optimizer::AdaptiveControllerState::emergency) {
+        const int target = current_level >= 3 ? 50 : 10;
+        desired = std::max(input.minimum_quality, target);
+    } else if (input.state ==
+               optimizer::AdaptiveControllerState::intervention) {
+        constexpr int lower_tier[] = {10, 10, 50, 75};
+        desired = std::max(input.minimum_quality, lower_tier[current_level]);
+    } else if (input.state == optimizer::AdaptiveControllerState::stable &&
+               input.recovery_eligible &&
+               input.current_quality < input.maximum_quality) {
+        constexpr int higher_tier[] = {50, 75, 100, 100};
+        desired = std::min(
+            input.maximum_quality, higher_tier[current_level]);
+        recovery = true;
+    } else {
+        return std::nullopt;
+    }
+
+    desired = std::clamp(
+        desired, input.minimum_quality, input.maximum_quality);
+    if (desired == input.current_quality) return std::nullopt;
+    if (!recovery &&
+        adaptive_runtime_quality_level(desired) >= current_level) {
+        return std::nullopt;
+    }
+    const auto resource = recovery
+        ? game::AdaptiveResourceControl::recover
+        : adaptive_runtime_resource(
+              input.primary_resource, input.primary_confidence);
+    return AdaptiveRuntimeControlSelection{resource, desired};
+}
 
 [[nodiscard]] inline AdaptiveSampleBuildResult build_adaptive_sample(
     const TelemetryFrame& frame, const AdaptiveSampleContext& context) {
@@ -69,6 +175,7 @@ struct AdaptiveSampleBuildResult final {
         frame.evidence.affinity_physical_cores;
     sample.system_logical_processors =
         frame.evidence.system_logical_processors;
+    sample.process_gpu_percent = frame.evidence.process_gpu_percent;
     sample.gpu_percent = frame.evidence.gpu_percent;
     if (frame.evidence.cpu_percent ||
         frame.evidence.critical_core_percent ||
@@ -80,13 +187,19 @@ struct AdaptiveSampleBuildResult final {
         sample.capabilities.gpu_telemetry =
             optimizer::AdaptiveCapabilityState::available;
     }
-    if (frame.evidence.dedicated_vram_bytes) {
+    const auto vram_used = frame.evidence.adapter_vram_used_bytes
+        ? frame.evidence.adapter_vram_used_bytes
+        : frame.evidence.dedicated_vram_bytes;
+    const auto vram_budget = frame.evidence.adapter_vram_budget_bytes
+        ? frame.evidence.adapter_vram_budget_bytes
+        : frame.evidence.dedicated_vram_budget_bytes;
+    if (vram_used) {
         sample.vram_used_bytes = static_cast<double>(
-            *frame.evidence.dedicated_vram_bytes);
+            *vram_used);
     }
-    if (frame.evidence.dedicated_vram_budget_bytes) {
+    if (vram_budget) {
         sample.vram_budget_bytes = static_cast<double>(
-            *frame.evidence.dedicated_vram_budget_bytes);
+            *vram_budget);
     }
     if (frame.evidence.system_ram_used_bytes) {
         sample.ram_used_bytes = static_cast<double>(
@@ -95,6 +208,18 @@ struct AdaptiveSampleBuildResult final {
     if (frame.evidence.system_ram_budget_bytes) {
         sample.ram_budget_bytes = static_cast<double>(
             *frame.evidence.system_ram_budget_bytes);
+    }
+    if (frame.evidence.system_commit_used_bytes) {
+        sample.commit_used_bytes = static_cast<double>(
+            *frame.evidence.system_commit_used_bytes);
+    }
+    if (frame.evidence.system_commit_budget_bytes) {
+        sample.commit_budget_bytes = static_cast<double>(
+            *frame.evidence.system_commit_budget_bytes);
+    }
+    if (frame.evidence.process_private_bytes) {
+        sample.process_private_bytes = static_cast<double>(
+            *frame.evidence.process_private_bytes);
     }
     sample.sample_loss = frame.frames.loss_count > 0;
     sample.discontinuity = frame.frames.reason ==

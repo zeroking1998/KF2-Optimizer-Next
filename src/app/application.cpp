@@ -156,6 +156,50 @@ Result<Application> Application::start(const StartOptions& options) {
         options.state_root, recovery_required,
         settings.value(), *events, options.game_discovery, options.mode,
         options.executable_root);
+    if (!runtime->model.recovery_required() &&
+        options.mode == StartMode::normal) {
+        const bool game_running = runtime->installation &&
+            game::find_running_game_process(
+                runtime->installation->executable).has_value();
+        if (runtime->installation && !game_running) {
+            const auto capped = runtime->synchronize_frame_rate_cap();
+            if (!capped.has_value()) {
+                events->append({0, diagnostics::Severity::error,
+                    "TARGET_FPS_PERSIST_FAILED", capped.error().message,
+                    L"config"});
+                runtime->model.set_notice({
+                    ui::NoticeSeverity::error,
+                    L"TARGET_FPS_PERSIST_FAILED",
+                    L"KF2's native FPS cap could not be prepared: " +
+                        capped.error().message,
+                    L"The app remains available; KF2 settings were not partially changed."});
+            } else if (capped.value().changed) {
+                events->append({0, diagnostics::Severity::info,
+                    "TARGET_FPS_PERSISTED",
+                    L"KF2's vendor-independent startup cap was set to " +
+                        std::to_wstring(capped.value().target_fps) + L" FPS",
+                    L"config"});
+            }
+        } else if (runtime->installation) {
+            events->append({0, diagnostics::Severity::info,
+                "TARGET_FPS_PENDING_RESTART",
+                L"KF2 is already running; the selected native FPS cap remains saved for the next start",
+                L"config"});
+        }
+        const auto prepared =
+            runtime->prepare_automatic_external_launch_profile();
+        if (!prepared.has_value()) {
+            events->append({0, diagnostics::Severity::error,
+                "ADAPTIVE_EXTERNAL_LAUNCH_PREPARE_FAILED",
+                prepared.error().message, L"optimizer"});
+            runtime->model.set_notice({
+                ui::NoticeSeverity::error,
+                L"ADAPTIVE_EXTERNAL_LAUNCH_PREPARE_FAILED",
+                L"Adaptive launch capabilities could not be prepared safely: " +
+                    prepared.error().message,
+                L"No game files were left partially changed."});
+        }
+    }
     if (!options.startup_warning.empty()) {
         events->append({0, diagnostics::Severity::error,
                         "PACKAGE_INTEGRITY_FAILED",
@@ -163,7 +207,7 @@ Result<Application> Application::start(const StartOptions& options) {
         runtime->model.set_notice({
             ui::NoticeSeverity::error, L"PACKAGE_INTEGRITY_FAILED",
             options.startup_warning,
-            L"Re-extract the complete portable package before enabling changes."});
+            L"Use Repair to restore the affected component; unrelated controls remain available."});
     }
     if (options.create_window) {
         auto created = runtime->create_window(options.window_title);
@@ -221,35 +265,6 @@ Application::game_installation() const noexcept {
 Result<config::ConfigPreview> Application::prepare_config_changes(
     const std::vector<config::RequestedChange>& requests) {
     return ui_runtime_->prepare(requests);
-}
-
-Result<OptimizerPreview> Application::prepare_optimizer(
-    const optimizer::OptimizerInput& input) {
-    return ui_runtime_->prepare_optimizer(input);
-}
-
-Result<OptimizerPreview> Application::prepare_current_optimizer() {
-    optimizer::QualityPolicy quality = optimizer::QualityPolicy::exact;
-    if (settings_.quality_policy == "invisible") {
-        quality = optimizer::QualityPolicy::invisible;
-    } else if (settings_.quality_policy == "performance") {
-        quality = optimizer::QualityPolicy::performance;
-    }
-    optimizer::Profile profile = optimizer::Profile::balanced;
-    if (settings_.optimizer_profile == "stability") {
-        profile = optimizer::Profile::stability;
-    } else if (settings_.optimizer_profile == "high_performance") {
-        profile = optimizer::Profile::high_performance;
-    } else if (settings_.optimizer_profile == "custom") {
-        profile = optimizer::Profile::custom;
-    }
-    return ui_runtime_->prepare_optimizer({
-        .target_fps = settings_.target_fps,
-        .quality = quality,
-        .profile = profile,
-        .profile_preview_requested = true,
-        .evidence = ui_runtime_->optimizer_evidence,
-    });
 }
 
 Result<config::ApplyResult> Application::apply_prepared_config(
