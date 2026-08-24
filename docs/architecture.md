@@ -134,8 +134,9 @@ stale telemetry, Zed Time, an online/unknown session, shadow mode, missing bridg
 capability or a readback mismatch prevents the change. Display mode, resolution,
 VSync, variable frame rate, anti-aliasing and FleX are not owned by this path.
 
-For a protected app-started standalone session, the optional telemetry
-package can also enable a narrowly bounded corpse-stagger actuator. The chosen
+For a prepared protected standalone session, including KF2 started through the
+optimizer, Steam or a shortcut, the optional telemetry package can also enable
+a narrowly bounded corpse-stagger actuator. The chosen
 `MaxDeadBodies` value from 4-2000 is the stable user ceiling. Merely reaching or
 crossing it performs no deletion. Only while a fresh current sample and the
 hysteresis-confirmed controller both report pressure against the exact
@@ -146,15 +147,15 @@ bounded steps applied to a separate runtime threshold and excess confirmed
 and never during Zed Time. Recovery stops removal immediately and raises the
 runtime threshold gradually back toward the selected ceiling. The same
 controller has a separate distance-first physics stage. At baseline it sleeps
-only an old slow corpse with stale native `LastRenderTime` beyond 3,500 units,
+only an old slow corpse with stale native `LastRenderTime` beyond 2,800 units,
 at most once per second. Fresh visible living/corpse density or confirmed
-target-relative frame pressure moves the threshold to 2,500/1,800 units and the
+target-relative frame pressure moves the threshold to 2,300/1,900 units and the
 interval to 500/250 ms; FPS is an amplifier rather than the sole gate.
-Optimizer-slept bodies are identity
-tracked and use the official `WakeRigidBody` path inside 1,500 units. Only then
-may the frame-pressure path raise native `MinLodModel` on one distant visible corpse every 500/250 ms
-and never beyond LOD 2; forced, near, sleeping, recovered and session-ending LOD
-state is preserved or restored. After eligible distance/LOD work is exhausted,
+Optimizer-slept bodies are identity tracked and use the official
+`WakeRigidBody` path inside 750 units. Reversible native `MinLodModel` tiers
+begin outside 1,000 units, become stronger with confirmed pressure and restore
+inside 900 units; `ForcedLodModel` is never overridden. After eligible
+distance/LOD work is exhausted,
 one old, slow, non-death-animation visible ragdoll may sleep at most once per
 750/350 ms. KF2/UE3 native frustum and occlusion culling already avoid drawing
 living-enemy primitives outside the view or behind occluders. No living pawn is

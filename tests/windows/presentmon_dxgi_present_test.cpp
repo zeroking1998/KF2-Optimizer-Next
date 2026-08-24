@@ -116,6 +116,7 @@ int main() {
         kf2::platform::windows::PresentMonSession::start(identity, source);
     CHECK(session.has_value());
     Sleep(250);
+    const auto fixture_started_ns = monotonic_ns();
     for (int frame = 0; frame < 120; ++frame) {
         pump_messages();
         const float shade = static_cast<float>(frame % 16) / 15.0F;
@@ -128,6 +129,10 @@ int main() {
         CHECK(SUCCEEDED(secondary_swap_chain->Present(0, 0)));
         Sleep(16);
     }
+    const auto fixture_finished_ns = monotonic_ns();
+    const double fixture_seconds = static_cast<double>(
+        fixture_finished_ns - fixture_started_ns) / 1'000'000'000.0;
+    const double expected_primary_fps = 120.0 / fixture_seconds;
     pump_messages();
     Sleep(500);
     CHECK(session.value()->stop().has_value());
@@ -135,10 +140,16 @@ int main() {
     CHECK(source.stop().has_value());
     if (metrics.fps) {
         std::cout << "Measured completed-present FPS: " << *metrics.fps << '\n';
-        CHECK(*metrics.fps > 30.0);
+        std::cout << "Fixture primary-stream FPS: "
+                  << expected_primary_fps << '\n';
+        // WARP and desktop contention change how long the fixture itself
+        // takes. Compare PresentMon with that independently timed stream
+        // instead of requiring an unrelated absolute desktop-performance
+        // threshold.
+        CHECK(*metrics.fps > expected_primary_fps * 0.60);
         // A process can own several swap chains. Only one coherent stream is
         // allowed to contribute frames; otherwise both fixtures are mixed.
-        CHECK(*metrics.fps < 90.0);
+        CHECK(*metrics.fps < expected_primary_fps * 1.50);
         CHECK(metrics.quality == SampleQuality::good);
     } else {
         CHECK(metrics.reason == UnavailableReason::no_samples ||

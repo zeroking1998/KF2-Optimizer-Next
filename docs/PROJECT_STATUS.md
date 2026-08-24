@@ -28,7 +28,7 @@ requirements from GitHub Issue 72.
   placing the whole controller behind an Online/Offline switch.
 - The Adaptive V2 target registry represents every concrete item from sections
   4-100 of the master specification, its architecture sections 101-138 and all
-  212 verified KF2 catalog settings. It records source, bounds, restore path,
+  213 verified KF2 catalog settings. It records source, bounds, restore path,
   risk, evidence, locks and capability state instead of silently treating a
   name in the specification as a writable game setting.
 - The deterministic target-relative governor validates process/session identity,
@@ -55,15 +55,15 @@ requirements from GitHub Issue 72.
   `TEST_REQUIRED`; protected gameplay/network/security targets are permanently
   blocked. No generated target becomes live merely because it exists in the
   registry.
-- The strict catalog covers 212 typed settings in the three protected KF2 INIs; 143 visibility/physics-sensitive values are protected from pre-launch profile writes. It includes the real active `KFGame.KFGameEngine` FPS cap/smoothing pair and rejects an invalid minimum/maximum smoothing window. The catalog also covers KF2's shipped FleX and APEX controls, global physics substeps, fracture/chunk limits, particle-memory and emitter budgets, CPU/frame-pacing, texture streaming/pool controls, render targets, anti-aliasing, compute effects, shadow/CSM, reflection, translucency, motion blur and clothing controls without granting profile automation permission to change sensitive values.
+- The strict catalog covers 213 typed settings in the three protected KF2 INIs; 142 visibility/physics-sensitive values are protected from pre-launch profile writes. It includes the real active `KFGame.KFGameEngine` FPS cap/smoothing pair and rejects an invalid minimum/maximum smoothing window. The catalog also covers KF2's shipped FleX and APEX controls, global physics substeps, fracture/chunk limits, particle-memory and emitter budgets, CPU/frame-pacing, texture streaming/pool controls, render targets, anti-aliasing, compute effects, shadow/CSM, reflection, translucency, motion blur and clothing controls without granting profile automation permission to change sensitive values.
 - Verified standalone gameplay can use a separate authenticated loopback actuator for bounded CPU, GPU, VRAM, RAM or mixed graphics tiers. Every action requires exact KF2 readback, pauses during Zed Time, leaves display/pacing/anti-aliasing/FleX ownership untouched and restores only its captured values.
 - PresentMon/DXGI, CPU/RAM, GPU/VRAM, overlay, backup/restore, session recovery,
   diagnostics and the offline-only FleX laboratory have direct current tests.
 - GPU diagnostics now group multiple DXGI display-path LUIDs by their physical
   PCI PnP identity, while live process sampling keeps every LUID available.
-- The independent Ninja Release contract enters a discovered Visual Studio x64
-  developer environment itself, so it does not depend on a preconfigured runner
-  shell. Its clean current-source suite passes 72/72 tests.
+- The current Visual Studio Debug and Release builds each pass the dynamically
+  counted 87-test suite. Ninja is not installed on the current validation host,
+  so no current-source Ninja result is claimed.
 - Dedicated current contracts now cover hardware overview, repeated hardware
   refresh and every overlay corner instead of relying on indirect coverage.
 - The Issue 72 inventory currently classifies 88 records as complete, 60 as
@@ -79,9 +79,10 @@ requirements from GitHub Issue 72.
 
 ## Current completion boundary
 
-The in-tree Debug, Visual Studio Release and clean Ninja Release regressions are
-complete for the General-Adaptive source at 72/72 tests each. Two clean Release
-builds produced byte-identical EXEs and FleX laboratory forwarders.
+The in-tree Debug and Visual Studio Release regressions are complete for the
+General-Adaptive source at 87/87 tests each. Two earlier clean Release builds
+produced byte-identical EXEs and FleX laboratory forwarders; reproducibility was
+not rerun for this working-tree candidate.
 The portable package is validated separately with fifteen managed payload hashes
 and user-data-preserving update semantics. The UI exposes one Adaptive control
 plane and the fail-closed safety policy.
@@ -135,15 +136,15 @@ generations; proposals and writes without readback are never logged as applied.
 
 The actuator also has a separate ragdoll-load controller. Its distant-physics
 stage is distance-first: without FPS pressure it may select only an old, slow,
-offscreen/occluded body beyond 3,500 units at most once per second. Fresh visible
+offscreen/occluded body beyond 2,800 units at most once per second. Fresh visible
 living/corpse density or hysteresis-confirmed target-relative frame pressure
-moves entry to 2,500/1,800 units and the interval to 500/250 ms. It uses KF2's
+moves entry to 2,300/1,900 units and the interval to 500/250 ms. It uses KF2's
 official `PutRigidBodyToSleep` path and never hides an actor. A
-tracked body is woken through `WakeRigidBody` after it comes inside 1,500 units;
-the separated entry/wake distances prevent churn. Only confirmed frame pressure
-may continue into native `MinLodModel` on one distant visible corpse every
-500/250 ms, never beyond LOD 2 or over `ForcedLodModel`; nearby, sleeping,
-recovered and session-ending LOD values are restored. Only after those stages
+tracked body is woken through `WakeRigidBody` after it comes inside 750 units;
+the separated entry/wake distances prevent churn. Reversible native
+`MinLodModel` tiers begin outside 1,000 units, become stronger with confirmed
+pressure and restore inside 900 units; `ForcedLodModel` is never overridden.
+Only after those stages
 may one old, slow visible corpse sleep every 750/350 ms. Living enemies, death
 animations, fast bodies, collision channels, Zed Time, Manual and online
 sessions are unchanged. KF2/UE3 already performs native view-frustum and
