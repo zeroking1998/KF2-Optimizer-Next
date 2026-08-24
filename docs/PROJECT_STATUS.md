@@ -95,8 +95,8 @@ actuations, and 8,785 successful FleX solver relays. Normal KF2 termination
 restored the original runtime and 16 protected INIs and removed the temporary
 telemetry module. A prior candidate also completed all four short waves and the
 boss with firearms, explosives, grenades, gore, gibs and heavy corpse load. The
-remaining visual-only acceptance is an isolated aggressive Distance-Sleep
-batch and unavailable external hardware variants.
+remaining visual-only acceptance is an isolated all-eligible Distance-Sleep
+pass and unavailable external hardware variants.
 
 ## Technical limits that are not missing implementation work
 
@@ -138,9 +138,11 @@ The actuator also has a separate ragdoll-load controller. Its distant-physics
 stage is distance-first: without FPS pressure it may select only an old, slow,
 eligible body beyond 1,500 units. Fresh visible living/corpse density or
 hysteresis-confirmed target-relative frame pressure moves entry to 1,100/750
-units and permits batches of at least two/four per control pass. It uses KF2's
-official `PutRigidBodyToSleep` path and never hides an actor. Distance Sleep is
-permanent for that corpse and has no proximity-wake pass. Reversible native
+units. The selected maximum bounds the corpse pool, but Distance Sleep has no
+second actor or batch cap: a single linear pass may sleep every currently
+eligible corpse. It uses KF2's official `PutRigidBodyToSleep` path and never
+hides an actor. Distance Sleep is permanent for that corpse and has no
+proximity-wake pass. Reversible native
 `MinLodModel` tiers begin outside 1,000 units, become stronger with confirmed
 pressure and restore inside 900 units with an actor-correlated receipt. An
 external override releases and excludes that actor; `ForcedLodModel` is never

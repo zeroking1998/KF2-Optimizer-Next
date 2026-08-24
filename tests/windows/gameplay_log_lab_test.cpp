@@ -234,7 +234,7 @@ int main() {
     CHECK(telemetry_source.find(
         "KF2OPT_CORPSE_LOD state=applied") != std::string::npos);
     CHECK(telemetry_source.find(
-        "SelectDistantAwakeMonsterCorpseForSleep") != std::string::npos);
+        "SleepAllEligibleDistantMonsterCorpses") != std::string::npos);
     CHECK(telemetry_source.find(
         "MinimumDistanceSquared = 2250000.0") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -312,12 +312,14 @@ int main() {
     CHECK(telemetry_source.find(
         "PhysicsPressureLevel <= 0 && bRecentlyRendered") !=
           std::string::npos);
+    const auto all_sleep_function = telemetry_source.find(
+        "function int SleepAllEligibleDistantMonsterCorpses(");
     const auto stagger_start = telemetry_source.find(
         "function AdaptiveCorpseLoadControl()");
     const auto zed_time_guard = telemetry_source.find(
         "GameInfo.IsZedTimeActive()", stagger_start);
     const auto distant_sleep_stage = telemetry_source.find(
-        "SleepOneDistantMonsterCorpse(", stagger_start);
+        "SleepAllEligibleDistantMonsterCorpses(", stagger_start);
     CHECK(stagger_start != std::string::npos);
     CHECK(zed_time_guard != std::string::npos);
     CHECK(distant_sleep_stage != std::string::npos);
@@ -347,15 +349,16 @@ int main() {
     CHECK(telemetry_source.find(
         "WakeNearAdaptiveDistanceSleptCorpses();", stagger_start) ==
           std::string::npos);
+    CHECK(all_sleep_function != std::string::npos);
     CHECK(telemetry_source.find(
-        "DistanceSleepBatch = Max(4, AttackScale * 2)", stagger_start) !=
+        "Index < GoreManager.CorpsePool.Length", all_sleep_function) !=
+          std::string::npos);
+    CHECK(telemetry_source.find("DistanceSleepBatch", stagger_start) ==
+          std::string::npos);
+    CHECK(telemetry_source.find("SleepOneDistantMonsterCorpse(") ==
           std::string::npos);
     CHECK(telemetry_source.find(
-        "DistanceSleepBatch = Max(2, AttackScale)", stagger_start) !=
-          std::string::npos);
-    CHECK(telemetry_source.find(
-        "DistanceSleepCount < DistanceSleepBatch", stagger_start) !=
-          std::string::npos);
+        "selected_max=", all_sleep_function) != std::string::npos);
 
     const auto lod_selector = telemetry_source.find(
         "function KFPawn SelectVisibleMonsterCorpseForLod(");

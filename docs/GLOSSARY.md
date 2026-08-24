@@ -23,7 +23,8 @@ runtime budget may be lower, never higher.
 
 **Distance Sleep** — A confirmed request to permanently stop expensive
 cosmetic simulation for an eligible corpse after it crosses the active
-distance threshold.
+distance threshold. The selected maximum bounds the corpse pool, while Distance
+Sleep itself adds no separate actor limit.
 
 **FleX** — NVIDIA particle/physics technology used by an optional, protected
 laboratory path in this project.

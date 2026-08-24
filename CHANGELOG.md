@@ -9,7 +9,8 @@ are visible immediately.
 ### Bug fixes
 
 - Made Distance Sleep substantially more aggressive at 1,500/1,100/750
-  units, with pressure-scaled batches, and removed the unused Near Wake path.
+  units. Every eligible corpse in the user-sized pool can sleep in one linear
+  pass; there is no separate fixed corpse or batch limit. Near Wake was removed.
 - Added actor-correlated LOD restore receipts and prevented reacquisition after
   KF2 or another system overrides an optimizer-owned corpse LOD value.
 - Target FPS now uses KF2's native startup cap independently of telemetry and

@@ -149,9 +149,11 @@ runtime threshold gradually back toward the selected ceiling. The same
 controller has a separate distance-first physics stage. At baseline it sleeps
 an eligible corpse beyond 1,500 units. Fresh visible living/corpse density or
 confirmed target-relative frame pressure moves the threshold to 1,100/750
-units and permits batches of at least two/four per control pass; FPS is an
-amplifier rather than the sole gate. Distance Sleep is permanent for that
-corpse and no proximity-wake pass remains. Reversible native `MinLodModel`
+units; FPS is an amplifier rather than the sole gate. The selected maximum
+bounds the corpse pool, but a linear Distance-Sleep pass can process every
+currently eligible corpse without a separate actor or batch cap. Distance
+Sleep is permanent for that corpse and no proximity-wake pass remains.
+Reversible native `MinLodModel`
 tiers begin outside 1,000 units, become stronger with confirmed pressure and
 restore inside 900 units with actor-correlated receipts. If KF2 or another
 system changes an owned LOD value, the optimizer releases and excludes that

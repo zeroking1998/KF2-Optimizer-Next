@@ -79,8 +79,10 @@ The corpse maximum selected by the user is a ceiling. A separate runtime budget
 uses visible density and distance first, with performance pressure as an
 amplifier. Actor IDs correlate each Distance Sleep or Ragdoll Sleep request
 with its receipt. Distance Sleep permanently stops eligible corpse physics;
-it has no proximity-wake pass. A per-action state machine prevents repeated
-work on an actor already in the requested state. Zed Time uses protected
+it has no proximity-wake pass. The selected maximum bounds the pool, while one
+linear pass can sleep every currently eligible corpse without another actor
+limit. A per-action state machine prevents repeated work on an actor already
+in the requested state. Zed Time uses protected
 behavior so normal-speed thresholds are not applied blindly during slow
 motion.
 

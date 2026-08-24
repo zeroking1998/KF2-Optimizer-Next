@@ -142,7 +142,9 @@ may keep fewer bodies active when distance, visible scene density, or measured
 performance pressure requires it. Distance Sleep and Ragdoll Sleep are
 actor-scoped and must carry a correlated actor identifier and receipt.
 Distance Sleep is permanent for that corpse; the optimizer does not wake dead
-bodies again after their cosmetic physics has been stopped.
+bodies again after their cosmetic physics has been stopped. The selected corpse
+maximum determines how large the pool can become; Distance Sleep adds no second
+fixed limit, so every currently eligible corpse can be put to sleep.
 
 For FleX, effective levels are 1 through 5. Level 0 means release/passthrough;
 it does not mean that a zero-step solver is applied.

@@ -863,25 +863,24 @@ function PruneAdaptiveDistanceSleptCorpses()
     }
 }
 
-function KFPawn SelectDistantAwakeMonsterCorpseForSleep(
-    KFGoreManager GoreManager, int PhysicsPressureLevel)
+function int SleepAllEligibleDistantMonsterCorpses(
+    KFGoreManager GoreManager, int PhysicsPressureLevel,
+    int VisibleLivingZeds, int VisibleCorpses)
 {
     local int Index;
+    local int SleepCount;
     local float DistanceSquared;
     local float MinimumAge;
     local float MinimumDistanceSquared;
     local float MaximumSpeedSquared;
-    local float Score;
-    local float SelectedScore;
     local bool bRecentlyRendered;
     local KFPawn Candidate;
-    local KFPawn Selected;
     local PlayerController LocalPC;
 
     LocalPC = GetALocalPlayerController();
     if (LocalPC == None || LocalPC.ViewTarget == None)
     {
-        return None;
+        return 0;
     }
     // Distance is the primary gate. The default enters at 1,500 units and
     // scene or confirmed frame pressure moves the gate to 1,100/750 units.
@@ -902,6 +901,9 @@ function KFPawn SelectDistantAwakeMonsterCorpseForSleep(
         MinimumDistanceSquared = 1210000.0;
         MaximumSpeedSquared = 122500.0;
     }
+    // MaxDeadBodies already binds CorpsePool to the user's selected maximum.
+    // Walk that pool once without a second fixed actor or batch limit, so every
+    // currently eligible corpse can enter Distance Sleep in this control pass.
     for (Index = 0; Index < GoreManager.CorpsePool.Length; ++Index)
     {
         Candidate = GoreManager.CorpsePool[Index];
@@ -929,57 +931,32 @@ function KFPawn SelectDistantAwakeMonsterCorpseForSleep(
         {
             continue;
         }
-        // Stale LastRenderTime means the native renderer already found the
-        // corpse offscreen or occluded. Prefer it without tracing or hiding.
-        Score = DistanceSquared +
-            (WorldInfo.TimeSeconds - Candidate.TimeOfDeath) * 1000.0;
-        if (!bRecentlyRendered)
+        Candidate.Mesh.PutRigidBodyToSleep();
+        if (Candidate.Mesh.RigidBodyIsAwake())
         {
-            Score += 100000000.0;
+            continue;
         }
-        if (Selected == None || Score > SelectedScore)
-        {
-            Selected = Candidate;
-            SelectedScore = Score;
-        }
+        Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
+        Candidate.Mesh.bNoSkeletonUpdate = true;
+        AdaptiveDistanceSleptCorpses.AddItem(Candidate);
+        ++AdaptiveDistancePhysicsSleeps;
+        ++AdaptiveCorpsesSlept;
+        ++SleepCount;
+        RegisterAdaptiveCorpseDebugMarker(Candidate, "DIST_SLEEP");
+        `log("KF2OPT_CORPSE_DISTANCE state=sleep physics_level="$
+             PhysicsPressureLevel$" frame_level="$AdaptiveCorpsePressureLevel$
+             " scene_level="$AdaptiveCorpseScenePressureLevel$
+             " quality_steps="$GetAdaptiveCorpseAttackScale()$" slept="$
+             AdaptiveDistancePhysicsSleeps$" pass_slept="$SleepCount$
+             " tracked="$AdaptiveDistanceSleptCorpses.Length$
+             " selected_max="$AdaptiveCorpseTarget$" pool="$
+             GoreManager.CorpsePool.Length$" visible_living="$
+             VisibleLivingZeds$" visible_corpses="$VisibleCorpses$
+             " corpse_id="$GetAdaptiveCorpseActionId(Candidate)$
+             " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
+             " effective_awake=0");
     }
-    return Selected;
-}
-
-function bool SleepOneDistantMonsterCorpse(
-    KFGoreManager GoreManager, int PhysicsPressureLevel,
-    int VisibleLivingZeds, int VisibleCorpses)
-{
-    local KFPawn Candidate;
-
-    Candidate = SelectDistantAwakeMonsterCorpseForSleep(
-        GoreManager, PhysicsPressureLevel);
-    if (Candidate == None || Candidate.Mesh == None)
-    {
-        return false;
-    }
-    Candidate.Mesh.PutRigidBodyToSleep();
-    if (Candidate.Mesh.RigidBodyIsAwake())
-    {
-        return false;
-    }
-    Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
-    Candidate.Mesh.bNoSkeletonUpdate = true;
-    AdaptiveDistanceSleptCorpses.AddItem(Candidate);
-    ++AdaptiveDistancePhysicsSleeps;
-    ++AdaptiveCorpsesSlept;
-    RegisterAdaptiveCorpseDebugMarker(Candidate, "DIST_SLEEP");
-    `log("KF2OPT_CORPSE_DISTANCE state=sleep physics_level="$
-         PhysicsPressureLevel$" frame_level="$AdaptiveCorpsePressureLevel$
-         " scene_level="$AdaptiveCorpseScenePressureLevel$
-         " quality_steps="$GetAdaptiveCorpseAttackScale()$" slept="$
-         AdaptiveDistancePhysicsSleeps$" tracked="$
-         AdaptiveDistanceSleptCorpses.Length$" visible_living="$
-         VisibleLivingZeds$" visible_corpses="$VisibleCorpses$
-         " corpse_id="$GetAdaptiveCorpseActionId(Candidate)$
-         " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
-         " effective_awake=0");
-    return true;
+    return SleepCount;
 }
 
 function KFPawn SelectVisibleMonsterCorpseForLod(
@@ -1305,7 +1282,6 @@ function AdaptiveCorpseLoadControl()
     local int ScenePressureLevel;
     local int PhysicsPressureLevel;
     local int RagdollPressureLevel;
-    local int DistanceSleepBatch;
     local int DistanceSleepCount;
     local bool bLivingVisibilityFresh;
     local float ActionInterval;
@@ -1434,26 +1410,9 @@ function AdaptiveCorpseLoadControl()
     if (WorldInfo.RealTimeSeconds - AdaptiveLastDistancePhysicsRealTime >=
             DistanceActionInterval)
     {
-        DistanceSleepBatch = 1;
-        if (PhysicsPressureLevel >= 2)
-        {
-            DistanceSleepBatch = Max(4, AttackScale * 2);
-        }
-        else if (PhysicsPressureLevel >= 1)
-        {
-            DistanceSleepBatch = Max(2, AttackScale);
-        }
-        DistanceSleepCount = 0;
-        while (DistanceSleepCount < DistanceSleepBatch)
-        {
-            if (!SleepOneDistantMonsterCorpse(
-                    GoreManager, PhysicsPressureLevel,
-                    VisibleLivingZeds, VisibleCorpses))
-            {
-                break;
-            }
-            ++DistanceSleepCount;
-        }
+        DistanceSleepCount = SleepAllEligibleDistantMonsterCorpses(
+            GoreManager, PhysicsPressureLevel,
+            VisibleLivingZeds, VisibleCorpses);
         if (DistanceSleepCount > 0)
         {
             AdaptiveLastDistancePhysicsRealTime = WorldInfo.RealTimeSeconds;
