@@ -21,6 +21,7 @@ namespace {
 // The current SDK-compiled package is about 262 KiB. Keep a bounded ceiling
 // with compiler-metadata headroom while rejecting unrelated large files.
 constexpr std::uintmax_t kMaximumModuleBytes = 384U * 1024U;
+constexpr std::uintmax_t kMinimumOptimizerModuleBytes = 64U * 1024U;
 constexpr std::uintmax_t kMaximumMarkerBytes = 1024U;
 constexpr wchar_t kModuleName[] = L"KF2OptimizerTelemetry.u";
 constexpr wchar_t kStateDirectoryName[] = L"offline-telemetry-lab";
@@ -211,11 +212,71 @@ Result<std::array<bool, 2>> ensure_target_directories(
 
 std::filesystem::path target_module(const std::filesystem::path& config_root) {
     return config_root.parent_path() / L"Published" / L"BrewedPC" /
-           kModuleName;
+        kModuleName;
 }
 
 std::filesystem::path marker_path(const std::filesystem::path& state_root) {
     return state_root / kStateDirectoryName / kMarkerName;
+}
+
+bool optimizer_module_signature(std::string_view bytes) {
+    if (bytes.size() < kMinimumOptimizerModuleBytes ||
+        static_cast<unsigned char>(bytes[0]) != 0xC1U ||
+        static_cast<unsigned char>(bytes[1]) != 0x83U ||
+        static_cast<unsigned char>(bytes[2]) != 0x2AU ||
+        static_cast<unsigned char>(bytes[3]) != 0x9EU) {
+        return false;
+    }
+    constexpr std::array<std::string_view, 5> owned_classes{
+        "KF2OptimizerTelemetryProbe",
+        "KF2OptimizerTelemetryMutator",
+        "KF2OptimizerTelemetryInteraction",
+        "KF2OptimizerAdaptiveControlListener",
+        "KF2OptimizerAdaptiveGraphics"};
+    return std::ranges::all_of(owned_classes, [&bytes](const auto name) {
+        return bytes.find(name) != std::string_view::npos;
+    });
+}
+
+Result<bool> remove_orphaned_optimizer_module(
+    const std::filesystem::path& config_root) {
+    const auto target = target_module(config_root);
+    const DWORD attributes = GetFileAttributesW(target.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        const DWORD native = GetLastError();
+        if (native == ERROR_FILE_NOT_FOUND || native == ERROR_PATH_NOT_FOUND) {
+            return Result<bool>::success(false);
+        }
+        return Result<bool>::failure(
+            {ErrorCode::io_failure,
+             L"Offline telemetry target cannot be inspected", native});
+    }
+    auto bytes = read_regular_file(target, kMaximumModuleBytes);
+    if (!bytes.has_value()) {
+        // An unrecognized or unsafe occupant is user-owned and must remain.
+        return Result<bool>::success(false);
+    }
+    auto captured_hash = security::sha256_hex(bytes.value());
+    if (!captured_hash.has_value()) {
+        return Result<bool>::failure(captured_hash.error());
+    }
+    if (captured_hash.value() != kOfflineTelemetryModuleSha256 &&
+        !optimizer_module_signature(bytes.value())) {
+        return Result<bool>::success(false);
+    }
+    auto live_hash = security::sha256_file_hex(target, kMaximumModuleBytes);
+    if (!live_hash.has_value() || live_hash.value() != captured_hash.value()) {
+        return Result<bool>::failure(
+            {ErrorCode::stale_data,
+             L"Offline telemetry target changed during orphan cleanup", 0});
+    }
+    if (!DeleteFileW(target.c_str())) {
+        return Result<bool>::failure(
+            {ErrorCode::io_failure,
+             L"Orphaned optimizer telemetry package could not be removed",
+             GetLastError()});
+    }
+    return Result<bool>::success(true);
 }
 
 std::string marker_bytes(std::string_view state,
@@ -333,7 +394,7 @@ Result<bool> validate_binding(const std::filesystem::path& config_root,
         identity.value().file != marker.root.file) {
         return Result<bool>::failure(
             {ErrorCode::access_denied,
-             L"Offline telemetry marker belongs to a different KF2 user directory",
+             L"Offline telemetry marker belongs to a different KF2 profile",
              0});
     }
     return Result<bool>::success(true);
@@ -370,6 +431,10 @@ Result<bool> install_offline_telemetry_lab(
         return Result<bool>::failure(
             {ErrorCode::stale_data,
              L"An unfinished offline telemetry session requires recovery", 0});
+    }
+    auto orphan_removed = remove_orphaned_optimizer_module(options.config_root);
+    if (!orphan_removed.has_value()) {
+        return Result<bool>::failure(orphan_removed.error());
     }
     if (GetFileAttributesW(target.c_str()) != INVALID_FILE_ATTRIBUTES) {
         return Result<bool>::failure(
@@ -446,6 +511,11 @@ Result<bool> restore_offline_telemetry_lab(
     if (!roots.has_value()) return roots;
     const auto marker_file = marker_path(state_root);
     if (GetFileAttributesW(marker_file.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        auto orphan_removed = remove_orphaned_optimizer_module(config_root);
+        if (!orphan_removed.has_value()) {
+            return Result<bool>::failure(orphan_removed.error());
+        }
+        if (orphan_removed.value()) return Result<bool>::success(true);
         return Result<bool>::failure(
             {ErrorCode::not_found,
              L"No active offline telemetry session exists", 0});
@@ -498,6 +568,22 @@ Result<OfflineTelemetryRecovery> recover_offline_telemetry_lab(
     if (attributes == INVALID_FILE_ATTRIBUTES) {
         const DWORD native = GetLastError();
         if (native == ERROR_FILE_NOT_FOUND || native == ERROR_PATH_NOT_FOUND) {
+            if (game_running) {
+                return Result<OfflineTelemetryRecovery>::success({});
+            }
+            auto roots = validate_roots(config_root, state_root);
+            if (!roots.has_value()) {
+                return Result<OfflineTelemetryRecovery>::failure(roots.error());
+            }
+            auto orphan_removed = remove_orphaned_optimizer_module(config_root);
+            if (!orphan_removed.has_value()) {
+                return Result<OfflineTelemetryRecovery>::failure(
+                    orphan_removed.error());
+            }
+            if (orphan_removed.value()) {
+                return Result<OfflineTelemetryRecovery>::success(
+                    {false, true});
+            }
             return Result<OfflineTelemetryRecovery>::success({});
         }
         return Result<OfflineTelemetryRecovery>::failure(

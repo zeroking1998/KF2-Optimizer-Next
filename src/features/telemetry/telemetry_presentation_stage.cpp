@@ -12,7 +12,7 @@ TelemetryPresentation derive_telemetry_presentation(
     TelemetryPresentation result;
     const auto analysis = frame.frames.fps
         ? std::optional{optimizer::evaluate({
-              .target_fps = runtime.optimizer_settings.target_fps,
+              .target_fps = runtime.effective_target_fps(),
               .evidence = frame.evidence})}
         : std::nullopt;
     const auto& adaptive_status = runtime.model.status();

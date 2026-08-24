@@ -38,6 +38,7 @@ kf2::telemetry_pipeline::TelemetryFrameInput complete_input() {
 
     telemetry::ProcessMetrics process;
     process.cpu_percent = 24.0;
+    process.system_cpu_percent = 67.0;
     process.critical_core_percent = 82.0;
     process.effective_core_usage = 3.25;
     process.dominant_thread_share_percent = 44.0;
@@ -121,6 +122,8 @@ int main() {
     CHECK(frame.evidence.fps == input.frames.fps);
     CHECK(frame.evidence.p95_frame_time_ms == input.frames.p95_ms);
     CHECK(frame.evidence.cpu_percent == input.process->cpu_percent);
+    CHECK(frame.evidence.system_cpu_percent ==
+          input.process->system_cpu_percent);
     CHECK(frame.evidence.critical_core_percent ==
           input.process->critical_core_percent);
     CHECK(frame.evidence.effective_core_usage ==
@@ -196,6 +199,7 @@ int main() {
     CHECK(!absent_frame.value().evidence.fresh);
     CHECK(!absent_frame.value().evidence.fps.has_value());
     CHECK(!absent_frame.value().evidence.cpu_percent.has_value());
+    CHECK(!absent_frame.value().evidence.system_cpu_percent.has_value());
     CHECK(!absent_frame.value().evidence.gpu_percent.has_value());
     CHECK(!absent_frame.value().evidence.system_ram_used_bytes.has_value());
     CHECK(!absent_frame.value().evidence.dedicated_vram_bytes.has_value());

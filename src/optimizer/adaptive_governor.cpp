@@ -110,6 +110,28 @@ bool at_least(FrameSignalLevel value, FrameSignalLevel threshold) noexcept {
            static_cast<unsigned int>(threshold);
 }
 
+FrameSignalLevel correction_level(
+    FrameSignalLevel live, FrameSignalLevel sustained,
+    FrameSignalLevel tail, bool emergency_enabled,
+    bool catastrophic_live_drop) noexcept {
+    if (emergency_enabled &&
+        (catastrophic_live_drop ||
+         (at_least(live, FrameSignalLevel::emergency) &&
+          (at_least(sustained, FrameSignalLevel::warning) ||
+           at_least(tail, FrameSignalLevel::warning))))) {
+        return FrameSignalLevel::emergency;
+    }
+    if ((at_least(live, FrameSignalLevel::corrective) &&
+         (at_least(sustained, FrameSignalLevel::corrective) ||
+          at_least(tail, FrameSignalLevel::corrective))) ||
+        (at_least(tail, FrameSignalLevel::corrective) &&
+         (at_least(live, FrameSignalLevel::warning) ||
+          at_least(sustained, FrameSignalLevel::warning)))) {
+        return FrameSignalLevel::corrective;
+    }
+    return FrameSignalLevel::healthy;
+}
+
 double ratio(const std::optional<double>& used,
              const std::optional<double>& budget) noexcept {
     if (!finite_nonnegative(used) || !finite_positive(budget)) return 0.0;
@@ -292,8 +314,11 @@ AdaptiveBottleneckReport classify_bottleneck(
                "sustained_frame_time_pressure");
     const double vram_ratio = ratio(sample.vram_used_bytes,
                                     sample.vram_budget_bytes);
+    const bool current_gpu_attribution =
+        resources.shared_gpu_pressure || !sample.process_gpu_percent ||
+        sample.process_gpu_percent.value_or(0.0) >= 89.0;
     const bool gpu_high = resources.gpu.smoothed >= 0.70 &&
-        resources.primary == ResourceKind::gpu;
+        resources.primary == ResourceKind::gpu && current_gpu_attribution;
     const bool process_cpu_high = sample.cpu_percent &&
                                   *sample.cpu_percent >= 85.0;
     const bool critical_thread_high = sample.critical_core_percent &&
@@ -307,8 +332,12 @@ AdaptiveBottleneckReport classify_bottleneck(
     const bool parallel_cpu_high = affinity_capacity > 0.0 &&
         sample.effective_core_usage.value_or(0.0) >=
             std::max(2.0, affinity_capacity * 0.70);
+    const bool shared_cpu_high = resources.primary == ResourceKind::cpu &&
+        resources.shared_cpu_pressure &&
+        sample.system_cpu_percent.value_or(0.0) >= 85.0;
     const bool cpu_high = process_cpu_high || critical_thread_high ||
-                          main_thread_bound || parallel_cpu_high;
+                          main_thread_bound || parallel_cpu_high ||
+                          shared_cpu_high;
 
     if (sample.thermal_power_pressure && *sample.thermal_power_pressure >= 0.80) {
         report.type = AdaptiveBottleneck::thermal_power;
@@ -348,9 +377,11 @@ AdaptiveBottleneckReport classify_bottleneck(
                    "simultaneous_cpu_gpu_pressure");
     } else if (gpu_high && !cpu_high) {
         report.type = AdaptiveBottleneck::gpu;
-        report.confidence = 0.68;
+        report.confidence = resources.shared_gpu_pressure ? 0.72 : 0.68;
         add_signal(report.supporting_signals, report.supporting_count,
-                   "gpu_pressure_with_cpu_reserve");
+                   resources.shared_gpu_pressure
+                       ? "shared_gpu_pressure_with_frame_impact"
+                       : "gpu_pressure_with_cpu_reserve");
         if (sample.graphics_engine_percent) {
             add_signal(report.supporting_signals, report.supporting_count,
                        "graphics_engine_counter");
@@ -362,7 +393,8 @@ AdaptiveBottleneckReport classify_bottleneck(
         // engine/main-thread limit; total CPU alone remains lower confidence.
         report.confidence = main_thread_bound ? 0.88
             : parallel_cpu_high ? 0.84
-            : critical_thread_high ? 0.82 : 0.48;
+            : critical_thread_high ? 0.82
+            : shared_cpu_high ? 0.72 : 0.48;
         add_signal(report.supporting_signals, report.supporting_count,
                    main_thread_bound
                        ? "main_thread_dominant_parallelism_evidence"
@@ -370,6 +402,8 @@ AdaptiveBottleneckReport classify_bottleneck(
                            ? "broad_parallel_cpu_capacity_pressure"
                        : critical_thread_high
                        ? "critical_thread_pressure_with_gpu_reserve"
+                       : shared_cpu_high
+                       ? "shared_cpu_pressure_with_frame_impact"
                        : "process_cpu_pressure_with_gpu_reserve");
         if (sample.effective_core_usage) {
             add_signal(report.supporting_signals, report.supporting_count,
@@ -493,6 +527,7 @@ AdaptiveDataQualityReport validate_adaptive_sample(
     if (!finite_positive(sample.fps) || !finite_positive(sample.frame_time_ms) ||
         *sample.fps > 1000.0 || *sample.frame_time_ms > 1000.0 ||
         !valid_percent(sample.cpu_percent) ||
+        !valid_percent(sample.system_cpu_percent) ||
         !valid_percent(sample.critical_core_percent) ||
         !valid_core_usage(sample.effective_core_usage) ||
         !valid_percent(sample.dominant_thread_share_percent) ||
@@ -757,6 +792,42 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     decision.drop_risk = clamp01(
         (predicted / target_frame_time - 0.98) / 0.30) *
         prediction_confidence;
+    decision.resources = resource_pressure_estimator_.evaluate({
+        .timestamp_ns = sample.timestamp_ns,
+        .target_fps = policy.target_fps,
+        .frame_time_ms = frame_time,
+        .p95_frame_time_ms = p95,
+        .process_cpu_percent = sample.cpu_percent,
+        .system_cpu_percent = sample.system_cpu_percent,
+        .critical_thread_percent = sample.critical_core_percent,
+        .effective_core_usage = sample.effective_core_usage,
+        .affinity_logical_processors =
+            sample.affinity_logical_processors,
+        .process_gpu_percent = sample.process_gpu_percent,
+        .adapter_gpu_percent = sample.gpu_percent,
+        .vram_used_bytes = sample.vram_used_bytes,
+        .vram_budget_bytes = sample.vram_budget_bytes,
+        .ram_used_bytes = sample.ram_used_bytes,
+        .ram_budget_bytes = sample.ram_budget_bytes,
+        .commit_used_bytes = sample.commit_used_bytes,
+        .commit_budget_bytes = sample.commit_budget_bytes,
+        .process_private_bytes = sample.process_private_bytes,
+        .paging_pressure = sample.paging_pressure,
+    });
+    decision.headroom = decision.resources.headroom;
+    const bool attributed_memory_pressure =
+        decision.resources.primary_confidence >= 0.55 &&
+        ((decision.resources.primary == ResourceKind::vram &&
+          decision.resources.vram.smoothed >= 0.75) ||
+         (decision.resources.primary == ResourceKind::ram &&
+          decision.resources.ram.smoothed >= 0.75));
+    const bool critical_memory_pressure =
+        attributed_memory_pressure &&
+        ((decision.resources.primary == ResourceKind::vram &&
+          decision.resources.vram.smoothed >= 0.90) ||
+         (decision.resources.primary == ResourceKind::ram &&
+          decision.resources.ram.smoothed >= 0.90));
+    decision.current_resource_pressure = attributed_memory_pressure;
 
     const auto live_level = maximum(
         level_for_fps(*sample.fps, stability_bands),
@@ -779,25 +850,21 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
         *sample.fps <= static_cast<double>(policy.target_fps) * 0.50 ||
         frame_time >= target_frame_time * 2.0;
 
-    FrameSignalLevel desired_level = FrameSignalLevel::healthy;
-    if (policy.emergency_enabled &&
-        (catastrophic_live_drop ||
-         (at_least(live_level, FrameSignalLevel::emergency) &&
-          (at_least(sustained_level, FrameSignalLevel::warning) ||
-           at_least(tail_level, FrameSignalLevel::warning))))) {
-        desired_level = FrameSignalLevel::emergency;
-    } else if ((at_least(live_level, FrameSignalLevel::corrective) &&
-                (at_least(sustained_level, FrameSignalLevel::corrective) ||
-                 at_least(tail_level, FrameSignalLevel::corrective))) ||
-               (at_least(tail_level, FrameSignalLevel::corrective) &&
-                (at_least(live_level, FrameSignalLevel::warning) ||
-                 at_least(sustained_level, FrameSignalLevel::warning)))) {
-        desired_level = FrameSignalLevel::corrective;
-    } else if (at_least(live_level, FrameSignalLevel::warning) ||
+    FrameSignalLevel desired_level = correction_level(
+        live_level, sustained_level, tail_level,
+        policy.emergency_enabled, catastrophic_live_drop);
+    if (desired_level == FrameSignalLevel::healthy &&
+        (at_least(live_level, FrameSignalLevel::warning) ||
                at_least(sustained_level, FrameSignalLevel::warning) ||
                at_least(tail_level, FrameSignalLevel::warning) ||
-               long_low_unhealthy) {
+               long_low_unhealthy)) {
         desired_level = FrameSignalLevel::warning;
+    }
+    if (critical_memory_pressure && policy.emergency_enabled) {
+        desired_level = FrameSignalLevel::emergency;
+    } else if (attributed_memory_pressure &&
+               !at_least(desired_level, FrameSignalLevel::corrective)) {
+        desired_level = FrameSignalLevel::corrective;
     }
 
     const AdaptivePressure desired =
@@ -808,6 +875,21 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
                 : desired_level == FrameSignalLevel::warning
                     ? AdaptivePressure::warning
                     : AdaptivePressure::healthy;
+    const auto current_live_level = maximum(
+        level_for_fps(*sample.fps, stability_bands),
+        level_for_frame_time(*sample.frame_time_ms, stability_bands));
+    const auto current_sustained_level = level_for_fps(
+        sample.average_fps.value_or(*sample.fps), stability_bands);
+    const auto current_tail_level = maximum(
+        level_for_tail(sample.p95_frame_time_ms.value_or(
+                           *sample.frame_time_ms), target_frame_time),
+        level_for_stutters(sample.stutter_count));
+    decision.current_frame_pressure = at_least(
+        correction_level(
+            current_live_level, current_sustained_level,
+            current_tail_level, policy.emergency_enabled,
+            catastrophic_live_drop),
+        FrameSignalLevel::corrective);
 
     if (desired != candidate_pressure_) {
         candidate_pressure_ = desired;
@@ -852,28 +934,6 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
             static_cast<double>(policy.maximum_quality)),
         static_cast<double>(policy.minimum_quality),
         static_cast<double>(policy.maximum_quality));
-    decision.resources = resource_pressure_estimator_.evaluate({
-        .timestamp_ns = sample.timestamp_ns,
-        .target_fps = policy.target_fps,
-        .frame_time_ms = frame_time,
-        .p95_frame_time_ms = p95,
-        .process_cpu_percent = sample.cpu_percent,
-        .critical_thread_percent = sample.critical_core_percent,
-        .effective_core_usage = sample.effective_core_usage,
-        .affinity_logical_processors =
-            sample.affinity_logical_processors,
-        .process_gpu_percent = sample.process_gpu_percent,
-        .adapter_gpu_percent = sample.gpu_percent,
-        .vram_used_bytes = sample.vram_used_bytes,
-        .vram_budget_bytes = sample.vram_budget_bytes,
-        .ram_used_bytes = sample.ram_used_bytes,
-        .ram_budget_bytes = sample.ram_budget_bytes,
-        .commit_used_bytes = sample.commit_used_bytes,
-        .commit_budget_bytes = sample.commit_budget_bytes,
-        .process_private_bytes = sample.process_private_bytes,
-        .paging_pressure = sample.paging_pressure,
-    });
-    decision.headroom = decision.resources.headroom;
     decision.quality_recovery_eligible =
         active_pressure_ == AdaptivePressure::healthy &&
         desired_level == FrameSignalLevel::healthy &&

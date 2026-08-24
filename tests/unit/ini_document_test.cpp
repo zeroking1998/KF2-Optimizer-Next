@@ -72,6 +72,25 @@ int main() {
     CHECK(!array_values.value().append_unique(
         L"Engine.GameEngine", L"ServerActors",
         L"KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe").changed);
+    const auto removed_array_value = array_values.value().remove_exact(
+        L"Engine.GameEngine", L"ServerActors",
+        L"KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe");
+    CHECK(removed_array_value.changed);
+    CHECK(removed_array_value.shadowed_occurrences == 0);
+    CHECK(array_values.value().serialize() ==
+        "[Engine.GameEngine]\r\nServerActors=IpDrv.WebServer\r\n"
+        "bUsedForTakeover=True\r\n[Next]\r\nValue=1\r\n");
+    CHECK(!array_values.value().remove_exact(
+        L"Engine.GameEngine", L"ServerActors",
+        L"KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe").changed);
+
+    auto missing_array_section = IniDocument::parse("[Engine.Engine]\nA=1\n");
+    CHECK(missing_array_section.has_value());
+    CHECK(missing_array_section.value().append_unique(
+        L"Engine.GameEngine", L"ServerActors", L"Probe.Class").changed);
+    CHECK(missing_array_section.value().serialize() ==
+        "[Engine.Engine]\nA=1\n[Engine.GameEngine]\n"
+        "ServerActors=Probe.Class\n");
 
     auto ambiguous_sections = IniDocument::parse(
         "[Engine.GameEngine]\nServerActors=Probe.Class\n"

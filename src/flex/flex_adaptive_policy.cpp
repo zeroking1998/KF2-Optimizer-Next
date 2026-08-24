@@ -6,6 +6,16 @@
 
 namespace kf2::flex {
 
+bool AdaptivePolicy::synchronize_observed(int substeps) noexcept {
+    if (substeps < 1 || substeps > 5) return false;
+    if (active_substeps_ == 0) {
+        active_substeps_ = substeps;
+        candidate_substeps_ = substeps;
+        constrained_ = true;
+    }
+    return true;
+}
+
 AdaptiveDecision AdaptivePolicy::evaluate(bool enabled, int target_fps,
     std::optional<double> fps, std::uint64_t now_ms,
     int quality_change_budget) noexcept {
@@ -19,8 +29,10 @@ AdaptiveDecision AdaptivePolicy::evaluate(bool enabled, int target_fps,
 
     if (target_fps_ != 0 && target_fps_ != target_fps) {
         // Target-dependent history and pending work must never cross a target
-        // generation. Rebase at full quality and learn from fresh samples.
-        reset();
+        // generation. Preserve the observed effective level while discarding
+        // only target-dependent pending work.
+        candidate_substeps_ = active_substeps_;
+        candidate_since_ = now_ms;
     }
     if (last_evaluation_ms_ != 0 && now_ms < last_evaluation_ms_) {
         reset();

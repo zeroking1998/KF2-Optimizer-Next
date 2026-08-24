@@ -20,6 +20,7 @@
 #include "kf2/app/application.hpp"
 #include "kf2/config/setting_catalog.hpp"
 #include "kf2/ui/shell_layout.hpp"
+#include "app/application_runtime.hpp"
 #include "app/runtime/feature_composition.hpp"
 
 #define CHECK(condition)                                                        \
@@ -207,6 +208,7 @@ int main() {
     const auto config_root = documents / L"My Games/KillingFloor2/KFGame/Config";
     const auto install_root = root / L"Steam/steamapps/common/KillingFloor2";
     write_test_pe(install_root / L"Binaries/Win64/KFGame.exe");
+    fs::create_directories(install_root / L"KFGame");
     write_bytes(install_root / L"Engine/Config/ConsoleVariables.ini",
                 "; native startup variables\r\n[Startup]\r\n");
     CHECK(write_complete_config_catalog(config_root));
@@ -216,6 +218,8 @@ int main() {
                     "bLogAICount=False\r\n");
     write_bytes(config_root / L"KFEngine.ini",
                 read_bytes(config_root / L"KFEngine.ini") +
+                    "[URL]\r\n"
+                    "LocalOptions=\r\n"
                     "[Engine.Engine]\r\n"
                     "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n");
     const fs::path telemetry_asset{KF2_TELEMETRY_ASSET};
@@ -238,14 +242,22 @@ int main() {
             .allowed_config_parent = documents,
         },
     };
+    write_bytes(options.state_root / L"settings.ini",
+                "schema_version=1\nadaptive_shadow_mode=true\n");
+
+    const auto original_game_config = read_bytes(config_root / L"KFGame.ini");
+    const auto original_engine_config = read_bytes(config_root / L"KFEngine.ini");
+    const auto published_telemetry = config_root.parent_path() /
+        L"Published" / L"BrewedPC" / L"KF2OptimizerTelemetry.u";
+    const auto published_runtime_path =
+        (config_root.parent_path() / L"Published" / L"BrewedPC")
+            .lexically_normal().string();
 
     {
-        const auto original_game_config = read_bytes(config_root / L"KFGame.ini");
-        const auto original_engine_config = read_bytes(config_root / L"KFEngine.ini");
-        const auto published_telemetry = config_root.parent_path() /
-            L"Published" / L"BrewedPC" / L"KF2OptimizerTelemetry.u";
         auto first = kf2::app::Application::start(options);
         CHECK(first.has_value());
+        CHECK(read_bytes(options.state_root / L"settings.ini").find(
+                  "adaptive_shadow_mode") == std::string::npos);
         const auto automatically_prepared =
             read_bytes(config_root / L"KFGame.ini");
         CHECK(automatically_prepared.find(
@@ -257,8 +269,14 @@ int main() {
         CHECK(fs::exists(published_telemetry));
         CHECK(read_bytes(published_telemetry) == read_bytes(telemetry_asset));
         CHECK(read_bytes(config_root / L"KFEngine.ini").find(
-                  "GameViewportClientClassName=KF2OptimizerTelemetry."
-                  "KF2OptimizerTelemetryViewport") != std::string::npos);
+                  "GameViewportClientClassName=KFGame."
+                  "KFGameViewportClient") !=
+              std::string::npos);
+        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                  "LocalOptions=?Mutator=KF2OptimizerTelemetry."
+                  "KF2OptimizerTelemetryMutator") != std::string::npos);
+        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                  "Package=KF2OptimizerTelemetry") == std::string::npos);
         CHECK(fs::exists(options.state_root / L"settings.ini"));
         CHECK(fs::exists(options.state_root / L"session.marker"));
         CHECK(fs::is_directory(options.state_root / L"logs"));
@@ -302,8 +320,8 @@ int main() {
     CHECK(read_bytes(options.state_root / L"session.marker").ends_with(
         "clean_shutdown=true\n"));
 
-    // A historically poisoned snapshot can leave the optimizer viewport and
-    // token behind after the module marker is already gone. Startup must
+    // A historically poisoned snapshot can leave the legacy optimizer viewport
+    // and token behind after the module marker is already gone. Startup must
     // remove that owned residue before capturing the next protected snapshot.
     auto poisoned_engine = read_bytes(config_root / L"KFEngine.ini");
     const std::string native_viewport =
@@ -364,7 +382,6 @@ int main() {
         "adaptive_emergency_enabled=true\n"
         "adaptive_quality_recovery_enabled=true\n"
         "adaptive_manual_locks_enabled=true\n"
-        "adaptive_shadow_mode=true\n"
         "adaptive_calibration_enabled=true\nadaptive_logging=true\n"
         "overlay_position=top_right\n"
         "overlay_scale_percent=100\n"
@@ -719,6 +736,74 @@ int main() {
     CHECK(graphical.value().shutdown_cleanly().has_value());
     CHECK(read_bytes(options.state_root / L"session.marker").ends_with(
         "clean_shutdown=true\n"));
+
+    // A single optimizer process can supervise multiple KF2 launches. After
+    // one protected session is restored, the next Steam/shortcut launch must
+    // receive the provider bootstrap and fixed session policy again.
+    {
+        const auto rearm_state = root / L"Data-rearm";
+        kf2::diagnostics::EventLog rearm_events{
+            128, rearm_state / L"logs/session-events.json"};
+        kf2::config::Settings rearm_settings{};
+        kf2::app::UiRuntime rearm_runtime{
+            rearm_state, false, rearm_settings, rearm_events,
+            options.game_discovery, kf2::app::StartMode::normal,
+            root / L"portable"};
+
+        const auto first_prepare =
+            rearm_runtime.prepare_automatic_external_launch_profile();
+        CHECK(first_prepare.has_value());
+        CHECK(first_prepare.value());
+        CHECK(fs::exists(published_telemetry));
+        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                  "LocalOptions=?Mutator=KF2OptimizerTelemetry."
+                  "KF2OptimizerTelemetryMutator") != std::string::npos);
+        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                  "GameViewportClientClassName=KFGame."
+                  "KFGameViewportClient") !=
+              std::string::npos);
+        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                  "Paths=" + published_runtime_path) != std::string::npos);
+
+        CHECK(rearm_runtime.restore_protected_session_config(
+            L"First simulated KF2 session ended"));
+        CHECK(!fs::exists(published_telemetry));
+        CHECK(read_bytes(config_root / L"KFEngine.ini") ==
+              original_engine_config);
+
+        const auto rearmed =
+            rearm_runtime.rearm_automatic_external_launch_profile();
+        CHECK(rearmed.has_value());
+        CHECK(rearmed.value());
+        CHECK(rearm_runtime.session_config_snapshot.has_value());
+        CHECK(rearm_runtime.session_config_waiting_for_launch);
+        CHECK(fs::exists(published_telemetry));
+        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                  "LocalOptions=?Mutator=KF2OptimizerTelemetry."
+                  "KF2OptimizerTelemetryMutator") != std::string::npos);
+        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                  "GameViewportClientClassName=KFGame."
+                  "KFGameViewportClient") !=
+              std::string::npos);
+        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                  "Paths=" + published_runtime_path) != std::string::npos);
+        const auto rearm_log = rearm_events.snapshot();
+        CHECK(std::any_of(rearm_log.begin(), rearm_log.end(),
+            [](const auto& event) {
+                return event.code == "ADAPTIVE_EXTERNAL_LAUNCH_PREPARED";
+            }));
+        CHECK(std::none_of(rearm_log.begin(), rearm_log.end(),
+            [](const auto& event) {
+                return event.code == "ADAPTIVE_EXTERNAL_LAUNCH_READY" ||
+                       event.code == "GAMEPLAY_LOG_LAB_READY";
+            }));
+        CHECK(std::any_of(rearm_log.begin(), rearm_log.end(),
+            [](const auto& event) {
+                return event.code == "ADAPTIVE_EXTERNAL_LAUNCH_REARMED";
+            }));
+    }
+    CHECK(!fs::exists(published_telemetry));
+    CHECK(read_bytes(config_root / L"KFEngine.ini") == original_engine_config);
 
     fs::remove_all(root);
     return EXIT_SUCCESS;

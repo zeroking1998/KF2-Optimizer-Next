@@ -21,6 +21,21 @@ int main() {
     input.fps = 60.0;
     input.now_ms = 1000;
 
+    kf2::optimizer::AdaptiveDecision adaptive;
+    adaptive.current_frame_pressure = true;
+    adaptive.resources.primary = kf2::optimizer::ResourceKind::cpu;
+    CHECK(flex_pressure_is_actionable(adaptive));
+    adaptive.resources.primary = kf2::optimizer::ResourceKind::gpu;
+    CHECK(flex_pressure_is_actionable(adaptive));
+    adaptive.resources.primary = kf2::optimizer::ResourceKind::vram;
+    CHECK(flex_pressure_is_actionable(adaptive));
+    adaptive.resources.primary = kf2::optimizer::ResourceKind::ram;
+    CHECK(!flex_pressure_is_actionable(adaptive));
+    adaptive.resources.primary = kf2::optimizer::ResourceKind::unknown;
+    CHECK(!flex_pressure_is_actionable(adaptive));
+    adaptive.current_frame_pressure = false;
+    CHECK(!flex_pressure_is_actionable(adaptive));
+
     auto decision = decide_flex_control(policy, input);
     CHECK(!decision.constrained);
     CHECK(decision.requested_substeps == 0);

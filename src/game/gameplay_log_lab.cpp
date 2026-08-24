@@ -26,6 +26,26 @@ constexpr std::array<std::wstring_view, 3> kWaveSections{
     L"KFGame.KFAISpawnManager_Normal",
     L"KFGame.KFAISpawnManager_Long"};
 constexpr std::wstring_view kWaveKey = L"bLogWaveSpawnTiming";
+constexpr std::wstring_view kCoreSystemSection = L"Core.System";
+constexpr std::wstring_view kRuntimePathsKey = L"Paths";
+constexpr std::wstring_view kScriptPathsKey = L"ScriptPaths";
+constexpr std::wstring_view kNativeScriptPath = L"..\\..\\KFGame\\Script";
+constexpr std::wstring_view kLegacyPublishedRuntimePath =
+    L"..\\..\\KFGame\\Published\\BrewedPC";
+constexpr std::wstring_view kUrlSection = L"URL";
+constexpr std::wstring_view kLocalOptionsKey = L"LocalOptions";
+constexpr std::wstring_view kTelemetryMutator =
+    L"KF2OptimizerTelemetry.KF2OptimizerTelemetryMutator";
+constexpr std::wstring_view kTelemetryMutatorOption =
+    L"?Mutator=KF2OptimizerTelemetry.KF2OptimizerTelemetryMutator";
+constexpr std::wstring_view kGameEngineSection = L"Engine.GameEngine";
+constexpr std::wstring_view kServerActorsKey = L"ServerActors";
+constexpr std::wstring_view kTelemetryBootstrapActor =
+    L"KF2OptimizerTelemetry.KF2OptimizerTelemetryBootstrap";
+constexpr std::wstring_view kStartupPackagesSection =
+    L"Engine.StartupPackages";
+constexpr std::wstring_view kStartupPackageKey = L"Package";
+constexpr std::wstring_view kTelemetryPackage = L"KF2OptimizerTelemetry";
 constexpr std::wstring_view kEngineSection = L"Engine.Engine";
 constexpr std::wstring_view kViewportClientKey = L"GameViewportClientClassName";
 constexpr std::wstring_view kTelemetryViewportClient =
@@ -114,6 +134,118 @@ Result<config::IniDocument> parse_verified(
 
 }  // namespace
 
+Result<std::optional<OfflineAdaptiveSessionPolicy>>
+read_offline_adaptive_session_policy(
+    const std::filesystem::path& config_root) {
+    if (config_root.empty() || !config_root.is_absolute()) {
+        return Result<std::optional<OfflineAdaptiveSessionPolicy>>::failure({
+            ErrorCode::invalid_argument,
+            L"KF2 configuration root must be absolute", 0});
+    }
+    auto document = parse_verified(config_root / L"KFEngine.ini");
+    if (!document.has_value()) {
+        return Result<std::optional<OfflineAdaptiveSessionPolicy>>::failure(
+            document.error());
+    }
+    const auto read_integer = [&](std::wstring_view key)
+        -> Result<std::optional<int>> {
+        const auto value = document.value().find(kTelemetrySection, key);
+        if (!value) {
+            return Result<std::optional<int>>::success(std::nullopt);
+        }
+        const auto duplicate_check = document.value().upsert(
+            kTelemetrySection, key, *value);
+        if (duplicate_check.shadowed_occurrences != 0 || value->empty()) {
+            return Result<std::optional<int>>::failure({
+                ErrorCode::invalid_argument,
+                L"Adaptive session policy is ambiguous or malformed", 0});
+        }
+        int parsed = 0;
+        for (const wchar_t character : *value) {
+            if (character < L'0' || character > L'9' ||
+                parsed > (std::numeric_limits<int>::max() - 9) / 10) {
+                return Result<std::optional<int>>::failure({
+                    ErrorCode::invalid_argument,
+                    L"Adaptive session policy is malformed", 0});
+            }
+            parsed = parsed * 10 + static_cast<int>(character - L'0');
+        }
+        return Result<std::optional<int>>::success(parsed);
+    };
+    auto corpse = read_integer(kAdaptiveCorpseMaximumKey);
+    auto target = read_integer(kAdaptiveTargetFpsKey);
+    auto budget = read_integer(kAdaptiveQualityChangeBudgetKey);
+    if (!corpse.has_value() || !target.has_value() || !budget.has_value()) {
+        const auto& error = !corpse.has_value() ? corpse.error()
+            : !target.has_value() ? target.error() : budget.error();
+        return Result<std::optional<OfflineAdaptiveSessionPolicy>>::failure(
+            error);
+    }
+    const bool any = corpse.value().has_value() ||
+                     target.value().has_value() ||
+                     budget.value().has_value();
+    if (!any) {
+        return Result<std::optional<OfflineAdaptiveSessionPolicy>>::success(
+            std::nullopt);
+    }
+    if (!corpse.value() || !target.value() || !budget.value() ||
+        *corpse.value() < 4 || *corpse.value() > 2000 ||
+        !optimizer::valid_target_fps(*target.value()) ||
+        *budget.value() < 1 || *budget.value() > 5) {
+        return Result<std::optional<OfflineAdaptiveSessionPolicy>>::failure({
+            ErrorCode::invalid_argument,
+            L"Adaptive session policy is incomplete or outside its safe bounds",
+            0});
+    }
+    return Result<std::optional<OfflineAdaptiveSessionPolicy>>::success(
+        OfflineAdaptiveSessionPolicy{
+            *corpse.value(), *target.value(), *budget.value()});
+}
+
+std::wstring lower_copy(std::wstring_view value) {
+    std::wstring lowered{value};
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+        [](wchar_t character) { return std::towlower(character); });
+    return lowered;
+}
+
+Result<std::wstring> stage_telemetry_mutator_option(
+    std::wstring_view current) {
+    const auto lowered = lower_copy(current);
+    const auto option = lower_copy(kTelemetryMutatorOption);
+    if (lowered.ends_with(option)) {
+        return Result<std::wstring>::success(std::wstring{current});
+    }
+    if (lowered.find(L"mutator=") != std::wstring::npos) {
+        return Result<std::wstring>::failure(
+            {ErrorCode::invalid_argument,
+             L"KF2 already has a user-selected local mutator; it was preserved",
+             0});
+    }
+    std::wstring staged{current};
+    if (!staged.empty() && staged.back() == L'?') {
+        staged.pop_back();
+    }
+    staged.append(kTelemetryMutatorOption);
+    return Result<std::wstring>::success(std::move(staged));
+}
+
+Result<std::wstring> remove_telemetry_mutator_option(
+    std::wstring_view current) {
+    const auto lowered = lower_copy(current);
+    const auto option = lower_copy(kTelemetryMutatorOption);
+    if (!lowered.ends_with(option)) {
+        if (lowered.find(lower_copy(kTelemetryMutator)) != std::wstring::npos) {
+            return Result<std::wstring>::failure(
+                {ErrorCode::invalid_argument,
+                 L"KF2 Optimizer local-mutator option is ambiguous", 0});
+        }
+        return Result<std::wstring>::success(std::wstring{current});
+    }
+    return Result<std::wstring>::success(std::wstring{
+        current.substr(0, current.size() - kTelemetryMutatorOption.size())});
+}
+
 Result<bool> enable_offline_gameplay_logging(
     const std::filesystem::path& config_root,
     bool adaptive_corpse_stagger,
@@ -150,19 +282,16 @@ Result<bool> enable_offline_gameplay_logging(
     if (!engine.has_value()) return Result<bool>::failure(engine.error());
 
     const auto current = parsed.value().find(kCountSection, kCountKey);
-    if (!current) {
-        return Result<bool>::failure(
-            {ErrorCode::not_found,
-             L"Verified KF2 AI-count logging setting was not found", 0});
-    }
-    const auto boolean = normalized_boolean(*current);
-    if (boolean != L"true" && boolean != L"false") {
-        return Result<bool>::failure(
-            {ErrorCode::invalid_argument,
-             L"KF2 AI-count logging setting is malformed", 0});
+    if (current) {
+        const auto boolean = normalized_boolean(*current);
+        if (boolean != L"true" && boolean != L"false") {
+            return Result<bool>::failure(
+                {ErrorCode::invalid_argument,
+                 L"KF2 AI-count logging setting is malformed", 0});
+        }
     }
 
-    const auto replaced = parsed.value().replace(
+    const auto replaced = parsed.value().upsert(
         kCountSection, kCountKey, L"True");
     if (replaced.shadowed_occurrences != 0) {
         return Result<bool>::failure(
@@ -190,17 +319,67 @@ Result<bool> enable_offline_gameplay_logging(
         }
         wave_changed = wave_changed || wave_replaced.changed;
     }
+    const auto current_viewport = engine.value().find(
+        kEngineSection, kViewportClientKey);
+    if (!current_viewport ||
+        (*current_viewport != kNativeViewportClient &&
+         *current_viewport != kTelemetryViewportClient)) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"KF2 viewport-client setting is missing or owned by another provider",
+             0});
+    }
     const auto viewport_replaced = engine.value().replace(
-        kEngineSection, kViewportClientKey, kTelemetryViewportClient);
+        kEngineSection, kViewportClientKey, kNativeViewportClient);
     if (viewport_replaced.shadowed_occurrences != 0) {
         return Result<bool>::failure(
             {ErrorCode::invalid_argument,
              L"KF2 viewport-client setting is ambiguous", 0});
     }
-    if (!engine.value().find(kEngineSection, kViewportClientKey)) {
+    const auto current_local_options = engine.value().find(
+        kUrlSection, kLocalOptionsKey);
+    if (!current_local_options) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"KF2 local URL options are missing or ambiguous", 0});
+    }
+    const auto staged_local_options = stage_telemetry_mutator_option(
+        *current_local_options);
+    if (!staged_local_options.has_value()) {
+        return Result<bool>::failure(staged_local_options.error());
+    }
+    const auto local_options_replaced = engine.value().replace(
+        kUrlSection, kLocalOptionsKey, staged_local_options.value());
+    if (local_options_replaced.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"KF2 local URL options are ambiguous", 0});
+    }
+    const auto published_runtime_path =
+        (config_root.parent_path() / L"Published" / L"BrewedPC")
+            .lexically_normal().wstring();
+    const auto runtime_path_appended = engine.value().append_unique(
+        kCoreSystemSection, kRuntimePathsKey, published_runtime_path);
+    if (runtime_path_appended.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"KF2 runtime-package search path is ambiguous", 0});
+    }
+    auto runtime_path_check = engine.value();
+    const auto runtime_path_present = runtime_path_check.remove_exact(
+        kCoreSystemSection, kRuntimePathsKey, published_runtime_path);
+    if (!runtime_path_present.changed ||
+        runtime_path_present.shadowed_occurrences != 0) {
         return Result<bool>::failure(
             {ErrorCode::not_found,
-             L"Verified KF2 viewport-client setting was not found", 0});
+             L"Verified KF2 Published runtime path could not be staged", 0});
+    }
+    const auto startup_package_removed = engine.value().remove_exact(
+        kStartupPackagesSection, kStartupPackageKey, kTelemetryPackage);
+    if (startup_package_removed.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"KF2 startup-package configuration is ambiguous", 0});
     }
     if (const auto current_stagger = engine.value().find(
             kTelemetrySection, kAdaptiveCorpseStaggerKey);
@@ -272,6 +451,9 @@ Result<bool> enable_offline_gameplay_logging(
              L"Adaptive control-token setting is ambiguous", 0});
     }
     if (!replaced.changed && !wave_changed && !viewport_replaced.changed &&
+        !local_options_replaced.changed &&
+        !runtime_path_appended.changed &&
+        !startup_package_removed.changed &&
         !stagger_replaced.changed && !markers_replaced.changed &&
         !maximum_replaced.changed &&
         !target_replaced.changed && !quality_budget_replaced.changed &&
@@ -284,7 +466,9 @@ Result<bool> enable_offline_gameplay_logging(
             game_ini, parsed.value().serialize());
         if (!written.has_value()) return Result<bool>::failure(written.error());
     }
-    if (viewport_replaced.changed || stagger_replaced.changed ||
+    if (viewport_replaced.changed || local_options_replaced.changed ||
+        runtime_path_appended.changed || startup_package_removed.changed ||
+        stagger_replaced.changed ||
         markers_replaced.changed || maximum_replaced.changed ||
         target_replaced.changed || quality_budget_replaced.changed ||
         control_token_replaced.changed) {
@@ -309,9 +493,30 @@ Result<bool> enable_offline_gameplay_logging(
              L"KF2 gameplay logging could not be verified after writing", 0});
     }
     auto verified_engine = parse_verified(engine_ini);
+    auto verified_startup_package_document = verified_engine.has_value()
+        ? std::optional<config::IniDocument>{verified_engine.value()}
+        : std::nullopt;
+    const auto verified_startup_package = verified_startup_package_document
+        ? verified_startup_package_document->remove_exact(
+              kStartupPackagesSection, kStartupPackageKey, kTelemetryPackage)
+        : config::ReplaceResult{};
+    auto verified_runtime_path_document = verified_engine.has_value()
+        ? std::optional<config::IniDocument>{verified_engine.value()}
+        : std::nullopt;
+    const auto verified_runtime_path = verified_runtime_path_document
+        ? verified_runtime_path_document->remove_exact(
+              kCoreSystemSection, kRuntimePathsKey, published_runtime_path)
+        : config::ReplaceResult{};
     const auto verified_viewport = verified_engine.has_value()
         ? verified_engine.value().find(kEngineSection, kViewportClientKey)
         : std::optional<std::wstring>{};
+    const auto verified_local_options = verified_engine.has_value()
+        ? verified_engine.value().find(kUrlSection, kLocalOptionsKey)
+        : std::optional<std::wstring>{};
+    const auto verified_mutator_option = verified_local_options
+        ? stage_telemetry_mutator_option(*verified_local_options)
+        : Result<std::wstring>::failure(
+              {ErrorCode::not_found, L"KF2 local URL options are missing", 0});
     const auto verified_stagger = verified_engine.has_value()
         ? verified_engine.value().find(
               kTelemetrySection, kAdaptiveCorpseStaggerKey)
@@ -336,7 +541,14 @@ Result<bool> enable_offline_gameplay_logging(
               kTelemetrySection, kAdaptiveControlTokenKey)
         : std::optional<std::wstring>{};
     if (!verified_engine.has_value() || !verified_viewport ||
-        *verified_viewport != kTelemetryViewportClient || !verified_stagger ||
+        *verified_viewport != kNativeViewportClient ||
+        !verified_local_options || !verified_mutator_option.has_value() ||
+        verified_mutator_option.value() != *verified_local_options ||
+        !verified_runtime_path.changed ||
+        verified_runtime_path.shadowed_occurrences != 0 ||
+        verified_startup_package.changed ||
+        verified_startup_package.shadowed_occurrences != 0 ||
+        !verified_stagger ||
         normalized_boolean(*verified_stagger) !=
             (adaptive_corpse_stagger ? L"true" : L"false") ||
         !verified_markers ||
@@ -352,7 +564,7 @@ Result<bool> enable_offline_gameplay_logging(
         !verified_control_token || *verified_control_token != control_token) {
         return Result<bool>::failure(
             {ErrorCode::io_failure,
-             L"KF2 offline telemetry viewport policy could not be verified after writing",
+             L"KF2 offline telemetry bootstrap policy could not be verified after writing",
              0});
     }
     return Result<bool>::success(true);
@@ -389,6 +601,84 @@ Result<bool> cleanup_stale_offline_gameplay_configuration(
         changed = changed || restored.changed;
     }
 
+    const auto local_options = engine.value().find(
+        kUrlSection, kLocalOptionsKey);
+    if (local_options) {
+        const auto cleaned_options = remove_telemetry_mutator_option(
+            *local_options);
+        if (!cleaned_options.has_value()) {
+            return Result<bool>::failure(cleaned_options.error());
+        }
+        const auto options_restored = engine.value().replace(
+            kUrlSection, kLocalOptionsKey, cleaned_options.value());
+        if (options_restored.shadowed_occurrences != 0) {
+            return Result<bool>::failure(
+                {ErrorCode::invalid_argument,
+                 L"KF2 local URL options are ambiguous", 0});
+        }
+        changed = changed || options_restored.changed;
+    }
+
+    const auto server_actor_removed = engine.value().remove_exact(
+        kGameEngineSection, kServerActorsKey, kTelemetryBootstrapActor);
+    if (server_actor_removed.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"KF2 Optimizer server-actor entry is ambiguous", 0});
+    }
+    changed = changed || server_actor_removed.changed;
+
+    const auto startup_package_removed = engine.value().remove_exact(
+        kStartupPackagesSection, kStartupPackageKey, kTelemetryPackage);
+    if (startup_package_removed.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"KF2 Optimizer startup-package entry is ambiguous", 0});
+    }
+    changed = changed || startup_package_removed.changed;
+
+    const auto absolute_optimizer_runtime_path =
+        (config_root.parent_path() / L"Published" / L"BrewedPC")
+            .lexically_normal();
+    const auto runtime_path_removed = engine.value().remove_exact(
+        kCoreSystemSection, kRuntimePathsKey,
+        absolute_optimizer_runtime_path.wstring());
+    if (runtime_path_removed.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"KF2 Optimizer runtime-package path is ambiguous", 0});
+    }
+    changed = changed || runtime_path_removed.changed;
+    const auto legacy_runtime_path_removed = engine.value().remove_exact(
+        kCoreSystemSection, kRuntimePathsKey, kLegacyPublishedRuntimePath);
+    if (legacy_runtime_path_removed.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"Legacy KF2 Optimizer runtime-package path is ambiguous", 0});
+    }
+    changed = changed || legacy_runtime_path_removed.changed;
+
+    const auto absolute_optimizer_script_path =
+        (config_root.parent_path() / L"Published" / L"BrewedPC")
+            .lexically_normal();
+    const auto script_path = engine.value().find(
+        kCoreSystemSection, kScriptPathsKey);
+    const bool optimizer_script_path = script_path && (
+        std::filesystem::path{*script_path}.lexically_normal() ==
+            std::filesystem::path{kLegacyPublishedRuntimePath}.lexically_normal() ||
+        std::filesystem::path{*script_path}.lexically_normal() ==
+            absolute_optimizer_script_path);
+    if (optimizer_script_path) {
+        const auto restored = engine.value().replace(
+            kCoreSystemSection, kScriptPathsKey, kNativeScriptPath);
+        if (restored.shadowed_occurrences != 0) {
+            return Result<bool>::failure(
+                {ErrorCode::invalid_argument,
+                 L"KF2 script-package search path is ambiguous", 0});
+        }
+        changed = changed || restored.changed;
+    }
+
     const auto removed = engine.value().remove_section(kTelemetrySection);
     if (removed.shadowed_occurrences != 0) {
         return Result<bool>::failure(
@@ -406,7 +696,48 @@ Result<bool> cleanup_stale_offline_gameplay_configuration(
     if (!verified.has_value()) return Result<bool>::failure(verified.error());
     const auto verified_viewport = verified.value().find(
         kEngineSection, kViewportClientKey);
-    if ((verified_viewport && *verified_viewport == kTelemetryViewportClient) ||
+    const auto verified_local_options = verified.value().find(
+        kUrlSection, kLocalOptionsKey);
+    const auto verified_cleaned_options = verified_local_options
+        ? remove_telemetry_mutator_option(*verified_local_options)
+        : Result<std::wstring>::success(L"");
+    auto verified_server_actor_document = verified.value();
+    const auto verified_server_actor = verified_server_actor_document.remove_exact(
+        kGameEngineSection, kServerActorsKey, kTelemetryBootstrapActor);
+    const auto verified_script_path = verified.value().find(
+        kCoreSystemSection, kScriptPathsKey);
+    auto verified_runtime_path_document = verified.value();
+    const auto verified_runtime_path = verified_runtime_path_document.remove_exact(
+        kCoreSystemSection, kRuntimePathsKey,
+        absolute_optimizer_runtime_path.wstring());
+    auto verified_legacy_runtime_path_document = verified.value();
+    const auto verified_legacy_runtime_path =
+        verified_legacy_runtime_path_document.remove_exact(
+            kCoreSystemSection, kRuntimePathsKey, kLegacyPublishedRuntimePath);
+    if ((verified_viewport &&
+         *verified_viewport == kTelemetryViewportClient) ||
+        !verified_cleaned_options.has_value() ||
+        (verified_local_options &&
+         verified_cleaned_options.value() != *verified_local_options) ||
+        verified_server_actor.changed ||
+        verified_server_actor.shadowed_occurrences != 0 ||
+        verified_runtime_path.changed ||
+        verified_runtime_path.shadowed_occurrences != 0 ||
+        verified_legacy_runtime_path.changed ||
+        verified_legacy_runtime_path.shadowed_occurrences != 0 ||
+        [&] {
+            auto document = verified.value();
+            const auto startup_package = document.remove_exact(
+                kStartupPackagesSection, kStartupPackageKey,
+                kTelemetryPackage);
+            return startup_package.changed ||
+                   startup_package.shadowed_occurrences != 0;
+        }() ||
+        (verified_script_path && (
+         std::filesystem::path{*verified_script_path}.lexically_normal() ==
+             std::filesystem::path{kLegacyPublishedRuntimePath}.lexically_normal() ||
+         std::filesystem::path{*verified_script_path}.lexically_normal() ==
+             absolute_optimizer_script_path)) ||
         verified.value().find(kTelemetrySection, kAdaptiveControlTokenKey) ||
         verified.value().find(kTelemetrySection, kAdaptiveTargetFpsKey)) {
         return Result<bool>::failure(

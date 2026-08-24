@@ -2,18 +2,33 @@
 // This avoids exporting KF2's large native GFXSettings struct across classes.
 class KF2OptimizerAdaptiveGraphics extends KFGFxOptionsMenu_Graphics;
 
-static function ApplyGpu(out GFXSettings Requested, int Level)
+static function ApplyGpu(out GFXSettings Requested, int Quality)
 {
     local int ShadowResolution;
     local float ShadowDensity;
 
-    if (Level >= 3) return;
-    if (Level == 2)
+    if (Quality >= 100) return;
+    if (Quality >= 90)
+    {
+        ShadowResolution = 4096;
+        ShadowDensity = 2.25;
+    }
+    else if (Quality >= 80)
     {
         ShadowResolution = 2048;
         ShadowDensity = 2.0;
     }
-    else if (Level == 1)
+    else if (Quality >= 70)
+    {
+        ShadowResolution = 2048;
+        ShadowDensity = 1.75;
+    }
+    else if (Quality >= 60)
+    {
+        ShadowResolution = 1024;
+        ShadowDensity = 1.5;
+    }
+    else if (Quality >= 40)
     {
         ShadowResolution = 1024;
         ShadowDensity = 1.25;
@@ -31,52 +46,138 @@ static function ApplyGpu(out GFXSettings Requested, int Level)
     Requested.Shadows.ShadowTexelsPerPixel = FMin(
         Requested.Shadows.ShadowTexelsPerPixel, ShadowDensity);
     Requested.Bloom.BloomQuality = Min(
-        Requested.Bloom.BloomQuality, Level == 2 ? 4 : 3);
-    if (Level <= 1)
+        Requested.Bloom.BloomQuality,
+        Quality >= 90 ? 5 : (Quality >= 70 ? 4 : 3));
+    if (Quality <= 80)
     {
         Requested.RealtimeReflections.bAllowScreenSpaceReflections = false;
+    }
+    if (Quality <= 70)
+    {
         Requested.AmbientOcclusion.HBAO = false;
+    }
+    if (Quality <= 60)
+    {
         Requested.DepthOfField.DepthOfField = false;
         Requested.LightShafts.bAllowLightShafts = false;
+    }
+    if (Quality <= 50)
+    {
         Requested.VolumetricLighting.bAllowLightCones = false;
         Requested.LensFlares.bAllowLensFlares = false;
     }
-    if (Level == 0)
+    if (Quality <= 30)
     {
         Requested.AmbientOcclusion.AmbientOcclusion = false;
+    }
+    if (Quality <= 20)
+    {
         Requested.Bloom.Bloom = false;
     }
 }
 
-static function ApplyCpu(out GFXSettings Requested, int Level)
+static function ApplyCpu(out GFXSettings Requested, int Quality)
 {
+    local int DetailMode;
+    local int LodBias;
     local float KinematicScale;
 
-    if (Level >= 3) return;
-    if (Level == 2) KinematicScale = 1.3;
-    else if (Level == 1) KinematicScale = 2.0;
-    else KinematicScale = 3.0;
+    if (Quality >= 100) return;
+    if (Quality >= 90)
+    {
+        DetailMode = 2;
+        LodBias = 0;
+        KinematicScale = 1.1;
+    }
+    else if (Quality >= 80)
+    {
+        DetailMode = 2;
+        LodBias = 1;
+        KinematicScale = 1.2;
+    }
+    else if (Quality >= 70)
+    {
+        DetailMode = 2;
+        LodBias = 1;
+        KinematicScale = 1.3;
+    }
+    else if (Quality >= 60)
+    {
+        DetailMode = 1;
+        LodBias = 1;
+        KinematicScale = 1.5;
+    }
+    else if (Quality >= 50)
+    {
+        DetailMode = 1;
+        LodBias = 2;
+        KinematicScale = 1.75;
+    }
+    else if (Quality >= 40)
+    {
+        DetailMode = 1;
+        LodBias = 2;
+        KinematicScale = 2.0;
+    }
+    else if (Quality >= 30)
+    {
+        DetailMode = 0;
+        LodBias = 2;
+        KinematicScale = 2.3;
+    }
+    else
+    {
+        DetailMode = 0;
+        LodBias = 3;
+        KinematicScale = 3.0;
+    }
     Requested.EnvironmentDetail.DetailMode = Min(
-        Requested.EnvironmentDetail.DetailMode, Level);
+        Requested.EnvironmentDetail.DetailMode, DetailMode);
     Requested.CharacterDetail.SkeletalMeshLODBias = Max(
-        Requested.CharacterDetail.SkeletalMeshLODBias, 3 - Level);
+        Requested.CharacterDetail.SkeletalMeshLODBias, LodBias);
     Requested.CharacterDetail.KinematicUpdateDistFactorScale = FMax(
         Requested.CharacterDetail.KinematicUpdateDistFactorScale,
         KinematicScale);
     Requested.FX.ParticleLODBias = Max(
-        Requested.FX.ParticleLODBias, 3 - Level);
+        Requested.FX.ParticleLODBias, LodBias);
 }
 
-static function ApplyVram(out GFXSettings Requested, int Level)
+static function ApplyVram(out GFXSettings Requested, int Quality)
 {
     local int Bias;
     local int Anisotropy;
 
-    if (Level >= 3) return;
-    Bias = 3 - Level;
-    if (Level == 2) Anisotropy = 8;
-    else if (Level == 1) Anisotropy = 4;
-    else Anisotropy = 2;
+    if (Quality >= 100) return;
+    if (Quality >= 90)
+    {
+        Bias = 0;
+        Anisotropy = 8;
+    }
+    else if (Quality >= 80)
+    {
+        Bias = 1;
+        Anisotropy = 8;
+    }
+    else if (Quality >= 60)
+    {
+        Bias = 1;
+        Anisotropy = 4;
+    }
+    else if (Quality >= 40)
+    {
+        Bias = 2;
+        Anisotropy = 4;
+    }
+    else if (Quality >= 20)
+    {
+        Bias = 2;
+        Anisotropy = 2;
+    }
+    else
+    {
+        Bias = 3;
+        Anisotropy = 2;
+    }
     Requested.TextureResolution.CharacterBias = Max(
         Requested.TextureResolution.CharacterBias, Bias);
     Requested.TextureResolution.Weapon1stBias = Max(
@@ -91,65 +192,28 @@ static function ApplyVram(out GFXSettings Requested, int Level)
         Requested.TextureFiltering.MaxAnisotropy, Anisotropy);
 }
 
-static function ApplyRam(out GFXSettings Requested, int Level)
+static function ApplyRam(out GFXSettings Requested, int Quality)
 {
-    if (Level >= 3) return;
-    if (Level == 2)
-    {
-        Requested.FX.EmitterPoolScale = FMin(
-            Requested.FX.EmitterPoolScale, 1.0);
-        Requested.FX.ShellEjectLifetime = FMin(
-            Requested.FX.ShellEjectLifetime, 10.0);
-        Requested.FX.GoreFXLifetimeMultiplier = FMin(
-            Requested.FX.GoreFXLifetimeMultiplier, 1.0);
-        Requested.FX.MaxImpactEffectDecals = Min(
-            Requested.FX.MaxImpactEffectDecals, 20);
-        Requested.FX.MaxExplosionDecals = Min(
-            Requested.FX.MaxExplosionDecals, 15);
-        Requested.FX.MaxBloodEffects = Min(
-            Requested.FX.MaxBloodEffects, 25);
-        Requested.FX.MaxGoreEffects = Min(
-            Requested.FX.MaxGoreEffects, 10);
-        Requested.FX.MaxPersistentSplatsPerFrame = Min(
-            Requested.FX.MaxPersistentSplatsPerFrame, 75);
-        return;
-    }
-    if (Level == 1)
-    {
-        Requested.FX.EmitterPoolScale = FMin(
-            Requested.FX.EmitterPoolScale, 0.5);
-        Requested.FX.ShellEjectLifetime = FMin(
-            Requested.FX.ShellEjectLifetime, 5.0);
-        Requested.FX.GoreFXLifetimeMultiplier = FMin(
-            Requested.FX.GoreFXLifetimeMultiplier, 0.75);
-        Requested.FX.MaxImpactEffectDecals = Min(
-            Requested.FX.MaxImpactEffectDecals, 15);
-        Requested.FX.MaxExplosionDecals = Min(
-            Requested.FX.MaxExplosionDecals, 12);
-        Requested.FX.MaxBloodEffects = Min(
-            Requested.FX.MaxBloodEffects, 15);
-        Requested.FX.MaxGoreEffects = Min(
-            Requested.FX.MaxGoreEffects, 8);
-        Requested.FX.MaxPersistentSplatsPerFrame = Min(
-            Requested.FX.MaxPersistentSplatsPerFrame, 50);
-        return;
-    }
+    if (Quality >= 100) return;
     Requested.FX.EmitterPoolScale = FMin(
-        Requested.FX.EmitterPoolScale, 0.25);
+        Requested.FX.EmitterPoolScale,
+        FMax(0.25, float(Quality) / 100.0));
     Requested.FX.ShellEjectLifetime = FMin(
-        Requested.FX.ShellEjectLifetime, 2.0);
+        Requested.FX.ShellEjectLifetime,
+        FMax(2.0, float(Quality) / 5.0));
     Requested.FX.GoreFXLifetimeMultiplier = FMin(
-        Requested.FX.GoreFXLifetimeMultiplier, 0.5);
+        Requested.FX.GoreFXLifetimeMultiplier,
+        FMax(0.5, float(Quality) / 100.0));
     Requested.FX.MaxImpactEffectDecals = Min(
-        Requested.FX.MaxImpactEffectDecals, 8);
+        Requested.FX.MaxImpactEffectDecals, Max(8, Quality / 4));
     Requested.FX.MaxExplosionDecals = Min(
-        Requested.FX.MaxExplosionDecals, 8);
+        Requested.FX.MaxExplosionDecals, Max(8, Quality / 6));
     Requested.FX.MaxBloodEffects = Min(
-        Requested.FX.MaxBloodEffects, 12);
+        Requested.FX.MaxBloodEffects, Max(12, Quality / 3));
     Requested.FX.MaxGoreEffects = Min(
-        Requested.FX.MaxGoreEffects, 8);
+        Requested.FX.MaxGoreEffects, Max(8, Quality / 8));
     Requested.FX.MaxPersistentSplatsPerFrame = Min(
-        Requested.FX.MaxPersistentSplatsPerFrame, 25);
+        Requested.FX.MaxPersistentSplatsPerFrame, Max(25, Quality));
 }
 
 static function CaptureOriginal(
@@ -196,10 +260,10 @@ static function CaptureOriginal(
     Snapshot.OriginalMaxGoreEffects = Current.FX.MaxGoreEffects;
     Snapshot.OriginalMaxPersistentSplatsPerFrame =
         Current.FX.MaxPersistentSplatsPerFrame;
-    Snapshot.GpuLevel = 3;
-    Snapshot.CpuLevel = 3;
-    Snapshot.VramLevel = 3;
-    Snapshot.RamLevel = 3;
+    Snapshot.GpuQuality = 100;
+    Snapshot.CpuQuality = 100;
+    Snapshot.VramQuality = 100;
+    Snapshot.RamQuality = 100;
     Snapshot.bOriginalCaptured = true;
 }
 
@@ -312,66 +376,66 @@ static function bool ReadbackMatches(
 }
 
 static function bool ApplyResource(
-    KF2OptimizerAdaptiveGraphicsState Snapshot, string Resource, int Level)
+    KF2OptimizerAdaptiveGraphicsState Snapshot, string Resource, int Quality)
 {
     local GFXSettings Current;
     local GFXSettings Requested;
     local GFXSettings Observed;
-    local int PreviousGpuLevel;
-    local int PreviousCpuLevel;
-    local int PreviousVramLevel;
-    local int PreviousRamLevel;
+    local int PreviousGpuQuality;
+    local int PreviousCpuQuality;
+    local int PreviousVramQuality;
+    local int PreviousRamQuality;
 
-    if (Snapshot == None || Level < 0 || Level > 3) return false;
+    if (Snapshot == None || Quality < 10 || Quality > 100) return false;
     GetCurrentGFXSettings(Current);
     if (!Snapshot.bOriginalCaptured) CaptureOriginal(Snapshot, Current);
-    PreviousGpuLevel = Snapshot.GpuLevel;
-    PreviousCpuLevel = Snapshot.CpuLevel;
-    PreviousVramLevel = Snapshot.VramLevel;
-    PreviousRamLevel = Snapshot.RamLevel;
+    PreviousGpuQuality = Snapshot.GpuQuality;
+    PreviousCpuQuality = Snapshot.CpuQuality;
+    PreviousVramQuality = Snapshot.VramQuality;
+    PreviousRamQuality = Snapshot.RamQuality;
 
     if (Resource ~= "recover")
     {
         // Recovery must never lower a resource group that was not degraded.
-        Snapshot.GpuLevel = Max(Snapshot.GpuLevel, Level);
-        Snapshot.CpuLevel = Max(Snapshot.CpuLevel, Level);
-        Snapshot.VramLevel = Max(Snapshot.VramLevel, Level);
-        Snapshot.RamLevel = Max(Snapshot.RamLevel, Level);
+        Snapshot.GpuQuality = Max(Snapshot.GpuQuality, Quality);
+        Snapshot.CpuQuality = Max(Snapshot.CpuQuality, Quality);
+        Snapshot.VramQuality = Max(Snapshot.VramQuality, Quality);
+        Snapshot.RamQuality = Max(Snapshot.RamQuality, Quality);
     }
-    else if (Resource ~= "gpu") Snapshot.GpuLevel = Level;
-    else if (Resource ~= "cpu") Snapshot.CpuLevel = Level;
-    else if (Resource ~= "vram") Snapshot.VramLevel = Level;
-    else if (Resource ~= "ram") Snapshot.RamLevel = Level;
+    else if (Resource ~= "gpu") Snapshot.GpuQuality = Quality;
+    else if (Resource ~= "cpu") Snapshot.CpuQuality = Quality;
+    else if (Resource ~= "vram") Snapshot.VramQuality = Quality;
+    else if (Resource ~= "ram") Snapshot.RamQuality = Quality;
     else if (Resource ~= "mixed")
     {
-        Snapshot.GpuLevel = Level;
-        Snapshot.CpuLevel = Level;
-        Snapshot.VramLevel = Level;
-        Snapshot.RamLevel = Level;
+        Snapshot.GpuQuality = Quality;
+        Snapshot.CpuQuality = Quality;
+        Snapshot.VramQuality = Quality;
+        Snapshot.RamQuality = Quality;
     }
     else return false;
 
     Requested = Current;
     RestoreOwnedSettings(Snapshot, Requested);
-    ApplyGpu(Requested, Snapshot.GpuLevel);
-    ApplyCpu(Requested, Snapshot.CpuLevel);
-    ApplyVram(Requested, Snapshot.VramLevel);
-    ApplyRam(Requested, Snapshot.RamLevel);
+    ApplyGpu(Requested, Snapshot.GpuQuality);
+    ApplyCpu(Requested, Snapshot.CpuQuality);
+    ApplyVram(Requested, Snapshot.VramQuality);
+    ApplyRam(Requested, Snapshot.RamQuality);
     SetNativeSettings(Requested);
     SetScriptSettings(Requested);
     GetCurrentGFXSettings(Observed);
     if (ReadbackMatches(Observed, Requested)) return true;
 
-    Snapshot.GpuLevel = PreviousGpuLevel;
-    Snapshot.CpuLevel = PreviousCpuLevel;
-    Snapshot.VramLevel = PreviousVramLevel;
-    Snapshot.RamLevel = PreviousRamLevel;
+    Snapshot.GpuQuality = PreviousGpuQuality;
+    Snapshot.CpuQuality = PreviousCpuQuality;
+    Snapshot.VramQuality = PreviousVramQuality;
+    Snapshot.RamQuality = PreviousRamQuality;
     Requested = Observed;
     RestoreOwnedSettings(Snapshot, Requested);
-    ApplyGpu(Requested, Snapshot.GpuLevel);
-    ApplyCpu(Requested, Snapshot.CpuLevel);
-    ApplyVram(Requested, Snapshot.VramLevel);
-    ApplyRam(Requested, Snapshot.RamLevel);
+    ApplyGpu(Requested, Snapshot.GpuQuality);
+    ApplyCpu(Requested, Snapshot.CpuQuality);
+    ApplyVram(Requested, Snapshot.VramQuality);
+    ApplyRam(Requested, Snapshot.RamQuality);
     SetNativeSettings(Requested);
     SetScriptSettings(Requested);
     GetCurrentGFXSettings(Observed);
@@ -400,10 +464,10 @@ static function bool RestoreOriginal(KF2OptimizerAdaptiveGraphicsState Snapshot)
     SetScriptSettings(Requested);
     GetCurrentGFXSettings(Observed);
     if (!ReadbackMatches(Observed, Requested)) return false;
-    Snapshot.GpuLevel = 3;
-    Snapshot.CpuLevel = 3;
-    Snapshot.VramLevel = 3;
-    Snapshot.RamLevel = 3;
+    Snapshot.GpuQuality = 100;
+    Snapshot.CpuQuality = 100;
+    Snapshot.VramQuality = 100;
+    Snapshot.RamQuality = 100;
     Snapshot.bOriginalCaptured = false;
     return true;
 }

@@ -183,7 +183,7 @@ void UiRuntime::update_adaptive_controller(
         frame,
         {.current_quality = current_quality,
          .minimum_quality = optimizer_settings.adaptive_minimum_quality,
-         .user_max_dead_bodies = optimizer_settings.corpse_limit,
+         .user_max_dead_bodies = effective_corpse_limit(),
          .current_map = adaptive_map,
          .map_generation = adaptive_map_generation,
          .last_telemetry_sample = adaptive_telemetry_sample,
@@ -193,11 +193,29 @@ void UiRuntime::update_adaptive_controller(
     adaptive_map_generation = sample_build.map_generation;
     adaptive_telemetry_sample = sample_build.telemetry_sample;
     const auto& sample = sample_build.sample;
-    if (sample.map_changed && present_source) {
+    if (!adaptive_provider_confirmed &&
+        sample.capabilities.corpse_telemetry ==
+            optimizer::AdaptiveCapabilityState::available) {
+        adaptive_provider_confirmed = true;
+        events->append({0, diagnostics::Severity::info,
+            "GAMEPLAY_PROVIDER_CONFIRMED",
+            L"KF2 runtime telemetry confirmed the protected Published provider and exposed its current capabilities",
+            L"game"});
+    }
+    if (requires_fresh_frame_window(sample_build) && present_source) {
         present_source->reset_statistics();
+        adaptive_governor.reset();
+        adaptive_decision = {};
+        events->append({0, diagnostics::Severity::info,
+            "ADAPTIVE_FRAME_WINDOW_RESET",
+            L"Adaptive discarded pre-map and loading-frame statistics and is collecting a fresh gameplay window",
+            L"optimizer"});
+        return;
     }
 
-    const auto policy = adaptive_policy_from(optimizer_settings);
+    auto policy = adaptive_policy_from(optimizer_settings);
+    policy.target_fps = effective_target_fps();
+    policy.quality_change_budget = effective_quality_change_budget();
     const auto controller_started_ns = monotonic_ns();
     adaptive_decision = adaptive_governor.evaluate(
         policy, sample, now_ns, adaptive_lock_cache);
@@ -298,6 +316,11 @@ void UiRuntime::update_adaptive_controller(
                 optimizer_settings.adaptive_minimum_quality,
             .maximum_quality =
                 optimizer_settings.adaptive_maximum_quality,
+            .quality_change_budget = effective_quality_change_budget(),
+            .current_frame_pressure =
+                adaptive_decision.current_frame_pressure,
+            .current_resource_pressure =
+                adaptive_decision.current_resource_pressure,
             .recovery_eligible =
                 adaptive_decision.quality_recovery_eligible,
             .active_gameplay = active_gameplay,
@@ -523,7 +546,7 @@ void UiRuntime::update_adaptive_controller(
     if (decision_changed && optimizer_settings.adaptive_logging) {
         std::wostringstream decision_log;
         decision_log << L"State=" << status.adaptive_state
-                     << L"; target=" << optimizer_settings.target_fps
+                     << L"; target=" << effective_target_fps()
                      << L" FPS; bands_ms="
                      << adaptive_decision.warning_frame_time_ms << L"/"
                      << adaptive_decision.corrective_frame_time_ms << L"/"
@@ -558,6 +581,12 @@ void UiRuntime::update_adaptive_controller(
         decision_log << L"; CPU=";
         if (frame.evidence.cpu_percent) {
             decision_log << *frame.evidence.cpu_percent << L"%";
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; systemCPU=";
+        if (frame.evidence.system_cpu_percent) {
+            decision_log << *frame.evidence.system_cpu_percent << L"%";
         } else {
             decision_log << L"NOT_AVAILABLE";
         }
@@ -611,6 +640,24 @@ void UiRuntime::update_adaptive_controller(
             }
             return L"UNKNOWN";
         }();
+        const auto resource_scope = [&]() -> const wchar_t* {
+            using optimizer::ResourceKind;
+            switch (adaptive_decision.resources.primary) {
+                case ResourceKind::cpu:
+                    return adaptive_decision.resources.shared_cpu_pressure
+                        ? L"SHARED" : L"KF2";
+                case ResourceKind::gpu:
+                    return adaptive_decision.resources.shared_gpu_pressure
+                        ? L"SHARED" : L"KF2";
+                case ResourceKind::vram:
+                    return L"ADAPTER";
+                case ResourceKind::ram:
+                    return L"SYSTEM";
+                case ResourceKind::unknown:
+                    return L"UNKNOWN";
+            }
+            return L"UNKNOWN";
+        }();
         decision_log << L"; resourcePressure=" << std::setprecision(0)
                      << L"CPU:"
                      << adaptive_decision.resources.cpu.smoothed * 100.0
@@ -621,6 +668,7 @@ void UiRuntime::update_adaptive_controller(
                      << L"%,RAM:"
                      << adaptive_decision.resources.ram.smoothed * 100.0
                      << L"%; resourcePrimary=" << primary_resource
+                     << L"; resourceScope=" << resource_scope
                      << L"; resourceConfidence="
                      << adaptive_decision.resources.primary_confidence * 100.0
                      << L"%; frameDeficitMs=" << std::setprecision(2)
@@ -634,7 +682,7 @@ void UiRuntime::update_adaptive_controller(
                      << L"; confidence="
                      << status.adaptive_confidence_percent << L"%"
                      << L"; action=" << status.adaptive_action
-                     << L"; corpseUserMax=" << optimizer_settings.corpse_limit
+                     << L"; corpseUserMax=" << effective_corpse_limit()
                      << L"; corpseRuntime=";
         if (status.adaptive_runtime_corpse_limit) {
             decision_log << *status.adaptive_runtime_corpse_limit;

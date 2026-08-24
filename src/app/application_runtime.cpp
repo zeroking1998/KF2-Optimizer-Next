@@ -75,6 +75,7 @@ Result<config::Settings> load_or_create_settings(
                 bytes.find("manual_gore_effect_limit=") != std::string::npos ||
                 bytes.find("adaptive_enabled=") != std::string::npos ||
                 bytes.find("adaptive_online_allowed=") != std::string::npos ||
+                bytes.find("adaptive_shadow_mode=") != std::string::npos ||
                 parsed.value().target_fps_migrated ||
                 parsed.value().adaptive_quality_range_migrated;
             if (canonicalization_needed) {
@@ -452,7 +453,8 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
                 game::find_running_game_process(installation->executable).has_value();
             const auto telemetry_recovered =
                 game::recover_offline_telemetry_lab(
-                    installation->config_root, state_root, game_running);
+                    installation->config_root,
+                    state_root, game_running);
             if (!telemetry_recovered.has_value()) {
                 event_log.append({0, diagnostics::Severity::error,
                     "OFFLINE_TELEMETRY_RECOVERY_BLOCKED",
@@ -461,7 +463,7 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
             } else if (telemetry_recovered.value().cleaned) {
                 event_log.append({0, diagnostics::Severity::warning,
                     "OFFLINE_TELEMETRY_RECOVERED",
-                    L"Interrupted offline telemetry package was hash-verified and removed",
+                    L"Stale optimizer-owned offline telemetry package was verified and removed",
                     L"game"});
             } else if (telemetry_recovered.value().active) {
                 event_log.append({0, diagnostics::Severity::info,

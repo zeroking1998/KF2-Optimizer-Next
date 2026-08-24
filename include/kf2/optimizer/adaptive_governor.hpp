@@ -118,6 +118,7 @@ struct AdaptiveSample {
     std::uint64_t stutter_count{0};
 
     std::optional<double> cpu_percent;
+    std::optional<double> system_cpu_percent;
     std::optional<double> critical_core_percent;
     std::optional<double> effective_core_usage;
     std::optional<double> dominant_thread_share_percent;
@@ -230,6 +231,8 @@ struct AdaptiveDecision {
     double drop_risk{0.0};
     double quality_score{100.0};
     double headroom{0.0};
+    bool current_frame_pressure{false};
+    bool current_resource_pressure{false};
     bool quality_recovery_eligible{false};
     bool rollback_available{false};
     bool target_unreachable{false};

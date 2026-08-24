@@ -14,6 +14,13 @@ invalid values or an app crash immediately preserve the game's original argument
 Particle counts and capacity remain telemetry only; they do not imply a writable
 particle-budget, spawn, lifetime or fluid/non-fluid actuator.
 
+KF2's shipped FleX solver is CUDA/GPU based; the optimizer does not claim or
+provide a CPU solver. CPU-side submission, transfer and synchronization can still
+become the measured frame bottleneck. Therefore adaptive FleX substep control may
+respond to confirmed CPU, GPU or VRAM pressure, but only while current frame
+pressure and live FleX readback are both present. RAM pressure alone never selects
+the FleX actuator.
+
 `flexUpdateSolver(solver, deltaTime, substeps, timers)` contains no semantic label
 for a living enemy, an active corpse or an inactive corpse. The old GitHub code
 also tracked only opaque solver pointers; it did not prove such a classification.

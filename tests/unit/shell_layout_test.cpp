@@ -273,6 +273,22 @@ int main() {
           std::wstring::npos);
     CHECK(node(home, "status")->text.find(L"Maximum corpses 20") !=
           std::wstring::npos);
+
+    home_status.active_target_fps = 240;
+    home_status.active_corpse_limit = 2000;
+    model.set_status(home_status);
+    const auto staged_target_home = layout_shell(model, 1440, 900);
+    CHECK(node(staged_target_home, "status")->text.find(
+              L"Target 240 FPS") != std::wstring::npos);
+    CHECK(node(staged_target_home, "status")->text.find(
+              L"60 next start") != std::wstring::npos);
+    CHECK(node(staged_target_home, "status")->text.find(
+              L"Maximum corpses 2000") != std::wstring::npos);
+    CHECK(node(staged_target_home, "status")->text.find(
+              L"20 next start") != std::wstring::npos);
+    home_status.active_target_fps.reset();
+    home_status.active_corpse_limit.reset();
+    model.set_status(home_status);
     CHECK(node(home, "dashboard-updates-installed")->text.find(
               L"No newer version available") != std::wstring::npos);
     CHECK(action(home, "settings-mode-manual") == nullptr);

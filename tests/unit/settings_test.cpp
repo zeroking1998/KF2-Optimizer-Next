@@ -99,11 +99,15 @@ int main() {
         "schema_version=1\noptimizer_mode=adaptive\n"
         "adaptive_aggressiveness=aggressive\n"
         "adaptive_minimum_quality=55\nadaptive_maximum_quality=95\n"
-        "adaptive_quality_change_budget=3\nadaptive_headroom_percent=12\n");
+        "adaptive_quality_change_budget=3\nadaptive_headroom_percent=12\n"
+        "adaptive_shadow_mode=true\n");
     CHECK(adaptive.has_value());
     CHECK(adaptive.value().adaptive_aggressiveness == "aggressive");
     CHECK(adaptive.value().adaptive_minimum_quality == 55);
     CHECK(adaptive.value().adaptive_maximum_quality == 95);
+    CHECK(!adaptive.value().adaptive_shadow_mode);
+    CHECK(serialize_settings(adaptive.value()).find(
+              "adaptive_shadow_mode") == std::string::npos);
     const auto migrated_quality_range = parse_settings(
         "schema_version=1\nadaptive_minimum_quality=70\n"
         "adaptive_maximum_quality=100\n");
@@ -194,7 +198,6 @@ int main() {
           "adaptive_emergency_enabled=true\n"
           "adaptive_quality_recovery_enabled=true\n"
           "adaptive_manual_locks_enabled=true\n"
-          "adaptive_shadow_mode=true\n"
           "adaptive_calibration_enabled=true\nadaptive_logging=true\n"
           "overlay_position=top_right\n"
           "overlay_scale_percent=100\n"

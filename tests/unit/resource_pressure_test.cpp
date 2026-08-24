@@ -19,6 +19,7 @@ ResourcePressureInput healthy(std::uint64_t now) {
         .frame_time_ms = 15.5,
         .p95_frame_time_ms = 16.0,
         .process_cpu_percent = 35.0,
+        .system_cpu_percent = 42.0,
         .critical_thread_percent = 45.0,
         .effective_core_usage = 3.0,
         .affinity_logical_processors = 16,
@@ -67,6 +68,28 @@ int main() {
         external_gpu_input);
     CHECK(external_gpu.gpu.raw <= 0.65);
     CHECK(external_gpu.primary != ResourceKind::gpu);
+
+    ResourcePressureEstimator shared_gpu_estimator;
+    auto shared_gpu_input = external_gpu_input;
+    shared_gpu_input.p95_frame_time_ms = 24.0;
+    const auto shared_gpu = shared_gpu_estimator.evaluate(shared_gpu_input);
+    CHECK(shared_gpu.primary == ResourceKind::gpu);
+    CHECK(shared_gpu.gpu.raw > 0.95);
+
+    ResourcePressureEstimator external_cpu_estimator;
+    auto external_cpu_input = healthy(start);
+    external_cpu_input.system_cpu_percent = 98.0;
+    const auto external_cpu = external_cpu_estimator.evaluate(
+        external_cpu_input);
+    CHECK(external_cpu.cpu.raw <= 0.65);
+    CHECK(external_cpu.primary != ResourceKind::cpu);
+
+    ResourcePressureEstimator shared_cpu_estimator;
+    auto shared_cpu_input = external_cpu_input;
+    shared_cpu_input.p95_frame_time_ms = 24.0;
+    const auto shared_cpu = shared_cpu_estimator.evaluate(shared_cpu_input);
+    CHECK(shared_cpu.primary == ResourceKind::cpu);
+    CHECK(shared_cpu.cpu.raw > 0.95);
 
     ResourcePressureEstimator game_gpu_estimator;
     auto game_gpu_input = healthy(start);
@@ -132,7 +155,21 @@ int main() {
     missing.process_gpu_percent.reset();
     missing.adapter_gpu_percent.reset();
     const auto incomplete = missing_estimator.evaluate(missing);
-    CHECK(!incomplete.recovery_safe);
+    CHECK(incomplete.recovery_safe);
+
+    ResourcePressureEstimator insufficient_estimator;
+    auto insufficient = healthy(start);
+    insufficient.process_gpu_percent.reset();
+    insufficient.adapter_gpu_percent.reset();
+    insufficient.vram_used_bytes.reset();
+    insufficient.vram_budget_bytes.reset();
+    insufficient.ram_used_bytes.reset();
+    insufficient.ram_budget_bytes.reset();
+    insufficient.commit_used_bytes.reset();
+    insufficient.commit_budget_bytes.reset();
+    insufficient.process_private_bytes.reset();
+    insufficient.paging_pressure.reset();
+    CHECK(!insufficient_estimator.evaluate(insufficient).recovery_safe);
 
     CHECK(std::string_view{resource_kind_name(ResourceKind::vram)} == "vram");
     CHECK(std::string_view{pressure_trend_name(PressureTrend::rising)} ==

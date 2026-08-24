@@ -154,6 +154,21 @@ std::optional<double> calculate_cpu_percent(CpuTimes previous, CpuTimes current)
     return std::clamp(process * 100.0 / system, 0.0, 100.0);
 }
 
+std::optional<double> calculate_system_cpu_percent(
+    CpuTimes previous, CpuTimes current) {
+    if (current.system_ticks <= previous.system_ticks ||
+        current.idle_ticks < previous.idle_ticks) {
+        return std::nullopt;
+    }
+    const auto total = current.system_ticks - previous.system_ticks;
+    const auto idle = current.idle_ticks - previous.idle_ticks;
+    if (idle > total) return std::nullopt;
+    return std::clamp(
+        static_cast<double>(total - idle) * 100.0 /
+            static_cast<double>(total),
+        0.0, 100.0);
+}
+
 std::optional<double> calculate_thread_cpu_percent(
     std::uint64_t previous_thread_ticks,
     std::uint64_t current_thread_ticks,
@@ -200,9 +215,14 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
     if (!ok) return Result<ProcessMetrics>::failure(
         {ErrorCode::platform_failure, L"Process metric query failed", native});
     CpuTimes current{value(system_kernel) + value(system_user),
-                     value(process_kernel) + value(process_user)};
+                     value(process_kernel) + value(process_user),
+                     value(idle)};
     ProcessMetrics result;
-    if (previous_) result.cpu_percent = calculate_cpu_percent(*previous_, current);
+    if (previous_) {
+        result.cpu_percent = calculate_cpu_percent(*previous_, current);
+        result.system_cpu_percent =
+            calculate_system_cpu_percent(*previous_, current);
+    }
     previous_ = current;
 
     // Thread enumeration is deliberately throttled. It supplies the missing

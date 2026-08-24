@@ -48,7 +48,8 @@ int main() {
     constexpr std::string_view control_token =
         "0123456789abcdef0123456789abcdef";
     const auto telemetry_source = read_bytes(KF2_TELEMETRY_SOURCE);
-    const auto viewport_source = read_bytes(KF2_TELEMETRY_VIEWPORT_SOURCE);
+    const auto mutator_source = read_bytes(KF2_TELEMETRY_MUTATOR_SOURCE);
+    const auto interaction_source = read_bytes(KF2_TELEMETRY_INTERACTION_SOURCE);
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto connection_source = read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE);
     const auto graphics_source = read_bytes(KF2_ADAPTIVE_GRAPHICS_SOURCE);
@@ -57,9 +58,13 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find("KF2OPT_ADAPTIVE_QUALITY state=applied") !=
           std::string::npos);
-    CHECK(viewport_source.find(
+    CHECK(interaction_source.find(
         "class'KF2OptimizerAdaptiveControlListener'") != std::string::npos);
-    CHECK(viewport_source.find("var transient WorldInfo ActiveWorld") ==
+    CHECK(interaction_source.find("var transient WorldInfo ActiveWorld") ==
+          std::string::npos);
+    CHECK(mutator_source.find("InsertInteraction(CurrentInteraction)") !=
+          std::string::npos);
+    CHECK(mutator_source.find("WorldInfo.NetMode != NM_Standalone") !=
           std::string::npos);
     CHECK(listener_source.find("BindPort(0, false)") != std::string::npos);
     CHECK(listener_source.find("state=ready port=") != std::string::npos);
@@ -78,17 +83,24 @@ int main() {
           std::string::npos);
     CHECK(graphics_source.find("RestoreOwnedSettings") != std::string::npos);
     CHECK(graphics_source.find(
-        "Snapshot.GpuLevel = Max(Snapshot.GpuLevel, Level)") !=
+        "Snapshot.GpuQuality = Max(Snapshot.GpuQuality, Quality)") !=
           std::string::npos);
     CHECK(graphics_source.find(
-        "Snapshot.CpuLevel = Max(Snapshot.CpuLevel, Level)") !=
+        "Snapshot.CpuQuality = Max(Snapshot.CpuQuality, Quality)") !=
           std::string::npos);
     CHECK(graphics_source.find(
-        "Snapshot.VramLevel = Max(Snapshot.VramLevel, Level)") !=
+        "Snapshot.VramQuality = Max(Snapshot.VramQuality, Quality)") !=
           std::string::npos);
     CHECK(graphics_source.find(
-        "Snapshot.RamLevel = Max(Snapshot.RamLevel, Level)") !=
+        "Snapshot.RamQuality = Max(Snapshot.RamQuality, Quality)") !=
           std::string::npos);
+    CHECK(graphics_source.find("Quality >= 90") != std::string::npos);
+    CHECK(graphics_source.find("Quality <= 80") != std::string::npos);
+    CHECK(graphics_source.find(
+        "FMax(0.25, float(Quality) / 100.0)") != std::string::npos);
+    CHECK(telemetry_source.find("AdaptivePresetIndex") == std::string::npos);
+    CHECK(telemetry_source.find(" preset=") == std::string::npos);
+    CHECK(telemetry_source.find(" stage=") != std::string::npos);
     CHECK(telemetry_source.find(
         "Resource ~= \"recover\" || Quality >= 95") ==
           std::string::npos);
@@ -107,12 +119,12 @@ int main() {
         "var globalconfig int AdaptiveTargetFPS") != std::string::npos);
     CHECK(telemetry_source.find("ApplyAdaptiveTargetFPS") ==
           std::string::npos);
-    CHECK(viewport_source.find("t.MaxFPS") == std::string::npos);
-    CHECK(viewport_source.find("MaxSmoothedFrameRate") ==
+    CHECK(interaction_source.find("t.MaxFPS") == std::string::npos);
+    CHECK(interaction_source.find("MaxSmoothedFrameRate") ==
           std::string::npos);
-    CHECK(viewport_source.find("KF2OPT_FRAME_RATE") ==
+    CHECK(interaction_source.find("KF2OPT_FRAME_RATE") ==
           std::string::npos);
-    CHECK(viewport_source.find("KF2OPT_TARGET_FPS") ==
+    CHECK(interaction_source.find("KF2OPT_TARGET_FPS") ==
           std::string::npos);
     CHECK(telemetry_source.find(
         "var globalconfig int AdaptiveQualityChangeBudget") !=
@@ -120,6 +132,17 @@ int main() {
     CHECK(telemetry_source.find(
         "function int GetAdaptiveCorpseAttackScale()") !=
           std::string::npos);
+    CHECK(telemetry_source.find(
+        "function bool HasConfirmedAdaptivePerformancePressure()") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "if (!HasConfirmedAdaptivePerformancePressure())") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "PhysicsPressureLevel = AdaptiveCorpsePressureLevel > 0") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveGraphicsQuality = 100") != std::string::npos);
     CHECK(telemetry_source.find(
         "Step = Step * AttackScale") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -201,24 +224,32 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find(
         "RestoreAllAdaptiveCorpseLods()") != std::string::npos);
+    const auto lod_restore_threshold = telemetry_source.find(
+        "DistanceSquared < 810000.0");
+    const auto lod_apply_threshold = telemetry_source.find(
+        "DistanceSquared < 1000000.0");
+    CHECK(lod_restore_threshold != std::string::npos);
+    CHECK(lod_apply_threshold != std::string::npos);
+    CHECK(lod_restore_threshold < lod_apply_threshold);
     CHECK(telemetry_source.find(
-        "DistanceSquared < 640000.0") != std::string::npos);
-    CHECK(telemetry_source.find(
-        "KF2OPT_CORPSE_LOD state=active") != std::string::npos);
+        "KF2OPT_CORPSE_LOD state=applied") != std::string::npos);
     CHECK(telemetry_source.find(
         "SelectDistantAwakeMonsterCorpseForSleep") != std::string::npos);
     CHECK(telemetry_source.find(
-        "MinimumDistanceSquared = 12250000.0") != std::string::npos);
+        "MinimumDistanceSquared = 7840000.0") != std::string::npos);
     CHECK(telemetry_source.find(
-        "MinimumDistanceSquared = 6250000.0") != std::string::npos);
+        "MinimumDistanceSquared = 5290000.0") != std::string::npos);
     CHECK(telemetry_source.find(
-        "MinimumDistanceSquared = 3240000.0") != std::string::npos);
+        "MinimumDistanceSquared = 3610000.0") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveDistanceSleptCorpses.Length >=") ==
+          std::string::npos);
     CHECK(telemetry_source.find(
         "Candidate.Mesh.LastRenderTime >") != std::string::npos);
     CHECK(telemetry_source.find(
         "Candidate.Mesh.WakeRigidBody()") != std::string::npos);
     CHECK(telemetry_source.find(
-        "DistanceSquared >= 2250000.0") != std::string::npos);
+        "DistanceSquared >= 562500.0") != std::string::npos);
     CHECK(telemetry_source.find(
         "AwakeTotal = CountAwakeMonsterCorpses(GoreManager)") !=
           std::string::npos);
@@ -237,8 +268,8 @@ int main() {
     CHECK(telemetry_source.find(
         "function int GetAdaptiveCorpseDistanceUnits(KFPawn Candidate)") !=
           std::string::npos);
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 3);
-    CHECK(count_occurrences(telemetry_source, "distance_units=") == 3);
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 4);
+    CHECK(count_occurrences(telemetry_source, "distance_units=") == 4);
     CHECK(telemetry_source.find(
         "var globalconfig bool bAdaptiveCorpseDebugMarkers") !=
           std::string::npos);
@@ -252,19 +283,17 @@ int main() {
     CHECK(telemetry_source.find(
         "GetAdaptiveCorpseActionId(Candidate)") != std::string::npos);
     CHECK(count_occurrences(
-        telemetry_source, "RegisterAdaptiveCorpseDebugMarker(Candidate,") == 3);
-    CHECK(viewport_source.find("event PostRender(Canvas MarkerCanvas)") !=
+        telemetry_source, "RegisterAdaptiveCorpseDebugMarker(Candidate,") == 4);
+    CHECK(interaction_source.find("event PostRender(Canvas MarkerCanvas)") !=
           std::string::npos);
-    CHECK(viewport_source.find("Super.PostRender(MarkerCanvas)") !=
-          std::string::npos);
-    CHECK(viewport_source.find(
+    CHECK(interaction_source.find(
         "var transient KF2OptimizerTelemetryProbe ActiveProbe") ==
           std::string::npos);
-    CHECK(viewport_source.find("var transient WorldInfo ActiveWorld") ==
+    CHECK(interaction_source.find("var transient WorldInfo ActiveWorld") ==
           std::string::npos);
-    CHECK(viewport_source.find(
+    CHECK(interaction_source.find(
         "foreach CurrentWorld.DynamicActors(") != std::string::npos);
-    CHECK(viewport_source.find(
+    CHECK(interaction_source.find(
         "CurrentProbe.DrawAdaptiveCorpseDebugMarkers(MarkerCanvas)") !=
           std::string::npos);
     CHECK(telemetry_source.find("AdaptiveDistancePhysicsSleeps % 4") ==
@@ -285,7 +314,7 @@ int main() {
     const auto zed_time_guard = telemetry_source.find(
         "GameInfo.IsZedTimeActive()", stagger_start);
     const auto wake_stage = telemetry_source.find(
-        "WakeOneNearAdaptiveDistanceSleptCorpse()", stagger_start);
+        "WakeNearAdaptiveDistanceSleptCorpses()", stagger_start);
     const auto distant_sleep_stage = telemetry_source.find(
         "SleepOneDistantMonsterCorpse(", stagger_start);
     CHECK(stagger_start != std::string::npos);
@@ -296,8 +325,11 @@ int main() {
     CHECK(zed_time_guard < distant_sleep_stage);
     const auto frame_only_action_gate = telemetry_source.find(
         "if (AdaptiveCorpsePressureLevel <= 0)", stagger_start);
-    CHECK(frame_only_action_gate != std::string::npos);
-    CHECK(distant_sleep_stage < frame_only_action_gate);
+    CHECK(frame_only_action_gate == std::string::npos);
+    CHECK(telemetry_source.find(
+        "PhysicsPressureLevel = Max(", stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "RagdollPressureLevel = Max(", stagger_start) != std::string::npos);
 
     const auto cleanup_start = telemetry_source.find(
         "function StaggerCorpseCleanup()");
@@ -311,9 +343,9 @@ int main() {
     CHECK(cleanup_zed_time_guard < cleanup_delete);
 
     const auto wake_function = telemetry_source.find(
-        "function bool WakeOneNearAdaptiveDistanceSleptCorpse()");
+        "function int WakeNearAdaptiveDistanceSleptCorpses()");
     const auto wake_threshold = telemetry_source.find(
-        "DistanceSquared >= 2250000.0", wake_function);
+        "DistanceSquared >= 562500.0", wake_function);
     const auto wake_call = telemetry_source.find(
         "Candidate.Mesh.WakeRigidBody()", wake_function);
     const auto wake_readback = telemetry_source.find(
@@ -332,6 +364,39 @@ int main() {
     CHECK(wake_call < wake_readback);
     CHECK(wake_readback < wake_tracking_release);
     CHECK(wake_tracking_release < wake_receipt);
+    CHECK(telemetry_source.find(
+        "function int WakeNearAdaptiveDistanceSleptCorpses()") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "WakeCount < Max(3, AttackScale)", stagger_start) ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "WakeNearAdaptiveDistanceSleptCorpses();", stagger_start) !=
+          std::string::npos);
+
+    const auto lod_selector = telemetry_source.find(
+        "function KFPawn SelectVisibleMonsterCorpseForLod(");
+    const auto lod_apply = telemetry_source.find(
+        "function bool ApplyOneAdaptiveCorpseLod(", lod_selector);
+    CHECK(lod_selector != std::string::npos);
+    CHECK(lod_apply != std::string::npos);
+    CHECK(telemetry_source.substr(
+        lod_selector, lod_apply - lod_selector).find(
+            "Candidate.Mesh.RigidBodyIsAwake()") == std::string::npos);
+    CHECK(telemetry_source.substr(
+        lod_selector, lod_apply - lod_selector).find(
+            "FindAdaptiveDistanceSleptCorpse(Candidate)") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "MaximumMinLod = Candidate.Mesh.SkeletalMesh.LODInfo.Length - 1",
+        lod_selector) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveCorpseLodCorpses.Length >=", lod_apply) ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "CandidateTarget = 4", lod_selector) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "readback=verified", lod_apply) != std::string::npos);
 
     const auto ragdoll_selector = telemetry_source.find(
         "function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(");
@@ -398,6 +463,15 @@ int main() {
     CHECK(ragdoll_sleep_readback < ragdoll_sleep_register);
     CHECK(ragdoll_sleep_register < ragdoll_counter);
     CHECK(ragdoll_counter < ragdoll_receipt);
+    CHECK(telemetry_source.find(
+        "MinimumAge = SeverePressure ? 0.75 : 1.5", ragdoll_selector) !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "VisibleAwake >= 3", stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "VisibleAwake >= 6", stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "DesiredVisibleAwake = 2", stagger_start) != std::string::npos);
     CHECK(telemetry_source.find("Zed.SetHidden(") == std::string::npos);
     CHECK(telemetry_source.find("Zed.bHidden") == std::string::npos);
 
@@ -414,7 +488,11 @@ int main() {
         "MaxPlayers=6\r\n";
     write_bytes(game_ini, original);
     constexpr std::string_view original_engine =
-        "[Engine.Engine]\r\n"
+        "[URL]\r\n"
+        "LocalOptions=\r\n"
+        "\r\n[Core.System]\r\n"
+        "ScriptPaths=..\\..\\KFGame\\Script\r\n"
+        "\r\n[Engine.Engine]\r\n"
         "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n"
         "\r\n[Engine.GameEngine]\r\n"
         "ServerActors=IpDrv.WebServer\r\n"
@@ -430,13 +508,23 @@ int main() {
           std::string::npos);
     CHECK(changed.find("MaxPlayers=6\r\n") != std::string::npos);
     const auto changed_engine = read_bytes(engine_ini);
+    const auto published_runtime_path =
+        (root.parent_path() / L"Published" / L"BrewedPC")
+            .lexically_normal().string();
     CHECK(changed_engine.find("ServerActors=IpDrv.WebServer\r\n") !=
           std::string::npos);
     CHECK(changed_engine.find(
-        "GameViewportClientClassName=KF2OptimizerTelemetry.KF2OptimizerTelemetryViewport\r\n") !=
-        std::string::npos);
-    CHECK(changed_engine.find("KFGame.KFGameViewportClient") ==
+        "Package=KF2OptimizerTelemetry\r\n") == std::string::npos);
+    CHECK(changed_engine.find(
+        "ScriptPaths=..\\..\\KFGame\\Script\r\n") != std::string::npos);
+    CHECK(changed_engine.find(
+        "Paths=" + published_runtime_path + "\r\n") != std::string::npos);
+    CHECK(changed_engine.find(
+        "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n") !=
           std::string::npos);
+    CHECK(changed_engine.find(
+        "LocalOptions=?Mutator=KF2OptimizerTelemetry."
+        "KF2OptimizerTelemetryMutator\r\n") != std::string::npos);
     CHECK(changed_engine.find(
         "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\r\n") !=
           std::string::npos);
@@ -485,6 +573,13 @@ int main() {
     CHECK(adaptive_engine.find(
         "AdaptiveControlToken=0123456789abcdef0123456789abcdef\r\n") !=
           std::string::npos);
+    const auto observed_policy =
+        kf2::game::read_offline_adaptive_session_policy(root);
+    CHECK(observed_policy.has_value());
+    CHECK(observed_policy.value().has_value());
+    CHECK(observed_policy.value()->target_fps == 137);
+    CHECK(observed_policy.value()->corpse_maximum == 350);
+    CHECK(observed_policy.value()->quality_change_budget == 2);
     const auto adaptive_unchanged =
         kf2::game::enable_offline_gameplay_logging(
             root, true, 350, 137, true, 2, control_token);
@@ -500,7 +595,19 @@ int main() {
     const auto cleaned_engine = read_bytes(engine_ini);
     CHECK(cleaned_engine.find(
         "GameViewportClientClassName=KFGame.KFGameViewportClient") !=
-        std::string::npos);
+          std::string::npos);
+    CHECK(cleaned_engine.find(
+        "ScriptPaths=..\\..\\KFGame\\Script") != std::string::npos);
+    CHECK(cleaned_engine.find("Paths=" + published_runtime_path) ==
+          std::string::npos);
+    CHECK(cleaned_engine.find("ServerActors=IpDrv.WebServer") !=
+          std::string::npos);
+    CHECK(cleaned_engine.find("KF2OptimizerTelemetryBootstrap") ==
+          std::string::npos);
+    CHECK(cleaned_engine.find("Package=KF2OptimizerTelemetry") ==
+          std::string::npos);
+    CHECK(cleaned_engine.find("KF2OptimizerTelemetryMutator") ==
+          std::string::npos);
     CHECK(cleaned_engine.find("[KF2OptimizerTelemetry.") ==
           std::string::npos);
     CHECK(cleaned_engine.find("AdaptiveControlToken=") == std::string::npos);
@@ -508,6 +615,55 @@ int main() {
         kf2::game::cleanup_stale_offline_gameplay_configuration(root, false);
     CHECK(already_clean.has_value());
     CHECK(!already_clean.value());
+
+    const std::string existing_local_options_engine =
+        "[URL]\r\n"
+        "LocalOptions=?Foo=Bar\r\n"
+        "\r\n[Core.System]\r\n"
+        "ScriptPaths=..\\..\\KFGame\\Script\r\n"
+        "\r\n[Engine.Engine]\r\n"
+        "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n";
+    write_bytes(engine_ini, existing_local_options_engine);
+    const auto existing_options_enabled =
+        kf2::game::enable_offline_gameplay_logging(root);
+    CHECK(existing_options_enabled.has_value());
+    CHECK(existing_options_enabled.value());
+    CHECK(read_bytes(engine_ini).find(
+        "LocalOptions=?Foo=Bar?Mutator=KF2OptimizerTelemetry."
+        "KF2OptimizerTelemetryMutator\r\n") != std::string::npos);
+    const auto existing_options_cleaned =
+        kf2::game::cleanup_stale_offline_gameplay_configuration(root, false);
+    CHECK(existing_options_cleaned.has_value());
+    CHECK(existing_options_cleaned.value());
+    CHECK(read_bytes(engine_ini).find(
+        "LocalOptions=?Foo=Bar\r\n") != std::string::npos);
+
+    const std::string foreign_mutator_engine =
+        "[URL]\r\n"
+        "LocalOptions=?Mutator=Example.Custom\r\n"
+        "\r\n[Core.System]\r\n"
+        "ScriptPaths=..\\..\\KFGame\\Script\r\n"
+        "\r\n[Engine.Engine]\r\n"
+        "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n";
+    write_bytes(engine_ini, foreign_mutator_engine);
+    CHECK(!kf2::game::enable_offline_gameplay_logging(root).has_value());
+    CHECK(read_bytes(engine_ini) == foreign_mutator_engine);
+
+    const std::string legacy_absolute_path_engine =
+        "[Core.System]\r\n"
+        "ScriptPaths=" +
+        (root.parent_path() / L"Published" / L"BrewedPC")
+            .lexically_normal().string() +
+        "\r\n[Engine.Engine]\r\n"
+        "GameViewportClientClassName=KF2OptimizerTelemetry."
+        "KF2OptimizerTelemetryViewport\r\n";
+    write_bytes(engine_ini, legacy_absolute_path_engine);
+    const auto legacy_path_cleaned =
+        kf2::game::cleanup_stale_offline_gameplay_configuration(root, false);
+    CHECK(legacy_path_cleaned.has_value());
+    CHECK(legacy_path_cleaned.value());
+    CHECK(read_bytes(engine_ini).find(
+        "ScriptPaths=..\\..\\KFGame\\Script") != std::string::npos);
 
     const std::string foreign_viewport_engine =
         "[Engine.Engine]\r\n"
@@ -535,6 +691,7 @@ int main() {
         "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\r\n"
         "AdaptiveTargetFPS=60\r\n";
     write_bytes(engine_ini, ambiguous_engine);
+    CHECK(!kf2::game::read_offline_adaptive_session_policy(root).has_value());
     CHECK(!kf2::game::cleanup_stale_offline_gameplay_configuration(
         root, false).has_value());
     CHECK(read_bytes(engine_ini) == ambiguous_engine);
@@ -550,6 +707,19 @@ int main() {
         "bAdaptiveCorpseDebugMarkers=Maybe\n");
     CHECK(!kf2::game::enable_offline_gameplay_logging(
         root, true, 350, 137, true, 1, control_token).has_value());
+    write_bytes(engine_ini, adaptive_engine);
+
+    write_bytes(engine_ini,
+        "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\n"
+        "AdaptiveTargetFPS=invalid\n");
+    CHECK(!kf2::game::read_offline_adaptive_session_policy(root).has_value());
+    write_bytes(engine_ini,
+        "[Engine.Engine]\n"
+        "GameViewportClientClassName=KFGame.KFGameViewportClient\n");
+    const auto missing_policy =
+        kf2::game::read_offline_adaptive_session_policy(root);
+    CHECK(missing_policy.has_value());
+    CHECK(!missing_policy.value().has_value());
     write_bytes(engine_ini, adaptive_engine);
 
     CHECK(!kf2::game::enable_offline_gameplay_logging(
@@ -583,11 +753,24 @@ int main() {
 
     write_bytes(game_ini,
         "[KFGameContent.KFGameInfo_Survival]\nMaxPlayers=6\n");
-    CHECK(!kf2::game::enable_offline_gameplay_logging(root).has_value());
+    const auto missing_ai_count =
+        kf2::game::enable_offline_gameplay_logging(root);
+    CHECK(missing_ai_count.has_value());
+    CHECK(missing_ai_count.value());
+    CHECK(read_bytes(game_ini).find(
+        "[KFGameContent.KFGameInfo_Survival]\n"
+        "MaxPlayers=6\n"
+        "bLogAICount=True\n") != std::string::npos);
 
     write_bytes(game_ini,
         "[Other]\nbLogAICount=False\n");
-    CHECK(!kf2::game::enable_offline_gameplay_logging(root).has_value());
+    const auto unrelated_ai_count =
+        kf2::game::enable_offline_gameplay_logging(root);
+    CHECK(unrelated_ai_count.has_value());
+    CHECK(unrelated_ai_count.value());
+    CHECK(read_bytes(game_ini).find(
+        "[KFGameContent.KFGameInfo_Survival]\n"
+        "bLogAICount=True\n") != std::string::npos);
 
     write_bytes(game_ini,
         "[KFGameContent.KFGameInfo_Survival]\n"

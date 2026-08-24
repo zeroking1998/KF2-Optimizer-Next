@@ -34,6 +34,12 @@ public:
     [[nodiscard]] ReplaceResult append_unique(std::wstring_view section,
                                               std::wstring_view key,
                                               std::wstring_view value);
+    // Removes one exact array-style value while preserving every unrelated
+    // value for the same key. Ambiguous duplicate sections or duplicate exact
+    // values are rejected without mutation.
+    [[nodiscard]] ReplaceResult remove_exact(std::wstring_view section,
+                                             std::wstring_view key,
+                                             std::wstring_view value);
     // Removes one unambiguous section, including its comments and assignments.
     // Duplicate section headers are rejected through shadowed_occurrences.
     [[nodiscard]] ReplaceResult remove_section(std::wstring_view section);

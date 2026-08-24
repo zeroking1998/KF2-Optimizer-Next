@@ -109,9 +109,10 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
     }
 
     runtime.detach_telemetry();
+    bool session_restored = true;
     if (runtime.session_config_snapshot) {
-        static_cast<void>(runtime.restore_protected_session_config(
-            L"KF2 closed"));
+        session_restored = runtime.restore_protected_session_config(
+            L"KF2 closed");
     } else if (runtime.installation) {
         const auto capped = runtime.synchronize_frame_rate_cap();
         if (!capped.has_value()) {
@@ -134,6 +135,10 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
         {0, diagnostics::Severity::info, "KF2_SESSION_ENDED",
          L"The bound KF2 process ended; session telemetry was finalized",
          L"game"});
+    if (session_restored) {
+        static_cast<void>(
+            runtime.rearm_automatic_external_launch_profile());
+    }
     runtime.invalidate();
     const SessionGateInput gate{
         .process_bound = true,
@@ -242,8 +247,10 @@ void UiRuntime::detach_telemetry() {
     adaptive_control_sequence = 0;
     adaptive_quality_last_dispatch_ns = 0;
     adaptive_runtime_quality = optimizer_settings.adaptive_maximum_quality;
+    adaptive_session_policy.reset();
     adaptive_profile_gate.reset();
     adaptive_gameplay_active = false;
+    adaptive_provider_confirmed = false;
     adaptive_overhead_breaches = 0;
     adaptive_overhead_frozen = false;
     adaptive_decision = {};
@@ -282,6 +289,8 @@ void UiRuntime::detach_telemetry() {
     status.live_gpu_percent.reset();
     status.live_active_corpses.reset();
     status.live_sleeping_corpses.reset();
+    status.active_target_fps.reset();
+    status.active_corpse_limit.reset();
     const auto launch_profile = optimizer::bound_adaptive_profile(
         stored_adaptive_profile(optimizer_settings),
         optimizer_settings.adaptive_minimum_quality,
@@ -324,6 +333,9 @@ void UiRuntime::update_overlay_scene_gate() {
     const auto last_write =
         (static_cast<std::uint64_t>(information.ftLastWriteTime.dwHighDateTime) << 32U) |
         information.ftLastWriteTime.dwLowDateTime;
+    const auto creation_time =
+        (static_cast<std::uint64_t>(information.ftCreationTime.dwHighDateTime) << 32U) |
+        information.ftCreationTime.dwLowDateTime;
     if (!game::game_log_belongs_to_process(
             last_write, game_process->process_start_id)) {
         return;
@@ -388,6 +400,8 @@ void UiRuntime::update_overlay_scene_gate() {
         overlay_scene_ready = true;
         game_log_startup_exited = false;
     } else if (!overlay_scene_ready &&
+               game::game_log_belongs_to_process(
+                   creation_time, game_process->process_start_id) &&
                game::game_log_reports_engine_exit(marker_input)) {
         game_log_startup_exited = true;
         if (!game_log_startup_exit_announced) {
@@ -457,6 +471,41 @@ void UiRuntime::try_attach_telemetry() {
                    : L"Waiting for app-started KF2 process")
             : L"Waiting for KF2 process";
         return;
+    }
+    const bool new_process = !game_process ||
+        game_process->pid != process.value().pid ||
+        game_process->process_start_id != process.value().process_start_id;
+    if (new_process) {
+        game::OfflineAdaptiveSessionPolicy active_policy{
+            optimizer_settings.corpse_limit,
+            optimizer_settings.target_fps,
+            optimizer_settings.adaptive_quality_change_budget};
+        const auto observed = game::read_offline_adaptive_session_policy(
+            installation->config_root);
+        if (observed.has_value() && observed.value()) {
+            active_policy = *observed.value();
+        } else if (!observed.has_value()) {
+            events->append({0, diagnostics::Severity::warning,
+                "ADAPTIVE_SESSION_POLICY_FALLBACK",
+                L"The protected provider policy could not be read; Adaptive bound the current saved values for this process: " +
+                    observed.error().message,
+                L"optimizer"});
+        }
+        adaptive_session_policy = active_policy;
+        auto status = model.status();
+        status.active_target_fps = active_policy.target_fps;
+        status.active_corpse_limit = active_policy.corpse_maximum;
+        model.set_status(std::move(status));
+        events->append({0, diagnostics::Severity::info,
+            "ADAPTIVE_SESSION_POLICY_BOUND",
+            L"KF2 process policy bound: target " +
+                std::to_wstring(active_policy.target_fps) +
+                L" FPS, maximum corpses " +
+                std::to_wstring(active_policy.corpse_maximum) +
+                L", quality-change budget " +
+                std::to_wstring(active_policy.quality_change_budget),
+            L"optimizer"});
+        invalidate();
     }
     // Bind the process before looking for a window. FleX exposes a
     // process-local channel and must work during splash, fullscreen and

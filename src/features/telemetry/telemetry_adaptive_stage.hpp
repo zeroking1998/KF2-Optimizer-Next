@@ -32,6 +32,11 @@ struct AdaptiveSampleBuildResult final {
     int telemetry_sample{0};
 };
 
+[[nodiscard]] inline bool requires_fresh_frame_window(
+    const AdaptiveSampleBuildResult& result) noexcept {
+    return result.sample.map_changed;
+}
+
 struct AdaptiveRuntimeControlInput final {
     optimizer::AdaptiveControllerState state{
         optimizer::AdaptiveControllerState::observing};
@@ -42,6 +47,9 @@ struct AdaptiveRuntimeControlInput final {
     int current_quality{100};
     int minimum_quality{10};
     int maximum_quality{100};
+    int quality_change_budget{2};
+    bool current_frame_pressure{false};
+    bool current_resource_pressure{false};
     bool recovery_eligible{false};
     bool active_gameplay{false};
     bool verified_offline{false};
@@ -57,13 +65,6 @@ struct AdaptiveRuntimeControlSelection final {
         game::AdaptiveResourceControl::mixed};
     int quality{100};
 };
-
-[[nodiscard]] inline int adaptive_runtime_quality_level(int quality) noexcept {
-    if (quality >= 88) return 3;
-    if (quality >= 63) return 2;
-    if (quality >= 38) return 1;
-    return 0;
-}
 
 [[nodiscard]] inline game::AdaptiveResourceControl adaptive_runtime_resource(
     optimizer::ResourceKind resource, double confidence) noexcept {
@@ -86,48 +87,58 @@ struct AdaptiveRuntimeControlSelection final {
 [[nodiscard]] inline std::optional<AdaptiveRuntimeControlSelection>
 select_adaptive_runtime_control(
     const AdaptiveRuntimeControlInput& input) noexcept {
-    constexpr std::uint64_t kMinimumDispatchIntervalNs = 2'000'000'000ULL;
     if (!input.active_gameplay || !input.verified_offline ||
         !input.bridge_available || input.zed_time_active || input.shadow_mode ||
         input.data_quality != optimizer::AdaptiveDataQuality::valid ||
         input.minimum_quality < 10 || input.maximum_quality > 100 ||
         input.minimum_quality > input.maximum_quality ||
+        input.quality_change_budget < 1 || input.quality_change_budget > 5 ||
         input.current_quality < input.minimum_quality ||
-        input.current_quality > input.maximum_quality || input.now_ns == 0 ||
-        (input.last_dispatch_ns != 0 &&
-         (input.now_ns < input.last_dispatch_ns ||
-          input.now_ns - input.last_dispatch_ns <
-              kMinimumDispatchIntervalNs))) {
+        input.current_quality > input.maximum_quality || input.now_ns == 0) {
         return std::nullopt;
     }
 
-    const int current_level = adaptive_runtime_quality_level(
-        input.current_quality);
     int desired = input.current_quality;
     bool recovery = false;
+    std::uint64_t minimum_dispatch_interval_ns = 0;
     if (input.state == optimizer::AdaptiveControllerState::emergency) {
-        const int target = current_level >= 3 ? 50 : 10;
-        desired = std::max(input.minimum_quality, target);
+        if (!input.current_frame_pressure &&
+            !input.current_resource_pressure) return std::nullopt;
+        const int step = std::clamp(
+            input.quality_change_budget * 8, 20, 40);
+        desired = std::max(
+            input.minimum_quality, input.current_quality - step);
+        minimum_dispatch_interval_ns = 500'000'000ULL;
     } else if (input.state ==
                optimizer::AdaptiveControllerState::intervention) {
-        constexpr int lower_tier[] = {10, 10, 50, 75};
-        desired = std::max(input.minimum_quality, lower_tier[current_level]);
+        if (!input.current_frame_pressure &&
+            !input.current_resource_pressure) return std::nullopt;
+        const int step = input.quality_change_budget * 5;
+        desired = std::max(
+            input.minimum_quality, input.current_quality - step);
+        minimum_dispatch_interval_ns = 1'000'000'000ULL;
     } else if (input.state == optimizer::AdaptiveControllerState::stable &&
                input.recovery_eligible &&
                input.current_quality < input.maximum_quality) {
-        constexpr int higher_tier[] = {50, 75, 100, 100};
         desired = std::min(
-            input.maximum_quality, higher_tier[current_level]);
+            input.maximum_quality, input.current_quality + 5);
         recovery = true;
+        minimum_dispatch_interval_ns = 4'000'000'000ULL;
     } else {
+        return std::nullopt;
+    }
+
+    if (input.last_dispatch_ns != 0 &&
+        (input.now_ns < input.last_dispatch_ns ||
+         input.now_ns - input.last_dispatch_ns <
+             minimum_dispatch_interval_ns)) {
         return std::nullopt;
     }
 
     desired = std::clamp(
         desired, input.minimum_quality, input.maximum_quality);
     if (desired == input.current_quality) return std::nullopt;
-    if (!recovery &&
-        adaptive_runtime_quality_level(desired) >= current_level) {
+    if (!recovery && desired >= input.current_quality) {
         return std::nullopt;
     }
     const auto resource = recovery
@@ -164,6 +175,7 @@ select_adaptive_runtime_control(
             optimizer::AdaptiveCapabilityState::available;
     }
     sample.cpu_percent = frame.evidence.cpu_percent;
+    sample.system_cpu_percent = frame.evidence.system_cpu_percent;
     sample.critical_core_percent = frame.evidence.critical_core_percent;
     sample.effective_core_usage = frame.evidence.effective_core_usage;
     sample.dominant_thread_share_percent =

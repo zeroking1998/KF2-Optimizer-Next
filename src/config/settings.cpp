@@ -238,7 +238,8 @@ Result<Settings> parse_settings(std::string_view text) {
                 if (!parsed.has_value()) {
                     return invalid_settings(L"adaptive_shadow_mode is invalid");
                 }
-                settings.adaptive_shadow_mode = parsed.value();
+                // Retired internal safety switch. Accept legacy files so they
+                // migrate cleanly, but the normal Adaptive mode is active.
             } else if (key == "adaptive_calibration_enabled") {
                 const auto parsed = parse_boolean(value);
                 if (!parsed.has_value()) {
@@ -385,8 +386,6 @@ std::string serialize_settings(const Settings& settings) {
            << (settings.adaptive_quality_recovery_enabled ? "true" : "false") << '\n'
            << "adaptive_manual_locks_enabled="
            << (settings.adaptive_manual_locks_enabled ? "true" : "false") << '\n'
-           << "adaptive_shadow_mode="
-           << (settings.adaptive_shadow_mode ? "true" : "false") << '\n'
            << "adaptive_calibration_enabled="
            << (settings.adaptive_calibration_enabled ? "true" : "false") << '\n'
            << "adaptive_logging="

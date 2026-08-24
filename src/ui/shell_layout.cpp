@@ -30,10 +30,28 @@ std::wstring status_text(const UiModel& model) {
     }
     const std::wstring mode = status.mode == L"Adaptive / Automatic"
         ? L"Adaptive on" : status.mode;
-    std::wstring text = L"Ready   •   " + mode + L"   •   Target " +
-                        std::to_wstring(model.presented_target_fps()) +
-                        L" FPS   •   Maximum corpses " +
-                        std::to_wstring(model.presented_corpse_limit());
+    const int configured_target = model.presented_target_fps();
+    const int displayed_target = status.active_target_fps.value_or(
+        configured_target);
+    std::wstring target = L"Target " + std::to_wstring(displayed_target) +
+                          L" FPS";
+    if (status.active_target_fps &&
+        *status.active_target_fps != configured_target) {
+        target += L"   •   " + std::to_wstring(configured_target) +
+                  L" next start";
+    }
+    const int configured_corpses = model.presented_corpse_limit();
+    const int displayed_corpses = status.active_corpse_limit.value_or(
+        configured_corpses);
+    std::wstring corpses = L"Maximum corpses " +
+                           std::to_wstring(displayed_corpses);
+    if (status.active_corpse_limit &&
+        *status.active_corpse_limit != configured_corpses) {
+        corpses += L"   •   " + std::to_wstring(configured_corpses) +
+                   L" next start";
+    }
+    std::wstring text = L"Ready   •   " + mode + L"   •   " + target +
+                        L"   •   " + corpses;
     const auto presented_fps = model.presented_live_fps();
     if (presented_fps && model.presented_live_frame_time_ms()) {
         std::wostringstream live;

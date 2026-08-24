@@ -27,13 +27,18 @@ void run_flex_control_stage(app::UiRuntime& runtime,
     if (!(runtime.adaptive_actuation.generation() == generation)) {
         runtime.adaptive_actuation.rebase(generation, frame.observed_at_ns);
     }
+    const bool pressure_actionable =
+        flex_pressure_is_actionable(runtime.adaptive_decision);
+    const bool observed_solver_ready = capability ==
+            optimizer::AdaptiveCapabilityState::available &&
+        frame.flex && runtime.flex_adaptive_policy.synchronize_observed(
+            frame.flex->last_forwarded_substeps);
     const auto decision = decide_flex_control(
         runtime.flex_adaptive_policy,
-        {.actuator_available =
-             capability == optimizer::AdaptiveCapabilityState::available,
-         .target_fps = runtime.optimizer_settings.target_fps,
+        {.actuator_available = observed_solver_ready && pressure_actionable,
+         .target_fps = runtime.effective_target_fps(),
          .quality_change_budget =
-             runtime.optimizer_settings.adaptive_quality_change_budget,
+             runtime.effective_quality_change_budget(),
          .fps = frame.frames.fps,
          .now_ms = GetTickCount64()});
     apply_flex_control_effect(

@@ -6,6 +6,8 @@
 
 int main() {
     kf2::flex::AdaptivePolicy policy;
+    if (policy.synchronize_observed(0)) return 900;
+    if (policy.synchronize_observed(6)) return 901;
     if (policy.evaluate(false, 60, 20.0, 1000).constrained) return 1;
     auto quality = policy.evaluate(true, 60, 60.0, 1000);
     if (!quality.constrained || quality.requested_substeps != 5) return 2;
@@ -53,6 +55,15 @@ int main() {
             .requested_substeps != 5) return 30;
     if (stronger.evaluate(true, 60, corrective_fps - 0.001, 17'601, 2)
             .requested_substeps != 3) return 31;
+
+    // Entering Adaptive pressure preserves the game's observed solver level;
+    // it must never jump from one or two substeps to the maximum first.
+    kf2::flex::AdaptivePolicy observed;
+    if (!observed.synchronize_observed(2)) return 902;
+    if (observed.evaluate(true, 60, 56.0, 18'000, 2)
+            .requested_substeps != 2) return 903;
+    if (observed.evaluate(true, 60, 56.0, 18'400, 2)
+            .requested_substeps != 1) return 904;
 
     // Every representative target reacts at its exact target-relative
     // corrective band, including non-display-standard and upper-bound values.

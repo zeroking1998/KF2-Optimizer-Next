@@ -369,8 +369,8 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
         return Result<bool>::failure(enabled.error());
     }
     events->append({0, diagnostics::Severity::info,
-        "GAMEPLAY_LOG_LAB_READY",
-        L"The protected published provider is ready for KF2 started from the optimizer, Steam or a shortcut and exposes verified AI, wave, corpse, physics, LOD and ragdoll capabilities",
+        "GAMEPLAY_PROVIDER_PREPARED",
+        L"The protected Published provider was staged for the next KF2 start; runtime capabilities remain unavailable until KF2 confirms telemetry",
         L"game"});
     return Result<bool>::success(true);
 }
@@ -426,12 +426,40 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
     // temporal-AA safety override remains disabled.
     session_config_waiting_for_launch = true;
     session_config_launch_deadline_ns = 0;
-    telemetry_failure = L"Adaptive profile ready; waiting for KF2";
+    telemetry_failure = L"Adaptive profile prepared; waiting for KF2 runtime confirmation";
     events->append({0, diagnostics::Severity::info,
-        "ADAPTIVE_EXTERNAL_LAUNCH_READY",
-        L"The protected Adaptive profile, telemetry provider and user-authorized FleX state are ready for KF2 started from the optimizer, Steam or a shortcut",
+        "ADAPTIVE_EXTERNAL_LAUNCH_PREPARED",
+        L"The protected Adaptive profile and Published provider were staged for KF2 started from the optimizer, Steam or a shortcut; runtime capabilities require telemetry confirmation",
         L"optimizer"});
     return Result<bool>::success(true);
+}
+
+Result<bool> UiRuntime::rearm_automatic_external_launch_profile() {
+    if (model.recovery_required() || start_mode != StartMode::normal ||
+        !installation) {
+        return Result<bool>::success(false);
+    }
+
+    const auto prepared = prepare_automatic_external_launch_profile();
+    if (!prepared.has_value()) {
+        events->append({0, diagnostics::Severity::error,
+            "ADAPTIVE_EXTERNAL_LAUNCH_REARM_FAILED",
+            prepared.error().message, L"optimizer"});
+        model.set_notice({ui::NoticeSeverity::error,
+            L"ADAPTIVE_EXTERNAL_LAUNCH_REARM_FAILED",
+            L"The next KF2 start could not be prepared safely: " +
+                prepared.error().message,
+            L"Do not start KF2 again until Repair reports that all protected files are healthy."});
+        invalidate();
+        return Result<bool>::failure(prepared.error());
+    }
+    if (!prepared.value()) return prepared;
+
+    events->append({0, diagnostics::Severity::info,
+        "ADAPTIVE_EXTERNAL_LAUNCH_REARMED",
+        L"The protected Adaptive profile and runtime capabilities were prepared again for the next KF2 start",
+        L"optimizer"});
+    return prepared;
 }
 
 void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
@@ -533,6 +561,15 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
         return;
     }
 
+    if (adaptive_policy_changed) {
+        const bool session_value_staged_for_restart =
+            adaptive_session_policy.has_value() &&
+            (control->id == runtime::ControlId::target_fps ||
+             control->id == runtime::ControlId::corpse_limit);
+        if (session_value_staged_for_restart) {
+            adaptive_policy_changed = false;
+        }
+    }
     if (adaptive_policy_changed) {
         auto generation = adaptive_actuation.generation();
         generation.settings = ++adaptive_settings_generation;

@@ -23,6 +23,7 @@ struct ResourcePressureInput final {
     std::optional<double> frame_time_ms;
     std::optional<double> p95_frame_time_ms;
     std::optional<double> process_cpu_percent;
+    std::optional<double> system_cpu_percent;
     std::optional<double> critical_thread_percent;
     std::optional<double> effective_core_usage;
     std::optional<std::uint32_t> affinity_logical_processors;
@@ -51,6 +52,8 @@ struct ResourcePressureSnapshot final {
     double frame_budget_deficit_ms{0.0};
     double predicted_deficit_ms{0.0};
     bool recovery_safe{false};
+    bool shared_cpu_pressure{false};
+    bool shared_gpu_pressure{false};
 };
 
 class ResourcePressureEstimator final {

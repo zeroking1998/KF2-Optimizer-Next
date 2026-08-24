@@ -8,6 +8,7 @@
 #include "kf2/flex/flex_adaptive_policy.hpp"
 #include "kf2/flex/flex_observation.hpp"
 #include "kf2/optimizer/adaptive_actuation.hpp"
+#include "kf2/optimizer/adaptive_governor.hpp"
 
 namespace kf2::app {
 struct UiRuntime;
@@ -27,6 +28,14 @@ struct FlexControlDecision final {
     int requested_substeps{0};
     bool constrained{false};
 };
+
+[[nodiscard]] inline bool flex_pressure_is_actionable(
+    const optimizer::AdaptiveDecision& decision) noexcept {
+    return decision.current_frame_pressure &&
+        (decision.resources.primary == optimizer::ResourceKind::cpu ||
+         decision.resources.primary == optimizer::ResourceKind::gpu ||
+         decision.resources.primary == optimizer::ResourceKind::vram);
+}
 
 [[nodiscard]] inline FlexControlDecision decide_flex_control(
     flex::AdaptivePolicy& policy, const FlexControlInput& input) noexcept {

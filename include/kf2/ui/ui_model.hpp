@@ -60,7 +60,9 @@ struct UiStatus {
     std::wstring overlay_position{L"top right"};
     int overlay_scale_percent{100};
     int target_fps{60};
+    std::optional<int> active_target_fps;
     int corpse_limit{20};
+    std::optional<int> active_corpse_limit;
     std::optional<int> adaptive_runtime_corpse_limit;
     std::wstring adaptive_corpse_capability{L"UNAVAILABLE"};
     std::wstring adaptive_corpse_action_status{L"NONE"};
@@ -85,7 +87,7 @@ struct UiStatus {
     std::wstring adaptive_safety{L"LAB / SHADOW_ONLY"};
     std::wstring adaptive_evidence{L"NOT_AVAILABLE"};
     std::uint64_t adaptive_restore_generation{0};
-    bool adaptive_shadow_mode{true};
+    bool adaptive_shadow_mode{false};
     std::wstring adaptive_aggressiveness{L"balanced"};
     int adaptive_minimum_quality{10};
     int adaptive_maximum_quality{100};
