@@ -147,14 +147,16 @@ bounded steps applied to a separate runtime threshold and excess confirmed
 and never during Zed Time. Recovery stops removal immediately and raises the
 runtime threshold gradually back toward the selected ceiling. The same
 controller has a separate distance-first physics stage. At baseline it sleeps
-only an old slow corpse with stale native `LastRenderTime` beyond 2,800 units,
-at most once per second. Fresh visible living/corpse density or confirmed
-target-relative frame pressure moves the threshold to 2,300/1,900 units and the
-interval to 500/250 ms; FPS is an amplifier rather than the sole gate.
-Optimizer-slept bodies are identity tracked and use the official
-`WakeRigidBody` path inside 750 units. Reversible native `MinLodModel` tiers
-begin outside 1,000 units, become stronger with confirmed pressure and restore
-inside 900 units; `ForcedLodModel` is never overridden. After eligible
+an eligible corpse beyond 1,500 units. Fresh visible living/corpse density or
+confirmed target-relative frame pressure moves the threshold to 1,100/750
+units and permits batches of at least two/four per control pass; FPS is an
+amplifier rather than the sole gate. Distance Sleep is permanent for that
+corpse and no proximity-wake pass remains. Reversible native `MinLodModel`
+tiers begin outside 1,000 units, become stronger with confirmed pressure and
+restore inside 900 units with actor-correlated receipts. If KF2 or another
+system changes an owned LOD value, the optimizer releases and excludes that
+actor instead of immediately reacquiring it; `ForcedLodModel` is never
+overridden. After eligible
 distance/LOD work is exhausted,
 one old, slow, non-death-animation visible ragdoll may sleep at most once per
 750/350 ms. KF2/UE3 native frustum and occlusion culling already avoid drawing

@@ -139,8 +139,10 @@ appear only when their provider and acknowledgement path are available.
 
 For corpse physics, the user-selected corpse maximum is a ceiling. The runtime
 may keep fewer bodies active when distance, visible scene density, or measured
-performance pressure requires it. Distance Sleep, Near Wake, and Ragdoll Sleep
-are actor-scoped and must carry a correlated actor identifier and receipt.
+performance pressure requires it. Distance Sleep and Ragdoll Sleep are
+actor-scoped and must carry a correlated actor identifier and receipt.
+Distance Sleep is permanent for that corpse; the optimizer does not wake dead
+bodies again after their cosmetic physics has been stopped.
 
 For FleX, effective levels are 1 through 5. Level 0 means release/passthrough;
 it does not mean that a zero-step solver is applied.

@@ -8,6 +8,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Made Distance Sleep substantially more aggressive at 1,500/1,100/750
+  units, with pressure-scaled batches, and removed the unused Near Wake path.
+- Added actor-correlated LOD restore receipts and prevented reacquisition after
+  KF2 or another system overrides an optimizer-owned corpse LOD value.
 - Target FPS now uses KF2's native startup cap independently of telemetry and
   Adaptive runtime capabilities, including Steam and shortcut launches.
 - Removed the redundant telemetry-side FPS actuator and its unused application

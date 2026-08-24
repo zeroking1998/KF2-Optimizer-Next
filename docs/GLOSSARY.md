@@ -21,14 +21,12 @@ acknowledgement, and restoration path exist for one control.
 **Corpse ceiling** — User-selected maximum permitted dead-body count. The
 runtime budget may be lower, never higher.
 
-**Distance Sleep** — A confirmed request to stop expensive cosmetic simulation
-for a corpse sufficiently far from the relevant view/player context.
+**Distance Sleep** — A confirmed request to permanently stop expensive
+cosmetic simulation for an eligible corpse after it crosses the active
+distance threshold.
 
 **FleX** — NVIDIA particle/physics technology used by an optional, protected
 laboratory path in this project.
-
-**Near Wake** — A confirmed request to resume a previously slept corpse when it
-returns to the near range.
 
 **Passthrough** — The optimizer has released control and leaves the native
 provider behavior unchanged.

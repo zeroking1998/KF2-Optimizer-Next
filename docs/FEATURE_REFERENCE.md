@@ -10,8 +10,7 @@
 | Session restoration | Restores the exact protected pre-session state | Restore report and integrity check |
 | External overlay | Displays selected telemetry outside the game process | Visible game-bound window and current sample |
 | Corpse ceiling | Sets the maximum permitted dead-body count | Configuration readback and runtime capacity receipt |
-| Distance Sleep | Sleeps a sufficiently distant corpse actor | Matching actor ID and `state=sleep` receipt |
-| Near Wake | Wakes a nearby previously slept corpse actor | Matching actor ID and `state=wake` receipt |
+| Distance Sleep | Permanently sleeps eligible corpse physics from 1,500 units, or 1,100/750 units under scene or frame pressure | Matching actor ID and `state=sleep` receipt |
 | Ragdoll Sleep | Stops redundant active ragdoll simulation | Matching actor ID and Ragdoll Sleep receipt |
 | Scene-density control | Reduces active cosmetic work when many relevant actors are visible | Scene level plus confirmed actor/capacity actions |
 | FleX adaptive control | Adjusts a protected solver level when the laboratory is available | `FLEX_ADAPTIVE_APPLIED` readback |

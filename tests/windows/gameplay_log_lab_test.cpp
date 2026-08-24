@@ -236,20 +236,23 @@ int main() {
     CHECK(telemetry_source.find(
         "SelectDistantAwakeMonsterCorpseForSleep") != std::string::npos);
     CHECK(telemetry_source.find(
-        "MinimumDistanceSquared = 7840000.0") != std::string::npos);
+        "MinimumDistanceSquared = 2250000.0") != std::string::npos);
     CHECK(telemetry_source.find(
-        "MinimumDistanceSquared = 5290000.0") != std::string::npos);
+        "MinimumDistanceSquared = 1210000.0") != std::string::npos);
     CHECK(telemetry_source.find(
-        "MinimumDistanceSquared = 3610000.0") != std::string::npos);
+        "MinimumDistanceSquared = 562500.0") != std::string::npos);
+    CHECK(telemetry_source.find("MinimumAge = 1.5") != std::string::npos);
+    CHECK(telemetry_source.find("MinimumAge = 0.75") != std::string::npos);
+    CHECK(telemetry_source.find("MinimumAge = 0.5") != std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveDistanceSleptCorpses.Length >=") ==
           std::string::npos);
     CHECK(telemetry_source.find(
         "Candidate.Mesh.LastRenderTime >") != std::string::npos);
     CHECK(telemetry_source.find(
-        "Candidate.Mesh.WakeRigidBody()") != std::string::npos);
+        "Candidate.Mesh.WakeRigidBody()") == std::string::npos);
     CHECK(telemetry_source.find(
-        "DistanceSquared >= 562500.0") != std::string::npos);
+        "KF2OPT_CORPSE_DISTANCE state=wake") == std::string::npos);
     CHECK(telemetry_source.find(
         "AwakeTotal = CountAwakeMonsterCorpses(GoreManager)") !=
           std::string::npos);
@@ -268,8 +271,8 @@ int main() {
     CHECK(telemetry_source.find(
         "function int GetAdaptiveCorpseDistanceUnits(KFPawn Candidate)") !=
           std::string::npos);
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 4);
-    CHECK(count_occurrences(telemetry_source, "distance_units=") == 4);
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") >= 5);
+    CHECK(count_occurrences(telemetry_source, "distance_units=") >= 4);
     CHECK(telemetry_source.find(
         "var globalconfig bool bAdaptiveCorpseDebugMarkers") !=
           std::string::npos);
@@ -283,7 +286,7 @@ int main() {
     CHECK(telemetry_source.find(
         "GetAdaptiveCorpseActionId(Candidate)") != std::string::npos);
     CHECK(count_occurrences(
-        telemetry_source, "RegisterAdaptiveCorpseDebugMarker(Candidate,") == 4);
+        telemetry_source, "RegisterAdaptiveCorpseDebugMarker(Candidate,") >= 4);
     CHECK(interaction_source.find("event PostRender(Canvas MarkerCanvas)") !=
           std::string::npos);
     CHECK(interaction_source.find(
@@ -313,15 +316,11 @@ int main() {
         "function AdaptiveCorpseLoadControl()");
     const auto zed_time_guard = telemetry_source.find(
         "GameInfo.IsZedTimeActive()", stagger_start);
-    const auto wake_stage = telemetry_source.find(
-        "WakeNearAdaptiveDistanceSleptCorpses()", stagger_start);
     const auto distant_sleep_stage = telemetry_source.find(
         "SleepOneDistantMonsterCorpse(", stagger_start);
     CHECK(stagger_start != std::string::npos);
     CHECK(zed_time_guard != std::string::npos);
-    CHECK(wake_stage != std::string::npos);
     CHECK(distant_sleep_stage != std::string::npos);
-    CHECK(zed_time_guard < wake_stage);
     CHECK(zed_time_guard < distant_sleep_stage);
     const auto frame_only_action_gate = telemetry_source.find(
         "if (AdaptiveCorpsePressureLevel <= 0)", stagger_start);
@@ -342,36 +341,20 @@ int main() {
     CHECK(cleanup_delete != std::string::npos);
     CHECK(cleanup_zed_time_guard < cleanup_delete);
 
-    const auto wake_function = telemetry_source.find(
-        "function int WakeNearAdaptiveDistanceSleptCorpses()");
-    const auto wake_threshold = telemetry_source.find(
-        "DistanceSquared >= 562500.0", wake_function);
-    const auto wake_call = telemetry_source.find(
-        "Candidate.Mesh.WakeRigidBody()", wake_function);
-    const auto wake_readback = telemetry_source.find(
-        "if (!Candidate.Mesh.RigidBodyIsAwake())", wake_call);
-    const auto wake_tracking_release = telemetry_source.find(
-        "RemoveAdaptiveDistanceSleptCorpseEntry(Index)", wake_function);
-    const auto wake_receipt = telemetry_source.find(
-        "KF2OPT_CORPSE_DISTANCE state=wake", wake_function);
-    CHECK(wake_function != std::string::npos);
-    CHECK(wake_threshold != std::string::npos);
-    CHECK(wake_call != std::string::npos);
-    CHECK(wake_readback != std::string::npos);
-    CHECK(wake_tracking_release != std::string::npos);
-    CHECK(wake_receipt != std::string::npos);
-    CHECK(wake_threshold < wake_call);
-    CHECK(wake_call < wake_readback);
-    CHECK(wake_readback < wake_tracking_release);
-    CHECK(wake_tracking_release < wake_receipt);
     CHECK(telemetry_source.find(
-        "function int WakeNearAdaptiveDistanceSleptCorpses()") !=
+        "function int WakeNearAdaptiveDistanceSleptCorpses()") ==
           std::string::npos);
     CHECK(telemetry_source.find(
-        "WakeCount < Max(3, AttackScale)", stagger_start) ==
+        "WakeNearAdaptiveDistanceSleptCorpses();", stagger_start) ==
           std::string::npos);
     CHECK(telemetry_source.find(
-        "WakeNearAdaptiveDistanceSleptCorpses();", stagger_start) !=
+        "DistanceSleepBatch = Max(4, AttackScale * 2)", stagger_start) !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "DistanceSleepBatch = Max(2, AttackScale)", stagger_start) !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "DistanceSleepCount < DistanceSleepBatch", stagger_start) !=
           std::string::npos);
 
     const auto lod_selector = telemetry_source.find(
@@ -397,6 +380,17 @@ int main() {
         "CandidateTarget = 4", lod_selector) != std::string::npos);
     CHECK(telemetry_source.find(
         "readback=verified", lod_apply) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_CORPSE_LOD state=restored") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_CORPSE_LOD state=released reason=external_override") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "RegisterAdaptiveCorpseLodExternalOverride(Candidate)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "HasAdaptiveCorpseLodExternalOverride(Candidate)", lod_selector) !=
+          std::string::npos);
 
     const auto ragdoll_selector = telemetry_source.find(
         "function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(");

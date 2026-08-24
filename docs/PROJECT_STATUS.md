@@ -95,8 +95,8 @@ actuations, and 8,785 successful FleX solver relays. Normal KF2 termination
 restored the original runtime and 16 protected INIs and removed the temporary
 telemetry module. A prior candidate also completed all four short waves and the
 boss with firearms, explosives, grenades, gore, gibs and heavy corpse load. The
-remaining visual-only acceptance is an isolated distance-sleep/proximity-wake
-transition and unavailable external hardware variants.
+remaining visual-only acceptance is an isolated aggressive Distance-Sleep
+batch and unavailable external hardware variants.
 
 ## Technical limits that are not missing implementation work
 
@@ -136,14 +136,15 @@ generations; proposals and writes without readback are never logged as applied.
 
 The actuator also has a separate ragdoll-load controller. Its distant-physics
 stage is distance-first: without FPS pressure it may select only an old, slow,
-offscreen/occluded body beyond 2,800 units at most once per second. Fresh visible
-living/corpse density or hysteresis-confirmed target-relative frame pressure
-moves entry to 2,300/1,900 units and the interval to 500/250 ms. It uses KF2's
-official `PutRigidBodyToSleep` path and never hides an actor. A
-tracked body is woken through `WakeRigidBody` after it comes inside 750 units;
-the separated entry/wake distances prevent churn. Reversible native
+eligible body beyond 1,500 units. Fresh visible living/corpse density or
+hysteresis-confirmed target-relative frame pressure moves entry to 1,100/750
+units and permits batches of at least two/four per control pass. It uses KF2's
+official `PutRigidBodyToSleep` path and never hides an actor. Distance Sleep is
+permanent for that corpse and has no proximity-wake pass. Reversible native
 `MinLodModel` tiers begin outside 1,000 units, become stronger with confirmed
-pressure and restore inside 900 units; `ForcedLodModel` is never overridden.
+pressure and restore inside 900 units with an actor-correlated receipt. An
+external override releases and excludes that actor; `ForcedLodModel` is never
+overridden.
 Only after those stages
 may one old, slow visible corpse sleep every 750/350 ms. Living enemies, death
 animations, fast bodies, collision channels, Zed Time, Manual and online

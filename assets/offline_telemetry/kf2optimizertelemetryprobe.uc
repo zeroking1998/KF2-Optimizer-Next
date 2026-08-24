@@ -48,12 +48,12 @@ var float AdaptiveLastCorpseCapacityRealTime;
 var array<KFPawn> AdaptiveCorpseLodCorpses;
 var array<int> AdaptiveCorpseLodOriginalMinModels;
 var array<int> AdaptiveCorpseLodAppliedMinModels;
+var array<string> AdaptiveCorpseLodExternalOverrideIds;
 var int AdaptiveCorpseLodReductions;
 var int AdaptiveCorpseLodRestores;
 var float AdaptiveLastCorpseLodRealTime;
 var array<KFPawn> AdaptiveDistanceSleptCorpses;
 var int AdaptiveDistancePhysicsSleeps;
-var int AdaptiveDistancePhysicsWakes;
 var int AdaptiveVisibleRagdollSleeps;
 var array<string> AdaptiveCorpseRagdollSleepIds;
 var int AdaptiveCorpseRagdollSleepIdCount;
@@ -465,6 +465,8 @@ function int FindAdaptiveCorpseLodEntry(KFPawn Candidate)
 
 function RemoveAdaptiveCorpseLodEntry(int Index, bool bRestore)
 {
+    local int AppliedMinLod;
+    local int OriginalMinLod;
     local KFPawn Candidate;
 
     if (Index < 0 || Index >= AdaptiveCorpseLodCorpses.Length ||
@@ -474,13 +476,24 @@ function RemoveAdaptiveCorpseLodEntry(int Index, bool bRestore)
         return;
     }
     Candidate = AdaptiveCorpseLodCorpses[Index];
+    OriginalMinLod = AdaptiveCorpseLodOriginalMinModels[Index];
+    AppliedMinLod = AdaptiveCorpseLodAppliedMinModels[Index];
     if (bRestore && Candidate != None && !Candidate.bDeleteMe &&
         Candidate.Mesh != None &&
-        Candidate.Mesh.MinLodModel == AdaptiveCorpseLodAppliedMinModels[Index])
+        Candidate.Mesh.MinLodModel == AppliedMinLod)
     {
-        Candidate.Mesh.MinLodModel =
-            AdaptiveCorpseLodOriginalMinModels[Index];
-        ++AdaptiveCorpseLodRestores;
+        Candidate.Mesh.MinLodModel = OriginalMinLod;
+        if (Candidate.Mesh.MinLodModel == OriginalMinLod)
+        {
+            ++AdaptiveCorpseLodRestores;
+            RegisterAdaptiveCorpseDebugMarker(Candidate, "LOD_RESTORE");
+            `log("KF2OPT_CORPSE_LOD state=restored previous_lod="$
+                 AppliedMinLod$" target_lod="$OriginalMinLod$" restored="$
+                 AdaptiveCorpseLodRestores$" corpse_id="$
+                 GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
+                 GetAdaptiveCorpseDistanceUnits(Candidate)$
+                 " readback=verified");
+        }
     }
     AdaptiveCorpseLodCorpses.Remove(Index, 1);
     AdaptiveCorpseLodOriginalMinModels.Remove(Index, 1);
@@ -504,7 +517,13 @@ function PruneAdaptiveCorpseLodEntries()
                  AdaptiveCorpseLodAppliedMinModels[Index])
         {
             // A different system changed the value. Stop owning it instead of
-            // overwriting an external decision during restore.
+            // overwriting or immediately reacquiring that external decision.
+            RegisterAdaptiveCorpseLodExternalOverride(Candidate);
+            `log("KF2OPT_CORPSE_LOD state=released reason=external_override"$
+                 " expected_lod="$AdaptiveCorpseLodAppliedMinModels[Index]$
+                 " observed_lod="$Candidate.Mesh.MinLodModel$" corpse_id="$
+                 GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
+                 GetAdaptiveCorpseDistanceUnits(Candidate));
             RemoveAdaptiveCorpseLodEntry(Index, false);
         }
     }
@@ -575,6 +594,37 @@ function string GetAdaptiveCorpseActionId(KFPawn Candidate)
     // receipt unique even if KF2 later reuses a pooled pawn instance.
     return string(Candidate.Name)$":"$
         int(Candidate.TimeOfDeath * 1000.0);
+}
+
+function bool HasAdaptiveCorpseLodExternalOverride(KFPawn Candidate)
+{
+    local int Index;
+    local string CorpseId;
+
+    CorpseId = GetAdaptiveCorpseActionId(Candidate);
+    for (Index = 0;
+         Index < AdaptiveCorpseLodExternalOverrideIds.Length; ++Index)
+    {
+        if (AdaptiveCorpseLodExternalOverrideIds[Index] == CorpseId)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+function RegisterAdaptiveCorpseLodExternalOverride(KFPawn Candidate)
+{
+    if (Candidate == None ||
+        HasAdaptiveCorpseLodExternalOverride(Candidate))
+    {
+        return;
+    }
+    // Keep only the session-local string identity. Holding the Pawn itself
+    // would retain deleted actors, while forgetting the identity would let the
+    // next control pass overwrite KF2's external LOD decision again.
+    AdaptiveCorpseLodExternalOverrideIds.AddItem(
+        GetAdaptiveCorpseActionId(Candidate));
 }
 
 function int GetAdaptiveCorpseRagdollSleepHash(string CorpseId)
@@ -813,61 +863,6 @@ function PruneAdaptiveDistanceSleptCorpses()
     }
 }
 
-function int WakeNearAdaptiveDistanceSleptCorpses()
-{
-    local int Index;
-    local int WakeCount;
-    local float DistanceSquared;
-    local bool bWasSleeping;
-    local KFPawn Candidate;
-    local PlayerController LocalPC;
-
-    LocalPC = GetALocalPlayerController();
-    if (LocalPC == None || LocalPC.ViewTarget == None)
-    {
-        return 0;
-    }
-    PruneAdaptiveDistanceSleptCorpses();
-    for (Index = AdaptiveDistanceSleptCorpses.Length - 1;
-         Index >= 0; --Index)
-    {
-        Candidate = AdaptiveDistanceSleptCorpses[Index];
-        DistanceSquared = VSizeSq(
-            Candidate.Location - LocalPC.ViewTarget.Location);
-        // Wake every tracked corpse inside the tight 750-unit interaction
-        // radius in the same control pass. This has no corpse-count limit, but
-        // avoids reviving physics merely because a corpse is at mid distance.
-        if (DistanceSquared >= 562500.0)
-        {
-            continue;
-        }
-        bWasSleeping = !Candidate.Mesh.RigidBodyIsAwake();
-        if (bWasSleeping)
-        {
-            Candidate.Mesh.WakeRigidBody();
-            if (!Candidate.Mesh.RigidBodyIsAwake())
-            {
-                continue;
-            }
-            Candidate.Mesh.bNoSkeletonUpdate = false;
-            ++AdaptiveDistancePhysicsWakes;
-            ++WakeCount;
-            RegisterAdaptiveCorpseDebugMarker(Candidate, "WAKE");
-        }
-        RemoveAdaptiveDistanceSleptCorpseEntry(Index);
-        if (bWasSleeping)
-        {
-            `log("KF2OPT_CORPSE_DISTANCE state=wake woken="$
-                 AdaptiveDistancePhysicsWakes$" tracked="$
-                 AdaptiveDistanceSleptCorpses.Length$" corpse_id="$
-                 GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-                 GetAdaptiveCorpseDistanceUnits(Candidate)$
-                 " effective_awake=1");
-        }
-    }
-    return WakeCount;
-}
-
 function KFPawn SelectDistantAwakeMonsterCorpseForSleep(
     KFGoreManager GoreManager, int PhysicsPressureLevel)
 {
@@ -888,21 +883,23 @@ function KFPawn SelectDistantAwakeMonsterCorpseForSleep(
     {
         return None;
     }
-    // Distance is the primary gate. Scene or confirmed frame pressure only
-    // moves the thresholds inward and permits settled, still-visible bodies.
-    MinimumAge = 2.5;
-    MinimumDistanceSquared = 7840000.0;
+    // Distance is the primary gate. The default enters at 1,500 units and
+    // scene or confirmed frame pressure moves the gate to 1,100/750 units.
+    // Distance Sleep is intentionally permanent for the corpse lifetime, so
+    // it never spends work waking an already cosmetic dead body again.
+    MinimumAge = 1.5;
+    MinimumDistanceSquared = 2250000.0;
     MaximumSpeedSquared = 62500.0;
     if (PhysicsPressureLevel >= 2)
     {
-        MinimumAge = 1.0;
-        MinimumDistanceSquared = 3610000.0;
+        MinimumAge = 0.5;
+        MinimumDistanceSquared = 562500.0;
         MaximumSpeedSquared = 250000.0;
     }
     else if (PhysicsPressureLevel >= 1)
     {
-        MinimumAge = 1.75;
-        MinimumDistanceSquared = 5290000.0;
+        MinimumAge = 0.75;
+        MinimumDistanceSquared = 1210000.0;
         MaximumSpeedSquared = 122500.0;
     }
     for (Index = 0; Index < GoreManager.CorpsePool.Length; ++Index)
@@ -1015,6 +1012,7 @@ function KFPawn SelectVisibleMonsterCorpseForLod(
             Candidate.TimeOfDeath <= 0.0 ||
             WorldInfo.TimeSeconds - Candidate.TimeOfDeath < 0.75 ||
             Candidate.SpecialMove == SM_DeathAnim ||
+            HasAdaptiveCorpseLodExternalOverride(Candidate) ||
             Candidate.Mesh.LastRenderTime <= WorldInfo.TimeSeconds - 0.3)
         {
             continue;
@@ -1307,6 +1305,8 @@ function AdaptiveCorpseLoadControl()
     local int ScenePressureLevel;
     local int PhysicsPressureLevel;
     local int RagdollPressureLevel;
+    local int DistanceSleepBatch;
+    local int DistanceSleepCount;
     local bool bLivingVisibilityFresh;
     local float ActionInterval;
     local float DistanceActionInterval;
@@ -1338,9 +1338,6 @@ function AdaptiveCorpseLoadControl()
 
     PruneAdaptiveDistanceSleptCorpses();
     AttackScale = GetAdaptiveCorpseAttackScale();
-    // Proximity is gameplay-critical: wake every matching tracked corpse now,
-    // independently of quality level or the number of nearby bodies.
-    WakeNearAdaptiveDistanceSleptCorpses();
     PruneAdaptiveCorpseLodEntries();
     RestoreNearAdaptiveCorpseLods();
     RefreshSleepingCorpseAnimationState(GoreManager);
@@ -1427,21 +1424,41 @@ function AdaptiveCorpseLoadControl()
     // far, settled corpse work can be reduced.
     PhysicsPressureLevel = Max(
         AdaptiveCorpsePressureLevel, ScenePressureLevel);
-    DistanceActionInterval = PhysicsPressureLevel >= 2 ? 0.10 :
-        (PhysicsPressureLevel >= 1 ? 0.20 : 0.40);
+    DistanceActionInterval = PhysicsPressureLevel >= 2 ? 0.05 :
+        (PhysicsPressureLevel >= 1 ? 0.10 : 0.20);
     if (PhysicsPressureLevel > 0)
     {
         DistanceActionInterval = FMax(
             0.05, DistanceActionInterval / float(AttackScale));
     }
     if (WorldInfo.RealTimeSeconds - AdaptiveLastDistancePhysicsRealTime >=
-            DistanceActionInterval &&
-        SleepOneDistantMonsterCorpse(
-            GoreManager, PhysicsPressureLevel,
-            VisibleLivingZeds, VisibleCorpses))
+            DistanceActionInterval)
     {
-        AdaptiveLastDistancePhysicsRealTime = WorldInfo.RealTimeSeconds;
-        return;
+        DistanceSleepBatch = 1;
+        if (PhysicsPressureLevel >= 2)
+        {
+            DistanceSleepBatch = Max(4, AttackScale * 2);
+        }
+        else if (PhysicsPressureLevel >= 1)
+        {
+            DistanceSleepBatch = Max(2, AttackScale);
+        }
+        DistanceSleepCount = 0;
+        while (DistanceSleepCount < DistanceSleepBatch)
+        {
+            if (!SleepOneDistantMonsterCorpse(
+                    GoreManager, PhysicsPressureLevel,
+                    VisibleLivingZeds, VisibleCorpses))
+            {
+                break;
+            }
+            ++DistanceSleepCount;
+        }
+        if (DistanceSleepCount > 0)
+        {
+            AdaptiveLastDistancePhysicsRealTime = WorldInfo.RealTimeSeconds;
+            return;
+        }
     }
 
     // Render LOD is distance-first and remains useful for sleeping corpses.
@@ -2503,6 +2520,7 @@ event Destroyed()
     ClearTimer(nameof(StaggerCorpseCleanup), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
     RestoreAllAdaptiveCorpseLods();
+    AdaptiveCorpseLodExternalOverrideIds.Length = 0;
     AdaptiveDistanceSleptCorpses.Length = 0;
     AdaptiveCorpseDebugMarkers.Length = 0;
     AdaptiveCorpseRagdollSleepIds.Length = 0;
@@ -2530,12 +2548,10 @@ event Destroyed()
              AdaptiveCorpseLodReductions$" restored="$
              AdaptiveCorpseLodRestores);
     }
-    if (AdaptiveDistancePhysicsSleeps > 0 ||
-        AdaptiveDistancePhysicsWakes > 0)
+    if (AdaptiveDistancePhysicsSleeps > 0)
     {
         `log("KF2OPT_CORPSE_DISTANCE state=stopped slept="$
-             AdaptiveDistancePhysicsSleeps$" woken="$
-             AdaptiveDistancePhysicsWakes);
+             AdaptiveDistancePhysicsSleeps);
     }
     if (AdaptiveVisibleRagdollSleeps > 0)
     {
