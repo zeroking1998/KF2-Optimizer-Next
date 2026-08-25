@@ -61,6 +61,27 @@ int main() {
     CHECK(!parse_adaptive_control_receipt(
         "KF2OPT_ACK 42 applied flex 50").has_value());
 
+    AdaptiveResourceQualityState quality{100};
+    CHECK(quality.effective_quality() == 100);
+    CHECK(quality.control_quality(AdaptiveResourceControl::gpu) == 100);
+    quality.apply({1, AdaptiveResourceControl::gpu, 60});
+    CHECK(quality.gpu == 60);
+    CHECK(quality.cpu == 100);
+    CHECK(quality.effective_quality() == 60);
+    CHECK(quality.control_quality(AdaptiveResourceControl::cpu) == 100);
+    quality.apply({2, AdaptiveResourceControl::cpu, 80});
+    CHECK(quality.cpu == 80);
+    CHECK(quality.gpu == 60);
+    quality.apply({3, AdaptiveResourceControl::recover, 65});
+    CHECK(quality.gpu == 65);
+    CHECK(quality.cpu == 80);
+    CHECK(quality.vram == 100);
+    quality.apply({4, AdaptiveResourceControl::mixed, 50});
+    CHECK(quality.cpu == 50 && quality.gpu == 50 &&
+          quality.vram == 50 && quality.ram == 50);
+    quality.reset(90);
+    CHECK(quality.effective_quality() == 90);
+
     WSADATA winsock{};
     CHECK(WSAStartup(MAKEWORD(2, 2), &winsock) == 0);
     const SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);

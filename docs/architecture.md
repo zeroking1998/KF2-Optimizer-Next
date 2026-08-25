@@ -133,6 +133,19 @@ native tier, emergency may lower two and stable recovery raises one. Missing or
 stale telemetry, Zed Time, an online/unknown session, shadow mode, missing bridge
 capability or a readback mismatch prevents the change. Display mode, resolution,
 VSync, variable frame rate, anti-aliasing and FleX are not owned by this path.
+The four resource groups retain separate quality levels: CPU pressure controls
+scene/mesh/particle LOD and light functions; GPU pressure controls shadows,
+post-processing, reflections and cosmetic lighting; VRAM pressure controls
+texture and shadowmap bias plus anisotropy; RAM pressure controls bounded effect,
+decal and lifetime budgets. The displayed effective quality is the lowest group,
+not a value reused as the starting point for unrelated resources.
+
+Adaptive settings use three operational safety levels. Verified live settings
+require an authenticated command, exact engine readback and session restore.
+Startup-only settings use an atomic pre-launch snapshot/apply/readback transaction
+and are never presented as mid-match changes. User-owned or protected settings,
+including display, anti-aliasing, FleX mode, corpse maximum and gameplay
+collision, are never changed by Adaptive.
 
 For a protected app-started standalone session, the optional telemetry
 package can also enable a narrowly bounded corpse-stagger actuator. The chosen

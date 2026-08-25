@@ -139,6 +139,53 @@ std::string_view adaptive_resource_control_name(
     return "mixed";
 }
 
+AdaptiveResourceQualityState::AdaptiveResourceQualityState(
+    int initial_quality) noexcept {
+    reset(initial_quality);
+}
+
+int AdaptiveResourceQualityState::effective_quality() const noexcept {
+    return std::min({cpu, gpu, vram, ram});
+}
+
+int AdaptiveResourceQualityState::control_quality(
+    AdaptiveResourceControl resource) const noexcept {
+    switch (resource) {
+        case AdaptiveResourceControl::cpu: return cpu;
+        case AdaptiveResourceControl::gpu: return gpu;
+        case AdaptiveResourceControl::vram: return vram;
+        case AdaptiveResourceControl::ram: return ram;
+        case AdaptiveResourceControl::mixed:
+        case AdaptiveResourceControl::recover: return effective_quality();
+    }
+    return effective_quality();
+}
+
+void AdaptiveResourceQualityState::apply(
+    const AdaptiveControlReceipt& receipt) noexcept {
+    const int quality = std::clamp(receipt.quality, 10, 100);
+    switch (receipt.resource) {
+        case AdaptiveResourceControl::cpu: cpu = quality; break;
+        case AdaptiveResourceControl::gpu: gpu = quality; break;
+        case AdaptiveResourceControl::vram: vram = quality; break;
+        case AdaptiveResourceControl::ram: ram = quality; break;
+        case AdaptiveResourceControl::mixed:
+            cpu = gpu = vram = ram = quality;
+            break;
+        case AdaptiveResourceControl::recover:
+            cpu = std::max(cpu, quality);
+            gpu = std::max(gpu, quality);
+            vram = std::max(vram, quality);
+            ram = std::max(ram, quality);
+            break;
+    }
+}
+
+void AdaptiveResourceQualityState::reset(int quality) noexcept {
+    const int bounded = std::clamp(quality, 10, 100);
+    cpu = gpu = vram = ram = bounded;
+}
+
 bool valid_adaptive_control_token(std::string_view token) noexcept {
     if (token.size() != 32) return false;
     for (const unsigned char character : token) {
