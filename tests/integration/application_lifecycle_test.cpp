@@ -22,6 +22,7 @@
 #include "kf2/ui/shell_layout.hpp"
 #include "app/application_runtime.hpp"
 #include "app/runtime/feature_composition.hpp"
+#include "features/telemetry/telemetry_session_stage.hpp"
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -836,8 +837,32 @@ int main() {
         CHECK(read_bytes(config_root / L"KFEngine.ini").find(
                   "Paths=" + published_runtime_path) != std::string::npos);
 
+        rearm_runtime.game_log_new_settings_restart_requested = true;
+        const auto restart_wait_started = rearm_runtime.monotonic_ns();
+        rearm_runtime.begin_game_restart_handoff({
+            4242, 123456, rearm_runtime.installation->executable});
+        CHECK(rearm_runtime.game_restart_handoff_previous_process.has_value());
+        CHECK(rearm_runtime.game_restart_handoff_new_settings);
+        CHECK(rearm_runtime.game_restart_handoff_deadline_ns >=
+              restart_wait_started +
+                  kf2::telemetry_pipeline::kNewSettingsRestartHandoffNs);
+        CHECK(rearm_runtime.session_config_snapshot.has_value());
+        CHECK(fs::exists(published_telemetry));
+        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                  "LocalOptions=?Mutator=KF2OptimizerTelemetry."
+                  "KF2OptimizerTelemetryMutator") != std::string::npos);
+        const auto restart_wait_events = rearm_events.snapshot();
+        CHECK(std::any_of(restart_wait_events.begin(),
+                          restart_wait_events.end(),
+            [](const auto& event) {
+                return event.code == "KF2_SESSION_RESTART_WAIT";
+            }));
+
         CHECK(rearm_runtime.restore_protected_session_config(
             L"First simulated KF2 session ended"));
+        CHECK(!rearm_runtime.game_restart_handoff_previous_process.has_value());
+        CHECK(rearm_runtime.game_restart_handoff_deadline_ns == 0);
+        CHECK(!rearm_runtime.game_restart_handoff_new_settings);
         CHECK(!fs::exists(published_telemetry));
         CHECK(read_bytes(config_root / L"KFEngine.ini") ==
               original_engine_config);

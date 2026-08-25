@@ -15,17 +15,19 @@ void refresh_session_gate(app::UiRuntime& runtime) {
 }
 
 void revalidate_bound_process(app::UiRuntime& runtime) {
-    if (!runtime.game_process || runtime.present_source ||
-        !runtime.installation) {
+    if (!runtime.game_process || !runtime.installation) {
         return;
     }
-    const auto running = game::find_running_game_process(
-        runtime.installation->executable);
+    const auto previous_process = *runtime.game_process;
+    const auto running = game::bind_game_process(
+        previous_process.pid, runtime.installation->executable);
     const bool same_process = running.has_value() &&
-        running.value().pid == runtime.game_process->pid &&
+        running.value().pid == previous_process.pid &&
         running.value().process_start_id ==
-            runtime.game_process->process_start_id;
-    if (!same_process) runtime.detach_telemetry();
+            previous_process.process_start_id;
+    if (!same_process) {
+        runtime.begin_game_restart_handoff(previous_process);
+    }
 }
 
 SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
@@ -84,7 +86,8 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
 
     const auto previous_process = *runtime.game_process;
     const auto still_running = runtime.installation
-        ? game::find_running_game_process(runtime.installation->executable)
+        ? game::bind_game_process(previous_process.pid,
+              runtime.installation->executable)
         : Result<game::GameProcessIdentity>::failure(
               {ErrorCode::not_found, L"KF2 installation unavailable", 0});
     const bool same_process_running = still_running.has_value() &&
@@ -108,38 +111,7 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
         return {classify_session_gate(gate), std::nullopt};
     }
 
-    runtime.detach_telemetry();
-    bool session_restored = true;
-    if (runtime.session_config_snapshot) {
-        session_restored = runtime.restore_protected_session_config(
-            L"KF2 closed");
-    } else if (runtime.installation) {
-        const auto capped = runtime.synchronize_frame_rate_cap();
-        if (!capped.has_value()) {
-            runtime.events->append({0, diagnostics::Severity::error,
-                "TARGET_FPS_PERSIST_FAILED", capped.error().message,
-                L"config"});
-        } else if (capped.value().changed) {
-            runtime.events->append({0, diagnostics::Severity::info,
-                "TARGET_FPS_PERSISTED",
-                L"KF2 closed; the native startup cap was updated to " +
-                    std::to_wstring(capped.value().target_fps) + L" FPS",
-                L"config"});
-        }
-    }
-    runtime.telemetry_failure = L"KF2 session ended";
-    runtime.model.set_notice(
-        {ui::NoticeSeverity::info, L"KF2_SESSION_ENDED",
-         L"KF2 closed; telemetry and protected INIs were finalized.", L""});
-    runtime.events->append(
-        {0, diagnostics::Severity::info, "KF2_SESSION_ENDED",
-         L"The bound KF2 process ended; session telemetry was finalized",
-         L"game"});
-    if (session_restored) {
-        static_cast<void>(
-            runtime.rearm_automatic_external_launch_profile());
-    }
-    runtime.invalidate();
+    runtime.begin_game_restart_handoff(previous_process);
     const SessionGateInput gate{
         .process_bound = true,
         .same_process_running = false,
@@ -205,9 +177,11 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
     return true;
 }
 
-void UiRuntime::detach_telemetry() {
-    static_cast<void>(restore_live_adaptive_quality(
-        L"Adaptive telemetry detached"));
+void UiRuntime::detach_telemetry(bool restore_live_quality) {
+    if (restore_live_quality) {
+        static_cast<void>(restore_live_adaptive_quality(
+            L"Adaptive telemetry detached"));
+    }
     if (last_flex_observation && last_flex_observation->update_calls > 0) {
         const auto& observed = *last_flex_observation;
         const bool saved = save_flex_report(observed);
@@ -278,6 +252,7 @@ void UiRuntime::detach_telemetry() {
     game_log_bound_to_process = false;
     game_log_startup_exited = false;
     game_log_startup_exit_announced = false;
+    game_log_new_settings_restart_requested = false;
     game_log_marker_tail.clear();
     game_log_session_parser.reset();
     auto status = model.status();
@@ -309,6 +284,73 @@ void UiRuntime::detach_telemetry() {
         overlay_presentation = hidden;
         static_cast<void>(overlay_window->update(hidden));
     }
+}
+
+void UiRuntime::begin_game_restart_handoff(
+    const game::GameProcessIdentity& previous_process) {
+    if (game_restart_handoff_previous_process) return;
+    // Consume the process' final native log lines before clearing the old
+    // binding. KF2 writes its settings-restart marker immediately before exit.
+    update_overlay_scene_gate();
+    const bool new_settings_restart =
+        game_log_new_settings_restart_requested;
+    detach_telemetry(false);
+    game_restart_handoff_previous_process = previous_process;
+    game_restart_handoff_new_settings = new_settings_restart;
+    const auto now = monotonic_ns();
+    const auto timeout_ns =
+        telemetry_pipeline::game_restart_handoff_timeout_ns(
+            new_settings_restart);
+    game_restart_handoff_deadline_ns =
+        now > std::numeric_limits<std::uint64_t>::max() -
+                  timeout_ns
+            ? std::numeric_limits<std::uint64_t>::max()
+            : now + timeout_ns;
+    telemetry_failure = new_settings_restart
+        ? L"KF2 is applying new settings; waiting for its replacement process"
+        : L"KF2 process ended; checking briefly for a replacement process";
+    events->append({0, diagnostics::Severity::info,
+        "KF2_SESSION_RESTART_WAIT",
+        new_settings_restart
+            ? L"KF2 confirmed a settings restart; protected INIs and the telemetry module are retained for up to five minutes"
+            : L"The bound KF2 process ended; checking briefly for a verified replacement process",
+        L"game"});
+    invalidate();
+}
+
+void UiRuntime::finalize_ended_game_session() {
+    game_restart_handoff_previous_process.reset();
+    game_restart_handoff_deadline_ns = 0;
+    game_restart_handoff_new_settings = false;
+    bool session_restored = true;
+    if (session_config_snapshot) {
+        session_restored = restore_protected_session_config(L"KF2 closed");
+    } else if (installation) {
+        const auto capped = synchronize_frame_rate_cap();
+        if (!capped.has_value()) {
+            events->append({0, diagnostics::Severity::error,
+                "TARGET_FPS_PERSIST_FAILED", capped.error().message,
+                L"config"});
+        } else if (capped.value().changed) {
+            events->append({0, diagnostics::Severity::info,
+                "TARGET_FPS_PERSISTED",
+                L"KF2 closed; the native startup cap was updated to " +
+                    std::to_wstring(capped.value().target_fps) + L" FPS",
+                L"config"});
+        }
+    }
+    telemetry_failure = L"KF2 session ended";
+    model.set_notice(
+        {ui::NoticeSeverity::info, L"KF2_SESSION_ENDED",
+         L"KF2 closed; telemetry and protected INIs were finalized.", L""});
+    events->append(
+        {0, diagnostics::Severity::info, "KF2_SESSION_ENDED",
+         L"No verified replacement process appeared; session telemetry was finalized",
+         L"game"});
+    if (session_restored) {
+        static_cast<void>(rearm_automatic_external_launch_profile());
+    }
+    invalidate();
 }
 
 void UiRuntime::update_overlay_scene_gate() {
@@ -357,6 +399,7 @@ void UiRuntime::update_overlay_scene_gate() {
         overlay_scene_ready = false;
         game_log_startup_exited = false;
         game_log_startup_exit_announced = false;
+        game_log_new_settings_restart_requested = false;
         game_log_session_parser.reset();
     }
     if (size < game_log_offset) {
@@ -365,6 +408,7 @@ void UiRuntime::update_overlay_scene_gate() {
         overlay_scene_ready = false;
         game_log_startup_exited = false;
         game_log_startup_exit_announced = false;
+        game_log_new_settings_restart_requested = false;
         game_log_session_parser.reset();
     }
     if (size == game_log_offset) {
@@ -393,6 +437,14 @@ void UiRuntime::update_overlay_scene_gate() {
     // This is a one-shot startup gate. Once KF2 reaches its main menu the
     // overlay remains eligible during later map loads and Steam overlays.
     const std::string marker_input = game_log_marker_tail + appended;
+    if (!game_log_new_settings_restart_requested &&
+        game::game_log_requests_settings_restart(marker_input)) {
+        game_log_new_settings_restart_requested = true;
+        events->append({0, diagnostics::Severity::info,
+            "KF2_NEW_SETTINGS_RESTART_REQUESTED",
+            L"KF2's native log confirmed that the game requested a settings restart",
+            L"game"});
+    }
     const bool menu_ready =
         marker_input.find("WidgetInitialized - WidgetName:  StartMenu") !=
         std::string::npos;
@@ -453,8 +505,64 @@ void UiRuntime::try_attach_telemetry() {
     // A cached PID without a window can otherwise survive a failed launch
     // forever and prevent the protected INI snapshot from being restored.
     auto process = game::find_running_game_process(installation->executable);
+    if (game_process) {
+        const auto previous_process = *game_process;
+        const auto bound_process = game::bind_game_process(
+            previous_process.pid, installation->executable);
+        const bool same_process = bound_process.has_value() &&
+            bound_process.value().process_start_id ==
+                previous_process.process_start_id;
+        if (same_process) {
+            // Process enumeration can briefly return a replacement process
+            // while the old bootstrap process is still shutting down. Keep
+            // the established identity until that exact process has ended.
+            process = bound_process;
+        } else {
+            begin_game_restart_handoff(previous_process);
+        }
+    }
+    const auto now = monotonic_ns();
+    if (game_restart_handoff_previous_process) {
+        const auto& previous = *game_restart_handoff_previous_process;
+        const bool same_process = process.has_value() &&
+            process.value().pid == previous.pid &&
+            process.value().process_start_id == previous.process_start_id;
+        const auto handoff = telemetry_pipeline::classify_restart_handoff({
+            .pending = true,
+            .verified_process_found = process.has_value(),
+            .same_process_identity = same_process,
+            .deadline_ns = game_restart_handoff_deadline_ns,
+            .now_ns = now});
+        if (handoff ==
+            telemetry_pipeline::RestartHandoffDisposition::waiting) {
+            telemetry_failure = game_restart_handoff_new_settings
+                ? L"KF2 is applying new settings; waiting for its replacement process"
+                : L"KF2 process ended; checking briefly for a replacement process";
+            return;
+        }
+        if (handoff ==
+            telemetry_pipeline::RestartHandoffDisposition::expired) {
+            finalize_ended_game_session();
+            return;
+        }
+        const bool replacement = handoff ==
+            telemetry_pipeline::RestartHandoffDisposition::replacement_found;
+        const bool new_settings_restart =
+            game_restart_handoff_new_settings;
+        game_restart_handoff_previous_process.reset();
+        game_restart_handoff_deadline_ns = 0;
+        game_restart_handoff_new_settings = false;
+        events->append({0, diagnostics::Severity::info,
+            replacement ? "KF2_SESSION_RESTART_HANDOFF"
+                        : "KF2_SESSION_PROCESS_REVALIDATED",
+            replacement
+                ? (new_settings_restart
+                    ? L"KF2's new-settings replacement process was bound from the verified game executable without restoring the protected session in between"
+                    : L"A replacement KF2 process from the verified game executable was bound without restoring the protected session in between")
+                : L"The original KF2 process identity was found again; telemetry will be rebound",
+            L"game"});
+    }
     if (!process.has_value()) {
-        const auto now = monotonic_ns();
         const bool launch_wait_expired = session_config_waiting_for_launch &&
             session_config_launch_deadline_ns != 0 &&
             now >= session_config_launch_deadline_ns;

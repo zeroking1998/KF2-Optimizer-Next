@@ -191,6 +191,9 @@ bool UiRuntime::restore_automatic_flex_lab(std::wstring_view reason) {
 }
 
 bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
+    game_restart_handoff_previous_process.reset();
+    game_restart_handoff_deadline_ns = 0;
+    game_restart_handoff_new_settings = false;
     bool complete = true;
     // Restore the native viewport/INI state even if Windows still has a
     // runtime file open. Each recovery surface is independent, so one busy

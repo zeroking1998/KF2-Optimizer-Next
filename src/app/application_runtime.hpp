@@ -117,6 +117,10 @@ struct UiRuntime {
     std::optional<overlay::OverlayPresentation> overlay_presentation;
     std::uint64_t last_telemetry_tick_ns{0};
     std::optional<game::GameProcessIdentity> game_process;
+    std::optional<game::GameProcessIdentity>
+        game_restart_handoff_previous_process;
+    std::uint64_t game_restart_handoff_deadline_ns{0};
+    bool game_restart_handoff_new_settings{false};
     std::optional<config::SessionConfigSnapshot> session_config_snapshot;
     bool session_config_waiting_for_launch{false};
     std::uint64_t session_config_launch_deadline_ns{0};
@@ -128,6 +132,7 @@ struct UiRuntime {
     bool game_log_bound_to_process{false};
     bool game_log_startup_exited{false};
     bool game_log_startup_exit_announced{false};
+    bool game_log_new_settings_restart_requested{false};
     std::string game_log_marker_tail;
     game::GameLogSessionParser game_log_session_parser;
     bool overlay_scene_ready{false};
@@ -243,7 +248,12 @@ struct UiRuntime {
 
     bool save_flex_report(const flex::ObservationSnapshot& observed);
 
-    void detach_telemetry();
+    void detach_telemetry(bool restore_live_quality = true);
+
+    void begin_game_restart_handoff(
+        const game::GameProcessIdentity& previous_process);
+
+    void finalize_ended_game_session();
 
     bool restore_live_adaptive_quality(std::wstring_view reason);
 
