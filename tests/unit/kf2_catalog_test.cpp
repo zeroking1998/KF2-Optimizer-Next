@@ -110,6 +110,38 @@ int main() {
     CHECK(smoothing != nullptr);
     CHECK(smoothing->relative_path == L"KFGame.ini");
     CHECK(smoothing->section == L"KFGame.KFGameEngine");
+    const auto* physics_async_scene =
+        find_setting(SettingId::physics_async_scene);
+    CHECK(physics_async_scene != nullptr);
+    CHECK(physics_async_scene->relative_path == L"KFEngine.ini");
+    CHECK(physics_async_scene->section == L"Engine.Physics");
+    CHECK(physics_async_scene->key == L"bPhysicsAsyncScene");
+    CHECK(physics_async_scene->type == SettingType::boolean);
+    CHECK(!physics_async_scene->adaptive_allowed);
+    const auto* enable_async_scene =
+        find_setting(SettingId::enable_async_scene);
+    CHECK(enable_async_scene != nullptr);
+    CHECK(enable_async_scene->relative_path == L"KFEngine.ini");
+    CHECK(enable_async_scene->section == L"Engine.Physics");
+    CHECK(enable_async_scene->key == L"bEnableAsyncScene");
+    CHECK(enable_async_scene->type == SettingType::boolean);
+    CHECK(!enable_async_scene->adaptive_allowed);
+    const auto* memory_margin =
+        find_setting(SettingId::texture_streaming_memory_margin);
+    CHECK(memory_margin != nullptr);
+    CHECK(memory_margin->relative_path == L"KFEngine.ini");
+    CHECK(memory_margin->section == L"TextureStreaming");
+    CHECK(memory_margin->key == L"MemoryMargin");
+    CHECK(memory_margin->type == SettingType::integer);
+    CHECK(!memory_margin->adaptive_allowed);
+    const auto* streaming_hysteresis =
+        find_setting(SettingId::texture_streaming_hysteresis_limit);
+    CHECK(streaming_hysteresis != nullptr);
+    CHECK(streaming_hysteresis->relative_path == L"KFEngine.ini");
+    CHECK(streaming_hysteresis->section == L"TextureStreaming");
+    CHECK(streaming_hysteresis->key == L"HysteresisLimit");
+    CHECK(streaming_hysteresis->type == SettingType::integer);
+    CHECK(!streaming_hysteresis->adaptive_allowed);
     const auto* shadow_resolution =
         find_setting(SettingId::max_shadow_resolution);
     CHECK(shadow_resolution != nullptr);

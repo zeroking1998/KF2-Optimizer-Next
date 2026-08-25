@@ -6,6 +6,13 @@ are visible immediately.
 
 ## Unreleased
 
+### What's new
+
+- Added a protected startup performance profile that enables KF2's native
+  asynchronous physics scene and real one-frame render-thread pipeline. It
+  also selects a bounded 160-6000 MB texture pool from detected dedicated
+  VRAM and adjusts the native streaming memory margin and hysteresis.
+
 ### Bug fixes
 
 - Made Distance Sleep substantially more aggressive at 1,200/800/450

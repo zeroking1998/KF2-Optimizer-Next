@@ -76,8 +76,16 @@ int wmain(int argc, wchar_t** argv) {
     for (const auto& definition : kf2::config::all_settings()) {
         const auto current = catalog_values.value().find(definition.id);
         if (current == catalog_values.value().end()) {
-            std::wcerr << L"FAIL: catalog value is missing\n";
-            return 1;
+            if (!definition.insert_if_missing ||
+                definition.type != kf2::config::SettingType::boolean) {
+                std::wcerr << L"FAIL: catalog value is missing\n";
+                return 1;
+            }
+            changes.push_back({
+                definition.id, true,
+                kf2::config::ChangeSource::explicit_user,
+                L"Complete catalog roundtrip validation"});
+            continue;
         }
         changes.push_back({
             definition.id, alternate_value(definition, current->second),

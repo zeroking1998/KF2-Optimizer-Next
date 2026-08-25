@@ -79,6 +79,10 @@ int main() {
     CHECK(find_setting_by_token("bEnableChanceOfPhysicsChunkOverride") != nullptr);
     CHECK(find_setting_by_token("bUseTextureStreaming") != nullptr);
     CHECK(find_setting_by_token("PoolSize") != nullptr);
+    CHECK(find_setting_by_token("MemoryMargin") != nullptr);
+    CHECK(find_setting_by_token("HysteresisLimit") != nullptr);
+    CHECK(find_setting_by_token("bPhysicsAsyncScene") != nullptr);
+    CHECK(find_setting_by_token("bEnableAsyncScene") != nullptr);
     CHECK(find_setting_by_token("MaxParticleVertexMemory") != nullptr);
     CHECK(find_setting_by_token("ApexEnableWriteBufferTask") != nullptr);
     CHECK(find_setting_by_token("GoreLevel") != nullptr);
@@ -110,9 +114,9 @@ int main() {
         categories.insert(setting_category(setting.id));
         CHECK(!setting_category_label(setting.id).empty());
     }
-    CHECK(adaptive_protected_count == 142);
+    CHECK(adaptive_protected_count == 146);
     CHECK(categories.size() == all_setting_categories().size());
-    CHECK(all_settings().size() == 213);
+    CHECK(all_settings().size() == 217);
     const auto* physics_substeps = find_setting_by_token("MaxPhysicsSubsteps");
     CHECK(physics_substeps != nullptr);
     CHECK(!physics_substeps->adaptive_allowed);
@@ -149,6 +153,7 @@ int main() {
     std::filesystem::create_directories(root);
     std::map<std::filesystem::path, std::string> files;
     for (const auto& definition : all_settings()) {
+        if (definition.insert_if_missing) continue;
         auto& bytes = files[definition.relative_path];
         bytes += "[";
         for (const wchar_t character : definition.section) bytes.push_back(
@@ -172,7 +177,7 @@ int main() {
     }
     const auto catalog = read_catalog_values(root);
     CHECK(catalog.has_value());
-    CHECK(catalog.value().size() == all_settings().size());
+    CHECK(catalog.value().size() == all_settings().size() - 2);
     const auto linked_alias = root.parent_path() / L"KFEngine-linked.ini";
     CHECK(CreateHardLinkW(linked_alias.c_str(),
                           (root / L"KFEngine.ini").c_str(), nullptr) != FALSE);

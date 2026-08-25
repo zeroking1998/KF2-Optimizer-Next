@@ -77,6 +77,31 @@ int main() {
     CHECK(preview.value().items[0].reason == L"Manual target");
     CHECK(preview.value().items[0].state == PreviewState::ready);
 
+    const auto inserted_startup_physics = build_preview(
+        installation,
+        {{SettingId::physics_async_scene, SettingValue{true},
+          ChangeSource::explicit_user, L"Protected startup default"},
+         {SettingId::enable_async_scene, SettingValue{true},
+          ChangeSource::explicit_user, L"Protected startup default"}},
+        documents);
+    CHECK(inserted_startup_physics.has_value());
+    CHECK(inserted_startup_physics.value().items.size() == 2);
+    CHECK(!inserted_startup_physics.value().items[0].existed_before);
+    CHECK(!inserted_startup_physics.value().items[1].existed_before);
+    const auto inserted_engine = std::find_if(
+        inserted_startup_physics.value().files.begin(),
+        inserted_startup_physics.value().files.end(),
+        [](const PreviewFile& file) {
+            return file.relative_path == L"KFEngine.ini";
+        });
+    CHECK(inserted_engine != inserted_startup_physics.value().files.end());
+    CHECK(inserted_engine->proposed_bytes.find("[Engine.Physics]") !=
+          std::string::npos);
+    CHECK(inserted_engine->proposed_bytes.find("bPhysicsAsyncScene=True") !=
+          std::string::npos);
+    CHECK(inserted_engine->proposed_bytes.find("bEnableAsyncScene=True") !=
+          std::string::npos);
+
     const auto valid_smoothing_range = build_preview(
         installation,
         {{SettingId::minimum_smooth_frame_rate, SettingValue{30},
