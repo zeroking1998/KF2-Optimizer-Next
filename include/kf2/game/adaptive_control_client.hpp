@@ -34,6 +34,21 @@ struct AdaptiveControlReceipt final {
     int quality{100};
 };
 
+struct AdaptiveResourceQualityState final {
+    explicit AdaptiveResourceQualityState(int initial_quality = 100) noexcept;
+
+    int cpu{100};
+    int gpu{100};
+    int vram{100};
+    int ram{100};
+
+    [[nodiscard]] int effective_quality() const noexcept;
+    [[nodiscard]] int control_quality(
+        AdaptiveResourceControl resource) const noexcept;
+    void apply(const AdaptiveControlReceipt& receipt) noexcept;
+    void reset(int quality) noexcept;
+};
+
 [[nodiscard]] std::string_view adaptive_resource_control_name(
     AdaptiveResourceControl resource) noexcept;
 [[nodiscard]] bool valid_adaptive_control_token(

@@ -8,6 +8,11 @@ are visible immediately.
 
 ### What's new
 
+- Adaptive live quality now keeps independent CPU, GPU, VRAM, and RAM levels.
+  Each confirmed bottleneck changes only its matching group, while recovery
+  restores the groups gradually. The live groups now also cover verified KF2
+  shadow distance/fade, post-processing quality, lighting, shadowmap textures,
+  wound decals, blood effects, and destruction lifetime controls.
 - Added a protected startup performance profile that enables KF2's native
   asynchronous physics scene and real one-frame render-thread pipeline. It
   also selects a bounded 160-6000 MB texture pool from detected dedicated
@@ -15,6 +20,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Fixed resource-specific quality changes being tracked as one shared value,
+  which could make a later CPU, GPU, VRAM, or RAM correction start from the
+  wrong quality level.
 - Made Distance Sleep substantially more aggressive at 1,200/800/450
   units. Every eligible corpse in the user-sized pool can sleep in one linear
   pass; there is no separate fixed corpse or batch limit. A monotonic scene

@@ -37,13 +37,30 @@ void UiRuntime::update_adaptive_controller(
                     {},
                     true,
                     static_cast<double>(pending.previous_quality)}));
-                adaptive_runtime_quality = outcome->value().quality;
+                adaptive_resource_quality.apply(outcome->value());
+                const int effective_quality =
+                    adaptive_resource_quality.effective_quality();
+                const auto resource_name =
+                    game::adaptive_resource_control_name(
+                        outcome->value().resource);
                 events->append({
                     0, diagnostics::Severity::info,
                     "ADAPTIVE_RUNTIME_QUALITY_APPLIED",
-                    L"Live KF2 quality changed to " +
-                        std::to_wstring(adaptive_runtime_quality) +
-                        L"% after an exact authenticated APPLIED readback",
+                    L"Live KF2 " + std::wstring{
+                        resource_name.begin(), resource_name.end()} +
+                        L" quality changed to " +
+                        std::to_wstring(outcome->value().quality) +
+                        L"% (effective " +
+                        std::to_wstring(effective_quality) +
+                        L"%; CPU " +
+                        std::to_wstring(adaptive_resource_quality.cpu) +
+                        L"%, GPU " +
+                        std::to_wstring(adaptive_resource_quality.gpu) +
+                        L"%, VRAM " +
+                        std::to_wstring(adaptive_resource_quality.vram) +
+                        L"%, RAM " +
+                        std::to_wstring(adaptive_resource_quality.ram) +
+                        L"%) after an exact authenticated APPLIED readback",
                     L"optimizer"});
             } else {
                 static_cast<void>(adaptive_actuation.receive({
@@ -161,8 +178,8 @@ void UiRuntime::update_adaptive_controller(
         adaptive_governor.reset();
         adaptive_profile_gate.reset();
         adaptive_decision = {};
-        adaptive_runtime_quality =
-            optimizer_settings.adaptive_maximum_quality;
+        adaptive_resource_quality.reset(
+            optimizer_settings.adaptive_maximum_quality);
         adaptive_quality_last_dispatch_ns = 0;
         events->append({0, diagnostics::Severity::info,
             "ADAPTIVE_GAMEPLAY_STARTED",
@@ -171,7 +188,7 @@ void UiRuntime::update_adaptive_controller(
     }
 
     const int current_quality = std::clamp(
-        adaptive_runtime_quality,
+        adaptive_resource_quality.effective_quality(),
         optimizer_settings.adaptive_minimum_quality,
         optimizer_settings.adaptive_maximum_quality);
     const bool flex_pressure_candidate = frame.flex && frame.flex->fresh &&
@@ -298,12 +315,23 @@ void UiRuntime::update_adaptive_controller(
 
     const auto runtime_control =
         optimizer::AdaptiveControlId::runtime_quality;
+    const int effective_runtime_quality =
+        adaptive_resource_quality.effective_quality();
     adaptive_actuation.establish_effective(
-        runtime_control, static_cast<double>(adaptive_runtime_quality));
+        runtime_control, static_cast<double>(effective_runtime_quality));
     bool bridge_available = frame.gameplay &&
         frame.gameplay->telemetry_control_port.has_value() &&
         game::valid_adaptive_control_token(adaptive_control_token) &&
         !adaptive_control_dispatcher.busy();
+    const auto pressure_resource =
+        telemetry_pipeline::adaptive_runtime_resource(
+            adaptive_decision.resources.primary,
+            adaptive_decision.resources.primary_confidence);
+    const int selected_runtime_quality =
+        adaptive_decision.state ==
+                    optimizer::AdaptiveControllerState::stable
+            ? effective_runtime_quality
+            : adaptive_resource_quality.control_quality(pressure_resource);
     const auto runtime_selection =
         telemetry_pipeline::select_adaptive_runtime_control({
             .state = adaptive_decision.state,
@@ -311,7 +339,7 @@ void UiRuntime::update_adaptive_controller(
             .primary_resource = adaptive_decision.resources.primary,
             .primary_confidence =
                 adaptive_decision.resources.primary_confidence,
-            .current_quality = adaptive_runtime_quality,
+            .current_quality = selected_runtime_quality,
             .minimum_quality =
                 optimizer_settings.adaptive_minimum_quality,
             .maximum_quality =
@@ -333,7 +361,7 @@ void UiRuntime::update_adaptive_controller(
             .now_ns = now_ns,
             .last_dispatch_ns = adaptive_quality_last_dispatch_ns});
     if (runtime_selection) {
-        const auto previous_quality = adaptive_runtime_quality;
+        const auto previous_quality = selected_runtime_quality;
         const auto& proposed = adaptive_actuation.propose(
             runtime_control,
             static_cast<double>(runtime_selection->quality),
@@ -381,7 +409,8 @@ void UiRuntime::update_adaptive_controller(
         }
     }
     adaptive_decision.quality_score =
-        static_cast<double>(adaptive_runtime_quality);
+        static_cast<double>(
+            adaptive_resource_quality.effective_quality());
     status.adaptive_state = std::wstring{
         optimizer::adaptive_stability_state_name(
             adaptive_decision.stability_state)};
@@ -711,6 +740,11 @@ void UiRuntime::update_adaptive_controller(
                      << L"; evidence=" << status.adaptive_evidence
                      << L"; session=" << status.adaptive_session
                      << L"; quality=" << status.adaptive_quality_score
+                     << L"%; resourceQuality=CPU:"
+                     << adaptive_resource_quality.cpu
+                     << L"%,GPU:" << adaptive_resource_quality.gpu
+                     << L"%,VRAM:" << adaptive_resource_quality.vram
+                     << L"%,RAM:" << adaptive_resource_quality.ram
                      << L"%; measuredEffect=NOT_AVAILABLE"
                      << L"; restoreGeneration="
                      << status.adaptive_restore_generation;

@@ -154,7 +154,7 @@ struct UiRuntime {
     std::string adaptive_control_token;
     std::uint64_t adaptive_control_sequence{0};
     std::uint64_t adaptive_quality_last_dispatch_ns{0};
-    int adaptive_runtime_quality{100};
+    game::AdaptiveResourceQualityState adaptive_resource_quality{100};
     std::optional<game::OfflineAdaptiveSessionPolicy>
         adaptive_session_policy;
     std::uint64_t adaptive_settings_generation{1};

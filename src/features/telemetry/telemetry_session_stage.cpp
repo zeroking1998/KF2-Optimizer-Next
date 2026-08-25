@@ -168,7 +168,7 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
         return false;
     }
     adaptive_control_pending.reset();
-    adaptive_runtime_quality = 100;
+    adaptive_resource_quality.reset(100);
     events->append({0, diagnostics::Severity::info,
         "ADAPTIVE_RUNTIME_RESTORED",
         std::wstring{reason} +
@@ -220,7 +220,8 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     adaptive_control_token.clear();
     adaptive_control_sequence = 0;
     adaptive_quality_last_dispatch_ns = 0;
-    adaptive_runtime_quality = optimizer_settings.adaptive_maximum_quality;
+    adaptive_resource_quality.reset(
+        optimizer_settings.adaptive_maximum_quality);
     adaptive_session_policy.reset();
     adaptive_profile_gate.reset();
     adaptive_gameplay_active = false;

@@ -79,8 +79,29 @@ int main() {
           std::string::npos);
     CHECK(connection_source.find("Len(Line) > 128") != std::string::npos);
     CHECK(graphics_source.find("Requested.Flex") == std::string::npos);
+    CHECK(graphics_source.find("Requested.CharacterDetail.MaxDeadBodies") ==
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.CharacterDetail.ShouldCorpseCollide") ==
+          std::string::npos);
     CHECK(graphics_source.find("KinematicUpdateDistFactorScale = FMax") !=
           std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.TextureResolution.ShadowmapBias = Max") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.MotionBlur.MotionBlurQuality = Min") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.EnvironmentDetail.AllowLightFunctions = false") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.Shadows.ShadowFadeResolution = Max") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.OriginalShadowmapTextureBias") != std::string::npos);
+    CHECK(graphics_source.find(
+        "Observed.TextureResolution.ShadowmapBias") != std::string::npos);
     CHECK(graphics_source.find("RestoreOwnedSettings") != std::string::npos);
     CHECK(graphics_source.find(
         "Snapshot.GpuQuality = Max(Snapshot.GpuQuality, Quality)") !=
