@@ -151,6 +151,7 @@ struct AdaptiveSample {
     std::optional<double> gore_pressure;
     std::optional<double> flex_pressure;
     std::optional<double> streaming_pressure;
+    std::optional<double> enemy_scene_pressure;
 
     std::optional<int> live_corpse_burden;
     std::optional<int> user_max_dead_bodies;

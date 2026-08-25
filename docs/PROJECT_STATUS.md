@@ -136,9 +136,15 @@ generations; proposals and writes without readback are never logged as applied.
 
 The actuator also has a separate ragdoll-load controller. Its distant-physics
 stage is distance-first: without FPS pressure it may select only an old, slow,
-eligible body beyond 1,500 units. Fresh visible living/corpse density or
-hysteresis-confirmed target-relative frame pressure moves entry to 1,100/750
-units. The selected maximum bounds the corpse pool, but Distance Sleep has no
+eligible body beyond 1,200 units. Corpse density, hysteresis-confirmed
+target-relative frame pressure, or independently calculated visible-enemy
+pressure moves entry to 800/450 units. Enemy pressure is a monotonic 0-100
+score: visible enemies contribute up to 60 points, total living enemies up to
+25 and active attacks up to 15. Level one begins at 30 and level two at 65;
+the exact score continuously moves Distance Sleep from 1,200 toward 450 units.
+The app reuses the score only to strengthen an already confirmed frame or
+CPU/GPU/VRAM/RAM correction. It never invents resource pressure.
+The selected maximum bounds the corpse pool, but Distance Sleep has no
 second actor or batch cap: a single linear pass may sleep every currently
 eligible corpse. It uses KF2's official `PutRigidBodyToSleep` path and never
 hides an actor. Distance Sleep is permanent for that corpse and has no

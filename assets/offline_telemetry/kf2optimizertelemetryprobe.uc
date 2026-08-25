@@ -59,6 +59,8 @@ var array<string> AdaptiveCorpseRagdollSleepIds;
 var int AdaptiveCorpseRagdollSleepIdCount;
 var float AdaptiveLastDistancePhysicsRealTime;
 var int AdaptiveVisibleLivingZeds;
+var int AdaptiveLivingZeds;
+var int AdaptiveLivingAttackMoves;
 var float AdaptiveVisibleLivingObservedRealTime;
 var int AdaptiveCorpseScenePressureLevel;
 var array<AdaptiveCorpseDebugMarkerEntry> AdaptiveCorpseDebugMarkers;
@@ -395,7 +397,6 @@ function int CountAwakeMonsterCorpses(KFGoreManager GoreManager)
 }
 
 function int GetAdaptiveCorpseScenePressureLevel(
-    int VisibleLivingZeds, bool bLivingVisibilityFresh,
     int VisibleCorpses, int VisibleAwakeCorpses, int AwakeCorpses,
     int VisibleCorpseThreshold)
 {
@@ -405,17 +406,40 @@ function int GetAdaptiveCorpseScenePressureLevel(
     }
     if (VisibleAwakeCorpses >= VisibleCorpseThreshold + 2 ||
         VisibleCorpses >= VisibleCorpseThreshold + 4 ||
-        AwakeCorpses >= Max(10, VisibleCorpseThreshold * 2) ||
-        (bLivingVisibilityFresh && VisibleLivingZeds >= 12 &&
-         AwakeCorpses >= 4))
+        AwakeCorpses >= Max(10, VisibleCorpseThreshold * 2))
     {
         return 2;
     }
     if (VisibleAwakeCorpses >= VisibleCorpseThreshold ||
         VisibleCorpses >= VisibleCorpseThreshold + 2 ||
-        AwakeCorpses >= Max(6, VisibleCorpseThreshold + 3) ||
-        (bLivingVisibilityFresh && VisibleLivingZeds >= 8 &&
-         AwakeCorpses >= 2))
+        AwakeCorpses >= Max(6, VisibleCorpseThreshold + 3))
+    {
+        return 1;
+    }
+    return 0;
+}
+
+function int GetAdaptiveEnemyPressureLevel(
+    int VisibleLivingZeds, int TotalLivingZeds, int LivingAttackMoves,
+    bool bLivingVisibilityFresh, int AwakeCorpses, out int PressureScore)
+{
+    // Enemy pressure is independent of corpse density. One eligible awake
+    // corpse is enough to activate it. Visible, total and actively attacking
+    // enemies contribute monotonically: adding an enemy never lowers pressure.
+    PressureScore = 0;
+    if (!bLivingVisibilityFresh || AwakeCorpses <= 0 || TotalLivingZeds <= 0)
+    {
+        return 0;
+    }
+    PressureScore = Min(60, Max(0, VisibleLivingZeds) * 8) +
+        Min(25, Max(0, TotalLivingZeds) * 2) +
+        Min(15, Max(0, LivingAttackMoves) * 5);
+    PressureScore = Clamp(PressureScore, 0, 100);
+    if (PressureScore >= 65)
+    {
+        return 2;
+    }
+    if (PressureScore >= 30)
     {
         return 1;
     }
@@ -865,11 +889,13 @@ function PruneAdaptiveDistanceSleptCorpses()
 
 function int SleepAllEligibleDistantMonsterCorpses(
     KFGoreManager GoreManager, int PhysicsPressureLevel,
-    int VisibleLivingZeds, int VisibleCorpses)
+    int EnemyPressureScore, int VisibleLivingZeds, int VisibleCorpses)
 {
     local int Index;
     local int SleepCount;
     local float DistanceSquared;
+    local float EnemyDistanceUnits;
+    local float EnemyMinimumAge;
     local float MinimumAge;
     local float MinimumDistanceSquared;
     local float MaximumSpeedSquared;
@@ -882,24 +908,34 @@ function int SleepAllEligibleDistantMonsterCorpses(
     {
         return 0;
     }
-    // Distance is the primary gate. The default enters at 1,500 units and
-    // scene or confirmed frame pressure moves the gate to 1,100/750 units.
+    // Distance is the primary gate. The default enters at 1,200 units and
+    // corpse, enemy or confirmed frame pressure moves it to 800/450 units.
     // Distance Sleep is intentionally permanent for the corpse lifetime, so
     // it never spends work waking an already cosmetic dead body again.
-    MinimumAge = 1.5;
-    MinimumDistanceSquared = 2250000.0;
+    MinimumAge = 1.0;
+    MinimumDistanceSquared = 1440000.0;
     MaximumSpeedSquared = 62500.0;
     if (PhysicsPressureLevel >= 2)
     {
-        MinimumAge = 0.5;
-        MinimumDistanceSquared = 562500.0;
+        MinimumAge = 0.25;
+        MinimumDistanceSquared = 202500.0;
         MaximumSpeedSquared = 250000.0;
     }
     else if (PhysicsPressureLevel >= 1)
     {
-        MinimumAge = 0.75;
-        MinimumDistanceSquared = 1210000.0;
+        MinimumAge = 0.5;
+        MinimumDistanceSquared = 640000.0;
         MaximumSpeedSquared = 122500.0;
+    }
+    if (EnemyPressureScore > 0)
+    {
+        EnemyDistanceUnits = FClamp(
+            1200.0 - float(EnemyPressureScore) * 7.5, 450.0, 1200.0);
+        EnemyMinimumAge = FClamp(
+            1.0 - float(EnemyPressureScore) * 0.0075, 0.25, 1.0);
+        MinimumDistanceSquared = FMin(
+            MinimumDistanceSquared, EnemyDistanceUnits * EnemyDistanceUnits);
+        MinimumAge = FMin(MinimumAge, EnemyMinimumAge);
     }
     // MaxDeadBodies already binds CorpsePool to the user's selected maximum.
     // Walk that pool once without a second fixed actor or batch limit, so every
@@ -927,7 +963,8 @@ function int SleepAllEligibleDistantMonsterCorpses(
         }
         bRecentlyRendered = Candidate.Mesh.LastRenderTime >
             WorldInfo.TimeSeconds - 0.3;
-        if (PhysicsPressureLevel <= 0 && bRecentlyRendered)
+        if (PhysicsPressureLevel <= 0 && EnemyPressureScore <= 0 &&
+            bRecentlyRendered)
         {
             continue;
         }
@@ -946,6 +983,7 @@ function int SleepAllEligibleDistantMonsterCorpses(
         `log("KF2OPT_CORPSE_DISTANCE state=sleep physics_level="$
              PhysicsPressureLevel$" frame_level="$AdaptiveCorpsePressureLevel$
              " scene_level="$AdaptiveCorpseScenePressureLevel$
+             " enemy_score="$EnemyPressureScore$
              " quality_steps="$GetAdaptiveCorpseAttackScale()$" slept="$
              AdaptiveDistancePhysicsSleeps$" pass_slept="$SleepCount$
              " tracked="$AdaptiveDistanceSleptCorpses.Length$
@@ -1275,10 +1313,15 @@ function AdaptiveCorpseLoadControl()
     local int VisibleCorpses;
     local int VisibleAwake;
     local int VisibleLivingZeds;
+    local int TotalLivingZeds;
+    local int LivingAttackMoves;
     local int VisibleThreshold;
     local int DesiredVisibleAwake;
     local int DesiredPressureLevel;
     local int CurrentPressureLevel;
+    local int CorpseScenePressureLevel;
+    local int EnemyPressureLevel;
+    local int EnemyPressureScore;
     local int ScenePressureLevel;
     local int PhysicsPressureLevel;
     local int RagdollPressureLevel;
@@ -1325,18 +1368,31 @@ function AdaptiveCorpseLoadControl()
     bLivingVisibilityFresh = AdaptiveVisibleLivingObservedRealTime > 0.0 &&
         WorldInfo.RealTimeSeconds - AdaptiveVisibleLivingObservedRealTime <= 1.5;
     VisibleLivingZeds = AdaptiveVisibleLivingZeds;
+    TotalLivingZeds = AdaptiveLivingZeds;
+    LivingAttackMoves = AdaptiveLivingAttackMoves;
     if (!bLivingVisibilityFresh)
     {
         VisibleLivingZeds = -1;
+        TotalLivingZeds = -1;
+        LivingAttackMoves = -1;
     }
-    ScenePressureLevel = GetAdaptiveCorpseScenePressureLevel(
-        VisibleLivingZeds, bLivingVisibilityFresh, VisibleCorpses,
-        VisibleAwake, AwakeTotal, VisibleThreshold);
+    CorpseScenePressureLevel = GetAdaptiveCorpseScenePressureLevel(
+        VisibleCorpses, VisibleAwake, AwakeTotal, VisibleThreshold);
+    EnemyPressureLevel = GetAdaptiveEnemyPressureLevel(
+        VisibleLivingZeds, TotalLivingZeds, LivingAttackMoves,
+        bLivingVisibilityFresh, AwakeTotal, EnemyPressureScore);
+    ScenePressureLevel = Max(
+        CorpseScenePressureLevel, EnemyPressureLevel);
     if (ScenePressureLevel != AdaptiveCorpseScenePressureLevel)
     {
         `log("KF2OPT_CORPSE_SCENE state=changed level="$
              ScenePressureLevel$" previous="$AdaptiveCorpseScenePressureLevel$
-             " visible_living="$VisibleLivingZeds$" visible_corpses="$
+             " corpse_level="$CorpseScenePressureLevel$" enemy_level="$
+             EnemyPressureLevel$" enemy_score="$EnemyPressureScore$
+             " visible_living="$
+             VisibleLivingZeds$" total_living="$TotalLivingZeds$
+             " living_attacks="$LivingAttackMoves$
+             " visible_corpses="$
              VisibleCorpses$" visible_awake="$VisibleAwake$" awake_total="$
              AwakeTotal);
         AdaptiveCorpseScenePressureLevel = ScenePressureLevel;
@@ -1399,7 +1455,7 @@ function AdaptiveCorpseLoadControl()
     // frame/resource pressure makes them stronger but is not required before
     // far, settled corpse work can be reduced.
     PhysicsPressureLevel = Max(
-        AdaptiveCorpsePressureLevel, ScenePressureLevel);
+        AdaptiveCorpsePressureLevel, CorpseScenePressureLevel);
     DistanceActionInterval = PhysicsPressureLevel >= 2 ? 0.05 :
         (PhysicsPressureLevel >= 1 ? 0.10 : 0.20);
     if (PhysicsPressureLevel > 0)
@@ -1411,7 +1467,7 @@ function AdaptiveCorpseLoadControl()
             DistanceActionInterval)
     {
         DistanceSleepCount = SleepAllEligibleDistantMonsterCorpses(
-            GoreManager, PhysicsPressureLevel,
+            GoreManager, PhysicsPressureLevel, EnemyPressureScore,
             VisibleLivingZeds, VisibleCorpses);
         if (DistanceSleepCount > 0)
         {
@@ -1913,6 +1969,8 @@ function SampleTelemetry()
     // Reuse the one-second telemetry scan for scene pressure instead of
     // enumerating every living pawn again in the 250-ms corpse controller.
     AdaptiveVisibleLivingZeds = LivingRecentlyRendered;
+    AdaptiveLivingZeds = LivingZeds;
+    AdaptiveLivingAttackMoves = LivingAttackMoves;
     AdaptiveVisibleLivingObservedRealTime = WorldInfo.RealTimeSeconds;
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=living_done");

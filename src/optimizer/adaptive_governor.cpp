@@ -547,7 +547,8 @@ AdaptiveDataQualityReport validate_adaptive_sample(
         !valid_pressure(sample.particle_pressure) ||
         !valid_pressure(sample.gore_pressure) ||
         !valid_pressure(sample.flex_pressure) ||
-        !valid_pressure(sample.streaming_pressure)) {
+        !valid_pressure(sample.streaming_pressure) ||
+        !valid_pressure(sample.enemy_scene_pressure)) {
         report.reason = "invalid_or_missing_primary_telemetry";
         return report;
     }

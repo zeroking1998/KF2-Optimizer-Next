@@ -1,11 +1,13 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <string>
 
 #include "features/telemetry/telemetry_frame.hpp"
+#include "features/telemetry/enemy_scene_pressure.hpp"
 #include "kf2/game/adaptive_control_client.hpp"
 #include "kf2/optimizer/adaptive_governor.hpp"
 
@@ -50,6 +52,7 @@ struct AdaptiveRuntimeControlInput final {
     int quality_change_budget{2};
     bool current_frame_pressure{false};
     bool current_resource_pressure{false};
+    std::optional<double> enemy_scene_pressure;
     bool recovery_eligible{false};
     bool active_gameplay{false};
     bool verified_offline{false};
@@ -93,6 +96,10 @@ select_adaptive_runtime_control(
         input.minimum_quality < 10 || input.maximum_quality > 100 ||
         input.minimum_quality > input.maximum_quality ||
         input.quality_change_budget < 1 || input.quality_change_budget > 5 ||
+        (input.enemy_scene_pressure &&
+         (!std::isfinite(*input.enemy_scene_pressure) ||
+          *input.enemy_scene_pressure < 0.0 ||
+          *input.enemy_scene_pressure > 1.0)) ||
         input.current_quality < input.minimum_quality ||
         input.current_quality > input.maximum_quality || input.now_ns == 0) {
         return std::nullopt;
@@ -101,11 +108,16 @@ select_adaptive_runtime_control(
     int desired = input.current_quality;
     bool recovery = false;
     std::uint64_t minimum_dispatch_interval_ns = 0;
+    const double enemy_pressure =
+        input.enemy_scene_pressure.value_or(0.0);
     if (input.state == optimizer::AdaptiveControllerState::emergency) {
         if (!input.current_frame_pressure &&
             !input.current_resource_pressure) return std::nullopt;
-        const int step = std::clamp(
+        const int base_step = std::clamp(
             input.quality_change_budget * 8, 20, 40);
+        const int step = std::min(
+            50, base_step + static_cast<int>(
+                std::lround(enemy_pressure * 10.0)));
         desired = std::max(
             input.minimum_quality, input.current_quality - step);
         minimum_dispatch_interval_ns = 500'000'000ULL;
@@ -113,7 +125,8 @@ select_adaptive_runtime_control(
                optimizer::AdaptiveControllerState::intervention) {
         if (!input.current_frame_pressure &&
             !input.current_resource_pressure) return std::nullopt;
-        const int step = input.quality_change_budget * 5;
+        const int step = input.quality_change_budget * 5 +
+            static_cast<int>(std::lround(enemy_pressure * 5.0));
         desired = std::max(
             input.minimum_quality, input.current_quality - step);
         minimum_dispatch_interval_ns = 1'000'000'000ULL;
@@ -320,6 +333,11 @@ select_adaptive_runtime_control(
             sample.particle_pressure = normalized(
                 frame.gameplay->telemetry_world_particles,
                 frame.gameplay->telemetry_world_particle_pool_capacity);
+            sample.enemy_scene_pressure = calculate_enemy_scene_pressure(
+                frame.gameplay->telemetry_living_visible,
+                frame.gameplay->telemetry_living_zeds,
+                frame.gameplay->telemetry_living_attack_moves,
+                sample.gameplay_context_fresh);
         }
     }
     if (frame.flex && frame.flex->fresh &&

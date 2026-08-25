@@ -236,14 +236,14 @@ int main() {
     CHECK(telemetry_source.find(
         "SleepAllEligibleDistantMonsterCorpses") != std::string::npos);
     CHECK(telemetry_source.find(
-        "MinimumDistanceSquared = 2250000.0") != std::string::npos);
+        "MinimumDistanceSquared = 1440000.0") != std::string::npos);
     CHECK(telemetry_source.find(
-        "MinimumDistanceSquared = 1210000.0") != std::string::npos);
+        "MinimumDistanceSquared = 640000.0") != std::string::npos);
     CHECK(telemetry_source.find(
-        "MinimumDistanceSquared = 562500.0") != std::string::npos);
-    CHECK(telemetry_source.find("MinimumAge = 1.5") != std::string::npos);
-    CHECK(telemetry_source.find("MinimumAge = 0.75") != std::string::npos);
+        "MinimumDistanceSquared = 202500.0") != std::string::npos);
+    CHECK(telemetry_source.find("MinimumAge = 1.0") != std::string::npos);
     CHECK(telemetry_source.find("MinimumAge = 0.5") != std::string::npos);
+    CHECK(telemetry_source.find("MinimumAge = 0.25") != std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveDistanceSleptCorpses.Length >=") ==
           std::string::npos);
@@ -306,11 +306,30 @@ int main() {
     CHECK(telemetry_source.find(
         "function int GetAdaptiveCorpseScenePressureLevel(") !=
           std::string::npos);
+    const auto enemy_pressure_function = telemetry_source.find(
+        "function int GetAdaptiveEnemyPressureLevel(");
+    CHECK(enemy_pressure_function != std::string::npos);
+    CHECK(telemetry_source.find(
+        "Min(60, Max(0, VisibleLivingZeds) * 8)",
+        enemy_pressure_function) !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "Min(25, Max(0, TotalLivingZeds) * 2)",
+        enemy_pressure_function) !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "Min(15, Max(0, LivingAttackMoves) * 5)",
+        enemy_pressure_function) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveLivingZeds = LivingZeds") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveLivingAttackMoves = LivingAttackMoves") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveVisibleLivingZeds = LivingRecentlyRendered") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "PhysicsPressureLevel <= 0 && bRecentlyRendered") !=
+        "PhysicsPressureLevel <= 0 && EnemyPressureScore <= 0 &&") !=
           std::string::npos);
     const auto all_sleep_function = telemetry_source.find(
         "function int SleepAllEligibleDistantMonsterCorpses(");
@@ -329,6 +348,21 @@ int main() {
     CHECK(frame_only_action_gate == std::string::npos);
     CHECK(telemetry_source.find(
         "PhysicsPressureLevel = Max(", stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "EnemyPressureLevel = GetAdaptiveEnemyPressureLevel(",
+        stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "ScenePressureLevel = Max(", stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "enemy_level=", stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "enemy_score=", stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "EnemyDistanceUnits = FClamp(", all_sleep_function) !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "1200.0 - float(EnemyPressureScore) * 7.5",
+        all_sleep_function) != std::string::npos);
     CHECK(telemetry_source.find(
         "RagdollPressureLevel = Max(", stagger_start) != std::string::npos);
 

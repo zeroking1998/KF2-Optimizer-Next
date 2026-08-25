@@ -1,10 +1,12 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>
 
 #include "features/telemetry/telemetry_frame.hpp"
+#include "features/telemetry/enemy_scene_pressure.hpp"
 #include "kf2/flex/flex_adaptive_policy.hpp"
 #include "kf2/flex/flex_observation.hpp"
 #include "kf2/optimizer/adaptive_actuation.hpp"
@@ -21,6 +23,7 @@ struct FlexControlInput final {
     int target_fps{60};
     int quality_change_budget{1};
     std::optional<double> fps;
+    std::optional<double> enemy_scene_pressure;
     std::uint64_t now_ms{0};
 };
 
@@ -39,10 +42,18 @@ struct FlexControlDecision final {
 
 [[nodiscard]] inline FlexControlDecision decide_flex_control(
     flex::AdaptivePolicy& policy, const FlexControlInput& input) noexcept {
+    int scene_bonus = 0;
+    if (input.enemy_scene_pressure &&
+        std::isfinite(*input.enemy_scene_pressure) &&
+        *input.enemy_scene_pressure >= 0.0 &&
+        *input.enemy_scene_pressure <= 1.0) {
+        scene_bonus = *input.enemy_scene_pressure >= 0.65 ? 2
+            : *input.enemy_scene_pressure >= 0.30 ? 1 : 0;
+    }
     const auto decision = policy.evaluate(
         input.actuator_available,
         input.target_fps, input.fps, input.now_ms,
-        input.quality_change_budget);
+        std::clamp(input.quality_change_budget + scene_bonus, 1, 5));
     return {decision.requested_substeps, decision.constrained};
 }
 

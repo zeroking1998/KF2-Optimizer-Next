@@ -147,9 +147,15 @@ bounded steps applied to a separate runtime threshold and excess confirmed
 and never during Zed Time. Recovery stops removal immediately and raises the
 runtime threshold gradually back toward the selected ceiling. The same
 controller has a separate distance-first physics stage. At baseline it sleeps
-an eligible corpse beyond 1,500 units. Fresh visible living/corpse density or
-confirmed target-relative frame pressure moves the threshold to 1,100/750
-units; FPS is an amplifier rather than the sole gate. The selected maximum
+an eligible corpse beyond 1,200 units. Corpse density, confirmed target-relative
+frame pressure, or independently calculated visible-enemy pressure moves the
+threshold to 800/450 units. Enemy pressure is a monotonic 0-100 score composed
+of visible enemies (up to 60), total living enemies (up to 25) and active
+attacks (up to 15), with levels at 30 and 65. Its exact value continuously
+moves the Distance-Sleep threshold from 1,200 toward 450 units; FPS is an
+amplifier rather than the sole gate. The app mirrors the same score as a scene
+amplifier for live graphics, physics and already-user-enabled FleX, but only
+after frame or resource telemetry confirms a correction. The selected maximum
 bounds the corpse pool, but a linear Distance-Sleep pass can process every
 currently eligible corpse without a separate actor or batch cap. Distance
 Sleep is permanent for that corpse and no proximity-wake pass remains.

@@ -321,6 +321,7 @@ void UiRuntime::update_adaptive_controller(
                 adaptive_decision.current_frame_pressure,
             .current_resource_pressure =
                 adaptive_decision.current_resource_pressure,
+            .enemy_scene_pressure = sample.enemy_scene_pressure,
             .recovery_eligible =
                 adaptive_decision.quality_recovery_eligible,
             .active_gameplay = active_gameplay,
@@ -678,7 +679,14 @@ void UiRuntime::update_adaptive_controller(
         decision_log << L"; prediction=" << status.adaptive_prediction
                      << L"; dropRisk="
                      << status.adaptive_drop_risk_percent << L"%"
-                     << L"; bottleneck=" << status.adaptive_bottleneck
+                     << L"; enemyScenePressure=";
+        if (sample.enemy_scene_pressure) {
+            decision_log << std::setprecision(0)
+                         << *sample.enemy_scene_pressure * 100.0 << L"%";
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; bottleneck=" << status.adaptive_bottleneck
                      << L"; confidence="
                      << status.adaptive_confidence_percent << L"%"
                      << L"; action=" << status.adaptive_action

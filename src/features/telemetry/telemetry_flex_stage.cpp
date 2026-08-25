@@ -33,6 +33,18 @@ void run_flex_control_stage(app::UiRuntime& runtime,
             optimizer::AdaptiveCapabilityState::available &&
         frame.flex && runtime.flex_adaptive_policy.synchronize_observed(
             frame.flex->last_forwarded_substeps);
+    const bool gameplay_context_fresh = frame.gameplay &&
+        frame.gameplay->telemetry_observed_ns != 0 &&
+        frame.observed_at_ns >= frame.gameplay->telemetry_observed_ns &&
+        frame.observed_at_ns - frame.gameplay->telemetry_observed_ns <=
+            game::kGameLogObservationFreshnessNs;
+    const auto enemy_scene_pressure = frame.gameplay
+        ? calculate_enemy_scene_pressure(
+              frame.gameplay->telemetry_living_visible,
+              frame.gameplay->telemetry_living_zeds,
+              frame.gameplay->telemetry_living_attack_moves,
+              gameplay_context_fresh)
+        : std::nullopt;
     const auto decision = decide_flex_control(
         runtime.flex_adaptive_policy,
         {.actuator_available = observed_solver_ready && pressure_actionable,
@@ -40,6 +52,7 @@ void run_flex_control_stage(app::UiRuntime& runtime,
          .quality_change_budget =
              runtime.effective_quality_change_budget(),
          .fps = frame.frames.fps,
+         .enemy_scene_pressure = enemy_scene_pressure,
          .now_ms = GetTickCount64()});
     apply_flex_control_effect(
         runtime, {decision.requested_substeps, decision.constrained,

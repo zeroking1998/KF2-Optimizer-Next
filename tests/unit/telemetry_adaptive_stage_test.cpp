@@ -72,8 +72,10 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     session.telemetry_gore_particle_pool_capacity = 100;
     session.telemetry_world_particles = 30;
     session.telemetry_world_particle_pool_capacity = 60;
+    session.telemetry_living_zeds = 11;
     session.telemetry_living_visible = 7;
     session.telemetry_living_offscreen = 4;
+    session.telemetry_living_attack_moves = 3;
     frame.gameplay = session;
 
     flex::ObservationSnapshot flex;
@@ -92,6 +94,12 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
 int main() {
     using namespace kf2;
     using namespace kf2::telemetry_pipeline;
+    const auto light_scene = calculate_enemy_scene_pressure(2, 4, 0, true);
+    const auto heavy_scene = calculate_enemy_scene_pressure(7, 11, 3, true);
+    CHECK(light_scene.has_value());
+    CHECK(heavy_scene.has_value());
+    CHECK(*heavy_scene > *light_scene);
+    CHECK(!calculate_enemy_scene_pressure(7, 11, 3, false).has_value());
     auto frame = complete_frame();
     AdaptiveSampleContext context;
     context.current_quality = 80;
@@ -193,6 +201,8 @@ int main() {
     CHECK(approximately_equal(*sample.gore_pressure, 0.2));
     CHECK(sample.particle_pressure.has_value());
     CHECK(approximately_equal(*sample.particle_pressure, 0.5));
+    CHECK(sample.enemy_scene_pressure.has_value());
+    CHECK(approximately_equal(*sample.enemy_scene_pressure, 0.93));
     CHECK(sample.flex_pressure.has_value());
     CHECK(approximately_equal(*sample.flex_pressure, 0.25));
     CHECK(sample.quality_score == 80.0);
@@ -238,6 +248,7 @@ int main() {
     CHECK(!stale_sample.gameplay_context_fresh);
     CHECK(!stale_sample.visibility_context_fresh);
     CHECK(!stale_sample.ragdoll_pressure.has_value());
+    CHECK(!stale_sample.enemy_scene_pressure.has_value());
 
     auto stale_flex = frame;
     auto late_context = context;
@@ -256,6 +267,7 @@ int main() {
     CHECK(!empty.sample.system_cpu_percent.has_value());
     CHECK(!empty.sample.gpu_percent.has_value());
     CHECK(!empty.sample.ragdoll_pressure.has_value());
+    CHECK(!empty.sample.enemy_scene_pressure.has_value());
     CHECK(!empty.sample.flex_pressure.has_value());
     CHECK(empty.sample.session_class ==
           optimizer::AdaptiveSessionClass::unknown);
@@ -274,11 +286,28 @@ int main() {
     control.bridge_available = true;
     control.now_ns = 10'000'000'000ULL;
     CHECK(!select_adaptive_runtime_control(control).has_value());
+    control.enemy_scene_pressure = 1.0;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
+    control.enemy_scene_pressure = 1.1;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
+    control.enemy_scene_pressure.reset();
     control.current_frame_pressure = true;
     auto selected = select_adaptive_runtime_control(control);
     CHECK(selected.has_value());
     CHECK(selected->resource == game::AdaptiveResourceControl::cpu);
     CHECK(selected->quality == 90);
+
+    control.enemy_scene_pressure = 0.93;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::cpu);
+    CHECK(selected->quality == 85);
+    control.enemy_scene_pressure = 0.20;
+    const auto low_enemy_pressure = select_adaptive_runtime_control(control);
+    CHECK(low_enemy_pressure.has_value());
+    CHECK(low_enemy_pressure->quality == 89);
+    CHECK(selected->quality < low_enemy_pressure->quality);
+    control.enemy_scene_pressure.reset();
 
     control.current_frame_pressure = false;
     control.current_resource_pressure = true;

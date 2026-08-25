@@ -8,9 +8,14 @@ are visible immediately.
 
 ### Bug fixes
 
-- Made Distance Sleep substantially more aggressive at 1,500/1,100/750
+- Made Distance Sleep substantially more aggressive at 1,200/800/450
   units. Every eligible corpse in the user-sized pool can sleep in one linear
-  pass; there is no separate fixed corpse or batch limit. Near Wake was removed.
+  pass; there is no separate fixed corpse or batch limit. A monotonic scene
+  score from visible enemies, total living enemies and active attacks now
+  activates it independently and continuously moves the sleep distance toward
+  450 units. The same score strengthens live graphics, physics and user-enabled
+  FleX corrections only while real frame or resource pressure is confirmed.
+  Near Wake was removed.
 - Added actor-correlated LOD restore receipts and prevented reacquisition after
   KF2 or another system overrides an optimizer-owned corpse LOD value.
 - Target FPS now uses KF2's native startup cap independently of telemetry and

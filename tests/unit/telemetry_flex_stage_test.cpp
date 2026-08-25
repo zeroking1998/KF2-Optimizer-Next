@@ -55,6 +55,21 @@ int main() {
     input.now_ms = 3200;
     CHECK(decide_flex_control(policy, input).requested_substeps == 1);
 
+    kf2::flex::AdaptivePolicy crowded_policy;
+    FlexControlInput crowded_input = input;
+    crowded_input.fps = 60.0;
+    crowded_input.now_ms = 10'000;
+    crowded_input.enemy_scene_pressure = 0.93;
+    CHECK(decide_flex_control(crowded_policy, crowded_input)
+              .requested_substeps == 5);
+    crowded_input.fps = 35.0;
+    crowded_input.now_ms = 10'400;
+    CHECK(decide_flex_control(crowded_policy, crowded_input)
+              .requested_substeps == 5);
+    crowded_input.now_ms = 10'800;
+    CHECK(decide_flex_control(crowded_policy, crowded_input)
+              .requested_substeps == 1);
+
     input.fps = 60.0;
     input.now_ms = 3600;
     CHECK(decide_flex_control(policy, input).requested_substeps == 1);
