@@ -858,6 +858,27 @@ int main() {
                 return event.code == "KF2_SESSION_RESTART_WAIT";
             }));
 
+        auto restarted_engine = read_bytes(config_root / L"KFEngine.ini");
+        const auto flex_setting = restarted_engine.find("PhysXLevel=0");
+        CHECK(flex_setting != std::string::npos);
+        restarted_engine.replace(
+            flex_setting, std::string_view{"PhysXLevel=0"}.size(),
+            "PhysXLevel=2");
+        write_bytes(config_root / L"KFEngine.ini", restarted_engine);
+        rearm_runtime.refresh_game_configuration_for_process_start(true);
+        const auto flex_index = static_cast<std::size_t>(
+            kf2::game::VideoOption::nvidia_flex);
+        CHECK(rearm_runtime.model.status().graphics_values[flex_index] ==
+              L"Gibs and fluids");
+        const auto refreshed_events = rearm_events.snapshot();
+        CHECK(std::any_of(refreshed_events.begin(), refreshed_events.end(),
+            [](const auto& event) {
+                return event.code ==
+                           "KF2_NEW_SETTINGS_CONFIGURATION_DETECTED" &&
+                       event.message.find(L"configured NVIDIA FleX: Gibs and fluids") !=
+                           std::wstring::npos;
+            }));
+
         CHECK(rearm_runtime.restore_protected_session_config(
             L"First simulated KF2 session ended"));
         CHECK(!rearm_runtime.game_restart_handoff_previous_process.has_value());

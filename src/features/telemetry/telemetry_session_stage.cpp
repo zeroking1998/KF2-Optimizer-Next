@@ -501,6 +501,7 @@ void UiRuntime::update_overlay_scene_gate() {
 
 void UiRuntime::try_attach_telemetry() {
     if (!installation || present_source) return;
+    bool confirmed_settings_restart_replacement = false;
     // Revalidate the executable-bound process on every pre-attach tick.
     // A cached PID without a window can otherwise survive a failed launch
     // forever and prevent the protected INI snapshot from being restored.
@@ -549,6 +550,8 @@ void UiRuntime::try_attach_telemetry() {
             telemetry_pipeline::RestartHandoffDisposition::replacement_found;
         const bool new_settings_restart =
             game_restart_handoff_new_settings;
+        confirmed_settings_restart_replacement =
+            replacement && new_settings_restart;
         game_restart_handoff_previous_process.reset();
         game_restart_handoff_deadline_ns = 0;
         game_restart_handoff_new_settings = false;
@@ -584,6 +587,8 @@ void UiRuntime::try_attach_telemetry() {
         game_process->pid != process.value().pid ||
         game_process->process_start_id != process.value().process_start_id;
     if (new_process) {
+        refresh_game_configuration_for_process_start(
+            confirmed_settings_restart_replacement);
         game::OfflineAdaptiveSessionPolicy active_policy{
             optimizer_settings.corpse_limit,
             optimizer_settings.target_fps,

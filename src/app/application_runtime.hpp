@@ -274,6 +274,7 @@ struct UiRuntime {
     void ignore_update();
     void refresh_update_presentation();
     void reload_video_settings();
+    void refresh_game_configuration_for_process_start(bool settings_restart);
     void refresh_video_presentation();
     void cycle_video_option(game::VideoOption option);
     void reset_video_settings();
