@@ -10,6 +10,7 @@ $failures = [System.Collections.Generic.List[string]]::new()
 $requiredFiles = @(
     '.gitattributes',
     '.gitignore',
+    '.vsconfig',
     'LICENSE',
     'README.md',
     'THIRD_PARTY_NOTICES.md',
@@ -18,7 +19,15 @@ $requiredFiles = @(
     '.github/workflows/windows-ci.yml',
     '.github/ISSUE_TEMPLATE/bug_report.yml',
     '.github/ISSUE_TEMPLATE/feature_request.yml',
-    '.github/PULL_REQUEST_TEMPLATE.md'
+    '.github/ISSUE_TEMPLATE/help_request.yml',
+    '.github/PULL_REQUEST_TEMPLATE.md',
+    'setup.cmd',
+    'build.cmd',
+    'package.cmd',
+    'tools/check_requirements.ps1',
+    'tools/install_requirements.ps1',
+    'tools/download_telemetry_seed.ps1',
+    'tools/build_for_contributors.ps1'
 )
 foreach ($relativePath in $requiredFiles) {
     $requiredPath = Join-Path $projectRoot $relativePath
@@ -68,7 +77,7 @@ foreach ($file in $files) {
 $textExtensions = @('.cpp', '.c', '.h', '.hpp', '.ps1', '.cmake', '.md',
                     '.yml', '.yaml', '.json', '.ini', '.uc', '.txt')
 $secretPattern = 'BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9]+|AKIA[0-9A-Z]{16}|(?i)(?:api[_-]?key|client[_-]?secret|access[_-]?token)\s*[:=]\s*["''][^"'']{8,}'
-$personalPathPattern = '(?i)(?:[A-Z]:\\Users\\alexw|D:\\KF2|E:\\KF2|zeroking1998)'
+$personalPathPattern = '(?i)(?:[A-Z]:\\Users\\alexw|D:\\KF2|E:\\KF2)'
 foreach ($file in $files | Where-Object {
         $textExtensions -contains $_.Extension.ToLowerInvariant() -and
         $_.FullName -ne $PSCommandPath

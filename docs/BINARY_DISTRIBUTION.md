@@ -16,8 +16,12 @@ It must not contain:
 
 The compiled telemetry package is excluded through `.gitignore`. Contributors
 install the official KF2 SDK separately, accept its applicable terms, and run
-`tools/build_kf2_telemetry.ps1`. Packaging automatically invokes that build
-when the module is absent and refuses to create a reduced-function package.
+`tools/build_kf2_telemetry.ps1`. When the local module is absent, packaging
+downloads the newest official portable release, verifies the release asset's
+repository, tag, filename, size, and GitHub SHA-256 digest, and uses only its
+telemetry module as KFEditor's conformity seed. Packaging then compiles the
+current public UnrealScript source and refuses to create a reduced-function or
+hash-mismatched package.
 
 ## Local package
 

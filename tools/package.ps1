@@ -47,14 +47,20 @@ $knownManagedPaths = [Collections.Generic.HashSet[string]]::new(
 $telemetryModule = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerTelemetry.u'
 if (-not (Test-Path -LiteralPath $telemetryModule -PathType Leaf)) {
-    Write-Host 'Telemetry module is missing; compiling it with the installed KF2 SDK.'
+    Write-Host 'Telemetry module is missing; preparing a verified build seed.'
+    if ([string]::IsNullOrWhiteSpace($TelemetrySeedModule)) {
+        $TelemetrySeedModule = (
+            & (Join-Path $PSScriptRoot 'download_telemetry_seed.ps1') |
+                Select-Object -Last 1)
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+    Write-Host 'Compiling telemetry with the installed KF2 SDK.'
     $telemetryBuild = @{
         OutputPath = $telemetryModule
-    }
-    if (-not [string]::IsNullOrWhiteSpace($TelemetrySeedModule)) {
-        $telemetryBuild.SeedModule = $TelemetrySeedModule
+        SeedModule = $TelemetrySeedModule
     }
     & (Join-Path $PSScriptRoot 'build_kf2_telemetry.ps1') @telemetryBuild
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 $actualTelemetryHash = (Get-FileHash -LiteralPath $telemetryModule `
     -Algorithm SHA256).Hash.ToLowerInvariant()

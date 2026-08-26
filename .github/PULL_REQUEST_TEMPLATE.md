@@ -1,29 +1,28 @@
-## Problem
+## What changed?
 
-What observable problem does this change solve?
+Explain the user-visible result in a few sentences.
 
-## Change
+## Why?
 
-Describe the smallest relevant behavior change and its ownership boundary.
+Describe the problem this pull request solves.
 
-## Evidence
+## How was it tested?
 
-- [ ] Focused regression test
-- [ ] Debug test suite
-- [ ] Release test suite
-- [ ] Documentation validation
-- [ ] Native Windows/package/runtime validation when relevant
+List the exact commands and any manual KF2 or Windows checks.
 
-List exact commands and results.
+- [ ] Focused test added or updated when behavior changed
+- [ ] Debug tests passed
+- [ ] Release tests passed
+- [ ] Documentation validation passed
+- [ ] Real Windows, KF2, or package check completed when required
 
-## Safety and restoration
+## Safety
 
-- [ ] Native state, proposals, requests, and applied receipts remain distinct.
-- [ ] Runtime work, retries, queues, and retained state remain bounded.
-- [ ] Protected state has a tested restoration path.
+- [ ] Original settings and recovery behavior still work.
+- [ ] Logs distinguish a request from a confirmed applied action.
 - [ ] The change does not modify competitive gameplay.
+- [ ] User-facing text and code are clear English.
 
-## Documentation
+## Anything left to test?
 
-- [ ] User-visible behavior and `CHANGELOG.md` are updated, or not applicable.
-- [ ] New UI, logs, identifiers, comments, tests, and docs use clear English.
+List any known limitation or required live test. Write `None` when complete.

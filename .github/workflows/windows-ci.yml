@@ -33,3 +33,16 @@ jobs:
       - name: Build and test
         shell: pwsh
         run: ./tools/test.ps1 -Configuration ${{ matrix.configuration }} -PublicCI
+
+      - name: Upload Windows x64 developer build
+        if: matrix.configuration == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: KF2Optimizer-Windows-x64-${{ github.sha }}
+          path: |
+            out/build/windows-x64-release/Release/KF2Optimizer.exe
+            README.md
+            LICENSE
+            THIRD_PARTY_NOTICES.md
+          if-no-files-found: error
+          retention-days: 14

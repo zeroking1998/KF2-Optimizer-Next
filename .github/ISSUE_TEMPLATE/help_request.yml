@@ -1,0 +1,40 @@
+name: Help or question
+description: Ask how to install, build, or use KF2 Optimizer
+title: "[Help] "
+labels:
+  - question
+body:
+  - type: input
+    id: version
+    attributes:
+      label: KF2 Optimizer version
+      placeholder: 0.0.4-alpha or source build
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What do you need help with?
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you already tried?
+      description: Include the command and the complete error message when this is a build question.
+
+  - type: input
+    id: system
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I removed personal information from screenshots and logs.
+          required: true

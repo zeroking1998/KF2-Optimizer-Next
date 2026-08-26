@@ -10,6 +10,10 @@ $requiredFiles = @(
     '.gitattributes',
     '.gitignore',
     'README.md',
+    '.vsconfig',
+    'setup.cmd',
+    'build.cmd',
+    'package.cmd',
     'CONTRIBUTING.md',
     'CODE_OF_CONDUCT.md',
     'SECURITY.md',
@@ -25,14 +29,20 @@ $requiredFiles = @(
     'docs/FEATURE_REFERENCE.md',
     'docs/SAFETY.md',
     'docs/DEVELOPER_GUIDE.md',
+    'docs/BUILDING.md',
     'docs/CODE_STYLE.md',
     'docs/GLOSSARY.md',
     'docs/OPEN_SOURCE_CHECKLIST.md',
     '.github/workflows/windows-ci.yml',
     '.github/ISSUE_TEMPLATE/bug_report.yml',
     '.github/ISSUE_TEMPLATE/feature_request.yml',
+    '.github/ISSUE_TEMPLATE/help_request.yml',
     '.github/PULL_REQUEST_TEMPLATE.md',
     'tools/build_kf2_telemetry.ps1',
+    'tools/check_requirements.ps1',
+    'tools/install_requirements.ps1',
+    'tools/download_telemetry_seed.ps1',
+    'tools/build_for_contributors.ps1',
     'tools/validate_publication.ps1'
 )
 
@@ -105,7 +115,7 @@ foreach ($markdownFile in $markdownFiles) {
 }
 
 $readme = Get-Content -LiteralPath (Join-Path $repositoryRoot 'README.md') -Raw
-foreach ($heading in @('## What it does', '## Start here', '## Build and test',
+foreach ($heading in @('## What it does', '## Start here', '## Build from source',
                         '## Contributing', '## License')) {
     if (-not $readme.Contains($heading)) {
         $failures.Add("README is missing required heading: $heading")

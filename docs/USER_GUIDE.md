@@ -34,7 +34,8 @@ when it contains exactly the `KF2OptimizerNext` folder.
 
 No KF2 SDK or compilation is required for the ready-to-run ZIP. The executable
 is currently unsigned, so Windows SmartScreen may display a warning on first
-launch.
+launch. The complete official ZIP already contains every project-owned runtime
+file required by that version.
 
 ## Update the portable app
 
