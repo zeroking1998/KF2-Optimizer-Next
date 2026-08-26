@@ -174,6 +174,10 @@ int main() {
     CHECK(game_log_is_offline_gameplay(*offline));
     CHECK(describe_game_log_session(*offline).find(L"connection: offline") !=
           std::wstring::npos);
+    CHECK(describe_game_log_session(*offline).find(
+              L"read-only active launch log") != std::wstring::npos);
+    CHECK(describe_game_log_session(*offline).find(L"Launch.log") ==
+          std::wstring::npos);
     CHECK(!stream.feed(
         "[0048.43] ScriptLog: WI.NetMode:  NM_Standalone\n").has_value());
     CHECK(!stream.feed(

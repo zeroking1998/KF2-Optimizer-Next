@@ -156,6 +156,7 @@ add_executable(KF2Optimizer WIN32
     src/game/gameplay_log_lab.cpp
     src/game/offline_telemetry_lab.cpp
     src/game/game_log_description.cpp
+    src/game/game_log_locator.cpp
     src/game/game_log_parsing.cpp
     src/game/game_log_session.cpp
     src/game/game_log_telemetry.cpp

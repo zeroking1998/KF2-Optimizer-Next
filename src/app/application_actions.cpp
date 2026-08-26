@@ -564,11 +564,16 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     if (adaptive_policy_changed) {
         const bool session_value_staged_for_restart =
             adaptive_session_policy.has_value() &&
-            (control->id == runtime::ControlId::target_fps ||
-             control->id == runtime::ControlId::corpse_limit);
+            control->id == runtime::ControlId::corpse_limit;
         if (session_value_staged_for_restart) {
             adaptive_policy_changed = false;
         }
+    }
+    const bool live_target_updated =
+        optimizer_settings.target_fps != previous.target_fps &&
+        adaptive_session_policy.has_value();
+    if (live_target_updated) {
+        adaptive_session_policy->target_fps = optimizer_settings.target_fps;
     }
     if (adaptive_policy_changed) {
         auto generation = adaptive_actuation.generation();
@@ -584,6 +589,9 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     preview.reset();
     auto status = model.status();
     status.target_fps = optimizer_settings.target_fps;
+    if (live_target_updated) {
+        status.active_target_fps = optimizer_settings.target_fps;
+    }
     status.corpse_limit = optimizer_settings.corpse_limit;
     status.overlay_scale_percent = optimizer_settings.overlay_scale_percent;
     update_adaptive_policy_status(status);
@@ -593,7 +601,8 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
         const bool game_running = game::find_running_game_process(
             installation->executable).has_value();
         if (game_running) {
-            message += L"; the native cap will use this value after KF2 restarts";
+            message +=
+                L"; Adaptive is using this target now; the native cap will use it after KF2 restarts";
         } else {
             const auto synchronized = synchronize_frame_rate_cap();
             if (!synchronized.has_value()) {

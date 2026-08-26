@@ -140,7 +140,7 @@ std::wstring describe_game_log_session(const GameLogSession& session) {
             result += L" | connection: dedicated server";
         }
     }
-    result += L" (read-only Launch.log)";
+    result += L" (read-only active launch log)";
     return result;
 }
 

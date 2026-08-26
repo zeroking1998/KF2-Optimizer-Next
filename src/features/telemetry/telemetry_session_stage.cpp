@@ -1,5 +1,7 @@
 #include "features/telemetry/telemetry_session_stage.hpp"
 
+#include "kf2/game/game_log_locator.hpp"
+
 #include "app/application_runtime.hpp"
 
 namespace kf2::telemetry_pipeline {
@@ -313,9 +315,11 @@ void UiRuntime::detach_telemetry() {
 
 void UiRuntime::update_overlay_scene_gate() {
     if (!installation || !game_process) return;
-    if (game_log_path.empty()) {
-        game_log_path = installation->config_root.parent_path() / L"Logs" / L"Launch.log";
-    }
+    const auto selected_log = game::find_active_game_log(
+        installation->config_root.parent_path() / L"Logs",
+        game_process->process_start_id);
+    if (!selected_log.has_value() || !selected_log.value()) return;
+    game_log_path = selected_log.value()->path;
     HANDLE log_file = CreateFileW(game_log_path.c_str(),
         FILE_READ_ATTRIBUTES | GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -491,6 +495,7 @@ void UiRuntime::try_attach_telemetry() {
                     observed.error().message,
                 L"optimizer"});
         }
+        active_policy.target_fps = optimizer_settings.target_fps;
         adaptive_session_policy = active_policy;
         auto status = model.status();
         status.active_target_fps = active_policy.target_fps;
@@ -540,9 +545,9 @@ void UiRuntime::try_attach_telemetry() {
     // before the DX11 presentation path is active and then remain silent
     // for the lifetime of the process.  Wait for KF2's own main-menu
     // marker first.  This also prevents the overlay from briefly appearing
-    // and disappearing during startup.  The complete current Launch.log is
-    // scanned, so starting the optimizer after KF2 reached the menu works
-    // as well.
+    // and disappearing during startup. The complete current process-bound
+    // Launch log is scanned, so starting the optimizer after KF2 reached the
+    // menu works as well.
     update_overlay_scene_gate();
     if (!overlay_scene_ready) {
         telemetry_failure = game_log_startup_exited
