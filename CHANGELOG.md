@@ -13,6 +13,9 @@ are visible immediately.
   restores the groups gradually. The live groups now also cover verified KF2
   shadow distance/fade, post-processing quality, lighting, shadowmap textures,
   wound decals, blood effects, and destruction lifetime controls.
+- CPU Adaptive quality now progressively reduces the three official cosmetic
+  corpse-collision options at 80%, 60%, and 40%, with exact engine readback and
+  restoration of the user's original values.
 
 ### Bug fixes
 

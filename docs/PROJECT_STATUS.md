@@ -148,8 +148,11 @@ may continue into native `MinLodModel` on one distant visible corpse every
 or overriding `ForcedLodModel`; nearby, sleeping,
 recovered and session-ending LOD values are restored. Only after those stages
 may one old, slow visible corpse sleep every 750/350 ms. Living enemies, death
-animations, fast bodies, collision channels, Zed Time, Manual and online
-sessions are unchanged. KF2/UE3 already performs native view-frustum and
+animations and fast bodies are unchanged. The CPU live-quality group can disable
+the three official cosmetic corpse-collision switches at 80/60/40%, with exact
+capture, engine readback and restore. Living-enemy collision/navigation,
+`bAllowPhysics`, Zed Time, Manual and online sessions remain unchanged. KF2/UE3
+already performs native view-frustum and
 occlusion culling for living-enemy primitives, so the optimizer never uses
 `bHidden` or custom hide/show logic that could create invisible enemies.
 

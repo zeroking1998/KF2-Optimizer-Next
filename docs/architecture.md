@@ -134,7 +134,8 @@ stale telemetry, Zed Time, an online/unknown session, shadow mode, missing bridg
 capability or a readback mismatch prevents the change. Display mode, resolution,
 VSync, variable frame rate, anti-aliasing and FleX are not owned by this path.
 The four resource groups retain separate quality levels: CPU pressure controls
-scene/mesh/particle LOD and light functions; GPU pressure controls shadows,
+scene/mesh/particle LOD, light functions and the three official cosmetic corpse
+collision switches; GPU pressure controls shadows,
 post-processing, reflections and cosmetic lighting; VRAM pressure controls
 texture and shadowmap bias plus anisotropy; RAM pressure controls bounded effect,
 decal and lifetime budgets. The displayed effective quality is the lowest group,
@@ -144,8 +145,12 @@ Adaptive settings use three operational safety levels. Verified live settings
 require an authenticated command, exact engine readback and session restore.
 Startup-only settings use an atomic pre-launch snapshot/apply/readback transaction
 and are never presented as mid-match changes. User-owned or protected settings,
-including display, anti-aliasing, FleX mode, corpse maximum and gameplay
-collision, are never changed by Adaptive.
+including display, anti-aliasing, FleX mode, corpse maximum and living-enemy
+collision/navigation, are never changed by Adaptive. Corpse collision is a
+separate verified live CPU group: collision between sleeping/dead corpses is
+disabled at 80%, dead-to-dead collision at 60%, and living-to-corpse collision
+at 40%. Every switch requires exact engine readback and restores the captured
+user value on recovery or session shutdown.
 
 For a protected app-started standalone session, the optional telemetry
 package can also enable a narrowly bounded corpse-stagger actuator. The chosen
@@ -174,7 +179,7 @@ state is preserved or restored. After eligible distance/LOD work is exhausted,
 one old, slow, non-death-animation visible ragdoll may sleep at most once per
 750/350 ms. KF2/UE3 native frustum and occlusion culling already avoid drawing
 living-enemy primitives outside the view or behind occluders. No living pawn is
-manually hidden or mutated and collision channels are never changed. If this
+manually hidden or mutated and its collision/navigation are never changed. If this
 protected provider is absent, only its corpse/ragdoll/LOD capabilities report
 `UNAVAILABLE`; the rest of General Adaptive continues independently.
 

@@ -107,7 +107,29 @@ int main() {
     CHECK(graphics_source.find("Requested.CharacterDetail.MaxDeadBodies") ==
           std::string::npos);
     CHECK(graphics_source.find(
-        "Requested.CharacterDetail.ShouldCorpseCollide") ==
+        "Requested.CharacterDetail.ShouldCorpseCollideWithDeadAfterSleep = false") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.CharacterDetail.ShouldCorpseCollideWithDead = false") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.CharacterDetail.ShouldCorpseCollideWithLiving = false") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.bOriginalCorpseCollideWithDead") != std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.bOriginalCorpseCollideWithLiving") != std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.bOriginalCorpseCollideWithDeadAfterSleep") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.CharacterDetail.ShouldCorpseCollideWithDead =\n"
+        "        Snapshot.bOriginalCorpseCollideWithDead") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Observed.CharacterDetail.ShouldCorpseCollideWithLiving") !=
+          std::string::npos);
+    CHECK(graphics_source.find("Requested.CharacterDetail.bAllowPhysics") ==
           std::string::npos);
     CHECK(graphics_source.find("KinematicUpdateDistFactorScale = FMax") !=
           std::string::npos);
