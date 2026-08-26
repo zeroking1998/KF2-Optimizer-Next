@@ -154,9 +154,11 @@ pressure and restore inside 900 units with an actor-correlated receipt. An
 external override releases and excludes that actor; `ForcedLodModel` is never
 overridden.
 Only after those stages
-may one old, slow visible corpse sleep every 750/350 ms. Living enemies, death
-animations, fast bodies, collision channels, Zed Time, Manual and online
-sessions are unchanged. KF2/UE3 already performs native view-frustum and
+may one old, slow visible corpse sleep every 750/350 ms. The CPU live-quality
+group can also disable the three official cosmetic corpse-collision switches at
+80/60/40%, with exact capture, engine readback and restore. Living-enemy
+collision/navigation, `bAllowPhysics`, death animations, fast bodies, Zed Time,
+Manual and online sessions are unchanged. KF2/UE3 already performs native view-frustum and
 occlusion culling for living-enemy primitives, so the optimizer never uses
 `bHidden` or custom hide/show logic that could create invisible enemies.
 

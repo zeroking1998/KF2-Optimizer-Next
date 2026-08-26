@@ -211,9 +211,18 @@ static function ApplyCpu(out GFXSettings Requested, int Quality)
         KinematicScale);
     Requested.FX.ParticleLODBias = Max(
         Requested.FX.ParticleLODBias, LodBias);
+    if (Quality <= 80)
+    {
+        Requested.CharacterDetail.ShouldCorpseCollideWithDeadAfterSleep = false;
+    }
     if (Quality <= 60)
     {
         Requested.EnvironmentDetail.AllowLightFunctions = false;
+        Requested.CharacterDetail.ShouldCorpseCollideWithDead = false;
+    }
+    if (Quality <= 40)
+    {
+        Requested.CharacterDetail.ShouldCorpseCollideWithLiving = false;
     }
 }
 
@@ -354,6 +363,12 @@ static function CaptureOriginal(
         Current.FX.AllowBloodSplatterDecals;
     Snapshot.bOriginalSubsurfaceScattering =
         Current.CharacterDetail.AllowSubsurfaceScattering;
+    Snapshot.bOriginalCorpseCollideWithDead =
+        Current.CharacterDetail.ShouldCorpseCollideWithDead;
+    Snapshot.bOriginalCorpseCollideWithLiving =
+        Current.CharacterDetail.ShouldCorpseCollideWithLiving;
+    Snapshot.bOriginalCorpseCollideWithDeadAfterSleep =
+        Current.CharacterDetail.ShouldCorpseCollideWithDeadAfterSleep;
     Snapshot.bOriginalLightFunctions =
         Current.EnvironmentDetail.AllowLightFunctions;
     Snapshot.OriginalDetailMode = Current.EnvironmentDetail.DetailMode;
@@ -447,6 +462,12 @@ static function RestoreOwnedSettings(
         Snapshot.bOriginalBloodSplatterDecals;
     Requested.CharacterDetail.AllowSubsurfaceScattering =
         Snapshot.bOriginalSubsurfaceScattering;
+    Requested.CharacterDetail.ShouldCorpseCollideWithDead =
+        Snapshot.bOriginalCorpseCollideWithDead;
+    Requested.CharacterDetail.ShouldCorpseCollideWithLiving =
+        Snapshot.bOriginalCorpseCollideWithLiving;
+    Requested.CharacterDetail.ShouldCorpseCollideWithDeadAfterSleep =
+        Snapshot.bOriginalCorpseCollideWithDeadAfterSleep;
     Requested.EnvironmentDetail.AllowLightFunctions =
         Snapshot.bOriginalLightFunctions;
     Requested.EnvironmentDetail.DetailMode = Snapshot.OriginalDetailMode;
@@ -541,6 +562,12 @@ static function bool ReadbackMatches(
                Requested.FX.AllowBloodSplatterDecals &&
            Observed.CharacterDetail.AllowSubsurfaceScattering ==
                Requested.CharacterDetail.AllowSubsurfaceScattering &&
+           Observed.CharacterDetail.ShouldCorpseCollideWithDead ==
+               Requested.CharacterDetail.ShouldCorpseCollideWithDead &&
+           Observed.CharacterDetail.ShouldCorpseCollideWithLiving ==
+               Requested.CharacterDetail.ShouldCorpseCollideWithLiving &&
+           Observed.CharacterDetail.ShouldCorpseCollideWithDeadAfterSleep ==
+               Requested.CharacterDetail.ShouldCorpseCollideWithDeadAfterSleep &&
            Observed.EnvironmentDetail.AllowLightFunctions ==
                Requested.EnvironmentDetail.AllowLightFunctions &&
            Observed.EnvironmentDetail.DetailMode ==
