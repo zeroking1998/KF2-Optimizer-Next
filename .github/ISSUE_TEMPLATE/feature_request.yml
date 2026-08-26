@@ -1,36 +1,40 @@
 name: Feature request
-description: Propose a focused, verifiable improvement
-title: "[Feature]: "
-labels: [enhancement]
+description: Suggest a useful improvement
+title: "[Feature] "
+labels:
+  - enhancement
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Explain the user problem first. A maintainer can help choose the safest implementation.
+
   - type: textarea
     id: problem
     attributes:
-      label: Problem
-      description: Explain the user problem without prescribing an implementation.
+      label: What problem would this solve?
+      placeholder: It is difficult to understand which Adaptive setting changed.
     validations:
       required: true
+
   - type: textarea
-    id: outcome
+    id: idea
     attributes:
-      label: Desired outcome
-      description: Describe observable behavior and how a user knows it worked.
+      label: What should the app do?
+      description: Describe the result a user should see.
     validations:
       required: true
+
   - type: textarea
-    id: evidence
+    id: benefit
     attributes:
-      label: Capability and evidence
-      description: What provider, acknowledgement, readback, and restore path could prove it?
+      label: Who would this help?
+      description: Explain when the feature would be useful.
+    validations:
+      required: true
+
   - type: textarea
-    id: risks
+    id: extra
     attributes:
-      label: Safety and compatibility risks
-      description: Include failure behavior and the permanent gameplay boundary.
-  - type: checkboxes
-    id: scope
-    attributes:
-      label: Scope confirmation
-      options:
-        - label: This request does not require changing competitive gameplay.
-          required: true
+      label: Extra context
+      description: Optional screenshots, examples, alternatives, or safety concerns.

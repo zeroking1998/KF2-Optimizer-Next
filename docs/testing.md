@@ -1,60 +1,49 @@
 # Testing
 
-Run the native tests from the repository root:
+Run commands from the repository root.
+
+## Normal contributor checks
 
 ```powershell
-pwsh -NoProfile -File KF2Optimizer/tools/test.ps1 -Configuration Debug
-pwsh -NoProfile -File KF2Optimizer/tools/test.ps1 -Configuration Release
+pwsh -NoProfile -File ./tools/test.ps1 -Configuration Debug
+pwsh -NoProfile -File ./tools/test.ps1 -Configuration Release
+pwsh -NoProfile -File ./tools/validate_documentation.ps1
 ```
 
-Validate deterministic Direct2D captures:
+`test.ps1` builds before running the tests. GitHub CI runs the same Debug and
+Release suites with desktop-only checks excluded.
 
-```powershell
-pwsh -NoProfile -File KF2Optimizer/tools/validate_gui.ps1 -Configuration Release
-```
+## Choose additional checks by change
 
-Validate live Windows telemetry and the external overlay without KF2:
+| Changed area | Additional command |
+|---|---|
+| UI or layout | `./tools/validate_gui.ps1 -Configuration Release` |
+| FPS telemetry or overlay | `./tools/validate_telemetry_overlay.ps1 -Configuration Release` |
+| KF2 configuration | `./tools/validate_config_roundtrip.ps1 -ConfigRoot <path> -Configuration Release` |
+| Telemetry module | `./tools/build_kf2_telemetry.ps1` |
+| Portable package | `./tools/package.ps1`, then `./tools/validate_release.ps1` |
+| Public repository files | `./tools/validate_publication.ps1` |
+| Full native foundation | `./tools/validate_foundation.ps1` |
 
-```powershell
-pwsh -NoProfile -File KF2Optimizer/tools/validate_telemetry_overlay.ps1 `
-  -Configuration Release
-```
+Prefix each script with `pwsh -NoProfile -File` when running it from a normal
+PowerShell terminal.
 
-Run the complete native-foundation validation:
+## Real KF2 checks
 
-```powershell
-pwsh -NoProfile -File KF2Optimizer/tools/validate_foundation.ps1
-```
+Automated tests cannot prove every in-game effect. Changes to protected runtime
+providers, corpse behavior, FleX, LOD, or restoration also need a controlled
+offline KF2 session when practical. Record native KF2 state separately from:
 
-Create and validate the one-file portable release package:
+1. an optimizer proposal;
+2. a requested action;
+3. a matching acknowledgement or exact readback;
+4. restoration after KF2 closes.
 
-```powershell
-pwsh -NoProfile -File KF2Optimizer/tools/package.ps1
-pwsh -NoProfile -File KF2Optimizer/tools/validate_release.ps1
-```
+Do not report a runtime action as applied if only the request is visible.
 
-Validate the product contract against copies of the installed KF2 configuration:
+## Configuration roundtrip safety
 
-```powershell
-pwsh -NoProfile -File KF2Optimizer/tools/validate_config_roundtrip.ps1 `
-  -ConfigRoot "$env:USERPROFILE\Documents\My Games\KillingFloor2\KFGame\Config" `
-  -Configuration Release
-```
-
-The roundtrip validator never modifies the supplied directory. It copies only
-allowlisted INI files into a unique directory below `out`, runs preview, apply,
-verified backup, and restore there, compares SHA-256 before and after, then
-removes only that resolved validation directory. A missing real config reports
-`BLOCKED`, never `PASS`.
-
-The validator checks source isolation, the requirements inventory, Debug and
-Release tests, deterministic GUI captures at 100/150/200 percent, clean
-double-build reproducibility, PE32+ x64 GUI identity, product shape, and
-forbidden imports. Integration tests exercise portable state, configuration
-discovery, lossless previews, disk and drift guards, journal recovery, restore,
-keyboard navigation, a real HWND, UI Automation invocation, and clean shutdown.
-The telemetry validator additionally creates a real D3D11/DXGI swap chain,
-submits real Presents, consumes them through the production ETW adapter, and
-rejects unavailable or fabricated FPS. Overlay policy and a layered-window soak
-verify stable resources and deterministic hide/show behavior. Gameplay remains
-a separate final acceptance step after all feature phases.
+`validate_config_roundtrip.ps1` never edits the supplied KF2 configuration
+folder. It copies only allowed INI files below `out`, tests preview, apply,
+backup, verification, and restore, then compares the original SHA-256 values.
+A missing real configuration reports `BLOCKED`, not `PASS`.
