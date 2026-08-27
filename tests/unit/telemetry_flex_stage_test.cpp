@@ -35,6 +35,13 @@ int main() {
     CHECK(!flex_pressure_is_actionable(adaptive));
     adaptive.current_frame_pressure = false;
     CHECK(!flex_pressure_is_actionable(adaptive));
+    CHECK(!visible_enemy_pressure(4).has_value());
+    CHECK(visible_enemy_pressure(5).has_value());
+    CHECK(*visible_enemy_pressure(42) > 0.49);
+    CHECK(*visible_enemy_pressure(42) < 0.51);
+    CHECK(*visible_enemy_pressure(80) == 1.0);
+    CHECK(*visible_enemy_pressure(500) == 1.0);
+    CHECK(enemy_pressure_is_actionable(visible_enemy_pressure(20)));
 
     auto decision = decide_flex_control(policy, input);
     CHECK(!decision.constrained);
@@ -74,6 +81,20 @@ int main() {
     decision = decide_flex_control(policy, input);
     CHECK(!decision.constrained);
     CHECK(decision.requested_substeps == 0);
+
+    policy.reset();
+    input.actuator_available = true;
+    input.fps = 60.0;
+    input.enemy_pressure = 1.0;
+    input.now_ms = 20'000;
+    CHECK(decide_flex_control(policy, input).requested_substeps == 5);
+    input.now_ms = 20'600;
+    CHECK(decide_flex_control(policy, input).requested_substeps == 1);
+    input.enemy_pressure.reset();
+    input.now_ms = 20'601;
+    CHECK(decide_flex_control(policy, input).requested_substeps == 1);
+    input.now_ms = 25'601;
+    CHECK(decide_flex_control(policy, input).requested_substeps == 2);
 
     kf2::optimizer::AdaptiveActionRecord pending;
     pending.action_id = 17;

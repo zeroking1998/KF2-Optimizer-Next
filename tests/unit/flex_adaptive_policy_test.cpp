@@ -95,6 +95,17 @@ int main() {
     auto restarted = policy.evaluate(true, 60, 60.0, 60'000);
     if (!restarted.constrained || restarted.requested_substeps != 5) return 16;
     if (policy.evaluate(true, 60, {}, 61'000).constrained) return 17;
+    kf2::flex::AdaptivePolicy enemy_pressure;
+    if (enemy_pressure.evaluate(true, 60, 60.0, 70'000, 1, 1.0)
+            .requested_substeps != 5) return 905;
+    if (enemy_pressure.evaluate(true, 60, 60.0, 70'600, 1, 1.0)
+            .requested_substeps != 1) return 906;
+    if (enemy_pressure.evaluate(
+            true, 60, 60.0, 70'601, 1, std::nullopt)
+            .requested_substeps != 1) return 907;
+    if (enemy_pressure.evaluate(
+            true, 60, 60.0, 75'601, 1, std::nullopt)
+            .requested_substeps != 2) return 908;
     if (kf2::flex::adaptive_substeps(2, 1, true) != 1) return 18;
     if (kf2::flex::adaptive_substeps(2, 1, false) != 2) return 19;
     if (kf2::flex::adaptive_substeps(1, 2, true) != 2) return 20;

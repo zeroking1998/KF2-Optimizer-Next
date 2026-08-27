@@ -135,14 +135,17 @@ generations; proposals and writes without readback are never logged as applied.
 
 The actuator also has a separate ragdoll-load controller. Its distant-physics
 stage is distance-first: without FPS pressure it may select only an old, slow,
-offscreen/occluded body beyond 3,500 units at most once per second. Fresh visible
-living/corpse density or hysteresis-confirmed target-relative frame pressure
-moves entry to 2,500/1,800 units and the interval to 500/250 ms. It uses KF2's
+offscreen/occluded body beyond 1,200 units at most once per 400 ms. Fresh visible
+enemy/corpse density or hysteresis-confirmed target-relative frame pressure
+moves entry to 1,000/850 units and the interval to 200/100 ms. It uses KF2's
 official `PutRigidBodyToSleep` path and never hides an actor. A
-tracked body is woken through `WakeRigidBody` after it comes inside 1,500 units;
+tracked body is woken through `WakeRigidBody` after it comes inside 800 units;
 the separated entry/wake distances prevent churn. Only confirmed frame pressure
 may continue into native `MinLodModel` on one distant visible corpse every
-500/250 ms, never beyond LOD 2 or over `ForcedLodModel`; nearby, sleeping,
+400/200/100 ms, starting at stage 2 outside 300 units and advancing through
+  stages 3/4/5 at 500/800/1,200 units. Visible-enemy pressure scales continuously
+  from five to eighty Zeds and consumes every available stage without exceeding the mesh's final LOD
+or overriding `ForcedLodModel`; nearby, sleeping,
 recovered and session-ending LOD values are restored. Only after those stages
 may one old, slow visible corpse sleep every 750/350 ms. Living enemies, death
 animations, fast bodies, collision channels, Zed Time, Manual and online

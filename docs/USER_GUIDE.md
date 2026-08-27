@@ -81,6 +81,8 @@ unchanged.
 
 Adaptive never enables FleX. If FleX is off in KF2, it remains off and no FleX
 runtime hook is installed. If the user has enabled FleX in the game, Adaptive
+may lower verified solver work under sustained performance pressure or a fresh
+high visible-enemy count, then recover slowly as pressure clears. Adaptive
 may use only the verified controls available for that existing setting.
 
 ## 5. Game graphics

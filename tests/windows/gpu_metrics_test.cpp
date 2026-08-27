@@ -60,6 +60,24 @@ int main() {
         {{4242, 1, L"3D", 0, 0}, 0.0, 0, 0},
         {{4242, 2, L"3D", 0, 0}, 0.0, 0, 0},
     }, 4242).has_value());
+    const auto stable_hybrid_adapter = active_process_gpu_adapter_luid({
+        {{4242, 1, L"3D", 0, 0}, 81.0, 0, 0},
+        {{4242, 2, L"3D", 0, 0}, 14.0, 0, 0},
+    }, 4242, 2);
+    CHECK(stable_hybrid_adapter.has_value());
+    CHECK(*stable_hybrid_adapter == 2);
+    const auto inactive_preferred_adapter = active_process_gpu_adapter_luid({
+        {{4242, 1, L"Copy", 0, 0}, 81.0, 0, 0},
+        {{4242, 2, L"3D", 0, 0}, 14.0, 0, 0},
+    }, 4242, 1);
+    CHECK(inactive_preferred_adapter.has_value());
+    CHECK(*inactive_preferred_adapter == 2);
+    const auto higher_memory_renderer = active_process_gpu_adapter_luid({
+        {{4242, 1, L"3D", 0, 0}, 81.0, 256, 0},
+        {{4242, 2, L"3D", 0, 0}, 14.0, 4096, 0},
+    }, 4242, 1);
+    CHECK(higher_memory_renderer.has_value());
+    CHECK(*higher_memory_renderer == 2);
     CHECK(!adapter_luid_for_window(nullptr).has_value());
     CHECK(!query_gpu_memory_budget(0).has_value());
     const auto parsed = parse_gpu_instance(

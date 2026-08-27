@@ -62,6 +62,15 @@ var int AdaptiveVisibleLivingZeds;
 var float AdaptiveVisibleLivingObservedRealTime;
 var int AdaptiveCorpseScenePressureLevel;
 var array<AdaptiveCorpseDebugMarkerEntry> AdaptiveCorpseDebugMarkers;
+var array<KFPawn_Monster> AdaptiveLivingVisualZeds;
+var array<int> AdaptiveLivingOriginalMinLods;
+var array<int> AdaptiveLivingAppliedMinLods;
+var array<float> AdaptiveLivingOriginalAnimDistances;
+var array<float> AdaptiveLivingAppliedAnimDistances;
+var array<int> AdaptiveLivingOriginalAnimRates;
+var array<int> AdaptiveLivingAppliedAnimRates;
+var int AdaptiveLivingVisualReductions;
+var int AdaptiveLivingVisualRestores;
 
 function bool ValidAdaptiveControlToken(string Candidate)
 {
@@ -422,6 +431,271 @@ function int GetAdaptiveCorpseScenePressureLevel(
     return 0;
 }
 
+function float GetAdaptiveLivingEnemyPressureScale(
+    int VisibleLivingZeds, bool bLivingVisibilityFresh)
+{
+    local float DistanceSquared;
+    local float WeightedVisibleZeds;
+    local KFPawn_Monster Candidate;
+    local PlayerController LocalPC;
+
+    if (!bLivingVisibilityFresh || VisibleLivingZeds <= 0)
+    {
+        return 0.0;
+    }
+    LocalPC = GetALocalPlayerController();
+    if (LocalPC == None || LocalPC.ViewTarget == None)
+    {
+        return 0.0;
+    }
+    // Every recently visible enemy contributes once. A visible enemy within
+    // 1,200 units contributes one extra point and one within 600 contributes
+    // two extra points, so a close crowd raises pressure sooner than a distant
+    // crowd of the same size.
+    WeightedVisibleZeds = float(VisibleLivingZeds);
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Candidate)
+    {
+        if (Candidate == None || Candidate.bDeleteMe ||
+            !Candidate.IsAliveAndWell() || Candidate.Mesh == None ||
+            Candidate.Mesh.LastRenderTime <= WorldInfo.TimeSeconds - 0.3)
+        {
+            continue;
+        }
+        DistanceSquared = VSizeSq(
+            Candidate.Location - LocalPC.ViewTarget.Location);
+        if (DistanceSquared < 360000.0)
+        {
+            WeightedVisibleZeds += 2.0;
+        }
+        else if (DistanceSquared < 1440000.0)
+        {
+            WeightedVisibleZeds += 1.0;
+        }
+    }
+    if (WeightedVisibleZeds < 5.0)
+    {
+        return 0.0;
+    }
+    // Scale continuously from five weighted visible Zeds to maximum pressure
+    // at eighty. Larger custom waves remain safely capped.
+    return FClamp(
+        (WeightedVisibleZeds - 4.0) / 76.0, 0.0, 1.0);
+}
+
+function int GetAdaptiveLivingEnemyPressureLevel(float PressureScale)
+{
+    if (PressureScale <= 0.0)
+    {
+        return 0;
+    }
+    // Integer-only corpse and mesh controls consume five evenly distributed
+    // levels derived from the continuous pressure signal.
+    return Clamp(1 + int(PressureScale * 4.999), 1, 5);
+}
+
+function int FindAdaptiveLivingVisualEntry(KFPawn_Monster Candidate)
+{
+    local int Index;
+
+    for (Index = 0; Index < AdaptiveLivingVisualZeds.Length; ++Index)
+    {
+        if (AdaptiveLivingVisualZeds[Index] == Candidate)
+        {
+            return Index;
+        }
+    }
+    return -1;
+}
+
+function RemoveAdaptiveLivingVisualEntry(int Index, bool bRestore)
+{
+    local KFPawn_Monster Candidate;
+
+    if (Index < 0 || Index >= AdaptiveLivingVisualZeds.Length ||
+        Index >= AdaptiveLivingOriginalMinLods.Length ||
+        Index >= AdaptiveLivingAppliedMinLods.Length ||
+        Index >= AdaptiveLivingOriginalAnimDistances.Length ||
+        Index >= AdaptiveLivingAppliedAnimDistances.Length ||
+        Index >= AdaptiveLivingOriginalAnimRates.Length ||
+        Index >= AdaptiveLivingAppliedAnimRates.Length)
+    {
+        return;
+    }
+    Candidate = AdaptiveLivingVisualZeds[Index];
+    if (bRestore && Candidate != None && !Candidate.bDeleteMe &&
+        Candidate.Mesh != None)
+    {
+        if (Candidate.Mesh.MinLodModel == AdaptiveLivingAppliedMinLods[Index])
+        {
+            Candidate.Mesh.MinLodModel = AdaptiveLivingOriginalMinLods[Index];
+        }
+        if (Candidate.Mesh.AnimationLODDistanceFactor ==
+            AdaptiveLivingAppliedAnimDistances[Index])
+        {
+            Candidate.Mesh.AnimationLODDistanceFactor =
+                AdaptiveLivingOriginalAnimDistances[Index];
+        }
+        if (Candidate.Mesh.AnimationLODFrameRate ==
+            AdaptiveLivingAppliedAnimRates[Index])
+        {
+            Candidate.Mesh.AnimationLODFrameRate =
+                AdaptiveLivingOriginalAnimRates[Index];
+        }
+        ++AdaptiveLivingVisualRestores;
+    }
+    AdaptiveLivingVisualZeds.Remove(Index, 1);
+    AdaptiveLivingOriginalMinLods.Remove(Index, 1);
+    AdaptiveLivingAppliedMinLods.Remove(Index, 1);
+    AdaptiveLivingOriginalAnimDistances.Remove(Index, 1);
+    AdaptiveLivingAppliedAnimDistances.Remove(Index, 1);
+    AdaptiveLivingOriginalAnimRates.Remove(Index, 1);
+    AdaptiveLivingAppliedAnimRates.Remove(Index, 1);
+}
+
+function RestoreAllAdaptiveLivingVisuals()
+{
+    local int Index;
+
+    for (Index = AdaptiveLivingVisualZeds.Length - 1; Index >= 0; --Index)
+    {
+        RemoveAdaptiveLivingVisualEntry(Index, true);
+    }
+}
+
+function PruneAdaptiveLivingVisualEntries()
+{
+    local int Index;
+    local KFPawn_Monster Candidate;
+
+    for (Index = AdaptiveLivingVisualZeds.Length - 1; Index >= 0; --Index)
+    {
+        Candidate = AdaptiveLivingVisualZeds[Index];
+        if (Candidate == None || Candidate.bDeleteMe ||
+            !Candidate.IsAliveAndWell() || Candidate.Mesh == None)
+        {
+            RemoveAdaptiveLivingVisualEntry(Index, false);
+        }
+        else if (Candidate.Mesh.MinLodModel !=
+                     AdaptiveLivingAppliedMinLods[Index] ||
+                 Candidate.Mesh.AnimationLODDistanceFactor !=
+                     AdaptiveLivingAppliedAnimDistances[Index] ||
+                 Candidate.Mesh.AnimationLODFrameRate !=
+                     AdaptiveLivingAppliedAnimRates[Index])
+        {
+            // Another KF2 system took ownership. Stop tracking instead of
+            // overwriting its values during a later restore.
+            RemoveAdaptiveLivingVisualEntry(Index, false);
+        }
+    }
+}
+
+function ApplyLivingEnemyVisualPressure(
+    int EnemyPressureLevel, float PressureScale)
+{
+    local int EntryIndex;
+    local int MaximumMinLod;
+    local int TargetMinLod;
+    local int TargetAnimRate;
+    local float DistanceSquared;
+    local float MinimumDistance;
+    local float MinimumDistanceSquared;
+    local float TargetAnimDistance;
+    local KFPawn_Monster Candidate;
+    local PlayerController LocalPC;
+
+    if (EnemyPressureLevel <= 0 || PressureScale <= 0.0)
+    {
+        RestoreAllAdaptiveLivingVisuals();
+        return;
+    }
+    PruneAdaptiveLivingVisualEntries();
+    LocalPC = GetALocalPlayerController();
+    if (LocalPC == None || LocalPC.ViewTarget == None)
+    {
+        return;
+    }
+    MinimumDistance = 600.0 - PressureScale * 300.0;
+    MinimumDistanceSquared = MinimumDistance * MinimumDistance;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Candidate)
+    {
+        if (Candidate == None || Candidate.bDeleteMe ||
+            !Candidate.IsAliveAndWell() || Candidate.Mesh == None ||
+            Candidate.Mesh.SkeletalMesh == None ||
+            Candidate.Mesh.SkeletalMesh.LODInfo.Length < 2 ||
+            Candidate.Mesh.ForcedLodModel != 0)
+        {
+            continue;
+        }
+        DistanceSquared = VSizeSq(
+            Candidate.Location - LocalPC.ViewTarget.Location);
+        EntryIndex = FindAdaptiveLivingVisualEntry(Candidate);
+        if (DistanceSquared < MinimumDistanceSquared)
+        {
+            if (EntryIndex >= 0 && DistanceSquared < 90000.0)
+            {
+                RemoveAdaptiveLivingVisualEntry(EntryIndex, true);
+            }
+            continue;
+        }
+        MaximumMinLod = Candidate.Mesh.SkeletalMesh.LODInfo.Length - 1;
+        // Each pressure tier consumes another real mesh LOD when available.
+        // The final mesh LOD remains the hard limit for every Zed type.
+        TargetMinLod = 1 + int(PressureScale * float(MaximumMinLod));
+        if (DistanceSquared >= 1440000.0)
+        {
+            ++TargetMinLod;
+        }
+        TargetMinLod = Min(TargetMinLod, MaximumMinLod);
+        TargetAnimDistance = FMin(0.55, 0.15 + PressureScale * 0.40);
+        TargetAnimRate = Clamp(2 + int(PressureScale * 4.999), 2, 6);
+        if (DistanceSquared >= 1440000.0)
+        {
+            TargetAnimRate = Min(6, TargetAnimRate + 1);
+        }
+        if (EntryIndex < 0)
+        {
+            EntryIndex = AdaptiveLivingVisualZeds.Length;
+            AdaptiveLivingVisualZeds.AddItem(Candidate);
+            AdaptiveLivingOriginalMinLods.AddItem(Candidate.Mesh.MinLodModel);
+            AdaptiveLivingAppliedMinLods.AddItem(TargetMinLod);
+            AdaptiveLivingOriginalAnimDistances.AddItem(
+                Candidate.Mesh.AnimationLODDistanceFactor);
+            AdaptiveLivingAppliedAnimDistances.AddItem(TargetAnimDistance);
+            AdaptiveLivingOriginalAnimRates.AddItem(
+                Candidate.Mesh.AnimationLODFrameRate);
+            AdaptiveLivingAppliedAnimRates.AddItem(TargetAnimRate);
+        }
+        else
+        {
+            AdaptiveLivingAppliedMinLods[EntryIndex] = TargetMinLod;
+            AdaptiveLivingAppliedAnimDistances[EntryIndex] = TargetAnimDistance;
+            AdaptiveLivingAppliedAnimRates[EntryIndex] = TargetAnimRate;
+        }
+        if (Candidate.Mesh.MinLodModel == TargetMinLod &&
+            Candidate.Mesh.AnimationLODDistanceFactor == TargetAnimDistance &&
+            Candidate.Mesh.AnimationLODFrameRate == TargetAnimRate)
+        {
+            continue;
+        }
+        Candidate.Mesh.MinLodModel = TargetMinLod;
+        Candidate.Mesh.AnimationLODDistanceFactor = TargetAnimDistance;
+        Candidate.Mesh.AnimationLODFrameRate = TargetAnimRate;
+        if (Candidate.Mesh.MinLodModel != TargetMinLod ||
+            Candidate.Mesh.AnimationLODDistanceFactor != TargetAnimDistance ||
+            Candidate.Mesh.AnimationLODFrameRate != TargetAnimRate)
+        {
+            RemoveAdaptiveLivingVisualEntry(EntryIndex, false);
+            continue;
+        }
+        ++AdaptiveLivingVisualReductions;
+        `log("KF2OPT_LIVING_VISUAL state=applied enemy_level="$
+             EnemyPressureLevel$" pressure_pct="$int(PressureScale * 100.0)$
+             " min_lod="$TargetMinLod$" anim_factor="$
+             TargetAnimDistance$" anim_rate="$TargetAnimRate$" distance_units="$
+             GetAdaptiveCorpseDistanceUnits(Candidate)$" readback=verified");
+    }
+}
+
 function RefreshSleepingCorpseAnimationState(KFGoreManager GoreManager)
 {
     local int Index;
@@ -532,9 +806,9 @@ function RestoreNearAdaptiveCorpseLods()
         }
         DistanceSquared = VSizeSq(
             Candidate.Location - LocalPC.ViewTarget.Location);
-        // Restore only after crossing the inner 900-unit boundary. LOD is
-        // applied outside 1,000 units, leaving a stable hysteresis band.
-        if (DistanceSquared < 810000.0)
+        // Restore only after crossing the inner 250-unit boundary. LOD is
+        // applied outside 300 units, leaving a stable hysteresis band.
+        if (DistanceSquared < 62500.0)
         {
             RemoveAdaptiveCorpseLodEntry(Index, true);
         }
@@ -834,10 +1108,10 @@ function int WakeNearAdaptiveDistanceSleptCorpses()
         Candidate = AdaptiveDistanceSleptCorpses[Index];
         DistanceSquared = VSizeSq(
             Candidate.Location - LocalPC.ViewTarget.Location);
-        // Wake every tracked corpse inside the tight 750-unit interaction
-        // radius in the same control pass. This has no corpse-count limit, but
+        // Wake every tracked corpse inside the 800-unit interaction radius
+        // in the same control pass. This has no corpse-count limit, but
         // avoids reviving physics merely because a corpse is at mid distance.
-        if (DistanceSquared >= 562500.0)
+        if (DistanceSquared >= 640000.0)
         {
             continue;
         }
@@ -891,18 +1165,18 @@ function KFPawn SelectDistantAwakeMonsterCorpseForSleep(
     // Distance is the primary gate. Scene or confirmed frame pressure only
     // moves the thresholds inward and permits settled, still-visible bodies.
     MinimumAge = 2.5;
-    MinimumDistanceSquared = 7840000.0;
+    MinimumDistanceSquared = 1440000.0;
     MaximumSpeedSquared = 62500.0;
     if (PhysicsPressureLevel >= 2)
     {
         MinimumAge = 1.0;
-        MinimumDistanceSquared = 3610000.0;
+        MinimumDistanceSquared = 722500.0;
         MaximumSpeedSquared = 250000.0;
     }
     else if (PhysicsPressureLevel >= 1)
     {
         MinimumAge = 1.75;
-        MinimumDistanceSquared = 5290000.0;
+        MinimumDistanceSquared = 1000000.0;
         MaximumSpeedSquared = 122500.0;
     }
     for (Index = 0; Index < GoreManager.CorpsePool.Length; ++Index)
@@ -1021,36 +1295,32 @@ function KFPawn SelectVisibleMonsterCorpseForLod(
         }
         DistanceSquared = VSizeSq(
             Candidate.Location - LocalPC.ViewTarget.Location);
-        // Enter corpse LOD outside 1,000 units. The separate 900-unit restore
+        // Enter corpse LOD outside 300 units. The separate 250-unit restore
         // boundary prevents repeated apply/restore work near the camera.
-        if (DistanceSquared < 1000000.0)
+        if (DistanceSquared < 90000.0)
         {
             continue;
         }
         MaximumMinLod = Candidate.Mesh.SkeletalMesh.LODInfo.Length - 1;
-        CandidateTarget = 1;
-        if (DistanceSquared >= 12960000.0)
+        // Corpse-only rendering starts two LODs lower than the source mesh and
+        // advances quickly with distance. The mesh's real final LOD remains
+        // the hard cap below, so short LOD chains are always respected.
+        CandidateTarget = 2;
+        if (DistanceSquared >= 1440000.0)
+        {
+            CandidateTarget = 5;
+        }
+        else if (DistanceSquared >= 640000.0)
         {
             CandidateTarget = 4;
         }
-        else if (DistanceSquared >= 6760000.0)
+        else if (DistanceSquared >= 250000.0)
         {
             CandidateTarget = 3;
         }
-        else if (DistanceSquared >= 2890000.0)
-        {
-            CandidateTarget = 2;
-        }
         CandidateTarget = Max(
             CandidateTarget, Candidate.Mesh.PredictedLODLevel);
-        if (PressureLevel >= 2)
-        {
-            CandidateTarget += 2;
-        }
-        else if (PressureLevel >= 1)
-        {
-            ++CandidateTarget;
-        }
+        CandidateTarget += Clamp(PressureLevel, 0, 5);
         CandidateTarget = Min(CandidateTarget, MaximumMinLod);
         if (Candidate.Mesh.MinLodModel >= CandidateTarget)
         {
@@ -1305,6 +1575,8 @@ function AdaptiveCorpseLoadControl()
     local int DesiredPressureLevel;
     local int CurrentPressureLevel;
     local int ScenePressureLevel;
+    local int EnemyPressureLevel;
+    local float EnemyPressureScale;
     local int PhysicsPressureLevel;
     local int RagdollPressureLevel;
     local bool bLivingVisibilityFresh;
@@ -1359,6 +1631,11 @@ function AdaptiveCorpseLoadControl()
     ScenePressureLevel = GetAdaptiveCorpseScenePressureLevel(
         VisibleLivingZeds, bLivingVisibilityFresh, VisibleCorpses,
         VisibleAwake, AwakeTotal, VisibleThreshold);
+    EnemyPressureScale = GetAdaptiveLivingEnemyPressureScale(
+        VisibleLivingZeds, bLivingVisibilityFresh);
+    EnemyPressureLevel = GetAdaptiveLivingEnemyPressureLevel(
+        EnemyPressureScale);
+    ApplyLivingEnemyVisualPressure(EnemyPressureLevel, EnemyPressureScale);
     if (ScenePressureLevel != AdaptiveCorpseScenePressureLevel)
     {
         `log("KF2OPT_CORPSE_SCENE state=changed level="$
@@ -1426,9 +1703,10 @@ function AdaptiveCorpseLoadControl()
     // frame/resource pressure makes them stronger but is not required before
     // far, settled corpse work can be reduced.
     PhysicsPressureLevel = Max(
-        AdaptiveCorpsePressureLevel, ScenePressureLevel);
-    DistanceActionInterval = PhysicsPressureLevel >= 2 ? 0.10 :
-        (PhysicsPressureLevel >= 1 ? 0.20 : 0.40);
+        Max(AdaptiveCorpsePressureLevel, ScenePressureLevel),
+        EnemyPressureLevel);
+    DistanceActionInterval = PhysicsPressureLevel > 0 ?
+        FMax(0.05, 0.20 / float(PhysicsPressureLevel)) : 0.40;
     if (PhysicsPressureLevel > 0)
     {
         DistanceActionInterval = FMax(
@@ -1446,8 +1724,8 @@ function AdaptiveCorpseLoadControl()
 
     // Render LOD is distance-first and remains useful for sleeping corpses.
     // Every mesh uses as many progressive LOD stages as it actually exposes.
-    LodActionInterval = PhysicsPressureLevel >= 2 ? 0.10 :
-        (PhysicsPressureLevel >= 1 ? 0.20 : 0.40);
+    LodActionInterval = PhysicsPressureLevel > 0 ?
+        FMax(0.05, 0.20 / float(PhysicsPressureLevel)) : 0.40;
     LodActionInterval = FMax(
         0.05, LodActionInterval / float(AttackScale));
     if (WorldInfo.RealTimeSeconds - AdaptiveLastCorpseLodRealTime >=
@@ -1459,7 +1737,8 @@ function AdaptiveCorpseLoadControl()
     }
 
     RagdollPressureLevel = Max(
-        AdaptiveCorpsePressureLevel, ScenePressureLevel);
+        Max(AdaptiveCorpsePressureLevel, ScenePressureLevel),
+        EnemyPressureLevel);
     // Start at low visible density and treat six moving corpses as medium to
     // severe density. Two remain awake for nearby visual response.
     if (VisibleAwake >= 6)
@@ -2503,6 +2782,7 @@ event Destroyed()
     ClearTimer(nameof(StaggerCorpseCleanup), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
     RestoreAllAdaptiveCorpseLods();
+    RestoreAllAdaptiveLivingVisuals();
     AdaptiveDistanceSleptCorpses.Length = 0;
     AdaptiveCorpseDebugMarkers.Length = 0;
     AdaptiveCorpseRagdollSleepIds.Length = 0;
@@ -2541,6 +2821,13 @@ event Destroyed()
     {
         `log("KF2OPT_CORPSE_RAGDOLL state=stopped slept="$
              AdaptiveVisibleRagdollSleeps);
+    }
+    if (AdaptiveLivingVisualReductions > 0 ||
+        AdaptiveLivingVisualRestores > 0)
+    {
+        `log("KF2OPT_LIVING_VISUAL state=stopped reduced="$
+             AdaptiveLivingVisualReductions$" restored="$
+             AdaptiveLivingVisualRestores);
     }
     Super.Destroyed();
 }

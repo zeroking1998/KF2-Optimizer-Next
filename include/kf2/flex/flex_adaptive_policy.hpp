@@ -15,7 +15,8 @@ public:
     [[nodiscard]] bool synchronize_observed(int substeps) noexcept;
     [[nodiscard]] AdaptiveDecision evaluate(bool enabled, int target_fps,
         std::optional<double> fps, std::uint64_t now_ms,
-        int quality_change_budget = 1) noexcept;
+        int quality_change_budget = 1,
+        std::optional<double> enemy_pressure = std::nullopt) noexcept;
     void reset() noexcept;
 
 private:

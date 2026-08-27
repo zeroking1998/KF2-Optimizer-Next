@@ -151,6 +151,8 @@ int main() {
     CHECK(telemetry_source.find(
         "LodActionInterval / float(AttackScale)") != std::string::npos);
     CHECK(telemetry_source.find(
+        "0.20 / float(PhysicsPressureLevel)") != std::string::npos);
+    CHECK(telemetry_source.find(
         "ActionInterval / float(AttackScale)") != std::string::npos);
     CHECK(telemetry_source.find(
         "TargetFrameMs * 60.0 / 58.0") != std::string::npos);
@@ -224,23 +226,28 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find(
         "RestoreAllAdaptiveCorpseLods()") != std::string::npos);
+    const auto lod_restore_function = telemetry_source.find(
+        "function RestoreNearAdaptiveCorpseLods()");
     const auto lod_restore_threshold = telemetry_source.find(
-        "DistanceSquared < 810000.0");
+        "DistanceSquared < 62500.0", lod_restore_function);
+    const auto lod_selector_function = telemetry_source.find(
+        "function KFPawn SelectVisibleMonsterCorpseForLod(");
     const auto lod_apply_threshold = telemetry_source.find(
-        "DistanceSquared < 1000000.0");
+        "DistanceSquared < 90000.0", lod_selector_function);
     CHECK(lod_restore_threshold != std::string::npos);
     CHECK(lod_apply_threshold != std::string::npos);
-    CHECK(lod_restore_threshold < lod_apply_threshold);
     CHECK(telemetry_source.find(
         "KF2OPT_CORPSE_LOD state=applied") != std::string::npos);
     CHECK(telemetry_source.find(
         "SelectDistantAwakeMonsterCorpseForSleep") != std::string::npos);
     CHECK(telemetry_source.find(
-        "MinimumDistanceSquared = 7840000.0") != std::string::npos);
+        "MinimumDistanceSquared = 1440000.0") != std::string::npos);
     CHECK(telemetry_source.find(
-        "MinimumDistanceSquared = 5290000.0") != std::string::npos);
+        "MinimumDistanceSquared = 1000000.0") != std::string::npos);
     CHECK(telemetry_source.find(
-        "MinimumDistanceSquared = 3610000.0") != std::string::npos);
+        "MinimumDistanceSquared = 722500.0") != std::string::npos);
+    CHECK(telemetry_source.find("MinimumDistanceSquared = 7840000.0") ==
+          std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveDistanceSleptCorpses.Length >=") ==
           std::string::npos);
@@ -249,7 +256,7 @@ int main() {
     CHECK(telemetry_source.find(
         "Candidate.Mesh.WakeRigidBody()") != std::string::npos);
     CHECK(telemetry_source.find(
-        "DistanceSquared >= 562500.0") != std::string::npos);
+        "DistanceSquared >= 640000.0") != std::string::npos);
     CHECK(telemetry_source.find(
         "AwakeTotal = CountAwakeMonsterCorpses(GoreManager)") !=
           std::string::npos);
@@ -269,7 +276,7 @@ int main() {
         "function int GetAdaptiveCorpseDistanceUnits(KFPawn Candidate)") !=
           std::string::npos);
     CHECK(count_occurrences(telemetry_source, "corpse_id=") == 4);
-    CHECK(count_occurrences(telemetry_source, "distance_units=") == 4);
+    CHECK(count_occurrences(telemetry_source, "distance_units=") == 5);
     CHECK(telemetry_source.find(
         "var globalconfig bool bAdaptiveCorpseDebugMarkers") !=
           std::string::npos);
@@ -302,6 +309,25 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find(
         "function int GetAdaptiveCorpseScenePressureLevel(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function int GetAdaptiveLivingEnemyPressureLevel(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function float GetAdaptiveLivingEnemyPressureScale(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "WeightedVisibleZeds = float(VisibleLivingZeds)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "DistanceSquared < 360000.0") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "DistanceSquared < 1440000.0") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "Candidate.Mesh.LastRenderTime <= WorldInfo.TimeSeconds - 0.3") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "(WeightedVisibleZeds - 4.0) / 76.0") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveVisibleLivingZeds = LivingRecentlyRendered") !=
@@ -345,7 +371,7 @@ int main() {
     const auto wake_function = telemetry_source.find(
         "function int WakeNearAdaptiveDistanceSleptCorpses()");
     const auto wake_threshold = telemetry_source.find(
-        "DistanceSquared >= 562500.0", wake_function);
+        "DistanceSquared >= 640000.0", wake_function);
     const auto wake_call = telemetry_source.find(
         "Candidate.Mesh.WakeRigidBody()", wake_function);
     const auto wake_readback = telemetry_source.find(
@@ -394,7 +420,57 @@ int main() {
         "AdaptiveCorpseLodCorpses.Length >=", lod_apply) ==
           std::string::npos);
     CHECK(telemetry_source.find(
+        "CandidateTarget = 2", lod_selector) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "DistanceSquared >= 1440000.0", lod_selector) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "CandidateTarget = 5", lod_selector) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "DistanceSquared >= 640000.0", lod_selector) != std::string::npos);
+    CHECK(telemetry_source.find(
         "CandidateTarget = 4", lod_selector) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "DistanceSquared >= 250000.0", lod_selector) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "CandidateTarget = 3", lod_selector) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "CandidateTarget += Clamp(PressureLevel, 0, 5)", lod_selector) !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "DistanceSquared >= 12960000.0", lod_selector) ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "Max(AdaptiveCorpsePressureLevel, ScenePressureLevel),\n"
+        "        EnemyPressureLevel", stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "function ApplyLivingEnemyVisualPressure(") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "ApplyLivingEnemyVisualPressure(EnemyPressureLevel, EnemyPressureScale);",
+        stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "Max(AdaptiveCorpsePressureLevel, ScenePressureLevel),\n"
+        "        EnemyPressureLevel", stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "Candidate.Mesh.AnimationLODDistanceFactor =") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "Candidate.Mesh.AnimationLODFrameRate =") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "TargetMinLod = 1 + int(PressureScale * float(MaximumMinLod))") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "Clamp(2 + int(PressureScale * 4.999), 2, 6)") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "FMin(0.55, 0.15 + PressureScale * 0.40)") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "Candidate.Mesh.bSkipTickAnimNodes =") == std::string::npos);
+    CHECK(telemetry_source.find(
+        "Candidate.Mesh.bSkipGetBoneAtoms =") == std::string::npos);
+    CHECK(telemetry_source.find(
+        "RestoreAllAdaptiveLivingVisuals();") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "function PruneAdaptiveLivingVisualEntries()") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "PruneAdaptiveLivingVisualEntries();") != std::string::npos);
     CHECK(telemetry_source.find(
         "readback=verified", lod_apply) != std::string::npos);
 
