@@ -89,7 +89,11 @@ std::wstring load_metric(const UiModel& model) {
     const auto cpu = model.presented_live_cpu_percent();
     const auto gpu = model.presented_live_gpu_percent();
     std::wostringstream text;
-    text << L"GAME LOAD\nCPU ";
+    text << L"GAME LOAD";
+    if (model.status().game_gpu_name) {
+        text << L'\n' << *model.status().game_gpu_name;
+    }
+    text << L"\nCPU ";
     if (cpu) {
         text << std::fixed << std::setprecision(0) << *cpu
              << L"%";

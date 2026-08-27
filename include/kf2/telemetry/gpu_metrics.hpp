@@ -32,6 +32,8 @@ struct GpuMetrics {
     std::uint64_t shared_bytes{0};
     std::optional<std::uint64_t> adapter_local_usage_bytes;
     std::optional<std::uint64_t> adapter_local_budget_bytes;
+    // Adapter that currently carries this process's busiest GPU engine.
+    std::optional<std::uint64_t> process_adapter_luid;
     SampleQuality quality{SampleQuality::unavailable};
     UnavailableReason reason{UnavailableReason::no_samples};
 };
@@ -58,6 +60,10 @@ struct GpuAdapter {
     std::uint64_t adapter_luid);
 [[nodiscard]] std::vector<GpuAdapter> unique_physical_gpu_adapters(
     const std::vector<GpuAdapter>& adapters);
+[[nodiscard]] std::optional<GpuAdapter> find_hardware_gpu_adapter_by_luid(
+    const std::vector<GpuAdapter>& adapters, std::uint64_t adapter_luid);
+[[nodiscard]] std::optional<std::uint64_t> active_process_gpu_adapter_luid(
+    const std::vector<GpuCounterValue>& values, std::uint32_t pid);
 [[nodiscard]] std::wstring format_gpu_driver_version(std::uint64_t version);
 [[nodiscard]] Result<std::uint64_t> adapter_luid_for_window(HWND window);
 [[nodiscard]] std::optional<GpuInstanceIdentity> parse_gpu_instance(

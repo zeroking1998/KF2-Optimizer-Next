@@ -39,6 +39,7 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
             runtime.model.status().live_frame_time_ms ||
             runtime.model.status().live_cpu_percent ||
             runtime.model.status().live_gpu_percent ||
+            runtime.model.status().game_gpu_name ||
             runtime.model.status().live_active_corpses ||
             runtime.model.status().live_sleeping_corpses) {
             auto status = runtime.model.status();
@@ -47,6 +48,7 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
             status.live_frame_time_ms.reset();
             status.live_cpu_percent.reset();
             status.live_gpu_percent.reset();
+            status.game_gpu_name.reset();
             status.live_active_corpses.reset();
             status.live_sleeping_corpses.reset();
             status.adaptive_runtime_corpse_limit.reset();
@@ -289,6 +291,7 @@ void UiRuntime::detach_telemetry() {
     status.live_frame_time_ms.reset();
     status.live_cpu_percent.reset();
     status.live_gpu_percent.reset();
+    status.game_gpu_name.reset();
     status.live_active_corpses.reset();
     status.live_sleeping_corpses.reset();
     status.active_target_fps.reset();
@@ -628,6 +631,44 @@ void UiRuntime::try_attach_telemetry() {
         auto gpu = telemetry::PdhGpuSampler::create(
             game_process->pid, window_luid.value());
         if (gpu.has_value()) gpu_metrics.emplace(std::move(gpu.value()));
+    }
+}
+
+void UiRuntime::bind_process_gpu_adapter(std::uint64_t adapter_luid) {
+    if (!game_process || adapter_luid == 0) return;
+    const auto adapters = telemetry::enumerate_gpu_adapters();
+    if (!adapters.has_value()) return;
+    const auto adapter = telemetry::find_hardware_gpu_adapter_by_luid(
+        adapters.value(), adapter_luid);
+    if (!adapter) return;
+
+    auto status = model.status();
+    const bool identity_changed = !status.game_gpu_name ||
+        *status.game_gpu_name != adapter->name;
+    if (identity_changed) {
+        status.game_gpu_name = adapter->name;
+        model.set_status(std::move(status));
+        events->append({0, diagnostics::Severity::info,
+            "GAME_GPU_CONFIRMED",
+            L"KF2 process GPU activity confirmed on " + adapter->name,
+            L"telemetry"});
+        invalidate();
+    }
+
+    if (adaptive_adapter_luid && *adaptive_adapter_luid == adapter_luid) return;
+    adaptive_adapter_luid = adapter_luid;
+    adapter_vram_budget = adapter->dedicated_memory_bytes;
+    if (auto gpu = telemetry::PdhGpuSampler::create(
+            game_process->pid, adapter_luid);
+        gpu.has_value()) {
+        gpu_metrics.emplace(std::move(gpu.value()));
+    }
+    nvidia_gpu_metrics.reset();
+    if (adapter->vendor_id == 0x10DE) {
+        if (auto nvidia = telemetry::NvidiaGpuSampler::create(adapter->name);
+            nvidia.has_value()) {
+            nvidia_gpu_metrics.emplace(std::move(nvidia.value()));
+        }
     }
 }
 

@@ -125,6 +125,7 @@ int wmain(int argument_count, wchar_t** arguments) {
     status.live_frame_time_ms = 7.0;
     status.live_cpu_percent = 31.0;
     status.live_gpu_percent = 72.0;
+    status.game_gpu_name = L"NVIDIA GeForce RTX 4090";
     status.live_active_corpses = 18;
     status.live_sleeping_corpses = 42;
     status.corpse_limit = 2000;

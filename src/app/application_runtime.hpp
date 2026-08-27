@@ -288,6 +288,7 @@ struct UiRuntime {
     bool restore_protected_session_config(std::wstring_view reason);
 
     void try_attach_telemetry();
+    void bind_process_gpu_adapter(std::uint64_t adapter_luid);
 
     void update_adaptive_controller(
         const telemetry_pipeline::TelemetryFrame& frame);

@@ -48,6 +48,7 @@ struct UiStatus {
     std::optional<double> live_frame_time_ms;
     std::optional<double> live_cpu_percent;
     std::optional<double> live_gpu_percent;
+    std::optional<std::wstring> game_gpu_name;
     std::optional<int> live_active_corpses;
     std::optional<int> live_sleeping_corpses;
     bool restore_config_after_game{true};
