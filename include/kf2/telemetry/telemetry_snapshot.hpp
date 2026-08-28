@@ -28,6 +28,7 @@ struct PresentTimestamp {
 struct FrameMetrics {
     std::optional<double> fps;
     std::optional<double> average_fps;
+    std::optional<double> sustained_one_percent_low_fps;
     std::optional<double> frame_time_ms;
     std::optional<double> p95_ms;
     std::optional<double> p99_ms;

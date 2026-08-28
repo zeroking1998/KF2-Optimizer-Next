@@ -123,6 +123,10 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
     if (sustained_metrics.fps) {
         result.average_fps = sustained_metrics.fps;
     }
+    if (sustained_metrics.one_percent_low_fps) {
+        result.sustained_one_percent_low_fps =
+            sustained_metrics.one_percent_low_fps;
+    }
     if (tail_metrics.p95_ms) result.p95_ms = tail_metrics.p95_ms;
     if (tail_metrics.p99_ms) result.p99_ms = tail_metrics.p99_ms;
     if (tail_metrics.fps) result.stutter_count = tail_metrics.stutter_count;

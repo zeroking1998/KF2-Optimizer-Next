@@ -30,6 +30,7 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     frame.frames.frame_time_ms = 17.2;
     frame.frames.p95_ms = 20.0;
     frame.frames.p99_ms = 24.0;
+    frame.frames.sustained_one_percent_low_fps = 47.0;
     frame.frames.one_percent_low_fps = 45.0;
     frame.frames.quality = telemetry::SampleQuality::good;
     frame.frames.stutter_count = 3;
@@ -114,6 +115,8 @@ int main() {
     CHECK(sample.frame_time_ms == frame.frames.frame_time_ms);
     CHECK(sample.p95_frame_time_ms == frame.frames.p95_ms);
     CHECK(sample.p99_frame_time_ms == frame.frames.p99_ms);
+    CHECK(sample.sustained_one_percent_low_fps ==
+          frame.frames.sustained_one_percent_low_fps);
     CHECK(sample.one_percent_low_fps ==
           frame.frames.one_percent_low_fps);
     CHECK(sample.stutter_count == 3);

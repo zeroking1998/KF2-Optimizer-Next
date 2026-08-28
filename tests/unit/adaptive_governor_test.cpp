@@ -42,6 +42,7 @@ AdaptiveSample sample(std::uint64_t now, double fps, double frame_time,
         .median_frame_time_ms = frame_time,
         .p95_frame_time_ms = p95,
         .p99_frame_time_ms = p95 * 1.1,
+        .sustained_one_percent_low_fps = fps,
         .one_percent_low_fps = fps,
         .point_one_percent_low_fps = fps * 0.8,
         .frame_time_variance = 0.4,
@@ -185,6 +186,7 @@ int main() {
     auto low_only_sample = sample(
         start, 60.0, 1000.0 / 60.0, 17.0, 35.0, 60.0);
     low_only_sample.one_percent_low_fps = 30.0;
+    low_only_sample.sustained_one_percent_low_fps = 60.0;
     AdaptiveGovernor low_warning_governor;
     const auto low_warning = drive(
         low_warning_governor, adaptive, low_only_sample,
@@ -192,6 +194,104 @@ int main() {
     CHECK(low_warning.state == AdaptiveControllerState::warning);
     CHECK(low_warning.disposition == AdaptiveDisposition::hold);
     CHECK(low_warning.reason == "early_warning_observe_only");
+
+    // Persistently poor short and long percentiles must eventually create a
+    // bounded corrective signal even when live and average FPS have recovered.
+    auto persistent_low_sample = sample(
+        start, 60.0, 1000.0 / 60.0, 17.0, 35.0, 60.0);
+    persistent_low_sample.sustained_one_percent_low_fps = 48.0;
+    persistent_low_sample.one_percent_low_fps = 48.0;
+    AdaptiveGovernor persistent_low_governor;
+    const auto persistent_low = drive(
+        persistent_low_governor, adaptive, persistent_low_sample,
+        start, 4'400'000'000ULL);
+    CHECK(persistent_low.state == AdaptiveControllerState::intervention);
+    CHECK(persistent_low.current_frame_pressure);
+    CHECK(persistent_low.recommended_profile == Profile::high_performance);
+
+    for (const int target : {30, 86, 122, 211, 240}) {
+        AdaptivePolicy target_policy = adaptive;
+        target_policy.target_fps = target;
+        const double target_fps = static_cast<double>(target);
+        auto target_low = sample(
+            start, target_fps, 1000.0 / target_fps,
+            1000.0 / target_fps, 35.0, 60.0);
+        const double poor_low = std::max(1.0, target_fps * 0.80);
+        target_low.sustained_one_percent_low_fps = poor_low;
+        target_low.one_percent_low_fps = poor_low;
+        AdaptiveGovernor target_low_governor;
+        const auto target_low_result = drive(
+            target_low_governor, target_policy, target_low,
+            start, 4'400'000'000ULL);
+        CHECK(target_low_result.state ==
+              AdaptiveControllerState::intervention);
+        CHECK(target_low_result.current_frame_pressure);
+    }
+
+    auto recovered_low_sample = persistent_low_sample;
+    recovered_low_sample.sustained_one_percent_low_fps = 60.0;
+    recovered_low_sample.one_percent_low_fps = 60.0;
+    const auto recovered_low = drive(
+        persistent_low_governor, adaptive, recovered_low_sample,
+        start + 4'600'000'000ULL, 7'000'000'000ULL);
+    CHECK(recovered_low.state == AdaptiveControllerState::stable);
+    CHECK(!recovered_low.current_frame_pressure);
+
+    // A transient that contaminates both percentile windows for no longer
+    // than the three-second short window must never cross into correction.
+    AdaptiveGovernor transient_low_governor;
+    auto transient_low = persistent_low_sample;
+    AdaptiveDecision transient_result;
+    for (std::uint64_t offset = 0; offset <= 3'000'000'000ULL;
+         offset += 200'000'000ULL) {
+        transient_low.timestamp_ns = start + offset;
+        transient_result = transient_low_governor.evaluate(
+            adaptive, transient_low, transient_low.timestamp_ns);
+    }
+    transient_low.sustained_one_percent_low_fps = 60.0;
+    for (std::uint64_t offset = 3'200'000'000ULL;
+         offset <= 4'600'000'000ULL; offset += 200'000'000ULL) {
+        transient_low.timestamp_ns = start + offset;
+        transient_result = transient_low_governor.evaluate(
+            adaptive, transient_low, transient_low.timestamp_ns);
+    }
+    CHECK(transient_result.state != AdaptiveControllerState::intervention);
+    CHECK(!transient_result.current_frame_pressure);
+
+    // Missing telemetry interrupts confirmation instead of counting an
+    // unobserved loading or capture gap as sustained gameplay pressure.
+    AdaptiveGovernor missing_low_governor;
+    static_cast<void>(drive(
+        missing_low_governor, adaptive, persistent_low_sample,
+        start, 3'000'000'000ULL));
+    auto missing_low = persistent_low_sample;
+    missing_low.timestamp_ns = start + 3'200'000'000ULL;
+    missing_low.fps.reset();
+    const auto missing_low_result = missing_low_governor.evaluate(
+        adaptive, missing_low, missing_low.timestamp_ns);
+    CHECK(missing_low_result.state == AdaptiveControllerState::observing);
+    const auto after_missing_low = drive(
+        missing_low_governor, adaptive, persistent_low_sample,
+        start + 3'400'000'000ULL, 1'000'000'000ULL);
+    CHECK(after_missing_low.state != AdaptiveControllerState::intervention);
+
+    // A gameplay boundary clears partial low-percentile confirmation state.
+    AdaptiveGovernor low_reset_governor;
+    static_cast<void>(drive(
+        low_reset_governor, adaptive, persistent_low_sample,
+        start, 3'000'000'000ULL));
+    auto low_reset = persistent_low_sample;
+    low_reset.timestamp_ns = start + 3'200'000'000ULL;
+    low_reset.map_generation = 2;
+    low_reset.map_changed = true;
+    const auto low_reset_result = low_reset_governor.evaluate(
+        adaptive, low_reset, low_reset.timestamp_ns);
+    CHECK(low_reset_result.state == AdaptiveControllerState::observing);
+    low_reset.map_changed = false;
+    const auto after_low_reset = drive(
+        low_reset_governor, adaptive, low_reset,
+        start + 6'400'000'000ULL, 1'000'000'000ULL);
+    CHECK(after_low_reset.state != AdaptiveControllerState::intervention);
 
     AdaptivePolicy intermediate_target = adaptive;
     intermediate_target.target_fps = 122;

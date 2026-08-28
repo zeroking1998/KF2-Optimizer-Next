@@ -112,6 +112,7 @@ struct AdaptiveSample {
     std::optional<double> median_frame_time_ms;
     std::optional<double> p95_frame_time_ms;
     std::optional<double> p99_frame_time_ms;
+    std::optional<double> sustained_one_percent_low_fps;
     std::optional<double> one_percent_low_fps;
     std::optional<double> point_one_percent_low_fps;
     std::optional<double> frame_time_variance;
@@ -279,6 +280,7 @@ private:
     AdaptivePressure active_pressure_{AdaptivePressure::observing};
     AdaptivePressure candidate_pressure_{AdaptivePressure::observing};
     std::uint64_t candidate_since_ns_{0};
+    std::uint64_t low_percentile_pressure_since_ns_{0};
     std::uint64_t last_direction_change_ns_{0};
     std::uint64_t last_evaluation_ns_{0};
     std::uint64_t identity_start_id_{0};
