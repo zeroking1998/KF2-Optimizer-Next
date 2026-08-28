@@ -295,6 +295,16 @@ std::vector<GpuAdapter> unique_physical_gpu_adapters(
     return result;
 }
 
+std::optional<GpuAdapter> find_hardware_gpu_adapter_by_luid(
+    const std::vector<GpuAdapter>& adapters, std::uint64_t adapter_luid) {
+    const auto found = std::find_if(
+        adapters.begin(), adapters.end(), [adapter_luid](const auto& adapter) {
+            return !adapter.software && adapter.luid == adapter_luid;
+        });
+    return found == adapters.end() ? std::nullopt
+                                   : std::optional<GpuAdapter>{*found};
+}
+
 NvidiaGpuSampler::NvidiaGpuSampler(std::unique_ptr<Impl> implementation)
     : implementation_{std::move(implementation)} {}
 NvidiaGpuSampler::NvidiaGpuSampler(NvidiaGpuSampler&&) noexcept = default;
@@ -596,6 +606,86 @@ std::optional<GpuInstanceIdentity> parse_gpu_instance(std::wstring_view instance
     } catch (...) { return std::nullopt; }
 }
 
+std::optional<std::uint64_t> active_process_gpu_adapter_luid(
+    const std::vector<GpuCounterValue>& values, std::uint32_t pid,
+    std::uint64_t preferred_adapter_luid) {
+    struct Candidate {
+        double busiest_3d_engine{0.0};
+        double busiest_engine{0.0};
+        std::uint64_t memory_bytes{0};
+        bool has_3d_engine{false};
+        bool has_engine{false};
+    };
+    std::map<std::uint64_t, Candidate> candidates;
+    for (const auto& value : values) {
+        if (value.identity.pid != pid || value.identity.adapter_luid == 0) {
+            continue;
+        }
+        auto& candidate = candidates[value.identity.adapter_luid];
+        candidate.memory_bytes = std::max(
+            candidate.memory_bytes, value.dedicated_bytes + value.shared_bytes);
+        if (value.identity.engine == L"memory" ||
+            value.utilization_percent < 0.0 ||
+            value.utilization_percent > 100.0) {
+            continue;
+        }
+        candidate.has_engine = true;
+        candidate.busiest_engine = std::max(
+            candidate.busiest_engine, value.utilization_percent);
+        if (value.identity.engine == L"3D") {
+            candidate.has_3d_engine = true;
+            candidate.busiest_3d_engine = std::max(
+                candidate.busiest_3d_engine, value.utilization_percent);
+        }
+    }
+
+    std::uint64_t largest_3d_memory{0};
+    for (const auto& [ignored, candidate] : candidates) {
+        static_cast<void>(ignored);
+        if (candidate.has_3d_engine) {
+            largest_3d_memory = std::max(
+                largest_3d_memory, candidate.memory_bytes);
+        }
+    }
+    if (const auto preferred = candidates.find(preferred_adapter_luid);
+        preferred != candidates.end() && preferred->second.has_3d_engine &&
+        (largest_3d_memory == 0 ||
+         preferred->second.memory_bytes == largest_3d_memory)) {
+        // Hybrid systems can expose KFGame activity on both the display APU
+        // and the rendering GPU. Keep the bound renderer while it still owns
+        // a 3D engine and the largest process allocation; a transient load
+        // spike on the other adapter must not make the UI and samplers flap.
+        return preferred_adapter_luid;
+    }
+
+    std::optional<std::pair<std::uint64_t, Candidate>> best;
+    bool tied{false};
+    for (const auto& [luid, candidate] : candidates) {
+        if (!candidate.has_engine) continue;
+        const auto rank = std::tuple{
+            candidate.has_3d_engine,
+            candidate.memory_bytes,
+            candidate.has_3d_engine ? candidate.busiest_3d_engine
+                                    : candidate.busiest_engine};
+        const auto best_rank = best
+            ? std::tuple{
+                  best->second.has_3d_engine,
+                  best->second.memory_bytes,
+                  best->second.has_3d_engine
+                      ? best->second.busiest_3d_engine
+                      : best->second.busiest_engine}
+            : decltype(rank){};
+        if (!best || rank > best_rank) {
+            best = std::pair{luid, candidate};
+            tied = false;
+        } else if (rank == best_rank) {
+            tied = true;
+        }
+    }
+    return best && !tied ? std::optional<std::uint64_t>{best->first}
+                         : std::nullopt;
+}
+
 GpuMetrics aggregate_gpu_counters(const std::vector<GpuCounterValue>& values,
                                   std::uint32_t pid, std::uint64_t adapter_luid) {
     std::map<std::wstring, double> engines;
@@ -726,6 +816,8 @@ Result<GpuMetrics> PdhGpuSampler::sample() {
         if (auto identity = parse_gpu_instance(name)) values.push_back({*identity, 0, 0, amount});
     }
     auto result = aggregate_gpu_counters(values, pid_, adapter_luid_);
+    result.process_adapter_luid = active_process_gpu_adapter_luid(
+        values, pid_, adapter_luid_);
     if (const auto memory = query_gpu_memory_budget(adapter_luid_);
         memory.has_value()) {
         result.adapter_local_usage_bytes =

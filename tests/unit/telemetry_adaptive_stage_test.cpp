@@ -39,6 +39,7 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     frame.active_gameplay = true;
     frame.offline_gameplay = true;
     frame.evidence.cpu_percent = 35.0;
+    frame.evidence.system_cpu_percent = 67.0;
     frame.evidence.critical_core_percent = 92.0;
     frame.evidence.effective_core_usage = 4.25;
     frame.evidence.dominant_thread_share_percent = 55.0;
@@ -102,6 +103,7 @@ int main() {
 
     const auto built = build_adaptive_sample(frame, context);
     const auto& sample = built.sample;
+    CHECK(requires_fresh_frame_window(built));
     CHECK(sample.pid == 42);
     CHECK(sample.process_start_id == 9001);
     CHECK(sample.timestamp_ns == 19'000'000'000ULL);
@@ -118,6 +120,8 @@ int main() {
     CHECK(sample.sample_loss);
     CHECK(sample.discontinuity);
     CHECK(sample.cpu_percent == frame.evidence.cpu_percent);
+    CHECK(sample.system_cpu_percent ==
+          frame.evidence.system_cpu_percent);
     CHECK(sample.critical_core_percent ==
           frame.evidence.critical_core_percent);
     CHECK(sample.effective_core_usage ==
@@ -174,6 +178,13 @@ int main() {
     CHECK(built.map == "KF-Outpost");
     CHECK(built.map_generation == 5);
     CHECK(built.telemetry_sample == 17);
+
+    AdaptiveSampleContext current_context = context;
+    current_context.current_map = built.map;
+    current_context.map_generation = built.map_generation;
+    current_context.last_telemetry_sample = built.telemetry_sample;
+    CHECK(!requires_fresh_frame_window(
+        build_adaptive_sample(frame, current_context)));
     CHECK(sample.gameplay_context_fresh);
     CHECK(sample.visibility_context_fresh);
     CHECK(sample.ragdoll_pressure.has_value());
@@ -242,6 +253,7 @@ int main() {
     CHECK(empty.sample.process_start_id == 9);
     CHECK(!empty.sample.fps.has_value());
     CHECK(!empty.sample.cpu_percent.has_value());
+    CHECK(!empty.sample.system_cpu_percent.has_value());
     CHECK(!empty.sample.gpu_percent.has_value());
     CHECK(!empty.sample.ragdoll_pressure.has_value());
     CHECK(!empty.sample.flex_pressure.has_value());
@@ -256,53 +268,95 @@ int main() {
     control.current_quality = 100;
     control.minimum_quality = 10;
     control.maximum_quality = 100;
+    control.quality_change_budget = 2;
     control.active_gameplay = true;
     control.verified_offline = true;
     control.bridge_available = true;
     control.now_ns = 10'000'000'000ULL;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
+    control.current_frame_pressure = true;
     auto selected = select_adaptive_runtime_control(control);
     CHECK(selected.has_value());
     CHECK(selected->resource == game::AdaptiveResourceControl::cpu);
-    CHECK(selected->quality == 75);
+    CHECK(selected->quality == 90);
 
-    control.last_dispatch_ns = 9'000'000'000ULL;
+    control.current_frame_pressure = false;
+    control.current_resource_pressure = true;
+    control.primary_resource = optimizer::ResourceKind::vram;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::vram);
+    CHECK(selected->quality == 90);
+    control.current_resource_pressure = false;
+    control.primary_resource = optimizer::ResourceKind::cpu;
+    control.current_frame_pressure = true;
+
+    control.state = optimizer::AdaptiveControllerState::emergency;
+    control.current_frame_pressure = false;
     CHECK(!select_adaptive_runtime_control(control).has_value());
-    control.last_dispatch_ns = 8'000'000'000ULL;
+    control.state = optimizer::AdaptiveControllerState::intervention;
+    control.current_frame_pressure = true;
+
+    control.last_dispatch_ns = 9'500'000'001ULL;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
+    control.last_dispatch_ns = 9'000'000'000ULL;
     CHECK(select_adaptive_runtime_control(control).has_value());
 
     control.last_dispatch_ns = 0;
     control.state = optimizer::AdaptiveControllerState::emergency;
     selected = select_adaptive_runtime_control(control);
     CHECK(selected.has_value());
-    CHECK(selected->quality == 50);
+    CHECK(selected->quality == 80);
     control.current_quality = 75;
     selected = select_adaptive_runtime_control(control);
     CHECK(selected.has_value());
-    CHECK(selected->quality == 10);
+    CHECK(selected->quality == 55);
     control.minimum_quality = 70;
-    CHECK(!select_adaptive_runtime_control(control).has_value());
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->quality == 70);
 
     control.minimum_quality = 10;
+    control.state = optimizer::AdaptiveControllerState::intervention;
+    control.current_quality = 100;
+    control.quality_change_budget = 1;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->quality == 95);
+    control.quality_change_budget = 5;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->quality == 75);
+
+    control.quality_change_budget = 2;
     control.state = optimizer::AdaptiveControllerState::stable;
+    control.current_frame_pressure = false;
     control.recovery_eligible = true;
     control.current_quality = 10;
     control.primary_confidence = 0.1;
     selected = select_adaptive_runtime_control(control);
     CHECK(selected.has_value());
     CHECK(selected->resource == game::AdaptiveResourceControl::recover);
-    CHECK(selected->quality == 50);
+    CHECK(selected->quality == 15);
     control.current_quality = 75;
     selected = select_adaptive_runtime_control(control);
     CHECK(selected.has_value());
     CHECK(selected->resource == game::AdaptiveResourceControl::recover);
-    CHECK(selected->quality == 100);
+    CHECK(selected->quality == 80);
 
     control.maximum_quality = 75;
     control.current_quality = 50;
     selected = select_adaptive_runtime_control(control);
     CHECK(selected.has_value());
     CHECK(selected->resource == game::AdaptiveResourceControl::recover);
-    CHECK(selected->quality == 75);
+    CHECK(selected->quality == 55);
+
+    control.maximum_quality = 100;
+    control.current_quality = 75;
+    control.last_dispatch_ns = 6'000'000'001ULL;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
+    control.last_dispatch_ns = 6'000'000'000ULL;
+    CHECK(select_adaptive_runtime_control(control).has_value());
 
     control.zed_time_active = true;
     CHECK(!select_adaptive_runtime_control(control).has_value());

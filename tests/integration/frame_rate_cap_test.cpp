@@ -69,11 +69,26 @@ int main() {
     CHECK(read_bytes(console_variables) == console_after);
     CHECK(read_bytes(game_ini) == game_after);
 
+    for (int target = 30; target <= 240; ++target) {
+        const auto exact = kf2::game::persist_frame_rate_cap(
+            installation, target);
+        CHECK(exact.has_value());
+        CHECK(exact.value().target_fps == target);
+        CHECK(read_bytes(console_variables).find(
+                  "t.MaxFPS=" + std::to_string(target) + "\r\n") !=
+              std::string::npos);
+        CHECK(read_bytes(game_ini).find(
+                  "MaxSmoothedFrameRate=" + std::to_string(target) +
+                  ".000000\r\n") != std::string::npos);
+    }
+    const auto all_values_console = read_bytes(console_variables);
+    const auto all_values_game = read_bytes(game_ini);
+
     const auto invalid = kf2::game::persist_frame_rate_cap(
         installation, 241);
     CHECK(!invalid.has_value());
-    CHECK(read_bytes(console_variables) == console_after);
-    CHECK(read_bytes(game_ini) == game_after);
+    CHECK(read_bytes(console_variables) == all_values_console);
+    CHECK(read_bytes(game_ini) == all_values_game);
 
     write_bytes(console_variables,
         "[Startup]\r\nt.MaxFPS=120\r\nt.MaxFPS=144\r\n");

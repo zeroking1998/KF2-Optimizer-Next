@@ -198,7 +198,8 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
     if (installation) {
         const auto module_restored =
             game::restore_offline_telemetry_lab(
-                installation->config_root, settings_path.parent_path(),
+                installation->config_root,
+                settings_path.parent_path(),
                 false);
         if (!module_restored.has_value() &&
             module_restored.error().code != ErrorCode::not_found) {

@@ -39,6 +39,8 @@ Result<TelemetryFrame> build_telemetry_frame(
     evidence.p95_frame_time_ms = frame.frames.p95_ms;
     if (frame.process) {
         evidence.cpu_percent = frame.process->cpu_percent;
+        evidence.system_cpu_percent =
+            frame.process->system_cpu_percent;
         evidence.critical_core_percent =
             frame.process->critical_core_percent;
         evidence.effective_core_usage =

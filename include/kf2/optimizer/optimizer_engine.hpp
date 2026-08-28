@@ -26,6 +26,7 @@ struct PerformanceEvidence {
     std::optional<double> fps;
     std::optional<double> p95_frame_time_ms;
     std::optional<double> cpu_percent;
+    std::optional<double> system_cpu_percent;
     std::optional<double> critical_core_percent;
     std::optional<double> effective_core_usage;
     std::optional<double> dominant_thread_share_percent;

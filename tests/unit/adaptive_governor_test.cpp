@@ -5,6 +5,7 @@
 #include <random>
 
 #include "kf2/optimizer/adaptive_governor.hpp"
+#include "kf2/optimizer/adaptive_session.hpp"
 #include "kf2/optimizer/adaptive_stability.hpp"
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__ \
@@ -74,6 +75,23 @@ int main() {
     constexpr std::uint64_t start = 10'000'000'000ULL;
     AdaptivePolicy adaptive;
 
+    CHECK(effective_adaptive_target_fps(60, std::nullopt) == 60);
+    CHECK(effective_adaptive_target_fps(60, 240) == 60);
+    CHECK(effective_adaptive_target_fps(10, 240) == 240);
+    CHECK(effective_adaptive_target_fps(60, 241) == 60);
+    for (int target = kTargetFpsMinimum;
+         target <= kTargetFpsMaximum; ++target) {
+        const int stale_session_target =
+            target == kTargetFpsMaximum ? kTargetFpsMinimum
+                                        : kTargetFpsMaximum;
+        CHECK(effective_adaptive_target_fps(
+                  target, stale_session_target) == target);
+    }
+    CHECK(effective_adaptive_corpse_limit(20, 2000) == 2000);
+    CHECK(effective_adaptive_corpse_limit(20, 2001) == 20);
+    CHECK(effective_adaptive_quality_change_budget(2, 5) == 5);
+    CHECK(effective_adaptive_quality_change_budget(2, 0) == 2);
+
     static_assert(kTargetFpsValueCount == 211);
     double previous_target_ms = 0.0;
     for (int target = kTargetFpsMinimum;
@@ -124,6 +142,12 @@ int main() {
           AdaptiveDataQuality::not_available);
     valid.fps = std::numeric_limits<double>::quiet_NaN();
     CHECK(validate_adaptive_sample(adaptive, valid, start).quality ==
+          AdaptiveDataQuality::not_available);
+
+    auto invalid_system_cpu = sample(
+        start, 60.0, 1000.0 / 60.0, 17.2, 35.0, 55.0);
+    invalid_system_cpu.system_cpu_percent = 101.0;
+    CHECK(validate_adaptive_sample(adaptive, invalid_system_cpu, start).quality ==
           AdaptiveDataQuality::not_available);
 
     AdaptiveGovernor corrective_governor;
@@ -252,6 +276,84 @@ int main() {
     // permitted and therefore no fabricated rollback capability is claimed.
     CHECK(!gpu.rollback_available);
 
+    // High whole-adapter load is not attributed to KF2 while its frame
+    // budget remains healthy. The same measured load becomes actionable
+    // shared GPU pressure only after frame timing also degrades.
+    auto stable_external_gpu = sample(
+        start, 60.0, 1000.0 / 60.0, 16.9, 18.0, 18.0);
+    stable_external_gpu.gpu_percent = 99.0;
+    AdaptiveGovernor stable_external_gpu_governor;
+    const auto stable_gpu = drive(
+        stable_external_gpu_governor, adaptive, stable_external_gpu,
+        start, 1'000'000'000ULL);
+    CHECK(stable_gpu.state != AdaptiveControllerState::intervention);
+    CHECK(stable_gpu.state != AdaptiveControllerState::emergency);
+    CHECK(!stable_gpu.resources.shared_gpu_pressure);
+    CHECK(stable_gpu.bottleneck.type == AdaptiveBottleneck::unknown);
+
+    // Near-exhausted VRAM is allowed to act before the first visible frame
+    // collapse. Unlike generic GPU utilization, memory exhaustion predicts a
+    // costly streaming or paging event and has direct budget attribution.
+    auto stable_vram_pressure = sample(
+        start, 60.0, 1000.0 / 60.0, 16.9, 30.0, 55.0);
+    stable_vram_pressure.vram_used_bytes =
+        7.5 * 1024.0 * 1024.0 * 1024.0;
+    AdaptiveGovernor stable_vram_governor;
+    const auto proactive_vram = drive(
+        stable_vram_governor, adaptive, stable_vram_pressure,
+        start, 1'000'000'000ULL);
+    CHECK(proactive_vram.state == AdaptiveControllerState::intervention);
+    CHECK(!proactive_vram.current_frame_pressure);
+    CHECK(proactive_vram.current_resource_pressure);
+    CHECK(proactive_vram.resources.primary == ResourceKind::vram);
+    CHECK(proactive_vram.bottleneck.type == AdaptiveBottleneck::vram);
+
+    auto stable_ram_pressure = sample(
+        start, 60.0, 1000.0 / 60.0, 16.9, 30.0, 55.0);
+    stable_ram_pressure.ram_used_bytes =
+        30.0 * 1024.0 * 1024.0 * 1024.0;
+    AdaptiveGovernor stable_ram_governor;
+    const auto proactive_ram = drive(
+        stable_ram_governor, adaptive, stable_ram_pressure,
+        start, 1'000'000'000ULL);
+    CHECK(proactive_ram.state == AdaptiveControllerState::intervention);
+    CHECK(proactive_ram.current_resource_pressure);
+    CHECK(proactive_ram.resources.primary == ResourceKind::ram);
+
+    auto impacted_external_gpu = stable_external_gpu;
+    impacted_external_gpu.fps = 30.0;
+    impacted_external_gpu.average_fps = 30.0;
+    impacted_external_gpu.frame_time_ms = 33.33;
+    impacted_external_gpu.median_frame_time_ms = 33.33;
+    impacted_external_gpu.p95_frame_time_ms = 42.0;
+    impacted_external_gpu.p99_frame_time_ms = 46.2;
+    impacted_external_gpu.one_percent_low_fps = 28.0;
+    AdaptiveGovernor impacted_external_gpu_governor;
+    const auto shared_gpu = drive(
+        impacted_external_gpu_governor, adaptive, impacted_external_gpu,
+        start, 1'000'000'000ULL);
+    CHECK(shared_gpu.state == AdaptiveControllerState::emergency);
+    CHECK(shared_gpu.current_frame_pressure);
+    CHECK(shared_gpu.resources.primary == ResourceKind::gpu);
+    CHECK(shared_gpu.resources.shared_gpu_pressure);
+    CHECK(shared_gpu.bottleneck.type == AdaptiveBottleneck::gpu);
+    CHECK(shared_gpu.bottleneck.confidence == 0.72);
+    CHECK(shared_gpu.bottleneck.supporting_count >= 2);
+    CHECK(shared_gpu.bottleneck.supporting_signals[1] ==
+          "shared_gpu_pressure_with_frame_impact");
+
+    auto recovered_external_gpu = stable_external_gpu;
+    AdaptiveDecision recovered_shared_gpu;
+    for (std::uint64_t offset = 1'200'000'000ULL;
+         offset <= 3'000'000'000ULL; offset += 200'000'000ULL) {
+        recovered_external_gpu.timestamp_ns = start + offset;
+        recovered_shared_gpu = impacted_external_gpu_governor.evaluate(
+            adaptive, recovered_external_gpu,
+            recovered_external_gpu.timestamp_ns);
+    }
+    CHECK(recovered_shared_gpu.state == AdaptiveControllerState::emergency);
+    CHECK(!recovered_shared_gpu.current_frame_pressure);
+
     AdaptiveGovernor unreachable_governor;
     auto minimum = sample(start, 30.0, 33.33, 42.0, 35.0, 98.0);
     minimum.quality_score =
@@ -307,6 +409,43 @@ int main() {
     CHECK(cpu.bottleneck.type == AdaptiveBottleneck::cpu);
     CHECK(cpu.bottleneck.confidence <= 0.48);
     CHECK(cpu.bottleneck.contradicting_count > 0);
+
+    // Whole-system CPU saturation follows the same rule: no quality loss
+    // while KF2 holds the target, but a classified shared CPU bottleneck once
+    // the saturation and frame-budget miss occur together.
+    auto stable_external_cpu = sample(
+        start, 60.0, 1000.0 / 60.0, 16.9, 18.0, 30.0);
+    stable_external_cpu.system_cpu_percent = 98.0;
+    AdaptiveGovernor stable_external_cpu_governor;
+    const auto stable_cpu = drive(
+        stable_external_cpu_governor, adaptive, stable_external_cpu,
+        start, 1'000'000'000ULL);
+    CHECK(stable_cpu.state != AdaptiveControllerState::intervention);
+    CHECK(stable_cpu.state != AdaptiveControllerState::emergency);
+    CHECK(!stable_cpu.resources.shared_cpu_pressure);
+    CHECK(stable_cpu.bottleneck.type == AdaptiveBottleneck::unknown);
+
+    auto impacted_external_cpu = stable_external_cpu;
+    impacted_external_cpu.fps = 30.0;
+    impacted_external_cpu.average_fps = 30.0;
+    impacted_external_cpu.frame_time_ms = 33.33;
+    impacted_external_cpu.median_frame_time_ms = 33.33;
+    impacted_external_cpu.p95_frame_time_ms = 42.0;
+    impacted_external_cpu.p99_frame_time_ms = 46.2;
+    impacted_external_cpu.one_percent_low_fps = 28.0;
+    AdaptiveGovernor impacted_external_cpu_governor;
+    const auto shared_cpu = drive(
+        impacted_external_cpu_governor, adaptive, impacted_external_cpu,
+        start, 1'000'000'000ULL);
+    CHECK(shared_cpu.state == AdaptiveControllerState::emergency);
+    CHECK(shared_cpu.current_frame_pressure);
+    CHECK(shared_cpu.resources.primary == ResourceKind::cpu);
+    CHECK(shared_cpu.resources.shared_cpu_pressure);
+    CHECK(shared_cpu.bottleneck.type == AdaptiveBottleneck::cpu);
+    CHECK(shared_cpu.bottleneck.confidence == 0.72);
+    CHECK(shared_cpu.bottleneck.supporting_count >= 2);
+    CHECK(shared_cpu.bottleneck.supporting_signals[1] ==
+          "shared_cpu_pressure_with_frame_impact");
 
     AdaptiveGovernor critical_thread_governor;
     auto critical_thread_sample =

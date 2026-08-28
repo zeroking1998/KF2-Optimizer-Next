@@ -43,6 +43,7 @@
 #include "kf2/overlay/overlay_policy.hpp"
 #include "kf2/overlay/overlay_window.hpp"
 #include "kf2/optimizer/adaptive_governor.hpp"
+#include "kf2/optimizer/adaptive_session.hpp"
 #include "kf2/optimizer/adaptive_actuation.hpp"
 #include "kf2/optimizer/adaptive_profile.hpp"
 #include "kf2/optimizer/optimizer_engine.hpp"
@@ -149,6 +150,8 @@ struct UiRuntime {
     std::uint64_t adaptive_control_sequence{0};
     std::uint64_t adaptive_quality_last_dispatch_ns{0};
     int adaptive_runtime_quality{100};
+    std::optional<game::OfflineAdaptiveSessionPolicy>
+        adaptive_session_policy;
     std::uint64_t adaptive_settings_generation{1};
     optimizer::AdaptiveProfilePersistenceGate adaptive_profile_gate;
     optimizer::AdaptiveDecision adaptive_decision;
@@ -167,6 +170,7 @@ struct UiRuntime {
     unsigned int adaptive_overhead_breaches{0};
     bool adaptive_overhead_frozen{false};
     bool adaptive_gameplay_active{false};
+    bool adaptive_provider_confirmed{false};
     telemetry::FrameMetrics last_frame_metrics;
     std::optional<game::GameLogSession> last_report_gameplay_session;
     std::optional<std::uint64_t> adapter_vram_budget;
@@ -211,6 +215,31 @@ struct UiRuntime {
               std::filesystem::path executable_directory);
 
     std::uint64_t monotonic_ns() const;
+
+    [[nodiscard]] int effective_target_fps() const noexcept {
+        return optimizer::effective_adaptive_target_fps(
+            optimizer_settings.target_fps,
+            adaptive_session_policy
+                ? std::optional{adaptive_session_policy->target_fps}
+                : std::nullopt);
+    }
+
+    [[nodiscard]] int effective_corpse_limit() const noexcept {
+        return optimizer::effective_adaptive_corpse_limit(
+            optimizer_settings.corpse_limit,
+            adaptive_session_policy
+                ? std::optional{adaptive_session_policy->corpse_maximum}
+                : std::nullopt);
+    }
+
+    [[nodiscard]] int effective_quality_change_budget() const noexcept {
+        return optimizer::effective_adaptive_quality_change_budget(
+            optimizer_settings.adaptive_quality_change_budget,
+            adaptive_session_policy
+                ? std::optional{
+                      adaptive_session_policy->quality_change_budget}
+                : std::nullopt);
+    }
 
     bool save_flex_report(const flex::ObservationSnapshot& observed);
 
@@ -259,6 +288,7 @@ struct UiRuntime {
     bool restore_protected_session_config(std::wstring_view reason);
 
     void try_attach_telemetry();
+    void bind_process_gpu_adapter(std::uint64_t adapter_luid);
 
     void update_adaptive_controller(
         const telemetry_pipeline::TelemetryFrame& frame);
@@ -278,6 +308,8 @@ struct UiRuntime {
     Result<bool> prepare_automatic_protected_launch_capabilities();
 
     Result<bool> prepare_automatic_external_launch_profile();
+
+    Result<bool> rearm_automatic_external_launch_profile();
 
     void set_slider_value(std::string_view id, int requested_value);
 

@@ -146,14 +146,17 @@ bounded steps applied to a separate runtime threshold and excess confirmed
 and never during Zed Time. Recovery stops removal immediately and raises the
 runtime threshold gradually back toward the selected ceiling. The same
 controller has a separate distance-first physics stage. At baseline it sleeps
-only an old slow corpse with stale native `LastRenderTime` beyond 3,500 units,
-at most once per second. Fresh visible living/corpse density or confirmed
-target-relative frame pressure moves the threshold to 2,500/1,800 units and the
-interval to 500/250 ms; FPS is an amplifier rather than the sole gate.
+only an old slow corpse with stale native `LastRenderTime` beyond 1,200 units,
+at most once per 400 ms. Fresh visible enemy/corpse density or confirmed
+target-relative frame pressure moves the threshold to 1,000/850 units and the
+interval to 200/100 ms; FPS is an amplifier rather than the sole gate.
 Optimizer-slept bodies are identity
-tracked and use the official `WakeRigidBody` path inside 1,500 units. Only then
-may the frame-pressure path raise native `MinLodModel` on one distant visible corpse every 500/250 ms
-and never beyond LOD 2; forced, near, sleeping, recovered and session-ending LOD
+tracked and use the official `WakeRigidBody` path inside 800 units. Only then
+may the pressure path raise native `MinLodModel` on one distant visible corpse
+every 400/200/100 ms. It starts at stage 2 outside 300 units and advances to
+  stages 3/4/5 at 500/800/1,200 units. Visible-enemy pressure scales continuously
+  from five to eighty Zeds and consumes every stage the mesh actually exposes;
+forced, near, sleeping, recovered and session-ending LOD
 state is preserved or restored. After eligible distance/LOD work is exhausted,
 one old, slow, non-death-animation visible ragdoll may sleep at most once per
 750/350 ms. KF2/UE3 native frustum and occlusion culling already avoid drawing

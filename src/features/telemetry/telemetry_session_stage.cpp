@@ -1,5 +1,7 @@
 #include "features/telemetry/telemetry_session_stage.hpp"
 
+#include "kf2/game/game_log_locator.hpp"
+
 #include "app/application_runtime.hpp"
 
 namespace kf2::telemetry_pipeline {
@@ -37,6 +39,7 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
             runtime.model.status().live_frame_time_ms ||
             runtime.model.status().live_cpu_percent ||
             runtime.model.status().live_gpu_percent ||
+            runtime.model.status().game_gpu_name ||
             runtime.model.status().live_active_corpses ||
             runtime.model.status().live_sleeping_corpses) {
             auto status = runtime.model.status();
@@ -45,6 +48,7 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
             status.live_frame_time_ms.reset();
             status.live_cpu_percent.reset();
             status.live_gpu_percent.reset();
+            status.game_gpu_name.reset();
             status.live_active_corpses.reset();
             status.live_sleeping_corpses.reset();
             status.adaptive_runtime_corpse_limit.reset();
@@ -109,9 +113,10 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
     }
 
     runtime.detach_telemetry();
+    bool session_restored = true;
     if (runtime.session_config_snapshot) {
-        static_cast<void>(runtime.restore_protected_session_config(
-            L"KF2 closed"));
+        session_restored = runtime.restore_protected_session_config(
+            L"KF2 closed");
     } else if (runtime.installation) {
         const auto capped = runtime.synchronize_frame_rate_cap();
         if (!capped.has_value()) {
@@ -134,6 +139,10 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
         {0, diagnostics::Severity::info, "KF2_SESSION_ENDED",
          L"The bound KF2 process ended; session telemetry was finalized",
          L"game"});
+    if (session_restored) {
+        static_cast<void>(
+            runtime.rearm_automatic_external_launch_profile());
+    }
     runtime.invalidate();
     const SessionGateInput gate{
         .process_bound = true,
@@ -242,8 +251,10 @@ void UiRuntime::detach_telemetry() {
     adaptive_control_sequence = 0;
     adaptive_quality_last_dispatch_ns = 0;
     adaptive_runtime_quality = optimizer_settings.adaptive_maximum_quality;
+    adaptive_session_policy.reset();
     adaptive_profile_gate.reset();
     adaptive_gameplay_active = false;
+    adaptive_provider_confirmed = false;
     adaptive_overhead_breaches = 0;
     adaptive_overhead_frozen = false;
     adaptive_decision = {};
@@ -280,8 +291,11 @@ void UiRuntime::detach_telemetry() {
     status.live_frame_time_ms.reset();
     status.live_cpu_percent.reset();
     status.live_gpu_percent.reset();
+    status.game_gpu_name.reset();
     status.live_active_corpses.reset();
     status.live_sleeping_corpses.reset();
+    status.active_target_fps.reset();
+    status.active_corpse_limit.reset();
     const auto launch_profile = optimizer::bound_adaptive_profile(
         stored_adaptive_profile(optimizer_settings),
         optimizer_settings.adaptive_minimum_quality,
@@ -304,9 +318,11 @@ void UiRuntime::detach_telemetry() {
 
 void UiRuntime::update_overlay_scene_gate() {
     if (!installation || !game_process) return;
-    if (game_log_path.empty()) {
-        game_log_path = installation->config_root.parent_path() / L"Logs" / L"Launch.log";
-    }
+    const auto selected_log = game::find_active_game_log(
+        installation->config_root.parent_path() / L"Logs",
+        game_process->process_start_id);
+    if (!selected_log.has_value() || !selected_log.value()) return;
+    game_log_path = selected_log.value()->path;
     HANDLE log_file = CreateFileW(game_log_path.c_str(),
         FILE_READ_ATTRIBUTES | GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -324,6 +340,9 @@ void UiRuntime::update_overlay_scene_gate() {
     const auto last_write =
         (static_cast<std::uint64_t>(information.ftLastWriteTime.dwHighDateTime) << 32U) |
         information.ftLastWriteTime.dwLowDateTime;
+    const auto creation_time =
+        (static_cast<std::uint64_t>(information.ftCreationTime.dwHighDateTime) << 32U) |
+        information.ftCreationTime.dwLowDateTime;
     if (!game::game_log_belongs_to_process(
             last_write, game_process->process_start_id)) {
         return;
@@ -388,6 +407,8 @@ void UiRuntime::update_overlay_scene_gate() {
         overlay_scene_ready = true;
         game_log_startup_exited = false;
     } else if (!overlay_scene_ready &&
+               game::game_log_belongs_to_process(
+                   creation_time, game_process->process_start_id) &&
                game::game_log_reports_engine_exit(marker_input)) {
         game_log_startup_exited = true;
         if (!game_log_startup_exit_announced) {
@@ -458,6 +479,42 @@ void UiRuntime::try_attach_telemetry() {
             : L"Waiting for KF2 process";
         return;
     }
+    const bool new_process = !game_process ||
+        game_process->pid != process.value().pid ||
+        game_process->process_start_id != process.value().process_start_id;
+    if (new_process) {
+        game::OfflineAdaptiveSessionPolicy active_policy{
+            optimizer_settings.corpse_limit,
+            optimizer_settings.target_fps,
+            optimizer_settings.adaptive_quality_change_budget};
+        const auto observed = game::read_offline_adaptive_session_policy(
+            installation->config_root);
+        if (observed.has_value() && observed.value()) {
+            active_policy = *observed.value();
+        } else if (!observed.has_value()) {
+            events->append({0, diagnostics::Severity::warning,
+                "ADAPTIVE_SESSION_POLICY_FALLBACK",
+                L"The protected provider policy could not be read; Adaptive bound the current saved values for this process: " +
+                    observed.error().message,
+                L"optimizer"});
+        }
+        active_policy.target_fps = optimizer_settings.target_fps;
+        adaptive_session_policy = active_policy;
+        auto status = model.status();
+        status.active_target_fps = active_policy.target_fps;
+        status.active_corpse_limit = active_policy.corpse_maximum;
+        model.set_status(std::move(status));
+        events->append({0, diagnostics::Severity::info,
+            "ADAPTIVE_SESSION_POLICY_BOUND",
+            L"KF2 process policy bound: target " +
+                std::to_wstring(active_policy.target_fps) +
+                L" FPS, maximum corpses " +
+                std::to_wstring(active_policy.corpse_maximum) +
+                L", quality-change budget " +
+                std::to_wstring(active_policy.quality_change_budget),
+            L"optimizer"});
+        invalidate();
+    }
     // Bind the process before looking for a window. FleX exposes a
     // process-local channel and must work during splash, fullscreen and
     // other periods in which KF2 has no inspectable top-level window yet.
@@ -491,9 +548,9 @@ void UiRuntime::try_attach_telemetry() {
     // before the DX11 presentation path is active and then remain silent
     // for the lifetime of the process.  Wait for KF2's own main-menu
     // marker first.  This also prevents the overlay from briefly appearing
-    // and disappearing during startup.  The complete current Launch.log is
-    // scanned, so starting the optimizer after KF2 reached the menu works
-    // as well.
+    // and disappearing during startup. The complete current process-bound
+    // Launch log is scanned, so starting the optimizer after KF2 reached the
+    // menu works as well.
     update_overlay_scene_gate();
     if (!overlay_scene_ready) {
         telemetry_failure = game_log_startup_exited
@@ -574,6 +631,44 @@ void UiRuntime::try_attach_telemetry() {
         auto gpu = telemetry::PdhGpuSampler::create(
             game_process->pid, window_luid.value());
         if (gpu.has_value()) gpu_metrics.emplace(std::move(gpu.value()));
+    }
+}
+
+void UiRuntime::bind_process_gpu_adapter(std::uint64_t adapter_luid) {
+    if (!game_process || adapter_luid == 0) return;
+    const auto adapters = telemetry::enumerate_gpu_adapters();
+    if (!adapters.has_value()) return;
+    const auto adapter = telemetry::find_hardware_gpu_adapter_by_luid(
+        adapters.value(), adapter_luid);
+    if (!adapter) return;
+
+    auto status = model.status();
+    const bool identity_changed = !status.game_gpu_name ||
+        *status.game_gpu_name != adapter->name;
+    if (identity_changed) {
+        status.game_gpu_name = adapter->name;
+        model.set_status(std::move(status));
+        events->append({0, diagnostics::Severity::info,
+            "GAME_GPU_CONFIRMED",
+            L"KF2 process GPU activity confirmed on " + adapter->name,
+            L"telemetry"});
+        invalidate();
+    }
+
+    if (adaptive_adapter_luid && *adaptive_adapter_luid == adapter_luid) return;
+    adaptive_adapter_luid = adapter_luid;
+    adapter_vram_budget = adapter->dedicated_memory_bytes;
+    if (auto gpu = telemetry::PdhGpuSampler::create(
+            game_process->pid, adapter_luid);
+        gpu.has_value()) {
+        gpu_metrics.emplace(std::move(gpu.value()));
+    }
+    nvidia_gpu_metrics.reset();
+    if (adapter->vendor_id == 0x10DE) {
+        if (auto nvidia = telemetry::NvidiaGpuSampler::create(adapter->name);
+            nvidia.has_value()) {
+            nvidia_gpu_metrics.emplace(std::move(nvidia.value()));
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -8,6 +9,7 @@
 #include "kf2/flex/flex_adaptive_policy.hpp"
 #include "kf2/flex/flex_observation.hpp"
 #include "kf2/optimizer/adaptive_actuation.hpp"
+#include "kf2/optimizer/adaptive_governor.hpp"
 
 namespace kf2::app {
 struct UiRuntime;
@@ -20,6 +22,7 @@ struct FlexControlInput final {
     int target_fps{60};
     int quality_change_budget{1};
     std::optional<double> fps;
+    std::optional<double> enemy_pressure;
     std::uint64_t now_ms{0};
 };
 
@@ -28,12 +31,33 @@ struct FlexControlDecision final {
     bool constrained{false};
 };
 
+[[nodiscard]] inline bool flex_pressure_is_actionable(
+    const optimizer::AdaptiveDecision& decision) noexcept {
+    return decision.current_frame_pressure &&
+        (decision.resources.primary == optimizer::ResourceKind::cpu ||
+         decision.resources.primary == optimizer::ResourceKind::gpu ||
+         decision.resources.primary == optimizer::ResourceKind::vram);
+}
+
+[[nodiscard]] inline std::optional<double> visible_enemy_pressure(
+    int visible_living_zeds) noexcept {
+    if (visible_living_zeds < 5) return std::nullopt;
+    return std::clamp(
+        (static_cast<double>(visible_living_zeds) - 4.0) / 76.0,
+        0.0, 1.0);
+}
+
+[[nodiscard]] inline bool enemy_pressure_is_actionable(
+    const std::optional<double>& pressure) noexcept {
+    return pressure && std::isfinite(*pressure) && *pressure > 0.0;
+}
+
 [[nodiscard]] inline FlexControlDecision decide_flex_control(
     flex::AdaptivePolicy& policy, const FlexControlInput& input) noexcept {
     const auto decision = policy.evaluate(
         input.actuator_available,
         input.target_fps, input.fps, input.now_ms,
-        input.quality_change_budget);
+        input.quality_change_budget, input.enemy_pressure);
     return {decision.requested_substeps, decision.constrained};
 }
 

@@ -48,17 +48,35 @@ ResourcePressureSnapshot ResourcePressureEstimator::evaluate(
     }
 
     ResourcePressureSnapshot result;
+    const double target_ms = input.target_fps > 0
+        ? 1000.0 / static_cast<double>(input.target_fps) : 0.0;
+    const double observed_ms = input.p95_frame_time_ms.value_or(
+        input.frame_time_ms.value_or(target_ms));
+    result.frame_budget_deficit_ms = target_ms > 0.0
+        ? std::max(0.0, observed_ms - target_ms) : 0.0;
+    result.predicted_deficit_ms = result.frame_budget_deficit_ms;
+    const bool frame_budget_missed = target_ms > 0.0 &&
+        observed_ms >= target_ms + 0.25;
+
     const double capacity = static_cast<double>(
         input.affinity_logical_processors.value_or(0));
     const double parallel_percent = capacity > 0.0
         ? input.effective_core_usage.value_or(0.0) * 100.0 / capacity
         : 0.0;
-    result.cpu.raw = std::max({
+    const double process_cpu = std::max({
         normalized(input.process_cpu_percent.value_or(0.0), 65.0, 92.0),
         normalized(input.critical_thread_percent.value_or(0.0), 65.0, 96.0),
         normalized(parallel_percent, 55.0, 85.0)});
+    const double system_cpu = normalized(
+        input.system_cpu_percent.value_or(0.0), 75.0, 98.0);
+    const double shared_cpu = frame_budget_missed
+        ? system_cpu : system_cpu * 0.50;
+    result.cpu.raw = std::max(process_cpu, shared_cpu);
+    result.shared_cpu_pressure = frame_budget_missed &&
+        system_cpu >= 0.70 && process_cpu < 0.70;
     result.cpu.confidence = confidence_for({
         input.process_cpu_percent.has_value(),
+        input.system_cpu_percent.has_value(),
         input.critical_thread_percent.has_value(),
         input.effective_core_usage.has_value() && capacity > 0.0});
 
@@ -69,9 +87,12 @@ ResourcePressureSnapshot ResourcePressureEstimator::evaluate(
     // Whole-adapter pressure matters, but cannot by itself prove that KF2 is
     // the cause. It is deliberately discounted when process attribution is
     // available and low.
+    const bool shared_gpu = frame_budget_missed && adapter_gpu >= 0.70 &&
+        process_gpu < 0.70;
     result.gpu.raw = input.process_gpu_percent
-        ? std::max(process_gpu, adapter_gpu * 0.65)
+        ? std::max(process_gpu, adapter_gpu * (shared_gpu ? 1.0 : 0.65))
         : adapter_gpu;
+    result.shared_gpu_pressure = shared_gpu;
     result.gpu.confidence = confidence_for({
         input.process_gpu_percent.has_value(),
         input.adapter_gpu_percent.has_value()});
@@ -156,7 +177,9 @@ ResourcePressureSnapshot ResourcePressureEstimator::evaluate(
         ResourceKind::cpu, ResourceKind::gpu,
         ResourceKind::vram, ResourceKind::ram};
     double best_evidence = 0.0;
-    bool all_core_signals_available = true;
+    std::size_t available_signal_count = 0;
+    bool compute_signal_available = false;
+    bool memory_signal_available = false;
     for (std::size_t index = 0; index < signals.size(); ++index) {
         const auto& signal = *signals[index];
         const double evidence = signal.smoothed * signal.confidence;
@@ -166,7 +189,15 @@ ResourcePressureSnapshot ResourcePressureEstimator::evaluate(
             result.primary_confidence = signal.confidence;
         }
         result.total = std::max(result.total, signal.smoothed);
-        if (signal.confidence < 0.55) all_core_signals_available = false;
+        if (signal.confidence >= 0.55) {
+            ++available_signal_count;
+            compute_signal_available = compute_signal_available ||
+                kinds[index] == ResourceKind::cpu ||
+                kinds[index] == ResourceKind::gpu;
+            memory_signal_available = memory_signal_available ||
+                kinds[index] == ResourceKind::vram ||
+                kinds[index] == ResourceKind::ram;
+        }
     }
     // A primary cause is stronger than a warning signal. Requiring combined
     // pressure and confidence prevents a busy adapter owned by another
@@ -177,13 +208,6 @@ ResourcePressureSnapshot ResourcePressureEstimator::evaluate(
     }
     result.headroom = std::clamp(1.0 - result.total, 0.0, 1.0);
 
-    const double target_ms = input.target_fps > 0
-        ? 1000.0 / static_cast<double>(input.target_fps) : 0.0;
-    const double observed_ms = input.p95_frame_time_ms.value_or(
-        input.frame_time_ms.value_or(target_ms));
-    result.frame_budget_deficit_ms = target_ms > 0.0
-        ? std::max(0.0, observed_ms - target_ms) : 0.0;
-    result.predicted_deficit_ms = result.frame_budget_deficit_ms;
     if (previous_p95_ms_ && previous_timestamp_ns_ != 0 &&
         input.timestamp_ns > previous_timestamp_ns_ &&
         input.p95_frame_time_ms) {
@@ -200,9 +224,14 @@ ResourcePressureSnapshot ResourcePressureEstimator::evaluate(
     previous_p95_ms_ = input.p95_frame_time_ms;
     previous_timestamp_ns_ = input.timestamp_ns;
     // Frame stability is evaluated independently by the Governor's target
-    // bands. This flag answers only whether all resource reserves are known
-    // and comfortably below pressure thresholds.
-    result.recovery_safe = all_core_signals_available && result.total <= 0.55;
+    // bands. Recovery does not require every vendor-specific counter: it
+    // requires at least one compute signal, one memory signal and two
+    // independently available resource domains with no observed pressure.
+    // This lets systems without GPU process attribution or VRAM budgets
+    // recover while still failing closed on materially incomplete evidence.
+    result.recovery_safe = available_signal_count >= 2 &&
+        compute_signal_available && memory_signal_available &&
+        result.total <= 0.55;
     return result;
 }
 

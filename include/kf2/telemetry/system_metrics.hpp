@@ -13,9 +13,16 @@ struct HardwareInventory {
     std::uint64_t installed_memory_bytes{0};
     std::uint64_t available_memory_bytes{0};
 };
-struct CpuTimes { std::uint64_t system_ticks{0}; std::uint64_t process_ticks{0}; };
+struct CpuTimes {
+    std::uint64_t system_ticks{0};
+    std::uint64_t process_ticks{0};
+    std::uint64_t idle_ticks{0};
+};
 struct ProcessMetrics {
     std::optional<double> cpu_percent;
+    // Whole-system processor occupancy over the same interval. Adaptive uses
+    // it only as shared pressure when KF2 also misses its frame budget.
+    std::optional<double> system_cpu_percent;
     // Occupancy of the busiest thread in the bound process over the most
     // recent sampling interval. Unlike cpu_percent this is not diluted by the
     // machine's logical-processor count, so a saturated KF2 game thread stays
@@ -48,6 +55,8 @@ struct SystemMemoryMetrics {
 [[nodiscard]] Result<SystemMemoryMetrics> query_system_memory_metrics();
 [[nodiscard]] std::optional<double> calculate_cpu_percent(CpuTimes previous,
                                                           CpuTimes current);
+[[nodiscard]] std::optional<double> calculate_system_cpu_percent(
+    CpuTimes previous, CpuTimes current);
 [[nodiscard]] std::optional<double> calculate_thread_cpu_percent(
     std::uint64_t previous_thread_ticks,
     std::uint64_t current_thread_ticks,

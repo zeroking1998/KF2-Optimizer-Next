@@ -11,6 +11,16 @@ void observe_flex_source(app::UiRuntime& runtime) {
 
 void run_flex_control_stage(app::UiRuntime& runtime,
                             const TelemetryFrame& frame) {
+    std::optional<double> enemy_pressure;
+    if (frame.offline_gameplay && frame.gameplay &&
+        frame.gameplay->telemetry_living_visible &&
+        frame.gameplay->telemetry_observed_ns != 0 &&
+        frame.observed_at_ns >= frame.gameplay->telemetry_observed_ns &&
+        frame.observed_at_ns - frame.gameplay->telemetry_observed_ns <=
+            game::kGameLogObservationFreshnessNs) {
+        enemy_pressure = visible_enemy_pressure(
+            *frame.gameplay->telemetry_living_visible);
+    }
     const auto capability = frame.offline_gameplay && frame.flex &&
             frame.flex->fresh && frame.flex->pass_through_healthy &&
             !frame.flex->solver_tracking_quarantined
@@ -27,14 +37,21 @@ void run_flex_control_stage(app::UiRuntime& runtime,
     if (!(runtime.adaptive_actuation.generation() == generation)) {
         runtime.adaptive_actuation.rebase(generation, frame.observed_at_ns);
     }
+    const bool pressure_actionable =
+        flex_pressure_is_actionable(runtime.adaptive_decision) ||
+        enemy_pressure_is_actionable(enemy_pressure);
+    const bool observed_solver_ready = capability ==
+            optimizer::AdaptiveCapabilityState::available &&
+        frame.flex && runtime.flex_adaptive_policy.synchronize_observed(
+            frame.flex->last_forwarded_substeps);
     const auto decision = decide_flex_control(
         runtime.flex_adaptive_policy,
-        {.actuator_available =
-             capability == optimizer::AdaptiveCapabilityState::available,
-         .target_fps = runtime.optimizer_settings.target_fps,
+        {.actuator_available = observed_solver_ready && pressure_actionable,
+         .target_fps = runtime.effective_target_fps(),
          .quality_change_budget =
-             runtime.optimizer_settings.adaptive_quality_change_budget,
+             runtime.effective_quality_change_budget(),
          .fps = frame.frames.fps,
+         .enemy_pressure = enemy_pressure,
          .now_ms = GetTickCount64()});
     apply_flex_control_effect(
         runtime, {decision.requested_substeps, decision.constrained,

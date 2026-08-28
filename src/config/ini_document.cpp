@@ -261,9 +261,8 @@ ReplaceResult IniDocument::append_unique(std::wstring_view section,
             sections.push_back(index);
         }
     }
-    if (sections.size() != 1) {
-        return {false, sections.size() > 1 ? sections.size() - 1 : 0};
-    }
+    if (sections.size() > 1) return {false, sections.size() - 1};
+    if (sections.empty()) return upsert(section, key, value);
     for (std::size_t index = 0; index < lines_.size(); ++index) {
         if (lines_[index].assignment &&
             lines_[index].section == wanted_section &&
@@ -297,6 +296,40 @@ ReplaceResult IniDocument::append_unique(std::wstring_view section,
     added.assignment = true;
     lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(insert_at),
                   std::move(added));
+    return {true, 0};
+}
+
+ReplaceResult IniDocument::remove_exact(std::wstring_view section,
+                                        std::wstring_view key,
+                                        std::wstring_view value) {
+    const auto wanted_section = normalized(section);
+    const auto wanted_key = normalized(key);
+    if (wanted_section.empty() || wanted_key.empty()) return {false, 0};
+
+    std::size_t section_count = 0;
+    std::vector<std::size_t> matches;
+    for (std::size_t index = 0; index < lines_.size(); ++index) {
+        if (lines_[index].section_header &&
+            lines_[index].section == wanted_section) {
+            ++section_count;
+        }
+        if (!lines_[index].assignment ||
+            lines_[index].section != wanted_section ||
+            lines_[index].key != wanted_key) {
+            continue;
+        }
+        const auto current = utf8_to_wide(std::string_view{
+            lines_[index].bytes}.substr(
+                lines_[index].value_start,
+                lines_[index].value_end - lines_[index].value_start));
+        if (normalized(current) == normalized(value)) matches.push_back(index);
+    }
+    if (section_count > 1 || matches.size() > 1) {
+        return {false, (section_count > 1 ? section_count - 1 : 0) +
+                           (matches.size() > 1 ? matches.size() - 1 : 0)};
+    }
+    if (section_count == 0 || matches.empty()) return {false, 0};
+    lines_.erase(lines_.begin() + static_cast<std::ptrdiff_t>(matches.front()));
     return {true, 0};
 }
 

@@ -105,6 +105,13 @@ Result<TelemetryFrame> capture_telemetry_frame(
         if (runtime.gpu_metrics) {
             auto gpu = runtime.gpu_metrics->sample();
             if (gpu.has_value()) {
+                if (gpu.value().process_adapter_luid) {
+                    runtime.bind_process_gpu_adapter(
+                        *gpu.value().process_adapter_luid);
+                    input.adapter_luid = runtime.adaptive_adapter_luid;
+                    input.adapter_vram_budget_bytes =
+                        runtime.adapter_vram_budget;
+                }
                 input.adapter_gpu = std::move(gpu.value());
             }
         }

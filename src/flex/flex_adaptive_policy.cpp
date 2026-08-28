@@ -6,9 +6,20 @@
 
 namespace kf2::flex {
 
+bool AdaptivePolicy::synchronize_observed(int substeps) noexcept {
+    if (substeps < 1 || substeps > 5) return false;
+    if (active_substeps_ == 0) {
+        active_substeps_ = substeps;
+        candidate_substeps_ = substeps;
+        constrained_ = true;
+    }
+    return true;
+}
+
 AdaptiveDecision AdaptivePolicy::evaluate(bool enabled, int target_fps,
     std::optional<double> fps, std::uint64_t now_ms,
-    int quality_change_budget) noexcept {
+    int quality_change_budget,
+    std::optional<double> enemy_pressure) noexcept {
     constexpr int maximum_substeps = 5;
     if (!enabled || !optimizer::valid_target_fps(target_fps) || !fps ||
         !std::isfinite(*fps) || *fps <= 0.0 ||
@@ -16,11 +27,20 @@ AdaptiveDecision AdaptivePolicy::evaluate(bool enabled, int target_fps,
         reset();
         return {};
     }
+    int enemy_pressure_target = maximum_substeps;
+    if (enemy_pressure && std::isfinite(*enemy_pressure)) {
+        const double pressure = std::clamp(*enemy_pressure, 0.0, 1.0);
+        enemy_pressure_target = std::clamp(
+            maximum_substeps - static_cast<int>(pressure * 4.999),
+            1, maximum_substeps);
+    }
 
     if (target_fps_ != 0 && target_fps_ != target_fps) {
         // Target-dependent history and pending work must never cross a target
-        // generation. Rebase at full quality and learn from fresh samples.
-        reset();
+        // generation. Preserve the observed effective level while discarding
+        // only target-dependent pending work.
+        candidate_substeps_ = active_substeps_;
+        candidate_since_ = now_ms;
     }
     if (last_evaluation_ms_ != 0 && now_ms < last_evaluation_ms_) {
         reset();
@@ -36,7 +56,7 @@ AdaptiveDecision AdaptivePolicy::evaluate(bool enabled, int target_fps,
     // Auto remained stuck at the original level or levels one and two.
     if (active_substeps_ == 0) {
         active_substeps_ = maximum_substeps;
-        candidate_substeps_ = maximum_substeps;
+        candidate_substeps_ = enemy_pressure_target;
         candidate_since_ = now_ms;
         constrained_ = true;
         return {active_substeps_, constrained_};
@@ -64,6 +84,13 @@ AdaptiveDecision AdaptivePolicy::evaluate(bool enabled, int target_fps,
         // Slow release prevents target-band noise from causing ping-pong.
         candidate = active_substeps_ + 1;
         dwell = 5'000;
+    }
+    if (enemy_pressure_target < candidate) {
+        // Visible-enemy load is proactive: it may lower solver work before
+        // the following frame-time samples fall, but uses the same dwell
+        // and never bypasses the verified user-enabled FleX actuator.
+        candidate = enemy_pressure_target;
+        dwell = dwell == 0 ? 600 : std::min<std::uint64_t>(dwell, 600);
     }
     candidate = std::clamp(candidate, 1, maximum_substeps);
 

@@ -33,6 +33,10 @@ int main() {
     CHECK(cpu.has_value());
     CHECK(*cpu == 25.0);
     CHECK(calculate_cpu_percent({100, 50}, {200, 500}).value() == 100.0);
+    CHECK(!calculate_system_cpu_percent({100, 50, 40}, {100, 60, 40})
+               .has_value());
+    CHECK(calculate_system_cpu_percent({100, 50, 40}, {200, 75, 90})
+              .value() == 50.0);
     CHECK(!calculate_thread_cpu_percent(100, 110, 0).has_value());
     CHECK(!calculate_thread_cpu_percent(110, 100, 10).has_value());
     CHECK(calculate_thread_cpu_percent(100, 50'100, 100).value() == 5.0);
@@ -51,6 +55,7 @@ int main() {
     const auto second = sampler.sample();
     CHECK(second.has_value());
     CHECK(second.value().cpu_percent.has_value());
+    CHECK(second.value().system_cpu_percent.has_value());
     Sleep(520);
     const auto third = sampler.sample();
     CHECK(third.has_value());

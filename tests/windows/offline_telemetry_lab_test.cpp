@@ -1,11 +1,16 @@
+#include <Windows.h>
+
 #include <cstdlib>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <thread>
 
 #include "kf2/game/offline_telemetry_lab.hpp"
+#include "kf2/security/sha256.hpp"
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -30,6 +35,26 @@ std::string read_bytes(const std::filesystem::path& path) {
             std::istreambuf_iterator<char>{}};
 }
 
+std::string legacy_optimizer_module_bytes() {
+    std::string bytes(64U * 1024U, '\0');
+    bytes[0] = static_cast<char>(0xC1);
+    bytes[1] = static_cast<char>(0x83);
+    bytes[2] = static_cast<char>(0x2A);
+    bytes[3] = static_cast<char>(0x9E);
+    constexpr std::string_view names[] = {
+        "KF2OptimizerTelemetryProbe",
+        "KF2OptimizerTelemetryMutator",
+        "KF2OptimizerTelemetryInteraction",
+        "KF2OptimizerAdaptiveControlListener",
+        "KF2OptimizerAdaptiveGraphics"};
+    std::size_t offset = 256;
+    for (const auto name : names) {
+        bytes.replace(offset, name.size(), name);
+        offset += name.size() + 64;
+    }
+    return bytes;
+}
+
 }  // namespace
 
 int main() {
@@ -41,6 +66,11 @@ int main() {
         std::cout << "SKIP: locally SDK-compiled telemetry asset is absent\n";
         return 77;
     }
+    const auto asset_bytes = read_bytes(asset);
+    CHECK(asset_bytes.find("KF2OPT_MUTATOR") != std::string::npos);
+    CHECK(asset_bytes.find("KF2OPT_INTERACTION") != std::string::npos);
+    CHECK(asset_bytes.find("KF2OPT_TELEMETRY") != std::string::npos);
+    CHECK(asset_bytes.find("KF2OPT_ADAPTIVE_BRIDGE") != std::string::npos);
     std::error_code error;
     fs::remove_all(root, error);
     const auto config = root / L"profile" / L"KFGame" / L"Config";
@@ -60,7 +90,7 @@ int main() {
     }
     CHECK(installed.has_value());
     CHECK(installed.value());
-    const auto target = root / L"profile" / L"KFGame" / L"Published" /
+    const auto target = config.parent_path() / L"Published" /
         L"BrewedPC" / L"KF2OptimizerTelemetry.u";
     CHECK(fs::exists(target));
     CHECK(read_bytes(target) == read_bytes(asset));
@@ -82,10 +112,69 @@ int main() {
     CHECK(!fs::exists(state / L"offline-telemetry-lab" / L"module.marker"));
 
     CHECK(install_offline_telemetry_lab(options).has_value());
+    HANDLE busy_target = CreateFileW(
+        target.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(busy_target != INVALID_HANDLE_VALUE);
+    std::thread release_busy_target([busy_target]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        CloseHandle(busy_target);
+    });
+    const auto restored_after_handle_release =
+        restore_offline_telemetry_lab(config, state, false);
+    release_busy_target.join();
+    CHECK(restored_after_handle_release.has_value());
+    CHECK(restored_after_handle_release.value());
+    CHECK(!fs::exists(target));
+    CHECK(!fs::exists(state / L"offline-telemetry-lab" / L"module.marker"));
+
+    CHECK(install_offline_telemetry_lab(options).has_value());
+    const auto previous_module = legacy_optimizer_module_bytes();
+    const auto previous_hash = kf2::security::sha256_hex(previous_module);
+    CHECK(previous_hash.has_value());
+    auto previous_marker = read_bytes(
+        state / L"offline-telemetry-lab" / L"module.marker");
+    const auto current_hash_offset = previous_marker.find(
+        kOfflineTelemetryModuleSha256);
+    CHECK(current_hash_offset != std::string::npos);
+    previous_marker.replace(current_hash_offset, 64, previous_hash.value());
+    write_bytes(target, previous_module);
+    write_bytes(state / L"offline-telemetry-lab" / L"module.marker",
+                previous_marker);
+    const auto previous_version_recovered =
+        recover_offline_telemetry_lab(config, state, false);
+    CHECK(previous_version_recovered.has_value());
+    CHECK(previous_version_recovered.value().cleaned);
+    CHECK(!fs::exists(target));
+    CHECK(!fs::exists(state / L"offline-telemetry-lab" / L"module.marker"));
+
+    CHECK(install_offline_telemetry_lab(options).has_value());
     const auto recovered = recover_offline_telemetry_lab(config, state, false);
     CHECK(recovered.has_value());
     CHECK(!recovered.value().active);
     CHECK(recovered.value().cleaned);
+    CHECK(!fs::exists(target));
+
+    const auto legacy_module = legacy_optimizer_module_bytes();
+    write_bytes(target, legacy_module);
+    const auto running_legacy = recover_offline_telemetry_lab(
+        config, state, true);
+    CHECK(running_legacy.has_value());
+    CHECK(!running_legacy.value().active);
+    CHECK(!running_legacy.value().cleaned);
+    CHECK(read_bytes(target) == legacy_module);
+    const auto recovered_legacy = recover_offline_telemetry_lab(
+        config, state, false);
+    CHECK(recovered_legacy.has_value());
+    CHECK(recovered_legacy.value().cleaned);
+    CHECK(!fs::exists(target));
+
+    write_bytes(target, legacy_module);
+    const auto replaced_legacy = install_offline_telemetry_lab(options);
+    CHECK(replaced_legacy.has_value());
+    CHECK(replaced_legacy.value());
+    CHECK(read_bytes(target) == read_bytes(asset));
+    CHECK(restore_offline_telemetry_lab(config, state, false).has_value());
     CHECK(!fs::exists(target));
 
     write_bytes(target, "foreign user package");

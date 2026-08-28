@@ -8,7 +8,7 @@ namespace kf2::game {
 
 #ifndef KF2_OFFLINE_TELEMETRY_SHA256
 #define KF2_OFFLINE_TELEMETRY_SHA256 \
-    "e8979fc9b0daf6104ebb7e4027aabf5e048aa1c49d386f29373253eabca27933"
+    "f91d70842d2008cbf4b41436783f82b0fcf673defe1d316680e5f37dec9a9b1c"
 #endif
 inline constexpr char kOfflineTelemetryModuleSha256[] =
     KF2_OFFLINE_TELEMETRY_SHA256;
@@ -41,7 +41,9 @@ struct OfflineTelemetryRecovery {
     bool game_running);
 
 // On startup, retains a verified package while its bound KF2 process is still
-// running; otherwise it performs the exact cleanup.
+// running; otherwise it performs exact cleanup. When KF2 is stopped it also
+// removes a markerless package whose UE3 identity and optimizer class set prove
+// that it came from an older KF2 Optimizer version. Foreign occupants remain.
 [[nodiscard]] Result<OfflineTelemetryRecovery>
 recover_offline_telemetry_lab(
     const std::filesystem::path& config_root,

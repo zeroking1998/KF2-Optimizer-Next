@@ -3,10 +3,10 @@
 class KF2OptimizerAdaptiveGraphicsState extends Object;
 
 var bool bOriginalCaptured;
-var int GpuLevel;
-var int CpuLevel;
-var int VramLevel;
-var int RamLevel;
+var int GpuQuality;
+var int CpuQuality;
+var int VramQuality;
+var int RamQuality;
 var int OriginalMaxWholeSceneShadowResolution;
 var int OriginalMaxShadowResolution;
 var float OriginalShadowTexelsPerPixel;
@@ -40,8 +40,8 @@ var int OriginalMaxPersistentSplatsPerFrame;
 
 defaultproperties
 {
-    GpuLevel=3
-    CpuLevel=3
-    VramLevel=3
-    RamLevel=3
+    GpuQuality=100
+    CpuQuality=100
+    VramQuality=100
+    RamQuality=100
 }

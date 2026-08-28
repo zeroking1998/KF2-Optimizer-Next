@@ -86,6 +86,20 @@ int main() {
     CHECK(node(dashboard, "metric-2")->text.find(L"GAME LOAD") !=
           std::wstring::npos);
 
+    auto gpu_status = model.status();
+    gpu_status.game_gpu_name = L"NVIDIA GeForce RTX 4090";
+    gpu_status.live_cpu_percent = 18.0;
+    gpu_status.live_gpu_percent = 72.0;
+    model.set_status(gpu_status);
+    const auto gpu_dashboard = layout_shell(model, 1440, 900);
+    CHECK(node(gpu_dashboard, "metric-2") != nullptr);
+    CHECK(node(gpu_dashboard, "metric-2")->text.find(
+              L"NVIDIA GeForce RTX 4090") != std::wstring::npos);
+    CHECK(node(gpu_dashboard, "metric-2")->text.find(L"CPU 18%") !=
+          std::wstring::npos);
+    CHECK(node(gpu_dashboard, "metric-2")->text.find(L"GPU 72%") !=
+          std::wstring::npos);
+
     std::set<std::string> ids;
     std::array<DipRect, 5> navigation{};
     std::size_t navigation_index = 0;
@@ -273,6 +287,22 @@ int main() {
           std::wstring::npos);
     CHECK(node(home, "status")->text.find(L"Maximum corpses 20") !=
           std::wstring::npos);
+
+    home_status.active_target_fps = 240;
+    home_status.active_corpse_limit = 2000;
+    model.set_status(home_status);
+    const auto staged_target_home = layout_shell(model, 1440, 900);
+    CHECK(node(staged_target_home, "status")->text.find(
+              L"Target 240 FPS") != std::wstring::npos);
+    CHECK(node(staged_target_home, "status")->text.find(
+              L"60 next start") != std::wstring::npos);
+    CHECK(node(staged_target_home, "status")->text.find(
+              L"Maximum corpses 2000") != std::wstring::npos);
+    CHECK(node(staged_target_home, "status")->text.find(
+              L"20 next start") != std::wstring::npos);
+    home_status.active_target_fps.reset();
+    home_status.active_corpse_limit.reset();
+    model.set_status(home_status);
     CHECK(node(home, "dashboard-updates-installed")->text.find(
               L"No newer version available") != std::wstring::npos);
     CHECK(action(home, "settings-mode-manual") == nullptr);
