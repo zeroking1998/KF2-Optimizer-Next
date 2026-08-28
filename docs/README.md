@@ -1,52 +1,47 @@
 # Documentation
 
-This index separates everyday use from implementation detail so readers can
-enter at the right level.
+Choose what you want to do. You do not need to read every document.
 
-## Get the application
+## Use KF2 Optimizer
 
-- [Download the current Windows release](../README.md#download)
-- [Install and use the application](USER_GUIDE.md)
+| Document | What it explains |
+|---|---|
+| [User Guide](USER_GUIDE.md) | Install, configure, run, update, repair, and recover |
+| [Feature Reference](FEATURE_REFERENCE.md) | What each major feature does |
+| [Updates](UPDATES.md) | How portable updates are verified and rolled back |
+| [Support](../SUPPORT.md) | Ask for help or report a problem safely |
+| [Glossary](GLOSSARY.md) | Short definitions of project terms |
 
-## Use the application
+## Build or contribute
 
-- [User guide](USER_GUIDE.md): installation, first launch, controls, and normal
-  recovery.
-- [Portable updates](UPDATES.md): update checks, user consent, verification,
-  restart, rollback, and preserved data.
-- [Feature reference](FEATURE_REFERENCE.md): what each major feature does and
-  what evidence confirms it.
-- [Support](../SUPPORT.md): questions, bug reports, logs, and sensitive data.
-- [Glossary](GLOSSARY.md): short definitions of project-specific terms.
+| Document | What it explains |
+|---|---|
+| [Build Guide](BUILDING.md) | Set up Windows and build in one command |
+| [Contributing](../CONTRIBUTING.md) | Make a focused change and open a pull request |
+| [Developer Guide](DEVELOPER_GUIDE.md) | Code map, workflow, and project rules |
+| [Testing](testing.md) | Tests for each kind of change |
+| [Code Style](CODE_STYLE.md) | Clear English, naming, comments, and errors |
 
-## Understand the application
+## Understand the design
 
-- [How it works](HOW_IT_WORKS.md): the complete measurement-to-restore flow.
-- [Safety model](SAFETY.md): permanent boundaries, capability gates, receipts,
-  protected files, and failure behavior.
-- [Architecture](architecture.md): components and ownership boundaries.
-- [Adaptive FleX scope](FLEX_ADAPTIVE_SCOPE.md): protected laboratory behavior.
-- [Issue 72 product matrix](ISSUE_72_PRODUCT_MATRIX.md): detailed requirement
-  and evidence inventory.
+| Document | What it explains |
+|---|---|
+| [How It Works](HOW_IT_WORKS.md) | The complete measurement-to-restore flow |
+| [Safety](SAFETY.md) | What the app may and may not change |
+| [Architecture](architecture.md) | Components and ownership boundaries |
+| [Binary Distribution](BINARY_DISTRIBUTION.md) | Source and release-package boundaries |
 
-## Change the application
+## Detailed project records
 
-- [Contributing guide](../CONTRIBUTING.md): contribution workflow and acceptance
-  requirements.
-- [Developer guide](DEVELOPER_GUIDE.md): build, test, package, and code map.
-- [Code style](CODE_STYLE.md): English, naming, comments, and evidence rules.
-- [Testing](testing.md): test layers and validation commands.
-- [Open-source checklist](OPEN_SOURCE_CHECKLIST.md): publication readiness and
-  third-party review.
-- [Third-party notices](../THIRD_PARTY_NOTICES.md): dependency, trademark, and
-  asset ownership boundaries.
-- [Binary distribution boundary](BINARY_DISTRIBUTION.md): files allowed in the
-  public source repository versus files requiring separate release review.
+These files exist for maintainers and reviewers. Most users and first-time
+contributors do not need them.
 
-## Status and history
-
-- [Project status](PROJECT_STATUS.md): concise current state and next work.
-- [Final acceptance](FINAL_ACCEPTANCE.md): completed acceptance evidence.
-- [Function matrix](function-matrix.md): implementation-to-test mapping.
-- [Changelog](../CHANGELOG.md): user-visible changes.
-- [Roadmap](../ROADMAP.md): planned work without promised dates.
+- [Project Status](PROJECT_STATUS.md)
+- [Final Acceptance Evidence](FINAL_ACCEPTANCE.md)
+- [Function Matrix](function-matrix.md)
+- [Issue 72 Product Matrix](ISSUE_72_PRODUCT_MATRIX.md)
+- [Adaptive FleX Scope](FLEX_ADAPTIVE_SCOPE.md)
+- [Open-Source Checklist](OPEN_SOURCE_CHECKLIST.md)
+- [Changelog](../CHANGELOG.md)
+- [Roadmap](../ROADMAP.md)
+- [Third-Party Notices](../THIRD_PARTY_NOTICES.md)

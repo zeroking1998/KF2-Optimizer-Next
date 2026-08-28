@@ -1,29 +1,31 @@
 # Support
 
-## Questions and normal bugs
+Use the matching [GitHub issue form](https://github.com/zeroking1998/KF2-Optimizer-Next/issues/new/choose):
 
-Use GitHub Discussions for usage questions when enabled. Use the bug-report
-template for reproducible defects. Include the application version, Windows
-version, selected target, relevant capability status, expected behavior, actual
-behavior, and concise reproduction steps.
+- **Help or question** for installation, building, or normal use;
+- **Bug report** when something behaves incorrectly;
+- **Feature request** for a new idea.
 
-## Logs
+## What to include
 
-Useful evidence normally includes `Data/logs/session-events.json`, the currently
-written KF2 `Launch*.log`, and the diagnostics export. Remove user names,
-personal paths, machine identifiers, account details, and unrelated process
-information before posting.
+- KF2 Optimizer version or commit
+- Windows version and relevant hardware
+- Short steps that reproduce the problem
+- Expected and actual behavior
+- The complete build error, if this is a build problem
+- A small screenshot or redacted log, when useful
 
-Clearly separate native KF2 messages from optimizer proposals and confirmed
-optimizer receipts. A request without its matching acknowledgement is not proof
-of an applied action.
+Useful runtime files include `Data/logs/session-events.json`, the currently
+written KF2 `Launch*.log`, and the Diagnostics export. Remove user names,
+personal paths, account details, machine identifiers, and unrelated process
+information before posting them.
 
-## Security
+## Security problems
 
-Do not report a vulnerability publicly. Follow [SECURITY.md](SECURITY.md).
+Do not report vulnerabilities in a public issue. Follow
+[SECURITY.md](SECURITY.md).
 
-## Scope
+## Project boundary
 
-The project cannot provide support for cheats, gameplay mutation, unofficial
-copies of proprietary game/SDK files, or bypassing the protected capability and
-restoration model.
+The project cannot help with cheats, competitive gameplay changes, unofficial
+copies of proprietary files, or bypassing safety and restoration checks.

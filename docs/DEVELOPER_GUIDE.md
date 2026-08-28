@@ -21,12 +21,13 @@
 
 ## Build
 
-Use an x64 Visual Studio 2022 environment with CMake 3.28 or newer and
-PowerShell 7.
+Start with the [Build Guide](BUILDING.md). It covers prerequisites, the
+read-only environment check, the normal one-command build, output paths, and
+the complete KF2 SDK package flow.
 
 ```powershell
-pwsh -NoProfile -File tools/build.ps1 -Configuration Debug
-pwsh -NoProfile -File tools/build.ps1 -Configuration Release
+pwsh -NoProfile -File ./tools/check_requirements.ps1
+pwsh -NoProfile -File ./tools/test.ps1 -Configuration Debug
 ```
 
 Do not add generated `out` content to a source change unless a release process
@@ -42,21 +43,23 @@ pwsh -NoProfile -File tools/build_kf2_telemetry.ps1
 ```
 
 The script discovers the normal Steam SDK location or accepts `-SdkRoot`. It
-temporarily stages only this project's six `.uc` files in the installed SDK,
+temporarily stages only this project's seven `.uc` files in the installed SDK,
 invokes `KFEditor.exe make -useunpublished`, copies the generated module into
 the local ignored asset path, and restores `KFEngine.ini`, any previous
 unpublished module, and SDK staging state. KFEditor requires the previous
 hash-pinned module as its bootstrap/conformity seed. The script uses the local
-ignored module by default; a clean checkout can pass `-SeedModule` pointing to
-the module from the latest complete release. It refuses to run while KF2 or
-KFEditor is open.
+ignored module by default. On a clean checkout, `package.ps1` and
+`build.cmd -Package` automatically download and SHA-256-verify the newest
+official release asset, extract its module as the seed, and compile the current
+source. An offline build can still pass `-SeedModule` explicitly. Compilation
+refuses to run while KF2 or KFEditor is open.
 
 ## Test
 
 ```powershell
-pwsh -NoProfile -File tools/test.ps1 -Configuration Debug
-pwsh -NoProfile -File tools/test.ps1 -Configuration Release
-pwsh -NoProfile -File tools/validate_documentation.ps1
+pwsh -NoProfile -File ./tools/test.ps1 -Configuration Debug
+pwsh -NoProfile -File ./tools/test.ps1 -Configuration Release
+pwsh -NoProfile -File ./tools/validate_documentation.ps1
 ```
 
 Use the smallest relevant test during development, then run the full Release
@@ -67,9 +70,9 @@ Windows/KF2 boundary test where practical.
 ## Package
 
 ```powershell
-pwsh -NoProfile -File tools/build_kf2_telemetry.ps1
-pwsh -NoProfile -File tools/package.ps1
-pwsh -NoProfile -File tools/validate_release.ps1
+pwsh -NoProfile -File ./tools/build_kf2_telemetry.ps1
+pwsh -NoProfile -File ./tools/package.ps1
+pwsh -NoProfile -File ./tools/validate_release.ps1
 ```
 
 Packaging must preserve portable user data, include third-party notices, record
