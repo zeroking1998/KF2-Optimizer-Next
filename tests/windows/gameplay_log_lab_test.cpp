@@ -199,6 +199,20 @@ int main() {
         "SetTimer(0.25, true, nameof(AdaptiveCorpseLoadControl), self)") !=
           std::string::npos);
     CHECK(telemetry_source.find(
+        "function int SleepBaselineAwakeMonsterCorpses(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "MinimumSettleAge = 0.75") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "MaximumFullPhysicsAge = 2.0") != std::string::npos);
+    CHECK(telemetry_source.find("MaximumSleepsPerPass") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_CORPSE_BASELINE state=sleep") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "0.05 + ((WeightedVisibleZeds - 1.0) / 79.0) * 0.95") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
         "WorldInfo.bDropDetail") != std::string::npos);
     CHECK(telemetry_source.find(
         "WorldInfo.DeltaSeconds * 1000.0") != std::string::npos);
@@ -275,7 +289,7 @@ int main() {
     CHECK(telemetry_source.find(
         "function int GetAdaptiveCorpseDistanceUnits(KFPawn Candidate)") !=
           std::string::npos);
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 4);
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 5);
     CHECK(count_occurrences(telemetry_source, "distance_units=") == 5);
     CHECK(telemetry_source.find(
         "var globalconfig bool bAdaptiveCorpseDebugMarkers") !=
@@ -290,7 +304,7 @@ int main() {
     CHECK(telemetry_source.find(
         "GetAdaptiveCorpseActionId(Candidate)") != std::string::npos);
     CHECK(count_occurrences(
-        telemetry_source, "RegisterAdaptiveCorpseDebugMarker(Candidate,") == 4);
+        telemetry_source, "RegisterAdaptiveCorpseDebugMarker(Candidate,") == 5);
     CHECK(interaction_source.find("event PostRender(Canvas MarkerCanvas)") !=
           std::string::npos);
     CHECK(interaction_source.find(
@@ -327,7 +341,7 @@ int main() {
         "Candidate.Mesh.LastRenderTime <= WorldInfo.TimeSeconds - 0.3") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "(WeightedVisibleZeds - 4.0) / 76.0") !=
+        "(WeightedVisibleZeds - 4.0) / 76.0") ==
           std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveVisibleLivingZeds = LivingRecentlyRendered") !=
@@ -341,12 +355,17 @@ int main() {
         "GameInfo.IsZedTimeActive()", stagger_start);
     const auto wake_stage = telemetry_source.find(
         "WakeNearAdaptiveDistanceSleptCorpses()", stagger_start);
+    const auto baseline_sleep_stage = telemetry_source.find(
+        "SleepBaselineAwakeMonsterCorpses(GoreManager)", stagger_start);
     const auto distant_sleep_stage = telemetry_source.find(
         "SleepOneDistantMonsterCorpse(", stagger_start);
     CHECK(stagger_start != std::string::npos);
     CHECK(zed_time_guard != std::string::npos);
+    CHECK(baseline_sleep_stage != std::string::npos);
     CHECK(wake_stage != std::string::npos);
     CHECK(distant_sleep_stage != std::string::npos);
+    CHECK(zed_time_guard < baseline_sleep_stage);
+    CHECK(baseline_sleep_stage < wake_stage);
     CHECK(zed_time_guard < wake_stage);
     CHECK(zed_time_guard < distant_sleep_stage);
     const auto frame_only_action_gate = telemetry_source.find(

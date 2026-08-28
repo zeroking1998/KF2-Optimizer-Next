@@ -42,6 +42,7 @@ var int AdaptiveCorpsePressureLevel;
 var int AdaptiveCorpseCurrentFramePressureLevel;
 var float AdaptiveFramePressureObservedRealTime;
 var int AdaptiveCorpsesSlept;
+var int AdaptiveBaselinePhysicsSleeps;
 var int AdaptiveSkeletonReductions;
 var float AdaptiveLastCorpseSleepRealTime;
 var float AdaptiveLastCorpseCapacityRealTime;
@@ -472,14 +473,12 @@ function float GetAdaptiveLivingEnemyPressureScale(
             WeightedVisibleZeds += 1.0;
         }
     }
-    if (WeightedVisibleZeds < 5.0)
-    {
-        return 0.0;
-    }
-    // Scale continuously from five weighted visible Zeds to maximum pressure
-    // at eighty. Larger custom waves remain safely capped.
+    // Even one visible living Zed receives a small visual-only baseline away
+    // from the player. Pressure then scales continuously to maximum at eighty
+    // weighted Zeds. Movement, collision, hit detection and gameplay physics
+    // remain native; only real mesh LOD and animation update inputs change.
     return FClamp(
-        (WeightedVisibleZeds - 4.0) / 76.0, 0.0, 1.0);
+        0.05 + ((WeightedVisibleZeds - 1.0) / 79.0) * 0.95, 0.05, 1.0);
 }
 
 function int GetAdaptiveLivingEnemyPressureLevel(float PressureScale)
@@ -721,6 +720,67 @@ function RefreshSleepingCorpseAnimationState(KFGoreManager GoreManager)
             ++AdaptiveSkeletonReductions;
         }
     }
+}
+
+function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
+{
+    local int Index;
+    local int SleepsThisPass;
+    local int ForcedSleep;
+    local float CorpseAge;
+    local float MinimumSettleAge;
+    local float MaximumFullPhysicsAge;
+    local float SettledSpeedSquared;
+    local KFPawn Candidate;
+
+    // This is the always-on low-cost corpse baseline. It deliberately does
+    // not consult FPS, quality, distance, scene pressure, enemy pressure or
+    // the user's visible-corpse maximum. A new ragdoll gets a short physical
+    // reaction window, then settled bodies sleep early and every remaining
+    // awake body receives a hard upper bound on full rigid-body simulation.
+    MinimumSettleAge = 0.75;
+    MaximumFullPhysicsAge = 2.0;
+    SettledSpeedSquared = 90000.0;
+
+    for (Index = 0; Index < GoreManager.CorpsePool.Length; ++Index)
+    {
+        Candidate = GoreManager.CorpsePool[Index];
+        if (Candidate == None || Candidate.bDeleteMe ||
+            KFPawn_Monster(Candidate) == None || Candidate.Mesh == None ||
+            Candidate.TimeOfDeath <= 0.0 ||
+            Candidate.Physics != PHYS_RigidBody ||
+            Candidate.SpecialMove == SM_DeathAnim ||
+            !Candidate.Mesh.RigidBodyIsAwake())
+        {
+            continue;
+        }
+        CorpseAge = WorldInfo.TimeSeconds - Candidate.TimeOfDeath;
+        if (CorpseAge < MinimumSettleAge ||
+            (CorpseAge < MaximumFullPhysicsAge &&
+             VSizeSq(Candidate.Velocity) > SettledSpeedSquared))
+        {
+            continue;
+        }
+
+        Candidate.Mesh.PutRigidBodyToSleep();
+        if (Candidate.Mesh.RigidBodyIsAwake())
+        {
+            continue;
+        }
+        Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
+        Candidate.Mesh.bNoSkeletonUpdate = true;
+        ForcedSleep = CorpseAge >= MaximumFullPhysicsAge ? 1 : 0;
+        ++SleepsThisPass;
+        ++AdaptiveBaselinePhysicsSleeps;
+        ++AdaptiveCorpsesSlept;
+        RegisterAdaptiveCorpseDebugMarker(Candidate, "BASE_SLEEP");
+        `log("KF2OPT_CORPSE_BASELINE state=sleep slept="$
+             AdaptiveBaselinePhysicsSleeps$" batch="$SleepsThisPass$
+             " forced="$ForcedSleep$" age_ms="$int(CorpseAge * 1000.0)$
+             " speed_units="$int(VSize(Candidate.Velocity))$" corpse_id="$
+             GetAdaptiveCorpseActionId(Candidate)$" effective_awake=0");
+    }
+    return SleepsThisPass;
 }
 
 function int FindAdaptiveCorpseLodEntry(KFPawn Candidate)
@@ -1608,6 +1668,7 @@ function AdaptiveCorpseLoadControl()
         return;
     }
 
+    SleepBaselineAwakeMonsterCorpses(GoreManager);
     PruneAdaptiveDistanceSleptCorpses();
     AttackScale = GetAdaptiveCorpseAttackScale();
     // Proximity is gameplay-critical: wake every matching tracked corpse now,
@@ -2803,6 +2864,11 @@ event Destroyed()
         `log("KF2OPT_CORPSE_LOAD state=stopped slept="$
              AdaptiveCorpsesSlept$" skeleton_reductions="$
              AdaptiveSkeletonReductions);
+    }
+    if (AdaptiveBaselinePhysicsSleeps > 0)
+    {
+        `log("KF2OPT_CORPSE_BASELINE state=stopped slept="$
+             AdaptiveBaselinePhysicsSleeps);
     }
     if (AdaptiveCorpseLodReductions > 0 || AdaptiveCorpseLodRestores > 0)
     {
