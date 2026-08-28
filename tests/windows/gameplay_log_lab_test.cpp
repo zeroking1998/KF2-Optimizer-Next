@@ -489,17 +489,14 @@ int main() {
     CHECK(telemetry_source.find(
         "DistanceSquared >= 12960000.0", lod_selector) ==
           std::string::npos);
-    CHECK(telemetry_source.find(
-        "Max(AdaptiveCorpsePressureLevel, ScenePressureLevel),\n"
-        "        EnemyPressureLevel", stagger_start) != std::string::npos);
+    CHECK(count_occurrences(telemetry_source,
+        "Max(AdaptiveCorpsePressureLevel, ScenePressureLevel)") >= 2);
+    CHECK(count_occurrences(telemetry_source, "EnemyPressureLevel);") >= 2);
     CHECK(telemetry_source.find(
         "function ApplyLivingEnemyVisualPressure(") != std::string::npos);
     CHECK(telemetry_source.find(
         "ApplyLivingEnemyVisualPressure(EnemyPressureLevel, EnemyPressureScale);",
         stagger_start) != std::string::npos);
-    CHECK(telemetry_source.find(
-        "Max(AdaptiveCorpsePressureLevel, ScenePressureLevel),\n"
-        "        EnemyPressureLevel", stagger_start) != std::string::npos);
     CHECK(telemetry_source.find(
         "Candidate.Mesh.AnimationLODDistanceFactor =") != std::string::npos);
     CHECK(telemetry_source.find(
