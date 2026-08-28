@@ -1,11 +1,16 @@
+#include <Windows.h>
+
 #include <cstdlib>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <thread>
 
 #include "kf2/game/offline_telemetry_lab.hpp"
+#include "kf2/security/sha256.hpp"
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -103,6 +108,43 @@ int main() {
     const auto restored = restore_offline_telemetry_lab(config, state, false);
     CHECK(restored.has_value());
     CHECK(restored.value());
+    CHECK(!fs::exists(target));
+    CHECK(!fs::exists(state / L"offline-telemetry-lab" / L"module.marker"));
+
+    CHECK(install_offline_telemetry_lab(options).has_value());
+    HANDLE busy_target = CreateFileW(
+        target.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(busy_target != INVALID_HANDLE_VALUE);
+    std::thread release_busy_target([busy_target]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        CloseHandle(busy_target);
+    });
+    const auto restored_after_handle_release =
+        restore_offline_telemetry_lab(config, state, false);
+    release_busy_target.join();
+    CHECK(restored_after_handle_release.has_value());
+    CHECK(restored_after_handle_release.value());
+    CHECK(!fs::exists(target));
+    CHECK(!fs::exists(state / L"offline-telemetry-lab" / L"module.marker"));
+
+    CHECK(install_offline_telemetry_lab(options).has_value());
+    const auto previous_module = legacy_optimizer_module_bytes();
+    const auto previous_hash = kf2::security::sha256_hex(previous_module);
+    CHECK(previous_hash.has_value());
+    auto previous_marker = read_bytes(
+        state / L"offline-telemetry-lab" / L"module.marker");
+    const auto current_hash_offset = previous_marker.find(
+        kOfflineTelemetryModuleSha256);
+    CHECK(current_hash_offset != std::string::npos);
+    previous_marker.replace(current_hash_offset, 64, previous_hash.value());
+    write_bytes(target, previous_module);
+    write_bytes(state / L"offline-telemetry-lab" / L"module.marker",
+                previous_marker);
+    const auto previous_version_recovered =
+        recover_offline_telemetry_lab(config, state, false);
+    CHECK(previous_version_recovered.has_value());
+    CHECK(previous_version_recovered.value().cleaned);
     CHECK(!fs::exists(target));
     CHECK(!fs::exists(state / L"offline-telemetry-lab" / L"module.marker"));
 

@@ -62,6 +62,31 @@ int main() {
         "class'KF2OptimizerAdaptiveControlListener'") != std::string::npos);
     CHECK(interaction_source.find("var transient WorldInfo ActiveWorld") ==
           std::string::npos);
+    CHECK(interaction_source.find("var bool bGameSessionEnding") !=
+          std::string::npos);
+    const auto interaction_tick = interaction_source.find(
+        "event Tick(float DeltaTime)");
+    const auto interaction_post_render = interaction_source.find(
+        "event PostRender(Canvas MarkerCanvas)");
+    CHECK(interaction_tick != std::string::npos);
+    CHECK(interaction_post_render != std::string::npos);
+    CHECK(interaction_source.find(
+        "if (bGameSessionEnding)", interaction_tick) <
+          interaction_post_render);
+    CHECK(interaction_source.find(
+        "if (bGameSessionEnding)", interaction_post_render) !=
+          std::string::npos);
+    CHECK(interaction_source.find("bGameSessionEnding = true",
+        interaction_source.find("function NotifyGameSessionEnded()")) !=
+          std::string::npos);
+    CHECK(interaction_source.find("CurrentProbe.QuiesceForWorldTeardown()",
+        interaction_source.find("function NotifyGameSessionEnded()")) !=
+          std::string::npos);
+    CHECK(interaction_source.find("function NotifyPlayerAdded(") !=
+          std::string::npos);
+    CHECK(interaction_source.find("bGameSessionEnding = false",
+        interaction_source.find("function NotifyPlayerAdded(")) !=
+          std::string::npos);
     CHECK(mutator_source.find("InsertInteraction(CurrentInteraction)") !=
           std::string::npos);
     CHECK(mutator_source.find("WorldInfo.NetMode != NM_Standalone") !=
@@ -209,6 +234,12 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find(
         "KF2OPT_CORPSE_BASELINE state=sleep") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "FindAdaptiveCorpsePhysicsActionId(\"baseline\",") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "RegisterAdaptiveCorpsePhysicsAction(Candidate, \"baseline\")") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "0.05 + ((WeightedVisibleZeds - 1.0) / 79.0) * 0.95") !=
           std::string::npos);
@@ -493,27 +524,59 @@ int main() {
     CHECK(telemetry_source.find(
         "readback=verified", lod_apply) != std::string::npos);
 
+    const auto destroyed = telemetry_source.find("event Destroyed()");
+    const auto destroyed_end = telemetry_source.find(
+        "Super.Destroyed();", destroyed);
+    CHECK(destroyed != std::string::npos);
+    CHECK(destroyed_end != std::string::npos);
+    const auto quiesce = telemetry_source.find(
+        "function QuiesceForWorldTeardown()");
+    CHECK(quiesce != std::string::npos);
+    CHECK(telemetry_source.find("if (bAdaptiveRuntimeQuiesced)", quiesce) !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "state=stopped reason=world_teardown", quiesce) != std::string::npos);
+    CHECK(telemetry_source.find("QuiesceForWorldTeardown();", destroyed) <
+          destroyed_end);
+    const auto quiesce_end = telemetry_source.find(
+        "event Destroyed()", quiesce);
+    CHECK(quiesce_end != std::string::npos);
+    const auto quiesce_body = telemetry_source.substr(
+        quiesce, quiesce_end - quiesce);
+    const auto destroyed_body = telemetry_source.substr(
+        destroyed, destroyed_end - destroyed);
+    CHECK(destroyed_body.find("RestoreAdaptiveGraphics()") ==
+          std::string::npos);
+    CHECK(destroyed_body.find("RestoreAllAdaptiveCorpseLods()") ==
+          std::string::npos);
+    CHECK(destroyed_body.find("RestoreAllAdaptiveLivingVisuals()") ==
+          std::string::npos);
+    CHECK(quiesce_body.find("AdaptiveLivingVisualZeds.Length = 0") !=
+          std::string::npos);
+    CHECK(quiesce_body.find("AdaptiveCorpseLodCorpses.Length = 0") !=
+          std::string::npos);
+
     const auto ragdoll_selector = telemetry_source.find(
         "function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(");
     const auto ragdoll_function = telemetry_source.find(
         "function bool SleepOneVisibleMonsterCorpse(");
     const auto ragdoll_ownership_array = telemetry_source.find(
-        "var array<string> AdaptiveCorpseRagdollSleepIds");
+        "var array<string> AdaptiveCorpsePhysicsActionIds");
     const auto ragdoll_ownership_count = telemetry_source.find(
-        "var int AdaptiveCorpseRagdollSleepIdCount");
+        "var int AdaptiveCorpsePhysicsActionIdCount");
     const auto ragdoll_ownership_capacity = telemetry_source.find(
-        "AdaptiveCorpseRagdollSleepIds.Length = 8192");
+        "AdaptiveCorpsePhysicsActionIds.Length = 8192");
     const auto ragdoll_ownership_hash = telemetry_source.find(
-        "function int GetAdaptiveCorpseRagdollSleepHash(string CorpseId)");
+        "function int GetAdaptiveCorpsePhysicsActionHash(string ActionId)");
     const auto ragdoll_ownership_lookup = telemetry_source.find(
-        "function int FindAdaptiveCorpseRagdollSleepId(string CorpseId)");
+        "function int FindAdaptiveCorpsePhysicsActionId(");
     const auto ragdoll_ownership_filter = telemetry_source.find(
-        "FindAdaptiveCorpseRagdollSleepId(", ragdoll_selector);
+        "FindAdaptiveCorpsePhysicsActionId(\"ragdoll\",", ragdoll_selector);
     const auto ragdoll_ownership_id = telemetry_source.find(
         "GetAdaptiveCorpseActionId(Candidate)) != -1",
         ragdoll_ownership_filter);
     const auto ragdoll_ownership_register = telemetry_source.find(
-        "RegisterAdaptiveCorpseRagdollSleep(Candidate)",
+        "RegisterAdaptiveCorpsePhysicsAction(Candidate, \"ragdoll\")",
         ragdoll_selector);
     const auto ragdoll_awake_filter = telemetry_source.find(
         "!Candidate.Mesh.RigidBodyIsAwake()", ragdoll_selector);
@@ -522,7 +585,7 @@ int main() {
     const auto ragdoll_sleep_readback = telemetry_source.find(
         "if (Candidate.Mesh.RigidBodyIsAwake())", ragdoll_sleep_call);
     const auto ragdoll_sleep_register = telemetry_source.find(
-        "RegisterAdaptiveCorpseRagdollSleep(Candidate)",
+        "RegisterAdaptiveCorpsePhysicsAction(Candidate, \"ragdoll\")",
         ragdoll_sleep_readback);
     const auto ragdoll_counter = telemetry_source.find(
         "++AdaptiveVisibleRagdollSleeps", ragdoll_function);

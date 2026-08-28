@@ -56,8 +56,8 @@ var array<KFPawn> AdaptiveDistanceSleptCorpses;
 var int AdaptiveDistancePhysicsSleeps;
 var int AdaptiveDistancePhysicsWakes;
 var int AdaptiveVisibleRagdollSleeps;
-var array<string> AdaptiveCorpseRagdollSleepIds;
-var int AdaptiveCorpseRagdollSleepIdCount;
+var array<string> AdaptiveCorpsePhysicsActionIds;
+var int AdaptiveCorpsePhysicsActionIdCount;
 var float AdaptiveLastDistancePhysicsRealTime;
 var int AdaptiveVisibleLivingZeds;
 var float AdaptiveVisibleLivingObservedRealTime;
@@ -72,6 +72,7 @@ var array<int> AdaptiveLivingOriginalAnimRates;
 var array<int> AdaptiveLivingAppliedAnimRates;
 var int AdaptiveLivingVisualReductions;
 var int AdaptiveLivingVisualRestores;
+var bool bAdaptiveRuntimeQuiesced;
 
 function bool ValidAdaptiveControlToken(string Candidate)
 {
@@ -750,6 +751,8 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
             Candidate.TimeOfDeath <= 0.0 ||
             Candidate.Physics != PHYS_RigidBody ||
             Candidate.SpecialMove == SM_DeathAnim ||
+            FindAdaptiveCorpsePhysicsActionId("baseline",
+                GetAdaptiveCorpseActionId(Candidate)) != -1 ||
             !Candidate.Mesh.RigidBodyIsAwake())
         {
             continue;
@@ -769,6 +772,11 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
         }
         Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
         Candidate.Mesh.bNoSkeletonUpdate = true;
+        if (!RegisterAdaptiveCorpsePhysicsAction(Candidate, "baseline"))
+        {
+            `log("KF2OPT_CORPSE_BASELINE state=tracking_full capacity=8192");
+            return SleepsThisPass;
+        }
         ForcedSleep = CorpseAge >= MaximumFullPhysicsAge ? 1 : 0;
         ++SleepsThisPass;
         ++AdaptiveBaselinePhysicsSleeps;
@@ -911,49 +919,53 @@ function string GetAdaptiveCorpseActionId(KFPawn Candidate)
         int(Candidate.TimeOfDeath * 1000.0);
 }
 
-function int GetAdaptiveCorpseRagdollSleepHash(string CorpseId)
+function int GetAdaptiveCorpsePhysicsActionHash(string ActionId)
 {
     local int Index;
     local int HashValue;
 
     HashValue = 5381;
-    for (Index = 0; Index < Len(CorpseId); ++Index)
+    for (Index = 0; Index < Len(ActionId); ++Index)
     {
         HashValue = ((HashValue << 5) + HashValue) ^
-            Asc(Mid(CorpseId, Index, 1));
+            Asc(Mid(ActionId, Index, 1));
     }
     return HashValue & 8191;
 }
 
-function bool EnsureAdaptiveCorpseRagdollSleepIds()
+function bool EnsureAdaptiveCorpsePhysicsActionIds()
 {
-    if (AdaptiveCorpseRagdollSleepIds.Length == 0)
+    if (AdaptiveCorpsePhysicsActionIds.Length == 0)
     {
-        // This is four times the maximum supported live corpse pool. Keeping
-        // only stable strings avoids retaining deleted Pawn objects while the
-        // power-of-two table keeps the hot selector lookup bounded.
-        AdaptiveCorpseRagdollSleepIds.Length = 8192;
+        // Baseline and pressure-driven Ragdoll ownership share one table with
+        // distinct action prefixes. Stable strings avoid retaining deleted
+        // Pawn objects while the power-of-two table keeps lookup bounded.
+        AdaptiveCorpsePhysicsActionIds.Length = 8192;
     }
-    return AdaptiveCorpseRagdollSleepIds.Length == 8192;
+    return AdaptiveCorpsePhysicsActionIds.Length == 8192;
 }
 
-function int FindAdaptiveCorpseRagdollSleepId(string CorpseId)
+function int FindAdaptiveCorpsePhysicsActionId(
+    string Action, string CorpseId)
 {
     local int Probe;
     local int Slot;
+    local string ActionId;
 
-    if (CorpseId == "" || AdaptiveCorpseRagdollSleepIds.Length != 8192)
+    if (Action == "" || CorpseId == "" ||
+        AdaptiveCorpsePhysicsActionIds.Length != 8192)
     {
         return -1;
     }
-    Slot = GetAdaptiveCorpseRagdollSleepHash(CorpseId);
+    ActionId = Action$":"$CorpseId;
+    Slot = GetAdaptiveCorpsePhysicsActionHash(ActionId);
     for (Probe = 0; Probe < 8192; ++Probe)
     {
-        if (AdaptiveCorpseRagdollSleepIds[Slot] == CorpseId)
+        if (AdaptiveCorpsePhysicsActionIds[Slot] == ActionId)
         {
             return Slot;
         }
-        if (AdaptiveCorpseRagdollSleepIds[Slot] == "")
+        if (AdaptiveCorpsePhysicsActionIds[Slot] == "")
         {
             return -1;
         }
@@ -962,35 +974,39 @@ function int FindAdaptiveCorpseRagdollSleepId(string CorpseId)
     return -1;
 }
 
-function bool RegisterAdaptiveCorpseRagdollSleep(KFPawn Candidate)
+function bool RegisterAdaptiveCorpsePhysicsAction(
+    KFPawn Candidate, string Action)
 {
     local int Probe;
     local int Slot;
     local string CorpseId;
+    local string ActionId;
 
-    if (Candidate == None || !EnsureAdaptiveCorpseRagdollSleepIds())
+    if (Candidate == None || Action == "" ||
+        !EnsureAdaptiveCorpsePhysicsActionIds())
     {
         return false;
     }
     CorpseId = GetAdaptiveCorpseActionId(Candidate);
-    Slot = GetAdaptiveCorpseRagdollSleepHash(CorpseId);
+    ActionId = Action$":"$CorpseId;
+    Slot = GetAdaptiveCorpsePhysicsActionHash(ActionId);
     for (Probe = 0; Probe < 8192; ++Probe)
     {
-        if (AdaptiveCorpseRagdollSleepIds[Slot] == CorpseId)
+        if (AdaptiveCorpsePhysicsActionIds[Slot] == ActionId)
         {
             return true;
         }
-        if (AdaptiveCorpseRagdollSleepIds[Slot] == "")
+        if (AdaptiveCorpsePhysicsActionIds[Slot] == "")
         {
-            AdaptiveCorpseRagdollSleepIds[Slot] = CorpseId;
-            ++AdaptiveCorpseRagdollSleepIdCount;
+            AdaptiveCorpsePhysicsActionIds[Slot] = ActionId;
+            ++AdaptiveCorpsePhysicsActionIdCount;
             return true;
         }
         Slot = (Slot + 1) & 8191;
     }
     // Never evict an owned ID: eviction would make an old corpse eligible for
-    // repeated work. A saturated table disables only further Ragdoll sleeps;
-    // distance, LOD and capacity control continue independently.
+    // repeated work. A saturated table disables only further baseline and
+    // Ragdoll ownership; distance, LOD and capacity continue independently.
     return false;
 }
 
@@ -1552,8 +1568,8 @@ function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(
     MinimumAge = SeverePressure ? 0.75 : 1.5;
     MaximumSpeedSquared = SeverePressure ? 360000.0 : 160000.0;
     SelectedDeathTime = WorldInfo.TimeSeconds + 1.0;
-    if (!EnsureAdaptiveCorpseRagdollSleepIds() ||
-        AdaptiveCorpseRagdollSleepIdCount >= 8192)
+    if (!EnsureAdaptiveCorpsePhysicsActionIds() ||
+        AdaptiveCorpsePhysicsActionIdCount >= 8192)
     {
         return None;
     }
@@ -1567,7 +1583,7 @@ function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(
             Candidate.Physics != PHYS_RigidBody ||
             Candidate.SpecialMove == SM_DeathAnim ||
             FindAdaptiveDistanceSleptCorpse(Candidate) != -1 ||
-            FindAdaptiveCorpseRagdollSleepId(
+            FindAdaptiveCorpsePhysicsActionId("ragdoll",
                 GetAdaptiveCorpseActionId(Candidate)) != -1 ||
             Candidate.Mesh.LastRenderTime <= WorldInfo.TimeSeconds - 0.3 ||
             !Candidate.Mesh.RigidBodyIsAwake() ||
@@ -1602,7 +1618,7 @@ function bool SleepOneVisibleMonsterCorpse(
     }
     Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
     Candidate.Mesh.bNoSkeletonUpdate = true;
-    if (!RegisterAdaptiveCorpseRagdollSleep(Candidate))
+    if (!RegisterAdaptiveCorpsePhysicsAction(Candidate, "ragdoll"))
     {
         `log("KF2OPT_CORPSE_RAGDOLL state=tracking_full capacity=8192");
         return false;
@@ -1616,7 +1632,7 @@ function bool SleepOneVisibleMonsterCorpse(
          AdaptiveVisibleRagdollSleeps$" visible_awake_before="$
          VisibleAwakeBefore$" distance_tracked="$
          AdaptiveDistanceSleptCorpses.Length$" ownership_tracked="$
-         AdaptiveCorpseRagdollSleepIdCount$" corpse_id="$
+          AdaptiveCorpsePhysicsActionIdCount$" corpse_id="$
          GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
          GetAdaptiveCorpseDistanceUnits(Candidate)$" effective_awake=0");
     return true;
@@ -2836,24 +2852,16 @@ function SampleTelemetry()
          " flex_surrogate_lod="$FlexSurrogateLod);
 }
 
-event Destroyed()
+function QuiesceForWorldTeardown()
 {
-    RestoreAdaptiveGraphics();
+    if (bAdaptiveRuntimeQuiesced)
+    {
+        return;
+    }
+    bAdaptiveRuntimeQuiesced = true;
     ClearTimer(nameof(SampleTelemetry), self);
     ClearTimer(nameof(StaggerCorpseCleanup), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
-    RestoreAllAdaptiveCorpseLods();
-    RestoreAllAdaptiveLivingVisuals();
-    AdaptiveDistanceSleptCorpses.Length = 0;
-    AdaptiveCorpseDebugMarkers.Length = 0;
-    AdaptiveCorpseRagdollSleepIds.Length = 0;
-    AdaptiveCorpseRagdollSleepIdCount = 0;
-    if (bAdaptiveCorpseStaggerInitialized &&
-        AdaptiveCorpseManager != None &&
-        AdaptiveCorpseManager.MaxDeadBodies == AdaptiveCorpseTarget)
-    {
-        AdaptiveCorpseManager.MaxDeadBodies = AdaptiveCorpseOriginalLimit;
-    }
     if (AdaptiveCorpsesRemoved > 0)
     {
         `log("KF2OPT_CORPSE_STAGGER state=stopped removed="$
@@ -2893,8 +2901,36 @@ event Destroyed()
     {
         `log("KF2OPT_LIVING_VISUAL state=stopped reduced="$
              AdaptiveLivingVisualReductions$" restored="$
-             AdaptiveLivingVisualRestores);
+              AdaptiveLivingVisualRestores);
     }
+    // The current world is already being unloaded. Do not write rendering,
+    // skeletal-mesh or WorldInfo state from Destroyed(): those objects are on
+    // UE3's teardown path and every modified value dies with this world.
+    // Drop all strong references and ownership metadata without dereferencing
+    // the actors. Live rollback remains handled by the authenticated recover
+    // action before teardown.
+    AdaptiveGraphicsState = None;
+    AdaptiveCorpseManager = None;
+    AdaptiveCorpseLodCorpses.Length = 0;
+    AdaptiveCorpseLodOriginalMinModels.Length = 0;
+    AdaptiveCorpseLodAppliedMinModels.Length = 0;
+    AdaptiveLivingVisualZeds.Length = 0;
+    AdaptiveLivingOriginalMinLods.Length = 0;
+    AdaptiveLivingAppliedMinLods.Length = 0;
+    AdaptiveLivingOriginalAnimDistances.Length = 0;
+    AdaptiveLivingAppliedAnimDistances.Length = 0;
+    AdaptiveLivingOriginalAnimRates.Length = 0;
+    AdaptiveLivingAppliedAnimRates.Length = 0;
+    AdaptiveDistanceSleptCorpses.Length = 0;
+    AdaptiveCorpseDebugMarkers.Length = 0;
+    AdaptiveCorpsePhysicsActionIds.Length = 0;
+    AdaptiveCorpsePhysicsActionIdCount = 0;
+    `log("KF2OPT_TELEMETRY schema=6 state=stopped reason=world_teardown");
+}
+
+event Destroyed()
+{
+    QuiesceForWorldTeardown();
     Super.Destroyed();
 }
 

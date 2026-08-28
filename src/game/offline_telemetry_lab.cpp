@@ -26,6 +26,8 @@ constexpr std::uintmax_t kMaximumMarkerBytes = 1024U;
 constexpr wchar_t kModuleName[] = L"KF2OptimizerTelemetry.u";
 constexpr wchar_t kStateDirectoryName[] = L"offline-telemetry-lab";
 constexpr wchar_t kMarkerName[] = L"module.marker";
+constexpr DWORD kDeleteRetryCount = 100;
+constexpr DWORD kDeleteRetryDelayMs = 50;
 
 struct DirectoryIdentity {
     std::uint64_t volume{0};
@@ -34,9 +36,27 @@ struct DirectoryIdentity {
 
 struct Marker {
     std::string state;
+    std::string sha256;
     DirectoryIdentity root;
     std::array<bool, 2> created{};
 };
+
+Result<bool> delete_file_after_transient_release(
+    const std::filesystem::path& path, std::wstring_view failure_message) {
+    DWORD native = ERROR_SUCCESS;
+    for (DWORD attempt = 0; attempt < kDeleteRetryCount; ++attempt) {
+        if (DeleteFileW(path.c_str())) return Result<bool>::success(true);
+        native = GetLastError();
+        if (native != ERROR_SHARING_VIOLATION &&
+            native != ERROR_LOCK_VIOLATION &&
+            native != ERROR_USER_MAPPED_FILE) {
+            break;
+        }
+        if (attempt + 1 < kDeleteRetryCount) Sleep(kDeleteRetryDelayMs);
+    }
+    return Result<bool>::failure(
+        {ErrorCode::io_failure, std::wstring{failure_message}, native});
+}
 
 template <typename Integer>
 bool parse_integer(std::string_view text, Integer& value) {
@@ -270,13 +290,8 @@ Result<bool> remove_orphaned_optimizer_module(
             {ErrorCode::stale_data,
              L"Offline telemetry target changed during orphan cleanup", 0});
     }
-    if (!DeleteFileW(target.c_str())) {
-        return Result<bool>::failure(
-            {ErrorCode::io_failure,
-             L"Orphaned optimizer telemetry package could not be removed",
-             GetLastError()});
-    }
-    return Result<bool>::success(true);
+    return delete_file_after_transient_release(
+        target, L"Orphaned optimizer telemetry package could not be removed");
 }
 
 std::string marker_bytes(std::string_view state,
@@ -311,7 +326,13 @@ Result<Marker> parse_marker(const std::filesystem::path& path) {
             state = marker.state == "installing" ||
                     marker.state == "installed";
         } else if (line.starts_with("sha256=") && !hash) {
-            hash = line.substr(7) == kOfflineTelemetryModuleSha256;
+            marker.sha256 = std::string{line.substr(7)};
+            hash = marker.sha256.size() == 64U &&
+                std::all_of(marker.sha256.begin(), marker.sha256.end(),
+                    [](char value) {
+                        return (value >= '0' && value <= '9') ||
+                               (value >= 'a' && value <= 'f');
+                    });
         } else if (line.starts_with("root_volume=") && !volume) {
             volume = parse_integer(line.substr(12), marker.root.volume);
         } else if (line.starts_with("root_file=") && !file) {
@@ -527,19 +548,21 @@ Result<bool> restore_offline_telemetry_lab(
     const auto target = target_module(config_root);
     const DWORD target_attributes = GetFileAttributesW(target.c_str());
     if (target_attributes != INVALID_FILE_ATTRIBUTES) {
-        auto hash = security::sha256_file_hex(target, kMaximumModuleBytes);
-        if (!hash.has_value() || hash.value() != kOfflineTelemetryModuleSha256) {
+        auto bytes = read_regular_file(target, kMaximumModuleBytes);
+        if (!bytes.has_value()) {
+            return Result<bool>::failure(bytes.error());
+        }
+        auto hash = security::sha256_hex(bytes.value());
+        if (!hash.has_value() || hash.value() != marker.value().sha256 ||
+            !optimizer_module_signature(bytes.value())) {
             return Result<bool>::failure(
                 {ErrorCode::stale_data,
                  L"Offline telemetry target changed; the foreign file was preserved",
                  0});
         }
-        if (!DeleteFileW(target.c_str())) {
-            return Result<bool>::failure(
-                {ErrorCode::io_failure,
-                 L"Offline telemetry package could not be removed",
-                 GetLastError()});
-        }
+        auto removed = delete_file_after_transient_release(
+            target, L"Offline telemetry package could not be removed");
+        if (!removed.has_value()) return removed;
     } else {
         const DWORD native = GetLastError();
         if (native != ERROR_FILE_NOT_FOUND && native != ERROR_PATH_NOT_FOUND) {
@@ -601,7 +624,8 @@ Result<OfflineTelemetryRecovery> recover_offline_telemetry_lab(
     const auto target = target_module(config_root);
     auto hash = security::sha256_file_hex(target, kMaximumModuleBytes);
     const bool exact_target = hash.has_value() &&
-        hash.value() == kOfflineTelemetryModuleSha256;
+        hash.value() == kOfflineTelemetryModuleSha256 &&
+        marker.value().sha256 == kOfflineTelemetryModuleSha256;
     if (game_running) {
         if (marker.value().state != "installed" || !exact_target) {
             return Result<OfflineTelemetryRecovery>::failure(

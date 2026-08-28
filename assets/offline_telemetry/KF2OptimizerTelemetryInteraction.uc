@@ -6,6 +6,7 @@ class KF2OptimizerTelemetryInteraction extends Interaction
 
 var string OptimizerContextState;
 var string OptimizerProbeState;
+var bool bGameSessionEnding;
 
 function ReportOptimizerContextState(string State)
 {
@@ -80,6 +81,10 @@ event Tick(float DeltaTime)
     local PlayerController PrimaryController;
     local WorldInfo CurrentWorld;
 
+    if (bGameSessionEnding)
+    {
+        return;
+    }
     if (!GetStandaloneGameplayContext(PrimaryController, CurrentWorld))
     {
         return;
@@ -127,6 +132,10 @@ event PostRender(Canvas MarkerCanvas)
     local PlayerController PrimaryController;
     local WorldInfo CurrentWorld;
 
+    if (bGameSessionEnding)
+    {
+        return;
+    }
     if (!GetStandaloneGameplayContext(PrimaryController, CurrentWorld))
     {
         return;
@@ -144,6 +153,48 @@ event PostRender(Canvas MarkerCanvas)
 
 function NotifyGameSessionEnded()
 {
+    local LocalPlayer PrimaryPlayer;
+    local PlayerController PrimaryController;
+    local WorldInfo CurrentWorld;
+    local KF2OptimizerTelemetryProbe CurrentProbe;
+
+    // GameViewportClient calls this before unloading the current map. Stop all
+    // Tick/PostRender access immediately so the persistent interaction cannot
+    // touch a controller, world or render object while UE3 tears them down.
+    bGameSessionEnding = true;
+    if (GamePlayers.Length > 0)
+    {
+        PrimaryPlayer = GamePlayers[0];
+        if (PrimaryPlayer != None)
+        {
+            PrimaryController = PrimaryPlayer.Actor;
+        }
+    }
+    if (PrimaryController != None)
+    {
+        CurrentWorld = PrimaryController.WorldInfo;
+    }
+    if (CurrentWorld != None)
+    {
+        foreach CurrentWorld.DynamicActors(
+            class'KF2OptimizerTelemetryProbe', CurrentProbe)
+        {
+            if (CurrentProbe != None && !CurrentProbe.bDeleteMe)
+            {
+                CurrentProbe.QuiesceForWorldTeardown();
+            }
+        }
+    }
+    OptimizerContextState = "";
+    OptimizerProbeState = "";
+    `log("KF2OPT_INTERACTION schema=1 state=session_ended");
+}
+
+function NotifyPlayerAdded(int PlayerIndex, LocalPlayer AddedPlayer)
+{
+    // A player added by the next map is the engine-owned rearm boundary. The
+    // next Tick performs all normal standalone/gameplay validation again.
+    bGameSessionEnding = false;
     OptimizerContextState = "";
     OptimizerProbeState = "";
 }
