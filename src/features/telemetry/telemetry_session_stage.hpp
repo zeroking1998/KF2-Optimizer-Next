@@ -20,6 +20,21 @@ enum class SessionDisposition {
     session_ended,
 };
 
+enum class BoundProcessTransition {
+    same_process,
+    replacement_process,
+    ended,
+};
+
+[[nodiscard]] constexpr BoundProcessTransition
+classify_bound_process_transition(bool same_process_running,
+                                  bool verified_process_running) noexcept {
+    if (same_process_running) return BoundProcessTransition::same_process;
+    return verified_process_running
+        ? BoundProcessTransition::replacement_process
+        : BoundProcessTransition::ended;
+}
+
 struct SessionGateInput final {
     bool process_bound{false};
     bool process_identity_matches{true};

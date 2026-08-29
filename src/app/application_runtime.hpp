@@ -243,7 +243,7 @@ struct UiRuntime {
 
     bool save_flex_report(const flex::ObservationSnapshot& observed);
 
-    void detach_telemetry();
+    void detach_telemetry(bool restore_live_quality = true);
 
     bool restore_live_adaptive_quality(std::wstring_view reason);
 

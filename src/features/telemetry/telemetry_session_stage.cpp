@@ -95,7 +95,9 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
         still_running.value().pid == previous_process.pid &&
         still_running.value().process_start_id ==
             previous_process.process_start_id;
-    if (same_process_running) {
+    const auto process_transition = classify_bound_process_transition(
+        same_process_running, still_running.has_value());
+    if (process_transition == BoundProcessTransition::same_process) {
         runtime.game_window = nullptr;
         runtime.telemetry_failure = L"Waiting for KF2 window";
         if (runtime.overlay_window) {
@@ -110,6 +112,18 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
             .scene_ready = runtime.overlay_scene_ready,
             .present_source_bound = true};
         return {classify_session_gate(gate), std::nullopt};
+    }
+
+    if (process_transition == BoundProcessTransition::replacement_process) {
+        runtime.detach_telemetry(false);
+        runtime.telemetry_failure =
+            L"KF2 process handoff detected; reconnecting telemetry";
+        runtime.events->append({0, diagnostics::Severity::info,
+            "KF2_PROCESS_HANDOFF",
+            L"KF2 moved to a verified replacement process; telemetry will rebind while the protected session and authenticated control token remain active",
+            L"telemetry"});
+        runtime.invalidate();
+        return {SessionDisposition::reconnecting, std::nullopt};
     }
 
     runtime.detach_telemetry();
@@ -209,9 +223,11 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
     return true;
 }
 
-void UiRuntime::detach_telemetry() {
-    static_cast<void>(restore_live_adaptive_quality(
-        L"Adaptive telemetry detached"));
+void UiRuntime::detach_telemetry(bool restore_live_quality) {
+    if (restore_live_quality) {
+        static_cast<void>(restore_live_adaptive_quality(
+            L"Adaptive telemetry detached"));
+    }
     if (last_flex_observation && last_flex_observation->update_calls > 0) {
         const auto& observed = *last_flex_observation;
         const bool saved = save_flex_report(observed);
@@ -247,7 +263,6 @@ void UiRuntime::detach_telemetry() {
     adaptive_actuation.disable(monotonic_ns());
     adaptive_actuation.rebase({}, monotonic_ns());
     adaptive_control_pending.reset();
-    adaptive_control_token.clear();
     adaptive_control_sequence = 0;
     adaptive_quality_last_dispatch_ns = 0;
     adaptive_resource_quality.reset(
