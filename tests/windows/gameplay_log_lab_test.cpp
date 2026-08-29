@@ -1,5 +1,6 @@
 #include <Windows.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -32,6 +33,11 @@ std::string read_bytes(const std::filesystem::path& path) {
             std::istreambuf_iterator<char>{}};
 }
 
+std::string normalize_newlines(std::string text) {
+    text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+    return text;
+}
+
 std::size_t count_occurrences(std::string_view text, std::string_view needle) {
     std::size_t count = 0;
     for (auto offset = text.find(needle); offset != std::string_view::npos;
@@ -52,7 +58,8 @@ int main() {
     const auto interaction_source = read_bytes(KF2_TELEMETRY_INTERACTION_SOURCE);
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto connection_source = read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE);
-    const auto graphics_source = read_bytes(KF2_ADAPTIVE_GRAPHICS_SOURCE);
+    const auto graphics_source = normalize_newlines(
+        read_bytes(KF2_ADAPTIVE_GRAPHICS_SOURCE));
     CHECK(telemetry_source.find("AdaptiveControlToken") != std::string::npos);
     CHECK(telemetry_source.find("ValidAdaptiveControlToken") !=
           std::string::npos);
@@ -104,8 +111,51 @@ int main() {
           std::string::npos);
     CHECK(connection_source.find("Len(Line) > 128") != std::string::npos);
     CHECK(graphics_source.find("Requested.Flex") == std::string::npos);
+    CHECK(graphics_source.find("Requested.CharacterDetail.MaxDeadBodies") ==
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.CharacterDetail.ShouldCorpseCollideWithDeadAfterSleep = false") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.CharacterDetail.ShouldCorpseCollideWithDead = false") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.CharacterDetail.ShouldCorpseCollideWithLiving = false") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.bOriginalCorpseCollideWithDead") != std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.bOriginalCorpseCollideWithLiving") != std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.bOriginalCorpseCollideWithDeadAfterSleep") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.CharacterDetail.ShouldCorpseCollideWithDead =\n"
+        "        Snapshot.bOriginalCorpseCollideWithDead") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Observed.CharacterDetail.ShouldCorpseCollideWithLiving") !=
+          std::string::npos);
+    CHECK(graphics_source.find("Requested.CharacterDetail.bAllowPhysics") ==
+          std::string::npos);
     CHECK(graphics_source.find("KinematicUpdateDistFactorScale = FMax") !=
           std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.TextureResolution.ShadowmapBias = Max") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.MotionBlur.MotionBlurQuality = Min") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.EnvironmentDetail.AllowLightFunctions = false") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.Shadows.ShadowFadeResolution = Max") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.OriginalShadowmapTextureBias") != std::string::npos);
+    CHECK(graphics_source.find(
+        "Observed.TextureResolution.ShadowmapBias") != std::string::npos);
     CHECK(graphics_source.find("RestoreOwnedSettings") != std::string::npos);
     CHECK(graphics_source.find(
         "Snapshot.GpuQuality = Max(Snapshot.GpuQuality, Quality)") !=

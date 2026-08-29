@@ -6,8 +6,22 @@ are visible immediately.
 
 ## Unreleased
 
+### What's new
+
+- Adaptive live quality now keeps independent CPU, GPU, VRAM, and RAM levels.
+  Each confirmed bottleneck changes only its matching group, while recovery
+  restores the groups gradually. The live groups now also cover verified KF2
+  shadow distance/fade, post-processing quality, lighting, shadowmap textures,
+  wound decals, blood effects, and destruction lifetime controls.
+- CPU Adaptive quality now progressively reduces the three official cosmetic
+  corpse-collision options at 80%, 60%, and 40%, with exact engine readback and
+  restoration of the user's original values.
+
 ### Bug fixes
 
+- Fixed resource-specific quality changes being tracked as one shared value,
+  which could make a later CPU, GPU, VRAM, or RAM correction start from the
+  wrong quality level.
 - Target FPS now uses KF2's native startup cap independently of telemetry and
   Adaptive runtime capabilities, including Steam and shortcut launches.
 - Removed the redundant telemetry-side FPS actuator and its unused application

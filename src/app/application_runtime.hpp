@@ -149,7 +149,7 @@ struct UiRuntime {
     std::string adaptive_control_token;
     std::uint64_t adaptive_control_sequence{0};
     std::uint64_t adaptive_quality_last_dispatch_ns{0};
-    int adaptive_runtime_quality{100};
+    game::AdaptiveResourceQualityState adaptive_resource_quality{100};
     std::optional<game::OfflineAdaptiveSessionPolicy>
         adaptive_session_policy;
     std::uint64_t adaptive_settings_generation{1};
@@ -243,7 +243,7 @@ struct UiRuntime {
 
     bool save_flex_report(const flex::ObservationSnapshot& observed);
 
-    void detach_telemetry();
+    void detach_telemetry(bool restore_live_quality = true);
 
     bool restore_live_adaptive_quality(std::wstring_view reason);
 

@@ -47,6 +47,13 @@ int main() {
     CHECK(classify_session_gate(input) ==
           SessionDisposition::session_ended);
 
+    CHECK(classify_bound_process_transition(true, true) ==
+          BoundProcessTransition::same_process);
+    CHECK(classify_bound_process_transition(false, true) ==
+          BoundProcessTransition::replacement_process);
+    CHECK(classify_bound_process_transition(false, false) ==
+          BoundProcessTransition::ended);
+
     SilentPresentInput silent;
     silent.scene_ready = true;
     silent.session_bound = true;

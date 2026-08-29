@@ -267,6 +267,12 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
                 L"config"});
         }
     }
+    // The credential belongs to the protected KF2 session, not to a single
+    // telemetry binding. Recoverable rebinds preserve it in detach_telemetry;
+    // only final configuration teardown invalidates the in-memory copy.
+    adaptive_control_token.clear();
+    adaptive_control_sequence = 0;
+    adaptive_control_pending.reset();
     invalidate();
     return complete;
 }
