@@ -593,6 +593,8 @@ AdaptiveDataQualityReport validate_adaptive_sample(
          !finite_positive(sample.p95_frame_time_ms)) ||
         (sample.p99_frame_time_ms &&
          !finite_positive(sample.p99_frame_time_ms)) ||
+        (sample.sustained_one_percent_low_fps &&
+         !finite_positive(sample.sustained_one_percent_low_fps)) ||
         (sample.one_percent_low_fps &&
          !finite_positive(sample.one_percent_low_fps)) ||
         (sample.point_one_percent_low_fps &&
@@ -677,6 +679,7 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     last_evaluation_ns_ = now_ns;
 
     if (decision.data.quality == AdaptiveDataQuality::not_available) {
+        low_percentile_pressure_since_ns_ = 0;
         decision.state = AdaptiveControllerState::observing;
         decision.disposition = AdaptiveDisposition::hold;
         decision.reason = decision.data.reason;
@@ -701,6 +704,7 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
         active_pressure_ = AdaptivePressure::observing;
         candidate_pressure_ = AdaptivePressure::observing;
         candidate_since_ns_ = now_ns;
+        low_percentile_pressure_since_ns_ = 0;
         held_bottleneck_ = AdaptiveBottleneck::unknown;
         bottleneck_hold_until_ns_ = 0;
         direction_changes_ = 0;
@@ -844,8 +848,33 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     const auto long_low_level = sample.one_percent_low_fps
         ? level_for_fps(*sample.one_percent_low_fps, stability_bands)
         : FrameSignalLevel::healthy;
+    const auto sustained_low_level = sample.sustained_one_percent_low_fps
+        ? level_for_fps(
+              *sample.sustained_one_percent_low_fps, stability_bands)
+        : FrameSignalLevel::healthy;
     const bool long_low_unhealthy =
         long_low_level != FrameSignalLevel::healthy;
+    const bool low_percentiles_need_correction =
+        decision.data.quality == AdaptiveDataQuality::valid &&
+        at_least(sustained_low_level, FrameSignalLevel::corrective) &&
+        at_least(long_low_level, FrameSignalLevel::corrective);
+    if (low_percentiles_need_correction) {
+        if (low_percentile_pressure_since_ns_ == 0) {
+            low_percentile_pressure_since_ns_ = now_ns;
+        }
+    } else {
+        low_percentile_pressure_since_ns_ = 0;
+    }
+    // The short percentile window is three seconds. Requiring the condition
+    // to outlive that entire window prevents one bad present from turning the
+    // stale ten-second percentile into an adaptive quality reduction.
+    constexpr std::uint64_t kLowPercentileConfirmationNs =
+        3'500'000'000ULL;
+    const bool confirmed_low_percentile_pressure =
+        low_percentile_pressure_since_ns_ != 0 &&
+        now_ns >= low_percentile_pressure_since_ns_ &&
+        now_ns - low_percentile_pressure_since_ns_ >=
+            kLowPercentileConfirmationNs;
     const bool catastrophic_live_drop =
         *sample.fps <= static_cast<double>(policy.target_fps) * 0.50 ||
         frame_time >= target_frame_time * 2.0;
@@ -859,6 +888,10 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
                at_least(tail_level, FrameSignalLevel::warning) ||
                long_low_unhealthy)) {
         desired_level = FrameSignalLevel::warning;
+    }
+    if (confirmed_low_percentile_pressure &&
+        !at_least(desired_level, FrameSignalLevel::corrective)) {
+        desired_level = FrameSignalLevel::corrective;
     }
     if (critical_memory_pressure && policy.emergency_enabled) {
         desired_level = FrameSignalLevel::emergency;
@@ -890,6 +923,8 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
             current_tail_level, policy.emergency_enabled,
             catastrophic_live_drop),
         FrameSignalLevel::corrective);
+    decision.current_frame_pressure = decision.current_frame_pressure ||
+        confirmed_low_percentile_pressure;
 
     if (desired != candidate_pressure_) {
         candidate_pressure_ = desired;
@@ -1144,6 +1179,7 @@ void AdaptiveGovernor::reset() noexcept {
     active_pressure_ = AdaptivePressure::observing;
     candidate_pressure_ = AdaptivePressure::observing;
     candidate_since_ns_ = 0;
+    low_percentile_pressure_since_ns_ = 0;
     last_direction_change_ns_ = 0;
     last_evaluation_ns_ = 0;
     identity_start_id_ = 0;

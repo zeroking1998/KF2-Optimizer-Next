@@ -95,6 +95,9 @@ int main() {
     CHECK(*responsive_metrics.fps > 119.0 && *responsive_metrics.fps < 121.0);
     CHECK(responsive_metrics.average_fps.has_value());
     CHECK(*responsive_metrics.average_fps < *responsive_metrics.fps);
+    CHECK(responsive_metrics.sustained_one_percent_low_fps.has_value());
+    CHECK(*responsive_metrics.sustained_one_percent_low_fps > 29.0 &&
+          *responsive_metrics.sustained_one_percent_low_fps < 31.0);
     CHECK(responsive_metrics.p95_ms.has_value());
     CHECK(*responsive_metrics.p95_ms > 30.0);
     CHECK(responsive_metrics.one_percent_low_fps.has_value());
@@ -114,9 +117,11 @@ int main() {
         reset_ns + 120 * 8'333'333ULL, 500'000'000ULL);
     CHECK(reset_metrics.fps.has_value());
     CHECK(reset_metrics.average_fps.has_value());
+    CHECK(reset_metrics.sustained_one_percent_low_fps.has_value());
     CHECK(reset_metrics.one_percent_low_fps.has_value());
     CHECK(*reset_metrics.fps > 119.0);
     CHECK(*reset_metrics.average_fps > 119.0);
+    CHECK(*reset_metrics.sustained_one_percent_low_fps > 119.0);
     CHECK(*reset_metrics.one_percent_low_fps > 119.0);
     return EXIT_SUCCESS;
 }

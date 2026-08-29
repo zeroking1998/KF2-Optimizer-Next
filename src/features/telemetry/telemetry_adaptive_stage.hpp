@@ -166,6 +166,8 @@ select_adaptive_runtime_control(
     sample.frame_time_ms = frame.frames.frame_time_ms;
     sample.p95_frame_time_ms = frame.frames.p95_ms;
     sample.p99_frame_time_ms = frame.frames.p99_ms;
+    sample.sustained_one_percent_low_fps =
+        frame.frames.sustained_one_percent_low_fps;
     sample.one_percent_low_fps = frame.frames.one_percent_low_fps;
     sample.stutter_count = frame.frames.stutter_count;
     if (frame.frames.fps && frame.frames.frame_time_ms &&

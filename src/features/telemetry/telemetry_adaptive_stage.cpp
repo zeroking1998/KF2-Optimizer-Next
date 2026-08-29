@@ -572,7 +572,13 @@ void UiRuntime::update_adaptive_controller(
             decision_log << L"NOT_AVAILABLE";
         }
         decision_log << L"; stutters5s=" << frames.stutter_count;
-        decision_log << L"; 1%low=";
+        decision_log << L"; 1%low3s=";
+        if (frames.sustained_one_percent_low_fps) {
+            decision_log << *frames.sustained_one_percent_low_fps << L" FPS";
+        } else {
+            decision_log << L"NOT_AVAILABLE";
+        }
+        decision_log << L"; 1%low10s=";
         if (frames.one_percent_low_fps) {
             decision_log << *frames.one_percent_low_fps << L" FPS";
         } else {
