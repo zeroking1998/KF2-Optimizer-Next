@@ -58,15 +58,17 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                     }
                     changed = *current_;
                 }
+            } else if (const auto port =
+                           detail::parse_adaptive_bridge_line(line);
+                       current_ && !current_->main_menu &&
+                       current_->phase != GameLogPhase::match_ended && port) {
+                if (current_->telemetry_control_port != port) {
+                    current_->telemetry_control_port = port;
+                    changed = *current_;
+                }
             } else if (current_ && current_->net_mode == "NM_Standalone") {
-                if (const auto port = detail::parse_adaptive_bridge_line(line);
-                    port) {
-                    if (current_->telemetry_control_port != port) {
-                        current_->telemetry_control_port = port;
-                        changed = *current_;
-                    }
-                } else if (const auto count = detail::parse_zed_count_line(line);
-                           count) {
+                if (const auto count = detail::parse_zed_count_line(line);
+                    count) {
                     auto& target = count->first ? current_->zeds_remaining
                                                 : current_->zeds_alive;
                     auto& observed = count->first

@@ -192,6 +192,25 @@ int main() {
         "port=0\n").has_value());
     CHECK(stream.current()->telemetry_control_port == 49152);
 
+    GameLogSessionParser early_bridge_stream;
+    CHECK(early_bridge_stream.feed(
+        "[0052.70] Log: LoadMap: KF-BioticsLab?"
+        "Game=KFGameContent.KFGameInfo_Survival\n").has_value());
+    const auto early_bridge = early_bridge_stream.feed(
+        "[0052.78] ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready "
+        "port=57659\n");
+    CHECK(early_bridge.has_value());
+    CHECK(early_bridge && early_bridge->telemetry_control_port == 57659);
+    const auto early_offline = early_bridge_stream.feed(
+        "[0052.79] ScriptLog: WI.NetMode:  NM_Standalone\n");
+    CHECK(early_offline.has_value());
+    CHECK(early_offline && early_offline->telemetry_control_port == 57659);
+
+    const auto early_online = early_bridge_stream.feed(
+        "[0052.80] ScriptLog: WI.NetMode:  NM_Client\n");
+    CHECK(early_online.has_value());
+    CHECK(early_online && !early_online->telemetry_control_port.has_value());
+
     const auto remaining = stream.feed(
         "[0060.10] ScriptLog: @@@@ ZED COUNT DEBUG: "
         "MyKFGRI.AIRemaining = 93\n", 1'000'000'000ULL);
