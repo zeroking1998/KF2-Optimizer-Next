@@ -113,6 +113,32 @@ void UiRuntime::reload_video_settings() {
     refresh_video_presentation();
 }
 
+void UiRuntime::refresh_game_configuration_for_process_start(
+    bool settings_restart) {
+    reload_video_settings();
+    if (!video_saved) {
+        events->append({
+            0, diagnostics::Severity::warning,
+            settings_restart ? "KF2_NEW_SETTINGS_CONFIGURATION_UNAVAILABLE"
+                             : "KF2_PROCESS_CONFIGURATION_UNAVAILABLE",
+            L"The current KF2 graphics and FleX configuration could not be read for the verified process",
+            L"graphics"});
+        return;
+    }
+
+    const auto flex = game::video_choice_label(
+        game::VideoOption::nvidia_flex, *video_saved);
+    events->append({
+        0, diagnostics::Severity::info,
+        settings_restart ? "KF2_NEW_SETTINGS_CONFIGURATION_DETECTED"
+                         : "KF2_PROCESS_CONFIGURATION_DETECTED",
+        (settings_restart
+             ? L"KF2 graphics settings were reloaded after the confirmed settings restart; configured NVIDIA FleX: "
+             : L"KF2 graphics settings were loaded for the verified process; configured NVIDIA FleX: ") +
+            flex,
+        L"graphics"});
+}
+
 void UiRuntime::cycle_video_option(game::VideoOption option) {
     if (!installation || !video_pending) {
         reload_video_settings();

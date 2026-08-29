@@ -462,5 +462,11 @@ int main() {
         "[0004.29] Exit: Preparing to exit.\n"));
     CHECK(!game_log_reports_engine_exit(
         "WidgetInitialized - WidgetName:  StartMenu\n"));
+    CHECK(game_log_requests_settings_restart(
+        "[0291.01] Log: Restarting by request\n"));
+    CHECK(!game_log_requests_settings_restart(
+        "[0000.60] Log: Game restarting within Steam client, exiting\n"));
+    CHECK(!game_log_requests_settings_restart(
+        "Log: UKFOnlineStatsWrite::CacheWeeklyEventState - RESTART Index: 487\n"));
     return EXIT_SUCCESS;
 }

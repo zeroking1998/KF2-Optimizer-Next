@@ -52,6 +52,45 @@ struct SessionStageResult final {
 
 inline constexpr std::uint64_t kSilentPresentRestartNs = 3'000'000'000ULL;
 inline constexpr unsigned int kMaximumPresentRestarts = 2;
+inline constexpr std::uint64_t kGameRestartHandoffNs = 10'000'000'000ULL;
+inline constexpr std::uint64_t kNewSettingsRestartHandoffNs =
+    300'000'000'000ULL;
+
+[[nodiscard]] constexpr std::uint64_t game_restart_handoff_timeout_ns(
+    bool new_settings_restart) noexcept {
+    return new_settings_restart ? kNewSettingsRestartHandoffNs
+                                : kGameRestartHandoffNs;
+}
+
+enum class RestartHandoffDisposition {
+    inactive,
+    waiting,
+    previous_process_resumed,
+    replacement_found,
+    expired,
+};
+
+struct RestartHandoffInput final {
+    bool pending{false};
+    bool verified_process_found{false};
+    bool same_process_identity{false};
+    std::uint64_t deadline_ns{0};
+    std::uint64_t now_ns{0};
+};
+
+[[nodiscard]] constexpr RestartHandoffDisposition classify_restart_handoff(
+    const RestartHandoffInput& input) noexcept {
+    if (!input.pending) return RestartHandoffDisposition::inactive;
+    if (input.verified_process_found) {
+        return input.same_process_identity
+            ? RestartHandoffDisposition::previous_process_resumed
+            : RestartHandoffDisposition::replacement_found;
+    }
+    if (input.deadline_ns != 0 && input.now_ns >= input.deadline_ns) {
+        return RestartHandoffDisposition::expired;
+    }
+    return RestartHandoffDisposition::waiting;
+}
 
 struct SilentPresentInput final {
     bool scene_ready{false};

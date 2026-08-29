@@ -14,6 +14,8 @@
 
 int main() {
     using namespace kf2::telemetry_pipeline;
+    CHECK(game_restart_handoff_timeout_ns(false) == 10'000'000'000ULL);
+    CHECK(game_restart_handoff_timeout_ns(true) == 300'000'000'000ULL);
     SessionGateInput input;
     CHECK(classify_session_gate(input) ==
           SessionDisposition::waiting_for_process);
@@ -77,5 +79,31 @@ int main() {
     silent.reason = kf2::telemetry::UnavailableReason::no_samples;
     silent.scene_ready = false;
     CHECK(!should_reconnect_silent_present(silent));
+
+    RestartHandoffInput restart;
+    CHECK(classify_restart_handoff(restart) ==
+          RestartHandoffDisposition::inactive);
+    restart.pending = true;
+    restart.deadline_ns = kGameRestartHandoffNs;
+    restart.now_ns = kGameRestartHandoffNs - 1;
+    CHECK(classify_restart_handoff(restart) ==
+          RestartHandoffDisposition::waiting);
+    restart.verified_process_found = true;
+    restart.same_process_identity = true;
+    CHECK(classify_restart_handoff(restart) ==
+          RestartHandoffDisposition::previous_process_resumed);
+    restart.same_process_identity = false;
+    CHECK(classify_restart_handoff(restart) ==
+          RestartHandoffDisposition::replacement_found);
+    restart.now_ns = kGameRestartHandoffNs + 1;
+    CHECK(classify_restart_handoff(restart) ==
+          RestartHandoffDisposition::replacement_found);
+    restart.verified_process_found = false;
+    restart.now_ns = kGameRestartHandoffNs - 1;
+    CHECK(classify_restart_handoff(restart) ==
+          RestartHandoffDisposition::waiting);
+    restart.now_ns = kGameRestartHandoffNs;
+    CHECK(classify_restart_handoff(restart) ==
+          RestartHandoffDisposition::expired);
     return EXIT_SUCCESS;
 }
