@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <string>
 
 #include "kf2/core/result.hpp"
 
@@ -16,5 +17,9 @@ struct ActiveGameLog final {
 [[nodiscard]] Result<std::optional<ActiveGameLog>> find_active_game_log(
     const std::filesystem::path& log_directory,
     std::uint64_t process_start_filetime);
+
+[[nodiscard]] Result<std::optional<std::wstring>>
+find_last_render_adapter_name(
+    const std::filesystem::path& log_directory);
 
 }  // namespace kf2::game

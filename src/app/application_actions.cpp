@@ -1,5 +1,6 @@
 #include "application_runtime.hpp"
 #include "kf2/config/setting_catalog.hpp"
+#include "kf2/game/game_log_locator.hpp"
 #include "runtime/action_contract.hpp"
 #include "runtime/action_router.hpp"
 #include "runtime/feature_composition.hpp"
@@ -345,20 +346,27 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
     enforce_async_physics_enabled(changes);
     enforce_one_frame_thread_lag(changes);
     std::optional<optimizer::StartupMemoryProfile> startup_memory_profile;
+    std::wstring startup_memory_adapter_name;
     const auto adapters = telemetry::enumerate_gpu_adapters();
     if (adapters.has_value()) {
         const auto physical = telemetry::unique_physical_gpu_adapters(
             adapters.value());
-        const auto selected = std::max_element(
-            physical.begin(), physical.end(), [](const auto& left,
-                                                 const auto& right) {
-                return left.dedicated_memory_bytes <
-                       right.dedicated_memory_bytes;
-            });
-        if (selected != physical.end()) {
+        std::optional<telemetry::GpuAdapter> selected;
+        if (physical.size() == 1) {
+            selected = physical.front();
+        } else if (installation && physical.size() > 1) {
+            const auto logged_renderer = game::find_last_render_adapter_name(
+                installation->config_root.parent_path() / L"Logs");
+            if (logged_renderer.has_value() && logged_renderer.value()) {
+                selected = telemetry::find_unique_hardware_gpu_adapter_by_name(
+                    physical, *logged_renderer.value());
+            }
+        }
+        if (selected) {
             startup_memory_profile =
                 optimizer::recommended_startup_memory_profile(
                     selected->dedicated_memory_bytes);
+            startup_memory_adapter_name = selected->name;
         }
     }
     if (startup_memory_profile) {
@@ -394,7 +402,8 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
     if (startup_memory_profile) {
         events->append({0, diagnostics::Severity::info,
             "STARTUP_MEMORY_PROFILE_APPLIED",
-            L"KF2 startup texture pool " +
+            L"KF2 startup memory uses the last confirmed renderer " +
+                startup_memory_adapter_name + L": texture pool " +
                 std::to_wstring(
                     startup_memory_profile->texture_pool_size_mb) +
                 L" MB, memory margin " +
@@ -402,6 +411,11 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
                 L" MB, streaming hysteresis " +
                 std::to_wstring(
                     startup_memory_profile->streaming_hysteresis_limit),
+            L"optimizer"});
+    } else {
+        events->append({0, diagnostics::Severity::info,
+            "STARTUP_MEMORY_PROFILE_PRESERVED",
+            L"KF2 startup memory values were preserved because the active renderer could not be identified unambiguously",
             L"optimizer"});
     }
     return applied;

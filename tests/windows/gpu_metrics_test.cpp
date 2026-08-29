@@ -43,6 +43,28 @@ int main() {
         {first, same_physical, separate_physical, software}, 4).has_value());
     CHECK(!find_hardware_gpu_adapter_by_luid(
         {first, same_physical, separate_physical, software}, 99).has_value());
+    GpuAdapter integrated = first;
+    integrated.luid = 10;
+    integrated.name = L"AMD Radeon(TM) Graphics";
+    integrated.dedicated_memory_bytes = 4ULL * 1024ULL * 1024ULL * 1024ULL;
+    integrated.physical_device_key = L"PCI\\AMD_APU";
+    GpuAdapter discrete = first;
+    discrete.luid = 11;
+    discrete.name = L"NVIDIA GeForce RTX 4090";
+    discrete.dedicated_memory_bytes = 24ULL * 1024ULL * 1024ULL * 1024ULL;
+    discrete.physical_device_key = L"PCI\\RTX_4090";
+    const auto selected_integrated = find_unique_hardware_gpu_adapter_by_name(
+        {integrated, discrete}, L"  amd radeon(tm) graphics  ");
+    CHECK(selected_integrated.has_value());
+    CHECK(selected_integrated->luid == integrated.luid);
+    CHECK(!find_unique_hardware_gpu_adapter_by_name(
+        {integrated, discrete}, L"Unknown GPU").has_value());
+    GpuAdapter duplicate_integrated = integrated;
+    duplicate_integrated.luid = 12;
+    duplicate_integrated.physical_device_key = L"PCI\\SECOND_AMD_APU";
+    CHECK(!find_unique_hardware_gpu_adapter_by_name(
+        {integrated, duplicate_integrated, discrete}, integrated.name)
+               .has_value());
     const auto active_adapter = active_process_gpu_adapter_luid({
         {{4242, 1, L"3D", 0, 0}, 18.0, 0, 0},
         {{4242, 2, L"3D", 0, 0}, 74.0, 0, 0},

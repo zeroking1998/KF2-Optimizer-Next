@@ -62,6 +62,8 @@ struct GpuAdapter {
     const std::vector<GpuAdapter>& adapters);
 [[nodiscard]] std::optional<GpuAdapter> find_hardware_gpu_adapter_by_luid(
     const std::vector<GpuAdapter>& adapters, std::uint64_t adapter_luid);
+[[nodiscard]] std::optional<GpuAdapter> find_unique_hardware_gpu_adapter_by_name(
+    const std::vector<GpuAdapter>& adapters, std::wstring_view adapter_name);
 [[nodiscard]] std::optional<std::uint64_t> active_process_gpu_adapter_luid(
     const std::vector<GpuCounterValue>& values, std::uint32_t pid,
     std::uint64_t preferred_adapter_luid = 0);

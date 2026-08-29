@@ -18,8 +18,9 @@
 
 namespace {
 
-void write_log(const std::filesystem::path& path, std::uint64_t timestamp) {
-    std::ofstream(path, std::ios::binary | std::ios::trunc) << "log";
+void write_log(const std::filesystem::path& path, std::uint64_t timestamp,
+               std::string_view contents = "log") {
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << contents;
     HANDLE file = CreateFileW(path.c_str(), FILE_WRITE_ATTRIBUTES,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -72,6 +73,23 @@ int main() {
     selected = kf2::game::find_active_game_log(root, 2'000);
     CHECK(selected.has_value());
     CHECK(!selected.value().has_value());
+
+    write_log(root / L"Launch.log", 2'100,
+              "[0002.55] Log: Adapter : AMD Radeon(TM) Graphics\r\n");
+    std::string delayed_renderer(128U * 1024U, 'x');
+    delayed_renderer +=
+        "\r\n[0002.55] Log: Adapter : NVIDIA GeForce RTX 4090\r\n";
+    write_log(root / L"Launch_2.log", 2'200, delayed_renderer);
+    auto renderer = kf2::game::find_last_render_adapter_name(root);
+    CHECK(renderer.has_value());
+    CHECK(renderer.value() ==
+          std::optional<std::wstring>{L"NVIDIA GeForce RTX 4090"});
+
+    write_log(root / L"Launch_2.log", 2'300,
+              "[0002.55] Log: Adapter :   \r\n");
+    renderer = kf2::game::find_last_render_adapter_name(root);
+    CHECK(renderer.has_value());
+    CHECK(!renderer.value().has_value());
 
     fs::remove_all(root, error);
     return EXIT_SUCCESS;

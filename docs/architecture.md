@@ -125,8 +125,10 @@ actuation gate: each source and actuator independently reports its runtime
 capability, while unproved live knobs remain unavailable or shadow-only.
 The protected startup plan also writes only catalogued native KF2 keys for its
 asynchronous physics scene, one-frame render-thread pipeline, and texture
-streaming memory profile. Dedicated VRAM selects a deterministic bounded pool
-tier; missing adapter evidence preserves the existing streaming values. These
+streaming memory profile. The last renderer reported by KF2 is matched uniquely
+to a physical adapter before its dedicated VRAM selects a deterministic bounded
+pool tier. A sole physical adapter is already unambiguous; otherwise missing or
+ambiguous renderer evidence preserves the existing streaming values. These
 startup values never become live mid-match actuators and remain covered by the
 same byte-exact session restore.
 

@@ -44,6 +44,20 @@ void write_bytes(const std::filesystem::path& path, const std::string& bytes) {
     output << bytes;
 }
 
+std::string utf8(std::wstring_view value) {
+    const int bytes = WideCharToMultiByte(
+        CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+        static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (bytes <= 0) return {};
+    std::string result(static_cast<std::size_t>(bytes), '\0');
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+            static_cast<int>(value.size()), result.data(), bytes, nullptr,
+            nullptr) != bytes) {
+        return {};
+    }
+    return result;
+}
+
 bool write_complete_config_catalog(const std::filesystem::path& root) {
     using namespace kf2::config;
     std::map<std::filesystem::path, std::string> files;
@@ -288,16 +302,14 @@ int main() {
     if (adapters.has_value()) {
         const auto physical = kf2::telemetry::unique_physical_gpu_adapters(
             adapters.value());
-        const auto selected = std::max_element(
-            physical.begin(), physical.end(), [](const auto& left,
-                                                 const auto& right) {
-                return left.dedicated_memory_bytes <
-                       right.dedicated_memory_bytes;
-            });
-        if (selected != physical.end()) {
+        if (!physical.empty()) {
+            const auto& selected = physical.front();
+            write_bytes(config_root.parent_path() / L"Logs" / L"Launch.log",
+                        "[0002.55] Log: Adapter : " + utf8(selected.name) +
+                            "\r\n");
             expected_startup_memory =
                 kf2::optimizer::recommended_startup_memory_profile(
-                    selected->dedicated_memory_bytes);
+                    selected.dedicated_memory_bytes);
         }
     }
 
