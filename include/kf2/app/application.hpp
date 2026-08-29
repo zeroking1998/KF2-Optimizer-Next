@@ -38,6 +38,13 @@ void preserve_user_flex_activation(
     std::vector<config::RequestedChange>& changes) noexcept;
 void enforce_temporal_aa_disabled(
     std::vector<config::RequestedChange>& changes) noexcept;
+void enforce_async_physics_enabled(
+    std::vector<config::RequestedChange>& changes) noexcept;
+void enforce_one_frame_thread_lag(
+    std::vector<config::RequestedChange>& changes) noexcept;
+void enforce_startup_memory_profile(
+    std::vector<config::RequestedChange>& changes,
+    const optimizer::StartupMemoryProfile& profile) noexcept;
 
 struct StartOptions {
     std::filesystem::path state_root;

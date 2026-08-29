@@ -32,6 +32,7 @@ struct PreviewItem {
     std::wstring reason;
     PreviewState state{PreviewState::ready};
     bool restore_available{true};
+    bool existed_before{true};
 };
 
 struct PreviewFile {

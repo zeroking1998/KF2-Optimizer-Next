@@ -264,6 +264,24 @@ void apply_render_profile(
 
 }  // namespace
 
+std::optional<StartupMemoryProfile> recommended_startup_memory_profile(
+    std::uint64_t dedicated_vram_bytes) noexcept {
+    if (dedicated_vram_bytes == 0) return std::nullopt;
+    constexpr std::uint64_t gib = 1024ULL * 1024ULL * 1024ULL;
+    const int texture_pool_size_mb = dedicated_vram_bytes >= 16 * gib ? 6000
+        : dedicated_vram_bytes >= 10 * gib ? 5000
+        : dedicated_vram_bytes >= 8 * gib ? 4000
+        : dedicated_vram_bytes >= 6 * gib ? 3000
+        : dedicated_vram_bytes >= 4 * gib ? 2000
+        : dedicated_vram_bytes >= 2 * gib ? 1000
+        : 160;
+    const bool large_streaming_budget = dedicated_vram_bytes >= 6 * gib;
+    return StartupMemoryProfile{
+        .texture_pool_size_mb = texture_pool_size_mb,
+        .memory_margin_mb = large_streaming_budget ? 128 : 20,
+        .streaming_hysteresis_limit = large_streaming_budget ? 40 : 20};
+}
+
 OptimizerDecision evaluate(const OptimizerInput& input) {
     OptimizerDecision decision;
     decision.bottleneck = classify(input);

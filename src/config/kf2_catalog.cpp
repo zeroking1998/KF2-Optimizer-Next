@@ -30,7 +30,7 @@ constexpr std::array<int, 2> kMotionBlurSkinningLevels{0, 1};
 constexpr std::array<int, 5> kPhysicsSubstepLevels{1, 2, 3, 4, 5};
 constexpr std::array<int, 3> kGoreLevels{0, 1, 2};
 
-const std::array<SettingDefinition, 213> kSettings{{
+const std::array<SettingDefinition, 217> kSettings{{
     {SettingId::target_fps, L"KFGame.ini", L"KFGame.KFGameEngine",
      L"MaxSmoothedFrameRate", SettingType::integer,
      optimizer::kTargetFpsMinimum, optimizer::kTargetFpsMaximum, true, {}, 1},
@@ -222,6 +222,10 @@ const std::array<SettingDefinition, 213> kSettings{{
      0, 2, false, kQualityLevels},
     {SettingId::physx_level, L"KFEngine.ini", L"Engine.Engine",
      L"PhysXLevel", SettingType::integer, 0, 2, true, kGoreLevels},
+    {SettingId::physics_async_scene, L"KFEngine.ini", L"Engine.Physics",
+     L"bPhysicsAsyncScene", SettingType::boolean, 0, 1, false, {}, 0, true},
+    {SettingId::enable_async_scene, L"KFEngine.ini", L"Engine.Physics",
+     L"bEnableAsyncScene", SettingType::boolean, 0, 1, false, {}, 0, true},
     {SettingId::flex_invisible_frames_before_sleep, L"KFSystemSettings.ini",
      L"SystemSettings", L"FlexInvisibleFramesBeforeSleep",
      SettingType::integer, 0, 600, false, {}, 5},
@@ -484,6 +488,12 @@ const std::array<SettingDefinition, 213> kSettings{{
      L"bUseTextureStreaming", SettingType::boolean, 0, 1, false},
     {SettingId::texture_pool_size, L"KFEngine.ini", L"TextureStreaming",
      L"PoolSize", SettingType::integer, 0, 16384, false, {}, 64},
+    {SettingId::texture_streaming_memory_margin, L"KFEngine.ini",
+     L"TextureStreaming", L"MemoryMargin", SettingType::integer,
+     0, 1024, false, {}, 4},
+    {SettingId::texture_streaming_hysteresis_limit, L"KFEngine.ini",
+     L"TextureStreaming", L"HysteresisLimit", SettingType::integer,
+     0, 1000, false, {}, 1},
     {SettingId::minimum_texture_resident_mips, L"KFEngine.ini",
      L"TextureStreaming", L"MinTextureResidentMipCount", SettingType::integer,
      1, 14, false, {}, 1},

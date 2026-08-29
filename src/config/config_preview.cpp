@@ -101,23 +101,28 @@ Result<ConfigPreview> build_preview(
             return Result<ConfigPreview>::failure(
                 {ErrorCode::not_found, L"Required KF2 config file is missing", 0});
         }
-        const auto existing = document->second.find(definition->section, definition->key);
-        if (!existing) {
+        const auto existing = document->second.find(
+            definition->section, definition->key);
+        if (!existing && !definition->insert_if_missing) {
             return Result<ConfigPreview>::failure(
                 {ErrorCode::not_found, L"Verified KF2 config key is missing", 0});
         }
-        const auto before = parse_setting_value(*definition, *existing);
-        if (!before) {
+        const auto before = existing
+            ? parse_setting_value(*definition, *existing) : std::nullopt;
+        if (existing && !before) {
             return Result<ConfigPreview>::failure(
                 {ErrorCode::invalid_argument,
                  L"Existing KF2 config value is outside the verified contract", 0});
         }
-        const PreviewState state = *before == request.value
+        const PreviewState state = before && *before == request.value
                                        ? PreviewState::unchanged
                                        : PreviewState::ready;
         if (state == PreviewState::ready) {
-            const auto replacement = document->second.replace(
-                definition->section, definition->key, *serialized);
+            const auto replacement = existing
+                ? document->second.replace(
+                      definition->section, definition->key, *serialized)
+                : document->second.upsert(
+                      definition->section, definition->key, *serialized);
             if (!replacement.changed) {
                 return Result<ConfigPreview>::failure(
                     {ErrorCode::internal_failure, L"KF2 preview replacement failed", 0});
@@ -125,8 +130,9 @@ Result<ConfigPreview> build_preview(
         }
         preview.items.push_back({id, definition->relative_path,
                                  definition->section, definition->key,
-                                 *before, request.value, request.source,
-                                 request.reason, state, true});
+                                 before.value_or(request.value), request.value,
+                                 request.source, request.reason, state, true,
+                                 existing.has_value()});
     }
 
     std::map<std::filesystem::path, bool> referenced;

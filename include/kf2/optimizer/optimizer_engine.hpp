@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -63,6 +64,16 @@ struct OptimizerDecision {
     std::wstring reason;
     std::vector<config::RequestedChange> changes;
 };
+
+struct StartupMemoryProfile {
+    int texture_pool_size_mb{160};
+    int memory_margin_mb{20};
+    int streaming_hysteresis_limit{20};
+};
+
+[[nodiscard]] std::optional<StartupMemoryProfile>
+recommended_startup_memory_profile(
+    std::uint64_t dedicated_vram_bytes) noexcept;
 
 [[nodiscard]] OptimizerDecision evaluate(const OptimizerInput& input);
 

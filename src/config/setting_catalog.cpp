@@ -169,6 +169,8 @@ SettingCategory setting_category(SettingId id) noexcept {
         case SettingId::only_stream_in_textures:
         case SettingId::texture_streaming:
         case SettingId::texture_pool_size:
+        case SettingId::texture_streaming_memory_margin:
+        case SettingId::texture_streaming_hysteresis_limit:
         case SettingId::minimum_texture_resident_mips:
         case SettingId::texture_async_defrag:
         case SettingId::texture_async_reallocation:
@@ -263,6 +265,8 @@ SettingCategory setting_category(SettingId id) noexcept {
         case SettingId::corpse_collision_with_living:
         case SettingId::corpse_collision_after_sleep:
         case SettingId::physx_level:
+        case SettingId::physics_async_scene:
+        case SettingId::enable_async_scene:
         case SettingId::flex_invisible_frames_before_sleep:
         case SettingId::flex_distance_before_sleep:
         case SettingId::sph_fluid_mipmap:
@@ -360,7 +364,9 @@ Result<std::map<SettingId, SettingValue>> read_catalog_values(
                                           std::move(parsed.value())).first;
         }
         const auto text = document->second.find(definition.section, definition.key);
-        const auto value = text ? parse_setting_value(definition, *text) : std::nullopt;
+        if (!text && definition.insert_if_missing) continue;
+        const auto value = text
+            ? parse_setting_value(definition, *text) : std::nullopt;
         if (!value) {
             return Result<std::map<SettingId, SettingValue>>::failure(
                 {ErrorCode::invalid_argument,
