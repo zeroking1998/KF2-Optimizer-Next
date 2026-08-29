@@ -131,6 +131,10 @@ Adaptive controls.
 Start KF2 through the optimizer when you want session-scoped telemetry,
 restoration, and optional protected corpse-physics or FleX controls. Controls
 appear only when their provider and acknowledgement path are available.
+When KF2's native log confirms a new-settings restart, the optimizer keeps the
+protected session intact for up to five minutes and rebinds only to the verified
+KF2 executable. A normal game exit uses only a short replacement check before
+restoration proceeds automatically.
 
 ## 8. Read the status correctly
 

@@ -18,6 +18,11 @@ bool game_log_reports_engine_exit(std::string_view text) noexcept {
            text.find("Log: Log file closed,") != std::string_view::npos;
 }
 
+bool game_log_requests_settings_restart(std::string_view text) noexcept {
+    return text.find("Log: Restarting by request") !=
+           std::string_view::npos;
+}
+
 std::optional<GameLogSession> GameLogSessionParser::feed(
     std::string_view bytes, std::uint64_t observed_at_ns) {
     if (bytes.empty()) return std::nullopt;
