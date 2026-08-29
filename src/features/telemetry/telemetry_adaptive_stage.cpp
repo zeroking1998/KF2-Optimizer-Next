@@ -378,8 +378,7 @@ void UiRuntime::update_adaptive_controller(
                 .token = adaptive_control_token,
                 .sequence = next_sequence,
                 .resource = runtime_selection->resource,
-                .quality = runtime_selection->quality,
-                .timeout_ms = 200});
+                .quality = runtime_selection->quality});
             if (started.has_value() && started.value()) {
                 adaptive_control_sequence = next_sequence;
                 adaptive_quality_last_dispatch_ns = now_ns;

@@ -10,6 +10,8 @@
 
 namespace kf2::game {
 
+inline constexpr std::uint32_t kAdaptiveControlReadbackTimeoutMs = 2'000;
+
 enum class AdaptiveResourceControl : std::uint8_t {
     cpu,
     gpu,
@@ -25,7 +27,7 @@ struct AdaptiveControlRequest final {
     std::uint64_t sequence{0};
     AdaptiveResourceControl resource{AdaptiveResourceControl::mixed};
     int quality{100};
-    std::uint32_t timeout_ms{200};
+    std::uint32_t timeout_ms{kAdaptiveControlReadbackTimeoutMs};
 };
 
 struct AdaptiveControlReceipt final {

@@ -131,6 +131,46 @@ int main() {
     CHECK(observed_command ==
           "KF2OPT 0123456789abcdef0123456789abcdef 77 cpu 75\n");
 
+    const SOCKET delayed_listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    CHECK(delayed_listener != INVALID_SOCKET);
+    address.sin_port = 0;
+    CHECK(bind(delayed_listener, reinterpret_cast<const sockaddr*>(&address),
+               sizeof(address)) == 0);
+    address_size = sizeof(address);
+    CHECK(getsockname(delayed_listener,
+                      reinterpret_cast<sockaddr*>(&address),
+                      &address_size) == 0);
+    CHECK(listen(delayed_listener, 1) == 0);
+    std::thread delayed_server{[&] {
+        const SOCKET connection = accept(delayed_listener, nullptr, nullptr);
+        if (connection == INVALID_SOCKET) return;
+        char buffer[128]{};
+        std::string request;
+        while (request.find('\n') == std::string::npos) {
+            const int received = recv(connection, buffer, sizeof(buffer), 0);
+            if (received <= 0) break;
+            request.append(buffer, static_cast<std::size_t>(received));
+        }
+        Sleep(350);
+        constexpr std::string_view acknowledgement =
+            "KF2OPT_ACK 79 applied gpu 60\r\n";
+        send(connection, acknowledgement.data(),
+             static_cast<int>(acknowledgement.size()), 0);
+        closesocket(connection);
+    }};
+    const auto delayed_receipt = send_adaptive_control({
+        .port = ntohs(address.sin_port),
+        .token = token,
+        .sequence = 79,
+        .resource = AdaptiveResourceControl::gpu,
+        .quality = 60});
+    delayed_server.join();
+    closesocket(delayed_listener);
+    CHECK(delayed_receipt.has_value());
+    CHECK(delayed_receipt.value().sequence == 79);
+    CHECK(delayed_receipt.value().resource == AdaptiveResourceControl::gpu);
+    CHECK(delayed_receipt.value().quality == 60);
+
     const SOCKET async_listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     CHECK(async_listener != INVALID_SOCKET);
     address.sin_port = 0;
@@ -168,19 +208,20 @@ int main() {
         .token = token,
         .sequence = 78,
         .resource = AdaptiveResourceControl::gpu,
-        .quality = 50,
-        .timeout_ms = 500});
+        .quality = 50});
     CHECK(started.has_value());
     CHECK(started.value());
     CHECK(dispatcher.busy());
     CHECK(!acknowledgement_sent.load());
+    Sleep(250);
+    CHECK(!dispatcher.poll().has_value());
+    CHECK(dispatcher.busy());
     const auto parallel = dispatcher.start({
         .port = ntohs(address.sin_port),
         .token = token,
         .sequence = 79,
-        .resource = AdaptiveResourceControl::ram,
-        .quality = 75,
-        .timeout_ms = 500});
+        .resource = AdaptiveResourceControl::gpu,
+        .quality = 50});
     CHECK(parallel.has_value());
     CHECK(!parallel.value());
     CHECK(SetEvent(release_ack));
