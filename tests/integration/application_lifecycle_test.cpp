@@ -44,6 +44,20 @@ void write_bytes(const std::filesystem::path& path, const std::string& bytes) {
     output << bytes;
 }
 
+std::string utf8(std::wstring_view value) {
+    const int bytes = WideCharToMultiByte(
+        CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+        static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (bytes <= 0) return {};
+    std::string result(static_cast<std::size_t>(bytes), '\0');
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+            static_cast<int>(value.size()), result.data(), bytes, nullptr,
+            nullptr) != bytes) {
+        return {};
+    }
+    return result;
+}
+
 bool write_complete_config_catalog(const std::filesystem::path& root) {
     using namespace kf2::config;
     std::map<std::filesystem::path, std::string> files;
@@ -185,6 +199,35 @@ int main() {
     kf2::app::enforce_temporal_aa_disabled(flex_preservation_changes);
     CHECK(flex_preservation_changes.size() == 2);
     CHECK(std::get<bool>(flex_preservation_changes.back().value) == false);
+    kf2::app::enforce_async_physics_enabled(flex_preservation_changes);
+    CHECK(flex_preservation_changes.size() == 4);
+    CHECK(flex_preservation_changes[2].id ==
+          kf2::config::SettingId::physics_async_scene);
+    CHECK(std::get<bool>(flex_preservation_changes[2].value));
+    CHECK(flex_preservation_changes[3].id ==
+          kf2::config::SettingId::enable_async_scene);
+    CHECK(std::get<bool>(flex_preservation_changes[3].value));
+    flex_preservation_changes[2].value = false;
+    flex_preservation_changes[3].value = false;
+    kf2::app::enforce_async_physics_enabled(flex_preservation_changes);
+    CHECK(flex_preservation_changes.size() == 4);
+    CHECK(std::get<bool>(flex_preservation_changes[2].value));
+    CHECK(std::get<bool>(flex_preservation_changes[3].value));
+    kf2::app::enforce_one_frame_thread_lag(flex_preservation_changes);
+    CHECK(flex_preservation_changes.size() == 5);
+    CHECK(flex_preservation_changes[4].id ==
+          kf2::config::SettingId::one_frame_thread_lag);
+    CHECK(std::get<bool>(flex_preservation_changes[4].value));
+    const kf2::optimizer::StartupMemoryProfile startup_memory{
+        .texture_pool_size_mb = 6000,
+        .memory_margin_mb = 128,
+        .streaming_hysteresis_limit = 40};
+    kf2::app::enforce_startup_memory_profile(
+        flex_preservation_changes, startup_memory);
+    CHECK(flex_preservation_changes.size() == 8);
+    CHECK(std::get<int>(flex_preservation_changes[5].value) == 6000);
+    CHECK(std::get<int>(flex_preservation_changes[6].value) == 128);
+    CHECK(std::get<int>(flex_preservation_changes[7].value) == 40);
     namespace fs = std::filesystem;
     CHECK(kf2::app::runtime::feature_definitions().size() == 7);
     CHECK(kf2::app::runtime::find_feature(
@@ -253,6 +296,22 @@ int main() {
     const auto published_runtime_path =
         (config_root.parent_path() / L"Published" / L"BrewedPC")
             .lexically_normal().string();
+    std::optional<kf2::optimizer::StartupMemoryProfile>
+        expected_startup_memory;
+    const auto adapters = kf2::telemetry::enumerate_gpu_adapters();
+    if (adapters.has_value()) {
+        const auto physical = kf2::telemetry::unique_physical_gpu_adapters(
+            adapters.value());
+        if (!physical.empty()) {
+            const auto& selected = physical.front();
+            write_bytes(config_root.parent_path() / L"Logs" / L"Launch.log",
+                        "[0002.55] Log: Adapter : " + utf8(selected.name) +
+                            "\r\n");
+            expected_startup_memory =
+                kf2::optimizer::recommended_startup_memory_profile(
+                    selected.dedicated_memory_bytes);
+        }
+    }
 
     {
         auto first = kf2::app::Application::start(options);
@@ -267,6 +326,30 @@ int main() {
                   "MinSmoothedFrameRate=22") != std::string::npos);
         CHECK(automatically_prepared.find(
                   "bSmoothFrameRate=True") != std::string::npos);
+        const auto automatically_prepared_engine =
+            read_bytes(config_root / L"KFEngine.ini");
+        CHECK(automatically_prepared_engine.find(
+                  "[Engine.Physics]") != std::string::npos);
+        CHECK(automatically_prepared_engine.find(
+                  "bPhysicsAsyncScene=True") != std::string::npos);
+        CHECK(automatically_prepared_engine.find(
+                  "bEnableAsyncScene=True") != std::string::npos);
+        if (expected_startup_memory) {
+            CHECK(automatically_prepared_engine.find(
+                      "PoolSize=" + std::to_string(
+                          expected_startup_memory->texture_pool_size_mb)) !=
+                  std::string::npos);
+            CHECK(automatically_prepared_engine.find(
+                      "MemoryMargin=" + std::to_string(
+                          expected_startup_memory->memory_margin_mb)) !=
+                  std::string::npos);
+            CHECK(automatically_prepared_engine.find(
+                      "HysteresisLimit=" + std::to_string(
+                          expected_startup_memory->streaming_hysteresis_limit)) !=
+                  std::string::npos);
+        }
+        CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
+                  "OneFrameThreadLag=True") != std::string::npos);
         CHECK(fs::exists(published_telemetry));
         CHECK(read_bytes(published_telemetry) == read_bytes(telemetry_asset));
         CHECK(read_bytes(config_root / L"KFEngine.ini").find(

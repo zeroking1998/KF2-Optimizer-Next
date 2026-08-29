@@ -25,7 +25,7 @@ if ($text -match '(43/43|50/50|58/58)') { throw 'Acceptance ledger contains a st
 if ($text -notmatch 'Debug, Release and Ninja regression.*(PASS|PENDING CURRENT BUILD)') {
     throw 'Current Debug/Release/Ninja regression state is not explicit'
 }
-if ($text -notmatch 'Offline FleX laboratory.*(PASS \(AUTOMATED/LIVE/RESTORE\)|PENDING FINAL GAMEPLAY)') {
+if ($text -notmatch 'Offline FleX laboratory.*(PASS \(AUTOMATED/(DISABLED-STATE )?LIVE/RESTORE\)|PENDING FINAL GAMEPLAY)') {
     throw 'Offline FleX validation state is not explicit'
 }
 if ($text -notmatch 'Final gameplay acceptance.*PENDING') {

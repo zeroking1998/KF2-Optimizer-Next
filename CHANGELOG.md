@@ -16,9 +16,15 @@ are visible immediately.
 - CPU Adaptive quality now progressively reduces the three official cosmetic
   corpse-collision options at 80%, 60%, and 40%, with exact engine readback and
   restoration of the user's original values.
+- Added a protected startup performance profile that enables KF2's native
+  asynchronous physics scene and real one-frame render-thread pipeline. It
+  also selects a bounded 160-6000 MB texture pool from the renderer confirmed
+  by KF2 and adjusts the native streaming memory margin and hysteresis.
 
 ### Bug fixes
 
+- Fixed hybrid-GPU systems sizing KF2's texture pool from the adapter with the
+  most VRAM instead of the GPU that KF2 actually uses.
 - Fixed resource-specific quality changes being tracked as one shared value,
   which could make a later CPU, GPU, VRAM, or RAM correction start from the
   wrong quality level.

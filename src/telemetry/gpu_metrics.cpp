@@ -305,6 +305,19 @@ std::optional<GpuAdapter> find_hardware_gpu_adapter_by_luid(
                                    : std::optional<GpuAdapter>{*found};
 }
 
+std::optional<GpuAdapter> find_unique_hardware_gpu_adapter_by_name(
+    const std::vector<GpuAdapter>& adapters, std::wstring_view adapter_name) {
+    const auto expected = normalized_gpu_name(adapter_name);
+    if (expected.empty()) return std::nullopt;
+    std::optional<GpuAdapter> match;
+    for (const auto& adapter : unique_physical_gpu_adapters(adapters)) {
+        if (normalized_gpu_name(adapter.name) != expected) continue;
+        if (match) return std::nullopt;
+        match = adapter;
+    }
+    return match;
+}
+
 NvidiaGpuSampler::NvidiaGpuSampler(std::unique_ptr<Impl> implementation)
     : implementation_{std::move(implementation)} {}
 NvidiaGpuSampler::NvidiaGpuSampler(NvidiaGpuSampler&&) noexcept = default;

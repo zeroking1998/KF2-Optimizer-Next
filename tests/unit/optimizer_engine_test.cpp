@@ -23,6 +23,29 @@ int main() {
     using namespace kf2;
     using namespace kf2::optimizer;
 
+    constexpr std::uint64_t gib = 1024ULL * 1024ULL * 1024ULL;
+    CHECK(!recommended_startup_memory_profile(0).has_value());
+    CHECK(recommended_startup_memory_profile(1 * gib)->texture_pool_size_mb ==
+          160);
+    CHECK(recommended_startup_memory_profile(2 * gib)->texture_pool_size_mb ==
+          1000);
+    CHECK(recommended_startup_memory_profile(4 * gib)->texture_pool_size_mb ==
+          2000);
+    CHECK(recommended_startup_memory_profile(6 * gib)->texture_pool_size_mb ==
+          3000);
+    CHECK(recommended_startup_memory_profile(8 * gib)->texture_pool_size_mb ==
+          4000);
+    CHECK(recommended_startup_memory_profile(10 * gib)->texture_pool_size_mb ==
+          5000);
+    const auto large_memory = recommended_startup_memory_profile(24 * gib);
+    CHECK(large_memory.has_value());
+    CHECK(large_memory->texture_pool_size_mb == 6000);
+    CHECK(large_memory->memory_margin_mb == 128);
+    CHECK(large_memory->streaming_hysteresis_limit == 40);
+    const auto small_memory = recommended_startup_memory_profile(4 * gib);
+    CHECK(small_memory->memory_margin_mb == 20);
+    CHECK(small_memory->streaming_hysteresis_limit == 20);
+
     OptimizerInput unavailable;
     auto no_evidence = evaluate(unavailable);
     CHECK(no_evidence.bottleneck == Bottleneck::unavailable);

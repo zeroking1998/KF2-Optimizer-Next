@@ -94,6 +94,8 @@ enum class SettingId {
     distance_fog_quality,
     volumetric_lighting_mode,
     physx_level,
+    physics_async_scene,
+    enable_async_scene,
     flex_invisible_frames_before_sleep,
     flex_distance_before_sleep,
     sph_fluid_mipmap,
@@ -188,6 +190,8 @@ enum class SettingId {
     max_damage_chunk_size,
     texture_streaming,
     texture_pool_size,
+    texture_streaming_memory_margin,
+    texture_streaming_hysteresis_limit,
     minimum_texture_resident_mips,
     texture_async_defrag,
     texture_async_reallocation,
@@ -239,6 +243,7 @@ struct SettingDefinition {
     bool adaptive_allowed{true};
     std::span<const int> allowed_integers{};
     double editor_step{0};
+    bool insert_if_missing{false};
 };
 
 [[nodiscard]] const SettingDefinition* find_setting(SettingId id) noexcept;

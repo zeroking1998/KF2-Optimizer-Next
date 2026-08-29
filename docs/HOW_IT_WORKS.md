@@ -73,6 +73,16 @@ Configuration changes are transactional: preview, backup, write, verify, and
 restore. Locked or unknown settings are filtered out. The exact pre-session
 snapshot is the restoration source of truth.
 
+The protected startup plan uses KF2's native configuration keys. It enables
+`bPhysicsAsyncScene`, `bEnableAsyncScene`, and `OneFrameThreadLag`; it does not
+add similarly named `r.*` console variables. The most recent KF2 launch log
+identifies the renderer KF2 actually used; its dedicated VRAM selects a
+conservative texture-pool tier from 160 to 6000 MB and a bounded
+`MemoryMargin` and `HysteresisLimit`. A single physical adapter is unambiguous.
+On a multi-GPU system with no unique renderer match, existing streaming values
+are left unchanged. These startup-only values are restored from the exact
+pre-game snapshot.
+
 ## 6. Corpse-physics actions
 
 The corpse maximum selected by the user is a ceiling. A separate runtime budget

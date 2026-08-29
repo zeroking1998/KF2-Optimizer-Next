@@ -1,5 +1,6 @@
 #include "application_runtime.hpp"
 #include "kf2/config/setting_catalog.hpp"
+#include "kf2/game/game_log_locator.hpp"
 #include "runtime/action_contract.hpp"
 #include "runtime/action_router.hpp"
 #include "runtime/feature_composition.hpp"
@@ -7,6 +8,26 @@
 #include <algorithm>
 
 namespace kf2::app {
+namespace {
+
+void upsert_startup_change(
+    std::vector<config::RequestedChange>& changes, config::SettingId id,
+    config::SettingValue value, std::wstring_view reason) {
+    const auto existing = std::find_if(
+        changes.begin(), changes.end(), [id](const auto& change) {
+            return change.id == id;
+        });
+    const config::RequestedChange required{
+        id, std::move(value), config::ChangeSource::explicit_user,
+        std::wstring{reason}};
+    if (existing == changes.end()) {
+        changes.push_back(required);
+    } else {
+        *existing = required;
+    }
+}
+
+}  // namespace
 
 void preserve_user_flex_activation(
     std::vector<config::RequestedChange>& changes) noexcept {
@@ -30,6 +51,40 @@ void enforce_temporal_aa_disabled(
     } else {
         *existing = required;
     }
+}
+
+void enforce_async_physics_enabled(
+    std::vector<config::RequestedChange>& changes) noexcept {
+    upsert_startup_change(
+        changes, config::SettingId::physics_async_scene, true,
+        L"Enable the standard asynchronous physics scene at KF2 startup");
+    upsert_startup_change(
+        changes, config::SettingId::enable_async_scene, true,
+        L"Enable asynchronous scene processing at KF2 startup");
+}
+
+void enforce_one_frame_thread_lag(
+    std::vector<config::RequestedChange>& changes) noexcept {
+    upsert_startup_change(
+        changes, config::SettingId::one_frame_thread_lag, true,
+        L"Enable KF2's native one-frame render-thread pipeline at startup");
+}
+
+void enforce_startup_memory_profile(
+    std::vector<config::RequestedChange>& changes,
+    const optimizer::StartupMemoryProfile& profile) noexcept {
+    upsert_startup_change(
+        changes, config::SettingId::texture_pool_size,
+        profile.texture_pool_size_mb,
+        L"Size KF2's native texture pool from detected dedicated VRAM");
+    upsert_startup_change(
+        changes, config::SettingId::texture_streaming_memory_margin,
+        profile.memory_margin_mb,
+        L"Reserve a bounded native texture-streaming memory margin");
+    upsert_startup_change(
+        changes, config::SettingId::texture_streaming_hysteresis_limit,
+        profile.streaming_hysteresis_limit,
+        L"Use bounded native texture-streaming hysteresis");
 }
 
 Result<bool> UiRuntime::set_overlay(bool enabled) {
@@ -288,6 +343,35 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
         decision.changes, adaptive_locks);
     preserve_user_flex_activation(changes);
     enforce_temporal_aa_disabled(changes);
+    enforce_async_physics_enabled(changes);
+    enforce_one_frame_thread_lag(changes);
+    std::optional<optimizer::StartupMemoryProfile> startup_memory_profile;
+    std::wstring startup_memory_adapter_name;
+    const auto adapters = telemetry::enumerate_gpu_adapters();
+    if (adapters.has_value()) {
+        const auto physical = telemetry::unique_physical_gpu_adapters(
+            adapters.value());
+        std::optional<telemetry::GpuAdapter> selected;
+        if (physical.size() == 1) {
+            selected = physical.front();
+        } else if (installation && physical.size() > 1) {
+            const auto logged_renderer = game::find_last_render_adapter_name(
+                installation->config_root.parent_path() / L"Logs");
+            if (logged_renderer.has_value() && logged_renderer.value()) {
+                selected = telemetry::find_unique_hardware_gpu_adapter_by_name(
+                    physical, *logged_renderer.value());
+            }
+        }
+        if (selected) {
+            startup_memory_profile =
+                optimizer::recommended_startup_memory_profile(
+                    selected->dedicated_memory_bytes);
+            startup_memory_adapter_name = selected->name;
+        }
+    }
+    if (startup_memory_profile) {
+        enforce_startup_memory_profile(changes, *startup_memory_profile);
+    }
     if (changes.empty()) {
         return Result<config::ApplyResult>::failure({
             ErrorCode::access_denied,
@@ -315,6 +399,25 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
                   L" protected-provider profile capability; individual locks were preserved and the exact pre-game snapshot remains protected"
             : L"General Adaptive preserved the user's FleX setting; the exact pre-game snapshot remains protected",
         L"optimizer"});
+    if (startup_memory_profile) {
+        events->append({0, diagnostics::Severity::info,
+            "STARTUP_MEMORY_PROFILE_APPLIED",
+            L"KF2 startup memory uses the last confirmed renderer " +
+                startup_memory_adapter_name + L": texture pool " +
+                std::to_wstring(
+                    startup_memory_profile->texture_pool_size_mb) +
+                L" MB, memory margin " +
+                std::to_wstring(startup_memory_profile->memory_margin_mb) +
+                L" MB, streaming hysteresis " +
+                std::to_wstring(
+                    startup_memory_profile->streaming_hysteresis_limit),
+            L"optimizer"});
+    } else {
+        events->append({0, diagnostics::Severity::info,
+            "STARTUP_MEMORY_PROFILE_PRESERVED",
+            L"KF2 startup memory values were preserved because the active renderer could not be identified unambiguously",
+            L"optimizer"});
+    }
     return applied;
 }
 
