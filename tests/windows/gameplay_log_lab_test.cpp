@@ -122,6 +122,10 @@ int main() {
         "else if (Resource ~= \"overdraw\") Snapshot.OverdrawQuality = Quality") !=
           std::string::npos);
     CHECK(graphics_source.find(
+        "Snapshot.RamQuality = Quality;\n"
+        "        Snapshot.OverdrawQuality = Quality;") ==
+          std::string::npos);
+    CHECK(graphics_source.find(
         "Requested.FX.DropParticleDistortion = true") !=
           std::string::npos);
     CHECK(graphics_source.find(

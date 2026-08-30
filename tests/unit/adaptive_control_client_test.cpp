@@ -97,7 +97,7 @@ int main() {
     quality.apply({4, AdaptiveResourceControl::mixed, 50});
     CHECK(quality.cpu == 50 && quality.gpu == 50 &&
           quality.vram == 50 && quality.ram == 50 &&
-          quality.overdraw == 50);
+          quality.overdraw == 70);
     quality.reset(90);
     CHECK(quality.effective_quality() == 90);
 

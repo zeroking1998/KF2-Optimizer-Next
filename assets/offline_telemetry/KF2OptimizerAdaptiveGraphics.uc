@@ -706,7 +706,6 @@ static function bool ApplyResource(
         Snapshot.CpuQuality = Quality;
         Snapshot.VramQuality = Quality;
         Snapshot.RamQuality = Quality;
-        Snapshot.OverdrawQuality = Quality;
     }
     else return false;
 

@@ -31,6 +31,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Fixed adaptive mixed-pressure corrections consuming the dedicated overdraw
+  quality channel before verified overdraw pressure could select it.
+
 - Ragdoll Sleep now preserves an unconditional 800-unit safety radius around
   the player, even under severe frame, enemy, or corpse-density pressure.
 - Fixed hybrid-GPU systems sizing KF2's texture pool from the adapter with the

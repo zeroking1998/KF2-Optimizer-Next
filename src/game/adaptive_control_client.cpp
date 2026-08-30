@@ -174,7 +174,7 @@ void AdaptiveResourceQualityState::apply(
         case AdaptiveResourceControl::ram: ram = quality; break;
         case AdaptiveResourceControl::overdraw: overdraw = quality; break;
         case AdaptiveResourceControl::mixed:
-            cpu = gpu = vram = ram = overdraw = quality;
+            cpu = gpu = vram = ram = quality;
             break;
         case AdaptiveResourceControl::recover:
             cpu = std::max(cpu, quality);
