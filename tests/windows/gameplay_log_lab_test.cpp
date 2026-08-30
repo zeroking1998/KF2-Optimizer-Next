@@ -361,6 +361,53 @@ int main() {
         "FindAdaptiveDistanceSleptCorpse(Candidate) != -1") !=
           std::string::npos);
     CHECK(telemetry_source.find(
+        "struct AdaptiveDistanceSleepEntry") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "struct AdaptiveDistanceSleepTransitionEntry") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function bool RememberAdaptiveDistanceSleepTransition(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveDistanceSleepTransitions.Length = 8192") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "Slot = (Slot + 1) & 8191") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_CORPSE_DISTANCE state=removed") != std::string::npos);
+    CHECK(count_occurrences(
+        telemetry_source, "KF2OPT_CORPSE_DISTANCE state=removed") == 2);
+    CHECK(telemetry_source.find(
+        "AdaptiveCorpseManager.CorpsePool.Find(Candidate) >= 0") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("Index, \"native_wake\"") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("Index, \"physics_changed\"") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("Index, \"deleted\"") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("Index, \"reused\"") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_CORPSE_DISTANCE state=resleep") != std::string::npos);
+    CHECK(telemetry_source.find(" previous_reason=") != std::string::npos);
+    CHECK(telemetry_source.find("removal_reason=tracking_lost") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "state=tracking_full capacity=8192") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "action=disabled_to_preserve_traceability") != std::string::npos);
+    const auto distance_prune = telemetry_source.find(
+        "function PruneAdaptiveDistanceSleptCorpses()");
+    const auto native_wake_transition = telemetry_source.find(
+        "Candidate.Mesh.RigidBodyIsAwake()", distance_prune);
+    const auto native_wake_release = telemetry_source.find(
+        "Index, \"native_wake\"", native_wake_transition);
+    CHECK(distance_prune != std::string::npos);
+    CHECK(native_wake_transition != std::string::npos);
+    CHECK(native_wake_release != std::string::npos);
+    CHECK(native_wake_transition < native_wake_release);
+    CHECK(telemetry_source.find(
         "function string GetAdaptiveCorpseActionId(KFPawn Candidate)") !=
           std::string::npos);
     CHECK(telemetry_source.find(
@@ -370,8 +417,8 @@ int main() {
     CHECK(telemetry_source.find(
         "function int GetAdaptiveCorpseDistanceUnits(KFPawn Candidate)") !=
           std::string::npos);
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 6);
-    CHECK(count_occurrences(telemetry_source, " distance_units=") == 6);
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 9);
+    CHECK(count_occurrences(telemetry_source, " distance_units=") == 9);
     CHECK(telemetry_source.find(
         "var globalconfig bool bAdaptiveCorpseDebugMarkers") !=
           std::string::npos);
@@ -477,7 +524,8 @@ int main() {
     const auto wake_readback = telemetry_source.find(
         "if (!Candidate.Mesh.RigidBodyIsAwake())", wake_call);
     const auto wake_tracking_release = telemetry_source.find(
-        "RemoveAdaptiveDistanceSleptCorpseEntry(Index)", wake_function);
+        "RemoveAdaptiveDistanceSleptCorpseEntry(Index, \"optimizer_wake\")",
+        wake_function);
     const auto wake_receipt = telemetry_source.find(
         "KF2OPT_CORPSE_DISTANCE state=wake", wake_function);
     CHECK(wake_function != std::string::npos);
