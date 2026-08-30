@@ -16,6 +16,18 @@ struct AdaptiveCorpseDebugMarkerEntry
     var float ExpiresRealTime;
 };
 
+struct AdaptiveDistanceSleepEntry
+{
+    var KFPawn Corpse;
+    var string CorpseId;
+};
+
+struct AdaptiveDistanceSleepTransitionEntry
+{
+    var string CorpseId;
+    var string RemovalReason;
+};
+
 var int SampleSequence;
 var globalconfig bool bAdaptiveCorpseStagger;
 var globalconfig bool bAdaptiveCorpseDebugMarkers;
@@ -52,7 +64,11 @@ var array<int> AdaptiveCorpseLodAppliedMinModels;
 var int AdaptiveCorpseLodReductions;
 var int AdaptiveCorpseLodRestores;
 var float AdaptiveLastCorpseLodRealTime;
-var array<KFPawn> AdaptiveDistanceSleptCorpses;
+var array<AdaptiveDistanceSleepEntry> AdaptiveDistanceSleptCorpses;
+var array<AdaptiveDistanceSleepTransitionEntry>
+    AdaptiveDistanceSleepTransitions;
+var int AdaptiveDistanceSleepTransitionCount;
+var bool bAdaptiveDistanceSleepTransitionFullLogged;
 var int AdaptiveDistancePhysicsSleeps;
 var int AdaptiveDistancePhysicsWakes;
 var int AdaptiveVisibleRagdollSleeps;
@@ -902,12 +918,101 @@ function int FindAdaptiveDistanceSleptCorpse(KFPawn Candidate)
 
     for (Index = 0; Index < AdaptiveDistanceSleptCorpses.Length; ++Index)
     {
-        if (AdaptiveDistanceSleptCorpses[Index] == Candidate)
+        if (AdaptiveDistanceSleptCorpses[Index].Corpse == Candidate)
         {
             return Index;
         }
     }
     return -1;
+}
+
+function bool EnsureAdaptiveDistanceSleepTransitions()
+{
+    if (AdaptiveDistanceSleepTransitions.Length == 0)
+    {
+        AdaptiveDistanceSleepTransitions.Length = 8192;
+    }
+    return AdaptiveDistanceSleepTransitions.Length == 8192;
+}
+
+function int FindAdaptiveDistanceSleepTransition(string CorpseId)
+{
+    local int Probe;
+    local int Slot;
+
+    if (CorpseId == "" || CorpseId == "none" ||
+        AdaptiveDistanceSleepTransitions.Length != 8192)
+    {
+        return -1;
+    }
+    Slot = GetAdaptiveCorpsePhysicsActionHash("distance:"$CorpseId);
+    for (Probe = 0; Probe < 8192; ++Probe)
+    {
+        if (AdaptiveDistanceSleepTransitions[Slot].CorpseId == CorpseId)
+        {
+            return Slot;
+        }
+        if (AdaptiveDistanceSleepTransitions[Slot].CorpseId == "")
+        {
+            return -1;
+        }
+        Slot = (Slot + 1) & 8191;
+    }
+    return -1;
+}
+
+function int FindOrAddAdaptiveDistanceSleepTransition(string CorpseId)
+{
+    local int Probe;
+    local int Slot;
+
+    if (CorpseId == "" || CorpseId == "none" ||
+        !EnsureAdaptiveDistanceSleepTransitions())
+    {
+        return -1;
+    }
+    Slot = GetAdaptiveCorpsePhysicsActionHash("distance:"$CorpseId);
+    for (Probe = 0; Probe < 8192; ++Probe)
+    {
+        if (AdaptiveDistanceSleepTransitions[Slot].CorpseId == CorpseId)
+        {
+            return Slot;
+        }
+        if (AdaptiveDistanceSleepTransitions[Slot].CorpseId == "")
+        {
+            AdaptiveDistanceSleepTransitions[Slot].CorpseId = CorpseId;
+            ++AdaptiveDistanceSleepTransitionCount;
+            return Slot;
+        }
+        Slot = (Slot + 1) & 8191;
+    }
+    return -1;
+}
+
+function string GetAdaptiveDistanceSleepTransitionReason(string CorpseId)
+{
+    local int Index;
+
+    Index = FindAdaptiveDistanceSleepTransition(CorpseId);
+    if (Index < 0)
+    {
+        return "";
+    }
+    return AdaptiveDistanceSleepTransitions[Index].RemovalReason;
+}
+
+function bool RememberAdaptiveDistanceSleepTransition(
+    string CorpseId, string RemovalReason)
+{
+    local int Index;
+
+    Index = FindOrAddAdaptiveDistanceSleepTransition(CorpseId);
+    if (Index < 0)
+    {
+        return false;
+    }
+    AdaptiveDistanceSleepTransitions[Index].RemovalReason = RemovalReason;
+    return true;
 }
 
 function string GetAdaptiveCorpseActionId(KFPawn Candidate)
@@ -1139,11 +1244,46 @@ function DrawAdaptiveCorpseDebugMarkers(Canvas MarkerCanvas)
     }
 }
 
-function RemoveAdaptiveDistanceSleptCorpseEntry(int Index)
+function int GetAdaptiveCorpseEffectiveAwake(KFPawn Candidate)
 {
+    if (Candidate == None || Candidate.Mesh == None)
+    {
+        return -1;
+    }
+    return Candidate.Mesh.RigidBodyIsAwake() ? 1 : 0;
+}
+
+function bool IsAdaptiveCorpseInPool(KFPawn Candidate)
+{
+    if (Candidate == None || AdaptiveCorpseManager == None)
+    {
+        return false;
+    }
+    // Dynamic-array Find is native. Avoid a script-level nested scan while
+    // pruning a large tracked corpse set every control pass.
+    return AdaptiveCorpseManager.CorpsePool.Find(Candidate) >= 0;
+}
+
+function RemoveAdaptiveDistanceSleptCorpseEntry(
+    int Index, string RemovalReason)
+{
+    local int DistanceUnits;
+    local int EffectiveAwake;
+    local string CorpseId;
+    local KFPawn Candidate;
+
     if (Index >= 0 && Index < AdaptiveDistanceSleptCorpses.Length)
     {
+        Candidate = AdaptiveDistanceSleptCorpses[Index].Corpse;
+        CorpseId = AdaptiveDistanceSleptCorpses[Index].CorpseId;
+        DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
+        EffectiveAwake = GetAdaptiveCorpseEffectiveAwake(Candidate);
+        RememberAdaptiveDistanceSleepTransition(CorpseId, RemovalReason);
         AdaptiveDistanceSleptCorpses.Remove(Index, 1);
+        `log("KF2OPT_CORPSE_DISTANCE state=removed previous_state=sleep"$
+             " removal_reason="$RemovalReason$" corpse_id="$CorpseId$
+             " distance_units="$DistanceUnits$
+             " effective_awake="$EffectiveAwake);
     }
 }
 
@@ -1155,13 +1295,34 @@ function PruneAdaptiveDistanceSleptCorpses()
     for (Index = AdaptiveDistanceSleptCorpses.Length - 1;
          Index >= 0; --Index)
     {
-        Candidate = AdaptiveDistanceSleptCorpses[Index];
-        if (Candidate == None || Candidate.bDeleteMe ||
-            KFPawn_Monster(Candidate) == None || Candidate.Mesh == None ||
-            Candidate.TimeOfDeath <= 0.0 ||
-            Candidate.Physics != PHYS_RigidBody)
+        Candidate = AdaptiveDistanceSleptCorpses[Index].Corpse;
+        if (Candidate == None || Candidate.bDeleteMe)
         {
-            RemoveAdaptiveDistanceSleptCorpseEntry(Index);
+            RemoveAdaptiveDistanceSleptCorpseEntry(Index, "deleted");
+        }
+        else if (GetAdaptiveCorpseActionId(Candidate) !=
+                 AdaptiveDistanceSleptCorpses[Index].CorpseId)
+        {
+            RemoveAdaptiveDistanceSleptCorpseEntry(Index, "reused");
+        }
+        else if (KFPawn_Monster(Candidate) == None || Candidate.Mesh == None ||
+                 Candidate.TimeOfDeath <= 0.0)
+        {
+            RemoveAdaptiveDistanceSleptCorpseEntry(Index, "invalidated");
+        }
+        else if (!IsAdaptiveCorpseInPool(Candidate))
+        {
+            RemoveAdaptiveDistanceSleptCorpseEntry(
+                Index, "removed_from_pool");
+        }
+        else if (Candidate.Physics != PHYS_RigidBody)
+        {
+            RemoveAdaptiveDistanceSleptCorpseEntry(
+                Index, "physics_changed");
+        }
+        else if (Candidate.Mesh.RigidBodyIsAwake())
+        {
+            RemoveAdaptiveDistanceSleptCorpseEntry(Index, "native_wake");
         }
     }
 }
@@ -1184,7 +1345,7 @@ function int WakeNearAdaptiveDistanceSleptCorpses()
     for (Index = AdaptiveDistanceSleptCorpses.Length - 1;
          Index >= 0; --Index)
     {
-        Candidate = AdaptiveDistanceSleptCorpses[Index];
+        Candidate = AdaptiveDistanceSleptCorpses[Index].Corpse;
         DistanceSquared = VSizeSq(
             Candidate.Location - LocalPC.ViewTarget.Location);
         // Wake every tracked corpse inside the 800-unit interaction radius
@@ -1207,7 +1368,7 @@ function int WakeNearAdaptiveDistanceSleptCorpses()
             ++WakeCount;
             RegisterAdaptiveCorpseDebugMarker(Candidate, "WAKE");
         }
-        RemoveAdaptiveDistanceSleptCorpseEntry(Index);
+        RemoveAdaptiveDistanceSleptCorpseEntry(Index, "optimizer_wake");
         if (bWasSleeping)
         {
             `log("KF2OPT_CORPSE_DISTANCE state=wake woken="$
@@ -1306,6 +1467,10 @@ function bool SleepOneDistantMonsterCorpse(
     KFGoreManager GoreManager, int PhysicsPressureLevel,
     int VisibleLivingZeds, int VisibleCorpses)
 {
+    local int EntryIndex;
+    local int TransitionIndex;
+    local string CorpseId;
+    local string PreviousReason;
     local KFPawn Candidate;
 
     Candidate = SelectDistantAwakeMonsterCorpseForSleep(
@@ -1314,6 +1479,31 @@ function bool SleepOneDistantMonsterCorpse(
     {
         return false;
     }
+    CorpseId = GetAdaptiveCorpseActionId(Candidate);
+    TransitionIndex = FindOrAddAdaptiveDistanceSleepTransition(CorpseId);
+    if (TransitionIndex < 0)
+    {
+        if (!bAdaptiveDistanceSleepTransitionFullLogged)
+        {
+            bAdaptiveDistanceSleepTransitionFullLogged = true;
+            `log("KF2OPT_CORPSE_DISTANCE state=tracking_full capacity=8192"$
+                 " used="$AdaptiveDistanceSleepTransitionCount$
+                 " action=disabled_to_preserve_traceability");
+        }
+        return false;
+    }
+    PreviousReason = GetAdaptiveDistanceSleepTransitionReason(CorpseId);
+    if (PreviousReason == "tracked")
+    {
+        PreviousReason = "tracking_lost";
+        AdaptiveDistanceSleepTransitions[TransitionIndex].RemovalReason =
+            PreviousReason;
+        `log("KF2OPT_CORPSE_DISTANCE state=removed previous_state=sleep"$
+             " removal_reason=tracking_lost corpse_id="$CorpseId$
+             " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
+             " effective_awake="$
+             GetAdaptiveCorpseEffectiveAwake(Candidate));
+    }
     Candidate.Mesh.PutRigidBodyToSleep();
     if (Candidate.Mesh.RigidBodyIsAwake())
     {
@@ -1321,20 +1511,42 @@ function bool SleepOneDistantMonsterCorpse(
     }
     Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
     Candidate.Mesh.bNoSkeletonUpdate = true;
-    AdaptiveDistanceSleptCorpses.AddItem(Candidate);
+    EntryIndex = AdaptiveDistanceSleptCorpses.Length;
+    AdaptiveDistanceSleptCorpses.Length = EntryIndex + 1;
+    AdaptiveDistanceSleptCorpses[EntryIndex].Corpse = Candidate;
+    AdaptiveDistanceSleptCorpses[EntryIndex].CorpseId = CorpseId;
+    AdaptiveDistanceSleepTransitions[TransitionIndex].RemovalReason =
+        "tracked";
     ++AdaptiveDistancePhysicsSleeps;
     ++AdaptiveCorpsesSlept;
     RegisterAdaptiveCorpseDebugMarker(Candidate, "DIST_SLEEP");
-    `log("KF2OPT_CORPSE_DISTANCE state=sleep physics_level="$
-         PhysicsPressureLevel$" frame_level="$AdaptiveCorpsePressureLevel$
-         " scene_level="$AdaptiveCorpseScenePressureLevel$
-         " quality_steps="$GetAdaptiveCorpseAttackScale()$" slept="$
-         AdaptiveDistancePhysicsSleeps$" tracked="$
-         AdaptiveDistanceSleptCorpses.Length$" visible_living="$
-         VisibleLivingZeds$" visible_corpses="$VisibleCorpses$
-         " corpse_id="$GetAdaptiveCorpseActionId(Candidate)$
-         " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
-         " effective_awake=0");
+    if (PreviousReason != "")
+    {
+        `log("KF2OPT_CORPSE_DISTANCE state=resleep previous_reason="$
+             PreviousReason$" physics_level="$PhysicsPressureLevel$
+             " frame_level="$AdaptiveCorpsePressureLevel$
+             " scene_level="$AdaptiveCorpseScenePressureLevel$
+             " quality_steps="$GetAdaptiveCorpseAttackScale()$" slept="$
+             AdaptiveDistancePhysicsSleeps$" tracked="$
+             AdaptiveDistanceSleptCorpses.Length$" visible_living="$
+             VisibleLivingZeds$" visible_corpses="$VisibleCorpses$
+             " corpse_id="$CorpseId$" distance_units="$
+             GetAdaptiveCorpseDistanceUnits(Candidate)$
+             " effective_awake=0");
+    }
+    else
+    {
+        `log("KF2OPT_CORPSE_DISTANCE state=sleep physics_level="$
+             PhysicsPressureLevel$" frame_level="$AdaptiveCorpsePressureLevel$
+             " scene_level="$AdaptiveCorpseScenePressureLevel$
+             " quality_steps="$GetAdaptiveCorpseAttackScale()$" slept="$
+             AdaptiveDistancePhysicsSleeps$" tracked="$
+             AdaptiveDistanceSleptCorpses.Length$" visible_living="$
+             VisibleLivingZeds$" visible_corpses="$VisibleCorpses$
+             " corpse_id="$CorpseId$" distance_units="$
+             GetAdaptiveCorpseDistanceUnits(Candidate)$
+             " effective_awake=0");
+    }
     return true;
 }
 
@@ -2964,6 +3176,9 @@ function QuiesceForWorldTeardown()
     AdaptiveLivingOriginalAnimRates.Length = 0;
     AdaptiveLivingAppliedAnimRates.Length = 0;
     AdaptiveDistanceSleptCorpses.Length = 0;
+    AdaptiveDistanceSleepTransitions.Length = 0;
+    AdaptiveDistanceSleepTransitionCount = 0;
+    bAdaptiveDistanceSleepTransitionFullLogged = false;
     AdaptiveCorpseDebugMarkers.Length = 0;
     AdaptiveCorpsePhysicsActionIds.Length = 0;
     AdaptiveCorpsePhysicsActionIdCount = 0;

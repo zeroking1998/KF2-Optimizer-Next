@@ -187,6 +187,12 @@ int main() {
     auto invalid_options = options;
     invalid_options.module_asset = invalid_asset;
     CHECK(!install_offline_telemetry_lab(invalid_options).has_value());
+    const auto oversized_asset =
+        root / L"oversized" / L"KF2OptimizerTelemetry.u";
+    write_bytes(oversized_asset, std::string(512U * 1024U + 1U, '\0'));
+    auto oversized_options = options;
+    oversized_options.module_asset = oversized_asset;
+    CHECK(!install_offline_telemetry_lab(oversized_options).has_value());
     auto running_options = options;
     running_options.game_running = true;
     CHECK(!install_offline_telemetry_lab(running_options).has_value());
