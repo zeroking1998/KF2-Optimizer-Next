@@ -664,6 +664,20 @@ void UiRuntime::update_adaptive_controller(
         } else {
             decision_log << L"NOT_AVAILABLE";
         }
+        decision_log << L"; gpuSampleAgeMs=";
+        if (frame.gpu_utilization) {
+            decision_log << frame.gpu_utilization->sample_age_ns / 1'000'000ULL
+                         << L"; gpuContinuity="
+                         << frame.gpu_utilization->continuity_samples
+                         << L"; gpuSampleConfidence=" << std::setprecision(0)
+                         << frame.gpu_utilization->confidence * 100.0 << L"%"
+                         << L"; gpuAdapterLuid=0x" << std::hex
+                         << frame.gpu_utilization->adapter_luid << std::dec;
+        } else {
+            decision_log << L"NOT_AVAILABLE; gpuContinuity=0"
+                         << L"; gpuSampleConfidence=0%"
+                         << L"; gpuAdapterLuid=NOT_AVAILABLE";
+        }
         const auto primary_resource = [&]() -> const wchar_t* {
             switch (adaptive_decision.resources.primary) {
                 case optimizer::ResourceKind::cpu: return L"CPU";

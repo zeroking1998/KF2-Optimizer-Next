@@ -217,6 +217,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     process_metrics.reset();
     gpu_metrics.reset();
     nvidia_gpu_metrics.reset();
+    gpu_utilization_filter.reset();
     adaptive_adapter_luid.reset();
     optimizer_evidence = {};
     adaptive_governor.reset();
@@ -771,6 +772,7 @@ void UiRuntime::bind_process_gpu_adapter(std::uint64_t adapter_luid) {
     }
 
     if (adaptive_adapter_luid && *adaptive_adapter_luid == adapter_luid) return;
+    gpu_utilization_filter.reset();
     adaptive_adapter_luid = adapter_luid;
     adapter_vram_budget = adapter->dedicated_memory_bytes;
     if (auto gpu = telemetry::PdhGpuSampler::create(
