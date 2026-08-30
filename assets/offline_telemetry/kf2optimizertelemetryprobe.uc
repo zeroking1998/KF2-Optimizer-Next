@@ -26,6 +26,8 @@ struct AdaptiveDistanceSleepTransitionEntry
 {
     var string CorpseId;
     var string RemovalReason;
+    var int NativeWakeDistanceUnits;
+    var float NativeWakeObservedRealTime;
 };
 
 var int SampleSequence;
@@ -100,6 +102,12 @@ function bool ApplyAdaptiveResourceControl(
     string Token, int Sequence, string Resource, int Quality)
 {
     local int QualityStage;
+    local int PreviousGpuQuality;
+    local int PreviousCpuQuality;
+    local int PreviousVramQuality;
+    local int PreviousRamQuality;
+    local int PreviousOverdrawQuality;
+    local int PreviousEffectsQuality;
 
     if (!ValidAdaptiveControlToken(Token) || Sequence <= 0 ||
         Sequence <= AdaptiveLastControlSequence ||
@@ -107,6 +115,7 @@ function bool ApplyAdaptiveResourceControl(
         !((Resource ~= "gpu") || (Resource ~= "vram") ||
           (Resource ~= "cpu") || (Resource ~= "ram") ||
           (Resource ~= "overdraw") ||
+          (Resource ~= "effects") ||
           (Resource ~= "mixed") || (Resource ~= "recover")))
     {
         return false;
@@ -118,6 +127,18 @@ function bool ApplyAdaptiveResourceControl(
         AdaptiveGraphicsState = new(self)
             class'KF2OptimizerAdaptiveGraphicsState';
     }
+    PreviousGpuQuality = AdaptiveGraphicsState == None
+        ? 100 : AdaptiveGraphicsState.GpuQuality;
+    PreviousCpuQuality = AdaptiveGraphicsState == None
+        ? 100 : AdaptiveGraphicsState.CpuQuality;
+    PreviousVramQuality = AdaptiveGraphicsState == None
+        ? 100 : AdaptiveGraphicsState.VramQuality;
+    PreviousRamQuality = AdaptiveGraphicsState == None
+        ? 100 : AdaptiveGraphicsState.RamQuality;
+    PreviousOverdrawQuality = AdaptiveGraphicsState == None
+        ? 100 : AdaptiveGraphicsState.OverdrawQuality;
+    PreviousEffectsQuality = AdaptiveGraphicsState == None
+        ? 100 : AdaptiveGraphicsState.EffectsQuality;
     if (AdaptiveGraphicsState == None ||
         !class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
             AdaptiveGraphicsState, Resource, Quality))
@@ -125,6 +146,23 @@ function bool ApplyAdaptiveResourceControl(
         `log("KF2OPT_ADAPTIVE_QUALITY state=failed seq="$Sequence$
              " resource="$Resource$" quality="$Quality$
              " reason=readback_mismatch");
+        return false;
+    }
+    if (!ApplyAdaptiveEffectRuntimeReadback(Resource, Quality))
+    {
+        if (!RollbackAdaptiveResourceControl(
+                PreviousGpuQuality, PreviousCpuQuality,
+                PreviousVramQuality, PreviousRamQuality,
+                PreviousOverdrawQuality, PreviousEffectsQuality) ||
+            !ApplyAdaptiveEffectRuntimeReadback(
+                "rollback", PreviousEffectsQuality))
+        {
+            `log("KF2OPT_EFFECT_RUNTIME state=rollback_failed resource="$
+                 Resource$" quality="$Quality);
+        }
+        `log("KF2OPT_ADAPTIVE_QUALITY state=failed seq="$Sequence$
+             " resource="$Resource$" quality="$Quality$
+             " reason=runtime_readback_mismatch");
         return false;
     }
 
@@ -138,10 +176,192 @@ function bool ApplyAdaptiveResourceControl(
     return true;
 }
 
+function bool RollbackAdaptiveResourceControl(
+    int GpuQuality, int CpuQuality, int VramQuality, int RamQuality,
+    int OverdrawQuality, int EffectsQuality)
+{
+    local bool bRestored;
+
+    bRestored = true;
+    if (!class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
+            AdaptiveGraphicsState, "gpu", GpuQuality))
+    {
+        bRestored = false;
+    }
+    if (!class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
+            AdaptiveGraphicsState, "cpu", CpuQuality))
+    {
+        bRestored = false;
+    }
+    if (!class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
+            AdaptiveGraphicsState, "vram", VramQuality))
+    {
+        bRestored = false;
+    }
+    if (!class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
+            AdaptiveGraphicsState, "ram", RamQuality))
+    {
+        bRestored = false;
+    }
+    if (!class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
+            AdaptiveGraphicsState, "overdraw", OverdrawQuality))
+    {
+        bRestored = false;
+    }
+    if (!class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
+            AdaptiveGraphicsState, "effects", EffectsQuality))
+    {
+        bRestored = false;
+    }
+    return bRestored;
+}
+
+// KF2's graphics menu updates class defaults, but managers and emitter pools
+// created earlier in the current world keep their old limits. Synchronize the
+// already-live instances and include them in the authenticated APPLIED result.
+function bool ApplyAdaptiveEffectRuntimeReadback(
+    string Resource, int Quality)
+{
+    local KFGoreManager GoreManager;
+    local KFImpactEffectManager ImpactEffectManager;
+    local int DesiredImpactEffects;
+    local bool bReadbackMatches;
+
+    if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
+    {
+        return false;
+    }
+    GoreManager = KFGoreManager(WorldInfo.MyGoreEffectManager);
+    if (GoreManager == None)
+    {
+        `log("KF2OPT_EFFECT_RUNTIME state=unavailable resource="$Resource$
+             " quality="$Quality$" reason=no_gore_manager");
+        return false;
+    }
+
+    GoreManager.GoreFXLifetimeMultiplier =
+        class'KFGoreManager'.default.GoreFXLifetimeMultiplier;
+    GoreManager.MaxBodyWoundDecals =
+        class'KFGoreManager'.default.MaxBodyWoundDecals;
+    GoreManager.MaxBloodEffects =
+        class'KFGoreManager'.default.MaxBloodEffects;
+    GoreManager.MaxGoreEffects =
+        class'KFGoreManager'.default.MaxGoreEffects;
+    GoreManager.MaxPersistentSplatsPerFrame =
+        class'KFGoreManager'.default.MaxPersistentSplatsPerFrame;
+    GoreManager.bAllowBloodSplatterDecals =
+        class'KFGoreManager'.default.bAllowBloodSplatterDecals;
+    if (GoreManager.BodyWoundDecalManager != None)
+    {
+        GoreManager.BodyWoundDecalManager.MaxActiveDecals =
+            GoreManager.MaxBodyWoundDecals;
+    }
+    if (GoreManager.BloodFXEmitterPool != None)
+    {
+        GoreManager.BloodFXEmitterPool.MaxActiveEffects =
+            GoreManager.MaxBloodEffects;
+    }
+    if (GoreManager.MiscGoreFXEmitterPool != None)
+    {
+        GoreManager.MiscGoreFXEmitterPool.MaxActiveEffects =
+            GoreManager.MaxGoreEffects;
+    }
+
+    ImpactEffectManager =
+        KFImpactEffectManager(WorldInfo.MyImpactEffectManager);
+    if (ImpactEffectManager != None)
+    {
+        ImpactEffectManager.MaxImpactEffectDecals =
+            class'KFImpactEffectManager'.default.MaxImpactEffectDecals;
+        if (ImpactEffectManager.ImpactEffectDecalManager != None)
+        {
+            ImpactEffectManager.ImpactEffectDecalManager.MaxActiveDecals =
+                ImpactEffectManager.MaxImpactEffectDecals;
+        }
+    }
+    DesiredImpactEffects = Max(1, int(
+        float(class'KFImpactFXEmitterPool'.default.MaxActiveEffects) *
+        class'WorldInfo'.default.EmitterPoolScale));
+    if (WorldInfo.ImpactFXEmitterPool != None)
+    {
+        WorldInfo.ImpactFXEmitterPool.MaxActiveEffects =
+            DesiredImpactEffects;
+    }
+    WorldInfo.MaxExplosionDecals = class'WorldInfo'.default.MaxExplosionDecals;
+    if (WorldInfo.ExplosionDecalManager != None)
+    {
+        WorldInfo.ExplosionDecalManager.MaxActiveDecals =
+            WorldInfo.MaxExplosionDecals;
+    }
+
+    bReadbackMatches =
+        Abs(GoreManager.GoreFXLifetimeMultiplier -
+            class'KFGoreManager'.default.GoreFXLifetimeMultiplier) < 0.001 &&
+        GoreManager.MaxBodyWoundDecals ==
+            class'KFGoreManager'.default.MaxBodyWoundDecals &&
+        GoreManager.MaxBloodEffects ==
+            class'KFGoreManager'.default.MaxBloodEffects &&
+        GoreManager.MaxGoreEffects ==
+            class'KFGoreManager'.default.MaxGoreEffects &&
+        GoreManager.MaxPersistentSplatsPerFrame ==
+            class'KFGoreManager'.default.MaxPersistentSplatsPerFrame &&
+        GoreManager.bAllowBloodSplatterDecals ==
+            class'KFGoreManager'.default.bAllowBloodSplatterDecals &&
+        (GoreManager.BodyWoundDecalManager == None ||
+         GoreManager.BodyWoundDecalManager.MaxActiveDecals ==
+            GoreManager.MaxBodyWoundDecals) &&
+        (GoreManager.BloodFXEmitterPool == None ||
+         GoreManager.BloodFXEmitterPool.MaxActiveEffects ==
+            GoreManager.MaxBloodEffects) &&
+        (GoreManager.MiscGoreFXEmitterPool == None ||
+         GoreManager.MiscGoreFXEmitterPool.MaxActiveEffects ==
+            GoreManager.MaxGoreEffects) &&
+        (ImpactEffectManager == None ||
+         (ImpactEffectManager.MaxImpactEffectDecals ==
+            class'KFImpactEffectManager'.default.MaxImpactEffectDecals &&
+          (ImpactEffectManager.ImpactEffectDecalManager == None ||
+           ImpactEffectManager.ImpactEffectDecalManager.MaxActiveDecals ==
+            ImpactEffectManager.MaxImpactEffectDecals))) &&
+        (WorldInfo.ImpactFXEmitterPool == None ||
+         WorldInfo.ImpactFXEmitterPool.MaxActiveEffects ==
+            DesiredImpactEffects) &&
+        WorldInfo.MaxExplosionDecals ==
+            class'WorldInfo'.default.MaxExplosionDecals &&
+        (WorldInfo.ExplosionDecalManager == None ||
+         WorldInfo.ExplosionDecalManager.MaxActiveDecals ==
+            WorldInfo.MaxExplosionDecals);
+    if (!bReadbackMatches)
+    {
+        `log("KF2OPT_EFFECT_RUNTIME state=failed resource="$Resource$
+             " quality="$Quality$" reason=readback_mismatch");
+        return false;
+    }
+    `log("KF2OPT_EFFECT_RUNTIME state=applied resource="$Resource$
+         " quality="$Quality$" blood_limit="$GoreManager.MaxBloodEffects$
+         " gore_limit="$GoreManager.MaxGoreEffects$
+         " blood_pool="$
+         (GoreManager.BloodFXEmitterPool == None ? -1 :
+          GoreManager.BloodFXEmitterPool.MaxActiveEffects)$
+         " gore_pool="$
+         (GoreManager.MiscGoreFXEmitterPool == None ? -1 :
+          GoreManager.MiscGoreFXEmitterPool.MaxActiveEffects)$
+         " wound_decals="$GoreManager.MaxBodyWoundDecals$
+         " impact_decals="$
+         (ImpactEffectManager == None ? -1 :
+          ImpactEffectManager.MaxImpactEffectDecals)$
+         " impact_pool="$
+         (WorldInfo.ImpactFXEmitterPool == None ? -1 :
+          WorldInfo.ImpactFXEmitterPool.MaxActiveEffects)$
+         " explosion_decals="$WorldInfo.MaxExplosionDecals$
+         " readback=verified");
+    return true;
+}
+
 function RestoreAdaptiveGraphics()
 {
     if (!class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
-            AdaptiveGraphicsState))
+            AdaptiveGraphicsState) ||
+        !ApplyAdaptiveEffectRuntimeReadback("restore", 100))
     {
         `log("KF2OPT_ADAPTIVE_QUALITY state=restore_failed reason=readback_mismatch");
         return;
@@ -1003,7 +1223,7 @@ function string GetAdaptiveDistanceSleepTransitionReason(string CorpseId)
 }
 
 function bool RememberAdaptiveDistanceSleepTransition(
-    string CorpseId, string RemovalReason)
+    string CorpseId, string RemovalReason, int DistanceUnits)
 {
     local int Index;
 
@@ -1013,7 +1233,47 @@ function bool RememberAdaptiveDistanceSleepTransition(
         return false;
     }
     AdaptiveDistanceSleepTransitions[Index].RemovalReason = RemovalReason;
+    AdaptiveDistanceSleepTransitions[Index].NativeWakeDistanceUnits =
+        RemovalReason == "native_wake" ? DistanceUnits : -1;
+    AdaptiveDistanceSleepTransitions[Index].NativeWakeObservedRealTime =
+        RemovalReason == "native_wake" ? WorldInfo.RealTimeSeconds : 0.0;
     return true;
+}
+
+function bool DeferAdaptiveDistanceResleepAfterNativeWake(KFPawn Candidate)
+{
+    local int CurrentDistanceUnits;
+    local int Index;
+    local int NativeWakeDistanceUnits;
+    local float NativeWakeAge;
+
+    Index = FindAdaptiveDistanceSleepTransition(
+        GetAdaptiveCorpseActionId(Candidate));
+    if (Index < 0 ||
+        AdaptiveDistanceSleepTransitions[Index].RemovalReason !=
+            "native_wake")
+    {
+        return false;
+    }
+    CurrentDistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
+    NativeWakeDistanceUnits =
+        AdaptiveDistanceSleepTransitions[Index].NativeWakeDistanceUnits;
+    NativeWakeAge = WorldInfo.RealTimeSeconds -
+        AdaptiveDistanceSleepTransitions[Index].NativeWakeObservedRealTime;
+    // Always respect native ownership for one second. For the next four
+    // seconds, require the corpse to be at least 250 units farther away.
+    // The five-second upper bound also prevents invalid distance data from
+    // permanently excluding an actor from distance sleep.
+    if (NativeWakeAge < 1.0)
+    {
+        return true;
+    }
+    if (NativeWakeAge >= 5.0)
+    {
+        return false;
+    }
+    return CurrentDistanceUnits < 0 || NativeWakeDistanceUnits < 0 ||
+        CurrentDistanceUnits < NativeWakeDistanceUnits + 250;
 }
 
 function string GetAdaptiveCorpseActionId(KFPawn Candidate)
@@ -1279,7 +1539,8 @@ function RemoveAdaptiveDistanceSleptCorpseEntry(
         CorpseId = AdaptiveDistanceSleptCorpses[Index].CorpseId;
         DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
         EffectiveAwake = GetAdaptiveCorpseEffectiveAwake(Candidate);
-        RememberAdaptiveDistanceSleepTransition(CorpseId, RemovalReason);
+        RememberAdaptiveDistanceSleepTransition(
+            CorpseId, RemovalReason, DistanceUnits);
         AdaptiveDistanceSleptCorpses.Remove(Index, 1);
         `log("KF2OPT_CORPSE_DISTANCE state=removed previous_state=sleep"$
              " removal_reason="$RemovalReason$" corpse_id="$CorpseId$
@@ -1431,7 +1692,8 @@ function KFPawn SelectDistantAwakeMonsterCorpseForSleep(
             Candidate.SpecialMove == SM_DeathAnim ||
             !Candidate.Mesh.RigidBodyIsAwake() ||
             VSizeSq(Candidate.Velocity) > MaximumSpeedSquared ||
-            FindAdaptiveDistanceSleptCorpse(Candidate) != -1)
+            FindAdaptiveDistanceSleptCorpse(Candidate) != -1 ||
+            DeferAdaptiveDistanceResleepAfterNativeWake(Candidate))
         {
             continue;
         }
@@ -1518,6 +1780,10 @@ function bool SleepOneDistantMonsterCorpse(
     AdaptiveDistanceSleptCorpses[EntryIndex].CorpseId = CorpseId;
     AdaptiveDistanceSleepTransitions[TransitionIndex].RemovalReason =
         "tracked";
+    AdaptiveDistanceSleepTransitions[TransitionIndex].NativeWakeDistanceUnits =
+        -1;
+    AdaptiveDistanceSleepTransitions[TransitionIndex].NativeWakeObservedRealTime =
+        0.0;
     ++AdaptiveDistancePhysicsSleeps;
     ++AdaptiveCorpsesSlept;
     RegisterAdaptiveCorpseDebugMarker(Candidate, "DIST_SLEEP");

@@ -8,6 +8,7 @@ var int CpuQuality;
 var int VramQuality;
 var int RamQuality;
 var int OverdrawQuality;
+var int EffectsQuality;
 var int OriginalMaxWholeSceneShadowResolution;
 var int OriginalMaxShadowResolution;
 var int OriginalShadowFadeResolution;
@@ -72,4 +73,5 @@ defaultproperties
     VramQuality=100
     RamQuality=100
     OverdrawQuality=100
+    EffectsQuality=100
 }

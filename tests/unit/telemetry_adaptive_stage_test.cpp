@@ -118,6 +118,7 @@ int main() {
     context.map_generation = 4;
     context.last_telemetry_sample = 16;
     context.flex_now_ms = 10'000;
+    context.effects_control_verified = true;
 
     const auto built = build_adaptive_sample(frame, context);
     const auto& sample = built.sample;
@@ -183,6 +184,10 @@ int main() {
     CHECK(sample.capabilities.corpse_telemetry ==
           optimizer::AdaptiveCapabilityState::available);
     CHECK(sample.capabilities.corpse_control ==
+          optimizer::AdaptiveCapabilityState::available);
+    CHECK(sample.capabilities.gore_control ==
+          optimizer::AdaptiveCapabilityState::available);
+    CHECK(sample.capabilities.particle_control ==
           optimizer::AdaptiveCapabilityState::available);
     CHECK(sample.capabilities.flex_telemetry ==
           optimizer::AdaptiveCapabilityState::available);
@@ -277,6 +282,10 @@ int main() {
           optimizer::AdaptiveCapabilityState::available);
     CHECK(online_sample.capabilities.corpse_control ==
           optimizer::AdaptiveCapabilityState::unavailable);
+    CHECK(online_sample.capabilities.gore_control ==
+          optimizer::AdaptiveCapabilityState::unavailable);
+    CHECK(online_sample.capabilities.particle_control ==
+          optimizer::AdaptiveCapabilityState::unavailable);
     CHECK(online_sample.capabilities.flex_solver_substep_control ==
           optimizer::AdaptiveCapabilityState::unavailable);
     online.gameplay->net_mode = "NM_ListenServer";
@@ -338,6 +347,37 @@ int main() {
     CHECK(selected.has_value());
     CHECK(selected->resource == game::AdaptiveResourceControl::overdraw);
     CHECK(selected->quality == 90);
+    control.overdraw_minimum_reached = true;
+    control.effects_control_available = true;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::effects);
+    control.effects_control_available = false;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
+    control.effects_control_available = true;
+    CHECK(selected->quality == 90);
+    control.overdraw_minimum_reached = false;
+    control.bottleneck = optimizer::AdaptiveBottleneck::gore;
+    control.bottleneck_confidence = 0.60;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::effects);
+    control.bottleneck = optimizer::AdaptiveBottleneck::particles;
+    control.bottleneck_confidence = 0.64;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::effects);
+    control.effects_control_available = false;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
+    control.effects_control_available = true;
+    control.bottleneck_confidence = 0.50;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
     control.bottleneck = optimizer::AdaptiveBottleneck::unknown;
     control.bottleneck_confidence = 0.0;
     control.primary_resource = optimizer::ResourceKind::cpu;

@@ -50,6 +50,16 @@ int main() {
     CHECK(overdraw_command.has_value());
     CHECK(overdraw_command.value() ==
           "KF2OPT 0123456789abcdef0123456789abcdef 43 overdraw 70\n");
+    const auto effects_command = build_adaptive_control_command({
+        .port = 17777,
+        .token = token,
+        .sequence = 44,
+        .resource = AdaptiveResourceControl::effects,
+        .quality = 65,
+        .timeout_ms = 200});
+    CHECK(effects_command.has_value());
+    CHECK(effects_command.value() ==
+          "KF2OPT 0123456789abcdef0123456789abcdef 44 effects 65\n");
     CHECK(!build_adaptive_control_command({
         .port = 0, .token = token, .sequence = 1}).has_value());
     CHECK(!build_adaptive_control_command({
@@ -67,6 +77,11 @@ int main() {
     CHECK(overdraw_receipt.has_value());
     CHECK(overdraw_receipt->resource == AdaptiveResourceControl::overdraw);
     CHECK(overdraw_receipt->quality == 70);
+    const auto effects_receipt = parse_adaptive_control_receipt(
+        "KF2OPT_ACK 44 applied effects 65\r\n");
+    CHECK(effects_receipt.has_value());
+    CHECK(effects_receipt->resource == AdaptiveResourceControl::effects);
+    CHECK(effects_receipt->quality == 65);
     CHECK(!parse_adaptive_control_receipt(
         "KF2OPT_ACK 43 applied target_fps 100\r\n").has_value());
     CHECK(!parse_adaptive_control_receipt(
@@ -87,6 +102,9 @@ int main() {
     quality.apply({2, AdaptiveResourceControl::overdraw, 70});
     CHECK(quality.overdraw == 70);
     CHECK(quality.effective_quality() == 60);
+    quality.apply({3, AdaptiveResourceControl::effects, 75});
+    CHECK(quality.effects == 75);
+    CHECK(quality.control_quality(AdaptiveResourceControl::effects) == 75);
     quality.apply({2, AdaptiveResourceControl::cpu, 80});
     CHECK(quality.cpu == 80);
     CHECK(quality.gpu == 60);
@@ -94,10 +112,11 @@ int main() {
     CHECK(quality.gpu == 65);
     CHECK(quality.cpu == 80);
     CHECK(quality.vram == 100);
+    CHECK(quality.effects == 75);
     quality.apply({4, AdaptiveResourceControl::mixed, 50});
     CHECK(quality.cpu == 50 && quality.gpu == 50 &&
           quality.vram == 50 && quality.ram == 50 &&
-          quality.overdraw == 70);
+          quality.overdraw == 70 && quality.effects == 75);
     quality.reset(90);
     CHECK(quality.effective_quality() == 90);
 

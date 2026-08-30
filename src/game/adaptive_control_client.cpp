@@ -53,6 +53,7 @@ std::optional<AdaptiveResourceControl> parse_resource(
     if (value == "vram") return AdaptiveResourceControl::vram;
     if (value == "ram") return AdaptiveResourceControl::ram;
     if (value == "overdraw") return AdaptiveResourceControl::overdraw;
+    if (value == "effects") return AdaptiveResourceControl::effects;
     if (value == "mixed") return AdaptiveResourceControl::mixed;
     if (value == "recover") return AdaptiveResourceControl::recover;
     return std::nullopt;
@@ -135,6 +136,7 @@ std::string_view adaptive_resource_control_name(
         case AdaptiveResourceControl::vram: return "vram";
         case AdaptiveResourceControl::ram: return "ram";
         case AdaptiveResourceControl::overdraw: return "overdraw";
+        case AdaptiveResourceControl::effects: return "effects";
         case AdaptiveResourceControl::mixed: return "mixed";
         case AdaptiveResourceControl::recover: return "recover";
     }
@@ -147,7 +149,7 @@ AdaptiveResourceQualityState::AdaptiveResourceQualityState(
 }
 
 int AdaptiveResourceQualityState::effective_quality() const noexcept {
-    return std::min({cpu, gpu, vram, ram, overdraw});
+    return std::min({cpu, gpu, vram, ram, overdraw, effects});
 }
 
 int AdaptiveResourceQualityState::control_quality(
@@ -158,6 +160,7 @@ int AdaptiveResourceQualityState::control_quality(
         case AdaptiveResourceControl::vram: return vram;
         case AdaptiveResourceControl::ram: return ram;
         case AdaptiveResourceControl::overdraw: return overdraw;
+        case AdaptiveResourceControl::effects: return effects;
         case AdaptiveResourceControl::mixed:
         case AdaptiveResourceControl::recover: return effective_quality();
     }
@@ -173,6 +176,7 @@ void AdaptiveResourceQualityState::apply(
         case AdaptiveResourceControl::vram: vram = quality; break;
         case AdaptiveResourceControl::ram: ram = quality; break;
         case AdaptiveResourceControl::overdraw: overdraw = quality; break;
+        case AdaptiveResourceControl::effects: effects = quality; break;
         case AdaptiveResourceControl::mixed:
             cpu = gpu = vram = ram = quality;
             break;
@@ -182,13 +186,14 @@ void AdaptiveResourceQualityState::apply(
             vram = std::max(vram, quality);
             ram = std::max(ram, quality);
             overdraw = std::max(overdraw, quality);
+            effects = std::max(effects, quality);
             break;
     }
 }
 
 void AdaptiveResourceQualityState::reset(int quality) noexcept {
     const int bounded = std::clamp(quality, 10, 100);
-    cpu = gpu = vram = ram = overdraw = bounded;
+    cpu = gpu = vram = ram = overdraw = effects = bounded;
 }
 
 bool valid_adaptive_control_token(std::string_view token) noexcept {

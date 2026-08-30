@@ -25,6 +25,7 @@ struct AdaptiveSampleContext final {
     std::uint64_t map_generation{0};
     int last_telemetry_sample{0};
     std::uint64_t flex_now_ms{0};
+    bool effects_control_verified{false};
 };
 
 struct AdaptiveSampleBuildResult final {
@@ -61,6 +62,8 @@ struct AdaptiveRuntimeControlInput final {
     bool bridge_available{false};
     bool zed_time_active{false};
     bool shadow_mode{false};
+    bool overdraw_minimum_reached{false};
+    bool effects_control_available{false};
     std::uint64_t now_ns{0};
     std::uint64_t last_dispatch_ns{0};
 };
@@ -75,10 +78,22 @@ struct AdaptiveRuntimeControlSelection final {
     optimizer::ResourceKind resource, double confidence,
     optimizer::AdaptiveBottleneck bottleneck =
         optimizer::AdaptiveBottleneck::unknown,
-    double bottleneck_confidence = 0.0) noexcept {
+    double bottleneck_confidence = 0.0,
+    bool overdraw_minimum_reached = false,
+    bool effects_control_available = false) noexcept {
     if (bottleneck == optimizer::AdaptiveBottleneck::rendering &&
         bottleneck_confidence >= 0.55) {
-        return game::AdaptiveResourceControl::overdraw;
+        if (!overdraw_minimum_reached) {
+            return game::AdaptiveResourceControl::overdraw;
+        }
+        if (effects_control_available) {
+            return game::AdaptiveResourceControl::effects;
+        }
+    }
+    if ((bottleneck == optimizer::AdaptiveBottleneck::particles ||
+         bottleneck == optimizer::AdaptiveBottleneck::gore) &&
+        bottleneck_confidence >= 0.55 && effects_control_available) {
+        return game::AdaptiveResourceControl::effects;
     }
     if (confidence < 0.55) return game::AdaptiveResourceControl::mixed;
     switch (resource) {
@@ -157,7 +172,9 @@ select_adaptive_runtime_control(
         ? game::AdaptiveResourceControl::recover
         : adaptive_runtime_resource(
               input.primary_resource, input.primary_confidence,
-              input.bottleneck, input.bottleneck_confidence);
+              input.bottleneck, input.bottleneck_confidence,
+              input.overdraw_minimum_reached,
+              input.effects_control_available);
     return AdaptiveRuntimeControlSelection{resource, desired};
 }
 
@@ -419,6 +436,13 @@ select_adaptive_runtime_control(
                 frame.gameplay->telemetry_world_particle_pool_capacity);
             sample.rendering_pressure = estimate_overdraw_pressure(
                 *frame.gameplay);
+            if (frame.offline_gameplay &&
+                context.effects_control_verified) {
+                sample.capabilities.gore_control =
+                    optimizer::AdaptiveCapabilityState::available;
+                sample.capabilities.particle_control =
+                    optimizer::AdaptiveCapabilityState::available;
+            }
         }
     }
     if (frame.flex && frame.flex->fresh &&
