@@ -7,6 +7,7 @@ class KF2OptimizerTelemetryInteraction extends Interaction
 var string OptimizerContextState;
 var string OptimizerProbeState;
 var bool bGameSessionEnding;
+var KF2OptimizerAdaptiveGraphicsState ProcessAdaptiveGraphicsState;
 
 function ReportOptimizerContextState(string State)
 {
@@ -26,6 +27,16 @@ function ReportOptimizerProbeState(string State)
     }
     OptimizerProbeState = State;
     `log("KF2OPT_INTERACTION schema=1 probe="$State);
+}
+
+function KF2OptimizerAdaptiveGraphicsState GetProcessAdaptiveGraphicsState()
+{
+    if (ProcessAdaptiveGraphicsState == None)
+    {
+        ProcessAdaptiveGraphicsState = new(self)
+            class'KF2OptimizerAdaptiveGraphicsState';
+    }
+    return ProcessAdaptiveGraphicsState;
 }
 
 function PrepareForGameplayWorld()
@@ -117,6 +128,16 @@ event Tick(float DeltaTime)
     if (CurrentProbe == None || CurrentProbe.bDeleteMe)
     {
         ReportOptimizerProbeState("spawn_failed");
+        return;
+    }
+    if (CurrentProbe.AdaptiveGraphicsState == None)
+    {
+        CurrentProbe.AdaptiveGraphicsState =
+            GetProcessAdaptiveGraphicsState();
+    }
+    if (CurrentProbe.AdaptiveGraphicsState == None)
+    {
+        ReportOptimizerProbeState("graphics_state_unavailable");
         return;
     }
     if (Len(CurrentProbe.AdaptiveControlToken) < 32)
