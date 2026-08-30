@@ -53,7 +53,8 @@ int main() {
     namespace fs = std::filesystem;
     constexpr std::string_view control_token =
         "0123456789abcdef0123456789abcdef";
-    const auto telemetry_source = read_bytes(KF2_TELEMETRY_SOURCE);
+    const auto telemetry_source = normalize_newlines(
+        read_bytes(KF2_TELEMETRY_SOURCE));
     const auto mutator_source = read_bytes(KF2_TELEMETRY_MUTATOR_SOURCE);
     const auto interaction_source = read_bytes(KF2_TELEMETRY_INTERACTION_SOURCE);
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
