@@ -147,6 +147,56 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
     }
 }
 
+// Reduces only renderer work that can stack repeatedly on the same pixels.
+// This is separate from generic GPU quality so an overdraw correction does
+// not unnecessarily lower textures, shadows, or geometry detail.
+static function ApplyOverdraw(out GFXSettings Requested, int Quality)
+{
+    local int ParticleLodBias;
+
+    if (Quality >= 100) return;
+    if (Quality >= 90) ParticleLodBias = 0;
+    else if (Quality >= 70) ParticleLodBias = 1;
+    else if (Quality >= 50) ParticleLodBias = 2;
+    else ParticleLodBias = 3;
+
+    Requested.FX.ParticleLODBias = Max(
+        Requested.FX.ParticleLODBias, ParticleLodBias);
+    Requested.FX.MaxImpactEffectDecals = Min(
+        Requested.FX.MaxImpactEffectDecals, Max(8, Quality / 4));
+    Requested.FX.MaxExplosionDecals = Min(
+        Requested.FX.MaxExplosionDecals, Max(8, Quality / 6));
+    Requested.FX.MaxBloodEffects = Min(
+        Requested.FX.MaxBloodEffects, Max(12, Quality / 3));
+    Requested.FX.MaxGoreEffects = Min(
+        Requested.FX.MaxGoreEffects, Max(8, Quality / 8));
+    Requested.FX.MaxPersistentSplatsPerFrame = Min(
+        Requested.FX.MaxPersistentSplatsPerFrame, Max(25, Quality));
+    Requested.CharacterDetail.MaxBodyWoundDecals = Min(
+        Requested.CharacterDetail.MaxBodyWoundDecals,
+        Max(2, Quality / 20));
+    if (Quality <= 90)
+    {
+        Requested.FX.DropParticleDistortion = true;
+    }
+    if (Quality <= 70)
+    {
+        Requested.FX.FilteredDistortion = false;
+    }
+    if (Quality <= 50)
+    {
+        Requested.FX.AllowSecondaryBloodEffects = false;
+    }
+    if (Quality <= 40)
+    {
+        Requested.FX.Distortion = false;
+    }
+    if (Quality <= 30)
+    {
+        Requested.FX.AllowBloodSplatterDecals = false;
+    }
+}
+
 static function ApplyCpu(out GFXSettings Requested, int Quality)
 {
     local int DetailMode;
@@ -407,6 +457,7 @@ static function CaptureOriginal(
     Snapshot.CpuQuality = 100;
     Snapshot.VramQuality = 100;
     Snapshot.RamQuality = 100;
+    Snapshot.OverdrawQuality = 100;
     Snapshot.bOriginalCaptured = true;
 }
 
@@ -623,6 +674,7 @@ static function bool ApplyResource(
     local int PreviousCpuQuality;
     local int PreviousVramQuality;
     local int PreviousRamQuality;
+    local int PreviousOverdrawQuality;
 
     if (Snapshot == None || Quality < 10 || Quality > 100) return false;
     GetCurrentGFXSettings(Current);
@@ -631,6 +683,7 @@ static function bool ApplyResource(
     PreviousCpuQuality = Snapshot.CpuQuality;
     PreviousVramQuality = Snapshot.VramQuality;
     PreviousRamQuality = Snapshot.RamQuality;
+    PreviousOverdrawQuality = Snapshot.OverdrawQuality;
 
     if (Resource ~= "recover")
     {
@@ -639,17 +692,21 @@ static function bool ApplyResource(
         Snapshot.CpuQuality = Max(Snapshot.CpuQuality, Quality);
         Snapshot.VramQuality = Max(Snapshot.VramQuality, Quality);
         Snapshot.RamQuality = Max(Snapshot.RamQuality, Quality);
+        Snapshot.OverdrawQuality = Max(
+            Snapshot.OverdrawQuality, Quality);
     }
     else if (Resource ~= "gpu") Snapshot.GpuQuality = Quality;
     else if (Resource ~= "cpu") Snapshot.CpuQuality = Quality;
     else if (Resource ~= "vram") Snapshot.VramQuality = Quality;
     else if (Resource ~= "ram") Snapshot.RamQuality = Quality;
+    else if (Resource ~= "overdraw") Snapshot.OverdrawQuality = Quality;
     else if (Resource ~= "mixed")
     {
         Snapshot.GpuQuality = Quality;
         Snapshot.CpuQuality = Quality;
         Snapshot.VramQuality = Quality;
         Snapshot.RamQuality = Quality;
+        Snapshot.OverdrawQuality = Quality;
     }
     else return false;
 
@@ -659,6 +716,7 @@ static function bool ApplyResource(
     ApplyCpu(Requested, Snapshot.CpuQuality);
     ApplyVram(Requested, Snapshot.VramQuality);
     ApplyRam(Requested, Snapshot.RamQuality);
+    ApplyOverdraw(Requested, Snapshot.OverdrawQuality);
     SetNativeSettings(Requested);
     SetScriptSettings(Requested);
     GetCurrentGFXSettings(Observed);
@@ -668,12 +726,14 @@ static function bool ApplyResource(
     Snapshot.CpuQuality = PreviousCpuQuality;
     Snapshot.VramQuality = PreviousVramQuality;
     Snapshot.RamQuality = PreviousRamQuality;
+    Snapshot.OverdrawQuality = PreviousOverdrawQuality;
     Requested = Observed;
     RestoreOwnedSettings(Snapshot, Requested);
     ApplyGpu(Requested, Snapshot.GpuQuality);
     ApplyCpu(Requested, Snapshot.CpuQuality);
     ApplyVram(Requested, Snapshot.VramQuality);
     ApplyRam(Requested, Snapshot.RamQuality);
+    ApplyOverdraw(Requested, Snapshot.OverdrawQuality);
     SetNativeSettings(Requested);
     SetScriptSettings(Requested);
     GetCurrentGFXSettings(Observed);
@@ -706,6 +766,7 @@ static function bool RestoreOriginal(KF2OptimizerAdaptiveGraphicsState Snapshot)
     Snapshot.CpuQuality = 100;
     Snapshot.VramQuality = 100;
     Snapshot.RamQuality = 100;
+    Snapshot.OverdrawQuality = 100;
     Snapshot.bOriginalCaptured = false;
     return true;
 }

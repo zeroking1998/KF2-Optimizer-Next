@@ -106,6 +106,7 @@ function bool ApplyAdaptiveResourceControl(
         Quality < 10 || Quality > 100 ||
         !((Resource ~= "gpu") || (Resource ~= "vram") ||
           (Resource ~= "cpu") || (Resource ~= "ram") ||
+          (Resource ~= "overdraw") ||
           (Resource ~= "mixed") || (Resource ~= "recover")))
     {
         return false;

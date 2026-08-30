@@ -65,6 +65,8 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find("KF2OPT_ADAPTIVE_QUALITY state=applied") !=
           std::string::npos);
+    CHECK(telemetry_source.find("Resource ~= \"overdraw\"") !=
+          std::string::npos);
     CHECK(interaction_source.find(
         "class'KF2OptimizerAdaptiveControlListener'") != std::string::npos);
     CHECK(interaction_source.find("var transient WorldInfo ActiveWorld") ==
@@ -111,6 +113,20 @@ int main() {
           std::string::npos);
     CHECK(connection_source.find("Len(Line) > 128") != std::string::npos);
     CHECK(graphics_source.find("Requested.Flex") == std::string::npos);
+    CHECK(graphics_source.find(
+        "static function ApplyOverdraw") != std::string::npos);
+    CHECK(graphics_source.find(
+        "ApplyOverdraw(Requested, Snapshot.OverdrawQuality)") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "else if (Resource ~= \"overdraw\") Snapshot.OverdrawQuality = Quality") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.FX.DropParticleDistortion = true") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.FX.MaxPersistentSplatsPerFrame = Min") !=
+          std::string::npos);
     CHECK(graphics_source.find("Requested.CharacterDetail.MaxDeadBodies") ==
           std::string::npos);
     CHECK(graphics_source.find(
@@ -168,6 +184,10 @@ int main() {
           std::string::npos);
     CHECK(graphics_source.find(
         "Snapshot.RamQuality = Max(Snapshot.RamQuality, Quality)") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.OverdrawQuality = Max(\n"
+        "            Snapshot.OverdrawQuality, Quality)") !=
           std::string::npos);
     CHECK(graphics_source.find("Quality >= 90") != std::string::npos);
     CHECK(graphics_source.find("Quality <= 80") != std::string::npos);

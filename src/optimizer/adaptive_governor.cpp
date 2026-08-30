@@ -338,6 +338,9 @@ AdaptiveBottleneckReport classify_bottleneck(
     const bool cpu_high = process_cpu_high || critical_thread_high ||
                           main_thread_bound || parallel_cpu_high ||
                           shared_cpu_high;
+    const bool verified_overdraw_high = sample.gameplay_context_fresh &&
+        sample.rendering_pressure.value_or(0.0) >= 0.80 &&
+        (sample.graphics_engine_percent.value_or(0.0) >= 70.0 || gpu_high);
 
     if (sample.thermal_power_pressure && *sample.thermal_power_pressure >= 0.80) {
         report.type = AdaptiveBottleneck::thermal_power;
@@ -375,6 +378,15 @@ AdaptiveBottleneckReport classify_bottleneck(
         report.confidence = 0.62;
         add_signal(report.supporting_signals, report.supporting_count,
                    "simultaneous_cpu_gpu_pressure");
+    } else if (verified_overdraw_high && gpu_high) {
+        report.type = AdaptiveBottleneck::rendering;
+        report.confidence = 0.74;
+        add_signal(report.supporting_signals, report.supporting_count,
+                   "verified_visible_overdraw_with_gpu_pressure");
+        if (sample.graphics_engine_percent) {
+            add_signal(report.supporting_signals, report.supporting_count,
+                       "graphics_engine_counter");
+        }
     } else if (gpu_high && !cpu_high) {
         report.type = AdaptiveBottleneck::gpu;
         report.confidence = resources.shared_gpu_pressure ? 0.72 : 0.68;
@@ -477,7 +489,8 @@ AdaptiveBottleneckReport classify_bottleneck(
         report.confidence = 0.60;
         add_signal(report.supporting_signals, report.supporting_count,
                    "verified_gore_pressure_context");
-    } else if (sample.rendering_pressure.value_or(0.0) >= 0.80) {
+    } else if (sample.gameplay_context_fresh &&
+               sample.rendering_pressure.value_or(0.0) >= 0.80) {
         report.type = AdaptiveBottleneck::rendering;
         report.confidence = 0.58;
         add_signal(report.supporting_signals, report.supporting_count,

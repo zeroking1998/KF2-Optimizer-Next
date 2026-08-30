@@ -71,8 +71,25 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     session.telemetry_corpse_limit = 10;
     session.telemetry_gore_particles = 20;
     session.telemetry_gore_particle_pool_capacity = 100;
+    session.telemetry_gore_particle_visible_components = 30;
+    session.telemetry_gore_particle_bounded_components = 40;
     session.telemetry_world_particles = 30;
     session.telemetry_world_particle_pool_capacity = 60;
+    session.telemetry_world_particle_visible_components = 50;
+    session.telemetry_world_particle_bounded_components = 60;
+    session.telemetry_ground_fire_particles = 25;
+    session.telemetry_impact_particles = 25;
+    session.telemetry_particle_peak_capacity = 100;
+    session.telemetry_wound_decals = 10;
+    session.telemetry_splatter_decals = 10;
+    session.telemetry_pool_decals = 5;
+    session.telemetry_impact_decals = 5;
+    session.telemetry_explosion_decals = 0;
+    session.telemetry_wound_decal_limit = 20;
+    session.telemetry_splatter_decal_limit = 20;
+    session.telemetry_pool_decal_limit = 20;
+    session.telemetry_impact_decal_limit = 20;
+    session.telemetry_explosion_decal_limit = 20;
     session.telemetry_living_visible = 7;
     session.telemetry_living_offscreen = 4;
     frame.gameplay = session;
@@ -196,10 +213,41 @@ int main() {
     CHECK(approximately_equal(*sample.gore_pressure, 0.2));
     CHECK(sample.particle_pressure.has_value());
     CHECK(approximately_equal(*sample.particle_pressure, 0.5));
+    CHECK(sample.rendering_pressure.has_value());
+    CHECK(approximately_equal(
+        *sample.rendering_pressure, std::sqrt(0.8)));
     CHECK(sample.flex_pressure.has_value());
     CHECK(approximately_equal(*sample.flex_pressure, 0.25));
     CHECK(sample.quality_score == 80.0);
     CHECK(!sample.minimum_quality_reached);
+
+    game::GameLogSession tiny_visible_particle_load;
+    tiny_visible_particle_load.telemetry_gore_particles = 100;
+    tiny_visible_particle_load.telemetry_world_particles = 0;
+    tiny_visible_particle_load.telemetry_ground_fire_particles = 0;
+    tiny_visible_particle_load.telemetry_impact_particles = 0;
+    tiny_visible_particle_load.telemetry_particle_peak_capacity = 100;
+    tiny_visible_particle_load.telemetry_gore_particle_visible_components = 1;
+    tiny_visible_particle_load.telemetry_world_particle_visible_components = 0;
+    tiny_visible_particle_load.telemetry_gore_particle_bounded_components = 50;
+    tiny_visible_particle_load.telemetry_world_particle_bounded_components = 50;
+    const auto tiny_overdraw = estimate_overdraw_pressure(
+        tiny_visible_particle_load);
+    CHECK(tiny_overdraw.has_value());
+    CHECK(approximately_equal(*tiny_overdraw, 0.1));
+
+    game::GameLogSession invalid_overdraw;
+    invalid_overdraw.telemetry_wound_decals = -1;
+    invalid_overdraw.telemetry_splatter_decals = 0;
+    invalid_overdraw.telemetry_pool_decals = 0;
+    invalid_overdraw.telemetry_impact_decals = 0;
+    invalid_overdraw.telemetry_explosion_decals = 0;
+    invalid_overdraw.telemetry_wound_decal_limit = 10;
+    invalid_overdraw.telemetry_splatter_decal_limit = 10;
+    invalid_overdraw.telemetry_pool_decal_limit = 10;
+    invalid_overdraw.telemetry_impact_decal_limit = 10;
+    invalid_overdraw.telemetry_explosion_decal_limit = 10;
+    CHECK(!estimate_overdraw_pressure(invalid_overdraw).has_value());
 
     auto same_map_restart = frame;
     same_map_restart.gameplay->telemetry_sample = 1;
@@ -282,6 +330,17 @@ int main() {
     CHECK(selected.has_value());
     CHECK(selected->resource == game::AdaptiveResourceControl::cpu);
     CHECK(selected->quality == 90);
+
+    control.bottleneck = optimizer::AdaptiveBottleneck::rendering;
+    control.bottleneck_confidence = 0.74;
+    control.primary_resource = optimizer::ResourceKind::gpu;
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::overdraw);
+    CHECK(selected->quality == 90);
+    control.bottleneck = optimizer::AdaptiveBottleneck::unknown;
+    control.bottleneck_confidence = 0.0;
+    control.primary_resource = optimizer::ResourceKind::cpu;
 
     control.current_frame_pressure = false;
     control.current_resource_pressure = true;

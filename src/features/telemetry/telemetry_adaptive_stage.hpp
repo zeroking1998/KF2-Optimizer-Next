@@ -1,7 +1,9 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <optional>
 #include <string>
 
@@ -44,6 +46,9 @@ struct AdaptiveRuntimeControlInput final {
         optimizer::AdaptiveDataQuality::not_available};
     optimizer::ResourceKind primary_resource{optimizer::ResourceKind::unknown};
     double primary_confidence{0.0};
+    optimizer::AdaptiveBottleneck bottleneck{
+        optimizer::AdaptiveBottleneck::unknown};
+    double bottleneck_confidence{0.0};
     int current_quality{100};
     int minimum_quality{10};
     int maximum_quality{100};
@@ -67,7 +72,14 @@ struct AdaptiveRuntimeControlSelection final {
 };
 
 [[nodiscard]] inline game::AdaptiveResourceControl adaptive_runtime_resource(
-    optimizer::ResourceKind resource, double confidence) noexcept {
+    optimizer::ResourceKind resource, double confidence,
+    optimizer::AdaptiveBottleneck bottleneck =
+        optimizer::AdaptiveBottleneck::unknown,
+    double bottleneck_confidence = 0.0) noexcept {
+    if (bottleneck == optimizer::AdaptiveBottleneck::rendering &&
+        bottleneck_confidence >= 0.55) {
+        return game::AdaptiveResourceControl::overdraw;
+    }
     if (confidence < 0.55) return game::AdaptiveResourceControl::mixed;
     switch (resource) {
         case optimizer::ResourceKind::cpu:
@@ -144,8 +156,91 @@ select_adaptive_runtime_control(
     const auto resource = recovery
         ? game::AdaptiveResourceControl::recover
         : adaptive_runtime_resource(
-              input.primary_resource, input.primary_confidence);
+              input.primary_resource, input.primary_confidence,
+              input.bottleneck, input.bottleneck_confidence);
     return AdaptiveRuntimeControlSelection{resource, desired};
+}
+
+[[nodiscard]] inline std::optional<double> normalized_required_sum(
+    std::initializer_list<std::optional<int>> values,
+    std::initializer_list<std::optional<int>> capacities) noexcept {
+    if (values.size() == 0 || values.size() != capacities.size()) {
+        return std::nullopt;
+    }
+    std::int64_t value_sum = 0;
+    std::int64_t capacity_sum = 0;
+    auto value = values.begin();
+    auto capacity = capacities.begin();
+    for (; value != values.end(); ++value, ++capacity) {
+        if (!*value || !*capacity || **value < 0 || **capacity <= 0) {
+            return std::nullopt;
+        }
+        value_sum += **value;
+        capacity_sum += **capacity;
+    }
+    if (capacity_sum <= 0) return std::nullopt;
+    return std::clamp(
+        static_cast<double>(value_sum) /
+            static_cast<double>(capacity_sum),
+        0.0, 1.0);
+}
+
+[[nodiscard]] inline std::optional<double> normalized_required_total(
+    std::initializer_list<std::optional<int>> values,
+    const std::optional<int>& capacity) noexcept {
+    if (values.size() == 0 || !capacity || *capacity <= 0) {
+        return std::nullopt;
+    }
+    std::int64_t value_sum = 0;
+    for (const auto& value : values) {
+        if (!value || *value < 0) return std::nullopt;
+        value_sum += *value;
+    }
+    return std::clamp(
+        static_cast<double>(value_sum) /
+            static_cast<double>(*capacity),
+        0.0, 1.0);
+}
+
+// KF2 does not expose per-pixel overdraw. This estimate therefore uses only
+// direct, fresh renderer-adjacent evidence: active decal saturation plus the
+// geometric mean of particle occupancy and visible bounded components. The
+// geometric mean prevents a large offscreen pool or one tiny visible emitter
+// from independently claiming overdraw pressure.
+[[nodiscard]] inline std::optional<double> estimate_overdraw_pressure(
+    const game::GameLogSession& gameplay) noexcept {
+    const auto decal_pressure = normalized_required_sum(
+        {gameplay.telemetry_wound_decals,
+         gameplay.telemetry_splatter_decals,
+         gameplay.telemetry_pool_decals,
+         gameplay.telemetry_impact_decals,
+         gameplay.telemetry_explosion_decals},
+        {gameplay.telemetry_wound_decal_limit,
+         gameplay.telemetry_splatter_decal_limit,
+         gameplay.telemetry_pool_decal_limit,
+         gameplay.telemetry_impact_decal_limit,
+         gameplay.telemetry_explosion_decal_limit});
+    const auto particle_occupancy = normalized_required_total(
+        {gameplay.telemetry_gore_particles,
+         gameplay.telemetry_world_particles,
+         gameplay.telemetry_ground_fire_particles,
+         gameplay.telemetry_impact_particles},
+        gameplay.telemetry_particle_peak_capacity);
+    const auto visible_particle_ratio = normalized_required_sum(
+        {gameplay.telemetry_gore_particle_visible_components,
+         gameplay.telemetry_world_particle_visible_components},
+        {gameplay.telemetry_gore_particle_bounded_components,
+         gameplay.telemetry_world_particle_bounded_components});
+
+    std::optional<double> particle_overdraw;
+    if (particle_occupancy && visible_particle_ratio) {
+        particle_overdraw = std::sqrt(
+            *particle_occupancy * *visible_particle_ratio);
+    }
+    if (decal_pressure && particle_overdraw) {
+        return std::max(*decal_pressure, *particle_overdraw);
+    }
+    return particle_overdraw ? particle_overdraw : decal_pressure;
 }
 
 [[nodiscard]] inline AdaptiveSampleBuildResult build_adaptive_sample(
@@ -322,6 +417,8 @@ select_adaptive_runtime_control(
             sample.particle_pressure = normalized(
                 frame.gameplay->telemetry_world_particles,
                 frame.gameplay->telemetry_world_particle_pool_capacity);
+            sample.rendering_pressure = estimate_overdraw_pressure(
+                *frame.gameplay);
         }
     }
     if (frame.flex && frame.flex->fresh &&

@@ -8,11 +8,16 @@ are visible immediately.
 
 ### What's new
 
-- Adaptive live quality now keeps independent CPU, GPU, VRAM, and RAM levels.
+- Adaptive live quality now keeps independent CPU, GPU, VRAM, RAM, and
+  overdraw levels.
   Each confirmed bottleneck changes only its matching group, while recovery
   restores the groups gradually. The live groups now also cover verified KF2
   shadow distance/fade, post-processing quality, lighting, shadowmap textures,
   wound decals, blood effects, and destruction lifetime controls.
+- Adaptive now derives a conservative overdraw signal from fresh visible
+  particle occupancy and active decal saturation. Confirmed rendering pressure
+  uses its own reversible quality group for particle distortion, particle LOD,
+  blood effects, and decal budgets instead of lowering unrelated graphics.
 - CPU Adaptive quality now progressively reduces the three official cosmetic
   corpse-collision options at 80%, 60%, and 40%, with exact engine readback and
   restoration of the user's original values.

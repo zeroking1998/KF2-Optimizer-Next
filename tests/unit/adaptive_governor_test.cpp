@@ -672,8 +672,15 @@ int main() {
     CHECK(classify(gore) == AdaptiveBottleneck::gore);
 
     auto rendering = sample(start, 30.0, 33.33, 42.0, 35.0, 55.0);
+    rendering.gameplay_context_fresh = true;
     rendering.rendering_pressure = 0.9;
     CHECK(classify(rendering) == AdaptiveBottleneck::rendering);
+
+    auto gpu_overdraw = sample(start, 30.0, 33.33, 42.0, 35.0, 95.0);
+    gpu_overdraw.gameplay_context_fresh = true;
+    gpu_overdraw.graphics_engine_percent = 95.0;
+    gpu_overdraw.rendering_pressure = 0.9;
+    CHECK(classify(gpu_overdraw) == AdaptiveBottleneck::rendering);
 
     CHECK(classify(sample(start, 30.0, 33.33, 42.0, 35.0, 55.0)) ==
           AdaptiveBottleneck::unknown);

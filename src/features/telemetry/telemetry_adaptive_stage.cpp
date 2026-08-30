@@ -60,6 +60,8 @@ void UiRuntime::update_adaptive_controller(
                         std::to_wstring(adaptive_resource_quality.vram) +
                         L"%, RAM " +
                         std::to_wstring(adaptive_resource_quality.ram) +
+                        L"%, overdraw " +
+                        std::to_wstring(adaptive_resource_quality.overdraw) +
                         L"%) after an exact authenticated APPLIED readback",
                     L"optimizer"});
             } else {
@@ -326,7 +328,9 @@ void UiRuntime::update_adaptive_controller(
     const auto pressure_resource =
         telemetry_pipeline::adaptive_runtime_resource(
             adaptive_decision.resources.primary,
-            adaptive_decision.resources.primary_confidence);
+            adaptive_decision.resources.primary_confidence,
+            adaptive_decision.bottleneck.type,
+            adaptive_decision.bottleneck.confidence);
     const int selected_runtime_quality =
         adaptive_decision.state ==
                     optimizer::AdaptiveControllerState::stable
@@ -339,6 +343,9 @@ void UiRuntime::update_adaptive_controller(
             .primary_resource = adaptive_decision.resources.primary,
             .primary_confidence =
                 adaptive_decision.resources.primary_confidence,
+            .bottleneck = adaptive_decision.bottleneck.type,
+            .bottleneck_confidence =
+                adaptive_decision.bottleneck.confidence,
             .current_quality = selected_runtime_quality,
             .minimum_quality =
                 optimizer_settings.adaptive_minimum_quality,
