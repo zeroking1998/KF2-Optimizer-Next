@@ -105,16 +105,37 @@ Result<TelemetryFrame> capture_telemetry_frame(
         if (runtime.gpu_metrics) {
             auto gpu = runtime.gpu_metrics->sample();
             if (gpu.has_value()) {
+                bool sample_matches_bound_adapter = true;
                 if (gpu.value().process_adapter_luid) {
+                    sample_matches_bound_adapter = !input.adapter_luid ||
+                        *input.adapter_luid ==
+                            *gpu.value().process_adapter_luid;
                     runtime.bind_process_gpu_adapter(
                         *gpu.value().process_adapter_luid);
                     input.adapter_luid = runtime.adaptive_adapter_luid;
                     input.adapter_vram_budget_bytes =
                         runtime.adapter_vram_budget;
                 }
-                input.adapter_gpu = std::move(gpu.value());
+                // A sample collected by the old sampler must never seed the
+                // newly selected physical adapter's continuity history.
+                if (sample_matches_bound_adapter) {
+                    input.adapter_gpu = std::move(gpu.value());
+                } else {
+                    input.driver_gpu_percent.reset();
+                }
             }
         }
+        const auto raw_process_gpu = input.adapter_gpu
+            ? input.adapter_gpu->gpu_percent : std::nullopt;
+        const auto raw_adapter_gpu =
+            ::kf2::telemetry::choose_total_gpu_percent(
+                input.driver_gpu_percent,
+                input.adapter_gpu
+                    ? input.adapter_gpu->adapter_gpu_percent
+                    : std::nullopt);
+        input.gpu_utilization = runtime.gpu_utilization_filter.update({
+            now_ns, input.adapter_luid.value_or(0), raw_process_gpu,
+            raw_adapter_gpu});
         const auto memory = ::kf2::telemetry::query_system_memory_metrics();
         if (memory.has_value()) input.system_memory = memory.value();
     }

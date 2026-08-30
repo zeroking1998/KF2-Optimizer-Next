@@ -153,6 +153,82 @@ int main() {
     CHECK(!choose_total_gpu_percent(std::nullopt, std::nullopt).has_value());
     CHECK(!choose_total_gpu_percent(101.0, std::nullopt).has_value());
 
+    constexpr std::uint64_t first_adapter = 0x100;
+    constexpr std::uint64_t second_adapter = 0x200;
+    constexpr std::uint64_t second = 1'000'000'000ULL;
+    GpuUtilizationFilter filter;
+    auto filtered = filter.update({second, first_adapter, 35.0, 40.0});
+    CHECK(!filtered.decision_ready);
+    CHECK(filtered.adapter_luid == first_adapter);
+    filtered = filter.update({second + 500'000'000ULL, first_adapter,
+                              36.0, 41.0});
+    CHECK(filtered.decision_ready);
+    CHECK(filtered.process_percent == 36.0);
+    CHECK(filtered.adapter_percent == 41.0);
+    CHECK(filtered.continuity_samples == 2);
+
+    // One implausible edge sample is rejected instead of immediately changing
+    // the value Adaptive sees.
+    filtered = filter.update({second + 1'000'000'000ULL, first_adapter,
+                              100.0, 100.0});
+    CHECK(filtered.decision_ready);
+    CHECK(filtered.process_percent == 36.0);
+    CHECK(filtered.adapter_percent == 41.0);
+    CHECK(filtered.sample_age_ns == 500'000'000ULL);
+
+    // Sustained saturation is accepted on the second agreeing observation,
+    // bounding detection delay to one normal sampling interval.
+    filtered = filter.update({second + 1'500'000'000ULL, first_adapter,
+                              100.0, 100.0});
+    CHECK(filtered.decision_ready);
+    CHECK(filtered.process_percent == 100.0);
+    CHECK(filtered.adapter_percent == 100.0);
+    CHECK(filtered.confidence >= 0.55);
+
+    GpuUtilizationFilter zero_spike_filter;
+    static_cast<void>(zero_spike_filter.update(
+        {second, first_adapter, 70.0, 80.0}));
+    filtered = zero_spike_filter.update(
+        {second + 500'000'000ULL, first_adapter, 72.0, 82.0});
+    CHECK(filtered.decision_ready);
+    filtered = zero_spike_filter.update(
+        {second + 1'000'000'000ULL, first_adapter, 0.0, 0.0});
+    CHECK(filtered.decision_ready);
+    CHECK(filtered.process_percent == 72.0);
+    CHECK(filtered.adapter_percent == 82.0);
+
+    GpuUtilizationFilter dropout_filter;
+    static_cast<void>(dropout_filter.update(
+        {second, first_adapter, 70.0, 80.0}));
+    filtered = dropout_filter.update(
+        {second + 500'000'000ULL, first_adapter, 72.0, 82.0});
+    CHECK(filtered.decision_ready);
+    filtered = dropout_filter.update(
+        {second + 1'000'000'000ULL, first_adapter, std::nullopt,
+         std::nullopt});
+    CHECK(filtered.decision_ready);
+    CHECK(filtered.process_percent == 72.0);
+    filtered = dropout_filter.update(
+        {second + 3'000'000'001ULL, first_adapter, std::nullopt,
+         std::nullopt});
+    CHECK(!filtered.decision_ready);
+    CHECK(!filtered.process_percent.has_value());
+    CHECK(!filtered.adapter_percent.has_value());
+    CHECK(filtered.confidence < 0.55);
+
+    // A different physical adapter never inherits the previous adapter's
+    // history or confidence.
+    filtered = filter.update({second + 2'000'000'000ULL, second_adapter,
+                              20.0, 25.0});
+    CHECK(!filtered.decision_ready);
+    CHECK(filtered.adapter_luid == second_adapter);
+    filtered = filter.update({second + 2'500'000'000ULL, second_adapter,
+                              21.0, 26.0});
+    CHECK(filtered.decision_ready);
+    CHECK(filtered.process_percent == 21.0);
+    CHECK(filtered.adapter_percent == 26.0);
+    CHECK(filtered.continuity_samples == 2);
+
     for (const auto& adapter : unique_physical_gpu_adapters(adapters.value())) {
         const auto memory = query_gpu_memory_budget(adapter.luid);
         if (memory.has_value()) {

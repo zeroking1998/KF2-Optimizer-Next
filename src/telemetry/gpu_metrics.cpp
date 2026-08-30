@@ -773,6 +773,127 @@ std::optional<double> choose_total_gpu_percent(
     return std::nullopt;
 }
 
+GpuUtilizationEstimate GpuUtilizationFilter::update(
+    const GpuUtilizationObservation& observation) noexcept {
+    constexpr std::uint64_t kMaximumContinuityGapNs = 2'000'000'000ULL;
+    constexpr std::uint64_t kMaximumHeldAgeNs = 2'000'000'000ULL;
+    constexpr double kExtremeLowPercent = 1.0;
+    constexpr double kExtremeHighPercent = 99.0;
+    constexpr double kAbruptDeltaPercent = 45.0;
+    constexpr double kCandidateAgreementPercent = 5.0;
+
+    if (observation.adapter_luid == 0) {
+        reset();
+        return {};
+    }
+    const bool adapter_changed = adapter_luid_ != 0 &&
+        observation.adapter_luid != adapter_luid_;
+    const bool time_discontinuity = last_observation_ns_ != 0 &&
+        (observation.timestamp_ns <= last_observation_ns_ ||
+         observation.timestamp_ns - last_observation_ns_ >
+             kMaximumContinuityGapNs);
+    if (adapter_changed || time_discontinuity) reset();
+    adapter_luid_ = observation.adapter_luid;
+    last_observation_ns_ = observation.timestamp_ns;
+
+    struct ChannelEstimate final {
+        std::optional<double> value;
+        std::uint64_t age_ns{0};
+        std::uint32_t continuity_samples{0};
+        double confidence{0.0};
+    };
+    const auto update_channel = [&](ChannelState& state,
+                                    const std::optional<double>& raw) {
+        ChannelEstimate result;
+        const bool valid = raw && std::isfinite(*raw) &&
+            *raw >= 0.0 && *raw <= 100.0;
+        if (valid) {
+            const bool edge = *raw <= kExtremeLowPercent ||
+                              *raw >= kExtremeHighPercent;
+            const bool abrupt = state.confirmed && edge &&
+                std::abs(*raw - *state.confirmed) >= kAbruptDeltaPercent;
+            if (!state.confirmed || abrupt) {
+                if (state.pending &&
+                    std::abs(*raw - *state.pending) <=
+                        kCandidateAgreementPercent) {
+                    ++state.pending_samples;
+                } else {
+                    state.pending = raw;
+                    state.pending_samples = 1;
+                }
+                if (state.pending_samples >= 2) {
+                    state.confirmed = raw;
+                    state.confirmed_at_ns = observation.timestamp_ns;
+                    state.continuity_samples = state.pending_samples;
+                    state.pending.reset();
+                    state.pending_samples = 0;
+                }
+            } else {
+                state.confirmed = raw;
+                state.confirmed_at_ns = observation.timestamp_ns;
+                state.pending.reset();
+                state.pending_samples = 0;
+                ++state.continuity_samples;
+            }
+        } else {
+            state.pending.reset();
+            state.pending_samples = 0;
+        }
+
+        if (!state.confirmed || observation.timestamp_ns <
+                                    state.confirmed_at_ns) {
+            return result;
+        }
+        result.age_ns = observation.timestamp_ns - state.confirmed_at_ns;
+        if (result.age_ns > kMaximumHeldAgeNs) return result;
+        result.value = state.confirmed;
+        result.continuity_samples = state.continuity_samples;
+        if (valid && result.age_ns == 0) {
+            result.confidence = state.continuity_samples >= 3 ? 0.90 : 0.75;
+        } else if (result.age_ns <= 1'000'000'000ULL) {
+            result.confidence = 0.65;
+        } else {
+            result.confidence = 0.45;
+        }
+        return result;
+    };
+
+    const auto process = update_channel(process_, observation.process_percent);
+    const auto adapter = update_channel(adapter_, observation.adapter_percent);
+    GpuUtilizationEstimate result;
+    result.adapter_luid = adapter_luid_;
+    result.process_percent = process.value;
+    result.adapter_percent = adapter.value;
+    if (process.value && adapter.value) {
+        result.sample_age_ns = std::max(process.age_ns, adapter.age_ns);
+        result.continuity_samples = std::min(
+            process.continuity_samples, adapter.continuity_samples);
+        result.confidence = std::min(process.confidence, adapter.confidence);
+    } else if (process.value) {
+        result.sample_age_ns = process.age_ns;
+        result.continuity_samples = process.continuity_samples;
+        result.confidence = process.confidence;
+    } else if (adapter.value) {
+        result.sample_age_ns = adapter.age_ns;
+        result.continuity_samples = adapter.continuity_samples;
+        result.confidence = adapter.confidence;
+    }
+    result.decision_ready = result.confidence >= 0.55 &&
+        (result.process_percent || result.adapter_percent);
+    if (!result.decision_ready) {
+        result.process_percent.reset();
+        result.adapter_percent.reset();
+    }
+    return result;
+}
+
+void GpuUtilizationFilter::reset() noexcept {
+    adapter_luid_ = 0;
+    last_observation_ns_ = 0;
+    process_ = {};
+    adapter_ = {};
+}
+
 PdhGpuSampler::PdhGpuSampler(PdhGpuSampler&& other) noexcept { *this = std::move(other); }
 PdhGpuSampler& PdhGpuSampler::operator=(PdhGpuSampler&& other) noexcept {
     if (this != &other) {

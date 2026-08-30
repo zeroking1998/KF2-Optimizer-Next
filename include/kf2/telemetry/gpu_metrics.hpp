@@ -80,6 +80,47 @@ struct GpuAdapter {
     std::optional<double> driver_gpu_percent,
     std::optional<double> adapter_gpu_percent);
 
+struct GpuUtilizationObservation final {
+    std::uint64_t timestamp_ns{0};
+    std::uint64_t adapter_luid{0};
+    std::optional<double> process_percent;
+    std::optional<double> adapter_percent;
+};
+
+struct GpuUtilizationEstimate final {
+    std::uint64_t adapter_luid{0};
+    std::optional<double> process_percent;
+    std::optional<double> adapter_percent;
+    std::uint64_t sample_age_ns{0};
+    std::uint32_t continuity_samples{0};
+    double confidence{0.0};
+    bool decision_ready{false};
+};
+
+// Keeps Adaptive independent from vendor-specific counter cadence. Abrupt edge
+// readings require a second agreeing observation, while a confirmed value may
+// bridge one short dropout. A physical-adapter change always clears history.
+class GpuUtilizationFilter final {
+public:
+    [[nodiscard]] GpuUtilizationEstimate update(
+        const GpuUtilizationObservation& observation) noexcept;
+    void reset() noexcept;
+
+private:
+    struct ChannelState final {
+        std::optional<double> confirmed;
+        std::optional<double> pending;
+        std::uint64_t confirmed_at_ns{0};
+        std::uint32_t pending_samples{0};
+        std::uint32_t continuity_samples{0};
+    };
+
+    std::uint64_t adapter_luid_{0};
+    std::uint64_t last_observation_ns_{0};
+    ChannelState process_;
+    ChannelState adapter_;
+};
+
 enum class NvidiaGpuSource {
     nvapi_dynamic_pstates,
     nvml_utilization,

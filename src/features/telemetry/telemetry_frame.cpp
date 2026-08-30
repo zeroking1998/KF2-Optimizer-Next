@@ -21,6 +21,7 @@ Result<TelemetryFrame> build_telemetry_frame(
     frame.process = input.process;
     frame.adapter_gpu = input.adapter_gpu;
     frame.driver_gpu_percent = input.driver_gpu_percent;
+    frame.gpu_utilization = input.gpu_utilization;
     frame.system_memory = input.system_memory;
     frame.gameplay = input.gameplay;
     frame.flex = input.flex;
@@ -56,12 +57,12 @@ Result<TelemetryFrame> build_telemetry_frame(
             frame.process->system_logical_processors;
         evidence.process_private_bytes = frame.process->private_bytes;
     }
-    const std::optional<double> adapter_percent = frame.adapter_gpu
-        ? frame.adapter_gpu->adapter_gpu_percent : std::nullopt;
-    evidence.gpu_percent = ::kf2::telemetry::choose_total_gpu_percent(
-        frame.driver_gpu_percent, adapter_percent);
+    if (frame.gpu_utilization && frame.gpu_utilization->decision_ready) {
+        evidence.process_gpu_percent =
+            frame.gpu_utilization->process_percent;
+        evidence.gpu_percent = frame.gpu_utilization->adapter_percent;
+    }
     if (frame.adapter_gpu) {
-        evidence.process_gpu_percent = frame.adapter_gpu->gpu_percent;
         evidence.dedicated_vram_bytes =
             frame.adapter_gpu->dedicated_bytes;
         evidence.dedicated_vram_budget_bytes =

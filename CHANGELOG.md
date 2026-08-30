@@ -23,6 +23,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Filtered vendor-neutral GPU utilization by physical adapter, sample age and
+  continuity so isolated 0%/100% readings cannot redirect Adaptive decisions;
+  sustained saturation is confirmed within one additional sampling interval.
 - Preserved one native adaptive-graphics baseline across consecutive maps so
   recovery and exact readback no longer treat previously reduced settings as
   the new 100% quality state.
