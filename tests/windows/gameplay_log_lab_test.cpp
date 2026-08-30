@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <set>
 #include <string>
 
 #include "kf2/game/gameplay_log_lab.hpp"
@@ -55,8 +56,10 @@ int main() {
         "0123456789abcdef0123456789abcdef";
     const auto telemetry_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_SOURCE));
-    const auto mutator_source = read_bytes(KF2_TELEMETRY_MUTATOR_SOURCE);
-    const auto interaction_source = read_bytes(KF2_TELEMETRY_INTERACTION_SOURCE);
+    const auto mutator_source = normalize_newlines(
+        read_bytes(KF2_TELEMETRY_MUTATOR_SOURCE));
+    const auto interaction_source = normalize_newlines(
+        read_bytes(KF2_TELEMETRY_INTERACTION_SOURCE));
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto connection_source = read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE);
     const auto graphics_source = normalize_newlines(
@@ -76,6 +79,33 @@ int main() {
           std::string::npos);
     CHECK(interaction_source.find("var bool bGameSessionEnding") !=
           std::string::npos);
+    CHECK(interaction_source.find(
+        "var KF2OptimizerAdaptiveGraphicsState "
+        "ProcessAdaptiveGraphicsState;") != std::string::npos);
+    CHECK(interaction_source.find(
+        "function KF2OptimizerAdaptiveGraphicsState "
+        "GetProcessAdaptiveGraphicsState()") != std::string::npos);
+    CHECK(interaction_source.find(
+        "ProcessAdaptiveGraphicsState = new(self)\n"
+        "            class'KF2OptimizerAdaptiveGraphicsState'") !=
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "CurrentProbe.AdaptiveGraphicsState =\n"
+        "            GetProcessAdaptiveGraphicsState()") !=
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "ProcessAdaptiveGraphicsState = None") == std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveGraphicsState = new(self)") == std::string::npos);
+    const auto restore_adaptive_graphics = telemetry_source.find(
+        "function RestoreAdaptiveGraphics()");
+    const auto select_staggered_corpse = telemetry_source.find(
+        "function int SelectStaggeredCorpse(");
+    CHECK(restore_adaptive_graphics != std::string::npos);
+    CHECK(select_staggered_corpse != std::string::npos);
+    CHECK(restore_adaptive_graphics < select_staggered_corpse);
+    CHECK(telemetry_source.find("AdaptiveGraphicsState = None",
+        restore_adaptive_graphics) >= select_staggered_corpse);
     const auto interaction_tick = interaction_source.find(
         "event Tick(float DeltaTime)");
     const auto interaction_post_render = interaction_source.find(
@@ -96,10 +126,96 @@ int main() {
           std::string::npos);
     CHECK(interaction_source.find("function NotifyPlayerAdded(") !=
           std::string::npos);
+    const auto prepare_for_world = interaction_source.find(
+        "function PrepareForGameplayWorld()");
+    const auto session_ended = interaction_source.find(
+        "function NotifyGameSessionEnded()");
+    const auto player_added = interaction_source.find(
+        "function NotifyPlayerAdded(");
+    CHECK(prepare_for_world != std::string::npos);
+    CHECK(session_ended != std::string::npos);
+    CHECK(player_added != std::string::npos);
     CHECK(interaction_source.find("bGameSessionEnding = false",
-        interaction_source.find("function NotifyPlayerAdded(")) !=
-          std::string::npos);
+        prepare_for_world) < session_ended);
+    CHECK(interaction_source.find("state=rearmed", prepare_for_world) <
+          session_ended);
+    CHECK(interaction_source.find("if (bGameSessionEnding)", session_ended) <
+          player_added);
+    CHECK(interaction_source.find("bGameSessionEnding = false",
+        player_added) == std::string::npos);
     CHECK(mutator_source.find("InsertInteraction(CurrentInteraction)") !=
+          std::string::npos);
+    const auto interaction_path = mutator_source.find(
+        "InteractionPath = PathName(CurrentViewport)$\n"
+        "        \".KF2OptimizerTelemetryInteraction\"");
+    const auto interaction_lookup = mutator_source.find(
+        "FindObject(InteractionPath,\n"
+        "            class'KF2OptimizerTelemetryInteraction')");
+    const auto existing_interaction = mutator_source.find(
+        "state=ready interaction=existing");
+    const auto create_interaction = mutator_source.find(
+        "new(CurrentViewport, \"KF2OptimizerTelemetryInteraction\")");
+    const auto insert_interaction = mutator_source.find(
+        "InsertInteraction(CurrentInteraction)");
+    CHECK(interaction_path != std::string::npos);
+    CHECK(interaction_lookup != std::string::npos);
+    CHECK(existing_interaction != std::string::npos);
+    CHECK(create_interaction != std::string::npos);
+    CHECK(insert_interaction != std::string::npos);
+    CHECK(interaction_path < interaction_lookup);
+    CHECK(interaction_lookup < existing_interaction);
+    CHECK(mutator_source.find(
+        "CurrentInteraction.PrepareForGameplayWorld();",
+        interaction_lookup) < existing_interaction);
+    CHECK(existing_interaction < create_interaction);
+    CHECK(create_interaction < insert_interaction);
+    CHECK(mutator_source.find(
+        "FindObject(\"KF2OptimizerTelemetryInteraction\"") ==
+          std::string::npos);
+    CHECK(count_occurrences(mutator_source,
+        "new(CurrentViewport, \"KF2OptimizerTelemetryInteraction\")") == 1);
+    CHECK(count_occurrences(mutator_source,
+        "InsertInteraction(CurrentInteraction)") == 1);
+    CHECK(count_occurrences(mutator_source,
+        "CurrentInteraction.PrepareForGameplayWorld();") == 2);
+
+    // Each map creates a new mutator, but all three mutators share the same
+    // process-lifetime viewport outer. The fully qualified object path must
+    // therefore resolve to one interaction instead of one per gameplay world.
+    std::set<std::string> viewport_interactions;
+    std::size_t created_interactions = 0;
+    std::size_t existing_interactions = 0;
+    std::size_t session_ended_callbacks = 0;
+    const std::string persistent_interaction_path =
+        "KFGameEngine.KFGameViewportClient."
+        "KF2OptimizerTelemetryInteraction";
+    for (int world = 0; world < 3; ++world) {
+        const auto [unused, inserted] =
+            viewport_interactions.insert(persistent_interaction_path);
+        static_cast<void>(unused);
+        if (inserted) {
+            ++created_interactions;
+        } else {
+            ++existing_interactions;
+        }
+        ++session_ended_callbacks;
+    }
+    CHECK(viewport_interactions.size() == 1);
+    CHECK(created_interactions == 1);
+    CHECK(existing_interactions == 2);
+    CHECK(session_ended_callbacks == 3);
+    CHECK(count_occurrences(interaction_source,
+        "state=session_ended") == 1);
+    CHECK(interaction_source.find("var transient WorldInfo") ==
+          std::string::npos);
+    CHECK(interaction_source.find("var transient PlayerController") ==
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "var transient KF2OptimizerTelemetryProbe") == std::string::npos);
+    CHECK(interaction_source.find(
+        "var transient KF2OptimizerAdaptiveControlListener") ==
+          std::string::npos);
+    CHECK(interaction_source.find("var transient Canvas") ==
           std::string::npos);
     CHECK(mutator_source.find("WorldInfo.NetMode != NM_Standalone") !=
           std::string::npos);

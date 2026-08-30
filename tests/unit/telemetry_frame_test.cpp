@@ -60,6 +60,8 @@ kf2::telemetry_pipeline::TelemetryFrameInput complete_input() {
     gpu.reason = telemetry::UnavailableReason::none;
     input.adapter_gpu = gpu;
     input.driver_gpu_percent = 36.0;
+    input.gpu_utilization = telemetry::GpuUtilizationEstimate{
+        77, 28.0, 36.0, 0, 4, 0.90, true};
     input.adapter_luid = 77;
     input.adapter_vram_budget_bytes = 12ULL << 30U;
 
@@ -113,6 +115,7 @@ int main() {
     CHECK(frame.frames.reason == input.frames.reason);
     CHECK(frame.process.has_value());
     CHECK(frame.adapter_gpu.has_value());
+    CHECK(frame.gpu_utilization.has_value());
     CHECK(frame.system_memory.has_value());
     CHECK(frame.gameplay.has_value());
     CHECK(frame.flex.has_value());
@@ -166,6 +169,7 @@ int main() {
 
     auto adapter_fallback = complete_input();
     adapter_fallback.driver_gpu_percent.reset();
+    adapter_fallback.gpu_utilization->adapter_percent = 31.0;
     const auto adapter_frame = build_telemetry_frame(adapter_fallback);
     CHECK(adapter_frame.has_value());
     CHECK(adapter_frame.value().evidence.gpu_percent.has_value());
@@ -174,6 +178,7 @@ int main() {
 
     auto driver_only = complete_input();
     driver_only.adapter_gpu.reset();
+    driver_only.gpu_utilization->process_percent.reset();
     const auto driver_frame = build_telemetry_frame(driver_only);
     CHECK(driver_frame.has_value());
     CHECK(driver_frame.value().evidence.gpu_percent.has_value());
@@ -182,11 +187,20 @@ int main() {
     CHECK(!driver_frame.value().evidence.dedicated_vram_bytes.has_value());
     CHECK(!driver_frame.value().evidence.dedicated_vram_budget_bytes.has_value());
 
+    auto unconfirmed_gpu = complete_input();
+    unconfirmed_gpu.gpu_utilization = telemetry::GpuUtilizationEstimate{
+        77, 100.0, 100.0, 0, 1, 0.35, false};
+    const auto unconfirmed_frame = build_telemetry_frame(unconfirmed_gpu);
+    CHECK(unconfirmed_frame.has_value());
+    CHECK(!unconfirmed_frame.value().evidence.process_gpu_percent.has_value());
+    CHECK(!unconfirmed_frame.value().evidence.gpu_percent.has_value());
+
     auto absent = complete_input();
     absent.frames = {};
     absent.process.reset();
     absent.adapter_gpu.reset();
     absent.driver_gpu_percent.reset();
+    absent.gpu_utilization.reset();
     absent.system_memory.reset();
     absent.gameplay.reset();
     absent.flex.reset();

@@ -7,6 +7,7 @@ class KF2OptimizerTelemetryInteraction extends Interaction
 var string OptimizerContextState;
 var string OptimizerProbeState;
 var bool bGameSessionEnding;
+var KF2OptimizerAdaptiveGraphicsState ProcessAdaptiveGraphicsState;
 
 function ReportOptimizerContextState(string State)
 {
@@ -26,6 +27,27 @@ function ReportOptimizerProbeState(string State)
     }
     OptimizerProbeState = State;
     `log("KF2OPT_INTERACTION schema=1 probe="$State);
+}
+
+function KF2OptimizerAdaptiveGraphicsState GetProcessAdaptiveGraphicsState()
+{
+    if (ProcessAdaptiveGraphicsState == None)
+    {
+        ProcessAdaptiveGraphicsState = new(self)
+            class'KF2OptimizerAdaptiveGraphicsState';
+    }
+    return ProcessAdaptiveGraphicsState;
+}
+
+function PrepareForGameplayWorld()
+{
+    // The viewport interaction outlives gameplay worlds. A newly initialized
+    // standalone gameplay mutator is the authoritative rearm boundary; local
+    // players may also be added while KF2 is only returning to the main menu.
+    bGameSessionEnding = false;
+    OptimizerContextState = "";
+    OptimizerProbeState = "";
+    `log("KF2OPT_INTERACTION schema=1 state=rearmed");
 }
 
 function bool GetStandaloneGameplayContext(
@@ -108,6 +130,16 @@ event Tick(float DeltaTime)
         ReportOptimizerProbeState("spawn_failed");
         return;
     }
+    if (CurrentProbe.AdaptiveGraphicsState == None)
+    {
+        CurrentProbe.AdaptiveGraphicsState =
+            GetProcessAdaptiveGraphicsState();
+    }
+    if (CurrentProbe.AdaptiveGraphicsState == None)
+    {
+        ReportOptimizerProbeState("graphics_state_unavailable");
+        return;
+    }
     if (Len(CurrentProbe.AdaptiveControlToken) < 32)
     {
         ReportOptimizerProbeState("token_unavailable");
@@ -158,6 +190,11 @@ function NotifyGameSessionEnded()
     local WorldInfo CurrentWorld;
     local KF2OptimizerTelemetryProbe CurrentProbe;
 
+    if (bGameSessionEnding)
+    {
+        return;
+    }
+
     // GameViewportClient calls this before unloading the current map. Stop all
     // Tick/PostRender access immediately so the persistent interaction cannot
     // touch a controller, world or render object while UE3 tears them down.
@@ -192,11 +229,9 @@ function NotifyGameSessionEnded()
 
 function NotifyPlayerAdded(int PlayerIndex, LocalPlayer AddedPlayer)
 {
-    // A player added by the next map is the engine-owned rearm boundary. The
-    // next Tick performs all normal standalone/gameplay validation again.
-    bGameSessionEnding = false;
-    OptimizerContextState = "";
-    OptimizerProbeState = "";
+    // Do not rearm here. KF2 also adds local players while returning to the
+    // main menu. InitMutator confirms the next standalone gameplay world and
+    // calls PrepareForGameplayWorld instead.
 }
 
 defaultproperties

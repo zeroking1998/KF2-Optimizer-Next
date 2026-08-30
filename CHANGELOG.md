@@ -44,7 +44,15 @@ are visible immediately.
   limits after an adaptive effect change. Their active pools, including KF2's
   impact-particle emitter pool, now receive and verify the same reversible
   limits before an APPLIED receipt is accepted.
-
+- Filtered vendor-neutral GPU utilization by physical adapter, sample age and
+  continuity so isolated 0%/100% readings cannot redirect Adaptive decisions;
+  sustained saturation is confirmed within one additional sampling interval.
+- Preserved one native adaptive-graphics baseline across consecutive maps so
+  recovery and exact readback no longer treat previously reduced settings as
+  the new 100% quality state.
+- Fixed duplicate telemetry viewport interactions accumulating after map
+  changes, and ensured the one persistent interaction safely stops and rearms
+  for every consecutive gameplay world.
 - Ragdoll Sleep now preserves an unconditional 800-unit safety radius around
   the player, even under severe frame, enemy, or corpse-density pressure.
 - Fixed hybrid-GPU systems sizing KF2's texture pool from the adapter with the

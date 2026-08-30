@@ -22,6 +22,7 @@ struct TelemetryFrameInput final {
     std::optional<::kf2::telemetry::ProcessMetrics> process;
     std::optional<::kf2::telemetry::GpuMetrics> adapter_gpu;
     std::optional<double> driver_gpu_percent;
+    std::optional<::kf2::telemetry::GpuUtilizationEstimate> gpu_utilization;
     std::optional<::kf2::telemetry::SystemMemoryMetrics> system_memory;
     std::optional<game::GameLogSession> gameplay;
     std::optional<flex::ObservationSnapshot> flex;
@@ -37,6 +38,7 @@ struct TelemetryFrame final {
     std::optional<::kf2::telemetry::ProcessMetrics> process;
     std::optional<::kf2::telemetry::GpuMetrics> adapter_gpu;
     std::optional<double> driver_gpu_percent;
+    std::optional<::kf2::telemetry::GpuUtilizationEstimate> gpu_utilization;
     std::optional<::kf2::telemetry::SystemMemoryMetrics> system_memory;
     std::optional<game::GameLogSession> gameplay;
     std::optional<flex::ObservationSnapshot> flex;

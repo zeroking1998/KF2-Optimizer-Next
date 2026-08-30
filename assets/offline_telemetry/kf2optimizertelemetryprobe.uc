@@ -122,11 +122,6 @@ function bool ApplyAdaptiveResourceControl(
     }
     QualityStage = Clamp((Quality + 9) / 10, 1, 10);
 
-    if (AdaptiveGraphicsState == None)
-    {
-        AdaptiveGraphicsState = new(self)
-            class'KF2OptimizerAdaptiveGraphicsState';
-    }
     PreviousGpuQuality = AdaptiveGraphicsState == None
         ? 100 : AdaptiveGraphicsState.GpuQuality;
     PreviousCpuQuality = AdaptiveGraphicsState == None
@@ -368,7 +363,6 @@ function RestoreAdaptiveGraphics()
     }
     AdaptiveGraphicsQuality = 100;
     AdaptiveGraphicsResource = "recover";
-    AdaptiveGraphicsState = None;
     `log("KF2OPT_ADAPTIVE_QUALITY state=restored readback=verified");
 }
 
