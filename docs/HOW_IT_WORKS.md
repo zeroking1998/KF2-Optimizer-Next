@@ -89,7 +89,9 @@ The corpse maximum selected by the user is a ceiling. A separate runtime budget
 uses visible density and distance first, with performance pressure as an
 amplifier. Actor IDs correlate each Distance Sleep, Near Wake, or Ragdoll Sleep
 request with its receipt. A per-action state machine prevents repeated work on
-an actor already in the requested state. Zed Time uses protected behavior so
+an actor already in the requested state. Visible Ragdoll Sleep never crosses
+the fixed 800-unit player safety radius; pressure can change timing and
+eligibility outside that radius but cannot bypass it. Zed Time uses protected behavior so
 normal-speed thresholds are not applied blindly during slow motion.
 
 ## 7. FleX actions

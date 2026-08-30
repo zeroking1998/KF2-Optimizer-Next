@@ -56,6 +56,7 @@ var array<KFPawn> AdaptiveDistanceSleptCorpses;
 var int AdaptiveDistancePhysicsSleeps;
 var int AdaptiveDistancePhysicsWakes;
 var int AdaptiveVisibleRagdollSleeps;
+var float AdaptiveLastNearRagdollRejectRealTime;
 var array<string> AdaptiveCorpsePhysicsActionIds;
 var int AdaptiveCorpsePhysicsActionIdCount;
 var float AdaptiveLastDistancePhysicsRealTime;
@@ -230,6 +231,8 @@ function InitializeAdaptiveCorpseStagger(KFGoreManager GoreManager)
     AdaptiveCorpsePressureLevel = 0;
     AdaptiveCorpseCurrentFramePressureLevel = 0;
     AdaptiveFramePressureObservedRealTime = 0.0;
+    AdaptiveLastNearRagdollRejectRealTime =
+        WorldInfo.RealTimeSeconds - 2.0;
     bAdaptiveCorpseStaggerInitialized = true;
     `log("KF2OPT_CORPSE_STAGGER state=enabled target="$
          AdaptiveCorpseTarget$" runtime_limit="$AdaptiveCorpseRuntimeLimit$
@@ -1556,15 +1559,23 @@ function int GetAdaptiveCorpseFramePressureLevel(
 }
 
 function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(
-    KFGoreManager GoreManager, bool SeverePressure)
+    KFGoreManager GoreManager, bool SeverePressure,
+    int ScenePressureLevel, int EnemyPressureLevel, int FramePressureLevel)
 {
     local int Index;
+    local float DistanceSquared;
     local float MinimumAge;
     local float MaximumSpeedSquared;
     local float SelectedDeathTime;
     local KFPawn Candidate;
     local KFPawn Selected;
+    local PlayerController LocalPC;
 
+    LocalPC = GetALocalPlayerController();
+    if (LocalPC == None || LocalPC.Pawn == None)
+    {
+        return None;
+    }
     MinimumAge = SeverePressure ? 0.75 : 1.5;
     MaximumSpeedSquared = SeverePressure ? 360000.0 : 160000.0;
     SelectedDeathTime = WorldInfo.TimeSeconds + 1.0;
@@ -1591,6 +1602,28 @@ function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(
         {
             continue;
         }
+        DistanceSquared = VSizeSq(
+            Candidate.Location - LocalPC.Pawn.Location);
+        // Ragdoll pressure may become more aggressive, but it must never
+        // freeze a visible corpse inside the 800-unit interaction radius.
+        if (DistanceSquared < 640000.0)
+        {
+            if (WorldInfo.RealTimeSeconds -
+                    AdaptiveLastNearRagdollRejectRealTime >= 2.0)
+            {
+                AdaptiveLastNearRagdollRejectRealTime =
+                    WorldInfo.RealTimeSeconds;
+                `log("KF2OPT_CORPSE_RAGDOLL state=rejected_near corpse_id="$
+                     GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
+                     GetAdaptiveCorpseDistanceUnits(Candidate)$
+                     " minimum_distance_units=800 scene_level="$
+                     ScenePressureLevel$" enemy_level="$EnemyPressureLevel$
+                     " frame_level="$FramePressureLevel$" visible=1 age_ms="$
+                     int((WorldInfo.TimeSeconds - Candidate.TimeOfDeath) *
+                         1000.0)$" zed_time=0 eligible=0 reason=near_player");
+            }
+            continue;
+        }
         if (Selected == None || Candidate.TimeOfDeath < SelectedDeathTime)
         {
             Selected = Candidate;
@@ -1601,12 +1634,14 @@ function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(
 }
 
 function bool SleepOneVisibleMonsterCorpse(
-    KFGoreManager GoreManager, bool SeverePressure, int VisibleAwakeBefore)
+    KFGoreManager GoreManager, bool SeverePressure, int VisibleAwakeBefore,
+    int ScenePressureLevel, int EnemyPressureLevel, int FramePressureLevel)
 {
     local KFPawn Candidate;
 
     Candidate = SelectVisibleAwakeMonsterCorpseForSleep(
-        GoreManager, SeverePressure);
+        GoreManager, SeverePressure, ScenePressureLevel,
+        EnemyPressureLevel, FramePressureLevel);
     if (Candidate == None || Candidate.Mesh == None)
     {
         return false;
@@ -1632,9 +1667,14 @@ function bool SleepOneVisibleMonsterCorpse(
          AdaptiveVisibleRagdollSleeps$" visible_awake_before="$
          VisibleAwakeBefore$" distance_tracked="$
          AdaptiveDistanceSleptCorpses.Length$" ownership_tracked="$
-          AdaptiveCorpsePhysicsActionIdCount$" corpse_id="$
+         AdaptiveCorpsePhysicsActionIdCount$" corpse_id="$
          GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-         GetAdaptiveCorpseDistanceUnits(Candidate)$" effective_awake=0");
+         GetAdaptiveCorpseDistanceUnits(Candidate)$
+         " minimum_distance_units=800 scene_level="$ScenePressureLevel$
+         " enemy_level="$EnemyPressureLevel$" frame_level="$FramePressureLevel$
+         " visible=1 age_ms="$
+         int((WorldInfo.TimeSeconds - Candidate.TimeOfDeath) * 1000.0)$
+         " zed_time=0 eligible=1 effective_awake=0");
     return true;
 }
 
@@ -1840,7 +1880,9 @@ function AdaptiveCorpseLoadControl()
         return;
     }
     if (SleepOneVisibleMonsterCorpse(
-            GoreManager, RagdollPressureLevel >= 2, VisibleAwake))
+            GoreManager, RagdollPressureLevel >= 2, VisibleAwake,
+            ScenePressureLevel, EnemyPressureLevel,
+            AdaptiveCorpseCurrentFramePressureLevel))
     {
         AdaptiveLastCorpseSleepRealTime = WorldInfo.RealTimeSeconds;
     }

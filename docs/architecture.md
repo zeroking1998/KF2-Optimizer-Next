@@ -185,7 +185,9 @@ every 400/200/100 ms. It starts at stage 2 outside 300 units and advances to
 forced, near, sleeping, recovered and session-ending LOD
 state is preserved or restored. After eligible distance/LOD work is exhausted,
 one old, slow, non-death-animation visible ragdoll may sleep at most once per
-750/350 ms. KF2/UE3 native frustum and occlusion culling already avoid drawing
+750/350 ms, but never inside the fixed 800-unit player safety radius. Rejected
+nearby candidates are reported with bounded policy evidence rather than
+mutated. KF2/UE3 native frustum and occlusion culling already avoid drawing
 living-enemy primitives outside the view or behind occluders. No living pawn is
 manually hidden or mutated and its collision/navigation are never changed. If this
 protected provider is absent, only its corpse/ragdoll/LOD capabilities report

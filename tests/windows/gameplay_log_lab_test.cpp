@@ -370,8 +370,8 @@ int main() {
     CHECK(telemetry_source.find(
         "function int GetAdaptiveCorpseDistanceUnits(KFPawn Candidate)") !=
           std::string::npos);
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 5);
-    CHECK(count_occurrences(telemetry_source, "distance_units=") == 5);
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 6);
+    CHECK(count_occurrences(telemetry_source, " distance_units=") == 6);
     CHECK(telemetry_source.find(
         "var globalconfig bool bAdaptiveCorpseDebugMarkers") !=
           std::string::npos);
@@ -627,6 +627,15 @@ int main() {
         ragdoll_selector);
     const auto ragdoll_awake_filter = telemetry_source.find(
         "!Candidate.Mesh.RigidBodyIsAwake()", ragdoll_selector);
+    const auto ragdoll_local_player = telemetry_source.find(
+        "LocalPC = GetALocalPlayerController();", ragdoll_selector);
+    const auto ragdoll_player_required = telemetry_source.find(
+        "if (LocalPC == None || LocalPC.Pawn == None)",
+        ragdoll_local_player);
+    const auto ragdoll_distance_measurement = telemetry_source.find(
+        "DistanceSquared = VSizeSq(", ragdoll_player_required);
+    const auto ragdoll_near_safety_gate = telemetry_source.find(
+        "DistanceSquared < 640000.0", ragdoll_distance_measurement);
     const auto ragdoll_sleep_call = telemetry_source.find(
         "Candidate.Mesh.PutRigidBodyToSleep()", ragdoll_function);
     const auto ragdoll_sleep_readback = telemetry_source.find(
@@ -638,6 +647,8 @@ int main() {
         "++AdaptiveVisibleRagdollSleeps", ragdoll_function);
     const auto ragdoll_receipt = telemetry_source.find(
         "KF2OPT_CORPSE_RAGDOLL state=sleep", ragdoll_function);
+    const auto ragdoll_near_rejection = telemetry_source.find(
+        "KF2OPT_CORPSE_RAGDOLL state=rejected_near", ragdoll_selector);
     const auto ragdoll_ownership_receipt = telemetry_source.find(
         "ownership_tracked=", ragdoll_receipt);
     CHECK(ragdoll_selector != std::string::npos);
@@ -657,17 +668,40 @@ int main() {
     CHECK(telemetry_source.find("struct AdaptiveCorpseRagdollSleepEntry") ==
           std::string::npos);
     CHECK(ragdoll_awake_filter != std::string::npos);
+    CHECK(ragdoll_local_player != std::string::npos);
+    CHECK(ragdoll_player_required != std::string::npos);
+    CHECK(ragdoll_distance_measurement != std::string::npos);
+    CHECK(ragdoll_near_safety_gate != std::string::npos);
     CHECK(ragdoll_sleep_call != std::string::npos);
     CHECK(ragdoll_sleep_readback != std::string::npos);
     CHECK(ragdoll_sleep_register != std::string::npos);
     CHECK(ragdoll_counter != std::string::npos);
     CHECK(ragdoll_receipt != std::string::npos);
+    CHECK(ragdoll_near_rejection != std::string::npos);
     CHECK(ragdoll_ownership_receipt != std::string::npos);
     CHECK(ragdoll_ownership_filter < ragdoll_awake_filter);
+    CHECK(ragdoll_local_player < ragdoll_function);
+    CHECK(ragdoll_player_required < ragdoll_function);
+    CHECK(ragdoll_distance_measurement < ragdoll_function);
+    CHECK(ragdoll_near_safety_gate < ragdoll_function);
     CHECK(ragdoll_sleep_call < ragdoll_sleep_readback);
     CHECK(ragdoll_sleep_readback < ragdoll_sleep_register);
     CHECK(ragdoll_sleep_register < ragdoll_counter);
     CHECK(ragdoll_counter < ragdoll_receipt);
+    CHECK(telemetry_source.find("minimum_distance_units=800",
+                                ragdoll_near_rejection) != std::string::npos);
+    CHECK(telemetry_source.find("eligible=0 reason=near_player",
+                                ragdoll_near_rejection) != std::string::npos);
+    CHECK(telemetry_source.find("scene_level=", ragdoll_receipt) !=
+          std::string::npos);
+    CHECK(telemetry_source.find("enemy_level=", ragdoll_receipt) !=
+          std::string::npos);
+    CHECK(telemetry_source.find("frame_level=", ragdoll_receipt) !=
+          std::string::npos);
+    CHECK(telemetry_source.find("minimum_distance_units=800",
+                                ragdoll_receipt) != std::string::npos);
+    CHECK(telemetry_source.find("zed_time=0 eligible=1",
+                                ragdoll_receipt) != std::string::npos);
     CHECK(telemetry_source.find(
         "MinimumAge = SeverePressure ? 0.75 : 1.5", ragdoll_selector) !=
           std::string::npos);
