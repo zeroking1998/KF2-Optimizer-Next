@@ -7,6 +7,7 @@ function InitMutator(string Options, out string ErrorMessage)
     local Engine CurrentEngine;
     local GameViewportClient CurrentViewport;
     local KF2OptimizerTelemetryInteraction CurrentInteraction;
+    local string InteractionPath;
 
     Super.InitMutator(Options, ErrorMessage);
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
@@ -23,11 +24,14 @@ function InitMutator(string Options, out string ErrorMessage)
         return;
     }
     CurrentViewport = CurrentEngine.GameViewport;
+    InteractionPath = PathName(CurrentViewport)$
+        ".KF2OptimizerTelemetryInteraction";
     CurrentInteraction = KF2OptimizerTelemetryInteraction(
-        FindObject("KF2OptimizerTelemetryInteraction",
+        FindObject(InteractionPath,
             class'KF2OptimizerTelemetryInteraction'));
     if (CurrentInteraction != None)
     {
+        CurrentInteraction.PrepareForGameplayWorld();
         `log("KF2OPT_MUTATOR schema=1 state=ready interaction=existing");
         return;
     }
@@ -39,6 +43,7 @@ function InitMutator(string Options, out string ErrorMessage)
         `log("KF2OPT_MUTATOR schema=1 state=interaction_failed");
         return;
     }
+    CurrentInteraction.PrepareForGameplayWorld();
     CurrentViewport.InsertInteraction(CurrentInteraction);
     `log("KF2OPT_MUTATOR schema=1 state=ready interaction=inserted");
 }

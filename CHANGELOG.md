@@ -23,6 +23,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Fixed duplicate telemetry viewport interactions accumulating after map
+  changes, and ensured the one persistent interaction safely stops and rearms
+  for every consecutive gameplay world.
 - Ragdoll Sleep now preserves an unconditional 800-unit safety radius around
   the player, even under severe frame, enemy, or corpse-density pressure.
 - Fixed hybrid-GPU systems sizing KF2's texture pool from the adapter with the
