@@ -23,6 +23,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Preserved one native adaptive-graphics baseline across consecutive maps so
+  recovery and exact readback no longer treat previously reduced settings as
+  the new 100% quality state.
 - Fixed duplicate telemetry viewport interactions accumulating after map
   changes, and ensured the one persistent interaction safely stops and rearms
   for every consecutive gameplay world.

@@ -74,6 +74,33 @@ int main() {
           std::string::npos);
     CHECK(interaction_source.find("var bool bGameSessionEnding") !=
           std::string::npos);
+    CHECK(interaction_source.find(
+        "var KF2OptimizerAdaptiveGraphicsState "
+        "ProcessAdaptiveGraphicsState;") != std::string::npos);
+    CHECK(interaction_source.find(
+        "function KF2OptimizerAdaptiveGraphicsState "
+        "GetProcessAdaptiveGraphicsState()") != std::string::npos);
+    CHECK(interaction_source.find(
+        "ProcessAdaptiveGraphicsState = new(self)\n"
+        "            class'KF2OptimizerAdaptiveGraphicsState'") !=
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "CurrentProbe.AdaptiveGraphicsState =\n"
+        "            GetProcessAdaptiveGraphicsState()") !=
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "ProcessAdaptiveGraphicsState = None") == std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveGraphicsState = new(self)") == std::string::npos);
+    const auto restore_adaptive_graphics = telemetry_source.find(
+        "function RestoreAdaptiveGraphics()");
+    const auto select_staggered_corpse = telemetry_source.find(
+        "function int SelectStaggeredCorpse(");
+    CHECK(restore_adaptive_graphics != std::string::npos);
+    CHECK(select_staggered_corpse != std::string::npos);
+    CHECK(restore_adaptive_graphics < select_staggered_corpse);
+    CHECK(telemetry_source.find("AdaptiveGraphicsState = None",
+        restore_adaptive_graphics) >= select_staggered_corpse);
     const auto interaction_tick = interaction_source.find(
         "event Tick(float DeltaTime)");
     const auto interaction_post_render = interaction_source.find(
