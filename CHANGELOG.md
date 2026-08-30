@@ -18,6 +18,9 @@ are visible immediately.
   particle occupancy and active decal saturation. Confirmed rendering pressure
   uses its own reversible quality group for particle distortion, particle LOD,
   blood effects, and decal budgets instead of lowering unrelated graphics.
+- Real KF2 gameplay calibration now recognizes the rare upper tail of that
+  signal at 50% only when independent KF2 GPU pressure is also confirmed; the
+  stronger 80% fallback remains required without GPU attribution.
 - CPU Adaptive quality now progressively reduces the three official cosmetic
   corpse-collision options at 80%, 60%, and 40%, with exact engine readback and
   restoration of the user's original values.

@@ -682,6 +682,32 @@ int main() {
     gpu_overdraw.rendering_pressure = 0.9;
     CHECK(classify(gpu_overdraw) == AdaptiveBottleneck::rendering);
 
+    // A real Burning Paris gameplay run peaked at 0.5676 from fresh
+    // particle/decal telemetry. Sustained KF2 GPU pressure must allow that
+    // observed load to select the dedicated overdraw actuator.
+    auto calibrated_gpu_overdraw =
+        sample(start, 30.0, 33.33, 42.0, 35.0, 95.0);
+    calibrated_gpu_overdraw.gameplay_context_fresh = true;
+    calibrated_gpu_overdraw.graphics_engine_percent = 95.0;
+    calibrated_gpu_overdraw.rendering_pressure = 0.5676;
+    CHECK(classify(calibrated_gpu_overdraw) ==
+          AdaptiveBottleneck::rendering);
+
+    auto ordinary_gpu_load = calibrated_gpu_overdraw;
+    ordinary_gpu_load.rendering_pressure = 0.4999;
+    CHECK(classify(ordinary_gpu_load) == AdaptiveBottleneck::gpu);
+
+    auto stale_gpu_overdraw = calibrated_gpu_overdraw;
+    stale_gpu_overdraw.gameplay_context_fresh = false;
+    CHECK(classify(stale_gpu_overdraw) == AdaptiveBottleneck::gpu);
+
+    auto uncorroborated_overdraw =
+        sample(start, 30.0, 33.33, 42.0, 35.0, 55.0);
+    uncorroborated_overdraw.gameplay_context_fresh = true;
+    uncorroborated_overdraw.rendering_pressure = 0.5676;
+    CHECK(classify(uncorroborated_overdraw) ==
+          AdaptiveBottleneck::unknown);
+
     CHECK(classify(sample(start, 30.0, 33.33, 42.0, 35.0, 55.0)) ==
           AdaptiveBottleneck::unknown);
 

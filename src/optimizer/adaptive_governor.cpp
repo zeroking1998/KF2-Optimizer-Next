@@ -8,6 +8,11 @@
 namespace kf2::optimizer {
 namespace {
 
+// Calibrated from a real high-effect KF2 session: only 7 of 574 fresh
+// samples reached 0.50, while none approached the old 0.80 threshold.
+// Classification still requires independently confirmed KF2 GPU pressure.
+constexpr double kGpuBoundOverdrawPressureThreshold = 0.50;
+
 bool finite_positive(const std::optional<double>& value) noexcept {
     return value && std::isfinite(*value) && *value > 0.0;
 }
@@ -339,8 +344,8 @@ AdaptiveBottleneckReport classify_bottleneck(
                           main_thread_bound || parallel_cpu_high ||
                           shared_cpu_high;
     const bool verified_overdraw_high = sample.gameplay_context_fresh &&
-        sample.rendering_pressure.value_or(0.0) >= 0.80 &&
-        (sample.graphics_engine_percent.value_or(0.0) >= 70.0 || gpu_high);
+        sample.rendering_pressure.value_or(0.0) >=
+            kGpuBoundOverdrawPressureThreshold;
 
     if (sample.thermal_power_pressure && *sample.thermal_power_pressure >= 0.80) {
         report.type = AdaptiveBottleneck::thermal_power;
