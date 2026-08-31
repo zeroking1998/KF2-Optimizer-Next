@@ -169,6 +169,7 @@ void UiRuntime::update_adaptive_controller(
         last_adaptive_state = optimizer::AdaptiveControllerState::observing;
         last_adaptive_disposition = optimizer::AdaptiveDisposition::hold;
         last_adaptive_bottleneck = optimizer::AdaptiveBottleneck::unknown;
+        last_adaptive_decision_log_ns = 0;
         model.set_status(std::move(status));
         return;
     }
@@ -567,11 +568,15 @@ void UiRuntime::update_adaptive_controller(
             *this, {*profile_to_persist}, status);
     }
 
-    const bool decision_changed =
+    const bool controller_changed =
         adaptive_decision.state != last_adaptive_state ||
-        adaptive_decision.disposition != last_adaptive_disposition ||
+        adaptive_decision.disposition != last_adaptive_disposition;
+    const bool bottleneck_changed =
         adaptive_decision.bottleneck.type != last_adaptive_bottleneck;
-    if (decision_changed && optimizer_settings.adaptive_logging) {
+    const bool log_decision = telemetry_pipeline::should_log_adaptive_decision(
+        controller_changed, bottleneck_changed, now_ns,
+        last_adaptive_decision_log_ns);
+    if (log_decision && optimizer_settings.adaptive_logging) {
         std::wostringstream decision_log;
         decision_log << L"State=" << status.adaptive_state
                      << L"; target=" << effective_target_fps()
@@ -763,10 +768,16 @@ void UiRuntime::update_adaptive_controller(
             "ADAPTIVE_DECISION",
             decision_log.str(),
             L"optimizer"});
+        last_adaptive_state = adaptive_decision.state;
+        last_adaptive_disposition = adaptive_decision.disposition;
+        last_adaptive_bottleneck = adaptive_decision.bottleneck.type;
+        last_adaptive_decision_log_ns = now_ns;
+    } else if (!optimizer_settings.adaptive_logging) {
+        last_adaptive_state = adaptive_decision.state;
+        last_adaptive_disposition = adaptive_decision.disposition;
+        last_adaptive_bottleneck = adaptive_decision.bottleneck.type;
+        last_adaptive_decision_log_ns = now_ns;
     }
-    last_adaptive_state = adaptive_decision.state;
-    last_adaptive_disposition = adaptive_decision.disposition;
-    last_adaptive_bottleneck = adaptive_decision.bottleneck.type;
     model.set_status(std::move(status));
 }
 

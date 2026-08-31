@@ -15,6 +15,18 @@ struct UiRuntime;
 
 namespace kf2::telemetry_pipeline {
 
+inline constexpr std::uint64_t kAdaptiveBottleneckLogIntervalNs =
+    5'000'000'000ULL;
+
+[[nodiscard]] inline bool should_log_adaptive_decision(
+    bool controller_changed, bool bottleneck_changed,
+    std::uint64_t now_ns, std::uint64_t last_log_ns) noexcept {
+    if (controller_changed) return true;
+    if (!bottleneck_changed) return false;
+    return last_log_ns == 0 || now_ns < last_log_ns ||
+           now_ns - last_log_ns >= kAdaptiveBottleneckLogIntervalNs;
+}
+
 struct AdaptiveSampleContext final {
     int current_quality{-1};
     int minimum_quality{10};

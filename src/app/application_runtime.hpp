@@ -173,6 +173,7 @@ struct UiRuntime {
         optimizer::AdaptiveDisposition::none};
     optimizer::AdaptiveBottleneck last_adaptive_bottleneck{
         optimizer::AdaptiveBottleneck::unknown};
+    std::uint64_t last_adaptive_decision_log_ns{0};
     unsigned int adaptive_overhead_breaches{0};
     bool adaptive_overhead_frozen{false};
     bool adaptive_gameplay_active{false};
