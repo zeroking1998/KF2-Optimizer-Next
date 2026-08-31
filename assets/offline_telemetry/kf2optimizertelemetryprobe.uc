@@ -2751,6 +2751,7 @@ function SampleTelemetry()
     local int WorldParticleVisibleComponents;
     local int WorldParticleLodTotal;
     local int WorldParticleBoundedComponents;
+    local int WorldEmitterComponents;
     local int GroundFireParticleComponents;
     local int GroundFireParticles;
     local int GroundFireParticleVisibleComponents;
@@ -2781,6 +2782,12 @@ function SampleTelemetry()
     local int ParticleFlexMixedComponents;
     local int ParticleNonFlexComponents;
     local int ParticleUnclassifiedComponents;
+    local float ProfileTotalSeconds;
+    local float ProfileLivingSeconds;
+    local float ProfileCorpseGoreSeconds;
+    local float ProfileParticlePoolSeconds;
+    local float ProfileEffectActorSeconds;
+    local float ProfileWorldEmitterSeconds;
 
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
     {
@@ -2791,6 +2798,8 @@ function SampleTelemetry()
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=sample_begin");
 
+    Clock(ProfileTotalSeconds);
+    Clock(ProfileLivingSeconds);
     foreach WorldInfo.AllPawns(class'KFPawn_Monster', Zed)
     {
         if (Zed != None && Zed.IsAliveAndWell())
@@ -2874,6 +2883,7 @@ function SampleTelemetry()
             LivingInjuredZones += CountBits(Zed.InjuredHitZones);
         }
     }
+    UnClock(ProfileLivingSeconds);
 
     // Reuse the one-second telemetry scan for scene pressure instead of
     // enumerating every living pawn again in the 250-ms corpse controller.
@@ -2883,6 +2893,7 @@ function SampleTelemetry()
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=living_done");
 
     GoreManager = KFGoreManager(WorldInfo.MyGoreEffectManager);
+    Clock(ProfileCorpseGoreSeconds);
     if (GoreManager != None)
     {
         for (Index = 0; Index < GoreManager.CorpsePool.Length; ++Index)
@@ -3035,6 +3046,7 @@ function SampleTelemetry()
                           ParticleBurstEntries,
                            ParticlePeakCapacity);
     }
+    UnClock(ProfileCorpseGoreSeconds);
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=gore_done");
 
@@ -3064,6 +3076,7 @@ function SampleTelemetry()
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=collision_done");
 
+    Clock(ProfileParticlePoolSeconds);
     if (WorldInfo.MyEmitterPool != None)
     {
         WorldParticlePoolCapacity = Max(
@@ -3137,9 +3150,11 @@ function SampleTelemetry()
     WorldParticleVisibleComponents += ImpactParticleVisibleComponents;
     WorldParticleLodTotal += ImpactParticleLodTotal;
     WorldParticleBoundedComponents += ImpactParticleBoundedComponents;
+    UnClock(ProfileParticlePoolSeconds);
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=pools_done");
 
+    Clock(ProfileEffectActorSeconds);
     ImpactEffectManager = KFImpactEffectManager(WorldInfo.MyImpactEffectManager);
     if (ImpactEffectManager != None &&
         ImpactEffectManager.ImpactEffectDecalManager != None)
@@ -3277,7 +3292,9 @@ function SampleTelemetry()
             ++VisibleGibs;
         }
     }
+    UnClock(ProfileEffectActorSeconds);
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=gibs_done");
+    Clock(ProfileWorldEmitterSeconds);
     foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
     {
         if (WorldEmitter == None || WorldEmitter.bDeleteMe ||
@@ -3286,6 +3303,7 @@ function SampleTelemetry()
         {
             continue;
         }
+        ++WorldEmitterComponents;
         ++WorldParticleComponents;
         WorldParticles +=
             WorldEmitter.ParticleSystemComponent.NumActiveParticles;
@@ -3311,6 +3329,7 @@ function SampleTelemetry()
             ++WorldParticleBoundedComponents;
         }
     }
+    UnClock(ProfileWorldEmitterSeconds);
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=emitters_done");
 
@@ -3322,7 +3341,29 @@ function SampleTelemetry()
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=sample_ready");
 
+    UnClock(ProfileTotalSeconds);
     ++SampleSequence;
+    // One compact timing receipt every ten seconds measures the full scan and
+    // its dominant sections without adding a second traversal or log chatter.
+    if (SampleSequence % 10 == 0)
+    {
+        `log("KF2OPT_TELEMETRY_PROFILE schema=1 sample="$SampleSequence$
+             " total_us="$int(ProfileTotalSeconds * 1000000.0)$
+             " living_us="$int(ProfileLivingSeconds * 1000000.0)$
+             " corpse_gore_us="$int(ProfileCorpseGoreSeconds * 1000000.0)$
+             " particle_pools_us="$int(ProfileParticlePoolSeconds * 1000000.0)$
+             " effect_actors_us="$int(ProfileEffectActorSeconds * 1000000.0)$
+             " world_emitters_us="$int(ProfileWorldEmitterSeconds * 1000000.0)$
+             " unclassified_us="$int(FMax(0.0, ProfileTotalSeconds -
+                 ProfileLivingSeconds - ProfileCorpseGoreSeconds -
+                 ProfileParticlePoolSeconds - ProfileEffectActorSeconds -
+                 ProfileWorldEmitterSeconds) * 1000000.0)$
+             " living="$LivingZeds$" corpses="$CorpseTotal$
+             " pool_components="$(GoreParticleComponents +
+                 WorldParticleComponents - WorldEmitterComponents)$
+             " world_emitters="$WorldEmitterComponents$
+             " dynamic_emitters="$ParticleDynamicSpawnEmitters);
+    }
     `log("KF2OPT_TELEMETRY schema=6 sample="$SampleSequence$
          " living="$LivingZeds$
          " living_classes="$LivingClasses.Length$

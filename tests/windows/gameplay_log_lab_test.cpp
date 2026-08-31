@@ -683,6 +683,17 @@ int main() {
         "function float GetAdaptiveLivingEnemyPressureScale(") !=
           std::string::npos);
     CHECK(telemetry_source.find(
+        "KF2OPT_TELEMETRY_PROFILE schema=1") != std::string::npos);
+    CHECK(telemetry_source.find("SampleSequence % 10 == 0") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("Clock(ProfileTotalSeconds)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("UnClock(ProfileTotalSeconds)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("particle_pools_us=") != std::string::npos);
+    CHECK(telemetry_source.find("world_emitters_us=") != std::string::npos);
+    CHECK(telemetry_source.find("unclassified_us=") != std::string::npos);
+    CHECK(telemetry_source.find(
         "WeightedVisibleZeds = float(VisibleLivingZeds)") !=
           std::string::npos);
     CHECK(telemetry_source.find(
