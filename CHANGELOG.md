@@ -35,6 +35,11 @@ are visible immediately.
 
 ### Bug fixes
 
+- Replaced telemetry profile values that were always reported as zero by the
+  KF2 release client. Profiling now reports an explicit accumulated
+  millisecond window, marks work below that resolution honestly, and submits
+  matching native engine profiler nodes without changing global profiler
+  settings.
 - Fixed adaptive mixed-pressure corrections consuming the dedicated overdraw
   quality channel before verified overdraw pressure could select it.
 - Fixed native corpse wakes being immediately undone by Distance Sleep. The

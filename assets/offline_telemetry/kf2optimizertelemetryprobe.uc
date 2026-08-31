@@ -31,6 +31,14 @@ struct AdaptiveDistanceSleepTransitionEntry
 };
 
 var int SampleSequence;
+var int ProfileWindowSamples;
+var int ProfileTotalMilliseconds;
+var int ProfileLivingMilliseconds;
+var int ProfileCorpseGoreMilliseconds;
+var int ProfileParticlePoolMilliseconds;
+var int ProfileEffectActorMilliseconds;
+var int ProfileWorldEmitterMilliseconds;
+var int ProfileClockAnomalies;
 var globalconfig bool bAdaptiveCorpseStagger;
 var globalconfig bool bAdaptiveCorpseDebugMarkers;
 var globalconfig int AdaptiveCorpseMaximum;
@@ -2647,6 +2655,47 @@ event PreBeginPlay()
     SampleTelemetry();
 }
 
+function int GetProfileSystemMilliseconds()
+{
+    local int Year;
+    local int Month;
+    local int DayOfWeek;
+    local int Day;
+    local int Hour;
+    local int Minute;
+    local int Second;
+    local int Millisecond;
+
+    GetSystemTime(
+        Year, Month, DayOfWeek, Day,
+        Hour, Minute, Second, Millisecond);
+    return (((Hour * 60) + Minute) * 60 + Second) * 1000 + Millisecond;
+}
+
+function int GetProfileElapsedMilliseconds(int StartMilliseconds,
+                                           int EndMilliseconds)
+{
+    local int ElapsedMilliseconds;
+
+    if (EndMilliseconds >= StartMilliseconds)
+    {
+        ElapsedMilliseconds = EndMilliseconds - StartMilliseconds;
+        if (ElapsedMilliseconds <= 10000)
+        {
+            return ElapsedMilliseconds;
+        }
+    }
+    else if (StartMilliseconds >= 86390000 && EndMilliseconds <= 10000)
+    {
+        // GetSystemTime is time-of-day based. Preserve a genuine midnight
+        // crossing without interpreting an ordinary backward clock correction
+        // as nearly 24 hours of telemetry work.
+        return (86400000 - StartMilliseconds) + EndMilliseconds;
+    }
+    ++ProfileClockAnomalies;
+    return 0;
+}
+
 function SampleTelemetry()
 {
     local KFPawn_Monster Zed;
@@ -2782,12 +2831,13 @@ function SampleTelemetry()
     local int ParticleFlexMixedComponents;
     local int ParticleNonFlexComponents;
     local int ParticleUnclassifiedComponents;
-    local float ProfileTotalSeconds;
-    local float ProfileLivingSeconds;
-    local float ProfileCorpseGoreSeconds;
-    local float ProfileParticlePoolSeconds;
-    local float ProfileEffectActorSeconds;
-    local float ProfileWorldEmitterSeconds;
+    local int ProfileTotalStartMilliseconds;
+    local int ProfileSectionStartMilliseconds;
+    local int ProfileTotalNode;
+    local int ProfileSectionNode;
+    local int ProfileUnclassifiedMilliseconds;
+    local bool bSubmitNativeProfileNodes;
+    local string ProfileState;
 
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
     {
@@ -2798,8 +2848,14 @@ function SampleTelemetry()
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=sample_begin");
 
-    Clock(ProfileTotalSeconds);
-    Clock(ProfileLivingSeconds);
+    bSubmitNativeProfileNodes = ((SampleSequence + 1) % 10 == 0);
+    ProfileTotalStartMilliseconds = GetProfileSystemMilliseconds();
+    if (bSubmitNativeProfileNodes)
+    {
+        ProfileTotalNode = ProfNodeStart("KF2OPT_Telemetry_Total");
+        ProfileSectionNode = ProfNodeStart("KF2OPT_Telemetry_Living");
+    }
+    ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
     foreach WorldInfo.AllPawns(class'KFPawn_Monster', Zed)
     {
         if (Zed != None && Zed.IsAliveAndWell())
@@ -2883,7 +2939,12 @@ function SampleTelemetry()
             LivingInjuredZones += CountBits(Zed.InjuredHitZones);
         }
     }
-    UnClock(ProfileLivingSeconds);
+    ProfileLivingMilliseconds += GetProfileElapsedMilliseconds(
+        ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
+    if (bSubmitNativeProfileNodes)
+    {
+        ProfNodeStop(ProfileSectionNode);
+    }
 
     // Reuse the one-second telemetry scan for scene pressure instead of
     // enumerating every living pawn again in the 250-ms corpse controller.
@@ -2893,7 +2954,11 @@ function SampleTelemetry()
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=living_done");
 
     GoreManager = KFGoreManager(WorldInfo.MyGoreEffectManager);
-    Clock(ProfileCorpseGoreSeconds);
+    if (bSubmitNativeProfileNodes)
+    {
+        ProfileSectionNode = ProfNodeStart("KF2OPT_Telemetry_CorpseGore");
+    }
+    ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
     if (GoreManager != None)
     {
         for (Index = 0; Index < GoreManager.CorpsePool.Length; ++Index)
@@ -3046,7 +3111,12 @@ function SampleTelemetry()
                           ParticleBurstEntries,
                            ParticlePeakCapacity);
     }
-    UnClock(ProfileCorpseGoreSeconds);
+    ProfileCorpseGoreMilliseconds += GetProfileElapsedMilliseconds(
+        ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
+    if (bSubmitNativeProfileNodes)
+    {
+        ProfNodeStop(ProfileSectionNode);
+    }
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=gore_done");
 
@@ -3076,7 +3146,11 @@ function SampleTelemetry()
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=collision_done");
 
-    Clock(ProfileParticlePoolSeconds);
+    if (bSubmitNativeProfileNodes)
+    {
+        ProfileSectionNode = ProfNodeStart("KF2OPT_Telemetry_ParticlePools");
+    }
+    ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
     if (WorldInfo.MyEmitterPool != None)
     {
         WorldParticlePoolCapacity = Max(
@@ -3150,11 +3224,20 @@ function SampleTelemetry()
     WorldParticleVisibleComponents += ImpactParticleVisibleComponents;
     WorldParticleLodTotal += ImpactParticleLodTotal;
     WorldParticleBoundedComponents += ImpactParticleBoundedComponents;
-    UnClock(ProfileParticlePoolSeconds);
+    ProfileParticlePoolMilliseconds += GetProfileElapsedMilliseconds(
+        ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
+    if (bSubmitNativeProfileNodes)
+    {
+        ProfNodeStop(ProfileSectionNode);
+    }
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=pools_done");
 
-    Clock(ProfileEffectActorSeconds);
+    if (bSubmitNativeProfileNodes)
+    {
+        ProfileSectionNode = ProfNodeStart("KF2OPT_Telemetry_EffectActors");
+    }
+    ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
     ImpactEffectManager = KFImpactEffectManager(WorldInfo.MyImpactEffectManager);
     if (ImpactEffectManager != None &&
         ImpactEffectManager.ImpactEffectDecalManager != None)
@@ -3292,9 +3375,18 @@ function SampleTelemetry()
             ++VisibleGibs;
         }
     }
-    UnClock(ProfileEffectActorSeconds);
+    ProfileEffectActorMilliseconds += GetProfileElapsedMilliseconds(
+        ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
+    if (bSubmitNativeProfileNodes)
+    {
+        ProfNodeStop(ProfileSectionNode);
+    }
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=gibs_done");
-    Clock(ProfileWorldEmitterSeconds);
+    if (bSubmitNativeProfileNodes)
+    {
+        ProfileSectionNode = ProfNodeStart("KF2OPT_Telemetry_WorldEmitters");
+    }
+    ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
     foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
     {
         if (WorldEmitter == None || WorldEmitter.bDeleteMe ||
@@ -3329,7 +3421,12 @@ function SampleTelemetry()
             ++WorldParticleBoundedComponents;
         }
     }
-    UnClock(ProfileWorldEmitterSeconds);
+    ProfileWorldEmitterMilliseconds += GetProfileElapsedMilliseconds(
+        ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
+    if (bSubmitNativeProfileNodes)
+    {
+        ProfNodeStop(ProfileSectionNode);
+    }
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=emitters_done");
 
@@ -3341,28 +3438,55 @@ function SampleTelemetry()
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=sample_ready");
 
-    UnClock(ProfileTotalSeconds);
+    if (bSubmitNativeProfileNodes)
+    {
+        ProfNodeStop(ProfileTotalNode);
+    }
+    ProfileTotalMilliseconds += GetProfileElapsedMilliseconds(
+        ProfileTotalStartMilliseconds, GetProfileSystemMilliseconds());
+    ++ProfileWindowSamples;
     ++SampleSequence;
-    // One compact timing receipt every ten seconds measures the full scan and
-    // its dominant sections without adding a second traversal or log chatter.
+    // KF2's shipping client exposes Clock/UnClock but returned zero for every
+    // section during the real 2026-09-01 gameplay run. Report an honest,
+    // accumulated one-millisecond wall-clock window instead of manufacturing
+    // microsecond precision. Native profiler nodes are also submitted on the
+    // receipt sample for a future engine-profiler capture.
     if (SampleSequence % 10 == 0)
     {
-        `log("KF2OPT_TELEMETRY_PROFILE schema=1 sample="$SampleSequence$
-             " total_us="$int(ProfileTotalSeconds * 1000000.0)$
-             " living_us="$int(ProfileLivingSeconds * 1000000.0)$
-             " corpse_gore_us="$int(ProfileCorpseGoreSeconds * 1000000.0)$
-             " particle_pools_us="$int(ProfileParticlePoolSeconds * 1000000.0)$
-             " effect_actors_us="$int(ProfileEffectActorSeconds * 1000000.0)$
-             " world_emitters_us="$int(ProfileWorldEmitterSeconds * 1000000.0)$
-             " unclassified_us="$int(FMax(0.0, ProfileTotalSeconds -
-                 ProfileLivingSeconds - ProfileCorpseGoreSeconds -
-                 ProfileParticlePoolSeconds - ProfileEffectActorSeconds -
-                 ProfileWorldEmitterSeconds) * 1000000.0)$
+        ProfileUnclassifiedMilliseconds = Max(0,
+            ProfileTotalMilliseconds - ProfileLivingMilliseconds -
+            ProfileCorpseGoreMilliseconds -
+            ProfileParticlePoolMilliseconds -
+            ProfileEffectActorMilliseconds -
+            ProfileWorldEmitterMilliseconds);
+        ProfileState = ProfileTotalMilliseconds > 0
+            ? "measured" : "below_resolution";
+        `log("KF2OPT_TELEMETRY_PROFILE schema=2 sample="$SampleSequence$
+             " state="$ProfileState$
+             " timer=system_clock_ms resolution_us=1000"$
+             " window_samples="$ProfileWindowSamples$
+             " clock_anomalies="$ProfileClockAnomalies$
+             " native_nodes=submitted"$
+             " total_ms="$ProfileTotalMilliseconds$
+             " living_ms="$ProfileLivingMilliseconds$
+             " corpse_gore_ms="$ProfileCorpseGoreMilliseconds$
+             " particle_pools_ms="$ProfileParticlePoolMilliseconds$
+             " effect_actors_ms="$ProfileEffectActorMilliseconds$
+             " world_emitters_ms="$ProfileWorldEmitterMilliseconds$
+             " unclassified_ms="$ProfileUnclassifiedMilliseconds$
              " living="$LivingZeds$" corpses="$CorpseTotal$
              " pool_components="$(GoreParticleComponents +
                  WorldParticleComponents - WorldEmitterComponents)$
              " world_emitters="$WorldEmitterComponents$
              " dynamic_emitters="$ParticleDynamicSpawnEmitters);
+        ProfileWindowSamples = 0;
+        ProfileTotalMilliseconds = 0;
+        ProfileLivingMilliseconds = 0;
+        ProfileCorpseGoreMilliseconds = 0;
+        ProfileParticlePoolMilliseconds = 0;
+        ProfileEffectActorMilliseconds = 0;
+        ProfileWorldEmitterMilliseconds = 0;
+        ProfileClockAnomalies = 0;
     }
     `log("KF2OPT_TELEMETRY schema=6 sample="$SampleSequence$
          " living="$LivingZeds$

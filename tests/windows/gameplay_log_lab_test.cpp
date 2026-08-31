@@ -683,16 +683,35 @@ int main() {
         "function float GetAdaptiveLivingEnemyPressureScale(") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "KF2OPT_TELEMETRY_PROFILE schema=1") != std::string::npos);
+        "KF2OPT_TELEMETRY_PROFILE schema=2") != std::string::npos);
     CHECK(telemetry_source.find("SampleSequence % 10 == 0") !=
           std::string::npos);
-    CHECK(telemetry_source.find("Clock(ProfileTotalSeconds)") !=
+    CHECK(telemetry_source.find("GetSystemTime(") !=
           std::string::npos);
-    CHECK(telemetry_source.find("UnClock(ProfileTotalSeconds)") !=
+    CHECK(telemetry_source.find("GetProfileElapsedMilliseconds(") !=
           std::string::npos);
-    CHECK(telemetry_source.find("particle_pools_us=") != std::string::npos);
-    CHECK(telemetry_source.find("world_emitters_us=") != std::string::npos);
-    CHECK(telemetry_source.find("unclassified_us=") != std::string::npos);
+    CHECK(telemetry_source.find("timer=system_clock_ms resolution_us=1000") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("clock_anomalies=") != std::string::npos);
+    CHECK(telemetry_source.find("ElapsedMilliseconds <= 10000") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "StartMilliseconds >= 86390000 && EndMilliseconds <= 10000") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("state=\"$ProfileState") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("native_nodes=submitted") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("ProfNodeStart(\"KF2OPT_Telemetry_Total\")") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("ProfNodeStop(ProfileTotalNode)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("particle_pools_ms=") != std::string::npos);
+    CHECK(telemetry_source.find("world_emitters_ms=") != std::string::npos);
+    CHECK(telemetry_source.find("unclassified_ms=") != std::string::npos);
+    CHECK(telemetry_source.find("Clock(ProfileTotalSeconds)") ==
+          std::string::npos);
+    CHECK(telemetry_source.find("total_us=") == std::string::npos);
     CHECK(telemetry_source.find(
         "WeightedVisibleZeds = float(VisibleLivingZeds)") !=
           std::string::npos);
