@@ -17,6 +17,8 @@ enum class AdaptiveResourceControl : std::uint8_t {
     gpu,
     vram,
     ram,
+    overdraw,
+    effects,
     mixed,
     recover,
 };
@@ -43,6 +45,8 @@ struct AdaptiveResourceQualityState final {
     int gpu{100};
     int vram{100};
     int ram{100};
+    int overdraw{100};
+    int effects{100};
 
     [[nodiscard]] int effective_quality() const noexcept;
     [[nodiscard]] int control_quality(

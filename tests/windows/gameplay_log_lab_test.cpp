@@ -54,7 +54,8 @@ int main() {
     namespace fs = std::filesystem;
     constexpr std::string_view control_token =
         "0123456789abcdef0123456789abcdef";
-    const auto telemetry_source = read_bytes(KF2_TELEMETRY_SOURCE);
+    const auto telemetry_source = normalize_newlines(
+        read_bytes(KF2_TELEMETRY_SOURCE));
     const auto mutator_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_MUTATOR_SOURCE));
     const auto interaction_source = normalize_newlines(
@@ -67,6 +68,10 @@ int main() {
     CHECK(telemetry_source.find("ValidAdaptiveControlToken") !=
           std::string::npos);
     CHECK(telemetry_source.find("KF2OPT_ADAPTIVE_QUALITY state=applied") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("Resource ~= \"overdraw\"") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("Resource ~= \"effects\"") !=
           std::string::npos);
     CHECK(interaction_source.find(
         "class'KF2OptimizerAdaptiveControlListener'") != std::string::npos);
@@ -227,6 +232,36 @@ int main() {
           std::string::npos);
     CHECK(connection_source.find("Len(Line) > 128") != std::string::npos);
     CHECK(graphics_source.find("Requested.Flex") == std::string::npos);
+    CHECK(graphics_source.find(
+        "static function ApplyOverdraw") != std::string::npos);
+    CHECK(graphics_source.find(
+        "static function ApplyEffects") != std::string::npos);
+    CHECK(graphics_source.find(
+        "ApplyOverdraw(Requested, Snapshot.OverdrawQuality)") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "ApplyEffects(Requested, Snapshot.EffectsQuality)") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "else if (Resource ~= \"overdraw\") Snapshot.OverdrawQuality = Quality") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "else if (Resource ~= \"effects\") Snapshot.EffectsQuality = Quality") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.RamQuality = Quality;\n"
+        "        Snapshot.OverdrawQuality = Quality;") ==
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.RamQuality = Quality;\n"
+        "        Snapshot.EffectsQuality = Quality;") ==
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.FX.DropParticleDistortion = true") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.FX.MaxPersistentSplatsPerFrame = Min") !=
+          std::string::npos);
     CHECK(graphics_source.find("Requested.CharacterDetail.MaxDeadBodies") ==
           std::string::npos);
     CHECK(graphics_source.find(
@@ -284,6 +319,47 @@ int main() {
           std::string::npos);
     CHECK(graphics_source.find(
         "Snapshot.RamQuality = Max(Snapshot.RamQuality, Quality)") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.OverdrawQuality = Max(\n"
+        "            Snapshot.OverdrawQuality, Quality)") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.EffectsQuality = Max(\n"
+        "            Snapshot.EffectsQuality, Quality)") !=
+          std::string::npos);
+    CHECK(graphics_source.find("Snapshot.EffectsQuality = 100") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Requested.FX.MaxGoreEffects, Max(2, Quality / 10)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function bool ApplyAdaptiveEffectRuntimeReadback(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "GoreManager.MaxBloodEffects =\n"
+        "        class'KFGoreManager'.default.MaxBloodEffects") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "GoreManager.BloodFXEmitterPool.MaxActiveEffects =\n"
+        "            GoreManager.MaxBloodEffects") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "ImpactEffectManager.ImpactEffectDecalManager.MaxActiveDecals =\n"
+        "                ImpactEffectManager.MaxImpactEffectDecals") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "WorldInfo.ImpactFXEmitterPool.MaxActiveEffects =\n"
+        "            DesiredImpactEffects") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "WorldInfo.ImpactFXEmitterPool.MaxActiveEffects ==\n"
+        "            DesiredImpactEffects") != std::string::npos);
+    CHECK(telemetry_source.find(
+        " impact_pool=\"$") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_EFFECT_RUNTIME state=applied") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "!ApplyAdaptiveEffectRuntimeReadback(Resource, Quality)") !=
           std::string::npos);
     CHECK(graphics_source.find("Quality >= 90") != std::string::npos);
     CHECK(graphics_source.find("Quality <= 80") != std::string::npos);
@@ -480,6 +556,23 @@ int main() {
         "struct AdaptiveDistanceSleepEntry") != std::string::npos);
     CHECK(telemetry_source.find(
         "struct AdaptiveDistanceSleepTransitionEntry") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "var int NativeWakeDistanceUnits") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "var float NativeWakeObservedRealTime") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "function bool DeferAdaptiveDistanceResleepAfterNativeWake(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "DeferAdaptiveDistanceResleepAfterNativeWake(Candidate)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("NativeWakeAge < 1.0") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("NativeWakeAge >= 5.0") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "CurrentDistanceUnits < NativeWakeDistanceUnits + 250") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "function bool RememberAdaptiveDistanceSleepTransition(") !=

@@ -1,5 +1,6 @@
-// Per-session snapshot for the live adaptive graphics actuator.
-// It is owned by the telemetry probe and never persisted to the user's INIs.
+// Process-session snapshot for the live adaptive graphics actuator. The
+// persistent viewport interaction owns it and shares it with each map probe;
+// it is never persisted to the user's INIs.
 class KF2OptimizerAdaptiveGraphicsState extends Object;
 
 var bool bOriginalCaptured;
@@ -7,6 +8,8 @@ var int GpuQuality;
 var int CpuQuality;
 var int VramQuality;
 var int RamQuality;
+var int OverdrawQuality;
+var int EffectsQuality;
 var int OriginalMaxWholeSceneShadowResolution;
 var int OriginalMaxShadowResolution;
 var int OriginalShadowFadeResolution;
@@ -70,4 +73,6 @@ defaultproperties
     CpuQuality=100
     VramQuality=100
     RamQuality=100
+    OverdrawQuality=100
+    EffectsQuality=100
 }

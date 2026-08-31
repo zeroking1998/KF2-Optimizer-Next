@@ -8,11 +8,23 @@ are visible immediately.
 
 ### What's new
 
-- Adaptive live quality now keeps independent CPU, GPU, VRAM, and RAM levels.
+- Adaptive live quality now keeps independent CPU, GPU, VRAM, RAM, and
+  overdraw levels.
   Each confirmed bottleneck changes only its matching group, while recovery
   restores the groups gradually. The live groups now also cover verified KF2
   shadow distance/fade, post-processing quality, lighting, shadowmap textures,
   wound decals, blood effects, and destruction lifetime controls.
+- Adaptive now derives a conservative overdraw signal from fresh visible
+  particle occupancy and active decal saturation. Confirmed rendering pressure
+  uses its own reversible quality group for particle distortion, particle LOD,
+  blood effects, and decal budgets instead of lowering unrelated graphics.
+- Real KF2 gameplay calibration now recognizes the rare upper tail of that
+  signal at 50% only when independent KF2 GPU pressure is also confirmed; the
+  stronger 80% fallback remains required without GPU attribution.
+- Effect-heavy combat now has an independent adaptive quality channel for
+  particle LOD, effect lifetimes, emitter capacity, blood, gore, and decals.
+  Verified gore or particle pressure can use it directly, and rendering
+  pressure falls back to it after overdraw reaches minimum quality.
 - CPU Adaptive quality now progressively reduces the three official cosmetic
   corpse-collision options at 80%, 60%, and 40%, with exact engine readback and
   restoration of the user's original values.
@@ -23,6 +35,15 @@ are visible immediately.
 
 ### Bug fixes
 
+- Fixed adaptive mixed-pressure corrections consuming the dedicated overdraw
+  quality channel before verified overdraw pressure could select it.
+- Fixed native corpse wakes being immediately undone by Distance Sleep. The
+  Optimizer now waits until the corpse is at least 250 units farther away
+  before that actor can be selected again.
+- Fixed live gore, blood, impact, and explosion managers keeping their old
+  limits after an adaptive effect change. Their active pools, including KF2's
+  impact-particle emitter pool, now receive and verify the same reversible
+  limits before an APPLIED receipt is accepted.
 - Filtered vendor-neutral GPU utilization by physical adapter, sample age and
   continuity so isolated 0%/100% readings cannot redirect Adaptive decisions;
   sustained saturation is confirmed within one additional sampling interval.
