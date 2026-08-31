@@ -705,6 +705,21 @@ int main() {
         "function int GetAdaptiveLivingEnemyPressureLevel(") !=
           std::string::npos);
     CHECK(telemetry_source.find(
+        "function int ResolveAdaptiveLivingEnemyPressureLevel(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveLivingVisualPressureLevel") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveLivingVisualPendingPressureLevel") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "float(AdaptiveLivingVisualPressureLevel) / 5.0 + 0.03") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("HoldSeconds = 0.75") != std::string::npos);
+    CHECK(telemetry_source.find("HoldSeconds = 1.25") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveLivingVisualLastChangeRealTime < 1.5") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
         "function float GetAdaptiveLivingEnemyPressureScale(") !=
           std::string::npos);
     CHECK(telemetry_source.find(
@@ -842,6 +857,9 @@ int main() {
     CHECK(telemetry_source.find(
         "function ApplyLivingEnemyVisualPressure(") != std::string::npos);
     CHECK(telemetry_source.find(
+        "EnemyPressureLevel = ResolveAdaptiveLivingEnemyPressureLevel(",
+        stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
         "ApplyLivingEnemyVisualPressure(EnemyPressureLevel, EnemyPressureScale);",
         stagger_start) != std::string::npos);
     CHECK(telemetry_source.find(
@@ -849,12 +867,20 @@ int main() {
     CHECK(telemetry_source.find(
         "Candidate.Mesh.AnimationLODFrameRate =") != std::string::npos);
     CHECK(telemetry_source.find(
-        "TargetMinLod = 1 + int(PressureScale * float(MaximumMinLod))") !=
+        "TierScale = float(EnemyPressureLevel) / 5.0") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "Clamp(2 + int(PressureScale * 4.999), 2, 6)") != std::string::npos);
+        "TargetMinLod = 1 + int(TierScale * float(MaximumMinLod))") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
-        "FMin(0.55, 0.15 + PressureScale * 0.40)") != std::string::npos);
+        "TargetAnimRate = Clamp(1 + EnemyPressureLevel, 2, 6)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "FMin(0.55, 0.15 + TierScale * 0.40)") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "Candidate.Mesh.MinLodModel == TargetMinLod") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "DistanceSquared < 90000.0") != std::string::npos);
     CHECK(telemetry_source.find(
         "Candidate.Mesh.bSkipTickAnimNodes =") == std::string::npos);
     CHECK(telemetry_source.find(

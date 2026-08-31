@@ -95,6 +95,10 @@ var array<int> AdaptiveLivingOriginalAnimRates;
 var array<int> AdaptiveLivingAppliedAnimRates;
 var int AdaptiveLivingVisualReductions;
 var int AdaptiveLivingVisualRestores;
+var int AdaptiveLivingVisualPressureLevel;
+var int AdaptiveLivingVisualPendingPressureLevel;
+var float AdaptiveLivingVisualPendingSinceRealTime;
+var float AdaptiveLivingVisualLastChangeRealTime;
 var bool bAdaptiveRuntimeQuiesced;
 
 function bool ValidAdaptiveControlToken(string Candidate)
@@ -731,6 +735,68 @@ function int GetAdaptiveLivingEnemyPressureLevel(float PressureScale)
     return Clamp(1 + int(PressureScale * 4.999), 1, 5);
 }
 
+function int ResolveAdaptiveLivingEnemyPressureLevel(float PressureScale)
+{
+    local int RequestedLevel;
+    local float HoldSeconds;
+    local float RequiredScale;
+
+    RequestedLevel = GetAdaptiveLivingEnemyPressureLevel(PressureScale);
+    if (RequestedLevel == AdaptiveLivingVisualPressureLevel)
+    {
+        AdaptiveLivingVisualPendingPressureLevel = 0;
+        AdaptiveLivingVisualPendingSinceRealTime = 0.0;
+        return AdaptiveLivingVisualPressureLevel;
+    }
+    // A three-percent dead band keeps adjacent pressure samples from bouncing
+    // across a tier boundary. Rising pressure reacts sooner than recovery.
+    if (RequestedLevel > AdaptiveLivingVisualPressureLevel)
+    {
+        RequiredScale = AdaptiveLivingVisualPressureLevel <= 0 ?
+            0.02 : float(AdaptiveLivingVisualPressureLevel) / 5.0 + 0.03;
+        HoldSeconds = 0.75;
+        if (PressureScale < RequiredScale)
+        {
+            AdaptiveLivingVisualPendingPressureLevel = 0;
+            AdaptiveLivingVisualPendingSinceRealTime = 0.0;
+            return AdaptiveLivingVisualPressureLevel;
+        }
+    }
+    else
+    {
+        RequiredScale = FMax(0.0,
+            float(AdaptiveLivingVisualPressureLevel - 1) / 5.0 - 0.03);
+        HoldSeconds = 1.25;
+        if (PressureScale > RequiredScale)
+        {
+            AdaptiveLivingVisualPendingPressureLevel = 0;
+            AdaptiveLivingVisualPendingSinceRealTime = 0.0;
+            return AdaptiveLivingVisualPressureLevel;
+        }
+    }
+    if (AdaptiveLivingVisualLastChangeRealTime > 0.0 &&
+        WorldInfo.RealTimeSeconds - AdaptiveLivingVisualLastChangeRealTime < 1.5)
+    {
+        return AdaptiveLivingVisualPressureLevel;
+    }
+    if (AdaptiveLivingVisualPendingPressureLevel != RequestedLevel)
+    {
+        AdaptiveLivingVisualPendingPressureLevel = RequestedLevel;
+        AdaptiveLivingVisualPendingSinceRealTime = WorldInfo.RealTimeSeconds;
+        return AdaptiveLivingVisualPressureLevel;
+    }
+    if (WorldInfo.RealTimeSeconds - AdaptiveLivingVisualPendingSinceRealTime <
+        HoldSeconds)
+    {
+        return AdaptiveLivingVisualPressureLevel;
+    }
+    AdaptiveLivingVisualPressureLevel = RequestedLevel;
+    AdaptiveLivingVisualPendingPressureLevel = 0;
+    AdaptiveLivingVisualPendingSinceRealTime = 0.0;
+    AdaptiveLivingVisualLastChangeRealTime = WorldInfo.RealTimeSeconds;
+    return AdaptiveLivingVisualPressureLevel;
+}
+
 function int FindAdaptiveLivingVisualEntry(KFPawn_Monster Candidate)
 {
     local int Index;
@@ -838,10 +904,11 @@ function ApplyLivingEnemyVisualPressure(
     local float MinimumDistance;
     local float MinimumDistanceSquared;
     local float TargetAnimDistance;
+    local float TierScale;
     local KFPawn_Monster Candidate;
     local PlayerController LocalPC;
 
-    if (EnemyPressureLevel <= 0 || PressureScale <= 0.0)
+    if (EnemyPressureLevel <= 0)
     {
         RestoreAllAdaptiveLivingVisuals();
         return;
@@ -852,7 +919,10 @@ function ApplyLivingEnemyVisualPressure(
     {
         return;
     }
-    MinimumDistance = 600.0 - PressureScale * 300.0;
+    // Targets use the stable effective tier, never the continuously changing
+    // observation. This prevents redundant writes while preserving pressure.
+    TierScale = float(EnemyPressureLevel) / 5.0;
+    MinimumDistance = 600.0 - TierScale * 300.0;
     MinimumDistanceSquared = MinimumDistance * MinimumDistance;
     foreach WorldInfo.AllPawns(class'KFPawn_Monster', Candidate)
     {
@@ -878,14 +948,14 @@ function ApplyLivingEnemyVisualPressure(
         MaximumMinLod = Candidate.Mesh.SkeletalMesh.LODInfo.Length - 1;
         // Each pressure tier consumes another real mesh LOD when available.
         // The final mesh LOD remains the hard limit for every Zed type.
-        TargetMinLod = 1 + int(PressureScale * float(MaximumMinLod));
+        TargetMinLod = 1 + int(TierScale * float(MaximumMinLod));
         if (DistanceSquared >= 1440000.0)
         {
             ++TargetMinLod;
         }
         TargetMinLod = Min(TargetMinLod, MaximumMinLod);
-        TargetAnimDistance = FMin(0.55, 0.15 + PressureScale * 0.40);
-        TargetAnimRate = Clamp(2 + int(PressureScale * 4.999), 2, 6);
+        TargetAnimDistance = FMin(0.55, 0.15 + TierScale * 0.40);
+        TargetAnimRate = Clamp(1 + EnemyPressureLevel, 2, 6);
         if (DistanceSquared >= 1440000.0)
         {
             TargetAnimRate = Min(6, TargetAnimRate + 1);
@@ -2345,7 +2415,7 @@ function AdaptiveCorpseLoadControl()
         VisibleAwake, AwakeTotal, VisibleThreshold);
     EnemyPressureScale = GetAdaptiveLivingEnemyPressureScale(
         VisibleLivingZeds, bLivingVisibilityFresh);
-    EnemyPressureLevel = GetAdaptiveLivingEnemyPressureLevel(
+    EnemyPressureLevel = ResolveAdaptiveLivingEnemyPressureLevel(
         EnemyPressureScale);
     ApplyLivingEnemyVisualPressure(EnemyPressureLevel, EnemyPressureScale);
     if (ScenePressureLevel != AdaptiveCorpseScenePressureLevel)
