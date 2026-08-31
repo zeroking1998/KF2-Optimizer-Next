@@ -35,6 +35,53 @@ int main() {
     CHECK(bounded.stats().appended == 3);
     CHECK(bounded.stats().overwritten == 1);
     CHECK(bounded.stats().deduplicated == 0);
+
+    EventLog retained{3};
+    retained.append(Event{0, Severity::info,
+                          "ADAPTIVE_RUNTIME_QUALITY_APPLIED",
+                          L"verified", L"test"});
+    retained.append(Event{0, Severity::info, "ADAPTIVE_DECISION",
+                          L"first", L"test"});
+    retained.append(Event{0, Severity::info, "ADAPTIVE_DECISION",
+                          L"second", L"test"});
+    retained.append(Event{0, Severity::info, "ADAPTIVE_DECISION",
+                          L"third", L"test"});
+    const auto retained_events = retained.snapshot();
+    CHECK(retained_events.size() == 3);
+    CHECK(retained_events.front().code ==
+          "ADAPTIVE_RUNTIME_QUALITY_APPLIED");
+    CHECK(retained_events.front().retained_audit);
+    CHECK(retained_events[1].message == L"second");
+    CHECK(retained_events[2].message == L"third");
+
+    EventLog retained_failures{2};
+    retained_failures.append(Event{0, Severity::warning, "QUALITY_FAILED",
+                                   L"failed", L"test"});
+    retained_failures.append(Event{0, Severity::info, "SESSION_CONFIG_RESTORED",
+                                   L"restored", L"test"});
+    retained_failures.append(Event{0, Severity::info, "ADAPTIVE_DECISION",
+                                   L"measurement", L"test"});
+    const auto retained_failure_events = retained_failures.snapshot();
+    CHECK(retained_failure_events.size() == 2);
+    CHECK(retained_failure_events[0].code == "QUALITY_FAILED");
+    CHECK(retained_failure_events[1].code == "SESSION_CONFIG_RESTORED");
+
+    EventLog long_session{512};
+    long_session.append(Event{0, Severity::info,
+                              "ADAPTIVE_RUNTIME_QUALITY_APPLIED",
+                              L"exact APPLIED readback", L"optimizer"});
+    for (int index = 0; index < 600; ++index) {
+        long_session.append(Event{0, Severity::info, "ADAPTIVE_DECISION",
+                                  L"measurement " + std::to_wstring(index),
+                                  L"optimizer"});
+    }
+    const auto long_session_events = long_session.snapshot();
+    CHECK(long_session_events.size() == 512);
+    CHECK(long_session_events.front().code ==
+          "ADAPTIVE_RUNTIME_QUALITY_APPLIED");
+    const auto long_session_json =
+        kf2::diagnostics::serialize_events_json(long_session_events);
+    CHECK(long_session_json.find("retained_audit") == std::string::npos);
     const auto json = kf2::diagnostics::serialize_events_json(events);
     CHECK(json.find("\"version\":1") != std::string::npos);
     CHECK(json.find("\"severity\":\"warning\"") != std::string::npos);

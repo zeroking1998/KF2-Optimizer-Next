@@ -26,6 +26,10 @@ struct Event {
     std::wstring message;
     std::wstring source;
     std::uint32_t repeat_count{1};
+    // Retained audit events are evicted only after all ordinary events have
+    // already left the bounded log. This flag is intentionally not serialized,
+    // preserving the version-1 JSON contract for existing consumers.
+    bool retained_audit{false};
 };
 
 struct EventLogStats {

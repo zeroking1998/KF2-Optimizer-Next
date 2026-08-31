@@ -110,6 +110,19 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
 int main() {
     using namespace kf2;
     using namespace kf2::telemetry_pipeline;
+    CHECK(should_log_adaptive_decision(
+        true, false, 1'000'000'000ULL, 900'000'000ULL));
+    CHECK(should_log_adaptive_decision(
+        false, true, 10'000'000'000ULL, 0));
+    CHECK(!should_log_adaptive_decision(
+        false, true, 14'999'999'999ULL, 10'000'000'000ULL));
+    CHECK(should_log_adaptive_decision(
+        false, true, 15'000'000'000ULL, 10'000'000'000ULL));
+    CHECK(should_log_adaptive_decision(
+        false, true, 9'000'000'000ULL, 10'000'000'000ULL));
+    CHECK(!should_log_adaptive_decision(
+        false, false, 20'000'000'000ULL, 10'000'000'000ULL));
+
     auto frame = complete_frame();
     AdaptiveSampleContext context;
     context.current_quality = 80;
