@@ -1,5 +1,6 @@
 #include "kf2/diagnostics/event_log.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <limits>
 #include <filesystem>
@@ -12,6 +13,18 @@
 
 namespace kf2::diagnostics {
 namespace {
+
+bool is_retained_audit_event(const Event& event) noexcept {
+    if (event.severity != Severity::info) return true;
+
+    const auto has_suffix = [&](std::string_view suffix) {
+        return event.code.size() >= suffix.size() &&
+            event.code.compare(event.code.size() - suffix.size(),
+                               suffix.size(), suffix) == 0;
+    };
+    return has_suffix("_APPLIED") || has_suffix("_RESTORED") ||
+           has_suffix("_REMOVED");
+}
 
 template <typename String>
 void truncate(String& value, std::size_t maximum) {
@@ -96,6 +109,8 @@ void EventLog::append(Event event) {
     truncate(event.code, 64);
     truncate(event.message, 1024);
     truncate(event.source, 128);
+    event.retained_audit = event.retained_audit ||
+                           is_retained_audit_event(event);
 
     std::scoped_lock lock{mutex_};
     if (stats_.appended != UINT64_MAX) ++stats_.appended;
@@ -116,7 +131,17 @@ void EventLog::append(Event event) {
         }
     }
     if (events_.size() == capacity_) {
-        events_.pop_front();
+        const auto ordinary = std::find_if(
+            events_.begin(), events_.end(),
+            [](const Event& retained) { return !retained.retained_audit; });
+        if (ordinary != events_.end()) {
+            events_.erase(ordinary);
+        } else if (!event.retained_audit) {
+            if (stats_.overwritten != UINT64_MAX) ++stats_.overwritten;
+            return;
+        } else {
+            events_.pop_front();
+        }
         if (stats_.overwritten != UINT64_MAX) ++stats_.overwritten;
     }
     events_.push_back(std::move(event));

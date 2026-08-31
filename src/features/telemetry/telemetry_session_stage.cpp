@@ -241,6 +241,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     last_adaptive_state = optimizer::AdaptiveControllerState::disabled;
     last_adaptive_disposition = optimizer::AdaptiveDisposition::none;
     last_adaptive_bottleneck = optimizer::AdaptiveBottleneck::unknown;
+    last_adaptive_decision_log_ns = 0;
     last_frame_metrics = {};
     last_report_gameplay_session.reset();
     adapter_vram_budget.reset();
