@@ -23,8 +23,8 @@ int main() {
         "settings-target-slider",
     }};
 
-    CHECK(action_bindings().size() == 63);
-    CHECK(action_definitions().size() == 61);
+    CHECK(action_bindings().size() == 65);
+    CHECK(action_definitions().size() == 63);
     CHECK(control_definitions().size() == kExistingControls.size() + 4);
 
     for (const auto name : kExistingControls) {
@@ -84,7 +84,7 @@ int main() {
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::game)] == 3);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::settings)] == 5);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::overlay)] == 8);
-    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::diagnostics)] == 7);
+    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::diagnostics)] == 9);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::backup)] == 1);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::graphics)] == 23);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::advanced)] == 14);
@@ -116,6 +116,10 @@ int main() {
     CHECK(requires_normal_mode(ActionId::optimizer_backup, {}));
     CHECK(!requires_normal_mode(ActionId::diagnostics_repair_package, {}));
     CHECK(!requires_normal_mode(ActionId::diagnostics_auto_repair, {}));
+    CHECK(requires_normal_mode(ActionId::debug_corpse_markers, {}));
+    CHECK(requires_normal_mode(ActionId::debug_zed_markers, {}));
+    CHECK(resolve_action("debug-corpse-markers", {}).has_value());
+    CHECK(resolve_action("debug-zed-markers", {}).has_value());
 
     const auto launch = resolve_action(
         "dashboard-launch", {.protected_game_launch = true});

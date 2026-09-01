@@ -16,12 +16,14 @@ enum class Destination : std::size_t {
     graphics,
     overlay,
     advanced,
+    debug,
     diagnostics,
 };
 
-inline constexpr std::array<Destination, 5> kDestinations{
+inline constexpr std::array<Destination, 6> kDestinations{
     Destination::dashboard, Destination::graphics,
-    Destination::overlay, Destination::advanced, Destination::diagnostics,
+    Destination::overlay, Destination::advanced, Destination::debug,
+    Destination::diagnostics,
 };
 
 enum class NavigationCommand { next, previous, home, end };
@@ -58,6 +60,8 @@ struct UiStatus {
     bool overlay_show_cpu{true};
     bool overlay_show_gpu{true};
     bool overlay_show_memory{true};
+    bool debug_corpse_markers{false};
+    bool debug_zed_markers{false};
     std::wstring overlay_position{L"top right"};
     int overlay_scale_percent{100};
     int target_fps{60};

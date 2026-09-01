@@ -178,6 +178,7 @@ event PostRender(Canvas MarkerCanvas)
         if (CurrentProbe != None && !CurrentProbe.bDeleteMe)
         {
             CurrentProbe.DrawAdaptiveCorpseDebugMarkers(MarkerCanvas);
+            CurrentProbe.DrawAdaptiveZedDebugMarkers(MarkerCanvas);
             return;
         }
     }

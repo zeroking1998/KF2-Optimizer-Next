@@ -15,6 +15,7 @@
 | Ragdoll Sleep | Stops redundant active ragdoll simulation | Matching actor ID and Ragdoll Sleep receipt |
 | Scene-density control | Reduces active cosmetic work when many relevant actors are visible | Scene level plus confirmed actor/capacity actions |
 | FleX adaptive control | Adjusts a protected solver level when the laboratory is available | `FLEX_ADAPTIVE_APPLIED` readback |
+| Debug markers | Correlates corpse actions and visible living-Zed distances with metre values and Actor IDs | Optional next-session in-game markers plus session log |
 | Diagnostics | Explains provider, identity, restore, and evidence status | Explicit checks and exported reports |
 
 ## Important distinctions

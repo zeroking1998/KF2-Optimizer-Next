@@ -16,6 +16,14 @@ struct AdaptiveCorpseDebugMarkerEntry
     var float ExpiresRealTime;
 };
 
+struct AdaptiveZedDebugMarkerEntry
+{
+    // Value-only snapshots deliberately avoid retaining living pawn actors.
+    var vector Location;
+    var string ZedId;
+    var int DistanceUnits;
+};
+
 struct AdaptiveDistanceSleepEntry
 {
     var KFPawn Corpse;
@@ -41,6 +49,7 @@ var int ProfileWorldEmitterMilliseconds;
 var int ProfileClockAnomalies;
 var globalconfig bool bAdaptiveCorpseStagger;
 var globalconfig bool bAdaptiveCorpseDebugMarkers;
+var globalconfig bool bAdaptiveZedDebugMarkers;
 var globalconfig int AdaptiveCorpseMaximum;
 var globalconfig int AdaptiveTargetFPS;
 var globalconfig int AdaptiveQualityChangeBudget;
@@ -90,6 +99,8 @@ var int AdaptiveVisibleLivingZeds;
 var float AdaptiveVisibleLivingObservedRealTime;
 var int AdaptiveCorpseScenePressureLevel;
 var array<AdaptiveCorpseDebugMarkerEntry> AdaptiveCorpseDebugMarkers;
+var array<AdaptiveZedDebugMarkerEntry> AdaptiveZedDebugMarkers;
+var float AdaptiveZedDebugRefreshRealTime;
 var array<KFPawn_Monster> AdaptiveLivingVisualZeds;
 var array<int> AdaptiveLivingOriginalMinLods;
 var array<int> AdaptiveLivingAppliedMinLods;
@@ -2723,6 +2734,89 @@ function int GetProfileSystemMilliseconds()
     return (((Hour * 60) + Minute) * 60 + Second) * 1000 + Millisecond;
 }
 
+function RefreshAdaptiveZedDebugMarkers()
+{
+    local int Index;
+    local KFPawn_Monster Candidate;
+    local PlayerController LocalPC;
+    local vector ViewLocation;
+
+    if (!bAdaptiveZedDebugMarkers || WorldInfo == None)
+    {
+        AdaptiveZedDebugMarkers.Length = 0;
+        return;
+    }
+    if (WorldInfo.RealTimeSeconds < AdaptiveZedDebugRefreshRealTime + 0.10)
+    {
+        return;
+    }
+    AdaptiveZedDebugRefreshRealTime = WorldInfo.RealTimeSeconds;
+    AdaptiveZedDebugMarkers.Length = 0;
+    LocalPC = GetALocalPlayerController();
+    if (LocalPC == None || LocalPC.ViewTarget == None)
+    {
+        return;
+    }
+    ViewLocation = LocalPC.ViewTarget.Location;
+    foreach WorldInfo.AllPawns(class'KFPawn_Monster', Candidate)
+    {
+        if (AdaptiveZedDebugMarkers.Length >= 64)
+        {
+            break;
+        }
+        if (Candidate == None || Candidate.bDeleteMe ||
+            !Candidate.IsAliveAndWell() || Candidate.Mesh == None ||
+            Candidate.Mesh.LastRenderTime <= WorldInfo.TimeSeconds - 0.30 ||
+            !LocalPC.FastTrace(Candidate.Location, ViewLocation))
+        {
+            continue;
+        }
+        Index = AdaptiveZedDebugMarkers.Length;
+        AdaptiveZedDebugMarkers.Length = Index + 1;
+        AdaptiveZedDebugMarkers[Index].Location = Candidate.Location;
+        // KFPawn_Monster does not expose CollisionHeight to UnrealScript in
+        // this KF2 SDK. A fixed world-space lift keeps the marker above the
+        // largest normal Zed without retaining a pawn reference.
+        AdaptiveZedDebugMarkers[Index].Location.Z += 120.0;
+        AdaptiveZedDebugMarkers[Index].ZedId =
+            GetAdaptiveCorpseActionId(Candidate);
+        AdaptiveZedDebugMarkers[Index].DistanceUnits =
+            GetAdaptiveCorpseDistanceUnits(Candidate);
+    }
+}
+
+function DrawAdaptiveZedDebugMarkers(Canvas MarkerCanvas)
+{
+    local int Index;
+    local vector ScreenPosition;
+
+    if (!bAdaptiveZedDebugMarkers || MarkerCanvas == None ||
+        WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
+    {
+        return;
+    }
+    RefreshAdaptiveZedDebugMarkers();
+    MarkerCanvas.SetDrawColor(64, 220, 255, 235);
+    for (Index = 0; Index < AdaptiveZedDebugMarkers.Length; ++Index)
+    {
+        ScreenPosition = MarkerCanvas.Project(
+            AdaptiveZedDebugMarkers[Index].Location);
+        if (ScreenPosition.Z <= 0.0 || ScreenPosition.X < 0.0 ||
+            ScreenPosition.Y < 0.0 ||
+            ScreenPosition.X >= MarkerCanvas.ClipX ||
+            ScreenPosition.Y >= MarkerCanvas.ClipY)
+        {
+            continue;
+        }
+        MarkerCanvas.SetPos(ScreenPosition.X - 82.0,
+                            ScreenPosition.Y - 16.0);
+        MarkerCanvas.DrawText(
+            "KF2OPT ZED | "$FormatAdaptiveCorpseDistanceMeters(
+                AdaptiveZedDebugMarkers[Index].DistanceUnits, true)$" | "$
+            AdaptiveZedDebugMarkers[Index].ZedId, false, 0.75, 0.75);
+    }
+}
+
 function int GetProfileElapsedMilliseconds(int StartMilliseconds,
                                            int EndMilliseconds)
 {
@@ -3727,6 +3821,8 @@ function QuiesceForWorldTeardown()
     AdaptiveDistanceSleepTransitionCount = 0;
     bAdaptiveDistanceSleepTransitionFullLogged = false;
     AdaptiveCorpseDebugMarkers.Length = 0;
+    AdaptiveZedDebugMarkers.Length = 0;
+    AdaptiveZedDebugRefreshRealTime = 0.0;
     AdaptiveCorpsePhysicsActionIds.Length = 0;
     AdaptiveCorpsePhysicsActionIdCount = 0;
     `log("KF2OPT_TELEMETRY schema=6 state=stopped reason=world_teardown");
@@ -3743,4 +3839,6 @@ defaultproperties
     bAlwaysRelevant=false
     bHidden=true
     RemoteRole=ROLE_None
+    bAdaptiveCorpseDebugMarkers=false
+    bAdaptiveZedDebugMarkers=false
 }

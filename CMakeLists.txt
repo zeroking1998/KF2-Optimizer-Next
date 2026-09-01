@@ -14,7 +14,7 @@ set(KF2_VERSION "${PROJECT_VERSION}-alpha" CACHE STRING "Product version")
 set(KF2_BUILD_COMMIT "unknown" CACHE STRING "Source commit identity")
 set(KF2_BUILD_CHANNEL "dev" CACHE STRING "Build channel")
 set(KF2_OFFLINE_TELEMETRY_SHA256
-    "7f37c147d7cb4c054a7bd819580da46d1ab9c5ee14b669141bd2ac8b624df7aa"
+    "fe2ed89c538075522579d247009c3406257ba3f94f94f8bebd2d540bdadb2240"
     CACHE STRING "SHA-256 of the exact locally compiled offline telemetry module")
 string(LENGTH "${KF2_OFFLINE_TELEMETRY_SHA256}" KF2_TELEMETRY_HASH_LENGTH)
 if(NOT KF2_TELEMETRY_HASH_LENGTH EQUAL 64 OR

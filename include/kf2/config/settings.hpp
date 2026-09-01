@@ -17,6 +17,8 @@ struct Settings {
     bool overlay_show_cpu{true};
     bool overlay_show_gpu{true};
     bool overlay_show_memory{true};
+    bool debug_corpse_markers{false};
+    bool debug_zed_markers{false};
     bool restore_config_after_game{true};
     std::string adaptive_aggressiveness{"balanced"};
     int adaptive_minimum_quality{10};

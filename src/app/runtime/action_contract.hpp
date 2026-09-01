@@ -80,6 +80,8 @@ enum class ActionId : std::uint16_t {
     advanced_gore_level = 125,
     advanced_apply = 126,
     advanced_reset = 127,
+    debug_corpse_markers = 128,
+    debug_zed_markers = 129,
 };
 
 enum class ControlId : std::uint8_t {

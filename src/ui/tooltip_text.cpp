@@ -33,6 +33,9 @@ constexpr TooltipEntry kTooltips[]{
     {"diagnostics-open-data", L"Opens the portable Data folder containing settings, backups, reports, and logs. Nothing is uploaded."},
     {"diagnostics-open-log", L"Opens the local JSON session-event log used to explain Optimizer decisions, receipts, warnings, and errors."},
 
+    {"debug-corpse-markers", L"Shows the Optimizer action, distance in metres, and Actor ID above recently changed corpses. It is off by default, adds debug rendering work, and applies on the next protected KF2 start."},
+    {"debug-zed-markers", L"Shows distance in metres and Actor ID for up to 64 recently visible living Zeds. It is off by default, refreshes at most every 100 ms, and applies on the next protected KF2 start."},
+
     {"settings-target-slider", L"Sets KF2's native FPS limit from 30 to 240. Steam and shortcut launches use the same limit from the next game start; Adaptive also uses it as its performance target."},
     {"settings-corpses-slider", L"Sets the maximum corpse ceiling and saves it immediately. Adaptive may use fewer corpses under confirmed scene or frame-time pressure."},
 

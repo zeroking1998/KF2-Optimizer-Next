@@ -645,9 +645,19 @@ int main() {
         "var globalconfig bool bAdaptiveCorpseDebugMarkers") !=
           std::string::npos);
     CHECK(telemetry_source.find(
+        "var globalconfig bool bAdaptiveZedDebugMarkers") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
         "function RegisterAdaptiveCorpseDebugMarker(") != std::string::npos);
     CHECK(telemetry_source.find(
         "function DrawAdaptiveCorpseDebugMarkers(Canvas MarkerCanvas)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function DrawAdaptiveZedDebugMarkers(Canvas MarkerCanvas)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("AdaptiveZedDebugMarkers.Length >= 64") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("AdaptiveZedDebugRefreshRealTime + 0.10") !=
           std::string::npos);
     CHECK(telemetry_source.find("AdaptiveCorpseDebugMarkers.Length >= 24") !=
           std::string::npos);
@@ -666,6 +676,9 @@ int main() {
         "foreach CurrentWorld.DynamicActors(") != std::string::npos);
     CHECK(interaction_source.find(
         "CurrentProbe.DrawAdaptiveCorpseDebugMarkers(MarkerCanvas)") !=
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "CurrentProbe.DrawAdaptiveZedDebugMarkers(MarkerCanvas)") !=
           std::string::npos);
     CHECK(telemetry_source.find("AdaptiveDistancePhysicsSleeps % 4") ==
           std::string::npos);
@@ -1101,6 +1114,8 @@ int main() {
           std::string::npos);
     CHECK(changed_engine.find("bAdaptiveCorpseDebugMarkers=False\r\n") !=
           std::string::npos);
+    CHECK(changed_engine.find("bAdaptiveZedDebugMarkers=False\r\n") !=
+          std::string::npos);
     CHECK(changed_engine.find("AdaptiveCorpseMaximum=0\r\n") !=
           std::string::npos);
     CHECK(changed_engine.find("AdaptiveTargetFPS=0\r\n") !=
@@ -1125,13 +1140,15 @@ int main() {
 
     const auto adaptive_enabled =
         kf2::game::enable_offline_gameplay_logging(
-            root, true, 350, 137, true, 2, control_token);
+            root, true, 350, 137, true, 2, control_token, true);
     CHECK(adaptive_enabled.has_value());
     CHECK(adaptive_enabled.value());
     const auto adaptive_engine = read_bytes(engine_ini);
     CHECK(adaptive_engine.find("bAdaptiveCorpseStagger=True\r\n") !=
           std::string::npos);
     CHECK(adaptive_engine.find("bAdaptiveCorpseDebugMarkers=True\r\n") !=
+          std::string::npos);
+    CHECK(adaptive_engine.find("bAdaptiveZedDebugMarkers=True\r\n") !=
           std::string::npos);
     CHECK(adaptive_engine.find("AdaptiveCorpseMaximum=350\r\n") !=
           std::string::npos);
@@ -1151,7 +1168,7 @@ int main() {
     CHECK(observed_policy.value()->quality_change_budget == 2);
     const auto adaptive_unchanged =
         kf2::game::enable_offline_gameplay_logging(
-            root, true, 350, 137, true, 2, control_token);
+            root, true, 350, 137, true, 2, control_token, true);
     CHECK(adaptive_unchanged.has_value());
     CHECK(!adaptive_unchanged.value());
 
@@ -1276,6 +1293,11 @@ int main() {
         "bAdaptiveCorpseDebugMarkers=Maybe\n");
     CHECK(!kf2::game::enable_offline_gameplay_logging(
         root, true, 350, 137, true, 1, control_token).has_value());
+    write_bytes(engine_ini,
+        "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\n"
+        "bAdaptiveZedDebugMarkers=Maybe\n");
+    CHECK(!kf2::game::enable_offline_gameplay_logging(
+        root, true, 350, 137, false, 1, control_token, true).has_value());
     write_bytes(engine_ini, adaptive_engine);
 
     write_bytes(engine_ini,
@@ -1307,6 +1329,8 @@ int main() {
     CHECK(!kf2::game::enable_offline_gameplay_logging(root, false, 0, 60).has_value());
     CHECK(!kf2::game::enable_offline_gameplay_logging(
         root, false, 0, 0, true).has_value());
+    CHECK(!kf2::game::enable_offline_gameplay_logging(
+        root, false, 0, 0, false, 1, {}, true).has_value());
     CHECK(!kf2::game::enable_offline_gameplay_logging(
         root, true, 350, 60, false, 2, "invalid").has_value());
 

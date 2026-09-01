@@ -424,6 +424,8 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
     status.overlay_show_cpu = settings.overlay_show_cpu;
     status.overlay_show_gpu = settings.overlay_show_gpu;
     status.overlay_show_memory = settings.overlay_show_memory;
+    status.debug_corpse_markers = settings.debug_corpse_markers;
+    status.debug_zed_markers = settings.debug_zed_markers;
     status.overlay_scale_percent = settings.overlay_scale_percent;
     status.overlay_position = settings.overlay_position == "top_left" ? L"top left" :
         settings.overlay_position == "bottom_left" ? L"bottom left" :

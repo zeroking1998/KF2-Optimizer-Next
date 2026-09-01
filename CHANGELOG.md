@@ -8,9 +8,11 @@ are visible immediately.
 
 ### What's new
 
-- Optional corpse debug markers now show the action, distance in metres, and
-  Actor ID together. Corpse-action receipts retain exact internal distance
-  units and add the corresponding human-readable metre value.
+- A new Debug page provides optional in-game markers for corpse actions and
+  living-Zed distances. Markers show metres and Actor IDs, stay off by default,
+  and apply only to the next protected KF2 start.
+- Corpse-action receipts retain exact internal distance units and add the
+  corresponding human-readable metre value.
 - Adaptive live quality now keeps independent CPU, GPU, VRAM, RAM, and
   overdraw levels.
   Each confirmed bottleneck changes only its matching group, while recovery

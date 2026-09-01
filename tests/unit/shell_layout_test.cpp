@@ -101,7 +101,7 @@ int main() {
           std::wstring::npos);
 
     std::set<std::string> ids;
-    std::array<DipRect, 5> navigation{};
+    std::array<DipRect, 6> navigation{};
     std::size_t navigation_index = 0;
     for (const auto& item : dashboard.nodes) {
         CHECK(ids.insert(item.id).second);
@@ -260,6 +260,24 @@ int main() {
     CHECK(action(advanced, "diagnostics-full-check") == nullptr);
     CHECK(action(advanced, "settings-restore-config") == nullptr);
 
+    static_cast<void>(model.focus_destination(Destination::debug));
+    static_cast<void>(model.activate_focused());
+    auto debug_status = model.status();
+    debug_status.debug_corpse_markers = false;
+    debug_status.debug_zed_markers = true;
+    model.set_status(debug_status);
+    const auto debug = layout_shell(model, 1440, 900);
+    CHECK(node(debug, "debug-markers-section") != nullptr);
+    CHECK(node(debug, "debug-tools-section") != nullptr);
+    CHECK(action(debug, "debug-corpse-markers") != nullptr);
+    CHECK(!action(debug, "debug-corpse-markers")->selected);
+    CHECK(action(debug, "debug-zed-markers") != nullptr);
+    CHECK(action(debug, "debug-zed-markers")->selected);
+    CHECK(action(debug, "diagnostics-open-data") != nullptr);
+    CHECK(action(debug, "diagnostics-open-log") != nullptr);
+    CHECK(action_help_text("debug-corpse-markers").has_value());
+    CHECK(action_help_text("debug-zed-markers").has_value());
+
     static_cast<void>(model.focus_destination(Destination::diagnostics));
     static_cast<void>(model.activate_focused());
     const auto diagnostics = layout_shell(model, 1440, 900);
@@ -372,8 +390,8 @@ int main() {
     CHECK(action(cached_available, "settings-updates-check") != nullptr);
     CHECK(action(cached_available, "settings-updates-install") == nullptr);
 
-    const std::array<const ShellLayoutResult*, 7> tooltip_layouts{
-        &home, &graphics, &overlay, &advanced, &diagnostics,
+    const std::array<const ShellLayoutResult*, 8> tooltip_layouts{
+        &home, &graphics, &overlay, &advanced, &debug, &diagnostics,
         &available_updates, &cached_available};
     for (const auto* tooltip_layout : tooltip_layouts) {
         for (const auto& item : tooltip_layout->nodes) {

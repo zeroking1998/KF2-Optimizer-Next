@@ -15,6 +15,78 @@ void show_notice(app::UiRuntime& runtime, ui::NoticeSeverity severity,
     runtime.invalidate();
 }
 
+app::runtime::DispatchResult toggle_debug_marker(
+    app::UiRuntime& runtime, bool& setting, bool corpse_marker) {
+    const bool previous = setting;
+    setting = !setting;
+    const auto saved = platform::windows::atomic_replace_utf8(
+        runtime.settings_path,
+        config::serialize_settings(runtime.optimizer_settings));
+    if (!saved.has_value()) {
+        setting = previous;
+        show_notice(runtime, ui::NoticeSeverity::error,
+                    L"SETTINGS_SAVE_FAILED", saved.error().message);
+        return app::runtime::DispatchResult::handled;
+    }
+
+    auto status = runtime.model.status();
+    status.debug_corpse_markers =
+        runtime.optimizer_settings.debug_corpse_markers;
+    status.debug_zed_markers = runtime.optimizer_settings.debug_zed_markers;
+    runtime.model.set_status(std::move(status));
+
+    bool staged_now = false;
+    bool verified_stopped = false;
+    if (runtime.installation) {
+        const auto process = game::find_running_game_process(
+            runtime.installation->executable);
+        verified_stopped = !process.has_value() &&
+            process.error().code == ErrorCode::not_found;
+    }
+    if (runtime.installation && !runtime.adaptive_control_token.empty() &&
+        verified_stopped) {
+        const auto staged = game::enable_offline_gameplay_logging(
+            runtime.installation->config_root, true,
+            runtime.optimizer_settings.corpse_limit,
+            runtime.optimizer_settings.target_fps,
+            runtime.optimizer_settings.debug_corpse_markers,
+            runtime.optimizer_settings.adaptive_quality_change_budget,
+            runtime.adaptive_control_token,
+            runtime.optimizer_settings.debug_zed_markers);
+        if (!staged.has_value()) {
+            show_notice(
+                runtime, ui::NoticeSeverity::error,
+                L"DEBUG_MARKER_STAGE_FAILED",
+                L"The preference was saved, but the currently prepared KF2 start could not be updated: " +
+                    staged.error().message +
+                    L" Restart KF2 Optimizer before the next test.");
+            return app::runtime::DispatchResult::handled;
+        }
+        staged_now = true;
+    }
+
+    runtime.events->append({
+        0, ::kf2::diagnostics::Severity::info,
+        corpse_marker ? "DEBUG_CORPSE_MARKERS_CHANGED"
+                      : "DEBUG_ZED_MARKERS_CHANGED",
+        std::wstring{corpse_marker ? L"Corpse action markers "
+                                   : L"Living Zed distance markers "} +
+            (setting ? L"enabled" : L"disabled") +
+            (staged_now ? L" for the prepared KF2 start"
+                        : L" for the next protected KF2 start"),
+        L"debug"});
+    show_notice(
+        runtime, ui::NoticeSeverity::info,
+        corpse_marker ? L"DEBUG_CORPSE_MARKERS_CHANGED"
+                      : L"DEBUG_ZED_MARKERS_CHANGED",
+        std::wstring{corpse_marker ? L"Corpse action markers "
+                                   : L"Living Zed distance markers "} +
+            (setting ? L"enabled" : L"disabled") +
+            (staged_now ? L" for the prepared KF2 start."
+                        : L" for the next protected KF2 start."));
+    return app::runtime::DispatchResult::handled;
+}
+
 product_diagnostics::ProductReport make_product_report(
     app::UiRuntime& runtime) {
     const auto& status = runtime.model.status();
@@ -178,6 +250,18 @@ app::runtime::DispatchResult auto_repair_package(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
     runtime.start_auto_package_repair();
     return app::runtime::DispatchResult::handled;
+}
+
+app::runtime::DispatchResult toggle_corpse_markers(
+    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
+    return toggle_debug_marker(
+        runtime, runtime.optimizer_settings.debug_corpse_markers, true);
+}
+
+app::runtime::DispatchResult toggle_zed_markers(
+    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
+    return toggle_debug_marker(
+        runtime, runtime.optimizer_settings.debug_zed_markers, false);
 }
 
 app::runtime::DispatchResult flex_restore(
