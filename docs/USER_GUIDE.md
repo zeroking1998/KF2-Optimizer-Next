@@ -156,6 +156,24 @@ may keep fewer bodies active when distance, visible scene density, or measured
 performance pressure requires it. Distance Sleep, Near Wake, and Ragdoll Sleep
 are actor-scoped and must carry a correlated actor identifier and receipt.
 
+Adaptive also ages corpses progressively after 3, 8, and 15 seconds. It checks
+one corpse every 50 ms and performs at most one meaningful reduction per check,
+so a large corpse pool is not changed as one physics batch. Visible old corpses
+are included: their real mesh LOD can be reduced outside 300 Unreal units, and
+an already sleeping corpse can stop skeleton work. At 3 and 8 seconds their
+rigid-body physics uses 1,200- and 1,000-unit distance guards. At 15 seconds the
+final tier applies to every confirmed corpse, including a nearby visible one,
+selects the mesh's final real LOD, and freezes the actor after verified sleep.
+KF2 can no longer wake that final-tier corpse, so old frozen bodies no longer
+react physically to later hits, explosions, or collisions. The freeze is
+applied once and is not rewritten. Turning Adaptive off restores tracked bodies
+one every 50 ms; session teardown simply releases the world-owned actors.
+There is no safe per-ragdoll fractional PhysX update rate in KF2's public SDK,
+so the optimizer never fakes one or disables actor ticking. Death
+animations, Zed Time, collision, cleanup limits, and living Zeds are not changed
+by this aging path. Confirmed aging receipts report the actor ID, distance, age,
+tier, recent-render state, and exact readback.
+
 For FleX, effective levels are 1 through 5. Level 0 means release/passthrough;
 it does not mean that a zero-step solver is applied.
 

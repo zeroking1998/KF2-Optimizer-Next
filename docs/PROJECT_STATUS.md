@@ -158,6 +158,24 @@ already performs native view-frustum and
 occlusion culling for living-enemy primitives, so the optimizer never uses
 `bHidden` or custom hide/show logic that could create invisible enemies.
 
+An additional time-sliced aging path now checks exactly one corpse-pool entry
+every 50 ms and performs at most one state transition per invocation. Ages 3,
+8 and 15 seconds progressively raise real corpse mesh LOD, stop skeleton work
+after native physics sleep and, at safe distance, request verified rigid-body
+sleep. Recently rendered corpses remain eligible for staged LOD outside 300
+units and verified physics sleep outside the early-tier distance guards. The
+15-second final tier covers every confirmed corpse, including a nearby visible
+body; the 3/8-second tiers keep 1,200/1,000-unit guards. After exact sleep
+readback, the final tier moves the actor once to `PHYS_None`, so native gameplay
+cannot wake it and later hits, explosions or collisions no longer move it. The
+public SDK exposes no safe fractional PhysX update rate or dedicated sleep lock,
+so this explicit final-pose tradeoff is used instead of pretending that a
+wake-event flag prevents wake. Adaptive disable restores one tracked body every
+50 ms to avoid a release batch. The path records actor identity, age, distance,
+visibility and readback, pauses during Zed Time and never changes collision
+channels, cleanup limits or living Zeds. This
+candidate still requires large-pool gameplay validation before merge.
+
 The remaining arbitrary mutation functions must stay unavailable or pass-through until an authoritative
 read-only source and gameplay-neutral mutation contract exist. Guessing them,
 injecting unknown process addresses, altering living-enemy truth or bypassing

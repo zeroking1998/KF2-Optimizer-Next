@@ -496,21 +496,144 @@ int main() {
         "SetTimer(0.25, true, nameof(AdaptiveCorpseLoadControl), self)") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "function int SleepBaselineAwakeMonsterCorpses(") !=
+        "function int SleepBaselineAwakeMonsterCorpses(") ==
           std::string::npos);
     CHECK(telemetry_source.find(
-        "MinimumSettleAge = 0.75") != std::string::npos);
+        "function AdaptiveCorpseAgingControl()") != std::string::npos);
     CHECK(telemetry_source.find(
-        "MaximumFullPhysicsAge = 2.0") != std::string::npos);
-    CHECK(telemetry_source.find("MaximumSleepsPerPass") ==
+        "SetTimer(0.05, true, nameof(AdaptiveCorpseAgingControl), self)") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "KF2OPT_CORPSE_BASELINE state=sleep") != std::string::npos);
+        "var int AdaptiveCorpseAgingCursor") != std::string::npos);
     CHECK(telemetry_source.find(
-        "FindAdaptiveCorpsePhysicsActionId(\"baseline\",") !=
+        "var int AdaptiveCorpseAgingReductions") != std::string::npos);
+    CHECK(telemetry_source.find("MinimumTierOneAge = 3.0") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("MinimumTierTwoAge = 8.0") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("MinimumTierThreeAge = 15.0") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "RegisterAdaptiveCorpsePhysicsAction(Candidate, \"baseline\")") !=
+        "RegisterAdaptiveCorpsePhysicsAction(Candidate, PhysicsAction)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_CORPSE_AGING state=applied") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "ClearTimer(nameof(AdaptiveCorpseAgingControl), self)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "Tier >= 3 ||") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "Tier == 2 && DistanceUnits >= 1000") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "Tier == 1 && DistanceUnits >= 1200") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "FindAdaptiveDistanceSleptCorpse(Candidate) == -1") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "!DeferAdaptiveDistanceResleepAfterNativeWake(Candidate)") !=
+          std::string::npos);
+    const auto aging_apply = telemetry_source.find(
+        "function bool ApplyOneAdaptiveCorpseAging(");
+    const auto aging_control = telemetry_source.find(
+        "function AdaptiveCorpseAgingControl()", aging_apply);
+    CHECK(aging_apply != std::string::npos);
+    CHECK(aging_control != std::string::npos);
+    const auto aging_body = telemetry_source.substr(
+        aging_apply, aging_control - aging_apply);
+    CHECK(aging_body.find("for (") == std::string::npos);
+    const auto aging_sleep = aging_body.find(
+        "Candidate.Mesh.PutRigidBodyToSleep()");
+    const auto aging_sleep_gate_begin = aging_body.find(
+        "MaximumSpeedSquared =");
+    const auto aging_sleep_gate_end = aging_body.find(
+        "FindAdaptiveDistanceSleptCorpse(Candidate)",
+        aging_sleep_gate_begin);
+    const auto aging_sleep_gate = aging_body.substr(
+        aging_sleep_gate_begin,
+        aging_sleep_gate_end - aging_sleep_gate_begin);
+    const auto aging_readback = aging_body.find(
+        "if (Candidate.Mesh.RigidBodyIsAwake())", aging_sleep);
+    const auto aging_ownership = aging_body.find(
+        "RegisterAdaptiveCorpsePhysicsAction(Candidate, PhysicsAction)",
+        aging_readback);
+    const auto aging_receipt = aging_body.find(
+        "KF2OPT_CORPSE_AGING state=applied action=", aging_ownership);
+    const auto aging_freeze = aging_body.find(
+        "Candidate.SetPhysics(PHYS_None)", aging_readback);
+    const auto aging_freeze_readback = aging_body.find(
+        "if (Candidate.Physics != PHYS_None)", aging_freeze);
+    const auto aging_lod_distance_guard = aging_body.find(
+        "Tier < 3 && DistanceUnits < 300");
+    const auto aging_lod_write = aging_body.find(
+        "Candidate.Mesh.MinLodModel = TargetMinLod",
+        aging_lod_distance_guard);
+    const auto aging_lod_path = aging_body.substr(
+        aging_lod_distance_guard, aging_lod_write - aging_lod_distance_guard);
+    CHECK(aging_sleep != std::string::npos);
+    CHECK(aging_sleep_gate_begin != std::string::npos);
+    CHECK(aging_sleep_gate_end != std::string::npos);
+    CHECK(aging_sleep_gate.find("!bRecentlyRendered") == std::string::npos);
+    CHECK(aging_readback != std::string::npos);
+    CHECK(aging_ownership != std::string::npos);
+    CHECK(aging_receipt != std::string::npos);
+    CHECK(aging_freeze != std::string::npos);
+    CHECK(aging_freeze_readback != std::string::npos);
+    CHECK(aging_sleep < aging_readback);
+    CHECK(aging_readback < aging_freeze);
+    CHECK(aging_freeze < aging_freeze_readback);
+    CHECK(aging_freeze_readback < aging_ownership);
+    CHECK(aging_ownership < aging_receipt);
+    CHECK(aging_lod_distance_guard != std::string::npos);
+    CHECK(aging_lod_write != std::string::npos);
+    CHECK(aging_lod_distance_guard < aging_lod_write);
+    CHECK(aging_lod_path.find("!bRecentlyRendered") == std::string::npos);
+    CHECK(aging_body.find(
+        "recently_rendered=\"$(bRecentlyRendered ? 1 : 0)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveCorpseLodPersistentAging.AddItem(true)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "if (!AdaptiveCorpseLodPersistentAging[Index] &&") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveCorpseLodPhysicsFrozen[EntryIndex] = true") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "Candidate.SetPhysics(PHYS_RigidBody)") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "SetTimer(0.05, true, nameof(RestoreOneAdaptiveCorpseLod), self)") !=
+          std::string::npos);
+    const auto runtime_toggle = telemetry_source.find(
+        "function bool SetAdaptiveRuntimeEnabled(bool bEnabled)");
+    const auto runtime_disable_release = telemetry_source.find(
+        "BeginAdaptiveCorpseLodRelease()", runtime_toggle);
+    const auto runtime_toggle_end = telemetry_source.find(
+        "function bool ApplyAdaptiveResourceControl(", runtime_toggle);
+    CHECK(runtime_toggle != std::string::npos);
+    CHECK(runtime_disable_release != std::string::npos);
+    CHECK(runtime_toggle_end != std::string::npos);
+    const auto runtime_after_release = telemetry_source.substr(
+        runtime_disable_release, runtime_toggle_end - runtime_disable_release);
+    CHECK(runtime_after_release.find(
+        "ClearTimer(nameof(RestoreOneAdaptiveCorpseLod), self)") ==
+          std::string::npos);
+    const auto aging_control_body = telemetry_source.substr(
+        aging_control,
+        telemetry_source.find("function ", aging_control + 10) -
+            aging_control);
+    const auto aging_zed_time = aging_control_body.find(
+        "GameInfo.IsZedTimeActive()");
+    const auto aging_apply_call = aging_control_body.find(
+        "ApplyOneAdaptiveCorpseAging(GoreManager)");
+    CHECK(aging_zed_time != std::string::npos);
+    CHECK(aging_apply_call != std::string::npos);
+    CHECK(aging_zed_time < aging_apply_call);
+    CHECK(telemetry_source.find(
+        "Candidate = GoreManager.CorpsePool[AdaptiveCorpseAgingCursor]") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "0.05 + ((WeightedVisibleZeds - 1.0) / 79.0) * 0.95") !=
@@ -542,7 +665,7 @@ int main() {
         "Candidate.Mesh.MinLodModel = TargetMinLod") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "RestoreAllAdaptiveCorpseLods()") != std::string::npos);
+        "BeginAdaptiveCorpseLodRelease()") != std::string::npos);
     const auto lod_restore_function = telemetry_source.find(
         "function RestoreNearAdaptiveCorpseLods()");
     const auto lod_restore_threshold = telemetry_source.find(
@@ -662,9 +785,9 @@ int main() {
     CHECK(telemetry_source.find(
         "DistanceDecimeters = (DistanceUnits + 5) / 10") !=
           std::string::npos);
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 9);
-    CHECK(count_occurrences(telemetry_source, " distance_units=") == 10);
-    CHECK(count_occurrences(telemetry_source, " distance_m=") == 10);
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 11);
+    CHECK(count_occurrences(telemetry_source, " distance_units=") == 12);
+    CHECK(count_occurrences(telemetry_source, " distance_m=") == 12);
     const auto distance_marker = telemetry_source.find(
         "AdaptiveCorpseDebugMarkers[Index].Action$\" | \"");
     CHECK(distance_marker != std::string::npos);
@@ -694,7 +817,7 @@ int main() {
     CHECK(telemetry_source.find(
         "GetAdaptiveCorpseActionId(Candidate)") != std::string::npos);
     CHECK(count_occurrences(
-        telemetry_source, "RegisterAdaptiveCorpseDebugMarker(Candidate,") == 5);
+        telemetry_source, "RegisterAdaptiveCorpseDebugMarker(Candidate,") == 6);
     CHECK(interaction_source.find("event PostRender(Canvas MarkerCanvas)") !=
           std::string::npos);
     CHECK(interaction_source.find(
@@ -799,11 +922,9 @@ int main() {
         "SleepOneDistantMonsterCorpse(", stagger_start);
     CHECK(stagger_start != std::string::npos);
     CHECK(zed_time_guard != std::string::npos);
-    CHECK(baseline_sleep_stage != std::string::npos);
+    CHECK(baseline_sleep_stage == std::string::npos);
     CHECK(wake_stage != std::string::npos);
     CHECK(distant_sleep_stage != std::string::npos);
-    CHECK(zed_time_guard < baseline_sleep_stage);
-    CHECK(baseline_sleep_stage < wake_stage);
     CHECK(zed_time_guard < wake_stage);
     CHECK(zed_time_guard < distant_sleep_stage);
     const auto frame_only_action_gate = telemetry_source.find(
