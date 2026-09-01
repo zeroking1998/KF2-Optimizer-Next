@@ -20,6 +20,7 @@
 #include "kf2/core/result.hpp"
 #include "kf2/diagnostics/crash_recorder.hpp"
 #include "kf2/game/game_discovery.hpp"
+#include "kf2/game/offline_telemetry_lab.hpp"
 #include "kf2/platform/windows/state_environment.hpp"
 #include "kf2/platform/windows/process_security.hpp"
 #include "kf2/security/package_integrity.hpp"
@@ -81,6 +82,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int show_command) {
             *end != L'\0') return std::nullopt;
         return static_cast<std::uint32_t>(parsed);
     };
+    if (arguments.size() == 5 &&
+        arguments[0] == L"--offline-telemetry-cleanup") {
+        const auto process_id = parse_process_id(arguments[1]);
+        const auto timeout_ms = parse_process_id(arguments[4]);
+        if (!process_id || !timeout_ms) return 20;
+        const auto cleaned =
+            kf2::game::run_offline_telemetry_cleanup_helper({
+                .wait_process_id = *process_id,
+                .config_root = arguments[2],
+                .state_root = arguments[3],
+                .wait_timeout_ms = *timeout_ms});
+        return cleaned.has_value() ? 0 : 21;
+    }
     const auto narrow_token = [](std::wstring_view value)
         -> std::optional<std::string> {
         std::string result;

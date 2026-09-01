@@ -458,6 +458,10 @@ int main() {
         "[0004.29] Exit: Exiting.\n"));
     CHECK(game_log_reports_engine_exit(
         "[0004.29] Log: Log file closed, 08/22/26 22:34:02\n"));
+    CHECK(game_log_reports_engine_exit(
+        "[0163.11] Critical: appError called: Rendering thread exception:\n"));
+    CHECK(game_log_reports_engine_exit(
+        "[0163.32] Log: appRequestExit(1)\n"));
     CHECK(!game_log_reports_engine_exit(
         "[0004.29] Exit: Preparing to exit.\n"));
     CHECK(!game_log_reports_engine_exit(

@@ -55,6 +55,12 @@ int main() {
           BoundProcessTransition::replacement_process);
     CHECK(classify_bound_process_transition(false, false) ==
           BoundProcessTransition::ended);
+    CHECK(classify_adaptive_control_failure(true, false) ==
+          AdaptiveControlFailureDisposition::failed);
+    CHECK(classify_adaptive_control_failure(false, false) ==
+          AdaptiveControlFailureDisposition::game_ended);
+    CHECK(classify_adaptive_control_failure(true, true) ==
+          AdaptiveControlFailureDisposition::game_ended);
 
     SilentPresentInput silent;
     silent.scene_ready = true;

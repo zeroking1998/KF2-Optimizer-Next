@@ -190,7 +190,14 @@ bool UiRuntime::restore_automatic_flex_lab(std::wstring_view reason) {
     return true;
 }
 
-bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
+bool UiRuntime::restore_protected_session_config(
+    std::wstring_view reason, bool allow_deferred_cleanup) {
+    std::optional<std::uint32_t> previous_process_id;
+    if (game_process) {
+        previous_process_id = game_process->pid;
+    } else if (game_restart_handoff_previous_process) {
+        previous_process_id = game_restart_handoff_previous_process->pid;
+    }
     game_restart_handoff_previous_process.reset();
     game_restart_handoff_deadline_ns = 0;
     game_restart_handoff_new_settings = false;
@@ -199,24 +206,61 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
     // runtime file open. Each recovery surface is independent, so one busy
     // file must not prevent the remaining protected state from being fixed.
     if (installation) {
-        const auto module_restored =
-            game::restore_offline_telemetry_lab(
+        const auto running = game::find_running_game_process(
+            installation->executable);
+        const bool verified_running = running.has_value();
+        std::optional<Result<bool>> module_restored;
+        const auto defer_cleanup = [&](std::uint32_t wait_process_id) {
+            const auto launched =
+                game::launch_offline_telemetry_cleanup_helper({
+                    .wait_process_id = wait_process_id,
+                    .config_root = installation->config_root,
+                    .state_root = settings_path.parent_path(),
+                    .wait_timeout_ms = 60'000});
+            if (launched.has_value()) {
+                events->append({0, diagnostics::Severity::info,
+                    "OFFLINE_TELEMETRY_CLEANUP_DEFERRED",
+                    std::wstring{reason} +
+                        L"; a temporary helper will remove the verified Published telemetry package after KF2 releases it",
+                    L"game"});
+            } else {
+                module_restored.emplace(Result<bool>::failure(
+                    launched.error()));
+            }
+        };
+        if (allow_deferred_cleanup && verified_running) {
+            defer_cleanup(running.value().pid);
+        } else {
+            module_restored.emplace(game::restore_offline_telemetry_lab(
                 installation->config_root,
-                settings_path.parent_path(),
-                false);
-        if (!module_restored.has_value() &&
-            module_restored.error().code != ErrorCode::not_found) {
+                settings_path.parent_path(), false));
+            if (allow_deferred_cleanup && !module_restored->has_value() &&
+                module_restored->error().code == ErrorCode::io_failure &&
+                (module_restored->error().native_code ==
+                     ERROR_SHARING_VIOLATION ||
+                 module_restored->error().native_code ==
+                     ERROR_LOCK_VIOLATION ||
+                 module_restored->error().native_code ==
+                     ERROR_USER_MAPPED_FILE)) {
+                module_restored.reset();
+                defer_cleanup(previous_process_id.value_or(
+                    GetCurrentProcessId()));
+            }
+        }
+        if (module_restored && !module_restored->has_value() &&
+            module_restored->error().code != ErrorCode::not_found) {
             events->append({0, diagnostics::Severity::error,
                 "OFFLINE_TELEMETRY_CLEANUP_FAILED",
-                module_restored.error().message, L"game"});
+                module_restored->error().message, L"game"});
             model.set_recovery_required(true);
             model.set_notice({ui::NoticeSeverity::error,
                 L"OFFLINE_TELEMETRY_CLEANUP_FAILED",
-                module_restored.error().message,
+                module_restored->error().message,
                 L"Do not start KF2 again until the telemetry package is safely removed."});
             complete = false;
         }
-        if (module_restored.has_value() && module_restored.value()) {
+        if (module_restored && module_restored->has_value() &&
+            module_restored->value()) {
             events->append({0, diagnostics::Severity::info,
                 "OFFLINE_TELEMETRY_REMOVED",
                 L"The hash-bound KF2 offline telemetry package was removed after the session",

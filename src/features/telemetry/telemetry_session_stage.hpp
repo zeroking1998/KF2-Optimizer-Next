@@ -26,6 +26,19 @@ enum class BoundProcessTransition {
     ended,
 };
 
+enum class AdaptiveControlFailureDisposition {
+    failed,
+    game_ended,
+};
+
+[[nodiscard]] constexpr AdaptiveControlFailureDisposition
+classify_adaptive_control_failure(bool verified_process_running,
+                                  bool engine_exit_reported) noexcept {
+    return !verified_process_running || engine_exit_reported
+        ? AdaptiveControlFailureDisposition::game_ended
+        : AdaptiveControlFailureDisposition::failed;
+}
+
 [[nodiscard]] constexpr BoundProcessTransition
 classify_bound_process_transition(bool same_process_running,
                                   bool verified_process_running) noexcept {

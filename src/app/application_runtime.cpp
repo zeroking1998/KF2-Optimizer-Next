@@ -262,7 +262,7 @@ UiRuntime::~UiRuntime() {
     static_cast<void>(restore_live_adaptive_quality(
         L"KF2 Optimizer closed"));
     static_cast<void>(restore_protected_session_config(
-        L"KF2 Optimizer closed"));
+        L"KF2 Optimizer closed", true));
     if (window) {
         KillTimer(static_cast<HWND>(window->native_handle_for_testing()), 1);
     }

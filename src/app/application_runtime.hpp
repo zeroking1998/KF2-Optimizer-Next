@@ -132,6 +132,7 @@ struct UiRuntime {
     bool game_log_bound_to_process{false};
     bool game_log_startup_exited{false};
     bool game_log_startup_exit_announced{false};
+    bool game_log_exit_reported{false};
     bool game_log_new_settings_restart_requested{false};
     std::string game_log_marker_tail;
     game::GameLogSessionParser game_log_session_parser;
@@ -307,7 +308,8 @@ struct UiRuntime {
 
     Result<game::FrameRateCapResult> synchronize_frame_rate_cap();
 
-    bool restore_protected_session_config(std::wstring_view reason);
+    bool restore_protected_session_config(
+        std::wstring_view reason, bool allow_deferred_cleanup = false);
 
     void try_attach_telemetry();
     void bind_process_gpu_adapter(std::uint64_t adapter_luid);

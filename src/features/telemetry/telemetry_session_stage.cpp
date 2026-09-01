@@ -166,6 +166,19 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
         .timeout_ms = 500});
     adaptive_control_sequence = next_sequence;
     if (!restored.has_value()) {
+        update_overlay_scene_gate();
+        const bool running = game::find_running_game_process(
+            installation->executable).has_value();
+        if (telemetry_pipeline::classify_adaptive_control_failure(
+                running, game_log_exit_reported) ==
+            telemetry_pipeline::AdaptiveControlFailureDisposition::game_ended) {
+            events->append({0, diagnostics::Severity::info,
+                "ADAPTIVE_RUNTIME_RESTORE_INTERRUPTED",
+                std::wstring{reason} +
+                    L"; KF2 was already exiting, so no live restore remained to confirm",
+                L"optimizer"});
+            return true;
+        }
         events->append({0, diagnostics::Severity::error,
             "ADAPTIVE_RUNTIME_RESTORE_FAILED",
             std::wstring{reason} +
@@ -228,6 +241,23 @@ bool UiRuntime::set_live_adaptive_enabled(
         .timeout_ms = game::kAdaptiveControlReadbackTimeoutMs});
     adaptive_control_sequence = next_sequence;
     if (!changed.has_value()) {
+        update_overlay_scene_gate();
+        const bool running = game::find_running_game_process(
+            installation->executable).has_value();
+        if (telemetry_pipeline::classify_adaptive_control_failure(
+                running, game_log_exit_reported) ==
+            telemetry_pipeline::AdaptiveControlFailureDisposition::game_ended) {
+            adaptive_runtime_mode_confirmed = false;
+            adaptive_runtime_mode_pending.reset();
+            adaptive_control_pending.reset();
+            events->append({0, diagnostics::Severity::info,
+                enabled ? "ADAPTIVE_RUNTIME_ENABLE_INTERRUPTED"
+                        : "ADAPTIVE_RUNTIME_DISABLE_INTERRUPTED",
+                std::wstring{reason} +
+                    L"; KF2 was already exiting, so the saved preference will apply on the next protected start",
+                L"optimizer"});
+            return true;
+        }
         events->append({0, diagnostics::Severity::error,
             enabled ? "ADAPTIVE_RUNTIME_ENABLE_FAILED"
                     : "ADAPTIVE_RUNTIME_DISABLE_FAILED",
@@ -352,6 +382,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     game_log_bound_to_process = false;
     game_log_startup_exited = false;
     game_log_startup_exit_announced = false;
+    game_log_exit_reported = false;
     game_log_new_settings_restart_requested = false;
     game_log_marker_tail.clear();
     game_log_session_parser.reset();
@@ -502,6 +533,7 @@ void UiRuntime::update_overlay_scene_gate() {
         overlay_scene_ready = false;
         game_log_startup_exited = false;
         game_log_startup_exit_announced = false;
+        game_log_exit_reported = false;
         game_log_new_settings_restart_requested = false;
         game_log_session_parser.reset();
     }
@@ -511,6 +543,7 @@ void UiRuntime::update_overlay_scene_gate() {
         overlay_scene_ready = false;
         game_log_startup_exited = false;
         game_log_startup_exit_announced = false;
+        game_log_exit_reported = false;
         game_log_new_settings_restart_requested = false;
         game_log_session_parser.reset();
     }
@@ -548,6 +581,12 @@ void UiRuntime::update_overlay_scene_gate() {
             L"KF2's native log confirmed that the game requested a settings restart",
             L"game"});
     }
+    const bool log_belongs_to_process = game::game_log_belongs_to_process(
+        creation_time, game_process->process_start_id);
+    if (log_belongs_to_process &&
+        game::game_log_reports_engine_exit(marker_input)) {
+        game_log_exit_reported = true;
+    }
     const bool menu_ready =
         marker_input.find("WidgetInitialized - WidgetName:  StartMenu") !=
         std::string::npos;
@@ -555,8 +594,7 @@ void UiRuntime::update_overlay_scene_gate() {
         overlay_scene_ready = true;
         game_log_startup_exited = false;
     } else if (!overlay_scene_ready &&
-               game::game_log_belongs_to_process(
-                   creation_time, game_process->process_start_id) &&
+               log_belongs_to_process &&
                game::game_log_reports_engine_exit(marker_input)) {
         game_log_startup_exited = true;
         if (!game_log_startup_exit_announced) {

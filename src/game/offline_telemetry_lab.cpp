@@ -239,6 +239,43 @@ std::filesystem::path marker_path(const std::filesystem::path& state_root) {
     return state_root / kStateDirectoryName / kMarkerName;
 }
 
+std::wstring quote_command_argument(std::wstring_view value) {
+    std::wstring quoted{L"\""};
+    std::size_t slashes = 0;
+    for (const wchar_t character : value) {
+        if (character == L'\\') {
+            ++slashes;
+            continue;
+        }
+        if (character == L'\"') {
+            quoted.append(slashes * 2 + 1, L'\\');
+            quoted.push_back(L'\"');
+            slashes = 0;
+            continue;
+        }
+        quoted.append(slashes, L'\\');
+        slashes = 0;
+        quoted.push_back(character);
+    }
+    quoted.append(slashes * 2, L'\\');
+    quoted.push_back(L'\"');
+    return quoted;
+}
+
+Result<std::filesystem::path> current_executable_path() {
+    std::vector<wchar_t> path(32'768, L'\0');
+    const DWORD length = GetModuleFileNameW(
+        nullptr, path.data(), static_cast<DWORD>(path.size()));
+    if (length == 0 || length >= path.size()) {
+        return Result<std::filesystem::path>::failure(
+            {ErrorCode::platform_failure,
+             L"Portable cleanup executable path is unavailable",
+             GetLastError()});
+    }
+    return Result<std::filesystem::path>::success(
+        std::filesystem::path{std::wstring{path.data(), length}});
+}
+
 bool optimizer_module_signature(std::string_view bytes) {
     if (bytes.size() < kMinimumOptimizerModuleBytes ||
         static_cast<unsigned char>(bytes[0]) != 0xC1U ||
@@ -640,6 +677,80 @@ Result<OfflineTelemetryRecovery> recover_offline_telemetry_lab(
         return Result<OfflineTelemetryRecovery>::failure(restored.error());
     }
     return Result<OfflineTelemetryRecovery>::success({false, true});
+}
+
+Result<bool> launch_offline_telemetry_cleanup_helper(
+    const OfflineTelemetryCleanupHelperOptions& options) {
+    if (options.wait_process_id == 0 || options.config_root.empty() ||
+        options.state_root.empty() || !options.config_root.is_absolute() ||
+        !options.state_root.is_absolute() || options.wait_timeout_ms == 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"Offline telemetry cleanup helper input is invalid", 0});
+    }
+    const auto executable = current_executable_path();
+    if (!executable.has_value()) {
+        return Result<bool>::failure(executable.error());
+    }
+    std::wstring command = quote_command_argument(executable.value().wstring()) +
+        L" --offline-telemetry-cleanup " +
+        std::to_wstring(options.wait_process_id) + L" " +
+        quote_command_argument(options.config_root.wstring()) + L" " +
+        quote_command_argument(options.state_root.wstring()) + L" " +
+        std::to_wstring(options.wait_timeout_ms);
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(executable.value().c_str(), command.data(), nullptr,
+            nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
+            executable.value().parent_path().c_str(), &startup, &process)) {
+        return Result<bool>::failure(
+            {ErrorCode::platform_failure,
+             L"Temporary telemetry cleanup helper could not start",
+             GetLastError()});
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return Result<bool>::success(true);
+}
+
+Result<bool> run_offline_telemetry_cleanup_helper(
+    const OfflineTelemetryCleanupHelperOptions& options) {
+    if (options.wait_process_id == 0 || options.config_root.empty() ||
+        options.state_root.empty() || !options.config_root.is_absolute() ||
+        !options.state_root.is_absolute()) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"Offline telemetry cleanup helper input is invalid", 0});
+    }
+    HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, options.wait_process_id);
+    if (process != nullptr) {
+        const DWORD waited = WaitForSingleObject(process,
+            options.wait_timeout_ms);
+        CloseHandle(process);
+        if (waited == WAIT_TIMEOUT) {
+            return Result<bool>::failure(
+                {ErrorCode::io_failure,
+                 L"KF2 still owns the telemetry package after the bounded cleanup wait",
+                 WAIT_TIMEOUT});
+        }
+        if (waited != WAIT_OBJECT_0) {
+            return Result<bool>::failure(
+                {ErrorCode::platform_failure,
+                 L"Telemetry cleanup could not verify process termination",
+                 GetLastError()});
+        }
+    } else {
+        const DWORD native = GetLastError();
+        if (native != ERROR_INVALID_PARAMETER) {
+            return Result<bool>::failure(
+                {ErrorCode::access_denied,
+                 L"Telemetry cleanup could not inspect the owning process",
+                 native});
+        }
+    }
+    return restore_offline_telemetry_lab(
+        options.config_root, options.state_root, false);
 }
 
 }  // namespace kf2::game
