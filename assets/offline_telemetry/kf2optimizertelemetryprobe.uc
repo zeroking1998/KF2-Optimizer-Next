@@ -1109,6 +1109,7 @@ function bool ApplyOneAdaptiveCorpseAging(KFGoreManager GoreManager)
     local float MinimumTierTwoAge;
     local float MinimumTierThreeAge;
     local bool bFinalTierInteractionSafe;
+    local bool bFinalTierLodReady;
     local bool bRecentlyRendered;
     local string PhysicsAction;
     local KFPawn Candidate;
@@ -1155,17 +1156,37 @@ function bool ApplyOneAdaptiveCorpseAging(KFGoreManager GoreManager)
     // advance it without a one-frame batch.
     bFinalTierInteractionSafe = DistanceUnits >= 800 &&
         !bRecentlyRendered;
+    EntryIndex = FindAdaptiveCorpseLodEntry(Candidate);
+    bFinalTierLodReady = false;
+    if (Tier >= 3 && bFinalTierInteractionSafe && EntryIndex >= 0 &&
+        EntryIndex < AdaptiveCorpseLodAppliedMinModels.Length &&
+        EntryIndex < AdaptiveCorpseLodPersistentAging.Length &&
+        EntryIndex < AdaptiveCorpseLodPhysicsFrozen.Length &&
+        Candidate.Mesh.SkeletalMesh != None &&
+        Candidate.Mesh.SkeletalMesh.LODInfo.Length >= 2 &&
+        Candidate.Mesh.ForcedLodModel == 0)
+    {
+        MaximumMinLod = Candidate.Mesh.SkeletalMesh.LODInfo.Length - 1;
+        bFinalTierLodReady =
+            AdaptiveCorpseLodAppliedMinModels[EntryIndex] == MaximumMinLod &&
+            Candidate.Mesh.MinLodModel == MaximumMinLod;
+        if (bFinalTierLodReady)
+        {
+            AdaptiveCorpseLodPersistentAging[EntryIndex] = true;
+        }
+    }
 
     // Only one corpse and one meaningful state transition are handled per
     // 50-ms invocation. Visible old corpses still receive staged LOD and
-    // sleeping-skeleton reductions. The final tier covers every corpse; the
-    // earlier tiers retain distance guards so a fresh nearby visible ragdoll
-    // still has a native reaction window.
+    // sleeping-skeleton reductions. The final tier waits for its final real
+    // LOD plus the interaction guard; the earlier tiers retain distance guards
+    // so a fresh nearby visible ragdoll still has a native reaction window.
     MaximumSpeedSquared = Tier >= 3 ? 160000.0 : 62500.0;
     PhysicsAction = Tier >= 3 ? "aging_freeze" : "aging";
     if ((Candidate.Mesh.RigidBodyIsAwake() || Tier >= 3) &&
         VSizeSq(Candidate.Velocity) <= MaximumSpeedSquared &&
-        (Tier < 3 || bFinalTierInteractionSafe) &&
+        (Tier < 3 ||
+         (bFinalTierInteractionSafe && bFinalTierLodReady)) &&
         (Tier >= 3 ||
          (Tier == 2 && DistanceUnits >= 1000) ||
          (Tier == 1 && DistanceUnits >= 1200)) &&
@@ -1199,6 +1220,14 @@ function bool ApplyOneAdaptiveCorpseAging(KFGoreManager GoreManager)
             if (Tier >= 3 && Candidate.Physics == PHYS_None)
             {
                 Candidate.SetPhysics(PHYS_RigidBody);
+                if (Candidate.Physics != PHYS_RigidBody)
+                {
+                    `log("KF2OPT_CORPSE_AGING state=rollback_failed"$
+                         " action=freeze corpse_id="$
+                         GetAdaptiveCorpseActionId(Candidate)$
+                         " physics=none readback=failed");
+                    return false;
+                }
                 AdaptiveCorpseLodPhysicsFrozen[EntryIndex] = false;
             }
             Candidate.Mesh.WakeRigidBody();
@@ -1340,7 +1369,7 @@ function int FindAdaptiveCorpseLodEntry(KFPawn Candidate)
     return -1;
 }
 
-function RemoveAdaptiveCorpseLodEntry(int Index, bool bRestore)
+function bool RemoveAdaptiveCorpseLodEntry(int Index, bool bRestore)
 {
     local KFPawn Candidate;
 
@@ -1350,14 +1379,25 @@ function RemoveAdaptiveCorpseLodEntry(int Index, bool bRestore)
         Index >= AdaptiveCorpseLodPersistentAging.Length ||
         Index >= AdaptiveCorpseLodPhysicsFrozen.Length)
     {
-        return;
+        return false;
     }
     Candidate = AdaptiveCorpseLodCorpses[Index];
     if (bRestore && AdaptiveCorpseLodPhysicsFrozen[Index] &&
-        Candidate != None && !Candidate.bDeleteMe &&
-        Candidate.Physics == PHYS_None)
+        Candidate != None && !Candidate.bDeleteMe)
     {
-        Candidate.SetPhysics(PHYS_RigidBody);
+        if (Candidate.Physics == PHYS_None)
+        {
+            Candidate.SetPhysics(PHYS_RigidBody);
+        }
+        if (Candidate.Physics != PHYS_RigidBody)
+        {
+            return false;
+        }
+        if (!UnregisterAdaptiveCorpsePhysicsAction(
+                Candidate, "aging_freeze"))
+        {
+            return false;
+        }
         if (Candidate.Mesh != None)
         {
             Candidate.Mesh.bNoSkeletonUpdate = false;
@@ -1369,6 +1409,11 @@ function RemoveAdaptiveCorpseLodEntry(int Index, bool bRestore)
     {
         Candidate.Mesh.MinLodModel =
             AdaptiveCorpseLodOriginalMinModels[Index];
+        if (Candidate.Mesh.MinLodModel !=
+            AdaptiveCorpseLodOriginalMinModels[Index])
+        {
+            return false;
+        }
         ++AdaptiveCorpseLodRestores;
     }
     AdaptiveCorpseLodCorpses.Remove(Index, 1);
@@ -1376,6 +1421,7 @@ function RemoveAdaptiveCorpseLodEntry(int Index, bool bRestore)
     AdaptiveCorpseLodAppliedMinModels.Remove(Index, 1);
     AdaptiveCorpseLodPersistentAging.Remove(Index, 1);
     AdaptiveCorpseLodPhysicsFrozen.Remove(Index, 1);
+    return true;
 }
 
 function PruneAdaptiveCorpseLodEntries()
@@ -1391,12 +1437,23 @@ function PruneAdaptiveCorpseLodEntries()
         {
             RemoveAdaptiveCorpseLodEntry(Index, false);
         }
+        else if (AdaptiveCorpseLodPhysicsFrozen[Index] &&
+                 FindAdaptiveCorpsePhysicsActionId(
+                     "aging_freeze",
+                     GetAdaptiveCorpseActionId(Candidate)) == -1)
+        {
+            // A failed action registration may already have reached
+            // PHYS_None. Retain ownership until the verified restore succeeds.
+            RemoveAdaptiveCorpseLodEntry(Index, true);
+        }
         else if (Candidate.Mesh.MinLodModel !=
                  AdaptiveCorpseLodAppliedMinModels[Index])
         {
             // A different system changed the value. Stop owning it instead of
-            // overwriting an external decision during restore.
-            RemoveAdaptiveCorpseLodEntry(Index, false);
+            // overwriting an external decision during restore. A final frozen
+            // actor must still pass the verified physics-release path.
+            RemoveAdaptiveCorpseLodEntry(
+                Index, AdaptiveCorpseLodPhysicsFrozen[Index]);
         }
     }
 }
@@ -1677,6 +1734,7 @@ function int FindAdaptiveCorpsePhysicsActionId(
 function bool RegisterAdaptiveCorpsePhysicsAction(
     KFPawn Candidate, string Action)
 {
+    local int DeletedSlot;
     local int Probe;
     local int Slot;
     local string CorpseId;
@@ -1690,24 +1748,66 @@ function bool RegisterAdaptiveCorpsePhysicsAction(
     CorpseId = GetAdaptiveCorpseActionId(Candidate);
     ActionId = Action$":"$CorpseId;
     Slot = GetAdaptiveCorpsePhysicsActionHash(ActionId);
+    DeletedSlot = -1;
     for (Probe = 0; Probe < 8192; ++Probe)
     {
         if (AdaptiveCorpsePhysicsActionIds[Slot] == ActionId)
         {
             return true;
         }
-        if (AdaptiveCorpsePhysicsActionIds[Slot] == "")
+        if (AdaptiveCorpsePhysicsActionIds[Slot] == "__deleted__" &&
+            DeletedSlot < 0)
         {
+            DeletedSlot = Slot;
+        }
+        else if (AdaptiveCorpsePhysicsActionIds[Slot] == "")
+        {
+            if (DeletedSlot >= 0)
+            {
+                Slot = DeletedSlot;
+            }
             AdaptiveCorpsePhysicsActionIds[Slot] = ActionId;
             ++AdaptiveCorpsePhysicsActionIdCount;
             return true;
         }
         Slot = (Slot + 1) & 8191;
     }
+    if (DeletedSlot >= 0)
+    {
+        AdaptiveCorpsePhysicsActionIds[DeletedSlot] = ActionId;
+        ++AdaptiveCorpsePhysicsActionIdCount;
+        return true;
+    }
     // Never evict an owned ID: eviction would make an old corpse eligible for
-    // repeated work. A saturated table disables only further baseline and
+    // repeated work. A saturated table disables only further aging and
     // Ragdoll ownership; distance, LOD and capacity continue independently.
     return false;
+}
+
+function bool UnregisterAdaptiveCorpsePhysicsAction(
+    KFPawn Candidate, string Action)
+{
+    local int Slot;
+
+    if (Candidate == None || Action == "")
+    {
+        return false;
+    }
+    Slot = FindAdaptiveCorpsePhysicsActionId(
+        Action, GetAdaptiveCorpseActionId(Candidate));
+    if (Slot < 0)
+    {
+        // Idempotent release: an already-cleared action must not prevent the
+        // actor and its LOD ownership from completing restore.
+        return true;
+    }
+    // Open-addressing lookup must continue through removed slots. Registration
+    // reuses the first tombstone it encounters, so repeated Adaptive
+    // off/on cycles do not consume the fixed table.
+    AdaptiveCorpsePhysicsActionIds[Slot] = "__deleted__";
+    AdaptiveCorpsePhysicsActionIdCount =
+        Max(0, AdaptiveCorpsePhysicsActionIdCount - 1);
+    return true;
 }
 
 function int GetAdaptiveCorpseDistanceUnits(KFPawn Candidate)

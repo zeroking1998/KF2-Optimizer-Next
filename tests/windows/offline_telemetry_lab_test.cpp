@@ -66,6 +66,9 @@ int main() {
         std::cout << "SKIP: locally SDK-compiled telemetry asset is absent\n";
         return 77;
     }
+    const auto asset_hash = kf2::security::sha256_file_hex(asset);
+    CHECK(asset_hash.has_value());
+    CHECK(asset_hash.value() == KF2_OFFLINE_TELEMETRY_SHA256);
     const auto asset_bytes = read_bytes(asset);
     CHECK(asset_bytes.find("KF2OPT_MUTATOR") != std::string::npos);
     CHECK(asset_bytes.find("KF2OPT_INTERACTION") != std::string::npos);
