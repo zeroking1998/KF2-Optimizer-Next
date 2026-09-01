@@ -626,8 +626,21 @@ int main() {
     CHECK(telemetry_source.find(
         "function int GetAdaptiveCorpseDistanceUnits(KFPawn Candidate)") !=
           std::string::npos);
+    CHECK(telemetry_source.find(
+        "function string FormatAdaptiveCorpseDistanceMeters(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "DistanceDecimeters = (DistanceUnits + 5) / 10") !=
+          std::string::npos);
     CHECK(count_occurrences(telemetry_source, "corpse_id=") == 9);
-    CHECK(count_occurrences(telemetry_source, " distance_units=") == 9);
+    CHECK(count_occurrences(telemetry_source, " distance_units=") == 10);
+    CHECK(count_occurrences(telemetry_source, " distance_m=") == 10);
+    const auto distance_marker = telemetry_source.find(
+        "AdaptiveCorpseDebugMarkers[Index].Action$\" | \"");
+    CHECK(distance_marker != std::string::npos);
+    CHECK(telemetry_source.find(
+        "GetAdaptiveCorpseDistanceUnits(Candidate), true)", distance_marker) !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "var globalconfig bool bAdaptiveCorpseDebugMarkers") !=
           std::string::npos);
@@ -1003,6 +1016,8 @@ int main() {
     CHECK(ragdoll_counter < ragdoll_receipt);
     CHECK(telemetry_source.find("minimum_distance_units=800",
                                 ragdoll_near_rejection) != std::string::npos);
+    CHECK(telemetry_source.find("minimum_distance_m=8.0",
+                                ragdoll_near_rejection) != std::string::npos);
     CHECK(telemetry_source.find("eligible=0 reason=near_player",
                                 ragdoll_near_rejection) != std::string::npos);
     CHECK(telemetry_source.find("scene_level=", ragdoll_receipt) !=
@@ -1012,6 +1027,8 @@ int main() {
     CHECK(telemetry_source.find("frame_level=", ragdoll_receipt) !=
           std::string::npos);
     CHECK(telemetry_source.find("minimum_distance_units=800",
+                                ragdoll_receipt) != std::string::npos);
+    CHECK(telemetry_source.find("minimum_distance_m=8.0",
                                 ragdoll_receipt) != std::string::npos);
     CHECK(telemetry_source.find("zed_time=0 eligible=1",
                                 ragdoll_receipt) != std::string::npos);

@@ -1004,7 +1004,10 @@ function ApplyLivingEnemyVisualPressure(
              EnemyPressureLevel$" pressure_pct="$int(PressureScale * 100.0)$
              " min_lod="$TargetMinLod$" anim_factor="$
              TargetAnimDistance$" anim_rate="$TargetAnimRate$" distance_units="$
-             GetAdaptiveCorpseDistanceUnits(Candidate)$" readback=verified");
+             GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
+             FormatAdaptiveCorpseDistanceMeters(
+                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             " readback=verified");
     }
 }
 
@@ -1098,7 +1101,11 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
              AdaptiveBaselinePhysicsSleeps$" batch="$SleepsThisPass$
              " forced="$ForcedSleep$" age_ms="$int(CorpseAge * 1000.0)$
              " speed_units="$int(VSize(Candidate.Velocity))$" corpse_id="$
-             GetAdaptiveCorpseActionId(Candidate)$" effective_awake=0");
+             GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
+             GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
+             FormatAdaptiveCorpseDistanceMeters(
+                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             " effective_awake=0");
     }
     return SleepsThisPass;
 }
@@ -1463,6 +1470,29 @@ function int GetAdaptiveCorpseDistanceUnits(KFPawn Candidate)
     return int(VSize(Candidate.Location - LocalPC.ViewTarget.Location));
 }
 
+function string FormatAdaptiveCorpseDistanceMeters(
+    int DistanceUnits, optional bool IncludeUnit)
+{
+    local int DistanceDecimeters;
+    local string Result;
+
+    if (DistanceUnits < 0)
+    {
+        return IncludeUnit ? "unknown" : "-1";
+    }
+    // KF2's own SDK converts world distance to metres by dividing Unreal
+    // units by 100. Keep one decimal place while avoiding locale-dependent
+    // float formatting in logs and debug markers.
+    DistanceDecimeters = (DistanceUnits + 5) / 10;
+    Result = string(DistanceDecimeters / 10)$"."$
+        string(DistanceDecimeters % 10);
+    if (IncludeUnit)
+    {
+        Result $= " m";
+    }
+    return Result;
+}
+
 function PruneAdaptiveCorpseDebugMarkers()
 {
     local int Index;
@@ -1572,7 +1602,9 @@ function DrawAdaptiveCorpseDebugMarkers(Canvas MarkerCanvas)
         }
         MarkerCanvas.SetPos(ScreenPosition.X - 90.0, ScreenPosition.Y - 18.0);
         MarkerCanvas.DrawText(
-            "KF2OPT "$AdaptiveCorpseDebugMarkers[Index].Action$" "$
+            "KF2OPT "$AdaptiveCorpseDebugMarkers[Index].Action$" | "$
+            FormatAdaptiveCorpseDistanceMeters(
+                GetAdaptiveCorpseDistanceUnits(Candidate), true)$" | "$
             AdaptiveCorpseDebugMarkers[Index].CorpseId, false, 0.8, 0.8);
     }
 }
@@ -1617,6 +1649,8 @@ function RemoveAdaptiveDistanceSleptCorpseEntry(
         `log("KF2OPT_CORPSE_DISTANCE state=removed previous_state=sleep"$
              " removal_reason="$RemovalReason$" corpse_id="$CorpseId$
              " distance_units="$DistanceUnits$
+             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                 DistanceUnits, false)$
              " effective_awake="$EffectiveAwake);
     }
 }
@@ -1710,6 +1744,8 @@ function int WakeNearAdaptiveDistanceSleptCorpses()
                  AdaptiveDistanceSleptCorpses.Length$" corpse_id="$
                  GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
                  GetAdaptiveCorpseDistanceUnits(Candidate)$
+                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
                  " effective_awake=1");
         }
     }
@@ -1836,6 +1872,8 @@ function bool SleepOneDistantMonsterCorpse(
         `log("KF2OPT_CORPSE_DISTANCE state=removed previous_state=sleep"$
              " removal_reason=tracking_lost corpse_id="$CorpseId$
              " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
+             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
              " effective_awake="$
              GetAdaptiveCorpseEffectiveAwake(Candidate));
     }
@@ -1871,6 +1909,8 @@ function bool SleepOneDistantMonsterCorpse(
              VisibleLivingZeds$" visible_corpses="$VisibleCorpses$
              " corpse_id="$CorpseId$" distance_units="$
              GetAdaptiveCorpseDistanceUnits(Candidate)$
+             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
              " effective_awake=0");
     }
     else
@@ -1884,6 +1924,8 @@ function bool SleepOneDistantMonsterCorpse(
              VisibleLivingZeds$" visible_corpses="$VisibleCorpses$
              " corpse_id="$CorpseId$" distance_units="$
              GetAdaptiveCorpseDistanceUnits(Candidate)$
+             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
              " effective_awake=0");
     }
     return true;
@@ -2011,7 +2053,10 @@ function bool ApplyOneAdaptiveCorpseLod(
          TargetMinLod$" reduced="$AdaptiveCorpseLodReductions$" tracked="$
          AdaptiveCorpseLodCorpses.Length$" corpse_id="$
          GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-         GetAdaptiveCorpseDistanceUnits(Candidate)$" readback=verified");
+         GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
+         FormatAdaptiveCorpseDistanceMeters(
+             GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+         " readback=verified");
     return true;
 }
 
@@ -2167,7 +2212,10 @@ function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(
                 `log("KF2OPT_CORPSE_RAGDOLL state=rejected_near corpse_id="$
                      GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
                      GetAdaptiveCorpseDistanceUnits(Candidate)$
-                     " minimum_distance_units=800 scene_level="$
+                     " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                         GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                     " minimum_distance_units=800 minimum_distance_m=8.0"$
+                     " scene_level="$
                      ScenePressureLevel$" enemy_level="$EnemyPressureLevel$
                      " frame_level="$FramePressureLevel$" visible=1 age_ms="$
                      int((WorldInfo.TimeSeconds - Candidate.TimeOfDeath) *
@@ -2221,7 +2269,10 @@ function bool SleepOneVisibleMonsterCorpse(
          AdaptiveCorpsePhysicsActionIdCount$" corpse_id="$
          GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
          GetAdaptiveCorpseDistanceUnits(Candidate)$
-         " minimum_distance_units=800 scene_level="$ScenePressureLevel$
+         " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+             GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+         " minimum_distance_units=800 minimum_distance_m=8.0"$
+         " scene_level="$ScenePressureLevel$
          " enemy_level="$EnemyPressureLevel$" frame_level="$FramePressureLevel$
          " visible=1 age_ms="$
          int((WorldInfo.TimeSeconds - Candidate.TimeOfDeath) * 1000.0)$
