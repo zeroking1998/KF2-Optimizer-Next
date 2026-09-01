@@ -52,7 +52,8 @@ app::runtime::DispatchResult toggle_debug_marker(
             runtime.optimizer_settings.debug_corpse_markers,
             runtime.optimizer_settings.adaptive_quality_change_budget,
             runtime.adaptive_control_token,
-            runtime.optimizer_settings.debug_zed_markers);
+            runtime.optimizer_settings.debug_zed_markers,
+            runtime.optimizer_settings.adaptive_optimization_enabled);
         if (!staged.has_value()) {
             show_notice(
                 runtime, ui::NoticeSeverity::error,

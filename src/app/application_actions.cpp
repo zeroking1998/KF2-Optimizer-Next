@@ -297,6 +297,26 @@ Result<config::ApplyResult> UiRuntime::apply_video_settings() {
 }
 
 Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
+    if (!optimizer_settings.adaptive_optimization_enabled) {
+        auto prepared = prepare({{
+            config::SettingId::corpse_limit,
+            optimizer_settings.corpse_limit,
+            config::ChangeSource::explicit_user,
+            L"Keep the user-selected maximum corpse count while Adaptive optimization is off"}},
+            L"Fixed user goals with Adaptive optimization off");
+        if (!prepared.has_value()) {
+            return Result<config::ApplyResult>::failure(prepared.error());
+        }
+        auto applied = apply({.game_running = false});
+        if (applied.has_value()) {
+            last_backup_id = applied.value().backup.id;
+            events->append({0, diagnostics::Severity::info,
+                "ADAPTIVE_LAUNCH_SKIPPED",
+                L"Adaptive launch changes were skipped; only the selected maximum corpse count and independent native FPS cap remain active",
+                L"optimizer"});
+        }
+        return applied;
+    }
     if (!adaptive_locks_valid) {
         return Result<config::ApplyResult>::failure({
             ErrorCode::access_denied,
@@ -494,7 +514,8 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
         optimizer_settings.target_fps,
         optimizer_settings.debug_corpse_markers,
         optimizer_settings.adaptive_quality_change_budget,
-        adaptive_control_token, optimizer_settings.debug_zed_markers);
+        adaptive_control_token, optimizer_settings.debug_zed_markers,
+        optimizer_settings.adaptive_optimization_enabled);
     if (!enabled.has_value()) {
         adaptive_control_token.clear();
         return Result<bool>::failure(enabled.error());

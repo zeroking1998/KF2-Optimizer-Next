@@ -10,6 +10,7 @@ namespace kf2::config {
 
 struct Settings {
     int schema_version{1};
+    bool adaptive_optimization_enabled{true};
     bool automatic_update_checks{true};
     bool overlay_enabled{true};
     bool overlay_show_fps{true};

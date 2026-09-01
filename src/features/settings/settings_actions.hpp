@@ -16,8 +16,10 @@ app::runtime::DispatchResult updates_later(
     app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult updates_ignore(
     app::UiRuntime&, const app::runtime::NoPayload&);
+app::runtime::DispatchResult adaptive_toggle(
+    app::UiRuntime&, const app::runtime::NoPayload&);
 
-inline constexpr std::array<app::runtime::ActionImplementation, 5> kActions{{
+inline constexpr std::array<app::runtime::ActionImplementation, 6> kActions{{
     {app::runtime::ActionId::settings_updates_automatic,
      &app::runtime::bind_no_payload<&updates_automatic>},
     {app::runtime::ActionId::settings_updates_check,
@@ -28,6 +30,8 @@ inline constexpr std::array<app::runtime::ActionImplementation, 5> kActions{{
      &app::runtime::bind_no_payload<&updates_later>},
     {app::runtime::ActionId::settings_updates_ignore,
      &app::runtime::bind_no_payload<&updates_ignore>},
+    {app::runtime::ActionId::settings_adaptive_toggle,
+     &app::runtime::bind_no_payload<&adaptive_toggle>},
 }};
 
 inline constexpr app::runtime::FeatureDefinition kFeature{

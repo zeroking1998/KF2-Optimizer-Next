@@ -183,6 +183,93 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
     return true;
 }
 
+bool UiRuntime::set_live_adaptive_enabled(
+    bool enabled, std::wstring_view reason) {
+    if (!installation ||
+        !game::find_running_game_process(
+             installation->executable).has_value()) {
+        return true;
+    }
+    if (!game::valid_adaptive_control_token(adaptive_control_token)) {
+        return false;
+    }
+    std::optional<std::uint16_t> port;
+    if (last_report_gameplay_session &&
+        last_report_gameplay_session->telemetry_control_port) {
+        port = last_report_gameplay_session->telemetry_control_port;
+    } else if (game_log_session_parser.current() &&
+               game_log_session_parser.current()->telemetry_control_port) {
+        port = game_log_session_parser.current()->telemetry_control_port;
+    }
+    if (!port) return false;
+    if (adaptive_mode_dispatcher.busy()) return false;
+
+    if (!enabled && flex_adaptive_constrained &&
+        (!game_process ||
+         !flex::write_adaptive_control(*game_process, 0))) {
+        events->append({0, diagnostics::Severity::error,
+            "ADAPTIVE_FLEX_RELEASE_FAILED",
+            std::wstring{reason} +
+                L"; the active FleX constraint could not be released, so Adaptive remains on",
+            L"flex"});
+        return false;
+    }
+
+    const auto next_sequence =
+        adaptive_control_sequence == std::numeric_limits<std::uint64_t>::max()
+            ? 1 : adaptive_control_sequence + 1;
+    const auto changed = game::send_adaptive_control({
+        .port = *port,
+        .token = adaptive_control_token,
+        .sequence = next_sequence,
+        .resource = enabled ? game::AdaptiveResourceControl::enable
+                            : game::AdaptiveResourceControl::disable,
+        .quality = 100,
+        .timeout_ms = game::kAdaptiveControlReadbackTimeoutMs});
+    adaptive_control_sequence = next_sequence;
+    if (!changed.has_value()) {
+        events->append({0, diagnostics::Severity::error,
+            enabled ? "ADAPTIVE_RUNTIME_ENABLE_FAILED"
+                    : "ADAPTIVE_RUNTIME_DISABLE_FAILED",
+            std::wstring{reason} +
+                L"; KF2 did not return the required authenticated APPLIED readback",
+            L"optimizer"});
+        return false;
+    }
+    adaptive_runtime_mode_process_start_id = game_process
+        ? game_process->process_start_id : 0;
+    adaptive_runtime_mode_port = *port;
+    adaptive_runtime_mode_last_attempt_ns = monotonic_ns();
+    adaptive_runtime_mode_confirmed = true;
+    adaptive_runtime_mode_pending.reset();
+    adaptive_control_pending.reset();
+    adaptive_governor.reset();
+    adaptive_profile_gate.reset();
+    adaptive_decision = {};
+    adaptive_gameplay_active = false;
+    if (!enabled) {
+        adaptive_actuation.disable(monotonic_ns());
+        adaptive_actuation.rebase({}, monotonic_ns());
+        adaptive_resource_quality.reset(100);
+        if (game_process && !flex_adaptive_constrained) {
+            // A passive channel may exist even when this session never
+            // constrained FleX. Request passthrough, but only an active
+            // constraint makes this write part of the confirmation boundary.
+            static_cast<void>(flex::write_adaptive_control(*game_process, 0));
+        }
+        flex_adaptive_constrained = false;
+    }
+    events->append({0, diagnostics::Severity::info,
+        enabled ? "ADAPTIVE_RUNTIME_ENABLED"
+                : "ADAPTIVE_RUNTIME_DISABLED",
+        std::wstring{reason} +
+            (enabled
+                ? L"; KF2 confirmed that adaptive runtime control resumed"
+                : L"; KF2 confirmed release of adaptive graphics, Zed LOD and reversible corpse control; FleX requested passthrough"),
+        L"optimizer"});
+    return true;
+}
+
 void UiRuntime::detach_telemetry(bool restore_live_quality) {
     if (restore_live_quality) {
         static_cast<void>(restore_live_adaptive_quality(
@@ -225,6 +312,11 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     adaptive_actuation.rebase({}, monotonic_ns());
     adaptive_control_pending.reset();
     adaptive_control_sequence = 0;
+    adaptive_runtime_mode_process_start_id = 0;
+    adaptive_runtime_mode_port.reset();
+    adaptive_runtime_mode_last_attempt_ns = 0;
+    adaptive_runtime_mode_confirmed = false;
+    adaptive_runtime_mode_pending.reset();
     adaptive_quality_last_dispatch_ns = 0;
     adaptive_resource_quality.reset(
         optimizer_settings.adaptive_maximum_quality);

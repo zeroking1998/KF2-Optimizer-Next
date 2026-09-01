@@ -414,6 +414,8 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
     ui::UiStatus status;
     status.mode = mode == StartMode::read_only
         ? L"Read-only" : L"Adaptive / Automatic";
+    status.adaptive_optimization_enabled =
+        settings.adaptive_optimization_enabled;
     status.target_fps = settings.target_fps;
     status.corpse_limit = settings.corpse_limit;
     update_adaptive_policy_status(status);

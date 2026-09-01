@@ -456,6 +456,7 @@ int main() {
         CHECK(fs::exists(options.state_root / L"settings.ini.corrupt"));
         CHECK(read_bytes(options.state_root / L"settings.ini") ==
         "schema_version=1\noptimizer_mode=adaptive\n"
+        "adaptive_optimization_enabled=true\n"
         "automatic_update_checks=true\n"
         "overlay_enabled=true\noverlay_show_fps=true\noverlay_show_frame_time=true\n"
         "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=true\n"
@@ -620,6 +621,7 @@ int main() {
     CHECK(graphical.value().ui_model().status().overlay_show_gpu);
     CHECK(graphical.value().ui_model().status().overlay_show_memory);
     CHECK(graphical.value().ui_model().status().update_newer_version_known);
+    CHECK(graphical.value().ui_model().status().adaptive_optimization_enabled);
     CHECK(graphical.value().ui_model().status().update_prompt_visible);
     CHECK(graphical.value().ui_model().status().update_available_version ==
           L"0.0.4-alpha");
@@ -644,6 +646,24 @@ int main() {
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(auto_update->x, auto_update->y));
     CHECK(graphical.value().ui_model().status().automatic_update_checks);
+    const auto adaptive_toggle = node_center(
+        hwnd, graphical.value().ui_model(), "settings-adaptive-toggle");
+    CHECK(adaptive_toggle.has_value());
+    SendMessageW(hwnd, WM_LBUTTONUP, 0,
+                 MAKELPARAM(adaptive_toggle->x, adaptive_toggle->y));
+    CHECK(!graphical.value().ui_model().status()
+               .adaptive_optimization_enabled);
+    CHECK(read_bytes(options.state_root / L"settings.ini").find(
+              "adaptive_optimization_enabled=false\n") !=
+          std::string::npos);
+    const auto adaptive_toggle_again = node_center(
+        hwnd, graphical.value().ui_model(), "settings-adaptive-toggle");
+    CHECK(adaptive_toggle_again.has_value());
+    SendMessageW(hwnd, WM_LBUTTONUP, 0,
+                 MAKELPARAM(adaptive_toggle_again->x,
+                            adaptive_toggle_again->y));
+    CHECK(graphical.value().ui_model().status()
+              .adaptive_optimization_enabled);
     const auto advanced_navigation =
         node_center(hwnd, graphical.value().ui_model(), "nav-3");
     CHECK(advanced_navigation.has_value());

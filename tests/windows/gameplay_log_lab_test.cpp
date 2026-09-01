@@ -73,6 +73,36 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find("Resource ~= \"effects\"") !=
           std::string::npos);
+    CHECK(telemetry_source.find("var globalconfig bool bAdaptiveRuntimeEnabled") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("function bool SetAdaptiveRuntimeEnabled") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("function int WakeAdaptiveDistanceSleptCorpseBatch") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("function BeginAdaptiveDistanceSleepRelease") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("WakeCount < 8") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_ADAPTIVE_MODE state=disabled readback=verified") !=
+          std::string::npos);
+    const auto adaptive_runtime_function = telemetry_source.find(
+        "function bool SetAdaptiveRuntimeEnabled");
+    const auto adaptive_control_function = telemetry_source.find(
+        "function bool ApplyAdaptiveResourceControl");
+    CHECK(adaptive_runtime_function != std::string::npos);
+    CHECK(adaptive_control_function != std::string::npos);
+    CHECK(telemetry_source.substr(
+              adaptive_runtime_function,
+              adaptive_control_function - adaptive_runtime_function).find(
+                  "ClearTimer(nameof(SampleTelemetry), self)") ==
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "var bool bProcessAdaptiveRuntimeEnabled") != std::string::npos);
+    CHECK(interaction_source.find(
+        "CurrentProbe.SetAdaptiveRuntimeEnabled(") != std::string::npos);
+    CHECK(connection_source.find(
+        "CurrentInteraction.SetProcessAdaptiveRuntimeEnabled(") !=
+          std::string::npos);
     CHECK(interaction_source.find(
         "class'KF2OptimizerAdaptiveControlListener'") != std::string::npos);
     CHECK(interaction_source.find("var transient WorldInfo ActiveWorld") ==
@@ -1146,6 +1176,8 @@ int main() {
     const auto adaptive_engine = read_bytes(engine_ini);
     CHECK(adaptive_engine.find("bAdaptiveCorpseStagger=True\r\n") !=
           std::string::npos);
+    CHECK(adaptive_engine.find("bAdaptiveRuntimeEnabled=True\r\n") !=
+          std::string::npos);
     CHECK(adaptive_engine.find("bAdaptiveCorpseDebugMarkers=True\r\n") !=
           std::string::npos);
     CHECK(adaptive_engine.find("bAdaptiveZedDebugMarkers=True\r\n") !=
@@ -1171,6 +1203,13 @@ int main() {
             root, true, 350, 137, true, 2, control_token, true);
     CHECK(adaptive_unchanged.has_value());
     CHECK(!adaptive_unchanged.value());
+    const auto adaptive_initially_off =
+        kf2::game::enable_offline_gameplay_logging(
+            root, true, 350, 137, true, 2, control_token, true, false);
+    CHECK(adaptive_initially_off.has_value());
+    CHECK(adaptive_initially_off.value());
+    CHECK(read_bytes(engine_ini).find(
+              "bAdaptiveRuntimeEnabled=False\r\n") != std::string::npos);
 
     CHECK(!kf2::game::cleanup_stale_offline_gameplay_configuration(
         root, true).has_value());

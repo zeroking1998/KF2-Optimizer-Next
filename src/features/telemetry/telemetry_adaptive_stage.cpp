@@ -20,6 +20,111 @@ void UiRuntime::update_adaptive_controller(
     const auto now_ns = frame.observed_at_ns;
     const bool active_gameplay = frame.active_gameplay;
     auto status = model.status();
+    if (auto mode_outcome = adaptive_mode_dispatcher.poll()) {
+        const bool expected_enabled =
+            adaptive_runtime_mode_pending.value_or(
+                optimizer_settings.adaptive_optimization_enabled);
+        const auto expected_resource = expected_enabled
+            ? game::AdaptiveResourceControl::enable
+            : game::AdaptiveResourceControl::disable;
+        adaptive_runtime_mode_confirmed =
+            mode_outcome->has_value() &&
+            mode_outcome->value().resource == expected_resource;
+        events->append({
+            0,
+            adaptive_runtime_mode_confirmed
+                ? diagnostics::Severity::info
+                : diagnostics::Severity::warning,
+            adaptive_runtime_mode_confirmed
+                ? "ADAPTIVE_RUNTIME_MODE_RECONCILED"
+                : "ADAPTIVE_RUNTIME_MODE_RECONCILE_FAILED",
+            adaptive_runtime_mode_confirmed
+                ? L"The current KF2 provider confirmed the saved Adaptive mode with an authenticated APPLIED readback"
+                : L"The current KF2 provider did not confirm the saved Adaptive mode; automatic actions remain blocked",
+            L"optimizer"});
+        adaptive_runtime_mode_pending.reset();
+    }
+    if (frame.gameplay && frame.gameplay->telemetry_control_port &&
+        game_process &&
+        game::valid_adaptive_control_token(adaptive_control_token)) {
+        const auto port = *frame.gameplay->telemetry_control_port;
+        const bool new_provider =
+            adaptive_runtime_mode_process_start_id !=
+                game_process->process_start_id ||
+            adaptive_runtime_mode_port != port;
+        const bool retry_due = !adaptive_runtime_mode_confirmed &&
+            (adaptive_runtime_mode_last_attempt_ns == 0 ||
+             now_ns >= adaptive_runtime_mode_last_attempt_ns +
+                           5'000'000'000ULL);
+        if ((new_provider || retry_due) &&
+            !adaptive_mode_dispatcher.busy()) {
+            adaptive_runtime_mode_process_start_id =
+                game_process->process_start_id;
+            adaptive_runtime_mode_port = port;
+            adaptive_runtime_mode_last_attempt_ns = now_ns;
+            adaptive_runtime_mode_confirmed = false;
+            const bool desired_enabled =
+                optimizer_settings.adaptive_optimization_enabled;
+            const auto next_sequence =
+                adaptive_control_sequence ==
+                        std::numeric_limits<std::uint64_t>::max()
+                    ? 1 : adaptive_control_sequence + 1;
+            const auto started = adaptive_mode_dispatcher.start({
+                .port = port,
+                .token = adaptive_control_token,
+                .sequence = next_sequence,
+                .resource = desired_enabled
+                    ? game::AdaptiveResourceControl::enable
+                    : game::AdaptiveResourceControl::disable,
+                .quality = 100});
+            if (started.has_value() && started.value()) {
+                adaptive_control_sequence = next_sequence;
+                adaptive_runtime_mode_pending = desired_enabled;
+            } else {
+                events->append({0, diagnostics::Severity::warning,
+                    "ADAPTIVE_RUNTIME_MODE_RECONCILE_FAILED",
+                    L"The background worker could not start; automatic actions remain blocked",
+                    L"optimizer"});
+            }
+        }
+    }
+    if (adaptive_runtime_mode_port &&
+        !adaptive_runtime_mode_confirmed) {
+        status.adaptive_state = L"mode unconfirmed";
+        status.adaptive_action = L"blocked";
+        status.adaptive_reason =
+            adaptive_mode_dispatcher.busy()
+                ? L"Waiting for the current KF2 provider to confirm the saved Adaptive mode"
+                : L"The current KF2 provider did not confirm the saved Adaptive mode";
+        status.adaptive_safety = L"fail closed";
+        status.adaptive_evidence = L"MODE_READBACK_PENDING";
+        model.set_status(std::move(status));
+        return;
+    }
+    if (!optimizer_settings.adaptive_optimization_enabled) {
+        status.adaptive_optimization_enabled = false;
+        status.adaptive_state = L"off";
+        status.adaptive_bottleneck = L"not evaluated";
+        status.adaptive_cpu_parallelism = L"telemetry only";
+        status.adaptive_action = L"none";
+        status.adaptive_reason =
+            L"Adaptive optimization is off; monitoring remains active";
+        status.adaptive_confidence_percent = 0;
+        status.adaptive_drop_risk_percent = 0;
+        status.adaptive_data_quality = L"NOT_EVALUATED";
+        status.adaptive_prediction = L"not evaluated";
+        status.adaptive_safety = L"no adaptive actuator";
+        status.adaptive_evidence = L"TELEMETRY_ONLY";
+        status.adaptive_corpse_action_status = L"DISABLED";
+        status.adaptive_flex_action_status = L"DISABLED";
+        adaptive_gameplay_active = false;
+        adaptive_governor.reset();
+        adaptive_profile_gate.reset();
+        adaptive_decision = {};
+        model.set_status(std::move(status));
+        return;
+    }
+    status.adaptive_optimization_enabled = true;
     if (auto outcome = adaptive_control_dispatcher.poll()) {
         if (adaptive_control_pending) {
             const auto pending = *adaptive_control_pending;

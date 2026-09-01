@@ -48,6 +48,7 @@ var int ProfileEffectActorMilliseconds;
 var int ProfileWorldEmitterMilliseconds;
 var int ProfileClockAnomalies;
 var globalconfig bool bAdaptiveCorpseStagger;
+var globalconfig bool bAdaptiveRuntimeEnabled;
 var globalconfig bool bAdaptiveCorpseDebugMarkers;
 var globalconfig bool bAdaptiveZedDebugMarkers;
 var globalconfig int AdaptiveCorpseMaximum;
@@ -121,6 +122,59 @@ function bool ValidAdaptiveControlToken(string Candidate)
     return Len(AdaptiveControlToken) == 32 && Candidate == AdaptiveControlToken;
 }
 
+function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
+{
+    if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
+    {
+        return false;
+    }
+    if (bEnabled)
+    {
+        bAdaptiveRuntimeEnabled = true;
+        if (bAdaptiveCorpseStagger)
+        {
+            SetTimer(0.45, true, nameof(StaggerCorpseCleanup), self);
+            SetTimer(0.25, true, nameof(AdaptiveCorpseLoadControl), self);
+        }
+        `log("KF2OPT_ADAPTIVE_MODE state=enabled readback=verified");
+        return true;
+    }
+
+    if (AdaptiveGraphicsState != None &&
+        !class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
+            AdaptiveGraphicsState, "recover", 100))
+    {
+        return false;
+    }
+    if (!ApplyAdaptiveEffectRuntimeReadback("recover", 100))
+    {
+        return false;
+    }
+    RestoreAllAdaptiveCorpseLods();
+    RestoreAllAdaptiveLivingVisuals();
+    BeginAdaptiveDistanceSleepRelease();
+    if (AdaptiveCorpseManager != None)
+    {
+        AdaptiveCorpseRuntimeLimit = AdaptiveCorpseTarget;
+        AdaptiveCorpseManager.MaxDeadBodies = AdaptiveCorpseTarget;
+    }
+    ClearTimer(nameof(StaggerCorpseCleanup), self);
+    ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
+    AdaptiveCorpsePressureSamples = 0;
+    AdaptiveCorpseRecoverySamples = 0;
+    AdaptiveCorpsePressureLevel = 0;
+    AdaptiveCorpseCurrentFramePressureLevel = 0;
+    AdaptiveCorpseScenePressureLevel = 0;
+    AdaptiveLivingVisualPressureLevel = 0;
+    AdaptiveLivingVisualPendingPressureLevel = 0;
+    AdaptiveFramePressureObservedRealTime = 0.0;
+    bAdaptiveRuntimeEnabled = false;
+    `log("KF2OPT_ADAPTIVE_MODE state=disabled readback=verified"$
+         " corpse_limit="$AdaptiveCorpseRuntimeLimit$
+         " telemetry=active");
+    return true;
+}
+
 function bool ApplyAdaptiveResourceControl(
     string Token, int Sequence, string Resource, int Quality)
 {
@@ -139,9 +193,21 @@ function bool ApplyAdaptiveResourceControl(
           (Resource ~= "cpu") || (Resource ~= "ram") ||
           (Resource ~= "overdraw") ||
           (Resource ~= "effects") ||
-          (Resource ~= "mixed") || (Resource ~= "recover")))
+          (Resource ~= "mixed") || (Resource ~= "recover") ||
+          (Resource ~= "enable") || (Resource ~= "disable")))
     {
         return false;
+    }
+    if ((Resource ~= "enable") || (Resource ~= "disable"))
+    {
+        if (!SetAdaptiveRuntimeEnabled(Resource ~= "enable"))
+        {
+            return false;
+        }
+        AdaptiveGraphicsQuality = Resource ~= "disable" ? 100 : Quality;
+        AdaptiveGraphicsResource = Resource;
+        AdaptiveLastControlSequence = Sequence;
+        return true;
     }
     QualityStage = Clamp((Quality + 9) / 10, 1, 10);
 
@@ -562,7 +628,8 @@ function StaggerCorpseCleanup()
     local KFGoreManager GoreManager;
     local KFGameInfo GameInfo;
 
-    if (!bAdaptiveCorpseStagger || WorldInfo == None ||
+    if (!bAdaptiveCorpseStagger || !bAdaptiveRuntimeEnabled ||
+        WorldInfo == None ||
         WorldInfo.NetMode != NM_Standalone)
     {
         return;
@@ -1763,6 +1830,49 @@ function int WakeNearAdaptiveDistanceSleptCorpses()
     return WakeCount;
 }
 
+function int WakeAdaptiveDistanceSleptCorpseBatch()
+{
+    local int Index;
+    local int WakeCount;
+    local KFPawn Candidate;
+
+    PruneAdaptiveDistanceSleptCorpses();
+    for (Index = AdaptiveDistanceSleptCorpses.Length - 1;
+         Index >= 0 && WakeCount < 8; --Index)
+    {
+        Candidate = AdaptiveDistanceSleptCorpses[Index].Corpse;
+        if (Candidate != None && Candidate.Mesh != None &&
+            !Candidate.Mesh.RigidBodyIsAwake())
+        {
+            Candidate.Mesh.WakeRigidBody();
+            if (Candidate.Mesh.RigidBodyIsAwake())
+            {
+                Candidate.Mesh.bNoSkeletonUpdate = false;
+                ++AdaptiveDistancePhysicsWakes;
+                ++WakeCount;
+            }
+        }
+        RemoveAdaptiveDistanceSleptCorpseEntry(
+            Index, "adaptive_disabled");
+    }
+    if (AdaptiveDistanceSleptCorpses.Length == 0)
+    {
+        ClearTimer(nameof(WakeAdaptiveDistanceSleptCorpseBatch), self);
+        `log("KF2OPT_CORPSE_DISTANCE state=release_complete reason=adaptive_disabled");
+    }
+    return WakeCount;
+}
+
+function BeginAdaptiveDistanceSleepRelease()
+{
+    if (WakeAdaptiveDistanceSleptCorpseBatch() > 0 &&
+        AdaptiveDistanceSleptCorpses.Length > 0)
+    {
+        SetTimer(0.05, true,
+            nameof(WakeAdaptiveDistanceSleptCorpseBatch), self);
+    }
+}
+
 function KFPawn SelectDistantAwakeMonsterCorpseForSleep(
     KFGoreManager GoreManager, int PhysicsPressureLevel)
 {
@@ -2315,7 +2425,8 @@ function AdaptiveCorpseLoadControl()
     local KFGoreManager GoreManager;
     local KFGameInfo GameInfo;
 
-    if (!bAdaptiveCorpseStagger || WorldInfo == None ||
+    if (!bAdaptiveCorpseStagger || !bAdaptiveRuntimeEnabled ||
+        WorldInfo == None ||
         WorldInfo.NetMode != NM_Standalone)
     {
         return;
@@ -2709,7 +2820,7 @@ event PreBeginPlay()
 
     `log("KF2OPT_TELEMETRY schema=6 state=started net=standalone");
     SetTimer(1.0, true, nameof(SampleTelemetry), self);
-    if (bAdaptiveCorpseStagger)
+    if (bAdaptiveCorpseStagger && bAdaptiveRuntimeEnabled)
     {
         SetTimer(0.45, true, nameof(StaggerCorpseCleanup), self);
         SetTimer(0.25, true, nameof(AdaptiveCorpseLoadControl), self);
@@ -3757,6 +3868,7 @@ function QuiesceForWorldTeardown()
     ClearTimer(nameof(SampleTelemetry), self);
     ClearTimer(nameof(StaggerCorpseCleanup), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
+    ClearTimer(nameof(WakeAdaptiveDistanceSleptCorpseBatch), self);
     if (AdaptiveCorpsesRemoved > 0)
     {
         `log("KF2OPT_CORPSE_STAGGER state=stopped removed="$
@@ -3841,4 +3953,5 @@ defaultproperties
     RemoteRole=ROLE_None
     bAdaptiveCorpseDebugMarkers=false
     bAdaptiveZedDebugMarkers=false
+    bAdaptiveRuntimeEnabled=true
 }

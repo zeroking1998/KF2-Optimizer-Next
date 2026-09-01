@@ -56,6 +56,8 @@ constexpr std::wstring_view kTelemetrySection =
     L"KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe";
 constexpr std::wstring_view kAdaptiveCorpseStaggerKey =
     L"bAdaptiveCorpseStagger";
+constexpr std::wstring_view kAdaptiveRuntimeEnabledKey =
+    L"bAdaptiveRuntimeEnabled";
 constexpr std::wstring_view kAdaptiveCorpseDebugMarkersKey =
     L"bAdaptiveCorpseDebugMarkers";
 constexpr std::wstring_view kAdaptiveZedDebugMarkersKey =
@@ -256,7 +258,8 @@ Result<bool> enable_offline_gameplay_logging(
     bool adaptive_corpse_debug_markers,
     int adaptive_quality_change_budget,
     std::string_view adaptive_control_token,
-    bool adaptive_zed_debug_markers) {
+    bool adaptive_zed_debug_markers,
+    bool adaptive_runtime_enabled) {
     if (config_root.empty() || !config_root.is_absolute()) {
         return Result<bool>::failure(
             {ErrorCode::invalid_argument,
@@ -428,6 +431,14 @@ Result<bool> enable_offline_gameplay_logging(
             {ErrorCode::invalid_argument,
              L"Adaptive corpse debug-marker setting is ambiguous", 0});
     }
+    const auto runtime_enabled_replaced = engine.value().upsert(
+        kTelemetrySection, kAdaptiveRuntimeEnabledKey,
+        adaptive_runtime_enabled ? L"True" : L"False");
+    if (runtime_enabled_replaced.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"Adaptive runtime setting is ambiguous", 0});
+    }
     if (const auto current_zed_markers = engine.value().find(
             kTelemetrySection, kAdaptiveZedDebugMarkersKey);
         current_zed_markers) {
@@ -475,7 +486,8 @@ Result<bool> enable_offline_gameplay_logging(
         !local_options_replaced.changed &&
         !runtime_path_appended.changed &&
         !startup_package_removed.changed &&
-        !stagger_replaced.changed && !markers_replaced.changed &&
+        !stagger_replaced.changed && !runtime_enabled_replaced.changed &&
+        !markers_replaced.changed &&
         !zed_markers_replaced.changed &&
         !maximum_replaced.changed &&
         !target_replaced.changed && !quality_budget_replaced.changed &&
@@ -490,7 +502,7 @@ Result<bool> enable_offline_gameplay_logging(
     }
     if (viewport_replaced.changed || local_options_replaced.changed ||
         runtime_path_appended.changed || startup_package_removed.changed ||
-        stagger_replaced.changed ||
+        stagger_replaced.changed || runtime_enabled_replaced.changed ||
         markers_replaced.changed || zed_markers_replaced.changed ||
         maximum_replaced.changed ||
         target_replaced.changed || quality_budget_replaced.changed ||
