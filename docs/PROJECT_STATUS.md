@@ -162,12 +162,14 @@ An additional time-sliced aging path now checks exactly one corpse-pool entry
 every 50 ms and performs at most one state transition per invocation. Ages 3,
 8 and 15 seconds progressively raise real corpse mesh LOD, stop skeleton work
 after native physics sleep and, at safe distance, request verified rigid-body
-sleep. Recently rendered corpses remain eligible for staged LOD outside 300
-units and verified physics sleep outside the early-tier distance guards. The
-15-second final tier covers every confirmed corpse, including a nearby visible
-body; the 3/8-second tiers keep 1,200/1,000-unit guards. After exact sleep
-readback, the final tier moves the actor once to `PHYS_None`, so native gameplay
-cannot wake it and later hits, explosions or collisions no longer move it. The
+sleep. Recently rendered corpses remain eligible for early staged LOD outside
+300 units and verified physics sleep outside the early-tier distance guards.
+The 3/8-second tiers keep 1,200/1,000-unit guards. The 15-second final tier is
+deferred until the corpse is at least 800 units away and is no longer recently
+rendered. After exact sleep readback, it moves the actor once to `PHYS_None`, so
+native gameplay cannot wake it and later hits, explosions or collisions no
+longer move it. The persistent cursor revisits deferred corpses, allowing the
+final tier to advance after the player moves away. The
 public SDK exposes no safe fractional PhysX update rate or dedicated sleep lock,
 so this explicit final-pose tradeoff is used instead of pretending that a
 wake-event flag prevents wake. Adaptive disable restores one tracked body every

@@ -565,8 +565,18 @@ int main() {
         "Candidate.SetPhysics(PHYS_None)", aging_readback);
     const auto aging_freeze_readback = aging_body.find(
         "if (Candidate.Physics != PHYS_None)", aging_freeze);
+    const auto aging_final_safety_definition = aging_body.find(
+        "bFinalTierInteractionSafe = DistanceUnits >= 800 &&");
+    const auto aging_final_safety_visibility = aging_body.find(
+        "!bRecentlyRendered", aging_final_safety_definition);
+    const auto aging_sleep_final_safety = aging_body.find(
+        "(Tier < 3 || bFinalTierInteractionSafe)",
+        aging_final_safety_visibility);
     const auto aging_lod_distance_guard = aging_body.find(
         "Tier < 3 && DistanceUnits < 300");
+    const auto aging_lod_final_safety = aging_body.find(
+        "Tier >= 3 && !bFinalTierInteractionSafe",
+        aging_sleep_final_safety);
     const auto aging_lod_write = aging_body.find(
         "Candidate.Mesh.MinLodModel = TargetMinLod",
         aging_lod_distance_guard);
@@ -581,12 +591,20 @@ int main() {
     CHECK(aging_receipt != std::string::npos);
     CHECK(aging_freeze != std::string::npos);
     CHECK(aging_freeze_readback != std::string::npos);
+    CHECK(aging_final_safety_definition != std::string::npos);
+    CHECK(aging_final_safety_visibility != std::string::npos);
+    CHECK(aging_sleep_final_safety != std::string::npos);
+    CHECK(aging_lod_final_safety != std::string::npos);
+    CHECK(aging_final_safety_definition < aging_sleep);
+    CHECK(aging_final_safety_visibility < aging_sleep);
+    CHECK(aging_sleep_final_safety < aging_sleep);
     CHECK(aging_sleep < aging_readback);
     CHECK(aging_readback < aging_freeze);
     CHECK(aging_freeze < aging_freeze_readback);
     CHECK(aging_freeze_readback < aging_ownership);
     CHECK(aging_ownership < aging_receipt);
     CHECK(aging_lod_distance_guard != std::string::npos);
+    CHECK(aging_lod_final_safety < aging_lod_write);
     CHECK(aging_lod_write != std::string::npos);
     CHECK(aging_lod_distance_guard < aging_lod_write);
     CHECK(aging_lod_path.find("!bRecentlyRendered") == std::string::npos);

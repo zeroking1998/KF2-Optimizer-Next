@@ -1108,6 +1108,7 @@ function bool ApplyOneAdaptiveCorpseAging(KFGoreManager GoreManager)
     local float MinimumTierOneAge;
     local float MinimumTierTwoAge;
     local float MinimumTierThreeAge;
+    local bool bFinalTierInteractionSafe;
     local bool bRecentlyRendered;
     local string PhysicsAction;
     local KFPawn Candidate;
@@ -1147,6 +1148,13 @@ function bool ApplyOneAdaptiveCorpseAging(KFGoreManager GoreManager)
     DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
     bRecentlyRendered = Candidate.Mesh.LastRenderTime >
         WorldInfo.TimeSeconds - 0.3;
+    // A final PHYS_None pose cannot react to a nearby player, hit or
+    // explosion. Require both the existing 800-unit interaction boundary and
+    // native render recency to be clear. The persistent cursor revisits a
+    // deferred corpse later, so moving away or losing visibility can still
+    // advance it without a one-frame batch.
+    bFinalTierInteractionSafe = DistanceUnits >= 800 &&
+        !bRecentlyRendered;
 
     // Only one corpse and one meaningful state transition are handled per
     // 50-ms invocation. Visible old corpses still receive staged LOD and
@@ -1157,6 +1165,7 @@ function bool ApplyOneAdaptiveCorpseAging(KFGoreManager GoreManager)
     PhysicsAction = Tier >= 3 ? "aging_freeze" : "aging";
     if ((Candidate.Mesh.RigidBodyIsAwake() || Tier >= 3) &&
         VSizeSq(Candidate.Velocity) <= MaximumSpeedSquared &&
+        (Tier < 3 || bFinalTierInteractionSafe) &&
         (Tier >= 3 ||
          (Tier == 2 && DistanceUnits >= 1000) ||
          (Tier == 1 && DistanceUnits >= 1200)) &&
@@ -1238,7 +1247,8 @@ function bool ApplyOneAdaptiveCorpseAging(KFGoreManager GoreManager)
     if (Candidate.Mesh.SkeletalMesh == None ||
         Candidate.Mesh.SkeletalMesh.LODInfo.Length < 2 ||
         Candidate.Mesh.ForcedLodModel != 0 ||
-        (Tier < 3 && DistanceUnits < 300))
+        (Tier < 3 && DistanceUnits < 300) ||
+        (Tier >= 3 && !bFinalTierInteractionSafe))
     {
         return false;
     }

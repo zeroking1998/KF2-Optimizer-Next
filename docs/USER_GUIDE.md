@@ -162,8 +162,10 @@ so a large corpse pool is not changed as one physics batch. Visible old corpses
 are included: their real mesh LOD can be reduced outside 300 Unreal units, and
 an already sleeping corpse can stop skeleton work. At 3 and 8 seconds their
 rigid-body physics uses 1,200- and 1,000-unit distance guards. At 15 seconds the
-final tier applies to every confirmed corpse, including a nearby visible one,
-selects the mesh's final real LOD, and freezes the actor after verified sleep.
+final tier waits until a corpse is at least 800 Unreal units (8 metres) away
+and no longer recently rendered, then selects the mesh's final real LOD and
+freezes the actor after verified sleep. The persistent cursor checks a deferred
+corpse again later, so the tier may advance after the player moves away.
 KF2 can no longer wake that final-tier corpse, so old frozen bodies no longer
 react physically to later hits, explosions, or collisions. The freeze is
 applied once and is not rewritten. Turning Adaptive off restores tracked bodies
