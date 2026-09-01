@@ -4,6 +4,12 @@
 
 namespace kf2::features::settings {
 
+app::runtime::DispatchResult adaptive_toggle(
+    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
+    runtime.toggle_adaptive_optimization();
+    return app::runtime::DispatchResult::handled;
+}
+
 app::runtime::DispatchResult updates_automatic(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
     runtime.toggle_automatic_update_checks();

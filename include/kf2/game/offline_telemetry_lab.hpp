@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 
 #include "kf2/core/result.hpp"
@@ -23,6 +24,13 @@ struct OfflineTelemetryLabOptions {
 struct OfflineTelemetryRecovery {
     bool active{false};
     bool cleaned{false};
+};
+
+struct OfflineTelemetryCleanupHelperOptions {
+    std::uint32_t wait_process_id{0};
+    std::filesystem::path config_root;
+    std::filesystem::path state_root;
+    std::uint32_t wait_timeout_ms{60'000};
 };
 
 // Installs the pinned UnrealScript package into KF2's normal per-user
@@ -49,5 +57,16 @@ recover_offline_telemetry_lab(
     const std::filesystem::path& config_root,
     const std::filesystem::path& state_root,
     bool game_running);
+
+// Starts a hidden, short-lived copy of the portable executable. It waits for
+// the process that still owns the package to exit and then performs the same
+// marker- and hash-bound cleanup as normal recovery.
+[[nodiscard]] Result<bool> launch_offline_telemetry_cleanup_helper(
+    const OfflineTelemetryCleanupHelperOptions& options);
+
+// Helper entry point used before the normal application and single-instance
+// startup paths. Exposed for deterministic recovery tests.
+[[nodiscard]] Result<bool> run_offline_telemetry_cleanup_helper(
+    const OfflineTelemetryCleanupHelperOptions& options);
 
 }  // namespace kf2::game

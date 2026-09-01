@@ -112,6 +112,26 @@ int main() {
     CHECK(!fs::exists(state / L"offline-telemetry-lab" / L"module.marker"));
 
     CHECK(install_offline_telemetry_lab(options).has_value());
+    const auto helper_while_owner_alive =
+        run_offline_telemetry_cleanup_helper({
+            .wait_process_id = GetCurrentProcessId(),
+            .config_root = config,
+            .state_root = state,
+            .wait_timeout_ms = 1});
+    CHECK(!helper_while_owner_alive.has_value());
+    CHECK(fs::exists(target));
+    const auto helper_after_owner_exit =
+        run_offline_telemetry_cleanup_helper({
+            .wait_process_id = UINT32_MAX,
+            .config_root = config,
+            .state_root = state,
+            .wait_timeout_ms = 1});
+    CHECK(helper_after_owner_exit.has_value());
+    CHECK(helper_after_owner_exit.value());
+    CHECK(!fs::exists(target));
+    CHECK(!fs::exists(state / L"offline-telemetry-lab" / L"module.marker"));
+
+    CHECK(install_offline_telemetry_lab(options).has_value());
     HANDLE busy_target = CreateFileW(
         target.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);

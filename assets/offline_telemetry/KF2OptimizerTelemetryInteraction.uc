@@ -8,6 +8,14 @@ var string OptimizerContextState;
 var string OptimizerProbeState;
 var bool bGameSessionEnding;
 var KF2OptimizerAdaptiveGraphicsState ProcessAdaptiveGraphicsState;
+var bool bProcessAdaptiveRuntimeStateInitialized;
+var bool bProcessAdaptiveRuntimeEnabled;
+
+function SetProcessAdaptiveRuntimeEnabled(bool bEnabled)
+{
+    bProcessAdaptiveRuntimeStateInitialized = true;
+    bProcessAdaptiveRuntimeEnabled = bEnabled;
+}
 
 function ReportOptimizerContextState(string State)
 {
@@ -138,6 +146,19 @@ event Tick(float DeltaTime)
     if (CurrentProbe.AdaptiveGraphicsState == None)
     {
         ReportOptimizerProbeState("graphics_state_unavailable");
+        return;
+    }
+    if (!bProcessAdaptiveRuntimeStateInitialized)
+    {
+        SetProcessAdaptiveRuntimeEnabled(
+            CurrentProbe.bAdaptiveRuntimeEnabled);
+    }
+    if (CurrentProbe.bAdaptiveRuntimeEnabled !=
+        bProcessAdaptiveRuntimeEnabled &&
+        !CurrentProbe.SetAdaptiveRuntimeEnabled(
+            bProcessAdaptiveRuntimeEnabled))
+    {
+        ReportOptimizerProbeState("adaptive_mode_sync_failed");
         return;
     }
     if (Len(CurrentProbe.AdaptiveControlToken) < 32)

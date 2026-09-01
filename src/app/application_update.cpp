@@ -176,6 +176,115 @@ void UiRuntime::toggle_automatic_update_checks() {
     refresh_update_presentation();
 }
 
+void UiRuntime::toggle_adaptive_optimization() {
+    if (start_mode != StartMode::normal) return;
+    const bool previous = optimizer_settings.adaptive_optimization_enabled;
+    const bool requested = !previous;
+    if (!set_live_adaptive_enabled(
+            requested, requested ? L"Adaptive enabled by the user"
+                                 : L"Adaptive disabled by the user")) {
+        model.set_notice({
+            ui::NoticeSeverity::error,
+            L"ADAPTIVE_MODE_CHANGE_UNCONFIRMED",
+            L"KF2 is running, but it did not confirm the safe Adaptive mode change. The saved setting was not changed.",
+            L"Close KF2 or wait until protected telemetry is ready, then try again."});
+        invalidate();
+        return;
+    }
+    optimizer_settings.adaptive_optimization_enabled = requested;
+    const auto saved = platform::windows::atomic_replace_utf8(
+        settings_path, config::serialize_settings(optimizer_settings));
+    if (!saved.has_value()) {
+        const bool runtime_rolled_back = set_live_adaptive_enabled(
+            previous, L"Adaptive setting save rollback");
+        optimizer_settings.adaptive_optimization_enabled =
+            runtime_rolled_back ? previous : requested;
+        auto status = model.status();
+        status.adaptive_optimization_enabled =
+            optimizer_settings.adaptive_optimization_enabled;
+        status.adaptive_state =
+            optimizer_settings.adaptive_optimization_enabled
+                ? L"observing" : L"off";
+        model.set_status(std::move(status));
+        if (!runtime_rolled_back) {
+            model.set_recovery_required(true);
+            model.set_notice({
+                ui::NoticeSeverity::error,
+                L"ADAPTIVE_SETTING_ROLLBACK_UNCONFIRMED",
+                L"KF2 confirmed the requested Adaptive mode, but the preference could not be saved and the live rollback was not confirmed: " +
+                    saved.error().message,
+                L"Close KF2, then run Repair before the next launch."});
+        } else {
+            model.set_notice({ui::NoticeSeverity::error,
+                              L"ADAPTIVE_SETTING_SAVE_FAILED",
+                              saved.error().message, L""});
+        }
+        invalidate();
+        return;
+    }
+    const bool game_running = installation &&
+        game::find_running_game_process(
+            installation->executable).has_value();
+    if (!game_running && session_config_snapshot) {
+        const bool restored = restore_protected_session_config(
+            L"Adaptive mode changed before KF2 start");
+        const auto rebuilt = restored
+            ? prepare_automatic_external_launch_profile()
+            : Result<bool>::failure({
+                ErrorCode::io_failure,
+                L"The previous protected session could not be restored", 0});
+        if (!rebuilt.has_value()) {
+            optimizer_settings.adaptive_optimization_enabled = previous;
+            const auto setting_rolled_back =
+                platform::windows::atomic_replace_utf8(
+                    settings_path,
+                    config::serialize_settings(optimizer_settings));
+            const bool staged_state_restored =
+                restore_protected_session_config(
+                    L"Adaptive mode rebuild rolled back");
+            const auto previous_profile_rebuilt = staged_state_restored
+                ? prepare_automatic_external_launch_profile()
+                : Result<bool>::failure({
+                    ErrorCode::io_failure,
+                    L"The failed staged state could not be restored", 0});
+            const bool rollback_confirmed =
+                setting_rolled_back.has_value() && staged_state_restored &&
+                previous_profile_rebuilt.has_value();
+            if (!rollback_confirmed) {
+                model.set_recovery_required(true);
+            }
+            model.set_notice({
+                ui::NoticeSeverity::error,
+                rollback_confirmed
+                    ? L"ADAPTIVE_PREPARED_SESSION_UPDATE_FAILED"
+                    : L"ADAPTIVE_PREPARED_SESSION_ROLLBACK_UNCONFIRMED",
+                rollback_confirmed
+                    ? L"The Adaptive preference was not changed because the prepared KF2 session could not be updated safely: " +
+                          rebuilt.error().message
+                    : L"The prepared KF2 session update failed and its rollback could not be fully verified. Do not start KF2 until Repair succeeds: " +
+                          rebuilt.error().message,
+                L"Run Repair before starting KF2."});
+            invalidate();
+            return;
+        }
+    }
+    auto status = model.status();
+    status.adaptive_optimization_enabled = requested;
+    status.adaptive_state = requested ? L"observing" : L"off";
+    status.adaptive_action = requested ? L"hold" : L"none";
+    status.adaptive_reason = requested
+        ? L"Adaptive optimization is enabled and waiting for verified gameplay"
+        : L"Adaptive optimization is off; telemetry, overlay, target FPS, maximum corpses and user-selected graphics remain active";
+    model.set_status(std::move(status));
+    model.set_notice({ui::NoticeSeverity::info,
+        requested ? L"ADAPTIVE_ENABLED" : L"ADAPTIVE_DISABLED",
+        requested
+            ? L"Adaptive optimization is on. It will adjust supported systems during verified gameplay."
+            : L"Adaptive optimization is off. Monitoring and your fixed game settings remain active.",
+        L""});
+    invalidate();
+}
+
 void UiRuntime::dismiss_update() {
     update_controller.dismiss();
     refresh_update_presentation();

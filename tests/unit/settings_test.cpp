@@ -108,6 +108,17 @@ int main() {
     CHECK(adaptive.value().adaptive_aggressiveness == "aggressive");
     CHECK(adaptive.value().adaptive_minimum_quality == 55);
     CHECK(adaptive.value().adaptive_maximum_quality == 95);
+    CHECK(adaptive.value().adaptive_optimization_enabled);
+    const auto adaptive_off = parse_settings(
+        "schema_version=1\nadaptive_optimization_enabled=false\n");
+    CHECK(adaptive_off.has_value());
+    CHECK(!adaptive_off.value().adaptive_optimization_enabled);
+    CHECK(serialize_settings(adaptive_off.value()).find(
+              "adaptive_optimization_enabled=false\n") !=
+          std::string::npos);
+    CHECK(!parse_settings(
+        "schema_version=1\nadaptive_optimization_enabled=maybe\n")
+               .has_value());
     CHECK(!adaptive.value().adaptive_shadow_mode);
     CHECK(serialize_settings(adaptive.value()).find(
               "adaptive_shadow_mode") == std::string::npos);
@@ -193,6 +204,7 @@ int main() {
 
     CHECK(serialize_settings(Settings{}) ==
           "schema_version=1\noptimizer_mode=adaptive\n"
+          "adaptive_optimization_enabled=true\n"
           "automatic_update_checks=true\n"
           "overlay_enabled=true\noverlay_show_fps=true\noverlay_show_frame_time=true\n"
           "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=true\n"

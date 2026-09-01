@@ -15,7 +15,9 @@ void add_saturated(std::uint64_t& value, std::uint64_t amount = 1) noexcept {
 
 bool game_log_reports_engine_exit(std::string_view text) noexcept {
     return text.find("] Exit: Exiting.") != std::string_view::npos ||
-           text.find("Log: Log file closed,") != std::string_view::npos;
+           text.find("Log: Log file closed,") != std::string_view::npos ||
+           text.find("Critical: appError called:") != std::string_view::npos ||
+           text.find("Log: appRequestExit(1)") != std::string_view::npos;
 }
 
 bool game_log_requests_settings_restart(std::string_view text) noexcept {

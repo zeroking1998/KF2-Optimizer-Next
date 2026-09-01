@@ -16,7 +16,9 @@ requirements from GitHub Issue 72.
   contains the two user goals, while Updates, automatic checks, and Repair stay
   visible in the upper-right corner. An available update is highlighted without
   a disruptive pop-up.
-- Adaptive / Automatic is the only user mode. Legacy `smart_mode`,
+- Adaptive / Automatic is the only optimizer system. Home now exposes a
+  persistent On/Off control for its automatic adjustments while fixed goals,
+  telemetry, overlay, and explicit game settings remain independent. Legacy `smart_mode`,
   `optimizer_mode=smart` and `optimizer_mode=manual` are accepted only during
   migration and are atomically rewritten to the canonical Adaptive schema.
 - Adaptive owns baseline selection and control instead of running beside a

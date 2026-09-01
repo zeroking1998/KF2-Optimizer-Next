@@ -21,6 +21,8 @@ enum class AdaptiveResourceControl : std::uint8_t {
     effects,
     mixed,
     recover,
+    enable,
+    disable,
 };
 
 struct AdaptiveControlRequest final {

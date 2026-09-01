@@ -325,6 +325,10 @@ int main() {
               L"No newer version available") != std::wstring::npos);
     CHECK(action(home, "settings-mode-manual") == nullptr);
     CHECK(action(home, "settings-mode-adaptive") == nullptr);
+    CHECK(action(home, "settings-adaptive-toggle") != nullptr);
+    CHECK(action(home, "settings-adaptive-toggle")->selected);
+    CHECK(action(home, "settings-adaptive-toggle")->text.find(L"ON") !=
+          std::wstring::npos);
     CHECK(action(home, "settings-animations") == nullptr);
     CHECK(action(home, "settings-advanced-toggle") == nullptr);
     CHECK(action(home, "settings-updates-automatic") != nullptr);
@@ -346,6 +350,16 @@ int main() {
     CHECK(node(home, "settings-adaptive-maximum-slider") == nullptr);
     CHECK(node(home, "settings-adaptive-headroom-slider") == nullptr);
     CHECK(node(home, "settings-flex-slider") == nullptr);
+
+    auto adaptive_off_status = home_status;
+    adaptive_off_status.adaptive_optimization_enabled = false;
+    model.set_status(adaptive_off_status);
+    const auto adaptive_off_home = layout_shell(model, 1440, 900);
+    CHECK(!action(adaptive_off_home, "settings-adaptive-toggle")->selected);
+    CHECK(action(adaptive_off_home, "settings-adaptive-toggle")->text.find(
+              L"OFF") != std::wstring::npos);
+    CHECK(node(adaptive_off_home, "status")->text.find(L"Adaptive off") !=
+          std::wstring::npos);
 
     auto checking_status = home_status;
     checking_status.update_checking = true;

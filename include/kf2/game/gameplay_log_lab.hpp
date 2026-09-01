@@ -31,7 +31,8 @@ struct OfflineAdaptiveSessionPolicy final {
     bool adaptive_corpse_debug_markers = false,
     int adaptive_quality_change_budget = 1,
     std::string_view adaptive_control_token = {},
-    bool adaptive_zed_debug_markers = false);
+    bool adaptive_zed_debug_markers = false,
+    bool adaptive_runtime_enabled = true);
 
 // Removes only unmistakably optimizer-owned INI residue from an interrupted
 // or historically broken session. Native KF2 logging choices are preserved.

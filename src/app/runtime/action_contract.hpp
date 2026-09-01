@@ -82,6 +82,7 @@ enum class ActionId : std::uint16_t {
     advanced_reset = 127,
     debug_corpse_markers = 128,
     debug_zed_markers = 129,
+    settings_adaptive_toggle = 130,
 };
 
 enum class ControlId : std::uint8_t {
