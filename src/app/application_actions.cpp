@@ -1,6 +1,6 @@
 #include "application_runtime.hpp"
 #include "kf2/config/setting_catalog.hpp"
-#include "kf2/game/game_log_locator.hpp"
+#include "kf2/optimizer/startup_gpu_profile.hpp"
 #include "runtime/action_contract.hpp"
 #include "runtime/action_router.hpp"
 #include "runtime/feature_composition.hpp"
@@ -25,6 +25,23 @@ void upsert_startup_change(
     } else {
         *existing = required;
     }
+}
+
+std::optional<std::wstring_view> persisted_physical_gpu_key(
+    const std::vector<telemetry::GpuAdapter>& adapters,
+    const config::Settings& settings) {
+    const auto stored = settings.extras.find("confirmed_gpu_physical_key");
+    if (stored == settings.extras.end() || stored->second.empty()) {
+        return std::nullopt;
+    }
+    for (const auto& adapter : adapters) {
+        const auto encoded = path_utf8(
+            std::filesystem::path{adapter.physical_device_key});
+        if (encoded && *encoded == stored->second) {
+            return adapter.physical_device_key;
+        }
+    }
+    return std::nullopt;
 }
 
 }  // namespace
@@ -367,26 +384,51 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
     enforce_one_frame_thread_lag(changes);
     std::optional<optimizer::StartupMemoryProfile> startup_memory_profile;
     std::wstring startup_memory_adapter_name;
+    std::wstring startup_memory_source;
     const auto adapters = telemetry::enumerate_gpu_adapters();
     if (adapters.has_value()) {
         const auto physical = telemetry::unique_physical_gpu_adapters(
             adapters.value());
-        std::optional<telemetry::GpuAdapter> selected;
-        if (physical.size() == 1) {
-            selected = physical.front();
-        } else if (installation && physical.size() > 1) {
-            const auto logged_renderer = game::find_last_render_adapter_name(
-                installation->config_root.parent_path() / L"Logs");
-            if (logged_renderer.has_value() && logged_renderer.value()) {
-                selected = telemetry::find_unique_hardware_gpu_adapter_by_name(
-                    physical, *logged_renderer.value());
+        std::wstring configured_key_storage;
+        std::optional<std::wstring_view> configured_key;
+        std::optional<telemetry::ProcessGpuPreference> current_preference;
+        if (installation) {
+            const auto configured =
+                telemetry::configured_gpu_adapter_for_process(
+                    installation->executable);
+            if (configured.has_value()) {
+                current_preference = configured.value().preference;
+                if (configured.value().adapter_luid) {
+                    const auto configured_adapter =
+                        telemetry::find_hardware_gpu_adapter_by_luid(
+                            adapters.value(),
+                            *configured.value().adapter_luid);
+                    if (configured_adapter &&
+                        !configured_adapter->physical_device_key.empty()) {
+                        configured_key_storage =
+                            configured_adapter->physical_device_key;
+                        configured_key = configured_key_storage;
+                    }
+                }
             }
         }
-        if (selected) {
-            startup_memory_profile =
-                optimizer::recommended_startup_memory_profile(
-                    selected->dedicated_memory_bytes);
-            startup_memory_adapter_name = selected->name;
+        const auto previous_key = persisted_physical_gpu_key(
+            physical, optimizer_settings);
+        const auto stored_preference = optimizer_settings.extras.find(
+            "confirmed_gpu_preference");
+        const bool preference_matches =
+            current_preference &&
+            stored_preference != optimizer_settings.extras.end() &&
+            stored_preference->second ==
+                telemetry::process_gpu_preference_token(*current_preference);
+        const auto resolved = optimizer::resolve_startup_gpu_profile(
+            physical, configured_key, previous_key, preference_matches);
+        if (resolved) {
+            startup_memory_profile = resolved->profile;
+            startup_memory_source = std::wstring{
+                optimizer::startup_gpu_profile_source_label(resolved->source)};
+            startup_memory_adapter_name = resolved->adapter
+                ? resolved->adapter->name : L"all detected adapters";
         }
     }
     if (startup_memory_profile) {
@@ -422,7 +464,7 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
     if (startup_memory_profile) {
         events->append({0, diagnostics::Severity::info,
             "STARTUP_MEMORY_PROFILE_APPLIED",
-            L"KF2 startup memory uses the last confirmed renderer " +
+            L"KF2 startup memory uses the " + startup_memory_source + L" " +
                 startup_memory_adapter_name + L": texture pool " +
                 std::to_wstring(
                     startup_memory_profile->texture_pool_size_mb) +
@@ -435,7 +477,7 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
     } else {
         events->append({0, diagnostics::Severity::info,
             "STARTUP_MEMORY_PROFILE_PRESERVED",
-            L"KF2 startup memory values were preserved because the active renderer could not be identified unambiguously",
+            L"KF2 startup memory values were preserved because no safe adapter memory budget was available",
             L"optimizer"});
     }
     return applied;

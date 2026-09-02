@@ -147,6 +147,7 @@ struct UiRuntime {
     std::optional<telemetry::NvidiaGpuSampler> nvidia_gpu_metrics;
     telemetry::GpuUtilizationFilter gpu_utilization_filter;
     std::optional<std::uint64_t> adaptive_adapter_luid;
+    std::optional<std::uint64_t> confirmed_game_adapter_luid;
     optimizer::PerformanceEvidence optimizer_evidence;
     optimizer::AdaptiveGovernor adaptive_governor;
     optimizer::AdaptiveActuationTracker adaptive_actuation;
