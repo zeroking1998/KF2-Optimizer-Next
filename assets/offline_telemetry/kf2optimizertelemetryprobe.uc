@@ -20,8 +20,17 @@ struct AdaptiveZedDebugMarkerEntry
 {
     // Value-only snapshots deliberately avoid retaining living pawn actors.
     var vector Location;
+    var vector Velocity;
     var string ZedId;
     var int DistanceUnits;
+};
+
+struct AdaptiveDebugMarkerScreenEntry
+{
+    var float X;
+    var float Y;
+    var float Width;
+    var float Height;
 };
 
 struct AdaptiveDistanceSleepEntry
@@ -105,7 +114,10 @@ var float AdaptiveVisibleLivingObservedRealTime;
 var int AdaptiveCorpseScenePressureLevel;
 var array<AdaptiveCorpseDebugMarkerEntry> AdaptiveCorpseDebugMarkers;
 var array<AdaptiveZedDebugMarkerEntry> AdaptiveZedDebugMarkers;
+var array<AdaptiveDebugMarkerScreenEntry> AdaptiveDebugMarkerScreenEntries;
 var float AdaptiveZedDebugRefreshRealTime;
+var transient HUD AdaptiveDebugMarkerHUD;
+var bool bAdaptiveDebugMarkerRenderConfirmed;
 var array<KFPawn_Monster> AdaptiveLivingVisualZeds;
 var array<int> AdaptiveLivingOriginalMinLods;
 var array<int> AdaptiveLivingAppliedMinLods;
@@ -1900,6 +1912,215 @@ function RegisterAdaptiveCorpseDebugMarker(
         WorldInfo.RealTimeSeconds + 10.0;
 }
 
+function string FormatAdaptiveDebugMarkerId(string FullId)
+{
+    // Keep the searchable actor/time suffix on screen. The complete ID remains
+    // in every APPLIED receipt and telemetry log entry.
+    if (FullId == "none")
+    {
+        return "#?";
+    }
+    if (Len(FullId) > 12)
+    {
+        return "#"$Right(FullId, 12);
+    }
+    return "#"$FullId;
+}
+
+function string FormatAdaptiveDebugMarkerAction(string Action)
+{
+    if (Left(Action, 8) == "AGE_LOD_")
+    {
+        return "LOD"$Mid(Action, 8);
+    }
+    if (Left(Action, 4) == "LOD_")
+    {
+        return "LOD"$Mid(Action, 4);
+    }
+    if (Left(Action, 10) == "AGE_SLEEP_")
+    {
+        return "SLEEP"$Mid(Action, 10);
+    }
+    if (Action == "DIST_SLEEP")
+    {
+        return "DIST SLEEP";
+    }
+    if (Action == "RAGDOLL_SLEEP")
+    {
+        return "RAGDOLL";
+    }
+    return Action;
+}
+
+function float GetAdaptiveDebugMarkerTextScale(
+    Canvas MarkerCanvas, int DistanceUnits)
+{
+    local float DistanceScale;
+    local float ResolutionScale;
+
+    if (MarkerCanvas == None)
+    {
+        return 0.85;
+    }
+    // Canvas text uses pixels. Compensate for high-resolution displays so a
+    // marker keeps roughly the same physical size at 1080p, 1440p and 4K.
+    ResolutionScale = MarkerCanvas.ClipY / 1080.0;
+    if (ResolutionScale < 1.0)
+    {
+        ResolutionScale = 1.0;
+    }
+    else if (ResolutionScale > 2.0)
+    {
+        ResolutionScale = 2.0;
+    }
+
+    DistanceScale = 0.85;
+    if (DistanceUnits >= 4000)
+    {
+        DistanceScale = 1.05;
+    }
+    else if (DistanceUnits >= 2000)
+    {
+        DistanceScale = 0.95;
+    }
+    return DistanceScale * ResolutionScale;
+}
+
+function bool ReserveAdaptiveDebugMarkerScreenPosition(
+    Canvas MarkerCanvas, string Label, float TextScale,
+    vector AnchorPosition, out vector ScreenPosition)
+{
+    local bool bOverlaps;
+    local float LabelWidth;
+    local float LabelHeight;
+    local float VerticalOffset;
+    local int Attempt;
+    local int Index;
+    local int NewIndex;
+
+    if (MarkerCanvas == None)
+    {
+        return false;
+    }
+    if (AdaptiveDebugMarkerScreenEntries.Length >= 10)
+    {
+        return false;
+    }
+    MarkerCanvas.Font = class'Engine'.Static.GetSmallFont();
+    MarkerCanvas.TextSize(
+        Label, LabelWidth, LabelHeight, TextScale, TextScale);
+    LabelWidth += 8.0;
+    LabelHeight += 4.0;
+
+    // Keep a marker close to its actor, but alternate below and above its
+    // anchor when another marker already occupies that screen rectangle.
+    // Debug markers that cannot find a nearby free slot are skipped instead
+    // of turning dense combat into an unreadable wall of text.
+    for (Attempt = 0; Attempt < 9; ++Attempt)
+    {
+        if (Attempt == 0)
+        {
+            VerticalOffset = 0.0;
+        }
+        else if ((Attempt % 2) == 1)
+        {
+            VerticalOffset = float((Attempt + 1) / 2) * LabelHeight;
+        }
+        else
+        {
+            VerticalOffset = -float(Attempt / 2) * LabelHeight;
+        }
+        ScreenPosition.X = AnchorPosition.X - LabelWidth * 0.5;
+        ScreenPosition.Y = AnchorPosition.Y - LabelHeight + VerticalOffset;
+        if (ScreenPosition.X < 4.0)
+        {
+            ScreenPosition.X = 4.0;
+        }
+        else if (ScreenPosition.X + LabelWidth > MarkerCanvas.ClipX - 4.0)
+        {
+            ScreenPosition.X = MarkerCanvas.ClipX - LabelWidth - 4.0;
+        }
+        if (ScreenPosition.Y < 4.0 ||
+            ScreenPosition.Y + LabelHeight > MarkerCanvas.ClipY - 4.0)
+        {
+            continue;
+        }
+
+        bOverlaps = false;
+        for (Index = 0;
+             Index < AdaptiveDebugMarkerScreenEntries.Length; ++Index)
+        {
+            if (ScreenPosition.X <
+                    AdaptiveDebugMarkerScreenEntries[Index].X +
+                    AdaptiveDebugMarkerScreenEntries[Index].Width &&
+                ScreenPosition.X + LabelWidth >
+                    AdaptiveDebugMarkerScreenEntries[Index].X &&
+                ScreenPosition.Y <
+                    AdaptiveDebugMarkerScreenEntries[Index].Y +
+                    AdaptiveDebugMarkerScreenEntries[Index].Height &&
+                ScreenPosition.Y + LabelHeight >
+                    AdaptiveDebugMarkerScreenEntries[Index].Y)
+            {
+                bOverlaps = true;
+                break;
+            }
+        }
+        if (!bOverlaps)
+        {
+            NewIndex = AdaptiveDebugMarkerScreenEntries.Length;
+            AdaptiveDebugMarkerScreenEntries.Length = NewIndex + 1;
+            AdaptiveDebugMarkerScreenEntries[NewIndex].X = ScreenPosition.X;
+            AdaptiveDebugMarkerScreenEntries[NewIndex].Y = ScreenPosition.Y;
+            AdaptiveDebugMarkerScreenEntries[NewIndex].Width = LabelWidth;
+            AdaptiveDebugMarkerScreenEntries[NewIndex].Height = LabelHeight;
+            return true;
+        }
+    }
+    return false;
+}
+
+function DrawAdaptiveDebugMarkerLabel(
+    Canvas MarkerCanvas, string Label, vector AnchorPosition,
+    int Red, int Green, int Blue, float TextScale)
+{
+    local int EntryIndex;
+    local FontRenderInfo MarkerFontRenderInfo;
+    local float OutlineOffset;
+    local vector ScreenPosition;
+
+    if (!ReserveAdaptiveDebugMarkerScreenPosition(
+            MarkerCanvas, Label, TextScale, AnchorPosition, ScreenPosition))
+    {
+        return;
+    }
+    EntryIndex = AdaptiveDebugMarkerScreenEntries.Length - 1;
+    MarkerFontRenderInfo =
+        MarkerCanvas.CreateFontRenderInfo(false, true);
+    MarkerCanvas.SetDrawColor(0, 0, 0, 190);
+    MarkerCanvas.SetPos(ScreenPosition.X - 4.0, ScreenPosition.Y - 2.0);
+    MarkerCanvas.DrawRect(
+        AdaptiveDebugMarkerScreenEntries[EntryIndex].Width,
+        AdaptiveDebugMarkerScreenEntries[EntryIndex].Height);
+    OutlineOffset = 1.25 * TextScale;
+    MarkerCanvas.SetDrawColor(0, 0, 0, 235);
+    MarkerCanvas.SetPos(
+        ScreenPosition.X - OutlineOffset, ScreenPosition.Y);
+    MarkerCanvas.DrawText(Label, false, TextScale, TextScale);
+    MarkerCanvas.SetPos(
+        ScreenPosition.X + OutlineOffset, ScreenPosition.Y);
+    MarkerCanvas.DrawText(Label, false, TextScale, TextScale);
+    MarkerCanvas.SetPos(
+        ScreenPosition.X, ScreenPosition.Y - OutlineOffset);
+    MarkerCanvas.DrawText(Label, false, TextScale, TextScale);
+    MarkerCanvas.SetPos(
+        ScreenPosition.X, ScreenPosition.Y + OutlineOffset);
+    MarkerCanvas.DrawText(Label, false, TextScale, TextScale);
+    MarkerCanvas.SetDrawColor(Red, Green, Blue, 255);
+    MarkerCanvas.SetPos(ScreenPosition.X, ScreenPosition.Y);
+    MarkerCanvas.DrawText(
+        Label, false, TextScale, TextScale, MarkerFontRenderInfo);
+}
+
 function DrawAdaptiveCorpseDebugMarkers(Canvas MarkerCanvas)
 {
     local int Index;
@@ -1909,6 +2130,12 @@ function DrawAdaptiveCorpseDebugMarkers(Canvas MarkerCanvas)
     local rotator ViewRotation;
     local KFPawn Candidate;
     local PlayerController LocalPC;
+    local string MarkerLabel;
+    local int MarkerRed;
+    local int MarkerGreen;
+    local int MarkerBlue;
+    local int DistanceUnits;
+    local float MarkerTextScale;
 
     if (!bAdaptiveCorpseDebugMarkers || !bAdaptiveCorpseStagger ||
         MarkerCanvas == None || WorldInfo == None ||
@@ -1923,17 +2150,24 @@ function DrawAdaptiveCorpseDebugMarkers(Canvas MarkerCanvas)
     }
     PruneAdaptiveCorpseDebugMarkers();
     LocalPC.GetPlayerViewPoint(ViewLocation, ViewRotation);
-    for (Index = 0; Index < AdaptiveCorpseDebugMarkers.Length; ++Index)
+    for (Index = AdaptiveCorpseDebugMarkers.Length - 1; Index >= 0; --Index)
     {
+        if (AdaptiveDebugMarkerScreenEntries.Length >= 5)
+        {
+            break;
+        }
         Candidate = AdaptiveCorpseDebugMarkers[Index].Corpse;
-        if (Candidate == None || Candidate.Mesh == None ||
-            Candidate.Mesh.LastRenderTime <= WorldInfo.TimeSeconds - 0.2 ||
-            !LocalPC.FastTrace(Candidate.Location, ViewLocation))
+        if (Candidate == None || Candidate.Mesh == None)
         {
             continue;
         }
         MarkerLocation = Candidate.Location;
         MarkerLocation.Z += 72.0;
+        if (Candidate.Mesh.LastRenderTime <= WorldInfo.TimeSeconds - 0.2 ||
+            !LocalPC.FastTrace(MarkerLocation, ViewLocation))
+        {
+            continue;
+        }
         ScreenPosition = MarkerCanvas.Project(MarkerLocation);
         if (ScreenPosition.X < 8.0 || ScreenPosition.X > MarkerCanvas.ClipX - 8.0 ||
             ScreenPosition.Y < 8.0 || ScreenPosition.Y > MarkerCanvas.ClipY - 8.0)
@@ -1942,22 +2176,35 @@ function DrawAdaptiveCorpseDebugMarkers(Canvas MarkerCanvas)
         }
         if (AdaptiveCorpseDebugMarkers[Index].Action == "WAKE")
         {
-            MarkerCanvas.SetDrawColor(80, 255, 120, 255);
+            MarkerRed = 80;
+            MarkerGreen = 255;
+            MarkerBlue = 120;
         }
         else if (AdaptiveCorpseDebugMarkers[Index].Action == "DIST_SLEEP")
         {
-            MarkerCanvas.SetDrawColor(80, 200, 255, 255);
+            MarkerRed = 80;
+            MarkerGreen = 200;
+            MarkerBlue = 255;
         }
         else
         {
-            MarkerCanvas.SetDrawColor(255, 170, 60, 255);
+            MarkerRed = 255;
+            MarkerGreen = 170;
+            MarkerBlue = 60;
         }
-        MarkerCanvas.SetPos(ScreenPosition.X - 90.0, ScreenPosition.Y - 18.0);
-        MarkerCanvas.DrawText(
-            "KF2OPT "$AdaptiveCorpseDebugMarkers[Index].Action$" | "$
+        DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
+        MarkerTextScale = GetAdaptiveDebugMarkerTextScale(
+            MarkerCanvas, DistanceUnits);
+        MarkerLabel =
+            FormatAdaptiveDebugMarkerAction(
+                AdaptiveCorpseDebugMarkers[Index].Action)$" "$
             FormatAdaptiveCorpseDistanceMeters(
-                GetAdaptiveCorpseDistanceUnits(Candidate), true)$" | "$
-            AdaptiveCorpseDebugMarkers[Index].CorpseId, false, 0.8, 0.8);
+                DistanceUnits, true)$" "$
+            FormatAdaptiveDebugMarkerId(
+                AdaptiveCorpseDebugMarkers[Index].CorpseId);
+        DrawAdaptiveDebugMarkerLabel(
+            MarkerCanvas, MarkerLabel, ScreenPosition,
+            MarkerRed, MarkerGreen, MarkerBlue, MarkerTextScale);
     }
 }
 
@@ -3120,12 +3367,44 @@ function int GetProfileSystemMilliseconds()
     return (((Hour * 60) + Minute) * 60 + Second) * 1000 + Millisecond;
 }
 
-function RefreshAdaptiveZedDebugMarkers()
+function InsertAdaptiveZedDebugMarkerByDistance(
+    vector MarkerLocation, vector MarkerVelocity,
+    string ZedId, int DistanceUnits)
 {
     local int Index;
+    local int LastIndex;
+
+    if (AdaptiveZedDebugMarkers.Length >= 24 &&
+        DistanceUnits >= AdaptiveZedDebugMarkers[23].DistanceUnits)
+    {
+        return;
+    }
+    if (AdaptiveZedDebugMarkers.Length < 24)
+    {
+        AdaptiveZedDebugMarkers.Length =
+            AdaptiveZedDebugMarkers.Length + 1;
+    }
+    LastIndex = AdaptiveZedDebugMarkers.Length - 1;
+    Index = LastIndex;
+    while (Index > 0 &&
+           AdaptiveZedDebugMarkers[Index - 1].DistanceUnits > DistanceUnits)
+    {
+        AdaptiveZedDebugMarkers[Index] =
+            AdaptiveZedDebugMarkers[Index - 1];
+        --Index;
+    }
+    AdaptiveZedDebugMarkers[Index].Location = MarkerLocation;
+    AdaptiveZedDebugMarkers[Index].Velocity = MarkerVelocity;
+    AdaptiveZedDebugMarkers[Index].ZedId = ZedId;
+    AdaptiveZedDebugMarkers[Index].DistanceUnits = DistanceUnits;
+}
+
+function RefreshAdaptiveZedDebugMarkers()
+{
     local KFPawn_Monster Candidate;
     local PlayerController LocalPC;
     local vector ViewLocation;
+    local vector MarkerLocation;
 
     if (!bAdaptiveZedDebugMarkers || WorldInfo == None)
     {
@@ -3146,60 +3425,147 @@ function RefreshAdaptiveZedDebugMarkers()
     ViewLocation = LocalPC.ViewTarget.Location;
     foreach WorldInfo.AllPawns(class'KFPawn_Monster', Candidate)
     {
-        if (AdaptiveZedDebugMarkers.Length >= 64)
-        {
-            break;
-        }
         if (Candidate == None || Candidate.bDeleteMe ||
-            !Candidate.IsAliveAndWell() || Candidate.Mesh == None ||
-            Candidate.Mesh.LastRenderTime <= WorldInfo.TimeSeconds - 0.30 ||
-            !LocalPC.FastTrace(Candidate.Location, ViewLocation))
+            !Candidate.IsAliveAndWell() || Candidate.Mesh == None)
         {
             continue;
         }
-        Index = AdaptiveZedDebugMarkers.Length;
-        AdaptiveZedDebugMarkers.Length = Index + 1;
-        AdaptiveZedDebugMarkers[Index].Location = Candidate.Location;
+        MarkerLocation = Candidate.Location;
+        // Trace to the visible upper body instead of the pawn origin. Low
+        // props and floor geometry can hide the feet without hiding the Zed.
+        MarkerLocation.Z += 120.0;
+        if (Candidate.Mesh.LastRenderTime <= WorldInfo.TimeSeconds - 0.30 ||
+            !LocalPC.FastTrace(MarkerLocation, ViewLocation))
+        {
+            continue;
+        }
         // KFPawn_Monster does not expose CollisionHeight to UnrealScript in
         // this KF2 SDK. A fixed world-space lift keeps the marker above the
         // largest normal Zed without retaining a pawn reference.
-        AdaptiveZedDebugMarkers[Index].Location.Z += 120.0;
-        AdaptiveZedDebugMarkers[Index].ZedId =
-            GetAdaptiveCorpseActionId(Candidate);
-        AdaptiveZedDebugMarkers[Index].DistanceUnits =
-            GetAdaptiveCorpseDistanceUnits(Candidate);
+        InsertAdaptiveZedDebugMarkerByDistance(
+            MarkerLocation, Candidate.Velocity,
+            GetAdaptiveCorpseActionId(Candidate),
+            GetAdaptiveCorpseDistanceUnits(Candidate));
     }
 }
 
 function DrawAdaptiveZedDebugMarkers(Canvas MarkerCanvas)
 {
     local int Index;
+    local vector MarkerLocation;
     local vector ScreenPosition;
+    local vector ViewLocation;
+    local rotator ViewRotation;
+    local PlayerController LocalPC;
+    local string MarkerLabel;
+    local float MarkerTextScale;
+    local float PredictionSeconds;
 
     if (!bAdaptiveZedDebugMarkers || MarkerCanvas == None ||
         WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
     {
         return;
     }
+    LocalPC = GetALocalPlayerController();
+    if (LocalPC == None)
+    {
+        return;
+    }
+    LocalPC.GetPlayerViewPoint(ViewLocation, ViewRotation);
     RefreshAdaptiveZedDebugMarkers();
-    MarkerCanvas.SetDrawColor(64, 220, 255, 235);
     for (Index = 0; Index < AdaptiveZedDebugMarkers.Length; ++Index)
     {
-        ScreenPosition = MarkerCanvas.Project(
-            AdaptiveZedDebugMarkers[Index].Location);
-        if (ScreenPosition.Z <= 0.0 || ScreenPosition.X < 0.0 ||
-            ScreenPosition.Y < 0.0 ||
+        MarkerLocation = AdaptiveZedDebugMarkers[Index].Location;
+        PredictionSeconds =
+            WorldInfo.RealTimeSeconds - AdaptiveZedDebugRefreshRealTime;
+        if (PredictionSeconds < 0.0)
+        {
+            PredictionSeconds = 0.0;
+        }
+        else if (PredictionSeconds > 0.10)
+        {
+            PredictionSeconds = 0.10;
+        }
+        MarkerLocation += AdaptiveZedDebugMarkers[Index].Velocity *
+            PredictionSeconds;
+        if (vector(ViewRotation) dot (MarkerLocation - ViewLocation) <= 0.0)
+        {
+            continue;
+        }
+        ScreenPosition = MarkerCanvas.Project(MarkerLocation);
+        if (ScreenPosition.X < 0.0 || ScreenPosition.Y < 0.0 ||
             ScreenPosition.X >= MarkerCanvas.ClipX ||
             ScreenPosition.Y >= MarkerCanvas.ClipY)
         {
             continue;
         }
-        MarkerCanvas.SetPos(ScreenPosition.X - 82.0,
-                            ScreenPosition.Y - 16.0);
-        MarkerCanvas.DrawText(
-            "KF2OPT ZED | "$FormatAdaptiveCorpseDistanceMeters(
-                AdaptiveZedDebugMarkers[Index].DistanceUnits, true)$" | "$
-            AdaptiveZedDebugMarkers[Index].ZedId, false, 0.75, 0.75);
+        MarkerLabel =
+            "Z "$FormatAdaptiveCorpseDistanceMeters(
+                AdaptiveZedDebugMarkers[Index].DistanceUnits, true)$" "$
+            FormatAdaptiveDebugMarkerId(
+                AdaptiveZedDebugMarkers[Index].ZedId);
+        MarkerTextScale = GetAdaptiveDebugMarkerTextScale(
+            MarkerCanvas, AdaptiveZedDebugMarkers[Index].DistanceUnits);
+        DrawAdaptiveDebugMarkerLabel(
+            MarkerCanvas, MarkerLabel, ScreenPosition,
+            64, 220, 255, MarkerTextScale);
+    }
+}
+
+function RemoveAdaptiveDebugMarkerPostRender()
+{
+    if (AdaptiveDebugMarkerHUD != None)
+    {
+        AdaptiveDebugMarkerHUD.RemovePostRenderedActor(self);
+        AdaptiveDebugMarkerHUD = None;
+    }
+    bPostRenderIfNotVisible = default.bPostRenderIfNotVisible;
+}
+
+function EnsureAdaptiveDebugMarkerPostRender()
+{
+    local PlayerController LocalPC;
+
+    if (!bAdaptiveCorpseDebugMarkers && !bAdaptiveZedDebugMarkers)
+    {
+        RemoveAdaptiveDebugMarkerPostRender();
+        return;
+    }
+    LocalPC = GetALocalPlayerController();
+    if (LocalPC == None || LocalPC.MyHUD == None)
+    {
+        return;
+    }
+    if (AdaptiveDebugMarkerHUD != None &&
+        AdaptiveDebugMarkerHUD != LocalPC.MyHUD)
+    {
+        AdaptiveDebugMarkerHUD.RemovePostRenderedActor(self);
+        AdaptiveDebugMarkerHUD = None;
+    }
+    AdaptiveDebugMarkerHUD = LocalPC.MyHUD;
+    bPostRenderIfNotVisible = true;
+    AdaptiveDebugMarkerHUD.bShowOverlays = true;
+    AdaptiveDebugMarkerHUD.AddPostRenderedActor(self);
+}
+
+simulated event PostRenderFor(PlayerController PC,
+    Canvas MarkerCanvas, vector CameraPosition, vector CameraDir)
+{
+    if (PC == None || MarkerCanvas == None)
+    {
+        return;
+    }
+    AdaptiveDebugMarkerScreenEntries.Length = 0;
+    DrawAdaptiveCorpseDebugMarkers(MarkerCanvas);
+    DrawAdaptiveZedDebugMarkers(MarkerCanvas);
+    if (!bAdaptiveDebugMarkerRenderConfirmed &&
+        (AdaptiveCorpseDebugMarkers.Length > 0 ||
+         AdaptiveZedDebugMarkers.Length > 0))
+    {
+        bAdaptiveDebugMarkerRenderConfirmed = true;
+        `log("KF2OPT_DEBUG_MARKERS state=rendered corpse_candidates="$
+             AdaptiveCorpseDebugMarkers.Length$" zed_candidates="$
+             AdaptiveZedDebugMarkers.Length);
     }
 }
 
@@ -3376,6 +3742,7 @@ function SampleTelemetry()
         Destroy();
         return;
     }
+    EnsureAdaptiveDebugMarkerPostRender();
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=sample_begin");
 
@@ -4140,6 +4507,7 @@ function QuiesceForWorldTeardown()
         return;
     }
     bAdaptiveRuntimeQuiesced = true;
+    RemoveAdaptiveDebugMarkerPostRender();
     ClearTimer(nameof(SampleTelemetry), self);
     ClearTimer(nameof(StaggerCorpseCleanup), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
@@ -4217,6 +4585,7 @@ function QuiesceForWorldTeardown()
     AdaptiveCorpseDebugMarkers.Length = 0;
     AdaptiveZedDebugMarkers.Length = 0;
     AdaptiveZedDebugRefreshRealTime = 0.0;
+    bAdaptiveDebugMarkerRenderConfirmed = false;
     AdaptiveCorpsePhysicsActionIds.Length = 0;
     AdaptiveCorpsePhysicsActionIdCount = 0;
     `log("KF2OPT_TELEMETRY schema=6 state=stopped reason=world_teardown");
