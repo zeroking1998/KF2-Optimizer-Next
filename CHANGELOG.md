@@ -40,11 +40,14 @@ are visible immediately.
   millisecond window, marks work below that resolution honestly, and submits
   matching native engine profiler nodes without changing global profiler
   settings.
+- Fixed the first launch after a Windows GPU-preference change inheriting the
+  previous adapter's texture-memory profile. Multi-GPU startup now uses the
+  configured physical adapter identity or a conservative cross-adapter budget.
 - Fixed adaptive mixed-pressure corrections consuming the dedicated overdraw
   quality channel before verified overdraw pressure could select it.
-- Fixed native corpse wakes being immediately undone by Distance Sleep. The
-  Optimizer now waits until the corpse is at least 250 units farther away
-  before that actor can be selected again.
+- Fixed repeated native corpse wakes being fought by Distance Sleep. Backoff
+  now grows from 2 to 30 seconds for only the affected corpse, while expired
+  actor records are reclaimed and other eligible corpses remain unrestricted.
 - Fixed live gore, blood, impact, and explosion managers keeping their old
   limits after an adaptive effect change. Their active pools, including KF2's
   impact-particle emitter pool, now receive and verify the same reversible

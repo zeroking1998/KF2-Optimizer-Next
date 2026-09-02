@@ -12,6 +12,14 @@ int main() {
     CHECK(!adapters.value().empty());
     CHECK(!adapters.value().front().name.empty());
     CHECK(format_gpu_driver_version(0x0001000200030004ULL) == L"1.2.3.4");
+    CHECK(parse_windows_gpu_preference(L"GpuPreference=0;") ==
+          ProcessGpuPreference::unspecified);
+    CHECK(parse_windows_gpu_preference(L" GPUPreference = 1 ;") ==
+          ProcessGpuPreference::minimum_power);
+    CHECK(parse_windows_gpu_preference(L"GpuPreference=2;") ==
+          ProcessGpuPreference::high_performance);
+    CHECK(!parse_windows_gpu_preference(L"GpuPreference=9;").has_value());
+    CHECK(!parse_windows_gpu_preference(L"broken").has_value());
     for (const auto& adapter : adapters.value()) {
         if (adapter.umd_driver_version) {
             CHECK(!format_gpu_driver_version(*adapter.umd_driver_version).empty());

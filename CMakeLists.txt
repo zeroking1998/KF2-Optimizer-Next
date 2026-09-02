@@ -14,7 +14,7 @@ set(KF2_VERSION "${PROJECT_VERSION}-alpha" CACHE STRING "Product version")
 set(KF2_BUILD_COMMIT "unknown" CACHE STRING "Source commit identity")
 set(KF2_BUILD_CHANNEL "dev" CACHE STRING "Build channel")
 set(KF2_OFFLINE_TELEMETRY_SHA256
-    "a99bc2e6224a5c79e9ec0e318a74ba8ba5f879ba998a308502f7d2b99df4ca13"
+    "ee7c99bc9ec02728c261bc3faf2ee9eaf3f90175889729b46d83d3d8b179af2e"
     CACHE STRING "SHA-256 of the exact locally compiled offline telemetry module")
 string(LENGTH "${KF2_OFFLINE_TELEMETRY_SHA256}" KF2_TELEMETRY_HASH_LENGTH)
 if(NOT KF2_TELEMETRY_HASH_LENGTH EQUAL 64 OR
@@ -174,6 +174,7 @@ add_executable(KF2Optimizer WIN32
     src/optimizer/adaptive_actuation.cpp
     src/optimizer/adaptive_governor.cpp
     src/optimizer/resource_pressure.cpp
+    src/optimizer/startup_gpu_profile.cpp
     src/optimizer/optimizer_engine.cpp
     src/platform/windows/atomic_file.cpp
     src/platform/windows/presentmon_session.cpp

@@ -558,27 +558,63 @@ int main() {
         "struct AdaptiveDistanceSleepTransitionEntry") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "var int NativeWakeDistanceUnits") != std::string::npos);
-    CHECK(telemetry_source.find(
         "var float NativeWakeObservedRealTime") != std::string::npos);
+    CHECK(telemetry_source.find("var int NativeWakeCount") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "var float NativeWakeCooldownUntilRealTime") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("var float ExpiresRealTime") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("var bool bReusable") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "function bool DeferAdaptiveDistanceResleepAfterNativeWake(") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "DeferAdaptiveDistanceResleepAfterNativeWake(Candidate)") !=
           std::string::npos);
-    CHECK(telemetry_source.find("NativeWakeAge < 1.0") !=
+    CHECK(telemetry_source.find(
+        "function float GetAdaptiveNativeWakeBackoffSeconds(") !=
           std::string::npos);
-    CHECK(telemetry_source.find("NativeWakeAge >= 5.0") !=
+    CHECK(telemetry_source.find("return 2.0;") != std::string::npos);
+    CHECK(telemetry_source.find("return 5.0;") != std::string::npos);
+    CHECK(telemetry_source.find("return 10.0;") != std::string::npos);
+    CHECK(telemetry_source.find("return 20.0;") != std::string::npos);
+    CHECK(telemetry_source.find("return 30.0;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "NativeWakeCooldownUntilRealTime;") != std::string::npos);
+    CHECK(telemetry_source.find("NativeWakeDistanceUnits + 250") ==
           std::string::npos);
     CHECK(telemetry_source.find(
-        "CurrentDistanceUnits < NativeWakeDistanceUnits + 250") !=
+        "CurrentDistanceUnits < 0") == std::string::npos);
+    CHECK(telemetry_source.find(
+        "NativeWakeCount = Min(\n            5,") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "ExpiresRealTime <=\n            WorldInfo.RealTimeSeconds") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "function bool RememberAdaptiveDistanceSleepTransition(") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveDistanceSleepTransitions.Length = 8192") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function ClearAdaptiveDistanceSleepTransition(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function PruneAdaptiveDistanceSleepTransitions()") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveDistanceSleepTransitionPruneCursor + 1") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("Index < 64") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "RemovalReason != \"tracked\"") != std::string::npos);
+    CHECK(telemetry_source.find(".bReusable = true") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "!AdaptiveDistanceSleepTransitions[Slot].bReusable") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "Slot = (Slot + 1) & 8191") != std::string::npos);
@@ -600,6 +636,10 @@ int main() {
     CHECK(telemetry_source.find(
         "KF2OPT_CORPSE_DISTANCE state=resleep") != std::string::npos);
     CHECK(telemetry_source.find(" previous_reason=") != std::string::npos);
+    CHECK(telemetry_source.find(" native_wake_count=") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(" resleep_after_ms=") !=
+          std::string::npos);
     CHECK(telemetry_source.find("removal_reason=tracking_lost") !=
           std::string::npos);
     CHECK(telemetry_source.find(
