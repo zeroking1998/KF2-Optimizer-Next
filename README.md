@@ -31,6 +31,9 @@ telemetry download.
 - Measures live, average, and 1% low FPS, frame time, CPU, GPU, RAM, and VRAM.
 - Uses a target from 30 to 240 FPS and adapts only when verified pressure exists.
 - Adjusts supported graphics, LOD, effects, corpse load, physics, and collision.
+- Time-slices old-corpse physics, skeleton, and LOD reductions without
+  processing a batch in one frame. Final frozen poses wait until a corpse is
+  at least 8 metres away and no longer recently rendered.
 - Leaves FleX off unless the user explicitly enables it in KF2.
 - Provides a separate overlay, graphics controls, backups, updates, and repair.
 - Confirms runtime changes with a matching receipt or exact readback.

@@ -74,13 +74,17 @@ var int AdaptiveCorpsePressureLevel;
 var int AdaptiveCorpseCurrentFramePressureLevel;
 var float AdaptiveFramePressureObservedRealTime;
 var int AdaptiveCorpsesSlept;
-var int AdaptiveBaselinePhysicsSleeps;
+var int AdaptiveAgingPhysicsSleeps;
 var int AdaptiveSkeletonReductions;
+var int AdaptiveCorpseAgingCursor;
+var int AdaptiveCorpseAgingReductions;
 var float AdaptiveLastCorpseSleepRealTime;
 var float AdaptiveLastCorpseCapacityRealTime;
 var array<KFPawn> AdaptiveCorpseLodCorpses;
 var array<int> AdaptiveCorpseLodOriginalMinModels;
 var array<int> AdaptiveCorpseLodAppliedMinModels;
+var array<bool> AdaptiveCorpseLodPersistentAging;
+var array<bool> AdaptiveCorpseLodPhysicsFrozen;
 var int AdaptiveCorpseLodReductions;
 var int AdaptiveCorpseLodRestores;
 var float AdaptiveLastCorpseLodRealTime;
@@ -130,11 +134,13 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
     }
     if (bEnabled)
     {
+        ClearTimer(nameof(RestoreOneAdaptiveCorpseLod), self);
         bAdaptiveRuntimeEnabled = true;
         if (bAdaptiveCorpseStagger)
         {
             SetTimer(0.45, true, nameof(StaggerCorpseCleanup), self);
             SetTimer(0.25, true, nameof(AdaptiveCorpseLoadControl), self);
+            SetTimer(0.05, true, nameof(AdaptiveCorpseAgingControl), self);
         }
         `log("KF2OPT_ADAPTIVE_MODE state=enabled readback=verified");
         return true;
@@ -150,7 +156,7 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
     {
         return false;
     }
-    RestoreAllAdaptiveCorpseLods();
+    BeginAdaptiveCorpseLodRelease();
     RestoreAllAdaptiveLivingVisuals();
     BeginAdaptiveDistanceSleepRelease();
     if (AdaptiveCorpseManager != None)
@@ -160,6 +166,7 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
     }
     ClearTimer(nameof(StaggerCorpseCleanup), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
+    ClearTimer(nameof(AdaptiveCorpseAgingControl), self);
     AdaptiveCorpsePressureSamples = 0;
     AdaptiveCorpseRecoverySamples = 0;
     AdaptiveCorpsePressureLevel = 0;
@@ -1089,103 +1096,263 @@ function ApplyLivingEnemyVisualPressure(
     }
 }
 
-function RefreshSleepingCorpseAnimationState(KFGoreManager GoreManager)
+function bool ApplyOneAdaptiveCorpseAging(KFGoreManager GoreManager)
 {
-    local int Index;
+    local int EntryIndex;
+    local int DistanceUnits;
+    local int MaximumMinLod;
+    local int TargetMinLod;
+    local int Tier;
+    local float CorpseAge;
+    local float MaximumSpeedSquared;
+    local float MinimumTierOneAge;
+    local float MinimumTierTwoAge;
+    local float MinimumTierThreeAge;
+    local bool bFinalTierInteractionSafe;
+    local bool bFinalTierLodReady;
+    local bool bRecentlyRendered;
+    local string PhysicsAction;
     local KFPawn Candidate;
 
-    for (Index = 0; Index < GoreManager.CorpsePool.Length; ++Index)
+    if (GoreManager == None || GoreManager.CorpsePool.Length == 0)
     {
-        Candidate = GoreManager.CorpsePool[Index];
-        if (Candidate == None || Candidate.bDeleteMe ||
-            KFPawn_Monster(Candidate) == None || Candidate.Mesh == None ||
-            Candidate.Physics != PHYS_RigidBody ||
-            Candidate.Mesh.RigidBodyIsAwake())
+        AdaptiveCorpseAgingCursor = 0;
+        return false;
+    }
+    if (AdaptiveCorpseAgingCursor < 0 ||
+        AdaptiveCorpseAgingCursor >= GoreManager.CorpsePool.Length)
+    {
+        AdaptiveCorpseAgingCursor = 0;
+    }
+    Candidate = GoreManager.CorpsePool[AdaptiveCorpseAgingCursor];
+    ++AdaptiveCorpseAgingCursor;
+
+    if (Candidate == None || Candidate.bDeleteMe ||
+        KFPawn_Monster(Candidate) == None || Candidate.Mesh == None ||
+        Candidate.TimeOfDeath <= 0.0 ||
+        Candidate.Physics != PHYS_RigidBody ||
+        Candidate.SpecialMove == SM_DeathAnim)
+    {
+        return false;
+    }
+
+    MinimumTierOneAge = 3.0;
+    MinimumTierTwoAge = 8.0;
+    MinimumTierThreeAge = 15.0;
+    CorpseAge = WorldInfo.TimeSeconds - Candidate.TimeOfDeath;
+    if (CorpseAge < MinimumTierOneAge)
+    {
+        return false;
+    }
+    Tier = CorpseAge >= MinimumTierThreeAge ? 3 :
+        CorpseAge >= MinimumTierTwoAge ? 2 : 1;
+    DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
+    bRecentlyRendered = Candidate.Mesh.LastRenderTime >
+        WorldInfo.TimeSeconds - 0.3;
+    // A final PHYS_None pose cannot react to a nearby player, hit or
+    // explosion. Require both the existing 800-unit interaction boundary and
+    // native render recency to be clear. The persistent cursor revisits a
+    // deferred corpse later, so moving away or losing visibility can still
+    // advance it without a one-frame batch.
+    bFinalTierInteractionSafe = DistanceUnits >= 800 &&
+        !bRecentlyRendered;
+    EntryIndex = FindAdaptiveCorpseLodEntry(Candidate);
+    bFinalTierLodReady = false;
+    if (Tier >= 3 && bFinalTierInteractionSafe && EntryIndex >= 0 &&
+        EntryIndex < AdaptiveCorpseLodAppliedMinModels.Length &&
+        EntryIndex < AdaptiveCorpseLodPersistentAging.Length &&
+        EntryIndex < AdaptiveCorpseLodPhysicsFrozen.Length &&
+        Candidate.Mesh.SkeletalMesh != None &&
+        Candidate.Mesh.SkeletalMesh.LODInfo.Length >= 2 &&
+        Candidate.Mesh.ForcedLodModel == 0)
+    {
+        MaximumMinLod = Candidate.Mesh.SkeletalMesh.LODInfo.Length - 1;
+        bFinalTierLodReady =
+            AdaptiveCorpseLodAppliedMinModels[EntryIndex] == MaximumMinLod &&
+            Candidate.Mesh.MinLodModel == MaximumMinLod;
+        if (bFinalTierLodReady)
         {
-            continue;
-        }
-        Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
-        if (!Candidate.Mesh.bNoSkeletonUpdate)
-        {
-            // This mirrors KFPawn.Dying.OnSleepRBPhysics: a sleeping corpse
-            // no longer needs per-frame skeleton evaluation. OnWakeRBPhysics
-            // restores it automatically if gameplay wakes the ragdoll again.
-            Candidate.Mesh.bNoSkeletonUpdate = true;
-            ++AdaptiveSkeletonReductions;
+            AdaptiveCorpseLodPersistentAging[EntryIndex] = true;
         }
     }
-}
 
-function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
-{
-    local int Index;
-    local int SleepsThisPass;
-    local int ForcedSleep;
-    local float CorpseAge;
-    local float MinimumSettleAge;
-    local float MaximumFullPhysicsAge;
-    local float SettledSpeedSquared;
-    local KFPawn Candidate;
-
-    // This is the always-on low-cost corpse baseline. It deliberately does
-    // not consult FPS, quality, distance, scene pressure, enemy pressure or
-    // the user's visible-corpse maximum. A new ragdoll gets a short physical
-    // reaction window, then settled bodies sleep early and every remaining
-    // awake body receives a hard upper bound on full rigid-body simulation.
-    MinimumSettleAge = 0.75;
-    MaximumFullPhysicsAge = 2.0;
-    SettledSpeedSquared = 90000.0;
-
-    for (Index = 0; Index < GoreManager.CorpsePool.Length; ++Index)
+    // Only one corpse and one meaningful state transition are handled per
+    // 50-ms invocation. Visible old corpses still receive staged LOD and
+    // sleeping-skeleton reductions. The final tier waits for its final real
+    // LOD plus the interaction guard; the earlier tiers retain distance guards
+    // so a fresh nearby visible ragdoll still has a native reaction window.
+    MaximumSpeedSquared = Tier >= 3 ? 160000.0 : 62500.0;
+    PhysicsAction = Tier >= 3 ? "aging_freeze" : "aging";
+    if ((Candidate.Mesh.RigidBodyIsAwake() || Tier >= 3) &&
+        VSizeSq(Candidate.Velocity) <= MaximumSpeedSquared &&
+        (Tier < 3 ||
+         (bFinalTierInteractionSafe && bFinalTierLodReady)) &&
+        (Tier >= 3 ||
+         (Tier == 2 && DistanceUnits >= 1000) ||
+         (Tier == 1 && DistanceUnits >= 1200)) &&
+        (Tier < 3 || FindAdaptiveCorpseLodEntry(Candidate) >= 0) &&
+        (Tier >= 3 || FindAdaptiveDistanceSleptCorpse(Candidate) == -1) &&
+        (Tier >= 3 ||
+         !DeferAdaptiveDistanceResleepAfterNativeWake(Candidate)) &&
+        FindAdaptiveCorpsePhysicsActionId(
+            PhysicsAction, GetAdaptiveCorpseActionId(Candidate)) == -1)
     {
-        Candidate = GoreManager.CorpsePool[Index];
-        if (Candidate == None || Candidate.bDeleteMe ||
-            KFPawn_Monster(Candidate) == None || Candidate.Mesh == None ||
-            Candidate.TimeOfDeath <= 0.0 ||
-            Candidate.Physics != PHYS_RigidBody ||
-            Candidate.SpecialMove == SM_DeathAnim ||
-            FindAdaptiveCorpsePhysicsActionId("baseline",
-                GetAdaptiveCorpseActionId(Candidate)) != -1 ||
-            !Candidate.Mesh.RigidBodyIsAwake())
-        {
-            continue;
-        }
-        CorpseAge = WorldInfo.TimeSeconds - Candidate.TimeOfDeath;
-        if (CorpseAge < MinimumSettleAge ||
-            (CorpseAge < MaximumFullPhysicsAge &&
-             VSizeSq(Candidate.Velocity) > SettledSpeedSquared))
-        {
-            continue;
-        }
-
         Candidate.Mesh.PutRigidBodyToSleep();
         if (Candidate.Mesh.RigidBodyIsAwake())
         {
-            continue;
+            return false;
         }
         Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
         Candidate.Mesh.bNoSkeletonUpdate = true;
-        if (!RegisterAdaptiveCorpsePhysicsAction(Candidate, "baseline"))
+        if (Tier >= 3)
         {
-            `log("KF2OPT_CORPSE_BASELINE state=tracking_full capacity=8192");
-            return SleepsThisPass;
+            EntryIndex = FindAdaptiveCorpseLodEntry(Candidate);
+            Candidate.SetPhysics(PHYS_None);
+            if (Candidate.Physics != PHYS_None)
+            {
+                Candidate.Mesh.WakeRigidBody();
+                return false;
+            }
+            AdaptiveCorpseLodPhysicsFrozen[EntryIndex] = true;
         }
-        ForcedSleep = CorpseAge >= MaximumFullPhysicsAge ? 1 : 0;
-        ++SleepsThisPass;
-        ++AdaptiveBaselinePhysicsSleeps;
+        if (!RegisterAdaptiveCorpsePhysicsAction(Candidate, PhysicsAction))
+        {
+            if (Tier >= 3 && Candidate.Physics == PHYS_None)
+            {
+                Candidate.SetPhysics(PHYS_RigidBody);
+                if (Candidate.Physics != PHYS_RigidBody)
+                {
+                    `log("KF2OPT_CORPSE_AGING state=rollback_failed"$
+                         " action=freeze corpse_id="$
+                         GetAdaptiveCorpseActionId(Candidate)$
+                         " physics=none readback=failed");
+                    return false;
+                }
+                AdaptiveCorpseLodPhysicsFrozen[EntryIndex] = false;
+            }
+            Candidate.Mesh.WakeRigidBody();
+            `log("KF2OPT_CORPSE_AGING state=tracking_full capacity=8192"$
+                 " action=cancelled effective_awake="$
+                 (Candidate.Mesh.RigidBodyIsAwake() ? 1 : 0));
+            return false;
+        }
+        ++AdaptiveAgingPhysicsSleeps;
         ++AdaptiveCorpsesSlept;
-        RegisterAdaptiveCorpseDebugMarker(Candidate, "BASE_SLEEP");
-        `log("KF2OPT_CORPSE_BASELINE state=sleep slept="$
-             AdaptiveBaselinePhysicsSleeps$" batch="$SleepsThisPass$
-             " forced="$ForcedSleep$" age_ms="$int(CorpseAge * 1000.0)$
-             " speed_units="$int(VSize(Candidate.Velocity))$" corpse_id="$
+        ++AdaptiveCorpseAgingReductions;
+        RegisterAdaptiveCorpseDebugMarker(Candidate, "AGE_SLEEP_"$Tier);
+        `log("KF2OPT_CORPSE_AGING state=applied action="$
+             (Tier >= 3 ? "freeze" : "sleep")$" tier="$Tier$
+             " reductions="$AdaptiveCorpseAgingReductions$" age_ms="$
+             int(CorpseAge * 1000.0)$" corpse_id="$
              GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-             GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
-             FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
-             " effective_awake=0");
+             DistanceUnits$" distance_m="$
+             FormatAdaptiveCorpseDistanceMeters(DistanceUnits, false)$
+             " recently_rendered="$(bRecentlyRendered ? 1 : 0)$
+             " effective_awake=0 physics="$
+             (Candidate.Physics == PHYS_None ? "none" : "rigid_body")$
+             " readback=verified");
+        return true;
     }
-    return SleepsThisPass;
+
+    if (!Candidate.Mesh.RigidBodyIsAwake() &&
+        (!Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep ||
+         !Candidate.Mesh.bNoSkeletonUpdate))
+    {
+        Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
+        Candidate.Mesh.bNoSkeletonUpdate = true;
+        ++AdaptiveSkeletonReductions;
+        ++AdaptiveCorpseAgingReductions;
+        `log("KF2OPT_CORPSE_AGING state=applied action=skeleton tier="$Tier$
+             " reductions="$AdaptiveCorpseAgingReductions$" age_ms="$
+             int(CorpseAge * 1000.0)$" corpse_id="$
+             GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
+             DistanceUnits$" distance_m="$
+             FormatAdaptiveCorpseDistanceMeters(DistanceUnits, false)$
+             " recently_rendered="$(bRecentlyRendered ? 1 : 0)$
+             " readback=verified");
+        return true;
+    }
+
+    if (Candidate.Mesh.SkeletalMesh == None ||
+        Candidate.Mesh.SkeletalMesh.LODInfo.Length < 2 ||
+        Candidate.Mesh.ForcedLodModel != 0 ||
+        (Tier < 3 && DistanceUnits < 300) ||
+        (Tier >= 3 && !bFinalTierInteractionSafe))
+    {
+        return false;
+    }
+    MaximumMinLod = Candidate.Mesh.SkeletalMesh.LODInfo.Length - 1;
+    TargetMinLod = Tier >= 3 ? MaximumMinLod :
+        Tier == 2 ? Min(3, MaximumMinLod) : Min(1, MaximumMinLod);
+    if (Candidate.Mesh.MinLodModel >= TargetMinLod)
+    {
+        return false;
+    }
+    EntryIndex = FindAdaptiveCorpseLodEntry(Candidate);
+    if (EntryIndex < 0)
+    {
+        EntryIndex = AdaptiveCorpseLodCorpses.Length;
+        AdaptiveCorpseLodCorpses.AddItem(Candidate);
+        AdaptiveCorpseLodOriginalMinModels.AddItem(
+            Candidate.Mesh.MinLodModel);
+        AdaptiveCorpseLodAppliedMinModels.AddItem(TargetMinLod);
+        AdaptiveCorpseLodPersistentAging.AddItem(true);
+        AdaptiveCorpseLodPhysicsFrozen.AddItem(false);
+    }
+    else if (Candidate.Mesh.MinLodModel !=
+             AdaptiveCorpseLodAppliedMinModels[EntryIndex])
+    {
+        RemoveAdaptiveCorpseLodEntry(EntryIndex, false);
+        return false;
+    }
+    else
+    {
+        AdaptiveCorpseLodAppliedMinModels[EntryIndex] = TargetMinLod;
+        AdaptiveCorpseLodPersistentAging[EntryIndex] = true;
+    }
+    Candidate.Mesh.MinLodModel = TargetMinLod;
+    if (Candidate.Mesh.MinLodModel != TargetMinLod)
+    {
+        RemoveAdaptiveCorpseLodEntry(EntryIndex, false);
+        return false;
+    }
+    ++AdaptiveCorpseLodReductions;
+    ++AdaptiveCorpseAgingReductions;
+    RegisterAdaptiveCorpseDebugMarker(Candidate, "AGE_LOD_"$Tier);
+    `log("KF2OPT_CORPSE_AGING state=applied action=lod tier="$Tier$
+         " target_lod="$TargetMinLod$" reductions="$
+         AdaptiveCorpseAgingReductions$" age_ms="$
+         int(CorpseAge * 1000.0)$" corpse_id="$
+         GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
+         DistanceUnits$" distance_m="$
+         FormatAdaptiveCorpseDistanceMeters(DistanceUnits, false)$
+         " recently_rendered="$(bRecentlyRendered ? 1 : 0)$
+         " readback=verified");
+    return true;
+}
+
+function AdaptiveCorpseAgingControl()
+{
+    local KFGoreManager GoreManager;
+    local KFGameInfo GameInfo;
+
+    if (!bAdaptiveCorpseStagger || !bAdaptiveRuntimeEnabled ||
+        WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
+    {
+        return;
+    }
+    GameInfo = KFGameInfo(WorldInfo.Game);
+    if (GameInfo != None && GameInfo.IsZedTimeActive())
+    {
+        return;
+    }
+    GoreManager = KFGoreManager(WorldInfo.MyGoreEffectManager);
+    if (GoreManager == None || !bAdaptiveCorpseStaggerInitialized ||
+        AdaptiveCorpseManager != GoreManager)
+    {
+        return;
+    }
+    ApplyOneAdaptiveCorpseAging(GoreManager);
 }
 
 function int FindAdaptiveCorpseLodEntry(KFPawn Candidate)
@@ -1202,28 +1369,59 @@ function int FindAdaptiveCorpseLodEntry(KFPawn Candidate)
     return -1;
 }
 
-function RemoveAdaptiveCorpseLodEntry(int Index, bool bRestore)
+function bool RemoveAdaptiveCorpseLodEntry(int Index, bool bRestore)
 {
     local KFPawn Candidate;
 
     if (Index < 0 || Index >= AdaptiveCorpseLodCorpses.Length ||
         Index >= AdaptiveCorpseLodOriginalMinModels.Length ||
-        Index >= AdaptiveCorpseLodAppliedMinModels.Length)
+        Index >= AdaptiveCorpseLodAppliedMinModels.Length ||
+        Index >= AdaptiveCorpseLodPersistentAging.Length ||
+        Index >= AdaptiveCorpseLodPhysicsFrozen.Length)
     {
-        return;
+        return false;
     }
     Candidate = AdaptiveCorpseLodCorpses[Index];
+    if (bRestore && AdaptiveCorpseLodPhysicsFrozen[Index] &&
+        Candidate != None && !Candidate.bDeleteMe)
+    {
+        if (Candidate.Physics == PHYS_None)
+        {
+            Candidate.SetPhysics(PHYS_RigidBody);
+        }
+        if (Candidate.Physics != PHYS_RigidBody)
+        {
+            return false;
+        }
+        if (!UnregisterAdaptiveCorpsePhysicsAction(
+                Candidate, "aging_freeze"))
+        {
+            return false;
+        }
+        if (Candidate.Mesh != None)
+        {
+            Candidate.Mesh.bNoSkeletonUpdate = false;
+        }
+    }
     if (bRestore && Candidate != None && !Candidate.bDeleteMe &&
         Candidate.Mesh != None &&
         Candidate.Mesh.MinLodModel == AdaptiveCorpseLodAppliedMinModels[Index])
     {
         Candidate.Mesh.MinLodModel =
             AdaptiveCorpseLodOriginalMinModels[Index];
+        if (Candidate.Mesh.MinLodModel !=
+            AdaptiveCorpseLodOriginalMinModels[Index])
+        {
+            return false;
+        }
         ++AdaptiveCorpseLodRestores;
     }
     AdaptiveCorpseLodCorpses.Remove(Index, 1);
     AdaptiveCorpseLodOriginalMinModels.Remove(Index, 1);
     AdaptiveCorpseLodAppliedMinModels.Remove(Index, 1);
+    AdaptiveCorpseLodPersistentAging.Remove(Index, 1);
+    AdaptiveCorpseLodPhysicsFrozen.Remove(Index, 1);
+    return true;
 }
 
 function PruneAdaptiveCorpseLodEntries()
@@ -1239,12 +1437,23 @@ function PruneAdaptiveCorpseLodEntries()
         {
             RemoveAdaptiveCorpseLodEntry(Index, false);
         }
+        else if (AdaptiveCorpseLodPhysicsFrozen[Index] &&
+                 FindAdaptiveCorpsePhysicsActionId(
+                     "aging_freeze",
+                     GetAdaptiveCorpseActionId(Candidate)) == -1)
+        {
+            // A failed action registration may already have reached
+            // PHYS_None. Retain ownership until the verified restore succeeds.
+            RemoveAdaptiveCorpseLodEntry(Index, true);
+        }
         else if (Candidate.Mesh.MinLodModel !=
                  AdaptiveCorpseLodAppliedMinModels[Index])
         {
             // A different system changed the value. Stop owning it instead of
-            // overwriting an external decision during restore.
-            RemoveAdaptiveCorpseLodEntry(Index, false);
+            // overwriting an external decision during restore. A final frozen
+            // actor must still pass the verified physics-release path.
+            RemoveAdaptiveCorpseLodEntry(
+                Index, AdaptiveCorpseLodPhysicsFrozen[Index]);
         }
     }
 }
@@ -1273,21 +1482,43 @@ function RestoreNearAdaptiveCorpseLods()
             Candidate.Location - LocalPC.ViewTarget.Location);
         // Restore only after crossing the inner 250-unit boundary. LOD is
         // applied outside 300 units, leaving a stable hysteresis band.
-        if (DistanceSquared < 62500.0)
+        if (!AdaptiveCorpseLodPersistentAging[Index] &&
+            DistanceSquared < 62500.0)
         {
             RemoveAdaptiveCorpseLodEntry(Index, true);
         }
     }
 }
 
-function RestoreAllAdaptiveCorpseLods()
+function RestoreOneAdaptiveCorpseLod()
 {
     local int Index;
 
-    for (Index = AdaptiveCorpseLodCorpses.Length - 1; Index >= 0; --Index)
+    if (bAdaptiveRuntimeEnabled)
     {
-        RemoveAdaptiveCorpseLodEntry(Index, true);
+        ClearTimer(nameof(RestoreOneAdaptiveCorpseLod), self);
+        return;
     }
+    Index = AdaptiveCorpseLodCorpses.Length - 1;
+    if (Index < 0)
+    {
+        ClearTimer(nameof(RestoreOneAdaptiveCorpseLod), self);
+        `log("KF2OPT_CORPSE_AGING state=release_complete");
+        return;
+    }
+    RemoveAdaptiveCorpseLodEntry(Index, true);
+}
+
+function BeginAdaptiveCorpseLodRelease()
+{
+    ClearTimer(nameof(RestoreOneAdaptiveCorpseLod), self);
+    if (AdaptiveCorpseLodCorpses.Length == 0)
+    {
+        return;
+    }
+    `log("KF2OPT_CORPSE_AGING state=release_started tracked="$
+         AdaptiveCorpseLodCorpses.Length$" interval_ms=50");
+    SetTimer(0.05, true, nameof(RestoreOneAdaptiveCorpseLod), self);
 }
 
 function int FindAdaptiveDistanceSleptCorpse(KFPawn Candidate)
@@ -1503,6 +1734,7 @@ function int FindAdaptiveCorpsePhysicsActionId(
 function bool RegisterAdaptiveCorpsePhysicsAction(
     KFPawn Candidate, string Action)
 {
+    local int DeletedSlot;
     local int Probe;
     local int Slot;
     local string CorpseId;
@@ -1516,24 +1748,66 @@ function bool RegisterAdaptiveCorpsePhysicsAction(
     CorpseId = GetAdaptiveCorpseActionId(Candidate);
     ActionId = Action$":"$CorpseId;
     Slot = GetAdaptiveCorpsePhysicsActionHash(ActionId);
+    DeletedSlot = -1;
     for (Probe = 0; Probe < 8192; ++Probe)
     {
         if (AdaptiveCorpsePhysicsActionIds[Slot] == ActionId)
         {
             return true;
         }
-        if (AdaptiveCorpsePhysicsActionIds[Slot] == "")
+        if (AdaptiveCorpsePhysicsActionIds[Slot] == "__deleted__" &&
+            DeletedSlot < 0)
         {
+            DeletedSlot = Slot;
+        }
+        else if (AdaptiveCorpsePhysicsActionIds[Slot] == "")
+        {
+            if (DeletedSlot >= 0)
+            {
+                Slot = DeletedSlot;
+            }
             AdaptiveCorpsePhysicsActionIds[Slot] = ActionId;
             ++AdaptiveCorpsePhysicsActionIdCount;
             return true;
         }
         Slot = (Slot + 1) & 8191;
     }
+    if (DeletedSlot >= 0)
+    {
+        AdaptiveCorpsePhysicsActionIds[DeletedSlot] = ActionId;
+        ++AdaptiveCorpsePhysicsActionIdCount;
+        return true;
+    }
     // Never evict an owned ID: eviction would make an old corpse eligible for
-    // repeated work. A saturated table disables only further baseline and
+    // repeated work. A saturated table disables only further aging and
     // Ragdoll ownership; distance, LOD and capacity continue independently.
     return false;
+}
+
+function bool UnregisterAdaptiveCorpsePhysicsAction(
+    KFPawn Candidate, string Action)
+{
+    local int Slot;
+
+    if (Candidate == None || Action == "")
+    {
+        return false;
+    }
+    Slot = FindAdaptiveCorpsePhysicsActionId(
+        Action, GetAdaptiveCorpseActionId(Candidate));
+    if (Slot < 0)
+    {
+        // Idempotent release: an already-cleared action must not prevent the
+        // actor and its LOD ownership from completing restore.
+        return true;
+    }
+    // Open-addressing lookup must continue through removed slots. Registration
+    // reuses the first tombstone it encounters, so repeated Adaptive
+    // off/on cycles do not consume the fixed table.
+    AdaptiveCorpsePhysicsActionIds[Slot] = "__deleted__";
+    AdaptiveCorpsePhysicsActionIdCount =
+        Max(0, AdaptiveCorpsePhysicsActionIdCount - 1);
+    return true;
 }
 
 function int GetAdaptiveCorpseDistanceUnits(KFPawn Candidate)
@@ -2155,6 +2429,8 @@ function bool ApplyOneAdaptiveCorpseLod(
         AdaptiveCorpseLodOriginalMinModels.AddItem(
             Candidate.Mesh.MinLodModel);
         AdaptiveCorpseLodAppliedMinModels.AddItem(TargetMinLod);
+        AdaptiveCorpseLodPersistentAging.AddItem(false);
+        AdaptiveCorpseLodPhysicsFrozen.AddItem(false);
     }
     else
     {
@@ -2448,7 +2724,6 @@ function AdaptiveCorpseLoadControl()
         return;
     }
 
-    SleepBaselineAwakeMonsterCorpses(GoreManager);
     PruneAdaptiveDistanceSleptCorpses();
     AttackScale = GetAdaptiveCorpseAttackScale();
     // Proximity is gameplay-critical: wake every matching tracked corpse now,
@@ -2456,7 +2731,6 @@ function AdaptiveCorpseLoadControl()
     WakeNearAdaptiveDistanceSleptCorpses();
     PruneAdaptiveCorpseLodEntries();
     RestoreNearAdaptiveCorpseLods();
-    RefreshSleepingCorpseAnimationState(GoreManager);
     VisibleAwake = CountVisibleAwakeMonsterCorpses(
         GoreManager, VisibleCorpses);
     AwakeTotal = CountAwakeMonsterCorpses(GoreManager);
@@ -2824,6 +3098,7 @@ event PreBeginPlay()
     {
         SetTimer(0.45, true, nameof(StaggerCorpseCleanup), self);
         SetTimer(0.25, true, nameof(AdaptiveCorpseLoadControl), self);
+        SetTimer(0.05, true, nameof(AdaptiveCorpseAgingControl), self);
     }
     SampleTelemetry();
 }
@@ -3868,6 +4143,8 @@ function QuiesceForWorldTeardown()
     ClearTimer(nameof(SampleTelemetry), self);
     ClearTimer(nameof(StaggerCorpseCleanup), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
+    ClearTimer(nameof(AdaptiveCorpseAgingControl), self);
+    ClearTimer(nameof(RestoreOneAdaptiveCorpseLod), self);
     ClearTimer(nameof(WakeAdaptiveDistanceSleptCorpseBatch), self);
     if (AdaptiveCorpsesRemoved > 0)
     {
@@ -3880,10 +4157,12 @@ function QuiesceForWorldTeardown()
              AdaptiveCorpsesSlept$" skeleton_reductions="$
              AdaptiveSkeletonReductions);
     }
-    if (AdaptiveBaselinePhysicsSleeps > 0)
+    if (AdaptiveAgingPhysicsSleeps > 0 ||
+        AdaptiveCorpseAgingReductions > 0)
     {
-        `log("KF2OPT_CORPSE_BASELINE state=stopped slept="$
-             AdaptiveBaselinePhysicsSleeps);
+        `log("KF2OPT_CORPSE_AGING state=stopped slept="$
+             AdaptiveAgingPhysicsSleeps$" reductions="$
+             AdaptiveCorpseAgingReductions);
     }
     if (AdaptiveCorpseLodReductions > 0 || AdaptiveCorpseLodRestores > 0)
     {
@@ -3918,9 +4197,12 @@ function QuiesceForWorldTeardown()
     // action before teardown.
     AdaptiveGraphicsState = None;
     AdaptiveCorpseManager = None;
+    AdaptiveCorpseAgingCursor = 0;
     AdaptiveCorpseLodCorpses.Length = 0;
     AdaptiveCorpseLodOriginalMinModels.Length = 0;
     AdaptiveCorpseLodAppliedMinModels.Length = 0;
+    AdaptiveCorpseLodPersistentAging.Length = 0;
+    AdaptiveCorpseLodPhysicsFrozen.Length = 0;
     AdaptiveLivingVisualZeds.Length = 0;
     AdaptiveLivingOriginalMinLods.Length = 0;
     AdaptiveLivingAppliedMinLods.Length = 0;
