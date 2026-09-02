@@ -219,6 +219,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     nvidia_gpu_metrics.reset();
     gpu_utilization_filter.reset();
     adaptive_adapter_luid.reset();
+    confirmed_game_adapter_luid.reset();
     optimizer_evidence = {};
     adaptive_governor.reset();
     adaptive_actuation.disable(monotonic_ns());
@@ -759,17 +760,60 @@ void UiRuntime::bind_process_gpu_adapter(std::uint64_t adapter_luid) {
         adapters.value(), adapter_luid);
     if (!adapter) return;
 
-    auto status = model.status();
-    const bool identity_changed = !status.game_gpu_name ||
-        *status.game_gpu_name != adapter->name;
-    if (identity_changed) {
-        status.game_gpu_name = adapter->name;
-        model.set_status(std::move(status));
+    const bool confirmation_changed = !confirmed_game_adapter_luid ||
+        *confirmed_game_adapter_luid != adapter_luid;
+    if (confirmation_changed) {
+        confirmed_game_adapter_luid = adapter_luid;
+        auto status = model.status();
+        if (!status.game_gpu_name || *status.game_gpu_name != adapter->name) {
+            status.game_gpu_name = adapter->name;
+            model.set_status(std::move(status));
+            invalidate();
+        }
         events->append({0, diagnostics::Severity::info,
             "GAME_GPU_CONFIRMED",
-            L"KF2 process GPU activity confirmed on " + adapter->name,
+            L"KF2 process GPU activity currently confirmed on " +
+                adapter->name + L" by physical adapter identity",
             L"telemetry"});
-        invalidate();
+        if (installation && !adapter->physical_device_key.empty()) {
+            const auto encoded_key = path_utf8(
+                std::filesystem::path{adapter->physical_device_key});
+            const auto preference =
+                telemetry::configured_gpu_adapter_for_process(
+                    installation->executable);
+            if (encoded_key && preference.has_value()) {
+                optimizer_settings.extras["confirmed_gpu_physical_key"] =
+                    *encoded_key;
+                optimizer_settings.extras["confirmed_gpu_preference"] =
+                    std::string{telemetry::process_gpu_preference_token(
+                        preference.value().preference)};
+                optimizer_settings.extras["confirmed_gpu_dedicated_bytes"] =
+                    std::to_string(adapter->dedicated_memory_bytes);
+                const auto saved = platform::windows::atomic_replace_utf8(
+                    settings_path,
+                    config::serialize_settings(optimizer_settings));
+                events->append({0,
+                    saved.has_value() ? diagnostics::Severity::info
+                                      : diagnostics::Severity::warning,
+                    saved.has_value()
+                        ? "GAME_GPU_PROFILE_REMEMBERED"
+                        : "GAME_GPU_PROFILE_REMEMBER_FAILED",
+                    saved.has_value()
+                        ? L"The currently confirmed physical adapter and its Windows GPU preference were saved for later launches"
+                        : L"The currently confirmed adapter could not be saved; later launches will use a conservative adapter budget",
+                    L"telemetry"});
+            } else {
+                events->append({0, diagnostics::Severity::warning,
+                    "GAME_GPU_PROFILE_REMEMBER_FAILED",
+                    L"The currently confirmed adapter identity or Windows GPU preference could not be persisted; later launches will use a conservative adapter budget",
+                    L"telemetry"});
+            }
+        } else if (installation) {
+            events->append({0, diagnostics::Severity::warning,
+                "GAME_GPU_PROFILE_REMEMBER_FAILED",
+                L"The currently confirmed adapter has no stable physical identity; later launches will use a conservative adapter budget",
+                L"telemetry"});
+        }
     }
 
     if (adaptive_adapter_luid && *adaptive_adapter_luid == adapter_luid) return;

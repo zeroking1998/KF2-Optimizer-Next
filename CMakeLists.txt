@@ -174,6 +174,7 @@ add_executable(KF2Optimizer WIN32
     src/optimizer/adaptive_actuation.cpp
     src/optimizer/adaptive_governor.cpp
     src/optimizer/resource_pressure.cpp
+    src/optimizer/startup_gpu_profile.cpp
     src/optimizer/optimizer_engine.cpp
     src/platform/windows/atomic_file.cpp
     src/platform/windows/presentmon_session.cpp
