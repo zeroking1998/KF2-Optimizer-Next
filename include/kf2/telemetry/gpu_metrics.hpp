@@ -66,6 +66,8 @@ struct ConfiguredGpuAdapter {
     ProcessGpuPreference preference{ProcessGpuPreference::unspecified};
     std::optional<std::uint64_t> adapter_luid;
 };
+// Missing GPU selection in a valid Windows option list is unspecified;
+// malformed or duplicate GPU selections are rejected.
 [[nodiscard]] std::optional<ProcessGpuPreference>
 parse_windows_gpu_preference(std::wstring_view value) noexcept;
 [[nodiscard]] std::string_view process_gpu_preference_token(
