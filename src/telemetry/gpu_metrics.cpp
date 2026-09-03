@@ -216,25 +216,42 @@ Result<GpuMemoryBudget> query_gpu_memory_budget(
 
 std::optional<ProcessGpuPreference> parse_windows_gpu_preference(
     std::wstring_view value) noexcept {
-    std::wstring normalized;
-    normalized.reserve(value.size());
-    for (const auto character : value) {
-        if (!std::iswspace(character)) {
-            normalized.push_back(
-                static_cast<wchar_t>(std::towlower(character)));
+    const auto trim = [](std::wstring_view text) {
+        while (!text.empty() && std::iswspace(text.front())) text.remove_prefix(1);
+        while (!text.empty() && std::iswspace(text.back())) text.remove_suffix(1);
+        return text;
+    };
+    std::optional<ProcessGpuPreference> preference;
+    while (!value.empty()) {
+        const auto separator = value.find(L';');
+        const auto field = trim(value.substr(0, separator));
+        value = separator == std::wstring_view::npos
+            ? std::wstring_view{} : value.substr(separator + 1);
+        if (field.empty()) continue;
+        const auto equals = field.find(L'=');
+        if (equals == std::wstring_view::npos) return std::nullopt;
+        const auto name = trim(field.substr(0, equals));
+        const auto setting = trim(field.substr(equals + 1));
+        if (name.empty() || setting.empty()) return std::nullopt;
+        constexpr std::wstring_view token{L"gpupreference"};
+        const bool is_preference = name.size() == token.size() &&
+            std::equal(name.begin(), name.end(), token.begin(),
+                [](wchar_t left, wchar_t right) {
+                    return std::towlower(left) == right;
+                });
+        if (!is_preference) continue;
+        // Reject ambiguous or malformed preferences rather than guessing a GPU.
+        if (preference || setting.size() != 1) return std::nullopt;
+        switch (setting.front()) {
+            case L'0': preference = ProcessGpuPreference::unspecified; break;
+            case L'1': preference = ProcessGpuPreference::minimum_power; break;
+            case L'2': preference = ProcessGpuPreference::high_performance; break;
+            default: return std::nullopt;
         }
     }
-    constexpr std::wstring_view token{L"gpupreference="};
-    const auto offset = normalized.find(token);
-    if (offset == std::wstring::npos || offset + token.size() >= normalized.size()) {
-        return std::nullopt;
-    }
-    switch (normalized[offset + token.size()]) {
-        case L'0': return ProcessGpuPreference::unspecified;
-        case L'1': return ProcessGpuPreference::minimum_power;
-        case L'2': return ProcessGpuPreference::high_performance;
-        default: return std::nullopt;
-    }
+    // Windows also stores unrelated options (for example Auto HDR) here.
+    // A valid entry without GpuPreference means no explicit GPU selection.
+    return preference.value_or(ProcessGpuPreference::unspecified);
 }
 
 std::string_view process_gpu_preference_token(

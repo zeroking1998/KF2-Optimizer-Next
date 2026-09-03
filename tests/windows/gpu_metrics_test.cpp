@@ -5,8 +5,17 @@
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
 
-int main() {
+int wmain(int argc, wchar_t** argv) {
     using namespace kf2::telemetry;
+    // Optional read-only probe of the real Windows preference boundary.
+    if (argc == 2) {
+        const auto configured = configured_gpu_adapter_for_process(argv[1]);
+        CHECK(configured.has_value());
+        std::cout << "CONFIGURED_GPU_PREFERENCE="
+                  << process_gpu_preference_token(configured.value().preference)
+                  << '\n';
+        return EXIT_SUCCESS;
+    }
     const auto adapters = enumerate_gpu_adapters();
     CHECK(adapters.has_value());
     CHECK(!adapters.value().empty());
@@ -20,6 +29,27 @@ int main() {
           ProcessGpuPreference::high_performance);
     CHECK(!parse_windows_gpu_preference(L"GpuPreference=9;").has_value());
     CHECK(!parse_windows_gpu_preference(L"broken").has_value());
+    CHECK(parse_windows_gpu_preference(L"AutoHDREnable=2097;") ==
+          ProcessGpuPreference::unspecified);
+    CHECK(parse_windows_gpu_preference(L"SwapEffectUpgradeEnable=1;") ==
+          ProcessGpuPreference::unspecified);
+    CHECK(parse_windows_gpu_preference(L"") == ProcessGpuPreference::unspecified);
+    CHECK(parse_windows_gpu_preference(
+              L"AutoHDREnable=2097;GpuPreference=1;SwapEffectUpgradeEnable=1;") ==
+          ProcessGpuPreference::minimum_power);
+    CHECK(parse_windows_gpu_preference(L"GpuPreference=2;AutoHDREnable=2097;") ==
+          ProcessGpuPreference::high_performance);
+    CHECK(parse_windows_gpu_preference(L"OtherGpuPreference=2;") ==
+          ProcessGpuPreference::unspecified);
+    CHECK(parse_windows_gpu_preference(L"Other=GpuPreference=2;") ==
+          ProcessGpuPreference::unspecified);
+    for (const auto malformed : {
+             L"GpuPreference=", L"GpuPreference=20;", L"GpuPreference=2junk;",
+             L"GpuPreference=2 0;", L"GpuPreference=;AutoHDREnable=2097;",
+             L"GpuPreference=1;GpuPreference=2;", L"GpuPreference=2;GpuPreference=2;",
+             L"GpuPreference;AutoHDREnable=2097;", L"=2;"}) {
+        CHECK(!parse_windows_gpu_preference(malformed).has_value());
+    }
     for (const auto& adapter : adapters.value()) {
         if (adapter.umd_driver_version) {
             CHECK(!format_gpu_driver_version(*adapter.umd_driver_version).empty());
