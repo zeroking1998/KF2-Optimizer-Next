@@ -831,6 +831,20 @@ target_include_directories(kf2_telemetry_adaptive_stage_test PRIVATE
 add_test(NAME kf2_telemetry_adaptive_stage_test
     COMMAND kf2_telemetry_adaptive_stage_test)
 
+add_executable(kf2_adaptive_quality_response_test
+    integration/adaptive_quality_response_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
+    "${PROJECT_SOURCE_DIR}/src/telemetry/telemetry_snapshot.cpp"
+    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_governor.cpp"
+    "${PROJECT_SOURCE_DIR}/src/optimizer/resource_pressure.cpp"
+    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
+    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
+)
+target_include_directories(kf2_adaptive_quality_response_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/src")
+add_test(NAME kf2_adaptive_quality_response_test
+    COMMAND kf2_adaptive_quality_response_test)
+
 add_executable(kf2_telemetry_effect_stage_test
     unit/telemetry_effect_stage_test.cpp
 )

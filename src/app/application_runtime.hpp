@@ -163,6 +163,8 @@ struct UiRuntime {
     bool adaptive_runtime_mode_confirmed{false};
     std::optional<bool> adaptive_runtime_mode_pending;
     std::uint64_t adaptive_quality_last_dispatch_ns{0};
+    std::uint64_t adaptive_quality_last_applied_ns{0};
+    std::uint64_t adaptive_frame_not_before_ns{0};
     game::AdaptiveResourceQualityState adaptive_resource_quality{100};
     std::optional<game::OfflineAdaptiveSessionPolicy>
         adaptive_session_policy;

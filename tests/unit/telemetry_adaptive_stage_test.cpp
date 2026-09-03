@@ -353,6 +353,41 @@ int main() {
     CHECK(selected->resource == game::AdaptiveResourceControl::cpu);
     CHECK(selected->quality == 90);
 
+    // Time since dispatch is not evidence of a response to the applied change.
+    // Even a delayed receipt must get a complete fresh fast window first.
+    auto post_applied = control;
+    post_applied.state = optimizer::AdaptiveControllerState::emergency;
+    post_applied.last_dispatch_ns = 1'000'000'000ULL;
+    post_applied.last_applied_ns = 9'500'000'000ULL;
+    post_applied.sample_timestamp_ns = post_applied.now_ns;
+    CHECK(!select_adaptive_runtime_control(post_applied));
+    post_applied.now_ns = 10'500'000'000ULL;
+    CHECK(!select_adaptive_runtime_control(post_applied));
+    post_applied.sample_timestamp_ns = 10'500'000'000ULL;
+    CHECK(select_adaptive_runtime_control(post_applied));
+    post_applied.current_frame_pressure = false;
+    CHECK(!select_adaptive_runtime_control(post_applied));
+    post_applied.current_resource_pressure = true;
+    CHECK(select_adaptive_runtime_control(post_applied));
+
+    auto fresh_context = context;
+    fresh_context.decision_frames = telemetry::FrameMetrics{
+        .fps = 60.0, .average_fps = 60.0,
+        .sustained_one_percent_low_fps = 60.0,
+        .frame_time_ms = 1000.0 / 60.0,
+        .p95_ms = 1000.0 / 60.0, .p99_ms = 1000.0 / 60.0,
+        .one_percent_low_fps = 60.0,
+        .quality = telemetry::SampleQuality::good,
+        .reason = telemetry::UnavailableReason::none};
+    const auto fresh_sample = build_adaptive_sample(frame, fresh_context).sample;
+    CHECK(fresh_sample.fps == 60.0);
+    CHECK(fresh_sample.one_percent_low_fps == 60.0);
+    CHECK(fresh_sample.stutter_count == 0);
+    CHECK(!fresh_sample.sample_loss);
+    CHECK(!fresh_sample.discontinuity);
+    CHECK(fresh_sample.timestamp_ns == frame.observed_at_ns);
+    CHECK(frame.frames.one_percent_low_fps == 45.0);
+
     control.bottleneck = optimizer::AdaptiveBottleneck::rendering;
     control.bottleneck_confidence = 0.74;
     control.primary_resource = optimizer::ResourceKind::gpu;

@@ -63,7 +63,8 @@ bool PresentSource::ingest(const PresentEvent& event) {
     return true;
 }
 FrameMetrics PresentSource::drain(std::uint64_t now_ns,
-                                  std::uint64_t stale_after_ns) const {
+                                  std::uint64_t stale_after_ns,
+                                  std::uint64_t not_before_ns) const {
     std::scoped_lock lock{mutex_};
     if (!running_ || schema_failure_) {
         FrameMetrics unavailable;
@@ -81,7 +82,9 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
         static_cast<void>(stream_id);
         if (presents.empty()) continue;
         const auto newest = presents.back().monotonic_ns;
-        const auto cutoff = newest > kFastWindowNs ? newest - kFastWindowNs : 0;
+        if (newest < not_before_ns) continue;
+        const auto cutoff = std::max(not_before_ns,
+            newest > kFastWindowNs ? newest - kFastWindowNs : 0);
         const auto first = std::lower_bound(
             presents.begin(), presents.end(), cutoff,
             [](const PresentTimestamp& present, std::uint64_t timestamp) {
@@ -100,7 +103,8 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
         const auto newest = selected->back().monotonic_ns;
         const auto copy_window = [&](std::uint64_t duration,
                                      std::vector<PresentTimestamp>& output) {
-            const auto cutoff = newest > duration ? newest - duration : 0;
+            const auto cutoff = std::max(not_before_ns,
+                newest > duration ? newest - duration : 0);
             output.reserve(selected->size());
             std::copy_if(selected->begin(), selected->end(),
                          std::back_inserter(output),

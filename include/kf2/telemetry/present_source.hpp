@@ -25,7 +25,8 @@ public:
     void reset_statistics();
     [[nodiscard]] bool ingest(const PresentEvent& event);
     [[nodiscard]] FrameMetrics drain(std::uint64_t now_ns,
-                                     std::uint64_t stale_after_ns) const;
+                                     std::uint64_t stale_after_ns,
+                                     std::uint64_t not_before_ns = 0) const;
 private:
     SampleIdentity identity_;
     std::size_t capacity_;

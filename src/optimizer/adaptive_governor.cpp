@@ -696,6 +696,14 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     }
     last_evaluation_ns_ = now_ns;
 
+    if (quality_applied_not_before_ns_ != 0 &&
+        sample.timestamp_ns < quality_applied_not_before_ns_) {
+        decision.state = AdaptiveControllerState::observing;
+        decision.disposition = AdaptiveDisposition::hold;
+        decision.reason = "quality_applied_waiting_for_fresh_frame";
+        return decision;
+    }
+
     if (decision.data.quality == AdaptiveDataQuality::not_available) {
         low_percentile_pressure_since_ns_ = 0;
         decision.state = AdaptiveControllerState::observing;
@@ -875,7 +883,18 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     const bool low_percentiles_need_correction =
         decision.data.quality == AdaptiveDataQuality::valid &&
         at_least(sustained_low_level, FrameSignalLevel::corrective) &&
-        at_least(long_low_level, FrameSignalLevel::corrective);
+        at_least(long_low_level, FrameSignalLevel::corrective) &&
+        // Percentiles describe the slowest frames, not sustained throughput.
+        // Applying only the live-FPS tolerance here ratchets quality down at
+        // the cap (50 FPS with 46-FPS lows). Require a material tail deficit
+        // as well: the existing 15% frame-time correction threshold, in both
+        // windows. Smaller deviations still warn and prevent early recovery.
+        at_least(level_for_tail(
+                     1000.0 / *sample.sustained_one_percent_low_fps,
+                     target_frame_time), FrameSignalLevel::corrective) &&
+        at_least(level_for_tail(
+                     1000.0 / *sample.one_percent_low_fps,
+                     target_frame_time), FrameSignalLevel::corrective);
     if (low_percentiles_need_correction) {
         if (low_percentile_pressure_since_ns_ == 0) {
             low_percentile_pressure_since_ns_ = now_ns;
@@ -895,7 +914,7 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
             kLowPercentileConfirmationNs;
     const bool catastrophic_live_drop =
         *sample.fps <= static_cast<double>(policy.target_fps) * 0.50 ||
-        frame_time >= target_frame_time * 2.0;
+        *sample.frame_time_ms >= target_frame_time * 2.0;
 
     FrameSignalLevel desired_level = correction_level(
         live_level, sustained_level, tail_level,
@@ -1185,6 +1204,29 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     return decision;
 }
 
+void AdaptiveGovernor::notify_quality_applied(
+    std::uint64_t applied_ns) noexcept {
+    if (applied_ns == 0 || applied_ns <= quality_applied_not_before_ns_) {
+        return;
+    }
+
+    // The receipt is an exact engine readback, so its timestamp begins a new
+    // performance-evidence epoch. Keep resource smoothing and ownership state:
+    // memory or compute pressure may remain dangerous after a graphics step.
+    quality_applied_not_before_ns_ = applied_ns;
+    history_ = {};
+    history_size_ = 0;
+    history_next_ = 0;
+    smoothed_frame_time_ms_.reset();
+    smoothed_p95_ms_.reset();
+    low_percentile_pressure_since_ns_ = 0;
+    active_pressure_ = AdaptivePressure::observing;
+    candidate_pressure_ = AdaptivePressure::observing;
+    candidate_since_ns_ = applied_ns;
+    last_direction_change_ns_ = 0;
+    direction_changes_ = 0;
+}
+
 void AdaptiveGovernor::reset() noexcept {
     history_ = {};
     history_size_ = 0;
@@ -1209,6 +1251,7 @@ void AdaptiveGovernor::reset() noexcept {
     target_fps_ = 0;
     held_bottleneck_ = AdaptiveBottleneck::unknown;
     bottleneck_hold_until_ns_ = 0;
+    quality_applied_not_before_ns_ = 0;
     direction_changes_ = 0;
     frozen_ = false;
 }

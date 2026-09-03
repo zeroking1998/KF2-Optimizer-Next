@@ -16,7 +16,6 @@ namespace kf2::app {
 
 void UiRuntime::update_adaptive_controller(
     const telemetry_pipeline::TelemetryFrame& frame) {
-    const auto& frames = frame.frames;
     const auto now_ns = frame.observed_at_ns;
     const bool active_gameplay = frame.active_gameplay;
     auto status = model.status();
@@ -130,7 +129,7 @@ void UiRuntime::update_adaptive_controller(
             const auto pending = *adaptive_control_pending;
             const auto completed_ns = monotonic_ns();
             if (outcome->has_value()) {
-                static_cast<void>(adaptive_actuation.receive({
+                const auto receipt_result = adaptive_actuation.receive({
                     pending.action_id,
                     optimizer::AdaptiveControlId::runtime_quality,
                     optimizer::AdaptiveActionStatus::applied,
@@ -141,36 +140,48 @@ void UiRuntime::update_adaptive_controller(
                     "kf2_loopback_readback",
                     {},
                     true,
-                    static_cast<double>(pending.previous_quality)}));
-                adaptive_resource_quality.apply(outcome->value());
-                const int effective_quality =
-                    adaptive_resource_quality.effective_quality();
-                const auto resource_name =
-                    game::adaptive_resource_control_name(
-                        outcome->value().resource);
-                events->append({
-                    0, diagnostics::Severity::info,
-                    "ADAPTIVE_RUNTIME_QUALITY_APPLIED",
-                    L"Live KF2 " + std::wstring{
-                        resource_name.begin(), resource_name.end()} +
-                        L" quality changed to " +
-                        std::to_wstring(outcome->value().quality) +
-                        L"% (effective " +
-                        std::to_wstring(effective_quality) +
-                        L"%; CPU " +
-                        std::to_wstring(adaptive_resource_quality.cpu) +
-                        L"%, GPU " +
-                        std::to_wstring(adaptive_resource_quality.gpu) +
-                        L"%, VRAM " +
-                        std::to_wstring(adaptive_resource_quality.vram) +
-                        L"%, RAM " +
-                        std::to_wstring(adaptive_resource_quality.ram) +
-                        L"%, overdraw " +
-                        std::to_wstring(adaptive_resource_quality.overdraw) +
-                        L"%, effects " +
-                        std::to_wstring(adaptive_resource_quality.effects) +
-                        L"%) after an exact authenticated APPLIED readback",
-                    L"optimizer"});
+                    static_cast<double>(pending.previous_quality)});
+                if (receipt_result ==
+                    optimizer::AdaptiveReceiptResult::accepted) {
+                    adaptive_resource_quality.apply(outcome->value());
+                    adaptive_quality_last_applied_ns = completed_ns;
+                    adaptive_frame_not_before_ns = completed_ns;
+                    adaptive_governor.notify_quality_applied(completed_ns);
+                    adaptive_profile_gate.reset();
+                    const int effective_quality =
+                        adaptive_resource_quality.effective_quality();
+                    const auto resource_name =
+                        game::adaptive_resource_control_name(
+                            outcome->value().resource);
+                    events->append({
+                        0, diagnostics::Severity::info,
+                        "ADAPTIVE_RUNTIME_QUALITY_APPLIED",
+                        L"Live KF2 " + std::wstring{
+                            resource_name.begin(), resource_name.end()} +
+                            L" quality changed to " +
+                            std::to_wstring(outcome->value().quality) +
+                            L"% (effective " +
+                            std::to_wstring(effective_quality) +
+                            L"%; CPU " +
+                            std::to_wstring(adaptive_resource_quality.cpu) +
+                            L"%, GPU " +
+                            std::to_wstring(adaptive_resource_quality.gpu) +
+                            L"%, VRAM " +
+                            std::to_wstring(adaptive_resource_quality.vram) +
+                            L"%, RAM " +
+                            std::to_wstring(adaptive_resource_quality.ram) +
+                            L"%, overdraw " +
+                            std::to_wstring(adaptive_resource_quality.overdraw) +
+                            L"%, effects " +
+                            std::to_wstring(adaptive_resource_quality.effects) +
+                            L"%) after an exact authenticated APPLIED readback; fresh post-action frame window started",
+                        L"optimizer"});
+                } else {
+                    events->append({0, diagnostics::Severity::warning,
+                        "ADAPTIVE_RUNTIME_QUALITY_RECEIPT_REJECTED",
+                        L"An outdated or invalid quality receipt was ignored; the confirmed quality and observation window were preserved",
+                        L"optimizer"});
+                }
             } else {
                 static_cast<void>(adaptive_actuation.receive({
                     pending.action_id,
@@ -291,6 +302,8 @@ void UiRuntime::update_adaptive_controller(
         adaptive_resource_quality.reset(
             optimizer_settings.adaptive_maximum_quality);
         adaptive_quality_last_dispatch_ns = 0;
+        adaptive_quality_last_applied_ns = 0;
+        adaptive_frame_not_before_ns = now_ns;
         events->append({0, diagnostics::Severity::info,
             "ADAPTIVE_GAMEPLAY_STARTED",
             L"Adaptive began a fresh controller window after verified active gameplay was detected",
@@ -306,6 +319,12 @@ void UiRuntime::update_adaptive_controller(
         frame.flex->particle_capacity > 0 &&
         frame.flex->aggregate_active_particles >= 0 &&
         frame.flex->last_update_tick != 0;
+    // Keep the overlay's historical statistics intact. Only the controller
+    // excludes presents from before its latest gameplay/action boundary.
+    const auto frames = present_source && adaptive_frame_not_before_ns != 0
+        ? present_source->drain(now_ns, 2'000'000'000ULL,
+                                adaptive_frame_not_before_ns)
+        : frame.frames;
     const auto sample_build = telemetry_pipeline::build_adaptive_sample(
         frame,
         {.current_quality = current_quality,
@@ -319,7 +338,8 @@ void UiRuntime::update_adaptive_controller(
          .effects_control_verified = frame.offline_gameplay &&
              frame.gameplay &&
              frame.gameplay->telemetry_control_port.has_value() &&
-             game::valid_adaptive_control_token(adaptive_control_token)});
+             game::valid_adaptive_control_token(adaptive_control_token),
+         .decision_frames = frames});
     adaptive_map = sample_build.map;
     adaptive_map_generation = sample_build.map_generation;
     adaptive_telemetry_sample = sample_build.telemetry_sample;
@@ -335,6 +355,7 @@ void UiRuntime::update_adaptive_controller(
     }
     if (requires_fresh_frame_window(sample_build) && present_source) {
         present_source->reset_statistics();
+        adaptive_frame_not_before_ns = now_ns;
         adaptive_governor.reset();
         adaptive_decision = {};
         events->append({0, diagnostics::Severity::info,
@@ -491,7 +512,9 @@ void UiRuntime::update_adaptive_controller(
                 sample.capabilities.particle_control ==
                     optimizer::AdaptiveCapabilityState::available,
             .now_ns = now_ns,
-            .last_dispatch_ns = adaptive_quality_last_dispatch_ns});
+            .last_dispatch_ns = adaptive_quality_last_dispatch_ns,
+            .last_applied_ns = adaptive_quality_last_applied_ns,
+            .sample_timestamp_ns = sample.timestamp_ns});
     if (runtime_selection) {
         const auto previous_quality = selected_runtime_quality;
         const auto& proposed = adaptive_actuation.propose(
@@ -520,6 +543,40 @@ void UiRuntime::update_adaptive_controller(
                     .generation = proposed.generation,
                     .previous_quality = previous_quality,
                     .requested_quality = runtime_selection->quality};
+                // Record the exact dispatch evidence separately from the
+                // throttled decision log. This is a request, not an APPLIED
+                // receipt; never include the authenticated bridge token.
+                if (optimizer_settings.adaptive_logging) {
+                    const auto resource_name = game::adaptive_resource_control_name(
+                        runtime_selection->resource);
+                    std::wostringstream request_log;
+                    request_log << L"seq=" << next_sequence
+                        << L"; resource=" << widen(resource_name)
+                        << L"; quality=" << previous_quality << L"->"
+                        << runtime_selection->quality
+                        << L"; state=" << optimizer::adaptive_controller_state_name(
+                            adaptive_decision.state)
+                        << L"; framePressure=" << adaptive_decision.current_frame_pressure
+                        << L"; memoryPressure=" << adaptive_decision.current_resource_pressure
+                        << L"; target=" << effective_target_fps();
+                    const auto append_metric = [&](std::wstring_view name,
+                                                   std::optional<double> value) {
+                        request_log << L"; " << name << L"=";
+                        if (value) request_log << *value;
+                        else request_log << L"NOT_AVAILABLE";
+                    };
+                    append_metric(L"fps", sample.fps);
+                    append_metric(L"avg", sample.average_fps);
+                    append_metric(L"p95ms", sample.p95_frame_time_ms);
+                    append_metric(L"low3s", sample.sustained_one_percent_low_fps);
+                    append_metric(L"low10s", sample.one_percent_low_fps);
+                    request_log << L"; stutters=" << sample.stutter_count
+                        << L"; sampleNs=" << sample.timestamp_ns
+                        << L"; lastAppliedNs=" << adaptive_quality_last_applied_ns;
+                    events->append({0, diagnostics::Severity::info,
+                        "ADAPTIVE_RUNTIME_QUALITY_REQUESTED",
+                        request_log.str(), L"optimizer"});
+                }
             } else {
                 static_cast<void>(adaptive_actuation.receive({
                     proposed.action_id,
@@ -749,6 +806,8 @@ void UiRuntime::update_adaptive_controller(
         } else {
             decision_log << L"NOT_AVAILABLE";
         }
+        decision_log << L"; frameWindowSinceNs=" << adaptive_frame_not_before_ns
+                     << L"; lastQualityAppliedNs=" << adaptive_quality_last_applied_ns;
         decision_log << L"; CPU=";
         if (frame.evidence.cpu_percent) {
             decision_log << *frame.evidence.cpu_percent << L"%";

@@ -209,6 +209,70 @@ int main() {
     CHECK(persistent_low.current_frame_pressure);
     CHECK(persistent_low.recommended_profile == Profile::high_performance);
 
+    // Significant short-window tail pressure must be continuous. Mild lows
+    // interrupt confirmation even if they still cross the live-FPS bands.
+    AdaptiveGovernor easing_tail_governor;
+    static_cast<void>(drive(easing_tail_governor, adaptive,
+        persistent_low_sample, start, 3'000'000'000ULL));
+    auto mild_tail = persistent_low_sample;
+    mild_tail.sustained_one_percent_low_fps = 55.0;
+    mild_tail.one_percent_low_fps = 54.0;
+    const auto mild_tail_result = drive(easing_tail_governor, adaptive,
+        mild_tail, start + 3'200'000'000ULL, 800'000'000ULL);
+    CHECK(!mild_tail_result.current_frame_pressure);
+    const auto fresh_tail_confirmation = drive(easing_tail_governor, adaptive,
+        persistent_low_sample, start + 4'200'000'000ULL, 1'000'000'000ULL);
+    CHECK(!fresh_tail_confirmation.current_frame_pressure);
+
+    // An exact quality receipt starts a new frame-evidence epoch. The stale
+    // low-percentile windows that caused the change cannot cause another one;
+    // only post-receipt samples may populate the new controller history.
+    AdaptiveGovernor applied_boundary_governor;
+    const auto before_applied_boundary = drive(
+        applied_boundary_governor, adaptive, persistent_low_sample,
+        start, 4'400'000'000ULL);
+    CHECK(before_applied_boundary.state ==
+          AdaptiveControllerState::intervention);
+    constexpr std::uint64_t applied_boundary_ns =
+        start + 4'600'000'000ULL;
+    applied_boundary_governor.notify_quality_applied(applied_boundary_ns);
+    auto pre_receipt = persistent_low_sample;
+    pre_receipt.timestamp_ns = applied_boundary_ns - 1;
+    const auto rejected_pre_receipt = applied_boundary_governor.evaluate(
+        adaptive, pre_receipt, applied_boundary_ns);
+    CHECK(rejected_pre_receipt.state == AdaptiveControllerState::observing);
+    CHECK(rejected_pre_receipt.disposition == AdaptiveDisposition::hold);
+    CHECK(rejected_pre_receipt.reason ==
+          "quality_applied_waiting_for_fresh_frame");
+    const auto fresh_after_receipt = sample(
+        applied_boundary_ns + 200'000'000ULL, 60.0, 1000.0 / 60.0,
+        17.0, 35.0, 60.0);
+    const auto clean_post_receipt = applied_boundary_governor.evaluate(
+        adaptive, fresh_after_receipt, fresh_after_receipt.timestamp_ns);
+    CHECK(clean_post_receipt.state == AdaptiveControllerState::observing);
+    CHECK(!clean_post_receipt.current_frame_pressure);
+
+    // The receipt boundary rebases only frame evidence. A slowly releasing
+    // VRAM signal remains available to protect against sustained pressure.
+    AdaptiveGovernor resource_boundary_governor;
+    auto high_vram = sample(
+        start, 60.0, 1000.0 / 60.0, 17.0, 35.0, 60.0);
+    high_vram.vram_used_bytes = 7.9 * 1024.0 * 1024.0 * 1024.0;
+    high_vram.vram_budget_bytes = 8.0 * 1024.0 * 1024.0 * 1024.0;
+    const auto high_vram_decision = drive(
+        resource_boundary_governor, adaptive, high_vram,
+        start, 1'000'000'000ULL);
+    CHECK(high_vram_decision.current_resource_pressure);
+    resource_boundary_governor.notify_quality_applied(
+        start + 1'200'000'000ULL);
+    auto easing_vram = high_vram;
+    easing_vram.timestamp_ns = start + 1'400'000'000ULL;
+    easing_vram.vram_used_bytes = 6.8 * 1024.0 * 1024.0 * 1024.0;
+    const auto retained_resource_pressure = resource_boundary_governor.evaluate(
+        adaptive, easing_vram, easing_vram.timestamp_ns);
+    CHECK(retained_resource_pressure.current_resource_pressure);
+    CHECK(!retained_resource_pressure.current_frame_pressure);
+
     for (const int target : {30, 86, 122, 211, 240}) {
         AdaptivePolicy target_policy = adaptive;
         target_policy.target_fps = target;
