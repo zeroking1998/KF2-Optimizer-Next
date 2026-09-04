@@ -3,6 +3,7 @@
 #include <iostream>
 
 #include "features/telemetry/telemetry_adaptive_stage.hpp"
+#include "features/telemetry/corpse_telemetry_state.hpp"
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -108,6 +109,85 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
 }  // namespace
 
 int main() {
+    {
+        using namespace kf2::telemetry_pipeline;
+        constexpr std::uint64_t second = 1'000'000'000ULL;
+        auto ready = complete_frame();
+        ready.active_gameplay = true;
+        ready.offline_gameplay = true;
+        ready.gameplay->net_mode = "NM_Standalone";
+        ready.gameplay->telemetry_sample = 5;
+        ready.gameplay->telemetry_corpse_limit = 2000;
+        ready.gameplay->telemetry_corpse_total = 20;
+        ready.gameplay->telemetry_observed_ns = ready.observed_at_ns;
+        CorpseTelemetryTracker tracker;
+        CHECK(tracker.observe(ready).state == CorpseTelemetryState::available);
+        CHECK(!tracker.observe(ready).event);
+        auto gap = ready;
+        gap.gameplay->telemetry_corpse_limit.reset();
+        gap.observed_at_ns += second;
+        auto result = tracker.observe(gap);
+        CHECK(result.state == CorpseTelemetryState::stale);
+        CHECK(result.runtime_limit == 2000);
+        CHECK(std::string_view{result.event} == "CORPSE_TELEMETRY_STALE");
+        const auto gap_start = gap.observed_at_ns;
+        gap.gameplay->map = "KF-NextMap";
+        gap.observed_at_ns += 9 * second;
+        result = tracker.observe(gap);
+        CHECK(result.state == CorpseTelemetryState::stale);
+        CHECK(!result.event); // Map changes cannot renew the grace period.
+        gap.observed_at_ns = gap_start + CorpseTelemetryTracker::grace_ns;
+        result = tracker.observe(gap);
+        CHECK(result.state == CorpseTelemetryState::unavailable);
+        CHECK(!result.runtime_limit);
+        CHECK(std::string_view{result.event} == "CORPSE_TELEMETRY_UNAVAILABLE");
+        CHECK(!tracker.observe(gap).event);
+
+        tracker.reset();
+        CHECK(tracker.observe(ready).state == CorpseTelemetryState::available);
+        gap = ready;
+        gap.gameplay.reset();
+        gap.observed_at_ns += second;
+        CHECK(tracker.observe(gap).state == CorpseTelemetryState::stale);
+        auto recovered = ready;
+        recovered.observed_at_ns += 2 * second;
+        recovered.gameplay->telemetry_observed_ns = recovered.observed_at_ns;
+        recovered.gameplay->telemetry_corpse_limit = 1500;
+        result = tracker.observe(recovered);
+        CHECK(result.state == CorpseTelemetryState::available);
+        CHECK(result.runtime_limit == 1500);
+        CHECK(std::string_view{result.event} == "CORPSE_TELEMETRY_RECOVERED");
+        CHECK(!tracker.observe(recovered).event);
+
+        // A long evaluation pause must not start a brand-new grace window.
+        recovered.observed_at_ns += 26 * second;
+        result = tracker.observe(recovered);
+        CHECK(result.state == CorpseTelemetryState::unavailable);
+        CHECK(!result.runtime_limit);
+
+        for (int boundary = 0; boundary < 6; ++boundary) {
+            tracker.reset();
+            auto initial = ready;
+            initial.gameplay->telemetry_control_port = std::uint16_t{1234};
+            CHECK(tracker.observe(initial).state == CorpseTelemetryState::available);
+            auto changed = initial;
+            changed.observed_at_ns += second;
+            changed.gameplay->telemetry_corpse_limit.reset();
+            if (boundary == 0) ++changed.identity.process_start_id;
+            if (boundary == 1) changed.gameplay->net_mode = "NM_Client";
+            if (boundary == 2) changed.gameplay->telemetry_control_port = std::uint16_t{2345};
+            if (boundary == 3) changed.gameplay->telemetry_sample = 1;
+            if (boundary == 5) changed.gameplay->telemetry_observed_ns = changed.observed_at_ns + second;
+            result = tracker.observe(changed, boundary != 4);
+            CHECK(result.state == CorpseTelemetryState::unavailable);
+            CHECK(!result.runtime_limit);
+        }
+        tracker.reset();
+        gap = ready;
+        gap.gameplay->telemetry_corpse_limit.reset();
+        CHECK(tracker.observe(gap).state == CorpseTelemetryState::unavailable);
+        CHECK(!tracker.observe(gap).runtime_limit);
+    }
     using namespace kf2;
     using namespace kf2::telemetry_pipeline;
     CHECK(should_log_adaptive_decision(

@@ -24,6 +24,7 @@
 #include "app/application_runtime.hpp"
 #include "app/runtime/feature_composition.hpp"
 #include "features/telemetry/telemetry_session_stage.hpp"
+#include "features/telemetry/telemetry_frame.hpp"
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -879,6 +880,82 @@ int main() {
     CHECK(graphical.value().shutdown_cleanly().has_value());
     CHECK(read_bytes(options.state_root / L"session.marker").ends_with(
         "clean_shutdown=true\n"));
+
+    // A transient provider gap must not erase the last confirmed corpse limit
+    // or start fallback decisions. Exercise the real runtime, not just a label.
+    {
+        kf2::diagnostics::EventLog transition_events{128};
+        kf2::app::UiRuntime runtime{root / L"Data-transition", false,
+            kf2::config::Settings{}, transition_events, options.game_discovery,
+            kf2::app::StartMode::read_only, root / L"portable"};
+        runtime.game_process = kf2::game::GameProcessIdentity{424242, 9001, {}};
+        kf2::telemetry_pipeline::TelemetryFrame frame;
+        frame.identity = {424242, 9001};
+        frame.active_gameplay = true;
+        frame.offline_gameplay = true;
+        frame.gameplay.emplace();
+        frame.gameplay->map = "KF-Test";
+        frame.gameplay->net_mode = "NM_Standalone";
+        frame.gameplay->telemetry_sample = 1;
+        frame.gameplay->telemetry_corpse_limit = 2000;
+        frame.gameplay->telemetry_corpse_total = 20;
+        frame.observed_at_ns = 20'000'000'000ULL;
+        frame.gameplay->telemetry_observed_ns = frame.observed_at_ns;
+        runtime.update_adaptive_controller(frame);
+        frame.observed_at_ns += 250'000'000ULL;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.model.status().adaptive_runtime_corpse_limit == 2000);
+        frame.gameplay->telemetry_corpse_limit = 1950;
+        frame.observed_at_ns += 250'000'000ULL;
+        frame.gameplay->telemetry_observed_ns = frame.observed_at_ns;
+        runtime.update_adaptive_controller(frame);
+        frame.gameplay->telemetry_corpse_limit = 2000;
+        frame.observed_at_ns += 250'000'000ULL;
+        frame.gameplay->telemetry_observed_ns = frame.observed_at_ns;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.model.status().adaptive_corpse_action_status == L"APPLIED");
+        // A partial readback used to pass the general gameplay gate and enter
+        // fallback selection. Other telemetry is still fresh during this gap.
+        frame.gameplay->telemetry_corpse_limit.reset();
+        frame.observed_at_ns += 250'000'000ULL;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.model.status().adaptive_corpse_capability == L"STALE");
+        CHECK(runtime.model.status().adaptive_runtime_corpse_limit == 2000);
+        CHECK(runtime.model.status().adaptive_action == L"hold");
+        // Even mode reconciliation must not start a new enable request using
+        // a partial corpse readback. Explicit user disable remains permitted.
+        frame.gameplay->telemetry_control_port = std::uint16_t{1};
+        runtime.adaptive_control_token = "0123456789abcdef0123456789abcdef";
+        const auto gap_start = frame.observed_at_ns;
+        const auto event_count = transition_events.snapshot().size();
+        for (int tick = 1; tick <= 39; ++tick) {
+            frame.observed_at_ns = gap_start + tick * 250'000'000ULL;
+            runtime.update_adaptive_controller(frame);
+            CHECK(runtime.model.status().adaptive_corpse_capability == L"STALE");
+            CHECK(runtime.model.status().adaptive_runtime_corpse_limit == 2000);
+            CHECK(runtime.model.status().adaptive_action == L"hold");
+            CHECK(runtime.model.status().adaptive_corpse_action_status == L"NONE");
+            CHECK(!runtime.adaptive_runtime_mode_port);
+            CHECK(!runtime.adaptive_mode_dispatcher.busy());
+        }
+        CHECK(transition_events.snapshot().size() == event_count);
+        runtime.adaptive_control_token.clear();
+        frame.gameplay->telemetry_control_port.reset();
+        frame.observed_at_ns = gap_start + 10'000'000'000ULL;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.model.status().adaptive_corpse_capability == L"UNAVAILABLE");
+        CHECK(!runtime.model.status().adaptive_runtime_corpse_limit);
+        CHECK(runtime.model.status().adaptive_corpse_action_status == L"NONE");
+        frame.gameplay->telemetry_sample = 2;
+        frame.gameplay->telemetry_corpse_limit = 1500;
+        frame.gameplay->telemetry_corpse_total = 10;
+        frame.observed_at_ns += 250'000'000ULL;
+        frame.gameplay->telemetry_observed_ns = frame.observed_at_ns;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.model.status().adaptive_corpse_capability == L"AVAILABLE");
+        CHECK(runtime.model.status().adaptive_runtime_corpse_limit == 1500);
+        runtime.game_process.reset();
+    }
 
     // A single optimizer process can supervise multiple KF2 launches. After
     // one protected session is restored, the next Steam/shortcut launch must
