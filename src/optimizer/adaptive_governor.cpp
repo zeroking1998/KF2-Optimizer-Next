@@ -880,21 +880,36 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
         : FrameSignalLevel::healthy;
     const bool long_low_unhealthy =
         long_low_level != FrameSignalLevel::healthy;
+    const auto short_percentile_tail = sample.sustained_one_percent_low_fps
+        ? level_for_tail(1000.0 / *sample.sustained_one_percent_low_fps,
+                         target_frame_time)
+        : FrameSignalLevel::healthy;
+    const auto long_percentile_tail = sample.one_percent_low_fps
+        ? level_for_tail(1000.0 / *sample.one_percent_low_fps, target_frame_time)
+        : FrameSignalLevel::healthy;
+    const bool percentile_pressure_corroborated =
+        at_least(level_for_tail(sample.p95_frame_time_ms.value_or(
+                                   *sample.frame_time_ms), target_frame_time),
+                 FrameSignalLevel::corrective) ||
+        at_least(level_for_fps(*sample.fps, stability_bands),
+                 FrameSignalLevel::warning) ||
+        at_least(average_level, FrameSignalLevel::warning) ||
+        sample.stutter_count != 0;
+    const bool severe_percentile_pressure =
+        at_least(short_percentile_tail, FrameSignalLevel::emergency) &&
+        at_least(long_percentile_tail, FrameSignalLevel::emergency);
     const bool low_percentiles_need_correction =
         decision.data.quality == AdaptiveDataQuality::valid &&
         at_least(sustained_low_level, FrameSignalLevel::corrective) &&
         at_least(long_low_level, FrameSignalLevel::corrective) &&
         // Percentiles describe the slowest frames, not sustained throughput.
-        // Applying only the live-FPS tolerance here ratchets quality down at
-        // the cap (50 FPS with 46-FPS lows). Require a material tail deficit
-        // as well: the existing 15% frame-time correction threshold, in both
-        // windows. Smaller deviations still warn and prevent early recovery.
-        at_least(level_for_tail(
-                     1000.0 / *sample.sustained_one_percent_low_fps,
-                     target_frame_time), FrameSignalLevel::corrective) &&
-        at_least(level_for_tail(
-                     1000.0 / *sample.one_percent_low_fps,
-                     target_frame_time), FrameSignalLevel::corrective);
+        // Moderate tails alone must not ratchet quality down at capped FPS.
+        // Require current corroboration, or both windows crossing the existing
+        // 30% severe-tail threshold. Zero counted stutters alone is not proof
+        // of smooth pacing: their threshold can be as high as 50 ms.
+        at_least(short_percentile_tail, FrameSignalLevel::corrective) &&
+        at_least(long_percentile_tail, FrameSignalLevel::corrective) &&
+        (percentile_pressure_corroborated || severe_percentile_pressure);
     if (low_percentiles_need_correction) {
         if (low_percentile_pressure_since_ns_ == 0) {
             low_percentile_pressure_since_ns_ = now_ns;

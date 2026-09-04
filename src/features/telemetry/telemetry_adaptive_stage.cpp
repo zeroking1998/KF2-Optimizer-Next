@@ -19,6 +19,57 @@ void UiRuntime::update_adaptive_controller(
     const auto now_ns = frame.observed_at_ns;
     const bool active_gameplay = frame.active_gameplay;
     auto status = model.status();
+    const auto log_response = [&](const auto& report) {
+        if (!report || !optimizer_settings.adaptive_logging) return;
+        const auto& r = *report;
+        std::wostringstream message;
+        message << L"seq=" << r.sequence << L"; resource=" << std::wstring{r.resource.begin(), r.resource.end()}
+            << L"; quality=" << r.from << L"->" << r.to
+            << L"; result=" << std::wstring{r.result.begin(), r.result.end()}
+            << L"; nominalWindowMs=5000; settleMs=1000; causalProof=false";
+        const auto append = [&](const wchar_t* label, const auto& window) {
+            message << L"; " << label << L"SpanMs=" << window.span_ns / 1'000'000
+                << L"; " << label << L"Frames=" << window.count;
+            const auto metric = [&](const wchar_t* name, auto value) {
+                message << L"; " << label << name << L"=";
+                if (value) message << *value;
+                else message << L"NOT_AVAILABLE";
+            };
+            metric(L"AvgFps", window.metrics.average_fps);
+            metric(L"P95ms", window.metrics.p95_ms);
+            metric(L"LowFps", window.metrics.one_percent_low_fps);
+        };
+        append(L"before", r.before);
+        append(L"after", r.after);
+        events->append({0, diagnostics::Severity::info,
+            "ADAPTIVE_QUALITY_RESPONSE", message.str(), L"optimizer"});
+    };
+    optimizer::QualityResponse::Context response_context{
+        frame.identity, frame.gameplay ? frame.gameplay->map : "",
+        frame.adapter_luid, effective_target_fps(),
+        frame.gameplay ? frame.gameplay->telemetry_living_visible : std::nullopt,
+        frame.gameplay ? frame.gameplay->telemetry_corpse_total : std::nullopt,
+        optimizer_settings.adaptive_optimization_enabled && frame.active_gameplay &&
+        frame.offline_gameplay && frame.gameplay && frame.adapter_luid &&
+        frame.gameplay->telemetry_sample.value_or(0) > 0 &&
+        frame.gameplay->telemetry_observed_ns != 0 &&
+        now_ns >= frame.gameplay->telemetry_observed_ns &&
+        now_ns - frame.gameplay->telemetry_observed_ns <= game::kGameLogObservationFreshnessNs &&
+        frame.gameplay->telemetry_zed_time_active == false &&
+        frame.frames.quality == telemetry::SampleQuality::good};
+    const auto baseline_end = quality_response.baseline_end_ns();
+    if (present_source && baseline_end >= optimizer::QualityResponse::window_ns &&
+        now_ns >= baseline_end &&
+        now_ns - baseline_end <= optimizer::QualityResponse::delivery_grace_ns) {
+        quality_response.refresh_baseline(now_ns, present_source->measure_window(
+            baseline_end - optimizer::QualityResponse::window_ns, baseline_end));
+    }
+    const auto response_end = quality_response.end_ns();
+    const auto post_window = present_source && response_end && now_ns >= response_end
+        ? present_source->measure_window(response_end - optimizer::QualityResponse::window_ns,
+                                          response_end)
+        : telemetry::PresentSource::Window{};
+    log_response(quality_response.observe(response_context, now_ns, post_window));
     if (auto mode_outcome = adaptive_mode_dispatcher.poll()) {
         const bool expected_enabled =
             adaptive_runtime_mode_pending.value_or(
@@ -143,6 +194,7 @@ void UiRuntime::update_adaptive_controller(
                     static_cast<double>(pending.previous_quality)});
                 if (receipt_result ==
                     optimizer::AdaptiveReceiptResult::accepted) {
+                    quality_response.confirm(pending.sequence, completed_ns);
                     adaptive_resource_quality.apply(outcome->value());
                     adaptive_quality_last_applied_ns = completed_ns;
                     adaptive_frame_not_before_ns = completed_ns;
@@ -353,11 +405,32 @@ void UiRuntime::update_adaptive_controller(
             L"KF2 runtime telemetry confirmed the protected Published provider and exposed its current capabilities",
             L"game"});
     }
-    if (requires_fresh_frame_window(sample_build) && present_source) {
-        present_source->reset_statistics();
+    if (requires_fresh_frame_window(sample_build)) {
         adaptive_frame_not_before_ns = now_ns;
         adaptive_governor.reset();
         adaptive_decision = {};
+        adaptive_profile_gate.reset();
+        if (sample_build.waiting_for_gameplay_telemetry) {
+            // Keep advancing the controller boundary while loading, without
+            // repeatedly clearing the overlay history or flooding the log.
+            status.adaptive_state = L"observing";
+            status.adaptive_action = L"hold";
+            status.adaptive_bottleneck = L"unknown";
+            status.adaptive_cpu_parallelism = L"waiting for gameplay telemetry";
+            status.adaptive_reason = L"Waiting for fresh gameplay telemetry";
+            status.adaptive_confidence_percent = 0;
+            status.adaptive_drop_risk_percent = 0;
+            status.adaptive_headroom_available_percent = 0;
+            status.adaptive_data_quality = L"NOT_AVAILABLE";
+            status.adaptive_prediction = L"not available";
+            status.adaptive_source = L"not selected";
+            status.adaptive_safety = L"no actuator";
+            status.adaptive_evidence = L"NOT_AVAILABLE";
+            status.recommendation_reason = status.adaptive_reason;
+            model.set_status(std::move(status));
+            return;
+        }
+        if (present_source) present_source->reset_statistics();
         events->append({0, diagnostics::Severity::info,
             "ADAPTIVE_FRAME_WINDOW_RESET",
             L"Adaptive discarded pre-map and loading-frame statistics and is collecting a fresh gameplay window",
@@ -538,7 +611,17 @@ void UiRuntime::update_adaptive_controller(
             if (started.has_value() && started.value()) {
                 adaptive_control_sequence = next_sequence;
                 adaptive_quality_last_dispatch_ns = now_ns;
+                log_response(quality_response.cancel("superseded_by_next_action"));
+                const auto baseline = present_source && now_ns >= optimizer::QualityResponse::window_ns &&
+                    now_ns - optimizer::QualityResponse::window_ns >= adaptive_frame_not_before_ns
+                    ? present_source->measure_window(now_ns - optimizer::QualityResponse::window_ns, now_ns)
+                    : telemetry::PresentSource::Window{};
+                quality_response.begin(next_sequence,
+                    std::string{game::adaptive_resource_control_name(runtime_selection->resource)},
+                    previous_quality, runtime_selection->quality, now_ns,
+                    response_context, baseline);
                 adaptive_control_pending = AdaptiveRuntimePendingRequest{
+                    .sequence = next_sequence,
                     .action_id = proposed.action_id,
                     .generation = proposed.generation,
                     .previous_quality = previous_quality,

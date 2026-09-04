@@ -56,6 +56,27 @@ int main() {
         "0123456789abcdef0123456789abcdef";
     const auto telemetry_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_SOURCE));
+    const auto wake_test_source = normalize_newlines(read_bytes(
+        fs::path{KF2_TELEMETRY_SOURCE}.parent_path() /
+        "KF2OptimizerNativeWakeTest.uc"));
+    CHECK(telemetry_source.find("bDebugNativeWakeTest=false") != std::string::npos);
+    CHECK(telemetry_source.find("DebugNativeWakeTest.Finish(\"incomplete\", \"world_teardown\")") != std::string::npos);
+    CHECK(wake_test_source.find("WorldInfo.NetMode != NM_Standalone") != std::string::npos);
+    CHECK(wake_test_source.find("Target.Health > 0") != std::string::npos);
+    CHECK(wake_test_source.find("max_cycles=6 timeout_s=240") != std::string::npos);
+    CHECK(wake_test_source.find("physics_changed_by_other_system") != std::string::npos);
+    CHECK(wake_test_source.find("resleep_before_deadline") != std::string::npos);
+    CHECK(wake_test_source.find("origin=injected_test") != std::string::npos);
+    CHECK(wake_test_source.find("PutRigidBodyToSleep") == std::string::npos);
+    CHECK(wake_test_source.find("SetPhysics") == std::string::npos);
+    CHECK(wake_test_source.find("target_disappeared") <
+          wake_test_source.find("for (Index = 0; Index < Probe.AdaptiveDistanceSleptCorpses.Length"));
+    CHECK(wake_test_source.find("Finish(\"partial\", \"aging_sleep_after_backoff\")") != std::string::npos);
+    CHECK(wake_test_source.find("Elapsed = SleepObservedAt - ObservedAt;") != std::string::npos);
+    CHECK(wake_test_source.find("function bool ConsumeInjectedWake(string CorpseId)") != std::string::npos);
+    CHECK(telemetry_source.find("wake_origin=injected_test") != std::string::npos);
+    CHECK(telemetry_source.find("wake_origin=unattributed") != std::string::npos);
+    CHECK(telemetry_source.find("DebugNativeWakeTest.ObserveSleep(Candidate, \"distance\")") != std::string::npos);
     const auto mutator_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_MUTATOR_SOURCE));
     const auto interaction_source = normalize_newlines(
@@ -1373,6 +1394,18 @@ int main() {
         "ownership_tracked=", ragdoll_receipt);
     CHECK(ragdoll_selector != std::string::npos);
     CHECK(ragdoll_function != std::string::npos);
+    // Every ragdoll path must honor the same per-actor native-wake deadline.
+    // Filtering before selection lets other eligible corpses proceed.
+    const auto ragdoll_selector_body = telemetry_source.substr(
+        ragdoll_selector, ragdoll_function - ragdoll_selector);
+    CHECK(ragdoll_selector_body.find(
+        "DeferAdaptiveDistanceResleepAfterNativeWake(Candidate)") !=
+        std::string::npos);
+    const auto ragdoll_before_sleep = telemetry_source.substr(
+        ragdoll_function, ragdoll_sleep_call - ragdoll_function);
+    CHECK(ragdoll_before_sleep.find(
+        "DeferAdaptiveDistanceResleepAfterNativeWake(Candidate)") !=
+        std::string::npos);
     CHECK(ragdoll_ownership_array != std::string::npos);
     CHECK(ragdoll_ownership_count != std::string::npos);
     CHECK(ragdoll_ownership_capacity != std::string::npos);

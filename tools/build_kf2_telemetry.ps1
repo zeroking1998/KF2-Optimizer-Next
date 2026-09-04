@@ -91,13 +91,15 @@ $adaptiveGraphicsSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerAdaptiveGraphics.uc'
 $adaptiveGraphicsStateSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerAdaptiveGraphicsState.uc'
+$nativeWakeTestSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerNativeWakeTest.uc'
 
 foreach ($required in @($editorPath, $configPath,
                          $probeSource,
                          $mutatorSource, $interactionSource,
                          $adaptiveListenerSource,
                          $adaptiveConnectionSource, $adaptiveGraphicsSource,
-                         $adaptiveGraphicsStateSource)) {
+                         $adaptiveGraphicsStateSource, $nativeWakeTestSource)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Required KF2 telemetry build input is missing: $required"
     }
@@ -170,6 +172,8 @@ try {
         (Join-Path $classesRoot 'KF2OptimizerAdaptiveControlListener.uc')
     Copy-Item -LiteralPath $adaptiveConnectionSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerAdaptiveControlConnection.uc')
+    Copy-Item -LiteralPath $nativeWakeTestSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerNativeWakeTest.uc')
     # KFEditor uses source timestamps for its incremental make decision. Touch
     # only the disposable staging copies so a missing output is really rebuilt.
     # Copying the bootstrap package can give it the current timestamp on some

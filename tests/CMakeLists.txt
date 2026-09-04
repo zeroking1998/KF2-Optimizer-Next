@@ -840,6 +840,12 @@ add_executable(kf2_adaptive_quality_response_test
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
 )
+add_executable(kf2_quality_response_test
+    integration/quality_response_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
+    "${PROJECT_SOURCE_DIR}/src/telemetry/telemetry_snapshot.cpp")
+target_include_directories(kf2_quality_response_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
+add_test(NAME kf2_quality_response_test COMMAND kf2_quality_response_test)
 target_include_directories(kf2_adaptive_quality_response_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/src")
 add_test(NAME kf2_adaptive_quality_response_test

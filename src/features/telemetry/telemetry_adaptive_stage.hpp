@@ -46,11 +46,12 @@ struct AdaptiveSampleBuildResult final {
     std::string map;
     std::uint64_t map_generation{0};
     int telemetry_sample{0};
+    bool waiting_for_gameplay_telemetry{false};
 };
 
 [[nodiscard]] inline bool requires_fresh_frame_window(
     const AdaptiveSampleBuildResult& result) noexcept {
-    return result.sample.map_changed;
+    return result.sample.map_changed || result.waiting_for_gameplay_telemetry;
 }
 
 struct AdaptiveRuntimeControlInput final {
@@ -143,11 +144,18 @@ select_adaptive_runtime_control(
     // Receipt time, not request time, starts the response observation window.
     // A full 750-ms fast window plus margin must contain post-action presents.
     constexpr std::uint64_t kPostAppliedObservationNs = 1'000'000'000ULL;
+    // Ordinary changes need one second to settle, five seconds to observe,
+    // and one second for batched telemetry. Keep emergency handling fast.
+    // This controller rule is independent of diagnostic logging availability.
+    constexpr std::uint64_t kOrdinaryPostAppliedObservationNs = 7'000'000'000ULL;
+    const auto observation_ns = input.state ==
+            optimizer::AdaptiveControllerState::emergency
+        ? kPostAppliedObservationNs : kOrdinaryPostAppliedObservationNs;
     if (input.last_applied_ns != 0 &&
         (input.now_ns < input.last_applied_ns ||
          input.sample_timestamp_ns < input.last_applied_ns ||
          input.sample_timestamp_ns > input.now_ns ||
-         input.now_ns - input.last_applied_ns < kPostAppliedObservationNs ||
+         input.now_ns - input.last_applied_ns < observation_ns ||
          input.sample_timestamp_ns - input.last_applied_ns <
              kPostAppliedObservationNs)) {
         return std::nullopt;
@@ -387,11 +395,23 @@ select_adaptive_runtime_control(
     }
 
     if (frame.gameplay) {
+        const auto& net_mode = frame.gameplay->net_mode;
+        const bool connection_known = net_mode &&
+            (*net_mode == "NM_Standalone" || *net_mode == "NM_Client" ||
+             *net_mode == "NM_ListenServer" || *net_mode == "NM_DedicatedServer");
+        sample.gameplay_context_fresh =
+            frame.gameplay->telemetry_observed_ns != 0 &&
+            frame.observed_at_ns >= frame.gameplay->telemetry_observed_ns &&
+            frame.observed_at_ns - frame.gameplay->telemetry_observed_ns <=
+                game::kGameLogObservationFreshnessNs;
         bool telemetry_restarted = false;
         if (frame.gameplay->telemetry_sample) {
             result.telemetry_sample = *frame.gameplay->telemetry_sample;
-            telemetry_restarted = context.last_telemetry_sample > 0 &&
-                result.telemetry_sample < context.last_telemetry_sample;
+            telemetry_restarted = connection_known && frame.offline_gameplay &&
+                sample.gameplay_context_fresh &&
+                result.telemetry_sample > 0 &&
+                (context.last_telemetry_sample == 0 ||
+                 result.telemetry_sample < context.last_telemetry_sample);
         }
         if (frame.offline_gameplay) {
             sample.session_class =
@@ -409,13 +429,15 @@ select_adaptive_runtime_control(
             sample.map_changed = true;
         }
         sample.map_generation = result.map_generation;
-        sample.gameplay_context_fresh =
-            frame.gameplay->telemetry_observed_ns != 0 &&
-            frame.observed_at_ns >=
-                frame.gameplay->telemetry_observed_ns &&
-            frame.observed_at_ns -
-                    frame.gameplay->telemetry_observed_ns <=
-                game::kGameLogObservationFreshnessNs;
+        // LoadMap is not a readiness receipt. Start a fresh frame window at
+        // the first provider tick, and again after a telemetry interruption.
+        // Unknown connection type is also a loading boundary, not proof of
+        // online gameplay. Confirmed online sessions need no offline provider.
+        result.waiting_for_gameplay_telemetry = !connection_known ||
+            (frame.offline_gameplay &&
+            (!sample.gameplay_context_fresh ||
+             frame.gameplay->telemetry_sample.value_or(0) <= 0));
+        if (result.waiting_for_gameplay_telemetry) result.telemetry_sample = 0;
         sample.visibility_context_fresh =
             sample.gameplay_context_fresh &&
             frame.gameplay->telemetry_living_visible.has_value() &&

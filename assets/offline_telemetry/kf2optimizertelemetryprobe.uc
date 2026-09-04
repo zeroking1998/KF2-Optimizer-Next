@@ -63,6 +63,10 @@ var globalconfig bool bAdaptiveCorpseStagger;
 var globalconfig bool bAdaptiveRuntimeEnabled;
 var globalconfig bool bAdaptiveCorpseDebugMarkers;
 var globalconfig bool bAdaptiveZedDebugMarkers;
+// Manual, one-world diagnostic; never enabled by normal Adaptive settings.
+var globalconfig bool bDebugNativeWakeTest;
+var bool bDebugNativeWakeTestStarted;
+var KF2OptimizerNativeWakeTest DebugNativeWakeTest;
 var globalconfig int AdaptiveCorpseMaximum;
 var globalconfig int AdaptiveTargetFPS;
 var globalconfig int AdaptiveQualityChangeBudget;
@@ -1267,6 +1271,11 @@ function bool ApplyOneAdaptiveCorpseAging(KFGoreManager GoreManager)
              " effective_awake=0 physics="$
              (Candidate.Physics == PHYS_None ? "none" : "rigid_body")$
              " readback=verified");
+        if (DebugNativeWakeTest != None && !DebugNativeWakeTest.bDeleteMe)
+        {
+            DebugNativeWakeTest.ObserveSleep(
+                Candidate, Tier >= 3 ? "aging_freeze" : "aging");
+        }
         return true;
     }
 
@@ -2364,7 +2373,18 @@ function RemoveAdaptiveDistanceSleptCorpseEntry(
                     " resleep_after_ms="$int(FMax(0.0,
                         AdaptiveDistanceSleepTransitions[TransitionIndex].
                             NativeWakeCooldownUntilRealTime -
-                        WorldInfo.RealTimeSeconds) * 1000.0);
+                            WorldInfo.RealTimeSeconds) * 1000.0);
+            }
+            // Detection alone cannot identify who woke the body. Preserve
+            // the existing reason for compatibility, but label test stimuli.
+            if (DebugNativeWakeTest != None && !DebugNativeWakeTest.bDeleteMe &&
+                DebugNativeWakeTest.ConsumeInjectedWake(CorpseId))
+            {
+                BackoffFields = BackoffFields$" wake_origin=injected_test";
+            }
+            else
+            {
+                BackoffFields = BackoffFields$" wake_origin=unattributed";
             }
         }
         AdaptiveDistanceSleptCorpses.Remove(Index, 1);
@@ -2692,6 +2712,10 @@ function bool SleepOneDistantMonsterCorpse(
                  GetAdaptiveCorpseDistanceUnits(Candidate), false)$
              " effective_awake=0");
     }
+    if (DebugNativeWakeTest != None && !DebugNativeWakeTest.bDeleteMe)
+    {
+        DebugNativeWakeTest.ObserveSleep(Candidate, "distance");
+    }
     return true;
 }
 
@@ -2958,6 +2982,7 @@ function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(
             FindAdaptiveDistanceSleptCorpse(Candidate) != -1 ||
             FindAdaptiveCorpsePhysicsActionId("ragdoll",
                 GetAdaptiveCorpseActionId(Candidate)) != -1 ||
+            DeferAdaptiveDistanceResleepAfterNativeWake(Candidate) ||
             Candidate.Mesh.LastRenderTime <= WorldInfo.TimeSeconds - 0.3 ||
             !Candidate.Mesh.RigidBodyIsAwake() ||
             VSizeSq(Candidate.Velocity) > MaximumSpeedSquared)
@@ -3007,7 +3032,10 @@ function bool SleepOneVisibleMonsterCorpse(
     Candidate = SelectVisibleAwakeMonsterCorpseForSleep(
         GoreManager, SeverePressure, ScenePressureLevel,
         EnemyPressureLevel, FramePressureLevel);
-    if (Candidate == None || Candidate.Mesh == None)
+    // Ragdoll pressure must not bypass the per-actor native-wake backoff.
+    // Reuse the absolute deadline without resetting or extending it.
+    if (Candidate == None || Candidate.Mesh == None ||
+        DeferAdaptiveDistanceResleepAfterNativeWake(Candidate))
     {
         return false;
     }
@@ -3867,6 +3895,12 @@ function SampleTelemetry()
     EnsureAdaptiveDebugMarkerPostRender();
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=sample_begin");
+    if (bDebugNativeWakeTest && !bDebugNativeWakeTestStarted && bAdaptiveRuntimeEnabled)
+    {
+        bDebugNativeWakeTestStarted = true;
+        DebugNativeWakeTest = Spawn(class'KF2OptimizerNativeWakeTest');
+        if (DebugNativeWakeTest != None) DebugNativeWakeTest.Start(self);
+    }
 
     bSubmitNativeProfileNodes = ((SampleSequence + 1) % 10 == 0);
     ProfileTotalStartMilliseconds = GetProfileSystemMilliseconds();
@@ -4629,6 +4663,11 @@ function QuiesceForWorldTeardown()
         return;
     }
     bAdaptiveRuntimeQuiesced = true;
+    if (DebugNativeWakeTest != None && !DebugNativeWakeTest.bDeleteMe)
+    {
+        DebugNativeWakeTest.Finish("incomplete", "world_teardown");
+    }
+    DebugNativeWakeTest = None;
     RemoveAdaptiveDebugMarkerPostRender();
     ClearTimer(nameof(SampleTelemetry), self);
     ClearTimer(nameof(StaggerCorpseCleanup), self);
@@ -4726,5 +4765,6 @@ defaultproperties
     RemoteRole=ROLE_None
     bAdaptiveCorpseDebugMarkers=false
     bAdaptiveZedDebugMarkers=false
+    bDebugNativeWakeTest=false
     bAdaptiveRuntimeEnabled=true
 }

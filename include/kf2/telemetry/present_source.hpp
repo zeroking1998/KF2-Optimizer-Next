@@ -18,6 +18,17 @@ struct PresentEvent {
 };
 class PresentSource final {
 public:
+    struct Window {
+        FrameMetrics metrics;
+        std::uint64_t stream_id{0};
+        std::uint64_t generation{0};
+        std::uint64_t span_ns{0};
+        std::size_t count{0};
+        bool complete{false};
+    };
+    // Read-only, single-stream statistics for a fixed diagnostic interval.
+    [[nodiscard]] Window measure_window(std::uint64_t begin_ns,
+                                        std::uint64_t end_ns) const;
     PresentSource(SampleIdentity identity, std::size_t capacity);
     [[nodiscard]] Result<bool> start();
     [[nodiscard]] Result<bool> stop();
@@ -33,6 +44,8 @@ private:
     bool running_{false};
     bool schema_failure_{false};
     std::uint64_t reported_loss_{0};
+    std::uint64_t diagnostic_generation_{0}, diagnostic_boundary_ns_{0};
+    std::optional<std::uint64_t> last_stream_;
     std::unordered_map<std::uint64_t, std::deque<PresentTimestamp>> streams_;
     mutable std::mutex mutex_;
 };

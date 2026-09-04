@@ -3,6 +3,7 @@
 
 #include "features/telemetry/telemetry_adaptive_stage.hpp"
 #include "kf2/telemetry/present_source.hpp"
+#include "kf2/optimizer/adaptive_stability.hpp"
 
 #define CHECK(condition) do { if (!(condition)) { \
     std::cerr << __LINE__ << ": " #condition << '\n'; return EXIT_FAILURE; \
@@ -13,6 +14,56 @@ int main() {
     using namespace kf2::telemetry_pipeline;
     constexpr std::uint64_t receipt_ns = 20'000'000'000ULL;
     const telemetry::SampleIdentity identity{42, 9001};
+    // A LoadMap interval can contain very slow presents for any duration.
+    // Rebase at the first provider tick before admitting quality decisions.
+    for (const bool recovered : {true, false}) {
+        telemetry::PresentSource source{identity, 2048};
+        CHECK(source.start().has_value());
+        optimizer::AdaptiveGovernor governor;
+        optimizer::AdaptivePolicy policy;
+        policy.target_fps = 60;
+        TelemetryFrame frame;
+        frame.identity = identity;
+        frame.adapter_luid = 77;
+        frame.active_gameplay = true;
+        frame.offline_gameplay = false;
+        frame.gameplay.emplace();
+        frame.gameplay->map = "KF-CastleVolter";
+        AdaptiveSampleContext context;
+        context.current_map = "KF-BioticsLab";
+        context.last_telemetry_sample = 500;
+        std::uint64_t boundary = 0;
+        bool pressure = false;
+        const auto ready_ns = receipt_ns + 40'000'000'000ULL;
+        for (auto now = receipt_ns; now <= ready_ns + 5'000'000'000ULL;) {
+            CHECK(source.ingest({identity, now, 1, true, 0}));
+            frame.observed_at_ns = now;
+            frame.frames = source.drain(now, 2'000'000'000ULL);
+            if (now >= ready_ns) {
+                frame.offline_gameplay = true;
+                frame.gameplay->net_mode = "NM_Standalone";
+                frame.gameplay->telemetry_sample = 1;
+                frame.gameplay->telemetry_observed_ns = now;
+            }
+            context.decision_frames = source.drain(now, 2'000'000'000ULL, boundary);
+            const auto built = build_adaptive_sample(frame, context);
+            context.current_map = built.map;
+            context.map_generation = built.map_generation;
+            context.last_telemetry_sample = built.telemetry_sample;
+            if (requires_fresh_frame_window(built)) {
+                boundary = now;
+                governor.reset();
+                CHECK(now <= ready_ns);
+            } else {
+                CHECK(now > ready_ns);
+                const auto decision = governor.evaluate(policy, built.sample, now);
+                pressure = pressure || decision.current_frame_pressure;
+                if (recovered) CHECK(!decision.current_frame_pressure);
+            }
+            now += now < ready_ns || !recovered ? 125'000'000ULL : 16'666'667ULL;
+        }
+        CHECK(pressure == !recovered);
+    }
     for (const int target : {30, 60, 86, 122, 211, 240}) {
         for (const bool recovered : {true, false}) {
             telemetry::PresentSource source{identity, 2048};
@@ -35,6 +86,7 @@ int main() {
             context.current_quality = 80;
             context.current_map = "KF-Outpost";
             context.map_generation = 1;
+            context.last_telemetry_sample = 1;
             optimizer::AdaptiveDecision before;
             // An earlier severe stall remains in the normal UI windows.
             for (std::uint64_t at = receipt_ns - 4'000'000'000ULL;
@@ -96,7 +148,11 @@ int main() {
     // keeping these modest percentile deviations for 3.5 s must not request
     // the effects 20 -> 10 change seen in sequence 88.
     for (int target = 30; target <= 240; ++target) {
-        for (const bool severe_tail : {false, true}) {
+        // 0: historical mild tail, 1: Issue #64's 48-52 FPS lows at 60,
+        // 2: severe tail alone; 3-6: moderate tail corroborated respectively
+        // by current p95, live FPS, average FPS, or a counted stutter.
+        for (const int scenario : {0, 1, 2, 3, 4, 5, 6}) {
+            const bool severe_tail = scenario >= 2;
             optimizer::AdaptiveGovernor governor;
             optimizer::AdaptivePolicy policy;
             policy.target_fps = target;
@@ -118,14 +174,26 @@ int main() {
             frame.frames.average_fps = frame.frames.fps;
             frame.frames.frame_time_ms = 1000.0 / *frame.frames.fps;
             frame.frames.p95_ms = 20.93 * 50.0 / target;
+            if (scenario == 1) frame.frames.p95_ms = 18.4 * 60.0 / target;
+            if (scenario == 3) frame.frames.p95_ms = 20.0 * 60.0 / target;
+            const double warning_fps = 1000.0 /
+                optimizer::adaptive_stability_bands(target).warning_frame_time_ms - 0.1;
+            if (scenario == 4) {
+                frame.frames.fps = warning_fps;
+                frame.frames.frame_time_ms = 1000.0 / *frame.frames.fps;
+            }
+            if (scenario == 5) frame.frames.average_fps = warning_fps;
+            if (scenario == 6) frame.frames.stutter_count = 1;
             frame.frames.sustained_one_percent_low_fps =
-                target * (severe_tail ? 0.80 : 46.28 / 50.0);
+                target * (scenario == 2 ? 0.73 : scenario != 0 ? 0.80 : 46.28 / 50.0);
             frame.frames.one_percent_low_fps =
-                target * (severe_tail ? 0.80 : 45.35 / 50.0);
+                target * (scenario == 2 ? 0.73 : scenario != 0 ? 0.80 : 45.35 / 50.0);
             AdaptiveSampleContext context;
             context.current_quality = 20;
             context.current_map = "KF-Outpost";
             context.map_generation = 1;
+            context.last_telemetry_sample = 1;
+            frame.gameplay->telemetry_sample = 1;
             bool requested = false;
             for (std::uint64_t elapsed = 200'000'000ULL;
                  elapsed <= 8'000'000'000ULL; elapsed += 200'000'000ULL) {
@@ -155,6 +223,9 @@ int main() {
                 const auto next = select_adaptive_runtime_control(input);
                 if (!severe_tail) CHECK(!next);
                 requested = requested || next.has_value();
+            }
+            if (requested != severe_tail) {
+                std::cerr << "target=" << target << " scenario=" << scenario << '\n';
             }
             CHECK(requested == severe_tail);
         }

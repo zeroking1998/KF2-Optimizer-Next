@@ -199,8 +199,8 @@ int main() {
     // bounded corrective signal even when live and average FPS have recovered.
     auto persistent_low_sample = sample(
         start, 60.0, 1000.0 / 60.0, 17.0, 35.0, 60.0);
-    persistent_low_sample.sustained_one_percent_low_fps = 48.0;
-    persistent_low_sample.one_percent_low_fps = 48.0;
+    persistent_low_sample.sustained_one_percent_low_fps = 44.0;
+    persistent_low_sample.one_percent_low_fps = 44.0;
     AdaptiveGovernor persistent_low_governor;
     const auto persistent_low = drive(
         persistent_low_governor, adaptive, persistent_low_sample,
@@ -280,7 +280,7 @@ int main() {
         auto target_low = sample(
             start, target_fps, 1000.0 / target_fps,
             1000.0 / target_fps, 35.0, 60.0);
-        const double poor_low = std::max(1.0, target_fps * 0.80);
+        const double poor_low = std::max(1.0, target_fps * 0.73);
         target_low.sustained_one_percent_low_fps = poor_low;
         target_low.one_percent_low_fps = poor_low;
         AdaptiveGovernor target_low_governor;

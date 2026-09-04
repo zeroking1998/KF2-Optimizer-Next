@@ -16,23 +16,27 @@ PresentSource::PresentSource(SampleIdentity identity, std::size_t capacity)
 Result<bool> PresentSource::start() {
     std::scoped_lock lock{mutex_};
     streams_.clear(); reported_loss_ = 0; schema_failure_ = false;
+    ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
     running_ = true;
     return Result<bool>::success(true);
 }
 Result<bool> PresentSource::stop() {
     std::scoped_lock lock{mutex_};
     running_ = false; streams_.clear(); reported_loss_ = 0;
+    ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
     return Result<bool>::success(true);
 }
 void PresentSource::bind(SampleIdentity identity) {
     std::scoped_lock lock{mutex_};
     identity_ = identity; streams_.clear(); reported_loss_ = 0;
+    ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
     schema_failure_ = false;
 }
 void PresentSource::reset_statistics() {
     std::scoped_lock lock{mutex_};
     streams_.clear();
     reported_loss_ = 0;
+    ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
 }
 bool PresentSource::ingest(const PresentEvent& event) {
     std::scoped_lock lock{mutex_};
@@ -41,6 +45,11 @@ bool PresentSource::ingest(const PresentEvent& event) {
         schema_failure_ = true; streams_.clear(); return false;
     }
     if (!event.completed) { ++reported_loss_; return false; }
+    if (last_stream_ && *last_stream_ != event.stream_id) {
+        ++diagnostic_generation_;
+        diagnostic_boundary_ns_ = std::max(diagnostic_boundary_ns_, event.monotonic_ns);
+    }
+    last_stream_ = event.stream_id;
     reported_loss_ += event.events_lost;
     constexpr std::size_t kMaximumStreams = 16;
     auto stream = streams_.find(event.stream_id);
@@ -139,6 +148,39 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
     }
     result.loss_count += reported_loss_;
     if (result.fps && result.loss_count > 0) result.quality = SampleQuality::degraded;
+    return result;
+}
+
+PresentSource::Window PresentSource::measure_window(
+    std::uint64_t begin_ns, std::uint64_t end_ns) const {
+    std::scoped_lock lock{mutex_};
+    Window result;
+    result.generation = diagnostic_generation_;
+    if (!running_ || schema_failure_ || reported_loss_ || end_ns <= begin_ns ||
+        (diagnostic_boundary_ns_ >= begin_ns && diagnostic_boundary_ns_ <= end_ns))
+        return result;
+    std::vector<PresentTimestamp> selected;
+    for (const auto& [stream_id, presents] : streams_) {
+        std::vector<PresentTimestamp> window;
+        std::copy_if(presents.begin(), presents.end(), std::back_inserter(window),
+            [=](const auto& p) {
+                return p.monotonic_ns >= begin_ns && p.monotonic_ns <= end_ns;
+            });
+        if (window.size() > selected.size() ||
+            (window.size() == selected.size() && stream_id < result.stream_id)) {
+            selected = std::move(window);
+            result.stream_id = stream_id;
+        }
+    }
+    result.count = selected.size();
+    if (result.count < 2) return result;
+    result.span_ns = selected.back().monotonic_ns - selected.front().monotonic_ns;
+    result.metrics = aggregate_presents(selected, identity_, end_ns, 100'000'000ULL);
+    // Allow boundary quantization by one frame, but not a young or stale window.
+    result.complete = selected.front().monotonic_ns - begin_ns <= 100'000'000ULL &&
+        end_ns - selected.back().monotonic_ns <= 100'000'000ULL &&
+        result.span_ns >= (end_ns - begin_ns) * 95 / 100 &&
+        result.metrics.quality == SampleQuality::good;
     return result;
 }
 }  // namespace kf2::telemetry
