@@ -149,10 +149,11 @@ int main() {
     // the effects 20 -> 10 change seen in sequence 88.
     for (int target = 30; target <= 240; ++target) {
         // 0: historical mild tail, 1: Issue #64's 48-52 FPS lows at 60,
-        // 2: severe tail alone; 3-6: moderate tail corroborated respectively
-        // by current p95, live FPS, average FPS, or a counted stutter.
-        for (const int scenario : {0, 1, 2, 3, 4, 5, 6}) {
-            const bool severe_tail = scenario >= 2;
+        // 2: moderate tail alone; 3-6: moderate tail corroborated respectively
+        // by current p95, live FPS, average FPS, or a counted stutter;
+        // 7: catastrophic tail alone.
+        for (const int scenario : {0, 1, 2, 3, 4, 5, 6, 7}) {
+            const bool severe_tail = scenario >= 3;
             optimizer::AdaptiveGovernor governor;
             optimizer::AdaptivePolicy policy;
             policy.target_fps = target;
@@ -184,10 +185,11 @@ int main() {
             }
             if (scenario == 5) frame.frames.average_fps = warning_fps;
             if (scenario == 6) frame.frames.stutter_count = 1;
-            frame.frames.sustained_one_percent_low_fps =
-                target * (scenario == 2 ? 0.73 : scenario != 0 ? 0.80 : 46.28 / 50.0);
-            frame.frames.one_percent_low_fps =
-                target * (scenario == 2 ? 0.73 : scenario != 0 ? 0.80 : 45.35 / 50.0);
+            const double low_factor = scenario == 7 ? 0.45
+                : scenario == 2 ? 0.73
+                : scenario != 0 ? 0.80 : 46.28 / 50.0;
+            frame.frames.sustained_one_percent_low_fps = target * low_factor;
+            frame.frames.one_percent_low_fps = target * low_factor;
             AdaptiveSampleContext context;
             context.current_quality = 20;
             context.current_map = "KF-Outpost";

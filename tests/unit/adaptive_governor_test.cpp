@@ -181,26 +181,45 @@ int main() {
     CHECK(warning.state == AdaptiveControllerState::warning);
     CHECK(warning.stability_state == AdaptiveStabilityState::watch);
 
-    // A stale 10-second 1% low may warn and block recovery, but it must not
-    // independently force correction after live and tail timing recovered.
+    // An isolated low-percentile window must not block recovery when live,
+    // average and p95 timing are stable and no resource pressure is present.
     auto low_only_sample = sample(
         start, 60.0, 1000.0 / 60.0, 17.0, 35.0, 60.0);
     low_only_sample.one_percent_low_fps = 30.0;
     low_only_sample.sustained_one_percent_low_fps = 60.0;
+    low_only_sample.quality_score = 60.0;
     AdaptiveGovernor low_warning_governor;
     const auto low_warning = drive(
         low_warning_governor, adaptive, low_only_sample,
-        start, 1'000'000'000ULL);
-    CHECK(low_warning.state == AdaptiveControllerState::warning);
+        start, 7'000'000'000ULL);
+    CHECK(low_warning.state == AdaptiveControllerState::stable);
     CHECK(low_warning.disposition == AdaptiveDisposition::hold);
-    CHECK(low_warning.reason == "early_warning_observe_only");
+    CHECK(low_warning.quality_recovery_eligible);
+    CHECK(low_warning.reason ==
+          "stable_headroom_slow_quality_recovery_eligible");
+
+    AdaptivePolicy capped_120 = adaptive;
+    capped_120.target_fps = 120;
+    auto stable_capped_sample = sample(
+        start, 120.0, 1000.0 / 120.0, 8.86, 8.0, 35.0);
+    stable_capped_sample.average_fps = 119.99;
+    stable_capped_sample.sustained_one_percent_low_fps = 91.5;
+    stable_capped_sample.one_percent_low_fps = 91.9;
+    stable_capped_sample.quality_score = 60.0;
+    AdaptiveGovernor stable_capped_governor;
+    const auto stable_capped = drive(
+        stable_capped_governor, capped_120, stable_capped_sample,
+        start, 8'000'000'000ULL);
+    CHECK(stable_capped.state == AdaptiveControllerState::stable);
+    CHECK(!stable_capped.current_frame_pressure);
+    CHECK(stable_capped.quality_recovery_eligible);
 
     // Persistently poor short and long percentiles must eventually create a
     // bounded corrective signal even when live and average FPS have recovered.
     auto persistent_low_sample = sample(
         start, 60.0, 1000.0 / 60.0, 17.0, 35.0, 60.0);
-    persistent_low_sample.sustained_one_percent_low_fps = 44.0;
-    persistent_low_sample.one_percent_low_fps = 44.0;
+    persistent_low_sample.sustained_one_percent_low_fps = 25.0;
+    persistent_low_sample.one_percent_low_fps = 25.0;
     AdaptiveGovernor persistent_low_governor;
     const auto persistent_low = drive(
         persistent_low_governor, adaptive, persistent_low_sample,
@@ -280,7 +299,7 @@ int main() {
         auto target_low = sample(
             start, target_fps, 1000.0 / target_fps,
             1000.0 / target_fps, 35.0, 60.0);
-        const double poor_low = std::max(1.0, target_fps * 0.73);
+        const double poor_low = std::max(1.0, target_fps * 0.45);
         target_low.sustained_one_percent_low_fps = poor_low;
         target_low.one_percent_low_fps = poor_low;
         AdaptiveGovernor target_low_governor;

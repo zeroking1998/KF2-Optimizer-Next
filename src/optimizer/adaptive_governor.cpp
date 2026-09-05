@@ -92,7 +92,10 @@ FrameSignalLevel level_for_tail(
     const double ratio = p95_frame_time_ms / target_frame_time_ms;
     if (ratio >= 1.30) return FrameSignalLevel::emergency;
     if (ratio >= 1.15) return FrameSignalLevel::corrective;
-    if (ratio >= 1.06) return FrameSignalLevel::warning;
+    // A capped renderer normally carries a small amount of scheduler and
+    // presentation jitter. Treating six percent as pressure at 120 FPS made
+    // otherwise steady 8.8-ms windows permanently block quality recovery.
+    if (ratio >= 1.08) return FrameSignalLevel::warning;
     return FrameSignalLevel::healthy;
 }
 
@@ -878,8 +881,6 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
         ? level_for_fps(
               *sample.sustained_one_percent_low_fps, stability_bands)
         : FrameSignalLevel::healthy;
-    const bool long_low_unhealthy =
-        long_low_level != FrameSignalLevel::healthy;
     const auto short_percentile_tail = sample.sustained_one_percent_low_fps
         ? level_for_tail(1000.0 / *sample.sustained_one_percent_low_fps,
                          target_frame_time)
@@ -895,9 +896,22 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
                  FrameSignalLevel::warning) ||
         at_least(average_level, FrameSignalLevel::warning) ||
         sample.stutter_count != 0;
-    const bool severe_percentile_pressure =
-        at_least(short_percentile_tail, FrameSignalLevel::emergency) &&
-        at_least(long_percentile_tail, FrameSignalLevel::emergency);
+    // Low percentiles are intentionally sensitive to rare frames. They may
+    // corroborate current pressure, but must not ratchet quality down or block
+    // recovery on their own while live, average and p95 timing are healthy.
+    // Preserve an independent safety path only for persistent catastrophic
+    // tails below half of the requested frame rate.
+    const bool catastrophic_percentile_pressure =
+        sample.sustained_one_percent_low_fps &&
+        sample.one_percent_low_fps &&
+        *sample.sustained_one_percent_low_fps <=
+            static_cast<double>(policy.target_fps) * 0.50 &&
+        *sample.one_percent_low_fps <=
+            static_cast<double>(policy.target_fps) * 0.50;
+    const bool long_low_unhealthy =
+        long_low_level != FrameSignalLevel::healthy &&
+        (percentile_pressure_corroborated ||
+         catastrophic_percentile_pressure);
     const bool low_percentiles_need_correction =
         decision.data.quality == AdaptiveDataQuality::valid &&
         at_least(sustained_low_level, FrameSignalLevel::corrective) &&
@@ -909,7 +923,8 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
         // of smooth pacing: their threshold can be as high as 50 ms.
         at_least(short_percentile_tail, FrameSignalLevel::corrective) &&
         at_least(long_percentile_tail, FrameSignalLevel::corrective) &&
-        (percentile_pressure_corroborated || severe_percentile_pressure);
+        (percentile_pressure_corroborated ||
+         catastrophic_percentile_pressure);
     if (low_percentiles_need_correction) {
         if (low_percentile_pressure_since_ns_ == 0) {
             low_percentile_pressure_since_ns_ = now_ns;
