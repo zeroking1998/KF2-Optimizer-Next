@@ -227,6 +227,8 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     adaptive_control_pending.reset();
     adaptive_control_sequence = 0;
     adaptive_quality_last_dispatch_ns = 0;
+    adaptive_quality_last_applied_ns = 0;
+    adaptive_frame_not_before_ns = 0;
     adaptive_resource_quality.reset(
         optimizer_settings.adaptive_maximum_quality);
     adaptive_session_policy.reset();

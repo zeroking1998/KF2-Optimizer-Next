@@ -38,6 +38,7 @@ struct AdaptiveSampleContext final {
     int last_telemetry_sample{0};
     std::uint64_t flex_now_ms{0};
     bool effects_control_verified{false};
+    std::optional<::kf2::telemetry::FrameMetrics> decision_frames;
 };
 
 struct AdaptiveSampleBuildResult final {
@@ -45,11 +46,12 @@ struct AdaptiveSampleBuildResult final {
     std::string map;
     std::uint64_t map_generation{0};
     int telemetry_sample{0};
+    bool waiting_for_gameplay_telemetry{false};
 };
 
 [[nodiscard]] inline bool requires_fresh_frame_window(
     const AdaptiveSampleBuildResult& result) noexcept {
-    return result.sample.map_changed;
+    return result.sample.map_changed || result.waiting_for_gameplay_telemetry;
 }
 
 struct AdaptiveRuntimeControlInput final {
@@ -78,6 +80,8 @@ struct AdaptiveRuntimeControlInput final {
     bool effects_control_available{false};
     std::uint64_t now_ns{0};
     std::uint64_t last_dispatch_ns{0};
+    std::uint64_t last_applied_ns{0};
+    std::uint64_t sample_timestamp_ns{0};
 };
 
 struct AdaptiveRuntimeControlSelection final {
@@ -134,6 +138,26 @@ select_adaptive_runtime_control(
         input.quality_change_budget < 1 || input.quality_change_budget > 5 ||
         input.current_quality < input.minimum_quality ||
         input.current_quality > input.maximum_quality || input.now_ns == 0) {
+        return std::nullopt;
+    }
+
+    // Receipt time, not request time, starts the response observation window.
+    // A full 750-ms fast window plus margin must contain post-action presents.
+    constexpr std::uint64_t kPostAppliedObservationNs = 1'000'000'000ULL;
+    // Ordinary changes need one second to settle, five seconds to observe,
+    // and one second for batched telemetry. Keep emergency handling fast.
+    // This controller rule is independent of diagnostic logging availability.
+    constexpr std::uint64_t kOrdinaryPostAppliedObservationNs = 7'000'000'000ULL;
+    const auto observation_ns = input.state ==
+            optimizer::AdaptiveControllerState::emergency
+        ? kPostAppliedObservationNs : kOrdinaryPostAppliedObservationNs;
+    if (input.last_applied_ns != 0 &&
+        (input.now_ns < input.last_applied_ns ||
+         input.sample_timestamp_ns < input.last_applied_ns ||
+         input.sample_timestamp_ns > input.now_ns ||
+         input.now_ns - input.last_applied_ns < observation_ns ||
+         input.sample_timestamp_ns - input.last_applied_ns <
+             kPostAppliedObservationNs)) {
         return std::nullopt;
     }
 
@@ -279,23 +303,25 @@ select_adaptive_runtime_control(
     result.map_generation = context.map_generation;
     result.telemetry_sample = context.last_telemetry_sample;
     auto& sample = result.sample;
+    const auto& frames = context.decision_frames
+        ? *context.decision_frames : frame.frames;
     sample.pid = frame.identity.pid;
     sample.process_start_id = frame.identity.process_start_id;
-    sample.timestamp_ns = frame.observed_at_ns >= frame.frames.age_ns
-        ? frame.observed_at_ns - frame.frames.age_ns : 0;
+    sample.timestamp_ns = frame.observed_at_ns >= frames.age_ns
+        ? frame.observed_at_ns - frames.age_ns : 0;
     sample.session_generation = frame.identity.process_start_id;
     sample.adapter_luid = frame.adapter_luid;
-    sample.fps = frame.frames.fps;
-    sample.average_fps = frame.frames.average_fps;
-    sample.frame_time_ms = frame.frames.frame_time_ms;
-    sample.p95_frame_time_ms = frame.frames.p95_ms;
-    sample.p99_frame_time_ms = frame.frames.p99_ms;
+    sample.fps = frames.fps;
+    sample.average_fps = frames.average_fps;
+    sample.frame_time_ms = frames.frame_time_ms;
+    sample.p95_frame_time_ms = frames.p95_ms;
+    sample.p99_frame_time_ms = frames.p99_ms;
     sample.sustained_one_percent_low_fps =
-        frame.frames.sustained_one_percent_low_fps;
-    sample.one_percent_low_fps = frame.frames.one_percent_low_fps;
-    sample.stutter_count = frame.frames.stutter_count;
-    if (frame.frames.fps && frame.frames.frame_time_ms &&
-        frame.frames.quality !=
+        frames.sustained_one_percent_low_fps;
+    sample.one_percent_low_fps = frames.one_percent_low_fps;
+    sample.stutter_count = frames.stutter_count;
+    if (frames.fps && frames.frame_time_ms &&
+        frames.quality !=
             ::kf2::telemetry::SampleQuality::unavailable) {
         sample.capabilities.frame_timing =
             optimizer::AdaptiveCapabilityState::available;
@@ -359,8 +385,8 @@ select_adaptive_runtime_control(
         sample.process_private_bytes = static_cast<double>(
             *frame.evidence.process_private_bytes);
     }
-    sample.sample_loss = frame.frames.loss_count > 0;
-    sample.discontinuity = frame.frames.reason ==
+    sample.sample_loss = frames.loss_count > 0;
+    sample.discontinuity = frames.reason ==
         ::kf2::telemetry::UnavailableReason::discontinuity;
     if (context.current_quality >= 0) {
         sample.quality_score = static_cast<double>(context.current_quality);
@@ -369,11 +395,23 @@ select_adaptive_runtime_control(
     }
 
     if (frame.gameplay) {
+        const auto& net_mode = frame.gameplay->net_mode;
+        const bool connection_known = net_mode &&
+            (*net_mode == "NM_Standalone" || *net_mode == "NM_Client" ||
+             *net_mode == "NM_ListenServer" || *net_mode == "NM_DedicatedServer");
+        sample.gameplay_context_fresh =
+            frame.gameplay->telemetry_observed_ns != 0 &&
+            frame.observed_at_ns >= frame.gameplay->telemetry_observed_ns &&
+            frame.observed_at_ns - frame.gameplay->telemetry_observed_ns <=
+                game::kGameLogObservationFreshnessNs;
         bool telemetry_restarted = false;
         if (frame.gameplay->telemetry_sample) {
             result.telemetry_sample = *frame.gameplay->telemetry_sample;
-            telemetry_restarted = context.last_telemetry_sample > 0 &&
-                result.telemetry_sample < context.last_telemetry_sample;
+            telemetry_restarted = connection_known && frame.offline_gameplay &&
+                sample.gameplay_context_fresh &&
+                result.telemetry_sample > 0 &&
+                (context.last_telemetry_sample == 0 ||
+                 result.telemetry_sample < context.last_telemetry_sample);
         }
         if (frame.offline_gameplay) {
             sample.session_class =
@@ -391,13 +429,15 @@ select_adaptive_runtime_control(
             sample.map_changed = true;
         }
         sample.map_generation = result.map_generation;
-        sample.gameplay_context_fresh =
-            frame.gameplay->telemetry_observed_ns != 0 &&
-            frame.observed_at_ns >=
-                frame.gameplay->telemetry_observed_ns &&
-            frame.observed_at_ns -
-                    frame.gameplay->telemetry_observed_ns <=
-                game::kGameLogObservationFreshnessNs;
+        // LoadMap is not a readiness receipt. Start a fresh frame window at
+        // the first provider tick, and again after a telemetry interruption.
+        // Unknown connection type is also a loading boundary, not proof of
+        // online gameplay. Confirmed online sessions need no offline provider.
+        result.waiting_for_gameplay_telemetry = !connection_known ||
+            (frame.offline_gameplay &&
+            (!sample.gameplay_context_fresh ||
+             frame.gameplay->telemetry_sample.value_or(0) <= 0));
+        if (result.waiting_for_gameplay_telemetry) result.telemetry_sample = 0;
         sample.visibility_context_fresh =
             sample.gameplay_context_fresh &&
             frame.gameplay->telemetry_living_visible.has_value() &&

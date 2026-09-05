@@ -252,6 +252,9 @@ public:
         const AdaptivePolicy& policy, const AdaptiveSample& sample,
         std::uint64_t now_ns,
         std::span<const AdaptiveManualLock> manual_locks = {}) noexcept;
+    // An exact runtime-quality readback creates a measurement boundary. Only
+    // frame evidence at or after this timestamp may drive the next change.
+    void notify_quality_applied(std::uint64_t applied_ns) noexcept;
     void reset() noexcept;
     [[nodiscard]] std::size_t quality_debt_count() const noexcept;
 
@@ -292,6 +295,7 @@ private:
     int target_fps_{0};
     AdaptiveBottleneck held_bottleneck_{AdaptiveBottleneck::unknown};
     std::uint64_t bottleneck_hold_until_ns_{0};
+    std::uint64_t quality_applied_not_before_ns_{0};
     std::uint32_t direction_changes_{0};
     bool frozen_{false};
 };

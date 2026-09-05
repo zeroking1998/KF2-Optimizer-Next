@@ -20,6 +20,47 @@
 
 ## Important distinctions
 
+### Adaptive frame pressure
+
+Offline quality decisions wait for a fresh gameplay-provider sample after
+loading or a telemetry interruption. Pre-boundary frames are excluded from
+the next controller window. An unknown connection type also pauses decisions
+until KF2 confirms the session type; it is not treated as online gameplay.
+
+Moderately low 1% lows alone do not keep lowering quality while live and
+average FPS are at the target. They must persist and be supported by current
+frame-time, FPS, or stutter evidence. Substantially worse sustained tails can
+still trigger correction on their own. Real FPS drops and memory pressure
+remain actionable; holding a target cannot be guaranteed on every scene.
+
+### Quality-response diagnostics
+
+`ADAPTIVE_QUALITY_RESPONSE` compares a five-second pre-request window with a
+five-second window starting one second after an authenticated APPLIED receipt.
+Late telemetry batches get up to one second to fill each fixed event-time
+window. The baseline is reread over its original pre-request bounds; the
+post-action window is not moved or shortened. Data still missing at the
+deadline makes the comparison inconclusive, without delaying Adaptive actions.
+Average FPS, p95 frame time and 1% low use the same window, unlike the overlay's
+different rolling windows. The log includes frame counts and actual coverage;
+incomplete windows, telemetry gaps, session/GPU/target changes, Zed Time,
+substantial observed scene-count changes or another quality action invalidate
+the comparison. No result is emitted for an unconfirmed action.
+
+Results are `improved`, `worsened`, `mixed`, `no_clear_change`, or `inconclusive`
+with a reason. A 5% metric change is the reporting threshold, not statistical
+significance. Scene checks use visible living Zeds and total corpse counts;
+they cannot establish identical camera views or effects. Results are therefore
+observational, explicitly not proof that the quality change caused the result.
+This diagnostic never changes or delays Adaptive actions.
+
+The controller separately spaces ordinary quality changes at least seven
+seconds after the previous authenticated APPLIED receipt: one second to settle,
+five seconds to observe, and one second for telemetry delivery. This applies
+to reductions and recovery, even with diagnostic logging disabled. Emergency
+corrections retain the one-second fresh-frame guard. Scene changes or emergency
+follow-ups can still make a diagnostic comparison inconclusive.
+
 ### Required-file repair
 
 The upper-right **Repair** action is available even in Safe
