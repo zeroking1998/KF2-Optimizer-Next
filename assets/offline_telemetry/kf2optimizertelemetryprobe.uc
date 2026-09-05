@@ -26,8 +26,11 @@ struct AdaptiveDistanceSleepTransitionEntry
 {
     var string CorpseId;
     var string RemovalReason;
-    var int NativeWakeDistanceUnits;
     var float NativeWakeObservedRealTime;
+    var int NativeWakeCount;
+    var float NativeWakeCooldownUntilRealTime;
+    var float ExpiresRealTime;
+    var bool bReusable;
 };
 
 var int SampleSequence;
@@ -70,6 +73,7 @@ var array<AdaptiveDistanceSleepEntry> AdaptiveDistanceSleptCorpses;
 var array<AdaptiveDistanceSleepTransitionEntry>
     AdaptiveDistanceSleepTransitions;
 var int AdaptiveDistanceSleepTransitionCount;
+var int AdaptiveDistanceSleepTransitionPruneCursor;
 var bool bAdaptiveDistanceSleepTransitionFullLogged;
 var int AdaptiveDistancePhysicsSleeps;
 var int AdaptiveDistancePhysicsWakes;
@@ -1167,7 +1171,8 @@ function int FindAdaptiveDistanceSleepTransition(string CorpseId)
         {
             return Slot;
         }
-        if (AdaptiveDistanceSleepTransitions[Slot].CorpseId == "")
+        if (AdaptiveDistanceSleepTransitions[Slot].CorpseId == "" &&
+            !AdaptiveDistanceSleepTransitions[Slot].bReusable)
         {
             return -1;
         }
@@ -1178,6 +1183,7 @@ function int FindAdaptiveDistanceSleepTransition(string CorpseId)
 
 function int FindOrAddAdaptiveDistanceSleepTransition(string CorpseId)
 {
+    local int FirstReusableSlot;
     local int Probe;
     local int Slot;
 
@@ -1186,6 +1192,7 @@ function int FindOrAddAdaptiveDistanceSleepTransition(string CorpseId)
     {
         return -1;
     }
+    FirstReusableSlot = -1;
     Slot = GetAdaptiveCorpsePhysicsActionHash("distance:"$CorpseId);
     for (Probe = 0; Probe < 8192; ++Probe)
     {
@@ -1195,13 +1202,101 @@ function int FindOrAddAdaptiveDistanceSleepTransition(string CorpseId)
         }
         if (AdaptiveDistanceSleepTransitions[Slot].CorpseId == "")
         {
+            if (AdaptiveDistanceSleepTransitions[Slot].bReusable)
+            {
+                if (FirstReusableSlot < 0)
+                {
+                    FirstReusableSlot = Slot;
+                }
+                Slot = (Slot + 1) & 8191;
+                continue;
+            }
+            if (FirstReusableSlot >= 0)
+            {
+                Slot = FirstReusableSlot;
+            }
             AdaptiveDistanceSleepTransitions[Slot].CorpseId = CorpseId;
+            AdaptiveDistanceSleepTransitions[Slot].bReusable = false;
             ++AdaptiveDistanceSleepTransitionCount;
             return Slot;
         }
         Slot = (Slot + 1) & 8191;
     }
+    if (FirstReusableSlot >= 0)
+    {
+        AdaptiveDistanceSleepTransitions[FirstReusableSlot].CorpseId = CorpseId;
+        AdaptiveDistanceSleepTransitions[FirstReusableSlot].bReusable = false;
+        ++AdaptiveDistanceSleepTransitionCount;
+        return FirstReusableSlot;
+    }
     return -1;
+}
+
+function ClearAdaptiveDistanceSleepTransition(int Index)
+{
+    if (Index < 0 || Index >= AdaptiveDistanceSleepTransitions.Length ||
+        AdaptiveDistanceSleepTransitions[Index].CorpseId == "")
+    {
+        return;
+    }
+    AdaptiveDistanceSleepTransitions[Index].CorpseId = "";
+    AdaptiveDistanceSleepTransitions[Index].RemovalReason = "";
+    AdaptiveDistanceSleepTransitions[Index].NativeWakeObservedRealTime = 0.0;
+    AdaptiveDistanceSleepTransitions[Index].NativeWakeCount = 0;
+    AdaptiveDistanceSleepTransitions[Index].NativeWakeCooldownUntilRealTime = 0.0;
+    AdaptiveDistanceSleepTransitions[Index].ExpiresRealTime = 0.0;
+    AdaptiveDistanceSleepTransitions[Index].bReusable = true;
+    AdaptiveDistanceSleepTransitionCount = Max(
+        0, AdaptiveDistanceSleepTransitionCount - 1);
+    bAdaptiveDistanceSleepTransitionFullLogged = false;
+}
+
+function PruneAdaptiveDistanceSleepTransitions()
+{
+    local int Index;
+    local int Slot;
+
+    if (AdaptiveDistanceSleepTransitions.Length != 8192)
+    {
+        return;
+    }
+    // Reclaim at most 64 expired records per control pass. Tombstones keep
+    // open-addressing lookup correct while the bounded sweep avoids a spike.
+    for (Index = 0; Index < 64; ++Index)
+    {
+        Slot = AdaptiveDistanceSleepTransitionPruneCursor;
+        AdaptiveDistanceSleepTransitionPruneCursor =
+            (AdaptiveDistanceSleepTransitionPruneCursor + 1) & 8191;
+        if (AdaptiveDistanceSleepTransitions[Slot].CorpseId != "" &&
+            AdaptiveDistanceSleepTransitions[Slot].RemovalReason != "tracked" &&
+            AdaptiveDistanceSleepTransitions[Slot].ExpiresRealTime > 0.0 &&
+            AdaptiveDistanceSleepTransitions[Slot].ExpiresRealTime <=
+                WorldInfo.RealTimeSeconds)
+        {
+            ClearAdaptiveDistanceSleepTransition(Slot);
+        }
+    }
+}
+
+function float GetAdaptiveNativeWakeBackoffSeconds(int NativeWakeCount)
+{
+    if (NativeWakeCount <= 1)
+    {
+        return 2.0;
+    }
+    if (NativeWakeCount == 2)
+    {
+        return 5.0;
+    }
+    if (NativeWakeCount == 3)
+    {
+        return 10.0;
+    }
+    if (NativeWakeCount == 4)
+    {
+        return 20.0;
+    }
+    return 30.0;
 }
 
 function string GetAdaptiveDistanceSleepTransitionReason(string CorpseId)
@@ -1219,6 +1314,7 @@ function string GetAdaptiveDistanceSleepTransitionReason(string CorpseId)
 function bool RememberAdaptiveDistanceSleepTransition(
     string CorpseId, string RemovalReason, int DistanceUnits)
 {
+    local float BackoffSeconds;
     local int Index;
 
     Index = FindOrAddAdaptiveDistanceSleepTransition(CorpseId);
@@ -1227,19 +1323,45 @@ function bool RememberAdaptiveDistanceSleepTransition(
         return false;
     }
     AdaptiveDistanceSleepTransitions[Index].RemovalReason = RemovalReason;
-    AdaptiveDistanceSleepTransitions[Index].NativeWakeDistanceUnits =
-        RemovalReason == "native_wake" ? DistanceUnits : -1;
-    AdaptiveDistanceSleepTransitions[Index].NativeWakeObservedRealTime =
-        RemovalReason == "native_wake" ? WorldInfo.RealTimeSeconds : 0.0;
+    if (RemovalReason == "native_wake")
+    {
+        if (AdaptiveDistanceSleepTransitions[Index].ExpiresRealTime <=
+            WorldInfo.RealTimeSeconds)
+        {
+            AdaptiveDistanceSleepTransitions[Index].NativeWakeCount = 0;
+        }
+        AdaptiveDistanceSleepTransitions[Index].NativeWakeCount = Min(
+            5, AdaptiveDistanceSleepTransitions[Index].NativeWakeCount + 1);
+        BackoffSeconds = GetAdaptiveNativeWakeBackoffSeconds(
+            AdaptiveDistanceSleepTransitions[Index].NativeWakeCount);
+        AdaptiveDistanceSleepTransitions[Index].NativeWakeObservedRealTime =
+            WorldInfo.RealTimeSeconds;
+        AdaptiveDistanceSleepTransitions[Index].NativeWakeCooldownUntilRealTime =
+            WorldInfo.RealTimeSeconds + BackoffSeconds;
+        AdaptiveDistanceSleepTransitions[Index].ExpiresRealTime =
+            WorldInfo.RealTimeSeconds + 60.0;
+    }
+    else
+    {
+        AdaptiveDistanceSleepTransitions[Index].NativeWakeCount = 0;
+        AdaptiveDistanceSleepTransitions[Index].NativeWakeObservedRealTime = 0.0;
+        AdaptiveDistanceSleepTransitions[Index].NativeWakeCooldownUntilRealTime =
+            0.0;
+        AdaptiveDistanceSleepTransitions[Index].ExpiresRealTime =
+            WorldInfo.RealTimeSeconds + 30.0;
+        if (RemovalReason == "deleted" || RemovalReason == "reused" ||
+            RemovalReason == "invalidated" ||
+            RemovalReason == "removed_from_pool")
+        {
+            ClearAdaptiveDistanceSleepTransition(Index);
+        }
+    }
     return true;
 }
 
 function bool DeferAdaptiveDistanceResleepAfterNativeWake(KFPawn Candidate)
 {
-    local int CurrentDistanceUnits;
     local int Index;
-    local int NativeWakeDistanceUnits;
-    local float NativeWakeAge;
 
     Index = FindAdaptiveDistanceSleepTransition(
         GetAdaptiveCorpseActionId(Candidate));
@@ -1249,25 +1371,11 @@ function bool DeferAdaptiveDistanceResleepAfterNativeWake(KFPawn Candidate)
     {
         return false;
     }
-    CurrentDistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
-    NativeWakeDistanceUnits =
-        AdaptiveDistanceSleepTransitions[Index].NativeWakeDistanceUnits;
-    NativeWakeAge = WorldInfo.RealTimeSeconds -
-        AdaptiveDistanceSleepTransitions[Index].NativeWakeObservedRealTime;
-    // Always respect native ownership for one second. For the next four
-    // seconds, require the corpse to be at least 250 units farther away.
-    // The five-second upper bound also prevents invalid distance data from
-    // permanently excluding an actor from distance sleep.
-    if (NativeWakeAge < 1.0)
-    {
-        return true;
-    }
-    if (NativeWakeAge >= 5.0)
-    {
-        return false;
-    }
-    return CurrentDistanceUnits < 0 || NativeWakeDistanceUnits < 0 ||
-        CurrentDistanceUnits < NativeWakeDistanceUnits + 250;
+    // A native wake is an ownership signal. Back off only this full actor ID;
+    // all other eligible corpses remain available to Distance-Sleep. The
+    // absolute deadline cannot be extended by missing distance telemetry.
+    return WorldInfo.RealTimeSeconds <
+        AdaptiveDistanceSleepTransitions[Index].NativeWakeCooldownUntilRealTime;
 }
 
 function string GetAdaptiveCorpseActionId(KFPawn Candidate)
@@ -1522,8 +1630,10 @@ function bool IsAdaptiveCorpseInPool(KFPawn Candidate)
 function RemoveAdaptiveDistanceSleptCorpseEntry(
     int Index, string RemovalReason)
 {
+    local string BackoffFields;
     local int DistanceUnits;
     local int EffectiveAwake;
+    local int TransitionIndex;
     local string CorpseId;
     local KFPawn Candidate;
 
@@ -1535,11 +1645,24 @@ function RemoveAdaptiveDistanceSleptCorpseEntry(
         EffectiveAwake = GetAdaptiveCorpseEffectiveAwake(Candidate);
         RememberAdaptiveDistanceSleepTransition(
             CorpseId, RemovalReason, DistanceUnits);
+        if (RemovalReason == "native_wake")
+        {
+            TransitionIndex = FindAdaptiveDistanceSleepTransition(CorpseId);
+            if (TransitionIndex >= 0)
+            {
+                BackoffFields = " native_wake_count="$
+                    AdaptiveDistanceSleepTransitions[TransitionIndex].NativeWakeCount$
+                    " resleep_after_ms="$int(FMax(0.0,
+                        AdaptiveDistanceSleepTransitions[TransitionIndex].
+                            NativeWakeCooldownUntilRealTime -
+                        WorldInfo.RealTimeSeconds) * 1000.0);
+            }
+        }
         AdaptiveDistanceSleptCorpses.Remove(Index, 1);
         `log("KF2OPT_CORPSE_DISTANCE state=removed previous_state=sleep"$
              " removal_reason="$RemovalReason$" corpse_id="$CorpseId$
              " distance_units="$DistanceUnits$
-             " effective_awake="$EffectiveAwake);
+             " effective_awake="$EffectiveAwake$BackoffFields);
     }
 }
 
@@ -1548,6 +1671,7 @@ function PruneAdaptiveDistanceSleptCorpses()
     local int Index;
     local KFPawn Candidate;
 
+    PruneAdaptiveDistanceSleepTransitions();
     for (Index = AdaptiveDistanceSleptCorpses.Length - 1;
          Index >= 0; --Index)
     {
@@ -1774,10 +1898,8 @@ function bool SleepOneDistantMonsterCorpse(
     AdaptiveDistanceSleptCorpses[EntryIndex].CorpseId = CorpseId;
     AdaptiveDistanceSleepTransitions[TransitionIndex].RemovalReason =
         "tracked";
-    AdaptiveDistanceSleepTransitions[TransitionIndex].NativeWakeDistanceUnits =
-        -1;
-    AdaptiveDistanceSleepTransitions[TransitionIndex].NativeWakeObservedRealTime =
-        0.0;
+    AdaptiveDistanceSleepTransitions[TransitionIndex].ExpiresRealTime =
+        WorldInfo.RealTimeSeconds + 60.0;
     ++AdaptiveDistancePhysicsSleeps;
     ++AdaptiveCorpsesSlept;
     RegisterAdaptiveCorpseDebugMarker(Candidate, "DIST_SLEEP");
