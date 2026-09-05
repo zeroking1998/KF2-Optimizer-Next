@@ -20,6 +20,46 @@
 
 ## Important distinctions
 
+### Corpse visual protection
+
+New corpse LOD reductions require at least 1,000 units (10 m). At 800 units
+(8 m) or closer, the optimizer restores its captured visual LOD constraint,
+including for aged corpses, without waking or releasing frozen physics.
+Skeleton reductions already applied to a corpse survive optimizer wake actions.
+The original `bNoSkeletonUpdate` and `bSkipAllUpdateWhenPhysicsAsleep` values
+are captured once per full corpse ID, not rewritten after every wake. Disabling
+Adaptive restores flags still matching the optimizer's changes; external changes
+are left alone. Visible model LOD can still recover near the player independently.
+Stock KF2's wake callback explicitly clears `bNoSkeletonUpdate`. While a corpse
+still uses rigid-body physics, the optimizer lets that callback finish and then
+restores only its owned skeleton reduction once per observed wake transition.
+KF2's native collision, warning, shadow and component behavior remains active.
+Unrelated code can still change flags. Retain/release receipts and observed-wake
+flag readbacks expose the actual values.
+
+The final freeze stage uses the latest complete combined frame, scene and enemy
+pressure sample. It accepts only an already sleeping corpse moving no faster
+than 400 units per second. Low pressure requires 15 seconds and 10 m; medium
+pressure requires 10 seconds and 8 m; high pressure requires five seconds and
+5 m. It then verifies `PHYS_None`, so the corpse no longer has rigid-body
+physics that KF2 could wake. No wake count is required and no new skeleton
+reduction is applied after this transition. At most one freeze runs per 250 ms.
+Adaptive-off restores the owned rigid-body state.
+
+New aging/skeleton actions are also blocked within 8 m. Other corpse physics
+controllers keep their own safeguards; this is not a global physics exclusion.
+
+Unchanged effective LOD targets produce no write or applied receipt. Tracking
+uses the full corpse lifetime ID. A changed readback emits `external_reset`
+with expected/observed values and an unknown writer, then defers reapplication
+for two seconds. The external value becomes the restoration baseline, not an
+optimizer-owned write. A later verified reapplication names that reset reason.
+These receipts verify properties, not the mesh detail actually rendered.
+Rejected writes also wait two seconds before retrying and never count as
+applied. The visible selector checks a fixed four-candidate shortlist to keep
+ownership lookups linear in pool size; if all four are deferred, that pass
+makes no visible LOD change. The independent aging cursor still progresses.
+
 ### Adaptive frame pressure
 
 Offline quality decisions wait for a fresh gameplay-provider sample after

@@ -183,6 +183,14 @@ function Check()
                 return;
             }
             bObserved = true;
+            // The delayed detector has now run after the injected wake, so
+            // this checks persistence beyond WakeRigidBody's immediate return.
+            if (!Target.Mesh.bNoSkeletonUpdate ||
+                !Target.Mesh.bSkipAllUpdateWhenPhysicsAsleep)
+            {
+                Finish("failed", "skeleton_reduction_lost_after_wake");
+                return;
+            }
             `log("KF2OPT_WAKE_TEST state=backoff_verified corpse_id="$TargetId$
                  " cycle="$Cycle$" expected_ms="$int(ExpectedSeconds(Cycle)*1000.0));
         }

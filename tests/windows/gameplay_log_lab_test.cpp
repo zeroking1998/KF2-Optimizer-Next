@@ -537,8 +537,7 @@ int main() {
         "ClearTimer(nameof(AdaptiveCorpseAgingControl), self)") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "Tier >= 3 ||") !=
-          std::string::npos);
+        "Tier >= 3 && DistanceUnits >= 800") != std::string::npos);
     CHECK(telemetry_source.find(
         "Tier == 2 && DistanceUnits >= 1000") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -576,38 +575,13 @@ int main() {
         aging_readback);
     const auto aging_receipt = aging_body.find(
         "KF2OPT_CORPSE_AGING state=applied action=", aging_ownership);
-    const auto aging_freeze = aging_body.find(
-        "Candidate.SetPhysics(PHYS_None)", aging_readback);
-    const auto aging_freeze_readback = aging_body.find(
-        "if (Candidate.Physics != PHYS_None)", aging_freeze);
-    const auto aging_registration_rollback = aging_body.find(
-        "Candidate.SetPhysics(PHYS_RigidBody)", aging_ownership);
-    const auto aging_registration_rollback_readback = aging_body.find(
-        "Candidate.Physics != PHYS_RigidBody",
-        aging_registration_rollback);
-    const auto aging_registration_ownership_release = aging_body.find(
-        "AdaptiveCorpseLodPhysicsFrozen[EntryIndex] = false",
-        aging_registration_rollback_readback);
-    const auto aging_final_safety_definition = aging_body.find(
-        "bFinalTierInteractionSafe = DistanceUnits >= 800 &&");
-    const auto aging_final_safety_visibility = aging_body.find(
-        "!bRecentlyRendered", aging_final_safety_definition);
-    const auto aging_sleep_final_safety = aging_body.find(
-        "(Tier < 3 ||",
-        aging_final_safety_visibility);
-    const auto aging_final_lod_ready_definition = aging_body.find(
-        "bFinalTierLodReady =");
-    const auto aging_final_lod_ready_gate = aging_body.find(
-        "bFinalTierInteractionSafe && bFinalTierLodReady",
-        aging_final_lod_ready_definition);
     const auto aging_lod_distance_guard = aging_body.find(
-        "Tier < 3 && DistanceUnits < 300");
-    const auto aging_lod_final_safety = aging_body.find(
-        "Tier >= 3 && !bFinalTierInteractionSafe",
-        aging_sleep_final_safety);
+        "DistanceUnits < 1000");
     const auto aging_lod_write = aging_body.find(
         "Candidate.Mesh.MinLodModel = TargetMinLod",
         aging_lod_distance_guard);
+    CHECK(aging_lod_distance_guard != std::string::npos);
+    CHECK(aging_lod_write != std::string::npos);
     const auto aging_lod_path = aging_body.substr(
         aging_lod_distance_guard, aging_lod_write - aging_lod_distance_guard);
     CHECK(aging_sleep != std::string::npos);
@@ -617,33 +591,14 @@ int main() {
     CHECK(aging_readback != std::string::npos);
     CHECK(aging_ownership != std::string::npos);
     CHECK(aging_receipt != std::string::npos);
-    CHECK(aging_freeze != std::string::npos);
-    CHECK(aging_freeze_readback != std::string::npos);
-    CHECK(aging_registration_rollback != std::string::npos);
-    CHECK(aging_registration_rollback_readback != std::string::npos);
-    CHECK(aging_registration_ownership_release != std::string::npos);
-    CHECK(aging_final_safety_definition != std::string::npos);
-    CHECK(aging_final_safety_visibility != std::string::npos);
-    CHECK(aging_sleep_final_safety != std::string::npos);
-    CHECK(aging_final_lod_ready_definition != std::string::npos);
-    CHECK(aging_final_lod_ready_gate != std::string::npos);
-    CHECK(aging_lod_final_safety != std::string::npos);
-    CHECK(aging_final_safety_definition < aging_sleep);
-    CHECK(aging_final_safety_visibility < aging_sleep);
-    CHECK(aging_sleep_final_safety < aging_sleep);
-    CHECK(aging_final_lod_ready_definition < aging_sleep);
-    CHECK(aging_final_lod_ready_gate < aging_sleep);
     CHECK(aging_sleep < aging_readback);
-    CHECK(aging_readback < aging_freeze);
-    CHECK(aging_freeze < aging_freeze_readback);
-    CHECK(aging_freeze_readback < aging_ownership);
-    CHECK(aging_ownership < aging_registration_rollback);
-    CHECK(aging_registration_rollback < aging_registration_rollback_readback);
-    CHECK(aging_registration_rollback_readback <
-          aging_registration_ownership_release);
+    CHECK(aging_readback < aging_ownership);
     CHECK(aging_ownership < aging_receipt);
+    CHECK(aging_body.find("Candidate.SetPhysics(PHYS_None)") ==
+          std::string::npos);
+    CHECK(aging_body.find("PhysicsAction = \"aging\"") !=
+          std::string::npos);
     CHECK(aging_lod_distance_guard != std::string::npos);
-    CHECK(aging_lod_final_safety < aging_lod_write);
     CHECK(aging_lod_write != std::string::npos);
     CHECK(aging_lod_distance_guard < aging_lod_write);
     CHECK(aging_lod_path.find("!bRecentlyRendered") == std::string::npos);
@@ -651,10 +606,12 @@ int main() {
         "recently_rendered=\"$(bRecentlyRendered ? 1 : 0)") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "AdaptiveCorpseLodPersistentAging.AddItem(true)") !=
+        "AdaptiveCorpseLodPersistentAging[EntryIndex] = true") !=
           std::string::npos);
-    CHECK(telemetry_source.find(
-        "if (!AdaptiveCorpseLodPersistentAging[Index] &&") !=
+    CHECK(aging_body.find("DistanceUnits <= 800") < aging_sleep);
+    CHECK(aging_body.find("DistanceUnits <= 800") <
+          aging_body.find("RetainAdaptiveCorpseSkeletonReduction(Candidate)"));
+    CHECK(aging_body.find("RetainAdaptiveCorpseSkeletonReduction(Candidate)") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveCorpseLodPhysicsFrozen[EntryIndex] = true") !=
@@ -671,6 +628,10 @@ int main() {
         aging_restore, aging_restore_end - aging_restore);
     const auto aging_restore_physics = aging_restore_body.find(
         "Candidate.SetPhysics(PHYS_RigidBody)");
+    const auto restore_identity_guard = aging_restore_body.find(
+        "AdaptiveCorpseLodIds[Index] == GetAdaptiveCorpseActionId(Candidate)");
+    CHECK(restore_identity_guard != std::string::npos);
+    CHECK(restore_identity_guard < aging_restore_physics);
     const auto aging_restore_readback = aging_restore_body.find(
         "Candidate.Physics != PHYS_RigidBody", aging_restore_physics);
     const auto aging_restore_unregister = aging_restore_body.find(
@@ -711,12 +672,15 @@ int main() {
     const auto aging_prune_frozen = aging_prune_body.find(
         "AdaptiveCorpseLodPhysicsFrozen[Index]");
     const auto aging_prune_safe_release = aging_prune_body.find(
-        "RemoveAdaptiveCorpseLodEntry(Index, true)", aging_prune_frozen);
+        "AdaptiveCorpseLodPhysicsFrozen[Index] = false", aging_prune_frozen);
     const auto aging_prune_external_lod_release = aging_prune_body.find(
-        "Index, AdaptiveCorpseLodPhysicsFrozen[Index]",
-        aging_prune_safe_release);
+        "ObserveAdaptiveCorpseLodReset(Index)");
     CHECK(aging_prune_frozen != std::string::npos);
     CHECK(aging_prune_safe_release != std::string::npos);
+    CHECK(aging_prune_body.find("Candidate.SetPhysics(PHYS_RigidBody)") <
+          aging_prune_body.find("if (Candidate.Physics == PHYS_RigidBody)"));
+    CHECK(aging_prune_body.find("if (Candidate.Physics == PHYS_RigidBody)") <
+          aging_prune_safe_release);
     CHECK(aging_prune_external_lod_release != std::string::npos);
     CHECK(telemetry_source.find(
         "SetTimer(0.05, true, nameof(RestoreOneAdaptiveCorpseLod), self)") !=
@@ -783,13 +747,58 @@ int main() {
     const auto lod_restore_function = telemetry_source.find(
         "function RestoreNearAdaptiveCorpseLods()");
     const auto lod_restore_threshold = telemetry_source.find(
-        "DistanceSquared < 62500.0", lod_restore_function);
+        "DistanceSquared <= 640000.0", lod_restore_function);
     const auto lod_selector_function = telemetry_source.find(
         "function KFPawn SelectVisibleMonsterCorpseForLod(");
     const auto lod_apply_threshold = telemetry_source.find(
-        "DistanceSquared < 90000.0", lod_selector_function);
+        "DistanceSquared < 1000000.0", lod_selector_function);
     CHECK(lod_restore_threshold != std::string::npos);
     CHECK(lod_apply_threshold != std::string::npos);
+    const auto near_restore_end = telemetry_source.find(
+        "function RestoreOneAdaptiveCorpseLod()", lod_restore_function);
+    const auto near_restore_body = telemetry_source.substr(
+        lod_restore_function, near_restore_end - lod_restore_function);
+    CHECK(near_restore_body.find("SetPhysics(") == std::string::npos);
+    CHECK(near_restore_body.find("WakeRigidBody(") == std::string::npos);
+    CHECK(near_restore_body.find("RemoveAdaptiveCorpseLodEntry(Index, true)") ==
+          std::string::npos);
+    CHECK(near_restore_body.find("state=restored reason=near_player") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("state=external_reset") != std::string::npos);
+    CHECK(telemetry_source.find("AdaptiveCorpseLodIds[Index] ==") !=
+          std::string::npos);
+    CHECK(aging_body.find("DeferAdaptiveCorpseLodAfterReset(Candidate)") <
+          aging_lod_write);
+    const auto reset_begin = telemetry_source.find(
+        "function ObserveAdaptiveCorpseLodReset(int Index)");
+    const auto reset_end = telemetry_source.find(
+        "function bool RemoveAdaptiveCorpseLodEntry(", reset_begin);
+    CHECK(reset_begin != std::string::npos);
+    CHECK(reset_end != std::string::npos);
+    const auto reset_body = telemetry_source.substr(reset_begin, reset_end - reset_begin);
+    CHECK(reset_body.find("source=unknown") != std::string::npos);
+    CHECK(reset_body.find("WorldInfo.RealTimeSeconds + 2.0") != std::string::npos);
+    CHECK(reset_body.find("Candidate.Mesh.MinLodModel = ") == std::string::npos);
+    CHECK(reset_body.find("SetPhysics(") == std::string::npos);
+    CHECK(reset_body.find("AdaptiveCorpseLodExternalReset[Index] &&") !=
+          std::string::npos);
+    CHECK(aging_body.find("Candidate.Mesh.MinLodModel >= TargetMinLod") <
+          aging_lod_write);
+    const auto selector_end = telemetry_source.find(
+        "function bool ApplyOneAdaptiveCorpseLod(", lod_selector_function);
+    const auto selector_body = telemetry_source.substr(
+        lod_selector_function, selector_end - lod_selector_function);
+    CHECK(selector_body.find("DeferAdaptiveCorpseLodAfterReset(Candidate)") !=
+          std::string::npos);
+    CHECK(selector_body.find("Candidate.Mesh.MinLodModel >= CandidateTarget") !=
+          std::string::npos);
+    CHECK(selector_body.find("local KFPawn BestCandidates[4]") != std::string::npos);
+    CHECK(count_occurrences(selector_body,
+        "DeferAdaptiveCorpseLodAfterReset(Candidate)") == 1);
+    CHECK(count_occurrences(telemetry_source,
+        "AdaptiveCorpseLodAppliedMinModels.AddItem(Candidate.Mesh.MinLodModel)") == 1);
+    CHECK(count_occurrences(telemetry_source,
+        "state=write_failed") == 2);
     CHECK(telemetry_source.find(
         "KF2OPT_CORPSE_LOD state=applied") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -939,9 +948,46 @@ int main() {
     CHECK(telemetry_source.find(
         "DistanceDecimeters = (DistanceUnits + 5) / 10") !=
           std::string::npos);
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 12);
-    CHECK(count_occurrences(telemetry_source, " distance_units=") == 12);
-    CHECK(count_occurrences(telemetry_source, " distance_m=") == 12);
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 17);
+    CHECK(count_occurrences(telemetry_source, " distance_units=") == 18);
+    CHECK(count_occurrences(telemetry_source, " distance_m=") == 18);
+    const auto pressure_freeze = telemetry_source.find(
+        "function bool FreezeOnePressureEligibleCorpse(");
+    const auto pressure_freeze_end = telemetry_source.find(
+        "function RemoveAdaptiveDistanceSleptCorpseEntry(", pressure_freeze);
+    CHECK(pressure_freeze != std::string::npos);
+    CHECK(pressure_freeze_end != std::string::npos);
+    const auto pressure_freeze_body = telemetry_source.substr(
+        pressure_freeze, pressure_freeze_end - pressure_freeze);
+    CHECK(telemetry_source.find("MinimumAgeSeconds = 15", pressure_freeze) !=
+          std::string::npos);
+    CHECK(telemetry_source.find("MinimumAgeSeconds = 10", pressure_freeze) !=
+          std::string::npos);
+    CHECK(telemetry_source.find("MinimumAgeSeconds = 5", pressure_freeze) !=
+          std::string::npos);
+    CHECK(telemetry_source.find("MinimumDistanceUnits = 1000", pressure_freeze) !=
+          std::string::npos);
+    CHECK(telemetry_source.find("MinimumDistanceUnits = 800", pressure_freeze) !=
+          std::string::npos);
+    CHECK(telemetry_source.find("MinimumDistanceUnits = 500", pressure_freeze) !=
+          std::string::npos);
+    CHECK(telemetry_source.find("AdaptiveLastCorpseFreezeRealTime < 0.25",
+          pressure_freeze) != std::string::npos);
+    CHECK(telemetry_source.find("Candidate.Mesh.RigidBodyIsAwake()",
+          pressure_freeze) != std::string::npos);
+    CHECK(telemetry_source.find("Candidate.SetPhysics(PHYS_None)",
+          pressure_freeze) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "state=frozen reason=pressure_eligible", pressure_freeze) !=
+          std::string::npos);
+    CHECK(pressure_freeze_body.find("RequiredWakeCount") ==
+          std::string::npos);
+    CHECK(pressure_freeze_body.find("PutRigidBodyToSleep") ==
+          std::string::npos);
+    CHECK(pressure_freeze_body.find("RetainAdaptiveCorpseSkeletonReduction") ==
+          std::string::npos);
+    CHECK(pressure_freeze_body.find("Candidate.Mesh.RigidBodyIsAwake()") <
+          pressure_freeze_body.find("Candidate.SetPhysics(PHYS_None)"));
     const auto distance_marker = telemetry_source.find(
         "FormatAdaptiveDebugMarkerAction(");
     CHECK(distance_marker != std::string::npos);
@@ -1043,7 +1089,7 @@ int main() {
     CHECK(telemetry_source.find(
         "GetAdaptiveCorpseActionId(Candidate)") != std::string::npos);
     CHECK(count_occurrences(
-        telemetry_source, "RegisterAdaptiveCorpseDebugMarker(Candidate,") == 6);
+        telemetry_source, "RegisterAdaptiveCorpseDebugMarker(Candidate,") == 7);
     CHECK(interaction_source.find("event PostRender(Canvas MarkerCanvas)") ==
           std::string::npos);
     CHECK(interaction_source.find(
@@ -1167,6 +1213,8 @@ int main() {
         "GameInfo.IsZedTimeActive()", stagger_start);
     const auto wake_stage = telemetry_source.find(
         "WakeNearAdaptiveDistanceSleptCorpses()", stagger_start);
+    const auto pressure_freeze_stage = telemetry_source.find(
+        "FreezeOnePressureEligibleCorpse(", stagger_start);
     const auto baseline_sleep_stage = telemetry_source.find(
         "SleepBaselineAwakeMonsterCorpses(GoreManager)", stagger_start);
     const auto distant_sleep_stage = telemetry_source.find(
@@ -1175,8 +1223,11 @@ int main() {
     CHECK(zed_time_guard != std::string::npos);
     CHECK(baseline_sleep_stage == std::string::npos);
     CHECK(wake_stage != std::string::npos);
+    CHECK(pressure_freeze_stage != std::string::npos);
     CHECK(distant_sleep_stage != std::string::npos);
     CHECK(zed_time_guard < wake_stage);
+    CHECK(zed_time_guard < pressure_freeze_stage);
+    CHECK(pressure_freeze_stage < wake_stage);
     CHECK(zed_time_guard < distant_sleep_stage);
     const auto frame_only_action_gate = telemetry_source.find(
         "if (AdaptiveCorpsePressureLevel <= 0)", stagger_start);
@@ -1220,6 +1271,63 @@ int main() {
     CHECK(wake_call < wake_readback);
     CHECK(wake_readback < wake_tracking_release);
     CHECK(wake_tracking_release < wake_receipt);
+    const auto wake_end = telemetry_source.find(
+        "function int WakeAdaptiveDistanceSleptCorpseBatch()", wake_function);
+    CHECK(wake_end != std::string::npos);
+    CHECK(telemetry_source.substr(wake_function, wake_end - wake_function).find(
+        "bNoSkeletonUpdate = false") == std::string::npos);
+    CHECK(telemetry_source.find(
+        "function bool RetainAdaptiveCorpseSkeletonReduction(KFPawn Candidate)") !=
+        std::string::npos);
+    const auto skeleton_start = telemetry_source.find(
+        "function bool RetainAdaptiveCorpseSkeletonReduction(KFPawn Candidate)");
+    const auto skeleton_end = telemetry_source.find(
+        "function ObserveAdaptiveCorpseLodReset", skeleton_start);
+    CHECK(skeleton_end != std::string::npos);
+    const auto skeleton_body = telemetry_source.substr(
+        skeleton_start, skeleton_end - skeleton_start);
+    CHECK(skeleton_body.find("if (AdaptiveCorpseSkeletonOwned[Index])") <
+          skeleton_body.find("AdaptiveCorpseOriginalNoSkeletonUpdate[Index] ="));
+    CHECK(skeleton_body.find("AdaptiveCorpseOriginalSkipWhenAsleep[Index] =") <
+          skeleton_body.find("Candidate.Mesh.bNoSkeletonUpdate = true"));
+    CHECK(count_occurrences(telemetry_source,
+        "Candidate.Mesh.bNoSkeletonUpdate = true") == 2);
+    CHECK(count_occurrences(telemetry_source,
+        "Candidate.Mesh.bNoSkeletonUpdate = false") == 1);
+    CHECK(count_occurrences(telemetry_source,
+        "Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true") == 1);
+    CHECK(count_occurrences(telemetry_source,
+        "Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = false") == 1);
+    const auto prune_start = telemetry_source.find(
+        "function PruneAdaptiveCorpseLodEntries()");
+    const auto prune_end = telemetry_source.find(
+        "function RestoreNearAdaptiveCorpseLods()", prune_start);
+    CHECK(prune_start != std::string::npos);
+    CHECK(prune_end != std::string::npos);
+    const auto prune_body = telemetry_source.substr(prune_start, prune_end - prune_start);
+    CHECK(prune_body.find("RemoveAdaptiveCorpseLodEntry(Index, true)") ==
+          std::string::npos);
+    CHECK(prune_body.find("AdaptiveCorpseLodPhysicsFrozen[Index] = false") !=
+          std::string::npos);
+    const auto release_start = telemetry_source.find(
+        "function bool RemoveAdaptiveCorpseLodEntry(");
+    CHECK(release_start != std::string::npos);
+    const auto release_body = telemetry_source.substr(release_start, prune_start - release_start);
+    CHECK(release_body.find("AdaptiveCorpseLodIds[Index] == GetAdaptiveCorpseActionId(Candidate)") <
+          release_body.find("Candidate.Mesh.bNoSkeletonUpdate = false"));
+    CHECK(release_body.find("AdaptiveCorpseLodPhysicsFrozen[Index] = false") <
+          release_body.find("Candidate.Mesh.bNoSkeletonUpdate = false"));
+    for (const auto* field : {"AdaptiveCorpseSkeletonOwned",
+             "AdaptiveCorpseOriginalNoSkeletonUpdate",
+             "AdaptiveCorpseOriginalSkipWhenAsleep",
+             "AdaptiveCorpseObservedAwake"}) {
+        CHECK(telemetry_source.find(std::string(field) + ".AddItem(false)") !=
+              std::string::npos);
+        CHECK(telemetry_source.find(std::string(field) + ".Remove(Index, 1)") !=
+              std::string::npos);
+        CHECK(telemetry_source.find(std::string(field) + ".Length = 0") !=
+              std::string::npos);
+    }
     CHECK(telemetry_source.find(
         "function int WakeNearAdaptiveDistanceSleptCorpses()") !=
           std::string::npos);
