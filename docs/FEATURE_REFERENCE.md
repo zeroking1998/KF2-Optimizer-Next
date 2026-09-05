@@ -33,6 +33,22 @@ frame-time, FPS, or stutter evidence. Substantially worse sustained tails can
 still trigger correction on their own. Real FPS drops and memory pressure
 remain actionable; holding a target cannot be guaranteed on every scene.
 
+### Corpse telemetry transitions
+
+After a confirmed corpse readback, a temporary missing field or telemetry gap
+shows `STALE` and preserves only the last confirmed runtime limit for up to ten
+seconds after the gap is detected. Repeated gaps or map changes do not extend
+that deadline. Long evaluation pauses are measured against the existing
+15-second telemetry freshness limit, not a newly started grace period.
+
+The cached limit is display-only. App quality/corpse decisions and fallback selection
+pause during this grace period; cached values never produce an APPLIED receipt.
+This does not stop KF2's own simulation, its already-running provider, or the
+separate FleX controller using its own telemetry.
+Expiry clears the displayed value to `UNAVAILABLE`. A newer valid readback
+restores `AVAILABLE`; process changes, provider replacement and rejected session
+boundaries discard the old cache. State events are emitted once per transition.
+
 ### Quality-response diagnostics
 
 `ADAPTIVE_QUALITY_RESPONSE` compares a five-second pre-request window with a

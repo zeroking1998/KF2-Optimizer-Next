@@ -23,6 +23,7 @@
 
 #include "kf2/app/build_identity.hpp"
 #include "kf2/optimizer/quality_response.hpp"
+#include "features/telemetry/corpse_telemetry_state.hpp"
 #include "kf2/backup/restore_transaction.hpp"
 #include "kf2/config/ini_document.hpp"
 #include "kf2/config/adaptive_locks.hpp"
@@ -161,6 +162,7 @@ struct UiRuntime {
     std::uint64_t adaptive_quality_last_applied_ns{0};
     std::uint64_t adaptive_frame_not_before_ns{0};
     optimizer::QualityResponse quality_response;
+    telemetry_pipeline::CorpseTelemetryTracker corpse_telemetry_tracker;
     game::AdaptiveResourceQualityState adaptive_resource_quality{100};
     std::optional<game::OfflineAdaptiveSessionPolicy>
         adaptive_session_policy;

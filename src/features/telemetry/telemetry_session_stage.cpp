@@ -34,6 +34,7 @@ void revalidate_bound_process(app::UiRuntime& runtime) {
 
 SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
     if (!runtime.game_process || !runtime.present_source) {
+        runtime.corpse_telemetry_tracker.reset();
         const std::wstring detail = runtime.telemetry_failure.empty()
             ? L"Telemetry waiting for KF2" : runtime.telemetry_failure;
         if (runtime.model.status().telemetry != detail ||
@@ -42,6 +43,8 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
             runtime.model.status().live_cpu_percent ||
             runtime.model.status().live_gpu_percent ||
             runtime.model.status().game_gpu_name ||
+            runtime.model.status().adaptive_runtime_corpse_limit ||
+            runtime.model.status().adaptive_corpse_capability != L"UNAVAILABLE" ||
             runtime.model.status().live_active_corpses ||
             runtime.model.status().live_sleeping_corpses) {
             auto status = runtime.model.status();
@@ -235,6 +238,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     adaptive_profile_gate.reset();
     adaptive_gameplay_active = false;
     adaptive_provider_confirmed = false;
+    corpse_telemetry_tracker.reset();
     adaptive_overhead_breaches = 0;
     adaptive_overhead_frozen = false;
     adaptive_decision = {};
@@ -404,6 +408,7 @@ void UiRuntime::update_overlay_scene_gate() {
          game_log_file_index != file_index ||
          game_log_process_start_id != game_process->process_start_id);
     if (!game_log_bound_to_process || identity_changed) {
+        corpse_telemetry_tracker.reset();
         game_log_volume_serial = information.dwVolumeSerialNumber;
         game_log_file_index = file_index;
         game_log_process_start_id = game_process->process_start_id;
@@ -417,6 +422,7 @@ void UiRuntime::update_overlay_scene_gate() {
         game_log_session_parser.reset();
     }
     if (size < game_log_offset) {
+        corpse_telemetry_tracker.reset();
         game_log_offset = 0;
         game_log_marker_tail.clear();
         overlay_scene_ready = false;
