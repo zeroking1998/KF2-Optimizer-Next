@@ -19,6 +19,7 @@
 
 #include "kf2/app/application.hpp"
 #include "kf2/config/setting_catalog.hpp"
+#include "kf2/optimizer/startup_gpu_profile.hpp"
 #include "kf2/ui/shell_layout.hpp"
 #include "app/application_runtime.hpp"
 #include "app/runtime/feature_composition.hpp"
@@ -303,13 +304,20 @@ int main() {
         const auto physical = kf2::telemetry::unique_physical_gpu_adapters(
             adapters.value());
         if (!physical.empty()) {
-            const auto& selected = physical.front();
+            // A historical renderer name must not select a high-memory profile
+            // for a later launch on another adapter.
+            const auto& historical = *std::max_element(
+                physical.begin(), physical.end(), [](const auto& left,
+                                                      const auto& right) {
+                    return left.dedicated_memory_bytes <
+                           right.dedicated_memory_bytes;
+                });
             write_bytes(config_root.parent_path() / L"Logs" / L"Launch.log",
-                        "[0002.55] Log: Adapter : " + utf8(selected.name) +
+                        "[0002.55] Log: Adapter : " + utf8(historical.name) +
                             "\r\n");
-            expected_startup_memory =
-                kf2::optimizer::recommended_startup_memory_profile(
-                    selected.dedicated_memory_bytes);
+            const auto resolved = kf2::optimizer::resolve_startup_gpu_profile(
+                physical, std::nullopt, std::nullopt, false);
+            if (resolved) expected_startup_memory = resolved->profile;
         }
     }
 

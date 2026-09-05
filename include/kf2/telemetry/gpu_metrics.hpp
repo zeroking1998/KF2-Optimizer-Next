@@ -2,9 +2,11 @@
 #include <Windows.h>
 #include <pdh.h>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 #include "kf2/core/result.hpp"
 #include "kf2/telemetry/telemetry_snapshot.hpp"
@@ -55,6 +57,23 @@ struct GpuAdapter {
     // remaining different for two genuinely separate, identical GPUs.
     std::wstring physical_device_key;
 };
+enum class ProcessGpuPreference {
+    unspecified,
+    minimum_power,
+    high_performance,
+};
+struct ConfiguredGpuAdapter {
+    ProcessGpuPreference preference{ProcessGpuPreference::unspecified};
+    std::optional<std::uint64_t> adapter_luid;
+};
+// Missing GPU selection in a valid Windows option list is unspecified;
+// malformed or duplicate GPU selections are rejected.
+[[nodiscard]] std::optional<ProcessGpuPreference>
+parse_windows_gpu_preference(std::wstring_view value) noexcept;
+[[nodiscard]] std::string_view process_gpu_preference_token(
+    ProcessGpuPreference preference) noexcept;
+[[nodiscard]] Result<ConfiguredGpuAdapter> configured_gpu_adapter_for_process(
+    const std::filesystem::path& executable);
 [[nodiscard]] Result<std::vector<GpuAdapter>> enumerate_gpu_adapters();
 [[nodiscard]] Result<GpuMemoryBudget> query_gpu_memory_budget(
     std::uint64_t adapter_luid);

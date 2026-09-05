@@ -459,6 +459,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_actuation.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_governor.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/resource_pressure.cpp"
+    "${PROJECT_SOURCE_DIR}/src/optimizer/startup_gpu_profile.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/optimizer_engine.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/presentmon_session.cpp"
@@ -786,7 +787,7 @@ target_include_directories(kf2_telemetry_frame_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include"
     "${PROJECT_SOURCE_DIR}/src"
 )
-target_link_libraries(kf2_telemetry_frame_test PRIVATE pdh dxgi gdi32)
+target_link_libraries(kf2_telemetry_frame_test PRIVATE pdh dxgi gdi32 advapi32)
 add_test(NAME kf2_telemetry_frame_test COMMAND kf2_telemetry_frame_test)
 
 add_executable(kf2_telemetry_session_stage_test
@@ -894,7 +895,7 @@ add_executable(kf2_hardware_overview_contract_test
 target_include_directories(kf2_hardware_overview_contract_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_hardware_overview_contract_test PRIVATE
-    psapi dwmapi pdh dxgi gdi32)
+    psapi dwmapi pdh dxgi gdi32 advapi32)
 add_test(NAME kf2_hardware_overview_contract_test
     COMMAND kf2_hardware_overview_contract_test)
 
@@ -906,7 +907,7 @@ add_executable(kf2_hardware_refresh_contract_test
 target_include_directories(kf2_hardware_refresh_contract_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_hardware_refresh_contract_test PRIVATE
-    psapi dwmapi pdh dxgi gdi32)
+    psapi dwmapi pdh dxgi gdi32 advapi32)
 add_test(NAME kf2_hardware_refresh_contract_test
     COMMAND kf2_hardware_refresh_contract_test)
 
@@ -954,7 +955,7 @@ add_executable(kf2_gpu_metrics_test
     "${PROJECT_SOURCE_DIR}/src/telemetry/gpu_metrics.cpp"
 )
 target_include_directories(kf2_gpu_metrics_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
-target_link_libraries(kf2_gpu_metrics_test PRIVATE pdh dxgi gdi32)
+target_link_libraries(kf2_gpu_metrics_test PRIVATE pdh dxgi gdi32 advapi32)
 add_test(NAME kf2_gpu_metrics_test COMMAND kf2_gpu_metrics_test)
 
 add_executable(kf2_overlay_policy_test
@@ -991,6 +992,17 @@ add_executable(kf2_optimizer_engine_test
 )
 target_include_directories(kf2_optimizer_engine_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_optimizer_engine_test COMMAND kf2_optimizer_engine_test)
+
+add_executable(kf2_startup_gpu_profile_test
+    unit/startup_gpu_profile_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/optimizer/startup_gpu_profile.cpp"
+    "${PROJECT_SOURCE_DIR}/src/optimizer/optimizer_engine.cpp"
+    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
+)
+target_include_directories(kf2_startup_gpu_profile_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+add_test(NAME kf2_startup_gpu_profile_test
+    COMMAND kf2_startup_gpu_profile_test)
 
 add_executable(kf2_adaptive_profile_test
     unit/adaptive_profile_test.cpp

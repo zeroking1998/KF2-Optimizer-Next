@@ -35,6 +35,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Fixed the first launch after a Windows GPU-preference change inheriting the
+  previous adapter's texture-memory profile. Multi-GPU startup now uses the
+  configured physical adapter identity or a conservative cross-adapter budget.
 - Fixed adaptive mixed-pressure corrections consuming the dedicated overdraw
   quality channel before verified overdraw pressure could select it.
 - Fixed native corpse wakes being immediately undone by Distance Sleep. The

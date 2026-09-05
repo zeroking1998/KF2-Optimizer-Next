@@ -2,7 +2,7 @@
 #include <winternl.h>
 #include <d3dkmthk.h>
 #include <pdhmsg.h>
-#include <dxgi1_4.h>
+#include <dxgi1_6.h>
 #include <wrl/client.h>
 #include <algorithm>
 #include <array>
@@ -212,6 +212,137 @@ Result<GpuMemoryBudget> query_gpu_memory_budget(
     }
     return Result<GpuMemoryBudget>::failure(
         {ErrorCode::not_found, L"GPU adapter identity is no longer present", 0});
+}
+
+std::optional<ProcessGpuPreference> parse_windows_gpu_preference(
+    std::wstring_view value) noexcept {
+    const auto trim = [](std::wstring_view text) {
+        while (!text.empty() && std::iswspace(text.front())) text.remove_prefix(1);
+        while (!text.empty() && std::iswspace(text.back())) text.remove_suffix(1);
+        return text;
+    };
+    std::optional<ProcessGpuPreference> preference;
+    while (!value.empty()) {
+        const auto separator = value.find(L';');
+        const auto field = trim(value.substr(0, separator));
+        value = separator == std::wstring_view::npos
+            ? std::wstring_view{} : value.substr(separator + 1);
+        if (field.empty()) continue;
+        const auto equals = field.find(L'=');
+        if (equals == std::wstring_view::npos) return std::nullopt;
+        const auto name = trim(field.substr(0, equals));
+        const auto setting = trim(field.substr(equals + 1));
+        if (name.empty() || setting.empty()) return std::nullopt;
+        constexpr std::wstring_view token{L"gpupreference"};
+        const bool is_preference = name.size() == token.size() &&
+            std::equal(name.begin(), name.end(), token.begin(),
+                [](wchar_t left, wchar_t right) {
+                    return std::towlower(left) == right;
+                });
+        if (!is_preference) continue;
+        // Reject ambiguous or malformed preferences rather than guessing a GPU.
+        if (preference || setting.size() != 1) return std::nullopt;
+        switch (setting.front()) {
+            case L'0': preference = ProcessGpuPreference::unspecified; break;
+            case L'1': preference = ProcessGpuPreference::minimum_power; break;
+            case L'2': preference = ProcessGpuPreference::high_performance; break;
+            default: return std::nullopt;
+        }
+    }
+    // Windows also stores unrelated options (for example Auto HDR) here.
+    // A valid entry without GpuPreference means no explicit GPU selection.
+    return preference.value_or(ProcessGpuPreference::unspecified);
+}
+
+std::string_view process_gpu_preference_token(
+    ProcessGpuPreference preference) noexcept {
+    switch (preference) {
+        case ProcessGpuPreference::minimum_power: return "minimum_power";
+        case ProcessGpuPreference::high_performance: return "high_performance";
+        case ProcessGpuPreference::unspecified: return "unspecified";
+    }
+    return "unspecified";
+}
+
+Result<ConfiguredGpuAdapter> configured_gpu_adapter_for_process(
+    const std::filesystem::path& executable) {
+    if (executable.empty()) {
+        return Result<ConfiguredGpuAdapter>::failure(
+            {ErrorCode::invalid_argument, L"Game executable path is missing", 0});
+    }
+    const auto value_name = executable.lexically_normal().wstring();
+    constexpr wchar_t subkey[] =
+        L"Software\\Microsoft\\DirectX\\UserGpuPreferences";
+    DWORD bytes = 0;
+    const auto measured = RegGetValueW(
+        HKEY_CURRENT_USER, subkey, value_name.c_str(), RRF_RT_REG_SZ,
+        nullptr, nullptr, &bytes);
+    if (measured == ERROR_FILE_NOT_FOUND) {
+        return Result<ConfiguredGpuAdapter>::success({});
+    }
+    if (measured != ERROR_SUCCESS || bytes < sizeof(wchar_t) ||
+        bytes > 64U * 1024U) {
+        return Result<ConfiguredGpuAdapter>::failure(
+            {ErrorCode::platform_failure,
+             L"Windows GPU preference could not be read",
+             static_cast<std::uint32_t>(measured)});
+    }
+    std::vector<wchar_t> value(bytes / sizeof(wchar_t) + 1U, L'\0');
+    auto loaded_bytes = bytes;
+    const auto loaded = RegGetValueW(
+        HKEY_CURRENT_USER, subkey, value_name.c_str(), RRF_RT_REG_SZ,
+        nullptr, value.data(), &loaded_bytes);
+    if (loaded != ERROR_SUCCESS) {
+        return Result<ConfiguredGpuAdapter>::failure(
+            {ErrorCode::platform_failure,
+             L"Windows GPU preference could not be read",
+             static_cast<std::uint32_t>(loaded)});
+    }
+    const auto preference = parse_windows_gpu_preference(value.data());
+    if (!preference) {
+        return Result<ConfiguredGpuAdapter>::failure(
+            {ErrorCode::invalid_argument,
+             L"Windows GPU preference is malformed", 0});
+    }
+    ConfiguredGpuAdapter result{*preference, std::nullopt};
+    if (*preference == ProcessGpuPreference::unspecified) {
+        return Result<ConfiguredGpuAdapter>::success(result);
+    }
+
+    Microsoft::WRL::ComPtr<IDXGIFactory1> factory1;
+    const HRESULT created = CreateDXGIFactory1(IID_PPV_ARGS(&factory1));
+    if (FAILED(created)) {
+        return Result<ConfiguredGpuAdapter>::failure(
+            {ErrorCode::platform_failure,
+             L"DXGI factory could not resolve the configured GPU",
+             static_cast<std::uint32_t>(created)});
+    }
+    Microsoft::WRL::ComPtr<IDXGIFactory6> factory6;
+    if (FAILED(factory1.As(&factory6))) {
+        return Result<ConfiguredGpuAdapter>::success(result);
+    }
+    const auto dxgi_preference =
+        *preference == ProcessGpuPreference::minimum_power
+            ? DXGI_GPU_PREFERENCE_MINIMUM_POWER
+            : DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE;
+    for (UINT index = 0;; ++index) {
+        Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+        const HRESULT found = factory6->EnumAdapterByGpuPreference(
+            index, dxgi_preference, IID_PPV_ARGS(&adapter));
+        if (found == DXGI_ERROR_NOT_FOUND) break;
+        if (FAILED(found)) continue;
+        DXGI_ADAPTER_DESC1 description{};
+        if (FAILED(adapter->GetDesc1(&description)) ||
+            (description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0) {
+            continue;
+        }
+        result.adapter_luid =
+            (static_cast<std::uint64_t>(static_cast<std::uint32_t>(
+                 description.AdapterLuid.HighPart)) << 32U) |
+            description.AdapterLuid.LowPart;
+        break;
+    }
+    return Result<ConfiguredGpuAdapter>::success(result);
 }
 
 struct NvidiaGpuSampler::Impl {
