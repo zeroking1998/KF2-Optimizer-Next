@@ -158,7 +158,16 @@ The overlay is a separate, game-bound Windows surface. It displays verified
 telemetry without injecting a renderer into KF2. Use F10 to toggle it. Scale,
 position, and metric visibility are stored in the portable `Data` directory.
 
-## 10. Recovery
+## 10. Debug markers
+
+Open **Debug** to enable temporary in-game evidence markers for corpse actions
+or living-Zed distances. Both options are off by default and affect only the
+next protected KF2 start; they never change a game that is already running.
+Living-Zed markers show distance in metres and a session Actor ID. Their
+snapshot is limited to 64 visible Zeds and refreshes at most every 100 ms.
+The Debug page also links to the portable data folder and current session log.
+
+## 11. Recovery
 
 If KF2 or the optimizer ends unexpectedly, reopen the optimizer and use the
 recovery status on **Help & Repair**. Recovery restores protected INIs,
@@ -167,7 +176,7 @@ snapshot. Do not delete the `Data` directory before recovery is complete.
 
 See [Support](../SUPPORT.md) before sharing logs publicly.
 
-## 11. License
+## 12. License
 
 KF2 Optimizer Next is distributed under `GPL-3.0-only` and without warranty.
 The complete terms are in the root `LICENSE` file and, in a portable package,

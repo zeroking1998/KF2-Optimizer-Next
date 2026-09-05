@@ -85,11 +85,11 @@ int main() {
     CHECK(SUCCEEDED(root->FindAll(TreeScope_Children, condition.Get(), &navigation)));
     int count = 0;
     CHECK(SUCCEEDED(navigation->get_Length(&count)));
-    CHECK(count == 5);
+    CHECK(count == 6);
 
     constexpr const wchar_t* expected[] = {
         L"Home", L"Game graphics", L"Overlay", L"Advanced settings",
-        L"Help & Repair"};
+        L"Debug", L"Help & Repair"};
     for (int index = 0; index < count; ++index) {
         ComPtr<IUIAutomationElement> item;
         CHECK(SUCCEEDED(navigation->GetElement(index, &item)));

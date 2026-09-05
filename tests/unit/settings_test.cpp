@@ -23,6 +23,7 @@ int main() {
         "animations_enabled=false\nguide_completed=true\nguide_step=17\n"
         "overlay_enabled=true\noverlay_show_fps=false\noverlay_show_frame_time=true\n"
         "overlay_show_cpu=false\noverlay_show_gpu=true\noverlay_show_memory=true\n"
+        "debug_corpse_markers=true\ndebug_zed_markers=true\n"
         "overlay_position=bottom_left\n"
         "offline_gameplay_telemetry=true\n"
         "adaptive_flex_enabled=true\nadaptive_flex_auto=false\n"
@@ -41,6 +42,8 @@ int main() {
     CHECK(!parsed.value().overlay_show_cpu);
     CHECK(parsed.value().overlay_show_gpu);
     CHECK(parsed.value().overlay_show_memory);
+    CHECK(parsed.value().debug_corpse_markers);
+    CHECK(parsed.value().debug_zed_markers);
     CHECK(parsed.value().overlay_position == "bottom_left");
     CHECK(parsed.value().overlay_scale_percent == 175);
     CHECK(parsed.value().quality_policy == "invisible");
@@ -139,6 +142,8 @@ int main() {
         "schema_version=1\nadaptive_minimum_quality=90\n"
         "adaptive_maximum_quality=80\n").has_value());
     CHECK(!parse_settings("schema_version=1\noverlay_show_memory=maybe\n").has_value());
+    CHECK(!parse_settings("schema_version=1\ndebug_corpse_markers=maybe\n").has_value());
+    CHECK(!parse_settings("schema_version=1\ndebug_zed_markers=maybe\n").has_value());
     CHECK(!parse_settings(
         "schema_version=1\noffline_gameplay_telemetry=maybe\n").has_value());
     const auto legacy_animations = parse_settings(
@@ -191,6 +196,7 @@ int main() {
           "automatic_update_checks=true\n"
           "overlay_enabled=true\noverlay_show_fps=true\noverlay_show_frame_time=true\n"
           "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=true\n"
+          "debug_corpse_markers=false\ndebug_zed_markers=false\n"
           "restore_config_after_game=true\n"
           "adaptive_aggressiveness=balanced\n"
           "adaptive_minimum_quality=10\nadaptive_maximum_quality=100\n"
