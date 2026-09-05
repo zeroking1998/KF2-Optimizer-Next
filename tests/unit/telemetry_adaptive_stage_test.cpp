@@ -124,6 +124,51 @@ int main() {
         false, false, 20'000'000'000ULL, 10'000'000'000ULL));
 
     auto frame = complete_frame();
+    // LoadMap is announced before the protected provider starts ticking.
+    // Neither that interval nor expired telemetry may admit loading frames.
+    {
+        auto loading = frame;
+        AdaptiveSampleContext boundary;
+        boundary.current_map = loading.gameplay->map;
+        boundary.last_telemetry_sample = 44;
+        loading.gameplay->telemetry_sample.reset();
+        loading.gameplay->telemetry_observed_ns = 0;
+        const auto waiting = build_adaptive_sample(loading, boundary);
+        CHECK(requires_fresh_frame_window(waiting));
+        CHECK(waiting.telemetry_sample == 0);
+        boundary.last_telemetry_sample = waiting.telemetry_sample;
+        loading.gameplay->telemetry_sample = 1;
+        loading.gameplay->telemetry_observed_ns = loading.observed_at_ns;
+        const auto ready = build_adaptive_sample(loading, boundary);
+        CHECK(requires_fresh_frame_window(ready));
+        boundary.last_telemetry_sample = ready.telemetry_sample;
+        CHECK(!requires_fresh_frame_window(build_adaptive_sample(loading, boundary)));
+        // LoadMap clears net mode before the later offline/online receipt.
+        // Unknown is not online, even if an old provider sample is present.
+        loading.gameplay->net_mode.reset();
+        CHECK(requires_fresh_frame_window(build_adaptive_sample(loading, boundary)));
+        loading.gameplay->telemetry_sample = 7;
+        loading.gameplay->telemetry_observed_ns = loading.observed_at_ns;
+        CHECK(requires_fresh_frame_window(build_adaptive_sample(loading, boundary)));
+        loading.gameplay->net_mode = "";
+        CHECK(requires_fresh_frame_window(build_adaptive_sample(loading, boundary)));
+        loading.gameplay->net_mode = "NM_Standalone";
+        loading.gameplay->telemetry_sample = 1;
+        loading.gameplay->telemetry_observed_ns = 1;
+        const auto expired = build_adaptive_sample(loading, boundary);
+        CHECK(requires_fresh_frame_window(expired));
+        CHECK(expired.telemetry_sample == 0);
+        boundary.last_telemetry_sample = expired.telemetry_sample;
+        CHECK(build_adaptive_sample(loading, boundary).map_generation ==
+              boundary.map_generation);
+        loading.gameplay->telemetry_observed_ns = loading.observed_at_ns;
+        CHECK(requires_fresh_frame_window(build_adaptive_sample(loading, boundary)));
+        loading.offline_gameplay = false;
+        loading.gameplay->net_mode = "NM_Client";
+        loading.gameplay->telemetry_sample.reset();
+        loading.gameplay->telemetry_observed_ns = 0;
+        CHECK(!requires_fresh_frame_window(build_adaptive_sample(loading, boundary)));
+    }
     AdaptiveSampleContext context;
     context.current_quality = 80;
     context.minimum_quality = 70;
@@ -352,6 +397,64 @@ int main() {
     CHECK(selected.has_value());
     CHECK(selected->resource == game::AdaptiveResourceControl::cpu);
     CHECK(selected->quality == 90);
+
+    // Time since dispatch is not evidence of a response to the applied change.
+    // Even a delayed receipt must get a complete fresh fast window first.
+    auto post_applied = control;
+    post_applied.state = optimizer::AdaptiveControllerState::emergency;
+    post_applied.last_dispatch_ns = 1'000'000'000ULL;
+    post_applied.last_applied_ns = 9'500'000'000ULL;
+    post_applied.sample_timestamp_ns = post_applied.now_ns;
+    CHECK(!select_adaptive_runtime_control(post_applied));
+    post_applied.now_ns = 10'500'000'000ULL;
+    CHECK(!select_adaptive_runtime_control(post_applied));
+    post_applied.sample_timestamp_ns = 10'500'000'000ULL;
+    CHECK(select_adaptive_runtime_control(post_applied));
+    post_applied.current_frame_pressure = false;
+    CHECK(!select_adaptive_runtime_control(post_applied));
+    post_applied.current_resource_pressure = true;
+    CHECK(select_adaptive_runtime_control(post_applied));
+
+    // Ordinary follow-ups must leave settling, measurement and delivery time
+    // after the receipt, including when dispatch happened much earlier.
+    for (const auto state : {optimizer::AdaptiveControllerState::intervention,
+                             optimizer::AdaptiveControllerState::stable}) {
+        auto ordinary = post_applied;
+        ordinary.state = state;
+        ordinary.current_quality = 70;
+        ordinary.recovery_eligible = true;
+        for (const auto elapsed : {1'000'000'000ULL, 5'000'000'000ULL,
+                                   6'999'999'999ULL}) {
+            ordinary.now_ns = ordinary.last_applied_ns + elapsed;
+            ordinary.sample_timestamp_ns = ordinary.now_ns;
+            CHECK(!select_adaptive_runtime_control(ordinary));
+        }
+        ordinary.now_ns = ordinary.last_applied_ns + 7'000'000'000ULL;
+        ordinary.sample_timestamp_ns = ordinary.now_ns - 250'000'000ULL;
+        CHECK(select_adaptive_runtime_control(ordinary));
+        ordinary.sample_timestamp_ns = ordinary.last_applied_ns + 999'999'999ULL;
+        CHECK(!select_adaptive_runtime_control(ordinary));
+        ordinary.now_ns = ordinary.last_applied_ns - 1;
+        CHECK(!select_adaptive_runtime_control(ordinary));
+    }
+
+    auto fresh_context = context;
+    fresh_context.decision_frames = telemetry::FrameMetrics{
+        .fps = 60.0, .average_fps = 60.0,
+        .sustained_one_percent_low_fps = 60.0,
+        .frame_time_ms = 1000.0 / 60.0,
+        .p95_ms = 1000.0 / 60.0, .p99_ms = 1000.0 / 60.0,
+        .one_percent_low_fps = 60.0,
+        .quality = telemetry::SampleQuality::good,
+        .reason = telemetry::UnavailableReason::none};
+    const auto fresh_sample = build_adaptive_sample(frame, fresh_context).sample;
+    CHECK(fresh_sample.fps == 60.0);
+    CHECK(fresh_sample.one_percent_low_fps == 60.0);
+    CHECK(fresh_sample.stutter_count == 0);
+    CHECK(!fresh_sample.sample_loss);
+    CHECK(!fresh_sample.discontinuity);
+    CHECK(fresh_sample.timestamp_ns == frame.observed_at_ns);
+    CHECK(frame.frames.one_percent_low_fps == 45.0);
 
     control.bottleneck = optimizer::AdaptiveBottleneck::rendering;
     control.bottleneck_confidence = 0.74;

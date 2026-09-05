@@ -104,6 +104,30 @@ int main() {
     CHECK(*responsive_metrics.one_percent_low_fps > 29.0 &&
           *responsive_metrics.one_percent_low_fps < 31.0);
 
+    // An authenticated quality correction starts an adaptive-only window.
+    // Older slow frames stay visible in the UI but cannot trigger more steps.
+    const auto corrected = responsive.drain(
+        transition_ns + 120 * 8'333'333ULL, 500'000'000ULL,
+        transition_ns);
+    CHECK(corrected.fps.has_value());
+    CHECK(corrected.average_fps.has_value());
+    CHECK(*corrected.average_fps > 119.0);
+    CHECK(*corrected.sustained_one_percent_low_fps > 119.0);
+    CHECK(*corrected.one_percent_low_fps > 119.0);
+    CHECK(*corrected.p95_ms < 9.0);
+    CHECK(corrected.stutter_count == 0);
+    const auto ui_after_correction = responsive.drain(
+        transition_ns + 120 * 8'333'333ULL, 500'000'000ULL);
+    CHECK(ui_after_correction.one_percent_low_fps ==
+          responsive_metrics.one_percent_low_fps);
+    // A late ETW event from before the receipt cannot recontaminate the view.
+    CHECK(responsive.ingest({game, transition_ns - 1'000'000ULL, 1, true, 0}));
+    CHECK(responsive.drain(transition_ns + 120 * 8'333'333ULL,
+              500'000'000ULL, transition_ns).one_percent_low_fps ==
+          corrected.one_percent_low_fps);
+    CHECK(!responsive.drain(7'000'000'000ULL, 500'000'000ULL,
+                            7'000'000'000ULL).fps.has_value());
+
     responsive.reset_statistics();
     CHECK(!responsive.drain(
         transition_ns + 120 * 8'333'333ULL,

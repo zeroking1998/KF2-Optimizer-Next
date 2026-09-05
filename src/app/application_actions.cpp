@@ -520,6 +520,8 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
     adaptive_control_token = control_token.value();
     adaptive_control_sequence = 0;
     adaptive_quality_last_dispatch_ns = 0;
+    adaptive_quality_last_applied_ns = 0;
+    adaptive_frame_not_before_ns = 0;
     adaptive_resource_quality.reset(
         optimizer_settings.adaptive_maximum_quality);
     const auto telemetry_module = game::install_offline_telemetry_lab({
