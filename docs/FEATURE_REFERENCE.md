@@ -11,6 +11,7 @@
 | External overlay | Displays selected telemetry outside the game process | Visible game-bound window and current sample |
 | Corpse ceiling | Sets the maximum permitted dead-body count | Configuration readback and runtime capacity receipt |
 | Distance Sleep | Sleeps a sufficiently distant corpse actor | Matching actor ID and `state=sleep` receipt |
+| Settled corpse freeze | Removes already sleeping, slow corpses from rigid-body simulation under scene pressure | Matching actor ID and verified `state=frozen` receipt |
 | Near Wake | Wakes a nearby previously slept corpse actor | Matching actor ID and `state=wake` receipt |
 | Ragdoll Sleep | Stops redundant active ragdoll simulation | Matching actor ID and Ragdoll Sleep receipt |
 | Scene-density control | Reduces active cosmetic work when many relevant actors are visible | Scene level plus confirmed actor/capacity actions |
@@ -48,6 +49,18 @@ separate FleX controller using its own telemetry.
 Expiry clears the displayed value to `UNAVAILABLE`. A newer valid readback
 restores `AVAILABLE`; process changes, provider replacement and rejected session
 boundaries discard the old cache. State events are emitted once per transition.
+
+### Settled corpse freeze
+
+Adaptive mode can move one already sleeping, slow rigid-body corpse out of the
+physics simulation every 250 milliseconds. The corpse must have remained
+settled for 15 seconds and be at least 10 metres away at low pressure,
+10 seconds and 8 metres away at medium pressure, or 5 seconds and 5 metres
+away at high pressure.
+The change is accepted only after `PHYS_None` is read back and logged with the
+same actor ID. Disabling Adaptive mode restores optimizer-owned freezes to
+`PHYS_RigidBody`; shutdown only releases tracking references and does not touch
+actors that may already be leaving the world.
 
 ### Quality-response diagnostics
 

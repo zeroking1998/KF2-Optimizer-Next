@@ -104,6 +104,11 @@ int main() {
     CHECK(restore_adaptive_graphics != std::string::npos);
     CHECK(select_staggered_corpse != std::string::npos);
     CHECK(restore_adaptive_graphics < select_staggered_corpse);
+    const auto restore_freezes = telemetry_source.find(
+        "RestoreAllAdaptiveCorpseFreezes();", restore_adaptive_graphics);
+    CHECK(restore_freezes != std::string::npos);
+    CHECK(restore_freezes < telemetry_source.find(
+        "RestoreOriginal(", restore_adaptive_graphics));
     CHECK(telemetry_source.find("AdaptiveGraphicsState = None",
         restore_adaptive_graphics) >= select_staggered_corpse);
     const auto interaction_tick = interaction_source.find(
@@ -666,9 +671,9 @@ int main() {
     CHECK(telemetry_source.find(
         "DistanceDecimeters = (DistanceUnits + 5) / 10") !=
           std::string::npos);
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 9);
-    CHECK(count_occurrences(telemetry_source, " distance_units=") == 10);
-    CHECK(count_occurrences(telemetry_source, " distance_m=") == 10);
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 12);
+    CHECK(count_occurrences(telemetry_source, " distance_units=") == 12);
+    CHECK(count_occurrences(telemetry_source, " distance_m=") == 12);
     const auto distance_marker = telemetry_source.find(
         "FormatAdaptiveDebugMarkerAction(");
     CHECK(distance_marker != std::string::npos);
@@ -770,7 +775,7 @@ int main() {
     CHECK(telemetry_source.find(
         "GetAdaptiveCorpseActionId(Candidate)") != std::string::npos);
     CHECK(count_occurrences(
-        telemetry_source, "RegisterAdaptiveCorpseDebugMarker(Candidate,") == 5);
+        telemetry_source, "RegisterAdaptiveCorpseDebugMarker(Candidate,") == 6);
     CHECK(interaction_source.find("event PostRender(Canvas MarkerCanvas)") ==
           std::string::npos);
     CHECK(interaction_source.find(
@@ -894,6 +899,8 @@ int main() {
         "GameInfo.IsZedTimeActive()", stagger_start);
     const auto wake_stage = telemetry_source.find(
         "WakeNearAdaptiveDistanceSleptCorpses()", stagger_start);
+    const auto freeze_stage = telemetry_source.find(
+        "FreezeOnePressureEligibleCorpse(", stagger_start);
     const auto baseline_sleep_stage = telemetry_source.find(
         "SleepBaselineAwakeMonsterCorpses(GoreManager)", stagger_start);
     const auto distant_sleep_stage = telemetry_source.find(
@@ -902,9 +909,17 @@ int main() {
     CHECK(zed_time_guard != std::string::npos);
     CHECK(baseline_sleep_stage != std::string::npos);
     CHECK(wake_stage != std::string::npos);
+    CHECK(freeze_stage != std::string::npos);
     CHECK(distant_sleep_stage != std::string::npos);
+    const auto adaptive_off_restore = telemetry_source.find(
+        "if (!bAdaptiveCorpseStagger)\n    {\n        RestoreAllAdaptiveCorpseFreezes();",
+        stagger_start);
+    CHECK(adaptive_off_restore != std::string::npos);
+    CHECK(adaptive_off_restore < baseline_sleep_stage);
     CHECK(zed_time_guard < baseline_sleep_stage);
     CHECK(baseline_sleep_stage < wake_stage);
+    CHECK(baseline_sleep_stage < freeze_stage);
+    CHECK(freeze_stage < wake_stage);
     CHECK(zed_time_guard < wake_stage);
     CHECK(zed_time_guard < distant_sleep_stage);
     const auto frame_only_action_gate = telemetry_source.find(
@@ -914,6 +929,53 @@ int main() {
         "PhysicsPressureLevel = Max(", stagger_start) != std::string::npos);
     CHECK(telemetry_source.find(
         "RagdollPressureLevel = Max(", stagger_start) != std::string::npos);
+
+    const auto pressure_freeze = telemetry_source.find(
+        "function bool FreezeOnePressureEligibleCorpse(");
+    const auto pressure_freeze_end = telemetry_source.find(
+        "function RemoveAdaptiveDistanceSleptCorpseEntry(", pressure_freeze);
+    CHECK(pressure_freeze != std::string::npos);
+    CHECK(pressure_freeze_end != std::string::npos);
+    const auto pressure_freeze_body = telemetry_source.substr(
+        pressure_freeze, pressure_freeze_end - pressure_freeze);
+    for (const auto* threshold : {"MinimumAgeSeconds = 15",
+             "MinimumAgeSeconds = 10", "MinimumAgeSeconds = 5",
+             "MinimumDistanceUnits = 1000", "MinimumDistanceUnits = 800",
+             "MinimumDistanceUnits = 500",
+             "AdaptiveLastCorpseFreezeRealTime < 0.25"}) {
+        CHECK(pressure_freeze_body.find(threshold) != std::string::npos);
+    }
+    CHECK(pressure_freeze_body.find("Candidate.Mesh.RigidBodyIsAwake()") !=
+          std::string::npos);
+    CHECK(pressure_freeze_body.find("Candidate.SetPhysics(PHYS_None)") !=
+          std::string::npos);
+    CHECK(pressure_freeze_body.find(
+        "state=frozen reason=pressure_eligible") != std::string::npos);
+    CHECK(pressure_freeze_body.find("physics=none readback=verified") !=
+          std::string::npos);
+    CHECK(pressure_freeze_body.find("RequiredWakeCount") ==
+          std::string::npos);
+    CHECK(pressure_freeze_body.find("PutRigidBodyToSleep") ==
+          std::string::npos);
+    CHECK(pressure_freeze_body.find("bNoSkeletonUpdate") ==
+          std::string::npos);
+    CHECK(pressure_freeze_body.find("Candidate.Mesh.RigidBodyIsAwake()") <
+          pressure_freeze_body.find("Candidate.SetPhysics(PHYS_None)"));
+    const auto restore_freeze_function = telemetry_source.find(
+        "function RestoreAllAdaptiveCorpseFreezes()");
+    CHECK(restore_freeze_function != std::string::npos);
+    const auto restore_freeze_end = telemetry_source.find(
+        "function bool FreezeOnePressureEligibleCorpse(",
+        restore_freeze_function);
+    CHECK(restore_freeze_end != std::string::npos);
+    const auto restore_freeze_body = telemetry_source.substr(
+        restore_freeze_function, restore_freeze_end - restore_freeze_function);
+    CHECK(restore_freeze_body.find("Candidate.SetPhysics(PHYS_RigidBody)") !=
+          std::string::npos);
+    CHECK(restore_freeze_body.find(
+        "state=unfrozen reason=adaptive_disabled") != std::string::npos);
+    CHECK(restore_freeze_body.find("physics=rigid_body readback=verified") !=
+          std::string::npos);
 
     const auto cleanup_start = telemetry_source.find(
         "function StaggerCorpseCleanup()");
