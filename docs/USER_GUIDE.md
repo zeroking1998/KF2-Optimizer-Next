@@ -80,6 +80,13 @@ Adaptive automatically manages verified quality, physics, LOD, FleX, and
 corpse-runtime controls while the game is running. Unsupported controls remain
 unchanged.
 
+Use **Adaptive optimization** on Home to enable or disable those automatic
+adjustments. The choice is saved. Turning Adaptive off during a supported
+offline session requires a confirmed runtime receipt before the app saves the
+new state. Monitoring, the overlay, Target FPS, Maximum corpses, and graphics
+settings selected by the user remain available while Adaptive is off. The
+saved state is also reapplied after a map change.
+
 Adaptive never enables FleX. If FleX is off in KF2, it remains off and no FleX
 runtime hook is installed. If the user has enabled FleX in the game, Adaptive
 may lower verified solver work under sustained performance pressure or a fresh

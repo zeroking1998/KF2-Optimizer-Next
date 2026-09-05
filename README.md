@@ -44,8 +44,9 @@ competitive gameplay.
 1. Start KF2 Optimizer.
 2. Confirm the detected Killing Floor 2 folder.
 3. Choose **Target FPS** and **Maximum corpses** on Home.
-4. Start or continue KF2. Steam and desktop-shortcut launches are supported.
-5. Let Adaptive work automatically while you play.
+4. Leave **Adaptive optimization** on for automatic adjustments, or turn it
+   off to keep only monitoring and your fixed goals.
+5. Start or continue KF2. Steam and desktop-shortcut launches are supported.
 
 The [User Guide](docs/USER_GUIDE.md) explains every screen and recovery option.
 

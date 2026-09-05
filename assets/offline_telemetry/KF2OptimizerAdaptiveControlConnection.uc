@@ -42,6 +42,10 @@ event ReceivedLine(string Line)
     local int Quality;
     local KF2OptimizerTelemetryProbe Probe;
     local bool Applied;
+    local Engine CurrentEngine;
+    local GameViewportClient CurrentViewport;
+    local KF2OptimizerTelemetryInteraction CurrentInteraction;
+    local string InteractionPath;
 
     if (Left(IpAddrToString(RemoteAddr), 10) != "127.0.0.1:" ||
         Len(Line) > 128)
@@ -65,6 +69,26 @@ event ReceivedLine(string Line)
         return;
     }
 
+    if ((Resource ~= "enable") || (Resource ~= "disable"))
+    {
+        CurrentEngine = class'Engine'.static.GetEngine();
+        if (CurrentEngine != None && CurrentEngine.GameViewport != None)
+        {
+            CurrentViewport = CurrentEngine.GameViewport;
+            InteractionPath = PathName(CurrentViewport)$
+                ".KF2OptimizerTelemetryInteraction";
+            CurrentInteraction = KF2OptimizerTelemetryInteraction(
+                FindObject(InteractionPath,
+                    class'KF2OptimizerTelemetryInteraction'));
+        }
+        if (CurrentInteraction == None)
+        {
+            SendText("KF2OPT_ACK "$Sequence$" failed rejected");
+            Close();
+            return;
+        }
+    }
+
     foreach WorldInfo.DynamicActors(class'KF2OptimizerTelemetryProbe', Probe)
     {
         if (Probe != None && !Probe.bDeleteMe)
@@ -72,6 +96,14 @@ event ReceivedLine(string Line)
             Applied = Probe.ApplyAdaptiveResourceControl(
                 Token, Sequence, Resource, Quality);
             break;
+        }
+    }
+    if (Applied)
+    {
+        if ((Resource ~= "enable") || (Resource ~= "disable"))
+        {
+            CurrentInteraction.SetProcessAdaptiveRuntimeEnabled(
+                Resource ~= "enable");
         }
     }
     if (Applied)

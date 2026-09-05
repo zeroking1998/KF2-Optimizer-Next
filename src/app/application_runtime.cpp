@@ -414,9 +414,21 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
     ui::UiStatus status;
     status.mode = mode == StartMode::read_only
         ? L"Read-only" : L"Adaptive / Automatic";
+    status.adaptive_optimization_enabled =
+        settings.adaptive_optimization_enabled;
     status.target_fps = settings.target_fps;
     status.corpse_limit = settings.corpse_limit;
     update_adaptive_policy_status(status);
+    if (!settings.adaptive_optimization_enabled) {
+        status.adaptive_state = L"off";
+        status.adaptive_action = L"none";
+        status.adaptive_reason =
+            L"Adaptive optimization is off; monitoring remains active";
+        status.adaptive_safety = L"no adaptive actuator";
+        status.adaptive_evidence = L"TELEMETRY_ONLY";
+        status.adaptive_corpse_action_status = L"DISABLED";
+        status.adaptive_flex_action_status = L"DISABLED";
+    }
     status.restore_config_after_game = settings.restore_config_after_game;
     status.overlay_enabled = overlay_enabled;
     status.overlay_show_fps = settings.overlay_show_fps;

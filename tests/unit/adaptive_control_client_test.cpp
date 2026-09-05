@@ -60,6 +60,17 @@ int main() {
     CHECK(effects_command.has_value());
     CHECK(effects_command.value() ==
           "KF2OPT 0123456789abcdef0123456789abcdef 44 effects 65\n");
+    const auto disable_command = build_adaptive_control_command({
+        .port = 17777, .token = token, .sequence = 45,
+        .resource = AdaptiveResourceControl::disable, .quality = 100,
+        .timeout_ms = 200});
+    CHECK(disable_command.has_value());
+    CHECK(disable_command.value() ==
+          "KF2OPT 0123456789abcdef0123456789abcdef 45 disable 100\n");
+    const auto enable_receipt = parse_adaptive_control_receipt(
+        "KF2OPT_ACK 46 applied enable 100\r\n");
+    CHECK(enable_receipt.has_value());
+    CHECK(enable_receipt->resource == AdaptiveResourceControl::enable);
     CHECK(!build_adaptive_control_command({
         .port = 0, .token = token, .sequence = 1}).has_value());
     CHECK(!build_adaptive_control_command({
@@ -118,6 +129,8 @@ int main() {
           quality.vram == 50 && quality.ram == 50 &&
           quality.overdraw == 70 && quality.effects == 75);
     quality.reset(90);
+    CHECK(quality.effective_quality() == 90);
+    quality.apply({5, AdaptiveResourceControl::disable, 100});
     CHECK(quality.effective_quality() == 90);
 
     WSADATA winsock{};

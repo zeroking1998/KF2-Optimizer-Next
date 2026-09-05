@@ -11,6 +11,7 @@ void observe_flex_source(app::UiRuntime& runtime) {
 
 void run_flex_control_stage(app::UiRuntime& runtime,
                             const TelemetryFrame& frame) {
+    if (!runtime.optimizer_settings.adaptive_optimization_enabled) return;
     std::optional<double> enemy_pressure;
     if (frame.offline_gameplay && frame.gameplay &&
         frame.gameplay->telemetry_living_visible &&

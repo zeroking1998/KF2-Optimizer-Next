@@ -59,7 +59,7 @@ int main() {
     CHECK(!valid_feature_registry({}));
 
     CompleteRegistryFixture complete;
-    CHECK(action_definitions().size() == 63);
+    CHECK(action_definitions().size() == 64);
     CHECK(complete.features.size() == 7);
     CHECK(valid_feature_registry(complete.features));
 
