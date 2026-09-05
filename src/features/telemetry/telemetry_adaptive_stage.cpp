@@ -19,6 +19,26 @@ void UiRuntime::update_adaptive_controller(
     const auto now_ns = frame.observed_at_ns;
     const bool active_gameplay = frame.active_gameplay;
     auto status = model.status();
+    const auto corpse_state = corpse_telemetry_tracker.observe(frame,
+        game_process && game_process->pid == frame.identity.pid &&
+        game_process->process_start_id == frame.identity.process_start_id &&
+        adaptive_locks_valid && !adaptive_overhead_frozen);
+    using telemetry_pipeline::CorpseTelemetryState;
+    status.adaptive_corpse_capability =
+        corpse_state.state == CorpseTelemetryState::available ? L"AVAILABLE" :
+        corpse_state.state == CorpseTelemetryState::stale ? L"STALE" : L"UNAVAILABLE";
+    status.adaptive_runtime_corpse_limit = corpse_state.runtime_limit;
+    if (corpse_state.state != CorpseTelemetryState::available)
+        status.adaptive_corpse_action_status = L"NONE";
+    if (corpse_state.event) {
+        events->append({0, diagnostics::Severity::info, corpse_state.event,
+            corpse_state.state == CorpseTelemetryState::stale
+                ? L"Corpse telemetry is temporarily stale; last confirmed limit is display-only for up to 10 seconds; quality/corpse decisions are paused"
+                : corpse_state.state == CorpseTelemetryState::available
+                ? L"Fresh corpse telemetry confirmed; runtime limit is current again"
+                : L"Corpse telemetry is unavailable; no cached runtime value is used",
+            L"game"});
+    }
     const auto log_response = [&](const auto& report) {
         if (!report || !optimizer_settings.adaptive_logging) return;
         const auto& r = *report;
@@ -300,12 +320,16 @@ void UiRuntime::update_adaptive_controller(
             L"KF2 runtime telemetry confirmed the protected Published provider and exposed its current capabilities",
             L"game"});
     }
-    if (requires_fresh_frame_window(sample_build)) {
+    const bool waiting_for_corpse_readback =
+        corpse_state.state == CorpseTelemetryState::stale ||
+        (corpse_state.state == CorpseTelemetryState::unavailable &&
+         sample.capabilities.corpse_control == optimizer::AdaptiveCapabilityState::available);
+    if (requires_fresh_frame_window(sample_build) || waiting_for_corpse_readback) {
         adaptive_frame_not_before_ns = now_ns;
         adaptive_governor.reset();
         adaptive_decision = {};
         adaptive_profile_gate.reset();
-        if (sample_build.waiting_for_gameplay_telemetry) {
+        if (sample_build.waiting_for_gameplay_telemetry || waiting_for_corpse_readback) {
             // Keep advancing the controller boundary while loading, without
             // repeatedly clearing the overlay history or flooding the log.
             status.adaptive_state = L"observing";
@@ -330,6 +354,7 @@ void UiRuntime::update_adaptive_controller(
             "ADAPTIVE_FRAME_WINDOW_RESET",
             L"Adaptive discarded pre-map and loading-frame statistics and is collecting a fresh gameplay window",
             L"optimizer"});
+        model.set_status(std::move(status));
         return;
     }
 
@@ -366,17 +391,12 @@ void UiRuntime::update_adaptive_controller(
     const auto widen = [](std::string_view value) {
         return std::wstring{value.begin(), value.end()};
     };
-    status.adaptive_corpse_capability = widen(
-        optimizer::adaptive_capability_state_name(
-            sample.capabilities.corpse_control));
     status.adaptive_flex_capability = widen(
         optimizer::adaptive_capability_state_name(
             sample.capabilities.flex_solver_substep_control));
     status.adaptive_particle_capability = widen(
         optimizer::adaptive_capability_state_name(
             sample.capabilities.flex_particle_budget_control));
-    status.adaptive_runtime_corpse_limit =
-        sample.adaptive_corpse_runtime_limit;
     if (sample.adaptive_corpse_runtime_limit &&
         sample.capabilities.corpse_control ==
             optimizer::AdaptiveCapabilityState::available) {
@@ -409,7 +429,8 @@ void UiRuntime::update_adaptive_controller(
         }
     }
     if (const auto* corpse_action = adaptive_actuation.current(
-            optimizer::AdaptiveControlId::corpse_runtime_limit)) {
+            optimizer::AdaptiveControlId::corpse_runtime_limit);
+        corpse_state.state == CorpseTelemetryState::available && corpse_action) {
         status.adaptive_corpse_action_status = widen(
             optimizer::adaptive_action_status_name(corpse_action->status));
     } else {
