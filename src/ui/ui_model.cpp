@@ -27,9 +27,9 @@ std::wstring_view friendly_mode(std::wstring_view mode) {
 }  // namespace
 
 std::wstring_view destination_label(Destination destination) {
-    static constexpr std::array<std::wstring_view, 5> labels{
+    static constexpr std::array<std::wstring_view, 6> labels{
         L"Home", L"Game graphics", L"Overlay", L"Advanced settings",
-        L"Help & Repair"};
+        L"Debug", L"Help & Repair"};
     return labels.at(enum_index(destination));
 }
 
@@ -186,6 +186,9 @@ std::wstring UiModel::page_body() const {
         return status_.advanced_available
             ? L""
             : L"Select a valid Killing Floor 2 installation to edit advanced INI settings.";
+    }
+    if (selected_ == Destination::debug) {
+        return L"Marker changes apply on the next protected KF2 start. Debug tools are off by default.";
     }
     if (selected_ == Destination::diagnostics) {
         return L"";

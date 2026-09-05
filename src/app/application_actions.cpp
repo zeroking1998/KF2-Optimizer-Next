@@ -533,9 +533,10 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
     }
     const auto enabled = game::enable_offline_gameplay_logging(
         installation->config_root, true, optimizer_settings.corpse_limit,
-        optimizer_settings.target_fps, true,
+        optimizer_settings.target_fps,
+        optimizer_settings.debug_corpse_markers,
         optimizer_settings.adaptive_quality_change_budget,
-        adaptive_control_token);
+        adaptive_control_token, optimizer_settings.debug_zed_markers);
     if (!enabled.has_value()) {
         adaptive_control_token.clear();
         return Result<bool>::failure(enabled.error());

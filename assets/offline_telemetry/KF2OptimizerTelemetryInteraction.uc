@@ -158,31 +158,6 @@ event Tick(float DeltaTime)
     PrimaryController.Spawn(class'KF2OptimizerAdaptiveControlListener');
 }
 
-event PostRender(Canvas MarkerCanvas)
-{
-    local KF2OptimizerTelemetryProbe CurrentProbe;
-    local PlayerController PrimaryController;
-    local WorldInfo CurrentWorld;
-
-    if (bGameSessionEnding)
-    {
-        return;
-    }
-    if (!GetStandaloneGameplayContext(PrimaryController, CurrentWorld))
-    {
-        return;
-    }
-    foreach CurrentWorld.DynamicActors(
-        class'KF2OptimizerTelemetryProbe', CurrentProbe)
-    {
-        if (CurrentProbe != None && !CurrentProbe.bDeleteMe)
-        {
-            CurrentProbe.DrawAdaptiveCorpseDebugMarkers(MarkerCanvas);
-            return;
-        }
-    }
-}
-
 function NotifyGameSessionEnded()
 {
     local LocalPlayer PrimaryPlayer;
@@ -196,7 +171,7 @@ function NotifyGameSessionEnded()
     }
 
     // GameViewportClient calls this before unloading the current map. Stop all
-    // Tick/PostRender access immediately so the persistent interaction cannot
+    // Stop Tick access immediately so the persistent interaction cannot
     // touch a controller, world or render object while UE3 tears them down.
     bGameSessionEnding = true;
     if (GamePlayers.Length > 0)

@@ -145,6 +145,18 @@ Result<Settings> parse_settings(std::string_view text) {
                 const auto parsed = parse_boolean(value);
                 if (!parsed.has_value()) return invalid_settings(L"overlay_show_memory is invalid");
                 settings.overlay_show_memory = parsed.value();
+            } else if (key == "debug_corpse_markers") {
+                const auto parsed = parse_boolean(value);
+                if (!parsed.has_value()) {
+                    return invalid_settings(L"debug_corpse_markers is invalid");
+                }
+                settings.debug_corpse_markers = parsed.value();
+            } else if (key == "debug_zed_markers") {
+                const auto parsed = parse_boolean(value);
+                if (!parsed.has_value()) {
+                    return invalid_settings(L"debug_zed_markers is invalid");
+                }
+                settings.debug_zed_markers = parsed.value();
             } else if (key == "restore_config_after_game") {
                 const auto parsed = parse_boolean(value);
                 if (!parsed.has_value()) {
@@ -368,6 +380,10 @@ std::string serialize_settings(const Settings& settings) {
            << "overlay_show_cpu=" << (settings.overlay_show_cpu ? "true" : "false") << '\n'
            << "overlay_show_gpu=" << (settings.overlay_show_gpu ? "true" : "false") << '\n'
            << "overlay_show_memory=" << (settings.overlay_show_memory ? "true" : "false") << '\n'
+           << "debug_corpse_markers="
+           << (settings.debug_corpse_markers ? "true" : "false") << '\n'
+           << "debug_zed_markers="
+           << (settings.debug_zed_markers ? "true" : "false") << '\n'
            << "restore_config_after_game="
            << (settings.restore_config_after_game ? "true" : "false") << '\n'
            << "adaptive_aggressiveness="

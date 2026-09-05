@@ -116,6 +116,7 @@ int main() {
         kf2::platform::windows::PresentMonSession::start(identity, source);
     CHECK(session.has_value());
     Sleep(250);
+    const auto producer_started_ns = monotonic_ns();
     for (int frame = 0; frame < 120; ++frame) {
         pump_messages();
         const float shade = static_cast<float>(frame % 16) / 15.0F;
@@ -128,17 +129,26 @@ int main() {
         CHECK(SUCCEEDED(secondary_swap_chain->Present(0, 0)));
         Sleep(16);
     }
+    const auto producer_elapsed_ns = monotonic_ns() - producer_started_ns;
+    CHECK(producer_elapsed_ns > 0);
+    const double produced_fps = 120.0 * 1'000'000'000.0 /
+                                static_cast<double>(producer_elapsed_ns);
     pump_messages();
     Sleep(500);
     CHECK(session.value()->stop().has_value());
     const auto metrics = source.drain(monotonic_ns(), 2'000'000'000ULL);
     CHECK(source.stop().has_value());
     if (metrics.fps) {
-        std::cout << "Measured completed-present FPS: " << *metrics.fps << '\n';
-        CHECK(*metrics.fps > 30.0);
+        std::cout << "Produced FPS: " << produced_fps
+                  << ", measured completed-present FPS: " << *metrics.fps
+                  << '\n';
+        // Compare against the fixture's real cadence. WARP, DWM and Sleep(16)
+        // are scheduler-dependent, so a fixed FPS floor is not meaningful.
+        CHECK(*metrics.fps >= produced_fps * 0.65);
+        CHECK(*metrics.fps <= produced_fps * 1.35);
         // A process can own several swap chains. Only one coherent stream is
         // allowed to contribute frames; otherwise both fixtures are mixed.
-        CHECK(*metrics.fps < 90.0);
+        CHECK(*metrics.fps < produced_fps * 1.65);
         CHECK(metrics.quality == SampleQuality::good);
     } else {
         CHECK(metrics.reason == UnavailableReason::no_samples ||

@@ -18,11 +18,13 @@ int main() {
     CHECK(model.selected() == Destination::dashboard);
     CHECK((kDestinations == std::array{
         Destination::dashboard, Destination::graphics, Destination::overlay,
-        Destination::advanced, Destination::diagnostics}));
+        Destination::advanced, Destination::debug,
+        Destination::diagnostics}));
     CHECK(destination_label(Destination::dashboard) == L"Home");
     CHECK(destination_label(Destination::diagnostics) == L"Help & Repair");
     CHECK(destination_label(Destination::graphics) == L"Game graphics");
     CHECK(destination_label(Destination::advanced) == L"Advanced settings");
+    CHECK(destination_label(Destination::debug) == L"Debug");
 
     UiModel navigation_model;
     CHECK(navigation_model.navigate(NavigationCommand::home).changed == false);
@@ -86,6 +88,12 @@ int main() {
     status.corpse_limit = 2000;
     model.set_status(status);
     CHECK(model.page_body().empty());
+
+    static_cast<void>(model.focus_destination(Destination::debug));
+    static_cast<void>(model.activate_focused());
+    CHECK(model.page_heading() == L"Debug");
+    CHECK(model.page_body().find(L"next protected KF2 start") !=
+          std::wstring::npos);
 
     static_cast<void>(model.focus_destination(Destination::advanced));
     static_cast<void>(model.activate_focused());

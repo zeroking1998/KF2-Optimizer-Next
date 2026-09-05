@@ -108,15 +108,9 @@ int main() {
         restore_adaptive_graphics) >= select_staggered_corpse);
     const auto interaction_tick = interaction_source.find(
         "event Tick(float DeltaTime)");
-    const auto interaction_post_render = interaction_source.find(
-        "event PostRender(Canvas MarkerCanvas)");
     CHECK(interaction_tick != std::string::npos);
-    CHECK(interaction_post_render != std::string::npos);
     CHECK(interaction_source.find(
-        "if (bGameSessionEnding)", interaction_tick) <
-          interaction_post_render);
-    CHECK(interaction_source.find(
-        "if (bGameSessionEnding)", interaction_post_render) !=
+        "if (bGameSessionEnding)", interaction_tick) !=
           std::string::npos);
     CHECK(interaction_source.find("bGameSessionEnding = true",
         interaction_source.find("function NotifyGameSessionEnded()")) !=
@@ -666,15 +660,110 @@ int main() {
     CHECK(telemetry_source.find(
         "function int GetAdaptiveCorpseDistanceUnits(KFPawn Candidate)") !=
           std::string::npos);
+    CHECK(telemetry_source.find(
+        "function string FormatAdaptiveCorpseDistanceMeters(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "DistanceDecimeters = (DistanceUnits + 5) / 10") !=
+          std::string::npos);
     CHECK(count_occurrences(telemetry_source, "corpse_id=") == 9);
-    CHECK(count_occurrences(telemetry_source, " distance_units=") == 9);
+    CHECK(count_occurrences(telemetry_source, " distance_units=") == 10);
+    CHECK(count_occurrences(telemetry_source, " distance_m=") == 10);
+    const auto distance_marker = telemetry_source.find(
+        "FormatAdaptiveDebugMarkerAction(");
+    CHECK(distance_marker != std::string::npos);
+    CHECK(telemetry_source.find(
+        "DistanceUnits, true)", distance_marker) !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "var globalconfig bool bAdaptiveCorpseDebugMarkers") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "var globalconfig bool bAdaptiveZedDebugMarkers") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "function RegisterAdaptiveCorpseDebugMarker(") != std::string::npos);
     CHECK(telemetry_source.find(
         "function DrawAdaptiveCorpseDebugMarkers(Canvas MarkerCanvas)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function DrawAdaptiveZedDebugMarkers(Canvas MarkerCanvas)") !=
+          std::string::npos);
+    const auto draw_zed_markers = telemetry_source.find(
+        "function DrawAdaptiveZedDebugMarkers(Canvas MarkerCanvas)");
+    const auto after_draw_zed_markers = telemetry_source.find(
+        "function int GetProfileElapsedMilliseconds(", draw_zed_markers);
+    CHECK(draw_zed_markers != std::string::npos);
+    CHECK(after_draw_zed_markers != std::string::npos);
+    const auto zed_marker_draw_source = telemetry_source.substr(
+        draw_zed_markers, after_draw_zed_markers - draw_zed_markers);
+    CHECK(zed_marker_draw_source.find(
+        "LocalPC.GetPlayerViewPoint(ViewLocation, ViewRotation)") !=
+          std::string::npos);
+    CHECK(zed_marker_draw_source.find(
+        "vector(ViewRotation) dot (MarkerLocation - ViewLocation)") !=
+          std::string::npos);
+    CHECK(zed_marker_draw_source.find("ScreenPosition.Z") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function bool ReserveAdaptiveDebugMarkerScreenPosition(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveDebugMarkerScreenEntries.Length = 0") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "MarkerCanvas.CreateFontRenderInfo(false, true)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function float GetAdaptiveDebugMarkerTextScale(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "ResolutionScale = MarkerCanvas.ClipY / 1080.0") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "DistanceUnits >= 4000") != std::string::npos);
+    CHECK(count_occurrences(
+        telemetry_source, "GetAdaptiveDebugMarkerTextScale(") == 3);
+    CHECK(telemetry_source.find(
+        "function string FormatAdaptiveDebugMarkerId(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function string FormatAdaptiveDebugMarkerAction(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveDebugMarkerScreenEntries.Length >= 10") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveDebugMarkerScreenEntries.Length >= 5") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "MarkerCanvas.DrawRect(") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "OutlineOffset = 1.25 * TextScale") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "ScreenPosition.X - OutlineOffset, ScreenPosition.Y") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "ScreenPosition.X, ScreenPosition.Y + OutlineOffset") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function InsertAdaptiveZedDebugMarkerByDistance(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "var vector Velocity;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "MarkerLocation += AdaptiveZedDebugMarkers[Index].Velocity *") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "PredictionSeconds > 0.10") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "!LocalPC.FastTrace(MarkerLocation, ViewLocation)") !=
+          std::string::npos);
+    CHECK(zed_marker_draw_source.find("KF2OPT ZED | ") ==
+          std::string::npos);
+    CHECK(telemetry_source.find("AdaptiveZedDebugMarkers.Length >= 24") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("AdaptiveZedDebugRefreshRealTime + 0.10") !=
           std::string::npos);
     CHECK(telemetry_source.find("AdaptiveCorpseDebugMarkers.Length >= 24") !=
           std::string::npos);
@@ -682,7 +771,7 @@ int main() {
         "GetAdaptiveCorpseActionId(Candidate)") != std::string::npos);
     CHECK(count_occurrences(
         telemetry_source, "RegisterAdaptiveCorpseDebugMarker(Candidate,") == 5);
-    CHECK(interaction_source.find("event PostRender(Canvas MarkerCanvas)") !=
+    CHECK(interaction_source.find("event PostRender(Canvas MarkerCanvas)") ==
           std::string::npos);
     CHECK(interaction_source.find(
         "var transient KF2OptimizerTelemetryProbe ActiveProbe") ==
@@ -691,8 +780,36 @@ int main() {
           std::string::npos);
     CHECK(interaction_source.find(
         "foreach CurrentWorld.DynamicActors(") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "function EnsureAdaptiveDebugMarkerPostRender()") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveDebugMarkerHUD.AddPostRenderedActor(self)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveDebugMarkerHUD.bShowOverlays = true") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("bPostRenderIfNotVisible = true") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "simulated event PostRenderFor(PlayerController PC,") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "DrawAdaptiveCorpseDebugMarkers(MarkerCanvas)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "DrawAdaptiveZedDebugMarkers(MarkerCanvas)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveDebugMarkerHUD.RemovePostRenderedActor(self)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_DEBUG_MARKERS state=rendered") != std::string::npos);
     CHECK(interaction_source.find(
-        "CurrentProbe.DrawAdaptiveCorpseDebugMarkers(MarkerCanvas)") !=
+        "CurrentProbe.DrawAdaptiveCorpseDebugMarkers(MarkerCanvas)") ==
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "CurrentProbe.DrawAdaptiveZedDebugMarkers(MarkerCanvas)") ==
           std::string::npos);
     CHECK(telemetry_source.find("AdaptiveDistancePhysicsSleeps % 4") ==
           std::string::npos);
@@ -1043,6 +1160,8 @@ int main() {
     CHECK(ragdoll_counter < ragdoll_receipt);
     CHECK(telemetry_source.find("minimum_distance_units=800",
                                 ragdoll_near_rejection) != std::string::npos);
+    CHECK(telemetry_source.find("minimum_distance_m=8.0",
+                                ragdoll_near_rejection) != std::string::npos);
     CHECK(telemetry_source.find("eligible=0 reason=near_player",
                                 ragdoll_near_rejection) != std::string::npos);
     CHECK(telemetry_source.find("scene_level=", ragdoll_receipt) !=
@@ -1052,6 +1171,8 @@ int main() {
     CHECK(telemetry_source.find("frame_level=", ragdoll_receipt) !=
           std::string::npos);
     CHECK(telemetry_source.find("minimum_distance_units=800",
+                                ragdoll_receipt) != std::string::npos);
+    CHECK(telemetry_source.find("minimum_distance_m=8.0",
                                 ragdoll_receipt) != std::string::npos);
     CHECK(telemetry_source.find("zed_time=0 eligible=1",
                                 ragdoll_receipt) != std::string::npos);
@@ -1124,6 +1245,8 @@ int main() {
           std::string::npos);
     CHECK(changed_engine.find("bAdaptiveCorpseDebugMarkers=False\r\n") !=
           std::string::npos);
+    CHECK(changed_engine.find("bAdaptiveZedDebugMarkers=False\r\n") !=
+          std::string::npos);
     CHECK(changed_engine.find("AdaptiveCorpseMaximum=0\r\n") !=
           std::string::npos);
     CHECK(changed_engine.find("AdaptiveTargetFPS=0\r\n") !=
@@ -1148,13 +1271,15 @@ int main() {
 
     const auto adaptive_enabled =
         kf2::game::enable_offline_gameplay_logging(
-            root, true, 350, 137, true, 2, control_token);
+            root, true, 350, 137, true, 2, control_token, true);
     CHECK(adaptive_enabled.has_value());
     CHECK(adaptive_enabled.value());
     const auto adaptive_engine = read_bytes(engine_ini);
     CHECK(adaptive_engine.find("bAdaptiveCorpseStagger=True\r\n") !=
           std::string::npos);
     CHECK(adaptive_engine.find("bAdaptiveCorpseDebugMarkers=True\r\n") !=
+          std::string::npos);
+    CHECK(adaptive_engine.find("bAdaptiveZedDebugMarkers=True\r\n") !=
           std::string::npos);
     CHECK(adaptive_engine.find("AdaptiveCorpseMaximum=350\r\n") !=
           std::string::npos);
@@ -1174,7 +1299,7 @@ int main() {
     CHECK(observed_policy.value()->quality_change_budget == 2);
     const auto adaptive_unchanged =
         kf2::game::enable_offline_gameplay_logging(
-            root, true, 350, 137, true, 2, control_token);
+            root, true, 350, 137, true, 2, control_token, true);
     CHECK(adaptive_unchanged.has_value());
     CHECK(!adaptive_unchanged.value());
 
@@ -1299,6 +1424,11 @@ int main() {
         "bAdaptiveCorpseDebugMarkers=Maybe\n");
     CHECK(!kf2::game::enable_offline_gameplay_logging(
         root, true, 350, 137, true, 1, control_token).has_value());
+    write_bytes(engine_ini,
+        "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\n"
+        "bAdaptiveZedDebugMarkers=Maybe\n");
+    CHECK(!kf2::game::enable_offline_gameplay_logging(
+        root, true, 350, 137, false, 1, control_token, true).has_value());
     write_bytes(engine_ini, adaptive_engine);
 
     write_bytes(engine_ini,
@@ -1330,6 +1460,8 @@ int main() {
     CHECK(!kf2::game::enable_offline_gameplay_logging(root, false, 0, 60).has_value());
     CHECK(!kf2::game::enable_offline_gameplay_logging(
         root, false, 0, 0, true).has_value());
+    CHECK(!kf2::game::enable_offline_gameplay_logging(
+        root, false, 0, 0, false, 1, {}, true).has_value());
     CHECK(!kf2::game::enable_offline_gameplay_logging(
         root, true, 350, 60, false, 2, "invalid").has_value());
 

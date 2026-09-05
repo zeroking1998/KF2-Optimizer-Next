@@ -668,6 +668,41 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         add_action("advanced-apply", L"APPLY ADVANCED SETTINGS",
                    editable && status.advanced_dirty, true);
         add_action("advanced-reset", L"RESET TO DEFAULTS", editable);
+    } else if (model.selected() == Destination::debug) {
+        const auto& status = model.status();
+        float cursor = grid_base;
+        add_section("debug-markers-section",
+                    L"IN-GAME MARKERS — NEXT PROTECTED START", cursor);
+        cursor += 34.0F;
+        grid_base = cursor;
+        action_index = 0;
+        add_action("debug-corpse-markers",
+                   status.debug_corpse_markers
+                       ? L"✓ CORPSE ACTIONS AND DISTANCES"
+                       : L"CORPSE ACTIONS AND DISTANCES",
+                   true, status.debug_corpse_markers);
+        add_action("debug-zed-markers",
+                   status.debug_zed_markers
+                       ? L"✓ LIVING ZED DISTANCES"
+                       : L"LIVING ZED DISTANCES",
+                   true, status.debug_zed_markers);
+        cursor = grid_base +
+            static_cast<float>((action_index + action_columns - 1) /
+                               action_columns) * kActionStride + 8.0F;
+        add_section("debug-status-section", L"LIVE STATUS", cursor);
+        cursor += 30.0F;
+        add_section("debug-status-text",
+                    L"Telemetry: " + status.telemetry +
+                        L"  •  Corpse actions: " +
+                        status.adaptive_corpse_action_status,
+                    cursor, 40.0F);
+        cursor += 48.0F;
+        add_section("debug-tools-section", L"LOCAL DEBUG FILES", cursor);
+        cursor += 34.0F;
+        grid_base = cursor;
+        action_index = 0;
+        add_action("diagnostics-open-data", L"OPEN PORTABLE DATA");
+        add_action("diagnostics-open-log", L"OPEN SESSION LOG");
     } else if (model.selected() == Destination::diagnostics) {
         float cursor = grid_base;
         add_section("diagnostics-check-section", L"FIX A PROBLEM", cursor);
@@ -691,8 +726,6 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         grid_base = cursor;
         action_index = 0;
         add_action("diagnostics-export-support", L"CREATE SUPPORT PACKAGE");
-        add_action("diagnostics-open-data", L"OPEN PORTABLE DATA");
-        add_action("diagnostics-open-log", L"OPEN SESSION LOG");
     }
     float content_bottom = result.content.y;
     for (auto index = page_nodes_begin; index < result.nodes.size(); ++index) {
