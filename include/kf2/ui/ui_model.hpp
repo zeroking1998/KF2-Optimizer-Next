@@ -37,6 +37,7 @@ struct Notice {
 
 struct UiStatus {
     std::wstring mode{L"Normal"};
+    bool adaptive_optimization_enabled{true};
     std::wstring game{L"Game not detected"};
     std::wstring game_session;
     std::wstring telemetry{L"Telemetry unavailable"};

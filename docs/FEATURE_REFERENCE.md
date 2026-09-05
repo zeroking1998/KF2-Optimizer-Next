@@ -5,6 +5,7 @@
 | Game discovery | Finds supported KF2 paths and identity | Unambiguous detected paths |
 | Performance telemetry | Measures FPS, averages, 1% lows, frame time, CPU, GPU, and memory | Timestamped samples |
 | Adaptive controller | Selects bounded quality pressure from performance and scene evidence | Decision record, then action receipt if applied |
+| Adaptive on/off | Enables or disables automatic runtime adjustments without disabling monitoring or fixed user goals | Saved state plus exact runtime `APPLIED` receipt while KF2 is running |
 | Configuration preview | Shows planned INI changes without writing | Preview diff |
 | Transactional apply | Backs up, writes, and verifies supported settings | Verified readback |
 | Session restoration | Restores the exact protected pre-session state | Restore report and integrity check |

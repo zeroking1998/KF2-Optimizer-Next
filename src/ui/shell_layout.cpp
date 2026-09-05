@@ -29,7 +29,9 @@ std::wstring status_text(const UiModel& model) {
         return L"Choose your Killing Floor 2 folder to get started";
     }
     const std::wstring mode = status.mode == L"Adaptive / Automatic"
-        ? L"Adaptive on" : status.mode;
+        ? (status.adaptive_optimization_enabled ? L"Adaptive on"
+                                                : L"Adaptive off")
+        : status.mode;
     const int configured_target = model.presented_target_fps();
     const int displayed_target = status.active_target_fps.value_or(
         configured_target);
@@ -408,6 +410,14 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                                action_columns) * kActionStride + 8.0F;
         add_section("dashboard-goals-section", L"GOALS", cursor);
         cursor += 34.0F;
+        grid_base = cursor;
+        action_index = 0;
+        add_action("settings-adaptive-toggle",
+                   status.adaptive_optimization_enabled
+                       ? L"✓ ADAPTIVE OPTIMIZATION: ON"
+                       : L"ADAPTIVE OPTIMIZATION: OFF",
+                   true, status.adaptive_optimization_enabled);
+        cursor = grid_base + kActionStride + 4.0F;
         add_slider("settings-target-slider", L"Target FPS", cursor,
                    {optimizer::kTargetFpsMinimum,
                     optimizer::kTargetFpsMaximum,

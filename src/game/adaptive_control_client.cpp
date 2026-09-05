@@ -56,6 +56,8 @@ std::optional<AdaptiveResourceControl> parse_resource(
     if (value == "effects") return AdaptiveResourceControl::effects;
     if (value == "mixed") return AdaptiveResourceControl::mixed;
     if (value == "recover") return AdaptiveResourceControl::recover;
+    if (value == "enable") return AdaptiveResourceControl::enable;
+    if (value == "disable") return AdaptiveResourceControl::disable;
     return std::nullopt;
 }
 
@@ -139,6 +141,8 @@ std::string_view adaptive_resource_control_name(
         case AdaptiveResourceControl::effects: return "effects";
         case AdaptiveResourceControl::mixed: return "mixed";
         case AdaptiveResourceControl::recover: return "recover";
+        case AdaptiveResourceControl::enable: return "enable";
+        case AdaptiveResourceControl::disable: return "disable";
     }
     return "mixed";
 }
@@ -162,7 +166,9 @@ int AdaptiveResourceQualityState::control_quality(
         case AdaptiveResourceControl::overdraw: return overdraw;
         case AdaptiveResourceControl::effects: return effects;
         case AdaptiveResourceControl::mixed:
-        case AdaptiveResourceControl::recover: return effective_quality();
+        case AdaptiveResourceControl::recover:
+        case AdaptiveResourceControl::enable:
+        case AdaptiveResourceControl::disable: return effective_quality();
     }
     return effective_quality();
 }
@@ -187,6 +193,9 @@ void AdaptiveResourceQualityState::apply(
             ram = std::max(ram, quality);
             overdraw = std::max(overdraw, quality);
             effects = std::max(effects, quality);
+            break;
+        case AdaptiveResourceControl::enable:
+        case AdaptiveResourceControl::disable:
             break;
     }
 }

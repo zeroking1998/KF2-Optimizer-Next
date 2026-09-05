@@ -154,10 +154,16 @@ struct UiRuntime {
     optimizer::AdaptiveGovernor adaptive_governor;
     optimizer::AdaptiveActuationTracker adaptive_actuation;
     game::AdaptiveControlDispatcher adaptive_control_dispatcher;
+    game::AdaptiveControlDispatcher adaptive_mode_dispatcher;
     std::optional<AdaptiveRuntimePendingRequest>
         adaptive_control_pending;
     std::string adaptive_control_token;
     std::uint64_t adaptive_control_sequence{0};
+    std::uint64_t adaptive_runtime_mode_process_start_id{0};
+    std::optional<std::uint16_t> adaptive_runtime_mode_port;
+    std::uint64_t adaptive_runtime_mode_last_attempt_ns{0};
+    bool adaptive_runtime_mode_confirmed{false};
+    std::optional<bool> adaptive_runtime_mode_pending;
     std::uint64_t adaptive_quality_last_dispatch_ns{0};
     std::uint64_t adaptive_quality_last_applied_ns{0};
     std::uint64_t adaptive_frame_not_before_ns{0};
@@ -267,6 +273,8 @@ struct UiRuntime {
 
     bool restore_live_adaptive_quality(std::wstring_view reason);
 
+    bool set_live_adaptive_enabled(bool enabled, std::wstring_view reason);
+
     void update_overlay_scene_gate();
 
     void runtime_tick();
@@ -278,6 +286,7 @@ struct UiRuntime {
     void start_update_check(update::CheckTrigger trigger);
     void poll_update_check();
     void toggle_automatic_update_checks();
+    void toggle_adaptive_optimization();
     void start_update_install();
     void poll_update_install();
     void dismiss_update();

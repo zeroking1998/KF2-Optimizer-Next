@@ -20,6 +20,7 @@ constexpr TooltipEntry kTooltips[]{
     {"header-update-install", L"Downloads and verifies the displayed portable Windows x64 release, then asks the update helper to install it with rollback protection."},
     {"settings-updates-install", L"Downloads and verifies the displayed portable Windows x64 release, then asks the update helper to install it with rollback protection."},
     {"settings-updates-automatic", L"Turns the once-per-24-hours startup update check on or off. Downloads and installation still always require your approval."},
+    {"settings-adaptive-toggle", L"Turns automatic quality, physics, LOD, FleX and corpse adjustments on or off. Target FPS, maximum corpses, telemetry, overlay and user-selected Game graphics remain active."},
     {"settings-updates-later", L"Hides the current update reminder without downloading or changing anything. You can check again at any time."},
     {"settings-updates-ignore", L"Hides this update dialog permanently for the displayed version. A later, newer version will still show a new dialog."},
     {"header-repair", L"Downloads the official release matching this exact installed version and repairs only missing or damaged managed files after SHA-256 verification."},
