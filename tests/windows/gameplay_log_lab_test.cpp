@@ -563,16 +563,13 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find(
         "RestoreAllAdaptiveCorpseLods()") != std::string::npos);
-    const auto lod_restore_function = telemetry_source.find(
-        "function RestoreNearAdaptiveCorpseLods()");
-    const auto lod_restore_threshold = telemetry_source.find(
-        "DistanceSquared < 62500.0", lod_restore_function);
     const auto lod_selector_function = telemetry_source.find(
         "function KFPawn SelectVisibleMonsterCorpseForLod(");
     const auto lod_apply_threshold = telemetry_source.find(
-        "DistanceSquared < 90000.0", lod_selector_function);
-    CHECK(lod_restore_threshold != std::string::npos);
+        "DistanceSquared < 640000.0", lod_selector_function);
     CHECK(lod_apply_threshold != std::string::npos);
+    CHECK(telemetry_source.find("RestoreNearAdaptiveCorpseLods") ==
+          std::string::npos);
     CHECK(telemetry_source.find(
         "KF2OPT_CORPSE_LOD state=applied") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -732,9 +729,9 @@ int main() {
     CHECK(telemetry_source.find(
         "DistanceDecimeters = (DistanceUnits + 5) / 10") !=
           std::string::npos);
-    // All three settle-guard paths emit actor-correlated deferred receipts
+    // All settle and LOD ownership paths emit actor-correlated receipts
     // without changing the twelve action receipts with measured distance.
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 15);
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 16);
     CHECK(count_occurrences(telemetry_source, " distance_units=") == 12);
     CHECK(count_occurrences(telemetry_source, " distance_m=") == 12);
     const auto distance_marker = telemetry_source.find(
@@ -1105,21 +1102,12 @@ int main() {
         "AdaptiveCorpseLodCorpses.Length >=", lod_apply) ==
           std::string::npos);
     CHECK(telemetry_source.find(
-        "CandidateTarget = 2", lod_selector) != std::string::npos);
+        "CandidateTarget = MaximumMinLod", lod_selector) !=
+          std::string::npos);
     CHECK(telemetry_source.find(
-        "DistanceSquared >= 1440000.0", lod_selector) != std::string::npos);
+        "CandidateTarget = 2", lod_selector) == std::string::npos);
     CHECK(telemetry_source.find(
-        "CandidateTarget = 5", lod_selector) != std::string::npos);
-    CHECK(telemetry_source.find(
-        "DistanceSquared >= 640000.0", lod_selector) != std::string::npos);
-    CHECK(telemetry_source.find(
-        "CandidateTarget = 4", lod_selector) != std::string::npos);
-    CHECK(telemetry_source.find(
-        "DistanceSquared >= 250000.0", lod_selector) != std::string::npos);
-    CHECK(telemetry_source.find(
-        "CandidateTarget = 3", lod_selector) != std::string::npos);
-    CHECK(telemetry_source.find(
-        "CandidateTarget += Clamp(PressureLevel, 0, 5)", lod_selector) !=
+        "CandidateTarget += Clamp(PressureLevel, 0, 5)", lod_selector) ==
           std::string::npos);
     CHECK(telemetry_source.find(
         "DistanceSquared >= 12960000.0", lod_selector) ==
@@ -1153,7 +1141,7 @@ int main() {
     CHECK(telemetry_source.find(
         "Candidate.Mesh.MinLodModel == TargetMinLod") != std::string::npos);
     CHECK(telemetry_source.find(
-        "DistanceSquared < 90000.0") != std::string::npos);
+        "DistanceSquared < 640000.0", lod_selector) != std::string::npos);
     CHECK(telemetry_source.find(
         "Candidate.Mesh.bSkipTickAnimNodes =") == std::string::npos);
     CHECK(telemetry_source.find(
@@ -1166,6 +1154,52 @@ int main() {
         "PruneAdaptiveLivingVisualEntries();") != std::string::npos);
     CHECK(telemetry_source.find(
         "readback=verified", lod_apply) != std::string::npos);
+    const auto lod_prune = telemetry_source.find(
+        "function PruneAdaptiveCorpseLodEntries()");
+    const auto lod_native_reset = telemetry_source.find(
+        "KF2OPT_CORPSE_LOD state=native_reset", lod_prune);
+    const auto lod_unowned_state = telemetry_source.find(
+        "AdaptiveCorpseLodAppliedMinModels[Index] = -1", lod_prune);
+    const auto lod_reapply_reason = telemetry_source.find(
+        "ApplyReason = \"native_state_changed\"", lod_apply);
+    const auto lod_reason_receipt = telemetry_source.find(
+        "state=applied reason=\"$ApplyReason", lod_apply);
+    CHECK(lod_prune != std::string::npos);
+    CHECK(lod_native_reset != std::string::npos);
+    CHECK(lod_unowned_state != std::string::npos);
+    CHECK(lod_reapply_reason != std::string::npos);
+    CHECK(lod_reason_receipt != std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_CORPSE_LOD state=restored reason=near_player") ==
+          std::string::npos);
+
+    const auto near_corpse_detail_guard = telemetry_source.find(
+        "function bool ShouldPreserveNearCorpseDetail(");
+    const auto corpse_animation_refresh = telemetry_source.find(
+        "function RefreshSleepingCorpseAnimationState(");
+    const auto corpse_animation_end = telemetry_source.find(
+        "function int FindAdaptiveBaselineSettleEntry(",
+        corpse_animation_refresh);
+    CHECK(near_corpse_detail_guard != std::string::npos);
+    CHECK(corpse_animation_refresh != std::string::npos);
+    CHECK(corpse_animation_end != std::string::npos);
+    const auto corpse_animation_body = telemetry_source.substr(
+        corpse_animation_refresh,
+        corpse_animation_end - corpse_animation_refresh);
+    const auto near_corpse_detail_body = telemetry_source.substr(
+        near_corpse_detail_guard,
+        corpse_animation_refresh - near_corpse_detail_guard);
+    CHECK(near_corpse_detail_body.find(
+        "LocalPC = GetALocalPlayerController()") != std::string::npos);
+    CHECK(near_corpse_detail_body.find(
+        "Candidate.Mesh.LastRenderTime <= WorldInfo.TimeSeconds - 0.3") !=
+          std::string::npos);
+    CHECK(near_corpse_detail_body.find(
+        "DistanceSquared < 640000.0") != std::string::npos);
+    CHECK(corpse_animation_body.find(
+        "ShouldPreserveNearCorpseDetail(Candidate)") != std::string::npos);
+    CHECK(count_occurrences(telemetry_source,
+        "!ShouldPreserveNearCorpseDetail(Candidate)") >= 3);
 
     const auto destroyed = telemetry_source.find("event Destroyed()");
     const auto destroyed_end = telemetry_source.find(
