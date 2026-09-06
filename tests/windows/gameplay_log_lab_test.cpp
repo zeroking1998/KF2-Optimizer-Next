@@ -502,8 +502,25 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find(
         "MinimumSettleAge = 0.75") != std::string::npos);
+    CHECK(telemetry_source.find("MaximumFullPhysicsAge") ==
+          std::string::npos);
     CHECK(telemetry_source.find(
-        "MaximumFullPhysicsAge = 2.0") != std::string::npos);
+        "function bool IsBaselineCorpseSettled(") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "MinimumStableTime = 0.75") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "GetRootBodyInstance()") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "GetUnrealWorldVelocity()") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "GetUnrealWorldAngularVelocity()") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "VSizeSq(Candidate.Mesh.Bounds.Origin - Entry.StableLocation)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_CORPSE_BASELINE state=deferred reason=") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("forced=") == std::string::npos);
     CHECK(telemetry_source.find("MaximumSleepsPerPass") ==
           std::string::npos);
     CHECK(telemetry_source.find(
@@ -704,7 +721,9 @@ int main() {
     CHECK(telemetry_source.find(
         "DistanceDecimeters = (DistanceUnits + 5) / 10") !=
           std::string::npos);
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 12);
+    // The baseline settle guard adds one rate-limited deferred receipt without
+    // changing the twelve action receipts that include measured distance.
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 13);
     CHECK(count_occurrences(telemetry_source, " distance_units=") == 12);
     CHECK(count_occurrences(telemetry_source, " distance_m=") == 12);
     const auto distance_marker = telemetry_source.find(
