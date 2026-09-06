@@ -65,7 +65,10 @@ Target FPS uses KF2's own GPU-independent `bSmoothFrameRate`,
 `MinSmoothedFrameRate`, and `MaxSmoothedFrameRate` controls. The protected
 offline provider reapplies them if KF2's graphics menu changes Variable Frame
 Rate during a session. A property readback proves that those engine values were
-configured; actual PresentMon FPS remains the final runtime evidence.
+configured; actual PresentMon FPS remains the final runtime evidence. A
+confirmed capped/variable mode change discards every mixed frame statistic and
+quality-response window before Adaptive can act again. The configured target
+FPS is preserved.
 
 ## 5. Configuration actions
 

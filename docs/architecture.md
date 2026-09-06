@@ -98,7 +98,10 @@ The `optimizer` module has one Adaptive decision path. It validates fresh
 identity-bound evidence, applies quality bounds and emits catalog-backed plans
 with source, reason and confidence. It evaluates only active gameplay; menus,
 loading screens and shutdown frames reset the fast controller window and
-cannot alter the persisted baseline. A separate slow persistence gate requires
+cannot alter the persisted baseline. A confirmed runtime change between capped
+and variable frame rate also resets current, rolling, prediction and
+quality-response evidence, then requires a fresh gameplay window without
+changing the target FPS. A separate slow persistence gate requires
 8 seconds of stable degradation or 45 seconds of stable recovery before saving
 a next-launch profile; recovery additionally requires the governor's verified
 stable-headroom state. CPU evidence is classified as idle/frame-limited,

@@ -169,6 +169,26 @@ void UiRuntime::update_adaptive_controller(
         events->append({0, diagnostics::Severity::info,
             "ADAPTIVE_QUALITY_RESPONSE", message.str(), L"optimizer"});
     };
+    if (reset_adaptive_frame_window_for_rate_mode_change(
+            now_ns, active_gameplay)) {
+        status.adaptive_state = L"observing";
+        status.adaptive_action = L"hold";
+        status.adaptive_bottleneck = L"unknown";
+        status.adaptive_cpu_parallelism = L"collecting fresh frame evidence";
+        status.adaptive_reason =
+            L"Variable frame rate changed; waiting for a fresh gameplay window";
+        status.adaptive_confidence_percent = 0;
+        status.adaptive_drop_risk_percent = 0;
+        status.adaptive_headroom_available_percent = 0;
+        status.adaptive_data_quality = L"NOT_AVAILABLE";
+        status.adaptive_prediction = L"not available";
+        status.adaptive_source = L"not selected";
+        status.adaptive_safety = L"no actuator";
+        status.adaptive_evidence = L"FRAME_RATE_MODE_CHANGED";
+        status.recommendation_reason = status.adaptive_reason;
+        model.set_status(std::move(status));
+        return;
+    }
     optimizer::QualityResponse::Context response_context{
         frame.identity, frame.gameplay ? frame.gameplay->map : "",
         frame.adapter_luid, effective_target_fps(),

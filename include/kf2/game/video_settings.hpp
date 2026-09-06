@@ -66,6 +66,8 @@ struct VideoSettings {
 
 [[nodiscard]] Result<VideoSettings> read_video_settings(
     const std::filesystem::path& config_root);
+[[nodiscard]] Result<bool> read_variable_frame_rate_enabled(
+    const std::filesystem::path& config_root);
 [[nodiscard]] Result<config::ConfigPreview> build_video_preview(
     const std::filesystem::path& config_root,
     const VideoSettings& settings);
