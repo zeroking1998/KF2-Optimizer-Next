@@ -39,6 +39,18 @@ struct AdaptiveDistanceSleepEntry
     var string CorpseId;
 };
 
+// Baseline sleep requires continuous evidence that a corpse has actually
+// settled. This ownership is deliberately independent from later PHYS_None
+// freezing, distance sleep, ragdoll sleep and visual LOD decisions.
+struct AdaptiveBaselineSettleEntry
+{
+    var KFPawn Corpse;
+    var string CorpseId;
+    var vector StableLocation;
+    var float StableSinceRealTime;
+    var float LastObservedRealTime;
+};
+
 // Frozen corpses are tracked separately from visual LOD ownership.  PHYS_None
 // is a physics decision, so restoring Adaptive must not depend on a mesh LOD
 // entry still being present.
@@ -96,6 +108,8 @@ var int AdaptiveCorpseCurrentFramePressureLevel;
 var float AdaptiveFramePressureObservedRealTime;
 var int AdaptiveCorpsesSlept;
 var int AdaptiveBaselinePhysicsSleeps;
+var array<AdaptiveBaselineSettleEntry> AdaptiveBaselineSettleEntries;
+var float AdaptiveLastBaselineDeferredRealTime;
 var int AdaptiveSkeletonReductions;
 var float AdaptiveLastCorpseSleepRealTime;
 var float AdaptiveLastCorpseCapacityRealTime;
@@ -593,6 +607,9 @@ function InitializeAdaptiveCorpseStagger(KFGoreManager GoreManager)
     AdaptiveFramePressureObservedRealTime = 0.0;
     AdaptiveLastCorpseFreezeRealTime =
         WorldInfo.RealTimeSeconds - 0.25;
+    AdaptiveBaselineSettleEntries.Length = 0;
+    AdaptiveLastBaselineDeferredRealTime =
+        WorldInfo.RealTimeSeconds - 1.0;
     AdaptiveFrozenCorpses.Length = 0;
     AdaptiveLastNearRagdollRejectRealTime =
         WorldInfo.RealTimeSeconds - 2.0;
@@ -1159,25 +1176,188 @@ function RefreshSleepingCorpseAnimationState(KFGoreManager GoreManager)
     }
 }
 
+function int FindAdaptiveBaselineSettleEntry(KFPawn Candidate)
+{
+    local int Index;
+
+    for (Index = 0; Index < AdaptiveBaselineSettleEntries.Length; ++Index)
+    {
+        if (AdaptiveBaselineSettleEntries[Index].Corpse == Candidate)
+        {
+            return Index;
+        }
+    }
+    return -1;
+}
+
+function RemoveAdaptiveBaselineSettleEntry(int Index)
+{
+    if (Index >= 0 && Index < AdaptiveBaselineSettleEntries.Length)
+    {
+        AdaptiveBaselineSettleEntries.Remove(Index, 1);
+    }
+}
+
+function PruneAdaptiveBaselineSettleEntries()
+{
+    local int Index;
+    local KFPawn Candidate;
+
+    for (Index = AdaptiveBaselineSettleEntries.Length - 1;
+         Index >= 0; --Index)
+    {
+        Candidate = AdaptiveBaselineSettleEntries[Index].Corpse;
+        if (Candidate == None || Candidate.bDeleteMe ||
+            Candidate.Mesh == None || Candidate.Physics != PHYS_RigidBody ||
+            !Candidate.Mesh.RigidBodyIsAwake())
+        {
+            AdaptiveBaselineSettleEntries.Remove(Index, 1);
+        }
+    }
+}
+
+function LogBaselineCorpseDeferred(
+    KFPawn Candidate, string Reason, float LinearSpeed,
+    float AngularSpeed, float PositionChange, float StableMilliseconds)
+{
+    if (Candidate == None || WorldInfo == None ||
+        WorldInfo.RealTimeSeconds - AdaptiveLastBaselineDeferredRealTime < 1.0)
+    {
+        return;
+    }
+    AdaptiveLastBaselineDeferredRealTime = WorldInfo.RealTimeSeconds;
+    `log("KF2OPT_CORPSE_BASELINE state=deferred reason="$Reason$
+         " linear_speed_units="$int(LinearSpeed)$
+         " angular_speed_units="$int(AngularSpeed)$
+         " position_change_units="$int(PositionChange)$
+         " stable_ms="$int(StableMilliseconds)$" corpse_id="$
+         GetAdaptiveCorpseActionId(Candidate));
+}
+
+function bool IsBaselineCorpseSettled(
+    KFPawn Candidate, out float LinearSpeed, out float AngularSpeed,
+    out float PositionChange, out float StableMilliseconds,
+    out string RejectReason)
+{
+    local int EntryIndex;
+    local float CurrentRealTime;
+    local float MinimumStableTime;
+    local float MaximumLinearSpeedSquared;
+    local float MaximumAngularSpeedSquared;
+    local float MaximumPositionChangeSquared;
+    local vector RootLinearVelocity;
+    local vector RootAngularVelocity;
+    local RB_BodyInstance RootBody;
+    local AdaptiveBaselineSettleEntry Entry;
+
+    MinimumStableTime = 0.75;
+    MaximumLinearSpeedSquared = 625.0;
+    MaximumAngularSpeedSquared = 1.0;
+    MaximumPositionChangeSquared = 64.0;
+    RejectReason = "invalid";
+    StableMilliseconds = 0.0;
+
+    if (Candidate == None || Candidate.Mesh == None || WorldInfo == None)
+    {
+        return false;
+    }
+    EntryIndex = FindAdaptiveBaselineSettleEntry(Candidate);
+    RootBody = Candidate.Mesh.GetRootBodyInstance();
+    if (RootBody == None || !RootBody.IsValidBodyInstance())
+    {
+        RemoveAdaptiveBaselineSettleEntry(EntryIndex);
+        RejectReason = "root_body_unavailable";
+        return false;
+    }
+
+    RootLinearVelocity = RootBody.GetUnrealWorldVelocity();
+    RootAngularVelocity = RootBody.GetUnrealWorldAngularVelocity();
+    LinearSpeed = FMax(VSize(Candidate.Velocity), VSize(RootLinearVelocity));
+    AngularSpeed = VSize(RootAngularVelocity);
+    if (VSizeSq(Candidate.Velocity) > MaximumLinearSpeedSquared ||
+        VSizeSq(RootLinearVelocity) > MaximumLinearSpeedSquared)
+    {
+        RemoveAdaptiveBaselineSettleEntry(EntryIndex);
+        RejectReason = "linear_motion";
+        return false;
+    }
+    if (VSizeSq(RootAngularVelocity) > MaximumAngularSpeedSquared)
+    {
+        RemoveAdaptiveBaselineSettleEntry(EntryIndex);
+        RejectReason = "angular_motion";
+        return false;
+    }
+
+    CurrentRealTime = WorldInfo.RealTimeSeconds;
+    if (EntryIndex == -1)
+    {
+        if (AdaptiveBaselineSettleEntries.Length >= 8192)
+        {
+            RejectReason = "tracking_full";
+            return false;
+        }
+        EntryIndex = AdaptiveBaselineSettleEntries.Length;
+        AdaptiveBaselineSettleEntries.Length = EntryIndex + 1;
+        AdaptiveBaselineSettleEntries[EntryIndex].Corpse = Candidate;
+        AdaptiveBaselineSettleEntries[EntryIndex].CorpseId =
+            GetAdaptiveCorpseActionId(Candidate);
+        AdaptiveBaselineSettleEntries[EntryIndex].StableLocation =
+            Candidate.Mesh.Bounds.Origin;
+        AdaptiveBaselineSettleEntries[EntryIndex].StableSinceRealTime =
+            CurrentRealTime;
+        AdaptiveBaselineSettleEntries[EntryIndex].LastObservedRealTime =
+            CurrentRealTime;
+        RejectReason = "collecting";
+        return false;
+    }
+
+    Entry = AdaptiveBaselineSettleEntries[EntryIndex];
+    PositionChange = VSize(Candidate.Mesh.Bounds.Origin - Entry.StableLocation);
+    if (CurrentRealTime - Entry.LastObservedRealTime > MinimumStableTime ||
+        VSizeSq(Candidate.Mesh.Bounds.Origin - Entry.StableLocation) >
+            MaximumPositionChangeSquared)
+    {
+        AdaptiveBaselineSettleEntries[EntryIndex].StableLocation =
+            Candidate.Mesh.Bounds.Origin;
+        AdaptiveBaselineSettleEntries[EntryIndex].StableSinceRealTime =
+            CurrentRealTime;
+        AdaptiveBaselineSettleEntries[EntryIndex].LastObservedRealTime =
+            CurrentRealTime;
+        RejectReason = "position_motion";
+        return false;
+    }
+
+    AdaptiveBaselineSettleEntries[EntryIndex].LastObservedRealTime =
+        CurrentRealTime;
+    StableMilliseconds = (CurrentRealTime - Entry.StableSinceRealTime) * 1000.0;
+    if (CurrentRealTime - Entry.StableSinceRealTime < MinimumStableTime)
+    {
+        RejectReason = "settling";
+        return false;
+    }
+    RejectReason = "settled";
+    return true;
+}
+
 function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
 {
     local int Index;
     local int SleepsThisPass;
-    local int ForcedSleep;
     local float CorpseAge;
     local float MinimumSettleAge;
-    local float MaximumFullPhysicsAge;
-    local float SettledSpeedSquared;
+    local float LinearSpeed;
+    local float AngularSpeed;
+    local float PositionChange;
+    local float StableMilliseconds;
+    local string RejectReason;
     local KFPawn Candidate;
 
     // This is the always-on low-cost corpse baseline. It deliberately does
     // not consult FPS, quality, distance, scene pressure, enemy pressure or
-    // the user's visible-corpse maximum. A new ragdoll gets a short physical
-    // reaction window, then settled bodies sleep early and every remaining
-    // awake body receives a hard upper bound on full rigid-body simulation.
+    // the user's visible-corpse maximum. It only sleeps a ragdoll after its
+    // real rigid body has remained continuously settled.
     MinimumSettleAge = 0.75;
-    MaximumFullPhysicsAge = 2.0;
-    SettledSpeedSquared = 90000.0;
+    PruneAdaptiveBaselineSettleEntries();
 
     for (Index = 0; Index < GoreManager.CorpsePool.Length; ++Index)
     {
@@ -1195,9 +1375,16 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
         }
         CorpseAge = WorldInfo.TimeSeconds - Candidate.TimeOfDeath;
         if (CorpseAge < MinimumSettleAge ||
-            (CorpseAge < MaximumFullPhysicsAge &&
-             VSizeSq(Candidate.Velocity) > SettledSpeedSquared))
+            !IsBaselineCorpseSettled(Candidate, LinearSpeed, AngularSpeed,
+                PositionChange, StableMilliseconds, RejectReason))
         {
+            if (CorpseAge >= 0.75 && RejectReason != "collecting" &&
+                RejectReason != "settling")
+            {
+                LogBaselineCorpseDeferred(Candidate, RejectReason,
+                    LinearSpeed, AngularSpeed, PositionChange,
+                    StableMilliseconds);
+            }
             continue;
         }
 
@@ -1206,6 +1393,8 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
         {
             continue;
         }
+        RemoveAdaptiveBaselineSettleEntry(
+            FindAdaptiveBaselineSettleEntry(Candidate));
         Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
         Candidate.Mesh.bNoSkeletonUpdate = true;
         if (!RegisterAdaptiveCorpsePhysicsAction(Candidate, "baseline"))
@@ -1213,15 +1402,17 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
             `log("KF2OPT_CORPSE_BASELINE state=tracking_full capacity=8192");
             return SleepsThisPass;
         }
-        ForcedSleep = CorpseAge >= MaximumFullPhysicsAge ? 1 : 0;
         ++SleepsThisPass;
         ++AdaptiveBaselinePhysicsSleeps;
         ++AdaptiveCorpsesSlept;
         RegisterAdaptiveCorpseDebugMarker(Candidate, "BASE_SLEEP");
         `log("KF2OPT_CORPSE_BASELINE state=sleep slept="$
              AdaptiveBaselinePhysicsSleeps$" batch="$SleepsThisPass$
-             " forced="$ForcedSleep$" age_ms="$int(CorpseAge * 1000.0)$
-             " speed_units="$int(VSize(Candidate.Velocity))$" corpse_id="$
+             " age_ms="$int(CorpseAge * 1000.0)$
+             " stable_ms="$int(StableMilliseconds)$
+             " linear_speed_units="$int(LinearSpeed)$
+             " angular_speed_units="$int(AngularSpeed)$
+             " position_change_units="$int(PositionChange)$" corpse_id="$
              GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
              GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
              FormatAdaptiveCorpseDistanceMeters(
@@ -4614,6 +4805,7 @@ function QuiesceForWorldTeardown()
     AdaptiveLivingOriginalAnimRates.Length = 0;
     AdaptiveLivingAppliedAnimRates.Length = 0;
     AdaptiveDistanceSleptCorpses.Length = 0;
+    AdaptiveBaselineSettleEntries.Length = 0;
     AdaptiveFrozenCorpses.Length = 0;
     AdaptiveDistanceSleepTransitions.Length = 0;
     AdaptiveDistanceSleepTransitionCount = 0;
