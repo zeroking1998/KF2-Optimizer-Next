@@ -504,8 +504,9 @@ int main() {
         "MinimumSettleAge = 0.75") != std::string::npos);
     CHECK(telemetry_source.find("MaximumFullPhysicsAge") ==
           std::string::npos);
-    CHECK(telemetry_source.find(
-        "function bool IsBaselineCorpseSettled(") != std::string::npos);
+    const auto shared_settle_guard = telemetry_source.find(
+        "function bool IsAdaptiveCorpseSettled(");
+    CHECK(shared_settle_guard != std::string::npos);
     CHECK(telemetry_source.find(
         "MinimumStableTime = 0.75") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -598,6 +599,16 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find(
         "KF2OPT_CORPSE_DISTANCE state=sleep") != std::string::npos);
+    const auto distance_sleep_function = telemetry_source.find(
+        "function bool SleepOneDistantMonsterCorpse(");
+    const auto distance_settle_guard = telemetry_source.find(
+        "IsAdaptiveCorpseSettled(Candidate,", distance_sleep_function);
+    const auto distance_sleep_call = telemetry_source.find(
+        "Candidate.Mesh.PutRigidBodyToSleep()", distance_sleep_function);
+    CHECK(distance_sleep_function != std::string::npos);
+    CHECK(distance_settle_guard != std::string::npos);
+    CHECK(distance_sleep_call != std::string::npos);
+    CHECK(distance_settle_guard < distance_sleep_call);
     CHECK(telemetry_source.find(
         "FindAdaptiveDistanceSleptCorpse(Candidate) != -1") !=
           std::string::npos);
@@ -721,9 +732,9 @@ int main() {
     CHECK(telemetry_source.find(
         "DistanceDecimeters = (DistanceUnits + 5) / 10") !=
           std::string::npos);
-    // The baseline settle guard adds one rate-limited deferred receipt without
-    // changing the twelve action receipts that include measured distance.
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 13);
+    // All three settle-guard paths emit actor-correlated deferred receipts
+    // without changing the twelve action receipts with measured distance.
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 15);
     CHECK(count_occurrences(telemetry_source, " distance_units=") == 12);
     CHECK(count_occurrences(telemetry_source, " distance_m=") == 12);
     const auto distance_marker = telemetry_source.find(
@@ -1223,6 +1234,8 @@ int main() {
         "DistanceSquared < 640000.0", ragdoll_distance_measurement);
     const auto ragdoll_sleep_call = telemetry_source.find(
         "Candidate.Mesh.PutRigidBodyToSleep()", ragdoll_function);
+    const auto ragdoll_settle_guard = telemetry_source.find(
+        "IsAdaptiveCorpseSettled(Candidate,", ragdoll_function);
     const auto ragdoll_sleep_readback = telemetry_source.find(
         "if (Candidate.Mesh.RigidBodyIsAwake())", ragdoll_sleep_call);
     const auto ragdoll_sleep_register = telemetry_source.find(
@@ -1257,6 +1270,7 @@ int main() {
     CHECK(ragdoll_player_required != std::string::npos);
     CHECK(ragdoll_distance_measurement != std::string::npos);
     CHECK(ragdoll_near_safety_gate != std::string::npos);
+    CHECK(ragdoll_settle_guard != std::string::npos);
     CHECK(ragdoll_sleep_call != std::string::npos);
     CHECK(ragdoll_sleep_readback != std::string::npos);
     CHECK(ragdoll_sleep_register != std::string::npos);
@@ -1269,6 +1283,7 @@ int main() {
     CHECK(ragdoll_player_required < ragdoll_function);
     CHECK(ragdoll_distance_measurement < ragdoll_function);
     CHECK(ragdoll_near_safety_gate < ragdoll_function);
+    CHECK(ragdoll_settle_guard < ragdoll_sleep_call);
     CHECK(ragdoll_sleep_call < ragdoll_sleep_readback);
     CHECK(ragdoll_sleep_readback < ragdoll_sleep_register);
     CHECK(ragdoll_sleep_register < ragdoll_counter);

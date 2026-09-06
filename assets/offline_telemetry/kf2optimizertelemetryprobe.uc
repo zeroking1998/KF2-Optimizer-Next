@@ -39,9 +39,9 @@ struct AdaptiveDistanceSleepEntry
     var string CorpseId;
 };
 
-// Baseline sleep requires continuous evidence that a corpse has actually
-// settled. This ownership is deliberately independent from later PHYS_None
-// freezing, distance sleep, ragdoll sleep and visual LOD decisions.
+// Every corpse sleep path requires continuous evidence that the rigid body
+// has actually settled. This shared ownership remains independent from later
+// PHYS_None freezing and visual LOD decisions.
 struct AdaptiveBaselineSettleEntry
 {
     var KFPawn Corpse;
@@ -110,6 +110,8 @@ var int AdaptiveCorpsesSlept;
 var int AdaptiveBaselinePhysicsSleeps;
 var array<AdaptiveBaselineSettleEntry> AdaptiveBaselineSettleEntries;
 var float AdaptiveLastBaselineDeferredRealTime;
+var float AdaptiveLastDistanceSettleDeferredRealTime;
+var float AdaptiveLastRagdollSettleDeferredRealTime;
 var int AdaptiveSkeletonReductions;
 var float AdaptiveLastCorpseSleepRealTime;
 var float AdaptiveLastCorpseCapacityRealTime;
@@ -1234,7 +1236,49 @@ function LogBaselineCorpseDeferred(
          GetAdaptiveCorpseActionId(Candidate));
 }
 
-function bool IsBaselineCorpseSettled(
+function LogAdaptiveCorpsePathDeferred(
+    KFPawn Candidate, string Stage, string Reason, float LinearSpeed,
+    float AngularSpeed, float PositionChange, float StableMilliseconds)
+{
+    if (Candidate == None || WorldInfo == None)
+    {
+        return;
+    }
+    if (Stage == "distance")
+    {
+        if (WorldInfo.RealTimeSeconds -
+                AdaptiveLastDistanceSettleDeferredRealTime < 1.0)
+        {
+            return;
+        }
+        AdaptiveLastDistanceSettleDeferredRealTime =
+            WorldInfo.RealTimeSeconds;
+        `log("KF2OPT_CORPSE_DISTANCE state=deferred reason="$Reason$
+             " linear_speed_units="$int(LinearSpeed)$
+             " angular_speed_units="$int(AngularSpeed)$
+             " position_change_units="$int(PositionChange)$
+             " stable_ms="$int(StableMilliseconds)$" corpse_id="$
+             GetAdaptiveCorpseActionId(Candidate));
+    }
+    else if (Stage == "ragdoll")
+    {
+        if (WorldInfo.RealTimeSeconds -
+                AdaptiveLastRagdollSettleDeferredRealTime < 1.0)
+        {
+            return;
+        }
+        AdaptiveLastRagdollSettleDeferredRealTime =
+            WorldInfo.RealTimeSeconds;
+        `log("KF2OPT_CORPSE_RAGDOLL state=deferred reason="$Reason$
+             " linear_speed_units="$int(LinearSpeed)$
+             " angular_speed_units="$int(AngularSpeed)$
+             " position_change_units="$int(PositionChange)$
+             " stable_ms="$int(StableMilliseconds)$" corpse_id="$
+             GetAdaptiveCorpseActionId(Candidate));
+    }
+}
+
+function bool IsAdaptiveCorpseSettled(
     KFPawn Candidate, out float LinearSpeed, out float AngularSpeed,
     out float PositionChange, out float StableMilliseconds,
     out string RejectReason)
@@ -1375,7 +1419,7 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
         }
         CorpseAge = WorldInfo.TimeSeconds - Candidate.TimeOfDeath;
         if (CorpseAge < MinimumSettleAge ||
-            !IsBaselineCorpseSettled(Candidate, LinearSpeed, AngularSpeed,
+            !IsAdaptiveCorpseSettled(Candidate, LinearSpeed, AngularSpeed,
                 PositionChange, StableMilliseconds, RejectReason))
         {
             if (CorpseAge >= 0.75 && RejectReason != "collecting" &&
@@ -2706,14 +2750,26 @@ function bool SleepOneDistantMonsterCorpse(
 {
     local int EntryIndex;
     local int TransitionIndex;
+    local float LinearSpeed;
+    local float AngularSpeed;
+    local float PositionChange;
+    local float StableMilliseconds;
     local string CorpseId;
     local string PreviousReason;
+    local string RejectReason;
     local KFPawn Candidate;
 
     Candidate = SelectDistantAwakeMonsterCorpseForSleep(
         GoreManager, PhysicsPressureLevel);
     if (Candidate == None || Candidate.Mesh == None)
     {
+        return false;
+    }
+    if (!IsAdaptiveCorpseSettled(Candidate, LinearSpeed, AngularSpeed,
+            PositionChange, StableMilliseconds, RejectReason))
+    {
+        LogAdaptiveCorpsePathDeferred(Candidate, "distance", RejectReason,
+            LinearSpeed, AngularSpeed, PositionChange, StableMilliseconds);
         return false;
     }
     CorpseId = GetAdaptiveCorpseActionId(Candidate);
@@ -3100,6 +3156,11 @@ function bool SleepOneVisibleMonsterCorpse(
     KFGoreManager GoreManager, bool SeverePressure, int VisibleAwakeBefore,
     int ScenePressureLevel, int EnemyPressureLevel, int FramePressureLevel)
 {
+    local float LinearSpeed;
+    local float AngularSpeed;
+    local float PositionChange;
+    local float StableMilliseconds;
+    local string RejectReason;
     local KFPawn Candidate;
 
     Candidate = SelectVisibleAwakeMonsterCorpseForSleep(
@@ -3107,6 +3168,13 @@ function bool SleepOneVisibleMonsterCorpse(
         EnemyPressureLevel, FramePressureLevel);
     if (Candidate == None || Candidate.Mesh == None)
     {
+        return false;
+    }
+    if (!IsAdaptiveCorpseSettled(Candidate, LinearSpeed, AngularSpeed,
+            PositionChange, StableMilliseconds, RejectReason))
+    {
+        LogAdaptiveCorpsePathDeferred(Candidate, "ragdoll", RejectReason,
+            LinearSpeed, AngularSpeed, PositionChange, StableMilliseconds);
         return false;
     }
     Candidate.Mesh.PutRigidBodyToSleep();
