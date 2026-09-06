@@ -147,6 +147,7 @@ inline constexpr int kPremiumMutantLowIdlePngResource = 203;
 
 [[nodiscard]] MascotAnimationAsset load_mascot_animation_asset();
 [[nodiscard]] HWND create_overlay_native_window(HINSTANCE instance);
+[[nodiscard]] DWORD bind_overlay_target_window(HWND overlay, HWND target);
 [[nodiscard]] bool same_rect(const RECT& left, const RECT& right);
 [[nodiscard]] RECT visibility_pose(
     const RECT& bounds, float scale, LONG outward);

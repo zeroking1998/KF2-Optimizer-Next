@@ -7,6 +7,7 @@
 namespace kf2::overlay {
 OverlayPresentation evaluate_overlay(const OverlayPolicyInput& input) {
     OverlayPresentation output;
+    output.target_window = input.window.window;
     if (!input.enabled) return output;
     if ((input.window.reason != game::WindowUnavailableReason::none &&
          input.window.reason != game::WindowUnavailableReason::not_foreground) ||
