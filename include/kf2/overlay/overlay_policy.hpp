@@ -31,6 +31,7 @@ struct OverlayPolicyInput {
 struct OverlayPresentation {
     bool visible{false};
     OverlayHideReason reason{OverlayHideReason::disabled};
+    HWND target_window{};
     RECT bounds{};
     std::wstring text;
     double fps{0.0};

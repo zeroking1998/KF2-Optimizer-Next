@@ -12,11 +12,24 @@ namespace kf2::overlay {
 Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     if (!state_) return Result<bool>::failure(
         {ErrorCode::internal_failure, L"Overlay state is unavailable", 0});
+    bool window_recreated = false;
     if (!IsWindow(state_->window)) {
         state_->window = detail::create_overlay_native_window(GetModuleHandleW(nullptr));
         if (!state_->window) return Result<bool>::failure(
             {ErrorCode::platform_failure,
              L"Overlay window could not be recovered", GetLastError()});
+        window_recreated = true;
+    }
+    const HWND verified_target = IsWindow(presentation.target_window)
+        ? presentation.target_window : nullptr;
+    const bool owner_changed =
+        GetWindow(state_->window, GW_OWNER) != verified_target;
+    const DWORD owner_error = detail::bind_overlay_target_window(
+        state_->window, presentation.target_window);
+    if (owner_error != ERROR_SUCCESS) {
+        return Result<bool>::failure(
+            {ErrorCode::platform_failure,
+             L"Overlay cannot bind to the current KF2 window", owner_error});
     }
     // A click-through tool window must never remain iconic.  Windows helpers
     // can otherwise select it as the process' main window and minimize it;
@@ -414,7 +427,8 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         state_->low_tug_load,
         state_->low_trend_started_ms, state_->low_trend_direction,
         state_->low_trend_intensity, 8.0F);
-    if (!geometry_changed && !content_changed && !any_metric_changed && !graph_sampled &&
+    if (!window_recreated && !owner_changed &&
+        !geometry_changed && !content_changed && !any_metric_changed && !graph_sampled &&
         !state_->animating &&
         !state_->metrics_animating && !number_bounce_animating && !mood_animating &&
         !average_tug_animating && !low_tug_animating && !mascot_idle_animating) {
@@ -882,10 +896,13 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         const DWORD first_error = GetLastError();
         if (IsWindow(state_->window)) DestroyWindow(state_->window);
         state_->window = detail::create_overlay_native_window(GetModuleHandleW(nullptr));
-        if (!state_->window ||
+        const DWORD recovery_owner_error = detail::bind_overlay_target_window(
+            state_->window, presentation.target_window);
+        if (!state_->window || recovery_owner_error != ERROR_SUCCESS ||
             !UpdateLayeredWindow(state_->window, nullptr, &destination, &size,
                                  state_->memory_dc, &source, 0, &blend, ULW_ALPHA)) {
-            const DWORD recovery_error = GetLastError();
+            const DWORD recovery_error = recovery_owner_error != ERROR_SUCCESS
+                ? recovery_owner_error : GetLastError();
             std::wostringstream message;
             message << L"Overlay frame cannot be presented after recovery"
                     << L" (initial Windows error " << first_error << L")";

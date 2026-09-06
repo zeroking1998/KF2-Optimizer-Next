@@ -6,7 +6,35 @@
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
 
+namespace {
+
+LRESULT CALLBACK target_proc(HWND window, UINT message, WPARAM wparam,
+                             LPARAM lparam) {
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+
+HWND create_target_window(const wchar_t* title = L"KF2 target fixture") {
+    WNDCLASSW type{};
+    type.lpfnWndProc = target_proc;
+    type.hInstance = GetModuleHandleW(nullptr);
+    type.lpszClassName = L"KF2OptimizerOverlayTargetTest";
+    if (!RegisterClassW(&type) &&
+        GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+        return nullptr;
+    }
+    return CreateWindowExW(
+        WS_EX_TOPMOST, type.lpszClassName, title,
+        WS_OVERLAPPEDWINDOW, 40, 40, 640, 480, nullptr, nullptr,
+        type.hInstance, nullptr);
+}
+
+}  // namespace
+
 int main() {
+    HWND target_window = create_target_window();
+    CHECK(target_window != nullptr);
+    ShowWindow(target_window, SW_SHOWNA);
+
     auto created = kf2::overlay::OverlayWindow::create();
     CHECK(created.has_value());
     auto overlay = std::move(created.value());
@@ -21,10 +49,12 @@ int main() {
 
     kf2::overlay::OverlayPresentation shown;
     shown.visible = true; shown.reason = kf2::overlay::OverlayHideReason::none;
+    shown.target_window = target_window;
     shown.bounds = {100, 120, 340, 210};
     shown.text = L"60.0 FPS\n16.7 ms";
     CHECK(overlay.update(shown).has_value());
     CHECK(IsWindowVisible(window));
+    CHECK(GetWindow(window, GW_OWNER) == target_window);
     CHECK(GetForegroundWindow() != window);
     for (int frame = 0; frame < 52; ++frame) {
         Sleep(16);
@@ -61,6 +91,31 @@ int main() {
     CHECK((recovered_style & WS_EX_NOACTIVATE) != 0);
     CHECK((recovered_style & WS_EX_TRANSPARENT) != 0);
     CHECK((recovered_style & WS_EX_LAYERED) != 0);
+    CHECK(GetWindow(window, GW_OWNER) == target_window);
+
+    // Replacing or closing a KF2 window can also destroy its owned overlay.
+    // An unchanged presentation must recreate, rebind and show the native
+    // surface immediately instead of waiting for a later metric animation.
+    shown.animations_enabled = false;
+    shown.fps = 121.0;
+    CHECK(overlay.update(shown).has_value());
+    HWND replacement_window = create_target_window(L"Replacement KF2 target");
+    CHECK(replacement_window != nullptr);
+    ShowWindow(replacement_window, SW_SHOWNA);
+    CHECK(DestroyWindow(target_window));
+    shown.target_window = replacement_window;
+    const auto rebound = overlay.update(shown);
+    CHECK(rebound.has_value());
+    CHECK(rebound.value());
+    window = overlay.native_handle();
+    CHECK(IsWindow(window));
+    CHECK(IsWindowVisible(window));
+    CHECK(GetWindow(window, GW_OWNER) == replacement_window);
+    CHECK(SetWindowPos(replacement_window, HWND_TOPMOST, 0, 0, 0, 0,
+                       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE |
+                           SWP_SHOWWINDOW));
+    CHECK(overlay.update(shown).has_value());
+    CHECK(IsWindowVisible(window));
 
     // Exercise the exact resize/relocate path used by scaling and automatic
     // corner selection, including negative desktop coordinates.
@@ -109,5 +164,6 @@ int main() {
         CHECK(overlay.update(shown).has_value());
     }
     CHECK(!IsWindowVisible(window));
+    DestroyWindow(replacement_window);
     return EXIT_SUCCESS;
 }

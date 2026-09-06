@@ -8,6 +8,7 @@
 int main() {
     using namespace kf2;
     game::GameWindowState window;
+    window.window = reinterpret_cast<HWND>(static_cast<ULONG_PTR>(0x1234));
     window.visible = true; window.foreground = true;
     window.client_bounds = {100, 200, 1380, 920};
     window.reason = game::WindowUnavailableReason::none;
@@ -21,6 +22,7 @@ int main() {
         overlay::OverlayCorner::top_right, 1.0F, {240, 90}, 12};
     auto shown = overlay::evaluate_overlay(input);
     CHECK(shown.visible);
+    CHECK(shown.target_window == window.window);
     CHECK(shown.bounds.right == 1368);
     CHECK(shown.bounds.top == 212);
     CHECK(shown.text.find(L"FPS  60.3") != std::wstring::npos);

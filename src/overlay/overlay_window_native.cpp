@@ -22,6 +22,21 @@ HWND create_overlay_native_window(HINSTANCE instance) {
         kClassName, L"KF2 Performance Overlay", WS_POPUP,
         0, 0, 1, 1, nullptr, nullptr, instance, nullptr);
 }
+
+DWORD bind_overlay_target_window(HWND overlay, HWND target) {
+    if (!IsWindow(overlay)) return ERROR_INVALID_WINDOW_HANDLE;
+    const HWND verified_target = IsWindow(target) ? target : nullptr;
+    if (GetWindow(overlay, GW_OWNER) == verified_target) {
+        return ERROR_SUCCESS;
+    }
+    SetLastError(ERROR_SUCCESS);
+    const LONG_PTR previous = SetWindowLongPtrW(
+        overlay, GWLP_HWNDPARENT,
+        reinterpret_cast<LONG_PTR>(verified_target));
+    const DWORD error = GetLastError();
+    if (previous == 0 && error != ERROR_SUCCESS) return error;
+    return ERROR_SUCCESS;
+}
 }  // namespace detail
 
 OverlayWindowState::~OverlayWindowState() {
