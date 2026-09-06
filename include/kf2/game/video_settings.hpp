@@ -59,6 +59,10 @@ struct VideoSettings {
     VideoOption option, const VideoSettings& settings) noexcept;
 [[nodiscard]] VideoSettings recommended_video_defaults(
     const VideoSettings& current);
+[[nodiscard]] Result<VideoSettings> rebase_video_changes(
+    const VideoSettings& original,
+    const VideoSettings& staged_base,
+    const VideoSettings& desired);
 
 [[nodiscard]] Result<VideoSettings> read_video_settings(
     const std::filesystem::path& config_root);

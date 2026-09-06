@@ -294,9 +294,39 @@ Result<config::ApplyResult> UiRuntime::apply_video_settings() {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::access_denied, L"Close KF2 before applying video settings", 0});
     }
+
+    const bool rebuild_protected_launch = session_config_snapshot.has_value();
+    const auto desired = *video_pending;
+    const auto staged_base = *video_saved;
+    if (rebuild_protected_launch) {
+        if (!restore_protected_session_config(
+                L"Explicit graphics settings changed before KF2 start")) {
+            return Result<config::ApplyResult>::failure({
+                ErrorCode::io_failure,
+                L"The prepared KF2 session could not be restored before applying graphics settings",
+                0});
+        }
+        const auto original = game::read_video_settings(
+            installation->config_root);
+        if (!original.has_value()) {
+            static_cast<void>(prepare_automatic_external_launch_profile());
+            return Result<config::ApplyResult>::failure(original.error());
+        }
+        const auto rebased = game::rebase_video_changes(
+            original.value(), staged_base, desired);
+        if (!rebased.has_value()) {
+            static_cast<void>(prepare_automatic_external_launch_profile());
+            return Result<config::ApplyResult>::failure(rebased.error());
+        }
+        video_saved = original.value();
+        video_pending = rebased.value();
+    }
     auto prepared = game::build_video_preview(
         installation->config_root, *video_pending);
     if (!prepared.has_value()) {
+        if (rebuild_protected_launch) {
+            static_cast<void>(prepare_automatic_external_launch_profile());
+        }
         return Result<config::ApplyResult>::failure(prepared.error());
     }
     preview = std::move(prepared.value());
@@ -309,6 +339,36 @@ Result<config::ApplyResult> UiRuntime::apply_video_settings() {
                         L"Explicit user-selected KF2 video settings were applied; FleX was changed only if its dedicated choice changed",
                         L"graphics"});
         reload_video_settings();
+        if (rebuild_protected_launch) {
+            const auto rebuilt = prepare_automatic_external_launch_profile();
+            if (!rebuilt.has_value()) {
+                events->append({0, diagnostics::Severity::error,
+                    "GRAPHICS_PROTECTED_LAUNCH_REBUILD_FAILED",
+                    L"The graphics settings were saved, but protected launch preparation failed: " +
+                        rebuilt.error().message,
+                    L"graphics"});
+                model.set_notice({ui::NoticeSeverity::warning,
+                    L"GRAPHICS_PROTECTED_LAUNCH_REBUILD_FAILED",
+                    L"The graphics settings were saved, but the next protected KF2 launch could not be prepared: " +
+                        rebuilt.error().message,
+                    L"Run Repair before starting KF2."});
+                invalidate();
+            } else {
+                events->append({0, diagnostics::Severity::info,
+                    "GRAPHICS_PROTECTED_LAUNCH_REBUILT",
+                    L"The protected KF2 launch was rebuilt from the newly saved graphics and FleX settings",
+                    L"graphics"});
+            }
+        }
+    } else if (rebuild_protected_launch) {
+        reload_video_settings();
+        const auto restored = prepare_automatic_external_launch_profile();
+        if (!restored.has_value()) {
+            model.set_recovery_required(true);
+            events->append({0, diagnostics::Severity::error,
+                "GRAPHICS_PROTECTED_LAUNCH_ROLLBACK_FAILED",
+                restored.error().message, L"graphics"});
+        }
     }
     return result;
 }

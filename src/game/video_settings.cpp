@@ -441,6 +441,47 @@ VideoSettings recommended_video_defaults(const VideoSettings& current) {
     return defaults;
 }
 
+Result<VideoSettings> rebase_video_changes(
+    const VideoSettings& original,
+    const VideoSettings& staged_base,
+    const VideoSettings& desired) {
+    VideoSettings rebased = original;
+    const auto resolution_index = index(VideoOption::resolution);
+    for (std::size_t option = 0; option < kVideoOptionCount; ++option) {
+        if (desired.choices[option] == staged_base.choices[option]) continue;
+        if (option != resolution_index) {
+            rebased.choices[option] = desired.choices[option];
+            continue;
+        }
+        const int selected = desired.choices[resolution_index];
+        if (selected < 0 ||
+            selected >= static_cast<int>(desired.resolutions.size())) {
+            return Result<VideoSettings>::failure({
+                ErrorCode::invalid_argument,
+                L"The staged resolution is invalid", 0});
+        }
+        const auto requested = desired.resolutions[static_cast<std::size_t>(selected)];
+        auto match = std::find_if(
+            rebased.resolutions.begin(), rebased.resolutions.end(),
+            [&](const Resolution& value) {
+                return value.width == requested.width &&
+                       value.height == requested.height;
+            });
+        if (match == rebased.resolutions.end()) {
+            rebased.resolutions.push_back(requested);
+            match = std::prev(rebased.resolutions.end());
+        }
+        rebased.choices[resolution_index] =
+            static_cast<int>(std::distance(rebased.resolutions.begin(), match));
+    }
+    if (desired.film_grain_percent != staged_base.film_grain_percent) {
+        rebased.film_grain_percent = desired.film_grain_percent;
+    }
+    rebased.flex_level =
+        rebased.choices[index(VideoOption::nvidia_flex)];
+    return Result<VideoSettings>::success(std::move(rebased));
+}
+
 Result<VideoSettings> read_video_settings(const std::filesystem::path& config_root) {
     auto bytes = read_file(config_root / kSystemFile);
     if (!bytes.has_value()) return Result<VideoSettings>::failure(bytes.error());
@@ -650,7 +691,7 @@ Result<config::ConfigPreview> build_video_preview(
     }
 
     const int shadow = selected(VideoOption::shadow_quality);
-    constexpr std::array<int, 4> whole_shadow{1204, 1204, 1280, 2048};
+    constexpr std::array<int, 4> whole_shadow{1280, 1280, 1280, 2048};
     constexpr std::array<int, 4> max_shadow{1024, 1024, 1024, 1536};
     constexpr std::array<int, 4> fade{256, 128, 128, 64};
     constexpr std::array<int, 4> min_shadow{128, 64, 64, 32};
