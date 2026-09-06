@@ -167,6 +167,10 @@ struct UiRuntime {
     std::uint64_t adaptive_quality_last_dispatch_ns{0};
     std::uint64_t adaptive_quality_last_applied_ns{0};
     std::uint64_t adaptive_frame_not_before_ns{0};
+    std::optional<bool> adaptive_variable_frame_rate_enabled;
+    std::optional<std::filesystem::file_time_type>
+        adaptive_frame_rate_config_write_time;
+    bool adaptive_frame_rate_mode_read_failed{false};
     optimizer::QualityResponse quality_response;
     telemetry_pipeline::CorpseTelemetryTracker corpse_telemetry_tracker;
     game::AdaptiveResourceQualityState adaptive_resource_quality{100};
@@ -294,6 +298,8 @@ struct UiRuntime {
     void refresh_update_presentation();
     void reload_video_settings();
     void refresh_game_configuration_for_process_start(bool settings_restart);
+    bool reset_adaptive_frame_window_for_rate_mode_change(
+        std::uint64_t now_ns, bool active_gameplay);
     void refresh_video_presentation();
     void cycle_video_option(game::VideoOption option);
     void reset_video_settings();

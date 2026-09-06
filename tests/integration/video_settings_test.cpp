@@ -53,6 +53,10 @@ int main() {
 
     auto loaded = kf2::game::read_video_settings(root);
     CHECK(loaded.has_value());
+    const auto variable_enabled =
+        kf2::game::read_variable_frame_rate_enabled(root);
+    CHECK(variable_enabled.has_value());
+    CHECK(variable_enabled.value());
     CHECK(loaded.value().choices[static_cast<std::size_t>(
               kf2::game::VideoOption::nvidia_flex)] == 0);
     CHECK(kf2::game::video_choice_label(
@@ -151,6 +155,20 @@ int main() {
     for (const auto& file : defaults_preview.value().files) {
         write_file(root / file.relative_path, file.proposed_bytes);
     }
+    const auto variable_after_defaults =
+        kf2::game::read_variable_frame_rate_enabled(root);
+    CHECK(variable_after_defaults.has_value());
+    CHECK(variable_after_defaults.value());
+    auto capped_game = defaults_preview.value().files[2].proposed_bytes;
+    const auto uncapped_setting = capped_game.find("bSmoothFrameRate=False");
+    CHECK(uncapped_setting != std::string::npos);
+    capped_game.replace(
+        uncapped_setting, std::string_view{"bSmoothFrameRate=False"}.size(),
+        "bSmoothFrameRate=True");
+    write_file(root / L"KFGame.ini", capped_game);
+    const auto capped = kf2::game::read_variable_frame_rate_enabled(root);
+    CHECK(capped.has_value());
+    CHECK(!capped.value());
     const auto reloaded_defaults = kf2::game::read_video_settings(root);
     CHECK(reloaded_defaults.has_value());
     CHECK(reloaded_defaults.value().choices[static_cast<std::size_t>(

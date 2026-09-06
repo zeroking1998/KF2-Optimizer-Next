@@ -198,6 +198,20 @@ void UiRuntime::refresh_game_configuration_for_process_start(
         return;
     }
 
+    const auto variable_index = static_cast<std::size_t>(
+        game::VideoOption::variable_frame_rate);
+    adaptive_variable_frame_rate_enabled =
+        video_saved->choices[variable_index] != 0;
+    adaptive_frame_rate_mode_read_failed = false;
+    std::error_code write_time_error;
+    const auto game_config_write_time = std::filesystem::last_write_time(
+        installation->config_root / L"KFGame.ini", write_time_error);
+    if (write_time_error) {
+        adaptive_frame_rate_config_write_time.reset();
+    } else {
+        adaptive_frame_rate_config_write_time = game_config_write_time;
+    }
+
     const auto flex = game::video_choice_label(
         game::VideoOption::nvidia_flex, *video_saved);
     events->append({
@@ -209,6 +223,63 @@ void UiRuntime::refresh_game_configuration_for_process_start(
              : L"KF2 graphics settings were loaded for the verified process; configured NVIDIA FleX: ") +
             flex,
         L"graphics"});
+}
+
+bool UiRuntime::reset_adaptive_frame_window_for_rate_mode_change(
+    std::uint64_t now_ns, bool active_gameplay) {
+    if (!installation || !game_process || now_ns == 0) return false;
+
+    const auto game_config = installation->config_root / L"KFGame.ini";
+    std::error_code write_time_error;
+    const auto write_time = std::filesystem::last_write_time(
+        game_config, write_time_error);
+    if (write_time_error ||
+        (adaptive_frame_rate_config_write_time &&
+         *adaptive_frame_rate_config_write_time == write_time)) {
+        return false;
+    }
+
+    const auto current = game::read_variable_frame_rate_enabled(
+        installation->config_root);
+    if (!current.has_value()) {
+        if (!adaptive_frame_rate_mode_read_failed) {
+            adaptive_frame_rate_mode_read_failed = true;
+            events->append({
+                0, diagnostics::Severity::warning,
+                "ADAPTIVE_FRAME_RATE_MODE_UNAVAILABLE",
+                L"KF2's current Variable frame rate mode could not be verified; Adaptive preserved its existing frame window",
+                L"optimizer"});
+        }
+        return false;
+    }
+
+    adaptive_frame_rate_mode_read_failed = false;
+    adaptive_frame_rate_config_write_time = write_time;
+    const auto previous = adaptive_variable_frame_rate_enabled;
+    adaptive_variable_frame_rate_enabled = current.value();
+    if (!previous || *previous == current.value() || !active_gameplay) {
+        return false;
+    }
+
+    adaptive_frame_not_before_ns = now_ns;
+    adaptive_governor.reset();
+    adaptive_profile_gate.reset();
+    adaptive_decision = {};
+    quality_response = {};
+    last_adaptive_state = optimizer::AdaptiveControllerState::observing;
+    last_adaptive_disposition = optimizer::AdaptiveDisposition::hold;
+    last_adaptive_bottleneck = optimizer::AdaptiveBottleneck::unknown;
+    last_adaptive_decision_log_ns = 0;
+    last_frame_metrics = {};
+    if (present_source) present_source->reset_statistics();
+    events->append({
+        0, diagnostics::Severity::info,
+        "ADAPTIVE_FRAME_RATE_MODE_CHANGED",
+        std::wstring{L"Variable frame rate changed to "} +
+            (current.value() ? L"On" : L"Off") +
+            L"; Adaptive discarded the mixed capped/uncapped frame evidence and is collecting a fresh gameplay window",
+        L"optimizer"});
+    return true;
 }
 
 void UiRuntime::cycle_video_option(game::VideoOption option) {

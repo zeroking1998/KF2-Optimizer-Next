@@ -949,6 +949,75 @@ int main() {
         runtime.game_process.reset();
     }
 
+    // A live Variable frame rate change invalidates every Adaptive frame
+    // statistic exactly once. Unchanged settings and loading-time changes do
+    // not repeatedly reset the controller boundary.
+    {
+        kf2::diagnostics::EventLog rate_mode_events{128};
+        kf2::app::UiRuntime runtime{root / L"Data-rate-mode", false,
+            kf2::config::Settings{}, rate_mode_events, options.game_discovery,
+            kf2::app::StartMode::read_only, root / L"portable"};
+        runtime.game_process = kf2::game::GameProcessIdentity{
+            515151, 7001, runtime.installation->executable};
+        runtime.refresh_game_configuration_for_process_start(false);
+        CHECK(runtime.adaptive_variable_frame_rate_enabled == false);
+
+        runtime.optimizer_settings.target_fps = 144;
+        runtime.adaptive_frame_not_before_ns = 1;
+        runtime.last_frame_metrics.fps = 60.0;
+        kf2::optimizer::QualityResponse::Context response_context{};
+        response_context.ready = true;
+        kf2::telemetry::PresentSource::Window response_window{};
+        response_window.complete = true;
+        runtime.quality_response.begin(
+            41, "gpu", 100, 90, 20'000'000'000ULL,
+            response_context, response_window);
+        runtime.quality_response.confirm(41, 20'100'000'000ULL);
+        CHECK(runtime.quality_response.end_ns() != 0);
+        auto game_config = read_bytes(config_root / L"KFGame.ini");
+        const auto capped = game_config.find("bSmoothFrameRate=True");
+        CHECK(capped != std::string::npos);
+        game_config.replace(capped, std::strlen("bSmoothFrameRate=True"),
+                            "bSmoothFrameRate=False");
+        write_bytes(config_root / L"KFGame.ini", game_config);
+        runtime.adaptive_frame_rate_config_write_time.reset();
+        CHECK(runtime.reset_adaptive_frame_window_for_rate_mode_change(
+            30'000'000'000ULL, true));
+        CHECK(runtime.adaptive_variable_frame_rate_enabled == true);
+        CHECK(runtime.adaptive_frame_not_before_ns == 30'000'000'000ULL);
+        CHECK(!runtime.last_frame_metrics.fps);
+        CHECK(runtime.quality_response.end_ns() == 0);
+        CHECK(runtime.optimizer_settings.target_fps == 144);
+        CHECK(!runtime.reset_adaptive_frame_window_for_rate_mode_change(
+            30'250'000'000ULL, true));
+
+        game_config.replace(
+            game_config.find("bSmoothFrameRate=False"),
+            std::strlen("bSmoothFrameRate=False"),
+            "bSmoothFrameRate=True");
+        write_bytes(config_root / L"KFGame.ini", game_config);
+        runtime.adaptive_frame_rate_config_write_time.reset();
+        CHECK(runtime.reset_adaptive_frame_window_for_rate_mode_change(
+            30'500'000'000ULL, true));
+        CHECK(runtime.adaptive_variable_frame_rate_enabled == false);
+
+        game_config.replace(
+            game_config.find("bSmoothFrameRate=True"),
+            std::strlen("bSmoothFrameRate=True"),
+            "bSmoothFrameRate=False");
+        write_bytes(config_root / L"KFGame.ini", game_config);
+        runtime.adaptive_frame_rate_config_write_time.reset();
+        CHECK(!runtime.reset_adaptive_frame_window_for_rate_mode_change(
+            30'750'000'000ULL, false));
+        CHECK(runtime.adaptive_variable_frame_rate_enabled == true);
+        const auto rate_events = rate_mode_events.snapshot();
+        CHECK(std::count_if(rate_events.begin(), rate_events.end(),
+            [](const auto& event) {
+                return event.code == "ADAPTIVE_FRAME_RATE_MODE_CHANGED";
+            }) == 2);
+        runtime.game_process.reset();
+    }
+
     // A single optimizer process can supervise multiple KF2 launches. After
     // one protected session is restored, the next Steam/shortcut launch must
     // receive the provider bootstrap and fixed session policy again.

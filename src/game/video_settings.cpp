@@ -589,6 +589,20 @@ Result<VideoSettings> read_video_settings(const std::filesystem::path& config_ro
     return Result<VideoSettings>::success(std::move(settings));
 }
 
+Result<bool> read_variable_frame_rate_enabled(
+    const std::filesystem::path& config_root) {
+    const auto bytes = read_file(config_root / kGameFile);
+    if (!bytes.has_value()) return Result<bool>::failure(bytes.error());
+    const auto parsed = config::IniDocument::parse(bytes.value());
+    if (!parsed.has_value()) return Result<bool>::failure(parsed.error());
+    const auto value = parsed.value().find(kGameEngine, L"bSmoothFrameRate");
+    if (same(value, L"true")) return Result<bool>::success(false);
+    if (same(value, L"false")) return Result<bool>::success(true);
+    return Result<bool>::failure({
+        ErrorCode::stale_data,
+        L"KF2's Variable frame rate setting could not be verified", 0});
+}
+
 Result<config::ConfigPreview> build_video_preview(
     const std::filesystem::path& config_root, const VideoSettings& settings) {
     auto bytes = read_file(config_root / kSystemFile);
