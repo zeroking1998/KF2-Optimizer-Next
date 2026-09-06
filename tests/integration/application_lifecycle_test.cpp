@@ -1058,6 +1058,29 @@ int main() {
             [](const auto& event) {
                 return event.code == "ADAPTIVE_EXTERNAL_LAUNCH_REARMED";
             }));
+
+        // Applying an explicit graphics change after automatic preparation
+        // must rebuild the protected snapshot and launch capabilities. This
+        // is the orchestration path used when the dedicated FleX control is
+        // changed before KF2 starts.
+        const auto vsync_index = static_cast<std::size_t>(
+            kf2::game::VideoOption::vsync);
+        const int original_vsync =
+            rearm_runtime.video_pending->choices[vsync_index];
+        rearm_runtime.cycle_video_option(kf2::game::VideoOption::vsync);
+        const auto graphics_applied = rearm_runtime.apply_video_settings();
+        CHECK(graphics_applied.has_value());
+        CHECK(rearm_runtime.session_config_snapshot.has_value());
+        CHECK(rearm_runtime.session_config_waiting_for_launch);
+        CHECK(rearm_runtime.video_saved->choices[vsync_index] !=
+              original_vsync);
+        const auto graphics_rebuild_log = rearm_events.snapshot();
+        CHECK(std::any_of(
+            graphics_rebuild_log.begin(), graphics_rebuild_log.end(),
+            [](const auto& event) {
+                return event.code ==
+                       "GRAPHICS_PROTECTED_LAUNCH_REBUILT";
+            }));
     }
     CHECK(!fs::exists(published_telemetry));
     CHECK(read_bytes(config_root / L"KFEngine.ini") == original_engine_config);

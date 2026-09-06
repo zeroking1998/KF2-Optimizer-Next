@@ -98,6 +98,29 @@ int main() {
     auto explicit_flex = loaded.value();
     explicit_flex.choices[static_cast<std::size_t>(
         kf2::game::VideoOption::nvidia_flex)] = 2;
+
+    // A protected Adaptive profile can already be staged when the user
+    // changes FleX. Rebase only the explicit user delta onto the original
+    // settings so Adaptive-only changes are not accidentally made permanent.
+    auto adaptive_staged = loaded.value();
+    adaptive_staged.choices[static_cast<std::size_t>(
+        kf2::game::VideoOption::shadow_quality)] = 0;
+    auto desired_after_staging = adaptive_staged;
+    desired_after_staging.choices[static_cast<std::size_t>(
+        kf2::game::VideoOption::nvidia_flex)] = 2;
+    desired_after_staging.film_grain_percent = 25;
+    const auto rebased = kf2::game::rebase_video_changes(
+        loaded.value(), adaptive_staged, desired_after_staging);
+    CHECK(rebased.has_value());
+    CHECK(rebased.value().choices[static_cast<std::size_t>(
+              kf2::game::VideoOption::nvidia_flex)] == 2);
+    CHECK(rebased.value().flex_level == 2);
+    CHECK(rebased.value().film_grain_percent == 25);
+    CHECK(rebased.value().choices[static_cast<std::size_t>(
+              kf2::game::VideoOption::shadow_quality)] ==
+          loaded.value().choices[static_cast<std::size_t>(
+              kf2::game::VideoOption::shadow_quality)]);
+
     auto flex_preview = kf2::game::build_video_preview(root, explicit_flex);
     CHECK(flex_preview.has_value());
     auto flex_engine = kf2::config::IniDocument::parse(
@@ -122,6 +145,9 @@ int main() {
     CHECK(default_system.has_value());
     CHECK(default_system.value().find(
               L"SystemSettings", L"MaxAnisotropy") == L"4");
+    CHECK(default_system.value().find(
+              L"SystemSettings",
+              L"MaxWholeSceneDominantShadowResolution") == L"1280");
     for (const auto& file : defaults_preview.value().files) {
         write_file(root / file.relative_path, file.proposed_bytes);
     }
