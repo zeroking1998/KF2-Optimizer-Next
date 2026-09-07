@@ -227,7 +227,7 @@ if(MSVC)
 endif()
 target_link_libraries(KF2Optimizer PRIVATE
     presentmon_data
-    user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs winmm uiautomationcore bcrypt dwmapi psapi advapi32 pdh dxgi tdh version winhttp ws2_32
+    user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs uiautomationcore bcrypt dwmapi psapi advapi32 pdh dxgi tdh version winhttp ws2_32
 )
 
 add_executable(KF2ConfigRoundtrip EXCLUDE_FROM_ALL

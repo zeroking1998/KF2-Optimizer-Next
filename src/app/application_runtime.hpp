@@ -2,7 +2,6 @@
 
 #include "kf2/app/application.hpp"
 #include "app/runtime/action_contract.hpp"
-#include <mmsystem.h>
 #include <shellapi.h>
 #include <shobjidl.h>
 #include <wrl/client.h>
@@ -234,7 +233,6 @@ struct UiRuntime {
     std::uint64_t last_flex_report_tick{0};
     flex::AdaptivePolicy flex_adaptive_policy;
     bool flex_adaptive_constrained{false};
-    bool high_resolution_animation_timer{false};
     StartMode start_mode{StartMode::normal};
     std::shared_ptr<PackageRepairAsyncState> package_repair_state;
     update::UpdateController update_controller;

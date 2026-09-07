@@ -505,7 +505,7 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
 )
 target_link_libraries(kf2_application_lifecycle_test PRIVATE
     presentmon_data
-    user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs winmm uiautomationcore bcrypt
+    user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs uiautomationcore bcrypt
     dwmapi psapi advapi32 pdh dxgi tdh version winhttp ws2_32
 )
 add_test(NAME kf2_application_lifecycle_test COMMAND kf2_application_lifecycle_test)

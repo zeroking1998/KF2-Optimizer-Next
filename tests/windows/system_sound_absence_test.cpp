@@ -33,5 +33,6 @@ int main(int argc, char** argv) {
     CHECK(image.find("messagebeep") == std::string::npos);
     CHECK(image.find("systemasterisk") == std::string::npos);
     CHECK(image.find("systemexclamation") == std::string::npos);
+    CHECK(image.find("winmm.dll") == std::string::npos);
     return EXIT_SUCCESS;
 }
