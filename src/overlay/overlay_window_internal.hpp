@@ -39,6 +39,7 @@ struct OverlayWindowState {
     SIZE bitmap_size{};
     Microsoft::WRL::ComPtr<ID2D1Factory> d2d_factory;
     Microsoft::WRL::ComPtr<ID2D1DCRenderTarget> render_target;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap> static_layer_bitmap;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> background;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> foreground;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> border;
@@ -139,6 +140,13 @@ struct OverlayWindowState {
     std::size_t frame_time_history_next{0};
     ULONGLONG frame_time_history_sample_ms{0};
     Microsoft::WRL::ComPtr<ID2D1PathGeometry> frame_time_graph_geometry;
+    SIZE static_layer_size{};
+    bool static_layer_show_fps{false};
+    bool static_layer_show_frame_time{false};
+    bool static_layer_show_cpu{false};
+    bool static_layer_show_gpu{false};
+    bool static_layer_show_memory{false};
+    std::size_t static_layer_builds{0};
     ULONGLONG frame_time_graph_source_sample_ms{0};
     bool frame_time_graph_uses_memory_layout{true};
     std::size_t graph_geometry_builds{0};
@@ -161,6 +169,10 @@ inline constexpr int kPremiumMutantLowIdlePngResource = 203;
 [[nodiscard]] bool same_rect(const RECT& left, const RECT& right);
 [[nodiscard]] RECT visibility_pose(
     const RECT& bounds, float scale, LONG outward);
+[[nodiscard]] bool static_layer_matches(
+    const OverlayWindowState& state, LONG width, LONG height) noexcept;
+HRESULT rebuild_static_layer(
+    OverlayWindowState& state, LONG width, LONG height);
 void draw_mood_character(
     OverlayWindowState& state,
     const D2D1_MATRIX_3X2_F& base_transform,

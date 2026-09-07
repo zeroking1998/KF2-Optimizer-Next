@@ -53,6 +53,7 @@ int main() {
     shown.bounds = {100, 120, 340, 210};
     CHECK(overlay.update(shown).has_value());
     CHECK(IsWindowVisible(window));
+    CHECK(overlay.static_layer_build_count() == 1);
     CHECK(GetWindow(window, GW_OWNER) == target_window);
     CHECK(GetForegroundWindow() != window);
     for (int frame = 0; frame < 52; ++frame) {
@@ -70,6 +71,7 @@ int main() {
     Sleep(100);
     CHECK(overlay.update(shown).has_value());
     CHECK(overlay.render_count() > settled_render_count);
+    CHECK(overlay.static_layer_build_count() == 1);
     // Decorative mascot motion uses a lower idle cadence than live metric and
     // transition animation. Keep the full layered-window upload below 25 FPS
     // while the caller continues to tick at the normal application cadence.
@@ -106,6 +108,8 @@ int main() {
     shown.show_memory = true;
     shown.frame_time_ms = 16.7;
     CHECK(overlay.update(shown).has_value());
+    const auto memory_layer_build_count = overlay.static_layer_build_count();
+    CHECK(memory_layer_build_count == 2);
     Sleep(110);
     shown.frame_time_ms = 17.2;
     CHECK(overlay.update(shown).has_value());
@@ -114,6 +118,7 @@ int main() {
     shown.frame_time_ms = 0.0;
     shown.bounds = {111, 130, 351, 220};
     CHECK(overlay.update(shown).has_value());
+    CHECK(overlay.static_layer_build_count() == memory_layer_build_count);
     CHECK(overlay.graph_geometry_build_count() == graph_build_count);
     shown.show_memory = false;
     CHECK(overlay.update(shown).has_value());

@@ -20,4 +20,7 @@ std::size_t OverlayWindow::render_count() const noexcept {
 std::size_t OverlayWindow::graph_geometry_build_count() const noexcept {
     return state_ ? state_->graph_geometry_builds : 0;
 }
+std::size_t OverlayWindow::static_layer_build_count() const noexcept {
+    return state_ ? state_->static_layer_builds : 0;
+}
 }  // namespace kf2::overlay

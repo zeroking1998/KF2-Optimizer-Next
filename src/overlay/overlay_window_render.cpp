@@ -9,6 +9,9 @@
 namespace kf2::overlay {
 namespace {
 
+constexpr float kLogicalCanvasWidth = 330.0F;
+constexpr float kLogicalHeight = 105.0F;
+
 HRESULT rebuild_frame_time_graph(OverlayWindowState& state,
                                  D2D1_RECT_F bounds) {
     Microsoft::WRL::ComPtr<ID2D1PathGeometry> geometry;
@@ -592,24 +595,36 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                  static_cast<std::uint32_t>(graph_result)});
         }
     }
+    const RECT& static_bounds = presentation.visible
+        ? presentation.bounds : state_->visual.bounds;
+    const LONG static_width = static_bounds.right - static_bounds.left;
+    const LONG static_height = static_bounds.bottom - static_bounds.top;
+    if (static_width <= 0 || static_height <= 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"Overlay static layer dimensions are invalid", 0});
+    }
     RECT local{0, 0, width, height};
     HRESULT result = state_->render_target->BindDC(state_->memory_dc, &local);
+    if (SUCCEEDED(result) &&
+        !detail::static_layer_matches(*state_, static_width, static_height)) {
+        result = detail::rebuild_static_layer(
+            *state_, static_width, static_height);
+    }
     if (SUCCEEDED(result)) {
         state_->render_target->BeginDraw();
         state_->render_target->Clear(D2D1::ColorF(0, 0.0F));
-        constexpr float logical_canvas_width = 330.0F;
-        constexpr float logical_content_width = 322.0F;
-        constexpr float logical_height = 105.0F;
+        state_->render_target->SetTransform(D2D1::Matrix3x2F::Identity());
+        state_->render_target->DrawBitmap(
+            state_->static_layer_bitmap.Get(),
+            D2D1::RectF(0.0F, 0.0F, static_cast<float>(width),
+                        static_cast<float>(height)),
+            1.0F, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
         const auto base_transform = D2D1::Matrix3x2F::Translation(8.0F, 0.0F) *
             D2D1::Matrix3x2F::Scale(
-                static_cast<float>(width) / logical_canvas_width,
-                static_cast<float>(height) / logical_height);
+                static_cast<float>(width) / kLogicalCanvasWidth,
+                static_cast<float>(height) / kLogicalHeight);
         state_->render_target->SetTransform(base_transform);
-        const auto card = D2D1::RoundedRect(
-            D2D1::RectF(2.0F, 2.0F, logical_content_width - 2.0F,
-                         logical_height - 2.0F), 11, 11);
-        state_->render_target->FillRoundedRectangle(card, state_->background.Get());
-        state_->render_target->DrawRoundedRectangle(card, state_->border.Get(), 1.0F);
         state_->render_target->DrawLine(D2D1::Point2F(14, 9),
                                         D2D1::Point2F(
                                             72 + 22 * std::sin(
@@ -617,24 +632,6 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                                                 5 * std::sin(
                                                 linear * 9.42477796F), 9),
                                         state_->accent.Get(), 3.0F);
-        const auto average_panel = D2D1::RoundedRect(
-            D2D1::RectF(140.0F, 6.0F, 223.0F, 66.0F), 6.0F, 6.0F);
-        const auto low_panel = D2D1::RoundedRect(
-            D2D1::RectF(225.0F, 6.0F, 315.0F, 66.0F), 6.0F, 6.0F);
-        const auto system_panel = D2D1::RoundedRect(
-            D2D1::RectF(76.0F, 13.0F, 139.0F, 64.0F), 5.0F, 5.0F);
-        state_->render_target->FillRoundedRectangle(
-            system_panel, state_->metric_panel.Get());
-        state_->render_target->DrawRoundedRectangle(
-            system_panel, state_->border.Get(), 1.0F);
-        state_->render_target->FillRoundedRectangle(
-            average_panel, state_->metric_panel.Get());
-        state_->render_target->DrawRoundedRectangle(
-            average_panel, state_->border.Get(), 1.0F);
-        state_->render_target->FillRoundedRectangle(
-            low_panel, state_->metric_panel.Get());
-        state_->render_target->DrawRoundedRectangle(
-            low_panel, state_->border.Get(), 1.0F);
         const auto draw = [&](std::wstring_view value, IDWriteTextFormat* format,
                               ID2D1Brush* brush, D2D1_RECT_F bounds) {
             state_->render_target->DrawTextW(
@@ -790,8 +787,6 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
             return cached_text;
         };
         if (state_->target.show_fps) {
-            draw(L"LIVE FPS", state_->title_format.Get(), state_->muted.Get(),
-                 D2D1::RectF(12, 14, 116, 30));
             draw_trend_number(rounded_text(
                                   state_->displayed_fps,
                                   state_->displayed_fps_text_value,
@@ -805,25 +800,16 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                               state_->fps_bounce_strength);
         }
         if (state_->target.show_cpu) {
-            draw(L"CPU", state_->title_format.Get(), state_->muted.Get(),
-                 D2D1::RectF(79, 17, 104, 34));
             draw_selective_percent(state_->displayed_cpu_percent, 91, 16,
                                    state_->cpu_changed_digits,
                                    state_->cpu_bounce_started_ms, 31.0F);
         }
-        state_->render_target->DrawLine(D2D1::Point2F(80, 38),
-                                        D2D1::Point2F(128, 38),
-                                        state_->border.Get(), 0.8F);
         if (state_->target.show_gpu) {
-            draw(L"GPU", state_->title_format.Get(), state_->muted.Get(),
-                 D2D1::RectF(79, 43, 104, 60));
             draw_selective_percent(state_->displayed_gpu_percent, 96, 42,
                                    state_->gpu_changed_digits,
                                    state_->gpu_bounce_started_ms);
         }
         if (state_->target.show_fps) {
-            draw(L"AVG", state_->title_format.Get(), state_->muted.Get(),
-                 D2D1::RectF(146, 12, 195, 28));
             detail::draw_mood_character(*state_, base_transform, frame_now_ms,
                       linear, 200.0F, 20.0F, state_->average_mood,
                       state_->average_mood_reaction_ms,
@@ -842,8 +828,6 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                               state_->average_tug_offset,
                               state_->average_bounce_started_ms,
                               state_->average_bounce_strength);
-            draw(L"1% LOW", state_->title_format.Get(), state_->muted.Get(),
-                 D2D1::RectF(231, 12, 287, 28));
             detail::draw_mood_character(*state_, base_transform, frame_now_ms,
                       linear, 292.0F, 20.0F, state_->low_mood,
                       state_->low_mood_reaction_ms,
@@ -863,12 +847,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                               state_->low_bounce_started_ms,
                               state_->low_bounce_strength);
         }
-        state_->render_target->DrawLine(D2D1::Point2F(12, 70),
-                                        D2D1::Point2F(310, 70),
-                                        state_->border.Get(), 1.0F);
         if (state_->target.show_frame_time) {
-            draw(L"FRAME TIME", state_->title_format.Get(), state_->muted.Get(),
-                 D2D1::RectF(12, 77, 91, 94));
             const long rounded_frame_time =
                 std::lround(state_->displayed_frame_time_ms);
             if (rounded_frame_time != state_->displayed_frame_time_text_value) {
@@ -907,9 +886,6 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                  D2D1::RectF(140, 76, 310, 96));
         }
         if (state_->target.show_frame_time) {
-            state_->render_target->FillRoundedRectangle(
-                D2D1::RoundedRect(graph_bounds, 4.0F, 4.0F),
-                state_->metric_panel.Get());
             if (state_->frame_time_graph_geometry) {
                 state_->render_target->DrawGeometry(
                     state_->frame_time_graph_geometry.Get(),
