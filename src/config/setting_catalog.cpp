@@ -370,7 +370,11 @@ Result<std::map<SettingId, SettingValue>> read_catalog_values(
         if (!value) {
             return Result<std::map<SettingId, SettingValue>>::failure(
                 {ErrorCode::invalid_argument,
-                 L"A verified catalog value is missing or outside its safe range", 0});
+                 L"The KF2 config value for " +
+                     definition.relative_path.wstring() + L" [" +
+                     definition.section + L"] " + definition.key +
+                     L" is missing or outside its safe range",
+                 0});
         }
         values.emplace(definition.id, *value);
     }
