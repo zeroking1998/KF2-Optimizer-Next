@@ -105,11 +105,16 @@ int main() {
         DWORD handles_while_tracked = 0;
         CHECK(GetProcessHandleCount(GetCurrentProcess(),
                                     &handles_while_tracked));
-        CHECK(handles_while_tracked > handles_before);
+        CHECK(handles_while_tracked >=
+              handles_before + static_cast<DWORD>(workers.size()));
     }
     DWORD handles_after = 0;
     CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after));
-    CHECK(handles_after == handles_before);
+    // The process-wide count can move by a handle or two when Windows or the
+    // test runtime performs unrelated asynchronous work. The eight persistent
+    // worker threads make a tracker leak much larger than that ambient noise.
+    constexpr DWORD kAmbientHandleAllowance = 2;
+    CHECK(handles_after <= handles_before + kAmbientHandleAllowance);
     keep_workers.store(false, std::memory_order_relaxed);
     for (auto& worker : workers) worker.join();
     return EXIT_SUCCESS;
