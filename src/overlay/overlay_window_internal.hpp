@@ -9,6 +9,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <string>
 
 #include "kf2/overlay/overlay_window.hpp"
 
@@ -78,6 +80,17 @@ struct OverlayWindowState {
     double displayed_gpu_percent{0.0};
     double displayed_process_ram_gib{0.0};
     double displayed_dedicated_vram_gib{0.0};
+    long displayed_fps_text_value{std::numeric_limits<long>::min()};
+    long displayed_average_text_value{std::numeric_limits<long>::min()};
+    long displayed_low_text_value{std::numeric_limits<long>::min()};
+    long displayed_frame_time_text_value{std::numeric_limits<long>::min()};
+    long displayed_ram_tenths{std::numeric_limits<long>::min()};
+    long displayed_vram_tenths{std::numeric_limits<long>::min()};
+    std::wstring displayed_fps_text;
+    std::wstring displayed_average_text;
+    std::wstring displayed_low_text;
+    std::wstring displayed_frame_time_text;
+    std::wstring displayed_memory_text;
     ULONGLONG system_metrics_sample_ms{0};
     ULONGLONG fps_bounce_started_ms{0};
     ULONGLONG average_bounce_started_ms{0};

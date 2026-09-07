@@ -3,8 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iomanip>
-#include <sstream>
+#include <string_view>
 #include <utility>
 
 namespace kf2::overlay {
@@ -570,13 +569,13 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
             low_panel, state_->metric_panel.Get());
         state_->render_target->DrawRoundedRectangle(
             low_panel, state_->border.Get(), 1.0F);
-        const auto draw = [&](const std::wstring& value, IDWriteTextFormat* format,
+        const auto draw = [&](std::wstring_view value, IDWriteTextFormat* format,
                               ID2D1Brush* brush, D2D1_RECT_F bounds) {
             state_->render_target->DrawTextW(
                 value.data(), static_cast<UINT32>(value.size()), format, bounds,
                 brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
         };
-        const auto draw_bouncing_number = [&](const std::wstring& value,
+        const auto draw_bouncing_number = [&](std::wstring_view value,
                                                IDWriteTextFormat* format,
                                                D2D1_RECT_F bounds,
                                                ULONGLONG bounce_started_ms) {
@@ -606,17 +605,21 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                                                  const std::array<bool, 3>& changed,
                                                  ULONGLONG started_ms,
                                                  float percent_offset = 26.0F) {
-            std::wstring digits = std::to_wstring(
-                std::clamp(static_cast<int>(std::lround(value)), 0, 100));
-            digits = std::wstring(3 - std::min<std::size_t>(3, digits.size()), L' ') +
-                     digits;
+            const int rounded = std::clamp(
+                static_cast<int>(std::lround(value)), 0, 100);
+            const std::array<wchar_t, 3> digits{
+                rounded >= 100 ? static_cast<wchar_t>(L'0' + rounded / 100)
+                               : L' ',
+                rounded >= 10 ? static_cast<wchar_t>(L'0' + (rounded / 10) % 10)
+                              : L' ',
+                static_cast<wchar_t>(L'0' + rounded % 10)};
             constexpr float advance = 6.2F;
             for (std::size_t index = 0; index < digits.size(); ++index) {
                 if (digits[index] == L' ') continue;
-                const std::wstring glyph(1, digits[index]);
                 const auto bounds = D2D1::RectF(
                     x + static_cast<float>(index) * advance, y,
                     x + static_cast<float>(index + 1) * advance, y + 19.0F);
+                const std::wstring_view glyph{&digits[index], 1};
                 if (changed[index]) {
                     draw_bouncing_number(glyph, state_->system_value_format.Get(), bounds,
                                          started_ms);
@@ -629,7 +632,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                  D2D1::RectF(x + percent_offset, y + 1.0F,
                              x + percent_offset + 8.0F, y + 18.0F));
         };
-        const auto draw_trend_number = [&](const std::wstring& value,
+        const auto draw_trend_number = [&](std::wstring_view value,
                                            IDWriteTextFormat* format,
                                            D2D1_RECT_F bounds,
                                            ULONGLONG trend_started_ms,
@@ -710,15 +713,24 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                 state_->accent->SetColor(D2D1::ColorF(0.92F, 0.12F, 0.08F, 0.95F));
             }
         };
-        const auto number = [](double value) {
-            std::wostringstream stream;
-            stream << std::fixed << std::setprecision(0) << value;
-            return stream.str();
+        const auto rounded_text = [](double value, long& cached_value,
+                                     std::wstring& cached_text)
+                -> const std::wstring& {
+            const long rounded = std::lround(value);
+            if (rounded != cached_value) {
+                cached_value = rounded;
+                cached_text = std::to_wstring(rounded);
+            }
+            return cached_text;
         };
         if (state_->target.show_fps) {
             draw(L"LIVE FPS", state_->title_format.Get(), state_->muted.Get(),
                  D2D1::RectF(12, 14, 116, 30));
-            draw_trend_number(number(state_->displayed_fps), state_->value_format.Get(),
+            draw_trend_number(rounded_text(
+                                  state_->displayed_fps,
+                                  state_->displayed_fps_text_value,
+                                  state_->displayed_fps_text),
+                              state_->value_format.Get(),
                               D2D1::RectF(11, 28, 79, 66),
                               state_->fps_trend_started_ms,
                               state_->fps_trend_direction,
@@ -751,7 +763,10 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                       state_->average_mood_reaction,
                       state_->average_tug_offset,
                       state_->average_tug_load);
-            draw_trend_number(number(state_->displayed_average_fps),
+            draw_trend_number(rounded_text(
+                                  state_->displayed_average_fps,
+                                  state_->displayed_average_text_value,
+                                  state_->displayed_average_text),
                               state_->summary_format.Get(),
                               D2D1::RectF(146, 29, 193, 59),
                               state_->average_trend_started_ms,
@@ -767,7 +782,10 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                       state_->low_mood_reaction,
                       state_->low_tug_offset,
                       state_->low_tug_load);
-            draw_trend_number(number(state_->displayed_one_percent_low_fps),
+            draw_trend_number(rounded_text(
+                                  state_->displayed_one_percent_low_fps,
+                                  state_->displayed_low_text_value,
+                                  state_->displayed_low_text),
                               state_->summary_format.Get(),
                               D2D1::RectF(231, 29, 278, 59),
                               state_->low_trend_started_ms,
@@ -783,17 +801,41 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         if (state_->target.show_frame_time) {
             draw(L"FRAME TIME", state_->title_format.Get(), state_->muted.Get(),
                  D2D1::RectF(12, 77, 91, 94));
-            draw_bouncing_number(number(state_->displayed_frame_time_ms) + L" ms",
+            const long rounded_frame_time =
+                std::lround(state_->displayed_frame_time_ms);
+            if (rounded_frame_time != state_->displayed_frame_time_text_value) {
+                state_->displayed_frame_time_text_value = rounded_frame_time;
+                state_->displayed_frame_time_text =
+                    std::to_wstring(rounded_frame_time) + L" ms";
+            }
+            draw_bouncing_number(state_->displayed_frame_time_text,
                                  state_->metric_format.Get(),
                                  D2D1::RectF(92, 75, 139, 99),
                                  state_->frame_time_bounce_started_ms);
         }
         if (state_->target.show_memory) {
-            std::wostringstream memory;
-            memory << std::fixed << std::setprecision(1)
-                   << L"RAM " << state_->displayed_process_ram_gib
-                   << L"G  VRAM " << state_->displayed_dedicated_vram_gib << L"G";
-            draw(memory.str(), state_->title_format.Get(), state_->muted.Get(),
+            const long ram_tenths = std::lround(
+                state_->displayed_process_ram_gib * 10.0);
+            const long vram_tenths = std::lround(
+                state_->displayed_dedicated_vram_gib * 10.0);
+            if (ram_tenths != state_->displayed_ram_tenths ||
+                vram_tenths != state_->displayed_vram_tenths) {
+                const auto fixed_tenth = [](long tenths) {
+                    const bool negative = tenths < 0;
+                    const unsigned long magnitude = static_cast<unsigned long>(
+                        negative ? -tenths : tenths);
+                    return std::wstring(negative ? L"-" : L"") +
+                        std::to_wstring(magnitude / 10) + L"." +
+                        std::to_wstring(magnitude % 10);
+                };
+                state_->displayed_ram_tenths = ram_tenths;
+                state_->displayed_vram_tenths = vram_tenths;
+                state_->displayed_memory_text =
+                    L"RAM " + fixed_tenth(ram_tenths) + L"G  VRAM " +
+                    fixed_tenth(vram_tenths) + L"G";
+            }
+            draw(state_->displayed_memory_text, state_->title_format.Get(),
+                 state_->muted.Get(),
                  D2D1::RectF(140, 76, 310, 96));
         }
         const D2D1_RECT_F graph_bounds = state_->target.show_memory
@@ -857,11 +899,12 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                                  state_->memory_dc, &source, 0, &blend, ULW_ALPHA)) {
             const DWORD recovery_error = recovery_owner_error != ERROR_SUCCESS
                 ? recovery_owner_error : GetLastError();
-            std::wostringstream message;
-            message << L"Overlay frame cannot be presented after recovery"
-                    << L" (initial Windows error " << first_error << L")";
             return Result<bool>::failure(
-                {ErrorCode::platform_failure, message.str(), recovery_error});
+                {ErrorCode::platform_failure,
+                 L"Overlay frame cannot be presented after recovery"
+                 L" (initial Windows error " + std::to_wstring(first_error) +
+                     L")",
+                 recovery_error});
         }
     }
     if (!SetWindowPos(state_->window, HWND_TOPMOST, animated_bounds.left,
