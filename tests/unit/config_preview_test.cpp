@@ -242,6 +242,24 @@ int main() {
         documents);
     CHECK(!wrong_type.has_value());
 
+    auto invalid_existing_game = IniDocument::parse(
+        "[KFGame.KFGameEngine]\r\n"
+        "bSmoothFrameRate=TRUE\r\n"
+        "MinSmoothedFrameRate=22.000000\r\n"
+        "MaxSmoothedFrameRate=not-a-number\r\n");
+    CHECK(invalid_existing_game.has_value());
+    documents.insert_or_assign(L"KFGame.ini",
+                               std::move(invalid_existing_game.value()));
+    const auto invalid_existing = build_preview(
+        installation,
+        {{SettingId::target_fps, SettingValue{90},
+          ChangeSource::explicit_user, L"report existing value"}},
+        documents);
+    CHECK(!invalid_existing.has_value());
+    CHECK(invalid_existing.error().message.find(
+              L"KFGame.ini [KFGame.KFGameEngine] MaxSmoothedFrameRate") !=
+          std::wstring::npos);
+
     const auto unsupported = build_preview(
         installation,
         {{SettingId::unverified_effect_profile, SettingValue{1},

@@ -112,7 +112,11 @@ Result<ConfigPreview> build_preview(
         if (existing && !before) {
             return Result<ConfigPreview>::failure(
                 {ErrorCode::invalid_argument,
-                 L"Existing KF2 config value is outside the verified contract", 0});
+                 L"Existing KF2 config value for " +
+                     definition->relative_path.wstring() + L" [" +
+                     definition->section + L"] " + definition->key +
+                     L" is outside the verified contract",
+                 0});
         }
         const PreviewState state = before && *before == request.value
                                        ? PreviewState::unchanged

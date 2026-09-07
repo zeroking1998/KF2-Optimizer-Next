@@ -147,6 +147,8 @@ int main() {
     CHECK(shadow_resolution != nullptr);
     CHECK(std::get<int>(*step_setting_value(
         *shadow_resolution, 512, 1)) == 1024);
+    CHECK(std::get<int>(*parse_setting_value(
+        *shadow_resolution, L"1536")) == 1536);
     CHECK(!parse_setting_value(*shadow_resolution, L"768").has_value());
     const auto* lifetime = find_setting(SettingId::gore_lifetime_multiplier);
     CHECK(lifetime != nullptr);

@@ -14,8 +14,8 @@ namespace kf2::config {
 namespace {
 
 constexpr std::array<int, 5> kAnisotropyLevels{1, 2, 4, 8, 16};
-constexpr std::array<int, 5> kShadowResolutionLevels{
-    256, 512, 1024, 2048, 4096};
+constexpr std::array<int, 6> kShadowResolutionLevels{
+    256, 512, 1024, 1536, 2048, 4096};
 constexpr std::array<int, 5> kWholeSceneShadowResolutionLevels{
     256, 512, 1280, 2048, 4096};
 constexpr std::array<int, 3> kQualityLevels{0, 1, 2};
