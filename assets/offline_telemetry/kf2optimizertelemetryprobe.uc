@@ -222,8 +222,8 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
     }
 
     if (AdaptiveGraphicsState != None &&
-        !class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
-            AdaptiveGraphicsState, "recover", 100))
+        !class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
+            AdaptiveGraphicsState))
     {
         return false;
     }
@@ -5001,12 +5001,12 @@ function QuiesceForWorldTeardown()
              AdaptiveLivingVisualReductions$" restored="$
               AdaptiveLivingVisualRestores);
     }
-    // The current world is already being unloaded. Do not write rendering,
+    // The process-owned graphics snapshot was restored by the persistent
+    // interaction before teardown. Do not write rendering,
     // skeletal-mesh or WorldInfo state from Destroyed(): those objects are on
     // UE3's teardown path and every modified value dies with this world.
     // Drop all strong references and ownership metadata without dereferencing
-    // the actors. Live rollback remains handled by the authenticated recover
-    // action before teardown.
+    // the actors.
     AdaptiveGraphicsState = None;
     AdaptiveCorpseManager = None;
     AdaptiveCorpseLodCorpses.Length = 0;
