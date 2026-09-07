@@ -404,12 +404,23 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         state_->low_tug_load,
         state_->low_trend_started_ms, state_->low_trend_direction,
         state_->low_trend_intensity, 8.0F);
-    if (!window_recreated && !owner_changed &&
-        !geometry_changed && !content_changed && !any_metric_changed && !graph_sampled &&
-        !state_->animating &&
-        !number_bounce_animating && !mood_animating &&
-        !average_tug_animating && !low_tug_animating && !mascot_idle_animating) {
+    const bool presentation_changed = window_recreated || owner_changed ||
+        geometry_changed || content_changed || any_metric_changed || graph_sampled;
+    const bool active_animation = state_->animating || number_bounce_animating ||
+        mood_animating || average_tug_animating || low_tug_animating;
+    if (!presentation_changed && !active_animation && !mascot_idle_animating) {
         return Result<bool>::success(false);
+    }
+    // New information is always presented immediately. Between data updates,
+    // cap active transitions near the display rate and the subtle mascot idle
+    // motion near 30 FPS. This matches the 15 ms application cadence without
+    // forcing duplicate full Direct2D layered-window uploads.
+    if (!presentation_changed && state_->last_rendered_ms != 0 &&
+        update_now_ms >= state_->last_rendered_ms) {
+        const ULONGLONG minimum_interval_ms = active_animation ? 15 : 30;
+        if (update_now_ms - state_->last_rendered_ms < minimum_interval_ms) {
+            return Result<bool>::success(false);
+        }
     }
 
 
@@ -861,6 +872,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
             {ErrorCode::platform_failure, L"Overlay cannot be placed above the game",
              GetLastError()});
     }
+    state_->last_rendered_ms = update_now_ms;
     ++state_->renders;
     return Result<bool>::success(true);
 }

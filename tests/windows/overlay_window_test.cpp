@@ -65,6 +65,11 @@ int main() {
     CHECK(bounds.left == 100 && bounds.top == 120);
     const auto settled_render_count = overlay.render_count();
     CHECK(overlay.update(shown).has_value());
+    CHECK(overlay.render_count() == settled_render_count);
+    // Debug rendering can itself cross one cadence boundary. Allow enough
+    // wall time for the next idle frame without depending on scheduler jitter.
+    Sleep(100);
+    CHECK(overlay.update(shown).has_value());
     CHECK(overlay.render_count() > settled_render_count);
     ShowWindow(window, SW_MINIMIZE);
     CHECK(IsIconic(window));

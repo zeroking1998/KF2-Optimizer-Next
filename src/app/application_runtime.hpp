@@ -120,6 +120,7 @@ struct UiRuntime {
     std::optional<overlay::OverlayPresentation> overlay_presentation;
     std::uint64_t last_telemetry_tick_ns{0};
     std::optional<game::GameProcessIdentity> game_process;
+    std::uint64_t last_game_process_scan_ns{0};
     std::optional<game::GameProcessIdentity>
         game_restart_handoff_previous_process;
     std::uint64_t game_restart_handoff_deadline_ns{0};

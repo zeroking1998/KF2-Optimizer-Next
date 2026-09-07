@@ -50,6 +50,25 @@ struct SessionStageResult final {
     std::optional<game::GameWindowState> window;
 };
 
+[[nodiscard]] constexpr bool should_rediscover_game_log(
+    bool bound_to_process, bool cached_path_empty,
+    std::uint64_t cached_process_start_id,
+    std::uint64_t current_process_start_id) noexcept {
+    return !bound_to_process || cached_path_empty ||
+           cached_process_start_id != current_process_start_id;
+}
+
+inline constexpr std::uint64_t kIdleProcessDiscoveryIntervalNs =
+    500'000'000ULL;
+
+[[nodiscard]] constexpr bool should_scan_for_game_process(
+    std::uint64_t now_ns, std::uint64_t last_scan_ns,
+    bool restart_handoff_pending) noexcept {
+    return restart_handoff_pending || last_scan_ns == 0 ||
+           now_ns < last_scan_ns ||
+           now_ns - last_scan_ns >= kIdleProcessDiscoveryIntervalNs;
+}
+
 inline constexpr std::uint64_t kSilentPresentRestartNs = 3'000'000'000ULL;
 inline constexpr unsigned int kMaximumPresentRestarts = 2;
 inline constexpr std::uint64_t kGameRestartHandoffNs = 10'000'000'000ULL;

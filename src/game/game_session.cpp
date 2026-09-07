@@ -82,6 +82,11 @@ Result<GameProcessIdentity> bind_game_process(
         {pid, file_time_value(creation), std::filesystem::weakly_canonical(actual)});
 }
 
+bool is_game_process_current(const GameProcessIdentity& process) noexcept {
+    return process.pid != 0 && process.process_start_id != 0 &&
+           process_start_matches(process);
+}
+
 Result<GameWindowState> inspect_game_window(
     const GameProcessIdentity& process, HWND window) {
     if (!IsWindow(window)) return Result<GameWindowState>::failure(
@@ -90,7 +95,7 @@ Result<GameWindowState> inspect_game_window(
     // 120 ms hot path, the immutable process creation time is sufficient to
     // reject exits and PID reuse without querying and canonicalizing the EXE
     // path again on every frame sample.
-    if (!process_start_matches(process)) {
+    if (!is_game_process_current(process)) {
         return Result<GameWindowState>::failure(
             {ErrorCode::stale_data, L"Game process was restarted", 0});
     }
@@ -157,12 +162,27 @@ bool is_game_area_covered(const GameWindowState& state, const RECT& area) {
 
 Result<GameProcessIdentity> find_running_game_process(
     const std::filesystem::path& expected_executable) {
+    const auto expected_name = expected_executable.filename().native();
+    if (expected_name.empty()) {
+        return Result<GameProcessIdentity>::failure(
+            {ErrorCode::invalid_argument,
+             L"Game executable name is unavailable", 0});
+    }
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return Result<GameProcessIdentity>::failure(
         {ErrorCode::platform_failure, L"Process list cannot be inspected", GetLastError()});
     PROCESSENTRY32W entry{sizeof(entry)};
     if (Process32FirstW(snapshot, &entry)) {
         do {
+            // The snapshot already provides the executable name. Avoid
+            // opening, querying and canonicalizing every unrelated Windows
+            // process; a matching name still receives the complete path and
+            // immutable creation-time verification in bind_game_process().
+            if (CompareStringOrdinal(entry.szExeFile, -1,
+                                     expected_name.c_str(), -1, TRUE) !=
+                CSTR_EQUAL) {
+                continue;
+            }
             auto candidate = bind_game_process(entry.th32ProcessID, expected_executable);
             if (candidate.has_value()) {
                 CloseHandle(snapshot);

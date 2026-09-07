@@ -17,17 +17,12 @@ void refresh_session_gate(app::UiRuntime& runtime) {
 }
 
 void revalidate_bound_process(app::UiRuntime& runtime) {
-    if (!runtime.game_process || !runtime.installation) {
-        return;
-    }
+    if (!runtime.game_process) return;
     const auto previous_process = *runtime.game_process;
-    const auto running = game::bind_game_process(
-        previous_process.pid, runtime.installation->executable);
-    const bool same_process = running.has_value() &&
-        running.value().pid == previous_process.pid &&
-        running.value().process_start_id ==
-            previous_process.process_start_id;
-    if (!same_process) {
+    // The executable path was verified when this immutable process identity
+    // was bound. Repeating path lookup and canonicalization every 120 ms adds
+    // no security after the creation timestamp protects against PID reuse.
+    if (!game::is_game_process_current(previous_process)) {
         runtime.begin_game_restart_handoff(previous_process);
     }
 }
@@ -466,22 +461,39 @@ void UiRuntime::finalize_ended_game_session() {
 
 void UiRuntime::update_overlay_scene_gate() {
     if (!installation || !game_process) return;
-    const auto selected_log = game::find_active_game_log(
-        installation->config_root.parent_path() / L"Logs",
-        game_process->process_start_id);
-    if (!selected_log.has_value() || !selected_log.value()) return;
-    game_log_path = selected_log.value()->path;
+    // Log selection is stable for the lifetime of a verified KF2 process.
+    // Enumerating every Launch*.log and probing file locks at telemetry rate
+    // adds avoidable filesystem work, especially on HDDs and large log dirs.
+    // Rediscover only before the first binding or after validation invalidates
+    // the cached file identity.
+    if (telemetry_pipeline::should_rediscover_game_log(
+            game_log_bound_to_process, game_log_path.empty(),
+            game_log_process_start_id, game_process->process_start_id)) {
+        const auto selected_log = game::find_active_game_log(
+            installation->config_root.parent_path() / L"Logs",
+            game_process->process_start_id);
+        if (!selected_log.has_value() || !selected_log.value()) return;
+        game_log_path = selected_log.value()->path;
+    }
     HANDLE log_file = CreateFileW(game_log_path.c_str(),
         FILE_READ_ATTRIBUTES | GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (log_file == INVALID_HANDLE_VALUE) return;
+    if (log_file == INVALID_HANDLE_VALUE) {
+        game_log_bound_to_process = false;
+        game_log_path.clear();
+        return;
+    }
     BY_HANDLE_FILE_INFORMATION information{};
     const bool inspected = GetFileInformationByHandle(log_file, &information) &&
         (information.dwFileAttributes &
             (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0;
     CloseHandle(log_file);
-    if (!inspected) return;
+    if (!inspected) {
+        game_log_bound_to_process = false;
+        game_log_path.clear();
+        return;
+    }
     const auto size =
         (static_cast<std::uintmax_t>(information.nFileSizeHigh) << 32U) |
         information.nFileSizeLow;
@@ -502,7 +514,12 @@ void UiRuntime::update_overlay_scene_gate() {
         (game_log_volume_serial != information.dwVolumeSerialNumber ||
          game_log_file_index != file_index ||
          game_log_process_start_id != game_process->process_start_id);
-    if (!game_log_bound_to_process || identity_changed) {
+    if (identity_changed) {
+        game_log_bound_to_process = false;
+        game_log_path.clear();
+        return;
+    }
+    if (!game_log_bound_to_process) {
         corpse_telemetry_tracker.reset();
         game_log_volume_serial = information.dwVolumeSerialNumber;
         game_log_file_index = file_index;
@@ -617,27 +634,27 @@ void UiRuntime::update_overlay_scene_gate() {
 void UiRuntime::try_attach_telemetry() {
     if (!installation || present_source) return;
     bool confirmed_settings_restart_replacement = false;
-    // Revalidate the executable-bound process on every pre-attach tick.
-    // A cached PID without a window can otherwise survive a failed launch
-    // forever and prevent the protected INI snapshot from being restored.
-    auto process = game::find_running_game_process(installation->executable);
+    const auto now = monotonic_ns();
+    std::optional<game::GameProcessIdentity> process;
     if (game_process) {
         const auto previous_process = *game_process;
-        const auto bound_process = game::bind_game_process(
-            previous_process.pid, installation->executable);
-        const bool same_process = bound_process.has_value() &&
-            bound_process.value().process_start_id ==
-                previous_process.process_start_id;
-        if (same_process) {
-            // Process enumeration can briefly return a replacement process
-            // while the old bootstrap process is still shutting down. Keep
-            // the established identity until that exact process has ended.
-            process = bound_process;
+        if (game::is_game_process_current(previous_process)) {
+            // The executable path was fully verified when this immutable
+            // process identity was bound. Keep it without taking another
+            // system-wide process snapshot while KF2 starts its window/log.
+            process = previous_process;
         } else {
             begin_game_restart_handoff(previous_process);
         }
     }
-    const auto now = monotonic_ns();
+    if (!process && telemetry_pipeline::should_scan_for_game_process(
+            now, last_game_process_scan_ns,
+            game_restart_handoff_previous_process.has_value())) {
+        last_game_process_scan_ns = now;
+        const auto discovered =
+            game::find_running_game_process(installation->executable);
+        if (discovered.has_value()) process = discovered.value();
+    }
     if (game_restart_handoff_previous_process) {
         const auto& previous = *game_restart_handoff_previous_process;
         const bool same_process = process.has_value() &&

@@ -50,6 +50,10 @@ int wmain(int argc, wchar_t** argv) {
     CHECK(bound.has_value());
     CHECK(bound.value().pid == GetCurrentProcessId());
     CHECK(bound.value().process_start_id != 0);
+    CHECK(kf2::game::is_game_process_current(bound.value()));
+    auto stale_process = bound.value();
+    ++stale_process.process_start_id;
+    CHECK(!kf2::game::is_game_process_current(stale_process));
 
     const auto wrong = kf2::game::bind_game_process(
         GetCurrentProcessId(), std::filesystem::path{executable}.parent_path() /
@@ -69,6 +73,10 @@ int wmain(int argc, wchar_t** argv) {
     CHECK(window != nullptr);
     const auto found_process = kf2::game::find_running_game_process(executable);
     CHECK(found_process.has_value());
+    const auto wrong_process = kf2::game::find_running_game_process(
+        std::filesystem::path{executable}.parent_path() / L"KFGame.exe");
+    CHECK(!wrong_process.has_value());
+    CHECK(wrong_process.error().code == kf2::ErrorCode::not_found);
 
     auto hidden = kf2::game::inspect_game_window(bound.value(), window);
     CHECK(hidden.has_value());

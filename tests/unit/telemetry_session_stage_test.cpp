@@ -14,6 +14,17 @@
 
 int main() {
     using namespace kf2::telemetry_pipeline;
+    CHECK(should_rediscover_game_log(false, false, 10, 10));
+    CHECK(should_rediscover_game_log(true, true, 10, 10));
+    CHECK(should_rediscover_game_log(true, false, 10, 11));
+    CHECK(!should_rediscover_game_log(true, false, 10, 10));
+    CHECK(should_scan_for_game_process(100, 0, false));
+    CHECK(!should_scan_for_game_process(
+        kIdleProcessDiscoveryIntervalNs - 1, 1, false));
+    CHECK(should_scan_for_game_process(
+        kIdleProcessDiscoveryIntervalNs + 1, 1, false));
+    CHECK(should_scan_for_game_process(10, 20, false));
+    CHECK(should_scan_for_game_process(100, 99, true));
     CHECK(game_restart_handoff_timeout_ns(false) == 10'000'000'000ULL);
     CHECK(game_restart_handoff_timeout_ns(true) == 300'000'000'000ULL);
     SessionGateInput input;

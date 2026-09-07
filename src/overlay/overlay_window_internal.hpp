@@ -123,6 +123,7 @@ struct OverlayWindowState {
     std::size_t frame_time_history_count{0};
     std::size_t frame_time_history_next{0};
     ULONGLONG frame_time_history_sample_ms{0};
+    ULONGLONG last_rendered_ms{0};
     std::size_t renders{0};
     ~OverlayWindowState();
 };

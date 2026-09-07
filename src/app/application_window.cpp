@@ -12,8 +12,12 @@ void UiRuntime::update_animation_cadence() {
         timeEndPeriod(1);
         high_resolution_animation_timer = false;
     }
+    // The shell animations are designed for display-rate presentation, not
+    // 125 Hz polling. A 15 ms cadence stays fluid while almost halving idle
+    // timer dispatch, controller animation work and overlay update checks.
+    // Eight ticks also remain close to the 120 ms telemetry interval.
     SetTimer(static_cast<HWND>(window->native_handle_for_testing()), 1,
-             animate ? 8U : 120U, nullptr);
+             animate ? 15U : 120U, nullptr);
 }
 
 
