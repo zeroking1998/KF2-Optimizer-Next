@@ -162,6 +162,7 @@ inline constexpr int kPremiumMutantLowIdlePngResource = 203;
 void draw_mood_character(
     OverlayWindowState& state,
     const D2D1_MATRIX_3X2_F& base_transform,
+    ULONGLONG frame_now_ms,
     float linear, float x, float y, float mood,
     ULONGLONG reaction_started, float reaction_strength,
     float tug_offset = 0.0F, float tug_intensity = 0.0F);

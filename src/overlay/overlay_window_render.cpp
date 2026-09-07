@@ -58,6 +58,7 @@ HRESULT rebuild_frame_time_graph(OverlayWindowState& state,
 Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     if (!state_) return Result<bool>::failure(
         {ErrorCode::internal_failure, L"Overlay state is unavailable", 0});
+    const ULONGLONG frame_now_ms = GetTickCount64();
     bool window_recreated = false;
     if (!IsWindow(state_->window)) {
         state_->window = detail::create_overlay_native_window(GetModuleHandleW(nullptr));
@@ -132,10 +133,9 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                   presentation.one_percent_low_fps) >= 1.0;
     const bool frame_time_changed = !state_->metrics_initialized ||
         std::fabs(state_->target.frame_time_ms - presentation.frame_time_ms) >= 0.3;
-    const ULONGLONG sample_now_ms = GetTickCount64();
     const bool system_metrics_due = !state_->metrics_initialized ||
         state_->system_metrics_sample_ms == 0 ||
-        sample_now_ms - state_->system_metrics_sample_ms >= 1000;
+        frame_now_ms - state_->system_metrics_sample_ms >= 1000;
     const bool cpu_changed = system_metrics_due &&
         (!state_->metrics_initialized ||
          std::fabs(state_->target.cpu_percent - presentation.cpu_percent) >= 1.0);
@@ -152,12 +152,12 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     const bool any_metric_changed = fps_changed || average_changed || low_changed ||
         frame_time_changed || cpu_changed || gpu_changed || ram_changed || vram_changed;
     if (cpu_changed || gpu_changed || ram_changed || vram_changed) {
-        state_->system_metrics_sample_ms = sample_now_ms;
+        state_->system_metrics_sample_ms = frame_now_ms;
     }
     bool graph_sampled = false;
     if (presentation.visible && presentation.frame_time_ms > 0.0 &&
         (state_->frame_time_history_sample_ms == 0 ||
-         sample_now_ms - state_->frame_time_history_sample_ms >= 100)) {
+         frame_now_ms - state_->frame_time_history_sample_ms >= 100)) {
         state_->frame_time_history[state_->frame_time_history_next] =
             static_cast<float>(presentation.frame_time_ms);
         state_->frame_time_history_next =
@@ -165,7 +165,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         state_->frame_time_history_count = std::min(
             state_->frame_time_history_count + 1,
             state_->frame_time_history.size());
-        state_->frame_time_history_sample_ms = sample_now_ms;
+        state_->frame_time_history_sample_ms = frame_now_ms;
         graph_sampled = true;
     }
     if (geometry_changed && presentation.animations_enabled) {
@@ -178,7 +178,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                 ? detail::visibility_pose(presentation.bounds, 0.72F, 28)
                 : presentation.bounds);
         state_->animation_from_opacity = state_->opacity;
-        state_->animation_started_ms = GetTickCount64();
+        state_->animation_started_ms = frame_now_ms;
         state_->animating = true;
         if (presentation.visible) {
             MONITORINFO monitor{sizeof(monitor)};
@@ -203,12 +203,12 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                     static_cast<float>(travel_x + travel_y) / 420.0F,
                     0.18F, 1.0F);
                 const int next_variant = static_cast<int>(
-                    (GetTickCount64() / 137 + travel_x + travel_y) %
+                    (frame_now_ms / 137 + travel_x + travel_y) %
                     static_cast<ULONGLONG>(state_->mascot_animation.variant_count));
                 state_->dock_variant = next_variant == state_->dock_variant
                     ? (next_variant + 1) % state_->mascot_animation.variant_count
                     : next_variant;
-                state_->dock_changed_ms = GetTickCount64();
+                state_->dock_changed_ms = frame_now_ms;
             }
         }
     }
@@ -219,7 +219,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         state_->animation_from_opacity = state_->opacity;
     }
     if (presentation.visible && any_metric_changed) {
-        const ULONGLONG now_ms = GetTickCount64();
+        const ULONGLONG now_ms = frame_now_ms;
         if (state_->metrics_initialized) {
             const auto update_trend = [&](double current, double previous,
                                           double minimum_delta,
@@ -353,7 +353,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
             std::max(1.0, presentation.average_fps));
         const float new_low_mood = std::clamp(
             (low_ratio - 0.58F) / 0.32F * 2.0F - 1.0F, -1.0F, 1.0F);
-        const ULONGLONG mood_now = GetTickCount64();
+        const ULONGLONG mood_now = frame_now_ms;
         if (std::fabs(new_average_mood - state_->average_mood_target) > 0.14F) {
             state_->average_mood_reaction = std::clamp(
                 std::fabs(new_average_mood - state_->average_mood_target), 0.0F, 1.0F);
@@ -377,7 +377,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         state_->animating = false;
         return Result<bool>::success(geometry_changed);
     }
-    const ULONGLONG update_now_ms = GetTickCount64();
+    const ULONGLONG update_now_ms = frame_now_ms;
     const auto bounce_active = [update_now_ms](ULONGLONG started) {
         return started != 0 && update_now_ms - started < 420;
     };
@@ -469,7 +469,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     }
 
 
-    const ULONGLONG elapsed = GetTickCount64() - state_->animation_started_ms;
+    const ULONGLONG elapsed = frame_now_ms - state_->animation_started_ms;
     const float animation_duration_ms = state_->visibility_animation
         ? 720.0F : 600.0F;
     const float linear = state_->animating
@@ -647,7 +647,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                                                ULONGLONG bounce_started_ms) {
             constexpr float bounce_duration_ms = 420.0F;
             const float phase = bounce_started_ms == 0 ? 1.0F : std::min(
-                1.0F, static_cast<float>(GetTickCount64() - bounce_started_ms) /
+                1.0F, static_cast<float>(frame_now_ms - bounce_started_ms) /
                           bounce_duration_ms);
             const float wave = std::sin(phase * 7.85398163F) *
                                std::exp(-2.8F * phase);
@@ -711,7 +711,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                                            float bounce_strength = 0.0F) {
             constexpr float trend_duration_ms = 900.0F;
             const float phase = trend_started_ms == 0 ? 1.0F :
-                std::min(1.0F, static_cast<float>(GetTickCount64() -
+                std::min(1.0F, static_cast<float>(frame_now_ms -
                     trend_started_ms) / trend_duration_ms);
             const float intensity = trend_intensity;
             const bool falling = trend_direction < 0;
@@ -719,7 +719,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
             const float offset_y = (falling ? 9.0F : -6.0F) * motion * strength +
                                    tug_offset;
             const float bounce_phase = bounce_started_ms == 0 ? 1.0F : std::min(
-                1.0F, static_cast<float>(GetTickCount64() - bounce_started_ms) /
+                1.0F, static_cast<float>(frame_now_ms - bounce_started_ms) /
                           360.0F);
             const float bounce = std::sin(bounce_phase * 6.28318531F) *
                                  std::exp(-3.2F * bounce_phase) * bounce_strength;
@@ -824,7 +824,8 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         if (state_->target.show_fps) {
             draw(L"AVG", state_->title_format.Get(), state_->muted.Get(),
                  D2D1::RectF(146, 12, 195, 28));
-            detail::draw_mood_character(*state_, base_transform, linear, 200.0F, 20.0F, state_->average_mood,
+            detail::draw_mood_character(*state_, base_transform, frame_now_ms,
+                      linear, 200.0F, 20.0F, state_->average_mood,
                       state_->average_mood_reaction_ms,
                       state_->average_mood_reaction,
                       state_->average_tug_offset,
@@ -843,7 +844,8 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                               state_->average_bounce_strength);
             draw(L"1% LOW", state_->title_format.Get(), state_->muted.Get(),
                  D2D1::RectF(231, 12, 287, 28));
-            detail::draw_mood_character(*state_, base_transform, linear, 292.0F, 20.0F, state_->low_mood,
+            detail::draw_mood_character(*state_, base_transform, frame_now_ms,
+                      linear, 292.0F, 20.0F, state_->low_mood,
                       state_->low_mood_reaction_ms,
                       state_->low_mood_reaction,
                       state_->low_tug_offset,

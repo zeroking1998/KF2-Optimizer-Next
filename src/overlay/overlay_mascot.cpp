@@ -50,11 +50,12 @@ MascotAnimationAsset load_mascot_animation_asset() {
 void draw_mood_character(
     OverlayWindowState& state,
     const D2D1_MATRIX_3X2_F& base_transform,
+    ULONGLONG frame_now_ms,
     float linear, float x, float y, float mood,
     ULONGLONG reaction_started, float reaction_strength,
     float tug_offset, float tug_intensity) {
             const float reaction_phase = reaction_started == 0 ? 1.0F :
-                std::min(1.0F, static_cast<float>(GetTickCount64() -
+                std::min(1.0F, static_cast<float>(frame_now_ms -
                     reaction_started) / 720.0F);
             const float energy = (1.0F - reaction_phase) * reaction_strength;
             const float happy_bounce = mood > 0.0F
@@ -65,13 +66,13 @@ void draw_mood_character(
             const auto& rig = state.mascot_animation;
             const auto idle_period = static_cast<ULONGLONG>(
                 std::max(100.0F, rig.idle_period_ms));
-            const float idle_phase = static_cast<float>(GetTickCount64() % idle_period) /
+            const float idle_phase = static_cast<float>(frame_now_ms % idle_period) /
                                      static_cast<float>(idle_period) * 6.28318531F +
                                      x * 0.017F;
             const float idle_bob = std::sin(idle_phase) * rig.idle_body_amplitude *
                                    (1.0F - load);
             const float dock_age = state.dock_changed_ms == 0 ? 1.0F :
-                std::min(1.0F, static_cast<float>(GetTickCount64() -
+                std::min(1.0F, static_cast<float>(frame_now_ms -
                     state.dock_changed_ms) / rig.dock_transition_ms);
             const float catch_force = state.animating
                 ? std::sin(std::clamp(linear, 0.0F, 1.0F) * 3.14159265F) *
@@ -148,7 +149,7 @@ void draw_mood_character(
                                                (is_low_character ? 0.83F : 1.0F);
                 const float character_offset = is_low_character ? 0.37F : 0.0F;
                 const float normalized_idle = std::fmod(
-                    static_cast<float>(GetTickCount64()), character_period) /
+                    static_cast<float>(frame_now_ms), character_period) /
                     character_period + character_offset;
                 const float frame_position = normalized_idle * kIdleFrameCount;
                 const int frame_index = static_cast<int>(std::floor(frame_position)) %
