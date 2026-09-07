@@ -51,7 +51,6 @@ int main() {
     shown.visible = true; shown.reason = kf2::overlay::OverlayHideReason::none;
     shown.target_window = target_window;
     shown.bounds = {100, 120, 340, 210};
-    shown.text = L"60.0 FPS\n16.7 ms";
     CHECK(overlay.update(shown).has_value());
     CHECK(IsWindowVisible(window));
     CHECK(GetWindow(window, GW_OWNER) == target_window);
@@ -88,10 +87,19 @@ int main() {
     CHECK(GetForegroundWindow() != window);
     shown.animations_enabled = false;
     shown.fps = 120.0;
+    shown.frame_time_ms = 0.0;
     shown.bounds = {110, 130, 350, 220};
     CHECK(overlay.update(shown).has_value());
     CHECK(GetWindowRect(window, &bounds));
     CHECK(bounds.left == 110 && bounds.top == 130);
+    // Sub-display-resolution telemetry changes must not force a full layered
+    // window upload. The visible rounded values have not changed.
+    const auto subpixel_metric_render_count = overlay.render_count();
+    shown.fps += 0.1;
+    shown.average_fps += 0.1;
+    shown.one_percent_low_fps += 0.1;
+    CHECK(overlay.update(shown).has_value());
+    CHECK(overlay.render_count() == subpixel_metric_render_count);
     shown.animations_enabled = true;
 
     // A layered tool window must recover if Windows or another desktop helper
@@ -160,13 +168,13 @@ int main() {
     }
 
     const auto idle_render_count = overlay.render_count();
-    shown.text = L"61.0 FPS\n16.4 ms";
+    shown.fps += 1.0;
     CHECK(overlay.update(shown).has_value());
     CHECK(overlay.render_count() > idle_render_count);
     const DWORD gdi_before = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
     const DWORD user_before = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
     for (int frame = 0; frame < 1000; ++frame) {
-        shown.text = std::to_wstring(60 + (frame % 3)) + L".0 FPS\n16.7 ms";
+        shown.fps = 60.0 + static_cast<double>(frame % 3);
         CHECK(overlay.update(shown).has_value());
     }
     CHECK(GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) <= gdi_before + 2);

@@ -1,8 +1,6 @@
 #include "kf2/overlay/overlay_policy.hpp"
 #include <algorithm>
 #include <cmath>
-#include <iomanip>
-#include <sstream>
 
 namespace kf2::overlay {
 OverlayPresentation evaluate_overlay(const OverlayPolicyInput& input) {
@@ -81,11 +79,6 @@ OverlayPresentation evaluate_overlay(const OverlayPolicyInput& input) {
     const auto rounded_low = std::round(
         input.frames.one_percent_low_fps.value_or(*input.frames.fps) * 10.0) / 10.0;
     const auto rounded_ms = std::round(*input.frames.frame_time_ms * 10.0) / 10.0;
-    std::wostringstream text;
-    text << L"KF2 PERFORMANCE\n" << std::fixed << std::setprecision(1)
-         << L"FPS  " << rounded_fps << L"     AVG  " << rounded_average << L"\n"
-         << L"1% LOW  " << rounded_low << L"     " << rounded_ms << L" ms";
-    output.text = text.str();
     output.fps = rounded_fps;
     output.average_fps = rounded_average;
     output.one_percent_low_fps = rounded_low;

@@ -70,7 +70,6 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         (presentation.visible &&
          !detail::same_rect(state_->target.bounds, presentation.bounds));
     const bool content_changed = !state_->has_target ||
-        state_->target.text != presentation.text ||
         state_->target.show_fps != presentation.show_fps ||
         state_->target.show_frame_time != presentation.show_frame_time ||
         state_->target.show_cpu != presentation.show_cpu ||

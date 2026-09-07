@@ -1,5 +1,4 @@
 #pragma once
-#include <string>
 #include "kf2/game/game_session.hpp"
 #include "kf2/telemetry/telemetry_snapshot.hpp"
 
@@ -33,7 +32,6 @@ struct OverlayPresentation {
     OverlayHideReason reason{OverlayHideReason::disabled};
     HWND target_window{};
     RECT bounds{};
-    std::wstring text;
     double fps{0.0};
     double average_fps{0.0};
     double one_percent_low_fps{0.0};
