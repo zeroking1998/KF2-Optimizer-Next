@@ -413,11 +413,11 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     }
     // New information is always presented immediately. Between data updates,
     // cap active transitions near the display rate and the subtle mascot idle
-    // motion near 30 FPS. This matches the 15 ms application cadence without
+    // motion near 20 FPS. This matches the 15 ms application cadence without
     // forcing duplicate full Direct2D layered-window uploads.
     if (!presentation_changed && state_->last_rendered_ms != 0 &&
         update_now_ms >= state_->last_rendered_ms) {
-        const ULONGLONG minimum_interval_ms = active_animation ? 15 : 30;
+        const ULONGLONG minimum_interval_ms = active_animation ? 15 : 50;
         if (update_now_ms - state_->last_rendered_ms < minimum_interval_ms) {
             return Result<bool>::success(false);
         }

@@ -71,6 +71,16 @@ int main() {
     Sleep(100);
     CHECK(overlay.update(shown).has_value());
     CHECK(overlay.render_count() > settled_render_count);
+    // Decorative mascot motion uses a lower idle cadence than live metric and
+    // transition animation. Keep the full layered-window upload below 25 FPS
+    // while the caller continues to tick at the normal application cadence.
+    const auto idle_cadence_start = overlay.render_count();
+    const ULONGLONG idle_cadence_started_ms = GetTickCount64();
+    while (GetTickCount64() - idle_cadence_started_ms < 260) {
+        Sleep(5);
+        CHECK(overlay.update(shown).has_value());
+    }
+    CHECK(overlay.render_count() - idle_cadence_start <= 6);
     ShowWindow(window, SW_MINIMIZE);
     CHECK(IsIconic(window));
     CHECK(overlay.update(shown).has_value());
