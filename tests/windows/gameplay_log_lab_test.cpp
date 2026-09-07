@@ -592,8 +592,27 @@ int main() {
     CHECK(telemetry_source.find(
         "DistanceSquared >= 640000.0") != std::string::npos);
     CHECK(telemetry_source.find(
-        "AwakeTotal = CountAwakeMonsterCorpses(GoreManager)") !=
+        "CollectAdaptiveCorpseCounts(\n"
+        "        GoreManager, VisibleCorpses, VisibleAwake, AwakeTotal)") !=
           std::string::npos);
+    CHECK(telemetry_source.find(
+        "function CollectAdaptiveCorpseCounts(") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "function int CountVisibleAwakeMonsterCorpses(") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function int CountAwakeMonsterCorpses(") == std::string::npos);
+    const auto corpse_count_start = telemetry_source.find(
+        "function CollectAdaptiveCorpseCounts(");
+    const auto corpse_count_end = telemetry_source.find(
+        "function int GetAdaptiveCorpseScenePressureLevel(",
+        corpse_count_start);
+    CHECK(corpse_count_start != std::string::npos);
+    CHECK(corpse_count_end != std::string::npos);
+    CHECK(count_occurrences(
+        telemetry_source.substr(corpse_count_start,
+                                corpse_count_end - corpse_count_start),
+        "GoreManager.CorpsePool.Length") == 1);
     CHECK(telemetry_source.find(
         "KF2OPT_CORPSE_DISTANCE state=sleep") != std::string::npos);
     const auto distance_sleep_function = telemetry_source.find(
@@ -930,7 +949,66 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find("particle_pools_ms=") != std::string::npos);
     CHECK(telemetry_source.find("world_emitters_ms=") != std::string::npos);
+    CHECK(telemetry_source.find("max_total_ms=") != std::string::npos);
+    CHECK(telemetry_source.find("max_effect_actors_ms=") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("max_world_emitters_ms=") !=
+          std::string::npos);
     CHECK(telemetry_source.find("unclassified_ms=") != std::string::npos);
+    const auto effect_profile_start = telemetry_source.find(
+        "ProfNodeStart(\"KF2OPT_Telemetry_EffectActors\")");
+    const auto effect_profile_end = telemetry_source.find(
+        "ProfileEffectActorMilliseconds +=", effect_profile_start);
+    CHECK(effect_profile_start != std::string::npos);
+    CHECK(effect_profile_end != std::string::npos);
+    const auto effect_scan = telemetry_source.substr(
+        effect_profile_start, effect_profile_end - effect_profile_start);
+    CHECK(effect_scan.find("class'Actor'") == std::string::npos);
+    CHECK(effect_scan.find("class'KFSprayActor'") != std::string::npos);
+    CHECK(effect_scan.find("class'KFExplosionActor'") != std::string::npos);
+    CHECK(effect_scan.find("class'KFProj_HansSmokeGrenade'") !=
+          std::string::npos);
+    CHECK(effect_scan.find("class'KFProj_BloatPukeMine'") !=
+          std::string::npos);
+    CHECK(effect_scan.find("class'KFGiblet'") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "SampleSequence % DiagnosticEffectScanInterval == 0") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "const DiagnosticEffectScanInterval=5;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "effect_actor_scan_interval=\"$DiagnosticEffectScanInterval") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function InspectParticleComponent(") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "function ClassifyParticleComponent(") == std::string::npos);
+    CHECK(telemetry_source.find(
+        "function CountParticleSpawnEnvelope(") == std::string::npos);
+    const auto particle_inspection_start = telemetry_source.find(
+        "function InspectParticleComponent(");
+    const auto particle_inspection_end = telemetry_source.find(
+        "function AdaptiveCorpseLoadControl()", particle_inspection_start);
+    CHECK(particle_inspection_start != std::string::npos);
+    CHECK(particle_inspection_end != std::string::npos);
+    const auto particle_inspection = telemetry_source.substr(
+        particle_inspection_start,
+        particle_inspection_end - particle_inspection_start);
+    CHECK(count_occurrences(
+        particle_inspection, "ParticleComponent.GetLODLevel()") == 1);
+    CHECK(count_occurrences(
+        particle_inspection, "ParticleComponent.Template.Emitters.Length") ==
+          1);
+    CHECK(telemetry_source.find(
+        "adaptive_controller_samples=") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "max_adaptive_controller_ms=") != std::string::npos);
+    CHECK(telemetry_source.find("zed_debug_samples=") != std::string::npos);
+    CHECK(telemetry_source.find("max_zed_debug_ms=") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "RunAdaptiveCorpseLoadControl();") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "CollectAdaptiveZedDebugMarkers();") != std::string::npos);
     CHECK(telemetry_source.find("Clock(ProfileTotalSeconds)") ==
           std::string::npos);
     CHECK(telemetry_source.find("total_us=") == std::string::npos);
@@ -954,7 +1032,7 @@ int main() {
         "PhysicsPressureLevel <= 0 && bRecentlyRendered") !=
           std::string::npos);
     const auto stagger_start = telemetry_source.find(
-        "function AdaptiveCorpseLoadControl()");
+        "function RunAdaptiveCorpseLoadControl()");
     const auto zed_time_guard = telemetry_source.find(
         "GameInfo.IsZedTimeActive()", stagger_start);
     const auto wake_stage = telemetry_source.find(
