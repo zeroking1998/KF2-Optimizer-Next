@@ -166,6 +166,7 @@ int AdaptiveResourceQualityState::control_quality(
         case AdaptiveResourceControl::overdraw: return overdraw;
         case AdaptiveResourceControl::effects: return effects;
         case AdaptiveResourceControl::mixed:
+            return std::min({cpu, gpu, vram, ram});
         case AdaptiveResourceControl::recover:
         case AdaptiveResourceControl::enable:
         case AdaptiveResourceControl::disable: return effective_quality();

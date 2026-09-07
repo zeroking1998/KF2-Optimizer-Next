@@ -166,6 +166,10 @@ struct UiRuntime {
     std::optional<bool> adaptive_runtime_mode_pending;
     std::uint64_t adaptive_quality_last_dispatch_ns{0};
     std::uint64_t adaptive_quality_last_applied_ns{0};
+    game::AdaptiveResourceQualityState adaptive_quality_reduction_floor{10};
+    std::optional<int> adaptive_quality_rollback_target;
+    std::optional<game::AdaptiveResourceControl>
+        adaptive_quality_rollback_resource;
     std::uint64_t adaptive_frame_not_before_ns{0};
     std::optional<bool> adaptive_variable_frame_rate_enabled;
     std::optional<std::filesystem::file_time_type>

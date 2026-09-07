@@ -672,6 +672,10 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
     adaptive_control_sequence = 0;
     adaptive_quality_last_dispatch_ns = 0;
     adaptive_quality_last_applied_ns = 0;
+    adaptive_quality_reduction_floor.reset(
+        optimizer_settings.adaptive_minimum_quality);
+    adaptive_quality_rollback_target.reset();
+    adaptive_quality_rollback_resource.reset();
     adaptive_frame_not_before_ns = 0;
     adaptive_resource_quality.reset(
         optimizer_settings.adaptive_maximum_quality);

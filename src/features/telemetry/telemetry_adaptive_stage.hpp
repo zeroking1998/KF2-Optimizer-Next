@@ -6,6 +6,7 @@
 #include <initializer_list>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "features/telemetry/telemetry_frame.hpp"
 #include "kf2/game/adaptive_control_client.hpp"
@@ -68,6 +69,9 @@ struct AdaptiveRuntimeControlInput final {
     int minimum_quality{10};
     int maximum_quality{100};
     int quality_change_budget{2};
+    int reduction_floor_quality{10};
+    std::optional<int> rollback_quality;
+    std::optional<game::AdaptiveResourceControl> rollback_resource;
     bool current_frame_pressure{false};
     bool current_resource_pressure{false};
     bool recovery_eligible{false};
@@ -83,6 +87,43 @@ struct AdaptiveRuntimeControlInput final {
     std::uint64_t last_applied_ns{0};
     std::uint64_t sample_timestamp_ns{0};
 };
+
+struct AdaptiveQualityResponseFeedback final {
+    std::optional<int> rollback_quality;
+    std::optional<int> reduction_floor_quality;
+    std::optional<game::AdaptiveResourceControl> resource;
+};
+
+[[nodiscard]] inline AdaptiveQualityResponseFeedback
+adaptive_quality_response_feedback(
+    std::string_view result, std::string_view resource,
+    int from, int to) noexcept {
+    if (to >= from) return {};
+    std::optional<game::AdaptiveResourceControl> parsed;
+    if (resource == "cpu") parsed = game::AdaptiveResourceControl::cpu;
+    else if (resource == "gpu") parsed = game::AdaptiveResourceControl::gpu;
+    else if (resource == "vram") parsed = game::AdaptiveResourceControl::vram;
+    else if (resource == "ram") parsed = game::AdaptiveResourceControl::ram;
+    else if (resource == "overdraw") {
+        parsed = game::AdaptiveResourceControl::overdraw;
+    } else if (resource == "effects") {
+        parsed = game::AdaptiveResourceControl::effects;
+    } else if (resource == "mixed") {
+        parsed = game::AdaptiveResourceControl::mixed;
+    }
+    if (!parsed) return {};
+    if (result == "no_clear_change" || result == "worsened") {
+        return {.rollback_quality = from,
+                .reduction_floor_quality = from,
+                .resource = parsed};
+    }
+    if (result == "mixed" || result.starts_with("inconclusive:")) {
+        return {.rollback_quality = std::nullopt,
+                .reduction_floor_quality = to,
+                .resource = parsed};
+    }
+    return {};
+}
 
 struct AdaptiveRuntimeControlSelection final {
     game::AdaptiveResourceControl resource{
@@ -136,29 +177,34 @@ select_adaptive_runtime_control(
         input.minimum_quality < 10 || input.maximum_quality > 100 ||
         input.minimum_quality > input.maximum_quality ||
         input.quality_change_budget < 1 || input.quality_change_budget > 5 ||
+        input.reduction_floor_quality > input.maximum_quality ||
         input.current_quality < input.minimum_quality ||
         input.current_quality > input.maximum_quality || input.now_ns == 0) {
         return std::nullopt;
     }
 
     // Receipt time, not request time, starts the response observation window.
-    // A full 750-ms fast window plus margin must contain post-action presents.
-    constexpr std::uint64_t kPostAppliedObservationNs = 1'000'000'000ULL;
-    // Ordinary changes need one second to settle, five seconds to observe,
-    // and one second for batched telemetry. Keep emergency handling fast.
-    // This controller rule is independent of diagnostic logging availability.
-    constexpr std::uint64_t kOrdinaryPostAppliedObservationNs = 7'000'000'000ULL;
-    const auto observation_ns = input.state ==
-            optimizer::AdaptiveControllerState::emergency
-        ? kPostAppliedObservationNs : kOrdinaryPostAppliedObservationNs;
+    // Every quality step needs one second to settle, five seconds to measure,
+    // and one second for batched telemetry. Skipping this for emergencies made
+    // the controller cancel its own evidence and ratchet straight to 10%.
+    constexpr std::uint64_t kPostAppliedFreshSampleNs = 1'000'000'000ULL;
+    constexpr std::uint64_t kPostAppliedObservationNs = 7'000'000'000ULL;
     if (input.last_applied_ns != 0 &&
         (input.now_ns < input.last_applied_ns ||
          input.sample_timestamp_ns < input.last_applied_ns ||
          input.sample_timestamp_ns > input.now_ns ||
-         input.now_ns - input.last_applied_ns < observation_ns ||
+         input.now_ns - input.last_applied_ns < kPostAppliedObservationNs ||
          input.sample_timestamp_ns - input.last_applied_ns <
-             kPostAppliedObservationNs)) {
+             kPostAppliedFreshSampleNs)) {
         return std::nullopt;
+    }
+
+    if (input.rollback_quality && input.rollback_resource &&
+        *input.rollback_quality > input.current_quality) {
+        return AdaptiveRuntimeControlSelection{
+            *input.rollback_resource,
+            std::clamp(*input.rollback_quality,
+                       input.minimum_quality, input.maximum_quality)};
     }
 
     int desired = input.current_quality;
@@ -170,7 +216,9 @@ select_adaptive_runtime_control(
         const int step = std::clamp(
             input.quality_change_budget * 8, 20, 40);
         desired = std::max(
-            input.minimum_quality, input.current_quality - step);
+            std::max(input.minimum_quality,
+                     input.reduction_floor_quality),
+            input.current_quality - step);
         minimum_dispatch_interval_ns = 500'000'000ULL;
     } else if (input.state ==
                optimizer::AdaptiveControllerState::intervention) {
@@ -178,7 +226,9 @@ select_adaptive_runtime_control(
             !input.current_resource_pressure) return std::nullopt;
         const int step = input.quality_change_budget * 5;
         desired = std::max(
-            input.minimum_quality, input.current_quality - step);
+            std::max(input.minimum_quality,
+                     input.reduction_floor_quality),
+            input.current_quality - step);
         minimum_dispatch_interval_ns = 1'000'000'000ULL;
     } else if (input.state == optimizer::AdaptiveControllerState::stable &&
                input.recovery_eligible &&
