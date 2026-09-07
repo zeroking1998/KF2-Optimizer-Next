@@ -47,7 +47,6 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     if (!presentation.animations_enabled) {
         state_->animating = false;
         state_->visibility_animation = false;
-        state_->metrics_animating = false;
         state_->fps_bounce_started_ms = 0;
         state_->average_bounce_started_ms = 0;
         state_->low_bounce_started_ms = 0;
@@ -271,42 +270,20 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                 state_->gpu_bounce_started_ms = now_ms;
             }
         }
-        state_->metrics_from_fps = state_->displayed_fps;
-        state_->metrics_from_average_fps = state_->displayed_average_fps;
-        state_->metrics_from_one_percent_low_fps =
-            state_->displayed_one_percent_low_fps;
-        state_->metrics_from_frame_time_ms = state_->displayed_frame_time_ms;
-        state_->metrics_from_cpu_percent = state_->displayed_cpu_percent;
-        state_->metrics_from_gpu_percent = state_->displayed_gpu_percent;
-        state_->metrics_from_process_ram_gib = state_->displayed_process_ram_gib;
-        state_->metrics_from_dedicated_vram_gib =
-            state_->displayed_dedicated_vram_gib;
-        state_->metrics_started_ms = GetTickCount64();
-        state_->metrics_animating = true;
+        state_->displayed_cpu_percent = presentation.cpu_percent;
+        state_->displayed_gpu_percent = presentation.gpu_percent;
+        state_->displayed_process_ram_gib = presentation.process_ram_gib;
+        state_->displayed_dedicated_vram_gib =
+            presentation.dedicated_vram_gib;
         state_->metrics_initialized = true;
-        if (!presentation.animations_enabled) {
-            state_->displayed_fps = presentation.fps;
-            state_->displayed_average_fps = presentation.average_fps;
-            state_->displayed_one_percent_low_fps =
-                presentation.one_percent_low_fps;
-            state_->displayed_frame_time_ms = presentation.frame_time_ms;
-            state_->displayed_cpu_percent = presentation.cpu_percent;
-            state_->displayed_gpu_percent = presentation.gpu_percent;
-            state_->displayed_process_ram_gib = presentation.process_ram_gib;
-            state_->displayed_dedicated_vram_gib =
-                presentation.dedicated_vram_gib;
-            state_->metrics_animating = false;
-        }
     }
+    // Keep frame telemetry exact on every presentation update. The surrounding
+    // bounce and trend transforms provide motion without interpolating values.
+    state_->displayed_fps = presentation.fps;
+    state_->displayed_average_fps = presentation.average_fps;
+    state_->displayed_one_percent_low_fps = presentation.one_percent_low_fps;
+    state_->displayed_frame_time_ms = presentation.frame_time_ms;
     state_->target = presentation;
-    if (!fps_changed) state_->target.fps = previous_target.fps;
-    if (!average_changed) state_->target.average_fps = previous_target.average_fps;
-    if (!low_changed) {
-        state_->target.one_percent_low_fps = previous_target.one_percent_low_fps;
-    }
-    if (!frame_time_changed) {
-        state_->target.frame_time_ms = previous_target.frame_time_ms;
-    }
     if (!cpu_changed) state_->target.cpu_percent = previous_target.cpu_percent;
     if (!gpu_changed) state_->target.gpu_percent = previous_target.gpu_percent;
     if (!ram_changed) state_->target.process_ram_gib = previous_target.process_ram_gib;
@@ -430,44 +407,11 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     if (!window_recreated && !owner_changed &&
         !geometry_changed && !content_changed && !any_metric_changed && !graph_sampled &&
         !state_->animating &&
-        !state_->metrics_animating && !number_bounce_animating && !mood_animating &&
+        !number_bounce_animating && !mood_animating &&
         !average_tug_animating && !low_tug_animating && !mascot_idle_animating) {
         return Result<bool>::success(false);
     }
 
-    if (state_->metrics_animating) {
-        constexpr float metric_duration_ms = 280.0F;
-        const float metric_linear = std::min(
-            1.0F, static_cast<float>(GetTickCount64() - state_->metrics_started_ms) /
-                      metric_duration_ms);
-        // The value itself follows a precise, jerk-free quintic curve; only
-        // the visual transform springs, so the displayed measurement stays true.
-        const float metric_progress = metric_linear * metric_linear * metric_linear *
-            (metric_linear * (metric_linear * 6.0F - 15.0F) + 10.0F);
-        const auto animate_metric = [metric_progress](double from, double to) {
-            return from + (to - from) * metric_progress;
-        };
-        state_->displayed_fps = animate_metric(
-            state_->metrics_from_fps, state_->target.fps);
-        state_->displayed_average_fps = animate_metric(
-            state_->metrics_from_average_fps, state_->target.average_fps);
-        state_->displayed_one_percent_low_fps = animate_metric(
-            state_->metrics_from_one_percent_low_fps,
-            state_->target.one_percent_low_fps);
-        state_->displayed_frame_time_ms = animate_metric(
-            state_->metrics_from_frame_time_ms, state_->target.frame_time_ms);
-        state_->displayed_cpu_percent = animate_metric(
-            state_->metrics_from_cpu_percent, state_->target.cpu_percent);
-        state_->displayed_gpu_percent = animate_metric(
-            state_->metrics_from_gpu_percent, state_->target.gpu_percent);
-        state_->displayed_process_ram_gib = animate_metric(
-            state_->metrics_from_process_ram_gib,
-            state_->target.process_ram_gib);
-        state_->displayed_dedicated_vram_gib = animate_metric(
-            state_->metrics_from_dedicated_vram_gib,
-            state_->target.dedicated_vram_gib);
-        state_->metrics_animating = metric_linear < 1.0F;
-    }
 
     const ULONGLONG elapsed = GetTickCount64() - state_->animation_started_ms;
     const float animation_duration_ms = state_->visibility_animation

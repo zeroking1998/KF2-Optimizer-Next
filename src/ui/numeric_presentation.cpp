@@ -134,10 +134,13 @@ bool NumericPresentation::advance(const NumericPresentationTargets& targets,
     changed = (!previewed_corpse_limit_ &&
                advance_integer(presented_corpse_limit_, targets.corpse_limit,
                                animate)) || changed;
+    // Performance measurements must show the newest sampled value. Smoothing
+    // them here makes the UI lag behind the telemetry source and can make an
+    // accurate sample look wrong next to another FPS counter.
     changed = advance_optional_real(presented_live_fps_, targets.live_fps,
-                                    animate) || changed;
+                                     false) || changed;
     changed = advance_optional_real(presented_live_frame_time_ms_,
-                                    targets.live_frame_time_ms, animate) ||
+                                     targets.live_frame_time_ms, false) ||
               changed;
     changed = advance_optional_real(presented_live_cpu_percent_,
                                     targets.live_cpu_percent, animate) ||
