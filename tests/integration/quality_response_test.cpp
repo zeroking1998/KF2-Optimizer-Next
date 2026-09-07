@@ -147,5 +147,32 @@ int main() {
         CHECK(result && result->result == (mixed ? "mixed" : "improved"));
         CHECK(!delayed.observe(context, 18 * second + second / 4, post));
     }
+    // Reproduce the gameplay trace from Issue #95: only the volatile 1% low
+    // improved materially, while average FPS and p95 were effectively flat.
+    // One noisy metric is not enough evidence that reducing quality helped.
+    QualityResponse volatile_low;
+    for (auto at = second; at <= 10 * second; at += second / 4)
+        CHECK(!volatile_low.observe(context, at));
+    auto volatile_before = complete;
+    volatile_before.metrics.average_fps = 134.117;
+    volatile_before.metrics.p95_ms = 7.8574;
+    volatile_before.metrics.one_percent_low_fps = 55.1334;
+    volatile_low.begin(
+        5, "mixed", 100, 80, 10 * second, context, volatile_before);
+    volatile_low.confirm(5, 10 * second);
+    auto volatile_after = complete;
+    volatile_after.metrics.average_fps = 134.786;
+    volatile_after.metrics.p95_ms = 7.7816;
+    volatile_after.metrics.one_percent_low_fps = 100.016;
+    std::optional<QualityResponse::Report> volatile_result;
+    for (auto at = 10 * second + second / 4; at <= 16 * second;
+         at += second / 4) {
+        if (auto report = volatile_low.observe(
+                context, at, volatile_after)) {
+            volatile_result = report;
+        }
+    }
+    CHECK(volatile_result);
+    CHECK(volatile_result->result == "no_clear_change");
     return EXIT_SUCCESS;
 }

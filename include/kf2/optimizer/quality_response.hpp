@@ -150,7 +150,14 @@ public:
             const double low_gain = (*b.one_percent_low_fps - *a.one_percent_low_fps) /
                 *a.one_percent_low_fps;
             const double avg_gain = (*b.average_fps - *a.average_fps) / *a.average_fps;
-            const bool better = p95_gain >= 0.05 || low_gain >= 0.05 || avg_gain >= 0.05;
+            const int better_signals =
+                static_cast<int>(p95_gain >= 0.05) +
+                static_cast<int>(low_gain >= 0.05) +
+                static_cast<int>(avg_gain >= 0.05);
+            // A rolling 1% low can move sharply after one old slow frame
+            // leaves its window. Require two independent signals before a
+            // quality reduction is allowed to count as an improvement.
+            const bool better = better_signals >= 2;
             const bool worse = p95_gain <= -0.05 || low_gain <= -0.05 || avg_gain <= -0.05;
             report.result = better && worse ? "mixed" : better ? "improved" :
                 worse ? "worsened" : "no_clear_change";

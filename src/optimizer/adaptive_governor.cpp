@@ -878,8 +878,6 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
         ? level_for_fps(
               *sample.sustained_one_percent_low_fps, stability_bands)
         : FrameSignalLevel::healthy;
-    const bool long_low_unhealthy =
-        long_low_level != FrameSignalLevel::healthy;
     const auto short_percentile_tail = sample.sustained_one_percent_low_fps
         ? level_for_tail(1000.0 / *sample.sustained_one_percent_low_fps,
                          target_frame_time)
@@ -895,9 +893,22 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
                  FrameSignalLevel::warning) ||
         at_least(average_level, FrameSignalLevel::warning) ||
         sample.stutter_count != 0;
-    const bool severe_percentile_pressure =
-        at_least(short_percentile_tail, FrameSignalLevel::emergency) &&
-        at_least(long_percentile_tail, FrameSignalLevel::emergency);
+    // Percentile windows intentionally retain rare slow frames longer than
+    // the live, average and p95 signals. Let them corroborate current pressure,
+    // but do not let an old tail permanently block quality recovery. Preserve
+    // an independent safety path when both windows are catastrophically below
+    // half of the requested frame rate.
+    const bool catastrophic_percentile_pressure =
+        sample.sustained_one_percent_low_fps &&
+        sample.one_percent_low_fps &&
+        *sample.sustained_one_percent_low_fps <=
+            static_cast<double>(policy.target_fps) * 0.50 &&
+        *sample.one_percent_low_fps <=
+            static_cast<double>(policy.target_fps) * 0.50;
+    const bool long_low_unhealthy =
+        long_low_level != FrameSignalLevel::healthy &&
+        (percentile_pressure_corroborated ||
+         catastrophic_percentile_pressure);
     const bool low_percentiles_need_correction =
         decision.data.quality == AdaptiveDataQuality::valid &&
         at_least(sustained_low_level, FrameSignalLevel::corrective) &&
@@ -909,7 +920,8 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
         // of smooth pacing: their threshold can be as high as 50 ms.
         at_least(short_percentile_tail, FrameSignalLevel::corrective) &&
         at_least(long_percentile_tail, FrameSignalLevel::corrective) &&
-        (percentile_pressure_corroborated || severe_percentile_pressure);
+        (percentile_pressure_corroborated ||
+         catastrophic_percentile_pressure);
     if (low_percentiles_need_correction) {
         if (low_percentile_pressure_since_ns_ == 0) {
             low_percentile_pressure_since_ns_ = now_ns;

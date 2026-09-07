@@ -214,7 +214,38 @@ void UiRuntime::update_adaptive_controller(
         ? present_source->measure_window(response_end - optimizer::QualityResponse::window_ns,
                                           response_end)
         : telemetry::PresentSource::Window{};
-    log_response(quality_response.observe(response_context, now_ns, post_window));
+    const auto response_report =
+        quality_response.observe(response_context, now_ns, post_window);
+    log_response(response_report);
+    if (response_report) {
+        const auto feedback =
+            telemetry_pipeline::adaptive_quality_response_feedback(
+                response_report->result, response_report->resource,
+                response_report->from, response_report->to);
+        if (feedback.reduction_floor_quality) {
+            adaptive_quality_reduction_floor.apply({
+                0, *feedback.resource,
+                *feedback.reduction_floor_quality});
+            if (feedback.rollback_quality) {
+                adaptive_quality_rollback_target = std::max(
+                    adaptive_quality_rollback_target.value_or(
+                        optimizer_settings.adaptive_minimum_quality),
+                    *feedback.rollback_quality);
+                adaptive_quality_rollback_resource = feedback.resource;
+                events->append({
+                    0, diagnostics::Severity::info,
+                    "ADAPTIVE_QUALITY_ROLLBACK_QUEUED",
+                    L"The last quality reduction did not improve frame pacing; its previous quality is being restored and will not be reduced again during this gameplay session",
+                    L"optimizer"});
+            } else {
+                events->append({
+                    0, diagnostics::Severity::info,
+                    "ADAPTIVE_QUALITY_REDUCTION_HELD",
+                    L"The quality response was not comparable enough to justify another reduction; the current resource level is held for this gameplay session",
+                    L"optimizer"});
+            }
+        }
+    }
     if (auto outcome = adaptive_control_dispatcher.poll()) {
         if (adaptive_control_pending) {
             const auto pending = *adaptive_control_pending;
@@ -236,6 +267,15 @@ void UiRuntime::update_adaptive_controller(
                     optimizer::AdaptiveReceiptResult::accepted) {
                     quality_response.confirm(pending.sequence, completed_ns);
                     adaptive_resource_quality.apply(outcome->value());
+                    if (adaptive_quality_rollback_resource &&
+                        outcome->value().resource ==
+                            *adaptive_quality_rollback_resource &&
+                        adaptive_quality_rollback_target &&
+                        outcome->value().quality >=
+                            *adaptive_quality_rollback_target) {
+                        adaptive_quality_rollback_target.reset();
+                        adaptive_quality_rollback_resource.reset();
+                    }
                     adaptive_quality_last_applied_ns = completed_ns;
                     adaptive_frame_not_before_ns = completed_ns;
                     adaptive_governor.notify_quality_applied(completed_ns);
@@ -393,6 +433,10 @@ void UiRuntime::update_adaptive_controller(
         adaptive_decision = {};
         adaptive_resource_quality.reset(
             optimizer_settings.adaptive_maximum_quality);
+        adaptive_quality_reduction_floor.reset(
+            optimizer_settings.adaptive_minimum_quality);
+        adaptive_quality_rollback_target.reset();
+        adaptive_quality_rollback_resource.reset();
         adaptive_quality_last_dispatch_ns = 0;
         adaptive_quality_last_applied_ns = 0;
         adaptive_frame_not_before_ns = now_ns;
@@ -454,6 +498,12 @@ void UiRuntime::update_adaptive_controller(
         adaptive_governor.reset();
         adaptive_decision = {};
         adaptive_profile_gate.reset();
+        if (sample_build.sample.map_changed) {
+            adaptive_quality_reduction_floor.reset(
+                optimizer_settings.adaptive_minimum_quality);
+            adaptive_quality_rollback_target.reset();
+            adaptive_quality_rollback_resource.reset();
+        }
         if (sample_build.waiting_for_gameplay_telemetry || waiting_for_corpse_readback) {
             // Keep advancing the controller boundary while loading, without
             // repeatedly clearing the overlay history or flooding the log.
@@ -605,6 +655,11 @@ void UiRuntime::update_adaptive_controller(
             .maximum_quality =
                 optimizer_settings.adaptive_maximum_quality,
             .quality_change_budget = effective_quality_change_budget(),
+            .reduction_floor_quality =
+                adaptive_quality_reduction_floor.control_quality(
+                    pressure_resource),
+            .rollback_quality = adaptive_quality_rollback_target,
+            .rollback_resource = adaptive_quality_rollback_resource,
             .current_frame_pressure =
                 adaptive_decision.current_frame_pressure,
             .current_resource_pressure =

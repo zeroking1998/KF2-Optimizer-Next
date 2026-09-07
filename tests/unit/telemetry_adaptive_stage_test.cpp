@@ -479,7 +479,8 @@ int main() {
     CHECK(selected->quality == 90);
 
     // Time since dispatch is not evidence of a response to the applied change.
-    // Even a delayed receipt must get a complete fresh fast window first.
+    // Even emergency changes must complete the full response window before a
+    // follow-up, otherwise their evidence is repeatedly superseded.
     auto post_applied = control;
     post_applied.state = optimizer::AdaptiveControllerState::emergency;
     post_applied.last_dispatch_ns = 1'000'000'000ULL;
@@ -487,13 +488,48 @@ int main() {
     post_applied.sample_timestamp_ns = post_applied.now_ns;
     CHECK(!select_adaptive_runtime_control(post_applied));
     post_applied.now_ns = 10'500'000'000ULL;
-    CHECK(!select_adaptive_runtime_control(post_applied));
     post_applied.sample_timestamp_ns = 10'500'000'000ULL;
+    CHECK(!select_adaptive_runtime_control(post_applied));
+    post_applied.now_ns = 16'500'000'000ULL;
+    post_applied.sample_timestamp_ns = 16'500'000'000ULL;
     CHECK(select_adaptive_runtime_control(post_applied));
     post_applied.current_frame_pressure = false;
     CHECK(!select_adaptive_runtime_control(post_applied));
     post_applied.current_resource_pressure = true;
     CHECK(select_adaptive_runtime_control(post_applied));
+
+    const auto ineffective = adaptive_quality_response_feedback(
+        "no_clear_change", "mixed", 20, 10);
+    CHECK(ineffective.rollback_quality == 20);
+    CHECK(ineffective.reduction_floor_quality == 20);
+    CHECK(ineffective.resource == game::AdaptiveResourceControl::mixed);
+    CHECK(!adaptive_quality_response_feedback(
+        "improved", "mixed", 20, 10).rollback_quality);
+    CHECK(!adaptive_quality_response_feedback(
+        "no_clear_change", "mixed", 10, 20).rollback_quality);
+    CHECK(!adaptive_quality_response_feedback(
+        "no_clear_change", "invalid", 20, 10).rollback_quality);
+    const auto inconclusive = adaptive_quality_response_feedback(
+        "inconclusive:scene_changed_or_unknown", "cpu", 70, 60);
+    CHECK(!inconclusive.rollback_quality);
+    CHECK(inconclusive.reduction_floor_quality == 60);
+    CHECK(inconclusive.resource == game::AdaptiveResourceControl::cpu);
+
+    auto rollback = post_applied;
+    rollback.current_quality = 10;
+    rollback.reduction_floor_quality = 20;
+    rollback.rollback_quality = 20;
+    rollback.rollback_resource = game::AdaptiveResourceControl::mixed;
+    rollback.current_frame_pressure = true;
+    rollback.current_resource_pressure = false;
+    selected = select_adaptive_runtime_control(rollback);
+    CHECK(selected);
+    CHECK(selected->resource == game::AdaptiveResourceControl::mixed);
+    CHECK(selected->quality == 20);
+    rollback.current_quality = 20;
+    rollback.rollback_quality.reset();
+    rollback.rollback_resource.reset();
+    CHECK(!select_adaptive_runtime_control(rollback));
 
     // Ordinary follow-ups must leave settling, measurement and delivery time
     // after the receipt, including when dispatch happened much earlier.

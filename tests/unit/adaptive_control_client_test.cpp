@@ -128,6 +128,12 @@ int main() {
     CHECK(quality.cpu == 50 && quality.gpu == 50 &&
           quality.vram == 50 && quality.ram == 50 &&
           quality.overdraw == 70 && quality.effects == 75);
+    // Mixed runtime control changes only CPU, GPU, VRAM and RAM. A low
+    // independent effects/overdraw value must not erase a held mixed floor.
+    AdaptiveResourceQualityState mixed_floor{10};
+    mixed_floor.apply({5, AdaptiveResourceControl::mixed, 80});
+    CHECK(mixed_floor.effective_quality() == 10);
+    CHECK(mixed_floor.control_quality(AdaptiveResourceControl::mixed) == 80);
     quality.reset(90);
     CHECK(quality.effective_quality() == 90);
     quality.apply({5, AdaptiveResourceControl::disable, 100});

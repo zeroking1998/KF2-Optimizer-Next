@@ -181,8 +181,8 @@ int main() {
     CHECK(warning.state == AdaptiveControllerState::warning);
     CHECK(warning.stability_state == AdaptiveStabilityState::watch);
 
-    // A stale 10-second 1% low may warn and block recovery, but it must not
-    // independently force correction after live and tail timing recovered.
+    // A stale 10-second 1% low must not independently block a healthy state
+    // after live, average and p95 timing have recovered.
     auto low_only_sample = sample(
         start, 60.0, 1000.0 / 60.0, 17.0, 35.0, 60.0);
     low_only_sample.one_percent_low_fps = 30.0;
@@ -190,17 +190,53 @@ int main() {
     AdaptiveGovernor low_warning_governor;
     const auto low_warning = drive(
         low_warning_governor, adaptive, low_only_sample,
-        start, 1'000'000'000ULL);
-    CHECK(low_warning.state == AdaptiveControllerState::warning);
+        start, 7'000'000'000ULL);
+    CHECK(low_warning.state == AdaptiveControllerState::stable);
     CHECK(low_warning.disposition == AdaptiveDisposition::hold);
-    CHECK(low_warning.reason == "early_warning_observe_only");
+    CHECK(low_warning.reason == "stable_or_reserve_insufficient_hold");
+
+    // Reproduce the observed 125-FPS session: current throughput and p95 are
+    // steady, but the rolling percentile windows still contain older slow
+    // frames. Those historical tails must not permanently prevent gradual
+    // recovery of an already reduced quality level.
+    AdaptivePolicy stable_125_policy = adaptive;
+    stable_125_policy.target_fps = 125;
+    auto stable_125 = sample(
+        start, 125.0, 1000.0 / 125.0, 8.2, 12.0, 25.0);
+    stable_125.average_fps = 125.0;
+    stable_125.sustained_one_percent_low_fps = 63.0;
+    stable_125.one_percent_low_fps = 52.0;
+    stable_125.quality_score = 20.0;
+    AdaptiveGovernor stable_125_governor;
+    const auto stable_125_recovery = drive(
+        stable_125_governor, stable_125_policy, stable_125,
+        start, 7'000'000'000ULL);
+    CHECK(stable_125_recovery.state == AdaptiveControllerState::stable);
+    CHECK(!stable_125_recovery.current_frame_pressure);
+    CHECK(stable_125_recovery.quality_recovery_eligible);
+
+    // The same percentile pressure remains actionable when a current stutter
+    // corroborates it. One stutter alone is only a warning; after the
+    // percentile persistence window the combined evidence requires correction.
+    auto corroborated_125 = stable_125;
+    corroborated_125.sustained_one_percent_low_fps = 90.0;
+    corroborated_125.one_percent_low_fps = 90.0;
+    corroborated_125.stutter_count = 1;
+    AdaptiveGovernor corroborated_125_governor;
+    const auto corroborated_125_result = drive(
+        corroborated_125_governor, stable_125_policy, corroborated_125,
+        start, 4'400'000'000ULL);
+    CHECK(corroborated_125_result.state ==
+          AdaptiveControllerState::intervention);
+    CHECK(corroborated_125_result.current_frame_pressure);
+    CHECK(!corroborated_125_result.quality_recovery_eligible);
 
     // Persistently poor short and long percentiles must eventually create a
     // bounded corrective signal even when live and average FPS have recovered.
     auto persistent_low_sample = sample(
         start, 60.0, 1000.0 / 60.0, 17.0, 35.0, 60.0);
-    persistent_low_sample.sustained_one_percent_low_fps = 44.0;
-    persistent_low_sample.one_percent_low_fps = 44.0;
+    persistent_low_sample.sustained_one_percent_low_fps = 25.0;
+    persistent_low_sample.one_percent_low_fps = 25.0;
     AdaptiveGovernor persistent_low_governor;
     const auto persistent_low = drive(
         persistent_low_governor, adaptive, persistent_low_sample,
@@ -280,7 +316,7 @@ int main() {
         auto target_low = sample(
             start, target_fps, 1000.0 / target_fps,
             1000.0 / target_fps, 35.0, 60.0);
-        const double poor_low = std::max(1.0, target_fps * 0.73);
+        const double poor_low = std::max(1.0, target_fps * 0.45);
         target_low.sustained_one_percent_low_fps = poor_low;
         target_low.one_percent_low_fps = poor_low;
         AdaptiveGovernor target_low_governor;

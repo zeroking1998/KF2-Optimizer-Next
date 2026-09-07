@@ -107,8 +107,10 @@ int main() {
                 ? 1'000'000'000ULL / static_cast<std::uint64_t>(target)
                 : 125'000'000ULL;
             bool corrected_again = false;
+            const auto observation_span = recovered
+                ? 2'000'000'000ULL : 8'000'000'000ULL;
             for (std::uint64_t elapsed = interval;
-                 elapsed <= 2'000'000'000ULL; elapsed += interval) {
+                 elapsed <= observation_span; elapsed += interval) {
                 const auto now = receipt_ns + elapsed;
                 CHECK(source.ingest({identity, now, 1, true, 0}));
                 frame.observed_at_ns = now;
@@ -131,7 +133,7 @@ int main() {
                 input.last_applied_ns = receipt_ns;
                 input.sample_timestamp_ns = built.sample.timestamp_ns;
                 const auto next = select_adaptive_runtime_control(input);
-                if (elapsed < 1'000'000'000ULL || recovered) CHECK(!next);
+                if (elapsed < 7'000'000'000ULL || recovered) CHECK(!next);
                 if (next) corrected_again = true;
             }
             CHECK(corrected_again == !recovered);
@@ -149,10 +151,11 @@ int main() {
     // the effects 20 -> 10 change seen in sequence 88.
     for (int target = 30; target <= 240; ++target) {
         // 0: historical mild tail, 1: Issue #64's 48-52 FPS lows at 60,
-        // 2: severe tail alone; 3-6: moderate tail corroborated respectively
-        // by current p95, live FPS, average FPS, or a counted stutter.
-        for (const int scenario : {0, 1, 2, 3, 4, 5, 6}) {
-            const bool severe_tail = scenario >= 2;
+        // 2: severe historical tail alone; 3-6: moderate tail corroborated
+        // respectively by current p95, live FPS, average FPS, or a counted
+        // stutter; 7: independently catastrophic short and long tails.
+        for (const int scenario : {0, 1, 2, 3, 4, 5, 6, 7}) {
+            const bool actionable_tail = scenario >= 3;
             optimizer::AdaptiveGovernor governor;
             optimizer::AdaptivePolicy policy;
             policy.target_fps = target;
@@ -184,10 +187,13 @@ int main() {
             }
             if (scenario == 5) frame.frames.average_fps = warning_fps;
             if (scenario == 6) frame.frames.stutter_count = 1;
+            const double low_factor = scenario == 7 ? 0.45
+                : scenario == 2 ? 0.73
+                : scenario != 0 ? 0.80 : 46.28 / 50.0;
             frame.frames.sustained_one_percent_low_fps =
-                target * (scenario == 2 ? 0.73 : scenario != 0 ? 0.80 : 46.28 / 50.0);
-            frame.frames.one_percent_low_fps =
-                target * (scenario == 2 ? 0.73 : scenario != 0 ? 0.80 : 45.35 / 50.0);
+                target * low_factor;
+            frame.frames.one_percent_low_fps = target *
+                (scenario == 0 ? 45.35 / 50.0 : low_factor);
             AdaptiveSampleContext context;
             context.current_quality = 20;
             context.current_map = "KF-Outpost";
@@ -204,7 +210,7 @@ int main() {
                 const auto decision = governor.evaluate(policy, built.sample, now);
                 CHECK(decision.data.quality == optimizer::AdaptiveDataQuality::valid);
                 CHECK(!decision.current_resource_pressure);
-                if (!severe_tail) {
+                if (!actionable_tail) {
                     CHECK(!decision.current_frame_pressure);
                     CHECK(!decision.quality_recovery_eligible);
                 }
@@ -221,13 +227,13 @@ int main() {
                 input.last_applied_ns = receipt_ns;
                 input.sample_timestamp_ns = built.sample.timestamp_ns;
                 const auto next = select_adaptive_runtime_control(input);
-                if (!severe_tail) CHECK(!next);
+                if (!actionable_tail) CHECK(!next);
                 requested = requested || next.has_value();
             }
-            if (requested != severe_tail) {
+            if (requested != actionable_tail) {
                 std::cerr << "target=" << target << " scenario=" << scenario << '\n';
             }
-            CHECK(requested == severe_tail);
+            CHECK(requested == actionable_tail);
         }
     }
     return EXIT_SUCCESS;
