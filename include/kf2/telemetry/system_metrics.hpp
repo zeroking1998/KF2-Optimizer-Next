@@ -74,5 +74,9 @@ private:
     std::optional<double> cached_effective_core_usage_;
     std::optional<double> cached_dominant_thread_share_percent_;
     std::optional<std::uint32_t> cached_active_cpu_threads_;
+    bool cpu_capacity_sampled_{false};
+    std::optional<std::uint32_t> cached_affinity_logical_processors_;
+    std::optional<std::uint32_t> cached_affinity_physical_cores_;
+    std::optional<std::uint32_t> cached_system_logical_processors_;
 };
 }  // namespace kf2::telemetry

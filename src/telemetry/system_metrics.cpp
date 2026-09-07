@@ -188,12 +188,6 @@ ProcessMetricSampler::ProcessMetricSampler(game::GameProcessIdentity identity)
     : identity_{std::move(identity)} {}
 
 Result<ProcessMetrics> ProcessMetricSampler::sample() {
-    auto rebound = game::bind_game_process(identity_.pid, identity_.executable);
-    if (!rebound.has_value() ||
-        rebound.value().process_start_id != identity_.process_start_id) {
-        return Result<ProcessMetrics>::failure(
-            {ErrorCode::stale_data, L"Metric process identity changed", 0});
-    }
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION |
                                  PROCESS_VM_READ, FALSE, identity_.pid);
     if (!process) return Result<ProcessMetrics>::failure(
@@ -208,8 +202,21 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
                     GetProcessMemoryInfo(process,
                         reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),
                         sizeof(memory));
-    const auto cpu_capacity = ok
-        ? query_process_cpu_capacity(process) : std::nullopt;
+    if (ok && value(creation) != identity_.process_start_id) {
+        CloseHandle(process);
+        return Result<ProcessMetrics>::failure(
+            {ErrorCode::stale_data, L"Metric process identity changed", 0});
+    }
+    if (ok && !cpu_capacity_sampled_) {
+        if (const auto capacity = query_process_cpu_capacity(process)) {
+            cached_affinity_logical_processors_ =
+                capacity->affinity_logical_processors;
+            cached_affinity_physical_cores_ = capacity->affinity_physical_cores;
+            cached_system_logical_processors_ =
+                capacity->system_logical_processors;
+        }
+        cpu_capacity_sampled_ = true;
+    }
     const DWORD native = ok ? ERROR_SUCCESS : GetLastError();
     CloseHandle(process);
     if (!ok) return Result<ProcessMetrics>::failure(
@@ -278,14 +285,11 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
     result.dominant_thread_share_percent =
         cached_dominant_thread_share_percent_;
     result.active_cpu_threads = cached_active_cpu_threads_;
-    if (cpu_capacity) {
-        result.affinity_logical_processors =
-            cpu_capacity->affinity_logical_processors;
-        result.affinity_physical_cores =
-            cpu_capacity->affinity_physical_cores;
-        result.system_logical_processors =
-            cpu_capacity->system_logical_processors;
-    }
+    result.affinity_logical_processors =
+        cached_affinity_logical_processors_;
+    result.affinity_physical_cores = cached_affinity_physical_cores_;
+    result.system_logical_processors =
+        cached_system_logical_processors_;
     result.working_set_bytes = memory.WorkingSetSize;
     result.private_bytes = memory.PrivateUsage;
     return Result<ProcessMetrics>::success(result);

@@ -28,7 +28,6 @@ struct GameWindowState {
     bool minimized{false};
     bool cloaked{false};
     bool foreground{false};
-    bool fully_occluded{false};
     WindowUnavailableReason reason{WindowUnavailableReason::invalid_geometry};
 };
 

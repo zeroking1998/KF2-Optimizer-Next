@@ -98,11 +98,6 @@ int main() {
     CHECK(overlay::evaluate_overlay(input).reason == overlay::OverlayHideReason::game_window);
     input.window.reason = game::WindowUnavailableReason::not_foreground;
     CHECK(overlay::evaluate_overlay(input).visible);
-    input.window.fully_occluded = true;
-    // An in-game provider such as Steam or Discord may cover the game while
-    // KF2 remains the valid presentation target. It must not disable our OSD.
-    CHECK(overlay::evaluate_overlay(input).visible);
-    input.window.fully_occluded = false;
     input.window.reason = game::WindowUnavailableReason::none;
     input.frames.fps.reset(); input.frames.reason = telemetry::UnavailableReason::stale;
     CHECK(overlay::evaluate_overlay(input).reason == overlay::OverlayHideReason::stale_telemetry);

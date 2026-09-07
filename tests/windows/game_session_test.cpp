@@ -99,9 +99,6 @@ int wmain(int argc, wchar_t** argv) {
                  game_bounds.right - game_bounds.left,
                  game_bounds.bottom - game_bounds.top, SWP_SHOWWINDOW);
     CHECK(kf2::game::is_game_area_covered(visible.value(), game_bounds));
-    auto covered = kf2::game::inspect_game_window(bound.value(), window);
-    CHECK(covered.has_value());
-    CHECK(covered.value().fully_occluded);
     DestroyWindow(cover_window);
 
     SetWindowPos(window, HWND_TOPMOST, game_bounds.left, game_bounds.top,
@@ -124,9 +121,6 @@ int wmain(int argc, wchar_t** argv) {
                  game_bounds.bottom - game_bounds.top,
                  SWP_SHOWWINDOW | SWP_NOACTIVATE);
     CHECK(!kf2::game::is_game_area_covered(visible.value(), game_bounds));
-    auto overlay_visible = kf2::game::inspect_game_window(bound.value(), window);
-    CHECK(overlay_visible.has_value());
-    CHECK(!overlay_visible.value().fully_occluded);
     DestroyWindow(overlay_cover);
 
     HWND origin_window = CreateWindowExW(0, class_name, L"origin fixture", WS_POPUP,

@@ -78,6 +78,12 @@ int main() {
         CHECK(*third.value().affinity_physical_cores <=
               *third.value().affinity_logical_processors);
     }
+    CHECK(second.value().affinity_logical_processors ==
+          third.value().affinity_logical_processors);
+    CHECK(second.value().affinity_physical_cores ==
+          third.value().affinity_physical_cores);
+    CHECK(second.value().system_logical_processors ==
+          third.value().system_logical_processors);
     auto stale = identity.value(); ++stale.process_start_id;
     CHECK(!ProcessMetricSampler{stale}.sample().has_value());
     return EXIT_SUCCESS;

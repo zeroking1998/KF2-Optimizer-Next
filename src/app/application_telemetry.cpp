@@ -112,12 +112,15 @@ private:
 }  // namespace
 
 std::uint64_t UiRuntime::monotonic_ns() const {
-    LARGE_INTEGER counter{}, frequency{};
-    if (!QueryPerformanceCounter(&counter) || !QueryPerformanceFrequency(&frequency) ||
-        frequency.QuadPart <= 0) return 0;
+    static const LONGLONG frequency = [] {
+        LARGE_INTEGER value{};
+        return QueryPerformanceFrequency(&value) ? value.QuadPart : 0LL;
+    }();
+    LARGE_INTEGER counter{};
+    if (frequency <= 0 || !QueryPerformanceCounter(&counter)) return 0;
     return static_cast<std::uint64_t>(
         (static_cast<long double>(counter.QuadPart) * 1'000'000'000.0L) /
-        frequency.QuadPart);
+        frequency);
 }
 
 
