@@ -14,6 +14,19 @@
 
 int main() {
     using namespace kf2::telemetry_pipeline;
+    CHECK(resource_sample_group(0) ==
+          ResourceSampleGroup::process_and_memory);
+    CHECK(resource_sample_group(1) == ResourceSampleGroup::gpu);
+    CHECK(resource_sample_group(2) ==
+          ResourceSampleGroup::process_and_memory);
+    CHECK(resource_sample_group(3) == ResourceSampleGroup::gpu);
+    CHECK(!resource_sample_is_fresh(0, 1));
+    CHECK(resource_sample_is_fresh(
+        1'000, 1'000 + kResourceSampleFreshnessNs));
+    CHECK(!resource_sample_is_fresh(
+        1'000, 1'000 + kResourceSampleFreshnessNs + 1));
+    CHECK(!resource_sample_is_fresh(2'000, 1'000));
+
     kf2::telemetry::FrameMetrics frames;
     frames.fps = 60.0;
     auto ready = PresentDrainResult::with_frames(std::move(frames));

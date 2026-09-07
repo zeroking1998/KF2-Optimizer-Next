@@ -32,41 +32,23 @@ bool is_nonblocking_overlay(HWND window) {
     return (style & (WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)) != 0;
 }
 
-bool is_fully_occluded(HWND window, const RECT& bounds) {
-    HRGN visible = CreateRectRgn(bounds.left, bounds.top,
-                                 bounds.right, bounds.bottom);
-    if (!visible) return false;
-    for (HWND candidate = GetWindow(window, GW_HWNDPREV); candidate;
-         candidate = GetWindow(candidate, GW_HWNDPREV)) {
-        if (!IsWindowVisible(candidate) || IsIconic(candidate) ||
-            is_nonblocking_overlay(candidate)) continue;
-        DWORD cloaked = 0;
-        if (SUCCEEDED(DwmGetWindowAttribute(candidate, DWMWA_CLOAKED,
-                                            &cloaked, sizeof(cloaked))) &&
-            cloaked != 0) continue;
-        RECT rectangle{};
-        if (!GetWindowRect(candidate, &rectangle)) continue;
-        RECT overlap{};
-        if (!IntersectRect(&overlap, &bounds, &rectangle)) continue;
-        HRGN covered = CreateRectRgn(rectangle.left, rectangle.top,
-                                     rectangle.right, rectangle.bottom);
-        if (!covered) continue;
-        const int remaining = CombineRgn(visible, visible, covered, RGN_DIFF);
-        DeleteObject(covered);
-        if (remaining == NULLREGION) {
-            DeleteObject(visible);
-            return true;
-        }
-    }
-    DeleteObject(visible);
-    return false;
-}
-
 bool is_overlay_window(HWND window) {
     wchar_t class_name[64]{};
     if (GetClassNameW(window, class_name, 64) <= 0) return false;
     const std::wstring_view name{class_name};
     return name == L"KF2OptimizerNext-Overlay";
+}
+
+bool process_start_matches(const GameProcessIdentity& identity) {
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,
+                                 FALSE, identity.pid);
+    if (!process) return false;
+    FILETIME creation{}, exit{}, kernel{}, user{};
+    const bool matches =
+        GetProcessTimes(process, &creation, &exit, &kernel, &user) != FALSE &&
+        file_time_value(creation) == identity.process_start_id;
+    CloseHandle(process);
+    return matches;
 }
 
 }  // namespace
@@ -100,13 +82,20 @@ Result<GameProcessIdentity> bind_game_process(
         {pid, file_time_value(creation), std::filesystem::weakly_canonical(actual)});
 }
 
+bool is_game_process_current(const GameProcessIdentity& process) noexcept {
+    return process.pid != 0 && process.process_start_id != 0 &&
+           process_start_matches(process);
+}
+
 Result<GameWindowState> inspect_game_window(
     const GameProcessIdentity& process, HWND window) {
     if (!IsWindow(window)) return Result<GameWindowState>::failure(
         {ErrorCode::not_found, L"Game window no longer exists", 0});
-    auto current = bind_game_process(process.pid, process.executable);
-    if (!current.has_value() ||
-        current.value().process_start_id != process.process_start_id) {
+    // The executable path was verified when the session was bound. During the
+    // 120 ms hot path, the immutable process creation time is sufficient to
+    // reject exits and PID reuse without querying and canonicalizing the EXE
+    // path again on every frame sample.
+    if (!is_game_process_current(process)) {
         return Result<GameWindowState>::failure(
             {ErrorCode::stale_data, L"Game process was restarted", 0});
     }
@@ -141,11 +130,6 @@ Result<GameWindowState> inspect_game_window(
     if (monitor && GetMonitorInfoW(monitor, &monitor_info)) {
         state.monitor_work_bounds = monitor_info.rcWork;
     }
-    if (state.visible && !state.minimized && !state.cloaked &&
-        state.client_bounds.right > state.client_bounds.left &&
-        state.client_bounds.bottom > state.client_bounds.top) {
-        state.fully_occluded = is_fully_occluded(window, state.client_bounds);
-    }
     if (!state.visible) state.reason = WindowUnavailableReason::hidden;
     else if (state.minimized) state.reason = WindowUnavailableReason::minimized;
     else if (state.cloaked) state.reason = WindowUnavailableReason::cloaked;
@@ -178,12 +162,27 @@ bool is_game_area_covered(const GameWindowState& state, const RECT& area) {
 
 Result<GameProcessIdentity> find_running_game_process(
     const std::filesystem::path& expected_executable) {
+    const auto expected_name = expected_executable.filename().native();
+    if (expected_name.empty()) {
+        return Result<GameProcessIdentity>::failure(
+            {ErrorCode::invalid_argument,
+             L"Game executable name is unavailable", 0});
+    }
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return Result<GameProcessIdentity>::failure(
         {ErrorCode::platform_failure, L"Process list cannot be inspected", GetLastError()});
     PROCESSENTRY32W entry{sizeof(entry)};
     if (Process32FirstW(snapshot, &entry)) {
         do {
+            // The snapshot already provides the executable name. Avoid
+            // opening, querying and canonicalizing every unrelated Windows
+            // process; a matching name still receives the complete path and
+            // immutable creation-time verification in bind_game_process().
+            if (CompareStringOrdinal(entry.szExeFile, -1,
+                                     expected_name.c_str(), -1, TRUE) !=
+                CSTR_EQUAL) {
+                continue;
+            }
             auto candidate = bind_game_process(entry.th32ProcessID, expected_executable);
             if (candidate.has_value()) {
                 CloseHandle(snapshot);

@@ -50,6 +50,10 @@ int wmain(int argc, wchar_t** argv) {
     CHECK(bound.has_value());
     CHECK(bound.value().pid == GetCurrentProcessId());
     CHECK(bound.value().process_start_id != 0);
+    CHECK(kf2::game::is_game_process_current(bound.value()));
+    auto stale_process = bound.value();
+    ++stale_process.process_start_id;
+    CHECK(!kf2::game::is_game_process_current(stale_process));
 
     const auto wrong = kf2::game::bind_game_process(
         GetCurrentProcessId(), std::filesystem::path{executable}.parent_path() /
@@ -69,6 +73,10 @@ int wmain(int argc, wchar_t** argv) {
     CHECK(window != nullptr);
     const auto found_process = kf2::game::find_running_game_process(executable);
     CHECK(found_process.has_value());
+    const auto wrong_process = kf2::game::find_running_game_process(
+        std::filesystem::path{executable}.parent_path() / L"KFGame.exe");
+    CHECK(!wrong_process.has_value());
+    CHECK(wrong_process.error().code == kf2::ErrorCode::not_found);
 
     auto hidden = kf2::game::inspect_game_window(bound.value(), window);
     CHECK(hidden.has_value());
@@ -99,9 +107,6 @@ int wmain(int argc, wchar_t** argv) {
                  game_bounds.right - game_bounds.left,
                  game_bounds.bottom - game_bounds.top, SWP_SHOWWINDOW);
     CHECK(kf2::game::is_game_area_covered(visible.value(), game_bounds));
-    auto covered = kf2::game::inspect_game_window(bound.value(), window);
-    CHECK(covered.has_value());
-    CHECK(covered.value().fully_occluded);
     DestroyWindow(cover_window);
 
     SetWindowPos(window, HWND_TOPMOST, game_bounds.left, game_bounds.top,
@@ -124,9 +129,6 @@ int wmain(int argc, wchar_t** argv) {
                  game_bounds.bottom - game_bounds.top,
                  SWP_SHOWWINDOW | SWP_NOACTIVATE);
     CHECK(!kf2::game::is_game_area_covered(visible.value(), game_bounds));
-    auto overlay_visible = kf2::game::inspect_game_window(bound.value(), window);
-    CHECK(overlay_visible.has_value());
-    CHECK(!overlay_visible.value().fully_occluded);
     DestroyWindow(overlay_cover);
 
     HWND origin_window = CreateWindowExW(0, class_name, L"origin fixture", WS_POPUP,

@@ -28,12 +28,13 @@ struct GameWindowState {
     bool minimized{false};
     bool cloaked{false};
     bool foreground{false};
-    bool fully_occluded{false};
     WindowUnavailableReason reason{WindowUnavailableReason::invalid_geometry};
 };
 
 [[nodiscard]] Result<GameProcessIdentity> bind_game_process(
     std::uint32_t pid, const std::filesystem::path& expected_executable);
+[[nodiscard]] bool is_game_process_current(
+    const GameProcessIdentity& process) noexcept;
 [[nodiscard]] Result<GameWindowState> inspect_game_window(
     const GameProcessIdentity& process, HWND window);
 [[nodiscard]] bool is_game_area_covered(const GameWindowState& state,

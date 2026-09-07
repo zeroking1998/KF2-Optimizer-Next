@@ -51,9 +51,9 @@ int main() {
     shown.visible = true; shown.reason = kf2::overlay::OverlayHideReason::none;
     shown.target_window = target_window;
     shown.bounds = {100, 120, 340, 210};
-    shown.text = L"60.0 FPS\n16.7 ms";
     CHECK(overlay.update(shown).has_value());
     CHECK(IsWindowVisible(window));
+    CHECK(overlay.static_layer_build_count() == 1);
     CHECK(GetWindow(window, GW_OWNER) == target_window);
     CHECK(GetForegroundWindow() != window);
     for (int frame = 0; frame < 52; ++frame) {
@@ -65,7 +65,23 @@ int main() {
     CHECK(bounds.left == 100 && bounds.top == 120);
     const auto settled_render_count = overlay.render_count();
     CHECK(overlay.update(shown).has_value());
+    CHECK(overlay.render_count() == settled_render_count);
+    // Debug rendering can itself cross one cadence boundary. Allow enough
+    // wall time for the next idle frame without depending on scheduler jitter.
+    Sleep(100);
+    CHECK(overlay.update(shown).has_value());
     CHECK(overlay.render_count() > settled_render_count);
+    CHECK(overlay.static_layer_build_count() == 1);
+    // Decorative mascot motion uses a lower idle cadence than live metric and
+    // transition animation. Keep the full layered-window upload below 25 FPS
+    // while the caller continues to tick at the normal application cadence.
+    const auto idle_cadence_start = overlay.render_count();
+    const ULONGLONG idle_cadence_started_ms = GetTickCount64();
+    while (GetTickCount64() - idle_cadence_started_ms < 260) {
+        Sleep(5);
+        CHECK(overlay.update(shown).has_value());
+    }
+    CHECK(overlay.render_count() - idle_cadence_start <= 6);
     ShowWindow(window, SW_MINIMIZE);
     CHECK(IsIconic(window));
     CHECK(overlay.update(shown).has_value());
@@ -73,10 +89,41 @@ int main() {
     CHECK(GetForegroundWindow() != window);
     shown.animations_enabled = false;
     shown.fps = 120.0;
+    shown.frame_time_ms = 0.0;
     shown.bounds = {110, 130, 350, 220};
     CHECK(overlay.update(shown).has_value());
     CHECK(GetWindowRect(window, &bounds));
     CHECK(bounds.left == 110 && bounds.top == 130);
+    // Sub-display-resolution telemetry changes must not force a full layered
+    // window upload. The visible rounded values have not changed.
+    const auto subpixel_metric_render_count = overlay.render_count();
+    shown.fps += 0.1;
+    shown.average_fps += 0.1;
+    shown.one_percent_low_fps += 0.1;
+    CHECK(overlay.update(shown).has_value());
+    CHECK(overlay.render_count() == subpixel_metric_render_count);
+    // The graph is sampled independently, but its Direct2D path must be built
+    // only when the history or its vertical layout changes. Other overlay
+    // renders reuse the same geometry instead of issuing every line again.
+    shown.show_memory = true;
+    shown.frame_time_ms = 16.7;
+    CHECK(overlay.update(shown).has_value());
+    const auto memory_layer_build_count = overlay.static_layer_build_count();
+    CHECK(memory_layer_build_count == 2);
+    Sleep(110);
+    shown.frame_time_ms = 17.2;
+    CHECK(overlay.update(shown).has_value());
+    const auto graph_build_count = overlay.graph_geometry_build_count();
+    CHECK(graph_build_count > 0);
+    shown.frame_time_ms = 0.0;
+    shown.bounds = {111, 130, 351, 220};
+    CHECK(overlay.update(shown).has_value());
+    CHECK(overlay.static_layer_build_count() == memory_layer_build_count);
+    CHECK(overlay.graph_geometry_build_count() == graph_build_count);
+    shown.show_memory = false;
+    CHECK(overlay.update(shown).has_value());
+    CHECK(overlay.graph_geometry_build_count() == graph_build_count + 1);
+    shown.show_memory = true;
     shown.animations_enabled = true;
 
     // A layered tool window must recover if Windows or another desktop helper
@@ -145,13 +192,13 @@ int main() {
     }
 
     const auto idle_render_count = overlay.render_count();
-    shown.text = L"61.0 FPS\n16.4 ms";
+    shown.fps += 1.0;
     CHECK(overlay.update(shown).has_value());
     CHECK(overlay.render_count() > idle_render_count);
     const DWORD gdi_before = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
     const DWORD user_before = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
     for (int frame = 0; frame < 1000; ++frame) {
-        shown.text = std::to_wstring(60 + (frame % 3)) + L".0 FPS\n16.7 ms";
+        shown.fps = 60.0 + static_cast<double>(frame % 3);
         CHECK(overlay.update(shown).has_value());
     }
     CHECK(GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) <= gdi_before + 2);

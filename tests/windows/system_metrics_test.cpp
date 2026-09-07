@@ -1,6 +1,9 @@
 #include <Windows.h>
+#include <atomic>
 #include <cstdlib>
 #include <iostream>
+#include <thread>
+#include <vector>
 #include "kf2/game/game_session.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
 
@@ -78,7 +81,41 @@ int main() {
         CHECK(*third.value().affinity_physical_cores <=
               *third.value().affinity_logical_processors);
     }
+    CHECK(second.value().affinity_logical_processors ==
+          third.value().affinity_logical_processors);
+    CHECK(second.value().affinity_physical_cores ==
+          third.value().affinity_physical_cores);
+    CHECK(second.value().system_logical_processors ==
+          third.value().system_logical_processors);
     auto stale = identity.value(); ++stale.process_start_id;
     CHECK(!ProcessMetricSampler{stale}.sample().has_value());
+
+    std::atomic_bool keep_workers{true};
+    std::vector<std::thread> workers;
+    for (int index = 0; index < 8; ++index) {
+        workers.emplace_back([&] {
+            while (keep_workers.load(std::memory_order_relaxed)) Sleep(5);
+        });
+    }
+    DWORD handles_before = 0;
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_before));
+    {
+        ProcessMetricSampler tracked{identity.value()};
+        CHECK(tracked.sample().has_value());
+        DWORD handles_while_tracked = 0;
+        CHECK(GetProcessHandleCount(GetCurrentProcess(),
+                                    &handles_while_tracked));
+        CHECK(handles_while_tracked >=
+              handles_before + static_cast<DWORD>(workers.size()));
+    }
+    DWORD handles_after = 0;
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after));
+    // The process-wide count can move by a handle or two when Windows or the
+    // test runtime performs unrelated asynchronous work. The eight persistent
+    // worker threads make a tracker leak much larger than that ambient noise.
+    constexpr DWORD kAmbientHandleAllowance = 2;
+    CHECK(handles_after <= handles_before + kAmbientHandleAllowance);
+    keep_workers.store(false, std::memory_order_relaxed);
+    for (auto& worker : workers) worker.join();
     return EXIT_SUCCESS;
 }

@@ -266,7 +266,6 @@ UiRuntime::~UiRuntime() {
     if (window) {
         KillTimer(static_cast<HWND>(window->native_handle_for_testing()), 1);
     }
-    if (high_resolution_animation_timer) timeEndPeriod(1);
 }
 
 std::filesystem::path UiRuntime::adaptive_locks_path() const {

@@ -3,15 +3,65 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iomanip>
-#include <sstream>
+#include <string_view>
 #include <utility>
 
 namespace kf2::overlay {
+namespace {
+
+constexpr float kLogicalCanvasWidth = 330.0F;
+constexpr float kLogicalHeight = 105.0F;
+
+HRESULT rebuild_frame_time_graph(OverlayWindowState& state,
+                                 D2D1_RECT_F bounds) {
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> geometry;
+    HRESULT result = state.d2d_factory->CreatePathGeometry(&geometry);
+    Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
+    if (SUCCEEDED(result)) result = geometry->Open(&sink);
+    if (FAILED(result)) return result;
+
+    float graph_max = 16.7F;
+    for (std::size_t index = 0; index < state.frame_time_history_count; ++index) {
+        graph_max = std::max(graph_max, state.frame_time_history[index]);
+    }
+    graph_max *= 1.15F;
+    const std::size_t oldest =
+        (state.frame_time_history_next + state.frame_time_history.size() -
+         state.frame_time_history_count) % state.frame_time_history.size();
+    const auto point_at = [&](std::size_t position) {
+        const float sample = state.frame_time_history[
+            (oldest + position) % state.frame_time_history.size()];
+        const float x = bounds.left + 3.0F +
+            (bounds.right - bounds.left - 6.0F) *
+            static_cast<float>(position) /
+            static_cast<float>(state.frame_time_history_count - 1);
+        const float normalized = std::clamp(sample / graph_max, 0.0F, 1.0F);
+        const float y = bounds.bottom - 3.0F - normalized *
+            (bounds.bottom - bounds.top - 6.0F);
+        return D2D1::Point2F(x, y);
+    };
+
+    sink->BeginFigure(point_at(0), D2D1_FIGURE_BEGIN_HOLLOW);
+    for (std::size_t index = 1; index < state.frame_time_history_count; ++index) {
+        sink->AddLine(point_at(index));
+    }
+    sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    result = sink->Close();
+    if (FAILED(result)) return result;
+    state.frame_time_graph_geometry = std::move(geometry);
+    state.frame_time_graph_source_sample_ms =
+        state.frame_time_history_sample_ms;
+    state.frame_time_graph_uses_memory_layout = state.target.show_memory;
+    ++state.graph_geometry_builds;
+    return S_OK;
+}
+
+}  // namespace
 
 Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     if (!state_) return Result<bool>::failure(
         {ErrorCode::internal_failure, L"Overlay state is unavailable", 0});
+    const ULONGLONG frame_now_ms = GetTickCount64();
     bool window_recreated = false;
     if (!IsWindow(state_->window)) {
         state_->window = detail::create_overlay_native_window(GetModuleHandleW(nullptr));
@@ -70,7 +120,6 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         (presentation.visible &&
          !detail::same_rect(state_->target.bounds, presentation.bounds));
     const bool content_changed = !state_->has_target ||
-        state_->target.text != presentation.text ||
         state_->target.show_fps != presentation.show_fps ||
         state_->target.show_frame_time != presentation.show_frame_time ||
         state_->target.show_cpu != presentation.show_cpu ||
@@ -87,10 +136,9 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                   presentation.one_percent_low_fps) >= 1.0;
     const bool frame_time_changed = !state_->metrics_initialized ||
         std::fabs(state_->target.frame_time_ms - presentation.frame_time_ms) >= 0.3;
-    const ULONGLONG sample_now_ms = GetTickCount64();
     const bool system_metrics_due = !state_->metrics_initialized ||
         state_->system_metrics_sample_ms == 0 ||
-        sample_now_ms - state_->system_metrics_sample_ms >= 1000;
+        frame_now_ms - state_->system_metrics_sample_ms >= 1000;
     const bool cpu_changed = system_metrics_due &&
         (!state_->metrics_initialized ||
          std::fabs(state_->target.cpu_percent - presentation.cpu_percent) >= 1.0);
@@ -107,12 +155,12 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     const bool any_metric_changed = fps_changed || average_changed || low_changed ||
         frame_time_changed || cpu_changed || gpu_changed || ram_changed || vram_changed;
     if (cpu_changed || gpu_changed || ram_changed || vram_changed) {
-        state_->system_metrics_sample_ms = sample_now_ms;
+        state_->system_metrics_sample_ms = frame_now_ms;
     }
     bool graph_sampled = false;
     if (presentation.visible && presentation.frame_time_ms > 0.0 &&
         (state_->frame_time_history_sample_ms == 0 ||
-         sample_now_ms - state_->frame_time_history_sample_ms >= 100)) {
+         frame_now_ms - state_->frame_time_history_sample_ms >= 100)) {
         state_->frame_time_history[state_->frame_time_history_next] =
             static_cast<float>(presentation.frame_time_ms);
         state_->frame_time_history_next =
@@ -120,7 +168,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         state_->frame_time_history_count = std::min(
             state_->frame_time_history_count + 1,
             state_->frame_time_history.size());
-        state_->frame_time_history_sample_ms = sample_now_ms;
+        state_->frame_time_history_sample_ms = frame_now_ms;
         graph_sampled = true;
     }
     if (geometry_changed && presentation.animations_enabled) {
@@ -133,7 +181,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                 ? detail::visibility_pose(presentation.bounds, 0.72F, 28)
                 : presentation.bounds);
         state_->animation_from_opacity = state_->opacity;
-        state_->animation_started_ms = GetTickCount64();
+        state_->animation_started_ms = frame_now_ms;
         state_->animating = true;
         if (presentation.visible) {
             MONITORINFO monitor{sizeof(monitor)};
@@ -158,12 +206,12 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                     static_cast<float>(travel_x + travel_y) / 420.0F,
                     0.18F, 1.0F);
                 const int next_variant = static_cast<int>(
-                    (GetTickCount64() / 137 + travel_x + travel_y) %
+                    (frame_now_ms / 137 + travel_x + travel_y) %
                     static_cast<ULONGLONG>(state_->mascot_animation.variant_count));
                 state_->dock_variant = next_variant == state_->dock_variant
                     ? (next_variant + 1) % state_->mascot_animation.variant_count
                     : next_variant;
-                state_->dock_changed_ms = GetTickCount64();
+                state_->dock_changed_ms = frame_now_ms;
             }
         }
     }
@@ -174,7 +222,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         state_->animation_from_opacity = state_->opacity;
     }
     if (presentation.visible && any_metric_changed) {
-        const ULONGLONG now_ms = GetTickCount64();
+        const ULONGLONG now_ms = frame_now_ms;
         if (state_->metrics_initialized) {
             const auto update_trend = [&](double current, double previous,
                                           double minimum_delta,
@@ -308,7 +356,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
             std::max(1.0, presentation.average_fps));
         const float new_low_mood = std::clamp(
             (low_ratio - 0.58F) / 0.32F * 2.0F - 1.0F, -1.0F, 1.0F);
-        const ULONGLONG mood_now = GetTickCount64();
+        const ULONGLONG mood_now = frame_now_ms;
         if (std::fabs(new_average_mood - state_->average_mood_target) > 0.14F) {
             state_->average_mood_reaction = std::clamp(
                 std::fabs(new_average_mood - state_->average_mood_target), 0.0F, 1.0F);
@@ -332,7 +380,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         state_->animating = false;
         return Result<bool>::success(geometry_changed);
     }
-    const ULONGLONG update_now_ms = GetTickCount64();
+    const ULONGLONG update_now_ms = frame_now_ms;
     const auto bounce_active = [update_now_ms](ULONGLONG started) {
         return started != 0 && update_now_ms - started < 420;
     };
@@ -404,16 +452,27 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         state_->low_tug_load,
         state_->low_trend_started_ms, state_->low_trend_direction,
         state_->low_trend_intensity, 8.0F);
-    if (!window_recreated && !owner_changed &&
-        !geometry_changed && !content_changed && !any_metric_changed && !graph_sampled &&
-        !state_->animating &&
-        !number_bounce_animating && !mood_animating &&
-        !average_tug_animating && !low_tug_animating && !mascot_idle_animating) {
+    const bool presentation_changed = window_recreated || owner_changed ||
+        geometry_changed || content_changed || any_metric_changed || graph_sampled;
+    const bool active_animation = state_->animating || number_bounce_animating ||
+        mood_animating || average_tug_animating || low_tug_animating;
+    if (!presentation_changed && !active_animation && !mascot_idle_animating) {
         return Result<bool>::success(false);
+    }
+    // New information is always presented immediately. Between data updates,
+    // cap active transitions near the display rate and the subtle mascot idle
+    // motion near 20 FPS. This matches the 15 ms application cadence without
+    // forcing duplicate full Direct2D layered-window uploads.
+    if (!presentation_changed && state_->last_rendered_ms != 0 &&
+        update_now_ms >= state_->last_rendered_ms) {
+        const ULONGLONG minimum_interval_ms = active_animation ? 15 : 50;
+        if (update_now_ms - state_->last_rendered_ms < minimum_interval_ms) {
+            return Result<bool>::success(false);
+        }
     }
 
 
-    const ULONGLONG elapsed = GetTickCount64() - state_->animation_started_ms;
+    const ULONGLONG elapsed = frame_now_ms - state_->animation_started_ms;
     const float animation_duration_ms = state_->visibility_animation
         ? 720.0F : 600.0F;
     const float linear = state_->animating
@@ -517,24 +576,55 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         state_->old_bitmap = previous_bitmap;
         state_->bitmap_size = {width, height};
     }
+    const D2D1_RECT_F graph_bounds = state_->target.show_memory
+        ? D2D1::RectF(140, 95, 298, 102)
+        : D2D1::RectF(140, 76, 298, 100);
+    if (state_->target.show_frame_time &&
+        state_->frame_time_history_count > 1 &&
+        (!state_->frame_time_graph_geometry ||
+         state_->frame_time_graph_source_sample_ms !=
+             state_->frame_time_history_sample_ms ||
+         state_->frame_time_graph_uses_memory_layout !=
+             state_->target.show_memory)) {
+        const HRESULT graph_result =
+            rebuild_frame_time_graph(*state_, graph_bounds);
+        if (FAILED(graph_result)) {
+            return Result<bool>::failure(
+                {ErrorCode::platform_failure,
+                 L"Overlay frame-time graph cannot be prepared",
+                 static_cast<std::uint32_t>(graph_result)});
+        }
+    }
+    const RECT& static_bounds = presentation.visible
+        ? presentation.bounds : state_->visual.bounds;
+    const LONG static_width = static_bounds.right - static_bounds.left;
+    const LONG static_height = static_bounds.bottom - static_bounds.top;
+    if (static_width <= 0 || static_height <= 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"Overlay static layer dimensions are invalid", 0});
+    }
     RECT local{0, 0, width, height};
     HRESULT result = state_->render_target->BindDC(state_->memory_dc, &local);
+    if (SUCCEEDED(result) &&
+        !detail::static_layer_matches(*state_, static_width, static_height)) {
+        result = detail::rebuild_static_layer(
+            *state_, static_width, static_height);
+    }
     if (SUCCEEDED(result)) {
         state_->render_target->BeginDraw();
         state_->render_target->Clear(D2D1::ColorF(0, 0.0F));
-        constexpr float logical_canvas_width = 330.0F;
-        constexpr float logical_content_width = 322.0F;
-        constexpr float logical_height = 105.0F;
+        state_->render_target->SetTransform(D2D1::Matrix3x2F::Identity());
+        state_->render_target->DrawBitmap(
+            state_->static_layer_bitmap.Get(),
+            D2D1::RectF(0.0F, 0.0F, static_cast<float>(width),
+                        static_cast<float>(height)),
+            1.0F, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
         const auto base_transform = D2D1::Matrix3x2F::Translation(8.0F, 0.0F) *
             D2D1::Matrix3x2F::Scale(
-                static_cast<float>(width) / logical_canvas_width,
-                static_cast<float>(height) / logical_height);
+                static_cast<float>(width) / kLogicalCanvasWidth,
+                static_cast<float>(height) / kLogicalHeight);
         state_->render_target->SetTransform(base_transform);
-        const auto card = D2D1::RoundedRect(
-            D2D1::RectF(2.0F, 2.0F, logical_content_width - 2.0F,
-                         logical_height - 2.0F), 11, 11);
-        state_->render_target->FillRoundedRectangle(card, state_->background.Get());
-        state_->render_target->DrawRoundedRectangle(card, state_->border.Get(), 1.0F);
         state_->render_target->DrawLine(D2D1::Point2F(14, 9),
                                         D2D1::Point2F(
                                             72 + 22 * std::sin(
@@ -542,37 +632,19 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                                                 5 * std::sin(
                                                 linear * 9.42477796F), 9),
                                         state_->accent.Get(), 3.0F);
-        const auto average_panel = D2D1::RoundedRect(
-            D2D1::RectF(140.0F, 6.0F, 223.0F, 66.0F), 6.0F, 6.0F);
-        const auto low_panel = D2D1::RoundedRect(
-            D2D1::RectF(225.0F, 6.0F, 315.0F, 66.0F), 6.0F, 6.0F);
-        const auto system_panel = D2D1::RoundedRect(
-            D2D1::RectF(76.0F, 13.0F, 139.0F, 64.0F), 5.0F, 5.0F);
-        state_->render_target->FillRoundedRectangle(
-            system_panel, state_->metric_panel.Get());
-        state_->render_target->DrawRoundedRectangle(
-            system_panel, state_->border.Get(), 1.0F);
-        state_->render_target->FillRoundedRectangle(
-            average_panel, state_->metric_panel.Get());
-        state_->render_target->DrawRoundedRectangle(
-            average_panel, state_->border.Get(), 1.0F);
-        state_->render_target->FillRoundedRectangle(
-            low_panel, state_->metric_panel.Get());
-        state_->render_target->DrawRoundedRectangle(
-            low_panel, state_->border.Get(), 1.0F);
-        const auto draw = [&](const std::wstring& value, IDWriteTextFormat* format,
+        const auto draw = [&](std::wstring_view value, IDWriteTextFormat* format,
                               ID2D1Brush* brush, D2D1_RECT_F bounds) {
             state_->render_target->DrawTextW(
                 value.data(), static_cast<UINT32>(value.size()), format, bounds,
                 brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
         };
-        const auto draw_bouncing_number = [&](const std::wstring& value,
+        const auto draw_bouncing_number = [&](std::wstring_view value,
                                                IDWriteTextFormat* format,
                                                D2D1_RECT_F bounds,
                                                ULONGLONG bounce_started_ms) {
             constexpr float bounce_duration_ms = 420.0F;
             const float phase = bounce_started_ms == 0 ? 1.0F : std::min(
-                1.0F, static_cast<float>(GetTickCount64() - bounce_started_ms) /
+                1.0F, static_cast<float>(frame_now_ms - bounce_started_ms) /
                           bounce_duration_ms);
             const float wave = std::sin(phase * 7.85398163F) *
                                std::exp(-2.8F * phase);
@@ -596,17 +668,21 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                                                  const std::array<bool, 3>& changed,
                                                  ULONGLONG started_ms,
                                                  float percent_offset = 26.0F) {
-            std::wstring digits = std::to_wstring(
-                std::clamp(static_cast<int>(std::lround(value)), 0, 100));
-            digits = std::wstring(3 - std::min<std::size_t>(3, digits.size()), L' ') +
-                     digits;
+            const int rounded = std::clamp(
+                static_cast<int>(std::lround(value)), 0, 100);
+            const std::array<wchar_t, 3> digits{
+                rounded >= 100 ? static_cast<wchar_t>(L'0' + rounded / 100)
+                               : L' ',
+                rounded >= 10 ? static_cast<wchar_t>(L'0' + (rounded / 10) % 10)
+                              : L' ',
+                static_cast<wchar_t>(L'0' + rounded % 10)};
             constexpr float advance = 6.2F;
             for (std::size_t index = 0; index < digits.size(); ++index) {
                 if (digits[index] == L' ') continue;
-                const std::wstring glyph(1, digits[index]);
                 const auto bounds = D2D1::RectF(
                     x + static_cast<float>(index) * advance, y,
                     x + static_cast<float>(index + 1) * advance, y + 19.0F);
+                const std::wstring_view glyph{&digits[index], 1};
                 if (changed[index]) {
                     draw_bouncing_number(glyph, state_->system_value_format.Get(), bounds,
                                          started_ms);
@@ -619,7 +695,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                  D2D1::RectF(x + percent_offset, y + 1.0F,
                              x + percent_offset + 8.0F, y + 18.0F));
         };
-        const auto draw_trend_number = [&](const std::wstring& value,
+        const auto draw_trend_number = [&](std::wstring_view value,
                                            IDWriteTextFormat* format,
                                            D2D1_RECT_F bounds,
                                            ULONGLONG trend_started_ms,
@@ -632,7 +708,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                                            float bounce_strength = 0.0F) {
             constexpr float trend_duration_ms = 900.0F;
             const float phase = trend_started_ms == 0 ? 1.0F :
-                std::min(1.0F, static_cast<float>(GetTickCount64() -
+                std::min(1.0F, static_cast<float>(frame_now_ms -
                     trend_started_ms) / trend_duration_ms);
             const float intensity = trend_intensity;
             const bool falling = trend_direction < 0;
@@ -640,7 +716,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
             const float offset_y = (falling ? 9.0F : -6.0F) * motion * strength +
                                    tug_offset;
             const float bounce_phase = bounce_started_ms == 0 ? 1.0F : std::min(
-                1.0F, static_cast<float>(GetTickCount64() - bounce_started_ms) /
+                1.0F, static_cast<float>(frame_now_ms - bounce_started_ms) /
                           360.0F);
             const float bounce = std::sin(bounce_phase * 6.28318531F) *
                                  std::exp(-3.2F * bounce_phase) * bounce_strength;
@@ -700,15 +776,22 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                 state_->accent->SetColor(D2D1::ColorF(0.92F, 0.12F, 0.08F, 0.95F));
             }
         };
-        const auto number = [](double value) {
-            std::wostringstream stream;
-            stream << std::fixed << std::setprecision(0) << value;
-            return stream.str();
+        const auto rounded_text = [](double value, long& cached_value,
+                                     std::wstring& cached_text)
+                -> const std::wstring& {
+            const long rounded = std::lround(value);
+            if (rounded != cached_value) {
+                cached_value = rounded;
+                cached_text = std::to_wstring(rounded);
+            }
+            return cached_text;
         };
         if (state_->target.show_fps) {
-            draw(L"LIVE FPS", state_->title_format.Get(), state_->muted.Get(),
-                 D2D1::RectF(12, 14, 116, 30));
-            draw_trend_number(number(state_->displayed_fps), state_->value_format.Get(),
+            draw_trend_number(rounded_text(
+                                  state_->displayed_fps,
+                                  state_->displayed_fps_text_value,
+                                  state_->displayed_fps_text),
+                              state_->value_format.Get(),
                               D2D1::RectF(11, 28, 79, 66),
                               state_->fps_trend_started_ms,
                               state_->fps_trend_direction,
@@ -717,31 +800,26 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                               state_->fps_bounce_strength);
         }
         if (state_->target.show_cpu) {
-            draw(L"CPU", state_->title_format.Get(), state_->muted.Get(),
-                 D2D1::RectF(79, 17, 104, 34));
             draw_selective_percent(state_->displayed_cpu_percent, 91, 16,
                                    state_->cpu_changed_digits,
                                    state_->cpu_bounce_started_ms, 31.0F);
         }
-        state_->render_target->DrawLine(D2D1::Point2F(80, 38),
-                                        D2D1::Point2F(128, 38),
-                                        state_->border.Get(), 0.8F);
         if (state_->target.show_gpu) {
-            draw(L"GPU", state_->title_format.Get(), state_->muted.Get(),
-                 D2D1::RectF(79, 43, 104, 60));
             draw_selective_percent(state_->displayed_gpu_percent, 96, 42,
                                    state_->gpu_changed_digits,
                                    state_->gpu_bounce_started_ms);
         }
         if (state_->target.show_fps) {
-            draw(L"AVG", state_->title_format.Get(), state_->muted.Get(),
-                 D2D1::RectF(146, 12, 195, 28));
-            detail::draw_mood_character(*state_, base_transform, linear, 200.0F, 20.0F, state_->average_mood,
+            detail::draw_mood_character(*state_, base_transform, frame_now_ms,
+                      linear, 200.0F, 20.0F, state_->average_mood,
                       state_->average_mood_reaction_ms,
                       state_->average_mood_reaction,
                       state_->average_tug_offset,
                       state_->average_tug_load);
-            draw_trend_number(number(state_->displayed_average_fps),
+            draw_trend_number(rounded_text(
+                                  state_->displayed_average_fps,
+                                  state_->displayed_average_text_value,
+                                  state_->displayed_average_text),
                               state_->summary_format.Get(),
                               D2D1::RectF(146, 29, 193, 59),
                               state_->average_trend_started_ms,
@@ -750,14 +828,16 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                               state_->average_tug_offset,
                               state_->average_bounce_started_ms,
                               state_->average_bounce_strength);
-            draw(L"1% LOW", state_->title_format.Get(), state_->muted.Get(),
-                 D2D1::RectF(231, 12, 287, 28));
-            detail::draw_mood_character(*state_, base_transform, linear, 292.0F, 20.0F, state_->low_mood,
+            detail::draw_mood_character(*state_, base_transform, frame_now_ms,
+                      linear, 292.0F, 20.0F, state_->low_mood,
                       state_->low_mood_reaction_ms,
                       state_->low_mood_reaction,
                       state_->low_tug_offset,
                       state_->low_tug_load);
-            draw_trend_number(number(state_->displayed_one_percent_low_fps),
+            draw_trend_number(rounded_text(
+                                  state_->displayed_one_percent_low_fps,
+                                  state_->displayed_low_text_value,
+                                  state_->displayed_low_text),
                               state_->summary_format.Get(),
                               D2D1::RectF(231, 29, 278, 59),
                               state_->low_trend_started_ms,
@@ -767,61 +847,50 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                               state_->low_bounce_started_ms,
                               state_->low_bounce_strength);
         }
-        state_->render_target->DrawLine(D2D1::Point2F(12, 70),
-                                        D2D1::Point2F(310, 70),
-                                        state_->border.Get(), 1.0F);
         if (state_->target.show_frame_time) {
-            draw(L"FRAME TIME", state_->title_format.Get(), state_->muted.Get(),
-                 D2D1::RectF(12, 77, 91, 94));
-            draw_bouncing_number(number(state_->displayed_frame_time_ms) + L" ms",
+            const long rounded_frame_time =
+                std::lround(state_->displayed_frame_time_ms);
+            if (rounded_frame_time != state_->displayed_frame_time_text_value) {
+                state_->displayed_frame_time_text_value = rounded_frame_time;
+                state_->displayed_frame_time_text =
+                    std::to_wstring(rounded_frame_time) + L" ms";
+            }
+            draw_bouncing_number(state_->displayed_frame_time_text,
                                  state_->metric_format.Get(),
                                  D2D1::RectF(92, 75, 139, 99),
                                  state_->frame_time_bounce_started_ms);
         }
         if (state_->target.show_memory) {
-            std::wostringstream memory;
-            memory << std::fixed << std::setprecision(1)
-                   << L"RAM " << state_->displayed_process_ram_gib
-                   << L"G  VRAM " << state_->displayed_dedicated_vram_gib << L"G";
-            draw(memory.str(), state_->title_format.Get(), state_->muted.Get(),
+            const long ram_tenths = std::lround(
+                state_->displayed_process_ram_gib * 10.0);
+            const long vram_tenths = std::lround(
+                state_->displayed_dedicated_vram_gib * 10.0);
+            if (ram_tenths != state_->displayed_ram_tenths ||
+                vram_tenths != state_->displayed_vram_tenths) {
+                const auto fixed_tenth = [](long tenths) {
+                    const bool negative = tenths < 0;
+                    const unsigned long magnitude = static_cast<unsigned long>(
+                        negative ? -tenths : tenths);
+                    return std::wstring(negative ? L"-" : L"") +
+                        std::to_wstring(magnitude / 10) + L"." +
+                        std::to_wstring(magnitude % 10);
+                };
+                state_->displayed_ram_tenths = ram_tenths;
+                state_->displayed_vram_tenths = vram_tenths;
+                state_->displayed_memory_text =
+                    L"RAM " + fixed_tenth(ram_tenths) + L"G  VRAM " +
+                    fixed_tenth(vram_tenths) + L"G";
+            }
+            draw(state_->displayed_memory_text, state_->title_format.Get(),
+                 state_->muted.Get(),
                  D2D1::RectF(140, 76, 310, 96));
         }
-        const D2D1_RECT_F graph_bounds = state_->target.show_memory
-            ? D2D1::RectF(140, 95, 298, 102)
-            : D2D1::RectF(140, 76, 298, 100);
         if (state_->target.show_frame_time) {
-        state_->render_target->FillRoundedRectangle(
-            D2D1::RoundedRect(graph_bounds, 4.0F, 4.0F), state_->metric_panel.Get());
-        if (state_->frame_time_history_count > 1) {
-            float graph_max = 16.7F;
-            for (std::size_t i = 0; i < state_->frame_time_history_count; ++i) {
-                graph_max = std::max(graph_max, state_->frame_time_history[i]);
+            if (state_->frame_time_graph_geometry) {
+                state_->render_target->DrawGeometry(
+                    state_->frame_time_graph_geometry.Get(),
+                    state_->graph_line.Get(), 1.35F);
             }
-            graph_max *= 1.15F;
-            const auto history_at = [&](std::size_t position) {
-                const std::size_t oldest =
-                    (state_->frame_time_history_next + state_->frame_time_history.size() -
-                     state_->frame_time_history_count) % state_->frame_time_history.size();
-                return state_->frame_time_history[
-                    (oldest + position) % state_->frame_time_history.size()];
-            };
-            D2D1_POINT_2F previous{};
-            for (std::size_t i = 0; i < state_->frame_time_history_count; ++i) {
-                const float x = graph_bounds.left + 3.0F +
-                    (graph_bounds.right - graph_bounds.left - 6.0F) *
-                    static_cast<float>(i) /
-                    static_cast<float>(state_->frame_time_history_count - 1);
-                const float normalized = std::clamp(history_at(i) / graph_max, 0.0F, 1.0F);
-                const float y = graph_bounds.bottom - 3.0F -
-                    normalized * (graph_bounds.bottom - graph_bounds.top - 6.0F);
-                const D2D1_POINT_2F point = D2D1::Point2F(x, y);
-                if (i != 0) {
-                    state_->render_target->DrawLine(previous, point,
-                                                     state_->graph_line.Get(), 1.35F);
-                }
-                previous = point;
-            }
-        }
         }
         state_->render_target->SetTransform(D2D1::Matrix3x2F::Identity());
         result = state_->render_target->EndDraw();
@@ -847,11 +916,12 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                                  state_->memory_dc, &source, 0, &blend, ULW_ALPHA)) {
             const DWORD recovery_error = recovery_owner_error != ERROR_SUCCESS
                 ? recovery_owner_error : GetLastError();
-            std::wostringstream message;
-            message << L"Overlay frame cannot be presented after recovery"
-                    << L" (initial Windows error " << first_error << L")";
             return Result<bool>::failure(
-                {ErrorCode::platform_failure, message.str(), recovery_error});
+                {ErrorCode::platform_failure,
+                 L"Overlay frame cannot be presented after recovery"
+                 L" (initial Windows error " + std::to_wstring(first_error) +
+                     L")",
+                 recovery_error});
         }
     }
     if (!SetWindowPos(state_->window, HWND_TOPMOST, animated_bounds.left,
@@ -861,6 +931,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
             {ErrorCode::platform_failure, L"Overlay cannot be placed above the game",
              GetLastError()});
     }
+    state_->last_rendered_ms = update_now_ms;
     ++state_->renders;
     return Result<bool>::success(true);
 }

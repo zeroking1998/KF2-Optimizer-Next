@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include "kf2/core/result.hpp"
@@ -64,15 +65,27 @@ struct SystemMemoryMetrics {
 class ProcessMetricSampler final {
 public:
     explicit ProcessMetricSampler(game::GameProcessIdentity identity);
+    ~ProcessMetricSampler();
+    ProcessMetricSampler(const ProcessMetricSampler&) = delete;
+    ProcessMetricSampler& operator=(const ProcessMetricSampler&) = delete;
+    ProcessMetricSampler(ProcessMetricSampler&&) noexcept;
+    ProcessMetricSampler& operator=(ProcessMetricSampler&&) noexcept;
     [[nodiscard]] Result<ProcessMetrics> sample();
 private:
+    class ThreadTracker;
     game::GameProcessIdentity identity_;
     std::optional<CpuTimes> previous_;
     std::optional<std::uint64_t> previous_thread_sample_ms_;
+    std::optional<std::uint64_t> previous_thread_refresh_ms_;
     std::unordered_map<std::uint32_t, std::uint64_t> previous_thread_ticks_;
+    std::unique_ptr<ThreadTracker> thread_tracker_;
     std::optional<double> cached_critical_core_percent_;
     std::optional<double> cached_effective_core_usage_;
     std::optional<double> cached_dominant_thread_share_percent_;
     std::optional<std::uint32_t> cached_active_cpu_threads_;
+    bool cpu_capacity_sampled_{false};
+    std::optional<std::uint32_t> cached_affinity_logical_processors_;
+    std::optional<std::uint32_t> cached_affinity_physical_cores_;
+    std::optional<std::uint32_t> cached_system_logical_processors_;
 };
 }  // namespace kf2::telemetry

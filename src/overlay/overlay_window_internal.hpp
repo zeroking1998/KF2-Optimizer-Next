@@ -9,6 +9,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <string>
 
 #include "kf2/overlay/overlay_window.hpp"
 
@@ -37,6 +39,7 @@ struct OverlayWindowState {
     SIZE bitmap_size{};
     Microsoft::WRL::ComPtr<ID2D1Factory> d2d_factory;
     Microsoft::WRL::ComPtr<ID2D1DCRenderTarget> render_target;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap> static_layer_bitmap;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> background;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> foreground;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> border;
@@ -50,6 +53,8 @@ struct OverlayWindowState {
     Microsoft::WRL::ComPtr<IWICImagingFactory> wic_factory;
     Microsoft::WRL::ComPtr<ID2D1Bitmap> mascot_bitmap;
     Microsoft::WRL::ComPtr<ID2D1Bitmap> low_mascot_bitmap;
+    D2D1_SIZE_F mascot_bitmap_size{};
+    D2D1_SIZE_F low_mascot_bitmap_size{};
     Microsoft::WRL::ComPtr<IDWriteFactory> write_factory;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> title_format;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> value_format;
@@ -78,6 +83,17 @@ struct OverlayWindowState {
     double displayed_gpu_percent{0.0};
     double displayed_process_ram_gib{0.0};
     double displayed_dedicated_vram_gib{0.0};
+    long displayed_fps_text_value{std::numeric_limits<long>::min()};
+    long displayed_average_text_value{std::numeric_limits<long>::min()};
+    long displayed_low_text_value{std::numeric_limits<long>::min()};
+    long displayed_frame_time_text_value{std::numeric_limits<long>::min()};
+    long displayed_ram_tenths{std::numeric_limits<long>::min()};
+    long displayed_vram_tenths{std::numeric_limits<long>::min()};
+    std::wstring displayed_fps_text;
+    std::wstring displayed_average_text;
+    std::wstring displayed_low_text;
+    std::wstring displayed_frame_time_text;
+    std::wstring displayed_memory_text;
     ULONGLONG system_metrics_sample_ms{0};
     ULONGLONG fps_bounce_started_ms{0};
     ULONGLONG average_bounce_started_ms{0};
@@ -123,6 +139,18 @@ struct OverlayWindowState {
     std::size_t frame_time_history_count{0};
     std::size_t frame_time_history_next{0};
     ULONGLONG frame_time_history_sample_ms{0};
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> frame_time_graph_geometry;
+    SIZE static_layer_size{};
+    bool static_layer_show_fps{false};
+    bool static_layer_show_frame_time{false};
+    bool static_layer_show_cpu{false};
+    bool static_layer_show_gpu{false};
+    bool static_layer_show_memory{false};
+    std::size_t static_layer_builds{0};
+    ULONGLONG frame_time_graph_source_sample_ms{0};
+    bool frame_time_graph_uses_memory_layout{true};
+    std::size_t graph_geometry_builds{0};
+    ULONGLONG last_rendered_ms{0};
     std::size_t renders{0};
     ~OverlayWindowState();
 };
@@ -141,9 +169,14 @@ inline constexpr int kPremiumMutantLowIdlePngResource = 203;
 [[nodiscard]] bool same_rect(const RECT& left, const RECT& right);
 [[nodiscard]] RECT visibility_pose(
     const RECT& bounds, float scale, LONG outward);
+[[nodiscard]] bool static_layer_matches(
+    const OverlayWindowState& state, LONG width, LONG height) noexcept;
+HRESULT rebuild_static_layer(
+    OverlayWindowState& state, LONG width, LONG height);
 void draw_mood_character(
     OverlayWindowState& state,
     const D2D1_MATRIX_3X2_F& base_transform,
+    ULONGLONG frame_now_ms,
     float linear, float x, float y, float mood,
     ULONGLONG reaction_started, float reaction_strength,
     float tug_offset = 0.0F, float tug_intensity = 0.0F);

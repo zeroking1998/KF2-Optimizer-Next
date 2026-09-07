@@ -453,6 +453,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_animation.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_native.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_render.cpp"
+    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_static.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_profile.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
@@ -505,7 +506,7 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
 )
 target_link_libraries(kf2_application_lifecycle_test PRIVATE
     presentmon_data
-    user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs winmm uiautomationcore bcrypt
+    user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs uiautomationcore bcrypt
     dwmapi psapi advapi32 pdh dxgi tdh version winhttp ws2_32
 )
 add_test(NAME kf2_application_lifecycle_test COMMAND kf2_application_lifecycle_test)
@@ -971,6 +972,7 @@ add_executable(kf2_presentmon_dxgi_present_test
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_animation.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_native.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_render.cpp"
+    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_static.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/presentmon_session.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
@@ -1014,6 +1016,7 @@ add_executable(kf2_overlay_window_test
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_animation.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_native.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_render.cpp"
+    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_static.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window.cpp"
 )
 target_include_directories(kf2_overlay_window_test PRIVATE "${PROJECT_SOURCE_DIR}/include")

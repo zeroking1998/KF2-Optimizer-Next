@@ -25,10 +25,10 @@ int main() {
     CHECK(shown.target_window == window.window);
     CHECK(shown.bounds.right == 1368);
     CHECK(shown.bounds.top == 212);
-    CHECK(shown.text.find(L"FPS  60.3") != std::wstring::npos);
-    CHECK(shown.text.find(L"AVG  58.8") != std::wstring::npos);
-    CHECK(shown.text.find(L"1% LOW  49.3") != std::wstring::npos);
-    CHECK(shown.text.find(L"16.6 ms") != std::wstring::npos);
+    CHECK(shown.fps == 60.3);
+    CHECK(shown.average_fps == 58.8);
+    CHECK(shown.one_percent_low_fps == 49.3);
+    CHECK(shown.frame_time_ms == 16.6);
     input.process_ram_bytes = 3ULL * 1024 * 1024 * 1024;
     input.dedicated_vram_bytes = 8ULL * 1024 * 1024 * 1024;
     input.show_memory = true;
@@ -98,11 +98,6 @@ int main() {
     CHECK(overlay::evaluate_overlay(input).reason == overlay::OverlayHideReason::game_window);
     input.window.reason = game::WindowUnavailableReason::not_foreground;
     CHECK(overlay::evaluate_overlay(input).visible);
-    input.window.fully_occluded = true;
-    // An in-game provider such as Steam or Discord may cover the game while
-    // KF2 remains the valid presentation target. It must not disable our OSD.
-    CHECK(overlay::evaluate_overlay(input).visible);
-    input.window.fully_occluded = false;
     input.window.reason = game::WindowUnavailableReason::none;
     input.frames.fps.reset(); input.frames.reason = telemetry::UnavailableReason::stale;
     CHECK(overlay::evaluate_overlay(input).reason == overlay::OverlayHideReason::stale_telemetry);

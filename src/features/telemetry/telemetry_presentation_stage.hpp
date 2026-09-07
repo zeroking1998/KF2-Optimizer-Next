@@ -32,6 +32,17 @@ struct TelemetryPresentation final {
     std::optional<overlay::OverlayPresentation> overlay;
 };
 
+inline constexpr std::uint64_t kOverlayPlacementCacheIntervalNs =
+    500'000'000ULL;
+
+[[nodiscard]] constexpr bool overlay_placement_cache_is_fresh(
+    std::uint64_t checked_at_ns, std::uint64_t now_ns,
+    bool context_matches) noexcept {
+    return context_matches && checked_at_ns != 0 &&
+        now_ns >= checked_at_ns &&
+        now_ns - checked_at_ns < kOverlayPlacementCacheIntervalNs;
+}
+
 [[nodiscard]] inline std::wstring format_gib(std::uint64_t bytes) {
     std::wostringstream text;
     text << std::fixed << std::setprecision(1)
@@ -140,7 +151,7 @@ struct TelemetryPresentation final {
 }
 
 [[nodiscard]] TelemetryPresentation derive_telemetry_presentation(
-    const app::UiRuntime& runtime, const TelemetryFrame& frame);
+    app::UiRuntime& runtime, const TelemetryFrame& frame);
 void publish_telemetry_presentation(
     app::UiRuntime& runtime, TelemetryPresentation presentation);
 

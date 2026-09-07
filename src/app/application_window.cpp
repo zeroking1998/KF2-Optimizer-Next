@@ -5,15 +5,12 @@ namespace kf2::app {
 void UiRuntime::update_animation_cadence() {
     if (!window) return;
     const bool animate = controller.theme().animations_enabled;
-    if (animate && !high_resolution_animation_timer &&
-        timeBeginPeriod(1) == TIMERR_NOERROR) {
-        high_resolution_animation_timer = true;
-    } else if (!animate && high_resolution_animation_timer) {
-        timeEndPeriod(1);
-        high_resolution_animation_timer = false;
-    }
+    // The shell animations are designed for display-rate presentation, not
+    // high-resolution polling. A regular 16 ms Windows timer stays near 60 Hz
+    // without raising the process-wide multimedia timer resolution. Telemetry
+    // remains independently sampled on its own cadence.
     SetTimer(static_cast<HWND>(window->native_handle_for_testing()), 1,
-             animate ? 8U : 120U, nullptr);
+             animate ? 16U : 120U, nullptr);
 }
 
 
@@ -32,8 +29,6 @@ Result<bool> UiRuntime::create_window(const std::wstring& title) {
         events->append({0, diagnostics::Severity::warning, "OVERLAY_UNAVAILABLE",
                         overlay_created.error().message, L"overlay"});
     }
-    // High-contrast mode uses a low-frequency maintenance tick and does not
-    // request the global 1 ms multimedia timer resolution.
     update_animation_cadence();
 
     auto graphics = ui::Direct2DShellRenderer::create(hwnd);
