@@ -100,6 +100,25 @@ int main() {
     shown.one_percent_low_fps += 0.1;
     CHECK(overlay.update(shown).has_value());
     CHECK(overlay.render_count() == subpixel_metric_render_count);
+    // The graph is sampled independently, but its Direct2D path must be built
+    // only when the history or its vertical layout changes. Other overlay
+    // renders reuse the same geometry instead of issuing every line again.
+    shown.show_memory = true;
+    shown.frame_time_ms = 16.7;
+    CHECK(overlay.update(shown).has_value());
+    Sleep(110);
+    shown.frame_time_ms = 17.2;
+    CHECK(overlay.update(shown).has_value());
+    const auto graph_build_count = overlay.graph_geometry_build_count();
+    CHECK(graph_build_count > 0);
+    shown.frame_time_ms = 0.0;
+    shown.bounds = {111, 130, 351, 220};
+    CHECK(overlay.update(shown).has_value());
+    CHECK(overlay.graph_geometry_build_count() == graph_build_count);
+    shown.show_memory = false;
+    CHECK(overlay.update(shown).has_value());
+    CHECK(overlay.graph_geometry_build_count() == graph_build_count + 1);
+    shown.show_memory = true;
     shown.animations_enabled = true;
 
     // A layered tool window must recover if Windows or another desktop helper

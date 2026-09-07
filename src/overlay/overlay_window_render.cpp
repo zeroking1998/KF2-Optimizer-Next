@@ -7,6 +7,53 @@
 #include <utility>
 
 namespace kf2::overlay {
+namespace {
+
+HRESULT rebuild_frame_time_graph(OverlayWindowState& state,
+                                 D2D1_RECT_F bounds) {
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> geometry;
+    HRESULT result = state.d2d_factory->CreatePathGeometry(&geometry);
+    Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
+    if (SUCCEEDED(result)) result = geometry->Open(&sink);
+    if (FAILED(result)) return result;
+
+    float graph_max = 16.7F;
+    for (std::size_t index = 0; index < state.frame_time_history_count; ++index) {
+        graph_max = std::max(graph_max, state.frame_time_history[index]);
+    }
+    graph_max *= 1.15F;
+    const std::size_t oldest =
+        (state.frame_time_history_next + state.frame_time_history.size() -
+         state.frame_time_history_count) % state.frame_time_history.size();
+    const auto point_at = [&](std::size_t position) {
+        const float sample = state.frame_time_history[
+            (oldest + position) % state.frame_time_history.size()];
+        const float x = bounds.left + 3.0F +
+            (bounds.right - bounds.left - 6.0F) *
+            static_cast<float>(position) /
+            static_cast<float>(state.frame_time_history_count - 1);
+        const float normalized = std::clamp(sample / graph_max, 0.0F, 1.0F);
+        const float y = bounds.bottom - 3.0F - normalized *
+            (bounds.bottom - bounds.top - 6.0F);
+        return D2D1::Point2F(x, y);
+    };
+
+    sink->BeginFigure(point_at(0), D2D1_FIGURE_BEGIN_HOLLOW);
+    for (std::size_t index = 1; index < state.frame_time_history_count; ++index) {
+        sink->AddLine(point_at(index));
+    }
+    sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    result = sink->Close();
+    if (FAILED(result)) return result;
+    state.frame_time_graph_geometry = std::move(geometry);
+    state.frame_time_graph_source_sample_ms =
+        state.frame_time_history_sample_ms;
+    state.frame_time_graph_uses_memory_layout = state.target.show_memory;
+    ++state.graph_geometry_builds;
+    return S_OK;
+}
+
+}  // namespace
 
 Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     if (!state_) return Result<bool>::failure(
@@ -526,6 +573,25 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         state_->old_bitmap = previous_bitmap;
         state_->bitmap_size = {width, height};
     }
+    const D2D1_RECT_F graph_bounds = state_->target.show_memory
+        ? D2D1::RectF(140, 95, 298, 102)
+        : D2D1::RectF(140, 76, 298, 100);
+    if (state_->target.show_frame_time &&
+        state_->frame_time_history_count > 1 &&
+        (!state_->frame_time_graph_geometry ||
+         state_->frame_time_graph_source_sample_ms !=
+             state_->frame_time_history_sample_ms ||
+         state_->frame_time_graph_uses_memory_layout !=
+             state_->target.show_memory)) {
+        const HRESULT graph_result =
+            rebuild_frame_time_graph(*state_, graph_bounds);
+        if (FAILED(graph_result)) {
+            return Result<bool>::failure(
+                {ErrorCode::platform_failure,
+                 L"Overlay frame-time graph cannot be prepared",
+                 static_cast<std::uint32_t>(graph_result)});
+        }
+    }
     RECT local{0, 0, width, height};
     HRESULT result = state_->render_target->BindDC(state_->memory_dc, &local);
     if (SUCCEEDED(result)) {
@@ -838,42 +904,15 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                  state_->muted.Get(),
                  D2D1::RectF(140, 76, 310, 96));
         }
-        const D2D1_RECT_F graph_bounds = state_->target.show_memory
-            ? D2D1::RectF(140, 95, 298, 102)
-            : D2D1::RectF(140, 76, 298, 100);
         if (state_->target.show_frame_time) {
-        state_->render_target->FillRoundedRectangle(
-            D2D1::RoundedRect(graph_bounds, 4.0F, 4.0F), state_->metric_panel.Get());
-        if (state_->frame_time_history_count > 1) {
-            float graph_max = 16.7F;
-            for (std::size_t i = 0; i < state_->frame_time_history_count; ++i) {
-                graph_max = std::max(graph_max, state_->frame_time_history[i]);
+            state_->render_target->FillRoundedRectangle(
+                D2D1::RoundedRect(graph_bounds, 4.0F, 4.0F),
+                state_->metric_panel.Get());
+            if (state_->frame_time_graph_geometry) {
+                state_->render_target->DrawGeometry(
+                    state_->frame_time_graph_geometry.Get(),
+                    state_->graph_line.Get(), 1.35F);
             }
-            graph_max *= 1.15F;
-            const auto history_at = [&](std::size_t position) {
-                const std::size_t oldest =
-                    (state_->frame_time_history_next + state_->frame_time_history.size() -
-                     state_->frame_time_history_count) % state_->frame_time_history.size();
-                return state_->frame_time_history[
-                    (oldest + position) % state_->frame_time_history.size()];
-            };
-            D2D1_POINT_2F previous{};
-            for (std::size_t i = 0; i < state_->frame_time_history_count; ++i) {
-                const float x = graph_bounds.left + 3.0F +
-                    (graph_bounds.right - graph_bounds.left - 6.0F) *
-                    static_cast<float>(i) /
-                    static_cast<float>(state_->frame_time_history_count - 1);
-                const float normalized = std::clamp(history_at(i) / graph_max, 0.0F, 1.0F);
-                const float y = graph_bounds.bottom - 3.0F -
-                    normalized * (graph_bounds.bottom - graph_bounds.top - 6.0F);
-                const D2D1_POINT_2F point = D2D1::Point2F(x, y);
-                if (i != 0) {
-                    state_->render_target->DrawLine(previous, point,
-                                                     state_->graph_line.Get(), 1.35F);
-                }
-                previous = point;
-            }
-        }
         }
         state_->render_target->SetTransform(D2D1::Matrix3x2F::Identity());
         result = state_->render_target->EndDraw();

@@ -136,6 +136,10 @@ struct OverlayWindowState {
     std::size_t frame_time_history_count{0};
     std::size_t frame_time_history_next{0};
     ULONGLONG frame_time_history_sample_ms{0};
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> frame_time_graph_geometry;
+    ULONGLONG frame_time_graph_source_sample_ms{0};
+    bool frame_time_graph_uses_memory_layout{true};
+    std::size_t graph_geometry_builds{0};
     ULONGLONG last_rendered_ms{0};
     std::size_t renders{0};
     ~OverlayWindowState();

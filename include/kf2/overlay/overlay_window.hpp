@@ -17,6 +17,7 @@ public:
     [[nodiscard]] Result<bool> update(const OverlayPresentation& presentation);
     [[nodiscard]] HWND native_handle() const noexcept;
     [[nodiscard]] std::size_t render_count() const noexcept;
+    [[nodiscard]] std::size_t graph_geometry_build_count() const noexcept;
 private:
     explicit OverlayWindow(std::unique_ptr<struct OverlayWindowState> state);
     std::unique_ptr<struct OverlayWindowState> state_;
