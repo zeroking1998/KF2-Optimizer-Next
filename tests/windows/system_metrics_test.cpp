@@ -1,6 +1,9 @@
 #include <Windows.h>
+#include <atomic>
 #include <cstdlib>
 #include <iostream>
+#include <thread>
+#include <vector>
 #include "kf2/game/game_session.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
 
@@ -86,5 +89,28 @@ int main() {
           third.value().system_logical_processors);
     auto stale = identity.value(); ++stale.process_start_id;
     CHECK(!ProcessMetricSampler{stale}.sample().has_value());
+
+    std::atomic_bool keep_workers{true};
+    std::vector<std::thread> workers;
+    for (int index = 0; index < 8; ++index) {
+        workers.emplace_back([&] {
+            while (keep_workers.load(std::memory_order_relaxed)) Sleep(5);
+        });
+    }
+    DWORD handles_before = 0;
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_before));
+    {
+        ProcessMetricSampler tracked{identity.value()};
+        CHECK(tracked.sample().has_value());
+        DWORD handles_while_tracked = 0;
+        CHECK(GetProcessHandleCount(GetCurrentProcess(),
+                                    &handles_while_tracked));
+        CHECK(handles_while_tracked > handles_before);
+    }
+    DWORD handles_after = 0;
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after));
+    CHECK(handles_after == handles_before);
+    keep_workers.store(false, std::memory_order_relaxed);
+    for (auto& worker : workers) worker.join();
     return EXIT_SUCCESS;
 }

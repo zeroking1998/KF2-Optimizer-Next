@@ -4,6 +4,7 @@
 #include <TlHelp32.h>
 #include <algorithm>
 #include <bit>
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
@@ -84,30 +85,65 @@ std::optional<ProcessCpuCapacity> query_process_cpu_capacity(HANDLE process) {
     return result;
 }
 
-std::optional<std::unordered_map<std::uint32_t, std::uint64_t>>
-query_process_thread_ticks(std::uint32_t pid) {
-    const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) return std::nullopt;
+}
 
-    std::unordered_map<std::uint32_t, std::uint64_t> ticks;
-    THREADENTRY32 entry{sizeof(entry)};
-    if (Thread32First(snapshot, &entry)) {
-        do {
-            if (entry.th32OwnerProcessID != pid) continue;
+class ProcessMetricSampler::ThreadTracker final {
+public:
+    ~ThreadTracker() {
+        for (const auto& [thread_id, handle] : handles_) {
+            static_cast<void>(thread_id);
+            CloseHandle(handle);
+        }
+    }
+
+    bool refresh(std::uint32_t pid) {
+        const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (snapshot == INVALID_HANDLE_VALUE) return false;
+        std::unordered_set<std::uint32_t> current;
+        THREADENTRY32 entry{sizeof(entry)};
+        if (Thread32First(snapshot, &entry)) {
+            do {
+                if (entry.th32OwnerProcessID == pid) {
+                    current.insert(entry.th32ThreadID);
+                }
+            } while (Thread32Next(snapshot, &entry));
+        }
+        CloseHandle(snapshot);
+
+        for (auto iterator = handles_.begin(); iterator != handles_.end();) {
+            if (current.contains(iterator->first)) {
+                ++iterator;
+            } else {
+                CloseHandle(iterator->second);
+                iterator = handles_.erase(iterator);
+            }
+        }
+        for (const auto thread_id : current) {
+            if (handles_.contains(thread_id)) continue;
             const HANDLE thread = OpenThread(
-                THREAD_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ThreadID);
-            if (!thread) continue;
+                THREAD_QUERY_LIMITED_INFORMATION, FALSE, thread_id);
+            if (thread) handles_.emplace(thread_id, thread);
+        }
+        return true;
+    }
+
+    std::unordered_map<std::uint32_t, std::uint64_t> sample() const {
+        std::unordered_map<std::uint32_t, std::uint64_t> ticks;
+        ticks.reserve(handles_.size());
+        for (const auto& [thread_id, thread] : handles_) {
             FILETIME creation{}, exit{}, kernel{}, user{};
             if (GetThreadTimes(thread, &creation, &exit, &kernel, &user)) {
-                ticks.emplace(entry.th32ThreadID, value(kernel) + value(user));
+                ticks.emplace(thread_id, value(kernel) + value(user));
             }
-            CloseHandle(thread);
-        } while (Thread32Next(snapshot, &entry));
+        }
+        return ticks;
     }
-    CloseHandle(snapshot);
-    return ticks;
-}
-}
+
+    [[nodiscard]] bool empty() const { return handles_.empty(); }
+
+private:
+    std::unordered_map<std::uint32_t, HANDLE> handles_;
+};
 
 Result<HardwareInventory> query_hardware_inventory() {
     HardwareInventory result;
@@ -185,7 +221,14 @@ std::optional<double> calculate_thread_cpu_percent(
 }
 
 ProcessMetricSampler::ProcessMetricSampler(game::GameProcessIdentity identity)
-    : identity_{std::move(identity)} {}
+    : identity_{std::move(identity)},
+      thread_tracker_{std::make_unique<ThreadTracker>()} {}
+
+ProcessMetricSampler::~ProcessMetricSampler() = default;
+ProcessMetricSampler::ProcessMetricSampler(ProcessMetricSampler&&) noexcept =
+    default;
+ProcessMetricSampler& ProcessMetricSampler::operator=(
+    ProcessMetricSampler&&) noexcept = default;
 
 Result<ProcessMetrics> ProcessMetricSampler::sample() {
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION |
@@ -232,16 +275,30 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
     }
     previous_ = current;
 
-    // Thread enumeration is deliberately throttled. It supplies the missing
-    // critical-thread signal without adding work to every overlay refresh.
+    // Cached handles keep CPU-time sampling responsive at 500 ms. Refresh the
+    // membership separately because Toolhelp enumerates every thread on the
+    // machine; KF2's long-lived game/render threads stay continuously sampled,
+    // while a newly created thread becomes visible within five seconds.
     constexpr std::uint64_t kThreadSampleIntervalMs = 500;
+    constexpr std::uint64_t kThreadRefreshIntervalMs = 5'000;
     const std::uint64_t thread_now_ms = GetTickCount64();
     if (!previous_thread_sample_ms_ ||
         (thread_now_ms >= *previous_thread_sample_ms_ &&
          thread_now_ms - *previous_thread_sample_ms_ >=
              kThreadSampleIntervalMs)) {
-        if (auto current_thread_ticks =
-                query_process_thread_ticks(identity_.pid)) {
+        const bool refresh_due = thread_tracker_->empty() ||
+            !previous_thread_refresh_ms_ ||
+            thread_now_ms < *previous_thread_refresh_ms_ ||
+            thread_now_ms - *previous_thread_refresh_ms_ >=
+                kThreadRefreshIntervalMs;
+        if (refresh_due && thread_tracker_->refresh(identity_.pid)) {
+            previous_thread_refresh_ms_ = thread_now_ms;
+        }
+        // A transient Toolhelp failure must not discard the valid handles
+        // from the previous refresh. Continue sampling them and retry the
+        // membership refresh on the next telemetry tick.
+        if (!thread_tracker_->empty()) {
+            auto current_thread_ticks = thread_tracker_->sample();
             if (previous_thread_sample_ms_ &&
                 thread_now_ms > *previous_thread_sample_ms_) {
                 std::optional<double> busiest;
@@ -250,7 +307,7 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
                 const auto elapsed_ms =
                     thread_now_ms - *previous_thread_sample_ms_;
                 for (const auto& [thread_id, current_ticks] :
-                     *current_thread_ticks) {
+                     current_thread_ticks) {
                     const auto previous = previous_thread_ticks_.find(thread_id);
                     if (previous == previous_thread_ticks_.end()) continue;
                     const auto percent = calculate_thread_cpu_percent(
@@ -276,7 +333,7 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
                     cached_active_cpu_threads_ = active_threads;
                 }
             }
-            previous_thread_ticks_ = std::move(*current_thread_ticks);
+            previous_thread_ticks_ = std::move(current_thread_ticks);
             previous_thread_sample_ms_ = thread_now_ms;
         }
     }
