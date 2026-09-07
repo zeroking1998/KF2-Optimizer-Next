@@ -42,8 +42,8 @@ int main() {
     CHECK(presentation.advance(targets, true));
     CHECK(presentation.target_fps(targets.target_fps) > 60);
     CHECK(presentation.target_fps(targets.target_fps) < 120);
-    CHECK(*presentation.live_fps(targets.live_fps) > 60.0);
-    CHECK(*presentation.live_fps(targets.live_fps) < 120.0);
+    CHECK(presentation.live_fps(targets.live_fps) == 120.0);
+    CHECK(presentation.live_frame_time_ms(targets.live_frame_time_ms) == 8.3);
 
     presentation.preview_target_fps(144);
     presentation.preview_corpse_limit(1500);

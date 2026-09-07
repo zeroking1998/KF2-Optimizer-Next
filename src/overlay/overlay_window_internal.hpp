@@ -70,7 +70,6 @@ struct OverlayWindowState {
     bool visibility_animation{false};
     bool appearing{false};
     bool metrics_initialized{false};
-    bool metrics_animating{false};
     double displayed_fps{0.0};
     double displayed_average_fps{0.0};
     double displayed_one_percent_low_fps{0.0};
@@ -79,15 +78,6 @@ struct OverlayWindowState {
     double displayed_gpu_percent{0.0};
     double displayed_process_ram_gib{0.0};
     double displayed_dedicated_vram_gib{0.0};
-    double metrics_from_fps{0.0};
-    double metrics_from_average_fps{0.0};
-    double metrics_from_one_percent_low_fps{0.0};
-    double metrics_from_frame_time_ms{0.0};
-    double metrics_from_cpu_percent{0.0};
-    double metrics_from_gpu_percent{0.0};
-    double metrics_from_process_ram_gib{0.0};
-    double metrics_from_dedicated_vram_gib{0.0};
-    ULONGLONG metrics_started_ms{0};
     ULONGLONG system_metrics_sample_ms{0};
     ULONGLONG fps_bounce_started_ms{0};
     ULONGLONG average_bounce_started_ms{0};
