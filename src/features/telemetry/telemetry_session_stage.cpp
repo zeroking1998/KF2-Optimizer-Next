@@ -164,7 +164,7 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
         .port = *port,
         .token = adaptive_control_token,
         .sequence = next_sequence,
-        .resource = game::AdaptiveResourceControl::recover,
+        .resource = game::AdaptiveResourceControl::disable,
         .quality = 100,
         .timeout_ms = 500});
     adaptive_control_sequence = next_sequence;
@@ -172,7 +172,7 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
         events->append({0, diagnostics::Severity::error,
             "ADAPTIVE_RUNTIME_RESTORE_FAILED",
             std::wstring{reason} +
-                L"; KF2 did not confirm the authenticated full-quality restore",
+                L"; KF2 did not confirm restoration of the original graphics settings",
             L"optimizer"});
         return false;
     }
@@ -181,7 +181,7 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
     events->append({0, diagnostics::Severity::info,
         "ADAPTIVE_RUNTIME_RESTORED",
         std::wstring{reason} +
-            L"; KF2 confirmed the full-quality restore with an exact APPLIED readback",
+            L"; KF2 confirmed the original graphics settings with an exact APPLIED readback",
         L"optimizer"});
     return true;
 }

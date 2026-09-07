@@ -692,7 +692,8 @@ target_compile_definitions(kf2_gameplay_log_lab_test PRIVATE
     KF2_TELEMETRY_INTERACTION_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetryInteraction.uc"
     KF2_ADAPTIVE_LISTENER_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerAdaptiveControlListener.uc"
     KF2_ADAPTIVE_CONNECTION_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerAdaptiveControlConnection.uc"
-    KF2_ADAPTIVE_GRAPHICS_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerAdaptiveGraphics.uc")
+    KF2_ADAPTIVE_GRAPHICS_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerAdaptiveGraphics.uc"
+    KF2_TELEMETRY_SESSION_SOURCE=L"${PROJECT_SOURCE_DIR}/src/features/telemetry/telemetry_session_stage.cpp")
 target_link_libraries(kf2_gameplay_log_lab_test PRIVATE bcrypt ws2_32)
 add_test(NAME kf2_gameplay_log_lab_test COMMAND kf2_gameplay_log_lab_test)
 

@@ -64,6 +64,8 @@ int main() {
     const auto connection_source = read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE);
     const auto graphics_source = normalize_newlines(
         read_bytes(KF2_ADAPTIVE_GRAPHICS_SOURCE));
+    const auto telemetry_session_source = normalize_newlines(
+        read_bytes(KF2_TELEMETRY_SESSION_SOURCE));
     CHECK(telemetry_source.find("AdaptiveControlToken") != std::string::npos);
     CHECK(telemetry_source.find("ValidAdaptiveControlToken") !=
           std::string::npos);
@@ -94,6 +96,27 @@ int main() {
         "function bool ApplyAdaptiveResourceControl");
     CHECK(adaptive_runtime_function != std::string::npos);
     CHECK(adaptive_control_function != std::string::npos);
+    const auto adaptive_disable_body = telemetry_source.substr(
+        adaptive_runtime_function,
+        adaptive_control_function - adaptive_runtime_function);
+    CHECK(adaptive_disable_body.find(
+        "class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(\n"
+        "            AdaptiveGraphicsState)") != std::string::npos);
+    CHECK(adaptive_disable_body.find(
+        "class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(\n"
+        "            AdaptiveGraphicsState, \"recover\", 100)") ==
+          std::string::npos);
+    const auto app_restore_function = telemetry_session_source.find(
+        "bool UiRuntime::restore_live_adaptive_quality(");
+    const auto app_toggle_function = telemetry_session_source.find(
+        "bool UiRuntime::set_live_adaptive_enabled(");
+    CHECK(app_restore_function != std::string::npos);
+    CHECK(app_toggle_function != std::string::npos);
+    CHECK(telemetry_session_source.substr(
+              app_restore_function,
+              app_toggle_function - app_restore_function).find(
+                  ".resource = game::AdaptiveResourceControl::disable") !=
+          std::string::npos);
     CHECK(telemetry_source.substr(
               adaptive_runtime_function,
               adaptive_control_function - adaptive_runtime_function).find(
@@ -150,14 +173,6 @@ int main() {
     CHECK(interaction_source.find(
         "if (bGameSessionEnding)", interaction_tick) !=
           std::string::npos);
-    CHECK(interaction_source.find("bGameSessionEnding = true",
-        interaction_source.find("function NotifyGameSessionEnded()")) !=
-          std::string::npos);
-    CHECK(interaction_source.find("CurrentProbe.QuiesceForWorldTeardown()",
-        interaction_source.find("function NotifyGameSessionEnded()")) !=
-          std::string::npos);
-    CHECK(interaction_source.find("function NotifyPlayerAdded(") !=
-          std::string::npos);
     const auto prepare_for_world = interaction_source.find(
         "function PrepareForGameplayWorld()");
     const auto session_ended = interaction_source.find(
@@ -167,6 +182,21 @@ int main() {
     CHECK(prepare_for_world != std::string::npos);
     CHECK(session_ended != std::string::npos);
     CHECK(player_added != std::string::npos);
+    CHECK(interaction_source.find("bGameSessionEnding = true",
+        interaction_source.find("function NotifyGameSessionEnded()")) !=
+          std::string::npos);
+    const auto teardown_restore = interaction_source.find(
+        "CurrentProbe.SetAdaptiveRuntimeEnabled(false)", session_ended);
+    const auto teardown_quiesce = interaction_source.find(
+        "CurrentProbe.QuiesceForWorldTeardown()", session_ended);
+    CHECK(teardown_restore != std::string::npos);
+    CHECK(teardown_quiesce != std::string::npos);
+    CHECK(teardown_restore < teardown_quiesce);
+    CHECK(interaction_source.find("CurrentProbe.QuiesceForWorldTeardown()",
+        interaction_source.find("function NotifyGameSessionEnded()")) !=
+          std::string::npos);
+    CHECK(interaction_source.find("function NotifyPlayerAdded(") !=
+          std::string::npos);
     CHECK(interaction_source.find("bGameSessionEnding = false",
         prepare_for_world) < session_ended);
     CHECK(interaction_source.find("state=rearmed", prepare_for_world) <
