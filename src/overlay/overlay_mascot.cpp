@@ -89,23 +89,11 @@ void draw_mood_character(
             y += std::max(0.0F, -mood) * 1.2F;
             if (state.mascot_bitmap) {
                 const bool is_low_character = x > 250.0F;
-                POINT cursor{};
-                GetCursorPos(&cursor);
-                const float cursor_x = static_cast<float>(
-                    cursor.x - state.current_bounds.left);
-                const float cursor_y = static_cast<float>(
-                    cursor.y - state.current_bounds.top);
-                const float pointer_dx = cursor_x - x;
-                const float pointer_dy = cursor_y - (y + 14.0F);
-                const bool pointer_hover = std::fabs(pointer_dx) <= 19.0F &&
-                                           std::fabs(pointer_dy) <= 34.0F;
-                const float pointer_lean = pointer_hover
-                    ? std::clamp(pointer_dx / 19.0F, -1.0F, 1.0F)
-                    : 0.0F;
-                ID2D1Bitmap* character_bitmap =
-                    is_low_character && state.low_mascot_bitmap
-                        ? state.low_mascot_bitmap.Get()
-                        : state.mascot_bitmap.Get();
+                const bool use_low_bitmap =
+                    is_low_character && state.low_mascot_bitmap;
+                ID2D1Bitmap* character_bitmap = use_low_bitmap
+                    ? state.low_mascot_bitmap.Get()
+                    : state.mascot_bitmap.Get();
                 const float idle_amount = 1.0F - load;
                 const float breath = std::sin(idle_phase) * idle_amount;
                 const float weight_shift = std::sin(idle_phase * 0.53F + 0.7F) *
@@ -114,27 +102,23 @@ void draw_mood_character(
                     std::max(0.0F, std::sin(idle_phase * 0.37F - 1.1F)), 10.0F) *
                     idle_amount;
                 const float strain_scale = 1.0F + load * 0.055F;
-                const float hover_scale = pointer_hover ? 1.045F : 1.0F;
                 constexpr float kCreatureWidth = 34.0F;
                 constexpr float kCreatureHeight = 64.0F;
-                const float creature_width = kCreatureWidth * strain_scale * hover_scale *
+                const float creature_width = kCreatureWidth * strain_scale *
                                              (1.0F + breath * 0.012F);
-                const float creature_height = kCreatureHeight * strain_scale * hover_scale *
+                const float creature_height = kCreatureHeight * strain_scale *
                                               (1.0F + breath * 0.022F);
                 const float idle_x = weight_shift * 0.55F +
-                                     edge_side * micro_impulse * 0.35F +
-                                     pointer_lean * 0.55F;
+                                     edge_side * micro_impulse * 0.35F;
                 const float idle_y = -std::fabs(breath) * 0.28F -
-                                     micro_impulse * 0.32F +
-                                     (pointer_hover ? -0.65F : 0.0F);
+                                     micro_impulse * 0.32F;
                 const D2D1_RECT_F destination = D2D1::RectF(
                     x + idle_x - creature_width * 0.5F,
                     y + idle_y - 18.0F - (creature_height - kCreatureHeight) * 0.5F,
                     x + idle_x + creature_width * 0.5F,
                     y + idle_y - 18.0F + creature_height);
                 const float sway_degrees = weight_shift * 0.75F +
-                                           micro_impulse * edge_side * 0.45F +
-                                           pointer_lean * 2.2F;
+                                           micro_impulse * edge_side * 0.45F;
                 state.render_target->SetTransform(
                     D2D1::Matrix3x2F::Rotation(
                         sway_degrees, D2D1::Point2F(x, y + 14.0F)) *
@@ -142,7 +126,9 @@ void draw_mood_character(
                 constexpr int kIdleFrameCount = 8;
                 constexpr int kIdleColumns = 4;
                 constexpr int kIdleRows = 2;
-                const D2D1_SIZE_F sheet_size = character_bitmap->GetSize();
+                const D2D1_SIZE_F sheet_size = use_low_bitmap
+                    ? state.low_mascot_bitmap_size
+                    : state.mascot_bitmap_size;
                 const float frame_width = sheet_size.width / kIdleColumns;
                 const float frame_height = sheet_size.height / kIdleRows;
                 const float character_period = static_cast<float>(idle_period) *

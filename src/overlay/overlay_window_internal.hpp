@@ -52,6 +52,8 @@ struct OverlayWindowState {
     Microsoft::WRL::ComPtr<IWICImagingFactory> wic_factory;
     Microsoft::WRL::ComPtr<ID2D1Bitmap> mascot_bitmap;
     Microsoft::WRL::ComPtr<ID2D1Bitmap> low_mascot_bitmap;
+    D2D1_SIZE_F mascot_bitmap_size{};
+    D2D1_SIZE_F low_mascot_bitmap_size{};
     Microsoft::WRL::ComPtr<IDWriteFactory> write_factory;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> title_format;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> value_format;

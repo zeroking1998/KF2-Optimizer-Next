@@ -151,6 +151,13 @@ Result<OverlayWindow> OverlayWindow::create() {
                              &state->mascot_bitmap);
         load_embedded_bitmap(detail::kPremiumMutantLowIdlePngResource,
                              &state->low_mascot_bitmap);
+        if (state->mascot_bitmap) {
+            state->mascot_bitmap_size = state->mascot_bitmap->GetSize();
+        }
+        if (state->low_mascot_bitmap) {
+            state->low_mascot_bitmap_size =
+                state->low_mascot_bitmap->GetSize();
+        }
     }
     if (FAILED(result)) return Result<OverlayWindow>::failure(
         {ErrorCode::platform_failure, L"Overlay renderer cannot initialize",
