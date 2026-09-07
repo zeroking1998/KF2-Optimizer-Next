@@ -118,6 +118,19 @@ struct UiRuntime {
     float overlay_scale{1.0F};
     std::optional<overlay::OverlayWindow> overlay_window;
     std::optional<overlay::OverlayPresentation> overlay_presentation;
+    bool overlay_placement_cache_valid{false};
+    std::uint64_t overlay_placement_checked_ns{0};
+    HWND overlay_placement_game_window{};
+    RECT overlay_placement_client_bounds{};
+    RECT overlay_placement_monitor_work_bounds{};
+    bool overlay_placement_game_foreground{false};
+    game::WindowUnavailableReason overlay_placement_window_reason{
+        game::WindowUnavailableReason::invalid_geometry};
+    overlay::OverlayCorner overlay_placement_requested_corner{
+        overlay::OverlayCorner::top_right};
+    float overlay_placement_scale{1.0F};
+    std::optional<overlay::OverlayCorner>
+        overlay_placement_resolved_corner;
     std::uint64_t last_telemetry_tick_ns{0};
     std::optional<game::GameProcessIdentity> game_process;
     std::uint64_t last_game_process_scan_ns{0};
@@ -149,6 +162,16 @@ struct UiRuntime {
     std::optional<telemetry::PdhGpuSampler> gpu_metrics;
     std::optional<telemetry::NvidiaGpuSampler> nvidia_gpu_metrics;
     telemetry::GpuUtilizationFilter gpu_utilization_filter;
+    std::uint64_t resource_sample_sequence{0};
+    std::uint64_t cached_process_memory_sample_ns{0};
+    std::uint64_t cached_gpu_sample_ns{0};
+    std::optional<telemetry::ProcessMetrics> cached_process_metrics;
+    std::optional<telemetry::GpuMetrics> cached_gpu_metrics;
+    std::optional<double> cached_driver_gpu_percent;
+    std::optional<telemetry::GpuUtilizationEstimate>
+        cached_gpu_utilization;
+    std::optional<telemetry::SystemMemoryMetrics>
+        cached_system_memory_metrics;
     std::optional<std::uint64_t> adaptive_adapter_luid;
     std::optional<std::uint64_t> confirmed_game_adapter_luid;
     optimizer::PerformanceEvidence optimizer_evidence;

@@ -299,6 +299,18 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     gpu_metrics.reset();
     nvidia_gpu_metrics.reset();
     gpu_utilization_filter.reset();
+    resource_sample_sequence = 0;
+    cached_process_memory_sample_ns = 0;
+    cached_gpu_sample_ns = 0;
+    cached_process_metrics.reset();
+    cached_gpu_metrics.reset();
+    cached_driver_gpu_percent.reset();
+    cached_gpu_utilization.reset();
+    cached_system_memory_metrics.reset();
+    overlay_placement_cache_valid = false;
+    overlay_placement_checked_ns = 0;
+    overlay_placement_game_window = nullptr;
+    overlay_placement_resolved_corner.reset();
     adaptive_adapter_luid.reset();
     confirmed_game_adapter_luid.reset();
     optimizer_evidence = {};
@@ -938,6 +950,10 @@ void UiRuntime::bind_process_gpu_adapter(std::uint64_t adapter_luid) {
 
     if (adaptive_adapter_luid && *adaptive_adapter_luid == adapter_luid) return;
     gpu_utilization_filter.reset();
+    cached_gpu_sample_ns = 0;
+    cached_gpu_metrics.reset();
+    cached_driver_gpu_percent.reset();
+    cached_gpu_utilization.reset();
     adaptive_adapter_luid = adapter_luid;
     adapter_vram_budget = adapter->dedicated_memory_bytes;
     if (auto gpu = telemetry::PdhGpuSampler::create(

@@ -6,9 +6,17 @@
 #include "app/application_runtime.hpp"
 
 namespace kf2::telemetry_pipeline {
+namespace {
+
+bool same_rectangle(const RECT& left, const RECT& right) noexcept {
+    return left.left == right.left && left.top == right.top &&
+        left.right == right.right && left.bottom == right.bottom;
+}
+
+}  // namespace
 
 TelemetryPresentation derive_telemetry_presentation(
-    const app::UiRuntime& runtime, const TelemetryFrame& frame) {
+    app::UiRuntime& runtime, const TelemetryFrame& frame) {
     TelemetryPresentation result;
     const auto analysis = frame.frames.fps
         ? std::optional{optimizer::evaluate({
@@ -29,51 +37,93 @@ TelemetryPresentation derive_telemetry_presentation(
     const auto dedicated_vram_bytes = frame.adapter_gpu
         ? std::optional<std::uint64_t>{frame.adapter_gpu->dedicated_bytes}
         : std::nullopt;
-    auto overlay_presentation = overlay::evaluate_overlay(
-        {runtime.overlay_enabled && runtime.overlay_scene_ready, frame.window,
-         frame.frames, runtime.overlay_corner, runtime.overlay_scale,
-         {330, 105}, 10, frame.evidence.cpu_percent,
-         frame.evidence.gpu_percent, process_ram_bytes, dedicated_vram_bytes,
-         runtime.optimizer_settings.overlay_show_fps,
-         runtime.optimizer_settings.overlay_show_frame_time,
-         runtime.optimizer_settings.overlay_show_cpu,
-         runtime.optimizer_settings.overlay_show_gpu,
-         runtime.optimizer_settings.overlay_show_memory,
-         runtime.controller.theme().animations_enabled});
-    if (overlay_presentation.visible &&
-        game::is_game_area_covered(frame.window,
-                                   overlay_presentation.bounds)) {
+    const auto evaluate_at = [&](overlay::OverlayCorner corner) {
+        return overlay::evaluate_overlay(
+            {runtime.overlay_enabled && runtime.overlay_scene_ready,
+             frame.window, frame.frames, corner, runtime.overlay_scale,
+             {330, 105}, 10, frame.evidence.cpu_percent,
+             frame.evidence.gpu_percent, process_ram_bytes,
+             dedicated_vram_bytes,
+             runtime.optimizer_settings.overlay_show_fps,
+             runtime.optimizer_settings.overlay_show_frame_time,
+             runtime.optimizer_settings.overlay_show_cpu,
+             runtime.optimizer_settings.overlay_show_gpu,
+             runtime.optimizer_settings.overlay_show_memory,
+             runtime.controller.theme().animations_enabled});
+    };
+    auto overlay_presentation = evaluate_at(runtime.overlay_corner);
+    if (!overlay_presentation.visible) {
+        runtime.overlay_placement_cache_valid = false;
+        result.overlay = std::move(overlay_presentation);
+        return result;
+    }
+
+    const bool context_matches =
+        runtime.overlay_placement_cache_valid &&
+        runtime.overlay_placement_game_window == frame.window.window &&
+        same_rectangle(runtime.overlay_placement_client_bounds,
+                       frame.window.client_bounds) &&
+        same_rectangle(runtime.overlay_placement_monitor_work_bounds,
+                       frame.window.monitor_work_bounds) &&
+        runtime.overlay_placement_game_foreground == frame.window.foreground &&
+        runtime.overlay_placement_window_reason == frame.window.reason &&
+        runtime.overlay_placement_requested_corner == runtime.overlay_corner &&
+        runtime.overlay_placement_scale == runtime.overlay_scale;
+    const bool use_cached_placement = overlay_placement_cache_is_fresh(
+        runtime.overlay_placement_checked_ns, frame.observed_at_ns,
+        context_matches);
+    if (use_cached_placement) {
+        if (runtime.overlay_placement_resolved_corner) {
+            if (*runtime.overlay_placement_resolved_corner !=
+                runtime.overlay_corner) {
+                overlay_presentation = evaluate_at(
+                    *runtime.overlay_placement_resolved_corner);
+            }
+        } else {
+            overlay_presentation.visible = false;
+            overlay_presentation.reason =
+                overlay::OverlayHideReason::not_foreground;
+        }
+    } else {
+        std::optional<overlay::OverlayCorner> resolved_corner;
+        if (!game::is_game_area_covered(frame.window,
+                                        overlay_presentation.bounds)) {
+            resolved_corner = runtime.overlay_corner;
+        }
         const std::array corners{
             overlay::OverlayCorner::top_left,
             overlay::OverlayCorner::top_right,
             overlay::OverlayCorner::bottom_left,
             overlay::OverlayCorner::bottom_right};
-        bool found_free_corner = false;
-        for (const auto corner : corners) {
-            if (corner == runtime.overlay_corner) continue;
-            auto candidate = overlay::evaluate_overlay(
-                {runtime.overlay_enabled, frame.window, frame.frames, corner,
-                 runtime.overlay_scale, {330, 105}, 10,
-                 frame.evidence.cpu_percent, frame.evidence.gpu_percent,
-                 process_ram_bytes, dedicated_vram_bytes,
-                 runtime.optimizer_settings.overlay_show_fps,
-                 runtime.optimizer_settings.overlay_show_frame_time,
-                 runtime.optimizer_settings.overlay_show_cpu,
-                 runtime.optimizer_settings.overlay_show_gpu,
-                 runtime.optimizer_settings.overlay_show_memory,
-                 runtime.controller.theme().animations_enabled});
-            if (candidate.visible && !game::is_game_area_covered(
-                                         frame.window, candidate.bounds)) {
-                overlay_presentation = std::move(candidate);
-                found_free_corner = true;
-                break;
+        if (!resolved_corner) {
+            for (const auto corner : corners) {
+                if (corner == runtime.overlay_corner) continue;
+                auto candidate = evaluate_at(corner);
+                if (candidate.visible && !game::is_game_area_covered(
+                                             frame.window,
+                                             candidate.bounds)) {
+                    overlay_presentation = std::move(candidate);
+                    resolved_corner = corner;
+                    break;
+                }
             }
         }
-        if (!found_free_corner) {
+        if (!resolved_corner) {
             overlay_presentation.visible = false;
             overlay_presentation.reason =
                 overlay::OverlayHideReason::not_foreground;
         }
+        runtime.overlay_placement_cache_valid = true;
+        runtime.overlay_placement_checked_ns = frame.observed_at_ns;
+        runtime.overlay_placement_game_window = frame.window.window;
+        runtime.overlay_placement_client_bounds = frame.window.client_bounds;
+        runtime.overlay_placement_monitor_work_bounds =
+            frame.window.monitor_work_bounds;
+        runtime.overlay_placement_game_foreground = frame.window.foreground;
+        runtime.overlay_placement_window_reason = frame.window.reason;
+        runtime.overlay_placement_requested_corner = runtime.overlay_corner;
+        runtime.overlay_placement_scale = runtime.overlay_scale;
+        runtime.overlay_placement_resolved_corner = resolved_corner;
     }
     result.overlay = std::move(overlay_presentation);
     return result;

@@ -11,6 +11,30 @@ struct UiRuntime;
 
 namespace kf2::telemetry_pipeline {
 
+enum class ResourceSampleGroup {
+    process_and_memory,
+    gpu,
+};
+
+inline constexpr std::uint64_t kResourceSampleFreshnessNs =
+    1'000'000'000ULL;
+
+[[nodiscard]] constexpr bool resource_sample_is_fresh(
+    std::uint64_t sampled_at_ns, std::uint64_t now_ns) noexcept {
+    return sampled_at_ns != 0 && now_ns >= sampled_at_ns &&
+        now_ns - sampled_at_ns <= kResourceSampleFreshnessNs;
+}
+
+// Resource counters are intentionally split across adjacent telemetry frames.
+// PresentMon remains on the normal telemetry cadence, while the more expensive
+// process/memory and GPU counter groups never burst on the same UI tick.
+[[nodiscard]] constexpr ResourceSampleGroup resource_sample_group(
+    std::uint64_t sequence) noexcept {
+    return sequence % 2 == 0
+        ? ResourceSampleGroup::process_and_memory
+        : ResourceSampleGroup::gpu;
+}
+
 enum class PresentDrainDisposition {
     frames_ready,
     reconnecting,
