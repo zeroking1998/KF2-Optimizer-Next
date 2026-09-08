@@ -90,56 +90,67 @@ Result<TelemetryFrame> capture_telemetry_frame(
     input.adapter_vram_budget_bytes = runtime.adapter_vram_budget;
 
     if (input.frames.fps && input.frames.frame_time_ms) {
-        const auto sample_group = resource_sample_group(
-            runtime.resource_sample_sequence++);
-        if (sample_group == ResourceSampleGroup::process_and_memory) {
-            runtime.cached_process_memory_sample_ns = now_ns;
-            if (runtime.process_metrics) {
-                auto process = runtime.process_metrics->sample();
-                if (process.has_value()) {
-                    runtime.cached_process_metrics =
-                        std::move(process.value());
+        runtime.resource_telemetry_worker.request(now_ns);
+        const auto snapshot = runtime.resource_telemetry_worker.latest();
+        const bool current_snapshot = snapshot &&
+            snapshot->generation == runtime.resource_telemetry_generation &&
+            snapshot->identity.pid == input.identity.pid &&
+            snapshot->identity.process_start_id ==
+                input.identity.process_start_id;
+        bool accepted_new_gpu_sample = false;
+        if (current_snapshot &&
+            snapshot->publication_sequence !=
+                runtime.resource_telemetry_publication_sequence) {
+            runtime.resource_telemetry_publication_sequence =
+                snapshot->publication_sequence;
+            if (snapshot->process_sampled_at_ns != 0 &&
+                snapshot->process_sampled_at_ns !=
+                    runtime.cached_process_memory_sample_ns) {
+                runtime.cached_process_memory_sample_ns =
+                    snapshot->process_sampled_at_ns;
+                runtime.cached_process_metrics = snapshot->process;
+                runtime.cached_system_memory_metrics = snapshot->system_memory;
+            }
+            if (snapshot->gpu_sampled_at_ns != 0 &&
+                snapshot->gpu_sampled_at_ns != runtime.cached_gpu_sample_ns) {
+                if (snapshot->detected_process_adapter &&
+                    (!input.adapter_luid ||
+                     *input.adapter_luid !=
+                         snapshot->detected_process_adapter->luid)) {
+                    runtime.bind_process_gpu_adapter(
+                        snapshot->detected_process_adapter->luid);
+                    input.adapter_luid = runtime.adaptive_adapter_luid;
+                    input.adapter_vram_budget_bytes =
+                        runtime.adapter_vram_budget;
                 } else {
-                    runtime.cached_process_metrics.reset();
-                }
-            }
-            const auto memory =
-                ::kf2::telemetry::query_system_memory_metrics();
-            if (memory.has_value()) {
-                runtime.cached_system_memory_metrics = memory.value();
-            } else {
-                runtime.cached_system_memory_metrics.reset();
-            }
-        } else {
-            runtime.cached_gpu_sample_ns = now_ns;
-            runtime.cached_driver_gpu_percent.reset();
-            if (runtime.nvidia_gpu_metrics) {
-                const auto driver_gpu = runtime.nvidia_gpu_metrics->sample();
-                if (driver_gpu.has_value()) {
-                    runtime.cached_driver_gpu_percent = driver_gpu.value();
-                }
-            }
-            runtime.cached_gpu_metrics.reset();
-            if (runtime.gpu_metrics) {
-                auto gpu = runtime.gpu_metrics->sample();
-                if (gpu.has_value()) {
-                    bool sample_matches_bound_adapter = true;
-                    if (gpu.value().process_adapter_luid) {
-                        sample_matches_bound_adapter = !input.adapter_luid ||
-                            *input.adapter_luid ==
-                                *gpu.value().process_adapter_luid;
-                        runtime.bind_process_gpu_adapter(
-                            *gpu.value().process_adapter_luid);
-                        input.adapter_luid = runtime.adaptive_adapter_luid;
-                        input.adapter_vram_budget_bytes =
-                            runtime.adapter_vram_budget;
-                    }
-                    // A sample collected by the old sampler must never seed
-                    // the newly selected physical adapter's continuity.
-                    if (sample_matches_bound_adapter) {
-                        runtime.cached_gpu_metrics = std::move(gpu.value());
-                    } else {
-                        runtime.cached_driver_gpu_percent.reset();
+                    runtime.cached_gpu_sample_ns =
+                        snapshot->gpu_sampled_at_ns;
+                    runtime.cached_gpu_metrics = snapshot->gpu;
+                    runtime.cached_driver_gpu_percent =
+                        snapshot->driver_gpu_percent;
+                    accepted_new_gpu_sample = true;
+                    if (runtime.resource_telemetry_nvidia_expected &&
+                        runtime.resource_telemetry_source_announced_generation !=
+                            snapshot->generation) {
+                        runtime.resource_telemetry_source_announced_generation =
+                            snapshot->generation;
+                        const bool afterburner_compatible =
+                            snapshot->nvidia_source ==
+                            ::kf2::telemetry::NvidiaGpuSource::
+                                nvapi_dynamic_pstates;
+                        runtime.events->append({0,
+                            snapshot->nvidia_source
+                                ? diagnostics::Severity::info
+                                : diagnostics::Severity::warning,
+                            snapshot->nvidia_source
+                                ? "NVIDIA_TOTAL_GPU_TELEMETRY_ACTIVE"
+                                : "NVIDIA_TOTAL_GPU_TELEMETRY_FALLBACK",
+                            snapshot->nvidia_source
+                                ? afterburner_compatible
+                                    ? L"GPU usage uses the installed NVIDIA driver's dynamic P-state utilization domain, matching MSI Afterburner semantics"
+                                    : L"GPU usage uses the installed NVIDIA driver's local NVML whole-device fallback"
+                                : L"NVIDIA driver utilization is unavailable; adapter-wide Windows GPU telemetry is used",
+                            L"telemetry"});
                     }
                 }
             }
@@ -151,10 +162,13 @@ Result<TelemetryFrame> capture_telemetry_frame(
                     runtime.cached_gpu_metrics
                         ? runtime.cached_gpu_metrics->adapter_gpu_percent
                         : std::nullopt);
-            runtime.cached_gpu_utilization =
-                runtime.gpu_utilization_filter.update({
-                    now_ns, input.adapter_luid.value_or(0), raw_process_gpu,
-                    raw_adapter_gpu});
+            if (accepted_new_gpu_sample) {
+                runtime.cached_gpu_utilization =
+                    runtime.gpu_utilization_filter.update({
+                        snapshot->gpu_sampled_at_ns,
+                        input.adapter_luid.value_or(0), raw_process_gpu,
+                        raw_adapter_gpu});
+            }
         }
         if (resource_sample_is_fresh(
                 runtime.cached_process_memory_sample_ns, now_ns)) {

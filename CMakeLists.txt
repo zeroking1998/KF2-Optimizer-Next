@@ -188,6 +188,7 @@ add_executable(KF2Optimizer WIN32
     src/security/release_package_repair.cpp
     src/telemetry/telemetry_snapshot.cpp
     src/telemetry/system_metrics.cpp
+    src/telemetry/resource_telemetry_worker.cpp
     src/telemetry/present_source.cpp
     src/telemetry/gpu_metrics.cpp
     src/update/semantic_version.cpp

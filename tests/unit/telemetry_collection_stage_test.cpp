@@ -14,12 +14,6 @@
 
 int main() {
     using namespace kf2::telemetry_pipeline;
-    CHECK(resource_sample_group(0) ==
-          ResourceSampleGroup::process_and_memory);
-    CHECK(resource_sample_group(1) == ResourceSampleGroup::gpu);
-    CHECK(resource_sample_group(2) ==
-          ResourceSampleGroup::process_and_memory);
-    CHECK(resource_sample_group(3) == ResourceSampleGroup::gpu);
     CHECK(!resource_sample_is_fresh(0, 1));
     CHECK(resource_sample_is_fresh(
         1'000, 1'000 + kResourceSampleFreshnessNs));
