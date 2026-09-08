@@ -132,6 +132,8 @@ struct UiRuntime {
     std::optional<overlay::OverlayCorner>
         overlay_placement_resolved_corner;
     std::uint64_t last_telemetry_tick_ns{0};
+    unsigned int current_ui_timer_interval_ms{0};
+    bool animation_timer_active{false};
     std::optional<game::GameProcessIdentity> game_process;
     std::uint64_t last_game_process_scan_ns{0};
     std::optional<game::GameProcessIdentity>

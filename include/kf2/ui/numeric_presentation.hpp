@@ -38,6 +38,8 @@ public:
     void commit_corpse_limit(int value) noexcept;
     [[nodiscard]] bool advance(const NumericPresentationTargets& targets,
                                bool animate) noexcept;
+    [[nodiscard]] bool pending(
+        const NumericPresentationTargets& targets) const noexcept;
 
 private:
     std::optional<int> presented_target_fps_;

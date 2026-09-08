@@ -214,7 +214,7 @@ LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM wparam,
             }
             break;
         case WM_TIMER:
-            if (sink != nullptr) sink->on_timer();
+            if (sink != nullptr) sink->on_timer(wparam);
             return 0;
         case WM_POWERBROADCAST:
             if ((wparam == PBT_APMRESUMEAUTOMATIC ||

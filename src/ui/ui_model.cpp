@@ -164,6 +164,17 @@ bool UiModel::advance_numeric_presentation(bool animate) noexcept {
          .live_sleeping_corpses = status_.live_sleeping_corpses},
         animate);
 }
+bool UiModel::numeric_presentation_pending() const noexcept {
+    return numeric_presentation_.pending(
+        {.target_fps = status_.target_fps,
+         .corpse_limit = status_.corpse_limit,
+         .live_fps = status_.live_fps,
+         .live_frame_time_ms = status_.live_frame_time_ms,
+         .live_cpu_percent = status_.live_cpu_percent,
+         .live_gpu_percent = status_.live_gpu_percent,
+         .live_active_corpses = status_.live_active_corpses,
+         .live_sleeping_corpses = status_.live_sleeping_corpses});
+}
 const std::optional<Notice>& UiModel::notice() const noexcept { return notice_; }
 
 std::wstring UiModel::page_heading() const {

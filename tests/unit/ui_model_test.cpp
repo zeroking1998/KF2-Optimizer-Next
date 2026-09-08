@@ -70,6 +70,16 @@ int main() {
     status.telemetry = L"143.8 FPS, 7.0 ms";
     model.set_status(status);
     CHECK(model.page_body().empty());
+    CHECK(!model.numeric_presentation_pending());
+    static_cast<void>(model.advance_numeric_presentation(true));
+    status.target_fps = 60;
+    model.set_status(status);
+    CHECK(model.numeric_presentation_pending());
+    for (int frame = 0; frame < 64 && model.numeric_presentation_pending();
+         ++frame) {
+        static_cast<void>(model.advance_numeric_presentation(true));
+    }
+    CHECK(!model.numeric_presentation_pending());
 
     static_cast<void>(model.focus_destination(Destination::overlay));
     static_cast<void>(model.activate_focused());

@@ -3,6 +3,7 @@
 #include <iostream>
 
 #include "kf2/ui/shell_controller.hpp"
+#include "kf2/ui/ui_cadence.hpp"
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -46,6 +47,10 @@ int main() {
          .theme_changed = [&] { ++theme_changes; }}};
 
     controller.on_resize({1440, 900});
+    CHECK(controller.animation_active());
+    CHECK(runtime_timer_interval_ms(true, false) == 120U);
+    CHECK(runtime_timer_interval_ms(false, true) == 120U);
+    CHECK(runtime_timer_interval_ms(false, false) == 500U);
     CHECK(controller.layout().root.width == 1440);
     CHECK(controller.layout().startup_progress == 0.0F);
     for (int frame = 0; frame < 79; ++frame) controller.on_timer();
@@ -53,6 +58,7 @@ int main() {
     controller.on_timer();
     controller.on_timer();
     CHECK(controller.layout().startup_progress == 1.0F);
+    CHECK(!controller.animation_active());
     controller.on_paint();
     CHECK(paints == 1);
 
@@ -62,6 +68,7 @@ int main() {
     model.set_status(update_status);
     controller.synchronize_model();
     CHECK(controller.layout().update_glow_progress == 0.0F);
+    CHECK(controller.animation_active());
     controller.on_timer();
     CHECK(controller.layout().update_glow_progress > 0.0F);
     CHECK(controller.layout().update_glow_progress < 1.0F);
@@ -461,7 +468,9 @@ int main() {
     CHECK(model.presented_live_active_corpses() == 5);
     CHECK(model.presented_live_sleeping_corpses() == 15);
     CHECK(invalidations >= 8);
-    CHECK(ticks >= 184);
+    CHECK(ticks == 0);
+    controller.on_timer(kRuntimeTimerId);
+    CHECK(ticks == 1);
     controller.on_system_resume();
     CHECK(resumes == 1);
     controller.on_key({WindowKey::f10});

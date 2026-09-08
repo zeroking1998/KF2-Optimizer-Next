@@ -8,6 +8,7 @@
 #include "kf2/platform/windows/window_events.hpp"
 #include "kf2/ui/shell_layout.hpp"
 #include "kf2/ui/theme.hpp"
+#include "kf2/ui/ui_cadence.hpp"
 #include "kf2/ui/ui_model.hpp"
 
 namespace kf2::ui {
@@ -38,12 +39,13 @@ public:
     void on_theme_changed(platform::windows::ThemeChangedEvent event) override;
     [[nodiscard]] bool on_close() override;
     LRESULT on_get_object(WPARAM wparam, LPARAM lparam) override;
-    void on_timer() override;
+    void on_timer(UINT_PTR timer_id = kAnimationTimerId) override;
     void on_system_resume() override;
 
     [[nodiscard]] const ShellLayoutResult& layout() const noexcept;
     [[nodiscard]] const Theme& theme() const noexcept;
     [[nodiscard]] float dpi() const noexcept;
+    [[nodiscard]] bool animation_active() const noexcept;
     void synchronize_model();
     void focus_target(Destination destination,
                       std::optional<std::string_view> action = std::nullopt);
