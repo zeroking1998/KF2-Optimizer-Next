@@ -181,6 +181,7 @@ public:
     [[nodiscard]] std::optional<int> presented_live_active_corpses() const noexcept;
     [[nodiscard]] std::optional<int> presented_live_sleeping_corpses() const noexcept;
     [[nodiscard]] bool advance_numeric_presentation(bool animate) noexcept;
+    [[nodiscard]] bool numeric_presentation_pending() const noexcept;
     [[nodiscard]] const std::optional<Notice>& notice() const noexcept;
     [[nodiscard]] std::wstring page_heading() const;
     [[nodiscard]] std::wstring page_body() const;

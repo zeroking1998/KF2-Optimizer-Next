@@ -63,7 +63,7 @@ public:
     virtual void on_theme_changed(ThemeChangedEvent event) = 0;
     [[nodiscard]] virtual bool on_close() = 0;
     virtual LRESULT on_get_object(WPARAM, LPARAM) { return 0; }
-    virtual void on_timer() {}
+    virtual void on_timer(UINT_PTR) {}
     virtual void on_system_resume() {}
 };
 

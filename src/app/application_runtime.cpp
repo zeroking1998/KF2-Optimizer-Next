@@ -265,7 +265,10 @@ UiRuntime::~UiRuntime() {
     static_cast<void>(restore_protected_session_config(
         L"KF2 Optimizer closed"));
     if (window) {
-        KillTimer(static_cast<HWND>(window->native_handle_for_testing()), 1);
+        const auto hwnd = static_cast<HWND>(
+            window->native_handle_for_testing());
+        KillTimer(hwnd, ui::kRuntimeTimerId);
+        KillTimer(hwnd, ui::kAnimationTimerId);
     }
 }
 
@@ -347,6 +350,7 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
     : controller{model,
                   {.invalidate = [this] { invalidate(); },
                    .repaint = [this] {
+                       update_animation_cadence();
                        if (window) window->invalidate();
                    },
                    .paint = [this](const ui::ShellLayoutResult& layout) {

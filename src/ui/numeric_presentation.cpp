@@ -157,4 +157,16 @@ bool NumericPresentation::advance(const NumericPresentationTargets& targets,
     return changed;
 }
 
+bool NumericPresentation::pending(
+    const NumericPresentationTargets& targets) const noexcept {
+    return (!previewed_target_fps_ && presented_target_fps_ &&
+            *presented_target_fps_ != targets.target_fps) ||
+        (!previewed_corpse_limit_ && presented_corpse_limit_ &&
+         *presented_corpse_limit_ != targets.corpse_limit) ||
+        presented_live_cpu_percent_ != targets.live_cpu_percent ||
+        presented_live_gpu_percent_ != targets.live_gpu_percent ||
+        presented_live_active_corpses_ != targets.live_active_corpses ||
+        presented_live_sleeping_corpses_ != targets.live_sleeping_corpses;
+}
+
 }  // namespace kf2::ui

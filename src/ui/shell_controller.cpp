@@ -76,8 +76,12 @@ void ShellController::on_key(platform::windows::KeyEvent event) {
     }
 }
 
-void ShellController::on_timer() {
-    if (callbacks_.tick) callbacks_.tick();
+void ShellController::on_timer(UINT_PTR timer_id) {
+    if (timer_id == kRuntimeTimerId) {
+        if (callbacks_.tick) callbacks_.tick();
+        return;
+    }
+    if (timer_id != kAnimationTimerId) return;
     bool changed = model_.advance_numeric_presentation(theme_.animations_enabled);
     if (changed) {
         synchronize_model();
@@ -298,6 +302,35 @@ LRESULT ShellController::on_get_object(WPARAM wparam, LPARAM lparam) {
 const ShellLayoutResult& ShellController::layout() const noexcept { return layout_; }
 const Theme& ShellController::theme() const noexcept { return theme_; }
 float ShellController::dpi() const noexcept { return dpi_; }
+
+bool ShellController::animation_active() const noexcept {
+    if (!theme_.animations_enabled) return false;
+    if (startup_progress_ < 1.0F || page_transition_progress_ < 1.0F ||
+        navigation_transition_progress_ < 1.0F ||
+        update_glow_progress_ < 1.0F ||
+        (closing_ && exit_progress_ < 1.0F) ||
+        model_.numeric_presentation_pending()) {
+        return true;
+    }
+    if (tooltip_target_id_) {
+        const bool visible = hovered_node_id_ == tooltip_target_id_;
+        if ((visible && tooltip_opacity_ < 1.0F) ||
+            (!visible && tooltip_opacity_ > 0.0F)) {
+            return true;
+        }
+    }
+    if (interaction_target_id_ && !interaction_held_ &&
+        interaction_strength_ > 0.0F) {
+        return true;
+    }
+    for (const auto& [id, strength] : hover_strengths_) {
+        const bool hovered = hovered_node_id_ && *hovered_node_id_ == id;
+        if ((hovered && strength < 1.0F) || (!hovered && strength > 0.0F)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 void ShellController::synchronize_model() {
     const Destination destination = model_.selected();

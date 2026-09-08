@@ -1,16 +1,28 @@
 #include "application_runtime.hpp"
+#include "kf2/ui/ui_cadence.hpp"
 
 namespace kf2::app {
 
 void UiRuntime::update_animation_cadence() {
     if (!window) return;
-    const bool animate = controller.theme().animations_enabled;
-    // The shell animations are designed for display-rate presentation, not
-    // high-resolution polling. A regular 16 ms Windows timer stays near 60 Hz
-    // without raising the process-wide multimedia timer resolution. Telemetry
-    // remains independently sampled on its own cadence.
-    SetTimer(static_cast<HWND>(window->native_handle_for_testing()), 1,
-             animate ? 16U : 120U, nullptr);
+    const bool background_work_active = package_repair_state ||
+        update_check_state || update_install_state;
+    const auto interval = ui::runtime_timer_interval_ms(
+        model.status().game_detected, background_work_active);
+    const auto hwnd = static_cast<HWND>(window->native_handle_for_testing());
+    if (interval != current_ui_timer_interval_ms &&
+        SetTimer(hwnd, ui::kRuntimeTimerId, interval, nullptr) != 0) {
+        current_ui_timer_interval_ms = interval;
+    }
+    const bool animation_active = controller.animation_active();
+    if (animation_active && !animation_timer_active) {
+        animation_timer_active =
+            SetTimer(hwnd, ui::kAnimationTimerId,
+                     ui::kAnimationTimerIntervalMs, nullptr) != 0;
+    } else if (!animation_active && animation_timer_active) {
+        KillTimer(hwnd, ui::kAnimationTimerId);
+        animation_timer_active = false;
+    }
 }
 
 
@@ -59,6 +71,7 @@ void UiRuntime::invalidate() {
     if (!callbacks_ready) return;
     controller.synchronize_model();
     if (automation) automation->update_layout(controller.layout());
+    update_animation_cadence();
     if (window) window->invalidate();
 }
 
@@ -66,6 +79,7 @@ void UiRuntime::paint(const ui::ShellLayoutResult& layout) {
     if (!renderer || !window) return;
     RECT area{};
     const auto hwnd = static_cast<HWND>(window->native_handle_for_testing());
+    if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return;
     GetClientRect(hwnd, &area);
     const float dpi = static_cast<float>(GetDpiForWindow(hwnd));
     auto resized = renderer->resize(
