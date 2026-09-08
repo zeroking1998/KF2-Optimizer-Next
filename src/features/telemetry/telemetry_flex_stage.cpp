@@ -47,7 +47,8 @@ void run_flex_control_stage(app::UiRuntime& runtime,
             frame.flex->last_forwarded_substeps);
     const auto decision = decide_flex_control(
         runtime.flex_adaptive_policy,
-        {.actuator_available = observed_solver_ready && pressure_actionable,
+        {.actuator_available = observed_solver_ready,
+         .pressure_actionable = pressure_actionable,
          .target_fps = runtime.effective_target_fps(),
          .quality_change_budget =
              runtime.effective_quality_change_budget(),

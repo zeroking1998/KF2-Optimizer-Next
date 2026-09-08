@@ -48,6 +48,7 @@ int main() {
     CHECK(decision.requested_substeps == 0);
 
     input.actuator_available = true;
+    input.pressure_actionable = true;
     decision = decide_flex_control(policy, input);
     CHECK(decision.constrained);
     CHECK(decision.requested_substeps == 5);
@@ -74,8 +75,8 @@ int main() {
 
     input.fps.reset();
     decision = decide_flex_control(policy, input);
-    CHECK(!decision.constrained);
-    CHECK(decision.requested_substeps == 0);
+    CHECK(decision.constrained);
+    CHECK(decision.requested_substeps == 5);
 
     input.actuator_available = false;
     decision = decide_flex_control(policy, input);
@@ -84,6 +85,7 @@ int main() {
 
     policy.reset();
     input.actuator_available = true;
+    input.pressure_actionable = true;
     input.fps = 60.0;
     input.enemy_pressure = 1.0;
     input.now_ms = 20'000;
@@ -95,6 +97,19 @@ int main() {
     CHECK(decide_flex_control(policy, input).requested_substeps == 1);
     input.now_ms = 25'601;
     CHECK(decide_flex_control(policy, input).requested_substeps == 2);
+
+    input.enemy_pressure.reset();
+    input.pressure_actionable = false;
+    input.now_ms = 25'602;
+    decision = decide_flex_control(policy, input);
+    CHECK(decision.constrained);
+    CHECK(decision.requested_substeps == 2);
+    input.now_ms = 35'601;
+    CHECK(decide_flex_control(policy, input).constrained);
+    input.now_ms = 35'602;
+    decision = decide_flex_control(policy, input);
+    CHECK(!decision.constrained);
+    CHECK(decision.requested_substeps == 0);
 
     kf2::optimizer::AdaptiveActionRecord pending;
     pending.action_id = 17;

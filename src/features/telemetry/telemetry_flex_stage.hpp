@@ -19,6 +19,7 @@ namespace kf2::telemetry_pipeline {
 
 struct FlexControlInput final {
     bool actuator_available{false};
+    bool pressure_actionable{false};
     int target_fps{60};
     int quality_change_budget{1};
     std::optional<double> fps;
@@ -56,6 +57,7 @@ struct FlexControlDecision final {
     flex::AdaptivePolicy& policy, const FlexControlInput& input) noexcept {
     const auto decision = policy.evaluate(
         input.actuator_available,
+        input.pressure_actionable,
         input.target_fps, input.fps, input.now_ms,
         input.quality_change_budget, input.enemy_pressure);
     return {decision.requested_substeps, decision.constrained};
