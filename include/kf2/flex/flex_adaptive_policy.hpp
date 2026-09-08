@@ -13,7 +13,8 @@ struct AdaptiveDecision {
 class AdaptivePolicy final {
 public:
     [[nodiscard]] bool synchronize_observed(int substeps) noexcept;
-    [[nodiscard]] AdaptiveDecision evaluate(bool enabled, int target_fps,
+    [[nodiscard]] AdaptiveDecision evaluate(bool actuator_available,
+        bool pressure_actionable, int target_fps,
         std::optional<double> fps, std::uint64_t now_ms,
         int quality_change_budget = 1,
         std::optional<double> enemy_pressure = std::nullopt) noexcept;
@@ -24,8 +25,11 @@ private:
     int active_substeps_{0};
     int candidate_substeps_{0};
     std::uint64_t candidate_since_{0};
+    std::uint64_t pressure_release_since_{0};
+    std::uint64_t telemetry_missing_since_{0};
     std::uint64_t last_evaluation_ms_{0};
     int target_fps_{0};
+    int observed_substeps_{0};
 };
 
 }  // namespace kf2::flex
