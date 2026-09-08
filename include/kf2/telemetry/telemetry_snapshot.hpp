@@ -5,6 +5,7 @@
 #include <deque>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace kf2::telemetry {
@@ -47,7 +48,7 @@ struct TelemetrySnapshot {
 };
 
 [[nodiscard]] FrameMetrics aggregate_presents(
-    const std::vector<PresentTimestamp>& presents,
+    std::span<const PresentTimestamp> presents,
     const SampleIdentity& expected_identity,
     std::uint64_t now_ns,
     std::uint64_t stale_after_ns);

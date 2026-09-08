@@ -18,6 +18,9 @@ struct PresentEvent {
 };
 class PresentSource final {
 public:
+    static constexpr std::uint64_t longest_window_ns =
+        10'000'000'000ULL;
+
     struct Window {
         FrameMetrics metrics;
         std::uint64_t stream_id{0};
