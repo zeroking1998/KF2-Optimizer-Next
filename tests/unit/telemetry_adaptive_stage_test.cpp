@@ -204,6 +204,19 @@ int main() {
         false, false, 20'000'000'000ULL, 10'000'000'000ULL));
 
     auto frame = complete_frame();
+    CHECK(!adaptive_frame_boundary_requires_drain(frame, 0));
+    CHECK(adaptive_frame_boundary_requires_drain(
+        frame, 9'000'000'001ULL));
+    CHECK(!adaptive_frame_boundary_requires_drain(
+        frame, 9'000'000'000ULL));
+    auto unavailable_frames = frame;
+    unavailable_frames.frames.fps.reset();
+    CHECK(adaptive_frame_boundary_requires_drain(
+        unavailable_frames, 1));
+    auto invalid_age = frame;
+    invalid_age.frames.age_ns = invalid_age.observed_at_ns + 1;
+    CHECK(adaptive_frame_boundary_requires_drain(invalid_age, 1));
+
     // LoadMap is announced before the protected provider starts ticking.
     // Neither that interval nor expired telemetry may admit loading frames.
     {

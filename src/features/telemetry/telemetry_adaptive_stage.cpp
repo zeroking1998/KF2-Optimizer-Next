@@ -457,7 +457,9 @@ void UiRuntime::update_adaptive_controller(
         frame.flex->last_update_tick != 0;
     // Keep the overlay's historical statistics intact. Only the controller
     // excludes presents from before its latest gameplay/action boundary.
-    const auto frames = present_source && adaptive_frame_not_before_ns != 0
+    const auto frames = present_source &&
+            telemetry_pipeline::adaptive_frame_boundary_requires_drain(
+                frame, adaptive_frame_not_before_ns)
         ? present_source->drain(now_ns, 2'000'000'000ULL,
                                 adaptive_frame_not_before_ns)
         : frame.frames;

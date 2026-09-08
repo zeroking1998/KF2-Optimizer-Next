@@ -11,6 +11,7 @@
 #include "features/telemetry/telemetry_frame.hpp"
 #include "kf2/game/adaptive_control_client.hpp"
 #include "kf2/optimizer/adaptive_governor.hpp"
+#include "kf2/telemetry/present_source.hpp"
 
 namespace kf2::app {
 struct UiRuntime;
@@ -53,6 +54,23 @@ struct AdaptiveSampleBuildResult final {
 [[nodiscard]] inline bool requires_fresh_frame_window(
     const AdaptiveSampleBuildResult& result) noexcept {
     return result.sample.map_changed || result.waiting_for_gameplay_telemetry;
+}
+
+// The normal telemetry drain already contains at most the longest rolling
+// PresentMon window. Once that complete window begins after the controller's
+// gameplay/action boundary, a second bounded drain would calculate identical
+// metrics and only repeat allocations and percentile work.
+[[nodiscard]] inline bool adaptive_frame_boundary_requires_drain(
+    const TelemetryFrame& frame, std::uint64_t not_before_ns) noexcept {
+    if (not_before_ns == 0) return false;
+    if (!frame.frames.fps || frame.frames.age_ns > frame.observed_at_ns) {
+        return true;
+    }
+    const auto newest_present_ns =
+        frame.observed_at_ns - frame.frames.age_ns;
+    return newest_present_ns < not_before_ns ||
+           newest_present_ns - not_before_ns <
+               ::kf2::telemetry::PresentSource::longest_window_ns;
 }
 
 struct AdaptiveRuntimeControlInput final {

@@ -23,7 +23,7 @@ double percentile(const std::vector<double>& sorted, double fraction) {
 }  // namespace
 
 FrameMetrics aggregate_presents(
-    const std::vector<PresentTimestamp>& presents,
+    std::span<const PresentTimestamp> presents,
     const SampleIdentity& expected_identity,
     std::uint64_t now_ns,
     std::uint64_t stale_after_ns) {
