@@ -1,6 +1,6 @@
 # Legacy recovery repository audit
 
-This report accounts for the legacy repository at `D:\KF2_r24_WORK` without
+This report accounts for the private legacy recovery repository without
 changing or deleting it. The comparison target is public `origin/main` at
 `6eb0d339124905b2343c6ad48a1109091a227ff0`.
 
