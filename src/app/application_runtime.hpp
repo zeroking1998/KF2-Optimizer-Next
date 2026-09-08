@@ -55,6 +55,7 @@
 #include "kf2/ui/shell_controller.hpp"
 #include "kf2/update/update_controller.hpp"
 #include "kf2/telemetry/gpu_metrics.hpp"
+#include "kf2/telemetry/resource_telemetry_worker.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
 
 namespace kf2::telemetry_pipeline {
@@ -140,12 +141,6 @@ struct UiRuntime {
     std::optional<config::SessionConfigSnapshot> session_config_snapshot;
     bool session_config_waiting_for_launch{false};
     std::uint64_t session_config_launch_deadline_ns{0};
-    std::filesystem::path game_log_path;
-    std::uintmax_t game_log_offset{0};
-    std::uint32_t game_log_volume_serial{0};
-    std::uint64_t game_log_file_index{0};
-    std::uint64_t game_log_process_start_id{0};
-    bool game_log_bound_to_process{false};
     bool game_log_startup_exited{false};
     bool game_log_startup_exit_announced{false};
     bool game_log_new_settings_restart_requested{false};
@@ -157,11 +152,12 @@ struct UiRuntime {
     std::unique_ptr<platform::windows::PresentMonSession> present_session;
     std::uint64_t present_session_started_ns{0};
     unsigned int present_session_restart_count{0};
-    std::unique_ptr<telemetry::ProcessMetricSampler> process_metrics;
-    std::optional<telemetry::PdhGpuSampler> gpu_metrics;
-    std::optional<telemetry::NvidiaGpuSampler> nvidia_gpu_metrics;
+    telemetry::ResourceTelemetryWorker resource_telemetry_worker;
+    std::uint64_t resource_telemetry_generation{0};
+    std::uint64_t resource_telemetry_publication_sequence{0};
+    std::uint64_t resource_telemetry_source_announced_generation{0};
+    bool resource_telemetry_nvidia_expected{false};
     telemetry::GpuUtilizationFilter gpu_utilization_filter;
-    std::uint64_t resource_sample_sequence{0};
     std::uint64_t cached_process_memory_sample_ns{0};
     std::uint64_t cached_gpu_sample_ns{0};
     std::optional<telemetry::ProcessMetrics> cached_process_metrics;
@@ -305,7 +301,7 @@ struct UiRuntime {
 
     bool set_live_adaptive_enabled(bool enabled, std::wstring_view reason);
 
-    void update_overlay_scene_gate();
+    void update_overlay_scene_gate(bool flush = false);
 
     void runtime_tick();
 
@@ -350,6 +346,10 @@ struct UiRuntime {
     bool restore_protected_session_config(std::wstring_view reason);
 
     void try_attach_telemetry();
+    void bind_resource_telemetry(
+        const std::optional<telemetry::GpuAdapter>& adapter,
+        std::optional<std::uint64_t> fallback_adapter_luid = std::nullopt);
+    void reset_resource_telemetry_cache(std::uint64_t generation);
     void bind_process_gpu_adapter(std::uint64_t adapter_luid);
 
     void update_adaptive_controller(

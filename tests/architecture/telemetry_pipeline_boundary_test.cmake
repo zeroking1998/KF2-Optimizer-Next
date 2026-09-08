@@ -112,6 +112,11 @@ endif()
 set(stage_root "${PROJECT_SOURCE_DIR}/src/features/telemetry")
 reject_literals("${stage_root}/telemetry_collection_stage.cpp"
     "Collection stage"
+    "query_system_memory_metrics"
+    "ProcessMetricSampler"
+    "PdhGpuSampler"
+    "NvidiaGpuSampler"
+    "->sample()"
     "write_adaptive_control"
     "atomic_replace_utf8"
     "evaluate_overlay"
@@ -146,6 +151,25 @@ reject_literals("${stage_root}/telemetry_effect_stage.cpp"
     "->drain(")
 
 file(READ "${stage_root}/telemetry_session_stage.cpp" session_stage_text)
+foreach(forbidden_sync_log_call
+        "find_active_game_log"
+        "CreateFileW"
+        "std::ifstream")
+    string(FIND "${session_stage_text}"
+        "${forbidden_sync_log_call}" forbidden_sync_log_offset)
+    if(NOT forbidden_sync_log_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Session stage performs synchronous log I/O on the UI thread: ${forbidden_sync_log_call}")
+    endif()
+endforeach()
+string(FIND "${session_stage_text}"
+    "resource_telemetry_worker.request" worker_request)
+string(FIND "${session_stage_text}"
+    "take_game_log_chunks" worker_log_result)
+if(worker_request EQUAL -1 OR worker_log_result EQUAL -1)
+    message(FATAL_ERROR
+        "Session stage must request and consume the desktop telemetry worker")
+endif()
 string(FIND "${session_stage_text}"
     "game_window = found_window.value()" visible_window_bound)
 string(FIND "${session_stage_text}"

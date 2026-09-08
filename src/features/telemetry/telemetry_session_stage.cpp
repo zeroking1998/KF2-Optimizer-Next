@@ -1,7 +1,5 @@
 #include "features/telemetry/telemetry_session_stage.hpp"
 
-#include "kf2/game/game_log_locator.hpp"
-
 #include "app/application_runtime.hpp"
 
 namespace kf2::telemetry_pipeline {
@@ -295,11 +293,12 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     present_session_restart_count = 0;
     if (present_source) static_cast<void>(present_source->stop());
     present_source.reset();
-    process_metrics.reset();
-    gpu_metrics.reset();
-    nvidia_gpu_metrics.reset();
+    resource_telemetry_worker.clear();
+    resource_telemetry_generation = 0;
+    resource_telemetry_publication_sequence = 0;
+    resource_telemetry_source_announced_generation = 0;
+    resource_telemetry_nvidia_expected = false;
     gpu_utilization_filter.reset();
-    resource_sample_sequence = 0;
     cached_process_memory_sample_ns = 0;
     cached_gpu_sample_ns = 0;
     cached_process_metrics.reset();
@@ -361,12 +360,6 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     flex_adaptive_policy.reset();
     flex_adaptive_constrained = false;
     game_process.reset();
-    game_log_path.clear();
-    game_log_offset = 0;
-    game_log_volume_serial = 0;
-    game_log_file_index = 0;
-    game_log_process_start_id = 0;
-    game_log_bound_to_process = false;
     game_log_startup_exited = false;
     game_log_startup_exit_announced = false;
     game_log_new_settings_restart_requested = false;
@@ -409,7 +402,7 @@ void UiRuntime::begin_game_restart_handoff(
     if (game_restart_handoff_previous_process) return;
     // Consume the process' final native log lines before clearing the old
     // binding. KF2 writes its settings-restart marker immediately before exit.
-    update_overlay_scene_gate();
+    update_overlay_scene_gate(true);
     const bool new_settings_restart =
         game_log_new_settings_restart_requested;
     detach_telemetry(false);
@@ -471,175 +464,105 @@ void UiRuntime::finalize_ended_game_session() {
     invalidate();
 }
 
-void UiRuntime::update_overlay_scene_gate() {
+void UiRuntime::update_overlay_scene_gate(bool flush) {
     if (!installation || !game_process) return;
-    // Log selection is stable for the lifetime of a verified KF2 process.
-    // Enumerating every Launch*.log and probing file locks at telemetry rate
-    // adds avoidable filesystem work, especially on HDDs and large log dirs.
-    // Rediscover only before the first binding or after validation invalidates
-    // the cached file identity.
-    if (telemetry_pipeline::should_rediscover_game_log(
-            game_log_bound_to_process, game_log_path.empty(),
-            game_log_process_start_id, game_process->process_start_id)) {
-        const auto selected_log = game::find_active_game_log(
-            installation->config_root.parent_path() / L"Logs",
-            game_process->process_start_id);
-        if (!selected_log.has_value() || !selected_log.value()) return;
-        game_log_path = selected_log.value()->path;
+    const telemetry::SampleIdentity identity{
+        game_process->pid, game_process->process_start_id};
+    const auto now = monotonic_ns();
+    resource_telemetry_worker.request(now);
+    if (flush) {
+        static_cast<void>(resource_telemetry_worker.wait_until_idle(
+            std::chrono::milliseconds{250}));
     }
-    HANDLE log_file = CreateFileW(game_log_path.c_str(),
-        FILE_READ_ATTRIBUTES | GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (log_file == INVALID_HANDLE_VALUE) {
-        game_log_bound_to_process = false;
-        game_log_path.clear();
-        return;
-    }
-    BY_HANDLE_FILE_INFORMATION information{};
-    const bool inspected = GetFileInformationByHandle(log_file, &information) &&
-        (information.dwFileAttributes &
-            (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0;
-    CloseHandle(log_file);
-    if (!inspected) {
-        game_log_bound_to_process = false;
-        game_log_path.clear();
-        return;
-    }
-    const auto size =
-        (static_cast<std::uintmax_t>(information.nFileSizeHigh) << 32U) |
-        information.nFileSizeLow;
-    const auto last_write =
-        (static_cast<std::uint64_t>(information.ftLastWriteTime.dwHighDateTime) << 32U) |
-        information.ftLastWriteTime.dwLowDateTime;
-    const auto creation_time =
-        (static_cast<std::uint64_t>(information.ftCreationTime.dwHighDateTime) << 32U) |
-        information.ftCreationTime.dwLowDateTime;
-    if (!game::game_log_belongs_to_process(
-            last_write, game_process->process_start_id)) {
-        return;
-    }
-    const auto file_index =
-        (static_cast<std::uint64_t>(information.nFileIndexHigh) << 32U) |
-        information.nFileIndexLow;
-    const bool identity_changed = game_log_bound_to_process &&
-        (game_log_volume_serial != information.dwVolumeSerialNumber ||
-         game_log_file_index != file_index ||
-         game_log_process_start_id != game_process->process_start_id);
-    if (identity_changed) {
-        game_log_bound_to_process = false;
-        game_log_path.clear();
-        return;
-    }
-    if (!game_log_bound_to_process) {
-        corpse_telemetry_tracker.reset();
-        game_log_volume_serial = information.dwVolumeSerialNumber;
-        game_log_file_index = file_index;
-        game_log_process_start_id = game_process->process_start_id;
-        game_log_bound_to_process = true;
-        game_log_offset = 0;
-        game_log_marker_tail.clear();
-        overlay_scene_ready = false;
-        game_log_startup_exited = false;
-        game_log_startup_exit_announced = false;
-        game_log_new_settings_restart_requested = false;
-        game_log_session_parser.reset();
-    }
-    if (size < game_log_offset) {
-        corpse_telemetry_tracker.reset();
-        game_log_offset = 0;
-        game_log_marker_tail.clear();
-        overlay_scene_ready = false;
-        game_log_startup_exited = false;
-        game_log_startup_exit_announced = false;
-        game_log_new_settings_restart_requested = false;
-        game_log_session_parser.reset();
-    }
-    if (size == game_log_offset) {
+    auto chunks = resource_telemetry_worker.take_game_log_chunks(identity);
+    if (chunks.empty()) {
         if (const auto expired =
-                game_log_session_parser.expire_observations(monotonic_ns())) {
+                game_log_session_parser.expire_observations(now)) {
             auto status = model.status();
             status.game_session = game::describe_game_log_session(*expired);
             model.set_status(std::move(status));
         }
         return;
     }
-    std::ifstream input(game_log_path, std::ios::binary);
-    if (!input) return;
-    input.seekg(static_cast<std::streamoff>(game_log_offset));
-    constexpr std::uintmax_t kMaximumLogChunkBytes = 32 * 1024;
-    const auto requested = static_cast<std::size_t>(
-        std::min<std::uintmax_t>(size - game_log_offset,
-                                kMaximumLogChunkBytes));
-    std::string appended(requested, '\0');
-    input.read(appended.data(), static_cast<std::streamsize>(requested));
-    const auto received = static_cast<std::size_t>(input.gcount());
-    if (received == 0) return;
-    appended.resize(received);
-    game_log_offset += received;
-
-    // This is a one-shot startup gate. Once KF2 reaches its main menu the
-    // overlay remains eligible during later map loads and Steam overlays.
-    const std::string marker_input = game_log_marker_tail + appended;
-    if (!game_log_new_settings_restart_requested &&
-        game::game_log_requests_settings_restart(marker_input)) {
-        game_log_new_settings_restart_requested = true;
-        events->append({0, diagnostics::Severity::info,
-            "KF2_NEW_SETTINGS_RESTART_REQUESTED",
-            L"KF2's native log confirmed that the game requested a settings restart",
-            L"game"});
-    }
-    const bool menu_ready =
-        marker_input.find("WidgetInitialized - WidgetName:  StartMenu") !=
-        std::string::npos;
-    if (menu_ready) {
-        overlay_scene_ready = true;
-        game_log_startup_exited = false;
-    } else if (!overlay_scene_ready &&
-               game::game_log_belongs_to_process(
-                   creation_time, game_process->process_start_id) &&
-               game::game_log_reports_engine_exit(marker_input)) {
-        game_log_startup_exited = true;
-        if (!game_log_startup_exit_announced) {
-            game_log_startup_exit_announced = true;
-            events->append({0, diagnostics::Severity::warning,
-                "KF2_STARTUP_EXITED_BEFORE_MENU",
-                L"KF2's engine exited before reaching the main menu; "
-                L"waiting for the remaining process to close",
-                L"telemetry"});
+    for (const auto& chunk : chunks) {
+        if (chunk.reset_parser) {
+            corpse_telemetry_tracker.reset();
+            game_log_marker_tail.clear();
+            overlay_scene_ready = false;
+            game_log_startup_exited = false;
+            game_log_startup_exit_announced = false;
+            game_log_new_settings_restart_requested = false;
+            game_log_session_parser.reset();
+        }
+        if (chunk.bytes.empty()) continue;
+        // This is a one-shot startup gate. Once KF2 reaches its main menu the
+        // overlay remains eligible during later map loads and Steam overlays.
+        const std::string marker_input = game_log_marker_tail + chunk.bytes;
+        if (!game_log_new_settings_restart_requested &&
+            game::game_log_requests_settings_restart(marker_input)) {
+            game_log_new_settings_restart_requested = true;
+            events->append({0, diagnostics::Severity::info,
+                "KF2_NEW_SETTINGS_RESTART_REQUESTED",
+                L"KF2's native log confirmed that the game requested a settings restart",
+                L"game"});
+        }
+        const bool menu_ready =
+            marker_input.find("WidgetInitialized - WidgetName:  StartMenu") !=
+            std::string::npos;
+        if (menu_ready) {
+            overlay_scene_ready = true;
+            game_log_startup_exited = false;
+        } else if (!overlay_scene_ready &&
+                   game::game_log_belongs_to_process(
+                       chunk.creation_filetime,
+                       game_process->process_start_id) &&
+                   game::game_log_reports_engine_exit(marker_input)) {
+            game_log_startup_exited = true;
+            if (!game_log_startup_exit_announced) {
+                game_log_startup_exit_announced = true;
+                events->append({0, diagnostics::Severity::warning,
+                    "KF2_STARTUP_EXITED_BEFORE_MENU",
+                    L"KF2's engine exited before reaching the main menu; "
+                    L"waiting for the remaining process to close",
+                    L"telemetry"});
+                invalidate();
+            }
+        }
+        constexpr std::size_t kMarkerTailBytes = 96;
+        game_log_marker_tail = marker_input.substr(
+            marker_input.size() > kMarkerTailBytes
+                ? marker_input.size() - kMarkerTailBytes : 0);
+        const auto previous_session = game_log_session_parser.current();
+        if (const auto session = game_log_session_parser.feed(
+                chunk.bytes, now)) {
+            auto status = model.status();
+            status.game_session = game::describe_game_log_session(*session);
+            model.set_status(std::move(status));
+            const bool context_changed = !previous_session ||
+                previous_session->map != session->map ||
+                previous_session->game_class != session->game_class ||
+                previous_session->difficulty != session->difficulty ||
+                previous_session->game_length != session->game_length ||
+                previous_session->net_mode != session->net_mode ||
+                previous_session->phase != session->phase ||
+                previous_session->main_menu != session->main_menu;
+            const bool map_changed = previous_session &&
+                previous_session->map != session->map;
+            if (map_changed) {
+                reset_resource_telemetry_cache(
+                    resource_telemetry_worker.invalidate_samples());
+            }
+            if (context_changed) {
+                const char* event_code = session->main_menu
+                    ? "GAME_SESSION_MENU"
+                    : session->phase == game::GameLogPhase::match_ended
+                        ? "GAME_SESSION_ENDED" : "GAME_SESSION_CONTEXT";
+                events->append({0, diagnostics::Severity::info,
+                    event_code,
+                    game::describe_game_log_session(*session), L"game"});
+            }
             invalidate();
         }
-    }
-    constexpr std::size_t kMarkerTailBytes = 96;
-    game_log_marker_tail = marker_input.substr(
-        marker_input.size() > kMarkerTailBytes
-            ? marker_input.size() - kMarkerTailBytes : 0);
-    const auto previous_session = game_log_session_parser.current();
-    if (const auto session = game_log_session_parser.feed(
-            appended, monotonic_ns())) {
-        auto status = model.status();
-        status.game_session = game::describe_game_log_session(*session);
-        model.set_status(std::move(status));
-        const bool context_changed = !previous_session ||
-            previous_session->map != session->map ||
-            previous_session->game_class != session->game_class ||
-            previous_session->difficulty != session->difficulty ||
-            previous_session->game_length != session->game_length ||
-            previous_session->net_mode != session->net_mode ||
-            previous_session->phase != session->phase ||
-            previous_session->main_menu != session->main_menu;
-        // Per-kill counter updates stay visible in the UI but do not flood
-        // the bounded diagnostic event log.
-        if (context_changed) {
-            const char* event_code = session->main_menu
-                ? "GAME_SESSION_MENU"
-                : session->phase == game::GameLogPhase::match_ended
-                    ? "GAME_SESSION_ENDED" : "GAME_SESSION_CONTEXT";
-            events->append({0, diagnostics::Severity::info,
-                event_code,
-                game::describe_game_log_session(*session), L"game"});
-        }
-        invalidate();
     }
 }
 
@@ -769,6 +692,7 @@ void UiRuntime::try_attach_telemetry() {
     // process-local channel and must work during splash, fullscreen and
     // other periods in which KF2 has no inspectable top-level window yet.
     game_process = process.value();
+    bind_resource_telemetry(std::nullopt);
     auto found_window = game::find_game_window(process.value());
     if (!found_window.has_value()) {
         telemetry_failure = L"Waiting for visible KF2 window";
@@ -826,7 +750,6 @@ void UiRuntime::try_attach_telemetry() {
                         "PRESENTMON_UNAVAILABLE",
                         presentmon.error().message, L"telemetry"});
     }
-    process_metrics = std::make_unique<telemetry::ProcessMetricSampler>(*game_process);
     const auto window_luid = telemetry::adapter_luid_for_window(game_window);
     const auto adapters = telemetry::enumerate_gpu_adapters();
     std::optional<telemetry::GpuAdapter> measured_adapter;
@@ -852,36 +775,56 @@ void UiRuntime::try_attach_telemetry() {
     if (measured_adapter) {
         adaptive_adapter_luid = measured_adapter->luid;
         adapter_vram_budget = measured_adapter->dedicated_memory_bytes;
-        auto gpu = telemetry::PdhGpuSampler::create(
-            game_process->pid, measured_adapter->luid);
-        if (gpu.has_value()) gpu_metrics.emplace(std::move(gpu.value()));
-        if (measured_adapter->vendor_id == 0x10DE) {
-            auto nvidia = telemetry::NvidiaGpuSampler::create(
-                measured_adapter->name);
-            if (nvidia.has_value()) {
-                const bool afterburner_compatible =
-                    nvidia.value().source() ==
-                    telemetry::NvidiaGpuSource::nvapi_dynamic_pstates;
-                nvidia_gpu_metrics.emplace(std::move(nvidia.value()));
-                events->append({0, diagnostics::Severity::info,
-                    "NVIDIA_TOTAL_GPU_TELEMETRY_ACTIVE",
-                    afterburner_compatible
-                        ? L"GPU usage uses the installed NVIDIA driver's dynamic P-state utilization domain, matching MSI Afterburner semantics"
-                        : L"GPU usage uses the installed NVIDIA driver's local NVML whole-device fallback",
-                    L"telemetry"});
-            } else {
-                events->append({0, diagnostics::Severity::warning,
-                    "NVIDIA_TOTAL_GPU_TELEMETRY_FALLBACK",
-                    L"NVIDIA driver utilization is unavailable; adapter-wide Windows GPU telemetry is used",
-                    L"telemetry"});
-            }
-        }
+        bind_resource_telemetry(measured_adapter);
     } else if (window_luid.has_value()) {
         adaptive_adapter_luid = window_luid.value();
-        auto gpu = telemetry::PdhGpuSampler::create(
-            game_process->pid, window_luid.value());
-        if (gpu.has_value()) gpu_metrics.emplace(std::move(gpu.value()));
+        bind_resource_telemetry(std::nullopt, window_luid.value());
+    } else {
+        bind_resource_telemetry(std::nullopt);
     }
+}
+
+void UiRuntime::bind_resource_telemetry(
+    const std::optional<telemetry::GpuAdapter>& adapter,
+    std::optional<std::uint64_t> fallback_adapter_luid) {
+    if (!game_process) return;
+    telemetry::ResourceTelemetryBinding binding;
+    binding.identity = {
+        game_process->pid, game_process->process_start_id};
+    if (installation) {
+        binding.game_log_directory =
+            installation->config_root.parent_path() / L"Logs";
+    }
+    if (adapter) {
+        binding.adapter_luid = adapter->luid;
+        binding.adapter_name = adapter->name;
+        binding.adapter_vendor_id = adapter->vendor_id;
+    } else {
+        binding.adapter_luid = fallback_adapter_luid;
+    }
+    const auto generation =
+        resource_telemetry_worker.bind(std::move(binding));
+    if (resource_telemetry_generation == generation && generation != 0) {
+        return;
+    }
+    resource_telemetry_nvidia_expected =
+        adapter && adapter->vendor_id == 0x10DE;
+    reset_resource_telemetry_cache(generation);
+}
+
+void UiRuntime::reset_resource_telemetry_cache(std::uint64_t generation) {
+    if (generation == 0) return;
+    resource_telemetry_generation = generation;
+    resource_telemetry_publication_sequence = 0;
+    resource_telemetry_source_announced_generation = 0;
+    cached_process_memory_sample_ns = 0;
+    cached_gpu_sample_ns = 0;
+    cached_process_metrics.reset();
+    cached_system_memory_metrics.reset();
+    cached_gpu_metrics.reset();
+    cached_driver_gpu_percent.reset();
+    cached_gpu_utilization.reset();
+    gpu_utilization_filter.reset();
 }
 
 void UiRuntime::bind_process_gpu_adapter(std::uint64_t adapter_luid) {
@@ -956,18 +899,7 @@ void UiRuntime::bind_process_gpu_adapter(std::uint64_t adapter_luid) {
     cached_gpu_utilization.reset();
     adaptive_adapter_luid = adapter_luid;
     adapter_vram_budget = adapter->dedicated_memory_bytes;
-    if (auto gpu = telemetry::PdhGpuSampler::create(
-            game_process->pid, adapter_luid);
-        gpu.has_value()) {
-        gpu_metrics.emplace(std::move(gpu.value()));
-    }
-    nvidia_gpu_metrics.reset();
-    if (adapter->vendor_id == 0x10DE) {
-        if (auto nvidia = telemetry::NvidiaGpuSampler::create(adapter->name);
-            nvidia.has_value()) {
-            nvidia_gpu_metrics.emplace(std::move(nvidia.value()));
-        }
-    }
+    bind_resource_telemetry(adapter);
 }
 
 }  // namespace kf2::app
