@@ -345,6 +345,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     adaptive_quality_rollback_target.reset();
     adaptive_quality_rollback_resource.reset();
     adaptive_frame_not_before_ns = 0;
+    adaptive_map_ready_ns = 0;
     adaptive_variable_frame_rate_enabled.reset();
     adaptive_frame_rate_config_write_time.reset();
     adaptive_frame_rate_mode_read_failed = false;

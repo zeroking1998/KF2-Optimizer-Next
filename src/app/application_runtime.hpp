@@ -192,6 +192,7 @@ struct UiRuntime {
     std::optional<game::AdaptiveResourceControl>
         adaptive_quality_rollback_resource;
     std::uint64_t adaptive_frame_not_before_ns{0};
+    std::uint64_t adaptive_map_ready_ns{0};
     std::optional<bool> adaptive_variable_frame_rate_enabled;
     std::optional<std::filesystem::file_time_type>
         adaptive_frame_rate_config_write_time;

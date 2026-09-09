@@ -491,6 +491,29 @@ int main() {
     CHECK(selected->resource == game::AdaptiveResourceControl::cpu);
     CHECK(selected->quality == 90);
 
+    // A newly playable map may still contain first-wave and scene-settling
+    // stalls. Runtime quality waits for that bounded window, while the
+    // governor and non-quality controls remain free to observe and react.
+    auto post_map_quality = control;
+    post_map_quality.state = optimizer::AdaptiveControllerState::emergency;
+    post_map_quality.primary_resource = optimizer::ResourceKind::unknown;
+    post_map_quality.primary_confidence = 0.0;
+    post_map_quality.bottleneck = optimizer::AdaptiveBottleneck::unknown;
+    post_map_quality.bottleneck_confidence = 0.0;
+    post_map_quality.map_ready_ns = 1'000'000'000ULL;
+    CHECK(!select_adaptive_runtime_control(post_map_quality));
+    post_map_quality.now_ns = 16'000'000'000ULL;
+    CHECK(!select_adaptive_runtime_control(post_map_quality));
+    post_map_quality.now_ns = 26'000'000'000ULL;
+    CHECK(select_adaptive_runtime_control(post_map_quality));
+
+    auto attributed_post_map_quality = post_map_quality;
+    attributed_post_map_quality.now_ns = 16'000'000'000ULL;
+    attributed_post_map_quality.primary_resource =
+        optimizer::ResourceKind::cpu;
+    attributed_post_map_quality.primary_confidence = 0.9;
+    CHECK(select_adaptive_runtime_control(attributed_post_map_quality));
+
     // Time since dispatch is not evidence of a response to the applied change.
     // Even emergency changes must complete the full response window before a
     // follow-up, otherwise their evidence is repeatedly superseded.

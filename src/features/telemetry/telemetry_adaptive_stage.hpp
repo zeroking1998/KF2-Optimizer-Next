@@ -101,6 +101,7 @@ struct AdaptiveRuntimeControlInput final {
     bool overdraw_minimum_reached{false};
     bool effects_control_available{false};
     std::uint64_t now_ns{0};
+    std::uint64_t map_ready_ns{0};
     std::uint64_t last_dispatch_ns{0};
     std::uint64_t last_applied_ns{0};
     std::uint64_t sample_timestamp_ns{0};
@@ -201,6 +202,15 @@ select_adaptive_runtime_control(
         return std::nullopt;
     }
 
+    constexpr std::uint64_t kPostMapTargetedQualityStabilizationNs =
+        15'000'000'000ULL;
+    if (input.map_ready_ns != 0 &&
+        (input.now_ns < input.map_ready_ns ||
+         input.now_ns - input.map_ready_ns <
+             kPostMapTargetedQualityStabilizationNs)) {
+        return std::nullopt;
+    }
+
     // Receipt time, not request time, starts the response observation window.
     // Every quality step needs one second to settle, five seconds to measure,
     // and one second for batched telemetry. Skipping this for emergencies made
@@ -279,6 +289,20 @@ select_adaptive_runtime_control(
               input.bottleneck, input.bottleneck_confidence,
               input.overdraw_minimum_reached,
               input.effects_control_available);
+    // A broad mixed reduction has no attributed bottleneck. Give the fresh
+    // ten-second percentile window one additional clean cycle after the
+    // general post-map guard, otherwise its retained loading tail can trigger
+    // an immediate 100 -> 80 -> 100 cycle. Targeted, evidenced controls remain
+    // available after the shorter guard above.
+    constexpr std::uint64_t kPostMapMixedQualityStabilizationNs =
+        25'000'000'000ULL;
+    if (!recovery &&
+        resource == game::AdaptiveResourceControl::mixed &&
+        input.map_ready_ns != 0 &&
+        input.now_ns - input.map_ready_ns <
+            kPostMapMixedQualityStabilizationNs) {
+        return std::nullopt;
+    }
     return AdaptiveRuntimeControlSelection{resource, desired};
 }
 

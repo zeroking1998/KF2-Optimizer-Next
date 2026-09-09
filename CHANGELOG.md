@@ -35,6 +35,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Prevented transient frame-percentile lows immediately after a map becomes
+  playable from causing an unnecessary quality reduction and rollback cycle.
 - Fixed the first launch after a Windows GPU-preference change inheriting the
   previous adapter's texture-memory profile. Multi-GPU startup now uses the
   configured physical adapter identity or a conservative cross-adapter budget.

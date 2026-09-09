@@ -13,7 +13,6 @@ void run_adaptive_stage(app::UiRuntime& runtime,
 }  // namespace kf2::telemetry_pipeline
 
 namespace kf2::app {
-
 void UiRuntime::update_adaptive_controller(
     const telemetry_pipeline::TelemetryFrame& frame) {
     const auto now_ns = frame.observed_at_ns;
@@ -440,6 +439,7 @@ void UiRuntime::update_adaptive_controller(
         adaptive_quality_last_dispatch_ns = 0;
         adaptive_quality_last_applied_ns = 0;
         adaptive_frame_not_before_ns = now_ns;
+        adaptive_map_ready_ns = now_ns;
         events->append({0, diagnostics::Severity::info,
             "ADAPTIVE_GAMEPLAY_STARTED",
             L"Adaptive began a fresh controller window after verified active gameplay was detected",
@@ -501,6 +501,7 @@ void UiRuntime::update_adaptive_controller(
         adaptive_decision = {};
         adaptive_profile_gate.reset();
         if (sample_build.sample.map_changed) {
+            adaptive_map_ready_ns = now_ns;
             adaptive_quality_reduction_floor.reset(
                 optimizer_settings.adaptive_minimum_quality);
             adaptive_quality_rollback_target.reset();
@@ -683,6 +684,7 @@ void UiRuntime::update_adaptive_controller(
                 sample.capabilities.particle_control ==
                     optimizer::AdaptiveCapabilityState::available,
             .now_ns = now_ns,
+            .map_ready_ns = adaptive_map_ready_ns,
             .last_dispatch_ns = adaptive_quality_last_dispatch_ns,
             .last_applied_ns = adaptive_quality_last_applied_ns,
             .sample_timestamp_ns = sample.timestamp_ns});
