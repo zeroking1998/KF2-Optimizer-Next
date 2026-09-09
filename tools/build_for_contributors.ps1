@@ -33,7 +33,6 @@ if ($Package) {
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
     & (Join-Path $PSScriptRoot 'build_kf2_telemetry.ps1') @telemetryArguments
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     & (Join-Path $PSScriptRoot 'test.ps1') -Configuration Release
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

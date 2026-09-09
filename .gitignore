@@ -3,6 +3,7 @@
 /.vs/
 /.cache/
 /assets/offline_telemetry/KF2OptimizerTelemetry.u
+/assets/offline_telemetry/KF2OptimizerTelemetry.u.sources.sha256
 
 CMakeUserPresets.json
 *.user

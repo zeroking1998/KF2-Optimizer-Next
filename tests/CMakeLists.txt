@@ -699,6 +699,15 @@ target_compile_definitions(kf2_gameplay_log_lab_test PRIVATE
 target_link_libraries(kf2_gameplay_log_lab_test PRIVATE bcrypt ws2_32)
 add_test(NAME kf2_gameplay_log_lab_test COMMAND kf2_gameplay_log_lab_test)
 
+find_program(KF2_POWERSHELL_EXECUTABLE NAMES pwsh powershell REQUIRED)
+add_test(NAME kf2_telemetry_source_fingerprint_test
+    COMMAND "${KF2_POWERSHELL_EXECUTABLE}" -NoProfile -File
+        "${PROJECT_SOURCE_DIR}/tests/tools/telemetry_source_fingerprint_test.ps1"
+        -FingerprintScript
+        "${PROJECT_SOURCE_DIR}/tools/get_telemetry_source_fingerprint.ps1"
+        -SourceRoot
+        "${PROJECT_SOURCE_DIR}/assets/offline_telemetry")
+
 add_executable(kf2_adaptive_control_client_test
     unit/adaptive_control_client_test.cpp
     "${PROJECT_SOURCE_DIR}/src/game/adaptive_control_client.cpp")

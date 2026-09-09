@@ -65,6 +65,10 @@ if ([string]::IsNullOrWhiteSpace($SeedModule)) {
     $SeedModule = $resolvedOutput
 }
 $resolvedSeed = [IO.Path]::GetFullPath($SeedModule)
+$sourceFingerprintScript = Join-Path $PSScriptRoot `
+    'get_telemetry_source_fingerprint.ps1'
+$sourceFingerprintPath = "$resolvedOutput.sources.sha256"
+$sourceFingerprint = (& $sourceFingerprintScript).Trim()
 $editorPath = Join-Path $resolvedSdkRoot 'Binaries\Win64\KFEditor.exe'
 $configPath = Join-Path $resolvedUserRoot 'KFGame\Config\KFEngine.ini'
 $sdkConfigPath = Join-Path $resolvedUserRoot 'KFGame\Config\KFSDK.ini'
@@ -316,7 +320,15 @@ if (-not $buildSucceeded) {
     throw 'KF2 telemetry compilation did not complete.'
 }
 
+$fingerprintTemporaryPath = "$sourceFingerprintPath.tmp"
+[IO.File]::WriteAllText(
+    $fingerprintTemporaryPath, "$sourceFingerprint`r`n",
+    [Text.ASCIIEncoding]::new())
+Move-Item -LiteralPath $fingerprintTemporaryPath `
+    -Destination $sourceFingerprintPath -Force
+
 $hash = (Get-FileHash -LiteralPath $resolvedOutput -Algorithm SHA256).Hash
 Write-Host "PASS: KF2 telemetry module compiled: $resolvedOutput"
 Write-Host "SHA256: $hash"
+Write-Host "SOURCE SHA256: $sourceFingerprint"
 Write-Host 'PASS: KF2 compiler INIs, published module and staging state restored'
