@@ -147,5 +147,20 @@ int main() {
     CHECK(*reset_metrics.average_fps > 119.0);
     CHECK(*reset_metrics.sustained_one_percent_low_fps > 119.0);
     CHECK(*reset_metrics.one_percent_low_fps > 119.0);
+
+    PresentSource asynchronous{game, 256};
+    CHECK(asynchronous.start().has_value());
+    for (std::uint64_t index = 0; index <= 120; ++index) {
+        CHECK(asynchronous.ingest(
+            {game, 8'000'000'000ULL + index * 16'000'000ULL,
+             1, true, 0}));
+    }
+    asynchronous.request_drain(9'921'000'000ULL, 500'000'000ULL);
+    CHECK(asynchronous.wait_for_drain(std::chrono::seconds{2}));
+    const auto asynchronous_metrics = asynchronous.latest_drain();
+    CHECK(asynchronous_metrics.has_value());
+    CHECK(asynchronous_metrics->fps.has_value());
+    CHECK(*asynchronous_metrics->fps > 62.0 &&
+          *asynchronous_metrics->fps < 63.0);
     return EXIT_SUCCESS;
 }

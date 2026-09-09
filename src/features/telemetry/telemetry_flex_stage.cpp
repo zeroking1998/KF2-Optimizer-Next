@@ -64,7 +64,8 @@ void run_flex_control_stage(app::UiRuntime& runtime,
 
 namespace kf2::app {
 
-bool UiRuntime::save_flex_report(const flex::ObservationSnapshot& observed) {
+bool UiRuntime::save_flex_report(const flex::ObservationSnapshot& observed,
+                                 bool wait_for_disk) {
     if (observed.update_calls == 0) return false;
     std::ostringstream report;
     report << "{\"version\":6,\"configured_mode\":\"auto\""
@@ -138,9 +139,11 @@ bool UiRuntime::save_flex_report(const flex::ObservationSnapshot& observed) {
                << (observed.solver_tracking_quarantined ? "true" : "false")
                << ",\"relay_healthy\":"
                << (observed.pass_through_healthy ? "true" : "false") << '}';
-    const auto saved = platform::windows::atomic_replace_utf8(
+    const auto ticket = file_writer.submit(
         settings_path.parent_path() / L"flex-session-last.json", report.str());
-    return saved.has_value();
+    if (ticket == 0) return false;
+    return !wait_for_disk ||
+        file_writer.wait(ticket, std::chrono::seconds{5});
 }
 
 void UiRuntime::observe_flex_process() {

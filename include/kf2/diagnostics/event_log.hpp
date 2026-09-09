@@ -1,14 +1,20 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <condition_variable>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <vector>
 
+#include "kf2/core/result.hpp"
 #include "kf2/game/game_log_session.hpp"
 
 namespace kf2::diagnostics {
@@ -41,11 +47,17 @@ struct EventLogStats {
 
 class EventLog final {
 public:
+    using PersistFunction = std::function<Result<bool>(
+        const std::filesystem::path&, std::string_view)>;
+
     explicit EventLog(std::size_t capacity,
-                      std::filesystem::path persistence_path = {});
+                      std::filesystem::path persistence_path = {},
+                      PersistFunction persist = {});
+    ~EventLog();
     void append(Event event);
     [[nodiscard]] std::vector<Event> snapshot() const;
     void clear();
+    [[nodiscard]] bool flush(std::chrono::milliseconds timeout);
     [[nodiscard]] const std::filesystem::path& persistence_path() const noexcept;
     [[nodiscard]] bool persistence_ready() const noexcept;
     [[nodiscard]] EventLogStats stats() const noexcept;
@@ -56,9 +68,18 @@ private:
     std::deque<Event> events_;
     std::uint64_t next_sequence_{1};
     std::filesystem::path persistence_path_;
+    PersistFunction persist_;
     bool persistence_ready_{false};
+    bool persistence_pending_{false};
+    bool persistence_active_{false};
+    std::uint64_t persistence_revision_{0};
+    std::uint64_t persisted_revision_{0};
+    std::condition_variable persistence_changed_;
+    std::jthread persistence_worker_;
     EventLogStats stats_{};
-    void persist_locked() noexcept;
+    void schedule_persist_locked() noexcept;
+    void persist_worker(std::stop_token stop) noexcept;
+    void record_persistence_failure_locked() noexcept;
 };
 
 [[nodiscard]] std::string serialize_events_json(

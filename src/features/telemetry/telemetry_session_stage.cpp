@@ -282,7 +282,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     }
     if (last_flex_observation && last_flex_observation->update_calls > 0) {
         const auto& observed = *last_flex_observation;
-        const bool saved = save_flex_report(observed);
+        const bool saved = save_flex_report(observed, true);
         events->append({0,
             saved && observed.pass_through_healthy
                 ? diagnostics::Severity::info : diagnostics::Severity::warning,

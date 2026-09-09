@@ -1,4 +1,5 @@
 #include "kf2/telemetry/present_source.hpp"
+#include <Windows.h>
 #include <algorithm>
 #include <iterator>
 
@@ -10,12 +11,21 @@ constexpr std::uint64_t kTailWindowNs = 5'000'000'000ULL;
 }
 
 PresentSource::PresentSource(SampleIdentity identity, std::size_t capacity)
-    : identity_{identity}, capacity_{std::max<std::size_t>(2, capacity)} {}
+    : identity_{identity},
+      capacity_{std::max<std::size_t>(2, capacity)},
+      drain_worker_{[this](std::stop_token stop) { drain_worker(stop); }} {}
+
+PresentSource::~PresentSource() {
+    drain_worker_.request_stop();
+    drain_changed_.notify_all();
+    if (drain_worker_.joinable()) drain_worker_.join();
+}
 
 Result<bool> PresentSource::start() {
     std::scoped_lock lock{mutex_};
     streams_.clear(); reported_loss_ = 0; schema_failure_ = false;
     ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
+    invalidate_drain_locked();
     running_ = true;
     return Result<bool>::success(true);
 }
@@ -23,6 +33,7 @@ Result<bool> PresentSource::stop() {
     std::scoped_lock lock{mutex_};
     running_ = false; streams_.clear(); reported_loss_ = 0;
     ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
+    invalidate_drain_locked();
     return Result<bool>::success(true);
 }
 void PresentSource::bind(SampleIdentity identity) {
@@ -30,12 +41,14 @@ void PresentSource::bind(SampleIdentity identity) {
     identity_ = identity; streams_.clear(); reported_loss_ = 0;
     ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
     schema_failure_ = false;
+    invalidate_drain_locked();
 }
 void PresentSource::reset_statistics() {
     std::scoped_lock lock{mutex_};
     streams_.clear();
     reported_loss_ = 0;
     ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
+    invalidate_drain_locked();
 }
 bool PresentSource::ingest(const PresentEvent& event) {
     std::scoped_lock lock{mutex_};
@@ -163,6 +176,89 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
     result.loss_count += reported_loss;
     if (result.fps && result.loss_count > 0) result.quality = SampleQuality::degraded;
     return result;
+}
+
+void PresentSource::request_drain(std::uint64_t now_ns,
+                                  std::uint64_t stale_after_ns,
+                                  std::uint64_t not_before_ns) {
+    std::scoped_lock lock{mutex_};
+    auto request = DrainRequest{
+        drain_generation_, now_ns, stale_after_ns, not_before_ns};
+    if (not_before_ns == 0) {
+        pending_default_drain_ = request;
+    } else {
+        pending_bounded_drain_ = request;
+    }
+    drain_changed_.notify_one();
+}
+
+std::optional<FrameMetrics> PresentSource::latest_drain(
+    std::uint64_t not_before_ns) const {
+    std::scoped_lock lock{mutex_};
+    if (not_before_ns == 0) return latest_default_drain_;
+    if (latest_bounded_not_before_ns_ != not_before_ns) return std::nullopt;
+    return latest_bounded_drain_;
+}
+
+bool PresentSource::wait_for_drain(std::chrono::milliseconds timeout) {
+    std::unique_lock lock{mutex_};
+    return drain_changed_.wait_for(lock, timeout, [this] {
+        return !pending_default_drain_ && !pending_bounded_drain_ &&
+               !drain_active_;
+    });
+}
+
+void PresentSource::invalidate_drain_locked() {
+    ++drain_generation_;
+    pending_default_drain_.reset();
+    pending_bounded_drain_.reset();
+    latest_default_drain_.reset();
+    latest_bounded_drain_.reset();
+    latest_bounded_not_before_ns_ = 0;
+    drain_changed_.notify_all();
+}
+
+void PresentSource::drain_worker(std::stop_token stop) {
+    static_cast<void>(SetThreadPriority(
+        GetCurrentThread(), THREAD_PRIORITY_NORMAL));
+    while (!stop.stop_requested()) {
+        DrainRequest request;
+        {
+            std::unique_lock lock{mutex_};
+            drain_changed_.wait(lock, [&] {
+                return pending_default_drain_.has_value() ||
+                       pending_bounded_drain_.has_value() ||
+                       stop.stop_requested();
+            });
+            if (pending_default_drain_) {
+                request = *pending_default_drain_;
+                pending_default_drain_.reset();
+            } else if (pending_bounded_drain_) {
+                request = *pending_bounded_drain_;
+                pending_bounded_drain_.reset();
+            } else {
+                return;
+            }
+            drain_active_ = true;
+        }
+
+        auto metrics = drain(request.now_ns, request.stale_after_ns,
+                             request.not_before_ns);
+        {
+            std::scoped_lock lock{mutex_};
+            drain_active_ = false;
+            if (!stop.stop_requested() &&
+                request.generation == drain_generation_) {
+                if (request.not_before_ns == 0) {
+                    latest_default_drain_ = std::move(metrics);
+                } else {
+                    latest_bounded_drain_ = std::move(metrics);
+                    latest_bounded_not_before_ns_ = request.not_before_ns;
+                }
+            }
+        }
+        drain_changed_.notify_all();
+    }
 }
 
 PresentSource::Window PresentSource::measure_window(

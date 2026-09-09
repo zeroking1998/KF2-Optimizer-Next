@@ -50,6 +50,7 @@
 #include "kf2/optimizer/optimizer_engine.hpp"
 #include "kf2/platform/windows/presentmon_session.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
+#include "kf2/platform/windows/async_file_writer.hpp"
 #include "kf2/ui/automation_provider.hpp"
 #include "kf2/ui/direct2d_renderer.hpp"
 #include "kf2/ui/shell_controller.hpp"
@@ -103,6 +104,7 @@ struct UiRuntime {
     std::optional<ui::Direct2DShellRenderer> renderer;
     std::optional<ui::AutomationProvider> automation;
     diagnostics::EventLog* events{};
+    platform::windows::AsyncFileWriter file_writer;
     std::filesystem::path settings_path;
     std::filesystem::path executable_root;
     config::Settings optimizer_settings;
@@ -292,7 +294,8 @@ struct UiRuntime {
                 : std::nullopt);
     }
 
-    bool save_flex_report(const flex::ObservationSnapshot& observed);
+    bool save_flex_report(const flex::ObservationSnapshot& observed,
+                          bool wait_for_disk = false);
 
     void detach_telemetry(bool restore_live_quality = true);
 

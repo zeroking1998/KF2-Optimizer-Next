@@ -87,8 +87,11 @@ void write_events(std::ostringstream& output, const std::vector<Event>& events) 
 }  // namespace
 
 EventLog::EventLog(std::size_t capacity,
-                   std::filesystem::path persistence_path)
-    : capacity_{capacity}, persistence_path_{std::move(persistence_path)} {
+                   std::filesystem::path persistence_path,
+                   PersistFunction persist)
+    : capacity_{capacity},
+      persistence_path_{std::move(persistence_path)},
+      persist_{std::move(persist)} {
     if (capacity == 0) {
         throw std::invalid_argument{"EventLog capacity must be positive"};
     }
@@ -99,10 +102,35 @@ EventLog::EventLog(std::size_t capacity,
             !parent.empty() && std::filesystem::is_directory(parent, error) &&
             !error;
         if (persistence_ready_) {
-            std::scoped_lock lock{mutex_};
-            persist_locked();
+            if (!persist_) {
+                persist_ = [](const std::filesystem::path& path,
+                              std::string_view bytes) {
+                    return platform::windows::atomic_replace_utf8(path, bytes);
+                };
+            }
+            bool initialized = false;
+            try {
+                const auto result = persist_(
+                    persistence_path_, serialize_events_json({}));
+                initialized = result.has_value() && result.value();
+            } catch (...) {
+                initialized = false;
+            }
+            if (!initialized) {
+                record_persistence_failure_locked();
+            } else {
+                persistence_worker_ = std::jthread(
+                    [this](std::stop_token stop) { persist_worker(stop); });
+            }
         }
     }
+}
+
+EventLog::~EventLog() {
+    if (!persistence_worker_.joinable()) return;
+    persistence_worker_.request_stop();
+    persistence_changed_.notify_all();
+    persistence_worker_.join();
 }
 
 void EventLog::append(Event event) {
@@ -126,7 +154,7 @@ void EventLog::append(Event event) {
             previous.message == event.message && previous.source == event.source) {
             if (previous.repeat_count < UINT32_MAX) ++previous.repeat_count;
             if (stats_.deduplicated != UINT64_MAX) ++stats_.deduplicated;
-            persist_locked();
+            schedule_persist_locked();
             return;
         }
     }
@@ -145,7 +173,7 @@ void EventLog::append(Event event) {
         if (stats_.overwritten != UINT64_MAX) ++stats_.overwritten;
     }
     events_.push_back(std::move(event));
-    persist_locked();
+    schedule_persist_locked();
 }
 
 std::vector<Event> EventLog::snapshot() const {
@@ -156,7 +184,22 @@ std::vector<Event> EventLog::snapshot() const {
 void EventLog::clear() {
     std::scoped_lock lock{mutex_};
     events_.clear();
-    persist_locked();
+    schedule_persist_locked();
+}
+
+bool EventLog::flush(std::chrono::milliseconds timeout) {
+    std::unique_lock lock{mutex_};
+    if (persistence_path_.empty()) return true;
+    if (!persistence_ready_) return false;
+    const auto target_revision = persistence_revision_;
+    persistence_changed_.notify_one();
+    const auto completed = persistence_changed_.wait_for(
+        lock, timeout, [&] {
+            return persisted_revision_ >= target_revision ||
+                   !persistence_ready_;
+        });
+    return completed && persistence_ready_ &&
+           persisted_revision_ >= target_revision;
 }
 
 const std::filesystem::path& EventLog::persistence_path() const noexcept {
@@ -173,21 +216,65 @@ EventLogStats EventLog::stats() const noexcept {
     return stats_;
 }
 
-void EventLog::persist_locked() noexcept {
+void EventLog::schedule_persist_locked() noexcept {
     if (!persistence_ready_ || persistence_path_.empty()) return;
-    try {
-        std::vector<Event> copy{events_.begin(), events_.end()};
-        const auto written = platform::windows::atomic_replace_utf8(
-            persistence_path_, serialize_events_json(copy));
-        if (!written.has_value()) {
-            persistence_ready_ = false;
-            if (stats_.persistence_failures != UINT64_MAX)
-                ++stats_.persistence_failures;
+    if (persistence_revision_ != UINT64_MAX) ++persistence_revision_;
+    persistence_pending_ = true;
+    persistence_changed_.notify_one();
+}
+
+void EventLog::persist_worker(std::stop_token stop) noexcept {
+    for (;;) {
+        std::vector<Event> copy;
+        std::uint64_t revision = 0;
+        {
+            std::unique_lock lock{mutex_};
+            persistence_changed_.wait(lock, [&] {
+                return persistence_pending_ || stop.stop_requested();
+            });
+            if (!persistence_pending_) {
+                if (stop.stop_requested()) return;
+                continue;
+            }
+            try {
+                copy.assign(events_.begin(), events_.end());
+            } catch (...) {
+                record_persistence_failure_locked();
+                persistence_changed_.notify_all();
+                return;
+            }
+            revision = persistence_revision_;
+            persistence_pending_ = false;
+            persistence_active_ = true;
         }
-    } catch (...) {
-        persistence_ready_ = false;
-        if (stats_.persistence_failures != UINT64_MAX)
-            ++stats_.persistence_failures;
+
+        bool succeeded = false;
+        try {
+            const auto result = persist_(
+                persistence_path_, serialize_events_json(copy));
+            succeeded = result.has_value() && result.value();
+        } catch (...) {
+            succeeded = false;
+        }
+
+        {
+            std::scoped_lock lock{mutex_};
+            persistence_active_ = false;
+            if (!succeeded) {
+                record_persistence_failure_locked();
+            } else {
+                persisted_revision_ = std::max(persisted_revision_, revision);
+            }
+        }
+        persistence_changed_.notify_all();
+    }
+}
+
+void EventLog::record_persistence_failure_locked() noexcept {
+    persistence_ready_ = false;
+    persistence_pending_ = false;
+    if (stats_.persistence_failures != UINT64_MAX) {
+        ++stats_.persistence_failures;
     }
 }
 

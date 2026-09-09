@@ -457,11 +457,16 @@ void UiRuntime::update_adaptive_controller(
         frame.flex->last_update_tick != 0;
     // Keep the overlay's historical statistics intact. Only the controller
     // excludes presents from before its latest gameplay/action boundary.
-    const auto frames = present_source &&
-            telemetry_pipeline::adaptive_frame_boundary_requires_drain(
-                frame, adaptive_frame_not_before_ns)
-        ? present_source->drain(now_ns, 2'000'000'000ULL,
-                                adaptive_frame_not_before_ns)
+    const bool bounded_frames_required = present_source &&
+        telemetry_pipeline::adaptive_frame_boundary_requires_drain(
+            frame, adaptive_frame_not_before_ns);
+    if (bounded_frames_required) {
+        present_source->request_drain(
+            now_ns, 2'000'000'000ULL, adaptive_frame_not_before_ns);
+    }
+    const auto frames = bounded_frames_required
+        ? present_source->latest_drain(adaptive_frame_not_before_ns)
+              .value_or(::kf2::telemetry::FrameMetrics{})
         : frame.frames;
     const auto sample_build = telemetry_pipeline::build_adaptive_sample(
         frame,
