@@ -320,6 +320,7 @@ private:
         std::unique_ptr<NativeResourceSamplers> native;
         std::optional<ResourceTelemetryBinding> log_binding;
         std::unique_ptr<NativeGameLogSampler> log_sampler;
+        game::GameLogSessionParser log_parser;
         while (!stop.stop_requested()) {
             ResourceSampleRequest request;
             std::uint64_t request_generation = 0;
@@ -355,13 +356,33 @@ private:
                         log_binding = request.binding;
                         log_sampler = std::make_unique<NativeGameLogSampler>(
                             request.binding);
+                        log_parser.reset();
                     }
                     bool log_queue_has_room = false;
                     {
                         std::scoped_lock lock{mutex_};
                         log_queue_has_room = log_chunks_.size() < 8;
                     }
-                    if (log_queue_has_room) log_chunk = log_sampler->sample();
+                    if (log_queue_has_room) {
+                        log_chunk = log_sampler->sample();
+                        if (log_chunk) {
+                            if (log_chunk->reset_parser) log_parser.reset();
+                            if (!log_chunk->bytes.empty()) {
+                                log_chunk->parsed_session = log_parser.feed(
+                                    log_chunk->bytes, request.sampled_at_ns);
+                            }
+                            log_chunk->parser_stats = log_parser.stats();
+                        } else if (const auto expired =
+                                       log_parser.expire_observations(
+                                           request.sampled_at_ns)) {
+                            GameLogChunk expiration;
+                            expiration.identity = request.binding.identity;
+                            expiration.observations_expired = true;
+                            expiration.parsed_session = std::move(expired);
+                            expiration.parser_stats = log_parser.stats();
+                            log_chunk = std::move(expiration);
+                        }
+                    }
                     if (!native || !sampler_binding ||
                         !same_session(*sampler_binding, request.binding)) {
                         native = std::make_unique<NativeResourceSamplers>(

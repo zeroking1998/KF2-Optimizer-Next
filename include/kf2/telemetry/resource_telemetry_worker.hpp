@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "kf2/game/game_log_session.hpp"
 #include "kf2/telemetry/gpu_metrics.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
 #include "kf2/telemetry/telemetry_snapshot.hpp"
@@ -32,8 +33,11 @@ struct ResourceTelemetryBinding final {
 struct GameLogChunk final {
     SampleIdentity identity;
     bool reset_parser{false};
+    bool observations_expired{false};
     std::uint64_t creation_filetime{0};
     std::string bytes;
+    std::optional<game::GameLogSession> parsed_session;
+    game::GameLogParserStats parser_stats;
 };
 
 struct ResourceSampleRequest final {

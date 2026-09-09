@@ -153,9 +153,8 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
     if (last_report_gameplay_session &&
         last_report_gameplay_session->telemetry_control_port) {
         port = last_report_gameplay_session->telemetry_control_port;
-    } else if (game_log_session_parser.current() &&
-               game_log_session_parser.current()->telemetry_control_port) {
-        port = game_log_session_parser.current()->telemetry_control_port;
+    } else if (game_log_session && game_log_session->telemetry_control_port) {
+        port = game_log_session->telemetry_control_port;
     }
     if (!port) {
         events->append({0, diagnostics::Severity::warning,
@@ -208,9 +207,8 @@ bool UiRuntime::set_live_adaptive_enabled(
     if (last_report_gameplay_session &&
         last_report_gameplay_session->telemetry_control_port) {
         port = last_report_gameplay_session->telemetry_control_port;
-    } else if (game_log_session_parser.current() &&
-               game_log_session_parser.current()->telemetry_control_port) {
-        port = game_log_session_parser.current()->telemetry_control_port;
+    } else if (game_log_session && game_log_session->telemetry_control_port) {
+        port = game_log_session->telemetry_control_port;
     }
     if (!port || adaptive_mode_dispatcher.busy()) return false;
 
@@ -380,7 +378,8 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     game_log_startup_exit_announced = false;
     game_log_new_settings_restart_requested = false;
     game_log_marker_tail.clear();
-    game_log_session_parser.reset();
+    game_log_session.reset();
+    game_log_parser_stats = {};
     auto status = model.status();
     status.game_session.clear();
     status.flex_telemetry = L"FleX telemetry not observed";
@@ -491,16 +490,9 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
             std::chrono::milliseconds{250}));
     }
     auto chunks = resource_telemetry_worker.take_game_log_chunks(identity);
-    if (chunks.empty()) {
-        if (const auto expired =
-                game_log_session_parser.expire_observations(now)) {
-            auto status = model.status();
-            status.game_session = game::describe_game_log_session(*expired);
-            model.set_status(std::move(status));
-        }
-        return;
-    }
-    for (const auto& chunk : chunks) {
+    if (chunks.empty()) return;
+    for (auto& chunk : chunks) {
+        game_log_parser_stats = chunk.parser_stats;
         if (chunk.reset_parser) {
             corpse_telemetry_tracker.reset();
             game_log_marker_tail.clear();
@@ -508,98 +500,104 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
             game_log_startup_exited = false;
             game_log_startup_exit_announced = false;
             game_log_new_settings_restart_requested = false;
-            game_log_session_parser.reset();
+            game_log_session.reset();
         }
-        if (chunk.bytes.empty()) continue;
-        // This is a one-shot startup gate. Once KF2 reaches its main menu the
-        // overlay remains eligible during later map loads and Steam overlays.
-        const std::string marker_input = game_log_marker_tail + chunk.bytes;
-        if (!game_log_new_settings_restart_requested &&
-            game::game_log_requests_settings_restart(marker_input)) {
-            game_log_new_settings_restart_requested = true;
-            events->append({0, diagnostics::Severity::info,
-                "KF2_NEW_SETTINGS_RESTART_REQUESTED",
-                L"KF2's native log confirmed that the game requested a settings restart",
-                L"game"});
-        }
-        const bool menu_ready =
-            marker_input.find("WidgetInitialized - WidgetName:  StartMenu") !=
-            std::string::npos;
-        if (menu_ready) {
-            overlay_scene_ready = true;
-            game_log_startup_exited = false;
-        } else if (!overlay_scene_ready &&
-                   game::game_log_belongs_to_process(
-                       chunk.creation_filetime,
-                       game_process->process_start_id) &&
-                   game::game_log_reports_engine_exit(marker_input)) {
-            game_log_startup_exited = true;
-            if (!game_log_startup_exit_announced) {
-                game_log_startup_exit_announced = true;
-                events->append({0, diagnostics::Severity::warning,
-                    "KF2_STARTUP_EXITED_BEFORE_MENU",
-                    L"KF2's engine exited before reaching the main menu; "
-                    L"waiting for the remaining process to close",
-                    L"telemetry"});
-                invalidate();
+        if (!chunk.bytes.empty()) {
+            // This is a one-shot startup gate. Once KF2 reaches its main menu
+            // the overlay remains eligible during later map loads and Steam
+            // overlays. The worker retains raw bytes only for these cheap
+            // boundary markers; structured parsing happens off the UI thread.
+            const std::string marker_input =
+                game_log_marker_tail + chunk.bytes;
+            if (!game_log_new_settings_restart_requested &&
+                game::game_log_requests_settings_restart(marker_input)) {
+                game_log_new_settings_restart_requested = true;
+                events->append({0, diagnostics::Severity::info,
+                    "KF2_NEW_SETTINGS_RESTART_REQUESTED",
+                    L"KF2's native log confirmed that the game requested a settings restart",
+                    L"game"});
             }
+            const bool menu_ready = marker_input.find(
+                "WidgetInitialized - WidgetName:  StartMenu") !=
+                std::string::npos;
+            if (menu_ready) {
+                overlay_scene_ready = true;
+                game_log_startup_exited = false;
+            } else if (!overlay_scene_ready &&
+                       game::game_log_belongs_to_process(
+                           chunk.creation_filetime,
+                           game_process->process_start_id) &&
+                       game::game_log_reports_engine_exit(marker_input)) {
+                game_log_startup_exited = true;
+                if (!game_log_startup_exit_announced) {
+                    game_log_startup_exit_announced = true;
+                    events->append({0, diagnostics::Severity::warning,
+                        "KF2_STARTUP_EXITED_BEFORE_MENU",
+                        L"KF2's engine exited before reaching the main menu; "
+                        L"waiting for the remaining process to close",
+                        L"telemetry"});
+                    invalidate();
+                }
+            }
+            constexpr std::size_t kMarkerTailBytes = 96;
+            game_log_marker_tail = marker_input.substr(
+                marker_input.size() > kMarkerTailBytes
+                    ? marker_input.size() - kMarkerTailBytes : 0);
         }
-        constexpr std::size_t kMarkerTailBytes = 96;
-        game_log_marker_tail = marker_input.substr(
-            marker_input.size() > kMarkerTailBytes
-                ? marker_input.size() - kMarkerTailBytes : 0);
-        const auto previous_session = game_log_session_parser.current();
-        if (const auto session = game_log_session_parser.feed(
-                chunk.bytes, now)) {
+        const auto previous_session = game_log_session;
+        if (chunk.parsed_session) {
+            game_log_session = std::move(chunk.parsed_session);
+            const auto& session = *game_log_session;
             auto status = model.status();
-            status.game_session = game::describe_game_log_session(*session);
+            status.game_session = game::describe_game_log_session(session);
             model.set_status(std::move(status));
+            if (chunk.observations_expired) continue;
             const bool context_changed = !previous_session ||
-                previous_session->map != session->map ||
-                previous_session->game_class != session->game_class ||
-                previous_session->difficulty != session->difficulty ||
-                previous_session->game_length != session->game_length ||
-                previous_session->net_mode != session->net_mode ||
-                previous_session->phase != session->phase ||
-                previous_session->main_menu != session->main_menu;
+                previous_session->map != session.map ||
+                previous_session->game_class != session.game_class ||
+                previous_session->difficulty != session.difficulty ||
+                previous_session->game_length != session.game_length ||
+                previous_session->net_mode != session.net_mode ||
+                previous_session->phase != session.phase ||
+                previous_session->main_menu != session.main_menu;
             const bool map_changed = previous_session &&
-                previous_session->map != session->map;
+                previous_session->map != session.map;
             if (map_changed) {
                 reset_resource_telemetry_cache(
                     resource_telemetry_worker.invalidate_samples());
             }
             if (context_changed) {
-                const char* event_code = session->main_menu
+                const char* event_code = session.main_menu
                     ? "GAME_SESSION_MENU"
-                    : session->phase == game::GameLogPhase::match_ended
+                    : session.phase == game::GameLogPhase::match_ended
                         ? "GAME_SESSION_ENDED" : "GAME_SESSION_CONTEXT";
                 events->append({0, diagnostics::Severity::info,
                     event_code,
-                    game::describe_game_log_session(*session), L"game"});
+                    game::describe_game_log_session(session), L"game"});
             }
-            if (session->level_load_seconds &&
+            if (session.level_load_seconds &&
                 (!previous_session ||
                  previous_session->level_load_seconds !=
-                     session->level_load_seconds)) {
+                     session.level_load_seconds)) {
                 events->append({0, diagnostics::Severity::info,
                     "KF2_LEVEL_LOAD_COMPLETED",
                     L"KF2 reported native level loading complete in " +
-                        seconds_text(*session->level_load_seconds) +
+                        seconds_text(*session.level_load_seconds) +
                         L" seconds",
                     L"game"});
             }
-            if (session->loading_movie_seconds &&
+            if (session.loading_movie_seconds &&
                 (!previous_session ||
                  previous_session->loading_movie_seconds !=
-                     session->loading_movie_seconds)) {
+                     session.loading_movie_seconds)) {
                 std::wstring message =
                     L"KF2 ended the loading movie after " +
-                    seconds_text(*session->loading_movie_seconds) +
+                    seconds_text(*session.loading_movie_seconds) +
                     L" seconds";
-                if (session->stream_all_resources_seconds) {
+                if (session.stream_all_resources_seconds) {
                     message += L"; final native StreamAllResources took " +
                         seconds_text(
-                            *session->stream_all_resources_seconds) +
+                            *session.stream_all_resources_seconds) +
                         L" seconds";
                 }
                 events->append({0, diagnostics::Severity::info,

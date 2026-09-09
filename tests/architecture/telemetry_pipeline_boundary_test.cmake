@@ -154,7 +154,9 @@ file(READ "${stage_root}/telemetry_session_stage.cpp" session_stage_text)
 foreach(forbidden_sync_log_call
         "find_active_game_log"
         "CreateFileW"
-        "std::ifstream")
+        "std::ifstream"
+        "game_log_session_parser.feed"
+        "expire_observations")
     string(FIND "${session_stage_text}"
         "${forbidden_sync_log_call}" forbidden_sync_log_offset)
     if(NOT forbidden_sync_log_offset EQUAL -1)
@@ -169,6 +171,16 @@ string(FIND "${session_stage_text}"
 if(worker_request EQUAL -1 OR worker_log_result EQUAL -1)
     message(FATAL_ERROR
         "Session stage must request and consume the desktop telemetry worker")
+endif()
+file(READ "${PROJECT_SOURCE_DIR}/src/telemetry/resource_telemetry_worker.cpp"
+    resource_worker_text)
+string(FIND "${resource_worker_text}"
+    "log_parser.feed" worker_log_parse)
+string(FIND "${resource_worker_text}"
+    "log_parser.expire_observations" worker_log_expiration)
+if(worker_log_parse EQUAL -1 OR worker_log_expiration EQUAL -1)
+    message(FATAL_ERROR
+        "Desktop telemetry worker must own structured game-log parsing and expiration")
 endif()
 string(FIND "${session_stage_text}"
     "game_window = found_window.value()" visible_window_bound)

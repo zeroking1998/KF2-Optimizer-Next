@@ -115,7 +115,7 @@ product_diagnostics::ProductReport make_product_report(
                   runtime.game_process->process_start_id}
             : std::nullopt,
         .event_log_stats = runtime.events->stats(),
-        .game_log_stats = runtime.game_log_session_parser.stats(),
+        .game_log_stats = runtime.game_log_parser_stats,
         .retained_crash_records =
             product_diagnostics::retained_crash_record_count(
                 runtime.settings_path.parent_path() /
@@ -437,7 +437,7 @@ app::runtime::DispatchResult full_check(
         .restore_config_after_game =
             runtime.model.status().restore_config_after_game,
         .event_log_stats = runtime.events->stats(),
-        .game_log_stats = runtime.game_log_session_parser.stats(),
+        .game_log_stats = runtime.game_log_parser_stats,
         .retained_crash_records = crash_count,
         .events = runtime.events->snapshot(),
     };
