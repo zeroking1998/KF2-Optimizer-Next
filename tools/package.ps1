@@ -46,13 +46,35 @@ $knownManagedPaths = [Collections.Generic.HashSet[string]]::new(
 
 $telemetryModule = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerTelemetry.u'
-if (-not (Test-Path -LiteralPath $telemetryModule -PathType Leaf)) {
-    Write-Host 'Telemetry module is missing; preparing a verified build seed.'
+$telemetryFingerprintScript = Join-Path $PSScriptRoot `
+    'get_telemetry_source_fingerprint.ps1'
+$telemetryFingerprintPath = "$telemetryModule.sources.sha256"
+$expectedTelemetryFingerprint = (& $telemetryFingerprintScript).Trim()
+$storedTelemetryFingerprint = if (
+    Test-Path -LiteralPath $telemetryFingerprintPath -PathType Leaf) {
+    (Get-Content -LiteralPath $telemetryFingerprintPath -Raw).Trim()
+} else {
+    ''
+}
+$telemetryModuleExists = Test-Path -LiteralPath $telemetryModule -PathType Leaf
+$telemetryNeedsBuild = -not $telemetryModuleExists -or
+    $storedTelemetryFingerprint -ne $expectedTelemetryFingerprint
+if ($telemetryNeedsBuild) {
+    if ($telemetryModuleExists) {
+        Write-Host ('Telemetry sources changed or have no verified build ' +
+            'fingerprint; recompiling the module.')
+    } else {
+        Write-Host 'Telemetry module is missing; preparing a verified build seed.'
+    }
     if ([string]::IsNullOrWhiteSpace($TelemetrySeedModule)) {
-        $TelemetrySeedModule = (
-            & (Join-Path $PSScriptRoot 'download_telemetry_seed.ps1') |
-                Select-Object -Last 1)
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        if ($telemetryModuleExists) {
+            $TelemetrySeedModule = $telemetryModule
+        } else {
+            $TelemetrySeedModule = (
+                & (Join-Path $PSScriptRoot 'download_telemetry_seed.ps1') |
+                    Select-Object -Last 1)
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
     }
     Write-Host 'Compiling telemetry with the installed KF2 SDK.'
     $telemetryBuild = @{
@@ -60,7 +82,16 @@ if (-not (Test-Path -LiteralPath $telemetryModule -PathType Leaf)) {
         SeedModule = $TelemetrySeedModule
     }
     & (Join-Path $PSScriptRoot 'build_kf2_telemetry.ps1') @telemetryBuild
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+$storedTelemetryFingerprint = if (
+    Test-Path -LiteralPath $telemetryFingerprintPath -PathType Leaf) {
+    (Get-Content -LiteralPath $telemetryFingerprintPath -Raw).Trim()
+} else {
+    ''
+}
+if ($storedTelemetryFingerprint -ne $expectedTelemetryFingerprint) {
+    throw ('Telemetry module source fingerprint does not match the current ' +
+        'UnrealScript sources.')
 }
 $actualTelemetryHash = (Get-FileHash -LiteralPath $telemetryModule `
     -Algorithm SHA256).Hash.ToLowerInvariant()
