@@ -177,6 +177,7 @@ var int AdaptiveVisibleRagdollSleeps;
 var float AdaptiveLastNearRagdollRejectRealTime;
 var array<string> AdaptiveCorpsePhysicsActionIds;
 var int AdaptiveCorpsePhysicsActionIdCount;
+var float AdaptiveLastPhysicsMutationWorldTime;
 var float AdaptiveLastDistancePhysicsRealTime;
 var float AdaptiveLastCorpseFreezeRealTime;
 var int AdaptiveCorpsePhysicsPressureLevel;
@@ -1626,6 +1627,11 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
             continue;
         }
 
+        if (!ReserveAdaptivePhysicsMutationForCurrentFrame())
+        {
+            AdaptiveBaselineScanCursor = (Index + 1) % PoolLength;
+            return SleepsThisPass;
+        }
         Candidate.Mesh.PutRigidBodyToSleep();
         if (Candidate.Mesh.RigidBodyIsAwake())
         {
@@ -2033,6 +2039,17 @@ function int GetAdaptiveCorpsePhysicsActionHash(string ActionId)
             Asc(Mid(ActionId, Index, 1));
     }
     return HashValue & 8191;
+}
+
+function bool ReserveAdaptivePhysicsMutationForCurrentFrame()
+{
+    if (WorldInfo == None ||
+        AdaptiveLastPhysicsMutationWorldTime == WorldInfo.TimeSeconds)
+    {
+        return false;
+    }
+    AdaptiveLastPhysicsMutationWorldTime = WorldInfo.TimeSeconds;
+    return true;
 }
 
 function bool EnsureAdaptiveCorpsePhysicsActionIds()
@@ -2597,6 +2614,10 @@ function int RestoreOneAdaptiveCorpseFreeze()
         }
         if (Candidate.Physics == PHYS_None)
         {
+            if (!ReserveAdaptivePhysicsMutationForCurrentFrame())
+            {
+                return 0;
+            }
             Candidate.SetPhysics(PHYS_RigidBody);
             // A failed readback still consumed the only physics mutation
             // permitted in this release callback.
@@ -2709,6 +2730,10 @@ function bool FreezeOnePressureEligibleCorpse(
     // deterministic and a failed bookkeeping path cannot require a rollback
     // mutation in the same callback.
     if (!CanRegisterAdaptiveCorpsePhysicsAction(Candidate, "aging_freeze"))
+    {
+        return false;
+    }
+    if (!ReserveAdaptivePhysicsMutationForCurrentFrame())
     {
         return false;
     }
@@ -2902,6 +2927,12 @@ function int WakeNearAdaptiveDistanceSleptCorpses()
         bWasSleeping = !Candidate.Mesh.RigidBodyIsAwake();
         if (bWasSleeping)
         {
+            if (!ReserveAdaptivePhysicsMutationForCurrentFrame())
+            {
+                AdaptiveDistanceWakeScanCursor =
+                    (Index + 1) % AdaptiveDistanceSleptCorpses.Length;
+                return WakeCount;
+            }
             Candidate.Mesh.WakeRigidBody();
             if (!Candidate.Mesh.RigidBodyIsAwake())
             {
@@ -2962,6 +2993,10 @@ function int WakeAdaptiveDistanceSleptCorpseBatch()
         }
         if (!Candidate.Mesh.RigidBodyIsAwake())
         {
+            if (!ReserveAdaptivePhysicsMutationForCurrentFrame())
+            {
+                return WakeCount;
+            }
             Candidate.Mesh.WakeRigidBody();
             if (Candidate.Mesh.RigidBodyIsAwake())
             {
@@ -3139,6 +3174,10 @@ function bool SleepOneDistantMonsterCorpse(
     {
         LogAdaptiveCorpsePathDeferred(Candidate, "distance", RejectReason,
             LinearSpeed, AngularSpeed, PositionChange, StableMilliseconds);
+        return false;
+    }
+    if (!ReserveAdaptivePhysicsMutationForCurrentFrame())
+    {
         return false;
     }
     CorpseId = GetAdaptiveCorpseActionId(Candidate);
@@ -3573,6 +3612,10 @@ function bool SleepOneVisibleMonsterCorpse(
     {
         LogAdaptiveCorpsePathDeferred(Candidate, "ragdoll", RejectReason,
             LinearSpeed, AngularSpeed, PositionChange, StableMilliseconds);
+        return false;
+    }
+    if (!ReserveAdaptivePhysicsMutationForCurrentFrame())
+    {
         return false;
     }
     Candidate.Mesh.PutRigidBodyToSleep();
@@ -5568,5 +5611,6 @@ defaultproperties
     RemoteRole=ROLE_None
     bAdaptiveCorpseDebugMarkers=false
     bAdaptiveZedDebugMarkers=false
+    AdaptiveLastPhysicsMutationWorldTime=-1.0
     bAdaptiveRuntimeEnabled=true
 }

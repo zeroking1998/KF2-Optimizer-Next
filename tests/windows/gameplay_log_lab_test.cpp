@@ -1132,6 +1132,62 @@ int main() {
         telemetry_source, "ScanCount = Min(AdaptiveCorpseScanBudget,") >= 6);
     CHECK(count_occurrences(
         telemetry_source, "Scanned < AdaptiveCorpseScanBudget") >= 7);
+    CHECK(telemetry_source.find(
+        "var float AdaptiveLastPhysicsMutationWorldTime") !=
+          std::string::npos);
+    const auto physics_frame_reservation = telemetry_source.find(
+        "function bool ReserveAdaptivePhysicsMutationForCurrentFrame()");
+    CHECK(physics_frame_reservation != std::string::npos);
+    const auto physics_frame_reservation_end = telemetry_source.find(
+        "\nfunction ", physics_frame_reservation + 1);
+    CHECK(physics_frame_reservation_end != std::string::npos);
+    const auto physics_frame_reservation_body = telemetry_source.substr(
+        physics_frame_reservation,
+        physics_frame_reservation_end - physics_frame_reservation);
+    CHECK(physics_frame_reservation_body.find(
+        "AdaptiveLastPhysicsMutationWorldTime == WorldInfo.TimeSeconds") !=
+          std::string::npos);
+    CHECK(physics_frame_reservation_body.find(
+        "AdaptiveLastPhysicsMutationWorldTime = WorldInfo.TimeSeconds") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveLastPhysicsMutationWorldTime=-1.0") != std::string::npos);
+    const char* physics_mutation_functions[] = {
+        "function int SleepBaselineAwakeMonsterCorpses(",
+        "function int RestoreOneAdaptiveCorpseFreeze()",
+        "function bool FreezeOnePressureEligibleCorpse(",
+        "function int WakeNearAdaptiveDistanceSleptCorpses()",
+        "function int WakeAdaptiveDistanceSleptCorpseBatch()",
+        "function bool SleepOneDistantMonsterCorpse(",
+        "function bool SleepOneVisibleMonsterCorpse("};
+    const char* physics_mutation_calls[] = {
+        "Candidate.Mesh.PutRigidBodyToSleep()",
+        "Candidate.SetPhysics(PHYS_RigidBody)",
+        "Candidate.SetPhysics(PHYS_None)",
+        "Candidate.Mesh.WakeRigidBody()",
+        "Candidate.Mesh.WakeRigidBody()",
+        "Candidate.Mesh.PutRigidBodyToSleep()",
+        "Candidate.Mesh.PutRigidBodyToSleep()"};
+    for (std::size_t mutation_index = 0;
+         mutation_index < std::size(physics_mutation_functions);
+         ++mutation_index) {
+        const auto mutation_function_start =
+            telemetry_source.find(physics_mutation_functions[mutation_index]);
+        CHECK(mutation_function_start != std::string::npos);
+        const auto mutation_function_end = telemetry_source.find(
+            "\nfunction ", mutation_function_start + 1);
+        CHECK(mutation_function_end != std::string::npos);
+        const auto mutation_function_body = telemetry_source.substr(
+            mutation_function_start,
+            mutation_function_end - mutation_function_start);
+        const auto frame_reservation_call = mutation_function_body.find(
+            "ReserveAdaptivePhysicsMutationForCurrentFrame()");
+        const auto physics_mutation_call = mutation_function_body.find(
+            physics_mutation_calls[mutation_index]);
+        CHECK(frame_reservation_call != std::string::npos);
+        CHECK(physics_mutation_call != std::string::npos);
+        CHECK(frame_reservation_call < physics_mutation_call);
+    }
     for (const auto* cursor : {"AdaptiveCleanupScanCursor",
              "AdaptiveBaselineScanCursor", "AdaptiveFreezeScanCursor",
              "AdaptiveDistanceScanCursor", "AdaptiveLodScanCursor",
