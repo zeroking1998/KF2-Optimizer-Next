@@ -839,6 +839,9 @@ add_executable(kf2_resource_telemetry_worker_test
     "${PROJECT_SOURCE_DIR}/src/telemetry/system_metrics.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/gpu_metrics.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_log_locator.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/game_log_parsing.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/game_log_session.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/game_log_telemetry.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_session.cpp"
 )
 target_include_directories(kf2_resource_telemetry_worker_test PRIVATE

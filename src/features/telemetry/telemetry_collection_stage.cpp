@@ -84,7 +84,7 @@ Result<TelemetryFrame> capture_telemetry_frame(
     input.observed_at_ns = now_ns;
     input.window = window;
     input.frames = std::move(frames);
-    input.gameplay = runtime.game_log_session_parser.current();
+    input.gameplay = runtime.game_log_session;
     input.flex = current_flex_snapshot(runtime);
     input.adapter_luid = runtime.adaptive_adapter_luid;
     input.adapter_vram_budget_bytes = runtime.adapter_vram_budget;

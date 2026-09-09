@@ -315,7 +315,8 @@ int main() {
         const auto log = root / L"Launch.log";
         {
             std::ofstream output(log, std::ios::binary);
-            output << "first line\n";
+            output << "[0053.20] Log: LoadMap: KF-BioticsLab?"
+                      "Game=KFGameContent.KFGameInfo_Survival\n";
         }
         wchar_t module[MAX_PATH + 1]{};
         const DWORD length = GetModuleFileNameW(nullptr, module, MAX_PATH);
@@ -330,34 +331,58 @@ int main() {
         {
             ResourceTelemetryWorker worker;
             static_cast<void>(worker.bind(log_binding));
-            worker.request(9'000);
+            worker.request(1'000'000'000ULL);
             CHECK(worker.wait_until_idle(2s));
             auto chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
             CHECK(chunks.front().reset_parser);
-            CHECK(chunks.front().bytes == "first line\n");
+            CHECK(chunks.front().bytes ==
+                "[0053.20] Log: LoadMap: KF-BioticsLab?"
+                "Game=KFGameContent.KFGameInfo_Survival\n");
+            CHECK(chunks.front().parsed_session.has_value());
+            CHECK(chunks.front().parsed_session->map == "KF-BioticsLab");
+            CHECK(chunks.front().parser_stats.lines_processed == 1);
 
             {
                 std::ofstream output(log, std::ios::binary | std::ios::app);
-                output << "second line\n";
+                output << "[0048.42] ScriptLog: WI.NetMode:  NM_Standalone\n"
+                          "[0060.11] ScriptLog: @@@@ ZED COUNT DEBUG: "
+                          "AIAliveCount = 24\n";
             }
-            worker.request(9'100);
+            worker.request(2'000'000'000ULL);
             CHECK(worker.wait_until_idle(2s));
             chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
             CHECK(!chunks.front().reset_parser);
-            CHECK(chunks.front().bytes == "second line\n");
+            CHECK(chunks.front().bytes ==
+                "[0048.42] ScriptLog: WI.NetMode:  NM_Standalone\n"
+                "[0060.11] ScriptLog: @@@@ ZED COUNT DEBUG: "
+                "AIAliveCount = 24\n");
+            CHECK(chunks.front().parsed_session.has_value());
+            CHECK(chunks.front().parsed_session->zeds_alive == 24);
+            CHECK(chunks.front().parser_stats.lines_processed == 3);
+
+            worker.request(17'000'000'001ULL);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(chunks.front().observations_expired);
+            CHECK(chunks.front().bytes.empty());
+            CHECK(chunks.front().parsed_session.has_value());
+            CHECK(!chunks.front().parsed_session->zeds_alive.has_value());
 
             {
                 std::ofstream output(log, std::ios::binary | std::ios::trunc);
                 output << "new\n";
             }
-            worker.request(9'200);
+            worker.request(18'000'000'000ULL);
             CHECK(worker.wait_until_idle(2s));
             chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
             CHECK(chunks.front().reset_parser);
             CHECK(chunks.front().bytes == "new\n");
+            CHECK(!chunks.front().parsed_session.has_value());
+            CHECK(chunks.front().parser_stats.lines_processed == 1);
         }
         fs::remove_all(root);
     }
