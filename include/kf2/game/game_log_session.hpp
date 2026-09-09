@@ -136,12 +136,19 @@ struct GameLogSession {
     std::optional<bool> telemetry_zed_time_active;
     std::optional<std::uint16_t> telemetry_control_port;
     std::optional<int> telemetry_sample;
+    std::optional<double> level_load_seconds;
+    std::optional<double> stream_all_resources_seconds;
+    std::optional<double> loading_movie_seconds;
+    std::uint64_t load_map_observed_ns{0};
+    std::uint64_t level_loaded_observed_ns{0};
+    std::uint64_t loading_movie_finished_observed_ns{0};
     std::uint64_t zeds_remaining_observed_ns{0};
     std::uint64_t zeds_alive_observed_ns{0};
     std::uint64_t wave_observed_ns{0};
     std::uint64_t telemetry_observed_ns{0};
     GameLogPhase phase{GameLogPhase::map_loaded};
     bool main_menu{false};
+    bool loading_movie_active{false};
 
     bool operator==(const GameLogSession&) const = default;
 };

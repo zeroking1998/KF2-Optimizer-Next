@@ -167,6 +167,38 @@ int main() {
     CHECK(!stream.feed("unrelated\n").has_value());
     CHECK(stream.current().has_value());
 
+    const auto loading = stream.feed(
+        "[0041.02] Log: --- LOADING MOVIE START ---\n",
+        1'000'000'000ULL);
+    CHECK(loading.has_value());
+    CHECK(loading->loading_movie_active);
+    CHECK(!game_log_is_active_gameplay(*loading));
+    CHECK(describe_game_log_session(*loading).find(L"state: loading map") !=
+          std::wstring::npos);
+    const auto level_loaded = stream.feed(
+        "[0043.37] Log: ########### Finished loading level: "
+        "2.353908 seconds\n",
+        3'000'000'000ULL);
+    CHECK(level_loaded.has_value());
+    CHECK(level_loaded->level_load_seconds == 2.353908);
+    CHECK(level_loaded->level_loaded_observed_ns == 3'000'000'000ULL);
+    CHECK(!game_log_is_active_gameplay(*level_loaded));
+    const auto streamed = stream.feed(
+        "[0044.77] Log: GameThreadStopMovie - StreamAllResources time: "
+        "0.002938\n",
+        4'000'000'000ULL);
+    CHECK(streamed.has_value());
+    CHECK(streamed->stream_all_resources_seconds == 0.002938);
+    const auto movie_finished = stream.feed(
+        "[0044.77] Log: --- LOADING MOVIE TIME: 3.74 sec ---\n",
+        4'000'000'000ULL);
+    CHECK(movie_finished.has_value());
+    CHECK(!movie_finished->loading_movie_active);
+    CHECK(movie_finished->loading_movie_seconds == 3.74);
+    CHECK(movie_finished->loading_movie_finished_observed_ns ==
+          4'000'000'000ULL);
+    CHECK(game_log_is_active_gameplay(*movie_finished));
+
     const auto offline = stream.feed(
         "[0048.42] ScriptLog: WI.NetMode:  NM_Standalone\n");
     CHECK(offline.has_value());

@@ -53,6 +53,9 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
         add_saturated(stats_.lines_processed);
         if (line.size() <= detail::kMaximumLineBytes) {
             if (auto parsed = parse_load_map_line(line); parsed) {
+                if (!parsed->main_menu && observed_at_ns != 0) {
+                    parsed->load_map_observed_ns = observed_at_ns;
+                }
                 if (!current_ || *parsed != *current_) changed = *parsed;
                 current_ = *parsed;
             } else if (auto mode = parse_net_mode_line(line); mode && current_) {
@@ -71,42 +74,86 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                     current_->telemetry_control_port = port;
                     changed = *current_;
                 }
-            } else if (current_ && current_->net_mode == "NM_Standalone") {
-                if (const auto count = detail::parse_zed_count_line(line);
-                    count) {
-                    auto& target = count->first ? current_->zeds_remaining
-                                                : current_->zeds_alive;
-                    auto& observed = count->first
-                        ? current_->zeds_remaining_observed_ns
-                        : current_->zeds_alive_observed_ns;
-                    const bool value_changed = target != count->second;
-                    target = count->second;
-                    if (observed_at_ns != 0) observed = observed_at_ns;
-                    if (value_changed) {
+            } else if (current_ && !current_->main_menu &&
+                       line.find("Log: --- LOADING MOVIE START ---") !=
+                           std::string_view::npos) {
+                if (!current_->loading_movie_active) {
+                    current_->loading_movie_active = true;
+                    changed = *current_;
+                }
+            } else if (current_ && !current_->main_menu) {
+                constexpr std::string_view level_marker =
+                    "Log: ########### Finished loading level: ";
+                constexpr std::string_view stream_marker =
+                    "Log: GameThreadStopMovie - StreamAllResources time: ";
+                constexpr std::string_view movie_marker =
+                    "Log: --- LOADING MOVIE TIME: ";
+                if (const auto level_seconds =
+                        detail::parse_seconds_after(line, level_marker)) {
+                    if (current_->level_load_seconds != level_seconds) {
+                        current_->level_load_seconds = level_seconds;
+                        current_->level_loaded_observed_ns = observed_at_ns;
                         changed = *current_;
                     }
-                } else if (const auto wave = detail::parse_wave_snapshot_line(line);
-                           wave && current_->game_class &&
-                           detail::equals_ascii_case_insensitive(
-                               *current_->game_class,
-                               "KFGameContent.KFGameInfo_Survival")) {
-                    const int wave_number = wave->first + 1;
-                    const bool value_changed =
-                        current_->wave_number != wave_number ||
-                        current_->wave_total_ai != wave->second;
-                    current_->wave_number = wave_number;
-                    current_->wave_total_ai = wave->second;
-                    if (observed_at_ns != 0) {
-                        current_->wave_observed_ns = observed_at_ns;
+                } else if (const auto stream_seconds =
+                               detail::parse_seconds_after(line, stream_marker)) {
+                    if (current_->stream_all_resources_seconds != stream_seconds) {
+                        current_->stream_all_resources_seconds = stream_seconds;
+                        changed = *current_;
                     }
-                    if (value_changed) changed = *current_;
-                } else if (const auto telemetry_changed =
-                               detail::apply_offline_telemetry_line(
-                                   *current_, line, observed_at_ns);
-                           telemetry_changed) {
-                    if (*telemetry_changed) changed = *current_;
-                } else if (!current_->main_menu &&
-                           current_->phase != GameLogPhase::match_ended &&
+                } else if (const auto movie_seconds =
+                               detail::parse_seconds_after(line, movie_marker)) {
+                    if (current_->loading_movie_active ||
+                        current_->loading_movie_seconds != movie_seconds) {
+                        current_->loading_movie_active = false;
+                        current_->loading_movie_seconds = movie_seconds;
+                        current_->loading_movie_finished_observed_ns =
+                            observed_at_ns;
+                        changed = *current_;
+                    }
+                } else if (current_->net_mode == "NM_Standalone") {
+                    if (const auto count = detail::parse_zed_count_line(line);
+                        count) {
+                        auto& target = count->first ? current_->zeds_remaining
+                                                    : current_->zeds_alive;
+                        auto& observed = count->first
+                            ? current_->zeds_remaining_observed_ns
+                            : current_->zeds_alive_observed_ns;
+                        const bool value_changed = target != count->second;
+                        target = count->second;
+                        if (observed_at_ns != 0) observed = observed_at_ns;
+                        if (value_changed) changed = *current_;
+                    } else if (const auto wave =
+                                   detail::parse_wave_snapshot_line(line);
+                               wave && current_->game_class &&
+                               detail::equals_ascii_case_insensitive(
+                                   *current_->game_class,
+                                   "KFGameContent.KFGameInfo_Survival")) {
+                        const int wave_number = wave->first + 1;
+                        const bool value_changed =
+                            current_->wave_number != wave_number ||
+                            current_->wave_total_ai != wave->second;
+                        current_->wave_number = wave_number;
+                        current_->wave_total_ai = wave->second;
+                        if (observed_at_ns != 0) {
+                            current_->wave_observed_ns = observed_at_ns;
+                        }
+                        if (value_changed) changed = *current_;
+                    } else if (const auto telemetry_changed =
+                                   detail::apply_offline_telemetry_line(
+                                       *current_, line, observed_at_ns);
+                               telemetry_changed) {
+                        if (*telemetry_changed) changed = *current_;
+                    } else if (current_->phase != GameLogPhase::match_ended &&
+                               line.find("ScriptLog: KFGameInfo_") !=
+                                   std::string_view::npos &&
+                               line.find(" - MatchEnded.BeginState") !=
+                                   std::string_view::npos) {
+                        current_->phase = GameLogPhase::match_ended;
+                        detail::clear_gameplay_snapshot(*current_);
+                        changed = *current_;
+                    }
+                } else if (current_->phase != GameLogPhase::match_ended &&
                            line.find("ScriptLog: KFGameInfo_") !=
                                std::string_view::npos &&
                            line.find(" - MatchEnded.BeginState") !=
@@ -115,15 +162,6 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                     detail::clear_gameplay_snapshot(*current_);
                     changed = *current_;
                 }
-            } else if (current_ && !current_->main_menu &&
-                       current_->phase != GameLogPhase::match_ended &&
-                       line.find("ScriptLog: KFGameInfo_") !=
-                           std::string_view::npos &&
-                       line.find(" - MatchEnded.BeginState") !=
-                           std::string_view::npos) {
-                current_->phase = GameLogPhase::match_ended;
-                detail::clear_gameplay_snapshot(*current_);
-                changed = *current_;
             }
         } else {
             add_saturated(stats_.oversized_line_drops);

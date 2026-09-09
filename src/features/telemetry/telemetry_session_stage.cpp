@@ -2,6 +2,9 @@
 
 #include "app/application_runtime.hpp"
 
+#include <iomanip>
+#include <sstream>
+
 namespace kf2::telemetry_pipeline {
 
 void attach_session_sources(app::UiRuntime& runtime) {
@@ -126,6 +129,18 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
 }  // namespace kf2::telemetry_pipeline
 
 namespace kf2::app {
+namespace {
+
+std::wstring seconds_text(double value) {
+    std::wostringstream text;
+    text << std::fixed << std::setprecision(3) << value;
+    auto result = text.str();
+    while (result.size() > 2 && result.back() == L'0') result.pop_back();
+    if (!result.empty() && result.back() == L'.') result.pop_back();
+    return result;
+}
+
+}  // namespace
 
 bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
     if (!installation ||
@@ -560,6 +575,34 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
                 events->append({0, diagnostics::Severity::info,
                     event_code,
                     game::describe_game_log_session(*session), L"game"});
+            }
+            if (session->level_load_seconds &&
+                (!previous_session ||
+                 previous_session->level_load_seconds !=
+                     session->level_load_seconds)) {
+                events->append({0, diagnostics::Severity::info,
+                    "KF2_LEVEL_LOAD_COMPLETED",
+                    L"KF2 reported native level loading complete in " +
+                        seconds_text(*session->level_load_seconds) +
+                        L" seconds",
+                    L"game"});
+            }
+            if (session->loading_movie_seconds &&
+                (!previous_session ||
+                 previous_session->loading_movie_seconds !=
+                     session->loading_movie_seconds)) {
+                std::wstring message =
+                    L"KF2 ended the loading movie after " +
+                    seconds_text(*session->loading_movie_seconds) +
+                    L" seconds";
+                if (session->stream_all_resources_seconds) {
+                    message += L"; final native StreamAllResources took " +
+                        seconds_text(
+                            *session->stream_all_resources_seconds) +
+                        L" seconds";
+                }
+                events->append({0, diagnostics::Severity::info,
+                    "KF2_MAP_ENTRY_READY", std::move(message), L"game"});
             }
             invalidate();
         }

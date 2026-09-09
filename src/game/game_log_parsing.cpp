@@ -96,6 +96,24 @@ std::optional<int> parse_bounded_count(std::string_view text) {
     return value;
 }
 
+std::optional<double> parse_seconds_after(
+    std::string_view line, std::string_view marker) {
+    const auto position = line.find(marker);
+    if (position == std::string_view::npos) return std::nullopt;
+    auto value = line.substr(position + marker.size());
+    const auto delimiter = value.find_first_of(" \t\r\n");
+    if (delimiter != std::string_view::npos) value = value.substr(0, delimiter);
+    double seconds = 0.0;
+    const auto parsed = std::from_chars(
+        value.data(), value.data() + value.size(), seconds,
+        std::chars_format::general);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+        !std::isfinite(seconds) || seconds < 0.0 || seconds > 3600.0) {
+        return std::nullopt;
+    }
+    return seconds;
+}
+
 std::optional<std::pair<bool, int>> parse_zed_count_line(
     std::string_view line) {
     constexpr std::string_view remaining_marker =

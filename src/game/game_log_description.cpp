@@ -42,7 +42,9 @@ std::wstring describe_game_log_session(const GameLogSession& session) {
     }
     if (!session.main_menu) {
         result += session.phase == GameLogPhase::match_ended
-            ? L" | state: match ended" : L" | state: map loaded";
+            ? L" | state: match ended"
+            : session.loading_movie_active
+                ? L" | state: loading map" : L" | state: map loaded";
     }
     if (session.net_mode && *session.net_mode == "NM_Standalone" &&
         session.phase == GameLogPhase::map_loaded) {
@@ -146,7 +148,8 @@ std::wstring describe_game_log_session(const GameLogSession& session) {
 
 bool game_log_is_active_gameplay(const GameLogSession& session) noexcept {
     return !session.main_menu && !session.map.empty() &&
-           session.phase == GameLogPhase::map_loaded;
+           session.phase == GameLogPhase::map_loaded &&
+           !session.loading_movie_active;
 }
 
 bool game_log_is_offline_gameplay(const GameLogSession& session) noexcept {
