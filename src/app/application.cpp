@@ -1,5 +1,7 @@
 #include "application_runtime.hpp"
 
+#include <chrono>
+
 namespace kf2::app {
 
 Application::Application(
@@ -236,6 +238,9 @@ Result<bool> Application::shutdown_cleanly() {
         return Result<bool>::success(true);
     }
     ui_runtime_.reset();
+    if (events_) {
+        (void)events_->flush(std::chrono::seconds{5});
+    }
     auto result = session_.mark_clean();
     if (result.has_value()) {
         clean_shutdown_ = true;

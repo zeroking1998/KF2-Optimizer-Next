@@ -178,6 +178,7 @@ add_executable(KF2Optimizer WIN32
     src/optimizer/startup_gpu_profile.cpp
     src/optimizer/optimizer_engine.cpp
     src/platform/windows/atomic_file.cpp
+    src/platform/windows/async_file_writer.cpp
     src/platform/windows/presentmon_session.cpp
     src/platform/windows/process_security.cpp
     src/platform/windows/single_instance.cpp

@@ -277,6 +277,18 @@ target_compile_definitions(kf2_atomic_file_test PRIVATE
 )
 add_test(NAME kf2_atomic_file_test COMMAND kf2_atomic_file_test)
 
+add_executable(kf2_async_file_writer_test
+    windows/async_file_writer_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/platform/windows/async_file_writer.cpp"
+    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
+)
+target_include_directories(kf2_async_file_writer_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_async_file_writer_test PRIVATE
+    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/async-file-writer"
+)
+add_test(NAME kf2_async_file_writer_test COMMAND kf2_async_file_writer_test)
+
 add_executable(kf2_session_test
     unit/session_test.cpp
     "${PROJECT_SOURCE_DIR}/src/app/session.cpp"
@@ -414,6 +426,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/app/application_package_repair.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application_runtime.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application_update.cpp"
+    "${PROJECT_SOURCE_DIR}/src/platform/windows/async_file_writer.cpp"
     ${KF2_APP_TELEMETRY_SOURCES}
     "${PROJECT_SOURCE_DIR}/src/app/application_window.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/build_identity.cpp"

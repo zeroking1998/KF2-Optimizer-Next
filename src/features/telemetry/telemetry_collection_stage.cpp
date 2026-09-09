@@ -31,7 +31,9 @@ PresentDrainResult drain_present_stage(app::UiRuntime& runtime,
              L"Telemetry sources are not bound to a current KF2 process", 0});
     }
 
-    auto frames = runtime.present_source->drain(now_ns, 2'000'000'000ULL);
+    runtime.present_source->request_drain(now_ns, 2'000'000'000ULL);
+    auto frames = runtime.present_source->latest_drain().value_or(
+        ::kf2::telemetry::FrameMetrics{});
     // A stale Launch.log can make the startup gate look ready before KF2's
     // new DX11 swap chain begins presenting. An embedded ETW session that
     // stays completely silent is restarted a bounded number of times; a

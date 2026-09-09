@@ -1,3 +1,6 @@
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -9,6 +12,7 @@
 #include <Windows.h>
 
 #include "kf2/diagnostics/event_log.hpp"
+#include "kf2/platform/windows/atomic_file.hpp"
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -99,6 +103,7 @@ int main() {
     CHECK(persistent.snapshot().front().repeat_count == 2);
     CHECK(persistent.stats().appended == 2);
     CHECK(persistent.stats().deduplicated == 1);
+    CHECK(persistent.flush(std::chrono::seconds{2}));
     {
         std::ifstream persisted(persistent_path, std::ios::binary);
         const std::string persisted_json{std::istreambuf_iterator<char>{persisted},
@@ -106,7 +111,53 @@ int main() {
         CHECK(persisted_json.find("\"repeat_count\":2") != std::string::npos);
     }
     persistent.clear();
+    CHECK(persistent.flush(std::chrono::seconds{2}));
     CHECK(std::filesystem::file_size(persistent_path) > 0);
+
+    const auto asynchronous_path = persistent_root / L"asynchronous.json";
+    std::mutex writer_mutex;
+    std::condition_variable writer_changed;
+    bool writer_blocked = false;
+    bool release_writer = false;
+    std::atomic<int> writes{0};
+    {
+        EventLog asynchronous{
+            4, asynchronous_path,
+            [&](const std::filesystem::path& path, std::string_view bytes) {
+                if (writes.fetch_add(1) > 0) {
+                    std::unique_lock lock{writer_mutex};
+                    writer_blocked = true;
+                    writer_changed.notify_all();
+                    writer_changed.wait(lock, [&] { return release_writer; });
+                }
+                return kf2::platform::windows::atomic_replace_utf8(path, bytes);
+            }};
+        asynchronous.append(
+            Event{0, Severity::info, "ASYNC", L"first", L"test"});
+        {
+            std::unique_lock lock{writer_mutex};
+            CHECK(writer_changed.wait_for(lock, std::chrono::seconds{2},
+                                          [&] { return writer_blocked; }));
+        }
+        const auto append_started = std::chrono::steady_clock::now();
+        asynchronous.append(
+            Event{0, Severity::info, "ASYNC", L"second", L"test"});
+        const auto append_elapsed = std::chrono::steady_clock::now() -
+                                    append_started;
+        CHECK(append_elapsed < std::chrono::milliseconds{100});
+        {
+            std::scoped_lock lock{writer_mutex};
+            release_writer = true;
+        }
+        writer_changed.notify_all();
+        CHECK(asynchronous.flush(std::chrono::seconds{2}));
+        std::ifstream persisted(asynchronous_path, std::ios::binary);
+        const std::string persisted_json{
+            std::istreambuf_iterator<char>{persisted},
+            std::istreambuf_iterator<char>{}};
+        CHECK(persisted_json.find("\"message\":\"second\"") !=
+              std::string::npos);
+    }
     std::filesystem::remove_all(persistent_root);
 
     EventLog escaped{1};
