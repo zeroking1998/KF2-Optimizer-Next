@@ -525,7 +525,22 @@ int main() {
     CHECK(telemetry_source.find(
         "GameInfo.IsZedTimeActive()") != std::string::npos);
     CHECK(telemetry_source.find(
-        "SetTimer(0.25, true, nameof(AdaptiveCorpseLoadControl), self)") !=
+        "const AdaptiveCorpseControlInterval=0.25;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "const AdaptiveCorpseControlInitialDelay=0.125;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "SetTimer(AdaptiveCorpseControlInterval, true,") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "SetTimer(AdaptiveCorpseControlInitialDelay, false,") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "ScheduleAdaptiveCorpseControlTimer();") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "ClearTimer(nameof(BeginAdaptiveCorpseControlTimer), self)") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "function int SleepBaselineAwakeMonsterCorpses(") !=
