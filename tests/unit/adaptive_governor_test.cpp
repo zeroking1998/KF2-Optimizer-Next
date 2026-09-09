@@ -245,6 +245,24 @@ int main() {
     CHECK(persistent_low.current_frame_pressure);
     CHECK(persistent_low.recommended_profile == Profile::high_performance);
 
+    // Characterize the post-map sample that previously triggered a needless
+    // 100 -> 80 quality cycle. The governor must still report its frame
+    // pressure; the runtime stage owns the bounded post-map actuator guard.
+    AdaptivePolicy post_map_policy = adaptive;
+    post_map_policy.target_fps = 120;
+    auto post_map_sample = sample(start, 112.31, 1000.0 / 112.31,
+                                  8.81, 1.57, 41.0);
+    post_map_sample.average_fps = 118.08;
+    post_map_sample.sustained_one_percent_low_fps = 35.30;
+    post_map_sample.one_percent_low_fps = 58.25;
+    AdaptiveGovernor post_map_governor;
+    const auto post_map_pressure = drive(
+        post_map_governor, post_map_policy, post_map_sample,
+        start, 4'400'000'000ULL);
+    CHECK(post_map_pressure.state == AdaptiveControllerState::intervention ||
+          post_map_pressure.state == AdaptiveControllerState::emergency);
+    CHECK(post_map_pressure.current_frame_pressure);
+
     // Significant short-window tail pressure must be continuous. Mild lows
     // interrupt confirmation even if they still cross the live-FPS bands.
     AdaptiveGovernor easing_tail_governor;
