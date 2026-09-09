@@ -81,12 +81,12 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find("function int WakeAdaptiveDistanceSleptCorpseBatch") !=
           std::string::npos);
-    CHECK(telemetry_source.find("function BeginAdaptiveDistanceSleepRelease") !=
+    CHECK(telemetry_source.find("function BeginAdaptiveCorpsePhysicsRelease") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "if (!bAdaptiveRuntimeEnabled)\n    {\n        `log(\"KF2OPT_ADAPTIVE_QUALITY") !=
           std::string::npos);
-    CHECK(telemetry_source.find("WakeCount < 8") != std::string::npos);
+    CHECK(telemetry_source.find("WakeCount < 1") != std::string::npos);
     CHECK(telemetry_source.find(
         "KF2OPT_ADAPTIVE_MODE state=disabled readback=verified") !=
           std::string::npos);
@@ -161,7 +161,7 @@ int main() {
     CHECK(select_staggered_corpse != std::string::npos);
     CHECK(restore_adaptive_graphics < select_staggered_corpse);
     const auto restore_freezes = telemetry_source.find(
-        "RestoreAllAdaptiveCorpseFreezes();", restore_adaptive_graphics);
+        "BeginAdaptiveCorpsePhysicsRelease();", restore_adaptive_graphics);
     CHECK(restore_freezes != std::string::npos);
     CHECK(restore_freezes < telemetry_source.find(
         "RestoreOriginal(", restore_adaptive_graphics));
@@ -507,7 +507,7 @@ int main() {
     CHECK(telemetry_source.find(
         "AdaptiveCorpsePressureLevel)") != std::string::npos);
     CHECK(telemetry_source.find(
-        "SetTimer(0.45, true, nameof(StaggerCorpseCleanup), self)") !=
+        "SetTimer(0.45, true, nameof(StaggerCorpseCleanup), self)") ==
           std::string::npos);
     CHECK(telemetry_source.find(
         "GoreManager.RemoveAndDeleteCorpse(SelectedIndex)") !=
@@ -531,16 +531,31 @@ int main() {
         "const AdaptiveCorpseControlInitialDelay=0.125;") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "SetTimer(AdaptiveCorpseControlInterval, true,") !=
+        "const AdaptiveCorpseControlIdleInterval=1.0;") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "SetTimer(AdaptiveCorpseControlInitialDelay, false,") !=
+        "const AdaptiveCorpseControlCalmInterval=0.5;") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "ScheduleAdaptiveCorpseControlTimer();") !=
+        "const AdaptiveCorpseControlUrgentInterval=0.125;") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "ClearTimer(nameof(BeginAdaptiveCorpseControlTimer), self)") !=
+        "const AdaptiveCorpseControlSliceInterval=0.05;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "const AdaptiveCorpseControlPhaseCount=13;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "const AdaptiveCorpseScanBudget=64;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "SetTimer(FMax(0.05, DelaySeconds), false,") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "ScheduleAdaptiveCorpseControlTimer(\n"
+        "                AdaptiveCorpseControlInitialDelay);") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "GetAdaptiveCorpseControlDelay(bActionTaken)") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "function int SleepBaselineAwakeMonsterCorpses(") !=
@@ -637,27 +652,29 @@ int main() {
     CHECK(telemetry_source.find(
         "DistanceSquared >= 640000.0") != std::string::npos);
     CHECK(telemetry_source.find(
-        "CollectAdaptiveCorpseCounts(\n"
-        "        GoreManager, VisibleCorpses, VisibleAwake, AwakeTotal)") !=
+        "function CollectAdaptiveCorpseCounts(") == std::string::npos);
+    CHECK(telemetry_source.find(
+        "VisibleCorpses = AdaptiveCachedVisibleCorpses;") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "function CollectAdaptiveCorpseCounts(") != std::string::npos);
+        "VisibleAwake = AdaptiveCachedVisibleAwakeCorpses;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AwakeTotal = AdaptiveCachedAwakeCorpses;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveCorpseCountsObservedRealTime") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "if (!bCorpseCountsFresh)\n    {\n        return false;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "!Corpse.bDeleteMe && KFPawn_Monster(Corpse) != None") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "function int CountVisibleAwakeMonsterCorpses(") ==
           std::string::npos);
     CHECK(telemetry_source.find(
         "function int CountAwakeMonsterCorpses(") == std::string::npos);
-    const auto corpse_count_start = telemetry_source.find(
-        "function CollectAdaptiveCorpseCounts(");
-    const auto corpse_count_end = telemetry_source.find(
-        "function int GetAdaptiveCorpseScenePressureLevel(",
-        corpse_count_start);
-    CHECK(corpse_count_start != std::string::npos);
-    CHECK(corpse_count_end != std::string::npos);
-    CHECK(count_occurrences(
-        telemetry_source.substr(corpse_count_start,
-                                corpse_count_end - corpse_count_start),
-        "GoreManager.CorpsePool.Length") == 1);
     CHECK(telemetry_source.find(
         "KF2OPT_CORPSE_DISTANCE state=sleep") != std::string::npos);
     const auto distance_sleep_function = telemetry_source.find(
@@ -795,7 +812,7 @@ int main() {
           std::string::npos);
     // All settle and LOD ownership paths emit actor-correlated receipts
     // without changing the twelve action receipts with measured distance.
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 16);
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 17);
     CHECK(count_occurrences(telemetry_source, " distance_units=") == 12);
     CHECK(count_occurrences(telemetry_source, " distance_m=") == 12);
     const auto distance_marker = telemetry_source.find(
@@ -966,7 +983,10 @@ int main() {
         "AdaptiveLivingVisualLastChangeRealTime < 1.5") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "function float GetAdaptiveLivingEnemyPressureScale(") !=
+        "function float GetAdaptiveLivingEnemyPressureScale(") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveCachedLivingEnemyPressureScale = FClamp(") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "KF2OPT_TELEMETRY_PROFILE schema=2") != std::string::npos);
@@ -1051,14 +1071,15 @@ int main() {
     CHECK(telemetry_source.find("zed_debug_samples=") != std::string::npos);
     CHECK(telemetry_source.find("max_zed_debug_ms=") != std::string::npos);
     CHECK(telemetry_source.find(
-        "RunAdaptiveCorpseLoadControl();") != std::string::npos);
+        "bActionTaken = RunAdaptiveCorpseLoadControl();") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "CollectAdaptiveZedDebugMarkers();") != std::string::npos);
     CHECK(telemetry_source.find("Clock(ProfileTotalSeconds)") ==
           std::string::npos);
     CHECK(telemetry_source.find("total_us=") == std::string::npos);
     CHECK(telemetry_source.find(
-        "WeightedVisibleZeds = float(VisibleLivingZeds)") !=
+        "WeightedVisibleZeds += 1.0") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "DistanceSquared < 360000.0") != std::string::npos);
@@ -1077,7 +1098,7 @@ int main() {
         "PhysicsPressureLevel <= 0 && bRecentlyRendered") !=
           std::string::npos);
     const auto stagger_start = telemetry_source.find(
-        "function RunAdaptiveCorpseLoadControl()");
+        "function bool RunAdaptiveCorpseLoadControl()");
     const auto zed_time_guard = telemetry_source.find(
         "GameInfo.IsZedTimeActive()", stagger_start);
     const auto wake_stage = telemetry_source.find(
@@ -1096,14 +1117,27 @@ int main() {
     CHECK(distant_sleep_stage != std::string::npos);
     const auto adaptive_off_restore = telemetry_source.find(
         "if (!bAdaptiveCorpseStagger || !bAdaptiveRuntimeEnabled)\n"
-        "    {\n        RestoreAllAdaptiveCorpseFreezes();",
+        "    {\n        BeginAdaptiveCorpsePhysicsRelease();",
         stagger_start);
     CHECK(adaptive_off_restore != std::string::npos);
     CHECK(adaptive_off_restore < baseline_sleep_stage);
     CHECK(zed_time_guard < baseline_sleep_stage);
-    CHECK(baseline_sleep_stage < wake_stage);
-    CHECK(baseline_sleep_stage < freeze_stage);
-    CHECK(freeze_stage < wake_stage);
+    CHECK(telemetry_source.find(
+        "switch (AdaptiveCorpseControlPhase)", stagger_start) !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveCorpseControlPhase + 1", stagger_start) !=
+          std::string::npos);
+    CHECK(count_occurrences(
+        telemetry_source, "ScanCount = Min(AdaptiveCorpseScanBudget,") >= 6);
+    CHECK(count_occurrences(
+        telemetry_source, "Scanned < AdaptiveCorpseScanBudget") >= 7);
+    for (const auto* cursor : {"AdaptiveCleanupScanCursor",
+             "AdaptiveBaselineScanCursor", "AdaptiveFreezeScanCursor",
+             "AdaptiveDistanceScanCursor", "AdaptiveLodScanCursor",
+             "AdaptiveRagdollScanCursor", "AdaptiveAnimationScanCursor"}) {
+        CHECK(telemetry_source.find(cursor) != std::string::npos);
+    }
     CHECK(zed_time_guard < wake_stage);
     CHECK(zed_time_guard < distant_sleep_stage);
     const auto frame_only_action_gate = telemetry_source.find(
@@ -1146,7 +1180,7 @@ int main() {
     CHECK(pressure_freeze_body.find("Candidate.Mesh.RigidBodyIsAwake()") <
           pressure_freeze_body.find("Candidate.SetPhysics(PHYS_None)"));
     const auto restore_freeze_function = telemetry_source.find(
-        "function RestoreAllAdaptiveCorpseFreezes()");
+        "function int RestoreOneAdaptiveCorpseFreeze()");
     CHECK(restore_freeze_function != std::string::npos);
     const auto restore_freeze_end = telemetry_source.find(
         "function bool FreezeOnePressureEligibleCorpse(",
@@ -1162,7 +1196,7 @@ int main() {
           std::string::npos);
 
     const auto cleanup_start = telemetry_source.find(
-        "function StaggerCorpseCleanup()");
+        "function bool StaggerCorpseCleanup()");
     const auto cleanup_zed_time_guard = telemetry_source.find(
         "GameInfo.IsZedTimeActive()", cleanup_start);
     const auto cleanup_delete = telemetry_source.find(
@@ -1202,8 +1236,20 @@ int main() {
         "WakeCount < Max(3, AttackScale)", stagger_start) ==
           std::string::npos);
     CHECK(telemetry_source.find(
-        "WakeNearAdaptiveDistanceSleptCorpses();", stagger_start) !=
+        "WakeNearAdaptiveDistanceSleptCorpses() > 0", stagger_start) !=
           std::string::npos);
+    const auto freeze_capacity = telemetry_source.find(
+        "CanRegisterAdaptiveCorpsePhysicsAction(Candidate, \"aging_freeze\")");
+    const auto freeze_mutation = telemetry_source.find(
+        "Candidate.SetPhysics(PHYS_None)", freeze_capacity);
+    const auto freeze_registration = telemetry_source.find(
+        "RegisterAdaptiveCorpsePhysicsAction(Candidate, \"aging_freeze\")",
+        freeze_mutation);
+    CHECK(freeze_capacity != std::string::npos);
+    CHECK(freeze_mutation != std::string::npos);
+    CHECK(freeze_registration != std::string::npos);
+    CHECK(freeze_capacity < freeze_mutation);
+    CHECK(freeze_mutation < freeze_registration);
 
     const auto lod_selector = telemetry_source.find(
         "function KFPawn SelectVisibleMonsterCorpseForLod(");
@@ -1239,13 +1285,39 @@ int main() {
         "Max(AdaptiveCorpsePressureLevel, ScenePressureLevel)") >= 2);
     CHECK(count_occurrences(telemetry_source, "EnemyPressureLevel);") >= 2);
     CHECK(telemetry_source.find(
-        "function ApplyLivingEnemyVisualPressure(") != std::string::npos);
+        "function bool ApplyLivingEnemyVisualPressure(") != std::string::npos);
     CHECK(telemetry_source.find(
         "EnemyPressureLevel = ResolveAdaptiveLivingEnemyPressureLevel(",
         stagger_start) != std::string::npos);
     CHECK(telemetry_source.find(
-        "ApplyLivingEnemyVisualPressure(EnemyPressureLevel, EnemyPressureScale);",
+        "bActionTaken = ApplyLivingEnemyVisualPressure(\n"
+        "                EnemyPressureLevel, EnemyPressureScale);",
         stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "while (ScanPawn != None && Scanned < AdaptiveCorpseScanBudget)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function bool RestoreOneAdaptiveLivingVisual()") !=
+          std::string::npos);
+    const auto living_apply_start = telemetry_source.find(
+        "function bool ApplyLivingEnemyVisualPressure(");
+    const auto living_apply_end = telemetry_source.find(
+        "function bool ShouldPreserveNearCorpseDetail(", living_apply_start);
+    CHECK(living_apply_start != std::string::npos);
+    CHECK(living_apply_end != std::string::npos);
+    const auto living_apply_body = telemetry_source.substr(
+        living_apply_start, living_apply_end - living_apply_start);
+    CHECK(living_apply_body.find("WorldInfo.AllPawns") == std::string::npos);
+    CHECK(living_apply_body.find(
+        "AdaptiveLivingScanPawn = ScanPawn.NextPawn") != std::string::npos);
+    CHECK(count_occurrences(
+        telemetry_source, "AdaptiveLivingScanPawn = None;") >= 3);
+    CHECK(telemetry_source.find(
+        "function AdaptiveCorpsePhysicsRelease()") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveFrozenCorpses.Length > 0 ||\n"
+        "                AdaptiveDistanceSleptCorpses.Length > 0") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "Candidate.Mesh.AnimationLODDistanceFactor =") != std::string::npos);
     CHECK(telemetry_source.find(
