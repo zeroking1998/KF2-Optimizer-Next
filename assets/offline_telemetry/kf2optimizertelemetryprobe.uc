@@ -130,6 +130,12 @@ struct AdaptiveCorpseFreezeEntry
 {
     var KFPawn Corpse;
     var string CorpseId;
+    var bool bOriginalTickDisabled;
+    var bool bOriginalCollideActors;
+    var bool bOriginalBlockActors;
+    var bool bOriginalIgnoreEncroachers;
+    var bool bHadCollisionComponent;
+    var bool bOriginalBlockRigidBody;
 };
 
 struct AdaptiveDistanceSleepTransitionEntry
@@ -2659,7 +2665,42 @@ function int RestoreOneAdaptiveCorpseFreeze()
             AdaptiveFrozenCorpses.Remove(Index, 1);
             continue;
         }
-        if (Candidate.Physics == PHYS_None)
+        Candidate.SetCollision(
+            AdaptiveFrozenCorpses[Index].bOriginalCollideActors,
+            AdaptiveFrozenCorpses[Index].bOriginalBlockActors,
+            AdaptiveFrozenCorpses[Index].bOriginalIgnoreEncroachers);
+        if (AdaptiveFrozenCorpses[Index].bHadCollisionComponent)
+        {
+            if (Candidate.CollisionComponent == None)
+            {
+                `log("KF2OPT_CORPSE_DISTANCE state=restore_failed corpse_id="$
+                     AdaptiveFrozenCorpses[Index].CorpseId$
+                     " reason=collision_component_missing");
+                return 1;
+            }
+            Candidate.CollisionComponent.SetBlockRigidBody(
+                AdaptiveFrozenCorpses[Index].bOriginalBlockRigidBody);
+        }
+        Candidate.SetTickIsDisabled(
+            AdaptiveFrozenCorpses[Index].bOriginalTickDisabled);
+        if (Candidate.bCollideActors !=
+                AdaptiveFrozenCorpses[Index].bOriginalCollideActors ||
+            Candidate.bBlockActors !=
+                AdaptiveFrozenCorpses[Index].bOriginalBlockActors ||
+            Candidate.bIgnoreEncroachers !=
+                AdaptiveFrozenCorpses[Index].bOriginalIgnoreEncroachers ||
+            Candidate.bTickIsDisabled !=
+                AdaptiveFrozenCorpses[Index].bOriginalTickDisabled ||
+            (AdaptiveFrozenCorpses[Index].bHadCollisionComponent &&
+             Candidate.CollisionComponent.BlockRigidBody !=
+                AdaptiveFrozenCorpses[Index].bOriginalBlockRigidBody))
+        {
+            `log("KF2OPT_CORPSE_DISTANCE state=restore_failed corpse_id="$
+                 AdaptiveFrozenCorpses[Index].CorpseId$
+                 " reason=collision_or_tick_readback");
+            return 1;
+        }
+        if (Candidate.Physics != PHYS_RigidBody)
         {
             if (!ReserveAdaptivePhysicsMutationForCurrentFrame())
             {
@@ -2682,7 +2723,8 @@ function int RestoreOneAdaptiveCorpseFreeze()
              " distance_units="$DistanceUnits$
              " distance_m="$FormatAdaptiveCorpseDistanceMeters(
                  DistanceUnits, false)$
-             " physics=rigid_body readback=verified");
+             " physics=rigid_body readback=verified"$
+             " collision=restored tick=restored");
         AdaptiveFrozenCorpses.Remove(Index, 1);
         return 1;
     }
@@ -2784,9 +2826,70 @@ function bool FreezeOnePressureEligibleCorpse(
     {
         return false;
     }
+    Index = AdaptiveFrozenCorpses.Length;
+    AdaptiveFrozenCorpses.Length = Index + 1;
+    AdaptiveFrozenCorpses[Index].Corpse = Candidate;
+    AdaptiveFrozenCorpses[Index].CorpseId = CorpseId;
+    AdaptiveFrozenCorpses[Index].bOriginalTickDisabled =
+        Candidate.bTickIsDisabled;
+    AdaptiveFrozenCorpses[Index].bOriginalCollideActors =
+        Candidate.bCollideActors;
+    AdaptiveFrozenCorpses[Index].bOriginalBlockActors =
+        Candidate.bBlockActors;
+    AdaptiveFrozenCorpses[Index].bOriginalIgnoreEncroachers =
+        Candidate.bIgnoreEncroachers;
+    AdaptiveFrozenCorpses[Index].bHadCollisionComponent =
+        Candidate.CollisionComponent != None;
+    if (Candidate.CollisionComponent != None)
+    {
+        AdaptiveFrozenCorpses[Index].bOriginalBlockRigidBody =
+            Candidate.CollisionComponent.BlockRigidBody;
+    }
+    // Match the engine's shutdown order for a corpse that has already settled:
+    // detach it from collision and ticking before the single bounded physics
+    // mutation. KFGoreManager remains responsible for pool cleanup.
+    Candidate.SetCollision(false, false, Candidate.bIgnoreEncroachers);
+    if (Candidate.CollisionComponent != None)
+    {
+        Candidate.CollisionComponent.SetBlockRigidBody(false);
+    }
+    Candidate.SetTickIsDisabled(true);
+    if (Candidate.bCollideActors || Candidate.bBlockActors ||
+        !Candidate.bTickIsDisabled ||
+        (Candidate.CollisionComponent != None &&
+         Candidate.CollisionComponent.BlockRigidBody))
+    {
+        Candidate.SetCollision(
+            AdaptiveFrozenCorpses[Index].bOriginalCollideActors,
+            AdaptiveFrozenCorpses[Index].bOriginalBlockActors,
+            AdaptiveFrozenCorpses[Index].bOriginalIgnoreEncroachers);
+        if (AdaptiveFrozenCorpses[Index].bHadCollisionComponent &&
+            Candidate.CollisionComponent != None)
+        {
+            Candidate.CollisionComponent.SetBlockRigidBody(
+                AdaptiveFrozenCorpses[Index].bOriginalBlockRigidBody);
+        }
+        Candidate.SetTickIsDisabled(
+            AdaptiveFrozenCorpses[Index].bOriginalTickDisabled);
+        AdaptiveFrozenCorpses.Remove(Index, 1);
+        return false;
+    }
     Candidate.SetPhysics(PHYS_None);
     if (Candidate.Physics != PHYS_None)
     {
+        Candidate.SetCollision(
+            AdaptiveFrozenCorpses[Index].bOriginalCollideActors,
+            AdaptiveFrozenCorpses[Index].bOriginalBlockActors,
+            AdaptiveFrozenCorpses[Index].bOriginalIgnoreEncroachers);
+        if (AdaptiveFrozenCorpses[Index].bHadCollisionComponent &&
+            Candidate.CollisionComponent != None)
+        {
+            Candidate.CollisionComponent.SetBlockRigidBody(
+                AdaptiveFrozenCorpses[Index].bOriginalBlockRigidBody);
+        }
+        Candidate.SetTickIsDisabled(
+            AdaptiveFrozenCorpses[Index].bOriginalTickDisabled);
+        AdaptiveFrozenCorpses.Remove(Index, 1);
         return false;
     }
     if (!RegisterAdaptiveCorpsePhysicsAction(Candidate, "aging_freeze"))
@@ -2794,10 +2897,6 @@ function bool FreezeOnePressureEligibleCorpse(
         `log("KF2OPT_CORPSE_DISTANCE state=freeze_tracking_failed corpse_id="$
              CorpseId$" physics=none");
     }
-    Index = AdaptiveFrozenCorpses.Length;
-    AdaptiveFrozenCorpses.Length = Index + 1;
-    AdaptiveFrozenCorpses[Index].Corpse = Candidate;
-    AdaptiveFrozenCorpses[Index].CorpseId = CorpseId;
     AdaptiveLastCorpseFreezeRealTime = WorldInfo.RealTimeSeconds;
     TrackedSleepIndex = FindAdaptiveDistanceSleptCorpse(Candidate);
     if (TrackedSleepIndex >= 0)
@@ -2810,8 +2909,9 @@ function bool FreezeOnePressureEligibleCorpse(
          " minimum_age_s="$MinimumAgeSeconds$
          " minimum_distance_units="$MinimumDistanceUnits$
          " corpse_id="$CorpseId$" distance_units="$DistanceUnits$
-         " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-             DistanceUnits, false)$" physics=none readback=verified");
+        " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+            DistanceUnits, false)$" physics=none readback=verified"$
+        " collision=disabled tick=disabled");
     return true;
 }
 

@@ -812,7 +812,7 @@ int main() {
           std::string::npos);
     // All settle and LOD ownership paths emit actor-correlated receipts
     // without changing the twelve action receipts with measured distance.
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 17);
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 19);
     CHECK(count_occurrences(telemetry_source, " distance_units=") == 12);
     CHECK(count_occurrences(telemetry_source, " distance_m=") == 12);
     const auto distance_marker = telemetry_source.find(
@@ -1308,10 +1308,36 @@ int main() {
           std::string::npos);
     CHECK(pressure_freeze_body.find("Candidate.SetPhysics(PHYS_None)") !=
           std::string::npos);
+    CHECK(telemetry_source.find("var bool bOriginalTickDisabled;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("var bool bOriginalCollideActors;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("var bool bOriginalBlockActors;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("var bool bOriginalIgnoreEncroachers;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("var bool bOriginalBlockRigidBody;") !=
+          std::string::npos);
+    const auto freeze_disable_collision = pressure_freeze_body.find(
+        "Candidate.SetCollision(false, false,");
+    const auto freeze_disable_rigid_body_collision = pressure_freeze_body.find(
+        "Candidate.CollisionComponent.SetBlockRigidBody(false)");
+    const auto freeze_disable_tick = pressure_freeze_body.find(
+        "Candidate.SetTickIsDisabled(true)");
+    const auto freeze_physics_none = pressure_freeze_body.find(
+        "Candidate.SetPhysics(PHYS_None)");
+    CHECK(freeze_disable_collision != std::string::npos);
+    CHECK(freeze_disable_rigid_body_collision != std::string::npos);
+    CHECK(freeze_disable_tick != std::string::npos);
+    CHECK(freeze_disable_collision < freeze_physics_none);
+    CHECK(freeze_disable_rigid_body_collision < freeze_physics_none);
+    CHECK(freeze_disable_tick < freeze_physics_none);
     CHECK(pressure_freeze_body.find(
         "state=frozen reason=pressure_eligible") != std::string::npos);
     CHECK(pressure_freeze_body.find("physics=none readback=verified") !=
           std::string::npos);
+    CHECK(pressure_freeze_body.find(
+        "collision=disabled tick=disabled") != std::string::npos);
     CHECK(pressure_freeze_body.find("RequiredWakeCount") ==
           std::string::npos);
     CHECK(pressure_freeze_body.find("PutRigidBodyToSleep") ==
@@ -1331,10 +1357,19 @@ int main() {
         restore_freeze_function, restore_freeze_end - restore_freeze_function);
     CHECK(restore_freeze_body.find("Candidate.SetPhysics(PHYS_RigidBody)") !=
           std::string::npos);
+    CHECK(restore_freeze_body.find("Candidate.SetCollision(") !=
+          std::string::npos);
+    CHECK(restore_freeze_body.find(
+        "Candidate.CollisionComponent.SetBlockRigidBody(") !=
+          std::string::npos);
+    CHECK(restore_freeze_body.find("Candidate.SetTickIsDisabled(") !=
+          std::string::npos);
     CHECK(restore_freeze_body.find(
         "state=unfrozen reason=adaptive_disabled") != std::string::npos);
     CHECK(restore_freeze_body.find("physics=rigid_body readback=verified") !=
           std::string::npos);
+    CHECK(restore_freeze_body.find(
+        "collision=restored tick=restored") != std::string::npos);
 
     const auto cleanup_start = telemetry_source.find(
         "function bool StaggerCorpseCleanup()");
