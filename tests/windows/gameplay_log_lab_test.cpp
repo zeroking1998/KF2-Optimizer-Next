@@ -1051,7 +1051,27 @@ int main() {
     CHECK(telemetry_source.find(
         "rotate one typed iterator per sample") != std::string::npos);
     CHECK(telemetry_source.find(
-        "const DiagnosticEffectScanInterval=5;") != std::string::npos);
+        "const DiagnosticEffectScanInterval=6;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "SampleSequence % DiagnosticEffectScanInterval == 5") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "var WorldEmitterTelemetrySnapshot CachedWorldEmitters;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "world_emitter_scan_interval=\"$DiagnosticEffectScanInterval") !=
+          std::string::npos);
+    const auto world_snapshot_start = telemetry_source.find(
+        "struct WorldEmitterTelemetrySnapshot");
+    const auto world_snapshot_end = telemetry_source.find(
+        "};", world_snapshot_start);
+    CHECK(world_snapshot_start != std::string::npos);
+    CHECK(world_snapshot_end != std::string::npos);
+    const auto world_snapshot = telemetry_source.substr(
+        world_snapshot_start, world_snapshot_end - world_snapshot_start);
+    CHECK(world_snapshot.find("Emitter ") == std::string::npos);
+    CHECK(world_snapshot.find("ParticleSystemComponent") ==
+          std::string::npos);
     CHECK(telemetry_source.find(
         "effect_actor_scan_interval=\"$DiagnosticEffectScanInterval") !=
           std::string::npos);

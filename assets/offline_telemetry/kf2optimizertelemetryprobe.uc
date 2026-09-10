@@ -8,7 +8,7 @@
 // Adaptive explicitly enables them in the protected session INI.
 class KF2OptimizerTelemetryProbe extends Info config(Engine);
 
-const DiagnosticEffectScanInterval=5;
+const DiagnosticEffectScanInterval=6;
 const AdaptiveCorpseControlInterval=0.25;
 const AdaptiveCorpseControlInitialDelay=0.125;
 const AdaptiveCorpseControlIdleInterval=1.0;
@@ -37,6 +37,28 @@ struct DiagnosticEffectTelemetrySnapshot
     var int SmokeGrenadeProjectiles;
     var int PukeMineProjectiles;
     var int BloatKingPukeMineProjectiles;
+};
+
+// Keep only aggregate values between samples. Retaining Emitter or component
+// references would extend their lifetime and make map teardown unsafe.
+struct WorldEmitterTelemetrySnapshot
+{
+    var int Components;
+    var int Particles;
+    var int VisibleComponents;
+    var int LodTotal;
+    var int BoundedComponents;
+    var int FlexComponents;
+    var int FlexFluidComponents;
+    var int FlexNonFluidComponents;
+    var int FlexMixedComponents;
+    var int NonFlexComponents;
+    var int UnclassifiedComponents;
+    var int ConstantSpawnEmitters;
+    var int DynamicSpawnEmitters;
+    var int ConstantSpawnRateMilli;
+    var int BurstEntries;
+    var int PeakCapacity;
 };
 
 struct AdaptiveCorpseDebugMarkerEntry
@@ -124,6 +146,7 @@ var int ProfileZedDebugMilliseconds;
 var int ProfileMaxZedDebugMilliseconds;
 var int ProfileClockAnomalies;
 var DiagnosticEffectTelemetrySnapshot CachedDiagnosticEffects;
+var WorldEmitterTelemetrySnapshot CachedWorldEmitters;
 var globalconfig bool bAdaptiveCorpseStagger;
 var globalconfig bool bAdaptiveRuntimeEnabled;
 var globalconfig bool bAdaptiveCorpseDebugMarkers;
@@ -4525,6 +4548,21 @@ function SampleTelemetry()
     local int WorldParticleLodTotal;
     local int WorldParticleBoundedComponents;
     local int WorldEmitterComponents;
+    local int ScannedWorldEmitterParticles;
+    local int ScannedWorldEmitterVisibleComponents;
+    local int ScannedWorldEmitterLodTotal;
+    local int ScannedWorldEmitterBoundedComponents;
+    local int ScannedWorldEmitterFlexComponents;
+    local int ScannedWorldEmitterFlexFluidComponents;
+    local int ScannedWorldEmitterFlexNonFluidComponents;
+    local int ScannedWorldEmitterFlexMixedComponents;
+    local int ScannedWorldEmitterNonFlexComponents;
+    local int ScannedWorldEmitterUnclassifiedComponents;
+    local int ScannedWorldEmitterConstantSpawnEmitters;
+    local int ScannedWorldEmitterDynamicSpawnEmitters;
+    local int ScannedWorldEmitterConstantSpawnRateMilli;
+    local int ScannedWorldEmitterBurstEntries;
+    local int ScannedWorldEmitterPeakCapacity;
     local int GroundFireParticleComponents;
     local int GroundFireParticles;
     local int GroundFireParticleVisibleComponents;
@@ -5279,38 +5317,101 @@ function SampleTelemetry()
         ProfileSectionNode = ProfNodeStart("KF2OPT_Telemetry_WorldEmitters");
     }
     ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
-    foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
+    // The five typed diagnostic iterators occupy phases 0-4. Refresh this
+    // complete value-only snapshot in phase 5 so no two global actor
+    // iterators share a normal one-second telemetry sample.
+    if (SampleSequence == 0 ||
+        SampleSequence % DiagnosticEffectScanInterval == 5)
     {
-        if (WorldEmitter == None || WorldEmitter.bDeleteMe ||
-            WorldEmitter.ParticleSystemComponent == None ||
-            !WorldEmitter.ParticleSystemComponent.bIsActive)
+        WorldEmitterComponents = 0;
+        foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
         {
-            continue;
+            if (WorldEmitter == None || WorldEmitter.bDeleteMe ||
+                WorldEmitter.ParticleSystemComponent == None ||
+                !WorldEmitter.ParticleSystemComponent.bIsActive)
+            {
+                continue;
+            }
+            ++WorldEmitterComponents;
+            ScannedWorldEmitterParticles +=
+                WorldEmitter.ParticleSystemComponent.NumActiveParticles;
+            InspectParticleComponent(
+                WorldEmitter.ParticleSystemComponent,
+                ScannedWorldEmitterFlexComponents,
+                ScannedWorldEmitterFlexFluidComponents,
+                ScannedWorldEmitterFlexNonFluidComponents,
+                ScannedWorldEmitterFlexMixedComponents,
+                ScannedWorldEmitterNonFlexComponents,
+                ScannedWorldEmitterUnclassifiedComponents,
+                ScannedWorldEmitterConstantSpawnEmitters,
+                ScannedWorldEmitterDynamicSpawnEmitters,
+                ScannedWorldEmitterConstantSpawnRateMilli,
+                ScannedWorldEmitterBurstEntries,
+                ScannedWorldEmitterPeakCapacity);
+            ScannedWorldEmitterLodTotal +=
+                WorldEmitter.ParticleSystemComponent.GetLODLevel();
+            if (WorldEmitter.ParticleSystemComponent.LastRenderTime >
+                WorldInfo.TimeSeconds - 0.3)
+            {
+                ++ScannedWorldEmitterVisibleComponents;
+            }
+            if (WorldEmitter.ParticleSystemComponent.Bounds.SphereRadius > 0.0)
+            {
+                ++ScannedWorldEmitterBoundedComponents;
+            }
         }
-        ++WorldEmitterComponents;
-        ++WorldParticleComponents;
-        WorldParticles +=
-            WorldEmitter.ParticleSystemComponent.NumActiveParticles;
-        InspectParticleComponent(
-            WorldEmitter.ParticleSystemComponent,
-            ParticleFlexComponents, ParticleFlexFluidComponents,
-            ParticleFlexNonFluidComponents, ParticleFlexMixedComponents,
-            ParticleNonFlexComponents, ParticleUnclassifiedComponents,
-            ParticleConstantSpawnEmitters, ParticleDynamicSpawnEmitters,
-            ParticleConstantSpawnRateMilli, ParticleBurstEntries,
-            ParticlePeakCapacity);
-        WorldParticleLodTotal +=
-            WorldEmitter.ParticleSystemComponent.GetLODLevel();
-        if (WorldEmitter.ParticleSystemComponent.LastRenderTime >
-            WorldInfo.TimeSeconds - 0.3)
-        {
-            ++WorldParticleVisibleComponents;
-        }
-        if (WorldEmitter.ParticleSystemComponent.Bounds.SphereRadius > 0.0)
-        {
-            ++WorldParticleBoundedComponents;
-        }
+        CachedWorldEmitters.Components = WorldEmitterComponents;
+        CachedWorldEmitters.Particles = ScannedWorldEmitterParticles;
+        CachedWorldEmitters.VisibleComponents =
+            ScannedWorldEmitterVisibleComponents;
+        CachedWorldEmitters.LodTotal = ScannedWorldEmitterLodTotal;
+        CachedWorldEmitters.BoundedComponents =
+            ScannedWorldEmitterBoundedComponents;
+        CachedWorldEmitters.FlexComponents =
+            ScannedWorldEmitterFlexComponents;
+        CachedWorldEmitters.FlexFluidComponents =
+            ScannedWorldEmitterFlexFluidComponents;
+        CachedWorldEmitters.FlexNonFluidComponents =
+            ScannedWorldEmitterFlexNonFluidComponents;
+        CachedWorldEmitters.FlexMixedComponents =
+            ScannedWorldEmitterFlexMixedComponents;
+        CachedWorldEmitters.NonFlexComponents =
+            ScannedWorldEmitterNonFlexComponents;
+        CachedWorldEmitters.UnclassifiedComponents =
+            ScannedWorldEmitterUnclassifiedComponents;
+        CachedWorldEmitters.ConstantSpawnEmitters =
+            ScannedWorldEmitterConstantSpawnEmitters;
+        CachedWorldEmitters.DynamicSpawnEmitters =
+            ScannedWorldEmitterDynamicSpawnEmitters;
+        CachedWorldEmitters.ConstantSpawnRateMilli =
+            ScannedWorldEmitterConstantSpawnRateMilli;
+        CachedWorldEmitters.BurstEntries =
+            ScannedWorldEmitterBurstEntries;
+        CachedWorldEmitters.PeakCapacity =
+            ScannedWorldEmitterPeakCapacity;
     }
+    WorldEmitterComponents = CachedWorldEmitters.Components;
+    WorldParticleComponents += CachedWorldEmitters.Components;
+    WorldParticles += CachedWorldEmitters.Particles;
+    WorldParticleVisibleComponents += CachedWorldEmitters.VisibleComponents;
+    WorldParticleLodTotal += CachedWorldEmitters.LodTotal;
+    WorldParticleBoundedComponents += CachedWorldEmitters.BoundedComponents;
+    ParticleFlexComponents += CachedWorldEmitters.FlexComponents;
+    ParticleFlexFluidComponents += CachedWorldEmitters.FlexFluidComponents;
+    ParticleFlexNonFluidComponents +=
+        CachedWorldEmitters.FlexNonFluidComponents;
+    ParticleFlexMixedComponents += CachedWorldEmitters.FlexMixedComponents;
+    ParticleNonFlexComponents += CachedWorldEmitters.NonFlexComponents;
+    ParticleUnclassifiedComponents +=
+        CachedWorldEmitters.UnclassifiedComponents;
+    ParticleConstantSpawnEmitters +=
+        CachedWorldEmitters.ConstantSpawnEmitters;
+    ParticleDynamicSpawnEmitters += CachedWorldEmitters.DynamicSpawnEmitters;
+    ParticleConstantSpawnRateMilli +=
+        CachedWorldEmitters.ConstantSpawnRateMilli;
+    ParticleBurstEntries += CachedWorldEmitters.BurstEntries;
+    ParticlePeakCapacity = Max(
+        ParticlePeakCapacity, CachedWorldEmitters.PeakCapacity);
     ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
         ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
     ProfileWorldEmitterMilliseconds += ProfileElapsedMilliseconds;
@@ -5376,6 +5477,7 @@ function SampleTelemetry()
              " max_effect_actors_ms="$ProfileMaxEffectActorMilliseconds$
              " max_world_emitters_ms="$ProfileMaxWorldEmitterMilliseconds$
              " effect_actor_scan_interval="$DiagnosticEffectScanInterval$
+             " world_emitter_scan_interval="$DiagnosticEffectScanInterval$
              " adaptive_controller_samples="$ProfileAdaptiveControllerSamples$
              " adaptive_controller_ms="$ProfileAdaptiveControllerMilliseconds$
              " max_adaptive_controller_ms="$
