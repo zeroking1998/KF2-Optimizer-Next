@@ -1079,10 +1079,21 @@ int main() {
         "var array<WorldEmitterTemplateTelemetrySnapshot> "
         "CachedWorldEmitterTemplates;") != std::string::npos);
     CHECK(telemetry_source.find(
+        "var array<WorldEmitterTemplateTelemetrySnapshot> "
+        "CachedWorldEmitterTraversalSnapshots;") != std::string::npos);
+    CHECK(telemetry_source.find(
         "InspectWorldEmitterParticleComponentCached(") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "FindWorldEmitterTemplateSnapshot(CacheKey, NewCacheIndex)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "CachedWorldEmitterTraversalSnapshots[TraversalIndex].Key == "
+        "CacheKey") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "InspectWorldEmitterParticleComponentCached(\n"
+        "                WorldEmitter.ParticleSystemComponent,\n"
+        "                WorldEmitterComponents - 1,") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "CachedWorldEmitterTemplates.Find('Key', CacheKey)") ==
@@ -1099,6 +1110,8 @@ int main() {
         "world_emitter_template_cache_hits=") != std::string::npos);
     CHECK(telemetry_source.find(
         "world_emitter_template_cache_misses=") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "world_emitter_template_position_hits=") != std::string::npos);
     const auto template_snapshot_start = telemetry_source.find(
         "struct WorldEmitterTemplateTelemetrySnapshot");
     const auto template_snapshot_end = telemetry_source.find(

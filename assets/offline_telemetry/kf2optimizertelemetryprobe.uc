@@ -167,8 +167,10 @@ var int ProfileClockAnomalies;
 var DiagnosticEffectTelemetrySnapshot CachedDiagnosticEffects;
 var WorldEmitterTelemetrySnapshot CachedWorldEmitters;
 var array<WorldEmitterTemplateTelemetrySnapshot> CachedWorldEmitterTemplates;
+var array<WorldEmitterTemplateTelemetrySnapshot> CachedWorldEmitterTraversalSnapshots;
 var int ProfileWorldEmitterTemplateCacheHits;
 var int ProfileWorldEmitterTemplateCacheMisses;
+var int ProfileWorldEmitterTemplatePositionHits;
 var globalconfig bool bAdaptiveCorpseStagger;
 var globalconfig bool bAdaptiveRuntimeEnabled;
 var globalconfig bool bAdaptiveCorpseDebugMarkers;
@@ -4141,6 +4143,7 @@ function int FindWorldEmitterTemplateSnapshot(
 
 function InspectWorldEmitterParticleComponentCached(
     ParticleSystemComponent ParticleComponent,
+    int TraversalIndex,
     out int FlexComponentCount,
     out int FlexFluidComponentCount,
     out int FlexNonFluidComponentCount,
@@ -4165,34 +4168,56 @@ function InspectWorldEmitterParticleComponentCached(
     }
     CacheKey = PathName(ParticleComponent.Template)$"#"$
         ParticleComponent.GetLODLevel();
-    CacheIndex = FindWorldEmitterTemplateSnapshot(CacheKey, NewCacheIndex);
-    if (CacheIndex >= 0)
+    if (TraversalIndex >= 0 &&
+        TraversalIndex < CachedWorldEmitterTraversalSnapshots.Length &&
+        CachedWorldEmitterTraversalSnapshots[TraversalIndex].Key == CacheKey)
     {
-        Snapshot = CachedWorldEmitterTemplates[CacheIndex];
+        Snapshot = CachedWorldEmitterTraversalSnapshots[TraversalIndex];
         ++ProfileWorldEmitterTemplateCacheHits;
+        ++ProfileWorldEmitterTemplatePositionHits;
     }
     else
     {
-        Snapshot.Key = CacheKey;
-        InspectParticleComponent(
-            ParticleComponent,
-            Snapshot.FlexComponents,
-            Snapshot.FlexFluidComponents,
-            Snapshot.FlexNonFluidComponents,
-            Snapshot.FlexMixedComponents,
-            Snapshot.NonFlexComponents,
-            Snapshot.UnclassifiedComponents,
-            Snapshot.ConstantSpawnEmitters,
-            Snapshot.DynamicSpawnEmitters,
-            Snapshot.ConstantSpawnRateMilli,
-            Snapshot.BurstEntries,
-            Snapshot.PeakCapacity);
-        ++ProfileWorldEmitterTemplateCacheMisses;
-        if (CachedWorldEmitterTemplates.Length <
-            MaxWorldEmitterTemplateSnapshots)
+        CacheIndex = FindWorldEmitterTemplateSnapshot(CacheKey, NewCacheIndex);
+        if (CacheIndex >= 0)
         {
-            CachedWorldEmitterTemplates.Insert(NewCacheIndex, 1);
-            CachedWorldEmitterTemplates[NewCacheIndex] = Snapshot;
+            Snapshot = CachedWorldEmitterTemplates[CacheIndex];
+            ++ProfileWorldEmitterTemplateCacheHits;
+        }
+        else
+        {
+            Snapshot.Key = CacheKey;
+            InspectParticleComponent(
+                ParticleComponent,
+                Snapshot.FlexComponents,
+                Snapshot.FlexFluidComponents,
+                Snapshot.FlexNonFluidComponents,
+                Snapshot.FlexMixedComponents,
+                Snapshot.NonFlexComponents,
+                Snapshot.UnclassifiedComponents,
+                Snapshot.ConstantSpawnEmitters,
+                Snapshot.DynamicSpawnEmitters,
+                Snapshot.ConstantSpawnRateMilli,
+                Snapshot.BurstEntries,
+                Snapshot.PeakCapacity);
+            ++ProfileWorldEmitterTemplateCacheMisses;
+            if (CachedWorldEmitterTemplates.Length <
+                MaxWorldEmitterTemplateSnapshots)
+            {
+                CachedWorldEmitterTemplates.Insert(NewCacheIndex, 1);
+                CachedWorldEmitterTemplates[NewCacheIndex] = Snapshot;
+            }
+        }
+        if (TraversalIndex >= 0 &&
+            TraversalIndex < MaxWorldEmitterTemplateSnapshots)
+        {
+            if (TraversalIndex >=
+                CachedWorldEmitterTraversalSnapshots.Length)
+            {
+                CachedWorldEmitterTraversalSnapshots.Length =
+                    TraversalIndex + 1;
+            }
+            CachedWorldEmitterTraversalSnapshots[TraversalIndex] = Snapshot;
         }
     }
     FlexComponentCount += Snapshot.FlexComponents;
@@ -5462,6 +5487,7 @@ function SampleTelemetry()
                 WorldEmitter.ParticleSystemComponent.NumActiveParticles;
             InspectWorldEmitterParticleComponentCached(
                 WorldEmitter.ParticleSystemComponent,
+                WorldEmitterComponents - 1,
                 ScannedWorldEmitterFlexComponents,
                 ScannedWorldEmitterFlexFluidComponents,
                 ScannedWorldEmitterFlexNonFluidComponents,
@@ -5609,6 +5635,8 @@ function SampleTelemetry()
                  ProfileWorldEmitterTemplateCacheHits$
              " world_emitter_template_cache_misses="$
                  ProfileWorldEmitterTemplateCacheMisses$
+             " world_emitter_template_position_hits="$
+                 ProfileWorldEmitterTemplatePositionHits$
              " adaptive_controller_samples="$ProfileAdaptiveControllerSamples$
              " adaptive_controller_ms="$ProfileAdaptiveControllerMilliseconds$
              " max_adaptive_controller_ms="$
