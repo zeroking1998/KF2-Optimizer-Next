@@ -193,6 +193,23 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
     return true;
 }
 
+void UiRuntime::reset_local_adaptive_controller_for_mode(bool enabled) {
+    adaptive_control_pending.reset();
+    adaptive_governor.reset();
+    adaptive_profile_gate.reset();
+    adaptive_decision = {};
+    adaptive_gameplay_active = false;
+    if (!enabled) {
+        adaptive_actuation.disable(monotonic_ns());
+        adaptive_actuation.rebase({}, monotonic_ns());
+        adaptive_resource_quality.reset(100);
+        if (game_process && !flex_adaptive_constrained) {
+            static_cast<void>(flex::write_adaptive_control(*game_process, 0));
+        }
+        flex_adaptive_constrained = false;
+    }
+}
+
 bool UiRuntime::set_live_adaptive_enabled(
     bool enabled, std::wstring_view reason) {
     if (!installation ||
@@ -250,20 +267,7 @@ bool UiRuntime::set_live_adaptive_enabled(
     adaptive_runtime_mode_last_attempt_ns = monotonic_ns();
     adaptive_runtime_mode_confirmed = true;
     adaptive_runtime_mode_pending.reset();
-    adaptive_control_pending.reset();
-    adaptive_governor.reset();
-    adaptive_profile_gate.reset();
-    adaptive_decision = {};
-    adaptive_gameplay_active = false;
-    if (!enabled) {
-        adaptive_actuation.disable(monotonic_ns());
-        adaptive_actuation.rebase({}, monotonic_ns());
-        adaptive_resource_quality.reset(100);
-        if (game_process && !flex_adaptive_constrained) {
-            static_cast<void>(flex::write_adaptive_control(*game_process, 0));
-        }
-        flex_adaptive_constrained = false;
-    }
+    reset_local_adaptive_controller_for_mode(enabled);
     events->append({0, diagnostics::Severity::info,
         enabled ? "ADAPTIVE_RUNTIME_ENABLED"
                 : "ADAPTIVE_RUNTIME_DISABLED",
