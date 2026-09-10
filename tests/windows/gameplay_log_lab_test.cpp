@@ -1039,6 +1039,17 @@ int main() {
     CHECK(telemetry_source.find(
         "SampleSequence % DiagnosticEffectScanInterval == 0") !=
           std::string::npos);
+    for (const auto* phased_effect_scan : {
+             "SampleSequence % DiagnosticEffectScanInterval == 1",
+             "SampleSequence % DiagnosticEffectScanInterval == 2",
+             "SampleSequence % DiagnosticEffectScanInterval == 3",
+             "SampleSequence % DiagnosticEffectScanInterval == 4"}) {
+        CHECK(telemetry_source.find(phased_effect_scan) != std::string::npos);
+    }
+    CHECK(count_occurrences(
+        telemetry_source, "SampleSequence == 0 ||") >= 5);
+    CHECK(telemetry_source.find(
+        "rotate one typed iterator per sample") != std::string::npos);
     CHECK(telemetry_source.find(
         "const DiagnosticEffectScanInterval=5;") != std::string::npos);
     CHECK(telemetry_source.find(
