@@ -167,6 +167,29 @@ int main() {
     CHECK(input.gameplay->map == "KF-BioticsLab");
     CHECK(input.flex->aggregate_active_particles == 120);
 
+    auto menu_input = complete_input();
+    menu_input.gameplay->gameplay_ui_context = game::GameplayUiContext::menu;
+    const auto menu_context_frame = build_telemetry_frame(menu_input);
+    CHECK(menu_context_frame.has_value());
+    CHECK(!menu_context_frame.value().active_gameplay);
+    CHECK(!menu_context_frame.value().offline_gameplay);
+    CHECK(!menu_context_frame.value().evidence.fresh);
+
+    auto trader_input = complete_input();
+    trader_input.gameplay->gameplay_ui_context =
+        game::GameplayUiContext::trader;
+    const auto trader_frame = build_telemetry_frame(trader_input);
+    CHECK(trader_frame.has_value());
+    CHECK(!trader_frame.value().active_gameplay);
+
+    auto gameplay_input = complete_input();
+    gameplay_input.gameplay->gameplay_ui_context =
+        game::GameplayUiContext::gameplay;
+    const auto gameplay_frame = build_telemetry_frame(gameplay_input);
+    CHECK(gameplay_frame.has_value());
+    CHECK(gameplay_frame.value().active_gameplay);
+    CHECK(gameplay_frame.value().offline_gameplay);
+
     auto adapter_fallback = complete_input();
     adapter_fallback.driver_gpu_percent.reset();
     adapter_fallback.gpu_utilization->adapter_percent = 31.0;

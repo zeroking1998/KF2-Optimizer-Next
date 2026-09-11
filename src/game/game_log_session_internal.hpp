@@ -20,6 +20,8 @@ inline constexpr std::size_t kMaximumLineBytes = 16 * 1024;
     std::string_view line);
 [[nodiscard]] std::optional<std::uint16_t> parse_adaptive_bridge_line(
     std::string_view line);
+[[nodiscard]] std::optional<GameplayUiContext> parse_gameplay_ui_context_line(
+    std::string_view line);
 [[nodiscard]] std::optional<double> parse_seconds_after(
     std::string_view line, std::string_view marker);
 [[nodiscard]] std::optional<bool> apply_offline_telemetry_line(

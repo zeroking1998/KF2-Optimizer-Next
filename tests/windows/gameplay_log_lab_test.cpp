@@ -171,6 +171,13 @@ int main() {
         "event Tick(float DeltaTime)");
     CHECK(interaction_tick != std::string::npos);
     CHECK(interaction_source.find(
+        "KF2OPT_GAMEPLAY_CONTEXT schema=1 state=") != std::string::npos);
+    CHECK(interaction_source.find(
+        "KFPC.MyGFxManager.bMenusOpen") != std::string::npos);
+    CHECK(interaction_source.find(
+        "KFPC.MyGFxManager.CurrentMenu == KFPC.MyGFxManager.TraderMenu") !=
+        std::string::npos);
+    CHECK(interaction_source.find(
         "if (bGameSessionEnding)", interaction_tick) !=
           std::string::npos);
     const auto prepare_for_world = interaction_source.find(
