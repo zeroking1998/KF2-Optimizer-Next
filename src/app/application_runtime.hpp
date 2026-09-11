@@ -308,6 +308,8 @@ struct UiRuntime {
 
     bool set_live_adaptive_enabled(bool enabled, std::wstring_view reason);
 
+    void reset_local_adaptive_controller_for_mode(bool enabled);
+
     void update_overlay_scene_gate(bool flush = false);
 
     void runtime_tick();

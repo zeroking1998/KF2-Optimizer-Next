@@ -1018,6 +1018,66 @@ int main() {
         runtime.game_process.reset();
     }
 
+    // Turning Adaptive off is fail-closed even while KF2 is between gameplay
+    // worlds and no protected control listener is reachable. The preference
+    // must change immediately, local actions must stop, and exact runtime
+    // confirmation remains pending for the next provider. Enabling records
+    // the user's preference too, but remains fail-closed until a live
+    // authenticated receipt arrives.
+    {
+        const auto deferred_state = root / L"Data-adaptive-disable-deferred";
+        kf2::diagnostics::EventLog deferred_events{
+            128, deferred_state / L"logs/session-events.json"};
+        kf2::config::Settings deferred_settings{};
+        deferred_settings.adaptive_optimization_enabled = true;
+        kf2::app::UiRuntime deferred_runtime{
+            deferred_state, false, deferred_settings, deferred_events,
+            options.game_discovery, kf2::app::StartMode::normal,
+            root / L"portable"};
+        CHECK(deferred_runtime.installation.has_value());
+        wchar_t current_executable[MAX_PATH + 1]{};
+        const DWORD current_executable_length = GetModuleFileNameW(
+            nullptr, current_executable, MAX_PATH);
+        CHECK(current_executable_length > 0);
+        CHECK(current_executable_length < MAX_PATH);
+        deferred_runtime.installation->executable = std::wstring{
+            current_executable, current_executable_length};
+        deferred_runtime.adaptive_control_token.clear();
+
+        deferred_runtime.toggle_adaptive_optimization();
+
+        CHECK(!deferred_runtime.optimizer_settings
+                   .adaptive_optimization_enabled);
+        CHECK(!deferred_runtime.model.status()
+                   .adaptive_optimization_enabled);
+        CHECK(deferred_runtime.model.status().adaptive_state == L"off");
+        CHECK(!deferred_runtime.adaptive_runtime_mode_confirmed);
+        CHECK(deferred_runtime.adaptive_runtime_mode_pending.has_value());
+        CHECK(!*deferred_runtime.adaptive_runtime_mode_pending);
+        CHECK(read_bytes(deferred_runtime.settings_path).find(
+                  "adaptive_optimization_enabled=false") !=
+              std::string::npos);
+        CHECK(deferred_runtime.model.notice().has_value());
+        CHECK(deferred_runtime.model.notice()->code ==
+              L"ADAPTIVE_DISABLE_CONFIRMATION_PENDING");
+
+        deferred_runtime.toggle_adaptive_optimization();
+
+        CHECK(deferred_runtime.optimizer_settings
+                   .adaptive_optimization_enabled);
+        CHECK(deferred_runtime.model.status()
+                   .adaptive_optimization_enabled);
+        CHECK(!deferred_runtime.adaptive_runtime_mode_confirmed);
+        CHECK(deferred_runtime.adaptive_runtime_mode_pending.has_value());
+        CHECK(*deferred_runtime.adaptive_runtime_mode_pending);
+        CHECK(deferred_runtime.model.notice().has_value());
+        CHECK(deferred_runtime.model.notice()->code ==
+              L"ADAPTIVE_ENABLE_CONFIRMATION_PENDING");
+        CHECK(read_bytes(deferred_runtime.settings_path).find(
+                  "adaptive_optimization_enabled=true") !=
+              std::string::npos);
+    }
+
     // A single optimizer process can supervise multiple KF2 launches. After
     // one protected session is restored, the next Steam/shortcut launch must
     // receive the provider bootstrap and fixed session policy again.

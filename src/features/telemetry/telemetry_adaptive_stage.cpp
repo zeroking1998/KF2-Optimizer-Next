@@ -106,14 +106,21 @@ void UiRuntime::update_adaptive_controller(
                 : L"Corpse telemetry is unavailable; no cached runtime value is used",
             L"game"});
     }
-    if (adaptive_runtime_mode_port &&
-        !adaptive_runtime_mode_confirmed) {
-        status.adaptive_state = L"mode unconfirmed";
-        status.adaptive_action = L"blocked";
-        status.adaptive_reason =
-            adaptive_mode_dispatcher.busy()
-                ? L"Waiting for the current KF2 provider to confirm the saved Adaptive mode"
-                : L"The current KF2 provider did not confirm the saved Adaptive mode";
+    if (!adaptive_runtime_mode_confirmed &&
+        (adaptive_runtime_mode_pending.has_value() ||
+         adaptive_runtime_mode_port.has_value())) {
+        const bool desired_enabled =
+            optimizer_settings.adaptive_optimization_enabled;
+        status.adaptive_optimization_enabled = desired_enabled;
+        status.adaptive_state = desired_enabled ? L"waiting" : L"off";
+        status.adaptive_action = desired_enabled ? L"blocked" : L"none";
+        status.adaptive_reason = desired_enabled
+            ? adaptive_mode_dispatcher.busy()
+                ? L"Waiting for the current KF2 provider to confirm Adaptive optimization"
+                : L"Adaptive optimization will start after protected KF2 confirmation"
+            : adaptive_mode_dispatcher.busy()
+                ? L"Adaptive optimization is off; KF2 runtime restoration is being confirmed"
+                : L"Adaptive optimization is off; runtime restoration confirmation is pending";
         status.adaptive_safety = L"fail closed";
         status.adaptive_evidence = L"MODE_READBACK_PENDING";
         model.set_status(std::move(status));

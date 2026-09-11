@@ -180,16 +180,28 @@ void UiRuntime::toggle_adaptive_optimization() {
     if (start_mode != StartMode::normal) return;
     const bool previous = optimizer_settings.adaptive_optimization_enabled;
     const bool requested = !previous;
-    if (!set_live_adaptive_enabled(
-            requested, requested ? L"Adaptive enabled by the user"
-                                 : L"Adaptive disabled by the user")) {
-        model.set_notice({
-            ui::NoticeSeverity::error,
-            L"ADAPTIVE_MODE_CHANGE_UNCONFIRMED",
-            L"KF2 is running, but it did not confirm the safe Adaptive mode change. The saved setting was not changed.",
-            L"Close KF2 or wait until protected telemetry is ready, then try again."});
-        invalidate();
-        return;
+    const bool live_confirmed = set_live_adaptive_enabled(
+        requested, requested ? L"Adaptive enabled by the user"
+                             : L"Adaptive disabled by the user");
+    const bool confirmation_pending = !live_confirmed;
+    if (!live_confirmed) {
+        // A gameplay listener intentionally does not exist in KF2's main menu
+        // and can disappear during world travel. Record the user's requested
+        // mode immediately, reset local controller state, and remain fail-
+        // closed until the authenticated background reconciliation confirms
+        // the same mode in the next gameplay world.
+        reset_local_adaptive_controller_for_mode(requested);
+        adaptive_runtime_mode_confirmed = false;
+        adaptive_runtime_mode_pending = requested;
+        adaptive_runtime_mode_last_attempt_ns = 0;
+        events->append({
+            0, diagnostics::Severity::info,
+            requested ? "ADAPTIVE_RUNTIME_ENABLE_DEFERRED"
+                      : "ADAPTIVE_RUNTIME_DISABLE_DEFERRED",
+            requested
+                ? L"Adaptive was requested; automatic actions remain blocked until protected gameplay telemetry confirms the enabled mode"
+                : L"Adaptive was disabled locally; exact KF2 runtime restoration will be confirmed when protected gameplay telemetry is available",
+            L"optimizer"});
     }
     optimizer_settings.adaptive_optimization_enabled = requested;
     const auto saved = platform::windows::atomic_replace_utf8(
@@ -277,10 +289,18 @@ void UiRuntime::toggle_adaptive_optimization() {
         : L"Adaptive optimization is off; telemetry, overlay, target FPS, maximum corpses and user-selected graphics remain active";
     model.set_status(std::move(status));
     model.set_notice({ui::NoticeSeverity::info,
-        requested ? L"ADAPTIVE_ENABLED" : L"ADAPTIVE_DISABLED",
-        requested
+        confirmation_pending
+            ? requested
+                ? L"ADAPTIVE_ENABLE_CONFIRMATION_PENDING"
+                : L"ADAPTIVE_DISABLE_CONFIRMATION_PENDING"
+            : requested ? L"ADAPTIVE_ENABLED" : L"ADAPTIVE_DISABLED",
+        requested && confirmation_pending
+            ? L"Adaptive optimization is on and waiting for protected KF2 confirmation. Automatic actions remain blocked until then."
+            : requested
             ? L"Adaptive optimization is on. It will adjust supported systems during verified gameplay."
-            : L"Adaptive optimization is off. Monitoring and your fixed game settings remain active.",
+            : confirmation_pending
+                ? L"Adaptive optimization is off. KF2 will confirm runtime restoration when protected gameplay telemetry is available."
+                : L"Adaptive optimization is off. Monitoring and your fixed game settings remain active.",
         L""});
     invalidate();
 }
