@@ -1051,7 +1051,80 @@ int main() {
     CHECK(telemetry_source.find(
         "rotate one typed iterator per sample") != std::string::npos);
     CHECK(telemetry_source.find(
-        "const DiagnosticEffectScanInterval=5;") != std::string::npos);
+        "const DiagnosticEffectScanInterval=6;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "SampleSequence % DiagnosticEffectScanInterval == 5") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "var WorldEmitterTelemetrySnapshot CachedWorldEmitters;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "world_emitter_scan_interval=\"$DiagnosticEffectScanInterval") !=
+          std::string::npos);
+    const auto world_snapshot_start = telemetry_source.find(
+        "struct WorldEmitterTelemetrySnapshot");
+    const auto world_snapshot_end = telemetry_source.find(
+        "};", world_snapshot_start);
+    CHECK(world_snapshot_start != std::string::npos);
+    CHECK(world_snapshot_end != std::string::npos);
+    const auto world_snapshot = telemetry_source.substr(
+        world_snapshot_start, world_snapshot_end - world_snapshot_start);
+    CHECK(world_snapshot.find("Emitter ") == std::string::npos);
+    CHECK(world_snapshot.find("ParticleSystemComponent") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "const MaxWorldEmitterTemplateSnapshots=256;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "var array<WorldEmitterTemplateTelemetrySnapshot> "
+        "CachedWorldEmitterTemplates;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "var array<WorldEmitterTemplateTelemetrySnapshot> "
+        "CachedWorldEmitterTraversalSnapshots;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "InspectWorldEmitterParticleComponentCached(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "FindWorldEmitterTemplateSnapshot(CacheKey, NewCacheIndex)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "CachedWorldEmitterTraversalSnapshots[TraversalIndex].Key == "
+        "CacheKey") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "InspectWorldEmitterParticleComponentCached(\n"
+        "                WorldEmitter.ParticleSystemComponent,\n"
+        "                WorldEmitterComponents - 1,") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "CachedWorldEmitterTemplates.Find('Key', CacheKey)") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "CachedWorldEmitterTemplates.Insert(NewCacheIndex, 1)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "CacheKey = PathName(ParticleComponent.Template)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "world_emitter_template_cache_entries=") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "world_emitter_template_cache_hits=") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "world_emitter_template_cache_misses=") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "world_emitter_template_position_hits=") != std::string::npos);
+    const auto template_snapshot_start = telemetry_source.find(
+        "struct WorldEmitterTemplateTelemetrySnapshot");
+    const auto template_snapshot_end = telemetry_source.find(
+        "};", template_snapshot_start);
+    CHECK(template_snapshot_start != std::string::npos);
+    CHECK(template_snapshot_end != std::string::npos);
+    const auto template_snapshot = telemetry_source.substr(
+        template_snapshot_start,
+        template_snapshot_end - template_snapshot_start);
+    CHECK(template_snapshot.find("ParticleSystem ") == std::string::npos);
+    CHECK(template_snapshot.find("ParticleSystemComponent") ==
+          std::string::npos);
+    CHECK(template_snapshot.find("Object ") == std::string::npos);
     CHECK(telemetry_source.find(
         "effect_actor_scan_interval=\"$DiagnosticEffectScanInterval") !=
           std::string::npos);
@@ -1064,7 +1137,8 @@ int main() {
     const auto particle_inspection_start = telemetry_source.find(
         "function InspectParticleComponent(");
     const auto particle_inspection_end = telemetry_source.find(
-        "function AdaptiveCorpseLoadControl()", particle_inspection_start);
+        "function InspectWorldEmitterParticleComponentCached(",
+        particle_inspection_start);
     CHECK(particle_inspection_start != std::string::npos);
     CHECK(particle_inspection_end != std::string::npos);
     const auto particle_inspection = telemetry_source.substr(
