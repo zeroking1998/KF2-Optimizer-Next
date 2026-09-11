@@ -9,6 +9,8 @@
 class KF2OptimizerTelemetryProbe extends Info config(Engine);
 
 const DiagnosticEffectScanInterval=5;
+const AdaptiveCorpseControlInterval=0.25;
+const AdaptiveCorpseControlInitialDelay=0.125;
 
 struct DiagnosticEffectTelemetrySnapshot
 {
@@ -202,6 +204,28 @@ function bool ValidAdaptiveControlToken(string Candidate)
     return Len(AdaptiveControlToken) == 32 && Candidate == AdaptiveControlToken;
 }
 
+// Keep the 250-ms gameplay control cadence, but offset it from the one-second
+// telemetry sample. Both callbacks execute on UE3's game thread; staggering
+// them avoids regularly combining their worst-case work in the same frame.
+function BeginAdaptiveCorpseControlTimer()
+{
+    ClearTimer(nameof(BeginAdaptiveCorpseControlTimer), self);
+    if (bAdaptiveCorpseStagger && bAdaptiveRuntimeEnabled &&
+        !bAdaptiveRuntimeQuiesced)
+    {
+        SetTimer(AdaptiveCorpseControlInterval, true,
+                 nameof(AdaptiveCorpseLoadControl), self);
+    }
+}
+
+function ScheduleAdaptiveCorpseControlTimer()
+{
+    ClearTimer(nameof(BeginAdaptiveCorpseControlTimer), self);
+    ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
+    SetTimer(AdaptiveCorpseControlInitialDelay, false,
+             nameof(BeginAdaptiveCorpseControlTimer), self);
+}
+
 function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
 {
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone ||
@@ -215,7 +239,7 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
         if (bAdaptiveCorpseStagger)
         {
             SetTimer(0.45, true, nameof(StaggerCorpseCleanup), self);
-            SetTimer(0.25, true, nameof(AdaptiveCorpseLoadControl), self);
+            ScheduleAdaptiveCorpseControlTimer();
         }
         `log("KF2OPT_ADAPTIVE_MODE state=enabled readback=verified");
         return true;
@@ -240,6 +264,7 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
         AdaptiveCorpseManager.MaxDeadBodies = AdaptiveCorpseTarget;
     }
     ClearTimer(nameof(StaggerCorpseCleanup), self);
+    ClearTimer(nameof(BeginAdaptiveCorpseControlTimer), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
     AdaptiveCorpsePressureSamples = 0;
     AdaptiveCorpseRecoverySamples = 0;
@@ -3675,7 +3700,7 @@ event PreBeginPlay()
     if (bAdaptiveCorpseStagger && bAdaptiveRuntimeEnabled)
     {
         SetTimer(0.45, true, nameof(StaggerCorpseCleanup), self);
-        SetTimer(0.25, true, nameof(AdaptiveCorpseLoadControl), self);
+        ScheduleAdaptiveCorpseControlTimer();
     }
     SampleTelemetry();
 }
@@ -4958,6 +4983,7 @@ function QuiesceForWorldTeardown()
     RemoveAdaptiveDebugMarkerPostRender();
     ClearTimer(nameof(SampleTelemetry), self);
     ClearTimer(nameof(StaggerCorpseCleanup), self);
+    ClearTimer(nameof(BeginAdaptiveCorpseControlTimer), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
     ClearTimer(nameof(WakeAdaptiveDistanceSleptCorpseBatch), self);
     if (AdaptiveCorpsesRemoved > 0)
