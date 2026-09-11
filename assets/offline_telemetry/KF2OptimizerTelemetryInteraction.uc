@@ -6,6 +6,7 @@ class KF2OptimizerTelemetryInteraction extends Interaction
 
 var string OptimizerContextState;
 var string OptimizerProbeState;
+var string OptimizerGameplayUiState;
 var bool bGameSessionEnding;
 var KF2OptimizerAdaptiveGraphicsState ProcessAdaptiveGraphicsState;
 var bool bProcessAdaptiveRuntimeStateInitialized;
@@ -37,6 +38,39 @@ function ReportOptimizerProbeState(string State)
     `log("KF2OPT_INTERACTION schema=1 probe="$State);
 }
 
+function ReportGameplayUiState(string State)
+{
+    if (OptimizerGameplayUiState ~= State)
+    {
+        return;
+    }
+    OptimizerGameplayUiState = State;
+    `log("KF2OPT_GAMEPLAY_CONTEXT schema=1 state="$State);
+}
+
+function UpdateGameplayUiState(PlayerController PrimaryController)
+{
+    local KFPlayerController KFPC;
+
+    KFPC = KFPlayerController(PrimaryController);
+    if (KFPC == None || KFPC.MyGFxManager == None)
+    {
+        return;
+    }
+    if (!KFPC.MyGFxManager.bMenusOpen)
+    {
+        ReportGameplayUiState("gameplay");
+    }
+    else if (KFPC.MyGFxManager.CurrentMenu == KFPC.MyGFxManager.TraderMenu)
+    {
+        ReportGameplayUiState("trader");
+    }
+    else
+    {
+        ReportGameplayUiState("menu");
+    }
+}
+
 function KF2OptimizerAdaptiveGraphicsState GetProcessAdaptiveGraphicsState()
 {
     if (ProcessAdaptiveGraphicsState == None)
@@ -55,6 +89,7 @@ function PrepareForGameplayWorld()
     bGameSessionEnding = false;
     OptimizerContextState = "";
     OptimizerProbeState = "";
+    OptimizerGameplayUiState = "";
     `log("KF2OPT_INTERACTION schema=1 state=rearmed");
 }
 
@@ -119,6 +154,7 @@ event Tick(float DeltaTime)
     {
         return;
     }
+    UpdateGameplayUiState(PrimaryController);
 
     foreach CurrentWorld.DynamicActors(
         class'KF2OptimizerTelemetryProbe', CurrentProbe)
@@ -228,6 +264,7 @@ function NotifyGameSessionEnded()
     }
     OptimizerContextState = "";
     OptimizerProbeState = "";
+    OptimizerGameplayUiState = "";
     `log("KF2OPT_INTERACTION schema=1 state=session_ended");
 }
 

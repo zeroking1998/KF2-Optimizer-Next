@@ -57,6 +57,21 @@ std::optional<std::uint16_t> parse_adaptive_bridge_line(
     return static_cast<std::uint16_t>(port);
 }
 
+std::optional<GameplayUiContext> parse_gameplay_ui_context_line(
+    std::string_view line) {
+    constexpr std::string_view marker =
+        "KF2OPT_GAMEPLAY_CONTEXT schema=1 state=";
+    const auto marker_offset = line.find(marker);
+    if (marker_offset == std::string_view::npos) return std::nullopt;
+    auto state = line.substr(marker_offset + marker.size());
+    const auto delimiter = state.find_first_of(" \t\r\n");
+    if (delimiter != std::string_view::npos) state = state.substr(0, delimiter);
+    if (state == "gameplay") return GameplayUiContext::gameplay;
+    if (state == "menu") return GameplayUiContext::menu;
+    if (state == "trader") return GameplayUiContext::trader;
+    return std::nullopt;
+}
+
 std::optional<double> parse_real(std::string_view text) {
     double value = 0.0;
     const auto parsed = std::from_chars(

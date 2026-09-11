@@ -167,6 +167,17 @@ int main() {
     CHECK(!stream.feed("unrelated\n").has_value());
     CHECK(stream.current().has_value());
 
+    // The protected interaction may report its initial state before KF2's
+    // separate net-mode line reaches the tailer. Do not lose that boundary.
+    const auto early_menu = stream.feed(
+        "[0040.99] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=menu\n");
+    CHECK(early_menu.has_value());
+    CHECK(!game_log_is_active_gameplay(*early_menu));
+    const auto early_gameplay = stream.feed(
+        "[0041.00] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=gameplay\n");
+    CHECK(early_gameplay.has_value());
+    CHECK(game_log_is_active_gameplay(*early_gameplay));
+
     const auto loading = stream.feed(
         "[0041.02] Log: --- LOADING MOVIE START ---\n",
         1'000'000'000ULL);
@@ -210,6 +221,30 @@ int main() {
               L"read-only active launch log") != std::wstring::npos);
     CHECK(describe_game_log_session(*offline).find(L"Launch.log") ==
           std::wstring::npos);
+
+    const auto escape_menu = stream.feed(
+        "[0048.425] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=menu\n");
+    CHECK(escape_menu.has_value());
+    CHECK(escape_menu->gameplay_ui_context == GameplayUiContext::menu);
+    CHECK(!game_log_is_active_gameplay(*escape_menu));
+    CHECK(!game_log_is_offline_gameplay(*escape_menu));
+    CHECK(!stream.feed(
+        "[0048.426] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=menu\n")
+               .has_value());
+    const auto trader_menu = stream.feed(
+        "[0048.427] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=trader\n");
+    CHECK(trader_menu.has_value());
+    CHECK(trader_menu->gameplay_ui_context == GameplayUiContext::trader);
+    CHECK(!game_log_is_active_gameplay(*trader_menu));
+    const auto gameplay_returned = stream.feed(
+        "[0048.428] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=gameplay\n");
+    CHECK(gameplay_returned.has_value());
+    CHECK(gameplay_returned->gameplay_ui_context == GameplayUiContext::gameplay);
+    CHECK(game_log_is_active_gameplay(*gameplay_returned));
+    CHECK(game_log_is_offline_gameplay(*gameplay_returned));
+    CHECK(!stream.feed(
+        "[0048.429] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=unknown\n")
+               .has_value());
     CHECK(!stream.feed(
         "[0048.43] ScriptLog: WI.NetMode:  NM_Standalone\n").has_value());
     CHECK(!stream.feed(

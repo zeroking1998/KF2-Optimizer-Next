@@ -13,6 +13,12 @@ enum class GameLogPhase {
     match_ended,
 };
 
+enum class GameplayUiContext {
+    gameplay,
+    menu,
+    trader,
+};
+
 struct GameLogSession {
     std::string map;
     std::optional<std::string> game_class;
@@ -136,6 +142,7 @@ struct GameLogSession {
     std::optional<bool> telemetry_zed_time_active;
     std::optional<std::uint16_t> telemetry_control_port;
     std::optional<int> telemetry_sample;
+    std::optional<GameplayUiContext> gameplay_ui_context;
     std::optional<double> level_load_seconds;
     std::optional<double> stream_all_resources_seconds;
     std::optional<double> loading_movie_seconds;

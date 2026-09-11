@@ -74,6 +74,15 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                     current_->telemetry_control_port = port;
                     changed = *current_;
                 }
+            } else if (const auto ui_context =
+                           detail::parse_gameplay_ui_context_line(line);
+                       current_ && !current_->main_menu &&
+                       current_->phase != GameLogPhase::match_ended &&
+                       ui_context) {
+                if (current_->gameplay_ui_context != ui_context) {
+                    current_->gameplay_ui_context = *ui_context;
+                    changed = *current_;
+                }
             } else if (current_ && !current_->main_menu &&
                        line.find("Log: --- LOADING MOVIE START ---") !=
                            std::string_view::npos) {

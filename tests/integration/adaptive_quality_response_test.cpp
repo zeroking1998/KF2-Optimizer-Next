@@ -145,6 +145,76 @@ int main() {
             }
         }
     }
+    // Escape/Trader transition frames remain available to the overlay, while
+    // Adaptive resumes from a bounded gameplay-only window. A real stall that
+    // occurs after that boundary must still be actionable.
+    {
+        telemetry::PresentSource source{identity, 2048};
+        CHECK(source.start().has_value());
+        const auto menu_open_ns = receipt_ns + 1'000'000'000ULL;
+        const auto gameplay_return_ns = receipt_ns + 3'000'000'000ULL;
+        for (auto at = receipt_ns; at < menu_open_ns;
+             at += 16'666'667ULL) {
+            CHECK(source.ingest({identity, at, 1, true, 0}));
+        }
+        for (auto at = menu_open_ns; at < gameplay_return_ns;
+             at += 125'000'000ULL) {
+            CHECK(source.ingest({identity, at, 1, true, 0}));
+        }
+        for (auto at = gameplay_return_ns + 16'666'667ULL;
+             at <= gameplay_return_ns + 2'000'000'000ULL;
+             at += 16'666'667ULL) {
+            CHECK(source.ingest({identity, at, 1, true, 0}));
+        }
+        const auto now = gameplay_return_ns + 2'000'000'000ULL;
+        const auto overlay_frames = source.drain(now, 2'000'000'000ULL);
+        const auto adaptive_frames = source.drain(
+            now, 2'000'000'000ULL, gameplay_return_ns);
+        CHECK(overlay_frames.one_percent_low_fps.has_value());
+        CHECK(*overlay_frames.one_percent_low_fps < 10.0);
+        CHECK(adaptive_frames.one_percent_low_fps.has_value());
+        CHECK(*adaptive_frames.one_percent_low_fps > 59.0);
+
+        optimizer::AdaptiveGovernor governor;
+        optimizer::AdaptivePolicy policy;
+        policy.target_fps = 60;
+        TelemetryFrame frame;
+        frame.identity = identity;
+        frame.observed_at_ns = now;
+        frame.active_gameplay = true;
+        frame.offline_gameplay = true;
+        frame.frames = overlay_frames;
+        frame.gameplay.emplace();
+        frame.gameplay->map = "KF-Outpost";
+        frame.gameplay->net_mode = "NM_Standalone";
+        frame.gameplay->phase = game::GameLogPhase::map_loaded;
+        frame.gameplay->telemetry_sample = 10;
+        frame.gameplay->telemetry_observed_ns = now;
+        AdaptiveSampleContext context;
+        context.current_map = "KF-Outpost";
+        context.map_generation = 1;
+        context.last_telemetry_sample = 10;
+        context.decision_frames = adaptive_frames;
+        const auto clean = build_adaptive_sample(frame, context);
+        CHECK(!governor.evaluate(policy, clean.sample, now)
+                   .current_frame_pressure);
+
+        bool gameplay_stall_detected = false;
+        for (auto at = now + 125'000'000ULL;
+             at <= now + 4'000'000'000ULL; at += 125'000'000ULL) {
+            CHECK(source.ingest({identity, at, 1, true, 0}));
+            frame.observed_at_ns = at;
+            frame.frames = source.drain(at, 2'000'000'000ULL);
+            frame.gameplay->telemetry_observed_ns = at;
+            context.decision_frames = source.drain(
+                at, 2'000'000'000ULL, gameplay_return_ns);
+            const auto stalled = build_adaptive_sample(frame, context);
+            gameplay_stall_detected = gameplay_stall_detected ||
+                governor.evaluate(policy, stalled.sample, at)
+                    .current_frame_pressure;
+        }
+        CHECK(gameplay_stall_detected);
+    }
     // Gameplay regression: at target 50, sequence 87 reported live/average
     // 50.01, p95 20.93 ms, lows 46.28/45.35, and zero stutters. Merely
     // keeping these modest percentile deviations for 3.5 s must not request

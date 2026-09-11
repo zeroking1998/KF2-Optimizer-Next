@@ -149,7 +149,9 @@ std::wstring describe_game_log_session(const GameLogSession& session) {
 bool game_log_is_active_gameplay(const GameLogSession& session) noexcept {
     return !session.main_menu && !session.map.empty() &&
            session.phase == GameLogPhase::map_loaded &&
-           !session.loading_movie_active;
+           !session.loading_movie_active &&
+           (!session.gameplay_ui_context ||
+            *session.gameplay_ui_context == GameplayUiContext::gameplay);
 }
 
 bool game_log_is_offline_gameplay(const GameLogSession& session) noexcept {
