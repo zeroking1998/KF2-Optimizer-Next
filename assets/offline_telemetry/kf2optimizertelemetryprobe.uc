@@ -5053,12 +5053,41 @@ function SampleTelemetry()
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=decals_done");
 
-    // These fields are diagnostics only. Keep KF2's efficient typed iterators,
-    // but amortize their combined cost and reuse the last complete snapshot.
-    // Adaptive inputs and world emitters are still sampled every second.
+    // These fields are diagnostics only. Bootstrap one complete snapshot, then
+    // rotate one typed iterator per sample so their costs cannot stack in the
+    // same game-thread frame. Unscanned groups reuse their last complete value.
+    SprayActors = CachedDiagnosticEffects.SprayActors;
+    FireSprayActors = CachedDiagnosticEffects.FireSprayActors;
+    ToxicSprayActors = CachedDiagnosticEffects.ToxicSprayActors;
+    OtherSprayActors = CachedDiagnosticEffects.OtherSprayActors;
+    ExplosionActors = CachedDiagnosticEffects.ExplosionActors;
+    DamagingExplosionActors =
+        CachedDiagnosticEffects.DamagingExplosionActors;
+    FireExplosionActors = CachedDiagnosticEffects.FireExplosionActors;
+    ToxicExplosionActors = CachedDiagnosticEffects.ToxicExplosionActors;
+    OtherDamagingExplosionActors =
+        CachedDiagnosticEffects.OtherDamagingExplosionActors;
+    UnclassifiedExplosionActors =
+        CachedDiagnosticEffects.UnclassifiedExplosionActors;
+    LingeringExplosionActors =
+        CachedDiagnosticEffects.LingeringExplosionActors;
+    SmokeExplosionActors = CachedDiagnosticEffects.SmokeExplosionActors;
+    BloatKingFartExplosionActors =
+        CachedDiagnosticEffects.BloatKingFartExplosionActors;
+    SmokeGrenadeProjectiles =
+        CachedDiagnosticEffects.SmokeGrenadeProjectiles;
+    PukeMineProjectiles = CachedDiagnosticEffects.PukeMineProjectiles;
+    BloatKingPukeMineProjectiles =
+        CachedDiagnosticEffects.BloatKingPukeMineProjectiles;
+    VisibleGibs = CachedDiagnosticEffects.VisibleGibs;
+
     if (SampleSequence == 0 ||
         SampleSequence % DiagnosticEffectScanInterval == 0)
     {
+        SprayActors = 0;
+        FireSprayActors = 0;
+        ToxicSprayActors = 0;
+        OtherSprayActors = 0;
         foreach WorldInfo.AllActors(class'KFSprayActor', SprayActor)
         {
             if (SprayActor == None || SprayActor.bDeleteMe)
@@ -5082,6 +5111,24 @@ function SampleTelemetry()
                 ++OtherSprayActors;
             }
         }
+        CachedDiagnosticEffects.SprayActors = SprayActors;
+        CachedDiagnosticEffects.FireSprayActors = FireSprayActors;
+        CachedDiagnosticEffects.ToxicSprayActors = ToxicSprayActors;
+        CachedDiagnosticEffects.OtherSprayActors = OtherSprayActors;
+    }
+
+    if (SampleSequence == 0 ||
+        SampleSequence % DiagnosticEffectScanInterval == 1)
+    {
+        ExplosionActors = 0;
+        DamagingExplosionActors = 0;
+        FireExplosionActors = 0;
+        ToxicExplosionActors = 0;
+        OtherDamagingExplosionActors = 0;
+        UnclassifiedExplosionActors = 0;
+        LingeringExplosionActors = 0;
+        SmokeExplosionActors = 0;
+        BloatKingFartExplosionActors = 0;
         foreach WorldInfo.AllActors(class'KFExplosionActor', ExplosionActor)
         {
             if (ExplosionActor == None || ExplosionActor.bDeleteMe)
@@ -5127,43 +5174,6 @@ function SampleTelemetry()
                 ++BloatKingFartExplosionActors;
             }
         }
-        foreach WorldInfo.AllActors(
-            class'KFProj_HansSmokeGrenade', SmokeGrenadeProjectile)
-        {
-            if (SmokeGrenadeProjectile != None &&
-                !SmokeGrenadeProjectile.bDeleteMe)
-            {
-                ++SmokeGrenadeProjectiles;
-            }
-        }
-
-        foreach WorldInfo.AllActors(
-            class'KFProj_BloatPukeMine', PukeMineProjectile)
-        {
-            if (PukeMineProjectile == None || PukeMineProjectile.bDeleteMe)
-            {
-                continue;
-            }
-            ++PukeMineProjectiles;
-            if (KFProj_BloatKingPukeMine(PukeMineProjectile) != None)
-            {
-                ++BloatKingPukeMineProjectiles;
-            }
-        }
-
-        foreach WorldInfo.AllActors(class'KFGiblet', Gib)
-        {
-            if (Gib != None && !Gib.bDeleteMe)
-            {
-                ++VisibleGibs;
-            }
-        }
-
-        CachedDiagnosticEffects.VisibleGibs = VisibleGibs;
-        CachedDiagnosticEffects.SprayActors = SprayActors;
-        CachedDiagnosticEffects.FireSprayActors = FireSprayActors;
-        CachedDiagnosticEffects.ToxicSprayActors = ToxicSprayActors;
-        CachedDiagnosticEffects.OtherSprayActors = OtherSprayActors;
         CachedDiagnosticEffects.ExplosionActors = ExplosionActors;
         CachedDiagnosticEffects.DamagingExplosionActors =
             DamagingExplosionActors;
@@ -5178,38 +5188,60 @@ function SampleTelemetry()
         CachedDiagnosticEffects.SmokeExplosionActors = SmokeExplosionActors;
         CachedDiagnosticEffects.BloatKingFartExplosionActors =
             BloatKingFartExplosionActors;
+    }
+
+    if (SampleSequence == 0 ||
+        SampleSequence % DiagnosticEffectScanInterval == 2)
+    {
+        SmokeGrenadeProjectiles = 0;
+        foreach WorldInfo.AllActors(
+            class'KFProj_HansSmokeGrenade', SmokeGrenadeProjectile)
+        {
+            if (SmokeGrenadeProjectile != None &&
+                !SmokeGrenadeProjectile.bDeleteMe)
+            {
+                ++SmokeGrenadeProjectiles;
+            }
+        }
         CachedDiagnosticEffects.SmokeGrenadeProjectiles =
             SmokeGrenadeProjectiles;
+    }
+
+    if (SampleSequence == 0 ||
+        SampleSequence % DiagnosticEffectScanInterval == 3)
+    {
+        PukeMineProjectiles = 0;
+        BloatKingPukeMineProjectiles = 0;
+        foreach WorldInfo.AllActors(
+            class'KFProj_BloatPukeMine', PukeMineProjectile)
+        {
+            if (PukeMineProjectile == None || PukeMineProjectile.bDeleteMe)
+            {
+                continue;
+            }
+            ++PukeMineProjectiles;
+            if (KFProj_BloatKingPukeMine(PukeMineProjectile) != None)
+            {
+                ++BloatKingPukeMineProjectiles;
+            }
+        }
         CachedDiagnosticEffects.PukeMineProjectiles = PukeMineProjectiles;
         CachedDiagnosticEffects.BloatKingPukeMineProjectiles =
             BloatKingPukeMineProjectiles;
     }
-    else
+
+    if (SampleSequence == 0 ||
+        SampleSequence % DiagnosticEffectScanInterval == 4)
     {
-        VisibleGibs = CachedDiagnosticEffects.VisibleGibs;
-        SprayActors = CachedDiagnosticEffects.SprayActors;
-        FireSprayActors = CachedDiagnosticEffects.FireSprayActors;
-        ToxicSprayActors = CachedDiagnosticEffects.ToxicSprayActors;
-        OtherSprayActors = CachedDiagnosticEffects.OtherSprayActors;
-        ExplosionActors = CachedDiagnosticEffects.ExplosionActors;
-        DamagingExplosionActors =
-            CachedDiagnosticEffects.DamagingExplosionActors;
-        FireExplosionActors = CachedDiagnosticEffects.FireExplosionActors;
-        ToxicExplosionActors = CachedDiagnosticEffects.ToxicExplosionActors;
-        OtherDamagingExplosionActors =
-            CachedDiagnosticEffects.OtherDamagingExplosionActors;
-        UnclassifiedExplosionActors =
-            CachedDiagnosticEffects.UnclassifiedExplosionActors;
-        LingeringExplosionActors =
-            CachedDiagnosticEffects.LingeringExplosionActors;
-        SmokeExplosionActors = CachedDiagnosticEffects.SmokeExplosionActors;
-        BloatKingFartExplosionActors =
-            CachedDiagnosticEffects.BloatKingFartExplosionActors;
-        SmokeGrenadeProjectiles =
-            CachedDiagnosticEffects.SmokeGrenadeProjectiles;
-        PukeMineProjectiles = CachedDiagnosticEffects.PukeMineProjectiles;
-        BloatKingPukeMineProjectiles =
-            CachedDiagnosticEffects.BloatKingPukeMineProjectiles;
+        VisibleGibs = 0;
+        foreach WorldInfo.AllActors(class'KFGiblet', Gib)
+        {
+            if (Gib != None && !Gib.bDeleteMe)
+            {
+                ++VisibleGibs;
+            }
+        }
+        CachedDiagnosticEffects.VisibleGibs = VisibleGibs;
     }
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=effect_actors_done");
