@@ -9,6 +9,71 @@
 namespace kf2::app {
 namespace {
 
+std::wstring widen_ascii(std::string_view value) {
+    return {value.begin(), value.end()};
+}
+
+void append_metric(std::wostringstream& text, std::wstring_view name,
+                   const std::optional<double>& value,
+                   int precision = 1) {
+    text << L"; " << name << L'=';
+    if (value) {
+        text << std::fixed << std::setprecision(precision) << *value;
+    } else {
+        text << L"NOT_AVAILABLE";
+    }
+}
+
+void append_count(std::wostringstream& text, std::wstring_view name,
+                  const std::optional<int>& value) {
+    text << L"; " << name << L'=';
+    if (value) {
+        text << *value;
+    } else {
+        text << L"NOT_AVAILABLE";
+    }
+}
+
+void record_zed_spawn_observation(
+    UiRuntime& runtime,
+    const telemetry_pipeline::TelemetryFrame& frame) {
+    const auto observation =
+        runtime.zed_spawn_observation_tracker.observe(frame);
+    if (!observation || !frame.gameplay) return;
+
+    std::wostringstream message;
+    message << L"map=" << widen_ascii(frame.gameplay->map)
+            << L"; sample=" << observation->sample
+            << L"; living=" << observation->previous_living << L"->"
+            << observation->current_living
+            << L"; delta=" << observation->delta
+            << L"; firstGroup="
+            << (observation->first_group ? L"true" : L"false");
+    append_metric(message, L"fps", frame.frames.fps);
+    append_metric(message, L"avgFps", frame.frames.average_fps);
+    append_metric(message, L"low1Fps",
+                  frame.frames.sustained_one_percent_low_fps
+                      ? frame.frames.sustained_one_percent_low_fps
+                      : frame.frames.one_percent_low_fps);
+    append_metric(message, L"p95Ms", frame.frames.p95_ms, 2);
+    append_metric(message, L"p99Ms", frame.frames.p99_ms, 2);
+    message << L"; stutters=" << frame.frames.stutter_count;
+    append_metric(message, L"criticalThreadPercent",
+                  frame.evidence.critical_core_percent);
+    append_metric(message, L"gpuPercent", frame.evidence.gpu_percent);
+    append_count(message, L"visibleLiving",
+                 frame.gameplay->telemetry_living_visible);
+    append_count(message, L"goreParticles",
+                 frame.gameplay->telemetry_gore_particles);
+    append_count(message, L"worldParticles",
+                 frame.gameplay->telemetry_world_particles);
+    append_count(message, L"corpses",
+                 frame.gameplay->telemetry_corpse_total);
+    runtime.events->append(
+        {0, diagnostics::Severity::info, "ZED_SPAWN_BURST_OBSERVED",
+         message.str(), L"telemetry"});
+}
+
 class RuntimeTelemetryPipeline final {
 public:
     explicit RuntimeTelemetryPipeline(UiRuntime& runtime)
@@ -64,6 +129,7 @@ public:
         runtime_.optimizer_evidence = frame_->evidence;
         runtime_.last_frame_metrics = frame_->frames;
         runtime_.last_report_gameplay_session = frame_->gameplay;
+        record_zed_spawn_observation(runtime_, *frame_);
         return true;
     }
 

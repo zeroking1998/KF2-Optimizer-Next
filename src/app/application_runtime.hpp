@@ -23,6 +23,7 @@
 #include "kf2/app/build_identity.hpp"
 #include "kf2/optimizer/quality_response.hpp"
 #include "features/telemetry/corpse_telemetry_state.hpp"
+#include "features/telemetry/zed_spawn_observation.hpp"
 #include "kf2/backup/restore_transaction.hpp"
 #include "kf2/config/ini_document.hpp"
 #include "kf2/config/adaptive_locks.hpp"
@@ -202,6 +203,7 @@ struct UiRuntime {
     bool adaptive_frame_rate_mode_read_failed{false};
     optimizer::QualityResponse quality_response;
     telemetry_pipeline::CorpseTelemetryTracker corpse_telemetry_tracker;
+    telemetry_pipeline::ZedSpawnObservationTracker zed_spawn_observation_tracker;
     game::AdaptiveResourceQualityState adaptive_resource_quality{100};
     std::optional<game::OfflineAdaptiveSessionPolicy>
         adaptive_session_policy;

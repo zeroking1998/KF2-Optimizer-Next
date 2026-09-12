@@ -846,6 +846,16 @@ target_include_directories(kf2_telemetry_collection_stage_test PRIVATE
 add_test(NAME kf2_telemetry_collection_stage_test
     COMMAND kf2_telemetry_collection_stage_test)
 
+add_executable(kf2_zed_spawn_observation_test
+    unit/zed_spawn_observation_test.cpp
+)
+target_include_directories(kf2_zed_spawn_observation_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include"
+    "${PROJECT_SOURCE_DIR}/src"
+)
+add_test(NAME kf2_zed_spawn_observation_test
+    COMMAND kf2_zed_spawn_observation_test)
+
 add_executable(kf2_resource_telemetry_worker_test
     unit/resource_telemetry_worker_test.cpp
     "${PROJECT_SOURCE_DIR}/src/telemetry/resource_telemetry_worker.cpp"
