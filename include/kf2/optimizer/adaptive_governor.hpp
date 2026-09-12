@@ -145,6 +145,7 @@ struct AdaptiveSample {
     std::optional<double> thermal_power_pressure;
 
     std::optional<double> rendering_pressure;
+    std::optional<double> living_zed_pressure;
     std::optional<double> animation_pressure;
     std::optional<double> physics_pressure;
     std::optional<double> ragdoll_pressure;

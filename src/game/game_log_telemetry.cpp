@@ -12,6 +12,7 @@ struct OfflineTelemetrySnapshot {
     int living_bosses{0};
     int living_visible{0};
     int living_offscreen{0};
+    std::optional<int> living_pressure_milli;
     int living_lod_total{0};
     int living_anim_rate_total{0};
     int living_injured_zones{0};
@@ -285,7 +286,19 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
     const auto flex_active = take(" flex_surrogate_particles=", 1);
     const auto flex_particles = take(" flex_surrogate_visible=", aggregate_max);
     const auto flex_visible = take(" flex_surrogate_lod=", 1);
-    const auto flex_lod = take({}, entity_max);
+    std::optional<int> flex_lod;
+    std::optional<int> living_pressure_milli;
+    constexpr std::string_view living_pressure_marker =
+        " living_pressure_milli=";
+    if (payload.find(living_pressure_marker) != std::string_view::npos) {
+        flex_lod = take(living_pressure_marker, entity_max);
+        living_pressure_milli = take({}, 1'000);
+    } else {
+        // Schema 6 originally ended at flex_surrogate_lod. Keep accepting
+        // those lines while packaged providers begin emitting the optional
+        // cause-first workload signal.
+        flex_lod = take({}, entity_max);
+    }
     if (!sample || *sample <= 0 || !living || !total || !awake || !sleeping ||
         !living_classes || !living_bosses || !living_visible ||
         !living_offscreen || !living_lod_total || !living_anim_rate_total ||
@@ -388,6 +401,7 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
     result.living_bosses = *living_bosses;
     result.living_visible = *living_visible;
     result.living_offscreen = *living_offscreen;
+    result.living_pressure_milli = living_pressure_milli;
     result.living_lod_total = *living_lod_total;
     result.living_anim_rate_total = *living_anim_rate_total;
     result.living_injured_zones = *living_injured_zones;
@@ -512,6 +526,8 @@ void apply_offline_telemetry_snapshot(
     session.telemetry_living_bosses = telemetry.living_bosses;
     session.telemetry_living_visible = telemetry.living_visible;
     session.telemetry_living_offscreen = telemetry.living_offscreen;
+    session.telemetry_living_pressure_milli =
+        telemetry.living_pressure_milli;
     session.telemetry_living_lod_total = telemetry.living_lod_total;
     session.telemetry_living_anim_rate_total =
         telemetry.living_anim_rate_total;
@@ -688,6 +704,7 @@ void clear_offline_telemetry_snapshot(GameLogSession& session) noexcept {
     session.telemetry_living_bosses.reset();
     session.telemetry_living_visible.reset();
     session.telemetry_living_offscreen.reset();
+    session.telemetry_living_pressure_milli.reset();
     session.telemetry_living_lod_total.reset();
     session.telemetry_living_anim_rate_total.reset();
     session.telemetry_living_injured_zones.reset();

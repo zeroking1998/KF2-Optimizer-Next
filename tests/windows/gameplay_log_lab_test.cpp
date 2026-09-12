@@ -1268,6 +1268,8 @@ int main() {
     CHECK(telemetry_source.find(
         "AdaptiveVisibleLivingZeds = LivingRecentlyRendered") !=
           std::string::npos);
+    CHECK(telemetry_source.find("living_pressure_milli=") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "PhysicsPressureLevel <= 0 && bRecentlyRendered") !=
           std::string::npos);

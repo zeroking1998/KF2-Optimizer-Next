@@ -580,6 +580,14 @@ select_adaptive_runtime_control(
             sample.ragdoll_pressure = normalized(
                 frame.gameplay->telemetry_corpse_awake,
                 frame.gameplay->telemetry_corpse_limit);
+            if (frame.gameplay->telemetry_living_pressure_milli &&
+                *frame.gameplay->telemetry_living_pressure_milli >= 0 &&
+                *frame.gameplay->telemetry_living_pressure_milli <= 1'000) {
+                sample.living_zed_pressure =
+                    static_cast<double>(
+                        *frame.gameplay->telemetry_living_pressure_milli) /
+                    1'000.0;
+            }
             sample.gore_pressure = normalized(
                 frame.gameplay->telemetry_gore_particles,
                 frame.gameplay->telemetry_gore_particle_pool_capacity);

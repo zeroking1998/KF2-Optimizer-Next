@@ -6318,7 +6318,10 @@ function SampleTelemetry()
          " flex_surrogate_active="$FlexSurrogateActive$
          " flex_surrogate_particles="$FlexSurrogateParticles$
          " flex_surrogate_visible="$FlexSurrogateVisible$
-         " flex_surrogate_lod="$FlexSurrogateLod);
+         " flex_surrogate_lod="$FlexSurrogateLod$
+         " living_pressure_milli="$Clamp(
+             int(AdaptiveCachedLivingEnemyPressureScale * 1000.0),
+             0, 1000));
 }
 
 function QuiesceForWorldTeardown()
