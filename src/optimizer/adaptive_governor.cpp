@@ -483,14 +483,11 @@ AdaptiveBottleneckReport classify_bottleneck(
         add_signal(report.supporting_signals, report.supporting_count,
                    "verified_physics_pressure_context");
     } else if (sample.gameplay_context_fresh &&
-               std::max(sample.living_zed_pressure.value_or(0.0),
-                        sample.animation_pressure.value_or(0.0)) >= 0.80) {
+               sample.animation_pressure.value_or(0.0) >= 0.80) {
         report.type = AdaptiveBottleneck::animation;
         report.confidence = 0.60;
         add_signal(report.supporting_signals, report.supporting_count,
-                   sample.living_zed_pressure.value_or(0.0) >= 0.80
-                       ? "verified_living_zed_pressure_context"
-                       : "verified_animation_pressure_context");
+                   "verified_animation_pressure_context");
     } else if (sample.gameplay_context_fresh &&
                sample.gore_pressure.value_or(0.0) >= 0.80) {
         report.type = AdaptiveBottleneck::gore;
@@ -562,7 +559,6 @@ AdaptiveDataQualityReport validate_adaptive_sample(
         !valid_pressure(sample.io_pressure) ||
         !valid_pressure(sample.thermal_power_pressure) ||
         !valid_pressure(sample.rendering_pressure) ||
-        !valid_pressure(sample.living_zed_pressure) ||
         !valid_pressure(sample.animation_pressure) ||
         !valid_pressure(sample.physics_pressure) ||
         !valid_pressure(sample.ragdoll_pressure) ||
@@ -1121,9 +1117,7 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     // high-frequency corpse loop. The app supplies the user ceiling at launch
     // and observes its transient integer runtime limit; it never writes that
     // effective reduction back to the user's preference.
-    if ((decision.bottleneck.type == AdaptiveBottleneck::ragdoll ||
-         decision.bottleneck.type == AdaptiveBottleneck::physics) &&
-        sample.capabilities.corpse_control ==
+    if (sample.capabilities.corpse_control ==
             AdaptiveCapabilityState::available &&
         sample.live_corpse_burden && sample.user_max_dead_bodies &&
         sample.adaptive_corpse_runtime_limit &&

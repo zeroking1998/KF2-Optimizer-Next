@@ -34,7 +34,6 @@ struct GameLogSession {
     std::optional<int> telemetry_living_bosses;
     std::optional<int> telemetry_living_visible;
     std::optional<int> telemetry_living_offscreen;
-    std::optional<int> telemetry_living_pressure_milli;
     std::optional<int> telemetry_living_lod_total;
     std::optional<int> telemetry_living_anim_rate_total;
     std::optional<int> telemetry_living_injured_zones;
