@@ -171,21 +171,6 @@ struct AdaptiveRuntimeControlSelection final {
         bottleneck_confidence >= 0.55 && effects_control_available) {
         return game::AdaptiveResourceControl::effects;
     }
-    if (bottleneck_confidence >= 0.55) {
-        switch (bottleneck) {
-            case optimizer::AdaptiveBottleneck::cpu:
-                return game::AdaptiveResourceControl::cpu;
-            case optimizer::AdaptiveBottleneck::gpu:
-                return game::AdaptiveResourceControl::gpu;
-            case optimizer::AdaptiveBottleneck::vram:
-                return game::AdaptiveResourceControl::vram;
-            case optimizer::AdaptiveBottleneck::ram:
-            case optimizer::AdaptiveBottleneck::paging:
-                return game::AdaptiveResourceControl::ram;
-            default:
-                break;
-        }
-    }
     if (confidence < 0.55) return game::AdaptiveResourceControl::mixed;
     switch (resource) {
         case optimizer::ResourceKind::cpu:
@@ -304,11 +289,18 @@ select_adaptive_runtime_control(
               input.bottleneck, input.bottleneck_confidence,
               input.overdraw_minimum_reached,
               input.effects_control_available);
-    // A mixed reduction changes four independent resource groups without
-    // identifying which one caused the frame deficit. Hold quality until a
-    // resource or supported bottleneck is attributed; rollback above remains
-    // available for mixed changes issued by older sessions.
-    if (!recovery && resource == game::AdaptiveResourceControl::mixed) {
+    // A broad mixed reduction has no attributed bottleneck. Give the fresh
+    // ten-second percentile window one additional clean cycle after the
+    // general post-map guard, otherwise its retained loading tail can trigger
+    // an immediate 100 -> 80 -> 100 cycle. Targeted, evidenced controls remain
+    // available after the shorter guard above.
+    constexpr std::uint64_t kPostMapMixedQualityStabilizationNs =
+        25'000'000'000ULL;
+    if (!recovery &&
+        resource == game::AdaptiveResourceControl::mixed &&
+        input.map_ready_ns != 0 &&
+        input.now_ns - input.map_ready_ns <
+            kPostMapMixedQualityStabilizationNs) {
         return std::nullopt;
     }
     return AdaptiveRuntimeControlSelection{resource, desired};
@@ -580,14 +572,6 @@ select_adaptive_runtime_control(
             sample.ragdoll_pressure = normalized(
                 frame.gameplay->telemetry_corpse_awake,
                 frame.gameplay->telemetry_corpse_limit);
-            if (frame.gameplay->telemetry_living_pressure_milli &&
-                *frame.gameplay->telemetry_living_pressure_milli >= 0 &&
-                *frame.gameplay->telemetry_living_pressure_milli <= 1'000) {
-                sample.living_zed_pressure =
-                    static_cast<double>(
-                        *frame.gameplay->telemetry_living_pressure_milli) /
-                    1'000.0;
-            }
             sample.gore_pressure = normalized(
                 frame.gameplay->telemetry_gore_particles,
                 frame.gameplay->telemetry_gore_particle_pool_capacity);

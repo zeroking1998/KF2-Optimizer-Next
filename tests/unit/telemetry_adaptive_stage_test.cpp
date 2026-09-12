@@ -93,7 +93,6 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     session.telemetry_explosion_decal_limit = 20;
     session.telemetry_living_visible = 7;
     session.telemetry_living_offscreen = 4;
-    session.telemetry_living_pressure_milli = 812;
     frame.gameplay = session;
 
     flex::ObservationSnapshot flex;
@@ -366,8 +365,6 @@ int main() {
     CHECK(sample.visibility_context_fresh);
     CHECK(sample.ragdoll_pressure.has_value());
     CHECK(approximately_equal(*sample.ragdoll_pressure, 0.5));
-    CHECK(sample.living_zed_pressure.has_value());
-    CHECK(approximately_equal(*sample.living_zed_pressure, 0.812));
     CHECK(sample.gore_pressure.has_value());
     CHECK(approximately_equal(*sample.gore_pressure, 0.2));
     CHECK(sample.particle_pressure.has_value());
@@ -508,22 +505,7 @@ int main() {
     post_map_quality.now_ns = 16'000'000'000ULL;
     CHECK(!select_adaptive_runtime_control(post_map_quality));
     post_map_quality.now_ns = 26'000'000'000ULL;
-    CHECK(!select_adaptive_runtime_control(post_map_quality));
-
-    // A strong bottleneck classification remains actionable even when the
-    // independent resource-pressure classifier has no primary resource. This
-    // is the exact shape observed in the gameplay regression: CPU at 88% and
-    // resourcePrimary UNKNOWN must select CPU, never mixed.
-    auto bottleneck_attributed_quality = post_map_quality;
-    bottleneck_attributed_quality.bottleneck =
-        optimizer::AdaptiveBottleneck::cpu;
-    bottleneck_attributed_quality.bottleneck_confidence = 0.88;
-    auto bottleneck_selected =
-        select_adaptive_runtime_control(bottleneck_attributed_quality);
-    CHECK(bottleneck_selected);
-    CHECK(bottleneck_selected->resource ==
-          game::AdaptiveResourceControl::cpu);
-    CHECK(bottleneck_selected->quality == 80);
+    CHECK(select_adaptive_runtime_control(post_map_quality));
 
     auto attributed_post_map_quality = post_map_quality;
     attributed_post_map_quality.now_ns = 16'000'000'000ULL;

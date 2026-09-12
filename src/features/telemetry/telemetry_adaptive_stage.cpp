@@ -763,8 +763,6 @@ void UiRuntime::update_adaptive_controller(
                     append_metric(L"fps", sample.fps);
                     append_metric(L"avg", sample.average_fps);
                     append_metric(L"p95ms", sample.p95_frame_time_ms);
-                    append_metric(L"livingZedPressure",
-                                  sample.living_zed_pressure);
                     append_metric(L"low3s", sample.sustained_one_percent_low_fps);
                     append_metric(L"low10s", sample.one_percent_low_fps);
                     request_log << L"; stutters=" << sample.stutter_count
@@ -1116,12 +1114,6 @@ void UiRuntime::update_adaptive_controller(
                      << adaptive_decision.resources.frame_budget_deficit_ms
                      << L"; predictedDeficitMs="
                      << adaptive_decision.resources.predicted_deficit_ms;
-        decision_log << L"; livingZedPressure=";
-        if (sample.living_zed_pressure) {
-            decision_log << *sample.living_zed_pressure * 100.0 << L"%";
-        } else {
-            decision_log << L"NOT_AVAILABLE";
-        }
         decision_log << L"; prediction=" << status.adaptive_prediction
                      << L"; dropRisk="
                      << status.adaptive_drop_risk_percent << L"%"
