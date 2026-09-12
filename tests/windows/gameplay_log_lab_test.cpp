@@ -1119,6 +1119,72 @@ int main() {
         "world_emitter_template_cache_misses=") != std::string::npos);
     CHECK(telemetry_source.find(
         "world_emitter_template_position_hits=") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "const WorldParticleGroupScanInterval=30;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "struct WorldParticleGroupTelemetrySnapshot") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "var array<WorldParticleGroupTelemetrySnapshot> "
+        "ScannedWorldParticleGroups;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "CollectWorldParticlePoolGroups(WorldInfo.MyEmitterPool, "
+        "\"world_pool\")") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "WorldInfo.GroundFireEmitterPool, \"ground_fire\"") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "WorldInfo.ImpactFXEmitterPool, \"impact_pool\"") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "\"placed\", WorldEmitter.ParticleSystemComponent") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_WORLD_PARTICLE_SOURCES schema=1") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_WORLD_PARTICLE_GROUP schema=1") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "struct AdaptiveWorldParticleIdleSnapshot") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "function bool IsAdaptiveWorldParticleCosmetic(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function bool ApplyAdaptiveWorldParticleIdleControl(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function bool RestoreAdaptiveWorldParticleIdleControl(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_WORLD_PARTICLE_IDLE state=applied") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_WORLD_PARTICLE_IDLE state=restored") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "reason=world_particle_idle_readback_mismatch") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveWorldParticleIdleStates.Length = 0;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "FX_Gameplay_EMIT.FX_Objective_White_Trail") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "FX_Gameplay_EMIT.Chr.FX_CHR_Fire_DOT") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "WEP_HRG_Warthog_EMIT.FX_HRG_Warthog_Grenade_Explosion") ==
+          std::string::npos);
+    const auto group_snapshot_start = telemetry_source.find(
+        "struct WorldParticleGroupTelemetrySnapshot");
+    const auto group_snapshot_end = telemetry_source.find(
+        "};", group_snapshot_start);
+    CHECK(group_snapshot_start != std::string::npos);
+    CHECK(group_snapshot_end != std::string::npos);
+    const auto group_snapshot = telemetry_source.substr(
+        group_snapshot_start, group_snapshot_end - group_snapshot_start);
+    CHECK(group_snapshot.find("Emitter ") == std::string::npos);
+    CHECK(group_snapshot.find("ParticleSystemComponent") ==
+          std::string::npos);
+    CHECK(group_snapshot.find("ParticleSystem ") == std::string::npos);
+    CHECK(group_snapshot.find("Object ") == std::string::npos);
     const auto template_snapshot_start = telemetry_source.find(
         "struct WorldEmitterTemplateTelemetrySnapshot");
     const auto template_snapshot_end = telemetry_source.find(

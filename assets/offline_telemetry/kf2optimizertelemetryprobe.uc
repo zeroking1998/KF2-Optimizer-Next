@@ -10,6 +10,9 @@ class KF2OptimizerTelemetryProbe extends Info config(Engine);
 
 const DiagnosticEffectScanInterval=6;
 const MaxWorldEmitterTemplateSnapshots=256;
+const WorldParticleGroupScanInterval=30;
+const MaxWorldParticleGroupSnapshots=256;
+const MaxWorldParticleGroupLogEntries=5;
 const AdaptiveCorpseControlInterval=0.25;
 const AdaptiveCorpseControlInitialDelay=0.125;
 const AdaptiveCorpseControlIdleInterval=1.0;
@@ -78,6 +81,33 @@ struct WorldEmitterTemplateTelemetrySnapshot
     var int ConstantSpawnRateMilli;
     var int BurstEntries;
     var int PeakCapacity;
+};
+
+// A short-lived, value-only attribution table. Source and template path make
+// pooled gameplay effects distinguishable from level-placed emitters without
+// retaining actors, components or templates across map teardown.
+struct WorldParticleGroupTelemetrySnapshot
+{
+    var string Key;
+    var string Source;
+    var string TemplatePath;
+    var int LODLevel;
+    var int Components;
+    var int Particles;
+    var int VisibleComponents;
+    var int DynamicSpawnEmitters;
+    var int BurstEntries;
+    var int PeakCapacity;
+    var int FlexComponents;
+};
+
+// Value-only ownership records keep the control reversible without retaining
+// level actors or particle components across world teardown.
+struct AdaptiveWorldParticleIdleSnapshot
+{
+    var string ComponentPath;
+    var float OriginalSecondsBeforeInactive;
+    var float AppliedSecondsBeforeInactive;
 };
 
 struct AdaptiveCorpseDebugMarkerEntry
@@ -174,6 +204,9 @@ var DiagnosticEffectTelemetrySnapshot CachedDiagnosticEffects;
 var WorldEmitterTelemetrySnapshot CachedWorldEmitters;
 var array<WorldEmitterTemplateTelemetrySnapshot> CachedWorldEmitterTemplates;
 var array<WorldEmitterTemplateTelemetrySnapshot> CachedWorldEmitterTraversalSnapshots;
+var array<WorldParticleGroupTelemetrySnapshot> ScannedWorldParticleGroups;
+var int ScannedWorldParticleGroupOverflow;
+var array<AdaptiveWorldParticleIdleSnapshot> AdaptiveWorldParticleIdleStates;
 var int ProfileWorldEmitterTemplateCacheHits;
 var int ProfileWorldEmitterTemplateCacheMisses;
 var int ProfileWorldEmitterTemplatePositionHits;
@@ -540,6 +573,179 @@ function bool RollbackAdaptiveResourceControl(
     return bRestored;
 }
 
+function bool IsAdaptiveWorldParticleCosmetic(string TemplatePath)
+{
+    // This intentionally stays an exact allow-list. The entries below were
+    // attributed in the Issue #44 gameplay capture as ambient map decoration.
+    // Gameplay, weapon, Zed, camera, objective, fire-DOT and pooled effects
+    // therefore remain untouched even when their particle count is higher.
+    return TemplatePath ~= "FX_Environmental_EMIT.fire.FX_Ash_Raining" ||
+        TemplatePath ~= "FX_Cinema_EMIT.FX_particulate_dust_01" ||
+        TemplatePath ~=
+            "FX_Environmental_EMIT_THREE.FX_Carnival_Ambient_Fog_01" ||
+        TemplatePath ~=
+            "FX_Environmental_EMIT_THREE.FX_Carnival_Ambient_Fog_02" ||
+        TemplatePath ~=
+            "FX_Environmental_EMIT_THREE.FX_Nightmare_Floating_Debris_01" ||
+        TemplatePath ~=
+            "FX_Environmental_EMIT_THREE.FX_Nightmare_Floating_Debris_02" ||
+        TemplatePath ~=
+            "ENV_BlackForest_EMIT.FX_Outside_Ambient_Dust_01" ||
+        TemplatePath ~=
+            "geometry_spring2021.Particles.Skyscraper_Lights_Red" ||
+        TemplatePath ~=
+            "geometry_spring2021.Particles.Skyscraper_Lights_White" ||
+        TemplatePath ~= "FX_Environmental_EMIT.FX_Water_fountain_Base_01" ||
+        TemplatePath ~= "FX_Environmental_EMIT.FX_Water_fountain_01";
+}
+
+function int FindAdaptiveWorldParticleIdleState(
+    string ComponentPath, out int InsertionIndex)
+{
+    local int LowIndex;
+    local int HighIndex;
+    local int MiddleIndex;
+
+    LowIndex = 0;
+    HighIndex = AdaptiveWorldParticleIdleStates.Length - 1;
+    while (LowIndex <= HighIndex)
+    {
+        MiddleIndex = LowIndex + (HighIndex - LowIndex) / 2;
+        if (AdaptiveWorldParticleIdleStates[MiddleIndex].ComponentPath ==
+            ComponentPath)
+        {
+            InsertionIndex = MiddleIndex;
+            return MiddleIndex;
+        }
+        if (AdaptiveWorldParticleIdleStates[MiddleIndex].ComponentPath <
+            ComponentPath)
+        {
+            LowIndex = MiddleIndex + 1;
+        }
+        else
+        {
+            HighIndex = MiddleIndex - 1;
+        }
+    }
+    InsertionIndex = LowIndex;
+    return INDEX_NONE;
+}
+
+function float GetAdaptiveWorldParticleInactiveSeconds(int Quality)
+{
+    if (Quality >= 80) return 1.0;
+    if (Quality >= 60) return 0.75;
+    if (Quality >= 40) return 0.5;
+    if (Quality >= 20) return 0.25;
+    return 0.1;
+}
+
+function bool RestoreAdaptiveWorldParticleIdleControl()
+{
+    local Emitter WorldEmitter;
+    local ParticleSystemComponent ParticleComponent;
+    local int StateIndex;
+    local int IgnoredInsertionIndex;
+    local int RestoredComponents;
+    local bool bReadbackMatches;
+
+    bReadbackMatches = true;
+    foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
+    {
+        ParticleComponent = WorldEmitter.ParticleSystemComponent;
+        if (ParticleComponent == None)
+        {
+            continue;
+        }
+        StateIndex = FindAdaptiveWorldParticleIdleState(
+            PathName(ParticleComponent), IgnoredInsertionIndex);
+        if (StateIndex == INDEX_NONE)
+        {
+            continue;
+        }
+        ParticleComponent.SecondsBeforeInactive =
+            AdaptiveWorldParticleIdleStates[StateIndex].OriginalSecondsBeforeInactive;
+        if (Abs(ParticleComponent.SecondsBeforeInactive -
+                AdaptiveWorldParticleIdleStates[StateIndex].OriginalSecondsBeforeInactive) >=
+            0.001)
+        {
+            bReadbackMatches = false;
+        }
+        ++RestoredComponents;
+    }
+    if (!bReadbackMatches)
+    {
+        `log("KF2OPT_WORLD_PARTICLE_IDLE state=restore_failed"$
+             " reason=readback_mismatch");
+        return false;
+    }
+    `log("KF2OPT_WORLD_PARTICLE_IDLE state=restored components="$
+         RestoredComponents$" readback=verified");
+    AdaptiveWorldParticleIdleStates.Length = 0;
+    return true;
+}
+
+function bool ApplyAdaptiveWorldParticleIdleControl(int Quality)
+{
+    local Emitter WorldEmitter;
+    local ParticleSystemComponent ParticleComponent;
+    local AdaptiveWorldParticleIdleSnapshot NewState;
+    local int StateIndex;
+    local int NewStateIndex;
+    local int AppliedComponents;
+    local float DesiredSeconds;
+    local float EffectiveSeconds;
+
+    if (Quality >= 100)
+    {
+        return RestoreAdaptiveWorldParticleIdleControl();
+    }
+    DesiredSeconds = GetAdaptiveWorldParticleInactiveSeconds(Quality);
+    foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
+    {
+        ParticleComponent = WorldEmitter.ParticleSystemComponent;
+        if (ParticleComponent == None || ParticleComponent.Template == None ||
+            !IsAdaptiveWorldParticleCosmetic(
+                PathName(ParticleComponent.Template)))
+        {
+            continue;
+        }
+        StateIndex = FindAdaptiveWorldParticleIdleState(
+            PathName(ParticleComponent), NewStateIndex);
+        if (StateIndex == INDEX_NONE)
+        {
+            NewState.ComponentPath = PathName(ParticleComponent);
+            NewState.OriginalSecondsBeforeInactive =
+                ParticleComponent.SecondsBeforeInactive;
+            NewState.AppliedSecondsBeforeInactive =
+                FMin(NewState.OriginalSecondsBeforeInactive, DesiredSeconds);
+            AdaptiveWorldParticleIdleStates.Insert(NewStateIndex, 1);
+            AdaptiveWorldParticleIdleStates[NewStateIndex] = NewState;
+            StateIndex = NewStateIndex;
+        }
+        EffectiveSeconds = FMin(
+            AdaptiveWorldParticleIdleStates[StateIndex].OriginalSecondsBeforeInactive,
+            DesiredSeconds);
+        ParticleComponent.SecondsBeforeInactive = EffectiveSeconds;
+        AdaptiveWorldParticleIdleStates[StateIndex].AppliedSecondsBeforeInactive =
+            EffectiveSeconds;
+        if (Abs(ParticleComponent.SecondsBeforeInactive - EffectiveSeconds) >=
+            0.001)
+        {
+            `log("KF2OPT_WORLD_PARTICLE_IDLE state=failed quality="$Quality$
+                 " reason=readback_mismatch component="$
+                 PathName(ParticleComponent));
+            return false;
+        }
+        ++AppliedComponents;
+    }
+    `log("KF2OPT_WORLD_PARTICLE_IDLE state=applied quality="$Quality$
+         " inactive_seconds="$DesiredSeconds$
+         " components="$AppliedComponents$" allowlist=exact"$
+         " readback=verified");
+    return true;
+}
+
 // KF2's graphics menu updates class defaults, but managers and emitter pools
 // created earlier in the current world keep their old limits. Synchronize the
 // already-live instances and include them in the authenticated APPLIED result.
@@ -549,6 +755,7 @@ function bool ApplyAdaptiveEffectRuntimeReadback(
     local KFGoreManager GoreManager;
     local KFImpactEffectManager ImpactEffectManager;
     local int DesiredImpactEffects;
+    local int WorldParticleQuality;
     local bool bReadbackMatches;
 
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
@@ -610,6 +817,16 @@ function bool ApplyAdaptiveEffectRuntimeReadback(
     {
         WorldInfo.ImpactFXEmitterPool.MaxActiveEffects =
             DesiredImpactEffects;
+    }
+    WorldParticleQuality = AdaptiveGraphicsState == None ? 100 : Min(
+        AdaptiveGraphicsState.CpuQuality,
+        AdaptiveGraphicsState.EffectsQuality);
+    if (!ApplyAdaptiveWorldParticleIdleControl(WorldParticleQuality))
+    {
+        `log("KF2OPT_EFFECT_RUNTIME state=failed resource="$Resource$
+             " quality="$Quality$
+             " reason=world_particle_idle_readback_mismatch");
+        return false;
     }
     WorldInfo.MaxExplosionDecals = class'WorldInfo'.default.MaxExplosionDecals;
     if (WorldInfo.ExplosionDecalManager != None)
@@ -676,6 +893,9 @@ function bool ApplyAdaptiveEffectRuntimeReadback(
          " impact_pool="$
          (WorldInfo.ImpactFXEmitterPool == None ? -1 :
           WorldInfo.ImpactFXEmitterPool.MaxActiveEffects)$
+         " world_particle_quality="$WorldParticleQuality$
+         " world_particle_idle_components="$
+         AdaptiveWorldParticleIdleStates.Length$
          " explosion_decals="$WorldInfo.MaxExplosionDecals$
          " readback=verified");
     return true;
@@ -4337,6 +4557,198 @@ function InspectWorldEmitterParticleComponentCached(
         1000000000 - PeakParticleCapacity, Snapshot.PeakCapacity);
 }
 
+function int FindWorldParticleGroupSnapshot(
+    string GroupKey, out int InsertionIndex)
+{
+    local int LowIndex;
+    local int HighIndex;
+    local int MiddleIndex;
+
+    LowIndex = 0;
+    HighIndex = ScannedWorldParticleGroups.Length - 1;
+    while (LowIndex <= HighIndex)
+    {
+        MiddleIndex = LowIndex + (HighIndex - LowIndex) / 2;
+        if (ScannedWorldParticleGroups[MiddleIndex].Key == GroupKey)
+        {
+            InsertionIndex = MiddleIndex;
+            return MiddleIndex;
+        }
+        if (ScannedWorldParticleGroups[MiddleIndex].Key < GroupKey)
+        {
+            LowIndex = MiddleIndex + 1;
+        }
+        else
+        {
+            HighIndex = MiddleIndex - 1;
+        }
+    }
+    InsertionIndex = LowIndex;
+    return INDEX_NONE;
+}
+
+function AccumulateWorldParticleGroup(
+    string Source, ParticleSystemComponent ParticleComponent)
+{
+    local int GroupIndex;
+    local int NewGroupIndex;
+    local int FlexComponents;
+    local int FlexFluidComponents;
+    local int FlexNonFluidComponents;
+    local int FlexMixedComponents;
+    local int NonFlexComponents;
+    local int UnclassifiedComponents;
+    local int ConstantSpawnEmitters;
+    local int DynamicSpawnEmitters;
+    local int ConstantSpawnRateMilli;
+    local int BurstEntries;
+    local int PeakCapacity;
+    local string TemplatePath;
+    local string GroupKey;
+    local WorldParticleGroupTelemetrySnapshot Group;
+
+    if (ParticleComponent == None || ParticleComponent.Template == None ||
+        !ParticleComponent.bIsActive)
+    {
+        return;
+    }
+    TemplatePath = PathName(ParticleComponent.Template);
+    GroupKey = Source$":"$TemplatePath$"#"$
+        ParticleComponent.GetLODLevel();
+    GroupIndex = FindWorldParticleGroupSnapshot(GroupKey, NewGroupIndex);
+    if (GroupIndex == INDEX_NONE)
+    {
+        if (ScannedWorldParticleGroups.Length >=
+            MaxWorldParticleGroupSnapshots)
+        {
+            ++ScannedWorldParticleGroupOverflow;
+            return;
+        }
+        Group.Key = GroupKey;
+        Group.Source = Source;
+        Group.TemplatePath = TemplatePath;
+        Group.LODLevel = ParticleComponent.GetLODLevel();
+        ScannedWorldParticleGroups.Insert(NewGroupIndex, 1);
+        ScannedWorldParticleGroups[NewGroupIndex] = Group;
+        GroupIndex = NewGroupIndex;
+    }
+
+    InspectWorldEmitterParticleComponentCached(
+        ParticleComponent, -1,
+        FlexComponents, FlexFluidComponents, FlexNonFluidComponents,
+        FlexMixedComponents, NonFlexComponents, UnclassifiedComponents,
+        ConstantSpawnEmitters, DynamicSpawnEmitters,
+        ConstantSpawnRateMilli, BurstEntries, PeakCapacity);
+    ++ScannedWorldParticleGroups[GroupIndex].Components;
+    ScannedWorldParticleGroups[GroupIndex].Particles +=
+        ParticleComponent.NumActiveParticles;
+    if (ParticleComponent.LastRenderTime > WorldInfo.TimeSeconds - 0.3)
+    {
+        ++ScannedWorldParticleGroups[GroupIndex].VisibleComponents;
+    }
+    ScannedWorldParticleGroups[GroupIndex].DynamicSpawnEmitters +=
+        DynamicSpawnEmitters;
+    ScannedWorldParticleGroups[GroupIndex].BurstEntries += BurstEntries;
+    ScannedWorldParticleGroups[GroupIndex].PeakCapacity += PeakCapacity;
+    ScannedWorldParticleGroups[GroupIndex].FlexComponents += FlexComponents;
+}
+
+function CollectWorldParticlePoolGroups(
+    EmitterPool ParticlePool, string Source)
+{
+    local int Index;
+
+    if (ParticlePool == None) return;
+    for (Index = 0; Index < ParticlePool.ActiveComponents.Length; ++Index)
+    {
+        AccumulateWorldParticleGroup(
+            Source, ParticlePool.ActiveComponents[Index]);
+    }
+}
+
+function LogWorldParticleGroupAttribution()
+{
+    local int Index;
+    local int Rank;
+    local int BestIndex;
+    local int BestParticles;
+    local int PoolComponents;
+    local int PoolParticles;
+    local int GroundFireComponents;
+    local int GroundFireParticles;
+    local int ImpactComponents;
+    local int ImpactParticles;
+    local int PlacedComponents;
+    local int PlacedParticles;
+    local array<int> LoggedIndices;
+
+    for (Index = 0; Index < ScannedWorldParticleGroups.Length; ++Index)
+    {
+        if (ScannedWorldParticleGroups[Index].Source ~= "world_pool")
+        {
+            PoolComponents += ScannedWorldParticleGroups[Index].Components;
+            PoolParticles += ScannedWorldParticleGroups[Index].Particles;
+        }
+        else if (ScannedWorldParticleGroups[Index].Source ~= "ground_fire")
+        {
+            GroundFireComponents +=
+                ScannedWorldParticleGroups[Index].Components;
+            GroundFireParticles += ScannedWorldParticleGroups[Index].Particles;
+        }
+        else if (ScannedWorldParticleGroups[Index].Source ~= "impact_pool")
+        {
+            ImpactComponents += ScannedWorldParticleGroups[Index].Components;
+            ImpactParticles += ScannedWorldParticleGroups[Index].Particles;
+        }
+        else if (ScannedWorldParticleGroups[Index].Source ~= "placed")
+        {
+            PlacedComponents += ScannedWorldParticleGroups[Index].Components;
+            PlacedParticles += ScannedWorldParticleGroups[Index].Particles;
+        }
+    }
+    `log("KF2OPT_WORLD_PARTICLE_SOURCES schema=1 sample="$SampleSequence$
+         " world_pool_components="$PoolComponents$
+         " world_pool_particles="$PoolParticles$
+         " ground_fire_components="$GroundFireComponents$
+         " ground_fire_particles="$GroundFireParticles$
+         " impact_components="$ImpactComponents$
+         " impact_particles="$ImpactParticles$
+         " placed_components="$PlacedComponents$
+         " placed_particles="$PlacedParticles$
+         " groups="$ScannedWorldParticleGroups.Length$
+         " overflow="$ScannedWorldParticleGroupOverflow);
+
+    for (Rank = 1; Rank <= MaxWorldParticleGroupLogEntries; ++Rank)
+    {
+        BestIndex = INDEX_NONE;
+        BestParticles = -1;
+        for (Index = 0; Index < ScannedWorldParticleGroups.Length; ++Index)
+        {
+            if (LoggedIndices.Find(Index) == INDEX_NONE &&
+                ScannedWorldParticleGroups[Index].Particles > BestParticles)
+            {
+                BestIndex = Index;
+                BestParticles = ScannedWorldParticleGroups[Index].Particles;
+            }
+        }
+        if (BestIndex == INDEX_NONE) break;
+        LoggedIndices.AddItem(BestIndex);
+        `log("KF2OPT_WORLD_PARTICLE_GROUP schema=1 sample="$SampleSequence$
+             " rank="$Rank$
+             " source="$ScannedWorldParticleGroups[BestIndex].Source$
+             " template="$ScannedWorldParticleGroups[BestIndex].TemplatePath$
+             " lod="$ScannedWorldParticleGroups[BestIndex].LODLevel$
+             " components="$ScannedWorldParticleGroups[BestIndex].Components$
+             " particles="$ScannedWorldParticleGroups[BestIndex].Particles$
+             " visible="$ScannedWorldParticleGroups[BestIndex].VisibleComponents$
+             " dynamic_emitters="$ScannedWorldParticleGroups[BestIndex].DynamicSpawnEmitters$
+             " bursts="$ScannedWorldParticleGroups[BestIndex].BurstEntries$
+             " peak_capacity="$ScannedWorldParticleGroups[BestIndex].PeakCapacity$
+             " flex_components="$ScannedWorldParticleGroups[BestIndex].FlexComponents);
+    }
+    ScannedWorldParticleGroups.Length = 0;
+}
+
 function AdaptiveCorpseLoadControl()
 {
     local int ProfileStartMilliseconds;
@@ -4853,6 +5265,7 @@ function SampleTelemetry()
     local float WeightedVisibleZeds;
     local PlayerController AdaptiveLocalPC;
     local bool bSubmitNativeProfileNodes;
+    local bool bCollectWorldParticleGroups;
     local string ProfileState;
 
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
@@ -5567,6 +5980,18 @@ function SampleTelemetry()
         ProfileSectionNode = ProfNodeStart("KF2OPT_Telemetry_WorldEmitters");
     }
     ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
+    bCollectWorldParticleGroups = SampleSequence == 0 ||
+        SampleSequence % WorldParticleGroupScanInterval == 5;
+    if (bCollectWorldParticleGroups)
+    {
+        ScannedWorldParticleGroups.Length = 0;
+        ScannedWorldParticleGroupOverflow = 0;
+        CollectWorldParticlePoolGroups(WorldInfo.MyEmitterPool, "world_pool");
+        CollectWorldParticlePoolGroups(
+            WorldInfo.GroundFireEmitterPool, "ground_fire");
+        CollectWorldParticlePoolGroups(
+            WorldInfo.ImpactFXEmitterPool, "impact_pool");
+    }
     // The five typed diagnostic iterators occupy phases 0-4. Refresh this
     // complete value-only snapshot in phase 5 so no two global actor
     // iterators share a normal one-second telemetry sample.
@@ -5583,6 +6008,11 @@ function SampleTelemetry()
                 continue;
             }
             ++WorldEmitterComponents;
+            if (bCollectWorldParticleGroups)
+            {
+                AccumulateWorldParticleGroup(
+                    "placed", WorldEmitter.ParticleSystemComponent);
+            }
             ScannedWorldEmitterParticles +=
                 WorldEmitter.ParticleSystemComponent.NumActiveParticles;
             InspectWorldEmitterParticleComponentCached(
@@ -5640,6 +6070,10 @@ function SampleTelemetry()
             ScannedWorldEmitterBurstEntries;
         CachedWorldEmitters.PeakCapacity =
             ScannedWorldEmitterPeakCapacity;
+        if (bCollectWorldParticleGroups)
+        {
+            LogWorldParticleGroupAttribution();
+        }
     }
     WorldEmitterComponents = CachedWorldEmitters.Components;
     WorldParticleComponents += CachedWorldEmitters.Components;
@@ -5967,6 +6401,7 @@ function QuiesceForWorldTeardown()
     // Drop all strong references and ownership metadata without dereferencing
     // the actors.
     AdaptiveGraphicsState = None;
+    AdaptiveWorldParticleIdleStates.Length = 0;
     AdaptiveCorpseManager = None;
     AdaptiveCorpseLodCorpses.Length = 0;
     AdaptiveCorpseLodOriginalMinModels.Length = 0;
