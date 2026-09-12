@@ -649,10 +649,12 @@ void UiRuntime::update_adaptive_controller(
                 optimizer::AdaptiveCapabilityState::available &&
                 sample.capabilities.particle_control ==
                     optimizer::AdaptiveCapabilityState::available);
+    const auto recovery_resource =
+        adaptive_resource_quality.recovery_control();
     const int selected_runtime_quality =
         adaptive_decision.state ==
                     optimizer::AdaptiveControllerState::stable
-            ? effective_runtime_quality
+            ? adaptive_resource_quality.control_quality(recovery_resource)
             : adaptive_resource_quality.control_quality(pressure_resource);
     const auto runtime_selection =
         telemetry_pipeline::select_adaptive_runtime_control({
@@ -673,6 +675,7 @@ void UiRuntime::update_adaptive_controller(
             .reduction_floor_quality =
                 adaptive_quality_reduction_floor.control_quality(
                     pressure_resource),
+            .recovery_resource = recovery_resource,
             .rollback_quality = adaptive_quality_rollback_target,
             .rollback_resource = adaptive_quality_rollback_resource,
             .current_frame_pressure =

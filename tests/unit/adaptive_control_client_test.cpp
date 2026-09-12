@@ -116,6 +116,7 @@ int main() {
     quality.apply({3, AdaptiveResourceControl::effects, 75});
     CHECK(quality.effects == 75);
     CHECK(quality.control_quality(AdaptiveResourceControl::effects) == 75);
+    CHECK(quality.recovery_control() == AdaptiveResourceControl::gpu);
     quality.apply({2, AdaptiveResourceControl::cpu, 80});
     CHECK(quality.cpu == 80);
     CHECK(quality.gpu == 60);
@@ -124,6 +125,22 @@ int main() {
     CHECK(quality.cpu == 80);
     CHECK(quality.vram == 100);
     CHECK(quality.effects == 75);
+    CHECK(quality.recovery_control() == AdaptiveResourceControl::gpu);
+    quality.apply({4, quality.recovery_control(), 70});
+    CHECK(quality.gpu == 70);
+    CHECK(quality.effects == 75);
+
+    AdaptiveResourceQualityState isolated_recovery{100};
+    isolated_recovery.apply({1, AdaptiveResourceControl::gpu, 60});
+    isolated_recovery.apply({2, AdaptiveResourceControl::effects, 60});
+    CHECK(isolated_recovery.recovery_control() == AdaptiveResourceControl::gpu);
+    isolated_recovery.apply(
+        {3, isolated_recovery.recovery_control(), 65});
+    CHECK(isolated_recovery.gpu == 65);
+    CHECK(isolated_recovery.effects == 60);
+    CHECK(isolated_recovery.recovery_control() ==
+          AdaptiveResourceControl::effects);
+
     quality.apply({4, AdaptiveResourceControl::mixed, 50});
     CHECK(quality.cpu == 50 && quality.gpu == 50 &&
           quality.vram == 50 && quality.ram == 50 &&

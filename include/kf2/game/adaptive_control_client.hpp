@@ -53,6 +53,7 @@ struct AdaptiveResourceQualityState final {
     [[nodiscard]] int effective_quality() const noexcept;
     [[nodiscard]] int control_quality(
         AdaptiveResourceControl resource) const noexcept;
+    [[nodiscard]] AdaptiveResourceControl recovery_control() const noexcept;
     void apply(const AdaptiveControlReceipt& receipt) noexcept;
     void reset(int quality) noexcept;
 };

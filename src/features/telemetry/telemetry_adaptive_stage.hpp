@@ -88,6 +88,7 @@ struct AdaptiveRuntimeControlInput final {
     int maximum_quality{100};
     int quality_change_budget{2};
     int reduction_floor_quality{10};
+    std::optional<game::AdaptiveResourceControl> recovery_resource;
     std::optional<int> rollback_quality;
     std::optional<game::AdaptiveResourceControl> rollback_resource;
     bool current_frame_pressure{false};
@@ -276,6 +277,13 @@ select_adaptive_runtime_control(
     } else if (input.state == optimizer::AdaptiveControllerState::stable &&
                input.recovery_eligible &&
                input.current_quality < input.maximum_quality) {
+        if (!input.recovery_resource ||
+            *input.recovery_resource == game::AdaptiveResourceControl::mixed ||
+            *input.recovery_resource == game::AdaptiveResourceControl::recover ||
+            *input.recovery_resource == game::AdaptiveResourceControl::enable ||
+            *input.recovery_resource == game::AdaptiveResourceControl::disable) {
+            return std::nullopt;
+        }
         desired = std::min(
             input.maximum_quality, input.current_quality + 5);
         recovery = true;
@@ -298,7 +306,7 @@ select_adaptive_runtime_control(
         return std::nullopt;
     }
     const auto resource = recovery
-        ? game::AdaptiveResourceControl::recover
+        ? *input.recovery_resource
         : adaptive_runtime_resource(
               input.primary_resource, input.primary_confidence,
               input.bottleneck, input.bottleneck_confidence,

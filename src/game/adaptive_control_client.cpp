@@ -174,6 +174,24 @@ int AdaptiveResourceQualityState::control_quality(
     return effective_quality();
 }
 
+AdaptiveResourceControl AdaptiveResourceQualityState::recovery_control()
+    const noexcept {
+    AdaptiveResourceControl selected = AdaptiveResourceControl::cpu;
+    int lowest = cpu;
+    const auto consider = [&](AdaptiveResourceControl resource, int quality) {
+        if (quality < lowest) {
+            selected = resource;
+            lowest = quality;
+        }
+    };
+    consider(AdaptiveResourceControl::gpu, gpu);
+    consider(AdaptiveResourceControl::vram, vram);
+    consider(AdaptiveResourceControl::ram, ram);
+    consider(AdaptiveResourceControl::overdraw, overdraw);
+    consider(AdaptiveResourceControl::effects, effects);
+    return selected;
+}
+
 void AdaptiveResourceQualityState::apply(
     const AdaptiveControlReceipt& receipt) noexcept {
     const int quality = std::clamp(receipt.quality, 10, 100);

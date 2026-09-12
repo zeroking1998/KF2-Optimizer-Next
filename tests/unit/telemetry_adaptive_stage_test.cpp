@@ -552,6 +552,29 @@ int main() {
     post_applied.current_resource_pressure = true;
     CHECK(select_adaptive_runtime_control(post_applied));
 
+    // Recovery must raise exactly one attributed resource domain. The old
+    // broad `recover` command could raise several independently reduced
+    // domains in one action and made the measured response ambiguous.
+    auto isolated_recovery = post_applied;
+    isolated_recovery.state = optimizer::AdaptiveControllerState::stable;
+    isolated_recovery.current_frame_pressure = false;
+    isolated_recovery.current_resource_pressure = false;
+    isolated_recovery.recovery_eligible = true;
+    isolated_recovery.current_quality = 60;
+    isolated_recovery.recovery_resource =
+        game::AdaptiveResourceControl::effects;
+    const auto isolated_selection =
+        select_adaptive_runtime_control(isolated_recovery);
+    CHECK(isolated_selection);
+    CHECK(isolated_selection->resource ==
+          game::AdaptiveResourceControl::effects);
+    CHECK(isolated_selection->quality == 65);
+    isolated_recovery.recovery_resource.reset();
+    CHECK(!select_adaptive_runtime_control(isolated_recovery));
+    isolated_recovery.recovery_resource =
+        game::AdaptiveResourceControl::recover;
+    CHECK(!select_adaptive_runtime_control(isolated_recovery));
+
     const auto ineffective = adaptive_quality_response_feedback(
         "no_clear_change", "mixed", 20, 10);
     CHECK(ineffective.rollback_quality == 20);
@@ -593,6 +616,7 @@ int main() {
         ordinary.state = state;
         ordinary.current_quality = 70;
         ordinary.recovery_eligible = true;
+        ordinary.recovery_resource = game::AdaptiveResourceControl::gpu;
         for (const auto elapsed : {1'000'000'000ULL, 5'000'000'000ULL,
                                    6'999'999'999ULL}) {
             ordinary.now_ns = ordinary.last_applied_ns + elapsed;
@@ -720,23 +744,24 @@ int main() {
     control.state = optimizer::AdaptiveControllerState::stable;
     control.current_frame_pressure = false;
     control.recovery_eligible = true;
+    control.recovery_resource = game::AdaptiveResourceControl::gpu;
     control.current_quality = 10;
     control.primary_confidence = 0.1;
     selected = select_adaptive_runtime_control(control);
     CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::recover);
+    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
     CHECK(selected->quality == 15);
     control.current_quality = 75;
     selected = select_adaptive_runtime_control(control);
     CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::recover);
+    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
     CHECK(selected->quality == 80);
 
     control.maximum_quality = 75;
     control.current_quality = 50;
     selected = select_adaptive_runtime_control(control);
     CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::recover);
+    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
     CHECK(selected->quality == 55);
 
     control.maximum_quality = 100;
