@@ -784,6 +784,11 @@ int main() {
     animation.animation_pressure = 0.9;
     CHECK(classify(animation) == AdaptiveBottleneck::animation);
 
+    auto living_zeds = sample(start, 30.0, 33.33, 42.0, 35.0, 55.0);
+    living_zeds.gameplay_context_fresh = true;
+    living_zeds.living_zed_pressure = 0.9;
+    CHECK(classify(living_zeds) == AdaptiveBottleneck::animation);
+
     auto gore = sample(start, 30.0, 33.33, 42.0, 35.0, 55.0);
     gore.gameplay_context_fresh = true;
     gore.gore_pressure = 0.9;

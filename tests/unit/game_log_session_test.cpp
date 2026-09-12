@@ -67,7 +67,8 @@ std::string telemetry_line(int sample, int corpse_awake = 2) {
         " particle_flex_nonfluid_components=1 particle_flex_mixed_components=1"
         " particle_nonflex_components=17 particle_unclassified_components=2"
         " flex_surrogate_active=1 flex_surrogate_particles=72"
-        " flex_surrogate_visible=1 flex_surrogate_lod=2\n";
+        " flex_surrogate_visible=1 flex_surrogate_lod=2"
+        " living_pressure_milli=812\n";
 }
 
 std::string empty_telemetry_line() {
@@ -325,6 +326,7 @@ int main() {
     CHECK(probe->telemetry_living_classes == 7);
     CHECK(probe->telemetry_living_bosses == 1);
     CHECK(probe->telemetry_living_visible == 18);
+    CHECK(probe->telemetry_living_pressure_milli == 812);
     CHECK(probe->telemetry_living_offscreen == 5);
     CHECK(probe->telemetry_living_lod_total == 31);
     CHECK(probe->telemetry_living_anim_rate_total == 1380);
@@ -452,6 +454,7 @@ int main() {
         stream.expire_observations(19'500'000'001ULL);
     CHECK(probe_expired.has_value());
     CHECK(!probe_expired->telemetry_living_zeds.has_value());
+    CHECK(!probe_expired->telemetry_living_pressure_milli.has_value());
     CHECK(!probe_expired->telemetry_corpse_total.has_value());
     CHECK(!probe_expired->telemetry_dismembered_limbs.has_value());
     CHECK(!probe_expired->telemetry_living_special_moves.has_value());
@@ -501,6 +504,19 @@ int main() {
     CHECK(!network_stream.current()->zeds_alive.has_value());
     CHECK(!network_stream.feed(empty_telemetry_line()).has_value());
     CHECK(!network_stream.current()->telemetry_living_zeds.has_value());
+
+    // Older schema-6 providers ended at flex_surrogate_lod. The new workload
+    // field is optional so an in-progress package transition remains readable.
+    GameLogSessionParser legacy_offline_stream;
+    CHECK(legacy_offline_stream.feed(
+        "Log: LoadMap: KF-Outpost\n").has_value());
+    CHECK(legacy_offline_stream.feed(
+        "ScriptLog: WI.NetMode:  NM_Standalone\n").has_value());
+    const auto legacy_probe = legacy_offline_stream.feed(
+        empty_telemetry_line(), 5'000'000'000ULL);
+    CHECK(legacy_probe.has_value());
+    CHECK(legacy_probe->telemetry_living_zeds == 1);
+    CHECK(!legacy_probe->telemetry_living_pressure_milli.has_value());
     stream.reset();
     CHECK(!stream.current().has_value());
     CHECK(stream.stats().bytes_received == 0);

@@ -93,6 +93,7 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     session.telemetry_explosion_decal_limit = 20;
     session.telemetry_living_visible = 7;
     session.telemetry_living_offscreen = 4;
+    session.telemetry_living_pressure_milli = 812;
     frame.gameplay = session;
 
     flex::ObservationSnapshot flex;
@@ -365,6 +366,8 @@ int main() {
     CHECK(sample.visibility_context_fresh);
     CHECK(sample.ragdoll_pressure.has_value());
     CHECK(approximately_equal(*sample.ragdoll_pressure, 0.5));
+    CHECK(sample.living_zed_pressure.has_value());
+    CHECK(approximately_equal(*sample.living_zed_pressure, 0.812));
     CHECK(sample.gore_pressure.has_value());
     CHECK(approximately_equal(*sample.gore_pressure, 0.2));
     CHECK(sample.particle_pressure.has_value());
