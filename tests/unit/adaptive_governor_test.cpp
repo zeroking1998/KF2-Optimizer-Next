@@ -843,6 +843,8 @@ int main() {
         AdaptiveCapabilityState::available;
     corpse_pressure.capabilities.ragdoll_control =
         AdaptiveCapabilityState::available;
+    corpse_pressure.gameplay_context_fresh = true;
+    corpse_pressure.ragdoll_pressure = 0.9;
     corpse_pressure.live_corpse_burden = 120;
     corpse_pressure.user_max_dead_bodies = 2000;
     corpse_pressure.adaptive_corpse_runtime_limit = 2000;
@@ -856,6 +858,23 @@ int main() {
     CHECK(corpse.proposed_value.has_value());
     CHECK(*corpse.proposed_value < 120.0);
     CHECK(*corpse.proposed_value >= 4.0);
+
+    // Corpse capability and a high corpse count do not justify a corpse
+    // reduction when fresh workload evidence attributes the frame pressure to
+    // another subsystem.
+    AdaptiveGovernor gore_with_corpses_governor;
+    auto gore_with_corpses = corpse_pressure;
+    gore_with_corpses.ragdoll_pressure.reset();
+    gore_with_corpses.gore_pressure = 0.9;
+    gore_with_corpses.capabilities.gore_control =
+        AdaptiveCapabilityState::shadow;
+    const auto attributed_gore = drive(
+        gore_with_corpses_governor, adaptive, gore_with_corpses,
+        start, 1'000'000'000ULL);
+    CHECK(attributed_gore.bottleneck.type == AdaptiveBottleneck::gore);
+    CHECK(attributed_gore.selected_setting == "GoreQuality");
+    CHECK(attributed_gore.disposition == AdaptiveDisposition::shadow);
+    CHECK(attributed_gore.reason == "candidate_capability_shadow");
 
     AdaptiveGovernor zed_time_governor;
     corpse_pressure.zed_time_protected = true;
