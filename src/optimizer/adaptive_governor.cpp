@@ -1121,7 +1121,9 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     // high-frequency corpse loop. The app supplies the user ceiling at launch
     // and observes its transient integer runtime limit; it never writes that
     // effective reduction back to the user's preference.
-    if (sample.capabilities.corpse_control ==
+    if ((decision.bottleneck.type == AdaptiveBottleneck::ragdoll ||
+         decision.bottleneck.type == AdaptiveBottleneck::physics) &&
+        sample.capabilities.corpse_control ==
             AdaptiveCapabilityState::available &&
         sample.live_corpse_burden && sample.user_max_dead_bodies &&
         sample.adaptive_corpse_runtime_limit &&
