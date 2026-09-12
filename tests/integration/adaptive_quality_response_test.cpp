@@ -123,6 +123,11 @@ int main() {
                 AdaptiveRuntimeControlInput input;
                 input.state = decision.state;
                 input.data_quality = decision.data.quality;
+                // This scenario verifies the post-receipt response window,
+                // not attribution. Supply an evidenced target so an unknown
+                // resource cannot intentionally suppress the quality action.
+                input.primary_resource = optimizer::ResourceKind::gpu;
+                input.primary_confidence = 0.80;
                 input.current_quality = 80;
                 input.current_frame_pressure = decision.current_frame_pressure;
                 input.current_resource_pressure = decision.current_resource_pressure;
@@ -287,6 +292,10 @@ int main() {
                 AdaptiveRuntimeControlInput input;
                 input.state = decision.state;
                 input.data_quality = decision.data.quality;
+                // Tail corroboration and resource attribution are independent
+                // gates. Keep this integration scenario focused on the former.
+                input.primary_resource = optimizer::ResourceKind::gpu;
+                input.primary_confidence = 0.80;
                 input.current_quality = 20;
                 input.current_frame_pressure = decision.current_frame_pressure;
                 input.current_resource_pressure = decision.current_resource_pressure;
