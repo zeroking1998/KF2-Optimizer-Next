@@ -198,21 +198,11 @@ static function ApplyOverdraw(out GFXSettings Requested, int Quality)
 }
 
 // Controls effect lifetime, pool size and spawn budgets independently from
-// pixel overdraw. This remains transient, reversible and read back through the
-// same native GFX settings contract as every other adaptive resource group.
+// native pixel-overdraw settings. These transient script defaults are also
+// synchronized to live managers by the telemetry probe and verified there.
 static function ApplyEffects(out GFXSettings Requested, int Quality)
 {
-    local int ParticleLodBias;
-
     if (Quality >= 100) return;
-    if (Quality >= 80) ParticleLodBias = 1;
-    else if (Quality >= 60) ParticleLodBias = 2;
-    else if (Quality >= 40) ParticleLodBias = 3;
-    else if (Quality >= 20) ParticleLodBias = 4;
-    else ParticleLodBias = 5;
-
-    Requested.FX.ParticleLODBias = Max(
-        Requested.FX.ParticleLODBias, ParticleLodBias);
     Requested.FX.EmitterPoolScale = FMin(
         Requested.FX.EmitterPoolScale,
         FMax(0.15, float(Quality) / 100.0));
@@ -238,18 +228,8 @@ static function ApplyEffects(out GFXSettings Requested, int Quality)
     Requested.CharacterDetail.MaxBodyWoundDecals = Min(
         Requested.CharacterDetail.MaxBodyWoundDecals,
         Max(0, Quality / 25));
-    if (Quality <= 80)
-    {
-        Requested.FX.DropParticleDistortion = true;
-    }
-    if (Quality <= 60)
-    {
-        Requested.FX.FilteredDistortion = false;
-        Requested.FX.AllowSecondaryBloodEffects = false;
-    }
     if (Quality <= 40)
     {
-        Requested.FX.Distortion = false;
         Requested.FX.AllowBloodSplatterDecals = false;
     }
     if (Quality <= 20)
@@ -417,10 +397,6 @@ static function ApplyRam(out GFXSettings Requested, int Quality)
     Requested.EnvironmentDetail.DestructionLifetimeScale = FMin(
         Requested.EnvironmentDetail.DestructionLifetimeScale,
         FMax(0.25, float(Quality) / 100.0));
-    if (Quality <= 50)
-    {
-        Requested.FX.AllowSecondaryBloodEffects = false;
-    }
     if (Quality <= 30)
     {
         Requested.FX.AllowBloodSplatterDecals = false;
@@ -618,6 +594,51 @@ static function RestoreOwnedSettings(
         Snapshot.OriginalMaxBodyWoundDecals;
 }
 
+// KF2's graphics-menu setter persists every script-backed graphics class with
+// StaticSaveConfig(). Adaptive changes are transient session state, so those
+// game-thread disk writes are unnecessary and harm frame pacing. Update only
+// the script defaults owned by this actuator; protected restore still owns the
+// user's persistent INI state.
+static function SetAdaptiveScriptSettings(out GFXSettings Requested)
+{
+    class'WorldInfo'.default.DestructionLifetimeScale =
+        Requested.EnvironmentDetail.DestructionLifetimeScale;
+    class'WorldInfo'.default.EmitterPoolScale = Requested.FX.EmitterPoolScale;
+    class'KFMuzzleFlash'.default.ShellEjectLifetime =
+        Requested.FX.ShellEjectLifetime;
+    class'WorldInfo'.default.bAllowExplosionLights =
+        Requested.FX.AllowExplosionLights;
+    class'KFSprayActor'.default.bAllowSprayLights =
+        Requested.FX.AllowSprayActorLights;
+    class'KFWeap_FlameBase'.default.bArePilotLightsAllowed =
+        Requested.FX.AllowPilotLights;
+    class'KFImpactEffectManager'.default.MaxImpactEffectDecals =
+        Requested.FX.MaxImpactEffectDecals;
+    class'WorldInfo'.default.MaxExplosionDecals =
+        Requested.FX.MaxExplosionDecals;
+    class'KFGoreManager'.default.GoreFXLifetimeMultiplier =
+        Requested.FX.GoreFXLifetimeMultiplier;
+    class'KFGoreManager'.default.MaxBloodEffects =
+        Requested.FX.MaxBloodEffects;
+    class'KFGoreManager'.default.MaxGoreEffects =
+        Requested.FX.MaxGoreEffects;
+    class'KFGoreManager'.default.MaxPersistentSplatsPerFrame =
+        Requested.FX.MaxPersistentSplatsPerFrame;
+    class'KFGoreManager'.default.bAllowBloodSplatterDecals =
+        Requested.FX.AllowBloodSplatterDecals;
+    class'KFGoreManager'.default.MaxBodyWoundDecals =
+        Requested.CharacterDetail.MaxBodyWoundDecals;
+}
+
+// Effect and RAM pressure only change transient script defaults and live
+// manager budgets. Global particle LOD and distortion belong to the separate
+// overdraw actuator. Avoiding KF2's all-settings native setter here prevents a
+// renderer-wide rebuild for the most frequent adaptive actions.
+static function bool ResourceNeedsNativeApply(string Resource)
+{
+    return !(Resource ~= "effects" || Resource ~= "ram");
+}
+
 static function bool ReadbackMatches(
     GFXSettings Observed, GFXSettings Requested)
 {
@@ -739,6 +760,7 @@ static function bool ApplyResource(
     local int PreviousRamQuality;
     local int PreviousOverdrawQuality;
     local int PreviousEffectsQuality;
+    local bool bIncrementalReduction;
 
     if (Snapshot == None || Quality < 10 || Quality > 100) return false;
     GetCurrentGFXSettings(Current);
@@ -777,16 +799,55 @@ static function bool ApplyResource(
     }
     else return false;
 
+    // A reduction can clamp only the owned fields for the selected resource.
+    // Rebuilding every resource group here caused avoidable render-thread
+    // work and measurable frame-time spikes. Recovery still starts from the
+    // original snapshot because increasing quality cannot be expressed with
+    // the reduction-only Min/Max transforms.
+    bIncrementalReduction =
+        ((Resource ~= "gpu") && Quality < PreviousGpuQuality) ||
+        ((Resource ~= "cpu") && Quality < PreviousCpuQuality) ||
+        ((Resource ~= "vram") && Quality < PreviousVramQuality) ||
+        ((Resource ~= "ram") && Quality < PreviousRamQuality) ||
+        ((Resource ~= "overdraw") && Quality < PreviousOverdrawQuality) ||
+        ((Resource ~= "effects") && Quality < PreviousEffectsQuality) ||
+        ((Resource ~= "mixed") &&
+         Quality <= PreviousGpuQuality && Quality <= PreviousCpuQuality &&
+         Quality <= PreviousVramQuality && Quality <= PreviousRamQuality &&
+         (Quality < PreviousGpuQuality || Quality < PreviousCpuQuality ||
+          Quality < PreviousVramQuality || Quality < PreviousRamQuality));
+
     Requested = Current;
-    RestoreOwnedSettings(Snapshot, Requested);
-    ApplyGpu(Requested, Snapshot.GpuQuality);
-    ApplyCpu(Requested, Snapshot.CpuQuality);
-    ApplyVram(Requested, Snapshot.VramQuality);
-    ApplyRam(Requested, Snapshot.RamQuality);
-    ApplyOverdraw(Requested, Snapshot.OverdrawQuality);
-    ApplyEffects(Requested, Snapshot.EffectsQuality);
-    SetNativeSettings(Requested);
-    SetScriptSettings(Requested);
+    if (bIncrementalReduction)
+    {
+        if (Resource ~= "gpu") ApplyGpu(Requested, Snapshot.GpuQuality);
+        else if (Resource ~= "cpu") ApplyCpu(Requested, Snapshot.CpuQuality);
+        else if (Resource ~= "vram") ApplyVram(Requested, Snapshot.VramQuality);
+        else if (Resource ~= "ram") ApplyRam(Requested, Snapshot.RamQuality);
+        else if (Resource ~= "overdraw")
+            ApplyOverdraw(Requested, Snapshot.OverdrawQuality);
+        else if (Resource ~= "effects")
+            ApplyEffects(Requested, Snapshot.EffectsQuality);
+        else
+        {
+            ApplyGpu(Requested, Snapshot.GpuQuality);
+            ApplyCpu(Requested, Snapshot.CpuQuality);
+            ApplyVram(Requested, Snapshot.VramQuality);
+            ApplyRam(Requested, Snapshot.RamQuality);
+        }
+    }
+    else
+    {
+        RestoreOwnedSettings(Snapshot, Requested);
+        ApplyGpu(Requested, Snapshot.GpuQuality);
+        ApplyCpu(Requested, Snapshot.CpuQuality);
+        ApplyVram(Requested, Snapshot.VramQuality);
+        ApplyRam(Requested, Snapshot.RamQuality);
+        ApplyOverdraw(Requested, Snapshot.OverdrawQuality);
+        ApplyEffects(Requested, Snapshot.EffectsQuality);
+    }
+    if (ResourceNeedsNativeApply(Resource)) SetNativeSettings(Requested);
+    SetAdaptiveScriptSettings(Requested);
     GetCurrentGFXSettings(Observed);
     if (ReadbackMatches(Observed, Requested)) return true;
 
@@ -804,8 +865,8 @@ static function bool ApplyResource(
     ApplyRam(Requested, Snapshot.RamQuality);
     ApplyOverdraw(Requested, Snapshot.OverdrawQuality);
     ApplyEffects(Requested, Snapshot.EffectsQuality);
-    SetNativeSettings(Requested);
-    SetScriptSettings(Requested);
+    if (ResourceNeedsNativeApply(Resource)) SetNativeSettings(Requested);
+    SetAdaptiveScriptSettings(Requested);
     GetCurrentGFXSettings(Observed);
     if (ReadbackMatches(Observed, Requested))
     {
@@ -829,7 +890,7 @@ static function bool RestoreOriginal(KF2OptimizerAdaptiveGraphicsState Snapshot)
     Requested = Current;
     RestoreOwnedSettings(Snapshot, Requested);
     SetNativeSettings(Requested);
-    SetScriptSettings(Requested);
+    SetAdaptiveScriptSettings(Requested);
     GetCurrentGFXSettings(Observed);
     if (!ReadbackMatches(Observed, Requested)) return false;
     Snapshot.GpuQuality = 100;

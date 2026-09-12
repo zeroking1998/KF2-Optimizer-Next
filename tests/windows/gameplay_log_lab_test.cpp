@@ -66,6 +66,22 @@ int main() {
         read_bytes(KF2_ADAPTIVE_GRAPHICS_SOURCE));
     const auto telemetry_session_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_SESSION_SOURCE));
+    CHECK(graphics_source.find(
+        "static function SetAdaptiveScriptSettings") != std::string::npos);
+    CHECK(graphics_source.find(".static.StaticSaveConfig(") ==
+          std::string::npos);
+    CHECK(graphics_source.find("SetScriptSettings(Requested)") ==
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "static function bool ResourceNeedsNativeApply") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "return !(Resource ~= \"effects\" || Resource ~= \"ram\");") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "if (ResourceNeedsNativeApply(Resource)) "
+        "SetNativeSettings(Requested)") !=
+          std::string::npos);
     CHECK(telemetry_source.find("AdaptiveControlToken") != std::string::npos);
     CHECK(telemetry_source.find("ValidAdaptiveControlToken") !=
           std::string::npos);
