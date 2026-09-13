@@ -221,6 +221,8 @@ struct UiRuntime {
     optimizer::AdaptiveBottleneck last_adaptive_bottleneck{
         optimizer::AdaptiveBottleneck::unknown};
     std::uint64_t last_adaptive_decision_log_ns{0};
+    std::uint64_t last_performance_sample_log_ns{0};
+    std::optional<bool> last_performance_sample_adaptive_mode;
     unsigned int adaptive_overhead_breaches{0};
     bool adaptive_overhead_frozen{false};
     bool adaptive_gameplay_active{false};

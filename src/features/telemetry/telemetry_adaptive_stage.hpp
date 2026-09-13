@@ -21,6 +21,29 @@ namespace kf2::telemetry_pipeline {
 
 inline constexpr std::uint64_t kAdaptiveBottleneckLogIntervalNs =
     5'000'000'000ULL;
+inline constexpr std::uint64_t kPerformanceSampleLogIntervalNs =
+    5'000'000'000ULL;
+
+[[nodiscard]] inline bool has_complete_performance_metrics(
+    const ::kf2::telemetry::FrameMetrics& frames) noexcept {
+    return frames.quality == ::kf2::telemetry::SampleQuality::good &&
+           frames.fps.has_value() && frames.average_fps.has_value() &&
+           frames.frame_time_ms.has_value() && frames.p95_ms.has_value() &&
+           frames.sustained_one_percent_low_fps.has_value() &&
+           frames.one_percent_low_fps.has_value();
+}
+
+[[nodiscard]] inline bool should_log_performance_sample(
+    bool active_gameplay, bool mode_confirmed, bool mode_changed,
+    const ::kf2::telemetry::FrameMetrics& frames,
+    std::uint64_t now_ns, std::uint64_t last_log_ns) noexcept {
+    if (!active_gameplay || !mode_confirmed ||
+        !has_complete_performance_metrics(frames) || now_ns == 0) {
+        return false;
+    }
+    return mode_changed || last_log_ns == 0 || now_ns < last_log_ns ||
+           now_ns - last_log_ns >= kPerformanceSampleLogIntervalNs;
+}
 
 [[nodiscard]] inline bool should_log_adaptive_decision(
     bool controller_changed, bool bottleneck_changed,
@@ -131,14 +154,10 @@ adaptive_quality_response_feedback(
         parsed = game::AdaptiveResourceControl::mixed;
     }
     if (!parsed) return {};
-    if (result == "no_clear_change" || result == "worsened") {
+    if (result == "no_clear_change" || result == "worsened" ||
+        result == "mixed" || result.starts_with("inconclusive:")) {
         return {.rollback_quality = from,
                 .reduction_floor_quality = from,
-                .resource = parsed};
-    }
-    if (result == "mixed" || result.starts_with("inconclusive:")) {
-        return {.rollback_quality = std::nullopt,
-                .reduction_floor_quality = to,
                 .resource = parsed};
     }
     return {};

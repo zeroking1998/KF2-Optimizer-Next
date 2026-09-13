@@ -70,7 +70,7 @@ five-second window starting one second after an authenticated APPLIED receipt.
 Late telemetry batches get up to one second to fill each fixed event-time
 window. The baseline is reread over its original pre-request bounds; the
 post-action window is not moved or shortened. Data still missing at the
-deadline makes the comparison inconclusive, without delaying Adaptive actions.
+deadline makes the comparison inconclusive.
 Average FPS, p95 frame time and 1% low use the same window, unlike the overlay's
 different rolling windows. The log includes frame counts and actual coverage;
 incomplete windows, telemetry gaps, session/GPU/target changes, Zed Time,
@@ -82,7 +82,9 @@ with a reason. A 5% metric change is the reporting threshold, not statistical
 significance. Scene checks use visible living Zeds and total corpse counts;
 they cannot establish identical camera views or effects. Results are therefore
 observational, explicitly not proof that the quality change caused the result.
-This diagnostic never changes or delays Adaptive actions.
+Only an `improved` result allows a reduction to remain. A worsened, mixed,
+unclear or inconclusive result queues restoration of the previous quality and
+prevents that resource from being reduced again during the gameplay session.
 
 The controller separately spaces ordinary quality changes at least seven
 seconds after the previous authenticated APPLIED receipt: one second to settle,
