@@ -204,6 +204,28 @@ int main() {
         false, false, 20'000'000'000ULL, 10'000'000'000ULL));
 
     auto frame = complete_frame();
+    CHECK(has_complete_performance_metrics(frame.frames));
+    CHECK(should_log_performance_sample(
+        true, true, false, frame.frames, 20'000'000'000ULL, 0));
+    CHECK(!should_log_performance_sample(
+        true, true, false, frame.frames, 24'999'999'999ULL,
+        20'000'000'000ULL));
+    CHECK(should_log_performance_sample(
+        true, true, false, frame.frames, 25'000'000'000ULL,
+        20'000'000'000ULL));
+    CHECK(should_log_performance_sample(
+        true, true, true, frame.frames, 20'100'000'000ULL,
+        20'000'000'000ULL));
+    CHECK(!should_log_performance_sample(
+        false, true, true, frame.frames, 25'000'000'000ULL, 0));
+    CHECK(!should_log_performance_sample(
+        true, false, true, frame.frames, 25'000'000'000ULL, 0));
+    auto incomplete_performance = frame.frames;
+    incomplete_performance.one_percent_low_fps.reset();
+    CHECK(!has_complete_performance_metrics(incomplete_performance));
+    CHECK(!should_log_performance_sample(
+        true, true, true, incomplete_performance, 25'000'000'000ULL, 0));
+
     CHECK(!adaptive_frame_boundary_requires_drain(frame, 0));
     CHECK(adaptive_frame_boundary_requires_drain(
         frame, 9'000'000'001ULL));
@@ -547,9 +569,14 @@ int main() {
         "no_clear_change", "invalid", 20, 10).rollback_quality);
     const auto inconclusive = adaptive_quality_response_feedback(
         "inconclusive:scene_changed_or_unknown", "cpu", 70, 60);
-    CHECK(!inconclusive.rollback_quality);
-    CHECK(inconclusive.reduction_floor_quality == 60);
+    CHECK(inconclusive.rollback_quality == 70);
+    CHECK(inconclusive.reduction_floor_quality == 70);
     CHECK(inconclusive.resource == game::AdaptiveResourceControl::cpu);
+    const auto mixed_response = adaptive_quality_response_feedback(
+        "mixed", "effects", 90, 80);
+    CHECK(mixed_response.rollback_quality == 90);
+    CHECK(mixed_response.reduction_floor_quality == 90);
+    CHECK(mixed_response.resource == game::AdaptiveResourceControl::effects);
 
     auto rollback = post_applied;
     rollback.current_quality = 10;

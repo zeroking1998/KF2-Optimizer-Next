@@ -357,6 +357,8 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     adaptive_profile_gate.reset();
     adaptive_gameplay_active = false;
     adaptive_provider_confirmed = false;
+    last_performance_sample_log_ns = 0;
+    last_performance_sample_adaptive_mode.reset();
     corpse_telemetry_tracker.reset();
     adaptive_overhead_breaches = 0;
     adaptive_overhead_frozen = false;

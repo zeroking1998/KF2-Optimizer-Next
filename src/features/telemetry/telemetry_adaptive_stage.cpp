@@ -86,6 +86,40 @@ void UiRuntime::update_adaptive_controller(
             }
         }
     }
+    const bool adaptive_mode =
+        optimizer_settings.adaptive_optimization_enabled;
+    const bool performance_mode_changed =
+        !last_performance_sample_adaptive_mode.has_value() ||
+        *last_performance_sample_adaptive_mode != adaptive_mode;
+    if (optimizer_settings.adaptive_logging &&
+        telemetry_pipeline::should_log_performance_sample(
+            active_gameplay, adaptive_runtime_mode_confirmed,
+            performance_mode_changed, frame.frames, now_ns,
+            last_performance_sample_log_ns)) {
+        std::wostringstream measurement;
+        measurement << std::fixed << std::setprecision(2)
+                    << L"mode=" << (adaptive_mode ? L"on" : L"off")
+                    << L"; current=" << *frame.frames.fps << L" FPS"
+                    << L"; frame=" << *frame.frames.frame_time_ms << L" ms"
+                    << L"; avg3s=" << *frame.frames.average_fps << L" FPS"
+                    << L"; p95=" << *frame.frames.p95_ms << L" ms"
+                    << L"; 1%low3s="
+                    << *frame.frames.sustained_one_percent_low_fps << L" FPS"
+                    << L"; 1%low10s=" << *frame.frames.one_percent_low_fps
+                    << L" FPS; stutters5s=" << frame.frames.stutter_count
+                    << L"; sampleNs=" << now_ns
+                    << L"; processStartId=" << frame.identity.process_start_id;
+        if (frame.gameplay && !frame.gameplay->map.empty()) {
+            measurement << L"; map="
+                        << std::wstring{frame.gameplay->map.begin(),
+                                        frame.gameplay->map.end()};
+        }
+        events->append({0, diagnostics::Severity::info,
+                        "PERFORMANCE_SAMPLE", measurement.str(),
+                        L"telemetry"});
+        last_performance_sample_log_ns = now_ns;
+        last_performance_sample_adaptive_mode = adaptive_mode;
+    }
     const auto corpse_state = corpse_telemetry_tracker.observe(frame,
         game_process && game_process->pid == frame.identity.pid &&
         game_process->process_start_id == frame.identity.process_start_id &&
