@@ -15,7 +15,6 @@ $requiredFiles = @(
     'README.md',
     'THIRD_PARTY_NOTICES.md',
     'assets/PROVENANCE.md',
-    'third_party/presentmon/LICENSE.txt',
     '.github/workflows/windows-ci.yml',
     '.github/ISSUE_TEMPLATE/bug_report.yml',
     '.github/ISSUE_TEMPLATE/feature_request.yml',
@@ -99,14 +98,6 @@ if ($ignoreText -notmatch '(?m)^/out/\r?$') {
 if ($ignoreText -notmatch
         '(?m)^/assets/offline_telemetry/KF2OptimizerTelemetry\.u\r?$') {
     $failures.Add('.gitignore must exclude the locally SDK-compiled telemetry package.')
-}
-
-$presentMonLicensePath = Join-Path $projectRoot `
-    'third_party/presentmon/LICENSE.txt'
-$presentMonLicense = Get-Content -LiteralPath $presentMonLicensePath -Raw
-if ($presentMonLicense -notmatch 'Copyright \(C\) 2017-2024 Intel Corporation' -or
-    $presentMonLicense -notmatch 'Permission is hereby granted') {
-    $failures.Add('The complete Intel PresentMon license is missing or changed.')
 }
 
 if ($failures.Count -gt 0) {

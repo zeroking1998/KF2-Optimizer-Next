@@ -8,6 +8,10 @@ are visible immediately.
 
 ### What's new
 
+- Replaced the embedded PresentMon analysis library with a small native DXGI
+  frame-timing session. The existing overlay keeps the same FPS, frame-time,
+  average, 1% low, percentile, and stutter output without injection, a helper
+  process, or an extra runtime DLL.
 - Adaptive live quality now keeps independent CPU, GPU, VRAM, RAM, and
   overdraw levels.
   Each confirmed bottleneck changes only its matching group, while recovery

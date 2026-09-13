@@ -69,10 +69,6 @@ if ($inventoryDocument.schema -cne 'KF2_ISSUE72_INVENTORY_V3' -or
     @($inventoryDocument.records).Count -ne 149) {
     throw 'Machine-readable Issue 72 inventory is incomplete or incompatible'
 }
-$license = Join-Path $root 'Data\Documentation\PresentMon-LICENSE.txt'
-if (-not (Test-Path -LiteralPath $license -PathType Leaf)) {
-    throw 'PresentMon license is missing from the portable package'
-}
 $projectLicense = Join-Path $root 'Data\Documentation\LICENSE'
 if (-not (Test-Path -LiteralPath $projectLicense -PathType Leaf)) {
     throw 'GPL-3.0 project license is missing from the portable package'
@@ -92,7 +88,7 @@ $packageManifest = Get-Content -LiteralPath $packageManifestPath -Raw |
 if ($packageManifest.schema_version -ne 2 -or
     $packageManifest.package_version -cne '0.0.4-alpha' -or
     $packageManifest.license -cne 'GPL-3.0-only' -or
-    @($packageManifest.managed_files).Count -ne 16) {
+    @($packageManifest.managed_files).Count -ne 15) {
     throw 'Portable package manifest is incomplete or incompatible'
 }
 foreach ($relative in @($packageManifest.managed_files)) {
@@ -102,8 +98,8 @@ foreach ($relative in @($packageManifest.managed_files)) {
     }
 }
 $payloadHashes = @($packageManifest.payload_hashes)
-if ($payloadHashes.Count -ne 15) {
-    throw 'Portable package hash manifest must cover all fifteen payload files'
+if ($payloadHashes.Count -ne 14) {
+    throw 'Portable package hash manifest must cover all fourteen payload files'
 }
 $seenPayload = @{}
 foreach ($entry in $payloadHashes) {
@@ -135,15 +131,15 @@ foreach ($entry in $payloadHashes) {
 }
 $integrityPath = Join-Path $root 'Data\package-integrity.ini'
 $integrityLines = @(Get-Content -LiteralPath $integrityPath)
-if ($integrityLines.Count -ne 18 -or
+if ($integrityLines.Count -ne 17 -or
     $integrityLines[0] -cne 'schema_version=1' -or
     $integrityLines[1] -cne 'product=KF2OptimizerNext' -or
     $integrityLines[2] -notmatch '^source_identity=[A-Za-z0-9._-]{1,128}$' -or
-    $integrityLines[3] -cne 'file_count=14' -or
-    @($integrityLines | Where-Object { $_ -match '^file=' }).Count -ne 14) {
+    $integrityLines[3] -cne 'file_count=13' -or
+    @($integrityLines | Where-Object { $_ -match '^file=' }).Count -ne 13) {
     throw 'Runtime package integrity document is invalid'
 }
 Write-Host "PASS: package has exactly one portable executable"
-Write-Host "PASS: all fifteen managed payload hashes match"
+Write-Host "PASS: all fourteen managed payload hashes match"
 Write-Host "SHA256: $((Get-FileHash -LiteralPath $executables[0].FullName -Algorithm SHA256).Hash)"
 & (Join-Path $PSScriptRoot 'validate_acceptance_ledger.ps1')

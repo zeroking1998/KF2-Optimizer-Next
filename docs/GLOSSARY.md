@@ -33,8 +33,8 @@ returns to the near range.
 **Passthrough** — The optimizer has released control and leaves the native
 provider behavior unchanged.
 
-**PresentMon** — The third-party telemetry component used to observe presentation
-timing. It retains its own license.
+**Native DXGI frame timing** — Built-in Windows telemetry used to observe
+application presentation timing.
 
 **Proposed** — Selected by policy but not yet confirmed as applied.
 

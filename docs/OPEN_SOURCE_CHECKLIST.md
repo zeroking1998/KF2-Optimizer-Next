@@ -11,7 +11,6 @@ decisions that require an owner.
 - [x] Code of conduct, security policy, support guide, changelog, and roadmap
 - [x] Automated Windows build/test workflow
 - [x] Documentation-link and English-contract validation
-- [x] Third-party PresentMon license retained
 - [x] Root `GPL-3.0-only` license selected and included in packages
 - [x] Standalone `.gitignore`, `.gitattributes`, third-party notices, and asset
   provenance added

@@ -65,7 +65,6 @@ $metadata = [ordered]@{
         'Data/Documentation/LICENSE',
         'Data/Documentation/THIRD_PARTY_NOTICES.md',
         'Data/Documentation/issue72-feature-inventory.json',
-        'Data/Documentation/PresentMon-LICENSE.txt',
         'Data/package-integrity.ini',
         'Data/package-manifest.json')
     issue72_inventory = [ordered]@{
@@ -100,7 +99,6 @@ $sbom = [ordered]@{
         licenses=@([ordered]@{ license=[ordered]@{ id='GPL-3.0-only' } })
     } }
     components = @(
-        [ordered]@{ type='library'; name='PresentMon PresentData'; supplier=[ordered]@{name='Intel'}; scope='required' },
         [ordered]@{ type='library'; name='KF2 FleX offline laboratory forwarder'; scope='optional'; hashes=@([ordered]@{alg='SHA-256'; content=$forwarderHash}) }
         [ordered]@{ type='file'; name='KF2 read-only offline telemetry package'; scope='optional'; hashes=@([ordered]@{alg='SHA-256'; content=$telemetryModuleHash}) }
         [ordered]@{ type='file'; name='Issue 72 function inventory'; scope='required'; hashes=@([ordered]@{alg='SHA-256'; content=$inventoryJsonHash}) }

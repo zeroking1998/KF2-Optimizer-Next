@@ -57,27 +57,6 @@ endif()
 
 include(CTest)
 
-add_library(presentmon_data STATIC
-    third_party/presentmon/presentmon_debug_stubs.cpp
-    third_party/presentmon/PresentData/GpuTrace.cpp
-    third_party/presentmon/PresentData/NvidiaTraceConsumer.cpp
-    third_party/presentmon/PresentData/PresentMonTraceConsumer.cpp
-    third_party/presentmon/PresentData/PresentMonTraceSession.cpp
-    third_party/presentmon/PresentData/TraceConsumer.cpp
-    third_party/presentmon/PresentData/TraceLogging.cpp
-)
-target_include_directories(presentmon_data PUBLIC
-    "${PROJECT_SOURCE_DIR}/third_party/presentmon/PresentData"
-)
-set_target_properties(presentmon_data PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
-target_compile_definitions(presentmon_data PRIVATE
-    _CRT_SECURE_NO_WARNINGS NDEBUG PRESENTMON_ENABLE_DEBUG_TRACE=0
-)
-if(MSVC)
-    target_compile_options(presentmon_data PRIVATE /w /permissive)
-endif()
-target_link_libraries(presentmon_data PUBLIC advapi32 tdh)
-
 set(KF2_FEATURE_ACTION_SOURCES
     "${PROJECT_SOURCE_DIR}/src/features/advanced/advanced_actions.cpp"
     "${PROJECT_SOURCE_DIR}/src/features/backup/backup_actions.cpp"
@@ -179,7 +158,7 @@ add_executable(KF2Optimizer WIN32
     src/optimizer/optimizer_engine.cpp
     src/platform/windows/atomic_file.cpp
     src/platform/windows/async_file_writer.cpp
-    src/platform/windows/presentmon_session.cpp
+    src/platform/windows/dxgi_frame_timing_session.cpp
     src/platform/windows/process_security.cpp
     src/platform/windows/single_instance.cpp
     src/platform/windows/state_environment.cpp
@@ -229,8 +208,7 @@ if(MSVC)
     )
 endif()
 target_link_libraries(KF2Optimizer PRIVATE
-    presentmon_data
-    user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs uiautomationcore bcrypt dwmapi psapi advapi32 pdh dxgi tdh version winhttp ws2_32
+    user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs uiautomationcore bcrypt dwmapi psapi advapi32 pdh dxgi version winhttp ws2_32
 )
 
 add_executable(KF2ConfigRoundtrip EXCLUDE_FROM_ALL

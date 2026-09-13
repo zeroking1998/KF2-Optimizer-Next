@@ -72,7 +72,7 @@ if (-not (Test-Path -LiteralPath $sourcePackage -PathType Container)) {
 Clear-ValidationRoot $testRoot
 Clear-ValidationRoot $looseRoot
 Copy-Item -LiteralPath $sourcePackage -Destination $testRoot -Recurse
-$damagedFile = Join-Path $testRoot 'Data\Documentation\PresentMon-LICENSE.txt'
+$damagedFile = Join-Path $testRoot 'Data\Documentation\FEATURE_REFERENCE.md'
 [IO.File]::AppendAllText($damagedFile, "`nintentional validation damage")
 $damagedProcess = Start-Process -FilePath (Join-Path $testRoot 'KF2Optimizer.exe') `
     -PassThru

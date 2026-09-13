@@ -27,7 +27,6 @@ constexpr std::pair<const wchar_t*, const char*> kFiles[]{
     {L"Data/Documentation/LICENSE", "test license"},
     {L"Data/Documentation/THIRD_PARTY_NOTICES.md", "test notices"},
     {L"Data/Documentation/issue72-feature-inventory.json", "test inventory"},
-    {L"Data/Documentation/PresentMon-LICENSE.txt", "test license"},
 };
 
 void write_file(const std::filesystem::path& path, std::string_view bytes) {
@@ -46,7 +45,7 @@ void write_package(const std::filesystem::path& root,
                    std::string_view identity) {
     std::string manifest =
         "schema_version=1\nproduct=KF2OptimizerNext\nsource_identity=" +
-        std::string{identity} + "\nfile_count=14\n";
+        std::string{identity} + "\nfile_count=13\n";
     for (const auto& [relative, content] : kFiles) {
         const auto path = root / relative;
         write_file(path, content);
@@ -78,7 +77,7 @@ int main() {
     CHECK(development.value().verified);
 
     write_package(root, "test-build");
-    CHECK(kf2::security::managed_package_payload_paths().size() == 14);
+    CHECK(kf2::security::managed_package_payload_paths().size() == 13);
     const auto source_identity = kf2::security::package_source_identity(root);
     CHECK(source_identity.has_value());
     CHECK(source_identity.value() == "test-build");
@@ -87,9 +86,9 @@ int main() {
     CHECK(verified.has_value());
     CHECK(verified.value().managed_package);
     CHECK(verified.value().verified);
-    CHECK(verified.value().verified_files == 14);
+    CHECK(verified.value().verified_files == 13);
 
-    write_file(root / L"Data/Documentation/PresentMon-LICENSE.txt", "damaged");
+    write_file(root / L"Data/Documentation/FEATURE_REFERENCE.md", "damaged");
     const auto damaged =
         kf2::security::audit_package_integrity(root, "test-build");
     CHECK(damaged.has_value());
@@ -114,7 +113,7 @@ int main() {
         repair_target, repair_source, "test-build");
     CHECK(repaired.has_value());
     CHECK(repaired.value().repaired_files == 3);
-    CHECK(repaired.value().already_valid_files == 12);
+    CHECK(repaired.value().already_valid_files == 11);
     CHECK(repaired.value().restart_required);
     const auto repaired_audit =
         kf2::security::audit_package_integrity(repair_target, "test-build");
@@ -125,13 +124,13 @@ int main() {
         repair_target, repair_source, "test-build");
     CHECK(unchanged.has_value());
     CHECK(unchanged.value().repaired_files == 0);
-    CHECK(unchanged.value().already_valid_files == 14);
+    CHECK(unchanged.value().already_valid_files == 13);
     CHECK(!unchanged.value().restart_required);
 
     write_file(repair_target / L"Data/Documentation/SAFETY.md",
                "target must remain unchanged");
     write_file(repair_source /
-                   L"Data/Documentation/PresentMon-LICENSE.txt",
+                   L"Data/Documentation/FEATURE_REFERENCE.md",
                "tampered source");
     const auto tampered_source =
         kf2::security::repair_package_from_directory(

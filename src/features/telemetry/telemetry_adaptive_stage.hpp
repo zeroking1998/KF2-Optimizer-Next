@@ -80,7 +80,7 @@ struct AdaptiveSampleBuildResult final {
 }
 
 // The normal telemetry drain already contains at most the longest rolling
-// PresentMon window. Once that complete window begins after the controller's
+// frame-timing window. Once that complete window begins after the controller's
 // gameplay/action boundary, a second bounded drain would calculate identical
 // metrics and only repeat allocations and percentile work.
 [[nodiscard]] inline bool adaptive_frame_boundary_requires_drain(

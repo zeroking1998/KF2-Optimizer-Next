@@ -20,9 +20,9 @@ Push-Location -LiteralPath $projectRoot
 try {
     Invoke-Native 'cmake' @('--preset', $preset)
     Invoke-Native 'cmake' @('--build', '--preset', $preset, '--parallel')
-    $tests = 'kf2_(game_session|system_metrics|present_source|presentmon_session|presentmon_dxgi_present|gpu_metrics|overlay_policy|overlay_window|application_lifecycle)_test'
+    $tests = 'kf2_(game_session|system_metrics|present_source|dxgi_frame_timing_session|dxgi_frame_timing_integration|gpu_metrics|overlay_policy|overlay_window|application_lifecycle)_test'
     Invoke-Native 'ctest' @('--preset', $preset, '-R', $tests, '--output-on-failure')
-    Write-Host 'PASS: PresentMon produced non-zero identity-bound application FPS' -ForegroundColor Green
+    Write-Host 'PASS: Native DXGI timing produced non-zero identity-bound application FPS' -ForegroundColor Green
     Write-Host 'PASS: CPU/RAM, GPU/VRAM, process/window identity, overlay policy and overlay soak passed' -ForegroundColor Green
     Write-Host 'PASS: overlay toggle and clean application shutdown passed' -ForegroundColor Green
 }

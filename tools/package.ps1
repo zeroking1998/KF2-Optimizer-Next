@@ -38,6 +38,7 @@ $knownManagedPaths = [Collections.Generic.HashSet[string]]::new(
     'Data/Documentation/THIRD_PARTY_NOTICES.md',
     'Data/Documentation/GPL-3.0-LICENSE.txt',
     'Data/Documentation/issue72-feature-inventory.json',
+    # Legacy managed path: accepted only so an older package can remove it.
     'Data/Documentation/PresentMon-LICENSE.txt',
     'Data/package-integrity.ini',
     'Data/Documentation/legacy-function-matrix.md',
@@ -177,9 +178,6 @@ foreach ($entry in $packageDocumentation.GetEnumerator()) {
     Copy-Item -LiteralPath $sourcePath -Destination `
         (Join-Path $documentationDirectory $entry.Value) -Force
 }
-$licenseSource = Join-Path $projectRoot 'third_party\presentmon\LICENSE.txt'
-Copy-Item -LiteralPath $licenseSource -Destination `
-    (Join-Path $documentationDirectory 'PresentMon-LICENSE.txt') -Force
 $projectLicenseSource = Join-Path $projectRoot 'LICENSE'
 Copy-Item -LiteralPath $projectLicenseSource -Destination `
     (Join-Path $documentationDirectory 'LICENSE') -Force
@@ -217,8 +215,7 @@ $integrityPayloadFiles = @(
     'Data/Documentation/SUPPORT.md',
     'Data/Documentation/LICENSE',
     'Data/Documentation/THIRD_PARTY_NOTICES.md',
-    'Data/Documentation/issue72-feature-inventory.json',
-    'Data/Documentation/PresentMon-LICENSE.txt')
+    'Data/Documentation/issue72-feature-inventory.json')
 $integrityHashes = @($integrityPayloadFiles | ForEach-Object {
     $payloadPath = Join-Path $destinationRoot $_
     if (-not (Test-Path -LiteralPath $payloadPath -PathType Leaf)) {

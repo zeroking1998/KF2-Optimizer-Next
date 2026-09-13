@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "kf2/platform/windows/presentmon_session.hpp"
+#include "kf2/platform/windows/dxgi_frame_timing_session.hpp"
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
@@ -14,9 +14,9 @@ int main() {
     PresentSource source{identity, 120};
     CHECK(source.start().has_value());
     auto session =
-        kf2::platform::windows::PresentMonSession::start(identity, source);
+        kf2::platform::windows::DxgiFrameTimingSession::start(identity, source);
     if (!session.has_value()) {
-        std::wcerr << L"PresentMon unavailable: " << session.error().message
+        std::wcerr << L"DXGI frame timing unavailable: " << session.error().message
                    << L" (" << session.error().native_code << L")\n";
         return EXIT_FAILURE;
     }

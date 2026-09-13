@@ -19,10 +19,10 @@ A restore creates its own pre-restore backup. Retention keeps at least the newes
 verified set; import/export accepts only versioned, catalogued setting requests.
 
 The `telemetry` module binds samples to the exact KFGame executable, PID and
-process-start identity. FPS and frame-time statistics come from statically
-embedded PresentMon analysis and its process-filtered DXGI application-present
+process-start identity. FPS and frame-time statistics come directly from
+process-filtered DXGI application-present
 timestamps. The trace buffer is flushed periodically so low frame rates remain
-live without waiting for shutdown. No PresentMon service, helper process,
+live without waiting for shutdown. No telemetry service, helper process,
 injection or extra runtime DLL is required. CPU/RAM use documented process
 queries. Total process CPU remains the user-facing utilization value; a
 throttled per-thread sampler separately measures the busiest KF2 thread, total
@@ -55,7 +55,8 @@ src/features/telemetry/
 ```
 
 The order is fixed: attach sources; refresh the process-bound session gate;
-observe FleX; inspect the exact window/process; drain PresentMon; capture one
+observe FleX; inspect the exact window/process; drain native DXGI timing;
+capture one
 typed frame; decide/apply FleX control; evaluate Adaptive and its permitted
 persistence; derive presentation; publish the model and overlay. Typed early
 outcomes stop the suffix when the session, Present stream, or completed frame
