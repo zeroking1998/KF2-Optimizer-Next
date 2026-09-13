@@ -189,6 +189,47 @@ int main() {
     CHECK(prepare_for_world != std::string::npos);
     CHECK(session_ended != std::string::npos);
     CHECK(player_added != std::string::npos);
+    const auto achievement_prewarm = interaction_source.find(
+        "function TryPrewarmAchievements(");
+    const auto achievement_complete = interaction_source.find(
+        "function OnAchievementPrewarmComplete(");
+    CHECK(achievement_prewarm != std::string::npos);
+    CHECK(achievement_complete != std::string::npos);
+    const auto prewarm_read = interaction_source.find(
+        "ReadAchievements(", achievement_prewarm);
+    CHECK(prewarm_read != std::string::npos);
+    CHECK(interaction_source.find(
+        "PlayerControllerId, 0, true, true)", prewarm_read) !=
+        std::string::npos);
+    const auto login_guard = interaction_source.find(
+        "GetLoginStatus(PlayerControllerId)", achievement_prewarm);
+    CHECK(login_guard != std::string::npos);
+    CHECK(interaction_source.find("LS_NotLoggedIn", login_guard) !=
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "IsGuestLogin(PlayerControllerId)", achievement_prewarm) !=
+        std::string::npos);
+    const auto prewarm_requested = interaction_source.find(
+        "state=requested", achievement_prewarm);
+    CHECK(prewarm_requested != std::string::npos);
+    CHECK(interaction_source.find(
+        "text=true images=true", prewarm_requested) != std::string::npos);
+    CHECK(interaction_source.find(
+        "state=complete", achievement_complete) != std::string::npos);
+    CHECK(interaction_source.find(
+        "TryPrewarmAchievements(PrimaryController);", interaction_tick) <
+        interaction_source.find("UpdateGameplayUiState(", interaction_tick));
+    CHECK(interaction_source.find(
+        "bAchievementPrewarmRequested = false", prepare_for_world) <
+        session_ended);
+    CHECK(interaction_source.find(
+        "bAchievementPrewarmComplete = false", prepare_for_world) <
+        session_ended);
+    CHECK(interaction_source.find(
+        "ClearAchievementPrewarmDelegate();", session_ended) < player_added);
+    CHECK(interaction_source.find("EnableSteamStats") == std::string::npos);
+    CHECK(interaction_source.find("ClearAchievements(") ==
+          std::string::npos);
     CHECK(interaction_source.find("bGameSessionEnding = true",
         interaction_source.find("function NotifyGameSessionEnded()")) !=
           std::string::npos);
