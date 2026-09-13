@@ -212,6 +212,7 @@ int main() {
     const auto prewarm_requested = interaction_source.find(
         "state=requested", achievement_prewarm);
     CHECK(prewarm_requested != std::string::npos);
+    CHECK(prewarm_requested < prewarm_read);
     CHECK(interaction_source.find(
         "text=true images=true", prewarm_requested) != std::string::npos);
     CHECK(interaction_source.find(

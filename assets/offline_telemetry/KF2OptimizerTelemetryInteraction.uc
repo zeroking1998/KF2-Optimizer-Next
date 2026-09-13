@@ -151,6 +151,8 @@ function TryPrewarmAchievements(PlayerController PrimaryController)
     bAchievementPrewarmDelegateRegistered = true;
     bAchievementPrewarmRequested = true;
     ++AchievementPrewarmAttempts;
+    `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=requested"$
+         " text=true images=true attempt="$AchievementPrewarmAttempts);
     if (!OnlineSub.PlayerInterface.ReadAchievements(
             PlayerControllerId, 0, true, true))
     {
@@ -162,8 +164,6 @@ function TryPrewarmAchievements(PlayerController PrimaryController)
              AchievementPrewarmAttempts);
         return;
     }
-    `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=requested"$
-         " text=true images=true attempt="$AchievementPrewarmAttempts);
 }
 
 function PrepareForGameplayWorld()
