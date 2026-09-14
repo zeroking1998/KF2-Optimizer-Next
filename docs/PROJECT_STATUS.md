@@ -57,7 +57,7 @@ requirements from GitHub Issue 72.
   registry.
 - The strict catalog covers 212 typed settings in the three protected KF2 INIs; 143 visibility/physics-sensitive values are protected from pre-launch profile writes. It includes the real active `KFGame.KFGameEngine` FPS cap/smoothing pair and rejects an invalid minimum/maximum smoothing window. The catalog also covers KF2's shipped FleX and APEX controls, global physics substeps, fracture/chunk limits, particle-memory and emitter budgets, CPU/frame-pacing, texture streaming/pool controls, render targets, anti-aliasing, compute effects, shadow/CSM, reflection, translucency, motion blur and clothing controls without granting profile automation permission to change sensitive values.
 - Verified standalone gameplay can use a separate authenticated loopback actuator for bounded CPU, GPU, VRAM, RAM, overdraw or mixed graphics tiers. The overdraw tier combines fresh particle occupancy/visibility and decal saturation, then changes only particle distortion/LOD, blood effects and decal budgets. Every action requires exact KF2 readback, pauses during Zed Time, leaves display/pacing/anti-aliasing/FleX ownership untouched and restores only its captured values.
-- PresentMon/DXGI, CPU/RAM, GPU/VRAM, overlay, backup/restore, session recovery,
+- native DXGI timing, CPU/RAM, GPU/VRAM, overlay, backup/restore, session recovery,
   diagnostics and the offline-only FleX laboratory have direct current tests.
 - GPU diagnostics now group multiple DXGI display-path LUIDs by their physical
   PCI PnP identity, while live process sampling keeps every LUID available.
@@ -109,7 +109,7 @@ and exact living-Zed special-move buckets. It also distinguishes smoke,
 fire, toxic/acid, Bloat puke mines and explosions from official SDK classes
 and damage inheritance, plus particle FleX-fluid/non-fluid classification,
 pool capacities, constant/dynamic spawn sources, bursts and peak capacity, while
-PresentMon measures presents and the FleX ABI exposes non-semantic solver values.
+Native DXGI events measure application presents and the FleX ABI exposes non-semantic solver values.
 
 The same pinned package now contains a protected autonomous corpse capability.
 A normal app-started General Adaptive session prepares this hash-bound provider

@@ -3,17 +3,6 @@
 KF2 Optimizer Next is licensed under `GPL-3.0-only`. The following separate
 components, products, and names retain their own licenses and ownership.
 
-## Intel PresentMon source subset
-
-The source under `third_party/presentmon` is derived from Intel PresentMon and
-is distributed under its permissive license:
-
-> Copyright (C) 2017-2024 Intel Corporation
-
-The complete license is in
-[`third_party/presentmon/LICENSE.txt`](third_party/presentmon/LICENSE.txt) and is
-also included in portable packages as `Data/Documentation/PresentMon-LICENSE.txt`.
-
 ## Killing Floor 2 and Tripwire Interactive
 
 Killing Floor 2, its SDK, game binaries, content, names, and trademarks belong

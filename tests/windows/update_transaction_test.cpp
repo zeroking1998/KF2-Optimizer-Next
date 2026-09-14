@@ -29,7 +29,6 @@ constexpr std::pair<const wchar_t*, const char*> kFiles[]{
     {L"Data/Documentation/LICENSE", "license"},
     {L"Data/Documentation/THIRD_PARTY_NOTICES.md", "notices"},
     {L"Data/Documentation/issue72-feature-inventory.json", "inventory"},
-    {L"Data/Documentation/PresentMon-LICENSE.txt", "presentmon license"},
 };
 
 void write_file(const std::filesystem::path& path, std::string_view bytes) {
@@ -50,7 +49,7 @@ void write_package(const std::filesystem::path& root,
                    std::string_view generation) {
     std::string integrity =
         "schema_version=1\nproduct=KF2OptimizerNext\nsource_identity=" +
-        std::string{identity} + "\nfile_count=14\n";
+        std::string{identity} + "\nfile_count=13\n";
     for (const auto& [relative, base] : kFiles) {
         const std::string bytes = std::string{generation} + " " + base;
         const auto path = root / relative;
@@ -112,7 +111,7 @@ int main() {
     });
     CHECK(applied.has_value());
     CHECK(!applied.value().rolled_back);
-    CHECK(applied.value().replaced_files == 16);
+    CHECK(applied.value().replaced_files == 15);
     CHECK(applied.value().previous_version == "0.0.2-alpha");
     CHECK(applied.value().installed_version == "0.0.3-alpha");
     CHECK(kf2::update::package_version(target).value() == "0.0.3-alpha");

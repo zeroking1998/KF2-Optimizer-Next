@@ -48,7 +48,7 @@
 #include "kf2/optimizer/adaptive_actuation.hpp"
 #include "kf2/optimizer/adaptive_profile.hpp"
 #include "kf2/optimizer/optimizer_engine.hpp"
-#include "kf2/platform/windows/presentmon_session.hpp"
+#include "kf2/platform/windows/dxgi_frame_timing_session.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
 #include "kf2/platform/windows/async_file_writer.hpp"
 #include "kf2/ui/automation_provider.hpp"
@@ -154,7 +154,7 @@ struct UiRuntime {
     bool overlay_scene_ready{false};
     HWND game_window{};
     std::unique_ptr<telemetry::PresentSource> present_source;
-    std::unique_ptr<platform::windows::PresentMonSession> present_session;
+    std::unique_ptr<platform::windows::DxgiFrameTimingSession> present_session;
     std::uint64_t present_session_started_ns{0};
     unsigned int present_session_restart_count{0};
     telemetry::ResourceTelemetryWorker resource_telemetry_worker;
@@ -377,6 +377,8 @@ struct UiRuntime {
         std::wstring context = L"Verified configuration changes");
 
     Result<config::ApplyResult> apply_adaptive_launch_profile();
+
+    Result<bool> apply_overlay_compatible_display_mode();
 
     Result<bool> prepare_automatic_protected_launch_capabilities();
 

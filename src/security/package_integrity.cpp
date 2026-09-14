@@ -16,7 +16,7 @@
 namespace kf2::security {
 namespace {
 
-constexpr std::array<std::string_view, 14> kPayloadPaths{
+constexpr std::array<std::string_view, 13> kPayloadPaths{
     "KF2Optimizer.exe",
     "Data/Lab/flexRelease_x64.forwarder-lab.dll",
     "Data/Lab/KF2OptimizerTelemetry.u",
@@ -30,7 +30,6 @@ constexpr std::array<std::string_view, 14> kPayloadPaths{
     "Data/Documentation/LICENSE",
     "Data/Documentation/THIRD_PARTY_NOTICES.md",
     "Data/Documentation/issue72-feature-inventory.json",
-    "Data/Documentation/PresentMon-LICENSE.txt",
 };
 
 bool safe_identity(std::string_view value) noexcept {

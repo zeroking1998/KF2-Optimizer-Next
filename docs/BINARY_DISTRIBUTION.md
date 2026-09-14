@@ -3,8 +3,7 @@
 ## Public source repository
 
 The public repository may contain the project’s C++, PowerShell, CMake, and
-UnrealScript source under `GPL-3.0-only`, the original project artwork, and the
-separately licensed Intel PresentMon source subset.
+UnrealScript source under `GPL-3.0-only` and the original project artwork.
 
 It must not contain:
 

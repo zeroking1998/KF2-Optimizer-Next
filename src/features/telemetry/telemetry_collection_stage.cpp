@@ -52,7 +52,7 @@ PresentDrainResult drain_present_stage(app::UiRuntime& runtime,
         const ::kf2::telemetry::SampleIdentity identity{
             runtime.game_process->pid,
             runtime.game_process->process_start_id};
-        auto restarted = platform::windows::PresentMonSession::start(
+        auto restarted = platform::windows::DxgiFrameTimingSession::start(
             identity, *runtime.present_source);
         ++runtime.present_session_restart_count;
         runtime.present_session_started_ns = now_ns;
@@ -61,15 +61,15 @@ PresentDrainResult drain_present_stage(app::UiRuntime& runtime,
             runtime.telemetry_failure =
                 L"Reconnecting KF2 frame telemetry";
             runtime.events->append(
-                {0, diagnostics::Severity::info, "PRESENTMON_RECONNECTED",
+                {0, diagnostics::Severity::info, "DXGI_FRAME_TIMING_RECONNECTED",
                  L"Silent startup telemetry was reconnected after KF2 reached the main menu",
                  L"telemetry"});
         } else {
-            runtime.telemetry_failure = L"PresentMon reconnect failed: " +
+            runtime.telemetry_failure = L"DXGI frame timing reconnect failed: " +
                 restarted.error().message;
             runtime.events->append(
                 {0, diagnostics::Severity::warning,
-                 "PRESENTMON_RECONNECT_FAILED", restarted.error().message,
+                 "DXGI_FRAME_TIMING_RECONNECT_FAILED", restarted.error().message,
                  L"telemetry"});
         }
         return PresentDrainResult::reconnecting();

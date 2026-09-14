@@ -8,6 +8,10 @@ are visible immediately.
 
 ### What's new
 
+- Replaced the embedded PresentMon analysis library with a small native DXGI
+  frame-timing session. The existing overlay keeps the same FPS, frame-time,
+  average, 1% low, percentile, and stutter output without injection, a helper
+  process, or an extra runtime DLL.
 - Adaptive live quality now keeps independent CPU, GPU, VRAM, RAM, and
   overdraw levels.
   Each confirmed bottleneck changes only its matching group, while recovery
@@ -35,6 +39,11 @@ are visible immediately.
 
 ### Bug fixes
 
+- Kept the overlay visible for exclusive-fullscreen users by temporarily using
+  borderless fullscreen during the protected session and restoring the selected
+  display mode after KF2 exits.
+- Aligned Live FPS with the one-second observation window used by common
+  external overlays, reducing display differences without extra sampling.
 - Prevented transient frame-percentile lows immediately after a map becomes
   playable from causing an unnecessary quality reduction and rollback cycle.
 - Fixed the first launch after a Windows GPU-preference change inheriting the

@@ -23,7 +23,7 @@ namespace kf2::security {
 namespace {
 
 constexpr std::uint64_t kMaximumArchiveBytes = 64ULL * 1024ULL * 1024ULL;
-constexpr std::array<std::wstring_view, 15> kExtractedFiles{
+constexpr std::array<std::wstring_view, 14> kExtractedFiles{
     L"KF2Optimizer.exe",
     L"Data/package-integrity.ini",
     L"Data/Lab/flexRelease_x64.forwarder-lab.dll",
@@ -38,7 +38,6 @@ constexpr std::array<std::wstring_view, 15> kExtractedFiles{
     L"Data/Documentation/LICENSE",
     L"Data/Documentation/THIRD_PARTY_NOTICES.md",
     L"Data/Documentation/issue72-feature-inventory.json",
-    L"Data/Documentation/PresentMon-LICENSE.txt",
 };
 
 std::atomic<unsigned long> temporary_sequence{0};

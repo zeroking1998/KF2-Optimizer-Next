@@ -258,6 +258,11 @@ int main() {
     write_bytes(install_root / L"Engine/Config/ConsoleVariables.ini",
                 "; native startup variables\r\n[Startup]\r\n");
     CHECK(write_complete_config_catalog(config_root));
+    write_bytes(config_root / L"KFSystemSettings.ini",
+                read_bytes(config_root / L"KFSystemSettings.ini") +
+                    "[SystemSettings]\r\n"
+                    "Fullscreen=True\r\n"
+                    "Borderless=False\r\n");
     write_bytes(config_root / L"KFGame.ini",
                 read_bytes(config_root / L"KFGame.ini") +
                     "[KFGameContent.KFGameInfo_Survival]\r\n"
@@ -359,6 +364,10 @@ int main() {
         }
         CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
                   "OneFrameThreadLag=True") != std::string::npos);
+        CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
+                  "Fullscreen=False") != std::string::npos);
+        CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
+                  "Borderless=True") != std::string::npos);
         CHECK(fs::exists(published_telemetry));
         CHECK(read_bytes(published_telemetry) == read_bytes(telemetry_asset));
         CHECK(read_bytes(config_root / L"KFEngine.ini").find(
@@ -405,6 +414,12 @@ int main() {
             "MaxSmoothedFrameRate=60.000000");
         CHECK(read_bytes(config_root / L"KFGame.ini") == expected_game_config);
         CHECK(read_bytes(config_root / L"KFEngine.ini") == original_engine_config);
+        const auto restored_system_config =
+            read_bytes(config_root / L"KFSystemSettings.ini");
+        CHECK(restored_system_config.find("Fullscreen=True") !=
+              std::string::npos);
+        CHECK(restored_system_config.find("Borderless=False") !=
+              std::string::npos);
         CHECK(read_bytes(install_root /
             L"Engine/Config/ConsoleVariables.ini").find(
                 "t.MaxFPS=60") != std::string::npos);

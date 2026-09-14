@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "kf2/platform/windows/presentmon_session.hpp"
+#include "kf2/platform/windows/dxgi_frame_timing_session.hpp"
 #include "kf2/overlay/overlay_policy.hpp"
 #include "kf2/overlay/overlay_window.hpp"
 
@@ -51,7 +51,7 @@ int main() {
     WNDCLASSW window_class{};
     window_class.hInstance = instance;
     window_class.lpfnWndProc = test_window_proc;
-    window_class.lpszClassName = L"KF2OptimizerPresentMonDxgiTest";
+    window_class.lpszClassName = L"KF2OptimizerDxgiFrameTimingTest";
     CHECK(RegisterClassW(&window_class) != 0 ||
           GetLastError() == ERROR_CLASS_ALREADY_EXISTS);
     HWND window = CreateWindowExW(0, window_class.lpszClassName, L"DXGI fixture",
@@ -88,7 +88,7 @@ int main() {
     ID3D11DeviceContext* secondary_context = nullptr;
     D3D_FEATURE_LEVEL level{};
     // Keep this desktop-bound integration test off the user's GPU driver. A
-    // paced WARP swap chain still emits the DXGI/DWM events PresentMon needs
+    // paced WARP swap chain still emits the native DXGI Present events
     // without creating a burst workload that can trigger a kernel watchdog.
     const HRESULT created = D3D11CreateDeviceAndSwapChain(
         nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
@@ -113,9 +113,16 @@ int main() {
     PresentSource source{identity, 512};
     CHECK(source.start().has_value());
     auto session =
-        kf2::platform::windows::PresentMonSession::start(identity, source);
+        kf2::platform::windows::DxgiFrameTimingSession::start(identity, source);
     CHECK(session.has_value());
     Sleep(250);
+    for (int probe = 0; probe < 8; ++probe) {
+        CHECK(SUCCEEDED(swap_chain->Present(0, DXGI_PRESENT_TEST)));
+        Sleep(4);
+    }
+    Sleep(150);
+    const auto probe_metrics = source.drain(monotonic_ns(), 2'000'000'000ULL);
+    CHECK(!probe_metrics.fps.has_value());
     const auto producer_started_ns = monotonic_ns();
     for (int frame = 0; frame < 120; ++frame) {
         pump_messages();
@@ -163,7 +170,7 @@ int main() {
         secondary_swap_chain->Release();
         DestroyWindow(window);
         DestroyWindow(secondary_window);
-        std::cout << "PresentMon completed-present samples unavailable; "
+        std::cout << "Native DXGI completed-present samples unavailable; "
                      "skipping desktop boundary\n";
         return 77;
     }

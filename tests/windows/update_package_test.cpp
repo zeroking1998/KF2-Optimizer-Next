@@ -29,7 +29,6 @@ constexpr std::pair<const wchar_t*, const char*> kFiles[]{
     {L"Data/Documentation/LICENSE", "license"},
     {L"Data/Documentation/THIRD_PARTY_NOTICES.md", "notices"},
     {L"Data/Documentation/issue72-feature-inventory.json", "inventory"},
-    {L"Data/Documentation/PresentMon-LICENSE.txt", "presentmon"},
 };
 
 void write_file(const std::filesystem::path& path, std::string_view bytes) {
@@ -41,7 +40,7 @@ void write_file(const std::filesystem::path& path, std::string_view bytes) {
 void write_package(const std::filesystem::path& root) {
     std::string integrity =
         "schema_version=1\nproduct=KF2OptimizerNext\n"
-        "source_identity=new-build\nfile_count=14\n";
+        "source_identity=new-build\nfile_count=13\n";
     for (const auto& [relative, bytes] : kFiles) {
         const auto path = root / relative;
         write_file(path, bytes);

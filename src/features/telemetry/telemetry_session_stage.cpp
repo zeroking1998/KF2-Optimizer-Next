@@ -12,7 +12,7 @@ void attach_session_sources(app::UiRuntime& runtime) {
 }
 
 void refresh_session_gate(app::UiRuntime& runtime) {
-    // Continue consuming KF2's own read-only session log after PresentMon
+    // Continue consuming KF2's own read-only session log after DXGI timing
     // attached; map transitions happen long after the startup gate.
     if (runtime.game_process) runtime.update_overlay_scene_gate();
 }
@@ -784,19 +784,19 @@ void UiRuntime::try_attach_telemetry() {
         game_process->pid, game_process->process_start_id};
     present_source = std::make_unique<telemetry::PresentSource>(identity, 2400);
     static_cast<void>(present_source->start());
-    auto presentmon = platform::windows::PresentMonSession::start(
+    auto frame_timing = platform::windows::DxgiFrameTimingSession::start(
         identity, *present_source);
-    if (presentmon.has_value()) {
-        present_session = std::move(presentmon.value());
+    if (frame_timing.has_value()) {
+        present_session = std::move(frame_timing.value());
         present_session_started_ns = monotonic_ns();
         present_session_restart_count = 0;
         telemetry_failure.clear();
     } else {
-        telemetry_failure = L"PresentMon unavailable: " +
-                            presentmon.error().message;
+        telemetry_failure = L"DXGI frame timing unavailable: " +
+                            frame_timing.error().message;
         events->append({0, diagnostics::Severity::warning,
-                        "PRESENTMON_UNAVAILABLE",
-                        presentmon.error().message, L"telemetry"});
+                        "DXGI_FRAME_TIMING_UNAVAILABLE",
+                        frame_timing.error().message, L"telemetry"});
     }
     const auto window_luid = telemetry::adapter_luid_for_window(game_window);
     const auto adapters = telemetry::enumerate_gpu_adapters();

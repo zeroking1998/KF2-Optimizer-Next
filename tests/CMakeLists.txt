@@ -476,7 +476,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/optimizer/startup_gpu_profile.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/optimizer_engine.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/presentmon_session.cpp"
+    "${PROJECT_SOURCE_DIR}/src/platform/windows/dxgi_frame_timing_session.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/process_security.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/single_instance.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
@@ -519,9 +519,8 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_TELEMETRY_ASSET=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetry.u"
 )
 target_link_libraries(kf2_application_lifecycle_test PRIVATE
-    presentmon_data
     user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs uiautomationcore bcrypt
-    dwmapi psapi advapi32 pdh dxgi tdh version winhttp ws2_32
+    dwmapi psapi advapi32 pdh dxgi version winhttp ws2_32
 )
 add_test(NAME kf2_application_lifecycle_test COMMAND kf2_application_lifecycle_test)
 set_tests_properties(kf2_application_lifecycle_test PROPERTIES
@@ -998,18 +997,18 @@ add_executable(kf2_present_source_test
 target_include_directories(kf2_present_source_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_present_source_test COMMAND kf2_present_source_test)
 
-add_executable(kf2_presentmon_session_test
-    windows/presentmon_session_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/presentmon_session.cpp"
+add_executable(kf2_dxgi_frame_timing_session_test
+    windows/dxgi_frame_timing_session_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/platform/windows/dxgi_frame_timing_session.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/telemetry_snapshot.cpp"
 )
-target_include_directories(kf2_presentmon_session_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
-target_link_libraries(kf2_presentmon_session_test PRIVATE presentmon_data advapi32 tdh)
-add_test(NAME kf2_presentmon_session_test COMMAND kf2_presentmon_session_test)
+target_include_directories(kf2_dxgi_frame_timing_session_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(kf2_dxgi_frame_timing_session_test PRIVATE advapi32)
+add_test(NAME kf2_dxgi_frame_timing_session_test COMMAND kf2_dxgi_frame_timing_session_test)
 
-add_executable(kf2_presentmon_dxgi_present_test
-    windows/presentmon_dxgi_present_test.cpp
+add_executable(kf2_dxgi_frame_timing_integration_test
+    windows/dxgi_frame_timing_integration_test.cpp
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_mascot.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_policy.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_animation.cpp"
@@ -1017,16 +1016,16 @@ add_executable(kf2_presentmon_dxgi_present_test
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_render.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_static.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/presentmon_session.cpp"
+    "${PROJECT_SOURCE_DIR}/src/platform/windows/dxgi_frame_timing_session.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/telemetry_snapshot.cpp"
 )
-target_include_directories(kf2_presentmon_dxgi_present_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
-target_link_libraries(kf2_presentmon_dxgi_present_test PRIVATE
-    presentmon_data advapi32 tdh d3d11 dxgi user32 gdi32 d2d1 dwrite dwmapi
+target_include_directories(kf2_dxgi_frame_timing_integration_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(kf2_dxgi_frame_timing_integration_test PRIVATE
+    advapi32 d3d11 dxgi user32 gdi32 d2d1 dwrite dwmapi
 )
-add_test(NAME kf2_presentmon_dxgi_present_test COMMAND kf2_presentmon_dxgi_present_test)
-set_tests_properties(kf2_presentmon_dxgi_present_test PROPERTIES
+add_test(NAME kf2_dxgi_frame_timing_integration_test COMMAND kf2_dxgi_frame_timing_integration_test)
+set_tests_properties(kf2_dxgi_frame_timing_integration_test PROPERTIES
     LABELS "requires-desktop"
     SKIP_RETURN_CODE 77)
 

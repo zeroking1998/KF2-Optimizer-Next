@@ -56,13 +56,13 @@ constexpr std::array area01_items{
 
 constexpr AreaContract area02{
     "Adaptive/Automatic", "src/optimizer; src/config/settings.cpp; src/app/application.cpp",
-    "Fresh PresentMon plus CPU, GPU, VRAM and RAM evidence", "B measured",
+    "Fresh native DXGI timing plus CPU, GPU, VRAM and RAM evidence", "B measured",
     "Adaptive uses validated samples, dwell, hysteresis, quality bounds and protected launch-time profile application.",
     "Automatic operation with explicit bounded safety locks.",
     "Telemetry loss must retain the last bounded safe profile instead of guessing.",
     "Adaptive automation respects every explicit bounded safety lock.",
     "Automatic launch application requires a verified session snapshot, backup, readback and safe restore.",
-    "PresentMon, system telemetry, settings and verified KF2 catalog.",
+    "Native DXGI timing, system telemetry, settings and verified KF2 catalog.",
     "Adaptive migration, freshness, bounds, lock priority, cooldown, restart and fallback tests.",
     "kf2_adaptive_profile_test; kf2_adaptive_governor_test; kf2_optimizer_engine_test; kf2_settings_test; lifecycle test"};
 
@@ -101,23 +101,23 @@ constexpr std::array area03_items{
 };
 
 constexpr AreaContract area04{
-    "Hardware and system telemetry", "src/telemetry; src/platform/windows/presentmon_session.cpp",
-    "Windows APIs, local NVIDIA NVAPI/NVML, PDH, DXGI and PresentMon ETW", "A APIs/B measured",
+    "Hardware and system telemetry", "src/telemetry; src/platform/windows/dxgi_frame_timing_session.cpp",
+    "Windows APIs, local NVIDIA NVAPI/NVML, PDH and direct DXGI ETW", "A APIs/B measured",
     "Samples carry PID/start identity, adapter LUID, freshness, quality, loss and discontinuity state.",
     "Correct bottleneck evidence and readable overlay metrics.",
     "Driver counters may be unavailable; unavailable values must remain absent.",
     "Read-only evidence in every mode.", "No hardware mutation; detach and reset on process identity change.",
     "Windows ETW, PDH, DXGI, process/system APIs and the installed NVIDIA driver API.",
     "DXGI present, CPU/RAM, GPU/LUID, freshness/loss, enumeration and overhead tests.",
-    "kf2_presentmon_dxgi_present_test; kf2_system_metrics_test; kf2_gpu_metrics_test; validate_telemetry_overlay.ps1"};
+    "kf2_dxgi_frame_timing_integration_test; kf2_system_metrics_test; kf2_gpu_metrics_test; validate_telemetry_overlay.ps1"};
 
 constexpr std::array area04_items{
     ItemSpec{FeatureStatus::present, "CPU, cores, CPU groups, and utilization", "Logical CPUs, groups and process CPU load are measured."},
     ItemSpec{FeatureStatus::partial, "GPU, adapter/LUID, multi-GPU, and drivers", "All physical adapters and identities are enumerated; a second real adapter is not target-tested."},
     ItemSpec{FeatureStatus::present, "GPU utilization and VRAM", "NVIDIA NVAPI dynamic-Pstate utilization is preferred for MSI Afterburner metric parity; local NVML and adapter-wide PDH are layered fallbacks, while process VRAM stays PID/LUID-bound."},
     ItemSpec{FeatureStatus::present, "process and system RAM", "Process working set and system memory pressure are measured."},
-    ItemSpec{FeatureStatus::present, "FPS, frame time, percentiles, and stutter", "PresentMon-derived live, average, 1% low, p95/p99 and stutter data are bounded and fresh."},
-    ItemSpec{FeatureStatus::present, "ETW, PresentMon, PDH, NVAPI/NVML, and alternatives", "ETW/PresentMon/PDH/DXGI are integrated. Installed NVIDIA NVAPI is loaded locally for Afterburner-compatible utilization, NVML is the secondary driver fallback, and neither requires starting another program."},
+    ItemSpec{FeatureStatus::present, "FPS, frame time, percentiles, and stutter", "Native DXGI live, average, 1% low, p95/p99 and stutter data are bounded and fresh."},
+    ItemSpec{FeatureStatus::present, "ETW, PDH, NVAPI/NVML, and alternatives", "Direct DXGI ETW and PDH are integrated. Installed NVIDIA NVAPI is loaded locally for Afterburner-compatible utilization, NVML is the secondary driver fallback, and neither requires starting another program."},
     ItemSpec{FeatureStatus::present, "freshness, measurement quality, loss, and contradictions", "Loss, discontinuity, stale samples and unavailable counters are explicit."},
     ItemSpec{FeatureStatus::partial, "measurement overhead and long-term stability", "Sampling is bounded and focused tests exist; a long physical-system soak remains external evidence."},
 };
@@ -130,7 +130,7 @@ constexpr AreaContract area05{
     "The probe reports aggregate states, not per-actor identifiers or exact decal creation events; FleX counters remain non-semantic.",
     "Telemetry remains observation-only; the separately reported protected corpse capability is explicit, bounded and never a guessed input.",
     "Parser reset on file/session/process change; temporary logs, LocalOptions bootstrap and the Published telemetry package are protected by whole-INI snapshot, pinned hash, marker and exact cleanup after KF2 exits. KF2's native viewport remains unchanged. The same prepared session is used when KF2 starts from the optimizer, Steam or a shortcut.",
-    "Official KF2 SDK, KF2 Launch.log, protected KFGame/KFEngine session switches, PresentMon and known FleX ABI.",
+    "Official KF2 SDK, KF2 Launch.log, protected KFGame/KFEngine session switches, native DXGI timing and known FleX ABI.",
     "Bounded parser, truncation, rotation, identity, freshness, negative inference and real gameplay tests.",
     "kf2_game_log_session_test; kf2_gameplay_log_lab_test; kf2_offline_telemetry_lab_test; official KFEditor 0-error compile with expected log-expression diagnostics; target gameplay evidence"};
 

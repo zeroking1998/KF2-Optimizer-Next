@@ -623,6 +623,40 @@ Result<game::FrameRateCapResult> UiRuntime::synchronize_frame_rate_cap() {
         *installation, optimizer_settings.target_fps);
 }
 
+Result<bool> UiRuntime::apply_overlay_compatible_display_mode() {
+    if (!overlay_enabled || !installation) {
+        return Result<bool>::success(false);
+    }
+    auto current = game::read_video_settings(installation->config_root);
+    if (!current.has_value()) {
+        return Result<bool>::failure(current.error());
+    }
+    const auto display = static_cast<std::size_t>(game::VideoOption::display);
+    constexpr int kExclusiveFullscreen = 2;
+    constexpr int kBorderlessFullscreen = 1;
+    if (current.value().choices[display] != kExclusiveFullscreen) {
+        return Result<bool>::success(false);
+    }
+    current.value().choices[display] = kBorderlessFullscreen;
+    auto prepared = game::build_video_preview(
+        installation->config_root, current.value());
+    if (!prepared.has_value()) {
+        return Result<bool>::failure(prepared.error());
+    }
+    preview = std::move(prepared.value());
+    preview_context = L"Temporary overlay-compatible fullscreen mode";
+    auto applied = apply({.game_running = false});
+    if (!applied.has_value()) {
+        return Result<bool>::failure(applied.error());
+    }
+    last_backup_id = applied.value().backup.id;
+    events->append({0, diagnostics::Severity::info,
+        "OVERLAY_FULLSCREEN_COMPATIBILITY_APPLIED",
+        L"Exclusive fullscreen was changed to borderless fullscreen for this protected session so the desktop overlay remains visible; the original display mode will be restored after KF2 exits",
+        L"overlay"});
+    return Result<bool>::success(true);
+}
+
 Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
     if (!installation || !session_config_snapshot) {
         return Result<bool>::failure({
@@ -741,6 +775,13 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
         const auto error = applied.error();
         static_cast<void>(restore_protected_session_config(
             L"Automatic external-launch preparation failed"));
+        return Result<bool>::failure(error);
+    }
+    const auto overlay_display = apply_overlay_compatible_display_mode();
+    if (!overlay_display.has_value()) {
+        const auto error = overlay_display.error();
+        static_cast<void>(restore_protected_session_config(
+            L"Overlay-compatible fullscreen preparation failed"));
         return Result<bool>::failure(error);
     }
     const auto capabilities =

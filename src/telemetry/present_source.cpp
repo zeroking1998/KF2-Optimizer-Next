@@ -5,7 +5,10 @@
 
 namespace kf2::telemetry {
 namespace {
-constexpr std::uint64_t kFastWindowNs = 750'000'000ULL;
+// Match the one-second live cadence used by common external overlays. The
+// samples are already retained for the longer statistics below, so this does
+// not add another capture, timer or telemetry pass.
+constexpr std::uint64_t kLiveWindowNs = 1'000'000'000ULL;
 constexpr std::uint64_t kSustainedWindowNs = 3'000'000'000ULL;
 constexpr std::uint64_t kTailWindowNs = 5'000'000'000ULL;
 }
@@ -107,7 +110,7 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
             const auto newest = presents.back().monotonic_ns;
             if (newest < not_before_ns) continue;
             const auto cutoff = std::max(not_before_ns,
-                newest > kFastWindowNs ? newest - kFastWindowNs : 0);
+                newest > kLiveWindowNs ? newest - kLiveWindowNs : 0);
             const auto first = std::lower_bound(
                 presents.begin(), presents.end(), cutoff,
                 [](const PresentTimestamp& present,
@@ -153,7 +156,7 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
         return all.subspan(static_cast<std::size_t>(first - all.begin()));
     };
     auto result = aggregate_presents(
-        window(kFastWindowNs), identity, now_ns, stale_after_ns);
+        window(kLiveWindowNs), identity, now_ns, stale_after_ns);
     const auto sustained_metrics = aggregate_presents(
         window(kSustainedWindowNs), identity, now_ns, stale_after_ns);
     const auto tail_metrics = aggregate_presents(

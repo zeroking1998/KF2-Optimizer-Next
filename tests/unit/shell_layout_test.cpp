@@ -141,7 +141,7 @@ int main() {
     auto graphics_status = model.status();
     graphics_status.graphics_available = true;
     graphics_status.graphics_values = {
-        L"Borderless", L"2560 × 1080", L"Ultra", L"Off", L"Off",
+        L"Borderless fullscreen", L"2560 × 1080", L"Ultra", L"Off", L"Off",
         L"Ultra", L"Ultra", L"Ultra", L"Ultra", L"16× Anisotropic",
         L"Ultra", L"On", L"On", L"High", L"On", L"HBAO+", L"On",
         L"On", L"On", L"On", L"Gibs and fluids"};

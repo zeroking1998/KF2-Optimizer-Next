@@ -104,6 +104,30 @@ int main() {
     CHECK(*responsive_metrics.one_percent_low_fps > 29.0 &&
           *responsive_metrics.one_percent_low_fps < 31.0);
 
+    // Live FPS uses the same one-second observation period as common external
+    // overlays. This avoids a systematic display mismatch when cadence changes
+    // inside the first quarter of that second.
+    PresentSource one_second_live{game, 256};
+    CHECK(one_second_live.start().has_value());
+    constexpr std::uint64_t live_start_ns = 10'000'000'000ULL;
+    for (std::uint64_t index = 0; index <= 15; ++index) {
+        CHECK(one_second_live.ingest(
+            {game, live_start_ns + index * 16'666'667ULL,
+             1, true, 0}));
+    }
+    constexpr std::uint64_t fast_start_ns =
+        live_start_ns + 15 * 16'666'667ULL;
+    for (std::uint64_t index = 1; index <= 90; ++index) {
+        CHECK(one_second_live.ingest(
+            {game, fast_start_ns + index * 8'333'333ULL,
+             1, true, 0}));
+    }
+    const auto one_second_metrics = one_second_live.drain(
+        fast_start_ns + 90 * 8'333'333ULL, 500'000'000ULL);
+    CHECK(one_second_metrics.fps.has_value());
+    CHECK(*one_second_metrics.fps > 104.0 &&
+          *one_second_metrics.fps < 106.0);
+
     // An authenticated quality correction starts an adaptive-only window.
     // Older slow frames stay visible in the UI but cannot trigger more steps.
     const auto corrected = responsive.drain(

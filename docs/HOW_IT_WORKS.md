@@ -29,7 +29,7 @@ read-only. Ambiguous results are reported instead of guessed.
 
 ## 2. Measurement
 
-PresentMon and protected offline telemetry provide timestamped samples such as
+Native DXGI timing and protected offline telemetry provide timestamped samples such as
 live FPS, average FPS, 1% low FPS, frame time, CPU/GPU load, visible living
 actors, visible corpses, active corpses, distance, and Zed Time state. Every
 decision records the evidence window it used.
@@ -65,7 +65,7 @@ Target FPS uses KF2's own GPU-independent `bSmoothFrameRate`,
 `MinSmoothedFrameRate`, and `MaxSmoothedFrameRate` controls. The protected
 offline provider reapplies them if KF2's graphics menu changes Variable Frame
 Rate during a session. A property readback proves that those engine values were
-configured; actual PresentMon FPS remains the final runtime evidence. A
+configured; actual native DXGI FPS remains the final runtime evidence. A
 confirmed capped/variable mode change discards every mixed frame statistic and
 quality-response window before Adaptive can act again. The configured target
 FPS is preserved.

@@ -152,7 +152,7 @@ void UiRuntime::system_resume() {
     telemetry_failure = L"System resumed; reconnecting KF2 telemetry";
     events->append({0, diagnostics::Severity::info,
                     "SYSTEM_RESUME_REBIND",
-                    L"Windows resumed; process, window, PresentMon, PDH and FleX observation bindings will be verified again",
+                    L"Windows resumed; process, window, DXGI, PDH and FleX observation bindings will be verified again",
                     L"lifecycle"});
     telemetry_tick();
     invalidate();
