@@ -1,5 +1,6 @@
 #include "application_runtime.hpp"
 #include "kf2/config/setting_catalog.hpp"
+#include "kf2/config/startup_movies.hpp"
 #include "kf2/optimizer/startup_gpu_profile.hpp"
 #include "runtime/action_contract.hpp"
 #include "runtime/action_router.hpp"
@@ -445,6 +446,25 @@ Result<config::ApplyResult> UiRuntime::apply_video_settings() {
 }
 
 Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
+    const auto apply_launch_preview = [this]() -> Result<config::ApplyResult> {
+        if (!preview) {
+            return Result<config::ApplyResult>::failure(
+                {ErrorCode::internal_failure,
+                 L"The protected launch preview is unavailable", 0});
+        }
+        const auto logos = config::stage_startup_logo_skip(*preview);
+        if (!logos.has_value()) {
+            return Result<config::ApplyResult>::failure(logos.error());
+        }
+        auto applied = apply({.game_running = false});
+        if (applied.has_value() && logos.value().removed_logos != 0) {
+            events->append({0, diagnostics::Severity::info,
+                "STARTUP_LOGOS_SKIPPED",
+                L"KF2's four startup logos were skipped for this protected session; the main-menu background and map-loading movies remain unchanged",
+                L"game"});
+        }
+        return applied;
+    };
     if (!optimizer_settings.adaptive_optimization_enabled) {
         auto prepared = prepare({{
             config::SettingId::corpse_limit,
@@ -455,7 +475,7 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
         if (!prepared.has_value()) {
             return Result<config::ApplyResult>::failure(prepared.error());
         }
-        auto applied = apply({.game_running = false});
+        auto applied = apply_launch_preview();
         if (applied.has_value()) {
             last_backup_id = applied.value().backup.id;
             events->append({0, diagnostics::Severity::info,
@@ -580,7 +600,7 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
     if (!prepared.has_value()) {
         return Result<config::ApplyResult>::failure(prepared.error());
     }
-    auto applied = apply({.game_running = false});
+    auto applied = apply_launch_preview();
     if (!applied.has_value()) return applied;
     last_backup_id = applied.value().backup.id;
     events->append({0, diagnostics::Severity::info,
