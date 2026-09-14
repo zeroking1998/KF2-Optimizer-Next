@@ -39,6 +39,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Aligned Live FPS with the one-second observation window used by common
+  external overlays, reducing display differences without extra sampling.
 - Prevented transient frame-percentile lows immediately after a map becomes
   playable from causing an unnecessary quality reduction and rollback cycle.
 - Fixed the first launch after a Windows GPU-preference change inheriting the
