@@ -378,6 +378,8 @@ struct UiRuntime {
 
     Result<config::ApplyResult> apply_adaptive_launch_profile();
 
+    Result<bool> apply_overlay_compatible_display_mode();
+
     Result<bool> prepare_automatic_protected_launch_capabilities();
 
     Result<bool> prepare_automatic_external_launch_profile();

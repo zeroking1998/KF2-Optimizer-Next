@@ -322,7 +322,9 @@ std::wstring video_choice_label(VideoOption option, const VideoSettings& setting
     const int selected = settings.choices[index(option)];
     switch (option) {
         case VideoOption::display:
-            return choice({L"Windowed", L"Borderless", L"Fullscreen"}, selected);
+            return choice(
+                {L"Windowed", L"Borderless fullscreen", L"Exclusive fullscreen"},
+                selected);
         case VideoOption::resolution: {
             if (selected < 0 || selected >= static_cast<int>(settings.resolutions.size())) return L"Unknown";
             const auto value = settings.resolutions[selected];

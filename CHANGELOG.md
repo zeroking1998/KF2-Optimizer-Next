@@ -39,6 +39,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Kept the overlay visible for exclusive-fullscreen users by temporarily using
+  borderless fullscreen during the protected session and restoring the selected
+  display mode after KF2 exits.
 - Aligned Live FPS with the one-second observation window used by common
   external overlays, reducing display differences without extra sampling.
 - Prevented transient frame-percentile lows immediately after a map becomes

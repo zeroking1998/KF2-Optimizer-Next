@@ -152,7 +152,7 @@ int wmain(int argument_count, wchar_t** arguments) {
 
     status.graphics_available = true;
     status.graphics_values = {
-        L"Borderless", L"2560 × 1440", L"Custom", L"Off", L"On",
+        L"Borderless fullscreen", L"2560 × 1440", L"Custom", L"Off", L"On",
         L"Ultra", L"Ultra", L"High", L"Ultra", L"16× Anisotropic",
         L"Ultra", L"On", L"FXAA", L"High", L"Off", L"HBAO+",
         L"On", L"On", L"On", L"On", L"Off"};

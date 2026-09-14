@@ -60,13 +60,15 @@ int main() {
     CHECK(loaded.value().choices[static_cast<std::size_t>(
               kf2::game::VideoOption::nvidia_flex)] == 0);
     CHECK(kf2::game::video_choice_label(
-              kf2::game::VideoOption::display, loaded.value()) == L"Borderless");
+              kf2::game::VideoOption::display, loaded.value()) ==
+          L"Borderless fullscreen");
     CHECK(kf2::game::aspect_ratio_label(loaded.value()) == L"16:9");
     CHECK(loaded.value().film_grain_percent == 50);
 
     const auto defaults = kf2::game::recommended_video_defaults(loaded.value());
     CHECK(kf2::game::video_choice_label(
-              kf2::game::VideoOption::display, defaults) == L"Borderless");
+              kf2::game::VideoOption::display, defaults) ==
+          L"Borderless fullscreen");
     CHECK(kf2::game::video_choice_label(
               kf2::game::VideoOption::resolution, defaults) ==
           kf2::game::video_choice_label(
