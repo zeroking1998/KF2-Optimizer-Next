@@ -31,6 +31,7 @@
 #include "kf2/diagnostics/feature_inventory.hpp"
 #include "kf2/diagnostics/crash_recorder.hpp"
 #include "kf2/game/game_session.hpp"
+#include "kf2/game/startup_prewarmer.hpp"
 #include "kf2/game/advanced_settings.hpp"
 #include "kf2/game/frame_rate_cap.hpp"
 #include "kf2/game/video_settings.hpp"
@@ -137,6 +138,8 @@ struct UiRuntime {
     unsigned int current_ui_timer_interval_ms{0};
     bool animation_timer_active{false};
     std::optional<game::GameProcessIdentity> game_process;
+    game::StartupPrewarmer startup_prewarmer;
+    bool startup_prewarm_announced{false};
     std::uint64_t last_game_process_scan_ns{0};
     std::optional<game::GameProcessIdentity>
         game_restart_handoff_previous_process;
@@ -315,6 +318,8 @@ struct UiRuntime {
     void update_overlay_scene_gate(bool flush = false);
 
     void runtime_tick();
+    void start_startup_prewarm();
+    void poll_startup_prewarm();
 
     void start_auto_package_repair();
 

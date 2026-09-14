@@ -86,6 +86,7 @@ app::runtime::DispatchResult select_install(
         return app::runtime::DispatchResult::handled;
     }
     runtime.installation = std::move(validated.value());
+    runtime.start_startup_prewarm();
     runtime.reload_video_settings();
     runtime.reload_advanced_settings();
     auto status = runtime.model.status();
@@ -238,6 +239,7 @@ app::runtime::DispatchResult launch(
                 ? std::numeric_limits<std::uint64_t>::max()
                 : now + kLaunchSafetyTimeoutNs;
     }
+    runtime.startup_prewarmer.request_stop();
     if (!ShellExecuteExW(&launch_request)) {
         const DWORD launch_error = GetLastError();
         bool restored = true;

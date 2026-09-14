@@ -459,6 +459,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/game/game_log_session.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_log_telemetry.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_session.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/startup_prewarmer.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/advanced_settings.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/video_settings.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_mascot.cpp"
@@ -955,6 +956,15 @@ add_executable(kf2_game_session_test
 target_include_directories(kf2_game_session_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_game_session_test PRIVATE user32 dwmapi)
 add_test(NAME kf2_game_session_test COMMAND kf2_game_session_test)
+
+add_executable(kf2_startup_prewarmer_test
+    windows/startup_prewarmer_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/game/startup_prewarmer.cpp"
+)
+target_include_directories(kf2_startup_prewarmer_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+add_test(NAME kf2_startup_prewarmer_test
+    COMMAND kf2_startup_prewarmer_test)
 
 add_executable(kf2_system_metrics_test
     windows/system_metrics_test.cpp

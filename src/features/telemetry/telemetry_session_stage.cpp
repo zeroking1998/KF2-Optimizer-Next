@@ -482,6 +482,7 @@ void UiRuntime::finalize_ended_game_session() {
     if (session_restored) {
         static_cast<void>(rearm_automatic_external_launch_profile());
     }
+    start_startup_prewarm();
     invalidate();
 }
 
@@ -739,6 +740,7 @@ void UiRuntime::try_attach_telemetry() {
     // Bind the process before looking for a window. FleX exposes a
     // process-local channel and must work during splash, fullscreen and
     // other periods in which KF2 has no inspectable top-level window yet.
+    startup_prewarmer.request_stop();
     game_process = process.value();
     bind_resource_telemetry(std::nullopt);
     auto found_window = game::find_game_window(process.value());
