@@ -330,6 +330,23 @@ int main() {
           std::string::npos);
     CHECK(mutator_source.find("WorldInfo.NetMode != NM_Standalone") !=
           std::string::npos);
+    const auto standalone_guard = mutator_source.find(
+        "WorldInfo.NetMode != NM_Standalone");
+    const auto map_settle_request = mutator_source.find(
+        "WorldInfo.bRequestedBlockOnAsyncLoading = true;");
+    const auto map_settle_call = mutator_source.find(
+        "RequestInitialMapSettle();");
+    const auto map_settle_receipt = mutator_source.find(
+        "KF2OPT_MAP_SETTLE schema=1 state=requested map=");
+    CHECK(map_settle_request != std::string::npos);
+    CHECK(map_settle_call != std::string::npos);
+    CHECK(map_settle_receipt != std::string::npos);
+    CHECK(standalone_guard < map_settle_call);
+    CHECK(map_settle_call < interaction_path);
+    CHECK(count_occurrences(mutator_source,
+        "WorldInfo.bRequestedBlockOnAsyncLoading = true;") == 1);
+    CHECK(count_occurrences(mutator_source,
+        "RequestInitialMapSettle();") == 1);
     CHECK(listener_source.find("BindPort(0, false)") != std::string::npos);
     CHECK(listener_source.find("state=ready port=") != std::string::npos);
     CHECK(connection_source.find("KF2OPT_ACK ") != std::string::npos);
