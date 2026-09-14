@@ -141,6 +141,7 @@ add_executable(KF2Optimizer WIN32
     src/game/game_log_session.cpp
     src/game/game_log_telemetry.cpp
     src/game/game_session.cpp
+    src/game/startup_prewarmer.cpp
     src/game/advanced_settings.cpp
     src/game/video_settings.cpp
     src/overlay/overlay_mascot.cpp

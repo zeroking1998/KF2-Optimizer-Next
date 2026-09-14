@@ -259,6 +259,7 @@ std::wstring query_hardware_summary() {
 }
 
 UiRuntime::~UiRuntime() {
+    startup_prewarmer.stop_and_wait();
     resource_telemetry_worker.stop();
     static_cast<void>(restore_live_adaptive_quality(
         L"KF2 Optimizer closed"));
@@ -588,6 +589,7 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
     model.set_status(std::move(status));
     reload_video_settings();
     reload_advanced_settings();
+    start_startup_prewarm();
     const auto persisted_update = update::load_update_state(update_state_path);
     const auto cached_update = persisted_update.has_value()
         ? persisted_update.value() : update::PersistedUpdateState{};
