@@ -267,6 +267,16 @@ target_compile_definitions(kf2_frame_rate_cap_test PRIVATE
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/frame-rate-cap")
 add_test(NAME kf2_frame_rate_cap_test COMMAND kf2_frame_rate_cap_test)
 
+add_executable(kf2_startup_movies_test
+    integration/startup_movies_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/config/startup_movies.cpp"
+    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp")
+target_include_directories(kf2_startup_movies_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_startup_movies_test PRIVATE
+    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/startup-movies")
+add_test(NAME kf2_startup_movies_test COMMAND kf2_startup_movies_test)
+
 add_executable(kf2_atomic_file_test
     windows/atomic_file_test.cpp
     "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
@@ -440,6 +450,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/setting_catalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/settings.cpp"
+    "${PROJECT_SOURCE_DIR}/src/config/startup_movies.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/session_guard.cpp"
     "${PROJECT_SOURCE_DIR}/src/diagnostics/event_log.cpp"
     "${PROJECT_SOURCE_DIR}/src/diagnostics/crash_recorder.cpp"
