@@ -121,6 +121,7 @@ add_executable(KF2Optimizer WIN32
     src/config/kf2_catalog.cpp
     src/config/setting_catalog.cpp
     src/config/config_preview.cpp
+    src/config/startup_movies.cpp
     src/config/apply_transaction.cpp
     src/diagnostics/event_log.cpp
     src/diagnostics/crash_recorder.cpp
