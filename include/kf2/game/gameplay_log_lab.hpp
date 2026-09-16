@@ -16,8 +16,8 @@ struct OfflineAdaptiveSessionPolicy final {
 
 // Enables KF2's own bounded AI/wave logs and registers the pinned per-user
 // Published package as an offline mutator for the next standalone session.
-// The native viewport configuration remains unchanged and all owned URL/path
-// entries are removed exactly afterward.
+// A temporary subclass of KF2's native viewport reads applied main-menu
+// graphics. All owned viewport/URL/path entries are removed afterward.
 // Adaptive frame-pressure-gated corpse cleanup
 // is an explicit offline-only cosmetic actuator; the actor remains read-only
 // when it is off.

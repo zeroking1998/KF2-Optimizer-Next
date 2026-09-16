@@ -167,15 +167,20 @@ LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM wparam,
             break;
         case WM_LBUTTONUP:
             if (sink != nullptr && state != nullptr) {
-                if (GetCapture() == window) ReleaseCapture();
                 const float scale = 96.0F / state->dpi;
                 sink->on_pointer({PointerKind::release,
                                   {static_cast<float>(GET_X_LPARAM(lparam)) * scale,
                                    static_cast<float>(GET_Y_LPARAM(lparam)) * scale},
                                   0});
+                if (GetCapture() == window) ReleaseCapture();
                 return 0;
             }
             break;
+        case WM_CAPTURECHANGED:
+            if (sink != nullptr) {
+                sink->on_pointer({PointerKind::capture_lost, {}, 0});
+            }
+            return 0;
         case WM_MOUSEMOVE:
             if (sink != nullptr && state != nullptr) {
                 if (!state->tracking_mouse) {

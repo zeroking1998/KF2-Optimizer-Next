@@ -16,8 +16,8 @@ namespace {
 constexpr std::array<int, 5> kAnisotropyLevels{1, 2, 4, 8, 16};
 constexpr std::array<int, 6> kShadowResolutionLevels{
     256, 512, 1024, 1536, 2048, 4096};
-constexpr std::array<int, 5> kWholeSceneShadowResolutionLevels{
-    256, 512, 1280, 2048, 4096};
+constexpr std::array<int, 6> kWholeSceneShadowResolutionLevels{
+    256, 512, 1204, 1280, 2048, 4096};
 constexpr std::array<int, 3> kQualityLevels{0, 1, 2};
 constexpr std::array<int, 4> kDepthOfFieldQualityLevels{0, 1, 2, 3};
 constexpr std::array<int, 8> kMinShadowResolutionLevels{
@@ -48,7 +48,7 @@ const std::array<SettingDefinition, 217> kSettings{{
     {SettingId::impact_decal_limit, L"KFGame.ini", L"KFGame.KFImpactEffectManager",
      L"MaxImpactEffectDecals", SettingType::integer, 0, 128},
     {SettingId::wound_decal_limit, L"KFGame.ini", L"KFGame.KFGoreManager",
-     L"MaxBodyWoundDecals", SettingType::integer, 5, 64},
+     L"MaxBodyWoundDecals", SettingType::integer, 2, 64},
     {SettingId::blood_splatter_decal_limit, L"KFGame.ini", L"KFGame.KFGoreManager",
      L"MaxBloodSplatterDecals", SettingType::integer, 0, 128},
     {SettingId::blood_pool_decal_limit, L"KFGame.ini", L"KFGame.KFGoreManager",
@@ -209,7 +209,7 @@ const std::array<SettingDefinition, 217> kSettings{{
      L"SystemSettings", L"ScreenSpaceReflectionDownsampleFactor",
      SettingType::integer, 1, 4, false, {}, 1},
     {SettingId::image_grain_scale, L"KFSystemSettings.ini", L"SystemSettings",
-     L"ImageGrainScaler", SettingType::real, 0.0, 2.0, false, {}, 0.05},
+     L"ImageGrainScaler", SettingType::real, 0.5, 37.5, false, {}, 0.05},
     {SettingId::depth_of_field_quality, L"KFSystemSettings.ini",
      L"SystemSettings", L"DepthOfFieldQuality", SettingType::integer,
      0, 3, true, kDepthOfFieldQualityLevels},

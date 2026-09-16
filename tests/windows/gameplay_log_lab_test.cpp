@@ -1917,7 +1917,8 @@ int main() {
     CHECK(changed_engine.find(
         "Paths=" + published_runtime_path + "\r\n") != std::string::npos);
     CHECK(changed_engine.find(
-        "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n") !=
+        "GameViewportClientClassName=KF2OptimizerTelemetry."
+        "KF2OptimizerGraphicsViewport\r\n") !=
           std::string::npos);
     CHECK(changed_engine.find(
         "LocalOptions=?Mutator=KF2OptimizerTelemetry."

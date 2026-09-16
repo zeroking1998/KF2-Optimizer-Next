@@ -10,7 +10,7 @@ namespace {
 constexpr AccessPolicy kRestricted = AccessPolicy::restricted_mode_allowed;
 constexpr AccessPolicy kNormal = AccessPolicy::normal_mode_required;
 
-constexpr std::array<ActionDefinition, 64> kActions{{
+constexpr std::array<ActionDefinition, 60> kActions{{
     {ActionId::diagnostics_export_support, "diagnostics-export-support", FeatureId::diagnostics, kRestricted},
     {ActionId::diagnostics_flex_restore, "diagnostics-flex-restore", FeatureId::diagnostics, kNormal},
     {ActionId::diagnostics_full_check, "diagnostics-full-check", FeatureId::diagnostics, kRestricted},
@@ -39,8 +39,6 @@ constexpr std::array<ActionDefinition, 64> kActions{{
     {ActionId::graphics_display, "graphics-display", FeatureId::graphics, kNormal},
     {ActionId::graphics_resolution, "graphics-resolution", FeatureId::graphics, kNormal},
     {ActionId::graphics_overall_quality, "graphics-overall-quality", FeatureId::graphics, kNormal},
-    {ActionId::graphics_vsync, "graphics-vsync", FeatureId::graphics, kNormal},
-    {ActionId::graphics_variable_frame_rate, "graphics-variable-frame-rate", FeatureId::graphics, kNormal},
     {ActionId::graphics_environment_detail, "graphics-environment-detail", FeatureId::graphics, kNormal},
     {ActionId::graphics_character_detail, "graphics-character-detail", FeatureId::graphics, kNormal},
     {ActionId::graphics_fx, "graphics-fx", FeatureId::graphics, kNormal},
@@ -57,7 +55,6 @@ constexpr std::array<ActionDefinition, 64> kActions{{
     {ActionId::graphics_lens_flares, "graphics-lens-flares", FeatureId::graphics, kNormal},
     {ActionId::graphics_light_shafts, "graphics-light-shafts", FeatureId::graphics, kNormal},
     {ActionId::graphics_flex, "graphics-flex", FeatureId::graphics, kNormal},
-    {ActionId::graphics_apply, "graphics-apply", FeatureId::graphics, kNormal},
     {ActionId::graphics_reset, "graphics-reset", FeatureId::graphics, kNormal},
     {ActionId::advanced_one_frame_thread_lag, "advanced-one-frame-thread-lag", FeatureId::advanced, kNormal},
     {ActionId::advanced_per_frame_sleep, "advanced-per-frame-sleep", FeatureId::advanced, kNormal},
@@ -71,13 +68,12 @@ constexpr std::array<ActionDefinition, 64> kActions{{
     {ActionId::advanced_floating_point_render_targets, "advanced-floating-point-render-targets", FeatureId::advanced, kNormal},
     {ActionId::advanced_max_multisamples, "advanced-max-multisamples", FeatureId::advanced, kNormal},
     {ActionId::advanced_gore_level, "advanced-gore-level", FeatureId::advanced, kNormal},
-    {ActionId::advanced_apply, "advanced-apply", FeatureId::advanced, kNormal},
     {ActionId::advanced_reset, "advanced-reset", FeatureId::advanced, kNormal},
     {ActionId::debug_corpse_markers, "debug-corpse-markers", FeatureId::diagnostics, kNormal},
     {ActionId::debug_zed_markers, "debug-zed-markers", FeatureId::diagnostics, kNormal},
 }};
 
-constexpr std::array<ActionBinding, 66> kBindings{{
+constexpr std::array<ActionBinding, 62> kBindings{{
     {"dashboard-launch", ActionId::game_launch},
     {"diagnostics-backup", ActionId::optimizer_backup},
     {"diagnostics-export-support", ActionId::diagnostics_export_support},
@@ -104,8 +100,6 @@ constexpr std::array<ActionBinding, 66> kBindings{{
     {"graphics-display", ActionId::graphics_display},
     {"graphics-resolution", ActionId::graphics_resolution},
     {"graphics-overall-quality", ActionId::graphics_overall_quality},
-    {"graphics-vsync", ActionId::graphics_vsync},
-    {"graphics-variable-frame-rate", ActionId::graphics_variable_frame_rate},
     {"graphics-environment-detail", ActionId::graphics_environment_detail},
     {"graphics-character-detail", ActionId::graphics_character_detail},
     {"graphics-fx", ActionId::graphics_fx},
@@ -122,7 +116,6 @@ constexpr std::array<ActionBinding, 66> kBindings{{
     {"graphics-lens-flares", ActionId::graphics_lens_flares},
     {"graphics-light-shafts", ActionId::graphics_light_shafts},
     {"graphics-flex", ActionId::graphics_flex},
-    {"graphics-apply", ActionId::graphics_apply},
     {"graphics-reset", ActionId::graphics_reset},
     {"advanced-one-frame-thread-lag", ActionId::advanced_one_frame_thread_lag},
     {"advanced-per-frame-sleep", ActionId::advanced_per_frame_sleep},
@@ -136,7 +129,6 @@ constexpr std::array<ActionBinding, 66> kBindings{{
     {"advanced-floating-point-render-targets", ActionId::advanced_floating_point_render_targets},
     {"advanced-max-multisamples", ActionId::advanced_max_multisamples},
     {"advanced-gore-level", ActionId::advanced_gore_level},
-    {"advanced-apply", ActionId::advanced_apply},
     {"advanced-reset", ActionId::advanced_reset},
     {"debug-corpse-markers", ActionId::debug_corpse_markers},
     {"debug-zed-markers", ActionId::debug_zed_markers},
@@ -147,7 +139,7 @@ constexpr std::array<ControlDefinition, 7> kControls{{
     {ControlId::corpse_limit, "settings-corpses-slider", FeatureId::settings, 4, 2000},
     {ControlId::target_fps, "settings-target-slider", FeatureId::settings,
      optimizer::kTargetFpsMinimum, optimizer::kTargetFpsMaximum},
-    {ControlId::film_grain, "graphics-film-grain-slider", FeatureId::graphics, 0, 200},
+    {ControlId::film_grain, "graphics-film-grain-slider", FeatureId::graphics, 0, 100},
     {ControlId::advanced_screen_percentage, "advanced-screen-percentage-slider", FeatureId::advanced, 50, 200},
     {ControlId::advanced_particle_percentage, "advanced-particle-percentage-slider", FeatureId::advanced, 0, 100},
     {ControlId::advanced_decal_lifetime, "advanced-decal-lifetime-slider", FeatureId::advanced, 0, 120},

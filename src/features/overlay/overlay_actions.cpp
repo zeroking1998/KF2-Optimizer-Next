@@ -52,6 +52,9 @@ app::runtime::DispatchResult toggle_metric(app::UiRuntime& runtime,
 
 app::runtime::DispatchResult set_scale(app::UiRuntime& runtime,
                                        int direction, bool reset_value) {
+    const int previous_percent =
+        runtime.optimizer_settings.overlay_scale_percent;
+    const float previous_scale = runtime.overlay_scale;
     runtime.optimizer_settings.overlay_scale_percent = reset_value
         ? 100
         : std::clamp(
@@ -64,6 +67,8 @@ app::runtime::DispatchResult set_scale(app::UiRuntime& runtime,
         runtime.settings_path,
         config::serialize_settings(runtime.optimizer_settings));
     if (!saved.has_value()) {
+        runtime.optimizer_settings.overlay_scale_percent = previous_percent;
+        runtime.overlay_scale = previous_scale;
         show_notice(runtime, ui::NoticeSeverity::error,
                     L"SETTINGS_SAVE_FAILED", saved.error().message);
         return app::runtime::DispatchResult::handled;
@@ -86,6 +91,9 @@ app::runtime::DispatchResult set_scale(app::UiRuntime& runtime,
 
 app::runtime::DispatchResult position(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
+    const auto previous_corner = runtime.overlay_corner;
+    const auto previous_position =
+        runtime.optimizer_settings.overlay_position;
     switch (runtime.overlay_corner) {
         case ::kf2::overlay::OverlayCorner::top_left:
             runtime.overlay_corner = ::kf2::overlay::OverlayCorner::top_right;
@@ -118,6 +126,8 @@ app::runtime::DispatchResult position(
         runtime.settings_path,
         config::serialize_settings(runtime.optimizer_settings));
     if (!saved.has_value()) {
+        runtime.overlay_corner = previous_corner;
+        runtime.optimizer_settings.overlay_position = previous_position;
         show_notice(runtime, ui::NoticeSeverity::error,
                     L"SETTINGS_SAVE_FAILED", saved.error().message);
         return app::runtime::DispatchResult::handled;

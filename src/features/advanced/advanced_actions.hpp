@@ -21,12 +21,11 @@ KF2_ADVANCED_HANDLER(downsampled_translucency);
 KF2_ADVANCED_HANDLER(floating_point_render_targets);
 KF2_ADVANCED_HANDLER(max_multisamples);
 KF2_ADVANCED_HANDLER(gore_level);
-KF2_ADVANCED_HANDLER(apply);
 KF2_ADVANCED_HANDLER(reset);
 
 #undef KF2_ADVANCED_HANDLER
 
-inline constexpr std::array<app::runtime::ActionImplementation, 14> kActions{{
+inline constexpr std::array<app::runtime::ActionImplementation, 13> kActions{{
     {app::runtime::ActionId::advanced_one_frame_thread_lag, &app::runtime::bind_no_payload<&one_frame_thread_lag>},
     {app::runtime::ActionId::advanced_per_frame_sleep, &app::runtime::bind_no_payload<&per_frame_sleep>},
     {app::runtime::ActionId::advanced_per_frame_yield, &app::runtime::bind_no_payload<&per_frame_yield>},
@@ -39,7 +38,6 @@ inline constexpr std::array<app::runtime::ActionImplementation, 14> kActions{{
     {app::runtime::ActionId::advanced_floating_point_render_targets, &app::runtime::bind_no_payload<&floating_point_render_targets>},
     {app::runtime::ActionId::advanced_max_multisamples, &app::runtime::bind_no_payload<&max_multisamples>},
     {app::runtime::ActionId::advanced_gore_level, &app::runtime::bind_no_payload<&gore_level>},
-    {app::runtime::ActionId::advanced_apply, &app::runtime::bind_no_payload<&apply>},
     {app::runtime::ActionId::advanced_reset, &app::runtime::bind_no_payload<&reset>},
 }};
 

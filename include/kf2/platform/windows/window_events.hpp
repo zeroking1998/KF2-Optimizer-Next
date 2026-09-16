@@ -39,7 +39,8 @@ struct KeyEvent {
     WindowKey key{WindowKey::tab};
 };
 
-enum class PointerKind { press, release, activate, move, leave, wheel };
+enum class PointerKind { press, release, activate, move, leave, wheel,
+                         capture_lost };
 
 struct PointerEvent {
     PointerKind kind{PointerKind::activate};

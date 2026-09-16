@@ -2,6 +2,7 @@
 
 #include <array>
 #include <filesystem>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -41,6 +42,7 @@ inline constexpr std::size_t kVideoOptionCount =
 struct Resolution {
     int width{};
     int height{};
+    bool operator==(const Resolution&) const = default;
 };
 
 struct VideoSettings {
@@ -49,6 +51,20 @@ struct VideoSettings {
     int film_grain_percent{50};
     int flex_level{0};
 };
+
+// A process-bound readback of KF2's applied graphics menu presets. A -1
+// component means KF2's own menu displays an INI override/Custom value.
+struct GameMenuGraphicsReadback {
+    std::array<int, kVideoOptionCount> choices{};
+    Resolution resolution{};
+    bool operator==(const GameMenuGraphicsReadback&) const = default;
+};
+
+[[nodiscard]] std::optional<GameMenuGraphicsReadback>
+parse_game_menu_graphics_readback(std::string_view line);
+[[nodiscard]] VideoSettings present_game_menu_graphics_readback(
+    const VideoSettings& baseline,
+    const GameMenuGraphicsReadback& readback);
 
 [[nodiscard]] std::wstring_view video_option_label(VideoOption option) noexcept;
 [[nodiscard]] std::wstring video_choice_label(
@@ -70,6 +86,7 @@ struct VideoSettings {
     const std::filesystem::path& config_root);
 [[nodiscard]] Result<config::ConfigPreview> build_video_preview(
     const std::filesystem::path& config_root,
-    const VideoSettings& settings);
+    const VideoSettings& settings,
+    const VideoSettings* baseline = nullptr);
 
 }  // namespace kf2::game
