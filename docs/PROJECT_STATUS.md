@@ -140,13 +140,12 @@ enemy/corpse density or hysteresis-confirmed target-relative frame pressure
 moves entry to 1,000/850 units and the interval to 200/100 ms. It uses KF2's
 official `PutRigidBodyToSleep` path and never hides an actor. A
 tracked body is woken through `WakeRigidBody` after it comes inside 800 units;
-the separated entry/wake distances prevent churn. Only confirmed frame pressure
-may continue into native `MinLodModel` on one distant visible corpse every
-400/200/100 ms, starting at stage 2 outside 300 units and advancing through
-  stages 3/4/5 at 500/800/1,200 units. Visible-enemy pressure scales continuously
-  from five to eighty Zeds and consumes every available stage without exceeding the mesh's final LOD
-or overriding `ForcedLodModel`; nearby, sleeping,
-recovered and session-ending LOD values are restored. Only after those stages
+the separated entry/wake distances prevent churn. A separate bounded controller
+fixes eligible living-Zed and corpse meshes to their final available
+`MinLodModel` and fixes living animation inputs to 0.55/6 throughout the world,
+independently of Adaptive mode and pressure, without overriding
+`ForcedLodModel`. Sleeping corpses use KF2's native final-pose skeleton flags.
+Only after the distance stage
 may one old, slow visible corpse sleep every 750/350 ms. Living enemies, death
 animations and fast bodies are unchanged. The CPU live-quality group can disable
 the three official cosmetic corpse-collision switches at 80/60/40%, with exact
