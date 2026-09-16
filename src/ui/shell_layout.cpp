@@ -421,10 +421,10 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         add_slider("settings-target-slider", L"Target FPS", cursor,
                    {optimizer::kTargetFpsMinimum,
                     optimizer::kTargetFpsMaximum,
-                    model.status().target_fps, 1, 10, L" FPS"});
+                    model.presented_target_fps(), 1, 10, L" FPS"});
         cursor += kSliderHeight + 12.0F;
         add_slider("settings-corpses-slider", L"Maximum corpses",
-                   cursor, {4, 2000, model.status().corpse_limit,
+                   cursor, {4, 2000, model.presented_corpse_limit(),
                              1, 50, L" corpses"});
         cursor += kSliderHeight + 12.0F;
         add_section("dashboard-updates-section", L"VERSION & UPDATES", cursor);
@@ -477,15 +477,17 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                 editable);
         };
         float cursor = grid_base;
+        add_section("graphics-source-section",
+            status.graphics_game_menu_readback
+                ? L"KF2 APPLIED MENU SETTINGS"
+                : L"SAVED KF2 INI SETTINGS", cursor);
+        cursor += 24.0F;
         add_section("graphics-basic-section", L"BASIC", cursor);
         cursor += graphics_section_advance;
         grid_base = cursor;
         action_index = 0;
         graphics_action("graphics-display", L"Display", 0);
         graphics_action("graphics-resolution", L"Resolution", 1);
-        graphics_action("graphics-vsync", L"Vertical sync", 3);
-        graphics_action("graphics-variable-frame-rate",
-                        L"Variable frame rate", 4);
         cursor = grid_base +
             static_cast<float>((action_index + graphics_columns - 1) /
                                graphics_columns) * graphics_action_stride + 4.0F;
@@ -494,8 +496,8 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                     cursor);
         cursor += 26.0F;
         add_slider("graphics-film-grain-slider", L"Film grain intensity", cursor,
-                   {0, 200, status.graphics_film_grain_percent,
-                    5, 25, L"%"});
+                   {0, 100, status.graphics_film_grain_percent,
+                    5, 25, L"%"}, editable);
         cursor += kSliderHeight + 10.0F;
 
         add_section("graphics-quality-section", L"QUALITY", cursor);
@@ -530,17 +532,13 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         cursor = grid_base +
             static_cast<float>((action_index + graphics_columns - 1) /
                                graphics_columns) * graphics_action_stride + 4.0F;
-        add_section("graphics-save-section",
-                    status.graphics_game_running
-                        ? L"CLOSE KF2 TO APPLY CHANGES"
-                        : status.graphics_dirty ? L"UNSAVED CHANGES"
-                                                 : L"NO UNSAVED CHANGES",
-                    cursor);
-        cursor += graphics_section_advance;
+        if (status.graphics_game_running) {
+            add_section("graphics-running-section",
+                        L"Close KF2 to change graphics", cursor);
+            cursor += graphics_section_advance;
+        }
         grid_base = cursor;
         action_index = 0;
-        add_action("graphics-apply", L"APPLY GRAPHICS",
-                   editable && status.graphics_dirty, true);
         add_action("graphics-reset", L"RESET TO DEFAULTS", editable);
         add_action("game-open-config", L"OPEN KF2 SETTINGS FOLDER",
                    status.graphics_available);

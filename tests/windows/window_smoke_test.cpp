@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <vector>
 
 #include "kf2/platform/windows/window.hpp"
 #include "kf2/platform/windows/window_events.hpp"
@@ -31,8 +32,9 @@ public:
         ++keys;
         last_key = event.key;
     }
-    void on_pointer(kf2::platform::windows::PointerEvent) override {
+    void on_pointer(kf2::platform::windows::PointerEvent event) override {
         ++pointers;
+        pointer_kinds.push_back(event.kind);
     }
     void on_theme_changed(
         kf2::platform::windows::ThemeChangedEvent) override {
@@ -52,6 +54,7 @@ public:
     int theme_changes{0};
     int closes{0};
     int resumes{0};
+    std::vector<kf2::platform::windows::PointerKind> pointer_kinds;
     float last_dpi{0};
     kf2::platform::windows::WindowSize last_size{};
     kf2::platform::windows::WindowKey last_key{};
@@ -84,6 +87,25 @@ int main() {
         SendMessageW(window, WM_HOTKEY, 0x4B46, 0);
         CHECK(sink.keys == 3);
         CHECK(sink.last_key == kf2::platform::windows::WindowKey::f10);
+        using kf2::platform::windows::PointerKind;
+        const auto normal_drag = sink.pointer_kinds.size();
+        SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON,
+                     MAKELPARAM(200, 100));
+        CHECK(GetCapture() == window);
+        SendMessageW(window, WM_LBUTTONUP, 0, MAKELPARAM(220, 100));
+        CHECK(sink.pointer_kinds.size() == normal_drag + 3);
+        CHECK(sink.pointer_kinds[normal_drag] == PointerKind::press);
+        CHECK(sink.pointer_kinds[normal_drag + 1] == PointerKind::release);
+        CHECK(sink.pointer_kinds[normal_drag + 2] == PointerKind::capture_lost);
+        const auto interrupted_drag = sink.pointer_kinds.size();
+        SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON,
+                     MAKELPARAM(200, 100));
+        CHECK(GetCapture() == window);
+        CHECK(ReleaseCapture());
+        CHECK(sink.pointer_kinds.size() == interrupted_drag + 2);
+        CHECK(sink.pointer_kinds[interrupted_drag] == PointerKind::press);
+        CHECK(sink.pointer_kinds[interrupted_drag + 1] ==
+              PointerKind::capture_lost);
         SendMessageW(window, WM_THEMECHANGED, 0, 0);
         CHECK(sink.theme_changes == 2);
         CHECK(SendMessageW(window, WM_POWERBROADCAST,

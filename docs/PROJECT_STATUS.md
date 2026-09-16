@@ -45,12 +45,12 @@ requirements from GitHub Issue 72.
   dominance, partial parallelism and broad parallel saturation, and reports an
   external affinity subset without changing it. A saturated game/main thread
   therefore remains visible on many-core CPUs without mislabeling the overlay's
-  total CPU percentage. Adaptive evaluates only active gameplay and persists a
-  next-launch profile only after 8 seconds of stable degradation or 45 seconds
-  of stable recovery with verified headroom; intervention can never be treated
-  as quality recovery. A two-second CPU evidence hold removes critical-thread
+  total CPU percentage. Adaptive evaluates only active gameplay and never
+  replaces the user's saved graphics with a named launch profile; runtime
+  intervention can never be treated as persistent quality recovery. A
+  two-second CPU evidence hold removes critical-thread
   threshold flapping without masking another proven bottleneck. Menu/loading
-  frames cannot churn the profile.
+  frames cannot drive runtime quality changes.
 - All currently unproved game mutations are structurally `SHADOW` and
   `TEST_REQUIRED`; protected gameplay/network/security targets are permanently
   blocked. No generated target becomes live merely because it exists in the

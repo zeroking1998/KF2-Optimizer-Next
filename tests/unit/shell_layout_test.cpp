@@ -159,21 +159,28 @@ int main() {
     CHECK(film_grain->text == L"Film grain intensity");
     CHECK(film_grain->slider.has_value());
     CHECK(film_grain->slider->minimum == 0);
-    CHECK(film_grain->slider->maximum == 200);
+    CHECK(film_grain->slider->maximum == 100);
     CHECK(film_grain->slider->small_step == 5);
     CHECK(film_grain->slider->unit == L"%");
     CHECK(action(graphics, "graphics-display") != nullptr);
-    CHECK(action(graphics, "graphics-variable-frame-rate") != nullptr);
-    CHECK(std::abs(action(graphics, "graphics-display")->bounds.y -
-                   action(graphics, "graphics-variable-frame-rate")->bounds.y) <
-          0.01F);
+    CHECK(action(graphics, "graphics-vsync") == nullptr);
+    CHECK(action(graphics, "graphics-variable-frame-rate") == nullptr);
     CHECK(action(graphics, "graphics-light-shafts") != nullptr);
     CHECK(action(graphics, "graphics-flex") != nullptr);
+    CHECK(action(graphics, "graphics-apply") == nullptr);
     CHECK(std::abs(action(graphics, "graphics-light-shafts")->bounds.y -
                    action(graphics, "graphics-flex")->bounds.y) < 0.01F);
+    graphics_status.graphics_game_running = true;
+    model.set_status(graphics_status);
+    const auto running_graphics = layout_shell(model, 1440, 900);
+    CHECK(!node(running_graphics, "graphics-film-grain-slider")->enabled);
+    CHECK(!action(running_graphics, "graphics-flex")->enabled);
+    CHECK(node(running_graphics, "graphics-running-section") != nullptr);
+    graphics_status.graphics_game_running = false;
+    model.set_status(graphics_status);
 
-    model.set_notice({NoticeSeverity::info, L"GRAPHICS_APPLIED",
-                      L"KF2 video settings were applied and verified.", L""});
+    model.set_notice({NoticeSeverity::info, L"GRAPHICS_SAVED",
+                      L"KF2 video settings were saved and verified.", L""});
     const auto graphics_notice_top = layout_shell(model, 1440, 900);
     const auto* top_notice = node(graphics_notice_top, "notice");
     const auto* top_heading = node(graphics_notice_top, "page-heading");

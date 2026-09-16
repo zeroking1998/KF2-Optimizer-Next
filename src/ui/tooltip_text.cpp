@@ -37,14 +37,12 @@ constexpr TooltipEntry kTooltips[]{
     {"debug-corpse-markers", L"Shows the Optimizer action, distance in metres, and Actor ID above recently changed corpses. It is off by default, adds debug rendering work, and applies on the next protected KF2 start."},
     {"debug-zed-markers", L"Shows distance in metres and Actor ID for up to 64 recently visible living Zeds. It is off by default, refreshes at most every 100 ms, and applies on the next protected KF2 start."},
 
-    {"settings-target-slider", L"Sets KF2's native FPS limit from 30 to 240. Steam and shortcut launches use the same limit from the next game start; Adaptive also uses it as its performance target."},
+    {"settings-target-slider", L"Sets KF2's native FPS limit from 30 to 240. Adaptive uses the same target. An external driver limit or a screen refresh limit can still keep displayed FPS below it."},
     {"settings-corpses-slider", L"Sets the maximum corpse ceiling and saves it immediately. Adaptive may use fewer corpses under confirmed scene or frame-time pressure."},
 
     {"graphics-display", L"Windowed is easy to switch away from. Borderless fullscreen keeps the desktop overlay visible. Exclusive fullscreen bypasses desktop overlays, so the app temporarily uses borderless fullscreen while the overlay is enabled and restores your selected mode after KF2 exits."},
     {"graphics-resolution", L"Sets the number of output pixels. Higher resolutions look sharper but increase GPU work and VRAM use."},
     {"graphics-overall-quality", L"Changes the main quality controls together. Higher presets improve detail and effects but increase CPU, GPU, and VRAM demand."},
-    {"graphics-vsync", L"On removes most screen tearing but may cap FPS and add input delay. Off favors lower latency but can show tearing."},
-    {"graphics-variable-frame-rate", L"On lets KF2 run outside its built-in smooth-FPS range. Off uses the game's configured frame-rate smoothing limits."},
     {"graphics-environment-detail", L"Higher values keep detailed scenery visible farther away, increasing CPU work, GPU work, and VRAM use."},
     {"graphics-character-detail", L"Higher values keep detailed Zed and character models visible farther away, increasing GPU work and VRAM use."},
     {"graphics-fx", L"Higher values increase particle and visual-effect quality, which can raise CPU, GPU, and VRAM use during busy fights."},
@@ -60,10 +58,9 @@ constexpr TooltipEntry kTooltips[]{
     {"graphics-volumetric-lighting", L"On draws visible light volumes and increases GPU work. Off removes those effects and saves GPU time."},
     {"graphics-lens-flares", L"On adds lens artifacts around bright lights with a small GPU cost. Off removes them."},
     {"graphics-light-shafts", L"On draws visible rays from strong lights and adds post-processing work. Off removes the rays and saves GPU time."},
-    {"graphics-flex", L"Selects Off, Gibs, or Gibs and fluids for NVIDIA FleX. Only your selection and Apply graphics can enable it; Adaptive never does."},
+    {"graphics-flex", L"Selects Off, Gibs, or Gibs and fluids for NVIDIA FleX and saves the choice immediately. Adaptive never enables FleX."},
     {"graphics-film-grain-slider", L"Adds film-like image noise. 0% is clean, 100% is normal strength, and 200% doubles the grain. It has little performance impact."},
-    {"graphics-apply", L"Backs up the current KF2 INIs, writes the selected graphics choices atomically, verifies them, and keeps user Data unchanged."},
-    {"graphics-reset", L"Returns the controls to balanced defaults while keeping the current display mode and resolution. NVIDIA FleX returns to Off."},
+    {"graphics-reset", L"Immediately saves balanced defaults while keeping the current display mode and resolution. NVIDIA FleX is turned Off."},
 
     {"overlay-toggle", L"Shows or hides the local telemetry overlay and saves the choice immediately. F10 performs the same action while KF2 runs."},
     {"overlay-position", L"Moves the overlay to the next screen corner and saves the position immediately."},

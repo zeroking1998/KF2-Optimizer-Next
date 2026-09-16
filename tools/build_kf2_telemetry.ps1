@@ -87,6 +87,10 @@ $mutatorSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerTelemetryMutator.uc'
 $interactionSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerTelemetryInteraction.uc'
+$graphicsViewportSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerGraphicsViewport.uc'
+$graphicsInteractionSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerGraphicsInteraction.uc'
 $adaptiveListenerSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerAdaptiveControlListener.uc'
 $adaptiveConnectionSource = Join-Path $projectRoot `
@@ -99,6 +103,7 @@ $adaptiveGraphicsStateSource = Join-Path $projectRoot `
 foreach ($required in @($editorPath, $configPath,
                          $probeSource,
                          $mutatorSource, $interactionSource,
+                         $graphicsViewportSource, $graphicsInteractionSource,
                          $adaptiveListenerSource,
                          $adaptiveConnectionSource, $adaptiveGraphicsSource,
                          $adaptiveGraphicsStateSource)) {
@@ -166,6 +171,10 @@ try {
         (Join-Path $classesRoot 'KF2OptimizerTelemetryMutator.uc')
     Copy-Item -LiteralPath $interactionSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerTelemetryInteraction.uc')
+    Copy-Item -LiteralPath $graphicsViewportSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerGraphicsViewport.uc')
+    Copy-Item -LiteralPath $graphicsInteractionSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerGraphicsInteraction.uc')
     Copy-Item -LiteralPath $adaptiveGraphicsSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerAdaptiveGraphics.uc')
     Copy-Item -LiteralPath $adaptiveGraphicsStateSource -Destination `

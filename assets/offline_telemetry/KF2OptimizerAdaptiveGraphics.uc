@@ -842,6 +842,50 @@ static function bool RestoreOriginal(KF2OptimizerAdaptiveGraphicsState Snapshot)
     return true;
 }
 
+// Uses the same composite preset comparison as KF2's own options menu.
+// INDEX_NONE (-1) is a real INI-override state, not a guessed quality tier.
+static function string MenuReadback()
+{
+    local GFXSettings Current;
+
+    GetCurrentGFXSettings(Current);
+    return "resx=" $ Current.Resolution.ResX $
+        " resy=" $ Current.Resolution.ResY $
+        " display_full=" $ int(Current.Display.Fullscreen) $
+        " display_borderless=" $ int(Current.Display.BorderlessWindow) $
+        " vsync=" $ int(Current.VSync.VSync) $
+        " variable_fps=" $ int(Current.VariableFPS.VariableFramerate) $
+        " environment=" $ FindEnvironmentDetailIndex(
+            Current.EnvironmentDetail, default.EnvironmentDetailPresets) $
+        " character=" $ FindCharacterDetailIndex(
+            Current.CharacterDetail, default.CharacterDetailPresets) $
+        " fx=" $ FindFXQualityIndex(Current.FX, default.FXQualityPresets) $
+        " texture_resolution=" $ FindTextureResolutionSettingIndex(
+            Current.TextureResolution, default.TextureResolutionPresets) $
+        " texture_filtering=" $ FindTextureFilterSettingIndex(
+            Current.TextureFiltering, default.TextureFilterPresets) $
+        " shadows=" $ FindShadowQualityIndex(
+            Current.Shadows, default.ShadowQualityPresets) $
+        " reflections=" $ FindReflectionsSettingIndex(
+            Current.RealtimeReflections, default.RealtimeReflectionsPresets) $
+        " aa=" $ FindAntiAliasingSettingIndex(
+            Current.AntiAliasing, default.AntiAliasingPresets) $
+        " bloom=" $ FindBloomSettingIndex(Current.Bloom, default.BloomPresets) $
+        " motion_blur=" $ FindMotionBlurSettingIndex(
+            Current.MotionBlur, default.MotionBlurPresets) $
+        " ao=" $ FindAmbientOcclusionSettingIndex(
+            Current.AmbientOcclusion, default.AmbientOcclusionPresets) $
+        " dof=" $ FindDOFSettingIndex(
+            Current.DepthOfField, default.DOFPresets) $
+        " volumetric=" $ FindVolumetricLightingSettingIndex(
+            Current.VolumetricLighting, default.VolumetricLightingPresets) $
+        " lens_flares=" $ FindLensFlareSettingIndex(
+            Current.LensFlares, default.LensFlarePresets) $
+        " light_shafts=" $ FindLightShaftsSettingIndex(
+            Current.LightShafts, default.LightShaftsPresets) $
+        " flex=" $ FindFlexSettingIndex(Current.Flex, default.FlexPresets);
+}
+
 defaultproperties
 {
 }

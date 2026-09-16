@@ -252,6 +252,71 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
             session_config_snapshot.reset();
             session_config_waiting_for_launch = false;
             session_config_launch_deadline_ns = 0;
+            // Restore the protected originals first, then replay only the
+            // graphics delta observed across KF2's confirmed settings restart.
+            // Temporary protected-session values must never be persisted.
+            if (installation && session_video_native_changes) {
+                const auto original = game::read_video_settings(
+                    installation->config_root);
+                if (original.has_value()) {
+                    if (original.value().choices ==
+                            session_video_native_changes->choices &&
+                        original.value().film_grain_percent ==
+                            session_video_native_changes->film_grain_percent &&
+                        game::video_choice_label(game::VideoOption::resolution,
+                            original.value()) ==
+                            game::video_choice_label(game::VideoOption::resolution,
+                                *session_video_native_changes)) {
+                        session_video_native_changes.reset();
+                    }
+                }
+                if (original.has_value() && session_video_native_changes) {
+                    const auto prepared = game::build_video_preview(
+                        installation->config_root,
+                        *session_video_native_changes, &original.value());
+                    if (prepared.has_value()) {
+                        const auto applied = config::apply_preview(
+                            prepared.value(), backups,
+                            {.game_running = game_process.has_value()});
+                        if (applied.has_value()) {
+                            events->append({0, diagnostics::Severity::info,
+                                "KF2_NATIVE_GRAPHICS_PRESERVED",
+                                L"KF2's confirmed graphics changes were saved separately from temporary protected-session values",
+                                L"graphics"});
+                            reload_video_settings();
+                        } else {
+                            complete = false;
+                            events->append({0, diagnostics::Severity::error,
+                                "KF2_NATIVE_GRAPHICS_SAVE_FAILED",
+                                applied.error().message, L"graphics"});
+                            model.set_notice({ui::NoticeSeverity::warning,
+                                L"KF2_NATIVE_GRAPHICS_SAVE_FAILED",
+                                L"Original INIs were restored, but KF2's graphics change could not be saved: " +
+                                    applied.error().message, L""});
+                        }
+                    } else {
+                        complete = false;
+                        events->append({0, diagnostics::Severity::error,
+                            "KF2_NATIVE_GRAPHICS_SAVE_FAILED",
+                            prepared.error().message, L"graphics"});
+                        model.set_notice({ui::NoticeSeverity::warning,
+                            L"KF2_NATIVE_GRAPHICS_SAVE_FAILED",
+                            L"Original INIs were restored, but KF2's graphics change could not be saved: " +
+                                prepared.error().message, L""});
+                    }
+                } else if (!original.has_value()) {
+                    complete = false;
+                    events->append({0, diagnostics::Severity::error,
+                        "KF2_NATIVE_GRAPHICS_SAVE_FAILED",
+                        original.error().message, L"graphics"});
+                    model.set_notice({ui::NoticeSeverity::warning,
+                        L"KF2_NATIVE_GRAPHICS_SAVE_FAILED",
+                        L"Original INIs were restored, but KF2's graphics change could not be read: " +
+                            original.error().message, L""});
+                }
+            }
+            session_video_runtime.reset();
+            session_video_native_changes.reset();
         }
     }
     if (!restore_automatic_flex_lab(reason)) complete = false;

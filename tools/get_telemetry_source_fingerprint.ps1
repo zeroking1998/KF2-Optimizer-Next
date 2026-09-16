@@ -14,6 +14,8 @@ $sourceNames = @(
     'kf2optimizertelemetryprobe.uc'
     'KF2OptimizerTelemetryMutator.uc'
     'KF2OptimizerTelemetryInteraction.uc'
+    'KF2OptimizerGraphicsViewport.uc'
+    'KF2OptimizerGraphicsInteraction.uc'
     'KF2OptimizerAdaptiveControlListener.uc'
     'KF2OptimizerAdaptiveControlConnection.uc'
     'KF2OptimizerAdaptiveGraphics.uc'

@@ -31,12 +31,6 @@ optimizer::AdaptivePolicy adaptive_policy_from(
     };
 }
 
-optimizer::Profile stored_adaptive_profile(
-    const config::Settings& settings) noexcept {
-    return optimizer::parse_adaptive_profile(settings.optimizer_profile)
-        .value_or(optimizer::Profile::balanced);
-}
-
 std::wstring adaptive_profile_reason(
     const optimizer::AdaptiveDecision& decision) {
     const std::string_view reason = decision.reason;
@@ -448,20 +442,12 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
         settings.overlay_position == "bottom_left" ? L"bottom left" :
         settings.overlay_position == "bottom_right" ? L"bottom right" : L"top right";
     status.hardware_summary = query_hardware_summary();
-    status.profile = std::wstring{settings.optimizer_profile.begin(),
-                                  settings.optimizer_profile.end()};
+    status.profile = L"user settings";
     status.quality = std::wstring{settings.quality_policy.begin(),
                                   settings.quality_policy.end()};
-    const auto initial_profile = optimizer::bound_adaptive_profile(
-        stored_adaptive_profile(settings),
-        settings.adaptive_minimum_quality,
-        settings.adaptive_maximum_quality);
-    status.recommended_profile = initial_profile
-        ? std::wstring{optimizer::adaptive_profile_label(*initial_profile)}
-        : L"not available";
-    status.recommendation_reason = initial_profile
-        ? L"Automatic profile is ready; gameplay telemetry will refine later launches"
-        : L"No verified named profile fits the selected quality limits";
+    status.recommended_profile = L"user settings";
+    status.recommendation_reason =
+        L"KF2 starts from the user's saved graphics; Adaptive reacts only to validated gameplay telemetry";
     if (discovery) {
         auto found = game::discover_game_installation(*discovery);
         if (found.has_value()) {
@@ -588,6 +574,20 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
     model.set_recovery_required(recovery_required);
     model.set_status(std::move(status));
     reload_video_settings();
+    // Prevent VSync and disabled frame-rate smoothing from competing with
+    // Target FPS. Do not describe an already-running game as changed live.
+    if (start_mode == StartMode::normal && installation && video_pending &&
+        (video_pending->choices[static_cast<std::size_t>(
+             game::VideoOption::vsync)] != 0 ||
+         video_pending->choices[static_cast<std::size_t>(
+             game::VideoOption::variable_frame_rate)] != 0) &&
+        !game::find_running_game_process(installation->executable).has_value()) {
+        video_pending->choices[static_cast<std::size_t>(
+            game::VideoOption::vsync)] = 0;
+        video_pending->choices[static_cast<std::size_t>(
+            game::VideoOption::variable_frame_rate)] = 0;
+        save_video_selection();
+    }
     reload_advanced_settings();
     start_startup_prewarm();
     const auto persisted_update = update::load_update_state(update_state_path);

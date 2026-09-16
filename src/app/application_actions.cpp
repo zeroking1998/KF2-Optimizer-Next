@@ -11,6 +11,28 @@
 namespace kf2::app {
 namespace {
 
+using VideoConfigWriteTimes =
+    std::array<std::optional<std::filesystem::file_time_type>, 3>;
+
+std::optional<VideoConfigWriteTimes> read_video_config_write_times(
+    const std::filesystem::path& config_root) {
+    static constexpr std::array<std::wstring_view, 3> files{
+        L"KFSystemSettings.ini", L"KFGame.ini", L"KFEngine.ini"};
+    VideoConfigWriteTimes times{};
+    for (std::size_t index = 0; index < files.size(); ++index) {
+        std::error_code error;
+        const auto write_time = std::filesystem::last_write_time(
+            config_root / files[index], error);
+        if (!error) {
+            times[index] = write_time;
+        } else if (index != 2 ||
+                   error != std::errc::no_such_file_or_directory) {
+            return std::nullopt;
+        }
+    }
+    return times;
+}
+
 void upsert_startup_change(
     std::vector<config::RequestedChange>& changes, config::SettingId id,
     config::SettingValue value, std::wstring_view reason) {
@@ -114,18 +136,29 @@ Result<bool> UiRuntime::set_overlay(bool enabled) {
     if (enabled == overlay_enabled) {
         return Result<bool>::success(overlay_enabled);
     }
+    const bool previous = overlay_enabled;
     overlay_enabled = enabled;
     if (!enabled && overlay_window) {
+        const auto previous_presentation = overlay_presentation;
         overlay::OverlayPresentation hidden;
         overlay_presentation = hidden;
         auto hidden_result = overlay_window->update(hidden);
-        if (!hidden_result.has_value()) return hidden_result;
+        if (!hidden_result.has_value()) {
+            overlay_enabled = previous;
+            overlay_presentation = previous_presentation;
+            return hidden_result;
+        }
     }
     telemetry_tick();
     optimizer_settings.overlay_enabled = overlay_enabled;
     const auto saved = platform::windows::atomic_replace_utf8(
         settings_path, config::serialize_settings(optimizer_settings));
-    if (!saved.has_value()) return Result<bool>::failure(saved.error());
+    if (!saved.has_value()) {
+        overlay_enabled = previous;
+        optimizer_settings.overlay_enabled = previous;
+        if (overlay_window) telemetry_tick();
+        return Result<bool>::failure(saved.error());
+    }
     auto status = model.status();
     status.overlay_enabled = overlay_enabled;
     model.set_status(std::move(status));
@@ -149,30 +182,49 @@ void UiRuntime::refresh_video_presentation() {
     status.graphics_available = video_pending.has_value();
     status.graphics_game_running = installation &&
         game::find_running_game_process(installation->executable).has_value();
+    status.graphics_game_menu_readback = status.graphics_game_running &&
+        game_menu_graphics_readback.has_value();
     if (video_pending) {
+        const auto presented = status.graphics_game_menu_readback
+            ? game::present_game_menu_graphics_readback(
+                *video_pending, *game_menu_graphics_readback)
+            : *video_pending;
         for (std::size_t option = 0; option < game::kVideoOptionCount; ++option) {
-            status.graphics_values[option] = game::video_choice_label(
-                static_cast<game::VideoOption>(option), *video_pending);
+            status.graphics_values[option] =
+                status.graphics_game_menu_readback &&
+                game_menu_graphics_readback->choices[option] == -1 &&
+                option != static_cast<std::size_t>(
+                    game::VideoOption::overall_quality) &&
+                option != static_cast<std::size_t>(
+                    game::VideoOption::resolution)
+                ? L"INI override"
+                : game::video_choice_label(
+                    static_cast<game::VideoOption>(option), presented);
         }
-        status.graphics_aspect_ratio = game::aspect_ratio_label(*video_pending);
-        status.graphics_film_grain_percent = video_pending->film_grain_percent;
-        status.graphics_dirty = video_saved &&
-            (video_pending->choices != video_saved->choices ||
-             video_pending->film_grain_percent != video_saved->film_grain_percent);
-    } else {
-        status.graphics_dirty = false;
+        status.graphics_aspect_ratio = game::aspect_ratio_label(presented);
+        status.graphics_film_grain_percent = presented.film_grain_percent;
     }
     model.set_status(std::move(status));
 }
 
 void UiRuntime::reload_video_settings() {
-    if (!installation) {
-        video_saved.reset();
-        video_pending.reset();
+    if (session_config_snapshot && video_saved) {
         refresh_video_presentation();
         return;
     }
-    const auto loaded = game::read_video_settings(installation->config_root);
+    if (!installation) {
+        video_saved.reset();
+        video_pending.reset();
+        video_config_write_times.reset();
+        refresh_video_presentation();
+        return;
+    }
+    const auto write_times_before = read_video_config_write_times(
+        installation->config_root);
+    const auto graphics_source = session_config_snapshot
+        ? session_config_snapshot->snapshot_root / L"files"
+        : installation->config_root;
+    const auto loaded = game::read_video_settings(graphics_source);
     if (!loaded.has_value()) {
         video_saved.reset();
         video_pending.reset();
@@ -183,13 +235,63 @@ void UiRuntime::reload_video_settings() {
     }
     video_saved = loaded.value();
     video_pending = loaded.value();
+    const auto write_times_after = read_video_config_write_times(
+        installation->config_root);
+    video_config_write_times = write_times_before == write_times_after
+        ? write_times_after : std::nullopt;
     refresh_video_presentation();
+}
+
+bool UiRuntime::synchronize_video_settings_from_game() {
+    if (!installation || !video_saved || !video_pending) return false;
+    // During a protected session, compare only with the already observed
+    // temporary runtime profile. The original personal graphics remain
+    // untouched until the snapshot has been restored.
+    if (session_config_snapshot && !session_video_runtime) return false;
+    const auto write_times = read_video_config_write_times(
+        installation->config_root);
+    if (!write_times ||
+        (video_config_write_times && *video_config_write_times == *write_times)) {
+        return false;
+    }
+    const auto current = game::read_video_settings(installation->config_root);
+    if (!current.has_value()) return false;  // Retry after KF2 finishes writing.
+    if (read_video_config_write_times(installation->config_root) != write_times) {
+        return false;  // A game write overlapped the read.
+    }
+    if (session_config_snapshot) {
+        const auto rebased = game::rebase_video_changes(
+            session_video_native_changes.value_or(*video_saved),
+            *session_video_runtime, current.value());
+        if (!rebased.has_value()) return false;
+        session_video_native_changes = rebased.value();
+        session_video_runtime = current.value();
+        video_config_write_times = *write_times;
+        events->append({0, diagnostics::Severity::info,
+            "KF2_RUNTIME_GRAPHICS_INI_CHANGED",
+            L"KF2's live graphics INI changed; its confirmed delta will be retained separately from temporary session changes",
+            L"graphics"});
+        return true;
+    }
+    const auto rebased = game::rebase_video_changes(
+        current.value(), *video_saved, *video_pending);
+    if (!rebased.has_value()) return false;
+    video_saved = current.value();
+    video_pending = rebased.value();
+    video_config_write_times = *write_times;
+    refresh_video_presentation();
+    invalidate();
+    return true;
 }
 
 void UiRuntime::refresh_game_configuration_for_process_start(
     bool settings_restart) {
-    reload_video_settings();
-    if (!video_saved) {
+    if (!session_config_snapshot) reload_video_settings();
+    const auto live = installation
+        ? game::read_video_settings(installation->config_root)
+        : Result<game::VideoSettings>::failure(
+              {ErrorCode::not_found, L"KF2 installation unavailable", 0});
+    if (!live.has_value()) {
         events->append({
             0, diagnostics::Severity::warning,
             settings_restart ? "KF2_NEW_SETTINGS_CONFIGURATION_UNAVAILABLE"
@@ -199,10 +301,30 @@ void UiRuntime::refresh_game_configuration_for_process_start(
         return;
     }
 
+    // A protected launch stages temporary runtime/session values. Never
+    // display those values as the user's saved graphics. Only a confirmed KF2
+    // settings restart may contribute a native delta to the personal config.
+    if (session_config_snapshot) {
+        if (settings_restart && session_video_runtime && video_saved) {
+            const auto rebased = game::rebase_video_changes(
+                session_video_native_changes.value_or(*video_saved),
+                *session_video_runtime, live.value());
+            if (rebased.has_value()) {
+                session_video_native_changes = rebased.value();
+            }
+        }
+        session_video_runtime = live.value();
+        video_config_write_times = read_video_config_write_times(
+            installation->config_root);
+    } else {
+        session_video_runtime.reset();
+        session_video_native_changes.reset();
+    }
+
     const auto variable_index = static_cast<std::size_t>(
         game::VideoOption::variable_frame_rate);
     adaptive_variable_frame_rate_enabled =
-        video_saved->choices[variable_index] != 0;
+        live.value().choices[variable_index] != 0;
     adaptive_frame_rate_mode_read_failed = false;
     std::error_code write_time_error;
     const auto game_config_write_time = std::filesystem::last_write_time(
@@ -214,7 +336,7 @@ void UiRuntime::refresh_game_configuration_for_process_start(
     }
 
     const auto flex = game::video_choice_label(
-        game::VideoOption::nvidia_flex, *video_saved);
+        game::VideoOption::nvidia_flex, live.value());
     events->append({
         0, diagnostics::Severity::info,
         settings_restart ? "KF2_NEW_SETTINGS_CONFIGURATION_DETECTED"
@@ -284,6 +406,7 @@ bool UiRuntime::reset_adaptive_frame_window_for_rate_mode_change(
 }
 
 void UiRuntime::cycle_video_option(game::VideoOption option) {
+    if (start_mode != StartMode::normal) return;
     if (!installation || !video_pending) {
         reload_video_settings();
         if (!video_pending) return;
@@ -331,30 +454,55 @@ void UiRuntime::cycle_video_option(game::VideoOption option) {
         // Overall quality deliberately does not touch NVIDIA FleX. FleX is a
         // separate explicit user choice and Adaptive never enables it.
     }
-    refresh_video_presentation();
-    model.set_notice({ui::NoticeSeverity::info, L"GRAPHICS_STAGED",
-                      std::wstring{game::video_option_label(option)} +
-                          L" is staged. Select Apply graphics to save it.",
-                      L""});
+    save_video_selection();
+}
+
+void UiRuntime::save_video_selection() {
+    const auto result = apply_video_settings();
+    if (!result.has_value()) {
+        if (session_config_snapshot && video_saved) {
+            video_pending = video_saved;
+            refresh_video_presentation();
+        } else {
+            reload_video_settings();
+        }
+    }
+    model.set_notice({
+        result.has_value() ? ui::NoticeSeverity::info
+                           : ui::NoticeSeverity::warning,
+        result.has_value() ? L"GRAPHICS_SAVED" : L"GRAPHICS_SAVE_FAILED",
+        result.has_value()
+            ? L"KF2 graphics saved and verified. A restore backup is available."
+            : L"Graphics were not changed: " + result.error().message,
+        L""});
     invalidate();
 }
 
 void UiRuntime::reset_video_settings() {
-    if (video_pending) {
-        video_pending = game::recommended_video_defaults(*video_pending);
+    if (start_mode != StartMode::normal) return;
+    if (!video_pending) reload_video_settings();
+    if (!video_pending) return;
+    if (installation && game::find_running_game_process(
+            installation->executable).has_value()) {
+        model.set_notice({ui::NoticeSeverity::warning, L"GRAPHICS_GAME_RUNNING",
+                          L"Close KF2 before changing its video settings.", L""});
+        invalidate();
+        return;
     }
-    refresh_video_presentation();
-    model.set_notice({ui::NoticeSeverity::info, L"GRAPHICS_RESET",
-                      L"Recommended graphics defaults are ready. Display mode and resolution were kept. Select Apply graphics to save them.",
-                      L""});
-    invalidate();
+    video_pending = game::recommended_video_defaults(*video_pending);
+    save_video_selection();
 }
 
 Result<config::ApplyResult> UiRuntime::apply_video_settings() {
+    static_cast<void>(synchronize_video_settings_from_game());
     if (!installation || !video_pending || !video_saved) {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::not_found, L"KF2 video settings are unavailable", 0});
     }
+    video_pending->choices[static_cast<std::size_t>(
+        game::VideoOption::vsync)] = 0;
+    video_pending->choices[static_cast<std::size_t>(
+        game::VideoOption::variable_frame_rate)] = 0;
     if (video_pending->choices == video_saved->choices &&
         video_pending->film_grain_percent == video_saved->film_grain_percent) {
         return Result<config::ApplyResult>::failure(
@@ -394,7 +542,7 @@ Result<config::ApplyResult> UiRuntime::apply_video_settings() {
         video_pending = rebased.value();
     }
     auto prepared = game::build_video_preview(
-        installation->config_root, *video_pending);
+        installation->config_root, *video_pending, &*video_saved);
     if (!prepared.has_value()) {
         if (rebuild_protected_launch) {
             static_cast<void>(prepare_automatic_external_launch_profile());
@@ -491,45 +639,16 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
             L"Adaptive locks are invalid; automatic launch fails closed",
             0});
     }
-    const auto profile = optimizer::bound_adaptive_profile(
-        stored_adaptive_profile(optimizer_settings),
-        optimizer_settings.adaptive_minimum_quality,
-        optimizer_settings.adaptive_maximum_quality);
-    const bool protected_profile_capability_requested =
-        should_prepare_protected_gameplay_provider(start_mode);
-    if (protected_profile_capability_requested && !profile) {
-        return Result<config::ApplyResult>::failure({
-            ErrorCode::invalid_argument,
-            L"No verified Adaptive profile fits the selected quality limits",
-            0});
-    }
-    const auto selected_profile = profile.value_or(
-        stored_adaptive_profile(optimizer_settings));
-    auto decision = optimizer::evaluate({
-        .target_fps = optimizer_settings.target_fps,
-        .quality = protected_profile_capability_requested
-            ? optimizer::QualityPolicy::performance
-            : optimizer::QualityPolicy::exact,
-        .profile = selected_profile,
-        .profile_preview_requested = true,
-        .evidence = optimizer_evidence,
-    });
-    if (protected_profile_capability_requested) {
-        const auto corpse_change = std::find_if(
-            decision.changes.begin(), decision.changes.end(),
-            [](const config::RequestedChange& change) {
-                return change.id == config::SettingId::corpse_limit;
-            });
-        if (corpse_change != decision.changes.end()) {
-            corpse_change->value = optimizer_settings.corpse_limit;
-            corpse_change->reason =
-                L"Use the selected Adaptive corpse ceiling; the protected "
-                L"runtime provider only reduces it during confirmed pressure";
-        }
-    }
-    auto changes = optimizer::filter_adaptive_locked_changes(
-        decision.changes, adaptive_locks);
-    preserve_user_flex_activation(changes);
+    // The protected launch only stages runtime capabilities. It must never
+    // replace the graphics selected by the user with a named startup profile.
+    // Adaptive may request individual runtime changes later, after validated
+    // gameplay telemetry confirms pressure.
+    std::vector<config::RequestedChange> changes{{
+        config::SettingId::corpse_limit,
+        optimizer_settings.corpse_limit,
+        config::ChangeSource::explicit_user,
+        L"Keep the user-selected maximum corpse count; the protected runtime "
+        L"provider only reduces it during confirmed pressure"}};
     enforce_temporal_aa_disabled(changes);
     enforce_async_physics_enabled(changes);
     enforce_one_frame_thread_lag(changes);
@@ -592,11 +711,9 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
             0});
     }
     auto prepared = prepare(
-        changes, protected_profile_capability_requested
-            ? L"General Adaptive launch plan with protected profile capability " +
-                  std::wstring{
-                      optimizer::adaptive_profile_label(selected_profile)}
-            : L"General Adaptive launch plan preserving the user's FleX setting");
+        changes,
+        L"Protected Adaptive runtime capabilities preserving the user's "
+        L"graphics and FleX settings");
     if (!prepared.has_value()) {
         return Result<config::ApplyResult>::failure(prepared.error());
     }
@@ -604,13 +721,10 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
     if (!applied.has_value()) return applied;
     last_backup_id = applied.value().backup.id;
     events->append({0, diagnostics::Severity::info,
-        "ADAPTIVE_LAUNCH_PROFILE_APPLIED",
-        protected_profile_capability_requested
-            ? L"General Adaptive applied the available bounded " +
-                  std::wstring{
-                      optimizer::adaptive_profile_label(selected_profile)} +
-                  L" protected-provider profile capability; individual locks were preserved and the exact pre-game snapshot remains protected"
-            : L"General Adaptive preserved the user's FleX setting; the exact pre-game snapshot remains protected",
+        "ADAPTIVE_LAUNCH_SETTINGS_APPLIED",
+        L"General Adaptive preserved the user's graphics and FleX settings "
+        L"while staging runtime capabilities; the selected maximum corpse "
+        L"count and exact pre-game snapshot remain protected",
         L"optimizer"});
     if (startup_memory_profile) {
         events->append({0, diagnostics::Severity::info,
@@ -813,16 +927,16 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
         return Result<bool>::failure(error);
     }
 
-    // A zero deadline deliberately means that the verified profile remains
-    // staged while the optimizer is open. The snapshot is restored on app
+    // A zero deadline deliberately means that the verified runtime
+    // capabilities remain staged while the optimizer is open. The snapshot is restored on app
     // shutdown, or after the next observed KF2 process exits, while the fixed
     // temporal-AA safety override remains disabled.
     session_config_waiting_for_launch = true;
     session_config_launch_deadline_ns = 0;
-    telemetry_failure = L"Adaptive profile prepared; waiting for KF2 runtime confirmation";
+    telemetry_failure = L"Adaptive runtime prepared; waiting for KF2 confirmation";
     events->append({0, diagnostics::Severity::info,
         "ADAPTIVE_EXTERNAL_LAUNCH_PREPARED",
-        L"The protected Adaptive profile and Published provider were staged for KF2 started from the optimizer, Steam or a shortcut; runtime capabilities require telemetry confirmation",
+        L"The protected Published provider and Adaptive runtime capabilities were staged for KF2 started from the optimizer, Steam or a shortcut; user graphics were preserved and runtime capabilities require telemetry confirmation",
         L"optimizer"});
     return Result<bool>::success(true);
 }
@@ -850,7 +964,7 @@ Result<bool> UiRuntime::rearm_automatic_external_launch_profile() {
 
     events->append({0, diagnostics::Severity::info,
         "ADAPTIVE_EXTERNAL_LAUNCH_REARMED",
-        L"The protected Adaptive profile and runtime capabilities were prepared again for the next KF2 start",
+        L"The protected Adaptive runtime capabilities were prepared again for the next KF2 start without replacing user graphics",
         L"optimizer"});
     return prepared;
 }
@@ -881,9 +995,7 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
             return;
         }
         video_pending->film_grain_percent = value;
-        refresh_video_presentation();
-        show_notice(ui::NoticeSeverity::info, L"GRAPHICS_STAGED",
-                    L"Film grain is staged. Select Apply graphics to save it.");
+        save_video_selection();
         return;
     }
     if (control->id == runtime::ControlId::advanced_screen_percentage) {

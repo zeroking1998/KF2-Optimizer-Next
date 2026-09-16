@@ -406,16 +406,9 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_particle_capability = L"UNAVAILABLE";
         status.adaptive_restore_generation = 0;
         status.adaptive_shadow_mode = optimizer_settings.adaptive_shadow_mode;
-        const auto launch_profile = optimizer::bound_adaptive_profile(
-            stored_adaptive_profile(optimizer_settings),
-            optimizer_settings.adaptive_minimum_quality,
-            optimizer_settings.adaptive_maximum_quality);
-        status.recommended_profile = launch_profile
-            ? std::wstring{optimizer::adaptive_profile_label(*launch_profile)}
-            : L"not available";
-        status.recommendation_reason = launch_profile
-                ? L"Automatic launch profile is ready; live telemetry will refine the next session"
-                : L"No verified named profile fits the selected quality limits";
+        status.recommended_profile = L"user settings";
+        status.recommendation_reason =
+            L"KF2 starts from the user's saved graphics; live telemetry may make temporary runtime changes";
         model.set_status(std::move(status));
         return;
     }
@@ -428,7 +421,7 @@ void UiRuntime::update_adaptive_controller(
             adaptive_decision = {};
             events->append({0, diagnostics::Severity::info,
                 "ADAPTIVE_GAMEPLAY_PAUSED",
-                L"Adaptive stopped evaluating menu/loading frames and preserved the last stable next-launch profile",
+                L"Adaptive stopped evaluating menu/loading frames and preserved the user's saved graphics",
                 L"optimizer"});
         }
         status.adaptive_state = L"observing";
@@ -450,13 +443,7 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_evidence = L"NOT_AVAILABLE";
         status.adaptive_restore_generation = 0;
         status.adaptive_shadow_mode = optimizer_settings.adaptive_shadow_mode;
-        const auto launch_profile = optimizer::bound_adaptive_profile(
-            stored_adaptive_profile(optimizer_settings),
-            optimizer_settings.adaptive_minimum_quality,
-            optimizer_settings.adaptive_maximum_quality);
-        status.recommended_profile = launch_profile
-            ? std::wstring{optimizer::adaptive_profile_label(*launch_profile)}
-            : L"not available";
+        status.recommended_profile = L"user settings";
         status.recommendation_reason = status.adaptive_reason;
         last_adaptive_state = optimizer::AdaptiveControllerState::observing;
         last_adaptive_disposition = optimizer::AdaptiveDisposition::hold;
@@ -949,42 +936,11 @@ void UiRuntime::update_adaptive_controller(
     }
     status.adaptive_shadow_mode = optimizer_settings.adaptive_shadow_mode;
 
-    const auto bounded_profile = optimizer::bound_adaptive_profile(
-        adaptive_decision.recommended_profile,
-        optimizer_settings.adaptive_minimum_quality,
-        optimizer_settings.adaptive_maximum_quality);
-    status.recommended_profile = bounded_profile
-        ? std::wstring{optimizer::adaptive_profile_label(*bounded_profile)}
-        : L"not available";
-    status.recommendation_reason = bounded_profile
-        ? adaptive_profile_reason(adaptive_decision)
-        : L"No verified named profile fits the selected quality limits";
-
-    std::optional<optimizer::Profile> profile_to_persist;
-    if (start_mode == StartMode::normal &&
-        adaptive_locks_valid &&
-        adaptive_decision.data.quality ==
-            optimizer::AdaptiveDataQuality::valid &&
-        adaptive_decision.state !=
-            optimizer::AdaptiveControllerState::observing &&
-        adaptive_decision.state !=
-            optimizer::AdaptiveControllerState::frozen &&
-        bounded_profile) {
-        profile_to_persist = adaptive_profile_gate.evaluate({
-            .current = stored_adaptive_profile(optimizer_settings),
-            .recommended = *bounded_profile,
-            .active_gameplay = active_gameplay,
-            .telemetry_valid = true,
-            .recovery_eligible =
-                adaptive_decision.quality_recovery_eligible,
-            .now_ns = now_ns});
-    } else {
-        adaptive_profile_gate.reset();
-    }
-    if (profile_to_persist) {
-        telemetry_pipeline::apply_adaptive_profile_effect(
-            *this, {*profile_to_persist}, status);
-    }
+    status.recommended_profile = L"user settings";
+    status.recommendation_reason = adaptive_profile_reason(adaptive_decision);
+    // Runtime decisions are session-local. Never persist a named profile for
+    // the next launch: the user's saved KF2 graphics are always the baseline.
+    adaptive_profile_gate.reset();
 
     const bool controller_changed =
         adaptive_decision.state != last_adaptive_state ||

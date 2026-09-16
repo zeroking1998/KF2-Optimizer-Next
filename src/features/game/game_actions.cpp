@@ -199,7 +199,7 @@ app::runtime::DispatchResult launch(
         runtime.events->append(
             {0, product_diagnostics::Severity::info,
              "ADAPTIVE_EXTERNAL_LAUNCH_REUSED",
-             L"The already verified external-launch profile was reused for the app-started KF2 session",
+             L"The already verified external-launch runtime setup was reused for the app-started KF2 session without replacing user graphics",
              L"optimizer"});
     }
     if (!automatic_external_profile_ready) {

@@ -27,22 +27,59 @@ constexpr std::wstring_view kGameEngine = L"KFGame.KFGameEngine";
 const std::filesystem::path kSystemFile{L"KFSystemSettings.ini"};
 const std::filesystem::path kEngineFile{L"KFEngine.ini"};
 const std::filesystem::path kGameFile{L"KFGame.ini"};
-constexpr std::array<std::wstring_view, 30> kTextureGroups{{
-    L"TEXTUREGROUP_World", L"TEXTUREGROUP_WorldNormalMap",
-    L"TEXTUREGROUP_WorldSpecular", L"TEXTUREGROUP_Character",
-    L"TEXTUREGROUP_CharacterNormalMap", L"TEXTUREGROUP_CharacterSpecular",
-    L"TEXTUREGROUP_Weapon", L"TEXTUREGROUP_WeaponNormalMap",
-    L"TEXTUREGROUP_WeaponSpecular", L"TEXTUREGROUP_Vehicle",
-    L"TEXTUREGROUP_VehicleNormalMap", L"TEXTUREGROUP_VehicleSpecular",
-    L"TEXTUREGROUP_Cinematic", L"TEXTUREGROUP_Effects",
-    L"TEXTUREGROUP_EffectsNotFiltered", L"TEXTUREGROUP_Skybox",
-    L"TEXTUREGROUP_UI", L"TEXTUREGROUP_Lightmap",
-    L"TEXTUREGROUP_Shadowmap", L"TEXTUREGROUP_RenderTarget",
-    L"TEXTUREGROUP_MobileFlattened", L"TEXTUREGROUP_ProcBuilding_Face",
-    L"TEXTUREGROUP_ProcBuilding_LightMap", L"TEXTUREGROUP_Terrain_Heightmap",
-    L"TEXTUREGROUP_Terrain_Weightmap", L"TEXTUREGROUP_ImageBasedReflection",
-    L"TEXTUREGROUP_Bokeh", L"TEXTUREGROUP_UIWithMips",
-    L"TEXTUREGROUP_UIStreamable", L"TEXTUREGROUP_Creature"}};
+// KFGFxOptionsMenu_Graphics.uc TextureResolutionSetting/TextureFilterSetting.
+// Only these groups are controlled by KF2's vanilla video menu.
+struct TextureGroup {
+    std::wstring_view name;
+    std::array<int, 4> bias;
+    bool no_mip_filter;
+};
+constexpr std::array<int, 4> kUiBias{0, 0, 0, 0};
+constexpr std::array<int, 4> kShadowBias{1, 0, 0, 0};
+constexpr std::array<int, 4> kCharacterBias{3, 2, 1, 0};
+constexpr std::array<int, 4> kWeaponBias{1, 1, 0, 0};
+constexpr std::array<int, 4> kWorldBias{2, 2, 1, 0};
+constexpr std::array<int, 4> kEffectsBias{1, 1, 0, 0};
+constexpr std::array<TextureGroup, 24> kTextureGroups{{
+    {L"TEXTUREGROUP_UI", kUiBias, true},
+    {L"TEXTUREGROUP_UIWithMips", kUiBias, false},
+    {L"TEXTUREGROUP_UIStreamable", kUiBias, true},
+    {L"TEXTUREGROUP_Shadowmap", kShadowBias, false},
+    {L"TEXTUREGROUP_Character", kCharacterBias, false},
+    {L"TEXTUREGROUP_CharacterNormalMap", kCharacterBias, false},
+    {L"TEXTUREGROUP_CharacterSpecular", kCharacterBias, false},
+    {L"TEXTUREGROUP_Creature", kCharacterBias, false},
+    {L"TEXTUREGROUP_CreatureNormalMap", kCharacterBias, false},
+    {L"TEXTUREGROUP_CreatureSpecular", kCharacterBias, false},
+    {L"TEXTUREGROUP_Cosmetic", kCharacterBias, false},
+    {L"TEXTUREGROUP_CosmeticNormalMap", kCharacterBias, false},
+    {L"TEXTUREGROUP_CosmeticSpecular", kCharacterBias, false},
+    {L"TEXTUREGROUP_Weapon", kWeaponBias, false},
+    {L"TEXTUREGROUP_WeaponNormalMap", kWeaponBias, false},
+    {L"TEXTUREGROUP_WeaponSpecular", kWeaponBias, false},
+    {L"TEXTUREGROUP_Weapon3rd", kWeaponBias, false},
+    {L"TEXTUREGROUP_Weapon3rdNormalMap", kWeaponBias, false},
+    {L"TEXTUREGROUP_Weapon3rdSpecular", kWeaponBias, false},
+    {L"TEXTUREGROUP_World", kWorldBias, false},
+    {L"TEXTUREGROUP_WorldNormalMap", kWorldBias, false},
+    {L"TEXTUREGROUP_WorldSpecular", kWorldBias, false},
+    {L"TEXTUREGROUP_Effects", kEffectsBias, false},
+    {L"TEXTUREGROUP_EffectsNotFiltered", kEffectsBias, true}}};
+
+constexpr std::array<VideoOption, 15> kOverallQualityTargets{{
+    VideoOption::environment_detail, VideoOption::character_detail,
+    VideoOption::fx_quality, VideoOption::texture_resolution,
+    VideoOption::texture_filtering, VideoOption::shadow_quality,
+    VideoOption::realtime_reflections, VideoOption::anti_aliasing,
+    VideoOption::bloom, VideoOption::motion_blur,
+    VideoOption::ambient_occlusion, VideoOption::depth_of_field,
+    VideoOption::volumetric_lighting, VideoOption::lens_flares,
+    VideoOption::light_shafts}};
+constexpr std::array<std::array<int, 15>, 4> kOverallQualityPresets{{
+    {{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},
+    {{1,0,1,1,1,1,0,1,1,0,0,0,0,0,0}},
+    {{2,1,2,2,2,2,0,1,2,0,1,1,1,1,1}},
+    {{3,2,3,3,3,3,1,1,2,1,2,1,1,1,1}}}};
 
 std::size_t index(VideoOption option) noexcept {
     return static_cast<std::size_t>(option);
@@ -146,6 +183,42 @@ Result<bool> put_double(config::IniDocument& document, std::wstring_view key,
     return put(document, key, value);
 }
 
+Result<bool> put_game_value(config::IniDocument& document,
+                            std::wstring_view section,
+                            std::wstring_view key,
+                            std::wstring_view value) {
+    const auto changed = document.upsert(section, key, value);
+    if (changed.shadowed_occurrences != 0) {
+        return Result<bool>::failure({
+            ErrorCode::stale_data,
+            L"Duplicate KF2 class graphics setting was rejected", 0});
+    }
+    return Result<bool>::success(changed.changed);
+}
+
+Result<bool> put_game_bool(config::IniDocument& document,
+                           std::wstring_view section,
+                           std::wstring_view key, bool value) {
+    return put_game_value(document, section, key,
+                          value ? L"True" : L"False");
+}
+
+Result<bool> put_game_int(config::IniDocument& document,
+                          std::wstring_view section,
+                          std::wstring_view key, int value) {
+    return put_game_value(document, section, key, std::to_wstring(value));
+}
+
+double class_number(const config::IniDocument& document,
+                    std::wstring_view section, std::wstring_view key,
+                    double fallback) {
+    const auto value = document.find(section, key);
+    if (!value) return fallback;
+    wchar_t* end{};
+    const double parsed = std::wcstod(value->c_str(), &end);
+    return end != value->c_str() && std::isfinite(parsed) ? parsed : fallback;
+}
+
 bool update_tuple_field(std::wstring& tuple, std::wstring_view field,
                         std::wstring_view value) {
     const std::wstring needle = std::wstring{field} + L"=";
@@ -188,94 +261,73 @@ std::optional<int> tuple_integer(
     return static_cast<int>(parsed);
 }
 
-std::optional<std::array<int, 4>> texture_bias_profile(
-    std::wstring_view group) {
-    const auto name = lower(std::wstring{group});
-    if (name.rfind(L"texturegroup_ui", 0) == 0) return std::nullopt;
-    if (name.find(L"character") != std::wstring::npos ||
-        name.find(L"creature") != std::wstring::npos) {
-        return std::array<int, 4>{3, 2, 1, 0};
-    }
-    if (name.find(L"world") != std::wstring::npos ||
-        name.find(L"terrain") != std::wstring::npos) {
-        return std::array<int, 4>{2, 2, 1, 0};
-    }
-    if (name.find(L"shadowmap") != std::wstring::npos) {
-        return std::array<int, 4>{1, 0, 0, 0};
-    }
-    return std::array<int, 4>{1, 1, 0, 0};
-}
-
 int texture_resolution_choice(const config::IniDocument& document) {
-    std::array<int, 4> scores{};
-    int samples = 0;
-    for (const auto group : kTextureGroups) {
-        const auto profile = texture_bias_profile(group);
-        const auto tuple = document.find(kSystem, group);
-        if (!profile || !tuple) continue;
-        const auto bias = tuple_integer(*tuple, L"LODBias");
-        if (!bias) continue;
-        ++samples;
-        const int bounded_bias = std::clamp(*bias, -1000, 1000);
-        for (std::size_t level = 0; level < scores.size(); ++level) {
-            scores[level] += std::abs(bounded_bias - (*profile)[level]);
+    bool found = false;
+    for (int level = 0; level < 4; ++level) {
+        bool matches = true;
+        for (const auto& group : kTextureGroups) {
+            const auto tuple = document.find(kSystem, group.name);
+            if (!tuple) continue;
+            found = true;
+            const auto bias = tuple_integer(*tuple, L"LODBias");
+            if (!bias || *bias != group.bias[level]) {
+                matches = false;
+                break;
+            }
         }
+        if (matches && found) return level;
     }
-    if (samples == 0) return 3;
-    return static_cast<int>(std::distance(
-        scores.begin(), std::min_element(scores.begin(), scores.end())));
+    return found ? -1 : 3;
 }
 
 int texture_filtering_choice(const config::IniDocument& document) {
-    const int anisotropy = std::clamp(
-        integer(document, L"MaxAnisotropy", 16), 1, 16);
-    for (const auto group : kTextureGroups) {
-        const auto tuple = document.find(kSystem, group);
-        if (!tuple) continue;
-        const auto minmag = tuple_field(*tuple, L"MinMagFilter");
-        const auto mip = tuple_field(*tuple, L"MipFilter");
-        if (same(minmag, L"linear")) {
-            if (same(mip, L"point")) return 0;
-            if (same(mip, L"linear")) return 1;
+    constexpr std::array<int, 4> anisotropy_values{1, 1, 4, 16};
+    constexpr std::array<std::wstring_view, 4> minmag{
+        L"Linear", L"Linear", L"Aniso", L"Aniso"};
+    constexpr std::array<std::wstring_view, 4> mip{
+        L"Point", L"Linear", L"Linear", L"Linear"};
+    const int anisotropy = integer(document, L"MaxAnisotropy", 16);
+    bool found = false;
+    for (int level = 0; level < 4; ++level) {
+        if (anisotropy != anisotropy_values[level]) continue;
+        bool matches = true;
+        for (const auto& group : kTextureGroups) {
+            const auto tuple = document.find(kSystem, group.name);
+            if (!tuple) continue;
+            found = true;
+            if (!same(tuple_field(*tuple, L"MinMagFilter"), minmag[level]) ||
+                !same(tuple_field(*tuple, L"MipFilter"),
+                      group.no_mip_filter ? L"Point" : mip[level])) {
+                matches = false;
+                break;
+            }
         }
-        if (same(minmag, L"aniso")) return anisotropy >= 16 ? 3 : 2;
+        if (matches) return level;
     }
-    if (anisotropy >= 16) return 3;
-    if (anisotropy >= 4) return 2;
-    return 1;
+    return found ? -1 : (anisotropy >= 16 ? 3 : anisotropy >= 4 ? 2 : 1);
 }
 
 Result<bool> update_texture_groups(
-    config::IniDocument& document, int resolution, int filtering) {
+    config::IniDocument& document, int resolution, int filtering,
+    bool update_resolution, bool update_filtering) {
     bool changed = false;
-    for (const auto group : kTextureGroups) {
-        auto tuple = document.find(kSystem, group);
+    for (const auto& group : kTextureGroups) {
+        auto tuple = document.find(kSystem, group.name);
         if (!tuple) continue;
-        int bias = 0;
-        const auto name = lower(std::wstring{group});
-        if (name.find(L"character") != std::wstring::npos ||
-            name.find(L"creature") != std::wstring::npos) {
-            constexpr std::array<int, 4> values{3, 2, 1, 0};
-            bias = values[resolution];
-        } else if (name.find(L"world") != std::wstring::npos ||
-                   name.find(L"terrain") != std::wstring::npos) {
-            constexpr std::array<int, 4> values{2, 2, 1, 0};
-            bias = values[resolution];
-        } else if (name.find(L"shadowmap") != std::wstring::npos) {
-            constexpr std::array<int, 4> values{1, 0, 0, 0};
-            bias = values[resolution];
-        } else if (name.find(L"ui") == std::wstring::npos) {
-            constexpr std::array<int, 4> values{1, 1, 0, 0};
-            bias = values[resolution];
+        if (update_resolution) {
+            update_tuple_field(*tuple, L"LODBias",
+                               std::to_wstring(group.bias[resolution]));
         }
-        update_tuple_field(*tuple, L"LODBias", std::to_wstring(bias));
         constexpr std::array<std::wstring_view, 4> minmag{
             L"Linear", L"Linear", L"Aniso", L"Aniso"};
         constexpr std::array<std::wstring_view, 4> mip{
             L"Point", L"Linear", L"Linear", L"Linear"};
-        update_tuple_field(*tuple, L"MinMagFilter", minmag[filtering]);
-        update_tuple_field(*tuple, L"MipFilter", mip[filtering]);
-        const auto result = put(document, group, *tuple);
+        if (update_filtering) {
+            update_tuple_field(*tuple, L"MinMagFilter", minmag[filtering]);
+            update_tuple_field(*tuple, L"MipFilter",
+                               group.no_mip_filter ? L"Point" : mip[filtering]);
+        }
+        const auto result = put(document, group.name, *tuple);
         if (!result.has_value()) return result;
         changed = changed || result.value();
     }
@@ -306,6 +358,117 @@ std::wstring choice(std::initializer_list<std::wstring_view> values, int selecte
 }
 
 }  // namespace
+
+std::optional<GameMenuGraphicsReadback>
+parse_game_menu_graphics_readback(std::string_view line) {
+    constexpr std::string_view marker =
+        "KF2OPT_GFX_MENU schema=1 state=applied ";
+    const auto start = line.find(marker);
+    if (start == std::string_view::npos || line.size() > 4096) {
+        return std::nullopt;
+    }
+    std::string_view payload = line.substr(start + marker.size());
+    constexpr std::array<std::string_view, 22> names{{
+        "resx", "resy", "display_full", "display_borderless", "vsync",
+        "variable_fps", "environment", "character", "fx",
+        "texture_resolution", "texture_filtering", "shadows", "reflections",
+        "aa", "bloom", "motion_blur", "ao", "dof", "volumetric",
+        "lens_flares", "light_shafts", "flex"}};
+    std::array<int, names.size()> values{};
+    for (std::size_t field = 0; field < names.size(); ++field) {
+        const auto first = payload.find_first_not_of(" \t");
+        if (first == std::string_view::npos) return std::nullopt;
+        payload.remove_prefix(first);
+        const auto end = payload.find_first_of(" \t\r\n");
+        const auto token = payload.substr(0, end);
+        const auto equals = token.find('=');
+        if (equals == std::string_view::npos ||
+            token.substr(0, equals) != names[field]) {
+            return std::nullopt;
+        }
+        const auto number = token.substr(equals + 1);
+        const auto parsed = std::from_chars(
+            number.data(), number.data() + number.size(), values[field]);
+        if (parsed.ec != std::errc{} ||
+            parsed.ptr != number.data() + number.size()) {
+            return std::nullopt;
+        }
+        payload.remove_prefix(end == std::string_view::npos ? payload.size() : end);
+    }
+    if (payload.find_first_not_of(" \t\r\n") != std::string_view::npos ||
+        values[0] < 640 || values[0] > 16384 ||
+        values[1] < 480 || values[1] > 16384 ||
+        values[2] < 0 || values[2] > 1 ||
+        values[3] < 0 || values[3] > 1 ||
+        (values[2] != 0 && values[3] != 0) ||
+        values[4] < 0 || values[4] > 1 ||
+        values[5] < 0 || values[5] > 1) {
+        return std::nullopt;
+    }
+    constexpr std::array<int, 16> maxima{{
+        3, 2, 3, 3, 3, 3, 1, 1, 2, 1, 2, 3, 1, 1, 1, 2}};
+    for (std::size_t field = 0; field < maxima.size(); ++field) {
+        if (values[field + 6] < -1 || values[field + 6] > maxima[field]) {
+            return std::nullopt;
+        }
+    }
+    GameMenuGraphicsReadback result;
+    result.choices.fill(-1);
+    result.resolution = {values[0], values[1]};
+    result.choices[index(VideoOption::display)] = values[2] ? 2 : values[3] ? 1 : 0;
+    result.choices[index(VideoOption::vsync)] = values[4];
+    result.choices[index(VideoOption::variable_frame_rate)] = values[5];
+    constexpr std::array<VideoOption, 16> options{{
+        VideoOption::environment_detail, VideoOption::character_detail,
+        VideoOption::fx_quality, VideoOption::texture_resolution,
+        VideoOption::texture_filtering, VideoOption::shadow_quality,
+        VideoOption::realtime_reflections, VideoOption::anti_aliasing,
+        VideoOption::bloom, VideoOption::motion_blur,
+        VideoOption::ambient_occlusion, VideoOption::depth_of_field,
+        VideoOption::volumetric_lighting, VideoOption::lens_flares,
+        VideoOption::light_shafts, VideoOption::nvidia_flex}};
+    for (std::size_t field = 0; field < options.size(); ++field) {
+        result.choices[index(options[field])] = values[field + 6];
+    }
+    return result;
+}
+
+VideoSettings present_game_menu_graphics_readback(
+    const VideoSettings& baseline,
+    const GameMenuGraphicsReadback& readback) {
+    VideoSettings result = baseline;
+    add_resolutions(result, readback.resolution);
+    const auto selected = std::find_if(
+        result.resolutions.begin(), result.resolutions.end(),
+        [&](const Resolution& candidate) {
+            return candidate.width == readback.resolution.width &&
+                   candidate.height == readback.resolution.height;
+        });
+    result.choices[index(VideoOption::resolution)] =
+        static_cast<int>(selected - result.resolutions.begin());
+    for (std::size_t option = 0; option < kVideoOptionCount; ++option) {
+        if (option != index(VideoOption::resolution) &&
+            option != index(VideoOption::overall_quality)) {
+            result.choices[option] = readback.choices[option];
+        }
+    }
+    result.choices[index(VideoOption::overall_quality)] = -1;
+    for (int preset = 0; preset < 4; ++preset) {
+        bool match = true;
+        for (std::size_t component = 0;
+             component < kOverallQualityTargets.size(); ++component) {
+            match = match && result.choices[index(
+                kOverallQualityTargets[component])] ==
+                kOverallQualityPresets[preset][component];
+        }
+        if (match) {
+            result.choices[index(VideoOption::overall_quality)] = preset;
+            break;
+        }
+    }
+    result.flex_level = std::max(0, result.choices[index(VideoOption::nvidia_flex)]);
+    return result;
+}
 
 std::wstring_view video_option_label(VideoOption option) noexcept {
     constexpr std::array<std::wstring_view, kVideoOptionCount> labels{{
@@ -449,20 +612,39 @@ Result<VideoSettings> rebase_video_changes(
     const VideoSettings& desired) {
     VideoSettings rebased = original;
     const auto resolution_index = index(VideoOption::resolution);
+    const auto selected_resolution = [&](const VideoSettings& source)
+        -> Result<Resolution> {
+        const int selected = source.choices[resolution_index];
+        if (selected < 0 || selected >= static_cast<int>(source.resolutions.size())) {
+            return Result<Resolution>::failure({
+                ErrorCode::invalid_argument,
+                L"The selected resolution is invalid", 0});
+        }
+        return Result<Resolution>::success(
+            source.resolutions[static_cast<std::size_t>(selected)]);
+    };
+    const auto previous_resolution = selected_resolution(staged_base);
+    if (!previous_resolution.has_value()) {
+        return Result<VideoSettings>::failure(previous_resolution.error());
+    }
+    const auto requested_resolution = selected_resolution(desired);
+    if (!requested_resolution.has_value()) {
+        return Result<VideoSettings>::failure(requested_resolution.error());
+    }
     for (std::size_t option = 0; option < kVideoOptionCount; ++option) {
-        if (desired.choices[option] == staged_base.choices[option]) continue;
+        if (option == resolution_index) {
+            const auto& previous = previous_resolution.value();
+            const auto& requested = requested_resolution.value();
+            if (previous.width == requested.width &&
+                previous.height == requested.height) continue;
+        } else if (desired.choices[option] == staged_base.choices[option]) {
+            continue;
+        }
         if (option != resolution_index) {
             rebased.choices[option] = desired.choices[option];
             continue;
         }
-        const int selected = desired.choices[resolution_index];
-        if (selected < 0 ||
-            selected >= static_cast<int>(desired.resolutions.size())) {
-            return Result<VideoSettings>::failure({
-                ErrorCode::invalid_argument,
-                L"The staged resolution is invalid", 0});
-        }
-        const auto requested = desired.resolutions[static_cast<std::size_t>(selected)];
+        const auto requested = requested_resolution.value();
         auto match = std::find_if(
             rebased.resolutions.begin(), rebased.resolutions.end(),
             [&](const Resolution& value) {
@@ -510,20 +692,30 @@ Result<VideoSettings> read_video_settings(const std::filesystem::path& config_ro
     if (!game_document.has_value()) {
         return Result<VideoSettings>::failure(game_document.error());
     }
+    const auto& script_document = game_document.value();
     settings.choices[index(VideoOption::variable_frame_rate)] =
         same(game_document.value().find(kGameEngine, L"bSmoothFrameRate"), L"true") ? 0 : 1;
+    // KF2's Graphics-menu slider maps [0, 1] to FilmGrainScale [0.5, 37.5].
     settings.film_grain_percent = std::clamp(
-        static_cast<int>(number(document, L"ImageGrainScaler", 0.5) *
-                         100.0 + 0.5),
-        0, 200);
+        static_cast<int>((number(document, L"ImageGrainScaler", 0.5) - 0.5) /
+                         37.0 * 100.0 + 0.5),
+        0, 100);
+    const int detail_mode = std::clamp(integer(document, L"DetailMode", 2), 0, 2);
     settings.choices[index(VideoOption::environment_detail)] =
-        std::clamp(integer(document, L"DetailMode", 2), 0, 2);
+        detail_mode == 2 && class_number(
+            script_document, L"Engine.WorldInfo", L"DestructionLifetimeScale",
+            number(document, L"DestructionLifetimeScale", 1.0)) >= 1.15
+            ? 3 : detail_mode;
     settings.choices[index(VideoOption::character_detail)] =
         integer(document, L"SkeletalMeshLODBias", 0) > 0 ? 0 :
         bool_choice(document, L"AllowSubsurfaceScattering") ? 2 : 1;
+    const int fog_quality = integer(document, L"DistanceFogQuality", 1);
+    const double emitter_pool = class_number(
+        script_document, L"Engine.WorldInfo", L"EmitterPoolScale",
+        number(document, L"EmitterPoolScale", 1.0));
     settings.choices[index(VideoOption::fx_quality)] =
-        std::clamp(integer(document, L"DistanceFogQuality", 1) +
-                   (number(document, L"EmitterPoolScale", 1.0) > 1.0 ? 2 : 1), 0, 3);
+        fog_quality <= 0 ? (emitter_pool <= 0.35 ? 0 : 1) :
+        (emitter_pool <= 1.1 ? 2 : 3);
     settings.choices[index(VideoOption::texture_resolution)] =
         texture_resolution_choice(document);
     settings.choices[index(VideoOption::texture_filtering)] =
@@ -544,28 +736,14 @@ Result<VideoSettings> read_video_settings(const std::filesystem::path& config_ro
     settings.choices[index(VideoOption::volumetric_lighting)] = bool_choice(document, L"LightCones");
     settings.choices[index(VideoOption::lens_flares)] = bool_choice(document, L"bAllowLensFlares");
     settings.choices[index(VideoOption::light_shafts)] = bool_choice(document, L"bAllowLightShafts");
-    constexpr std::array<std::array<int, 15>, 4> overall_presets{{
-        {{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},
-        {{1,0,1,1,1,1,0,1,1,0,0,0,0,0,0}},
-        {{2,1,2,2,2,2,0,1,2,0,1,1,1,1,1}},
-        {{3,2,3,3,3,3,1,1,2,1,2,1,1,1,1}},
-    }};
-    constexpr std::array<VideoOption, 15> overall_targets{{
-        VideoOption::environment_detail, VideoOption::character_detail,
-        VideoOption::fx_quality, VideoOption::texture_resolution,
-        VideoOption::texture_filtering, VideoOption::shadow_quality,
-        VideoOption::realtime_reflections, VideoOption::anti_aliasing,
-        VideoOption::bloom, VideoOption::motion_blur,
-        VideoOption::ambient_occlusion, VideoOption::depth_of_field,
-        VideoOption::volumetric_lighting, VideoOption::lens_flares,
-        VideoOption::light_shafts,
-    }};
     settings.choices[index(VideoOption::overall_quality)] = 4;
     for (int preset = 0; preset < 4; ++preset) {
         bool match = true;
-        for (std::size_t component = 0; component < overall_targets.size(); ++component) {
-            match = match && settings.choices[index(overall_targets[component])] ==
-                               overall_presets[preset][component];
+        for (std::size_t component = 0;
+             component < kOverallQualityTargets.size(); ++component) {
+            match = match && settings.choices[index(
+                kOverallQualityTargets[component])] ==
+                kOverallQualityPresets[preset][component];
         }
         if (match) {
             settings.choices[index(VideoOption::overall_quality)] = preset;
@@ -606,13 +784,31 @@ Result<bool> read_variable_frame_rate_enabled(
 }
 
 Result<config::ConfigPreview> build_video_preview(
-    const std::filesystem::path& config_root, const VideoSettings& settings) {
+    const std::filesystem::path& config_root, const VideoSettings& settings,
+    const VideoSettings* baseline) {
     auto bytes = read_file(config_root / kSystemFile);
     if (!bytes.has_value()) return Result<config::ConfigPreview>::failure(bytes.error());
     auto parsed = config::IniDocument::parse(bytes.value());
     if (!parsed.has_value()) return Result<config::ConfigPreview>::failure(parsed.error());
     auto document = std::move(parsed.value());
     const auto selected = [&](VideoOption option) { return settings.choices[index(option)]; };
+    const auto option_changed = [&](VideoOption option) {
+        if (!baseline) return true;
+        if (option != VideoOption::resolution) {
+            return selected(option) != baseline->choices[index(option)];
+        }
+        const int requested = selected(option);
+        const int previous = baseline->choices[index(option)];
+        if (requested < 0 ||
+            requested >= static_cast<int>(settings.resolutions.size()) ||
+            previous < 0 ||
+            previous >= static_cast<int>(baseline->resolutions.size())) {
+            return true;
+        }
+        const auto& current = settings.resolutions[static_cast<std::size_t>(requested)];
+        const auto& saved = baseline->resolutions[static_cast<std::size_t>(previous)];
+        return current.width != saved.width || current.height != saved.height;
+    };
     bool changed = false;
     const auto apply_result = [&](Result<bool> result) -> bool {
         if (!result.has_value()) return false;
@@ -620,8 +816,9 @@ Result<config::ConfigPreview> build_video_preview(
         return true;
     };
     const int display = selected(VideoOption::display);
-    if (!apply_result(put_bool(document, L"Fullscreen", display == 2)) ||
-        !apply_result(put_bool(document, L"Borderless", display == 1))) {
+    if (option_changed(VideoOption::display) &&
+        (!apply_result(put_bool(document, L"Fullscreen", display == 2)) ||
+         !apply_result(put_bool(document, L"Borderless", display == 1)))) {
         return Result<config::ConfigPreview>::failure(
             {ErrorCode::stale_data, L"Display settings contain duplicates", 0});
     }
@@ -630,27 +827,32 @@ Result<config::ConfigPreview> build_video_preview(
         return Result<config::ConfigPreview>::failure(
             {ErrorCode::invalid_argument, L"Resolution selection is invalid", 0});
     }
-    if (!apply_result(put_int(document, L"ResX", settings.resolutions[resolution].width)) ||
-        !apply_result(put_int(document, L"ResY", settings.resolutions[resolution].height)) ||
-        !apply_result(put_bool(document, L"UseVsync", selected(VideoOption::vsync) != 0))) {
+    if ((option_changed(VideoOption::resolution) &&
+         (!apply_result(put_int(document, L"ResX", settings.resolutions[resolution].width)) ||
+          !apply_result(put_int(document, L"ResY", settings.resolutions[resolution].height)))) ||
+        (option_changed(VideoOption::vsync) &&
+         !apply_result(put_bool(document, L"UseVsync", selected(VideoOption::vsync) != 0)))) {
         return Result<config::ConfigPreview>::failure(
             {ErrorCode::stale_data, L"Basic video settings contain duplicates", 0});
     }
-    const double grain = static_cast<double>(settings.film_grain_percent) / 100.0;
+    const double grain = 0.5 + 37.0 *
+        static_cast<double>(settings.film_grain_percent) / 100.0;
     wchar_t grain_text[32]{};
     swprintf_s(grain_text, L"%.2f", grain);
-    if (!apply_result(put_double(document, L"ImageGrainScaler", grain_text))) {
+    if ((!baseline || settings.film_grain_percent != baseline->film_grain_percent) &&
+        !apply_result(put_double(document, L"ImageGrainScaler", grain_text))) {
         return Result<config::ConfigPreview>::failure(
             {ErrorCode::stale_data, L"Film grain setting contains duplicates", 0});
     }
 
     const int environment = selected(VideoOption::environment_detail);
     constexpr std::array<std::wstring_view, 4> lifetime{L"0.25", L"0.5", L"1.0", L"1.2"};
-    if (!apply_result(put_int(document, L"DetailMode", environment < 2 ? environment : 2)) ||
+    if (option_changed(VideoOption::environment_detail) &&
+        (!apply_result(put_int(document, L"DetailMode", environment < 2 ? environment : 2)) ||
         !apply_result(put_double(document, L"DestructionLifetimeScale", lifetime[environment])) ||
         !apply_result(put_bool(document, L"bDisableCanBecomeDynamicWakeup", environment == 0)) ||
         !apply_result(put_int(document, L"MakeDynamicCollisionThreshold", environment < 2 ? 200 : 150)) ||
-        !apply_result(put_bool(document, L"AllowLightFunctions", environment >= 2))) {
+         !apply_result(put_bool(document, L"AllowLightFunctions", environment >= 2)))) {
         return Result<config::ConfigPreview>::failure(
             {ErrorCode::stale_data, L"Environment settings contain duplicates", 0});
     }
@@ -658,14 +860,15 @@ Result<config::ConfigPreview> build_video_preview(
     const int character = selected(VideoOption::character_detail);
     constexpr std::array<int, 3> wounds{2, 5, 5};
     constexpr std::array<std::wstring_view, 3> kinematic{L"3.0", L"1.3", L"1.0"};
-    if (!apply_result(put_int(document, L"SkeletalMeshLODBias", character == 0 ? 1 : 0)) ||
+    if (option_changed(VideoOption::character_detail) &&
+        (!apply_result(put_int(document, L"SkeletalMeshLODBias", character == 0 ? 1 : 0)) ||
         !apply_result(put_bool(document, L"AllowSubsurfaceScattering", character == 2)) ||
         !apply_result(put_int(document, L"MaxBodyWoundDecals", wounds[character])) ||
         !apply_result(put_double(document, L"KinematicUpdateDistFactorScale", kinematic[character])) ||
         !apply_result(put_bool(document, L"ShouldCorpseCollideWithDead", character > 0)) ||
         !apply_result(put_bool(document, L"ShouldCorpseCollideWithLiving", character > 0)) ||
         !apply_result(put_bool(document, L"ShouldCorpseCollideWithDeadAfterSleep", character == 2)) ||
-        !apply_result(put_bool(document, L"bAllowPhysics", character > 0))) {
+         !apply_result(put_bool(document, L"bAllowPhysics", character > 0)))) {
         return Result<config::ConfigPreview>::failure(
             {ErrorCode::stale_data, L"Character settings contain duplicates", 0});
     }
@@ -682,7 +885,8 @@ Result<config::ConfigPreview> build_video_preview(
     constexpr std::array<int, 4> gore{8, 8, 10, 15};
     constexpr std::array<int, 4> splats{25, 50, 75, 100};
     const bool high_fx = fx >= 2;
-    if (!apply_result(put_int(document, L"ParticleLODBias", particle_bias[fx])) ||
+    if (option_changed(VideoOption::fx_quality) &&
+        (!apply_result(put_int(document, L"ParticleLODBias", particle_bias[fx])) ||
         !apply_result(put_int(document, L"DistanceFogQuality", fog[fx])) ||
         !apply_result(put_bool(document, L"Distortion", high_fx)) ||
         !apply_result(put_bool(document, L"FilteredDistortion", high_fx)) ||
@@ -701,19 +905,20 @@ Result<config::ConfigPreview> build_video_preview(
         !apply_result(put_int(document, L"MaxGoreEffects", gore[fx])) ||
         !apply_result(put_bool(document, L"AllowSecondaryBloodEffects", high_fx)) ||
         !apply_result(put_bool(document, L"AllowBloodSplatterDecals", high_fx)) ||
-        !apply_result(put_int(document, L"MaxPersistentSplatsPerFrame", splats[fx]))) {
+         !apply_result(put_int(document, L"MaxPersistentSplatsPerFrame", splats[fx])))) {
         return Result<config::ConfigPreview>::failure(
             {ErrorCode::stale_data, L"FX settings contain duplicates", 0});
     }
 
     const int shadow = selected(VideoOption::shadow_quality);
-    constexpr std::array<int, 4> whole_shadow{1280, 1280, 1280, 2048};
+    constexpr std::array<int, 4> whole_shadow{1204, 1204, 1280, 2048};
     constexpr std::array<int, 4> max_shadow{1024, 1024, 1024, 1536};
     constexpr std::array<int, 4> fade{256, 128, 128, 64};
     constexpr std::array<int, 4> min_shadow{128, 64, 64, 32};
     constexpr std::array<std::wstring_view, 4> texels{L"0.5", L"1.0", L"1.3", L"2.0"};
     constexpr std::array<std::wstring_view, 4> distance{L"0.75", L"0.75", L"1.0", L"1.5"};
-    if (!apply_result(put_bool(document, L"bAllowWholeSceneDominantShadows", shadow > 0)) ||
+    if (option_changed(VideoOption::shadow_quality) &&
+        (!apply_result(put_bool(document, L"bAllowWholeSceneDominantShadows", shadow > 0)) ||
         !apply_result(put_bool(document, L"bOverrideMapWholeSceneDominantShadowSetting", shadow == 3)) ||
         !apply_result(put_bool(document, L"bAllowDynamicShadows", true)) ||
         !apply_result(put_bool(document, L"bAllowPerObjectShadows", shadow > 0)) ||
@@ -723,32 +928,42 @@ Result<config::ConfigPreview> build_video_preview(
         !apply_result(put_int(document, L"MinShadowResolution", min_shadow[shadow])) ||
         !apply_result(put_double(document, L"ShadowTexelsPerPixel", texels[shadow])) ||
         !apply_result(put_double(document, L"GlobalShadowDistanceScale", distance[shadow])) ||
-        !apply_result(put_bool(document, L"AllowForegroundPreshadows", shadow >= 2))) {
+         !apply_result(put_bool(document, L"AllowForegroundPreshadows", shadow >= 2)))) {
         return Result<config::ConfigPreview>::failure(
             {ErrorCode::stale_data, L"Shadow settings contain duplicates", 0});
     }
 
     const int bloom = selected(VideoOption::bloom);
     const int ao = selected(VideoOption::ambient_occlusion);
-    if (!apply_result(put_bool(document, L"bAllowScreenSpaceReflections", selected(VideoOption::realtime_reflections) != 0)) ||
-        !apply_result(put_bool(document, L"PostProcessAA", selected(VideoOption::anti_aliasing) != 0)) ||
-        !apply_result(put_bool(document, L"bAllowTemporalAA", false)) ||
-        !apply_result(put_bool(document, L"Bloom", bloom != 0)) ||
-        !apply_result(put_int(document, L"BloomQuality", bloom)) ||
-        !apply_result(put_bool(document, L"MotionBlur", selected(VideoOption::motion_blur) != 0)) ||
-        !apply_result(put_int(document, L"MotionBlurQuality", selected(VideoOption::motion_blur))) ||
-        !apply_result(put_bool(document, L"AmbientOcclusion", ao != 0)) ||
-        !apply_result(put_bool(document, L"HBAO", ao == 2)) ||
-        !apply_result(put_bool(document, L"DepthOfField", selected(VideoOption::depth_of_field) != 0)) ||
-        !apply_result(put_int(document, L"DepthOfFieldQuality", selected(VideoOption::depth_of_field))) ||
-        !apply_result(put_bool(document, L"LightCones", selected(VideoOption::volumetric_lighting) != 0)) ||
-        !apply_result(put_bool(document, L"bAllowLensFlares", selected(VideoOption::lens_flares) != 0)) ||
-        !apply_result(put_bool(document, L"bAllowLightShafts", selected(VideoOption::light_shafts) != 0))) {
+    if ((option_changed(VideoOption::realtime_reflections) &&
+         !apply_result(put_bool(document, L"bAllowScreenSpaceReflections", selected(VideoOption::realtime_reflections) != 0))) ||
+        (option_changed(VideoOption::anti_aliasing) &&
+         (!apply_result(put_bool(document, L"PostProcessAA", selected(VideoOption::anti_aliasing) != 0)) ||
+          !apply_result(put_bool(document, L"bAllowTemporalAA", false)))) ||
+        (option_changed(VideoOption::bloom) &&
+         (!apply_result(put_bool(document, L"Bloom", bloom != 0)) ||
+          !apply_result(put_int(document, L"BloomQuality", bloom)))) ||
+        (option_changed(VideoOption::motion_blur) &&
+         (!apply_result(put_bool(document, L"MotionBlur", selected(VideoOption::motion_blur) != 0)) ||
+          !apply_result(put_int(document, L"MotionBlurQuality", selected(VideoOption::motion_blur))))) ||
+        (option_changed(VideoOption::ambient_occlusion) &&
+         (!apply_result(put_bool(document, L"AmbientOcclusion", ao != 0)) ||
+          !apply_result(put_bool(document, L"HBAO", ao == 2)))) ||
+        (option_changed(VideoOption::depth_of_field) &&
+         (!apply_result(put_bool(document, L"DepthOfField", selected(VideoOption::depth_of_field) != 0)) ||
+          !apply_result(put_int(document, L"DepthOfFieldQuality", selected(VideoOption::depth_of_field))))) ||
+        (option_changed(VideoOption::volumetric_lighting) &&
+         !apply_result(put_bool(document, L"LightCones", selected(VideoOption::volumetric_lighting) != 0))) ||
+        (option_changed(VideoOption::lens_flares) &&
+         !apply_result(put_bool(document, L"bAllowLensFlares", selected(VideoOption::lens_flares) != 0))) ||
+        (option_changed(VideoOption::light_shafts) &&
+         !apply_result(put_bool(document, L"bAllowLightShafts", selected(VideoOption::light_shafts) != 0)))) {
         return Result<config::ConfigPreview>::failure(
             {ErrorCode::stale_data, L"Effects settings contain duplicates", 0});
     }
     constexpr std::array<int, 4> anisotropy{1, 1, 4, 16};
-    if (!apply_result(put_int(
+    if (option_changed(VideoOption::texture_filtering) &&
+        !apply_result(put_int(
             document, L"MaxAnisotropy",
             anisotropy[selected(VideoOption::texture_filtering)]))) {
         return Result<config::ConfigPreview>::failure(
@@ -756,7 +971,9 @@ Result<config::ConfigPreview> build_video_preview(
     }
     auto textures = update_texture_groups(
         document, selected(VideoOption::texture_resolution),
-        selected(VideoOption::texture_filtering));
+        selected(VideoOption::texture_filtering),
+        option_changed(VideoOption::texture_resolution),
+        option_changed(VideoOption::texture_filtering));
     if (!textures.has_value()) return Result<config::ConfigPreview>::failure(textures.error());
     changed = changed || textures.value();
     static_cast<void>(changed);
@@ -770,12 +987,14 @@ Result<config::ConfigPreview> build_video_preview(
         return Result<config::ConfigPreview>::failure(engine_parsed.error());
     }
     auto engine = std::move(engine_parsed.value());
-    const auto flex_changed = engine.upsert(
-        kEngine, L"PhysXLevel",
-        std::to_wstring(selected(VideoOption::nvidia_flex)));
-    if (flex_changed.shadowed_occurrences != 0) {
-        return Result<config::ConfigPreview>::failure(
-            {ErrorCode::stale_data, L"Duplicate FleX setting was rejected", 0});
+    if (option_changed(VideoOption::nvidia_flex)) {
+        const auto flex_changed = engine.upsert(
+            kEngine, L"PhysXLevel",
+            std::to_wstring(selected(VideoOption::nvidia_flex)));
+        if (flex_changed.shadowed_occurrences != 0) {
+            return Result<config::ConfigPreview>::failure(
+                {ErrorCode::stale_data, L"Duplicate FleX setting was rejected", 0});
+        }
     }
     auto game_bytes = read_file(config_root / kGameFile);
     if (!game_bytes.has_value()) {
@@ -786,12 +1005,73 @@ Result<config::ConfigPreview> build_video_preview(
         return Result<config::ConfigPreview>::failure(game_parsed.error());
     }
     auto game = std::move(game_parsed.value());
-    const auto variable_changed = game.upsert(
-        kGameEngine, L"bSmoothFrameRate",
-        selected(VideoOption::variable_frame_rate) == 0 ? L"True" : L"False");
-    if (variable_changed.shadowed_occurrences != 0) {
-        return Result<config::ConfigPreview>::failure(
-            {ErrorCode::stale_data, L"Duplicate variable frame-rate setting was rejected", 0});
+    if (option_changed(VideoOption::variable_frame_rate)) {
+        const auto variable_changed = game.upsert(
+            kGameEngine, L"bSmoothFrameRate",
+            selected(VideoOption::variable_frame_rate) == 0 ? L"True" : L"False");
+        if (variable_changed.shadowed_occurrences != 0) {
+            return Result<config::ConfigPreview>::failure(
+                {ErrorCode::stale_data, L"Duplicate variable frame-rate setting was rejected", 0});
+        }
+    }
+    // These values are read by KF2's options menu from Script class defaults,
+    // not from [SystemSettings]. Keep the user-controlled corpse maximum in
+    // KFGoreManager untouched even when Character detail is selected.
+    if (option_changed(VideoOption::environment_detail) &&
+        !apply_result(put_game_value(
+            game, L"Engine.WorldInfo", L"DestructionLifetimeScale",
+            lifetime[environment]))) {
+        return Result<config::ConfigPreview>::failure({
+            ErrorCode::stale_data, L"Environment Script setting is ambiguous", 0});
+    }
+    if (option_changed(VideoOption::character_detail) &&
+        (!apply_result(put_game_int(
+            game, L"KFGame.KFGoreManager", L"MaxBodyWoundDecals",
+            wounds[character])) ||
+         !apply_result(put_game_bool(
+            game, L"KFGame.KFPawn", L"bAllowAlwaysOnPhysics",
+            character > 0)))) {
+        return Result<config::ConfigPreview>::failure({
+            ErrorCode::stale_data, L"Character Script setting is ambiguous", 0});
+    }
+    if (option_changed(VideoOption::fx_quality) &&
+        (!apply_result(put_game_value(
+            game, L"Engine.WorldInfo", L"EmitterPoolScale", pool[fx])) ||
+         !apply_result(put_game_int(
+            game, L"KFGame.KFMuzzleFlash", L"ShellEjectLifetime", shell[fx])) ||
+         !apply_result(put_game_bool(
+            game, L"Engine.WorldInfo", L"bAllowExplosionLights", fx > 0)) ||
+         !apply_result(put_game_bool(
+            game, L"KFGame.KFSprayActor", L"bAllowSprayLights", high_fx)) ||
+         !apply_result(put_game_bool(
+            game, L"KFGame.KFPawn", L"bAllowFootstepSounds", fx > 0)) ||
+         !apply_result(put_game_bool(
+            game, L"KFGame.KFPawn", L"bAllowRagdollAndGoreOnDeadBodies",
+            fx > 0)) ||
+         !apply_result(put_game_bool(
+            game, L"KFGame.KFGoreManager", L"bAllowBloodSplatterDecals",
+            high_fx)) ||
+         !apply_result(put_game_bool(
+            game, L"KFGame.KFWeap_FlameBase", L"bArePilotLightsAllowed",
+            fx > 0)) ||
+         !apply_result(put_game_int(
+            game, L"KFGame.KFImpactEffectManager", L"MaxImpactEffectDecals",
+            impact[fx])) ||
+         !apply_result(put_game_int(
+            game, L"Engine.WorldInfo", L"MaxExplosionDecals",
+            explosion[fx])) ||
+         !apply_result(put_game_value(
+            game, L"KFGame.KFGoreManager", L"GoreFXLifetimeMultiplier",
+            gore_lifetime[fx])) ||
+         !apply_result(put_game_int(
+            game, L"KFGame.KFGoreManager", L"MaxBloodEffects", blood[fx])) ||
+         !apply_result(put_game_int(
+            game, L"KFGame.KFGoreManager", L"MaxGoreEffects", gore[fx])) ||
+         !apply_result(put_game_int(
+            game, L"KFGame.KFGoreManager", L"MaxPersistentSplatsPerFrame",
+            splats[fx])))) {
+        return Result<config::ConfigPreview>::failure({
+            ErrorCode::stale_data, L"FX Script setting is ambiguous", 0});
     }
 
     config::ConfigPreview preview;

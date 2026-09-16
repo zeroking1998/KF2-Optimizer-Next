@@ -99,13 +99,11 @@ The `optimizer` module has one Adaptive decision path. It validates fresh
 identity-bound evidence, applies quality bounds and emits catalog-backed plans
 with source, reason and confidence. It evaluates only active gameplay; menus,
 loading screens and shutdown frames reset the fast controller window and
-cannot alter the persisted baseline. A confirmed runtime change between capped
+cannot alter the user's persisted graphics. A confirmed runtime change between capped
 and variable frame rate also resets current, rolling, prediction and
 quality-response evidence, then requires a fresh gameplay window without
-changing the target FPS. A separate slow persistence gate requires
-8 seconds of stable degradation or 45 seconds of stable recovery before saving
-a next-launch profile; recovery additionally requires the governor's verified
-stable-headroom state. CPU evidence is classified as idle/frame-limited,
+changing the target FPS. Runtime quality decisions remain session-local; every
+launch starts from the user's saved KF2 graphics. CPU evidence is classified as idle/frame-limited,
 main-thread dominant, partially parallel or broadly parallel. Frame pressure
 plus a dominant thread can prove a CPU bottleneck below a brittle 90-percent
 point threshold, while broadly parallel saturation is evaluated against the

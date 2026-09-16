@@ -57,7 +57,7 @@ constexpr std::array area01_items{
 constexpr AreaContract area02{
     "Adaptive/Automatic", "src/optimizer; src/config/settings.cpp; src/app/application.cpp",
     "Fresh native DXGI timing plus CPU, GPU, VRAM and RAM evidence", "B measured",
-    "Adaptive uses validated samples, dwell, hysteresis, quality bounds and protected launch-time profile application.",
+    "Adaptive uses validated samples, dwell, hysteresis and quality bounds while preserving user graphics at launch.",
     "Automatic operation with explicit bounded safety locks.",
     "Telemetry loss must retain the last bounded safe profile instead of guessing.",
     "Adaptive automation respects every explicit bounded safety lock.",

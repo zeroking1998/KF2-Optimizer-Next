@@ -95,17 +95,27 @@ may use only the verified controls available for that existing setting.
 
 ## 5. Game graphics
 
-Open **Game graphics** to view and stage KF2's display, resolution, frame-rate,
-quality and effects options. Click an option to move to its next KF2 value, then
-select **Apply graphics**. KF2 must be closed. The app creates and verifies a
-backup before atomically replacing the managed INI files. **Discard changes**
-returns to the values currently stored by KF2.
+Open **Game graphics** to view KF2's display, resolution, frame-rate, quality
+and effects options. Click an option to move to its next value; the app saves
+and verifies it immediately. KF2 must be closed because INI changes cannot
+reliably alter graphics in a running match. A restore backup is created before
+the managed INI files are replaced. **Reset to defaults** also saves immediately.
+While KF2 is running in its main menu, the page shows values confirmed by
+KF2's own applied Graphics-menu getter, including **INI override** where a
+saved value does not match a built-in preset. Values selected in KF2's menu
+before pressing **Apply** are not yet treated as applied settings.
+The app does not expose VSync or Variable frame rate controls. When KF2 is
+closed and the app opens, an enabled VSync value or disabled frame-rate
+smoothing is corrected through the same verified backup transaction. An
+already-running match cannot be changed live by an INI write; the corrected
+values take effect on a later KF2 start. The native KF2 video menu remains
+under KF2's control and is not disabled by this portable app.
 
 NVIDIA FleX is an explicit user control with **Off**, **Gibs**, and
 **Gibs and fluids**. It starts at the value already stored by KF2. Neither
 opening the page, selecting an overall graphics preset, nor Adaptive enables
-FleX. Only changing this dedicated value and selecting **Apply graphics** may
-write `PhysXLevel`.
+FleX. Only changing this dedicated value may write `PhysXLevel`; the choice is
+saved immediately.
 
 The Home-page maximum-corpse goal is preserved when Character Detail changes;
 the graphics page does not silently replace that separate user choice.
