@@ -73,8 +73,10 @@ resample. Only read-only last-completed diagnostic/report projections survive
 the tick, and they never feed a later decision.
 
 Runtime, configuration, and protected-session mutations are restricted to the
-effect stage: process-local FleX control, Adaptive profile persistence with
-rollback, and verified protected session restoration. The FleX observation
+effect stage: process-local FleX control, telemetry-confirmed temporary
+Adaptive actions with exact readback, and verified protected session
+restoration. Adaptive starts from the user's saved graphics and does not
+persist a named graphics profile for a later start. The FleX observation
 stage separately persists only its bounded diagnostic report. Collection
 cannot write configuration or update the overlay; Adaptive cannot read
 platform samplers; presentation cannot sample or write configuration/FleX;

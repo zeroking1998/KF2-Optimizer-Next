@@ -580,8 +580,10 @@ VideoSettings recommended_video_defaults(const VideoSettings& current) {
     };
 
     // Keep the monitor-dependent display mode and resolution. Reset the
-    // quality controls to a balanced baseline and leave costly optional FleX
-    // effects disabled until the user explicitly enables them again.
+    // quality controls to KF2's shipped Medium preset values and leave costly
+    // optional FleX effects disabled until the user explicitly enables them
+    // again. This is an explicit user action; Adaptive never selects this
+    // preset at startup.
     set(VideoOption::overall_quality, 2);
     set(VideoOption::vsync, 0);
     set(VideoOption::variable_frame_rate, 1);

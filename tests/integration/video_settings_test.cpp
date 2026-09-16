@@ -128,6 +128,29 @@ int main() {
     CHECK(defaults.choices[static_cast<std::size_t>(
               kf2::game::VideoOption::nvidia_flex)] == 0);
     CHECK(defaults.film_grain_percent == 0);
+    // Reset is KF2's exact shipped Medium preset, not an Optimizer-created
+    // "Balanced" startup profile. Adaptive never calls this user action.
+    constexpr std::array<std::pair<kf2::game::VideoOption, int>, 15>
+        vanilla_medium{{
+            {kf2::game::VideoOption::environment_detail, 2},
+            {kf2::game::VideoOption::character_detail, 1},
+            {kf2::game::VideoOption::fx_quality, 2},
+            {kf2::game::VideoOption::texture_resolution, 2},
+            {kf2::game::VideoOption::texture_filtering, 2},
+            {kf2::game::VideoOption::shadow_quality, 2},
+            {kf2::game::VideoOption::realtime_reflections, 0},
+            {kf2::game::VideoOption::anti_aliasing, 1},
+            {kf2::game::VideoOption::bloom, 2},
+            {kf2::game::VideoOption::motion_blur, 0},
+            {kf2::game::VideoOption::ambient_occlusion, 1},
+            {kf2::game::VideoOption::depth_of_field, 1},
+            {kf2::game::VideoOption::volumetric_lighting, 1},
+            {kf2::game::VideoOption::lens_flares, 1},
+            {kf2::game::VideoOption::light_shafts, 1},
+        }};
+    for (const auto& [option, expected] : vanilla_medium) {
+        CHECK(defaults.choices[static_cast<std::size_t>(option)] == expected);
+    }
 
     auto near_sixteen_nine = loaded.value();
     near_sixteen_nine.resolutions = {{1366, 768}};
