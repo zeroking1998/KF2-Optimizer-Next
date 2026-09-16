@@ -702,9 +702,9 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
             0});
     }
 
-    if (should_prepare_adaptive_flex_runtime(
+    if (should_prepare_fixed_flex_runtime(
             start_mode, *configured_physx_level)) {
-        const auto prepared = ensure_automatic_flex_lab();
+        const auto prepared = ensure_fixed_flex_runtime();
         if (!prepared.has_value()) {
             return Result<bool>::failure(prepared.error());
         }

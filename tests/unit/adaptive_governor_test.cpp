@@ -759,11 +759,6 @@ int main() {
     thermal.thermal_power_pressure = 0.9;
     CHECK(classify(thermal) == AdaptiveBottleneck::thermal_power);
 
-    auto flex = sample(start, 30.0, 33.33, 42.0, 35.0, 55.0);
-    flex.gameplay_context_fresh = true;
-    flex.flex_pressure = 0.9;
-    CHECK(classify(flex) == AdaptiveBottleneck::flex);
-
     auto particles = sample(start, 30.0, 33.33, 42.0, 35.0, 55.0);
     particles.gameplay_context_fresh = true;
     particles.particle_pressure = 0.9;

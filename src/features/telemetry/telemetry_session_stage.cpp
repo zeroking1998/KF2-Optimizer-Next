@@ -55,10 +55,10 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
             status.adaptive_runtime_corpse_limit.reset();
             status.adaptive_corpse_capability = L"UNAVAILABLE";
             status.adaptive_corpse_action_status = L"NONE";
-            status.adaptive_flex_requested_substeps.reset();
-            status.adaptive_flex_effective_substeps.reset();
-            status.adaptive_flex_action_status = L"NONE";
-            status.adaptive_flex_capability = L"UNAVAILABLE";
+            status.flex_requested_substeps.reset();
+            status.flex_effective_substeps.reset();
+            status.flex_action_status = L"NONE";
+            status.flex_capability = L"UNAVAILABLE";
             status.adaptive_particle_capability = L"UNAVAILABLE";
             runtime.model.set_status(std::move(status));
             runtime.invalidate();
@@ -203,10 +203,6 @@ void UiRuntime::reset_local_adaptive_controller_for_mode(bool enabled) {
         adaptive_actuation.disable(monotonic_ns());
         adaptive_actuation.rebase({}, monotonic_ns());
         adaptive_resource_quality.reset(100);
-        if (game_process && !flex_adaptive_constrained) {
-            static_cast<void>(flex::write_adaptive_control(*game_process, 0));
-        }
-        flex_adaptive_constrained = false;
     }
 }
 
@@ -228,17 +224,6 @@ bool UiRuntime::set_live_adaptive_enabled(
         port = game_log_session->telemetry_control_port;
     }
     if (!port || adaptive_mode_dispatcher.busy()) return false;
-
-    if (!enabled && flex_adaptive_constrained &&
-        (!game_process ||
-         !flex::write_adaptive_control(*game_process, 0))) {
-        events->append({0, diagnostics::Severity::error,
-            "ADAPTIVE_FLEX_RELEASE_FAILED",
-            std::wstring{reason} +
-                L"; the active FleX constraint could not be released, so Adaptive remains on",
-            L"flex"});
-        return false;
-    }
 
     const auto next_sequence =
         adaptive_control_sequence == std::numeric_limits<std::uint64_t>::max()
@@ -274,7 +259,7 @@ bool UiRuntime::set_live_adaptive_enabled(
         std::wstring{reason} +
             (enabled
                 ? L"; KF2 confirmed that adaptive runtime control resumed"
-                : L"; KF2 confirmed release of adaptive graphics, Zed LOD and reversible corpse control; FleX requested passthrough"),
+                : L"; KF2 confirmed release of adaptive graphics, Zed LOD and reversible corpse control; the independent fixed FleX limit is unchanged"),
         L"optimizer"});
     return true;
 }
@@ -377,8 +362,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     flex_observation_announced = false;
     last_flex_observation.reset();
     last_flex_report_tick = 0;
-    flex_adaptive_policy.reset();
-    flex_adaptive_constrained = false;
+    flex_minimum_limited = false;
     game_process.reset();
     game_log_startup_exited = false;
     game_log_startup_exit_announced = false;

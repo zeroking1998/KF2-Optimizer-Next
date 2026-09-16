@@ -127,7 +127,6 @@ add_executable(KF2Optimizer WIN32
     src/diagnostics/crash_recorder.cpp
     src/diagnostics/feature_inventory.cpp
     src/flex/flex_audit.cpp
-    src/flex/flex_adaptive_policy.cpp
     src/flex/flex_lab.cpp
     src/flex/flex_observation.cpp
     src/game/adaptive_control_client.cpp

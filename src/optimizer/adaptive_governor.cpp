@@ -200,7 +200,6 @@ std::string_view candidate_setting(AdaptiveBottleneck bottleneck) noexcept {
         case AdaptiveBottleneck::ragdoll: return "MaxActiveRagdolls";
         case AdaptiveBottleneck::particles: return "GlobalParticleQuality";
         case AdaptiveBottleneck::gore: return "GoreQuality";
-        case AdaptiveBottleneck::flex: return "FlexAdaptiveSubsteps";
         case AdaptiveBottleneck::streaming:
         case AdaptiveBottleneck::io_pressure:
             return "EnemyTextureStreamingPriority";
@@ -219,19 +218,9 @@ AdaptiveCapabilityState candidate_capability(
         case AdaptiveBottleneck::ragdoll:
             return capabilities.corpse_control;
         case AdaptiveBottleneck::particles:
-            if (capabilities.flex_particle_budget_control ==
-                AdaptiveCapabilityState::available) {
-                return capabilities.flex_particle_budget_control;
-            }
             return capabilities.particle_control;
         case AdaptiveBottleneck::gore:
             return capabilities.gore_control;
-        case AdaptiveBottleneck::flex:
-            if (capabilities.flex_particle_budget_control ==
-                AdaptiveCapabilityState::available) {
-                return capabilities.flex_particle_budget_control;
-            }
-            return capabilities.flex_solver_substep_control;
         case AdaptiveBottleneck::cpu:
         case AdaptiveBottleneck::gpu:
         case AdaptiveBottleneck::vram:
@@ -459,12 +448,6 @@ AdaptiveBottleneckReport classify_bottleneck(
         add_signal(report.supporting_signals, report.supporting_count,
                    "streaming_pressure");
     } else if (sample.gameplay_context_fresh &&
-               sample.flex_pressure.value_or(0.0) >= 0.80) {
-        report.type = AdaptiveBottleneck::flex;
-        report.confidence = 0.66;
-        add_signal(report.supporting_signals, report.supporting_count,
-                   "verified_flex_pressure_context");
-    } else if (sample.gameplay_context_fresh &&
                sample.particle_pressure.value_or(0.0) >= 0.80) {
         report.type = AdaptiveBottleneck::particles;
         report.confidence = 0.64;
@@ -564,7 +547,6 @@ AdaptiveDataQualityReport validate_adaptive_sample(
         !valid_pressure(sample.ragdoll_pressure) ||
         !valid_pressure(sample.particle_pressure) ||
         !valid_pressure(sample.gore_pressure) ||
-        !valid_pressure(sample.flex_pressure) ||
         !valid_pressure(sample.streaming_pressure)) {
         report.reason = "invalid_or_missing_primary_telemetry";
         return report;
@@ -1100,10 +1082,6 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     if (active_pressure_ == AdaptivePressure::emergency &&
         sample.minimum_quality_reached &&
         sample.capabilities.corpse_control !=
-            AdaptiveCapabilityState::available &&
-        sample.capabilities.flex_solver_substep_control !=
-            AdaptiveCapabilityState::available &&
-        sample.capabilities.flex_particle_budget_control !=
             AdaptiveCapabilityState::available) {
         decision.state = AdaptiveControllerState::target_unreachable;
         decision.stability_state = AdaptiveStabilityState::target_unreachable;
@@ -1317,7 +1295,6 @@ std::wstring_view adaptive_bottleneck_name(
         case AdaptiveBottleneck::ragdoll: return L"ragdoll";
         case AdaptiveBottleneck::particles: return L"particles";
         case AdaptiveBottleneck::gore: return L"gore";
-        case AdaptiveBottleneck::flex: return L"FleX";
         case AdaptiveBottleneck::streaming: return L"streaming";
         case AdaptiveBottleneck::io_pressure: return L"I/O";
         case AdaptiveBottleneck::thermal_power: return L"thermal/power";

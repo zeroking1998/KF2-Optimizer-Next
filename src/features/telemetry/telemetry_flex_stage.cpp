@@ -11,17 +11,6 @@ void observe_flex_source(app::UiRuntime& runtime) {
 
 void run_flex_control_stage(app::UiRuntime& runtime,
                             const TelemetryFrame& frame) {
-    if (!runtime.optimizer_settings.adaptive_optimization_enabled) return;
-    std::optional<double> enemy_pressure;
-    if (frame.offline_gameplay && frame.gameplay &&
-        frame.gameplay->telemetry_living_visible &&
-        frame.gameplay->telemetry_observed_ns != 0 &&
-        frame.observed_at_ns >= frame.gameplay->telemetry_observed_ns &&
-        frame.observed_at_ns - frame.gameplay->telemetry_observed_ns <=
-            game::kGameLogObservationFreshnessNs) {
-        enemy_pressure = visible_enemy_pressure(
-            *frame.gameplay->telemetry_living_visible);
-    }
     const auto capability = frame.offline_gameplay && frame.flex &&
             frame.flex->fresh && frame.flex->pass_through_healthy &&
             !frame.flex->solver_tracking_quarantined
@@ -38,23 +27,19 @@ void run_flex_control_stage(app::UiRuntime& runtime,
     if (!(runtime.adaptive_actuation.generation() == generation)) {
         runtime.adaptive_actuation.rebase(generation, frame.observed_at_ns);
     }
-    const bool pressure_actionable =
-        flex_pressure_is_actionable(runtime.adaptive_decision) ||
-        enemy_pressure_is_actionable(enemy_pressure);
     const bool observed_solver_ready = capability ==
             optimizer::AdaptiveCapabilityState::available &&
-        frame.flex && runtime.flex_adaptive_policy.synchronize_observed(
-            frame.flex->last_forwarded_substeps);
-    const auto decision = decide_flex_control(
-        runtime.flex_adaptive_policy,
-        {.actuator_available = observed_solver_ready,
-         .pressure_actionable = pressure_actionable,
-         .target_fps = runtime.effective_target_fps(),
-         .quality_change_budget =
-             runtime.effective_quality_change_budget(),
-         .fps = frame.frames.fps,
-         .enemy_pressure = enemy_pressure,
-         .now_ms = GetTickCount64()});
+        frame.flex && frame.flex->last_forwarded_substeps >= 1 &&
+        frame.flex->last_forwarded_substeps <= 5;
+    const auto decision = decide_flex_control(observed_solver_ready);
+    auto status = runtime.model.status();
+    const std::wstring capability_label = observed_solver_ready
+        ? L"AVAILABLE" : L"UNAVAILABLE";
+    if (status.flex_capability != capability_label) {
+        status.flex_capability = capability_label;
+        runtime.model.set_status(std::move(status));
+        runtime.invalidate();
+    }
     apply_flex_control_effect(
         runtime, {decision.requested_substeps, decision.constrained,
                   capability});
@@ -68,8 +53,8 @@ bool UiRuntime::save_flex_report(const flex::ObservationSnapshot& observed,
                                  bool wait_for_disk) {
     if (observed.update_calls == 0) return false;
     std::ostringstream report;
-    report << "{\"version\":6,\"configured_mode\":\"auto\""
-               << ",\"adaptive_substep_range\":\"1..5\""
+    report << "{\"version\":7,\"configured_mode\":\"fixed_minimum\""
+               << ",\"fixed_substeps\":1"
                << ",\"update_calls\":" << observed.update_calls
                << ",\"successful_updates\":" << observed.successful_updates
                << ",\"destroy_calls\":" << observed.destroy_calls
@@ -162,8 +147,8 @@ void UiRuntime::observe_flex_process() {
             optimizer::AdaptiveReceiptResult::accepted) {
         events->append({
             0, diagnostics::Severity::info,
-            "FLEX_ADAPTIVE_APPLIED",
-            L"FleX solver readback confirmed APPLIED: requested=" +
+            "FLEX_MINIMUM_APPLIED",
+            L"Fixed FleX minimum readback confirmed APPLIED: requested=" +
                 std::to_wstring(static_cast<int>(receipt->requested_value)) +
                 L", effective=" + std::to_wstring(
                     static_cast<int>(*receipt->observed_value)) +
@@ -214,13 +199,13 @@ void UiRuntime::observe_flex_process() {
     const std::wstring action_status{
         action_status_view.begin(), action_status_view.end()};
     if (status.flex_telemetry != flex_status ||
-        status.adaptive_flex_requested_substeps != requested ||
-        status.adaptive_flex_effective_substeps != applied ||
-        status.adaptive_flex_action_status != action_status) {
+        status.flex_requested_substeps != requested ||
+        status.flex_effective_substeps != applied ||
+        status.flex_action_status != action_status) {
         status.flex_telemetry = flex_status;
-        status.adaptive_flex_requested_substeps = requested;
-        status.adaptive_flex_effective_substeps = applied;
-        status.adaptive_flex_action_status = action_status;
+        status.flex_requested_substeps = requested;
+        status.flex_effective_substeps = applied;
+        status.flex_action_status = action_status;
         model.set_status(std::move(status));
         invalidate();
     }

@@ -29,7 +29,7 @@ enum class StartMode { normal, read_only };
     return mode == StartMode::normal;
 }
 
-[[nodiscard]] constexpr bool should_prepare_adaptive_flex_runtime(
+[[nodiscard]] constexpr bool should_prepare_fixed_flex_runtime(
     StartMode mode, int configured_physx_level) noexcept {
     return mode == StartMode::normal && configured_physx_level > 0;
 }
