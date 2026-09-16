@@ -491,5 +491,126 @@ int main() {
     CHECK(closing_controller.layout().exit_progress == 1.0F);
     CHECK(close_requests == 1);
     CHECK(closing_controller.on_close());
+
+    // A rejected persistence request must not leave a preview looking saved.
+    UiModel rejected_model;
+    int rejected_requests = 0;
+    ShellController rejected_controller{
+        rejected_model,
+        {.set_slider_value = [&](std::string_view, int) {
+             ++rejected_requests;
+             // A failed write leaves the authoritative model unchanged.
+         }}};
+    rejected_controller.on_resize({1440, 900});
+    rejected_controller.focus_target(Destination::dashboard,
+                                     "settings-target-slider");
+    rejected_controller.on_key({WindowKey::right});
+    CHECK(rejected_requests == 1);
+    CHECK(rejected_model.status().target_fps == 60);
+    CHECK(rejected_model.presented_target_fps() == 60);
+    rejected_controller.focus_target(Destination::dashboard,
+                                     "settings-corpses-slider");
+    rejected_controller.on_key({WindowKey::right});
+    CHECK(rejected_requests == 2);
+    CHECK(rejected_model.status().corpse_limit == 20);
+    CHECK(rejected_model.presented_corpse_limit() == 20);
+    rejected_controller.focus_target(Destination::dashboard,
+                                     "settings-target-slider");
+    const auto rejected_target = std::find_if(
+        rejected_controller.layout().nodes.begin(),
+        rejected_controller.layout().nodes.end(),
+        [](const SemanticNode& item) {
+            return item.id == "settings-target-slider";
+        });
+    CHECK(rejected_target != rejected_controller.layout().nodes.end());
+    const DipRect rejected_bounds = rejected_target->bounds;
+    const float rejected_y = rejected_bounds.y + rejected_bounds.height - 25.0F;
+    rejected_controller.on_pointer({PointerKind::press,
+        {rejected_bounds.x + 30.0F, rejected_y}, 0});
+    rejected_controller.on_pointer({PointerKind::move,
+        {rejected_bounds.x + rejected_bounds.width - 30.0F, rejected_y}, 0});
+    CHECK(rejected_model.presented_target_fps() > 60);
+    rejected_controller.on_pointer({PointerKind::release,
+        {rejected_bounds.x + rejected_bounds.width - 30.0F, rejected_y}, 0});
+    CHECK(rejected_requests == 3);
+    CHECK(rejected_model.presented_target_fps() == 60);
+
+    UiModel saved_model;
+    int saved_requests = 0;
+    ShellController saved_controller{
+        saved_model,
+        {.set_slider_value = [&](std::string_view id, int value) {
+             ++saved_requests;
+             auto status = saved_model.status();
+             if (id == "settings-target-slider") status.target_fps = value;
+             if (id == "settings-corpses-slider") status.corpse_limit = value;
+             saved_model.set_status(std::move(status));
+         }}};
+    saved_controller.on_resize({1440, 900});
+    saved_controller.focus_target(Destination::dashboard,
+                                  "settings-target-slider");
+    saved_controller.on_key({WindowKey::right});
+    CHECK(saved_model.status().target_fps == 61);
+    CHECK(saved_model.presented_target_fps() == 61);
+    saved_controller.focus_target(Destination::dashboard,
+                                  "settings-corpses-slider");
+    saved_controller.on_key({WindowKey::right});
+    CHECK(saved_model.status().corpse_limit == 21);
+    CHECK(saved_model.presented_corpse_limit() == 21);
+    const auto max_corpse_slider = std::find_if(
+        saved_controller.layout().nodes.begin(),
+        saved_controller.layout().nodes.end(),
+        [](const SemanticNode& item) {
+            return item.id == "settings-corpses-slider";
+        });
+    CHECK(max_corpse_slider != saved_controller.layout().nodes.end());
+    const DipRect max_corpse_bounds = max_corpse_slider->bounds;
+    const float max_corpse_y = max_corpse_bounds.y +
+        max_corpse_bounds.height - 25.0F;
+    saved_controller.on_pointer({PointerKind::press,
+        {max_corpse_bounds.x + 30.0F, max_corpse_y}, 0});
+    saved_controller.on_pointer({PointerKind::move,
+        {max_corpse_bounds.x + max_corpse_bounds.width, max_corpse_y}, 0});
+    CHECK(saved_model.presented_corpse_limit() == 2000);
+    saved_controller.synchronize_model();
+    const auto max_corpse_preview = std::find_if(
+        saved_controller.layout().nodes.begin(),
+        saved_controller.layout().nodes.end(),
+        [](const SemanticNode& item) {
+            return item.id == "settings-corpses-slider";
+        });
+    CHECK(max_corpse_preview != saved_controller.layout().nodes.end());
+    CHECK(max_corpse_preview->slider->value == 2000);
+    saved_controller.on_pointer({PointerKind::release,
+        {max_corpse_bounds.x + max_corpse_bounds.width, max_corpse_y}, 0});
+    CHECK(saved_model.status().corpse_limit == 2000);
+    CHECK(saved_model.presented_corpse_limit() == 2000);
+    saved_controller.focus_target(Destination::dashboard,
+                                  "settings-target-slider");
+    const auto interrupted_target = std::find_if(
+        saved_controller.layout().nodes.begin(),
+        saved_controller.layout().nodes.end(),
+        [](const SemanticNode& item) {
+            return item.id == "settings-target-slider";
+        });
+    CHECK(interrupted_target != saved_controller.layout().nodes.end());
+    const DipRect interrupted_bounds = interrupted_target->bounds;
+    const float interrupted_y = interrupted_bounds.y +
+        interrupted_bounds.height - 25.0F;
+    const float interrupted_x = interrupted_bounds.x +
+        interrupted_bounds.width - 30.0F;
+    saved_controller.on_pointer({PointerKind::press,
+        {interrupted_bounds.x + 30.0F, interrupted_y}, 0});
+    saved_controller.on_pointer({PointerKind::move,
+        {interrupted_x, interrupted_y}, 0});
+    CHECK(saved_model.presented_target_fps() > 61);
+    saved_controller.on_pointer({PointerKind::capture_lost, {}, 0});
+    CHECK(saved_requests == 4);
+    CHECK(saved_model.status().target_fps >= 235);
+    const int saved_after_interruption = saved_model.status().target_fps;
+    saved_controller.on_pointer({PointerKind::release,
+        {interrupted_x, interrupted_y}, 0});
+    CHECK(saved_requests == 4);
+    CHECK(saved_model.status().target_fps == saved_after_interruption);
     return EXIT_SUCCESS;
 }

@@ -45,51 +45,24 @@ void apply_flex_control_effect(app::UiRuntime& runtime,
         return;
     }
     if (write_succeeded &&
-        effect.constrained != runtime.flex_adaptive_constrained) {
-        runtime.flex_adaptive_constrained = effect.constrained;
+        effect.constrained != runtime.flex_minimum_limited) {
+        runtime.flex_minimum_limited = effect.constrained;
         runtime.events->append(
             {0, diagnostics::Severity::info,
-             effect.constrained ? "FLEX_ADAPTIVE_CONSTRAINED"
-                                : "FLEX_ADAPTIVE_RECOVERED",
+             effect.constrained ? "FLEX_MINIMUM_LIMIT_REQUESTED"
+                                : "FLEX_MINIMUM_LIMIT_RELEASED",
              effect.constrained
-                 ? L"Adaptive FleX requested a hysteresis-stabilized solver level from 1 to 5; applied status waits for shared-memory readback"
-                 : L"Adaptive FleX requested passthrough; applied status waits for shared-memory readback",
+                 ? L"User-enabled FleX requested the fixed minimum solver level of one; applied status waits for shared-memory readback"
+                 : L"The fixed FleX minimum limit was released; applied status waits for shared-memory readback",
              L"flex"});
     }
-}
-
-void apply_adaptive_profile_effect(
-    app::UiRuntime& runtime, const AdaptiveProfileEffect& effect,
-    ui::UiStatus& status) {
-    const std::string selected{
-        optimizer::adaptive_profile_token(effect.profile)};
-    if (selected == runtime.optimizer_settings.optimizer_profile) return;
-    const auto previous = runtime.optimizer_settings.optimizer_profile;
-    runtime.optimizer_settings.optimizer_profile = selected;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        runtime.settings_path,
-        config::serialize_settings(runtime.optimizer_settings));
-    if (!saved.has_value()) {
-        runtime.optimizer_settings.optimizer_profile = previous;
-        runtime.adaptive_profile_gate = {};
-        runtime.events->append(
-            {0, diagnostics::Severity::error,
-             "ADAPTIVE_BASELINE_SAVE_FAILED", saved.error().message,
-             L"optimizer"});
-        return;
-    }
-    status.profile = std::wstring{selected.begin(), selected.end()};
-    runtime.events->append(
-        {0, diagnostics::Severity::info, "ADAPTIVE_PROFILE_SELECTED",
-         L"Adaptive saved a sustained active-gameplay recommendation for the next protected automatic launch",
-         L"optimizer"});
 }
 
 }  // namespace kf2::telemetry_pipeline
 
 namespace kf2::app {
 
-Result<bool> UiRuntime::ensure_automatic_flex_lab() {
+Result<bool> UiRuntime::ensure_fixed_flex_runtime() {
     if (!installation) {
         return Result<bool>::failure(
             {ErrorCode::not_found,
@@ -149,13 +122,13 @@ Result<bool> UiRuntime::ensure_automatic_flex_lab() {
         return Result<bool>::failure(installed.error());
     }
     events->append({0, diagnostics::Severity::info,
-        "FLEX_AUTO_HOOK_READY",
-        L"The verified offline FleX hook was prepared automatically for Adaptive control",
+        "FLEX_MINIMUM_HOOK_READY",
+        L"The verified offline FleX hook was prepared for the fixed minimum solver level",
         L"flex"});
     return Result<bool>::success(true);
 }
 
-bool UiRuntime::restore_automatic_flex_lab(std::wstring_view reason) {
+bool UiRuntime::restore_fixed_flex_runtime(std::wstring_view reason) {
     if (!installation) return true;
     const auto game_directory = installation->install_root /
         L"Binaries" / L"Win64";
@@ -173,17 +146,17 @@ bool UiRuntime::restore_automatic_flex_lab(std::wstring_view reason) {
         game_directory, state_directory, running);
     if (!restored.has_value()) {
         events->append({0, diagnostics::Severity::error,
-            "FLEX_AUTO_RESTORE_FAILED", restored.error().message,
+            "FLEX_FIXED_RESTORE_FAILED", restored.error().message,
             L"flex"});
         model.set_recovery_required(true);
         model.set_notice({ui::NoticeSeverity::error,
-            L"FLEX_AUTO_RESTORE_FAILED", restored.error().message,
+            L"FLEX_FIXED_RESTORE_FAILED", restored.error().message,
             L"Do not start KF2 again until the original FleX runtime is restored."});
         invalidate();
         return false;
     }
     events->append({0, diagnostics::Severity::info,
-        "FLEX_AUTO_RESTORED",
+        "FLEX_FIXED_RESTORED",
         std::wstring{reason} +
             L"; the original FleX runtime was restored and verified",
         L"flex"});
@@ -252,9 +225,74 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
             session_config_snapshot.reset();
             session_config_waiting_for_launch = false;
             session_config_launch_deadline_ns = 0;
+            // Restore the protected originals first, then replay only the
+            // graphics delta observed across KF2's confirmed settings restart.
+            // Temporary protected-session values must never be persisted.
+            if (installation && session_video_native_changes) {
+                const auto original = game::read_video_settings(
+                    installation->config_root);
+                if (original.has_value()) {
+                    if (original.value().choices ==
+                            session_video_native_changes->choices &&
+                        original.value().film_grain_percent ==
+                            session_video_native_changes->film_grain_percent &&
+                        game::video_choice_label(game::VideoOption::resolution,
+                            original.value()) ==
+                            game::video_choice_label(game::VideoOption::resolution,
+                                *session_video_native_changes)) {
+                        session_video_native_changes.reset();
+                    }
+                }
+                if (original.has_value() && session_video_native_changes) {
+                    const auto prepared = game::build_video_preview(
+                        installation->config_root,
+                        *session_video_native_changes, &original.value());
+                    if (prepared.has_value()) {
+                        const auto applied = config::apply_preview(
+                            prepared.value(), backups,
+                            {.game_running = game_process.has_value()});
+                        if (applied.has_value()) {
+                            events->append({0, diagnostics::Severity::info,
+                                "KF2_NATIVE_GRAPHICS_PRESERVED",
+                                L"KF2's confirmed graphics changes were saved separately from temporary protected-session values",
+                                L"graphics"});
+                            reload_video_settings();
+                        } else {
+                            complete = false;
+                            events->append({0, diagnostics::Severity::error,
+                                "KF2_NATIVE_GRAPHICS_SAVE_FAILED",
+                                applied.error().message, L"graphics"});
+                            model.set_notice({ui::NoticeSeverity::warning,
+                                L"KF2_NATIVE_GRAPHICS_SAVE_FAILED",
+                                L"Original INIs were restored, but KF2's graphics change could not be saved: " +
+                                    applied.error().message, L""});
+                        }
+                    } else {
+                        complete = false;
+                        events->append({0, diagnostics::Severity::error,
+                            "KF2_NATIVE_GRAPHICS_SAVE_FAILED",
+                            prepared.error().message, L"graphics"});
+                        model.set_notice({ui::NoticeSeverity::warning,
+                            L"KF2_NATIVE_GRAPHICS_SAVE_FAILED",
+                            L"Original INIs were restored, but KF2's graphics change could not be saved: " +
+                                prepared.error().message, L""});
+                    }
+                } else if (!original.has_value()) {
+                    complete = false;
+                    events->append({0, diagnostics::Severity::error,
+                        "KF2_NATIVE_GRAPHICS_SAVE_FAILED",
+                        original.error().message, L"graphics"});
+                    model.set_notice({ui::NoticeSeverity::warning,
+                        L"KF2_NATIVE_GRAPHICS_SAVE_FAILED",
+                        L"Original INIs were restored, but KF2's graphics change could not be read: " +
+                            original.error().message, L""});
+                }
+            }
+            session_video_runtime.reset();
+            session_video_native_changes.reset();
         }
     }
-    if (!restore_automatic_flex_lab(reason)) complete = false;
+    if (!restore_fixed_flex_runtime(reason)) complete = false;
     if (installation) {
         const auto capped = synchronize_frame_rate_cap();
         if (!capped.has_value()) {

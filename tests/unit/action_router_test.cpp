@@ -65,8 +65,8 @@ ActionRequest request(ActionId id, std::string_view received_name,
 int main() {
     using namespace kf2::app::runtime;
 
-    CHECK(action_definitions().size() == 64);
-    CHECK(action_bindings().size() == 66);
+    CHECK(action_definitions().size() == 60);
+    CHECK(action_bindings().size() == 62);
 
     CompleteRegistryFixture complete;
     CHECK(valid_feature_registry(complete.features));

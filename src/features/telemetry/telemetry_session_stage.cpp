@@ -55,10 +55,10 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
             status.adaptive_runtime_corpse_limit.reset();
             status.adaptive_corpse_capability = L"UNAVAILABLE";
             status.adaptive_corpse_action_status = L"NONE";
-            status.adaptive_flex_requested_substeps.reset();
-            status.adaptive_flex_effective_substeps.reset();
-            status.adaptive_flex_action_status = L"NONE";
-            status.adaptive_flex_capability = L"UNAVAILABLE";
+            status.flex_requested_substeps.reset();
+            status.flex_effective_substeps.reset();
+            status.flex_action_status = L"NONE";
+            status.flex_capability = L"UNAVAILABLE";
             status.adaptive_particle_capability = L"UNAVAILABLE";
             runtime.model.set_status(std::move(status));
             runtime.invalidate();
@@ -196,17 +196,12 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
 void UiRuntime::reset_local_adaptive_controller_for_mode(bool enabled) {
     adaptive_control_pending.reset();
     adaptive_governor.reset();
-    adaptive_profile_gate.reset();
     adaptive_decision = {};
     adaptive_gameplay_active = false;
     if (!enabled) {
         adaptive_actuation.disable(monotonic_ns());
         adaptive_actuation.rebase({}, monotonic_ns());
         adaptive_resource_quality.reset(100);
-        if (game_process && !flex_adaptive_constrained) {
-            static_cast<void>(flex::write_adaptive_control(*game_process, 0));
-        }
-        flex_adaptive_constrained = false;
     }
 }
 
@@ -228,17 +223,6 @@ bool UiRuntime::set_live_adaptive_enabled(
         port = game_log_session->telemetry_control_port;
     }
     if (!port || adaptive_mode_dispatcher.busy()) return false;
-
-    if (!enabled && flex_adaptive_constrained &&
-        (!game_process ||
-         !flex::write_adaptive_control(*game_process, 0))) {
-        events->append({0, diagnostics::Severity::error,
-            "ADAPTIVE_FLEX_RELEASE_FAILED",
-            std::wstring{reason} +
-                L"; the active FleX constraint could not be released, so Adaptive remains on",
-            L"flex"});
-        return false;
-    }
 
     const auto next_sequence =
         adaptive_control_sequence == std::numeric_limits<std::uint64_t>::max()
@@ -274,7 +258,7 @@ bool UiRuntime::set_live_adaptive_enabled(
         std::wstring{reason} +
             (enabled
                 ? L"; KF2 confirmed that adaptive runtime control resumed"
-                : L"; KF2 confirmed release of adaptive graphics, Zed LOD and reversible corpse control; FleX requested passthrough"),
+                : L"; KF2 confirmed release of adaptive graphics, Zed LOD and reversible corpse control; the independent fixed FleX limit is unchanged"),
         L"optimizer"});
     return true;
 }
@@ -354,7 +338,6 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     adaptive_resource_quality.reset(
         optimizer_settings.adaptive_maximum_quality);
     adaptive_session_policy.reset();
-    adaptive_profile_gate.reset();
     adaptive_gameplay_active = false;
     adaptive_provider_confirmed = false;
     last_performance_sample_log_ns = 0;
@@ -377,13 +360,14 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     flex_observation_announced = false;
     last_flex_observation.reset();
     last_flex_report_tick = 0;
-    flex_adaptive_policy.reset();
-    flex_adaptive_constrained = false;
+    flex_minimum_limited = false;
     game_process.reset();
     game_log_startup_exited = false;
     game_log_startup_exit_announced = false;
     game_log_new_settings_restart_requested = false;
     game_log_marker_tail.clear();
+    game_graphics_marker_tail.clear();
+    game_menu_graphics_readback.reset();
     game_log_session.reset();
     game_log_parser_stats = {};
     auto status = model.status();
@@ -398,17 +382,12 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     status.live_sleeping_corpses.reset();
     status.active_target_fps.reset();
     status.active_corpse_limit.reset();
-    const auto launch_profile = optimizer::bound_adaptive_profile(
-        stored_adaptive_profile(optimizer_settings),
-        optimizer_settings.adaptive_minimum_quality,
-        optimizer_settings.adaptive_maximum_quality);
-    status.recommended_profile = launch_profile
-        ? std::wstring{optimizer::adaptive_profile_label(*launch_profile)}
-        : L"not available";
-    status.recommendation_reason = launch_profile
-        ? L"Saved automatic profile is ready for the next protected launch"
-        : L"No verified named profile fits the selected quality limits";
+    status.graphics_game_menu_readback = false;
+    status.recommended_profile = L"user settings";
+    status.recommendation_reason =
+        L"The next KF2 launch preserves the user's saved graphics";
     model.set_status(std::move(status));
+    refresh_video_presentation();
     overlay_scene_ready = false;
     game_window = nullptr;
     if (overlay_window) {
@@ -456,6 +435,7 @@ void UiRuntime::finalize_ended_game_session() {
     game_restart_handoff_new_settings = false;
     bool session_restored = true;
     if (session_config_snapshot) {
+        static_cast<void>(synchronize_video_settings_from_game());
         session_restored = restore_protected_session_config(L"KF2 closed");
     } else if (installation) {
         const auto capped = synchronize_frame_rate_cap();
@@ -472,9 +452,11 @@ void UiRuntime::finalize_ended_game_session() {
         }
     }
     telemetry_failure = L"KF2 session ended";
-    model.set_notice(
-        {ui::NoticeSeverity::info, L"KF2_SESSION_ENDED",
-         L"KF2 closed; telemetry and protected INIs were finalized.", L""});
+    if (session_restored) {
+        model.set_notice(
+            {ui::NoticeSeverity::info, L"KF2_SESSION_ENDED",
+             L"KF2 closed; telemetry and protected INIs were finalized.", L""});
+    }
     events->append(
         {0, diagnostics::Severity::info, "KF2_SESSION_ENDED",
          L"No verified replacement process appeared; session telemetry was finalized",
@@ -482,6 +464,7 @@ void UiRuntime::finalize_ended_game_session() {
     if (session_restored) {
         static_cast<void>(rearm_automatic_external_launch_profile());
     }
+    start_startup_prewarm();
     invalidate();
 }
 
@@ -502,6 +485,8 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
         if (chunk.reset_parser) {
             corpse_telemetry_tracker.reset();
             game_log_marker_tail.clear();
+            game_graphics_marker_tail.clear();
+            game_menu_graphics_readback.reset();
             overlay_scene_ready = false;
             game_log_startup_exited = false;
             game_log_startup_exit_announced = false;
@@ -509,6 +494,38 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
             game_log_session.reset();
         }
         if (!chunk.bytes.empty()) {
+            // Consume only complete lines from this verified process-bound
+            // Launch log. A partial or malformed menu receipt is never used
+            // as a personal graphics value.
+            std::string graphics_lines =
+                game_graphics_marker_tail + chunk.bytes;
+            std::size_t line_start = 0;
+            for (;;) {
+                const auto line_end = graphics_lines.find('\n', line_start);
+                if (line_end == std::string::npos) break;
+                if (line_end - line_start <= 4096) {
+                    const auto line = std::string_view{graphics_lines}.substr(
+                        line_start, line_end - line_start);
+                    if (const auto readback =
+                            game::parse_game_menu_graphics_readback(line);
+                        readback &&
+                        (!game_menu_graphics_readback ||
+                         *game_menu_graphics_readback != *readback)) {
+                        game_menu_graphics_readback = *readback;
+                        refresh_video_presentation();
+                        events->append({0, diagnostics::Severity::info,
+                            "KF2_APPLIED_GRAPHICS_MENU_READBACK",
+                            L"KF2 confirmed its applied graphics menu state; Custom entries are retained rather than guessed from INIs",
+                            L"graphics"});
+                        invalidate();
+                    }
+                }
+                line_start = line_end + 1;
+            }
+            game_graphics_marker_tail = graphics_lines.substr(line_start);
+            if (game_graphics_marker_tail.size() > 4096) {
+                game_graphics_marker_tail.clear();
+            }
             // This is a one-shot startup gate. Once KF2 reaches its main menu
             // the overlay remains eligible during later map loads and Steam
             // overlays. The worker retains raw bytes only for these cheap
@@ -693,7 +710,7 @@ void UiRuntime::try_attach_telemetry() {
         }
         telemetry_failure = session_config_waiting_for_launch
             ? (session_config_launch_deadline_ns == 0
-                   ? L"Adaptive profile ready; waiting for KF2 process"
+                   ? L"Adaptive runtime ready; waiting for KF2 process"
                    : L"Waiting for app-started KF2 process")
             : L"Waiting for KF2 process";
         return;
@@ -739,6 +756,7 @@ void UiRuntime::try_attach_telemetry() {
     // Bind the process before looking for a window. FleX exposes a
     // process-local channel and must work during splash, fullscreen and
     // other periods in which KF2 has no inspectable top-level window yet.
+    startup_prewarmer.request_stop();
     game_process = process.value();
     bind_resource_telemetry(std::nullopt);
     auto found_window = game::find_game_window(process.value());

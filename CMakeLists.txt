@@ -121,12 +121,12 @@ add_executable(KF2Optimizer WIN32
     src/config/kf2_catalog.cpp
     src/config/setting_catalog.cpp
     src/config/config_preview.cpp
+    src/config/startup_movies.cpp
     src/config/apply_transaction.cpp
     src/diagnostics/event_log.cpp
     src/diagnostics/crash_recorder.cpp
     src/diagnostics/feature_inventory.cpp
     src/flex/flex_audit.cpp
-    src/flex/flex_adaptive_policy.cpp
     src/flex/flex_lab.cpp
     src/flex/flex_observation.cpp
     src/game/adaptive_control_client.cpp
@@ -140,6 +140,7 @@ add_executable(KF2Optimizer WIN32
     src/game/game_log_session.cpp
     src/game/game_log_telemetry.cpp
     src/game/game_session.cpp
+    src/game/startup_prewarmer.cpp
     src/game/advanced_settings.cpp
     src/game/video_settings.cpp
     src/overlay/overlay_mascot.cpp

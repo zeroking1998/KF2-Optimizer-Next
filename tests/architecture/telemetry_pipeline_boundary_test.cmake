@@ -209,7 +209,7 @@ file(READ "${stage_root}/telemetry_flex_stage.cpp" flex_stage_text)
 string(FIND "${flex_stage_text}"
     "AdaptiveReceiptResult::accepted" accepted_flex_receipt)
 string(FIND "${flex_stage_text}"
-    "FLEX_ADAPTIVE_APPLIED" durable_flex_applied_event)
+    "FLEX_MINIMUM_APPLIED" durable_flex_applied_event)
 if(accepted_flex_receipt EQUAL -1 OR durable_flex_applied_event EQUAL -1 OR
    NOT accepted_flex_receipt LESS durable_flex_applied_event)
     message(FATAL_ERROR

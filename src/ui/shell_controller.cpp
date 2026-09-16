@@ -159,6 +159,10 @@ void ShellController::on_system_resume() {
 }
 
 void ShellController::on_pointer(platform::windows::PointerEvent event) {
+    if (event.kind == platform::windows::PointerKind::capture_lost) {
+        finish_slider_drag(std::nullopt);
+        return;
+    }
     if (event.kind == platform::windows::PointerKind::leave) {
         if (dragged_slider_id_) return;
         hovered_node_id_.reset();
@@ -221,14 +225,7 @@ void ShellController::on_pointer(platform::windows::PointerEvent event) {
     }
     if (event.kind == platform::windows::PointerKind::release &&
         dragged_slider_id_) {
-        const std::string id = *dragged_slider_id_;
-        preview_slider(id, event.position.x_dip);
-        const auto value = dragged_slider_value_;
-        dragged_slider_id_.reset();
-        dragged_slider_value_.reset();
-        pressed_node_id_.reset();
-        end_interaction();
-        if (value) commit_slider(id, *value);
+        finish_slider_drag(event.position.x_dip);
         return;
     }
     if (event.kind != platform::windows::PointerKind::release &&
@@ -719,6 +716,18 @@ void ShellController::preview_slider(std::string_view node_id, float x_dip) {
     else if (callbacks_.invalidate) callbacks_.invalidate();
 }
 
+void ShellController::finish_slider_drag(std::optional<float> x_dip) {
+    if (!dragged_slider_id_) return;
+    const std::string id = *dragged_slider_id_;
+    if (x_dip) preview_slider(id, *x_dip);
+    const auto value = dragged_slider_value_;
+    dragged_slider_id_.reset();
+    dragged_slider_value_.reset();
+    pressed_node_id_.reset();
+    end_interaction();
+    if (value) commit_slider(id, *value);
+}
+
 void ShellController::commit_slider(std::string_view node_id, int value) {
     const auto found = std::find_if(
         layout_.nodes.begin(), layout_.nodes.end(), [&](const SemanticNode& node) {
@@ -731,13 +740,15 @@ void ShellController::commit_slider(std::string_view node_id, int value) {
     const std::string action = *found->action_id;
     const int committed = std::clamp(
         value, found->slider->minimum, found->slider->maximum);
+    callbacks_.set_slider_value(action, committed);
+    // The callback may reject the write (read-only mode, a running game, or
+    // an I/O error). Only the authoritative model can confirm the value.
     if (node_id == "settings-target-slider") {
-        model_.commit_target_fps_presentation(committed);
+        model_.commit_target_fps_presentation(model_.status().target_fps);
     } else if (node_id == "settings-corpses-slider") {
-        model_.commit_corpse_limit_presentation(committed);
+        model_.commit_corpse_limit_presentation(model_.status().corpse_limit);
     }
     rebuild_layout();
-    callbacks_.set_slider_value(action, committed);
 }
 
 }  // namespace kf2::ui

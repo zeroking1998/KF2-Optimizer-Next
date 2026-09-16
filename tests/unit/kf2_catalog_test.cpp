@@ -74,6 +74,11 @@ int main() {
     CHECK(std::get<int>(*step_setting_value(*anisotropy, 4, -1)) == 2);
     CHECK(std::get<int>(*step_setting_value(*anisotropy, 16, 1)) == 16);
     CHECK(!step_setting_value(*anisotropy, 4, 0).has_value());
+    const auto* whole_scene_shadow = find_setting(
+        SettingId::max_whole_scene_shadow_resolution);
+    CHECK(whole_scene_shadow != nullptr);
+    CHECK(parse_setting_value(*whole_scene_shadow, L"1204").has_value());
+    CHECK(serialize_setting_value(*whole_scene_shadow, 1204).has_value());
     const auto* target = find_setting(SettingId::target_fps);
     CHECK(target != nullptr);
     CHECK(target->relative_path == L"KFGame.ini");
@@ -97,8 +102,9 @@ int main() {
     CHECK(!parse_setting_value(*corpses, L"2001").has_value());
     const auto* wounds = find_setting(SettingId::wound_decal_limit);
     CHECK(wounds != nullptr);
-    CHECK(wounds->minimum == 5);
-    CHECK(!parse_setting_value(*wounds, L"4").has_value());
+    CHECK(wounds->minimum == 2);
+    CHECK(parse_setting_value(*wounds, L"2").has_value());
+    CHECK(!parse_setting_value(*wounds, L"1").has_value());
     const auto* minimum = find_setting(
         SettingId::minimum_smooth_frame_rate);
     CHECK(minimum != nullptr);

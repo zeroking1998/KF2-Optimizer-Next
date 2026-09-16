@@ -177,11 +177,11 @@ int main() {
         kf2::app::StartMode::normal));
     CHECK(!kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::read_only));
-    CHECK(!kf2::app::should_prepare_adaptive_flex_runtime(
+    CHECK(!kf2::app::should_prepare_fixed_flex_runtime(
         kf2::app::StartMode::normal, 0));
-    CHECK(kf2::app::should_prepare_adaptive_flex_runtime(
+    CHECK(kf2::app::should_prepare_fixed_flex_runtime(
         kf2::app::StartMode::normal, 1));
-    CHECK(kf2::app::should_prepare_adaptive_flex_runtime(
+    CHECK(kf2::app::should_prepare_fixed_flex_runtime(
         kf2::app::StartMode::normal, 2));
     std::vector<kf2::config::RequestedChange> flex_preservation_changes{
         {kf2::config::SettingId::target_fps, 120,
@@ -263,6 +263,8 @@ int main() {
                     "[SystemSettings]\r\n"
                     "Fullscreen=True\r\n"
                     "Borderless=False\r\n");
+    CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
+              "UseVsync=True") != std::string::npos);
     write_bytes(config_root / L"KFGame.ini",
                 read_bytes(config_root / L"KFGame.ini") +
                     "[KFGameContent.KFGameInfo_Survival]\r\n"
@@ -330,6 +332,8 @@ int main() {
     {
         auto first = kf2::app::Application::start(options);
         CHECK(first.has_value());
+        CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
+                  "UseVsync=False") != std::string::npos);
         CHECK(read_bytes(options.state_root / L"settings.ini").find(
                   "adaptive_shadow_mode") == std::string::npos);
         const auto automatically_prepared =
@@ -371,8 +375,8 @@ int main() {
         CHECK(fs::exists(published_telemetry));
         CHECK(read_bytes(published_telemetry) == read_bytes(telemetry_asset));
         CHECK(read_bytes(config_root / L"KFEngine.ini").find(
-                  "GameViewportClientClassName=KFGame."
-                  "KFGameViewportClient") !=
+                  "GameViewportClientClassName=KF2OptimizerTelemetry."
+                  "KF2OptimizerGraphicsViewport") !=
               std::string::npos);
         CHECK(read_bytes(config_root / L"KFEngine.ini").find(
                   "LocalOptions=?Mutator=KF2OptimizerTelemetry."
@@ -496,8 +500,7 @@ int main() {
         "overlay_position=top_right\n"
         "overlay_scale_percent=100\n"
         "target_fps=60\ncorpse_limit=20\n"
-        "quality_policy=exact\n"
-              "optimizer_profile=balanced\n");
+        "quality_policy=exact\n");
         CHECK(recovered.value().shutdown_cleanly().has_value());
     }
     {
@@ -702,17 +705,8 @@ int main() {
     CHECK(thread_lag.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(thread_lag->x, thread_lag->y));
-    CHECK(graphical.value().ui_model().status().advanced_dirty);
-    CHECK(graphical.value().ui_model().status().advanced_values[0] == L"Off");
-    for (int step = 0; step < 24 &&
-         graphical.value().ui_model().focused_action() !=
-             std::optional<std::string>{"advanced-apply"}; ++step) {
-        SendMessageW(hwnd, WM_KEYDOWN, VK_TAB, 0);
-    }
-    CHECK(graphical.value().ui_model().focused_action() ==
-          std::optional<std::string>{"advanced-apply"});
-    SendMessageW(hwnd, WM_KEYDOWN, VK_RETURN, 0);
     CHECK(!graphical.value().ui_model().status().advanced_dirty);
+    CHECK(graphical.value().ui_model().status().advanced_values[0] == L"Off");
     CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
               "OneFrameThreadLag=False") != std::string::npos);
     const auto debug_navigation =
@@ -1033,6 +1027,197 @@ int main() {
         runtime.game_process.reset();
     }
 
+    // KF2 can save video choices while the app is open. The graphics page
+    // follows the game files without discarding a different staged choice.
+    {
+        const auto graphics_config = root / L"graphics-sync-config";
+        fs::create_directories(graphics_config);
+        for (const auto* graphics_ini : {L"KFSystemSettings.ini", L"KFGame.ini",
+                                 L"KFEngine.ini"}) {
+            write_bytes(graphics_config / graphics_ini,
+                        read_bytes(config_root / graphics_ini));
+        }
+        kf2::diagnostics::EventLog graphics_events{128};
+        kf2::app::UiRuntime graphics_runtime{
+            root / L"Data-graphics-sync", false,
+            kf2::config::Settings{}, graphics_events, options.game_discovery,
+            kf2::app::StartMode::read_only, root / L"portable"};
+        CHECK(graphics_runtime.installation.has_value());
+        graphics_runtime.installation->config_root = graphics_config;
+        graphics_runtime.reload_video_settings();
+        CHECK(graphics_runtime.video_saved.has_value());
+        const auto vsync_index = static_cast<std::size_t>(
+            kf2::game::VideoOption::vsync);
+        const int old_vsync =
+            graphics_runtime.video_saved->choices[vsync_index];
+        graphics_runtime.video_pending->film_grain_percent = 75;
+        graphics_runtime.refresh_video_presentation();
+
+        auto system_config = read_bytes(
+            graphics_config / L"KFSystemSettings.ini");
+        const auto old_choice = old_vsync == 0
+            ? std::string{"UseVsync=False"}
+            : std::string{"UseVsync=True"};
+        const auto new_choice = old_vsync == 0
+            ? std::string{"UseVsync=True"}
+            : std::string{"UseVsync=False"};
+        const auto choice_at = system_config.find(old_choice);
+        CHECK(choice_at != std::string::npos);
+        system_config.replace(choice_at, old_choice.size(), new_choice);
+        const auto system_path = graphics_config / L"KFSystemSettings.ini";
+        const auto old_write_time = fs::last_write_time(system_path);
+        write_bytes(system_path, system_config);
+        fs::last_write_time(system_path, old_write_time +
+            std::chrono::seconds{2});
+        CHECK(graphics_runtime.synchronize_video_settings_from_game());
+        CHECK(graphics_runtime.video_saved->choices[vsync_index] !=
+              old_vsync);
+        CHECK(graphics_runtime.video_pending->choices[vsync_index] !=
+              old_vsync);
+        CHECK(graphics_runtime.video_pending->film_grain_percent == 75);
+        CHECK(!graphics_runtime.synchronize_video_settings_from_game());
+        fs::remove(graphics_config / L"KFEngine.ini");
+        CHECK(graphics_runtime.synchronize_video_settings_from_game());
+        CHECK(graphics_runtime.video_saved->choices[static_cast<std::size_t>(
+                  kf2::game::VideoOption::nvidia_flex)] == 0);
+    }
+
+    // Releasing a graphics slider and selecting Reset both save directly to
+    // KF2's INIs; neither workflow needs a separate Apply action.
+    {
+        const auto direct_config = root / L"graphics-direct-config";
+        fs::create_directories(direct_config);
+        for (const auto* graphics_ini : {L"KFSystemSettings.ini", L"KFGame.ini",
+                                          L"KFEngine.ini"}) {
+            write_bytes(direct_config / graphics_ini,
+                        read_bytes(config_root / graphics_ini));
+        }
+        kf2::diagnostics::EventLog direct_events{128};
+        kf2::app::UiRuntime direct_runtime{
+            root / L"Data-graphics-direct", false,
+            kf2::config::Settings{}, direct_events, options.game_discovery,
+            kf2::app::StartMode::normal, root / L"portable"};
+        CHECK(direct_runtime.installation.has_value());
+        direct_runtime.installation->config_root = direct_config;
+        auto vsync_ini = read_bytes(direct_config / L"KFSystemSettings.ini");
+        const auto vsync_false = vsync_ini.find("UseVsync=False");
+        CHECK(vsync_false != std::string::npos);
+        vsync_ini.replace(vsync_false, std::strlen("UseVsync=False"),
+                          "UseVsync=True");
+        write_bytes(direct_config / L"KFSystemSettings.ini", vsync_ini);
+        auto variable_ini = read_bytes(direct_config / L"KFGame.ini");
+        const auto smoothing_on = variable_ini.find("bSmoothFrameRate=True");
+        CHECK(smoothing_on != std::string::npos);
+        variable_ini.replace(smoothing_on, std::strlen("bSmoothFrameRate=True"),
+                             "bSmoothFrameRate=False");
+        write_bytes(direct_config / L"KFGame.ini", variable_ini);
+        direct_runtime.reload_video_settings();
+        CHECK(direct_runtime.video_saved.has_value());
+        const auto vsync_choice = static_cast<std::size_t>(
+            kf2::game::VideoOption::vsync);
+        CHECK(direct_runtime.video_saved->choices[vsync_choice] == 1);
+        const auto variable_choice = static_cast<std::size_t>(
+            kf2::game::VideoOption::variable_frame_rate);
+        CHECK(direct_runtime.video_saved->choices[variable_choice] == 1);
+        direct_runtime.video_pending->choices[vsync_choice] = 0;
+        direct_runtime.video_pending->choices[variable_choice] = 0;
+        direct_runtime.save_video_selection();
+        const auto saved_vsync = kf2::game::read_video_settings(direct_config);
+        CHECK(saved_vsync.has_value());
+        CHECK(saved_vsync.value().choices[vsync_choice] == 0);
+        CHECK(saved_vsync.value().choices[variable_choice] == 0);
+        const auto original_display = kf2::game::video_choice_label(
+            kf2::game::VideoOption::display, *direct_runtime.video_saved);
+        const auto original_resolution = kf2::game::video_choice_label(
+            kf2::game::VideoOption::resolution, *direct_runtime.video_saved);
+        direct_runtime.set_slider_value("graphics-film-grain-slider", 75);
+        CHECK(direct_runtime.video_saved->film_grain_percent == 75);
+        const auto saved_grain = kf2::game::read_video_settings(direct_config);
+        CHECK(saved_grain.has_value());
+        CHECK(saved_grain.value().film_grain_percent == 75);
+        direct_runtime.reset_video_settings();
+        CHECK(direct_runtime.video_saved->film_grain_percent == 0);
+        const auto reset_graphics = kf2::game::read_video_settings(direct_config);
+        CHECK(reset_graphics.has_value());
+        CHECK(reset_graphics.value().film_grain_percent == 0);
+        CHECK(kf2::game::video_choice_label(
+                  kf2::game::VideoOption::display, reset_graphics.value()) ==
+              original_display);
+        CHECK(kf2::game::video_choice_label(
+                  kf2::game::VideoOption::resolution, reset_graphics.value()) ==
+              original_resolution);
+        CHECK(reset_graphics.value().flex_level == 0);
+    }
+
+    // A failed portable settings write must leave the Overlay switch and
+    // runtime state at their previously saved value.
+    {
+        kf2::diagnostics::EventLog overlay_events{128};
+        kf2::config::Settings overlay_start;
+        overlay_start.overlay_scale_percent = 125;
+        kf2::app::UiRuntime overlay_runtime{
+            root / L"Data-overlay-save", false,
+            overlay_start, overlay_events, options.game_discovery,
+            kf2::app::StartMode::normal, root / L"portable"};
+        CHECK(overlay_runtime.overlay_enabled);
+        overlay_runtime.settings_path =
+            root / L"missing-overlay-parent" / L"settings.ini";
+        const auto failed = overlay_runtime.set_overlay(false);
+        CHECK(!failed.has_value());
+        CHECK(overlay_runtime.overlay_enabled);
+        CHECK(overlay_runtime.optimizer_settings.overlay_enabled);
+        CHECK(overlay_runtime.model.status().overlay_enabled);
+        const auto previous_corner = overlay_runtime.overlay_corner;
+        const auto previous_position =
+            overlay_runtime.optimizer_settings.overlay_position;
+        overlay_runtime.execute_action("overlay-position");
+        CHECK(overlay_runtime.overlay_corner == previous_corner);
+        CHECK(overlay_runtime.optimizer_settings.overlay_position ==
+              previous_position);
+        overlay_runtime.execute_action("overlay-scale-reset");
+        CHECK(overlay_runtime.optimizer_settings.overlay_scale_percent == 125);
+        CHECK(overlay_runtime.overlay_scale == 1.25F);
+    }
+
+    // The rightmost corpse slider value must survive the real portable
+    // settings write and a fresh parse, not just the visual preview.
+    {
+        kf2::diagnostics::EventLog slider_events{128};
+        kf2::app::UiRuntime slider_runtime{
+            root / L"Data-corpse-slider", false,
+            kf2::config::Settings{}, slider_events, options.game_discovery,
+            kf2::app::StartMode::normal, root / L"portable"};
+        slider_runtime.set_slider_value("settings-corpses-slider", 2000);
+        CHECK(slider_runtime.model.status().corpse_limit == 2000);
+        const auto stored = kf2::config::parse_settings(
+            read_bytes(slider_runtime.settings_path));
+        CHECK(stored.has_value());
+        CHECK(stored.value().corpse_limit == 2000);
+    }
+
+    // A real filesystem failure must roll both Home sliders back to their
+    // authoritative saved values instead of leaving a misleading preview.
+    {
+        kf2::diagnostics::EventLog slider_events{128};
+        kf2::config::Settings initial;
+        initial.target_fps = 90;
+        initial.corpse_limit = 40;
+        kf2::app::UiRuntime slider_runtime{
+            root / L"Data-slider-save-failure", false,
+            initial, slider_events, options.game_discovery,
+            kf2::app::StartMode::normal, root / L"portable"};
+        slider_runtime.settings_path =
+            root / L"missing-slider-parent" / L"settings.ini";
+
+        slider_runtime.set_slider_value("settings-target-slider", 144);
+        CHECK(slider_runtime.optimizer_settings.target_fps == 90);
+        CHECK(slider_runtime.model.status().target_fps == 90);
+
+        slider_runtime.set_slider_value("settings-corpses-slider", 2000);
+        CHECK(slider_runtime.optimizer_settings.corpse_limit == 40);
+        CHECK(slider_runtime.model.status().corpse_limit == 40);
+    }
+
     // Turning Adaptive off is fail-closed even while KF2 is between gameplay
     // worlds and no protected control listener is reachable. The preference
     // must change immediately, local actions must stop, and exact runtime
@@ -1105,21 +1290,54 @@ int main() {
             rearm_state, false, rearm_settings, rearm_events,
             options.game_discovery, kf2::app::StartMode::normal,
             root / L"portable"};
+        rearm_runtime.reload_video_settings();
+        CHECK(rearm_runtime.video_saved.has_value());
+        const auto personal_graphics = *rearm_runtime.video_saved;
 
         const auto first_prepare =
             rearm_runtime.prepare_automatic_external_launch_profile();
         CHECK(first_prepare.has_value());
         CHECK(first_prepare.value());
+        const auto staged_native_graphics =
+            kf2::game::read_video_settings(config_root);
+        CHECK(staged_native_graphics.has_value());
+        const auto display_index = static_cast<std::size_t>(
+            kf2::game::VideoOption::display);
+        CHECK(staged_native_graphics.value().choices[display_index] == 1);
+        for (std::size_t index = 0;
+             index < staged_native_graphics.value().choices.size(); ++index) {
+            if (index == display_index) continue;
+            CHECK(staged_native_graphics.value().choices[index] ==
+                  personal_graphics.choices[index]);
+        }
+        CHECK(staged_native_graphics.value().film_grain_percent ==
+              personal_graphics.film_grain_percent);
+        CHECK(!rearm_runtime.synchronize_video_settings_from_game());
+        CHECK(rearm_runtime.video_saved->choices == personal_graphics.choices);
+        CHECK(rearm_runtime.video_saved->film_grain_percent ==
+              personal_graphics.film_grain_percent);
         CHECK(fs::exists(published_telemetry));
         CHECK(read_bytes(config_root / L"KFEngine.ini").find(
                   "LocalOptions=?Mutator=KF2OptimizerTelemetry."
                   "KF2OptimizerTelemetryMutator") != std::string::npos);
         CHECK(read_bytes(config_root / L"KFEngine.ini").find(
-                  "GameViewportClientClassName=KFGame."
-                  "KFGameViewportClient") !=
+                  "GameViewportClientClassName=KF2OptimizerTelemetry."
+                  "KF2OptimizerGraphicsViewport") !=
               std::string::npos);
         CHECK(read_bytes(config_root / L"KFEngine.ini").find(
                   "Paths=" + published_runtime_path) != std::string::npos);
+        rearm_runtime.video_saved.reset();
+        rearm_runtime.video_pending.reset();
+        rearm_runtime.reload_video_settings();
+        CHECK(rearm_runtime.video_saved->choices == personal_graphics.choices);
+        rearm_runtime.refresh_game_configuration_for_process_start(false);
+        CHECK(rearm_runtime.video_saved->choices == personal_graphics.choices);
+        CHECK(!rearm_runtime.synchronize_video_settings_from_game());
+        const auto motion_index = static_cast<std::size_t>(
+            kf2::game::VideoOption::motion_blur);
+        const int native_motion =
+            rearm_runtime.session_video_runtime->choices[motion_index] == 0
+                ? 1 : 0;
 
         rearm_runtime.game_log_new_settings_restart_requested = true;
         const auto restart_wait_started = rearm_runtime.monotonic_ns();
@@ -1149,11 +1367,19 @@ int main() {
             flex_setting, std::string_view{"PhysXLevel=0"}.size(),
             "PhysXLevel=2");
         write_bytes(config_root / L"KFEngine.ini", restarted_engine);
+        auto restarted_system = read_bytes(config_root / L"KFSystemSettings.ini");
+        const auto old_motion = native_motion == 0
+            ? std::string_view{"MotionBlur=True"}
+            : std::string_view{"MotionBlur=False"};
+        const auto motion_setting = restarted_system.find(old_motion);
+        CHECK(motion_setting != std::string::npos);
+        restarted_system.replace(motion_setting, old_motion.size(),
+            native_motion == 0 ? "MotionBlur=False" : "MotionBlur=True");
+        write_bytes(config_root / L"KFSystemSettings.ini", restarted_system);
+        CHECK(rearm_runtime.synchronize_video_settings_from_game());
+        CHECK(rearm_runtime.video_saved->choices == personal_graphics.choices);
         rearm_runtime.refresh_game_configuration_for_process_start(true);
-        const auto flex_index = static_cast<std::size_t>(
-            kf2::game::VideoOption::nvidia_flex);
-        CHECK(rearm_runtime.model.status().graphics_values[flex_index] ==
-              L"Gibs and fluids");
+        CHECK(rearm_runtime.video_saved->choices == personal_graphics.choices);
         const auto refreshed_events = rearm_events.snapshot();
         CHECK(std::any_of(refreshed_events.begin(), refreshed_events.end(),
             [](const auto& event) {
@@ -1169,8 +1395,19 @@ int main() {
         CHECK(rearm_runtime.game_restart_handoff_deadline_ns == 0);
         CHECK(!rearm_runtime.game_restart_handoff_new_settings);
         CHECK(!fs::exists(published_telemetry));
-        CHECK(read_bytes(config_root / L"KFEngine.ini") ==
-              original_engine_config);
+        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                  "PhysXLevel=2") != std::string::npos);
+        const auto native_graphics = kf2::game::read_video_settings(config_root);
+        CHECK(native_graphics.has_value());
+        CHECK(native_graphics.value().choices[motion_index] == native_motion);
+        CHECK(native_graphics.value().choices[static_cast<std::size_t>(
+                  kf2::game::VideoOption::shadow_quality)] ==
+              personal_graphics.choices[static_cast<std::size_t>(
+                  kf2::game::VideoOption::shadow_quality)]);
+        // This fixture has no NVIDIA FleX runtime. Reset its simulated native
+        // selection before testing the unrelated external-launch rearm path.
+        write_bytes(config_root / L"KFEngine.ini", original_engine_config);
+        rearm_runtime.reload_video_settings();
 
         const auto rearmed =
             rearm_runtime.rearm_automatic_external_launch_profile();
@@ -1183,8 +1420,8 @@ int main() {
                   "LocalOptions=?Mutator=KF2OptimizerTelemetry."
                   "KF2OptimizerTelemetryMutator") != std::string::npos);
         CHECK(read_bytes(config_root / L"KFEngine.ini").find(
-                  "GameViewportClientClassName=KFGame."
-                  "KFGameViewportClient") !=
+                  "GameViewportClientClassName=KF2OptimizerTelemetry."
+                  "KF2OptimizerGraphicsViewport") !=
               std::string::npos);
         CHECK(read_bytes(config_root / L"KFEngine.ini").find(
                   "Paths=" + published_runtime_path) != std::string::npos);
@@ -1207,17 +1444,17 @@ int main() {
         // must rebuild the protected snapshot and launch capabilities. This
         // is the orchestration path used when the dedicated FleX control is
         // changed before KF2 starts.
-        const auto vsync_index = static_cast<std::size_t>(
-            kf2::game::VideoOption::vsync);
-        const int original_vsync =
-            rearm_runtime.video_pending->choices[vsync_index];
-        rearm_runtime.cycle_video_option(kf2::game::VideoOption::vsync);
-        const auto graphics_applied = rearm_runtime.apply_video_settings();
-        CHECK(graphics_applied.has_value());
+        const auto effect_index = static_cast<std::size_t>(
+            kf2::game::VideoOption::motion_blur);
+        const int original_effect =
+            rearm_runtime.video_pending->choices[effect_index];
+        rearm_runtime.cycle_video_option(kf2::game::VideoOption::motion_blur);
         CHECK(rearm_runtime.session_config_snapshot.has_value());
         CHECK(rearm_runtime.session_config_waiting_for_launch);
-        CHECK(rearm_runtime.video_saved->choices[vsync_index] !=
-              original_vsync);
+        CHECK(rearm_runtime.video_saved->choices[effect_index] !=
+              original_effect);
+        // Rebuilding the protected launch must retain the explicit user
+        // choice in both the saved model and the live KF2 configuration.
         const auto graphics_rebuild_log = rearm_events.snapshot();
         CHECK(std::any_of(
             graphics_rebuild_log.begin(), graphics_rebuild_log.end(),

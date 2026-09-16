@@ -543,8 +543,7 @@ int main() {
     CHECK(telemetry_source.find(
         "DistanceActionInterval / float(AttackScale)") !=
           std::string::npos);
-    CHECK(telemetry_source.find(
-        "LodActionInterval / float(AttackScale)") != std::string::npos);
+    CHECK(telemetry_source.find("LodActionInterval") == std::string::npos);
     CHECK(telemetry_source.find(
         "0.20 / float(PhysicsPressureLevel)") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -609,7 +608,10 @@ int main() {
         "const AdaptiveCorpseControlSliceInterval=0.05;") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "const AdaptiveCorpseControlPhaseCount=13;") !=
+        "const AdaptiveCorpseControlPhaseCount=8;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "const FixedMinimumVisualControlPhaseCount=5;") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "const AdaptiveCorpseScanBudget=64;") != std::string::npos);
@@ -688,16 +690,23 @@ int main() {
         "Candidate.Mesh.MinLodModel = TargetMinLod") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "RestoreAllAdaptiveCorpseLods()") != std::string::npos);
+        "RestoreAllAdaptiveCorpseLods()") == std::string::npos);
     const auto lod_selector_function = telemetry_source.find(
-        "function KFPawn SelectVisibleMonsterCorpseForLod(");
-    const auto lod_apply_threshold = telemetry_source.find(
-        "DistanceSquared < 640000.0", lod_selector_function);
-    CHECK(lod_apply_threshold != std::string::npos);
+        "function KFPawn SelectVisibleMonsterCorpseForMinimumLod(");
+    CHECK(lod_selector_function != std::string::npos);
+    const auto lod_apply_function = telemetry_source.find(
+        "function bool ApplyOneFixedMinimumCorpseLod(",
+        lod_selector_function);
+    CHECK(lod_apply_function != std::string::npos);
+    CHECK(telemetry_source.substr(
+        lod_selector_function,
+        lod_apply_function - lod_selector_function).find(
+            "DistanceSquared < 640000.0") == std::string::npos);
     CHECK(telemetry_source.find("RestoreNearAdaptiveCorpseLods") ==
           std::string::npos);
     CHECK(telemetry_source.find(
-        "KF2OPT_CORPSE_LOD state=applied") != std::string::npos);
+        "KF2OPT_CORPSE_LOD state=fixed_minimum") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "SelectDistantAwakeMonsterCorpseForSleep") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -1037,16 +1046,16 @@ int main() {
         "function int ResolveAdaptiveLivingEnemyPressureLevel(") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "AdaptiveLivingVisualPressureLevel") != std::string::npos);
+        "AdaptiveLivingEnemyPressureLevel") != std::string::npos);
     CHECK(telemetry_source.find(
-        "AdaptiveLivingVisualPendingPressureLevel") != std::string::npos);
+        "AdaptiveLivingEnemyPendingPressureLevel") != std::string::npos);
     CHECK(telemetry_source.find(
-        "float(AdaptiveLivingVisualPressureLevel) / 5.0 + 0.03") !=
+        "float(AdaptiveLivingEnemyPressureLevel) / 5.0 + 0.03") !=
           std::string::npos);
     CHECK(telemetry_source.find("HoldSeconds = 0.75") != std::string::npos);
     CHECK(telemetry_source.find("HoldSeconds = 1.25") != std::string::npos);
     CHECK(telemetry_source.find(
-        "AdaptiveLivingVisualLastChangeRealTime < 1.5") !=
+        "AdaptiveLivingEnemyLastChangeRealTime < 1.5") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "function float GetAdaptiveLivingEnemyPressureScale(") ==
@@ -1407,8 +1416,9 @@ int main() {
     }
     for (const auto* cursor : {"AdaptiveCleanupScanCursor",
              "AdaptiveBaselineScanCursor", "AdaptiveFreezeScanCursor",
-             "AdaptiveDistanceScanCursor", "AdaptiveLodScanCursor",
-             "AdaptiveRagdollScanCursor", "AdaptiveAnimationScanCursor"}) {
+             "AdaptiveDistanceScanCursor", "AdaptiveRagdollScanCursor",
+             "FixedMinimumCorpseLodScanCursor",
+             "FixedMinimumAnimationScanCursor"}) {
         CHECK(telemetry_source.find(cursor) != std::string::npos);
     }
     CHECK(zed_time_guard < wake_stage);
@@ -1560,9 +1570,9 @@ int main() {
     CHECK(freeze_mutation < freeze_registration);
 
     const auto lod_selector = telemetry_source.find(
-        "function KFPawn SelectVisibleMonsterCorpseForLod(");
+        "function KFPawn SelectVisibleMonsterCorpseForMinimumLod(");
     const auto lod_apply = telemetry_source.find(
-        "function bool ApplyOneAdaptiveCorpseLod(", lod_selector);
+        "function bool ApplyOneFixedMinimumCorpseLod(", lod_selector);
     CHECK(lod_selector != std::string::npos);
     CHECK(lod_apply != std::string::npos);
     CHECK(telemetry_source.substr(
@@ -1576,7 +1586,7 @@ int main() {
         "MaximumMinLod = Candidate.Mesh.SkeletalMesh.LODInfo.Length - 1",
         lod_selector) != std::string::npos);
     CHECK(telemetry_source.find(
-        "AdaptiveCorpseLodCorpses.Length >=", lod_apply) ==
+        "FixedMinimumCorpseLodCorpses.Length >=", lod_apply) ==
           std::string::npos);
     CHECK(telemetry_source.find(
         "CandidateTarget = MaximumMinLod", lod_selector) !=
@@ -1593,22 +1603,22 @@ int main() {
         "Max(AdaptiveCorpsePressureLevel, ScenePressureLevel)") >= 2);
     CHECK(count_occurrences(telemetry_source, "EnemyPressureLevel);") >= 2);
     CHECK(telemetry_source.find(
-        "function bool ApplyLivingEnemyVisualPressure(") != std::string::npos);
+        "function bool ApplyLivingEnemyMinimumVisuals()") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "EnemyPressureLevel = ResolveAdaptiveLivingEnemyPressureLevel(",
         stagger_start) != std::string::npos);
+    const auto fixed_visual_start = telemetry_source.find(
+        "function bool RunFixedMinimumVisualControl()");
+    CHECK(fixed_visual_start != std::string::npos);
     CHECK(telemetry_source.find(
-        "bActionTaken = ApplyLivingEnemyVisualPressure(\n"
-        "                EnemyPressureLevel, EnemyPressureScale);",
-        stagger_start) != std::string::npos);
+        "bActionTaken = ApplyLivingEnemyMinimumVisuals();",
+        fixed_visual_start) != std::string::npos);
     CHECK(telemetry_source.find(
         "while (ScanPawn != None && Scanned < AdaptiveCorpseScanBudget)") !=
           std::string::npos);
-    CHECK(telemetry_source.find(
-        "function bool RestoreOneAdaptiveLivingVisual()") !=
-          std::string::npos);
     const auto living_apply_start = telemetry_source.find(
-        "function bool ApplyLivingEnemyVisualPressure(");
+        "function bool ApplyLivingEnemyMinimumVisuals()");
     const auto living_apply_end = telemetry_source.find(
         "function bool ShouldPreserveNearCorpseDetail(", living_apply_start);
     CHECK(living_apply_start != std::string::npos);
@@ -1617,9 +1627,10 @@ int main() {
         living_apply_start, living_apply_end - living_apply_start);
     CHECK(living_apply_body.find("WorldInfo.AllPawns") == std::string::npos);
     CHECK(living_apply_body.find(
-        "AdaptiveLivingScanPawn = ScanPawn.NextPawn") != std::string::npos);
+        "FixedMinimumLivingScanPawn = ScanPawn.NextPawn") !=
+          std::string::npos);
     CHECK(count_occurrences(
-        telemetry_source, "AdaptiveLivingScanPawn = None;") >= 3);
+        telemetry_source, "FixedMinimumLivingScanPawn = None;") >= 2);
     CHECK(telemetry_source.find(
         "function AdaptiveCorpsePhysicsRelease()") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -1630,43 +1641,64 @@ int main() {
         "Candidate.Mesh.AnimationLODDistanceFactor =") != std::string::npos);
     CHECK(telemetry_source.find(
         "Candidate.Mesh.AnimationLODFrameRate =") != std::string::npos);
-    CHECK(telemetry_source.find(
-        "TierScale = float(EnemyPressureLevel) / 5.0") !=
+    CHECK(living_apply_body.find(
+        "TargetMinLod = MaximumMinLod") != std::string::npos);
+    CHECK(living_apply_body.find(
+        "TargetAnimRate = 6") != std::string::npos);
+    CHECK(living_apply_body.find(
+        "TargetAnimDistance = 0.55") != std::string::npos);
+    CHECK(living_apply_body.find("EnemyPressureLevel") ==
           std::string::npos);
-    CHECK(telemetry_source.find(
-        "TargetMinLod = 1 + int(TierScale * float(MaximumMinLod))") !=
-          std::string::npos);
-    CHECK(telemetry_source.find(
-        "TargetAnimRate = Clamp(1 + EnemyPressureLevel, 2, 6)") !=
-          std::string::npos);
-    CHECK(telemetry_source.find(
-        "FMin(0.55, 0.15 + TierScale * 0.40)") != std::string::npos);
     CHECK(telemetry_source.find(
         "Candidate.Mesh.MinLodModel == TargetMinLod") != std::string::npos);
-    CHECK(telemetry_source.find(
-        "DistanceSquared < 640000.0", lod_selector) != std::string::npos);
+    CHECK(telemetry_source.substr(
+        lod_selector, lod_apply - lod_selector).find(
+            "DistanceSquared < 640000.0") == std::string::npos);
     CHECK(telemetry_source.find(
         "Candidate.Mesh.bSkipTickAnimNodes =") == std::string::npos);
     CHECK(telemetry_source.find(
         "Candidate.Mesh.bSkipGetBoneAtoms =") == std::string::npos);
+    const auto adaptive_disable = telemetry_source.find(
+        "function bool SetAdaptiveRuntimeEnabled(bool bEnabled)");
+    const auto adaptive_resource = telemetry_source.find(
+        "function bool ApplyAdaptiveResourceControl(", adaptive_disable);
+    const auto fixed_visual_adaptive_disable_body = telemetry_source.substr(
+        adaptive_disable, adaptive_resource - adaptive_disable);
+    CHECK(fixed_visual_adaptive_disable_body.find(
+        "RestoreAllAdaptiveCorpseLods();") ==
+          std::string::npos);
+    CHECK(fixed_visual_adaptive_disable_body.find(
+        "RestoreAllAdaptiveLivingVisuals();") ==
+          std::string::npos);
+    CHECK(fixed_visual_adaptive_disable_body.find(
+        "ClearTimer(nameof(FixedMinimumVisualControl)") ==
+          std::string::npos);
+    const auto fixed_schedule = telemetry_source.find(
+        "function ScheduleFixedMinimumVisualControlTimer(");
+    const auto fixed_schedule_end = telemetry_source.find(
+        "function bool SetAdaptiveRuntimeEnabled(", fixed_schedule);
+    CHECK(fixed_schedule != std::string::npos);
+    CHECK(fixed_schedule_end != std::string::npos);
+    CHECK(telemetry_source.substr(
+        fixed_schedule, fixed_schedule_end - fixed_schedule).find(
+            "bAdaptiveRuntimeEnabled") == std::string::npos);
     CHECK(telemetry_source.find(
-        "RestoreAllAdaptiveLivingVisuals();") != std::string::npos);
+        "function PruneFixedMinimumLivingVisualEntries()") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
-        "function PruneAdaptiveLivingVisualEntries()") != std::string::npos);
-    CHECK(telemetry_source.find(
-        "PruneAdaptiveLivingVisualEntries();") != std::string::npos);
+        "PruneFixedMinimumLivingVisualEntries();") != std::string::npos);
     CHECK(telemetry_source.find(
         "readback=verified", lod_apply) != std::string::npos);
     const auto lod_prune = telemetry_source.find(
-        "function PruneAdaptiveCorpseLodEntries()");
+        "function PruneFixedMinimumCorpseLodEntries()");
     const auto lod_native_reset = telemetry_source.find(
         "KF2OPT_CORPSE_LOD state=native_reset", lod_prune);
     const auto lod_unowned_state = telemetry_source.find(
-        "AdaptiveCorpseLodAppliedMinModels[Index] = -1", lod_prune);
+        "FixedMinimumCorpseLodAppliedMinModels[Index] = -1", lod_prune);
     const auto lod_reapply_reason = telemetry_source.find(
         "ApplyReason = \"native_state_changed\"", lod_apply);
     const auto lod_reason_receipt = telemetry_source.find(
-        "state=applied reason=\"$ApplyReason", lod_apply);
+        "state=fixed_minimum reason=\"$ApplyReason", lod_apply);
     CHECK(lod_prune != std::string::npos);
     CHECK(lod_native_reset != std::string::npos);
     CHECK(lod_unowned_state != std::string::npos);
@@ -1679,7 +1711,7 @@ int main() {
     const auto near_corpse_detail_guard = telemetry_source.find(
         "function bool ShouldPreserveNearCorpseDetail(");
     const auto corpse_animation_refresh = telemetry_source.find(
-        "function RefreshSleepingCorpseAnimationState(");
+        "function RefreshSleepingCorpseMinimumAnimationState(");
     const auto corpse_animation_end = telemetry_source.find(
         "function int FindAdaptiveBaselineSettleEntry(",
         corpse_animation_refresh);
@@ -1700,9 +1732,11 @@ int main() {
     CHECK(near_corpse_detail_body.find(
         "DistanceSquared < 640000.0") != std::string::npos);
     CHECK(corpse_animation_body.find(
-        "ShouldPreserveNearCorpseDetail(Candidate)") != std::string::npos);
-    CHECK(count_occurrences(telemetry_source,
-        "!ShouldPreserveNearCorpseDetail(Candidate)") >= 3);
+        "ShouldPreserveNearCorpseDetail(Candidate)") == std::string::npos);
+    CHECK(corpse_animation_body.find(
+        "Candidate.Mesh.bNoSkeletonUpdate = true") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "ScheduleFixedMinimumVisualControlTimer(") != std::string::npos);
 
     const auto destroyed = telemetry_source.find("event Destroyed()");
     const auto destroyed_end = telemetry_source.find(
@@ -1731,9 +1765,9 @@ int main() {
           std::string::npos);
     CHECK(destroyed_body.find("RestoreAllAdaptiveLivingVisuals()") ==
           std::string::npos);
-    CHECK(quiesce_body.find("AdaptiveLivingVisualZeds.Length = 0") !=
+    CHECK(quiesce_body.find("FixedMinimumLivingVisualZeds.Length = 0") !=
           std::string::npos);
-    CHECK(quiesce_body.find("AdaptiveCorpseLodCorpses.Length = 0") !=
+    CHECK(quiesce_body.find("FixedMinimumCorpseLodCorpses.Length = 0") !=
           std::string::npos);
 
     const auto ragdoll_selector = telemetry_source.find(
@@ -1900,7 +1934,8 @@ int main() {
     CHECK(changed_engine.find(
         "Paths=" + published_runtime_path + "\r\n") != std::string::npos);
     CHECK(changed_engine.find(
-        "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n") !=
+        "GameViewportClientClassName=KF2OptimizerTelemetry."
+        "KF2OptimizerGraphicsViewport\r\n") !=
           std::string::npos);
     CHECK(changed_engine.find(
         "LocalOptions=?Mutator=KF2OptimizerTelemetry."

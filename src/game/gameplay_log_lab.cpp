@@ -50,6 +50,8 @@ constexpr std::wstring_view kEngineSection = L"Engine.Engine";
 constexpr std::wstring_view kViewportClientKey = L"GameViewportClientClassName";
 constexpr std::wstring_view kTelemetryViewportClient =
     L"KF2OptimizerTelemetry.KF2OptimizerTelemetryViewport";
+constexpr std::wstring_view kGraphicsViewportClient =
+    L"KF2OptimizerTelemetry.KF2OptimizerGraphicsViewport";
 constexpr std::wstring_view kNativeViewportClient =
     L"KFGame.KFGameViewportClient";
 constexpr std::wstring_view kTelemetrySection =
@@ -329,14 +331,14 @@ Result<bool> enable_offline_gameplay_logging(
         kEngineSection, kViewportClientKey);
     if (!current_viewport ||
         (*current_viewport != kNativeViewportClient &&
-         *current_viewport != kTelemetryViewportClient)) {
+         *current_viewport != kGraphicsViewportClient)) {
         return Result<bool>::failure(
             {ErrorCode::invalid_argument,
              L"KF2 viewport-client setting is missing or owned by another provider",
              0});
     }
     const auto viewport_replaced = engine.value().replace(
-        kEngineSection, kViewportClientKey, kNativeViewportClient);
+        kEngineSection, kViewportClientKey, kGraphicsViewportClient);
     if (viewport_replaced.shadowed_occurrences != 0) {
         return Result<bool>::failure(
             {ErrorCode::invalid_argument,
@@ -595,7 +597,7 @@ Result<bool> enable_offline_gameplay_logging(
               kTelemetrySection, kAdaptiveControlTokenKey)
         : std::optional<std::wstring>{};
     if (!verified_engine.has_value() || !verified_viewport ||
-        *verified_viewport != kNativeViewportClient ||
+        *verified_viewport != kGraphicsViewportClient ||
         !verified_local_options || !verified_mutator_option.has_value() ||
         verified_mutator_option.value() != *verified_local_options ||
         !verified_runtime_path.changed ||
@@ -650,7 +652,8 @@ Result<bool> cleanup_stale_offline_gameplay_configuration(
     bool changed = false;
     const auto viewport = engine.value().find(
         kEngineSection, kViewportClientKey);
-    if (viewport && *viewport == kTelemetryViewportClient) {
+    if (viewport && (*viewport == kTelemetryViewportClient ||
+                     *viewport == kGraphicsViewportClient)) {
         const auto restored = engine.value().replace(
             kEngineSection, kViewportClientKey, kNativeViewportClient);
         if (restored.shadowed_occurrences != 0) {
@@ -775,7 +778,8 @@ Result<bool> cleanup_stale_offline_gameplay_configuration(
         verified_legacy_runtime_path_document.remove_exact(
             kCoreSystemSection, kRuntimePathsKey, kLegacyPublishedRuntimePath);
     if ((verified_viewport &&
-         *verified_viewport == kTelemetryViewportClient) ||
+         (*verified_viewport == kTelemetryViewportClient ||
+          *verified_viewport == kGraphicsViewportClient)) ||
         !verified_cleaned_options.has_value() ||
         (verified_local_options &&
          verified_cleaned_options.value() != *verified_local_options) ||

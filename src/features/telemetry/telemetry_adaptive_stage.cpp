@@ -175,10 +175,8 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_safety = L"no adaptive actuator";
         status.adaptive_evidence = L"TELEMETRY_ONLY";
         status.adaptive_corpse_action_status = L"DISABLED";
-        status.adaptive_flex_action_status = L"DISABLED";
         adaptive_gameplay_active = false;
         adaptive_governor.reset();
-        adaptive_profile_gate.reset();
         adaptive_decision = {};
         model.set_status(std::move(status));
         return;
@@ -319,7 +317,6 @@ void UiRuntime::update_adaptive_controller(
                     adaptive_quality_last_applied_ns = completed_ns;
                     adaptive_frame_not_before_ns = completed_ns;
                     adaptive_governor.notify_quality_applied(completed_ns);
-                    adaptive_profile_gate.reset();
                     const int effective_quality =
                         adaptive_resource_quality.effective_quality();
                     const auto resource_name =
@@ -399,23 +396,12 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_runtime_corpse_limit.reset();
         status.adaptive_corpse_capability = L"UNAVAILABLE";
         status.adaptive_corpse_action_status = L"NONE";
-        status.adaptive_flex_requested_substeps.reset();
-        status.adaptive_flex_effective_substeps.reset();
-        status.adaptive_flex_action_status = L"NONE";
-        status.adaptive_flex_capability = L"UNAVAILABLE";
         status.adaptive_particle_capability = L"UNAVAILABLE";
         status.adaptive_restore_generation = 0;
         status.adaptive_shadow_mode = optimizer_settings.adaptive_shadow_mode;
-        const auto launch_profile = optimizer::bound_adaptive_profile(
-            stored_adaptive_profile(optimizer_settings),
-            optimizer_settings.adaptive_minimum_quality,
-            optimizer_settings.adaptive_maximum_quality);
-        status.recommended_profile = launch_profile
-            ? std::wstring{optimizer::adaptive_profile_label(*launch_profile)}
-            : L"not available";
-        status.recommendation_reason = launch_profile
-                ? L"Automatic launch profile is ready; live telemetry will refine the next session"
-                : L"No verified named profile fits the selected quality limits";
+        status.recommended_profile = L"user settings";
+        status.recommendation_reason =
+            L"KF2 starts from the user's saved graphics; live telemetry may make temporary runtime changes";
         model.set_status(std::move(status));
         return;
     }
@@ -424,11 +410,10 @@ void UiRuntime::update_adaptive_controller(
         if (adaptive_gameplay_active) {
             adaptive_gameplay_active = false;
             adaptive_governor.reset();
-            adaptive_profile_gate.reset();
             adaptive_decision = {};
             events->append({0, diagnostics::Severity::info,
                 "ADAPTIVE_GAMEPLAY_PAUSED",
-                L"Adaptive stopped evaluating menu/loading frames and preserved the last stable next-launch profile",
+                L"Adaptive stopped evaluating menu/loading frames and preserved the user's saved graphics",
                 L"optimizer"});
         }
         status.adaptive_state = L"observing";
@@ -450,13 +435,7 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_evidence = L"NOT_AVAILABLE";
         status.adaptive_restore_generation = 0;
         status.adaptive_shadow_mode = optimizer_settings.adaptive_shadow_mode;
-        const auto launch_profile = optimizer::bound_adaptive_profile(
-            stored_adaptive_profile(optimizer_settings),
-            optimizer_settings.adaptive_minimum_quality,
-            optimizer_settings.adaptive_maximum_quality);
-        status.recommended_profile = launch_profile
-            ? std::wstring{optimizer::adaptive_profile_label(*launch_profile)}
-            : L"not available";
+        status.recommended_profile = L"user settings";
         status.recommendation_reason = status.adaptive_reason;
         last_adaptive_state = optimizer::AdaptiveControllerState::observing;
         last_adaptive_disposition = optimizer::AdaptiveDisposition::hold;
@@ -469,7 +448,6 @@ void UiRuntime::update_adaptive_controller(
     if (!adaptive_gameplay_active) {
         adaptive_gameplay_active = true;
         adaptive_governor.reset();
-        adaptive_profile_gate.reset();
         adaptive_decision = {};
         adaptive_resource_quality.reset(
             optimizer_settings.adaptive_maximum_quality);
@@ -491,11 +469,6 @@ void UiRuntime::update_adaptive_controller(
         adaptive_resource_quality.effective_quality(),
         optimizer_settings.adaptive_minimum_quality,
         optimizer_settings.adaptive_maximum_quality);
-    const bool flex_pressure_candidate = frame.flex && frame.flex->fresh &&
-        frame.flex->aggregate_particles_fresh &&
-        frame.flex->particle_capacity > 0 &&
-        frame.flex->aggregate_active_particles >= 0 &&
-        frame.flex->last_update_tick != 0;
     // Keep the overlay's historical statistics intact. Only the controller
     // excludes presents from before its latest gameplay/action boundary.
     const bool bounded_frames_required = present_source &&
@@ -517,8 +490,6 @@ void UiRuntime::update_adaptive_controller(
          .current_map = adaptive_map,
          .map_generation = adaptive_map_generation,
          .last_telemetry_sample = adaptive_telemetry_sample,
-         .flex_now_ms =
-             flex_pressure_candidate ? GetTickCount64() : 0,
          .effects_control_verified = frame.offline_gameplay &&
              frame.gameplay &&
              frame.gameplay->telemetry_control_port.has_value() &&
@@ -545,7 +516,6 @@ void UiRuntime::update_adaptive_controller(
         adaptive_frame_not_before_ns = now_ns;
         adaptive_governor.reset();
         adaptive_decision = {};
-        adaptive_profile_gate.reset();
         if (sample_build.sample.map_changed) {
             adaptive_map_ready_ns = now_ns;
             adaptive_quality_reduction_floor.reset(
@@ -615,12 +585,9 @@ void UiRuntime::update_adaptive_controller(
     const auto widen = [](std::string_view value) {
         return std::wstring{value.begin(), value.end()};
     };
-    status.adaptive_flex_capability = widen(
-        optimizer::adaptive_capability_state_name(
-            sample.capabilities.flex_solver_substep_control));
     status.adaptive_particle_capability = widen(
         optimizer::adaptive_capability_state_name(
-            sample.capabilities.flex_particle_budget_control));
+            sample.capabilities.particle_control));
     if (sample.adaptive_corpse_runtime_limit &&
         sample.capabilities.corpse_control ==
             optimizer::AdaptiveCapabilityState::available) {
@@ -949,43 +916,8 @@ void UiRuntime::update_adaptive_controller(
     }
     status.adaptive_shadow_mode = optimizer_settings.adaptive_shadow_mode;
 
-    const auto bounded_profile = optimizer::bound_adaptive_profile(
-        adaptive_decision.recommended_profile,
-        optimizer_settings.adaptive_minimum_quality,
-        optimizer_settings.adaptive_maximum_quality);
-    status.recommended_profile = bounded_profile
-        ? std::wstring{optimizer::adaptive_profile_label(*bounded_profile)}
-        : L"not available";
-    status.recommendation_reason = bounded_profile
-        ? adaptive_profile_reason(adaptive_decision)
-        : L"No verified named profile fits the selected quality limits";
-
-    std::optional<optimizer::Profile> profile_to_persist;
-    if (start_mode == StartMode::normal &&
-        adaptive_locks_valid &&
-        adaptive_decision.data.quality ==
-            optimizer::AdaptiveDataQuality::valid &&
-        adaptive_decision.state !=
-            optimizer::AdaptiveControllerState::observing &&
-        adaptive_decision.state !=
-            optimizer::AdaptiveControllerState::frozen &&
-        bounded_profile) {
-        profile_to_persist = adaptive_profile_gate.evaluate({
-            .current = stored_adaptive_profile(optimizer_settings),
-            .recommended = *bounded_profile,
-            .active_gameplay = active_gameplay,
-            .telemetry_valid = true,
-            .recovery_eligible =
-                adaptive_decision.quality_recovery_eligible,
-            .now_ns = now_ns});
-    } else {
-        adaptive_profile_gate.reset();
-    }
-    if (profile_to_persist) {
-        telemetry_pipeline::apply_adaptive_profile_effect(
-            *this, {*profile_to_persist}, status);
-    }
-
+    status.recommended_profile = L"user settings";
+    status.recommendation_reason = adaptive_profile_reason(adaptive_decision);
     const bool controller_changed =
         adaptive_decision.state != last_adaptive_state ||
         adaptive_decision.disposition != last_adaptive_disposition;
@@ -1166,8 +1098,6 @@ void UiRuntime::update_adaptive_controller(
                      << status.adaptive_corpse_capability
                      << L"; corpseAction="
                      << status.adaptive_corpse_action_status
-                     << L"; flexCapability="
-                     << status.adaptive_flex_capability
                      << L"; particleCapability="
                      << status.adaptive_particle_capability
                      << L"; reason=" << status.adaptive_reason

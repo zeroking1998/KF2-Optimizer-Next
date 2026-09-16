@@ -12,8 +12,6 @@ namespace kf2::features::graphics {
 KF2_GRAPHICS_HANDLER(display);
 KF2_GRAPHICS_HANDLER(resolution);
 KF2_GRAPHICS_HANDLER(overall_quality);
-KF2_GRAPHICS_HANDLER(vsync);
-KF2_GRAPHICS_HANDLER(variable_frame_rate);
 KF2_GRAPHICS_HANDLER(environment_detail);
 KF2_GRAPHICS_HANDLER(character_detail);
 KF2_GRAPHICS_HANDLER(fx);
@@ -30,17 +28,14 @@ KF2_GRAPHICS_HANDLER(volumetric_lighting);
 KF2_GRAPHICS_HANDLER(lens_flares);
 KF2_GRAPHICS_HANDLER(light_shafts);
 KF2_GRAPHICS_HANDLER(flex);
-KF2_GRAPHICS_HANDLER(apply);
 KF2_GRAPHICS_HANDLER(reset);
 
 #undef KF2_GRAPHICS_HANDLER
 
-inline constexpr std::array<app::runtime::ActionImplementation, 23> kActions{{
+inline constexpr std::array<app::runtime::ActionImplementation, 20> kActions{{
     {app::runtime::ActionId::graphics_display, &app::runtime::bind_no_payload<&display>},
     {app::runtime::ActionId::graphics_resolution, &app::runtime::bind_no_payload<&resolution>},
     {app::runtime::ActionId::graphics_overall_quality, &app::runtime::bind_no_payload<&overall_quality>},
-    {app::runtime::ActionId::graphics_vsync, &app::runtime::bind_no_payload<&vsync>},
-    {app::runtime::ActionId::graphics_variable_frame_rate, &app::runtime::bind_no_payload<&variable_frame_rate>},
     {app::runtime::ActionId::graphics_environment_detail, &app::runtime::bind_no_payload<&environment_detail>},
     {app::runtime::ActionId::graphics_character_detail, &app::runtime::bind_no_payload<&character_detail>},
     {app::runtime::ActionId::graphics_fx, &app::runtime::bind_no_payload<&fx>},
@@ -57,7 +52,6 @@ inline constexpr std::array<app::runtime::ActionImplementation, 23> kActions{{
     {app::runtime::ActionId::graphics_lens_flares, &app::runtime::bind_no_payload<&lens_flares>},
     {app::runtime::ActionId::graphics_light_shafts, &app::runtime::bind_no_payload<&light_shafts>},
     {app::runtime::ActionId::graphics_flex, &app::runtime::bind_no_payload<&flex>},
-    {app::runtime::ActionId::graphics_apply, &app::runtime::bind_no_payload<&apply>},
     {app::runtime::ActionId::graphics_reset, &app::runtime::bind_no_payload<&reset>},
 }};
 

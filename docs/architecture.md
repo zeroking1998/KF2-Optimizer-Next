@@ -73,8 +73,10 @@ resample. Only read-only last-completed diagnostic/report projections survive
 the tick, and they never feed a later decision.
 
 Runtime, configuration, and protected-session mutations are restricted to the
-effect stage: process-local FleX control, Adaptive profile persistence with
-rollback, and verified protected session restoration. The FleX observation
+effect stage: process-local FleX control, telemetry-confirmed temporary
+Adaptive actions with exact readback, and verified protected session
+restoration. Adaptive starts from the user's saved graphics and does not
+persist a named graphics profile for a later start. The FleX observation
 stage separately persists only its bounded diagnostic report. Collection
 cannot write configuration or update the overlay; Adaptive cannot read
 platform samplers; presentation cannot sample or write configuration/FleX;
@@ -99,13 +101,11 @@ The `optimizer` module has one Adaptive decision path. It validates fresh
 identity-bound evidence, applies quality bounds and emits catalog-backed plans
 with source, reason and confidence. It evaluates only active gameplay; menus,
 loading screens and shutdown frames reset the fast controller window and
-cannot alter the persisted baseline. A confirmed runtime change between capped
+cannot alter the user's persisted graphics. A confirmed runtime change between capped
 and variable frame rate also resets current, rolling, prediction and
 quality-response evidence, then requires a fresh gameplay window without
-changing the target FPS. A separate slow persistence gate requires
-8 seconds of stable degradation or 45 seconds of stable recovery before saving
-a next-launch profile; recovery additionally requires the governor's verified
-stable-headroom state. CPU evidence is classified as idle/frame-limited,
+changing the target FPS. Runtime quality decisions remain session-local; every
+launch starts from the user's saved KF2 graphics. CPU evidence is classified as idle/frame-limited,
 main-thread dominant, partially parallel or broadly parallel. Frame pressure
 plus a dominant thread can prove a CPU bottleneck below a brittle 90-percent
 point threshold, while broadly parallel saturation is evaluated against the
@@ -181,13 +181,14 @@ at most once per 400 ms. Fresh visible enemy/corpse density or confirmed
 target-relative frame pressure moves the threshold to 1,000/850 units and the
 interval to 200/100 ms; FPS is an amplifier rather than the sole gate.
 Optimizer-slept bodies are identity
-tracked and use the official `WakeRigidBody` path inside 800 units. Only then
-may the pressure path raise native `MinLodModel` on one distant visible corpse
-every 400/200/100 ms. It starts at stage 2 outside 300 units and advances to
-  stages 3/4/5 at 500/800/1,200 units. Visible-enemy pressure scales continuously
-  from five to eighty Zeds and consumes every stage the mesh actually exposes;
-forced, near, sleeping, recovered and session-ending LOD
-state is preserved or restored. After eligible distance/LOD work is exhausted,
+tracked and use the official `WakeRigidBody` path inside 800 units. A separate
+bounded session controller fixes eligible living-Zed and corpse meshes to their
+final available `MinLodModel`, and fixes living animation inputs to
+`AnimationLODDistanceFactor=0.55` and `AnimationLODFrameRate=6`. This controller
+does not consume FPS, density, distance, enemy-pressure or Adaptive state.
+Sleeping corpses also enter KF2's native final-pose skeleton state. Direct bone
+arrays, attacks, hits, collision and native culling remain engine-owned. After
+eligible distance work is exhausted,
 one old, slow, non-death-animation visible ragdoll may sleep at most once per
 750/350 ms, but never inside the fixed 800-unit player safety radius. Rejected
 nearby candidates are reported with bounded policy evidence rather than

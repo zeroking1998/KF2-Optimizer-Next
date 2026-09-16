@@ -72,10 +72,10 @@ struct UiStatus {
     std::optional<int> adaptive_runtime_corpse_limit;
     std::wstring adaptive_corpse_capability{L"UNAVAILABLE"};
     std::wstring adaptive_corpse_action_status{L"NONE"};
-    std::optional<int> adaptive_flex_requested_substeps;
-    std::optional<int> adaptive_flex_effective_substeps;
-    std::wstring adaptive_flex_action_status{L"NONE"};
-    std::wstring adaptive_flex_capability{L"UNAVAILABLE"};
+    std::optional<int> flex_requested_substeps;
+    std::optional<int> flex_effective_substeps;
+    std::wstring flex_action_status{L"NONE"};
+    std::wstring flex_capability{L"UNAVAILABLE"};
     std::wstring adaptive_particle_capability{L"UNAVAILABLE"};
     std::wstring adaptive_state{L"observing"};
     std::wstring adaptive_bottleneck{L"unknown"};
@@ -120,8 +120,8 @@ struct UiStatus {
     bool update_installable{false};
     bool update_installing{false};
     bool graphics_available{false};
-    bool graphics_dirty{false};
     bool graphics_game_running{false};
+    bool graphics_game_menu_readback{false};
     std::array<std::wstring, 21> graphics_values{};
     std::wstring graphics_aspect_ratio{L"Unknown"};
     int graphics_film_grain_percent{50};
@@ -132,7 +132,7 @@ struct UiStatus {
     int advanced_screen_percentage{100};
     int advanced_particle_percentage{100};
     int advanced_decal_lifetime{30};
-    std::wstring profile{L"balanced"};
+    std::wstring profile{L"user settings"};
     std::wstring quality{L"exact"};
 };
 

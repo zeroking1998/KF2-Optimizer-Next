@@ -45,12 +45,12 @@ requirements from GitHub Issue 72.
   dominance, partial parallelism and broad parallel saturation, and reports an
   external affinity subset without changing it. A saturated game/main thread
   therefore remains visible on many-core CPUs without mislabeling the overlay's
-  total CPU percentage. Adaptive evaluates only active gameplay and persists a
-  next-launch profile only after 8 seconds of stable degradation or 45 seconds
-  of stable recovery with verified headroom; intervention can never be treated
-  as quality recovery. A two-second CPU evidence hold removes critical-thread
+  total CPU percentage. Adaptive evaluates only active gameplay and never
+  replaces the user's saved graphics with a named launch profile; runtime
+  intervention can never be treated as persistent quality recovery. A
+  two-second CPU evidence hold removes critical-thread
   threshold flapping without masking another proven bottleneck. Menu/loading
-  frames cannot churn the profile.
+  frames cannot drive runtime quality changes.
 - All currently unproved game mutations are structurally `SHADOW` and
   `TEST_REQUIRED`; protected gameplay/network/security targets are permanently
   blocked. No generated target becomes live merely because it exists in the
@@ -130,7 +130,7 @@ the complete protected session is restored afterward.
 FleX solver actions remain `PENDING` until the shared-memory provider reports
 the requested value and a matching forwarded value in the current generation.
 Each accepted receipt is now retained in the bounded session event log as
-`FLEX_ADAPTIVE_APPLIED`, including requested/effective values and ownership
+`FLEX_MINIMUM_APPLIED`, including requested/effective values and ownership
 generations; proposals and writes without readback are never logged as applied.
 
 The actuator also has a separate ragdoll-load controller. Its distant-physics
@@ -140,13 +140,12 @@ enemy/corpse density or hysteresis-confirmed target-relative frame pressure
 moves entry to 1,000/850 units and the interval to 200/100 ms. It uses KF2's
 official `PutRigidBodyToSleep` path and never hides an actor. A
 tracked body is woken through `WakeRigidBody` after it comes inside 800 units;
-the separated entry/wake distances prevent churn. Only confirmed frame pressure
-may continue into native `MinLodModel` on one distant visible corpse every
-400/200/100 ms, starting at stage 2 outside 300 units and advancing through
-  stages 3/4/5 at 500/800/1,200 units. Visible-enemy pressure scales continuously
-  from five to eighty Zeds and consumes every available stage without exceeding the mesh's final LOD
-or overriding `ForcedLodModel`; nearby, sleeping,
-recovered and session-ending LOD values are restored. Only after those stages
+the separated entry/wake distances prevent churn. A separate bounded controller
+fixes eligible living-Zed and corpse meshes to their final available
+`MinLodModel` and fixes living animation inputs to 0.55/6 throughout the world,
+independently of Adaptive mode and pressure, without overriding
+`ForcedLodModel`. Sleeping corpses use KF2's native final-pose skeleton flags.
+Only after the distance stage
 may one old, slow visible corpse sleep every 750/350 ms. Living enemies, death
 animations and fast bodies are unchanged. The CPU live-quality group can disable
 the three official cosmetic corpse-collision switches at 80/60/40%, with exact

@@ -342,11 +342,9 @@ Result<Settings> parse_settings(std::string_view text) {
                 }
                 settings.quality_policy = value;
             } else if (key == "optimizer_profile") {
-                if (value != "balanced" && value != "stability" &&
-                    value != "high_performance" && value != "custom") {
-                    return invalid_settings(L"optimizer_profile is invalid");
-                }
-                settings.optimizer_profile = value;
+                // Legacy portable builds persisted a named startup profile.
+                // User-owned graphics now come directly from KF2, so accept
+                // and discard this obsolete migration key.
             } else if (key == "manual_game_path") {
                 if (!safe_path_text(value)) {
                     return invalid_settings(L"manual_game_path is invalid");
@@ -420,8 +418,7 @@ std::string serialize_settings(const Settings& settings) {
            << "overlay_scale_percent=" << settings.overlay_scale_percent << '\n'
            << "target_fps=" << settings.target_fps << '\n'
            << "corpse_limit=" << settings.corpse_limit << '\n'
-           << "quality_policy=" << settings.quality_policy << '\n'
-           << "optimizer_profile=" << settings.optimizer_profile << '\n';
+           << "quality_policy=" << settings.quality_policy << '\n';
     if (!settings.manual_game_path.empty()) {
         output << "manual_game_path=" << settings.manual_game_path << '\n';
     }

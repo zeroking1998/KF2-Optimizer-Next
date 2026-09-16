@@ -126,10 +126,18 @@ std::uint64_t UiRuntime::monotonic_ns() const {
 
 
 void UiRuntime::runtime_tick() {
+    poll_startup_prewarm();
     poll_auto_package_repair();
     poll_update_check();
     poll_update_install();
     const auto now = monotonic_ns();
+    if ((model.selected() == ui::Destination::graphics ||
+         (session_config_snapshot && session_video_runtime)) &&
+        (last_video_config_poll_ns == 0 || now < last_video_config_poll_ns ||
+         now - last_video_config_poll_ns >= 1'000'000'000ULL)) {
+        last_video_config_poll_ns = now;
+        static_cast<void>(synchronize_video_settings_from_game());
+    }
     constexpr std::uint64_t kTelemetryIntervalNs = 120'000'000ULL;
     if (last_telemetry_tick_ns == 0 || now < last_telemetry_tick_ns ||
         now - last_telemetry_tick_ns >= kTelemetryIntervalNs) {
@@ -139,6 +147,51 @@ void UiRuntime::runtime_tick() {
     }
     if (overlay_window && overlay_presentation) {
         static_cast<void>(overlay_window->update(*overlay_presentation));
+    }
+}
+
+void UiRuntime::start_startup_prewarm() {
+    if (!installation || game::find_running_game_process(
+            installation->executable).has_value()) {
+        return;
+    }
+    startup_prewarm_announced = false;
+    startup_prewarmer.start(installation->install_root);
+}
+
+void UiRuntime::poll_startup_prewarm() {
+    if (startup_prewarm_announced) return;
+    const auto current = startup_prewarmer.snapshot();
+    switch (current.state) {
+        case game::StartupPrewarmState::complete:
+            startup_prewarm_announced = true;
+            events->append({0, diagnostics::Severity::info,
+                "STARTUP_PREWARM_COMPLETED",
+                L"Prepared " + std::to_wstring(current.files_read) +
+                    L" known KF2 startup files (" +
+                    std::to_wstring(current.bytes_read / (1024ULL * 1024ULL)) +
+                    L" MiB) in the Windows file cache",
+                L"performance"});
+            break;
+        case game::StartupPrewarmState::cancelled:
+            startup_prewarm_announced = true;
+            if (current.bytes_read != 0) {
+                events->append({0, diagnostics::Severity::info,
+                    "STARTUP_PREWARM_CANCELLED",
+                    L"Stopped startup preparation before KF2 launch after " +
+                        std::to_wstring(
+                            current.bytes_read / (1024ULL * 1024ULL)) +
+                        L" MiB; no launch wait was introduced",
+                    L"performance"});
+            }
+            break;
+        case game::StartupPrewarmState::skipped_unknown_storage:
+        case game::StartupPrewarmState::skipped_low_memory:
+        case game::StartupPrewarmState::skipped_no_files:
+            startup_prewarm_announced = true;
+            break;
+        default:
+            break;
     }
 }
 

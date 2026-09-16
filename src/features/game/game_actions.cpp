@@ -86,6 +86,7 @@ app::runtime::DispatchResult select_install(
         return app::runtime::DispatchResult::handled;
     }
     runtime.installation = std::move(validated.value());
+    runtime.start_startup_prewarm();
     runtime.reload_video_settings();
     runtime.reload_advanced_settings();
     auto status = runtime.model.status();
@@ -180,8 +181,8 @@ app::runtime::DispatchResult launch(
         }
         return app::runtime::DispatchResult::handled;
     }
-    const bool automatic_flex_launch =
-        app::should_prepare_adaptive_flex_runtime(
+    const bool fixed_flex_launch =
+        app::should_prepare_fixed_flex_runtime(
             runtime.start_mode, *configured_physx_level);
     if (!automatic_external_profile_ready) {
         const auto automatic = runtime.apply_adaptive_launch_profile();
@@ -198,7 +199,7 @@ app::runtime::DispatchResult launch(
         runtime.events->append(
             {0, product_diagnostics::Severity::info,
              "ADAPTIVE_EXTERNAL_LAUNCH_REUSED",
-             L"The already verified external-launch profile was reused for the app-started KF2 session",
+             L"The already verified external-launch runtime setup was reused for the app-started KF2 session without replacing user graphics",
              L"optimizer"});
     }
     if (!automatic_external_profile_ready) {
@@ -238,6 +239,7 @@ app::runtime::DispatchResult launch(
                 ? std::numeric_limits<std::uint64_t>::max()
                 : now + kLaunchSafetyTimeoutNs;
     }
+    runtime.startup_prewarmer.request_stop();
     if (!ShellExecuteExW(&launch_request)) {
         const DWORD launch_error = GetLastError();
         bool restored = true;
@@ -255,8 +257,8 @@ app::runtime::DispatchResult launch(
     }
     show_notice(
         runtime, ui::NoticeSeverity::info, L"GAME_LAUNCH_STARTED",
-        automatic_flex_launch
-            ? L"Killing Floor 2 start was requested with the protected Adaptive plan, corpse provider and user-enabled FleX. The verified providers and exact original INIs will be restored after the session."
+        fixed_flex_launch
+            ? L"Killing Floor 2 start was requested with the protected Adaptive plan, corpse provider and user-enabled FleX at its fixed minimum solver level. The verified providers and exact original INIs will be restored after the session."
             : L"Killing Floor 2 start was requested with the protected Adaptive plan and corpse provider. FleX remains off because the user did not enable it in KF2. The verified provider and exact original INIs will be restored after the session.");
     return app::runtime::DispatchResult::handled;
 }

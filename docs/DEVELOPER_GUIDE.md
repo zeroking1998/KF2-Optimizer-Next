@@ -43,7 +43,7 @@ pwsh -NoProfile -File tools/build_kf2_telemetry.ps1
 ```
 
 The script discovers the normal Steam SDK location or accepts `-SdkRoot`. It
-temporarily stages only this project's seven `.uc` files in the installed SDK,
+temporarily stages only this project's nine `.uc` files in the installed SDK,
 invokes `KFEditor.exe make -useunpublished`, copies the generated module into
 the local ignored asset path, and restores `KFEngine.ini`, any previous
 unpublished module, and SDK staging state. KFEditor requires the previous

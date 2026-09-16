@@ -63,13 +63,7 @@ void UiRuntime::cycle_advanced_option(game::AdvancedOption option) {
         return;
     }
     if (!game::cycle_advanced_option(*advanced_pending, option)) return;
-    refresh_advanced_presentation();
-    model.set_notice({
-        ui::NoticeSeverity::info, L"ADVANCED_STAGED",
-        std::wstring{game::advanced_option_label(option)} +
-            L" is staged. Select Apply advanced settings to save it.",
-        L""});
-    invalidate();
+    save_advanced_selection(game::advanced_option_label(option));
 }
 
 void UiRuntime::stage_advanced_slider(
@@ -88,25 +82,52 @@ void UiRuntime::stage_advanced_slider(
     if (!game::set_advanced_slider_value(*advanced_pending, option, value)) {
         return;
     }
-    refresh_advanced_presentation();
+    save_advanced_selection(game::advanced_option_label(option));
+}
+
+void UiRuntime::save_advanced_selection(std::wstring_view label) {
+    if (!advanced_saved || !advanced_pending) {
+        reload_advanced_settings();
+        return;
+    }
+    if (*advanced_saved == *advanced_pending) {
+        refresh_advanced_presentation();
+        invalidate();
+        return;
+    }
+    const auto saved = apply_advanced_settings();
+    if (!saved.has_value()) {
+        const auto error = saved.error();
+        reload_advanced_settings();
+        model.set_notice({
+            ui::NoticeSeverity::warning, L"ADVANCED_SAVE_FAILED",
+            std::wstring{label} + L" was not saved: " + error.message,
+            L"The controls were restored to the values currently stored by KF2."});
+        invalidate();
+        return;
+    }
     model.set_notice({
-        ui::NoticeSeverity::info, L"ADVANCED_STAGED",
-        std::wstring{game::advanced_option_label(option)} +
-            L" is staged. Select Apply advanced settings to save it.",
+        ui::NoticeSeverity::info, L"ADVANCED_SAVED",
+        std::wstring{label} +
+            L" was saved and verified. A restore backup is available.",
         L""});
     invalidate();
 }
 
 void UiRuntime::reset_advanced_settings() {
-    if (advanced_pending) {
-        advanced_pending = game::recommended_advanced_defaults();
+    if (!installation || !advanced_pending) {
+        reload_advanced_settings();
+        if (!advanced_pending) return;
     }
-    refresh_advanced_presentation();
-    model.set_notice({
-        ui::NoticeSeverity::info, L"ADVANCED_RESET",
-        L"Recommended advanced defaults are ready. Select Apply advanced settings to save them.",
-        L""});
-    invalidate();
+    if (game::find_running_game_process(installation->executable).has_value()) {
+        model.set_notice({
+            ui::NoticeSeverity::warning, L"ADVANCED_GAME_RUNNING",
+            L"Close KF2 before changing advanced game settings.", L""});
+        invalidate();
+        return;
+    }
+    advanced_pending = game::recommended_advanced_defaults();
+    save_advanced_selection(L"Recommended advanced defaults");
 }
 
 Result<config::ApplyResult> UiRuntime::apply_advanced_settings() {
@@ -120,7 +141,7 @@ Result<config::ApplyResult> UiRuntime::apply_advanced_settings() {
     if (changes.empty()) {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::invalid_argument,
-             L"No advanced game changes are staged", 0});
+             L"The selected advanced settings are already saved", 0});
     }
     if (game::find_running_game_process(installation->executable).has_value()) {
         return Result<config::ApplyResult>::failure(

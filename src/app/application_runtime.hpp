@@ -31,6 +31,7 @@
 #include "kf2/diagnostics/feature_inventory.hpp"
 #include "kf2/diagnostics/crash_recorder.hpp"
 #include "kf2/game/game_session.hpp"
+#include "kf2/game/startup_prewarmer.hpp"
 #include "kf2/game/advanced_settings.hpp"
 #include "kf2/game/frame_rate_cap.hpp"
 #include "kf2/game/video_settings.hpp"
@@ -38,7 +39,6 @@
 #include "kf2/game/game_log_session.hpp"
 #include "kf2/game/adaptive_control_client.hpp"
 #include "kf2/flex/flex_audit.hpp"
-#include "kf2/flex/flex_adaptive_policy.hpp"
 #include "kf2/flex/flex_lab.hpp"
 #include "kf2/flex/flex_observation.hpp"
 #include "kf2/overlay/overlay_policy.hpp"
@@ -78,8 +78,6 @@ struct AdaptiveRuntimePendingRequest final {
 };
 
 optimizer::AdaptivePolicy adaptive_policy_from(
-    const config::Settings& settings) noexcept;
-optimizer::Profile stored_adaptive_profile(
     const config::Settings& settings) noexcept;
 std::wstring adaptive_profile_reason(
     const optimizer::AdaptiveDecision& decision);
@@ -137,6 +135,8 @@ struct UiRuntime {
     unsigned int current_ui_timer_interval_ms{0};
     bool animation_timer_active{false};
     std::optional<game::GameProcessIdentity> game_process;
+    game::StartupPrewarmer startup_prewarmer;
+    bool startup_prewarm_announced{false};
     std::uint64_t last_game_process_scan_ns{0};
     std::optional<game::GameProcessIdentity>
         game_restart_handoff_previous_process;
@@ -149,6 +149,7 @@ struct UiRuntime {
     bool game_log_startup_exit_announced{false};
     bool game_log_new_settings_restart_requested{false};
     std::string game_log_marker_tail;
+    std::string game_graphics_marker_tail;
     std::optional<game::GameLogSession> game_log_session;
     game::GameLogParserStats game_log_parser_stats;
     bool overlay_scene_ready{false};
@@ -206,7 +207,6 @@ struct UiRuntime {
     std::optional<game::OfflineAdaptiveSessionPolicy>
         adaptive_session_policy;
     std::uint64_t adaptive_settings_generation{1};
-    optimizer::AdaptiveProfilePersistenceGate adaptive_profile_gate;
     optimizer::AdaptiveDecision adaptive_decision;
     config::AdaptiveLocks adaptive_locks;
     std::vector<optimizer::AdaptiveManualLock> adaptive_lock_cache;
@@ -235,8 +235,7 @@ struct UiRuntime {
     bool flex_observation_announced{false};
     std::optional<flex::ObservationSnapshot> last_flex_observation;
     std::uint64_t last_flex_report_tick{0};
-    flex::AdaptivePolicy flex_adaptive_policy;
-    bool flex_adaptive_constrained{false};
+    bool flex_minimum_limited{false};
     StartMode start_mode{StartMode::normal};
     std::shared_ptr<PackageRepairAsyncState> package_repair_state;
     update::UpdateController update_controller;
@@ -245,6 +244,13 @@ struct UiRuntime {
     std::shared_ptr<UpdateInstallAsyncState> update_install_state;
     std::optional<game::VideoSettings> video_saved;
     std::optional<game::VideoSettings> video_pending;
+    std::optional<game::GameMenuGraphicsReadback> game_menu_graphics_readback;
+    // Keep the temporary live profile separate from the user's saved graphics.
+    std::optional<game::VideoSettings> session_video_runtime;
+    std::optional<game::VideoSettings> session_video_native_changes;
+    std::optional<std::array<std::optional<std::filesystem::file_time_type>, 3>>
+        video_config_write_times;
+    std::uint64_t last_video_config_poll_ns{0};
     std::optional<game::AdvancedGameSettings> advanced_saved;
     std::optional<game::AdvancedGameSettings> advanced_pending;
 
@@ -315,6 +321,8 @@ struct UiRuntime {
     void update_overlay_scene_gate(bool flush = false);
 
     void runtime_tick();
+    void start_startup_prewarm();
+    void poll_startup_prewarm();
 
     void start_auto_package_repair();
 
@@ -330,17 +338,20 @@ struct UiRuntime {
     void ignore_update();
     void refresh_update_presentation();
     void reload_video_settings();
+    bool synchronize_video_settings_from_game();
     void refresh_game_configuration_for_process_start(bool settings_restart);
     bool reset_adaptive_frame_window_for_rate_mode_change(
         std::uint64_t now_ns, bool active_gameplay);
     void refresh_video_presentation();
     void cycle_video_option(game::VideoOption option);
+    void save_video_selection();
     void reset_video_settings();
     Result<config::ApplyResult> apply_video_settings();
     void reload_advanced_settings();
     void refresh_advanced_presentation();
     void cycle_advanced_option(game::AdvancedOption option);
     void stage_advanced_slider(game::AdvancedOption option, int value);
+    void save_advanced_selection(std::wstring_view label);
     void reset_advanced_settings();
     Result<config::ApplyResult> apply_advanced_settings();
 
@@ -348,9 +359,9 @@ struct UiRuntime {
 
     void observe_flex_process();
 
-    Result<bool> ensure_automatic_flex_lab();
+    Result<bool> ensure_fixed_flex_runtime();
 
-    bool restore_automatic_flex_lab(std::wstring_view reason);
+    bool restore_fixed_flex_runtime(std::wstring_view reason);
 
     Result<game::FrameRateCapResult> synchronize_frame_rate_cap();
 

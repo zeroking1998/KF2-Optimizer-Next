@@ -267,6 +267,16 @@ target_compile_definitions(kf2_frame_rate_cap_test PRIVATE
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/frame-rate-cap")
 add_test(NAME kf2_frame_rate_cap_test COMMAND kf2_frame_rate_cap_test)
 
+add_executable(kf2_startup_movies_test
+    integration/startup_movies_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/config/startup_movies.cpp"
+    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp")
+target_include_directories(kf2_startup_movies_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_startup_movies_test PRIVATE
+    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/startup-movies")
+add_test(NAME kf2_startup_movies_test COMMAND kf2_startup_movies_test)
+
 add_executable(kf2_atomic_file_test
     windows/atomic_file_test.cpp
     "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
@@ -394,15 +404,15 @@ if(TARGET KF2FlexForwarder)
     set_tests_properties(kf2_flex_forwarder_loader_test PROPERTIES
         SKIP_RETURN_CODE 77)
 
-    add_executable(kf2_flex_forwarder_adaptive_test
-        windows/flex_forwarder_adaptive_test.cpp)
-    target_include_directories(kf2_flex_forwarder_adaptive_test PRIVATE
+    add_executable(kf2_flex_forwarder_fixed_minimum_test
+        windows/flex_forwarder_fixed_minimum_test.cpp)
+    target_include_directories(kf2_flex_forwarder_fixed_minimum_test PRIVATE
         "${PROJECT_SOURCE_DIR}/include")
-    add_dependencies(kf2_flex_forwarder_adaptive_test
+    add_dependencies(kf2_flex_forwarder_fixed_minimum_test
         KF2FlexForwarder kf2_flex_original_test_double)
-    add_test(NAME kf2_flex_forwarder_adaptive_test
-        COMMAND kf2_flex_forwarder_adaptive_test
-        "${PROJECT_SOURCE_DIR}/out/tests/flex-forwarder-adaptive"
+    add_test(NAME kf2_flex_forwarder_fixed_minimum_test
+        COMMAND kf2_flex_forwarder_fixed_minimum_test
+        "${PROJECT_SOURCE_DIR}/out/tests/flex-forwarder-fixed-minimum"
         "${KF2_FLEX_FORWARDER}"
         "$<TARGET_FILE:kf2_flex_original_test_double>")
 endif()
@@ -412,12 +422,6 @@ add_executable(kf2_flex_observation_test
     "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp")
 target_include_directories(kf2_flex_observation_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_flex_observation_test COMMAND kf2_flex_observation_test)
-
-add_executable(kf2_flex_adaptive_policy_test
-    unit/flex_adaptive_policy_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/flex/flex_adaptive_policy.cpp")
-target_include_directories(kf2_flex_adaptive_policy_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
-add_test(NAME kf2_flex_adaptive_policy_test COMMAND kf2_flex_adaptive_policy_test)
 
 add_executable(kf2_application_lifecycle_test
     integration/application_lifecycle_test.cpp
@@ -440,12 +444,12 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/setting_catalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/settings.cpp"
+    "${PROJECT_SOURCE_DIR}/src/config/startup_movies.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/session_guard.cpp"
     "${PROJECT_SOURCE_DIR}/src/diagnostics/event_log.cpp"
     "${PROJECT_SOURCE_DIR}/src/diagnostics/crash_recorder.cpp"
     "${PROJECT_SOURCE_DIR}/src/diagnostics/feature_inventory.cpp"
     "${PROJECT_SOURCE_DIR}/src/flex/flex_audit.cpp"
-    "${PROJECT_SOURCE_DIR}/src/flex/flex_adaptive_policy.cpp"
     "${PROJECT_SOURCE_DIR}/src/flex/flex_lab.cpp"
     "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/frame_rate_cap.cpp"
@@ -459,6 +463,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/game/game_log_session.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_log_telemetry.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_session.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/startup_prewarmer.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/advanced_settings.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/video_settings.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_mascot.cpp"
@@ -826,7 +831,6 @@ add_test(NAME kf2_telemetry_session_stage_test
 
 add_executable(kf2_telemetry_flex_stage_test
     unit/telemetry_flex_stage_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/flex/flex_adaptive_policy.cpp"
 )
 target_include_directories(kf2_telemetry_flex_stage_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include"
@@ -955,6 +959,15 @@ add_executable(kf2_game_session_test
 target_include_directories(kf2_game_session_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_game_session_test PRIVATE user32 dwmapi)
 add_test(NAME kf2_game_session_test COMMAND kf2_game_session_test)
+
+add_executable(kf2_startup_prewarmer_test
+    windows/startup_prewarmer_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/game/startup_prewarmer.cpp"
+)
+target_include_directories(kf2_startup_prewarmer_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+add_test(NAME kf2_startup_prewarmer_test
+    COMMAND kf2_startup_prewarmer_test)
 
 add_executable(kf2_system_metrics_test
     windows/system_metrics_test.cpp

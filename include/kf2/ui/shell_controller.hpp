@@ -71,6 +71,7 @@ private:
     [[nodiscard]] std::optional<int> slider_value_at(
         const SemanticNode& node, float x_dip) const noexcept;
     void preview_slider(std::string_view node_id, float x_dip);
+    void finish_slider_drag(std::optional<float> x_dip);
     void commit_slider(std::string_view node_id, int value);
 
     UiModel& model_;
