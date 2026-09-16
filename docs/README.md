@@ -40,7 +40,7 @@ contributors do not need them.
 - [Final Acceptance Evidence](FINAL_ACCEPTANCE.md)
 - [Function Matrix](function-matrix.md)
 - [Issue 72 Product Matrix](ISSUE_72_PRODUCT_MATRIX.md)
-- [Adaptive FleX Scope](FLEX_ADAPTIVE_SCOPE.md)
+- [Fixed FleX Runtime Scope](FLEX_RUNTIME_SCOPE.md)
 - [Open-Source Checklist](OPEN_SOURCE_CHECKLIST.md)
 - [Changelog](../CHANGELOG.md)
 - [Roadmap](../ROADMAP.md)

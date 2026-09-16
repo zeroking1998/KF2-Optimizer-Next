@@ -39,7 +39,6 @@
 #include "kf2/game/game_log_session.hpp"
 #include "kf2/game/adaptive_control_client.hpp"
 #include "kf2/flex/flex_audit.hpp"
-#include "kf2/flex/flex_adaptive_policy.hpp"
 #include "kf2/flex/flex_lab.hpp"
 #include "kf2/flex/flex_observation.hpp"
 #include "kf2/overlay/overlay_policy.hpp"
@@ -238,8 +237,7 @@ struct UiRuntime {
     bool flex_observation_announced{false};
     std::optional<flex::ObservationSnapshot> last_flex_observation;
     std::uint64_t last_flex_report_tick{0};
-    flex::AdaptivePolicy flex_adaptive_policy;
-    bool flex_adaptive_constrained{false};
+    bool flex_minimum_limited{false};
     StartMode start_mode{StartMode::normal};
     std::shared_ptr<PackageRepairAsyncState> package_repair_state;
     update::UpdateController update_controller;
@@ -353,9 +351,9 @@ struct UiRuntime {
 
     void observe_flex_process();
 
-    Result<bool> ensure_automatic_flex_lab();
+    Result<bool> ensure_fixed_flex_runtime();
 
-    bool restore_automatic_flex_lab(std::wstring_view reason);
+    bool restore_fixed_flex_runtime(std::wstring_view reason);
 
     Result<game::FrameRateCapResult> synchronize_frame_rate_cap();
 

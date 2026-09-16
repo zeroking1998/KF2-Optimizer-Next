@@ -130,7 +130,7 @@ the complete protected session is restored afterward.
 FleX solver actions remain `PENDING` until the shared-memory provider reports
 the requested value and a matching forwarded value in the current generation.
 Each accepted receipt is now retained in the bounded session event log as
-`FLEX_ADAPTIVE_APPLIED`, including requested/effective values and ownership
+`FLEX_MINIMUM_APPLIED`, including requested/effective values and ownership
 generations; proposals and writes without readback are never logged as applied.
 
 The actuator also has a separate ragdoll-load controller. Its distant-physics

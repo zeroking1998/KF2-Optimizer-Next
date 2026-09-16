@@ -290,7 +290,6 @@ int main() {
     context.current_map = "KF-BioticsLab";
     context.map_generation = 4;
     context.last_telemetry_sample = 16;
-    context.flex_now_ms = 10'000;
     context.effects_control_verified = true;
 
     const auto built = build_adaptive_sample(frame, context);
@@ -362,12 +361,6 @@ int main() {
           optimizer::AdaptiveCapabilityState::available);
     CHECK(sample.capabilities.particle_control ==
           optimizer::AdaptiveCapabilityState::available);
-    CHECK(sample.capabilities.flex_telemetry ==
-          optimizer::AdaptiveCapabilityState::available);
-    CHECK(sample.capabilities.flex_solver_substep_control ==
-          optimizer::AdaptiveCapabilityState::available);
-    CHECK(sample.capabilities.flex_particle_budget_control ==
-          optimizer::AdaptiveCapabilityState::unavailable);
     CHECK(sample.live_corpse_burden == 8);
     CHECK(sample.adaptive_corpse_runtime_limit == 10);
     CHECK(sample.user_max_dead_bodies == context.user_max_dead_bodies);
@@ -394,8 +387,6 @@ int main() {
     CHECK(sample.rendering_pressure.has_value());
     CHECK(approximately_equal(
         *sample.rendering_pressure, std::sqrt(0.8)));
-    CHECK(sample.flex_pressure.has_value());
-    CHECK(approximately_equal(*sample.flex_pressure, 0.25));
     CHECK(sample.quality_score == 80.0);
     CHECK(!sample.minimum_quality_reached);
 
@@ -459,8 +450,6 @@ int main() {
           optimizer::AdaptiveCapabilityState::unavailable);
     CHECK(online_sample.capabilities.particle_control ==
           optimizer::AdaptiveCapabilityState::unavailable);
-    CHECK(online_sample.capabilities.flex_solver_substep_control ==
-          optimizer::AdaptiveCapabilityState::unavailable);
     online.gameplay->net_mode = "NM_ListenServer";
     CHECK(build_adaptive_sample(online, context).sample.session_class ==
           optimizer::AdaptiveSessionClass::host_or_listen_server);
@@ -471,12 +460,6 @@ int main() {
     CHECK(!stale_sample.gameplay_context_fresh);
     CHECK(!stale_sample.visibility_context_fresh);
     CHECK(!stale_sample.ragdoll_pressure.has_value());
-
-    auto stale_flex = frame;
-    auto late_context = context;
-    late_context.flex_now_ms = 11'001;
-    CHECK(!build_adaptive_sample(stale_flex, late_context)
-               .sample.flex_pressure.has_value());
 
     TelemetryFrame missing;
     missing.identity = {8, 9};
@@ -489,7 +472,6 @@ int main() {
     CHECK(!empty.sample.system_cpu_percent.has_value());
     CHECK(!empty.sample.gpu_percent.has_value());
     CHECK(!empty.sample.ragdoll_pressure.has_value());
-    CHECK(!empty.sample.flex_pressure.has_value());
     CHECK(empty.sample.session_class ==
           optimizer::AdaptiveSessionClass::unknown);
 
