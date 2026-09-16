@@ -47,7 +47,6 @@ int main() {
     CHECK(parsed.value().overlay_position == "bottom_left");
     CHECK(parsed.value().overlay_scale_percent == 175);
     CHECK(parsed.value().quality_policy == "invisible");
-    CHECK(parsed.value().optimizer_profile == "stability");
     CHECK(parsed.value().manual_game_path == "D:\\Steam\\KillingFloor2");
     CHECK(parsed.value().extras.at("custom_key") == "preserved");
     const auto migrated_serialized = serialize_settings(parsed.value());
@@ -58,6 +57,7 @@ int main() {
     CHECK(migrated_serialized.find("adaptive_flex_max_substeps") ==
           std::string::npos);
     CHECK(migrated_serialized.find("animations_enabled") == std::string::npos);
+    CHECK(migrated_serialized.find("optimizer_profile") == std::string::npos);
 
     CHECK(!parse_settings("schema_version=9\ntarget_fps=120\n").has_value());
     CHECK(!parse_settings("schema_version=1\ntarget_fps=9999\n").has_value());
@@ -164,7 +164,11 @@ int main() {
               "animations_enabled") == std::string::npos);
     CHECK(!parse_settings("schema_version=1\nguide_step=25\n").has_value());
     CHECK(!parse_settings("schema_version=1\nquality_policy=magic\n").has_value());
-    CHECK(!parse_settings("schema_version=1\noptimizer_profile=turbo\n").has_value());
+    const auto legacy_profile = parse_settings(
+        "schema_version=1\noptimizer_profile=turbo\n");
+    CHECK(legacy_profile.has_value());
+    CHECK(serialize_settings(legacy_profile.value()).find(
+              "optimizer_profile") == std::string::npos);
     CHECK(!parse_settings("schema_version=1\noverlay_position=center\n").has_value());
     CHECK(!parse_settings("schema_version=1\noverlay_scale_percent=201\n").has_value());
     CHECK(parse_settings(
@@ -220,8 +224,7 @@ int main() {
           "overlay_position=top_right\n"
           "overlay_scale_percent=100\n"
           "target_fps=60\ncorpse_limit=20\n"
-          "quality_policy=exact\n"
-          "optimizer_profile=balanced\n");
+          "quality_policy=exact\n");
 
     Settings with_extras;
     CHECK(serialize_settings(with_extras).find(

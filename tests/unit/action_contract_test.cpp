@@ -23,8 +23,8 @@ int main() {
         "settings-target-slider",
     }};
 
-    CHECK(action_bindings().size() == 66);
-    CHECK(action_definitions().size() == 64);
+    CHECK(action_bindings().size() == 62);
+    CHECK(action_definitions().size() == 60);
     CHECK(control_definitions().size() == kExistingControls.size() + 4);
 
     for (const auto name : kExistingControls) {
@@ -86,8 +86,9 @@ int main() {
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::overlay)] == 8);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::diagnostics)] == 9);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::backup)] == 1);
-    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::graphics)] == 23);
-    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::advanced)] == 14);
+    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::graphics)] == 20);
+    CHECK(!parse_action("graphics-apply").has_value());
+    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::advanced)] == 13);
 
 
     std::set<ControlId> control_ids;
@@ -104,7 +105,7 @@ int main() {
     CHECK(settings_controls == 2);
     CHECK(find_control("graphics-film-grain-slider") != nullptr);
     CHECK(find_control("graphics-film-grain-slider")->minimum == 0);
-    CHECK(find_control("graphics-film-grain-slider")->maximum == 200);
+    CHECK(find_control("graphics-film-grain-slider")->maximum == 100);
     CHECK(find_control("advanced-screen-percentage-slider") != nullptr);
     CHECK(find_control("advanced-screen-percentage-slider")->minimum == 50);
     CHECK(find_control("advanced-screen-percentage-slider")->maximum == 200);

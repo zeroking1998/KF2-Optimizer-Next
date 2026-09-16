@@ -131,6 +131,13 @@ void UiRuntime::runtime_tick() {
     poll_update_check();
     poll_update_install();
     const auto now = monotonic_ns();
+    if ((model.selected() == ui::Destination::graphics ||
+         (session_config_snapshot && session_video_runtime)) &&
+        (last_video_config_poll_ns == 0 || now < last_video_config_poll_ns ||
+         now - last_video_config_poll_ns >= 1'000'000'000ULL)) {
+        last_video_config_poll_ns = now;
+        static_cast<void>(synchronize_video_settings_from_game());
+    }
     constexpr std::uint64_t kTelemetryIntervalNs = 120'000'000ULL;
     if (last_telemetry_tick_ns == 0 || now < last_telemetry_tick_ns ||
         now - last_telemetry_tick_ns >= kTelemetryIntervalNs) {

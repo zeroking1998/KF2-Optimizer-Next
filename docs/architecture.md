@@ -73,8 +73,10 @@ resample. Only read-only last-completed diagnostic/report projections survive
 the tick, and they never feed a later decision.
 
 Runtime, configuration, and protected-session mutations are restricted to the
-effect stage: process-local FleX control, Adaptive profile persistence with
-rollback, and verified protected session restoration. The FleX observation
+effect stage: process-local FleX control, telemetry-confirmed temporary
+Adaptive actions with exact readback, and verified protected session
+restoration. Adaptive starts from the user's saved graphics and does not
+persist a named graphics profile for a later start. The FleX observation
 stage separately persists only its bounded diagnostic report. Collection
 cannot write configuration or update the overlay; Adaptive cannot read
 platform samplers; presentation cannot sample or write configuration/FleX;
@@ -99,13 +101,11 @@ The `optimizer` module has one Adaptive decision path. It validates fresh
 identity-bound evidence, applies quality bounds and emits catalog-backed plans
 with source, reason and confidence. It evaluates only active gameplay; menus,
 loading screens and shutdown frames reset the fast controller window and
-cannot alter the persisted baseline. A confirmed runtime change between capped
+cannot alter the user's persisted graphics. A confirmed runtime change between capped
 and variable frame rate also resets current, rolling, prediction and
 quality-response evidence, then requires a fresh gameplay window without
-changing the target FPS. A separate slow persistence gate requires
-8 seconds of stable degradation or 45 seconds of stable recovery before saving
-a next-launch profile; recovery additionally requires the governor's verified
-stable-headroom state. CPU evidence is classified as idle/frame-limited,
+changing the target FPS. Runtime quality decisions remain session-local; every
+launch starts from the user's saved KF2 graphics. CPU evidence is classified as idle/frame-limited,
 main-thread dominant, partially parallel or broadly parallel. Frame pressure
 plus a dominant thread can prove a CPU bottleneck below a brittle 90-percent
 point threshold, while broadly parallel saturation is evaluated against the

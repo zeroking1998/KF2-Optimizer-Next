@@ -120,8 +120,8 @@ struct UiStatus {
     bool update_installable{false};
     bool update_installing{false};
     bool graphics_available{false};
-    bool graphics_dirty{false};
     bool graphics_game_running{false};
+    bool graphics_game_menu_readback{false};
     std::array<std::wstring, 21> graphics_values{};
     std::wstring graphics_aspect_ratio{L"Unknown"};
     int graphics_film_grain_percent{50};
@@ -132,7 +132,7 @@ struct UiStatus {
     int advanced_screen_percentage{100};
     int advanced_particle_percentage{100};
     int advanced_decal_lifetime{30};
-    std::wstring profile{L"balanced"};
+    std::wstring profile{L"user settings"};
     std::wstring quality{L"exact"};
 };
 

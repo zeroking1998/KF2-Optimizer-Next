@@ -1,8 +1,5 @@
 #include <cstdlib>
 #include <iostream>
-#include <string>
-#include <vector>
-
 #include "features/telemetry/telemetry_effect_stage.hpp"
 
 #define CHECK(condition)                                                        \
@@ -16,44 +13,17 @@
 
 int main() {
     using namespace kf2::telemetry_pipeline;
-    std::vector<std::string> calls;
-    const auto flex = [&](const FlexControlEffect&) {
-        calls.emplace_back("flex");
-    };
-    const auto profile = [&](const AdaptiveProfileEffect&) {
-        calls.emplace_back("profile");
-    };
+    const FlexControlEffect defaults;
+    CHECK(defaults.requested_substeps == 0);
+    CHECK(!defaults.constrained);
+    CHECK(defaults.capability ==
+          kf2::optimizer::AdaptiveCapabilityState::unavailable);
 
-    apply_effects_in_order({}, flex, profile);
-    CHECK(calls.empty());
-
-    TelemetryEffectBatch batch;
-    batch.adaptive_profile =
-        AdaptiveProfileEffect{kf2::optimizer::Profile::stability};
-    apply_effects_in_order(batch, flex, profile);
-    CHECK(calls.size() == 1);
-    CHECK(calls[0] == "profile");
-
-    calls.clear();
-    batch.flex_control = FlexControlEffect{
+    const FlexControlEffect requested{
         3, true, kf2::optimizer::AdaptiveCapabilityState::available};
-    apply_effects_in_order(batch, flex, profile);
-    CHECK(calls.size() == 2);
-    CHECK(calls[0] == "flex");
-    CHECK(calls[1] == "profile");
-
-    std::string persisted = "balanced";
-    const std::string previous = persisted;
-    const bool write_succeeded = false;
-    const auto rollback_on_failure = [&](const AdaptiveProfileEffect&) {
-        persisted = "stability";
-        if (!write_succeeded) persisted = previous;
-    };
-    apply_effects_in_order(
-        TelemetryEffectBatch{
-            .adaptive_profile = AdaptiveProfileEffect{
-                kf2::optimizer::Profile::stability}},
-        flex, rollback_on_failure);
-    CHECK(persisted == previous);
+    CHECK(requested.requested_substeps == 3);
+    CHECK(requested.constrained);
+    CHECK(requested.capability ==
+          kf2::optimizer::AdaptiveCapabilityState::available);
     return EXIT_SUCCESS;
 }

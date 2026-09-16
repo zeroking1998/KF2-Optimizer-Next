@@ -22,8 +22,6 @@ app::runtime::DispatchResult cycle(app::UiRuntime& runtime,
 KF2_CYCLE_HANDLER(display, display)
 KF2_CYCLE_HANDLER(resolution, resolution)
 KF2_CYCLE_HANDLER(overall_quality, overall_quality)
-KF2_CYCLE_HANDLER(vsync, vsync)
-KF2_CYCLE_HANDLER(variable_frame_rate, variable_frame_rate)
 KF2_CYCLE_HANDLER(environment_detail, environment_detail)
 KF2_CYCLE_HANDLER(character_detail, character_detail)
 KF2_CYCLE_HANDLER(fx, fx_quality)
@@ -42,20 +40,6 @@ KF2_CYCLE_HANDLER(light_shafts, light_shafts)
 KF2_CYCLE_HANDLER(flex, nvidia_flex)
 
 #undef KF2_CYCLE_HANDLER
-
-app::runtime::DispatchResult apply(
-    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
-    const auto result = runtime.apply_video_settings();
-    runtime.model.set_notice({
-        result.has_value() ? ui::NoticeSeverity::info : ui::NoticeSeverity::warning,
-        result.has_value() ? L"GRAPHICS_APPLIED" : L"GRAPHICS_APPLY_BLOCKED",
-        result.has_value()
-            ? L"KF2 video settings were applied and verified. A restore backup is available."
-            : result.error().message,
-        L""});
-    runtime.invalidate();
-    return app::runtime::DispatchResult::handled;
-}
 
 app::runtime::DispatchResult reset(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
