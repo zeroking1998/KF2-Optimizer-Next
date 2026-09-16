@@ -426,7 +426,6 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
         status.adaptive_safety = L"no adaptive actuator";
         status.adaptive_evidence = L"TELEMETRY_ONLY";
         status.adaptive_corpse_action_status = L"DISABLED";
-        status.adaptive_flex_action_status = L"DISABLED";
     }
     status.restore_config_after_game = settings.restore_config_after_game;
     status.overlay_enabled = overlay_enabled;

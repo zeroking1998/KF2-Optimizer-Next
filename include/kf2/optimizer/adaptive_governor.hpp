@@ -48,7 +48,6 @@ enum class AdaptiveBottleneck {
     ragdoll,
     particles,
     gore,
-    flex,
     streaming,
     io_pressure,
     thermal_power,
@@ -87,13 +86,6 @@ struct AdaptiveCapabilities final {
     AdaptiveCapabilityState gore_control{AdaptiveCapabilityState::unavailable};
     AdaptiveCapabilityState particle_control{AdaptiveCapabilityState::unavailable};
 
-    AdaptiveCapabilityState flex_telemetry{AdaptiveCapabilityState::unavailable};
-    AdaptiveCapabilityState flex_particle_budget_control{AdaptiveCapabilityState::unavailable};
-    AdaptiveCapabilityState flex_particle_spawn_control{AdaptiveCapabilityState::unavailable};
-    AdaptiveCapabilityState flex_particle_lifetime_control{AdaptiveCapabilityState::unavailable};
-    AdaptiveCapabilityState flex_fluid_particle_control{AdaptiveCapabilityState::unavailable};
-    AdaptiveCapabilityState flex_nonfluid_particle_control{AdaptiveCapabilityState::unavailable};
-    AdaptiveCapabilityState flex_solver_substep_control{AdaptiveCapabilityState::unavailable};
 };
 
 struct AdaptiveSample {
@@ -150,7 +142,6 @@ struct AdaptiveSample {
     std::optional<double> ragdoll_pressure;
     std::optional<double> particle_pressure;
     std::optional<double> gore_pressure;
-    std::optional<double> flex_pressure;
     std::optional<double> streaming_pressure;
 
     std::optional<int> live_corpse_burden;

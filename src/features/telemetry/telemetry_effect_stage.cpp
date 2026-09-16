@@ -45,15 +45,15 @@ void apply_flex_control_effect(app::UiRuntime& runtime,
         return;
     }
     if (write_succeeded &&
-        effect.constrained != runtime.flex_adaptive_constrained) {
-        runtime.flex_adaptive_constrained = effect.constrained;
+        effect.constrained != runtime.flex_minimum_limited) {
+        runtime.flex_minimum_limited = effect.constrained;
         runtime.events->append(
             {0, diagnostics::Severity::info,
-             effect.constrained ? "FLEX_ADAPTIVE_CONSTRAINED"
-                                : "FLEX_ADAPTIVE_RECOVERED",
+             effect.constrained ? "FLEX_MINIMUM_LIMIT_REQUESTED"
+                                : "FLEX_MINIMUM_LIMIT_RELEASED",
              effect.constrained
-                 ? L"Adaptive FleX requested a hysteresis-stabilized solver level from 1 to 5; applied status waits for shared-memory readback"
-                 : L"Adaptive FleX requested passthrough; applied status waits for shared-memory readback",
+                 ? L"User-enabled FleX requested the fixed minimum solver level of one; applied status waits for shared-memory readback"
+                 : L"The fixed FleX minimum limit was released; applied status waits for shared-memory readback",
              L"flex"});
     }
 }
@@ -62,7 +62,7 @@ void apply_flex_control_effect(app::UiRuntime& runtime,
 
 namespace kf2::app {
 
-Result<bool> UiRuntime::ensure_automatic_flex_lab() {
+Result<bool> UiRuntime::ensure_fixed_flex_runtime() {
     if (!installation) {
         return Result<bool>::failure(
             {ErrorCode::not_found,
@@ -122,13 +122,13 @@ Result<bool> UiRuntime::ensure_automatic_flex_lab() {
         return Result<bool>::failure(installed.error());
     }
     events->append({0, diagnostics::Severity::info,
-        "FLEX_AUTO_HOOK_READY",
-        L"The verified offline FleX hook was prepared automatically for Adaptive control",
+        "FLEX_MINIMUM_HOOK_READY",
+        L"The verified offline FleX hook was prepared for the fixed minimum solver level",
         L"flex"});
     return Result<bool>::success(true);
 }
 
-bool UiRuntime::restore_automatic_flex_lab(std::wstring_view reason) {
+bool UiRuntime::restore_fixed_flex_runtime(std::wstring_view reason) {
     if (!installation) return true;
     const auto game_directory = installation->install_root /
         L"Binaries" / L"Win64";
@@ -146,17 +146,17 @@ bool UiRuntime::restore_automatic_flex_lab(std::wstring_view reason) {
         game_directory, state_directory, running);
     if (!restored.has_value()) {
         events->append({0, diagnostics::Severity::error,
-            "FLEX_AUTO_RESTORE_FAILED", restored.error().message,
+            "FLEX_FIXED_RESTORE_FAILED", restored.error().message,
             L"flex"});
         model.set_recovery_required(true);
         model.set_notice({ui::NoticeSeverity::error,
-            L"FLEX_AUTO_RESTORE_FAILED", restored.error().message,
+            L"FLEX_FIXED_RESTORE_FAILED", restored.error().message,
             L"Do not start KF2 again until the original FleX runtime is restored."});
         invalidate();
         return false;
     }
     events->append({0, diagnostics::Severity::info,
-        "FLEX_AUTO_RESTORED",
+        "FLEX_FIXED_RESTORED",
         std::wstring{reason} +
             L"; the original FleX runtime was restored and verified",
         L"flex"});
@@ -292,7 +292,7 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
             session_video_native_changes.reset();
         }
     }
-    if (!restore_automatic_flex_lab(reason)) complete = false;
+    if (!restore_fixed_flex_runtime(reason)) complete = false;
     if (installation) {
         const auto capped = synchronize_frame_rate_cap();
         if (!capped.has_value()) {

@@ -61,7 +61,6 @@ struct AdaptiveSampleContext final {
     std::string current_map;
     std::uint64_t map_generation{0};
     int last_telemetry_sample{0};
-    std::uint64_t flex_now_ms{0};
     bool effects_control_verified{false};
     std::optional<::kf2::telemetry::FrameMetrics> decision_frames;
 };
@@ -608,39 +607,6 @@ select_adaptive_runtime_control(
             }
         }
     }
-    if (frame.flex && frame.flex->fresh &&
-        frame.flex->aggregate_particles_fresh &&
-        frame.flex->particle_capacity > 0 &&
-        frame.flex->aggregate_active_particles >= 0 &&
-        frame.flex->last_update_tick != 0 &&
-        context.flex_now_ms >= frame.flex->last_update_tick &&
-        context.flex_now_ms - frame.flex->last_update_tick <= 2000) {
-        sample.flex_pressure = std::clamp(
-            static_cast<double>(frame.flex->aggregate_active_particles) /
-                static_cast<double>(frame.flex->particle_capacity),
-            0.0, 1.0);
-    }
-    if (frame.flex && frame.flex->fresh && frame.flex->pass_through_healthy) {
-        sample.capabilities.flex_telemetry =
-            optimizer::AdaptiveCapabilityState::available;
-        if (frame.offline_gameplay &&
-            !frame.flex->solver_tracking_quarantined) {
-            sample.capabilities.flex_solver_substep_control =
-                optimizer::AdaptiveCapabilityState::available;
-        }
-    }
-    // The current forwarder observes particle counts and capacity only. No
-    // writable budget/spawn/lifetime or fluid split has been proven.
-    sample.capabilities.flex_particle_budget_control =
-        optimizer::AdaptiveCapabilityState::unavailable;
-    sample.capabilities.flex_particle_spawn_control =
-        optimizer::AdaptiveCapabilityState::unavailable;
-    sample.capabilities.flex_particle_lifetime_control =
-        optimizer::AdaptiveCapabilityState::unavailable;
-    sample.capabilities.flex_fluid_particle_control =
-        optimizer::AdaptiveCapabilityState::unavailable;
-    sample.capabilities.flex_nonfluid_particle_control =
-        optimizer::AdaptiveCapabilityState::unavailable;
     return result;
 }
 

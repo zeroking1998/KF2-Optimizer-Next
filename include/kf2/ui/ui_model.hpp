@@ -72,10 +72,10 @@ struct UiStatus {
     std::optional<int> adaptive_runtime_corpse_limit;
     std::wstring adaptive_corpse_capability{L"UNAVAILABLE"};
     std::wstring adaptive_corpse_action_status{L"NONE"};
-    std::optional<int> adaptive_flex_requested_substeps;
-    std::optional<int> adaptive_flex_effective_substeps;
-    std::wstring adaptive_flex_action_status{L"NONE"};
-    std::wstring adaptive_flex_capability{L"UNAVAILABLE"};
+    std::optional<int> flex_requested_substeps;
+    std::optional<int> flex_effective_substeps;
+    std::wstring flex_action_status{L"NONE"};
+    std::wstring flex_capability{L"UNAVAILABLE"};
     std::wstring adaptive_particle_capability{L"UNAVAILABLE"};
     std::wstring adaptive_state{L"observing"};
     std::wstring adaptive_bottleneck{L"unknown"};

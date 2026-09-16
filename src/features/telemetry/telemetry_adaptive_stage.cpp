@@ -175,7 +175,6 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_safety = L"no adaptive actuator";
         status.adaptive_evidence = L"TELEMETRY_ONLY";
         status.adaptive_corpse_action_status = L"DISABLED";
-        status.adaptive_flex_action_status = L"DISABLED";
         adaptive_gameplay_active = false;
         adaptive_governor.reset();
         adaptive_decision = {};
@@ -397,10 +396,6 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_runtime_corpse_limit.reset();
         status.adaptive_corpse_capability = L"UNAVAILABLE";
         status.adaptive_corpse_action_status = L"NONE";
-        status.adaptive_flex_requested_substeps.reset();
-        status.adaptive_flex_effective_substeps.reset();
-        status.adaptive_flex_action_status = L"NONE";
-        status.adaptive_flex_capability = L"UNAVAILABLE";
         status.adaptive_particle_capability = L"UNAVAILABLE";
         status.adaptive_restore_generation = 0;
         status.adaptive_shadow_mode = optimizer_settings.adaptive_shadow_mode;
@@ -474,11 +469,6 @@ void UiRuntime::update_adaptive_controller(
         adaptive_resource_quality.effective_quality(),
         optimizer_settings.adaptive_minimum_quality,
         optimizer_settings.adaptive_maximum_quality);
-    const bool flex_pressure_candidate = frame.flex && frame.flex->fresh &&
-        frame.flex->aggregate_particles_fresh &&
-        frame.flex->particle_capacity > 0 &&
-        frame.flex->aggregate_active_particles >= 0 &&
-        frame.flex->last_update_tick != 0;
     // Keep the overlay's historical statistics intact. Only the controller
     // excludes presents from before its latest gameplay/action boundary.
     const bool bounded_frames_required = present_source &&
@@ -500,8 +490,6 @@ void UiRuntime::update_adaptive_controller(
          .current_map = adaptive_map,
          .map_generation = adaptive_map_generation,
          .last_telemetry_sample = adaptive_telemetry_sample,
-         .flex_now_ms =
-             flex_pressure_candidate ? GetTickCount64() : 0,
          .effects_control_verified = frame.offline_gameplay &&
              frame.gameplay &&
              frame.gameplay->telemetry_control_port.has_value() &&
@@ -597,12 +585,9 @@ void UiRuntime::update_adaptive_controller(
     const auto widen = [](std::string_view value) {
         return std::wstring{value.begin(), value.end()};
     };
-    status.adaptive_flex_capability = widen(
-        optimizer::adaptive_capability_state_name(
-            sample.capabilities.flex_solver_substep_control));
     status.adaptive_particle_capability = widen(
         optimizer::adaptive_capability_state_name(
-            sample.capabilities.flex_particle_budget_control));
+            sample.capabilities.particle_control));
     if (sample.adaptive_corpse_runtime_limit &&
         sample.capabilities.corpse_control ==
             optimizer::AdaptiveCapabilityState::available) {
@@ -1113,8 +1098,6 @@ void UiRuntime::update_adaptive_controller(
                      << status.adaptive_corpse_capability
                      << L"; corpseAction="
                      << status.adaptive_corpse_action_status
-                     << L"; flexCapability="
-                     << status.adaptive_flex_capability
                      << L"; particleCapability="
                      << status.adaptive_particle_capability
                      << L"; reason=" << status.adaptive_reason

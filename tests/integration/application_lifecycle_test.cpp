@@ -177,11 +177,11 @@ int main() {
         kf2::app::StartMode::normal));
     CHECK(!kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::read_only));
-    CHECK(!kf2::app::should_prepare_adaptive_flex_runtime(
+    CHECK(!kf2::app::should_prepare_fixed_flex_runtime(
         kf2::app::StartMode::normal, 0));
-    CHECK(kf2::app::should_prepare_adaptive_flex_runtime(
+    CHECK(kf2::app::should_prepare_fixed_flex_runtime(
         kf2::app::StartMode::normal, 1));
-    CHECK(kf2::app::should_prepare_adaptive_flex_runtime(
+    CHECK(kf2::app::should_prepare_fixed_flex_runtime(
         kf2::app::StartMode::normal, 2));
     std::vector<kf2::config::RequestedChange> flex_preservation_changes{
         {kf2::config::SettingId::target_fps, 120,

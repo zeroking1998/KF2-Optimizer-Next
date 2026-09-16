@@ -253,7 +253,7 @@ constexpr AreaContract area11{
     "Solver counts do not prove fluid, gore, enemy or corpse meaning.",
     "Explicit verified config; aggregate observation only.", "INI restore and FleX stale-control pass-through.",
     "KF2 config and known FleX ABI.", "Capacity, multisolver, stale, loader-soak and visual gameplay tests.",
-    "kf2_flex_observation_test; kf2_flex_forwarder_adaptive_test; catalog tests"};
+    "kf2_flex_observation_test; kf2_flex_forwarder_fixed_minimum_test; catalog tests"};
 
 constexpr std::array area11_items{
     ItemSpec{FeatureStatus::partial, "spawn rate, lifetime, and capacity", "Verified cosmetic lifetimes, FleX aggregate capacity and official emitter-pool capacities are reported. Active emitter templates expose a bounded constant spawn-rate sum, dynamic/unknown source count, burst entries and peak-particle capacity; dynamic distributions and unspawned content remain explicitly unknown."},
@@ -285,7 +285,7 @@ constexpr std::array area12_items{
     ItemSpec{FeatureStatus::partial, "rigid bodies, shapes, shape matching, and collision shapes", "KF2's shipped high-level rigid-body collision switch is catalogued but protected from Adaptive writes; per-shape gameplay-neutral mutation remains unavailable."},
     ItemSpec{FeatureStatus::partial, "filters, containers, multiple solvers, and generations", "Multiple solver lifecycles and generations are tracked; filter/container semantics are not."},
     ItemSpec{FeatureStatus::partial, "neighbor, contact, and timer data when exported", "The pinned 1.0.5 runtime exports flexGetContacts at ordinal 16 and the laboratory DLL preserves it as an exact direct PE forwarder. No timer export exists, and no ABI-proven non-invasive semantic observation is added."},
-    ItemSpec{FeatureStatus::partial, "feature modes and selective functions", "Adaptive uses the bounded FleX policy only when the user already enabled FleX in KF2. Fresh visible-enemy pressure may proactively lower verified solver substeps from five toward one before a later frame-time drop, with 600 ms confirmation and slow recovery; PhysXLevel and unproved global FleX sleep/fluid/rigid controls remain protected from automatic mutation."},
+    ItemSpec{FeatureStatus::partial, "feature modes and selective functions", "FleX remains user-controlled through KF2. When already enabled, the verified runtime requests one fixed solver substep independently of Adaptive mode or pressure; PhysXLevel and unproved global FleX sleep/fluid/rigid controls remain protected from automatic mutation."},
     ItemSpec{FeatureStatus::partial, "asynchronous computation and synchronization points", "The exported set/wait fence calls are counted after exact relay; no wait or synchronization is added by the optimizer."},
     ItemSpec{FeatureStatus::partial, "subrange updates, mapping, and memory transfers", "All six full-buffer particle/phase/velocity upload and download entry points are relayed exactly and measured; the pinned 1.0.5 ABI exposes no verified subrange or mapping entry point, so none is invented."},
     ItemSpec{FeatureStatus::partial, "GPU context loss, TDR, driver changes, and error states", "Stale/failed observations fall back; physical TDR/driver matrices remain target-system tests."},
