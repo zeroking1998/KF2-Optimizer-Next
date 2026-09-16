@@ -2,6 +2,20 @@
 // gameplay URL is opened, when Published packages are available.
 class KF2OptimizerTelemetryMutator extends KFMutator;
 
+function RequestInitialMapSettle()
+{
+    if (WorldInfo.bRequestedBlockOnAsyncLoading)
+    {
+        `log("KF2OPT_MAP_SETTLE schema=1 state=already_pending map="$
+            WorldInfo.GetMapName(true));
+        return;
+    }
+
+    WorldInfo.bRequestedBlockOnAsyncLoading = true;
+    `log("KF2OPT_MAP_SETTLE schema=1 state=requested map="$
+        WorldInfo.GetMapName(true));
+}
+
 function InitMutator(string Options, out string ErrorMessage)
 {
     local Engine CurrentEngine;
@@ -16,6 +30,8 @@ function InitMutator(string Options, out string ErrorMessage)
         Destroy();
         return;
     }
+
+    RequestInitialMapSettle();
 
     CurrentEngine = class'Engine'.static.GetEngine();
     if (CurrentEngine == None || CurrentEngine.GameViewport == None)
