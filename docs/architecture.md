@@ -181,13 +181,14 @@ at most once per 400 ms. Fresh visible enemy/corpse density or confirmed
 target-relative frame pressure moves the threshold to 1,000/850 units and the
 interval to 200/100 ms; FPS is an amplifier rather than the sole gate.
 Optimizer-slept bodies are identity
-tracked and use the official `WakeRigidBody` path inside 800 units. Only then
-may the pressure path raise native `MinLodModel` on one distant visible corpse
-every 400/200/100 ms. It starts at stage 2 outside 300 units and advances to
-  stages 3/4/5 at 500/800/1,200 units. Visible-enemy pressure scales continuously
-  from five to eighty Zeds and consumes every stage the mesh actually exposes;
-forced, near, sleeping, recovered and session-ending LOD
-state is preserved or restored. After eligible distance/LOD work is exhausted,
+tracked and use the official `WakeRigidBody` path inside 800 units. A separate
+bounded session controller fixes eligible living-Zed and corpse meshes to their
+final available `MinLodModel`, and fixes living animation inputs to
+`AnimationLODDistanceFactor=0.55` and `AnimationLODFrameRate=6`. This controller
+does not consume FPS, density, distance, enemy-pressure or Adaptive state.
+Sleeping corpses also enter KF2's native final-pose skeleton state. Direct bone
+arrays, attacks, hits, collision and native culling remain engine-owned. After
+eligible distance work is exhausted,
 one old, slow, non-death-animation visible ragdoll may sleep at most once per
 750/350 ms, but never inside the fixed 800-unit player safety radius. Rejected
 nearby candidates are reported with bounded policy evidence rather than

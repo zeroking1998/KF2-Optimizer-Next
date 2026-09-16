@@ -76,21 +76,22 @@ offline session.
 ## 4. Adaptive control
 
 Target FPS and Maximum corpses are the only performance goals you set.
-Adaptive automatically manages verified quality, physics, LOD, FleX, and
-corpse-runtime controls while the game is running. Unsupported controls remain
-unchanged.
+Adaptive automatically manages verified quality, physics, and corpse-runtime
+controls while the game is running. The protected offline session separately
+keeps eligible Zed/corpse LOD and safe animation work at their fixed minimum.
+Unsupported controls remain unchanged.
 
 Use **Adaptive optimization** on Home to enable or disable those automatic
 adjustments. The choice is saved. Turning Adaptive off during a supported
 offline session requires a confirmed runtime receipt before the app saves the
-new state. Monitoring, the overlay, Target FPS, Maximum corpses, and graphics
-settings selected by the user remain available while Adaptive is off. The
-saved state is also reapplied after a map change.
+new state. Monitoring, the overlay, Target FPS, Maximum corpses, graphics
+settings selected by the user, user-selected FleX minimum and fixed-minimum
+Zed/corpse visual controls remain available while Adaptive is off. The saved
+state is also reapplied after a map change.
 
-Adaptive never enables FleX. If FleX is off in KF2, it remains off and no FleX
-runtime hook is installed. If the user has enabled FleX in the game, Adaptive
-may lower verified solver work under sustained performance pressure or a fresh
-high visible-enemy count, then recover slowly as pressure clears. Adaptive
+The optimizer never enables FleX. If FleX is off in KF2, it remains off and no
+FleX runtime hook is installed. If the user enabled FleX in KF2, the protected
+session requests the fixed minimum solver work independently of Adaptive mode.
 may use only the verified controls available for that existing setting.
 
 ## 5. Game graphics
