@@ -259,8 +259,7 @@ int main() {
           particles->slider->maximum == 100 && particles->slider->value == 85);
     CHECK(decals && decals->slider && decals->slider->minimum == 0 &&
           decals->slider->maximum == 120 && decals->slider->value == 45);
-    CHECK(action(advanced, "advanced-apply") != nullptr);
-    CHECK(action(advanced, "advanced-apply")->enabled);
+    CHECK(action(advanced, "advanced-apply") == nullptr);
     CHECK(action(advanced, "advanced-reset") != nullptr);
     CHECK(action(advanced, "advanced-reset")->text == L"RESET TO DEFAULTS");
     CHECK(action(advanced, "advanced-reset")->enabled);
@@ -461,6 +460,14 @@ int main() {
     CHECK(action_help_text("graphics-flex")->find(L"Adaptive never") !=
           std::wstring::npos);
     CHECK(action_help_text("graphics-film-grain-slider")->find(L"0%") !=
+          std::wstring::npos);
+    CHECK(action_help_text("graphics-film-grain-slider")->find(L"100%") !=
+          std::wstring::npos);
+    CHECK(action_help_text("graphics-film-grain-slider")->find(L"200%") ==
+          std::wstring::npos);
+    CHECK(action_help_text("graphics-reset")->find(L"balanced") ==
+          std::wstring::npos);
+    CHECK(action_help_text("advanced-reset")->find(L"balanced") ==
           std::wstring::npos);
     CHECK(action_help_text("advanced-one-frame-thread-lag")->find(
               L"input delay") != std::wstring::npos);

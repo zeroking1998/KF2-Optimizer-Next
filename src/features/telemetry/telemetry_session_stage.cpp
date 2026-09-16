@@ -196,7 +196,6 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
 void UiRuntime::reset_local_adaptive_controller_for_mode(bool enabled) {
     adaptive_control_pending.reset();
     adaptive_governor.reset();
-    adaptive_profile_gate.reset();
     adaptive_decision = {};
     adaptive_gameplay_active = false;
     if (!enabled) {
@@ -354,7 +353,6 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     adaptive_resource_quality.reset(
         optimizer_settings.adaptive_maximum_quality);
     adaptive_session_policy.reset();
-    adaptive_profile_gate.reset();
     adaptive_gameplay_active = false;
     adaptive_provider_confirmed = false;
     last_performance_sample_log_ns = 0;

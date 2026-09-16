@@ -58,33 +58,6 @@ void apply_flex_control_effect(app::UiRuntime& runtime,
     }
 }
 
-void apply_adaptive_profile_effect(
-    app::UiRuntime& runtime, const AdaptiveProfileEffect& effect,
-    ui::UiStatus& status) {
-    const std::string selected{
-        optimizer::adaptive_profile_token(effect.profile)};
-    if (selected == runtime.optimizer_settings.optimizer_profile) return;
-    const auto previous = runtime.optimizer_settings.optimizer_profile;
-    runtime.optimizer_settings.optimizer_profile = selected;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        runtime.settings_path,
-        config::serialize_settings(runtime.optimizer_settings));
-    if (!saved.has_value()) {
-        runtime.optimizer_settings.optimizer_profile = previous;
-        runtime.adaptive_profile_gate = {};
-        runtime.events->append(
-            {0, diagnostics::Severity::error,
-             "ADAPTIVE_BASELINE_SAVE_FAILED", saved.error().message,
-             L"optimizer"});
-        return;
-    }
-    status.profile = std::wstring{selected.begin(), selected.end()};
-    runtime.events->append(
-        {0, diagnostics::Severity::info, "ADAPTIVE_PROFILE_SELECTED",
-         L"Adaptive saved a sustained active-gameplay recommendation for the next protected automatic launch",
-         L"optimizer"});
-}
-
 }  // namespace kf2::telemetry_pipeline
 
 namespace kf2::app {

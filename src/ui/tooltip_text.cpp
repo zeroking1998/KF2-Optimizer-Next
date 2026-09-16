@@ -59,8 +59,8 @@ constexpr TooltipEntry kTooltips[]{
     {"graphics-lens-flares", L"On adds lens artifacts around bright lights with a small GPU cost. Off removes them."},
     {"graphics-light-shafts", L"On draws visible rays from strong lights and adds post-processing work. Off removes the rays and saves GPU time."},
     {"graphics-flex", L"Selects Off, Gibs, or Gibs and fluids for NVIDIA FleX and saves the choice immediately. Adaptive never enables FleX."},
-    {"graphics-film-grain-slider", L"Adds film-like image noise. 0% is clean, 100% is normal strength, and 200% doubles the grain. It has little performance impact."},
-    {"graphics-reset", L"Immediately saves balanced defaults while keeping the current display mode and resolution. NVIDIA FleX is turned Off."},
+    {"graphics-film-grain-slider", L"Adds film-like image noise. 0% is clean and 100% is KF2's full menu range. It has little performance impact."},
+    {"graphics-reset", L"Immediately saves KF2's default graphics values while keeping the current display mode and resolution. NVIDIA FleX is turned Off."},
 
     {"overlay-toggle", L"Shows or hides the local telemetry overlay and saves the choice immediately. F10 performs the same action while KF2 runs."},
     {"overlay-position", L"Moves the overlay to the next screen corner and saves the position immediately."},
@@ -87,8 +87,7 @@ constexpr TooltipEntry kTooltips[]{
     {"advanced-gore-level", L"Off removes blood and gibs, Reduced lowers them, and Full shows all configured gore. More gore can increase CPU, GPU, and memory use in busy scenes."},
     {"advanced-particle-percentage-slider", L"Controls how many configured particles are emitted. Higher values increase effect density and can raise CPU, GPU, and VRAM use during combat."},
     {"advanced-decal-lifetime-slider", L"Controls how long blood and impact marks remain. Longer times keep more decals in RAM and VRAM and add draw work, which can cause stutter in long fights."},
-    {"advanced-apply", L"Backs up the KF2 INIs, writes these settings atomically, and verifies the result. Adaptive does not control them."},
-    {"advanced-reset", L"Returns the controls to balanced defaults: 100% render scale, 100% particles, 30-second decals, and low-cost render buffers."},
+    {"advanced-reset", L"Immediately saves the recommended defaults: 100% render scale, 100% particles, 30-second decals, and low-cost render buffers."},
 };
 
 }  // namespace

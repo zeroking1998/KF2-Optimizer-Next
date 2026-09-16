@@ -178,7 +178,6 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_flex_action_status = L"DISABLED";
         adaptive_gameplay_active = false;
         adaptive_governor.reset();
-        adaptive_profile_gate.reset();
         adaptive_decision = {};
         model.set_status(std::move(status));
         return;
@@ -319,7 +318,6 @@ void UiRuntime::update_adaptive_controller(
                     adaptive_quality_last_applied_ns = completed_ns;
                     adaptive_frame_not_before_ns = completed_ns;
                     adaptive_governor.notify_quality_applied(completed_ns);
-                    adaptive_profile_gate.reset();
                     const int effective_quality =
                         adaptive_resource_quality.effective_quality();
                     const auto resource_name =
@@ -417,7 +415,6 @@ void UiRuntime::update_adaptive_controller(
         if (adaptive_gameplay_active) {
             adaptive_gameplay_active = false;
             adaptive_governor.reset();
-            adaptive_profile_gate.reset();
             adaptive_decision = {};
             events->append({0, diagnostics::Severity::info,
                 "ADAPTIVE_GAMEPLAY_PAUSED",
@@ -456,7 +453,6 @@ void UiRuntime::update_adaptive_controller(
     if (!adaptive_gameplay_active) {
         adaptive_gameplay_active = true;
         adaptive_governor.reset();
-        adaptive_profile_gate.reset();
         adaptive_decision = {};
         adaptive_resource_quality.reset(
             optimizer_settings.adaptive_maximum_quality);
@@ -532,7 +528,6 @@ void UiRuntime::update_adaptive_controller(
         adaptive_frame_not_before_ns = now_ns;
         adaptive_governor.reset();
         adaptive_decision = {};
-        adaptive_profile_gate.reset();
         if (sample_build.sample.map_changed) {
             adaptive_map_ready_ns = now_ns;
             adaptive_quality_reduction_floor.reset(
@@ -938,10 +933,6 @@ void UiRuntime::update_adaptive_controller(
 
     status.recommended_profile = L"user settings";
     status.recommendation_reason = adaptive_profile_reason(adaptive_decision);
-    // Runtime decisions are session-local. Never persist a named profile for
-    // the next launch: the user's saved KF2 graphics are always the baseline.
-    adaptive_profile_gate.reset();
-
     const bool controller_changed =
         adaptive_decision.state != last_adaptive_state ||
         adaptive_decision.disposition != last_adaptive_disposition;

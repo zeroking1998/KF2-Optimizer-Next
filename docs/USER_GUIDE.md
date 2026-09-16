@@ -132,16 +132,15 @@ INI files but are not exposed by its normal video menu. The page groups engine
 and streaming, rendering, and effects values. These are explicit manual KF2
 settings and are independent of Adaptive.
 
-Click an On/Off or enumerated option to stage its next value, or use the
-sliders for render scale, particle amount, and decal lifetime. Nothing is
-written until **Apply advanced settings** is selected. KF2 must be closed, and
-the app creates and verifies a restore backup before applying the changes.
-**Discard changes** reloads the values currently stored by KF2.
+Click an On/Off or enumerated option, or use the sliders for render scale,
+particle amount, and decal lifetime. Each change is saved and verified
+immediately. KF2 must be closed, and the app creates a restore backup before
+writing. If writing or verification fails, the controls return to the values
+currently stored by KF2.
 
-Hover over any button or slider to see what it changes, the visual or
-performance trade-off, and whether the value is staged until Apply or saved
-immediately. These descriptions also distinguish manual Advanced settings from
-Adaptive controls.
+Hover over any button or slider to see what it changes and its visual or
+performance trade-off. These descriptions also distinguish user-owned
+Advanced settings from Adaptive controls.
 
 ## 7. Start a protected session
 

@@ -75,7 +75,6 @@ enum class ActionId : std::uint16_t {
     advanced_floating_point_render_targets = 123,
     advanced_max_multisamples = 124,
     advanced_gore_level = 125,
-    advanced_apply = 126,
     advanced_reset = 127,
     debug_corpse_markers = 128,
     debug_zed_markers = 129,

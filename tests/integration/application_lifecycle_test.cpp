@@ -500,8 +500,7 @@ int main() {
         "overlay_position=top_right\n"
         "overlay_scale_percent=100\n"
         "target_fps=60\ncorpse_limit=20\n"
-        "quality_policy=exact\n"
-              "optimizer_profile=balanced\n");
+        "quality_policy=exact\n");
         CHECK(recovered.value().shutdown_cleanly().has_value());
     }
     {
@@ -706,17 +705,8 @@ int main() {
     CHECK(thread_lag.has_value());
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(thread_lag->x, thread_lag->y));
-    CHECK(graphical.value().ui_model().status().advanced_dirty);
-    CHECK(graphical.value().ui_model().status().advanced_values[0] == L"Off");
-    for (int step = 0; step < 24 &&
-         graphical.value().ui_model().focused_action() !=
-             std::optional<std::string>{"advanced-apply"}; ++step) {
-        SendMessageW(hwnd, WM_KEYDOWN, VK_TAB, 0);
-    }
-    CHECK(graphical.value().ui_model().focused_action() ==
-          std::optional<std::string>{"advanced-apply"});
-    SendMessageW(hwnd, WM_KEYDOWN, VK_RETURN, 0);
     CHECK(!graphical.value().ui_model().status().advanced_dirty);
+    CHECK(graphical.value().ui_model().status().advanced_values[0] == L"Off");
     CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
               "OneFrameThreadLag=False") != std::string::npos);
     const auto debug_navigation =
@@ -1203,6 +1193,29 @@ int main() {
             read_bytes(slider_runtime.settings_path));
         CHECK(stored.has_value());
         CHECK(stored.value().corpse_limit == 2000);
+    }
+
+    // A real filesystem failure must roll both Home sliders back to their
+    // authoritative saved values instead of leaving a misleading preview.
+    {
+        kf2::diagnostics::EventLog slider_events{128};
+        kf2::config::Settings initial;
+        initial.target_fps = 90;
+        initial.corpse_limit = 40;
+        kf2::app::UiRuntime slider_runtime{
+            root / L"Data-slider-save-failure", false,
+            initial, slider_events, options.game_discovery,
+            kf2::app::StartMode::normal, root / L"portable"};
+        slider_runtime.settings_path =
+            root / L"missing-slider-parent" / L"settings.ini";
+
+        slider_runtime.set_slider_value("settings-target-slider", 144);
+        CHECK(slider_runtime.optimizer_settings.target_fps == 90);
+        CHECK(slider_runtime.model.status().target_fps == 90);
+
+        slider_runtime.set_slider_value("settings-corpses-slider", 2000);
+        CHECK(slider_runtime.optimizer_settings.corpse_limit == 40);
+        CHECK(slider_runtime.model.status().corpse_limit == 40);
     }
 
     // Turning Adaptive off is fail-closed even while KF2 is between gameplay

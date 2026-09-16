@@ -34,21 +34,6 @@ KF2_ADVANCED_CYCLE(gore_level, gore_level)
 
 #undef KF2_ADVANCED_CYCLE
 
-app::runtime::DispatchResult apply(
-    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
-    const auto result = runtime.apply_advanced_settings();
-    runtime.model.set_notice({
-        result.has_value() ? ui::NoticeSeverity::info
-                           : ui::NoticeSeverity::warning,
-        result.has_value() ? L"ADVANCED_APPLIED" : L"ADVANCED_APPLY_BLOCKED",
-        result.has_value()
-            ? L"Advanced KF2 settings were applied and verified. A restore backup is available."
-            : result.error().message,
-        L""});
-    runtime.invalidate();
-    return app::runtime::DispatchResult::handled;
-}
-
 app::runtime::DispatchResult reset(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
     runtime.reset_advanced_settings();

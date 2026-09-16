@@ -666,15 +666,12 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
 
         add_section("advanced-save-section",
                     status.advanced_game_running
-                        ? L"CLOSE KF2 TO APPLY CHANGES"
-                        : status.advanced_dirty ? L"UNSAVED CHANGES"
-                                                : L"NO UNSAVED CHANGES",
+                        ? L"CLOSE KF2 TO CHANGE THESE SETTINGS"
+                        : L"SAVED IMMEDIATELY",
                     cursor);
         cursor += 34.0F;
         grid_base = cursor;
         action_index = 0;
-        add_action("advanced-apply", L"APPLY ADVANCED SETTINGS",
-                   editable && status.advanced_dirty, true);
         add_action("advanced-reset", L"RESET TO DEFAULTS", editable);
     } else if (model.selected() == Destination::debug) {
         const auto& status = model.status();

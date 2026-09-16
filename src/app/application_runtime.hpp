@@ -208,7 +208,6 @@ struct UiRuntime {
     std::optional<game::OfflineAdaptiveSessionPolicy>
         adaptive_session_policy;
     std::uint64_t adaptive_settings_generation{1};
-    optimizer::AdaptiveProfilePersistenceGate adaptive_profile_gate;
     optimizer::AdaptiveDecision adaptive_decision;
     config::AdaptiveLocks adaptive_locks;
     std::vector<optimizer::AdaptiveManualLock> adaptive_lock_cache;
@@ -354,6 +353,7 @@ struct UiRuntime {
     void refresh_advanced_presentation();
     void cycle_advanced_option(game::AdvancedOption option);
     void stage_advanced_slider(game::AdvancedOption option, int value);
+    void save_advanced_selection(std::wstring_view label);
     void reset_advanced_settings();
     Result<config::ApplyResult> apply_advanced_settings();
 

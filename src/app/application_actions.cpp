@@ -386,7 +386,6 @@ bool UiRuntime::reset_adaptive_frame_window_for_rate_mode_change(
 
     adaptive_frame_not_before_ns = now_ns;
     adaptive_governor.reset();
-    adaptive_profile_gate.reset();
     adaptive_decision = {};
     quality_response = {};
     last_adaptive_state = optimizer::AdaptiveControllerState::observing;
@@ -1087,7 +1086,6 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
         if (optimizer_settings.target_fps == previous.target_fps) {
             adaptive_governor.reset();
         }
-        adaptive_profile_gate.reset();
         adaptive_overhead_breaches = 0;
         adaptive_overhead_frozen = false;
     }

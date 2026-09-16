@@ -10,7 +10,7 @@ namespace {
 constexpr AccessPolicy kRestricted = AccessPolicy::restricted_mode_allowed;
 constexpr AccessPolicy kNormal = AccessPolicy::normal_mode_required;
 
-constexpr std::array<ActionDefinition, 61> kActions{{
+constexpr std::array<ActionDefinition, 60> kActions{{
     {ActionId::diagnostics_export_support, "diagnostics-export-support", FeatureId::diagnostics, kRestricted},
     {ActionId::diagnostics_flex_restore, "diagnostics-flex-restore", FeatureId::diagnostics, kNormal},
     {ActionId::diagnostics_full_check, "diagnostics-full-check", FeatureId::diagnostics, kRestricted},
@@ -68,13 +68,12 @@ constexpr std::array<ActionDefinition, 61> kActions{{
     {ActionId::advanced_floating_point_render_targets, "advanced-floating-point-render-targets", FeatureId::advanced, kNormal},
     {ActionId::advanced_max_multisamples, "advanced-max-multisamples", FeatureId::advanced, kNormal},
     {ActionId::advanced_gore_level, "advanced-gore-level", FeatureId::advanced, kNormal},
-    {ActionId::advanced_apply, "advanced-apply", FeatureId::advanced, kNormal},
     {ActionId::advanced_reset, "advanced-reset", FeatureId::advanced, kNormal},
     {ActionId::debug_corpse_markers, "debug-corpse-markers", FeatureId::diagnostics, kNormal},
     {ActionId::debug_zed_markers, "debug-zed-markers", FeatureId::diagnostics, kNormal},
 }};
 
-constexpr std::array<ActionBinding, 63> kBindings{{
+constexpr std::array<ActionBinding, 62> kBindings{{
     {"dashboard-launch", ActionId::game_launch},
     {"diagnostics-backup", ActionId::optimizer_backup},
     {"diagnostics-export-support", ActionId::diagnostics_export_support},
@@ -130,7 +129,6 @@ constexpr std::array<ActionBinding, 63> kBindings{{
     {"advanced-floating-point-render-targets", ActionId::advanced_floating_point_render_targets},
     {"advanced-max-multisamples", ActionId::advanced_max_multisamples},
     {"advanced-gore-level", ActionId::advanced_gore_level},
-    {"advanced-apply", ActionId::advanced_apply},
     {"advanced-reset", ActionId::advanced_reset},
     {"debug-corpse-markers", ActionId::debug_corpse_markers},
     {"debug-zed-markers", ActionId::debug_zed_markers},
