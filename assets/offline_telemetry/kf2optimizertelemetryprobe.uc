@@ -2,10 +2,10 @@
 // The interaction inserted by the Published mutator creates this actor only
 // after a standalone gameplay world exists, so the normal KF2 menu flow and
 // native viewport remain preserved. The actor
-// destroys itself outside a local standalone world. Its optional Adaptive
-// actuators use only KF2's official
-// confirmed-corpse cleanup and rigid-body sleep paths and remain disabled unless
-// Adaptive explicitly enables them in the protected session INI.
+// destroys itself outside a local standalone world. Pressure-based actuators
+// remain gated by Adaptive. A separate bounded controller keeps eligible
+// living/corpse visual LOD and safe sleeping-corpse skeleton work at fixed
+// minimum values throughout the protected session.
 class KF2OptimizerTelemetryProbe extends Info config(Engine);
 
 const DiagnosticEffectScanInterval=6;
@@ -19,8 +19,11 @@ const AdaptiveCorpseControlIdleInterval=1.0;
 const AdaptiveCorpseControlCalmInterval=0.5;
 const AdaptiveCorpseControlUrgentInterval=0.125;
 const AdaptiveCorpseControlSliceInterval=0.05;
-const AdaptiveCorpseControlPhaseCount=13;
+const AdaptiveCorpseControlPhaseCount=8;
 const AdaptiveCorpseScanBudget=64;
+const FixedMinimumVisualControlInterval=0.10;
+const FixedMinimumVisualControlIdleInterval=0.50;
+const FixedMinimumVisualControlPhaseCount=5;
 
 struct DiagnosticEffectTelemetrySnapshot
 {
@@ -242,15 +245,12 @@ var array<AdaptiveBaselineSettleEntry> AdaptiveBaselineSettleEntries;
 var float AdaptiveLastBaselineDeferredRealTime;
 var float AdaptiveLastDistanceSettleDeferredRealTime;
 var float AdaptiveLastRagdollSettleDeferredRealTime;
-var int AdaptiveSkeletonReductions;
+var int FixedMinimumSkeletonReductions;
 var float AdaptiveLastCorpseSleepRealTime;
 var float AdaptiveLastCorpseCapacityRealTime;
-var array<KFPawn> AdaptiveCorpseLodCorpses;
-var array<int> AdaptiveCorpseLodOriginalMinModels;
-var array<int> AdaptiveCorpseLodAppliedMinModels;
-var int AdaptiveCorpseLodReductions;
-var int AdaptiveCorpseLodRestores;
-var float AdaptiveLastCorpseLodRealTime;
+var array<KFPawn> FixedMinimumCorpseLodCorpses;
+var array<int> FixedMinimumCorpseLodAppliedMinModels;
+var int FixedMinimumCorpseLodReductions;
 var array<AdaptiveDistanceSleepEntry> AdaptiveDistanceSleptCorpses;
 var array<AdaptiveDistanceSleepTransitionEntry>
     AdaptiveDistanceSleepTransitions;
@@ -281,37 +281,34 @@ var array<AdaptiveDebugMarkerScreenEntry> AdaptiveDebugMarkerScreenEntries;
 var float AdaptiveZedDebugRefreshRealTime;
 var transient HUD AdaptiveDebugMarkerHUD;
 var bool bAdaptiveDebugMarkerRenderConfirmed;
-var array<KFPawn_Monster> AdaptiveLivingVisualZeds;
-var array<int> AdaptiveLivingOriginalMinLods;
-var array<int> AdaptiveLivingAppliedMinLods;
-var array<float> AdaptiveLivingOriginalAnimDistances;
-var array<float> AdaptiveLivingAppliedAnimDistances;
-var array<int> AdaptiveLivingOriginalAnimRates;
-var array<int> AdaptiveLivingAppliedAnimRates;
-var int AdaptiveLivingVisualReductions;
-var int AdaptiveLivingVisualRestores;
-var int AdaptiveLivingVisualPressureLevel;
-var int AdaptiveLivingVisualPendingPressureLevel;
-var float AdaptiveLivingVisualPendingSinceRealTime;
-var float AdaptiveLivingVisualLastChangeRealTime;
+var array<KFPawn_Monster> FixedMinimumLivingVisualZeds;
+var array<int> FixedMinimumLivingAppliedMinLods;
+var array<float> FixedMinimumLivingAppliedAnimDistances;
+var array<int> FixedMinimumLivingAppliedAnimRates;
+var int FixedMinimumLivingVisualReductions;
+var int AdaptiveLivingEnemyPressureLevel;
+var int AdaptiveLivingEnemyPendingPressureLevel;
+var float AdaptiveLivingEnemyPendingSinceRealTime;
+var float AdaptiveLivingEnemyLastChangeRealTime;
 var float AdaptiveCachedLivingEnemyPressureScale;
 var int AdaptiveCorpseControlPhase;
+var int FixedMinimumVisualControlPhase;
 var int AdaptiveCleanupScanCursor;
 var int AdaptiveBaselineScanCursor;
 var int AdaptiveFreezeScanCursor;
 var int AdaptiveDistanceScanCursor;
-var int AdaptiveLodScanCursor;
+var int FixedMinimumCorpseLodScanCursor;
 var int AdaptiveRagdollScanCursor;
-var int AdaptiveAnimationScanCursor;
+var int FixedMinimumAnimationScanCursor;
 var int AdaptiveBaselinePruneCursor;
 var int AdaptiveFreezePruneCursor;
 var int AdaptiveDistancePruneCursor;
 var int AdaptiveDistanceWakeScanCursor;
-var int AdaptiveLodPruneCursor;
+var int FixedMinimumCorpseLodPruneCursor;
 // One same-world cursor bounds PawnList traversal without retaining a work
 // queue. It is cleared on disable, manager replacement and world teardown.
-var Pawn AdaptiveLivingScanPawn;
-var int AdaptiveLivingPruneCursor;
+var Pawn FixedMinimumLivingScanPawn;
+var int FixedMinimumLivingPruneCursor;
 var bool bAdaptiveCorpseControlUrgentRepeat;
 var bool bAdaptiveRuntimeQuiesced;
 
@@ -358,6 +355,19 @@ function ScheduleAdaptiveCorpseControlTimer(float DelaySeconds)
     }
 }
 
+// Visual LOD and safe sleeping-corpse skeleton reductions are fixed session
+// optimizations. They deliberately do not depend on Adaptive mode, FPS,
+// resource pressure or enemy density.
+function ScheduleFixedMinimumVisualControlTimer(float DelaySeconds)
+{
+    ClearTimer(nameof(FixedMinimumVisualControl), self);
+    if (bAdaptiveCorpseStagger && !bAdaptiveRuntimeQuiesced)
+    {
+        SetTimer(FMax(0.05, DelaySeconds), false,
+                 nameof(FixedMinimumVisualControl), self);
+    }
+}
+
 function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
 {
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone ||
@@ -398,8 +408,6 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
     bAdaptiveRuntimeEnabled = false;
     ClearTimer(nameof(StaggerCorpseCleanup), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
-    RestoreAllAdaptiveCorpseLods();
-    RestoreAllAdaptiveLivingVisuals();
     BeginAdaptiveCorpsePhysicsRelease();
     if (AdaptiveCorpseManager != None)
     {
@@ -411,24 +419,19 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
     AdaptiveBaselineScanCursor = 0;
     AdaptiveFreezeScanCursor = 0;
     AdaptiveDistanceScanCursor = 0;
-    AdaptiveLodScanCursor = 0;
     AdaptiveRagdollScanCursor = 0;
-    AdaptiveAnimationScanCursor = 0;
     AdaptiveBaselinePruneCursor = 0;
     AdaptiveFreezePruneCursor = 0;
     AdaptiveDistancePruneCursor = 0;
     AdaptiveDistanceWakeScanCursor = 0;
-    AdaptiveLodPruneCursor = 0;
-    AdaptiveLivingScanPawn = None;
-    AdaptiveLivingPruneCursor = 0;
     bAdaptiveCorpseControlUrgentRepeat = false;
     AdaptiveCorpsePressureSamples = 0;
     AdaptiveCorpseRecoverySamples = 0;
     AdaptiveCorpsePressureLevel = 0;
     AdaptiveCorpseCurrentFramePressureLevel = 0;
     AdaptiveCorpseScenePressureLevel = 0;
-    AdaptiveLivingVisualPressureLevel = 0;
-    AdaptiveLivingVisualPendingPressureLevel = 0;
+    AdaptiveLivingEnemyPressureLevel = 0;
+    AdaptiveLivingEnemyPendingPressureLevel = 0;
     AdaptiveCachedLivingEnemyPressureScale = 0.0;
     AdaptiveCachedVisibleCorpses = 0;
     AdaptiveCachedVisibleAwakeCorpses = 0;
@@ -1044,16 +1047,16 @@ function InitializeAdaptiveCorpseStagger(KFGoreManager GoreManager)
     AdaptiveBaselineScanCursor = 0;
     AdaptiveFreezeScanCursor = 0;
     AdaptiveDistanceScanCursor = 0;
-    AdaptiveLodScanCursor = 0;
+    FixedMinimumCorpseLodScanCursor = 0;
     AdaptiveRagdollScanCursor = 0;
-    AdaptiveAnimationScanCursor = 0;
+    FixedMinimumAnimationScanCursor = 0;
     AdaptiveBaselinePruneCursor = 0;
     AdaptiveFreezePruneCursor = 0;
     AdaptiveDistancePruneCursor = 0;
     AdaptiveDistanceWakeScanCursor = 0;
-    AdaptiveLodPruneCursor = 0;
-    AdaptiveLivingScanPawn = None;
-    AdaptiveLivingPruneCursor = 0;
+    FixedMinimumCorpseLodPruneCursor = 0;
+    FixedMinimumLivingScanPawn = None;
+    FixedMinimumLivingPruneCursor = 0;
     bAdaptiveCorpseControlUrgentRepeat = false;
     AdaptiveCachedLivingEnemyPressureScale = 0.0;
     AdaptiveCachedVisibleCorpses = 0;
@@ -1233,68 +1236,68 @@ function int ResolveAdaptiveLivingEnemyPressureLevel(float PressureScale)
     local float RequiredScale;
 
     RequestedLevel = GetAdaptiveLivingEnemyPressureLevel(PressureScale);
-    if (RequestedLevel == AdaptiveLivingVisualPressureLevel)
+    if (RequestedLevel == AdaptiveLivingEnemyPressureLevel)
     {
-        AdaptiveLivingVisualPendingPressureLevel = 0;
-        AdaptiveLivingVisualPendingSinceRealTime = 0.0;
-        return AdaptiveLivingVisualPressureLevel;
+        AdaptiveLivingEnemyPendingPressureLevel = 0;
+        AdaptiveLivingEnemyPendingSinceRealTime = 0.0;
+        return AdaptiveLivingEnemyPressureLevel;
     }
     // A three-percent dead band keeps adjacent pressure samples from bouncing
     // across a tier boundary. Rising pressure reacts sooner than recovery.
-    if (RequestedLevel > AdaptiveLivingVisualPressureLevel)
+    if (RequestedLevel > AdaptiveLivingEnemyPressureLevel)
     {
-        RequiredScale = AdaptiveLivingVisualPressureLevel <= 0 ?
-            0.02 : float(AdaptiveLivingVisualPressureLevel) / 5.0 + 0.03;
+        RequiredScale = AdaptiveLivingEnemyPressureLevel <= 0 ?
+            0.02 : float(AdaptiveLivingEnemyPressureLevel) / 5.0 + 0.03;
         HoldSeconds = 0.75;
         if (PressureScale < RequiredScale)
         {
-            AdaptiveLivingVisualPendingPressureLevel = 0;
-            AdaptiveLivingVisualPendingSinceRealTime = 0.0;
-            return AdaptiveLivingVisualPressureLevel;
+            AdaptiveLivingEnemyPendingPressureLevel = 0;
+            AdaptiveLivingEnemyPendingSinceRealTime = 0.0;
+            return AdaptiveLivingEnemyPressureLevel;
         }
     }
     else
     {
         RequiredScale = FMax(0.0,
-            float(AdaptiveLivingVisualPressureLevel - 1) / 5.0 - 0.03);
+            float(AdaptiveLivingEnemyPressureLevel - 1) / 5.0 - 0.03);
         HoldSeconds = 1.25;
         if (PressureScale > RequiredScale)
         {
-            AdaptiveLivingVisualPendingPressureLevel = 0;
-            AdaptiveLivingVisualPendingSinceRealTime = 0.0;
-            return AdaptiveLivingVisualPressureLevel;
+            AdaptiveLivingEnemyPendingPressureLevel = 0;
+            AdaptiveLivingEnemyPendingSinceRealTime = 0.0;
+            return AdaptiveLivingEnemyPressureLevel;
         }
     }
-    if (AdaptiveLivingVisualLastChangeRealTime > 0.0 &&
-        WorldInfo.RealTimeSeconds - AdaptiveLivingVisualLastChangeRealTime < 1.5)
+    if (AdaptiveLivingEnemyLastChangeRealTime > 0.0 &&
+        WorldInfo.RealTimeSeconds - AdaptiveLivingEnemyLastChangeRealTime < 1.5)
     {
-        return AdaptiveLivingVisualPressureLevel;
+        return AdaptiveLivingEnemyPressureLevel;
     }
-    if (AdaptiveLivingVisualPendingPressureLevel != RequestedLevel)
+    if (AdaptiveLivingEnemyPendingPressureLevel != RequestedLevel)
     {
-        AdaptiveLivingVisualPendingPressureLevel = RequestedLevel;
-        AdaptiveLivingVisualPendingSinceRealTime = WorldInfo.RealTimeSeconds;
-        return AdaptiveLivingVisualPressureLevel;
+        AdaptiveLivingEnemyPendingPressureLevel = RequestedLevel;
+        AdaptiveLivingEnemyPendingSinceRealTime = WorldInfo.RealTimeSeconds;
+        return AdaptiveLivingEnemyPressureLevel;
     }
-    if (WorldInfo.RealTimeSeconds - AdaptiveLivingVisualPendingSinceRealTime <
+    if (WorldInfo.RealTimeSeconds - AdaptiveLivingEnemyPendingSinceRealTime <
         HoldSeconds)
     {
-        return AdaptiveLivingVisualPressureLevel;
+        return AdaptiveLivingEnemyPressureLevel;
     }
-    AdaptiveLivingVisualPressureLevel = RequestedLevel;
-    AdaptiveLivingVisualPendingPressureLevel = 0;
-    AdaptiveLivingVisualPendingSinceRealTime = 0.0;
-    AdaptiveLivingVisualLastChangeRealTime = WorldInfo.RealTimeSeconds;
-    return AdaptiveLivingVisualPressureLevel;
+    AdaptiveLivingEnemyPressureLevel = RequestedLevel;
+    AdaptiveLivingEnemyPendingPressureLevel = 0;
+    AdaptiveLivingEnemyPendingSinceRealTime = 0.0;
+    AdaptiveLivingEnemyLastChangeRealTime = WorldInfo.RealTimeSeconds;
+    return AdaptiveLivingEnemyPressureLevel;
 }
 
-function int FindAdaptiveLivingVisualEntry(KFPawn_Monster Candidate)
+function int FindFixedMinimumLivingVisualEntry(KFPawn_Monster Candidate)
 {
     local int Index;
 
-    for (Index = 0; Index < AdaptiveLivingVisualZeds.Length; ++Index)
+    for (Index = 0; Index < FixedMinimumLivingVisualZeds.Length; ++Index)
     {
-        if (AdaptiveLivingVisualZeds[Index] == Candidate)
+        if (FixedMinimumLivingVisualZeds[Index] == Candidate)
         {
             return Index;
         }
@@ -1302,162 +1305,91 @@ function int FindAdaptiveLivingVisualEntry(KFPawn_Monster Candidate)
     return -1;
 }
 
-function RemoveAdaptiveLivingVisualEntry(int Index, bool bRestore)
+function RemoveFixedMinimumLivingVisualEntry(int Index)
 {
-    local KFPawn_Monster Candidate;
-
-    if (Index < 0 || Index >= AdaptiveLivingVisualZeds.Length ||
-        Index >= AdaptiveLivingOriginalMinLods.Length ||
-        Index >= AdaptiveLivingAppliedMinLods.Length ||
-        Index >= AdaptiveLivingOriginalAnimDistances.Length ||
-        Index >= AdaptiveLivingAppliedAnimDistances.Length ||
-        Index >= AdaptiveLivingOriginalAnimRates.Length ||
-        Index >= AdaptiveLivingAppliedAnimRates.Length)
+    if (Index < 0 || Index >= FixedMinimumLivingVisualZeds.Length ||
+        Index >= FixedMinimumLivingAppliedMinLods.Length ||
+        Index >= FixedMinimumLivingAppliedAnimDistances.Length ||
+        Index >= FixedMinimumLivingAppliedAnimRates.Length)
     {
         return;
     }
-    Candidate = AdaptiveLivingVisualZeds[Index];
-    if (bRestore && Candidate != None && !Candidate.bDeleteMe &&
-        Candidate.Mesh != None)
-    {
-        if (Candidate.Mesh.MinLodModel == AdaptiveLivingAppliedMinLods[Index])
-        {
-            Candidate.Mesh.MinLodModel = AdaptiveLivingOriginalMinLods[Index];
-        }
-        if (Candidate.Mesh.AnimationLODDistanceFactor ==
-            AdaptiveLivingAppliedAnimDistances[Index])
-        {
-            Candidate.Mesh.AnimationLODDistanceFactor =
-                AdaptiveLivingOriginalAnimDistances[Index];
-        }
-        if (Candidate.Mesh.AnimationLODFrameRate ==
-            AdaptiveLivingAppliedAnimRates[Index])
-        {
-            Candidate.Mesh.AnimationLODFrameRate =
-                AdaptiveLivingOriginalAnimRates[Index];
-        }
-        ++AdaptiveLivingVisualRestores;
-    }
-    AdaptiveLivingVisualZeds.Remove(Index, 1);
-    AdaptiveLivingOriginalMinLods.Remove(Index, 1);
-    AdaptiveLivingAppliedMinLods.Remove(Index, 1);
-    AdaptiveLivingOriginalAnimDistances.Remove(Index, 1);
-    AdaptiveLivingAppliedAnimDistances.Remove(Index, 1);
-    AdaptiveLivingOriginalAnimRates.Remove(Index, 1);
-    AdaptiveLivingAppliedAnimRates.Remove(Index, 1);
+    FixedMinimumLivingVisualZeds.Remove(Index, 1);
+    FixedMinimumLivingAppliedMinLods.Remove(Index, 1);
+    FixedMinimumLivingAppliedAnimDistances.Remove(Index, 1);
+    FixedMinimumLivingAppliedAnimRates.Remove(Index, 1);
 }
 
-function RestoreAllAdaptiveLivingVisuals()
-{
-    local int Index;
-
-    for (Index = AdaptiveLivingVisualZeds.Length - 1; Index >= 0; --Index)
-    {
-        RemoveAdaptiveLivingVisualEntry(Index, true);
-    }
-}
-
-function PruneAdaptiveLivingVisualEntries()
+function PruneFixedMinimumLivingVisualEntries()
 {
     local int Index;
     local int Scanned;
     local KFPawn_Monster Candidate;
 
-    if (AdaptiveLivingVisualZeds.Length <= 0)
+    if (FixedMinimumLivingVisualZeds.Length <= 0)
     {
-        AdaptiveLivingPruneCursor = 0;
+        FixedMinimumLivingPruneCursor = 0;
         return;
     }
-    AdaptiveLivingPruneCursor = Clamp(
-        AdaptiveLivingPruneCursor, 0, AdaptiveLivingVisualZeds.Length - 1);
-    while (AdaptiveLivingVisualZeds.Length > 0 &&
+    FixedMinimumLivingPruneCursor = Clamp(
+        FixedMinimumLivingPruneCursor, 0,
+        FixedMinimumLivingVisualZeds.Length - 1);
+    while (FixedMinimumLivingVisualZeds.Length > 0 &&
            Scanned < AdaptiveCorpseScanBudget)
     {
         Index = Clamp(
-            AdaptiveLivingPruneCursor, 0,
-            AdaptiveLivingVisualZeds.Length - 1);
-        Candidate = AdaptiveLivingVisualZeds[Index];
+            FixedMinimumLivingPruneCursor, 0,
+            FixedMinimumLivingVisualZeds.Length - 1);
+        Candidate = FixedMinimumLivingVisualZeds[Index];
         if (Candidate == None || Candidate.bDeleteMe ||
             !Candidate.IsAliveAndWell() || Candidate.Mesh == None)
         {
-            RemoveAdaptiveLivingVisualEntry(Index, false);
+            RemoveFixedMinimumLivingVisualEntry(Index);
         }
         else if (Candidate.Mesh.MinLodModel !=
-                     AdaptiveLivingAppliedMinLods[Index] ||
+                     FixedMinimumLivingAppliedMinLods[Index] ||
                  Candidate.Mesh.AnimationLODDistanceFactor !=
-                     AdaptiveLivingAppliedAnimDistances[Index] ||
+                      FixedMinimumLivingAppliedAnimDistances[Index] ||
                  Candidate.Mesh.AnimationLODFrameRate !=
-                     AdaptiveLivingAppliedAnimRates[Index])
+                      FixedMinimumLivingAppliedAnimRates[Index])
         {
-            // Another KF2 system took ownership. Stop tracking instead of
-            // overwriting its values during a later restore.
-            RemoveAdaptiveLivingVisualEntry(Index, false);
+            // Another KF2 system changed the mesh. Drop the stale readback;
+            // the fixed controller will verify and reapply it on a later scan.
+            RemoveFixedMinimumLivingVisualEntry(Index);
         }
         else
         {
-            AdaptiveLivingPruneCursor =
-                (Index + 1) % AdaptiveLivingVisualZeds.Length;
+            FixedMinimumLivingPruneCursor =
+                (Index + 1) % FixedMinimumLivingVisualZeds.Length;
         }
         ++Scanned;
     }
-    if (AdaptiveLivingVisualZeds.Length <= 0)
+    if (FixedMinimumLivingVisualZeds.Length <= 0)
     {
-        AdaptiveLivingPruneCursor = 0;
+        FixedMinimumLivingPruneCursor = 0;
     }
 }
 
-function bool RestoreOneAdaptiveLivingVisual()
-{
-    local int Index;
-
-    if (AdaptiveLivingVisualZeds.Length <= 0)
-    {
-        return false;
-    }
-    Index = AdaptiveLivingVisualZeds.Length - 1;
-    RemoveAdaptiveLivingVisualEntry(Index, true);
-    return true;
-}
-
-function bool ApplyLivingEnemyVisualPressure(
-    int EnemyPressureLevel, float PressureScale)
+function bool ApplyLivingEnemyMinimumVisuals()
 {
     local int EntryIndex;
     local int MaximumMinLod;
     local int Scanned;
     local int TargetMinLod;
     local int TargetAnimRate;
-    local float DistanceSquared;
-    local float MinimumDistance;
-    local float MinimumDistanceSquared;
     local float TargetAnimDistance;
-    local float TierScale;
     local KFPawn_Monster Candidate;
     local Pawn ScanPawn;
-    local PlayerController LocalPC;
 
-    if (EnemyPressureLevel <= 0)
+    if (FixedMinimumLivingScanPawn == None ||
+        FixedMinimumLivingScanPawn.bDeleteMe)
     {
-        return RestoreOneAdaptiveLivingVisual();
+        FixedMinimumLivingScanPawn = WorldInfo.PawnList;
     }
-    LocalPC = GetALocalPlayerController();
-    if (LocalPC == None || LocalPC.ViewTarget == None)
-    {
-        return false;
-    }
-    // Targets use the stable effective tier, never the continuously changing
-    // observation. This prevents redundant writes while preserving pressure.
-    TierScale = float(EnemyPressureLevel) / 5.0;
-    MinimumDistance = 600.0 - TierScale * 300.0;
-    MinimumDistanceSquared = MinimumDistance * MinimumDistance;
-    if (AdaptiveLivingScanPawn == None || AdaptiveLivingScanPawn.bDeleteMe)
-    {
-        AdaptiveLivingScanPawn = WorldInfo.PawnList;
-    }
-    ScanPawn = AdaptiveLivingScanPawn;
+    ScanPawn = FixedMinimumLivingScanPawn;
     while (ScanPawn != None && Scanned < AdaptiveCorpseScanBudget)
     {
-        AdaptiveLivingScanPawn = ScanPawn.NextPawn;
+        FixedMinimumLivingScanPawn = ScanPawn.NextPawn;
         Candidate = KFPawn_Monster(ScanPawn);
         ++Scanned;
         if (Candidate == None || Candidate.bDeleteMe ||
@@ -1466,61 +1398,34 @@ function bool ApplyLivingEnemyVisualPressure(
             Candidate.Mesh.SkeletalMesh.LODInfo.Length < 2 ||
             Candidate.Mesh.ForcedLodModel != 0)
         {
-            ScanPawn = AdaptiveLivingScanPawn;
+            ScanPawn = FixedMinimumLivingScanPawn;
             continue;
         }
-        DistanceSquared = VSizeSq(
-            Candidate.Location - LocalPC.ViewTarget.Location);
-        EntryIndex = FindAdaptiveLivingVisualEntry(Candidate);
-        if (DistanceSquared < MinimumDistanceSquared)
-        {
-            if (EntryIndex >= 0 && DistanceSquared < 90000.0)
-            {
-                RemoveAdaptiveLivingVisualEntry(EntryIndex, true);
-                return true;
-            }
-            ScanPawn = AdaptiveLivingScanPawn;
-            continue;
-        }
+        EntryIndex = FindFixedMinimumLivingVisualEntry(Candidate);
         MaximumMinLod = Candidate.Mesh.SkeletalMesh.LODInfo.Length - 1;
-        // Each pressure tier consumes another real mesh LOD when available.
-        // The final mesh LOD remains the hard limit for every Zed type.
-        TargetMinLod = 1 + int(TierScale * float(MaximumMinLod));
-        if (DistanceSquared >= 1440000.0)
-        {
-            ++TargetMinLod;
-        }
-        TargetMinLod = Min(TargetMinLod, MaximumMinLod);
-        TargetAnimDistance = FMin(0.55, 0.15 + TierScale * 0.40);
-        TargetAnimRate = Clamp(1 + EnemyPressureLevel, 2, 6);
-        if (DistanceSquared >= 1440000.0)
-        {
-            TargetAnimRate = Min(6, TargetAnimRate + 1);
-        }
+        TargetMinLod = MaximumMinLod;
+        TargetAnimDistance = 0.55;
+        TargetAnimRate = 6;
         if (EntryIndex < 0)
         {
-            EntryIndex = AdaptiveLivingVisualZeds.Length;
-            AdaptiveLivingVisualZeds.AddItem(Candidate);
-            AdaptiveLivingOriginalMinLods.AddItem(Candidate.Mesh.MinLodModel);
-            AdaptiveLivingAppliedMinLods.AddItem(TargetMinLod);
-            AdaptiveLivingOriginalAnimDistances.AddItem(
-                Candidate.Mesh.AnimationLODDistanceFactor);
-            AdaptiveLivingAppliedAnimDistances.AddItem(TargetAnimDistance);
-            AdaptiveLivingOriginalAnimRates.AddItem(
-                Candidate.Mesh.AnimationLODFrameRate);
-            AdaptiveLivingAppliedAnimRates.AddItem(TargetAnimRate);
+            EntryIndex = FixedMinimumLivingVisualZeds.Length;
+            FixedMinimumLivingVisualZeds.AddItem(Candidate);
+            FixedMinimumLivingAppliedMinLods.AddItem(TargetMinLod);
+            FixedMinimumLivingAppliedAnimDistances.AddItem(TargetAnimDistance);
+            FixedMinimumLivingAppliedAnimRates.AddItem(TargetAnimRate);
         }
         else
         {
-            AdaptiveLivingAppliedMinLods[EntryIndex] = TargetMinLod;
-            AdaptiveLivingAppliedAnimDistances[EntryIndex] = TargetAnimDistance;
-            AdaptiveLivingAppliedAnimRates[EntryIndex] = TargetAnimRate;
+            FixedMinimumLivingAppliedMinLods[EntryIndex] = TargetMinLod;
+            FixedMinimumLivingAppliedAnimDistances[EntryIndex] =
+                TargetAnimDistance;
+            FixedMinimumLivingAppliedAnimRates[EntryIndex] = TargetAnimRate;
         }
         if (Candidate.Mesh.MinLodModel == TargetMinLod &&
             Candidate.Mesh.AnimationLODDistanceFactor == TargetAnimDistance &&
             Candidate.Mesh.AnimationLODFrameRate == TargetAnimRate)
         {
-            ScanPawn = AdaptiveLivingScanPawn;
+            ScanPawn = FixedMinimumLivingScanPawn;
             continue;
         }
         Candidate.Mesh.MinLodModel = TargetMinLod;
@@ -1530,14 +1435,13 @@ function bool ApplyLivingEnemyVisualPressure(
             Candidate.Mesh.AnimationLODDistanceFactor != TargetAnimDistance ||
             Candidate.Mesh.AnimationLODFrameRate != TargetAnimRate)
         {
-            RemoveAdaptiveLivingVisualEntry(EntryIndex, false);
-            ScanPawn = AdaptiveLivingScanPawn;
+            RemoveFixedMinimumLivingVisualEntry(EntryIndex);
+            ScanPawn = FixedMinimumLivingScanPawn;
             continue;
         }
-        ++AdaptiveLivingVisualReductions;
-        `log("KF2OPT_LIVING_VISUAL state=applied enemy_level="$
-             EnemyPressureLevel$" pressure_pct="$int(PressureScale * 100.0)$
-             " min_lod="$TargetMinLod$" anim_factor="$
+        ++FixedMinimumLivingVisualReductions;
+        `log("KF2OPT_LIVING_VISUAL state=fixed_minimum min_lod="$
+             TargetMinLod$" anim_factor="$
              TargetAnimDistance$" anim_rate="$TargetAnimRate$" distance_units="$
              GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
              FormatAdaptiveCorpseDistanceMeters(
@@ -1571,7 +1475,7 @@ function bool ShouldPreserveNearCorpseDetail(KFPawn Candidate)
     return DistanceSquared < 640000.0;
 }
 
-function RefreshSleepingCorpseAnimationState(KFGoreManager GoreManager)
+function RefreshSleepingCorpseMinimumAnimationState(KFGoreManager GoreManager)
 {
     local int Index;
     local int Offset;
@@ -1582,15 +1486,15 @@ function RefreshSleepingCorpseAnimationState(KFGoreManager GoreManager)
     PoolLength = GoreManager.CorpsePool.Length;
     if (PoolLength <= 0)
     {
-        AdaptiveAnimationScanCursor = 0;
+        FixedMinimumAnimationScanCursor = 0;
         return;
     }
-    AdaptiveAnimationScanCursor =
-        Clamp(AdaptiveAnimationScanCursor, 0, PoolLength - 1);
+    FixedMinimumAnimationScanCursor =
+        Clamp(FixedMinimumAnimationScanCursor, 0, PoolLength - 1);
     ScanCount = Min(AdaptiveCorpseScanBudget, PoolLength);
     for (Offset = 0; Offset < ScanCount; ++Offset)
     {
-        Index = (AdaptiveAnimationScanCursor + Offset) % PoolLength;
+        Index = (FixedMinimumAnimationScanCursor + Offset) % PoolLength;
         Candidate = GoreManager.CorpsePool[Index];
         if (Candidate == None || Candidate.bDeleteMe ||
             KFPawn_Monster(Candidate) == None || Candidate.Mesh == None ||
@@ -1600,18 +1504,17 @@ function RefreshSleepingCorpseAnimationState(KFGoreManager GoreManager)
             continue;
         }
         Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
-        if (!Candidate.Mesh.bNoSkeletonUpdate &&
-            !ShouldPreserveNearCorpseDetail(Candidate))
+        if (!Candidate.Mesh.bNoSkeletonUpdate)
         {
             // This mirrors KFPawn.Dying.OnSleepRBPhysics: a sleeping corpse
             // no longer needs per-frame skeleton evaluation. OnWakeRBPhysics
             // restores it automatically if gameplay wakes the ragdoll again.
             Candidate.Mesh.bNoSkeletonUpdate = true;
-            ++AdaptiveSkeletonReductions;
+            ++FixedMinimumSkeletonReductions;
         }
     }
-    AdaptiveAnimationScanCursor =
-        (AdaptiveAnimationScanCursor + ScanCount) % PoolLength;
+    FixedMinimumAnimationScanCursor =
+        (FixedMinimumAnimationScanCursor + ScanCount) % PoolLength;
 }
 
 function int FindAdaptiveBaselineSettleEntry(KFPawn Candidate)
@@ -1947,13 +1850,13 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
     return SleepsThisPass;
 }
 
-function int FindAdaptiveCorpseLodEntry(KFPawn Candidate)
+function int FindFixedMinimumCorpseLodEntry(KFPawn Candidate)
 {
     local int Index;
 
-    for (Index = 0; Index < AdaptiveCorpseLodCorpses.Length; ++Index)
+    for (Index = 0; Index < FixedMinimumCorpseLodCorpses.Length; ++Index)
     {
-        if (AdaptiveCorpseLodCorpses[Index] == Candidate)
+        if (FixedMinimumCorpseLodCorpses[Index] == Candidate)
         {
             return Index;
         }
@@ -1961,83 +1864,60 @@ function int FindAdaptiveCorpseLodEntry(KFPawn Candidate)
     return -1;
 }
 
-function RemoveAdaptiveCorpseLodEntry(int Index, bool bRestore)
+function RemoveFixedMinimumCorpseLodEntry(int Index)
 {
-    local KFPawn Candidate;
-
-    if (Index < 0 || Index >= AdaptiveCorpseLodCorpses.Length ||
-        Index >= AdaptiveCorpseLodOriginalMinModels.Length ||
-        Index >= AdaptiveCorpseLodAppliedMinModels.Length)
+    if (Index < 0 || Index >= FixedMinimumCorpseLodCorpses.Length ||
+        Index >= FixedMinimumCorpseLodAppliedMinModels.Length)
     {
         return;
     }
-    Candidate = AdaptiveCorpseLodCorpses[Index];
-    if (bRestore && Candidate != None && !Candidate.bDeleteMe &&
-        Candidate.Mesh != None &&
-        Candidate.Mesh.MinLodModel == AdaptiveCorpseLodAppliedMinModels[Index])
-    {
-        Candidate.Mesh.MinLodModel =
-            AdaptiveCorpseLodOriginalMinModels[Index];
-        ++AdaptiveCorpseLodRestores;
-    }
-    AdaptiveCorpseLodCorpses.Remove(Index, 1);
-    AdaptiveCorpseLodOriginalMinModels.Remove(Index, 1);
-    AdaptiveCorpseLodAppliedMinModels.Remove(Index, 1);
+    FixedMinimumCorpseLodCorpses.Remove(Index, 1);
+    FixedMinimumCorpseLodAppliedMinModels.Remove(Index, 1);
 }
 
-function PruneAdaptiveCorpseLodEntries()
+function PruneFixedMinimumCorpseLodEntries()
 {
     local int Index;
     local int Scanned;
     local KFPawn Candidate;
 
-    if (AdaptiveCorpseLodCorpses.Length <= 0)
+    if (FixedMinimumCorpseLodCorpses.Length <= 0)
     {
-        AdaptiveLodPruneCursor = 0;
+        FixedMinimumCorpseLodPruneCursor = 0;
         return;
     }
-    AdaptiveLodPruneCursor = Clamp(
-        AdaptiveLodPruneCursor, 0, AdaptiveCorpseLodCorpses.Length - 1);
-    while (AdaptiveCorpseLodCorpses.Length > 0 &&
+    FixedMinimumCorpseLodPruneCursor = Clamp(
+        FixedMinimumCorpseLodPruneCursor, 0,
+        FixedMinimumCorpseLodCorpses.Length - 1);
+    while (FixedMinimumCorpseLodCorpses.Length > 0 &&
            Scanned < AdaptiveCorpseScanBudget)
     {
-        Index = Clamp(AdaptiveLodPruneCursor, 0,
-            AdaptiveCorpseLodCorpses.Length - 1);
-        Candidate = AdaptiveCorpseLodCorpses[Index];
+        Index = Clamp(FixedMinimumCorpseLodPruneCursor, 0,
+            FixedMinimumCorpseLodCorpses.Length - 1);
+        Candidate = FixedMinimumCorpseLodCorpses[Index];
         if (Candidate == None || Candidate.bDeleteMe ||
             KFPawn_Monster(Candidate) == None || Candidate.Mesh == None)
         {
-            RemoveAdaptiveCorpseLodEntry(Index, false);
+            RemoveFixedMinimumCorpseLodEntry(Index);
         }
-        else if (AdaptiveCorpseLodAppliedMinModels[Index] >= 0 &&
+        else if (FixedMinimumCorpseLodAppliedMinModels[Index] >= 0 &&
                  Candidate.Mesh.MinLodModel !=
-                 AdaptiveCorpseLodAppliedMinModels[Index])
+                 FixedMinimumCorpseLodAppliedMinModels[Index])
         {
             // Preserve the entry as an unowned tombstone. A later reapply can
             // now identify the same actor, explain the native reset, and take
             // a fresh restore snapshot without overwriting the new value.
             `log("KF2OPT_CORPSE_LOD state=native_reset previous_applied="$
-                 AdaptiveCorpseLodAppliedMinModels[Index]$" observed_lod="$
+                 FixedMinimumCorpseLodAppliedMinModels[Index]$" observed_lod="$
                  Candidate.Mesh.MinLodModel$" corpse_id="$
                  GetAdaptiveCorpseActionId(Candidate)$
                  " readback=verified");
-            AdaptiveCorpseLodOriginalMinModels[Index] =
-                Candidate.Mesh.MinLodModel;
-            AdaptiveCorpseLodAppliedMinModels[Index] = -1;
+            FixedMinimumCorpseLodAppliedMinModels[Index] = -1;
         }
-        AdaptiveLodPruneCursor = AdaptiveCorpseLodCorpses.Length > 0 ?
-            (Index + 1) % AdaptiveCorpseLodCorpses.Length : 0;
+        FixedMinimumCorpseLodPruneCursor =
+            FixedMinimumCorpseLodCorpses.Length > 0 ?
+            (Index + 1) % FixedMinimumCorpseLodCorpses.Length : 0;
         ++Scanned;
-    }
-}
-
-function RestoreAllAdaptiveCorpseLods()
-{
-    local int Index;
-
-    for (Index = AdaptiveCorpseLodCorpses.Length - 1; Index >= 0; --Index)
-    {
-        RemoveAdaptiveCorpseLodEntry(Index, true);
     }
 }
 
@@ -3629,8 +3509,8 @@ function bool SleepOneDistantMonsterCorpse(
     return true;
 }
 
-function KFPawn SelectVisibleMonsterCorpseForLod(
-    KFGoreManager GoreManager, int PressureLevel, out int TargetMinLod)
+function KFPawn SelectVisibleMonsterCorpseForMinimumLod(
+    KFGoreManager GoreManager, out int TargetMinLod)
 {
     local int Index;
     local int Offset;
@@ -3654,15 +3534,15 @@ function KFPawn SelectVisibleMonsterCorpseForLod(
     PoolLength = GoreManager.CorpsePool.Length;
     if (PoolLength <= 0)
     {
-        AdaptiveLodScanCursor = 0;
+        FixedMinimumCorpseLodScanCursor = 0;
         return None;
     }
-    AdaptiveLodScanCursor =
-        Clamp(AdaptiveLodScanCursor, 0, PoolLength - 1);
+    FixedMinimumCorpseLodScanCursor =
+        Clamp(FixedMinimumCorpseLodScanCursor, 0, PoolLength - 1);
     ScanCount = Min(AdaptiveCorpseScanBudget, PoolLength);
     for (Offset = 0; Offset < ScanCount; ++Offset)
     {
-        Index = (AdaptiveLodScanCursor + Offset) % PoolLength;
+        Index = (FixedMinimumCorpseLodScanCursor + Offset) % PoolLength;
         Candidate = GoreManager.CorpsePool[Index];
         if (Candidate == None || Candidate.bDeleteMe ||
             KFPawn_Monster(Candidate) == None || Candidate.Mesh == None ||
@@ -3678,16 +3558,10 @@ function KFPawn SelectVisibleMonsterCorpseForLod(
         }
         DistanceSquared = VSizeSq(
             Candidate.Location - LocalPC.ViewTarget.Location);
-        // Keep full corpse detail until it first leaves the 800-unit
-        // interaction radius used by visible-ragdoll safety.
-        if (DistanceSquared < 640000.0)
-        {
-            continue;
-        }
         MaximumMinLod = Candidate.Mesh.SkeletalMesh.LODInfo.Length - 1;
-        // Once safely outside the interaction radius, use the mesh's final
-        // available LOD for the rest of this actor's lifetime. This avoids
-        // repeated distance-driven LOD transitions and their CPU cost.
+        // Use the mesh's final available LOD for the rest of this actor's
+        // lifetime. The fixed-minimum controller has no Adaptive, pressure or
+        // distance tier, which avoids repeated LOD transitions and their cost.
         CandidateTarget = MaximumMinLod;
         if (Candidate.Mesh.MinLodModel >= CandidateTarget)
         {
@@ -3703,13 +3577,12 @@ function KFPawn SelectVisibleMonsterCorpseForLod(
             TargetMinLod = CandidateTarget;
         }
     }
-    AdaptiveLodScanCursor =
-        (AdaptiveLodScanCursor + ScanCount) % PoolLength;
+    FixedMinimumCorpseLodScanCursor =
+        (FixedMinimumCorpseLodScanCursor + ScanCount) % PoolLength;
     return Selected;
 }
 
-function bool ApplyOneAdaptiveCorpseLod(
-    KFGoreManager GoreManager, int PressureLevel)
+function bool ApplyOneFixedMinimumCorpseLod(KFGoreManager GoreManager)
 {
     local int EntryIndex;
     local int PreviousMinLod;
@@ -3717,50 +3590,46 @@ function bool ApplyOneAdaptiveCorpseLod(
     local string ApplyReason;
     local KFPawn Candidate;
 
-    Candidate = SelectVisibleMonsterCorpseForLod(
-        GoreManager, PressureLevel, TargetMinLod);
+    Candidate = SelectVisibleMonsterCorpseForMinimumLod(
+        GoreManager, TargetMinLod);
     if (Candidate == None || Candidate.Mesh == None || TargetMinLod <= 0)
     {
         return false;
     }
-    EntryIndex = FindAdaptiveCorpseLodEntry(Candidate);
+    EntryIndex = FindFixedMinimumCorpseLodEntry(Candidate);
     if (EntryIndex < 0)
     {
         ApplyReason = "new_actor";
-        EntryIndex = AdaptiveCorpseLodCorpses.Length;
-        AdaptiveCorpseLodCorpses.AddItem(Candidate);
-        AdaptiveCorpseLodOriginalMinModels.AddItem(
-            Candidate.Mesh.MinLodModel);
-        AdaptiveCorpseLodAppliedMinModels.AddItem(TargetMinLod);
+        EntryIndex = FixedMinimumCorpseLodCorpses.Length;
+        FixedMinimumCorpseLodCorpses.AddItem(Candidate);
+        FixedMinimumCorpseLodAppliedMinModels.AddItem(TargetMinLod);
     }
     else
     {
-        if (AdaptiveCorpseLodAppliedMinModels[EntryIndex] < 0)
+        if (FixedMinimumCorpseLodAppliedMinModels[EntryIndex] < 0)
         {
             ApplyReason = "native_state_changed";
-            AdaptiveCorpseLodOriginalMinModels[EntryIndex] =
-                Candidate.Mesh.MinLodModel;
         }
         else
         {
             ApplyReason = "target_increased";
         }
-        AdaptiveCorpseLodAppliedMinModels[EntryIndex] = TargetMinLod;
+        FixedMinimumCorpseLodAppliedMinModels[EntryIndex] = TargetMinLod;
     }
     PreviousMinLod = Candidate.Mesh.MinLodModel;
     Candidate.Mesh.MinLodModel = TargetMinLod;
     if (Candidate.Mesh.MinLodModel != TargetMinLod)
     {
-        RemoveAdaptiveCorpseLodEntry(EntryIndex, false);
+        RemoveFixedMinimumCorpseLodEntry(EntryIndex);
         return false;
     }
-    ++AdaptiveCorpseLodReductions;
+    ++FixedMinimumCorpseLodReductions;
     RegisterAdaptiveCorpseDebugMarker(Candidate, "LOD_"$TargetMinLod);
-    `log("KF2OPT_CORPSE_LOD state=applied reason="$ApplyReason$
-         " pressure_level="$PressureLevel$" previous_lod="$PreviousMinLod$
+    `log("KF2OPT_CORPSE_LOD state=fixed_minimum reason="$ApplyReason$
+         " previous_lod="$PreviousMinLod$
          " target_lod="$
-         TargetMinLod$" reduced="$AdaptiveCorpseLodReductions$" tracked="$
-         AdaptiveCorpseLodCorpses.Length$" corpse_id="$
+         TargetMinLod$" reduced="$FixedMinimumCorpseLodReductions$" tracked="$
+         FixedMinimumCorpseLodCorpses.Length$" corpse_id="$
          GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
          GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
          FormatAdaptiveCorpseDistanceMeters(
@@ -4044,7 +3913,6 @@ function bool RunAdaptiveCorpseLoadControl()
     local bool bLivingVisibilityFresh;
     local float ActionInterval;
     local float DistanceActionInterval;
-    local float LodActionInterval;
     local bool bActionTaken;
     local KFGoreManager GoreManager;
     local KFGameInfo GameInfo;
@@ -4235,20 +4103,6 @@ function bool RunAdaptiveCorpseLoadControl()
             }
             break;
         case 3:
-            LodActionInterval = PhysicsPressureLevel > 0 ?
-                FMax(0.05, 0.20 / float(PhysicsPressureLevel)) : 0.40;
-            LodActionInterval = FMax(
-                0.05, LodActionInterval / float(AttackScale));
-            if (WorldInfo.RealTimeSeconds - AdaptiveLastCorpseLodRealTime >=
-                    LodActionInterval &&
-                ApplyOneAdaptiveCorpseLod(
-                    GoreManager, PhysicsPressureLevel))
-            {
-                AdaptiveLastCorpseLodRealTime = WorldInfo.RealTimeSeconds;
-                bActionTaken = true;
-            }
-            break;
-        case 4:
             if (RagdollPressureLevel > 0 &&
                 VisibleAwake > DesiredVisibleAwake)
             {
@@ -4268,35 +4122,17 @@ function bool RunAdaptiveCorpseLoadControl()
                 }
             }
             break;
-        case 5:
-            bActionTaken = ApplyLivingEnemyVisualPressure(
-                EnemyPressureLevel, EnemyPressureScale);
-            if (EnemyPressureLevel <= 0 &&
-                AdaptiveLivingVisualZeds.Length > 0)
-            {
-                bAdaptiveCorpseControlUrgentRepeat = true;
-            }
-            break;
-        case 6:
+        case 4:
             bActionTaken = StaggerCorpseCleanup();
             break;
-        case 7:
+        case 5:
             PruneAdaptiveDistanceSleptCorpses();
             break;
-        case 8:
+        case 6:
             PruneAdaptiveCorpseFreezes();
             break;
-        case 9:
-            PruneAdaptiveCorpseLodEntries();
-            break;
-        case 10:
-            PruneAdaptiveBaselineSettleEntries();
-            break;
-        case 11:
-            PruneAdaptiveLivingVisualEntries();
-            break;
         default:
-            RefreshSleepingCorpseAnimationState(GoreManager);
+            PruneAdaptiveBaselineSettleEntries();
             break;
     }
 
@@ -4306,6 +4142,45 @@ function bool RunAdaptiveCorpseLoadControl()
             (AdaptiveCorpseControlPhase + 1) %
             AdaptiveCorpseControlPhaseCount;
     }
+    return bActionTaken;
+}
+
+function bool RunFixedMinimumVisualControl()
+{
+    local bool bActionTaken;
+    local KFGoreManager GoreManager;
+
+    if (!bAdaptiveCorpseStagger || WorldInfo == None ||
+        WorldInfo.NetMode != NM_Standalone)
+    {
+        return false;
+    }
+    GoreManager = KFGoreManager(WorldInfo.MyGoreEffectManager);
+    if (GoreManager == None)
+    {
+        return false;
+    }
+    switch (FixedMinimumVisualControlPhase)
+    {
+        case 0:
+            bActionTaken = ApplyOneFixedMinimumCorpseLod(GoreManager);
+            break;
+        case 1:
+            bActionTaken = ApplyLivingEnemyMinimumVisuals();
+            break;
+        case 2:
+            RefreshSleepingCorpseMinimumAnimationState(GoreManager);
+            break;
+        case 3:
+            PruneFixedMinimumCorpseLodEntries();
+            break;
+        default:
+            PruneFixedMinimumLivingVisualEntries();
+            break;
+    }
+    FixedMinimumVisualControlPhase =
+        (FixedMinimumVisualControlPhase + 1) %
+        FixedMinimumVisualControlPhaseCount;
     return bActionTaken;
 }
 
@@ -4768,6 +4643,16 @@ function AdaptiveCorpseLoadControl()
         GetAdaptiveCorpseControlDelay(bActionTaken));
 }
 
+function FixedMinimumVisualControl()
+{
+    local bool bActionTaken;
+
+    bActionTaken = RunFixedMinimumVisualControl();
+    ScheduleFixedMinimumVisualControlTimer(
+        bActionTaken ? FixedMinimumVisualControlInterval :
+        FixedMinimumVisualControlIdleInterval);
+}
+
 function CountParticlePool(
     EmitterPool ParticlePool,
     out int ComponentCount,
@@ -4838,6 +4723,11 @@ event PreBeginPlay()
 
     `log("KF2OPT_TELEMETRY schema=6 state=started net=standalone");
     SetTimer(1.0, true, nameof(SampleTelemetry), self);
+    if (bAdaptiveCorpseStagger)
+    {
+        ScheduleFixedMinimumVisualControlTimer(
+            AdaptiveCorpseControlInitialDelay);
+    }
     if (bAdaptiveCorpseStagger && bAdaptiveRuntimeEnabled)
     {
         ScheduleAdaptiveCorpseControlTimer(
@@ -6332,22 +6222,24 @@ function QuiesceForWorldTeardown()
     ClearTimer(nameof(SampleTelemetry), self);
     ClearTimer(nameof(StaggerCorpseCleanup), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
+    ClearTimer(nameof(FixedMinimumVisualControl), self);
     ClearTimer(nameof(AdaptiveCorpsePhysicsRelease), self);
     AdaptiveCorpseControlPhase = 0;
+    FixedMinimumVisualControlPhase = 0;
     AdaptiveCleanupScanCursor = 0;
     AdaptiveBaselineScanCursor = 0;
     AdaptiveFreezeScanCursor = 0;
     AdaptiveDistanceScanCursor = 0;
-    AdaptiveLodScanCursor = 0;
+    FixedMinimumCorpseLodScanCursor = 0;
     AdaptiveRagdollScanCursor = 0;
-    AdaptiveAnimationScanCursor = 0;
+    FixedMinimumAnimationScanCursor = 0;
     AdaptiveBaselinePruneCursor = 0;
     AdaptiveFreezePruneCursor = 0;
     AdaptiveDistancePruneCursor = 0;
     AdaptiveDistanceWakeScanCursor = 0;
-    AdaptiveLodPruneCursor = 0;
-    AdaptiveLivingScanPawn = None;
-    AdaptiveLivingPruneCursor = 0;
+    FixedMinimumCorpseLodPruneCursor = 0;
+    FixedMinimumLivingScanPawn = None;
+    FixedMinimumLivingPruneCursor = 0;
     bAdaptiveCorpseControlUrgentRepeat = false;
     AdaptiveCachedVisibleCorpses = 0;
     AdaptiveCachedVisibleAwakeCorpses = 0;
@@ -6358,22 +6250,21 @@ function QuiesceForWorldTeardown()
         `log("KF2OPT_CORPSE_STAGGER state=stopped removed="$
              AdaptiveCorpsesRemoved);
     }
-    if (AdaptiveCorpsesSlept > 0 || AdaptiveSkeletonReductions > 0)
+    if (AdaptiveCorpsesSlept > 0 || FixedMinimumSkeletonReductions > 0)
     {
         `log("KF2OPT_CORPSE_LOAD state=stopped slept="$
              AdaptiveCorpsesSlept$" skeleton_reductions="$
-             AdaptiveSkeletonReductions);
+             FixedMinimumSkeletonReductions);
     }
     if (AdaptiveBaselinePhysicsSleeps > 0)
     {
         `log("KF2OPT_CORPSE_BASELINE state=stopped slept="$
              AdaptiveBaselinePhysicsSleeps);
     }
-    if (AdaptiveCorpseLodReductions > 0 || AdaptiveCorpseLodRestores > 0)
+    if (FixedMinimumCorpseLodReductions > 0)
     {
         `log("KF2OPT_CORPSE_LOD state=stopped reduced="$
-             AdaptiveCorpseLodReductions$" restored="$
-             AdaptiveCorpseLodRestores);
+             FixedMinimumCorpseLodReductions);
     }
     if (AdaptiveDistancePhysicsSleeps > 0 ||
         AdaptiveDistancePhysicsWakes > 0)
@@ -6387,12 +6278,10 @@ function QuiesceForWorldTeardown()
         `log("KF2OPT_CORPSE_RAGDOLL state=stopped slept="$
              AdaptiveVisibleRagdollSleeps);
     }
-    if (AdaptiveLivingVisualReductions > 0 ||
-        AdaptiveLivingVisualRestores > 0)
+    if (FixedMinimumLivingVisualReductions > 0)
     {
         `log("KF2OPT_LIVING_VISUAL state=stopped reduced="$
-             AdaptiveLivingVisualReductions$" restored="$
-              AdaptiveLivingVisualRestores);
+             FixedMinimumLivingVisualReductions);
     }
     // The process-owned graphics snapshot was restored by the persistent
     // interaction before teardown. Do not write rendering,
@@ -6403,16 +6292,12 @@ function QuiesceForWorldTeardown()
     AdaptiveGraphicsState = None;
     AdaptiveWorldParticleIdleStates.Length = 0;
     AdaptiveCorpseManager = None;
-    AdaptiveCorpseLodCorpses.Length = 0;
-    AdaptiveCorpseLodOriginalMinModels.Length = 0;
-    AdaptiveCorpseLodAppliedMinModels.Length = 0;
-    AdaptiveLivingVisualZeds.Length = 0;
-    AdaptiveLivingOriginalMinLods.Length = 0;
-    AdaptiveLivingAppliedMinLods.Length = 0;
-    AdaptiveLivingOriginalAnimDistances.Length = 0;
-    AdaptiveLivingAppliedAnimDistances.Length = 0;
-    AdaptiveLivingOriginalAnimRates.Length = 0;
-    AdaptiveLivingAppliedAnimRates.Length = 0;
+    FixedMinimumCorpseLodCorpses.Length = 0;
+    FixedMinimumCorpseLodAppliedMinModels.Length = 0;
+    FixedMinimumLivingVisualZeds.Length = 0;
+    FixedMinimumLivingAppliedMinLods.Length = 0;
+    FixedMinimumLivingAppliedAnimDistances.Length = 0;
+    FixedMinimumLivingAppliedAnimRates.Length = 0;
     AdaptiveDistanceSleptCorpses.Length = 0;
     AdaptiveBaselineSettleEntries.Length = 0;
     AdaptiveFrozenCorpses.Length = 0;
