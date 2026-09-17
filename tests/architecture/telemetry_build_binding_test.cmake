@@ -6,6 +6,8 @@ endif()
 
 file(READ "${PROJECT_SOURCE_DIR}/CMakeLists.txt" product_cmake)
 file(READ "${PROJECT_SOURCE_DIR}/tools/build.ps1" build_script)
+file(READ "${PROJECT_SOURCE_DIR}/tools/validate_foundation.ps1"
+    foundation_validation_script)
 file(READ "${PROJECT_SOURCE_DIR}/tools/build_kf2_telemetry.ps1"
     telemetry_build_script)
 file(READ "${PROJECT_SOURCE_DIR}/tools/package.ps1" package_script)
@@ -24,6 +26,14 @@ string(FIND "${build_script}"
 if(build_hash_binding EQUAL -1)
     message(FATAL_ERROR
         "The build script must bind the application to the current telemetry module")
+endif()
+
+string(FIND "${foundation_validation_script}"
+    "-DKF2_OFFLINE_TELEMETRY_SHA256=$telemetryHash"
+    foundation_hash_binding)
+if(foundation_hash_binding EQUAL -1)
+    message(FATAL_ERROR
+        "Foundation clean builds must bind the application to the current telemetry module")
 endif()
 
 string(FIND "${telemetry_build_script}"
