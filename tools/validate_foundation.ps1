@@ -8,6 +8,13 @@ $buildRoots = @(
     [IO.Path]::GetFullPath((Join-Path $validationRoot 'build-a')),
     [IO.Path]::GetFullPath((Join-Path $validationRoot 'build-b'))
 )
+$telemetryModule = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerTelemetry.u'
+$telemetryHash = if (Test-Path -LiteralPath $telemetryModule -PathType Leaf) {
+    (Get-FileHash -LiteralPath $telemetryModule -Algorithm SHA256).Hash.ToLowerInvariant()
+} else {
+    '589aa708392e2c26abc753ce272c6e146f274623181015e8f6bdc201ccb8e2f0'
+}
 
 function Write-Pass([string] $Message) {
     Write-Host "PASS: $Message" -ForegroundColor Green
@@ -102,7 +109,8 @@ foreach ($buildRoot in $buildRoots) {
         '-DBUILD_TESTING=ON',
         '-DKF2_VERSION=0.0.4-alpha',
         '-DKF2_BUILD_COMMIT=validation',
-        '-DKF2_BUILD_CHANNEL=validation'
+        '-DKF2_BUILD_CHANNEL=validation',
+        "-DKF2_OFFLINE_TELEMETRY_SHA256=$telemetryHash"
     )
     Invoke-Native 'cmake' @('--build', $buildRoot, '--config', 'Release', '--clean-first')
     Invoke-Native 'ctest' @('--test-dir', $buildRoot, '-C', 'Release', '--output-on-failure')
