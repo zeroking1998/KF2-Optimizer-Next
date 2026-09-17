@@ -204,11 +204,22 @@ target_compile_definitions(KF2Optimizer PRIVATE
     KF2_BUILD_CHANNEL="${KF2_BUILD_CHANNEL}"
     KF2_RELEASE_REPOSITORY="${KF2_RELEASE_REPOSITORY}"
 )
+include(CheckIPOSupported)
+check_ipo_supported(RESULT KF2_IPO_SUPPORTED OUTPUT KF2_IPO_ERROR
+    LANGUAGES CXX)
+if(KF2_IPO_SUPPORTED)
+    set_property(TARGET KF2Optimizer PROPERTY
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+else()
+    message(FATAL_ERROR
+        "Release IPO is required but unsupported: ${KF2_IPO_ERROR}")
+endif()
 if(MSVC)
     set_source_files_properties(assets/app.manifest PROPERTIES
         VS_DEPLOYMENT_CONTENT 0)
     target_compile_options(KF2Optimizer PRIVATE /guard:cf)
     target_link_options(KF2Optimizer PRIVATE
+        $<$<CONFIG:Release>:/LTCG>
         /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA /guard:cf /CETCOMPAT
     )
 endif()
