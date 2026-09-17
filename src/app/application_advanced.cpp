@@ -4,23 +4,28 @@ namespace kf2::app {
 
 void UiRuntime::refresh_advanced_presentation() {
     auto status = model.status();
-    status.advanced_available = advanced_pending.has_value();
+    status.advanced_available = advanced_settings.pending.has_value();
     status.advanced_game_running = installation &&
         game::find_running_game_process(installation->executable).has_value();
-    status.advanced_dirty = advanced_saved && advanced_pending &&
-        *advanced_saved != *advanced_pending;
-    if (advanced_pending) {
+    status.advanced_dirty = advanced_settings.saved &&
+        advanced_settings.pending &&
+        *advanced_settings.saved != *advanced_settings.pending;
+    if (advanced_settings.pending) {
         for (std::size_t option = 0;
              option < game::kAdvancedOptionCount; ++option) {
             status.advanced_values[option] = game::advanced_value_label(
-                static_cast<game::AdvancedOption>(option), *advanced_pending);
+                static_cast<game::AdvancedOption>(option),
+                *advanced_settings.pending);
         }
         status.advanced_screen_percentage = game::advanced_slider_value(
-            game::AdvancedOption::screen_percentage, *advanced_pending);
+            game::AdvancedOption::screen_percentage,
+            *advanced_settings.pending);
         status.advanced_particle_percentage = game::advanced_slider_value(
-            game::AdvancedOption::particle_percentage, *advanced_pending);
+            game::AdvancedOption::particle_percentage,
+            *advanced_settings.pending);
         status.advanced_decal_lifetime = game::advanced_slider_value(
-            game::AdvancedOption::decal_lifetime, *advanced_pending);
+            game::AdvancedOption::decal_lifetime,
+            *advanced_settings.pending);
     } else {
         status.advanced_values.fill(L"Unavailable");
     }
@@ -29,31 +34,31 @@ void UiRuntime::refresh_advanced_presentation() {
 
 void UiRuntime::reload_advanced_settings() {
     if (!installation) {
-        advanced_saved.reset();
-        advanced_pending.reset();
+        advanced_settings.saved.reset();
+        advanced_settings.pending.reset();
         refresh_advanced_presentation();
         return;
     }
     const auto loaded = game::read_advanced_game_settings(
         installation->config_root);
     if (!loaded.has_value()) {
-        advanced_saved.reset();
-        advanced_pending.reset();
+        advanced_settings.saved.reset();
+        advanced_settings.pending.reset();
         refresh_advanced_presentation();
         model.set_notice({
             ui::NoticeSeverity::warning, L"ADVANCED_UNAVAILABLE",
             loaded.error().message, L""});
         return;
     }
-    advanced_saved = loaded.value();
-    advanced_pending = loaded.value();
+    advanced_settings.saved = loaded.value();
+    advanced_settings.pending = loaded.value();
     refresh_advanced_presentation();
 }
 
 void UiRuntime::cycle_advanced_option(game::AdvancedOption option) {
-    if (!installation || !advanced_pending) {
+    if (!installation || !advanced_settings.pending) {
         reload_advanced_settings();
-        if (!advanced_pending) return;
+        if (!advanced_settings.pending) return;
     }
     if (game::find_running_game_process(installation->executable).has_value()) {
         model.set_notice({
@@ -62,15 +67,16 @@ void UiRuntime::cycle_advanced_option(game::AdvancedOption option) {
         invalidate();
         return;
     }
-    if (!game::cycle_advanced_option(*advanced_pending, option)) return;
+    if (!game::cycle_advanced_option(
+            *advanced_settings.pending, option)) return;
     save_advanced_selection(game::advanced_option_label(option));
 }
 
 void UiRuntime::stage_advanced_slider(
     game::AdvancedOption option, int value) {
-    if (!installation || !advanced_pending) {
+    if (!installation || !advanced_settings.pending) {
         reload_advanced_settings();
-        if (!advanced_pending) return;
+        if (!advanced_settings.pending) return;
     }
     if (game::find_running_game_process(installation->executable).has_value()) {
         model.set_notice({
@@ -79,18 +85,19 @@ void UiRuntime::stage_advanced_slider(
         invalidate();
         return;
     }
-    if (!game::set_advanced_slider_value(*advanced_pending, option, value)) {
+    if (!game::set_advanced_slider_value(
+            *advanced_settings.pending, option, value)) {
         return;
     }
     save_advanced_selection(game::advanced_option_label(option));
 }
 
 void UiRuntime::save_advanced_selection(std::wstring_view label) {
-    if (!advanced_saved || !advanced_pending) {
+    if (!advanced_settings.saved || !advanced_settings.pending) {
         reload_advanced_settings();
         return;
     }
-    if (*advanced_saved == *advanced_pending) {
+    if (*advanced_settings.saved == *advanced_settings.pending) {
         refresh_advanced_presentation();
         invalidate();
         return;
@@ -115,9 +122,9 @@ void UiRuntime::save_advanced_selection(std::wstring_view label) {
 }
 
 void UiRuntime::reset_advanced_settings() {
-    if (!installation || !advanced_pending) {
+    if (!installation || !advanced_settings.pending) {
         reload_advanced_settings();
-        if (!advanced_pending) return;
+        if (!advanced_settings.pending) return;
     }
     if (game::find_running_game_process(installation->executable).has_value()) {
         model.set_notice({
@@ -126,18 +133,19 @@ void UiRuntime::reset_advanced_settings() {
         invalidate();
         return;
     }
-    advanced_pending = game::recommended_advanced_defaults();
+    advanced_settings.pending = game::recommended_advanced_defaults();
     save_advanced_selection(L"Recommended advanced defaults");
 }
 
 Result<config::ApplyResult> UiRuntime::apply_advanced_settings() {
-    if (!installation || !advanced_pending || !advanced_saved) {
+    if (!installation || !advanced_settings.pending ||
+        !advanced_settings.saved) {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::not_found,
              L"Advanced KF2 settings are unavailable", 0});
     }
     const auto changes = game::advanced_setting_changes(
-        *advanced_saved, *advanced_pending);
+        *advanced_settings.saved, *advanced_settings.pending);
     if (changes.empty()) {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::invalid_argument,

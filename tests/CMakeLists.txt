@@ -469,6 +469,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_mascot.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_policy.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_animation.cpp"
+    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_metrics.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_native.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_render.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_static.cpp"
@@ -1025,6 +1026,7 @@ add_executable(kf2_dxgi_frame_timing_integration_test
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_mascot.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_policy.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_animation.cpp"
+    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_metrics.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_native.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_render.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_static.cpp"
@@ -1069,6 +1071,7 @@ add_executable(kf2_overlay_window_test
     windows/overlay_window_test.cpp
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_mascot.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_animation.cpp"
+    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_metrics.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_native.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_render.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_static.cpp"

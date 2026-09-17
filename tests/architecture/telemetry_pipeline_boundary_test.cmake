@@ -13,14 +13,14 @@ string(REPLACE "|" ";" app_telemetry_sources
        "${KF2_APP_TELEMETRY_SOURCES_PIPE}")
 
 list(LENGTH telemetry_stage_sources telemetry_stage_count)
-if(NOT telemetry_stage_count EQUAL 7)
+if(NOT telemetry_stage_count EQUAL 8)
     message(FATAL_ERROR
-        "Telemetry architecture requires exactly seven stage .cpp files; found ${telemetry_stage_count}")
+        "Telemetry architecture requires exactly eight stage modules; found ${telemetry_stage_count}")
 endif()
 list(LENGTH app_telemetry_sources app_telemetry_count)
-if(NOT app_telemetry_count EQUAL 8)
+if(NOT app_telemetry_count EQUAL 9)
     message(FATAL_ERROR
-        "Telemetry application source list requires one orchestrator plus seven stages; found ${app_telemetry_count}")
+        "Telemetry application source list requires one orchestrator plus eight stage modules; found ${app_telemetry_count}")
 endif()
 
 set(unique_stage_sources ${telemetry_stage_sources})
@@ -31,6 +31,7 @@ if(NOT unique_stage_count EQUAL telemetry_stage_count)
 endif()
 
 set(expected_stage_names
+    telemetry_adaptive_controller.cpp
     telemetry_adaptive_stage.cpp
     telemetry_collection_stage.cpp
     telemetry_effect_stage.cpp
@@ -50,7 +51,7 @@ list(SORT expected_stage_names)
 list(SORT actual_stage_names)
 if(NOT actual_stage_names STREQUAL expected_stage_names)
     message(FATAL_ERROR
-        "Telemetry stage source list differs from the seven approved stages")
+        "Telemetry stage source list differs from the eight approved modules")
 endif()
 
 list(GET app_telemetry_sources 0 orchestrator)
@@ -131,6 +132,15 @@ reject_literals("${stage_root}/telemetry_adaptive_stage.cpp"
     "evaluate_overlay"
     "overlay_window"
     "game_log_session_parser")
+reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
+    "Adaptive controller"
+    "DxgiFrameTimingSession"
+    "ProcessMetricSampler"
+    "PdhGpuSampler"
+    "NvidiaGpuSampler"
+    "evaluate_overlay"
+    "overlay_window"
+    "game_log_session_parser")
 reject_literals("${stage_root}/telemetry_presentation_stage.cpp"
     "Presentation stage"
     "DxgiFrameTimingSession"
@@ -193,6 +203,7 @@ if(visible_window_bound EQUAL -1 OR launch_wait_cleared EQUAL -1 OR
 endif()
 
 foreach(non_session_stage
+        telemetry_adaptive_controller.cpp
         telemetry_collection_stage.cpp
         telemetry_adaptive_stage.cpp
         telemetry_effect_stage.cpp
@@ -217,4 +228,4 @@ if(accepted_flex_receipt EQUAL -1 OR durable_flex_applied_event EQUAL -1 OR
 endif()
 
 message(STATUS
-    "Telemetry pipeline boundary verified: one orchestrator and seven directional stages")
+    "Telemetry pipeline boundary verified: one orchestrator and eight directional stage modules")

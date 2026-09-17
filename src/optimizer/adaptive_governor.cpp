@@ -640,6 +640,170 @@ AdaptiveDataQualityReport validate_adaptive_sample(
     return report;
 }
 
+void AdaptiveGovernor::reset_for_boundary(
+    std::uint64_t now_ns, bool telemetry_transition) noexcept {
+    history_size_ = 0;
+    history_next_ = 0;
+    smoothed_frame_time_ms_.reset();
+    smoothed_p95_ms_.reset();
+    resource_pressure_estimator_.reset();
+    active_pressure_ = AdaptivePressure::observing;
+    candidate_pressure_ = AdaptivePressure::observing;
+    candidate_since_ns_ = now_ns;
+    low_percentile_pressure_since_ns_ = 0;
+    held_bottleneck_ = AdaptiveBottleneck::unknown;
+    bottleneck_hold_until_ns_ = 0;
+    direction_changes_ = 0;
+    ++restore_generation_;
+    if (telemetry_transition) {
+        constexpr std::uint64_t kStabilizationNs = 3'000'000'000ULL;
+        stabilization_until_ns_ = now_ns >
+                std::numeric_limits<std::uint64_t>::max() -
+                    kStabilizationNs
+            ? std::numeric_limits<std::uint64_t>::max()
+            : now_ns + kStabilizationNs;
+    }
+}
+
+AdaptiveGovernor::FrameAnalysis AdaptiveGovernor::update_frame_analysis(
+    const AdaptivePolicy& policy, const AdaptiveSample& sample,
+    double confidence_factor) noexcept {
+    const double alpha =
+        policy.aggressiveness == AdaptiveAggressiveness::conservative
+        ? 0.12
+        : policy.aggressiveness == AdaptiveAggressiveness::aggressive
+            ? 0.30
+            : 0.20;
+    const auto smooth = [alpha](std::optional<double>& state,
+                                double value) noexcept {
+        state = state ? *state + alpha * (value - *state) : value;
+        return *state;
+    };
+    FrameAnalysis analysis;
+    analysis.frame_time_ms = smooth(
+        smoothed_frame_time_ms_, *sample.frame_time_ms);
+    analysis.p95_frame_time_ms = smooth(
+        smoothed_p95_ms_,
+        sample.p95_frame_time_ms.value_or(*sample.frame_time_ms));
+
+    history_[history_next_] = {
+        sample.timestamp_ns,
+        analysis.frame_time_ms,
+        analysis.p95_frame_time_ms};
+    history_next_ = (history_next_ + 1) % history_.size();
+    history_size_ = std::min(history_size_ + 1, history_.size());
+
+    analysis.predicted_frame_time_ms = analysis.frame_time_ms;
+    if (history_size_ < 4) return analysis;
+
+    const std::size_t oldest = history_size_ < history_.size()
+        ? 0
+        : history_next_;
+    const std::size_t newest = history_next_ == 0
+        ? history_.size() - 1
+        : history_next_ - 1;
+    const auto& first = history_[oldest];
+    const auto& last = history_[newest];
+    if (last.timestamp_ns <= first.timestamp_ns) return analysis;
+
+    const double seconds = static_cast<double>(
+        last.timestamp_ns - first.timestamp_ns) / 1'000'000'000.0;
+    const double slope =
+        (last.frame_time_ms - first.frame_time_ms) /
+        std::max(0.001, seconds);
+    const double horizon =
+        policy.aggressiveness == AdaptiveAggressiveness::aggressive
+        ? 1.2
+        : policy.aggressiveness == AdaptiveAggressiveness::conservative
+            ? 0.5
+            : 0.8;
+    analysis.predicted_frame_time_ms = std::max(
+        0.1, analysis.frame_time_ms + slope * horizon);
+    analysis.prediction_confidence = std::min(
+        confidence_factor,
+        std::min(1.0, static_cast<double>(history_size_) / 24.0));
+    return analysis;
+}
+
+void AdaptiveGovernor::update_pressure_hysteresis(
+    AdaptivePressure desired, const AdaptivePolicy& policy,
+    bool catastrophic_live_drop, std::uint64_t now_ns) noexcept {
+    if (desired != candidate_pressure_) {
+        candidate_pressure_ = desired;
+        candidate_since_ns_ = now_ns;
+    }
+    std::uint64_t dwell_ns = desired == AdaptivePressure::healthy
+        ? 6'000'000'000ULL
+        : desired == AdaptivePressure::warning
+            ? 800'000'000ULL
+            : desired == AdaptivePressure::intervention
+                ? 600'000'000ULL
+                : catastrophic_live_drop
+                    ? 200'000'000ULL
+                    : 400'000'000ULL;
+    if (desired == AdaptivePressure::healthy) {
+        // Threshold bouncing slows release instead of freezing the controller.
+        // The score is bounded, so oscillation cannot create hidden debt.
+        dwell_ns += static_cast<std::uint64_t>(
+            std::min<std::uint32_t>(direction_changes_, 8U)) *
+            1'000'000'000ULL;
+    }
+    if (policy.aggressiveness == AdaptiveAggressiveness::conservative) {
+        dwell_ns += dwell_ns / 2;
+    } else if (policy.aggressiveness == AdaptiveAggressiveness::aggressive) {
+        dwell_ns -= dwell_ns / 4;
+    }
+    if (desired != active_pressure_ && now_ns >= candidate_since_ns_ &&
+        now_ns - candidate_since_ns_ >= dwell_ns) {
+        const bool direction_changed =
+            (desired == AdaptivePressure::healthy) !=
+            (active_pressure_ == AdaptivePressure::healthy);
+        if (direction_changed) {
+            direction_changes_ = std::min<std::uint32_t>(
+                direction_changes_ + 1U, 32U);
+            last_direction_change_ns_ = now_ns;
+        }
+        active_pressure_ = desired;
+    }
+}
+
+void AdaptiveGovernor::update_bottleneck_hysteresis(
+    AdaptiveDecision& decision, const AdaptiveSample& sample,
+    std::uint64_t now_ns) noexcept {
+    // A busy KF2 main thread naturally moves above and below a point threshold
+    // over adjacent 500 ms samples. Once high-confidence CPU pressure is
+    // established, retain that explanation briefly while GPU reserve and a
+    // still-busy critical thread corroborate it. A different proven cause
+    // always replaces the hold immediately.
+    constexpr std::uint64_t kBottleneckHoldNs = 2'000'000'000ULL;
+    if (decision.bottleneck.type == AdaptiveBottleneck::cpu &&
+        decision.bottleneck.confidence >= 0.70 &&
+        decision.data.quality == AdaptiveDataQuality::valid) {
+        held_bottleneck_ = AdaptiveBottleneck::cpu;
+        bottleneck_hold_until_ns_ = now_ns + kBottleneckHoldNs;
+    } else if (decision.bottleneck.type == AdaptiveBottleneck::unknown &&
+               held_bottleneck_ == AdaptiveBottleneck::cpu &&
+               decision.data.quality == AdaptiveDataQuality::valid &&
+               active_pressure_ != AdaptivePressure::observing &&
+               active_pressure_ != AdaptivePressure::healthy &&
+               now_ns <= bottleneck_hold_until_ns_ &&
+               (sample.critical_core_percent.value_or(0.0) >= 55.0 ||
+                decision.cpu.workload ==
+                    AdaptiveCpuWorkload::main_thread_dominant) &&
+               sample.gpu_percent.value_or(100.0) < 85.0) {
+        decision.bottleneck.type = AdaptiveBottleneck::cpu;
+        decision.bottleneck.confidence = 0.68;
+        decision.bottleneck.contradicting_count = 0;
+        add_signal(decision.bottleneck.supporting_signals,
+                   decision.bottleneck.supporting_count,
+                   "critical_thread_hysteresis_hold");
+    } else if (decision.bottleneck.type != AdaptiveBottleneck::unknown ||
+               now_ns > bottleneck_hold_until_ns_) {
+        held_bottleneck_ = AdaptiveBottleneck::unknown;
+        bottleneck_hold_until_ns_ = 0;
+    }
+}
+
 AdaptiveDecision AdaptiveGovernor::evaluate(
     const AdaptivePolicy& policy, const AdaptiveSample& sample,
     std::uint64_t now_ns,
@@ -704,27 +868,7 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     const bool telemetry_transition = sample.discontinuity ||
         sample.session_changed || sample.map_changed;
     if (boundary) {
-        history_size_ = 0;
-        history_next_ = 0;
-        smoothed_frame_time_ms_.reset();
-        smoothed_p95_ms_.reset();
-        resource_pressure_estimator_.reset();
-        active_pressure_ = AdaptivePressure::observing;
-        candidate_pressure_ = AdaptivePressure::observing;
-        candidate_since_ns_ = now_ns;
-        low_percentile_pressure_since_ns_ = 0;
-        held_bottleneck_ = AdaptiveBottleneck::unknown;
-        bottleneck_hold_until_ns_ = 0;
-        direction_changes_ = 0;
-        ++restore_generation_;
-        if (telemetry_transition) {
-            constexpr std::uint64_t kStabilizationNs = 3'000'000'000ULL;
-            stabilization_until_ns_ = now_ns >
-                    std::numeric_limits<std::uint64_t>::max() -
-                        kStabilizationNs
-                ? std::numeric_limits<std::uint64_t>::max()
-                : now_ns + kStabilizationNs;
-        }
+        reset_for_boundary(now_ns, telemetry_transition);
     }
     identity_start_id_ = sample.process_start_id;
     session_generation_ = sample.session_generation;
@@ -757,48 +901,13 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     }
 
     const double target_frame_time = stability_bands.target_frame_time_ms;
-    const double alpha = policy.aggressiveness == AdaptiveAggressiveness::conservative
-        ? 0.12 : policy.aggressiveness == AdaptiveAggressiveness::aggressive
-            ? 0.30 : 0.20;
-    const auto smooth = [alpha](std::optional<double>& state,
-                                double value) noexcept {
-        state = state ? *state + alpha * (value - *state) : value;
-        return *state;
-    };
-    const double frame_time = smooth(smoothed_frame_time_ms_,
-                                     *sample.frame_time_ms);
-    const double p95 = smooth(smoothed_p95_ms_,
-        sample.p95_frame_time_ms.value_or(*sample.frame_time_ms));
-
-    history_[history_next_] = {sample.timestamp_ns, frame_time, p95};
-    history_next_ = (history_next_ + 1) % history_.size();
-    history_size_ = std::min(history_size_ + 1, history_.size());
-
-    double predicted = frame_time;
-    double prediction_confidence = 0.0;
-    if (history_size_ >= 4) {
-        const std::size_t oldest = history_size_ < history_.size()
-            ? 0 : history_next_;
-        const std::size_t newest = history_next_ == 0
-            ? history_.size() - 1 : history_next_ - 1;
-        const auto& first = history_[oldest];
-        const auto& last = history_[newest];
-        if (last.timestamp_ns > first.timestamp_ns) {
-            const double seconds = static_cast<double>(
-                last.timestamp_ns - first.timestamp_ns) / 1'000'000'000.0;
-            const double slope = (last.frame_time_ms - first.frame_time_ms) /
-                                 std::max(0.001, seconds);
-            const double horizon = policy.aggressiveness ==
-                                           AdaptiveAggressiveness::aggressive
-                ? 1.2 : policy.aggressiveness ==
-                             AdaptiveAggressiveness::conservative
-                    ? 0.5 : 0.8;
-            predicted = std::max(0.1, frame_time + slope * horizon);
-            prediction_confidence = std::min(
-                decision.data.confidence_factor,
-                std::min(1.0, static_cast<double>(history_size_) / 24.0));
-        }
-    }
+    const auto frame_analysis = update_frame_analysis(
+        policy, sample, decision.data.confidence_factor);
+    const double frame_time = frame_analysis.frame_time_ms;
+    const double p95 = frame_analysis.p95_frame_time_ms;
+    const double predicted = frame_analysis.predicted_frame_time_ms;
+    const double prediction_confidence =
+        frame_analysis.prediction_confidence;
     decision.predicted_frame_time_ms = predicted;
     decision.prediction_confidence = prediction_confidence;
     decision.drop_risk = clamp01(
@@ -972,39 +1081,8 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     decision.current_frame_pressure = decision.current_frame_pressure ||
         confirmed_low_percentile_pressure;
 
-    if (desired != candidate_pressure_) {
-        candidate_pressure_ = desired;
-        candidate_since_ns_ = now_ns;
-    }
-    std::uint64_t dwell_ns = desired == AdaptivePressure::healthy
-        ? 6'000'000'000ULL
-        : desired == AdaptivePressure::warning ? 800'000'000ULL
-        : desired == AdaptivePressure::intervention ? 600'000'000ULL
-        : catastrophic_live_drop ? 200'000'000ULL : 400'000'000ULL;
-    if (desired == AdaptivePressure::healthy) {
-        // Threshold bouncing slows release instead of freezing the controller.
-        // The score is bounded, so oscillation cannot create hidden debt.
-        dwell_ns += static_cast<std::uint64_t>(
-            std::min<std::uint32_t>(direction_changes_, 8U)) *
-            1'000'000'000ULL;
-    }
-    if (policy.aggressiveness == AdaptiveAggressiveness::conservative) {
-        dwell_ns += dwell_ns / 2;
-    } else if (policy.aggressiveness == AdaptiveAggressiveness::aggressive) {
-        dwell_ns -= dwell_ns / 4;
-    }
-    if (desired != active_pressure_ && now_ns >= candidate_since_ns_ &&
-        now_ns - candidate_since_ns_ >= dwell_ns) {
-        const bool direction_changed =
-            (desired == AdaptivePressure::healthy) !=
-            (active_pressure_ == AdaptivePressure::healthy);
-        if (direction_changed) {
-            direction_changes_ = std::min<std::uint32_t>(
-                direction_changes_ + 1U, 32U);
-            last_direction_change_ns_ = now_ns;
-        }
-        active_pressure_ = desired;
-    }
+    update_pressure_hysteresis(
+        desired, policy, catastrophic_live_drop, now_ns);
     decision.pressure = active_pressure_;
     decision.state = state_for(active_pressure_);
     decision.stability_state = stability_state_for(active_pressure_);
@@ -1028,38 +1106,7 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     decision.bottleneck = classify_bottleneck(
         sample, decision.data, decision.cpu, active_pressure_,
         decision.resources);
-    // A busy KF2 main thread naturally moves above and below a point threshold
-    // over adjacent 500 ms samples. Once high-confidence CPU pressure is
-    // established, retain that explanation briefly while GPU reserve and a
-    // still-busy critical thread corroborate it. A different proven cause
-    // always replaces the hold immediately.
-    constexpr std::uint64_t kBottleneckHoldNs = 2'000'000'000ULL;
-    if (decision.bottleneck.type == AdaptiveBottleneck::cpu &&
-        decision.bottleneck.confidence >= 0.70 &&
-        decision.data.quality == AdaptiveDataQuality::valid) {
-        held_bottleneck_ = AdaptiveBottleneck::cpu;
-        bottleneck_hold_until_ns_ = now_ns + kBottleneckHoldNs;
-    } else if (decision.bottleneck.type == AdaptiveBottleneck::unknown &&
-               held_bottleneck_ == AdaptiveBottleneck::cpu &&
-               decision.data.quality == AdaptiveDataQuality::valid &&
-               active_pressure_ != AdaptivePressure::observing &&
-               active_pressure_ != AdaptivePressure::healthy &&
-               now_ns <= bottleneck_hold_until_ns_ &&
-               (sample.critical_core_percent.value_or(0.0) >= 55.0 ||
-                decision.cpu.workload ==
-                    AdaptiveCpuWorkload::main_thread_dominant) &&
-               sample.gpu_percent.value_or(100.0) < 85.0) {
-        decision.bottleneck.type = AdaptiveBottleneck::cpu;
-        decision.bottleneck.confidence = 0.68;
-        decision.bottleneck.contradicting_count = 0;
-        add_signal(decision.bottleneck.supporting_signals,
-                   decision.bottleneck.supporting_count,
-                   "critical_thread_hysteresis_hold");
-    } else if (decision.bottleneck.type != AdaptiveBottleneck::unknown ||
-               now_ns > bottleneck_hold_until_ns_) {
-        held_bottleneck_ = AdaptiveBottleneck::unknown;
-        bottleneck_hold_until_ns_ = 0;
-    }
+    update_bottleneck_hysteresis(decision, sample, now_ns);
 
     if (active_pressure_ == AdaptivePressure::observing) {
         decision.disposition = AdaptiveDisposition::hold;
