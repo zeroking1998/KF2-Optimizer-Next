@@ -30,7 +30,7 @@ try {
         exit $LASTEXITCODE
     }
 
-    & cmake --build --preset $preset
+    & cmake --build --preset $preset --parallel 4
     exit $LASTEXITCODE
 }
 finally {

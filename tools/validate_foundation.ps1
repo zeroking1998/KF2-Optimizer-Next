@@ -112,7 +112,12 @@ foreach ($buildRoot in $buildRoots) {
         '-DKF2_BUILD_CHANNEL=validation',
         "-DKF2_OFFLINE_TELEMETRY_SHA256=$telemetryHash"
     )
-    Invoke-Native 'cmake' @('--build', $buildRoot, '--config', 'Release', '--clean-first')
+    Invoke-Native 'cmake' @(
+        '--build', $buildRoot,
+        '--config', 'Release',
+        '--clean-first',
+        '--parallel', '4'
+    )
     Invoke-Native 'ctest' @('--test-dir', $buildRoot, '-C', 'Release', '--output-on-failure')
 
     $releaseRoot = Join-Path $buildRoot 'Release'
