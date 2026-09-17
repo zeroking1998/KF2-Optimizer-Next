@@ -45,6 +45,18 @@ if(build_source_fingerprint EQUAL -1 OR build_fingerprint_stamp EQUAL -1)
         "Telemetry compilation must stamp the exact UnrealScript source fingerprint")
 endif()
 
+string(FIND "${telemetry_build_script}" "'-debug'" debug_compile_flag)
+string(FIND "${telemetry_build_script}" "'-final_release'"
+    final_release_compile_flag)
+if(NOT debug_compile_flag EQUAL -1)
+    message(FATAL_ERROR
+        "Telemetry compilation must not ship optional UnrealScript debug metadata")
+endif()
+if(NOT final_release_compile_flag EQUAL -1)
+    message(FATAL_ERROR
+        "Telemetry compilation must preserve the KF2OPT runtime log protocol")
+endif()
+
 string(FIND "${package_script}"
     "get_telemetry_source_fingerprint.ps1" package_source_fingerprint)
 string(FIND "${package_script}"
