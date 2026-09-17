@@ -4994,21 +4994,256 @@ function int GetProfileElapsedMilliseconds(int StartMilliseconds,
     return 0;
 }
 
+function RefreshDiagnosticEffectCache()
+{
+    local KFGiblet Gib;
+    local KFSprayActor SprayActor;
+    local KFExplosionActor ExplosionActor;
+    local KFProj_HansSmokeGrenade SmokeGrenadeProjectile;
+    local KFProj_BloatPukeMine PukeMineProjectile;
+
+    // Bootstrap one complete snapshot, then rotate one typed iterator per
+    // sample. Diagnostic actor scans therefore never stack in a normal frame.
+    if (SampleSequence == 0 ||
+        SampleSequence % DiagnosticEffectScanInterval == 0)
+    {
+        CachedDiagnosticEffects.SprayActors = 0;
+        CachedDiagnosticEffects.FireSprayActors = 0;
+        CachedDiagnosticEffects.ToxicSprayActors = 0;
+        CachedDiagnosticEffects.OtherSprayActors = 0;
+        foreach WorldInfo.AllActors(class'KFSprayActor', SprayActor)
+        {
+            if (SprayActor == None || SprayActor.bDeleteMe)
+            {
+                continue;
+            }
+            ++CachedDiagnosticEffects.SprayActors;
+            if (SprayActor.MyDamageType != None &&
+                ClassIsChildOf(SprayActor.MyDamageType, class'KFDT_Fire'))
+            {
+                ++CachedDiagnosticEffects.FireSprayActors;
+            }
+            else if (SprayActor.MyDamageType != None &&
+                     ClassIsChildOf(
+                         SprayActor.MyDamageType, class'KFDT_Toxic'))
+            {
+                ++CachedDiagnosticEffects.ToxicSprayActors;
+            }
+            else
+            {
+                ++CachedDiagnosticEffects.OtherSprayActors;
+            }
+        }
+    }
+
+    if (SampleSequence == 0 ||
+        SampleSequence % DiagnosticEffectScanInterval == 1)
+    {
+        CachedDiagnosticEffects.ExplosionActors = 0;
+        CachedDiagnosticEffects.DamagingExplosionActors = 0;
+        CachedDiagnosticEffects.FireExplosionActors = 0;
+        CachedDiagnosticEffects.ToxicExplosionActors = 0;
+        CachedDiagnosticEffects.OtherDamagingExplosionActors = 0;
+        CachedDiagnosticEffects.UnclassifiedExplosionActors = 0;
+        CachedDiagnosticEffects.LingeringExplosionActors = 0;
+        CachedDiagnosticEffects.SmokeExplosionActors = 0;
+        CachedDiagnosticEffects.BloatKingFartExplosionActors = 0;
+        foreach WorldInfo.AllActors(class'KFExplosionActor', ExplosionActor)
+        {
+            if (ExplosionActor == None || ExplosionActor.bDeleteMe)
+            {
+                continue;
+            }
+            ++CachedDiagnosticEffects.ExplosionActors;
+            if (KFExplosionActorLingering(ExplosionActor) != None)
+            {
+                ++CachedDiagnosticEffects.LingeringExplosionActors;
+            }
+            if (ExplosionActor.ExplosionTemplate != None &&
+                ExplosionActor.ExplosionTemplate.MyDamageType != None)
+            {
+                ++CachedDiagnosticEffects.DamagingExplosionActors;
+                if (ClassIsChildOf(
+                        ExplosionActor.ExplosionTemplate.MyDamageType,
+                        class'KFDT_Fire'))
+                {
+                    ++CachedDiagnosticEffects.FireExplosionActors;
+                }
+                else if (ClassIsChildOf(
+                             ExplosionActor.ExplosionTemplate.MyDamageType,
+                             class'KFDT_Toxic'))
+                {
+                    ++CachedDiagnosticEffects.ToxicExplosionActors;
+                }
+                else
+                {
+                    ++CachedDiagnosticEffects.OtherDamagingExplosionActors;
+                }
+            }
+            else
+            {
+                ++CachedDiagnosticEffects.UnclassifiedExplosionActors;
+            }
+            if (KFExplosion_HansSmokeGrenade(ExplosionActor) != None)
+            {
+                ++CachedDiagnosticEffects.SmokeExplosionActors;
+            }
+            if (KFExplosion_BloatKingFart(ExplosionActor) != None)
+            {
+                ++CachedDiagnosticEffects.BloatKingFartExplosionActors;
+            }
+        }
+    }
+
+    if (SampleSequence == 0 ||
+        SampleSequence % DiagnosticEffectScanInterval == 2)
+    {
+        CachedDiagnosticEffects.SmokeGrenadeProjectiles = 0;
+        foreach WorldInfo.AllActors(
+            class'KFProj_HansSmokeGrenade', SmokeGrenadeProjectile)
+        {
+            if (SmokeGrenadeProjectile != None &&
+                !SmokeGrenadeProjectile.bDeleteMe)
+            {
+                ++CachedDiagnosticEffects.SmokeGrenadeProjectiles;
+            }
+        }
+    }
+
+    if (SampleSequence == 0 ||
+        SampleSequence % DiagnosticEffectScanInterval == 3)
+    {
+        CachedDiagnosticEffects.PukeMineProjectiles = 0;
+        CachedDiagnosticEffects.BloatKingPukeMineProjectiles = 0;
+        foreach WorldInfo.AllActors(
+            class'KFProj_BloatPukeMine', PukeMineProjectile)
+        {
+            if (PukeMineProjectile == None || PukeMineProjectile.bDeleteMe)
+            {
+                continue;
+            }
+            ++CachedDiagnosticEffects.PukeMineProjectiles;
+            if (KFProj_BloatKingPukeMine(PukeMineProjectile) != None)
+            {
+                ++CachedDiagnosticEffects.BloatKingPukeMineProjectiles;
+            }
+        }
+    }
+
+    if (SampleSequence == 0 ||
+        SampleSequence % DiagnosticEffectScanInterval == 4)
+    {
+        CachedDiagnosticEffects.VisibleGibs = 0;
+        foreach WorldInfo.AllActors(class'KFGiblet', Gib)
+        {
+            if (Gib != None && !Gib.bDeleteMe)
+            {
+                ++CachedDiagnosticEffects.VisibleGibs;
+            }
+        }
+    }
+}
+
+function RefreshWorldEmitterCache(bool bCollectWorldParticleGroups)
+{
+    local Emitter WorldEmitter;
+    local int WorldEmitterComponents;
+    local int ScannedWorldEmitterParticles;
+    local int ScannedWorldEmitterVisibleComponents;
+    local int ScannedWorldEmitterLodTotal;
+    local int ScannedWorldEmitterBoundedComponents;
+    local int ScannedWorldEmitterFlexComponents;
+    local int ScannedWorldEmitterFlexFluidComponents;
+    local int ScannedWorldEmitterFlexNonFluidComponents;
+    local int ScannedWorldEmitterFlexMixedComponents;
+    local int ScannedWorldEmitterNonFlexComponents;
+    local int ScannedWorldEmitterUnclassifiedComponents;
+    local int ScannedWorldEmitterConstantSpawnEmitters;
+    local int ScannedWorldEmitterDynamicSpawnEmitters;
+    local int ScannedWorldEmitterConstantSpawnRateMilli;
+    local int ScannedWorldEmitterBurstEntries;
+    local int ScannedWorldEmitterPeakCapacity;
+
+    foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
+    {
+        if (WorldEmitter == None || WorldEmitter.bDeleteMe ||
+            WorldEmitter.ParticleSystemComponent == None ||
+            !WorldEmitter.ParticleSystemComponent.bIsActive)
+        {
+            continue;
+        }
+        ++WorldEmitterComponents;
+        if (bCollectWorldParticleGroups)
+        {
+            AccumulateWorldParticleGroup(
+                "placed", WorldEmitter.ParticleSystemComponent);
+        }
+        ScannedWorldEmitterParticles +=
+            WorldEmitter.ParticleSystemComponent.NumActiveParticles;
+        InspectWorldEmitterParticleComponentCached(
+            WorldEmitter.ParticleSystemComponent,
+            WorldEmitterComponents - 1,
+            ScannedWorldEmitterFlexComponents,
+            ScannedWorldEmitterFlexFluidComponents,
+            ScannedWorldEmitterFlexNonFluidComponents,
+            ScannedWorldEmitterFlexMixedComponents,
+            ScannedWorldEmitterNonFlexComponents,
+            ScannedWorldEmitterUnclassifiedComponents,
+            ScannedWorldEmitterConstantSpawnEmitters,
+            ScannedWorldEmitterDynamicSpawnEmitters,
+            ScannedWorldEmitterConstantSpawnRateMilli,
+            ScannedWorldEmitterBurstEntries,
+            ScannedWorldEmitterPeakCapacity);
+        ScannedWorldEmitterLodTotal +=
+            WorldEmitter.ParticleSystemComponent.GetLODLevel();
+        if (WorldEmitter.ParticleSystemComponent.LastRenderTime >
+            WorldInfo.TimeSeconds - 0.3)
+        {
+            ++ScannedWorldEmitterVisibleComponents;
+        }
+        if (WorldEmitter.ParticleSystemComponent.Bounds.SphereRadius > 0.0)
+        {
+            ++ScannedWorldEmitterBoundedComponents;
+        }
+    }
+    CachedWorldEmitters.Components = WorldEmitterComponents;
+    CachedWorldEmitters.Particles = ScannedWorldEmitterParticles;
+    CachedWorldEmitters.VisibleComponents =
+        ScannedWorldEmitterVisibleComponents;
+    CachedWorldEmitters.LodTotal = ScannedWorldEmitterLodTotal;
+    CachedWorldEmitters.BoundedComponents =
+        ScannedWorldEmitterBoundedComponents;
+    CachedWorldEmitters.FlexComponents =
+        ScannedWorldEmitterFlexComponents;
+    CachedWorldEmitters.FlexFluidComponents =
+        ScannedWorldEmitterFlexFluidComponents;
+    CachedWorldEmitters.FlexNonFluidComponents =
+        ScannedWorldEmitterFlexNonFluidComponents;
+    CachedWorldEmitters.FlexMixedComponents =
+        ScannedWorldEmitterFlexMixedComponents;
+    CachedWorldEmitters.NonFlexComponents =
+        ScannedWorldEmitterNonFlexComponents;
+    CachedWorldEmitters.UnclassifiedComponents =
+        ScannedWorldEmitterUnclassifiedComponents;
+    CachedWorldEmitters.ConstantSpawnEmitters =
+        ScannedWorldEmitterConstantSpawnEmitters;
+    CachedWorldEmitters.DynamicSpawnEmitters =
+        ScannedWorldEmitterDynamicSpawnEmitters;
+    CachedWorldEmitters.ConstantSpawnRateMilli =
+        ScannedWorldEmitterConstantSpawnRateMilli;
+    CachedWorldEmitters.BurstEntries = ScannedWorldEmitterBurstEntries;
+    CachedWorldEmitters.PeakCapacity = ScannedWorldEmitterPeakCapacity;
+}
+
 function SampleTelemetry()
 {
     local KFPawn_Monster Zed;
     local array<class<KFPawn_Monster> > LivingClasses;
     local KFPawn Corpse;
     local KFPawn CollisionProbeCorpse;
-    local KFGiblet Gib;
     local KFGoreManager GoreManager;
     local KFGameInfo GameInfo;
     local KFImpactEffectManager ImpactEffectManager;
-    local KFSprayActor SprayActor;
-    local KFExplosionActor ExplosionActor;
-    local KFProj_HansSmokeGrenade SmokeGrenadeProjectile;
-    local KFProj_BloatPukeMine PukeMineProjectile;
-    local Emitter WorldEmitter;
     local int Index;
     local int HitZoneIndex;
     local int LivingZeds;
@@ -5100,21 +5335,6 @@ function SampleTelemetry()
     local int WorldParticleLodTotal;
     local int WorldParticleBoundedComponents;
     local int WorldEmitterComponents;
-    local int ScannedWorldEmitterParticles;
-    local int ScannedWorldEmitterVisibleComponents;
-    local int ScannedWorldEmitterLodTotal;
-    local int ScannedWorldEmitterBoundedComponents;
-    local int ScannedWorldEmitterFlexComponents;
-    local int ScannedWorldEmitterFlexFluidComponents;
-    local int ScannedWorldEmitterFlexNonFluidComponents;
-    local int ScannedWorldEmitterFlexMixedComponents;
-    local int ScannedWorldEmitterNonFlexComponents;
-    local int ScannedWorldEmitterUnclassifiedComponents;
-    local int ScannedWorldEmitterConstantSpawnEmitters;
-    local int ScannedWorldEmitterDynamicSpawnEmitters;
-    local int ScannedWorldEmitterConstantSpawnRateMilli;
-    local int ScannedWorldEmitterBurstEntries;
-    local int ScannedWorldEmitterPeakCapacity;
     local int GroundFireParticleComponents;
     local int GroundFireParticles;
     local int GroundFireParticleVisibleComponents;
@@ -5647,6 +5867,7 @@ function SampleTelemetry()
     // These fields are diagnostics only. Bootstrap one complete snapshot, then
     // rotate one typed iterator per sample so their costs cannot stack in the
     // same game-thread frame. Unscanned groups reuse their last complete value.
+    RefreshDiagnosticEffectCache();
     SprayActors = CachedDiagnosticEffects.SprayActors;
     FireSprayActors = CachedDiagnosticEffects.FireSprayActors;
     ToxicSprayActors = CachedDiagnosticEffects.ToxicSprayActors;
@@ -5671,169 +5892,6 @@ function SampleTelemetry()
     BloatKingPukeMineProjectiles =
         CachedDiagnosticEffects.BloatKingPukeMineProjectiles;
     VisibleGibs = CachedDiagnosticEffects.VisibleGibs;
-
-    if (SampleSequence == 0 ||
-        SampleSequence % DiagnosticEffectScanInterval == 0)
-    {
-        SprayActors = 0;
-        FireSprayActors = 0;
-        ToxicSprayActors = 0;
-        OtherSprayActors = 0;
-        foreach WorldInfo.AllActors(class'KFSprayActor', SprayActor)
-        {
-            if (SprayActor == None || SprayActor.bDeleteMe)
-            {
-                continue;
-            }
-            ++SprayActors;
-            if (SprayActor.MyDamageType != None &&
-                ClassIsChildOf(SprayActor.MyDamageType, class'KFDT_Fire'))
-            {
-                ++FireSprayActors;
-            }
-            else if (SprayActor.MyDamageType != None &&
-                     ClassIsChildOf(
-                         SprayActor.MyDamageType, class'KFDT_Toxic'))
-            {
-                ++ToxicSprayActors;
-            }
-            else
-            {
-                ++OtherSprayActors;
-            }
-        }
-        CachedDiagnosticEffects.SprayActors = SprayActors;
-        CachedDiagnosticEffects.FireSprayActors = FireSprayActors;
-        CachedDiagnosticEffects.ToxicSprayActors = ToxicSprayActors;
-        CachedDiagnosticEffects.OtherSprayActors = OtherSprayActors;
-    }
-
-    if (SampleSequence == 0 ||
-        SampleSequence % DiagnosticEffectScanInterval == 1)
-    {
-        ExplosionActors = 0;
-        DamagingExplosionActors = 0;
-        FireExplosionActors = 0;
-        ToxicExplosionActors = 0;
-        OtherDamagingExplosionActors = 0;
-        UnclassifiedExplosionActors = 0;
-        LingeringExplosionActors = 0;
-        SmokeExplosionActors = 0;
-        BloatKingFartExplosionActors = 0;
-        foreach WorldInfo.AllActors(class'KFExplosionActor', ExplosionActor)
-        {
-            if (ExplosionActor == None || ExplosionActor.bDeleteMe)
-            {
-                continue;
-            }
-            ++ExplosionActors;
-            if (KFExplosionActorLingering(ExplosionActor) != None)
-            {
-                ++LingeringExplosionActors;
-            }
-            if (ExplosionActor.ExplosionTemplate != None &&
-                ExplosionActor.ExplosionTemplate.MyDamageType != None)
-            {
-                ++DamagingExplosionActors;
-                if (ClassIsChildOf(
-                        ExplosionActor.ExplosionTemplate.MyDamageType,
-                        class'KFDT_Fire'))
-                {
-                    ++FireExplosionActors;
-                }
-                else if (ClassIsChildOf(
-                             ExplosionActor.ExplosionTemplate.MyDamageType,
-                             class'KFDT_Toxic'))
-                {
-                    ++ToxicExplosionActors;
-                }
-                else
-                {
-                    ++OtherDamagingExplosionActors;
-                }
-            }
-            else
-            {
-                ++UnclassifiedExplosionActors;
-            }
-            if (KFExplosion_HansSmokeGrenade(ExplosionActor) != None)
-            {
-                ++SmokeExplosionActors;
-            }
-            if (KFExplosion_BloatKingFart(ExplosionActor) != None)
-            {
-                ++BloatKingFartExplosionActors;
-            }
-        }
-        CachedDiagnosticEffects.ExplosionActors = ExplosionActors;
-        CachedDiagnosticEffects.DamagingExplosionActors =
-            DamagingExplosionActors;
-        CachedDiagnosticEffects.FireExplosionActors = FireExplosionActors;
-        CachedDiagnosticEffects.ToxicExplosionActors = ToxicExplosionActors;
-        CachedDiagnosticEffects.OtherDamagingExplosionActors =
-            OtherDamagingExplosionActors;
-        CachedDiagnosticEffects.UnclassifiedExplosionActors =
-            UnclassifiedExplosionActors;
-        CachedDiagnosticEffects.LingeringExplosionActors =
-            LingeringExplosionActors;
-        CachedDiagnosticEffects.SmokeExplosionActors = SmokeExplosionActors;
-        CachedDiagnosticEffects.BloatKingFartExplosionActors =
-            BloatKingFartExplosionActors;
-    }
-
-    if (SampleSequence == 0 ||
-        SampleSequence % DiagnosticEffectScanInterval == 2)
-    {
-        SmokeGrenadeProjectiles = 0;
-        foreach WorldInfo.AllActors(
-            class'KFProj_HansSmokeGrenade', SmokeGrenadeProjectile)
-        {
-            if (SmokeGrenadeProjectile != None &&
-                !SmokeGrenadeProjectile.bDeleteMe)
-            {
-                ++SmokeGrenadeProjectiles;
-            }
-        }
-        CachedDiagnosticEffects.SmokeGrenadeProjectiles =
-            SmokeGrenadeProjectiles;
-    }
-
-    if (SampleSequence == 0 ||
-        SampleSequence % DiagnosticEffectScanInterval == 3)
-    {
-        PukeMineProjectiles = 0;
-        BloatKingPukeMineProjectiles = 0;
-        foreach WorldInfo.AllActors(
-            class'KFProj_BloatPukeMine', PukeMineProjectile)
-        {
-            if (PukeMineProjectile == None || PukeMineProjectile.bDeleteMe)
-            {
-                continue;
-            }
-            ++PukeMineProjectiles;
-            if (KFProj_BloatKingPukeMine(PukeMineProjectile) != None)
-            {
-                ++BloatKingPukeMineProjectiles;
-            }
-        }
-        CachedDiagnosticEffects.PukeMineProjectiles = PukeMineProjectiles;
-        CachedDiagnosticEffects.BloatKingPukeMineProjectiles =
-            BloatKingPukeMineProjectiles;
-    }
-
-    if (SampleSequence == 0 ||
-        SampleSequence % DiagnosticEffectScanInterval == 4)
-    {
-        VisibleGibs = 0;
-        foreach WorldInfo.AllActors(class'KFGiblet', Gib)
-        {
-            if (Gib != None && !Gib.bDeleteMe)
-            {
-                ++VisibleGibs;
-            }
-        }
-        CachedDiagnosticEffects.VisibleGibs = VisibleGibs;
-    }
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=effect_actors_done");
 
@@ -5888,78 +5946,7 @@ function SampleTelemetry()
     if (SampleSequence == 0 ||
         SampleSequence % DiagnosticEffectScanInterval == 5)
     {
-        WorldEmitterComponents = 0;
-        foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
-        {
-            if (WorldEmitter == None || WorldEmitter.bDeleteMe ||
-                WorldEmitter.ParticleSystemComponent == None ||
-                !WorldEmitter.ParticleSystemComponent.bIsActive)
-            {
-                continue;
-            }
-            ++WorldEmitterComponents;
-            if (bCollectWorldParticleGroups)
-            {
-                AccumulateWorldParticleGroup(
-                    "placed", WorldEmitter.ParticleSystemComponent);
-            }
-            ScannedWorldEmitterParticles +=
-                WorldEmitter.ParticleSystemComponent.NumActiveParticles;
-            InspectWorldEmitterParticleComponentCached(
-                WorldEmitter.ParticleSystemComponent,
-                WorldEmitterComponents - 1,
-                ScannedWorldEmitterFlexComponents,
-                ScannedWorldEmitterFlexFluidComponents,
-                ScannedWorldEmitterFlexNonFluidComponents,
-                ScannedWorldEmitterFlexMixedComponents,
-                ScannedWorldEmitterNonFlexComponents,
-                ScannedWorldEmitterUnclassifiedComponents,
-                ScannedWorldEmitterConstantSpawnEmitters,
-                ScannedWorldEmitterDynamicSpawnEmitters,
-                ScannedWorldEmitterConstantSpawnRateMilli,
-                ScannedWorldEmitterBurstEntries,
-                ScannedWorldEmitterPeakCapacity);
-            ScannedWorldEmitterLodTotal +=
-                WorldEmitter.ParticleSystemComponent.GetLODLevel();
-            if (WorldEmitter.ParticleSystemComponent.LastRenderTime >
-                WorldInfo.TimeSeconds - 0.3)
-            {
-                ++ScannedWorldEmitterVisibleComponents;
-            }
-            if (WorldEmitter.ParticleSystemComponent.Bounds.SphereRadius > 0.0)
-            {
-                ++ScannedWorldEmitterBoundedComponents;
-            }
-        }
-        CachedWorldEmitters.Components = WorldEmitterComponents;
-        CachedWorldEmitters.Particles = ScannedWorldEmitterParticles;
-        CachedWorldEmitters.VisibleComponents =
-            ScannedWorldEmitterVisibleComponents;
-        CachedWorldEmitters.LodTotal = ScannedWorldEmitterLodTotal;
-        CachedWorldEmitters.BoundedComponents =
-            ScannedWorldEmitterBoundedComponents;
-        CachedWorldEmitters.FlexComponents =
-            ScannedWorldEmitterFlexComponents;
-        CachedWorldEmitters.FlexFluidComponents =
-            ScannedWorldEmitterFlexFluidComponents;
-        CachedWorldEmitters.FlexNonFluidComponents =
-            ScannedWorldEmitterFlexNonFluidComponents;
-        CachedWorldEmitters.FlexMixedComponents =
-            ScannedWorldEmitterFlexMixedComponents;
-        CachedWorldEmitters.NonFlexComponents =
-            ScannedWorldEmitterNonFlexComponents;
-        CachedWorldEmitters.UnclassifiedComponents =
-            ScannedWorldEmitterUnclassifiedComponents;
-        CachedWorldEmitters.ConstantSpawnEmitters =
-            ScannedWorldEmitterConstantSpawnEmitters;
-        CachedWorldEmitters.DynamicSpawnEmitters =
-            ScannedWorldEmitterDynamicSpawnEmitters;
-        CachedWorldEmitters.ConstantSpawnRateMilli =
-            ScannedWorldEmitterConstantSpawnRateMilli;
-        CachedWorldEmitters.BurstEntries =
-            ScannedWorldEmitterBurstEntries;
-        CachedWorldEmitters.PeakCapacity =
-            ScannedWorldEmitterPeakCapacity;
+        RefreshWorldEmitterCache(bCollectWorldParticleGroups);
         if (bCollectWorldParticleGroups)
         {
             LogWorldParticleGroupAttribution();

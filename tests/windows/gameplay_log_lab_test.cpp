@@ -1104,13 +1104,25 @@ int main() {
     const auto effect_scan = telemetry_source.substr(
         effect_profile_start, effect_profile_end - effect_profile_start);
     CHECK(effect_scan.find("class'Actor'") == std::string::npos);
-    CHECK(effect_scan.find("class'KFSprayActor'") != std::string::npos);
-    CHECK(effect_scan.find("class'KFExplosionActor'") != std::string::npos);
-    CHECK(effect_scan.find("class'KFProj_HansSmokeGrenade'") !=
+    CHECK(effect_scan.find("RefreshDiagnosticEffectCache();") !=
           std::string::npos);
-    CHECK(effect_scan.find("class'KFProj_BloatPukeMine'") !=
+    const auto diagnostic_scan_start = telemetry_source.find(
+        "function RefreshDiagnosticEffectCache()");
+    const auto diagnostic_scan_end = telemetry_source.find(
+        "function SampleTelemetry()", diagnostic_scan_start);
+    CHECK(diagnostic_scan_start != std::string::npos);
+    CHECK(diagnostic_scan_end != std::string::npos);
+    const auto diagnostic_scan = telemetry_source.substr(
+        diagnostic_scan_start, diagnostic_scan_end - diagnostic_scan_start);
+    CHECK(diagnostic_scan.find("class'Actor'") == std::string::npos);
+    CHECK(diagnostic_scan.find("class'KFSprayActor'") != std::string::npos);
+    CHECK(diagnostic_scan.find("class'KFExplosionActor'") !=
           std::string::npos);
-    CHECK(effect_scan.find("class'KFGiblet'") != std::string::npos);
+    CHECK(diagnostic_scan.find("class'KFProj_HansSmokeGrenade'") !=
+          std::string::npos);
+    CHECK(diagnostic_scan.find("class'KFProj_BloatPukeMine'") !=
+          std::string::npos);
+    CHECK(diagnostic_scan.find("class'KFGiblet'") != std::string::npos);
     CHECK(telemetry_source.find(
         "SampleSequence % DiagnosticEffectScanInterval == 0") !=
           std::string::npos);
@@ -1165,10 +1177,17 @@ int main() {
     CHECK(telemetry_source.find(
         "CachedWorldEmitterTraversalSnapshots[TraversalIndex].Key == "
         "CacheKey") != std::string::npos);
+    const auto world_emitter_refresh = telemetry_source.find(
+        "function RefreshWorldEmitterCache(");
+    CHECK(world_emitter_refresh != std::string::npos);
     CHECK(telemetry_source.find(
-        "InspectWorldEmitterParticleComponentCached(\n"
-        "                WorldEmitter.ParticleSystemComponent,\n"
-        "                WorldEmitterComponents - 1,") !=
+        "RefreshWorldEmitterCache(bCollectWorldParticleGroups);") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "InspectWorldEmitterParticleComponentCached(",
+        world_emitter_refresh) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "WorldEmitterComponents - 1,", world_emitter_refresh) !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "CachedWorldEmitterTemplates.Find('Key', CacheKey)") ==
