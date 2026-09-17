@@ -953,6 +953,13 @@ add_test(NAME kf2_contributor_package_flow_test
 set_tests_properties(kf2_contributor_package_flow_test PROPERTIES
     LABELS "architecture;packaging")
 
+add_test(NAME kf2_release_ipo_contract_test
+    COMMAND "${CMAKE_COMMAND}"
+        "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/architecture/release_ipo_contract_test.cmake")
+set_tests_properties(kf2_release_ipo_contract_test PROPERTIES
+    LABELS "architecture;build")
+
 add_executable(kf2_game_session_test
     windows/game_session_test.cpp
     "${PROJECT_SOURCE_DIR}/src/game/game_session.cpp"
