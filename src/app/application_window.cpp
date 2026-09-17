@@ -6,7 +6,7 @@ namespace kf2::app {
 void UiRuntime::update_animation_cadence() {
     if (!window) return;
     const bool background_work_active = package_repair_state ||
-        update_check_state || update_install_state;
+        updates.check || updates.install;
     const auto interval = ui::runtime_timer_interval_ms(
         model.status().game_detected, background_work_active);
     const auto hwnd = static_cast<HWND>(window->native_handle_for_testing());

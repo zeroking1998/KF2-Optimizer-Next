@@ -155,6 +155,10 @@ struct OverlayWindowState {
     ~OverlayWindowState();
 };
 
+struct MetricUpdateResult {
+    bool any_metric_changed{false};
+    bool graph_sampled{false};
+};
 
 namespace detail {
 
@@ -169,6 +173,40 @@ inline constexpr int kPremiumMutantLowIdlePngResource = 203;
 [[nodiscard]] bool same_rect(const RECT& left, const RECT& right);
 [[nodiscard]] RECT visibility_pose(
     const RECT& bounds, float scale, LONG outward);
+void disable_overlay_animations(OverlayWindowState& state) noexcept;
+void prepare_visibility_animation(
+    OverlayWindowState& state,
+    const OverlayPresentation& presentation,
+    bool geometry_changed,
+    ULONGLONG now_ms);
+[[nodiscard]] RECT advance_visibility_animation(
+    OverlayWindowState& state,
+    const OverlayPresentation& presentation,
+    ULONGLONG now_ms);
+[[nodiscard]] bool advance_metric_reaction_animation(
+    OverlayWindowState& state,
+    bool animations_enabled,
+    ULONGLONG now_ms) noexcept;
+HRESULT rebuild_frame_time_graph(
+    OverlayWindowState& state,
+    D2D1_RECT_F bounds);
+[[nodiscard]] const std::wstring& rounded_metric_text(
+    double value,
+    long& cached_value,
+    std::wstring& cached_text);
+void refresh_frame_time_text(OverlayWindowState& state);
+void refresh_memory_text(OverlayWindowState& state);
+[[nodiscard]] MetricUpdateResult update_overlay_metrics(
+    OverlayWindowState& state,
+    const OverlayPresentation& presentation,
+    ULONGLONG frame_now_ms,
+    bool content_changed);
+void draw_overlay_metrics(
+    OverlayWindowState& state,
+    LONG width,
+    LONG height,
+    ULONGLONG frame_now_ms,
+    float animation_progress);
 [[nodiscard]] bool static_layer_matches(
     const OverlayWindowState& state, LONG width, LONG height) noexcept;
 HRESULT rebuild_static_layer(

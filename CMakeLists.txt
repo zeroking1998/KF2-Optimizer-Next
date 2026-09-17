@@ -69,6 +69,8 @@ set(KF2_FEATURE_ACTION_SOURCES
 set(KF2_APP_ACTION_SOURCES
     "${PROJECT_SOURCE_DIR}/src/app/application_advanced.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application_actions.cpp"
+    "${PROJECT_SOURCE_DIR}/src/app/application_launch_actions.cpp"
+    "${PROJECT_SOURCE_DIR}/src/app/application_video_state.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/runtime/action_contract.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/runtime/action_router.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/runtime/feature_composition.cpp"
@@ -81,6 +83,7 @@ string(JOIN "|" KF2_APP_ACTION_SOURCES_PIPE
     ${KF2_APP_ACTION_SOURCES})
 
 set(KF2_TELEMETRY_STAGE_SOURCES
+    "${PROJECT_SOURCE_DIR}/src/features/telemetry/telemetry_adaptive_controller.cpp"
     "${PROJECT_SOURCE_DIR}/src/features/telemetry/telemetry_adaptive_stage.cpp"
     "${PROJECT_SOURCE_DIR}/src/features/telemetry/telemetry_collection_stage.cpp"
     "${PROJECT_SOURCE_DIR}/src/features/telemetry/telemetry_effect_stage.cpp"
@@ -146,6 +149,7 @@ add_executable(KF2Optimizer WIN32
     src/overlay/overlay_mascot.cpp
     src/overlay/overlay_policy.cpp
     src/overlay/overlay_window_animation.cpp
+    src/overlay/overlay_window_metrics.cpp
     src/overlay/overlay_window_native.cpp
     src/overlay/overlay_window_render.cpp
     src/overlay/overlay_window_static.cpp

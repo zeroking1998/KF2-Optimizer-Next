@@ -337,6 +337,98 @@ void UiRuntime::update_adaptive_policy_status(ui::UiStatus& status) const {
     status.adaptive_logging = optimizer_settings.adaptive_logging;
 }
 
+void UiRuntime::configure_overlay_from_settings(
+    const config::Settings& settings) {
+    overlay_enabled = settings.overlay_enabled;
+    overlay_scale = static_cast<float>(settings.overlay_scale_percent) / 100.0F;
+    if (settings.overlay_position == "top_left") {
+        overlay_corner = overlay::OverlayCorner::top_left;
+    } else if (settings.overlay_position == "bottom_left") {
+        overlay_corner = overlay::OverlayCorner::bottom_left;
+    } else if (settings.overlay_position == "bottom_right") {
+        overlay_corner = overlay::OverlayCorner::bottom_right;
+    }
+}
+
+ui::UiStatus UiRuntime::make_initial_status(
+    const config::Settings& settings, StartMode mode) const {
+    ui::UiStatus status;
+    status.mode = mode == StartMode::read_only
+        ? L"Read-only" : L"Adaptive / Automatic";
+    status.adaptive_optimization_enabled =
+        settings.adaptive_optimization_enabled;
+    status.target_fps = settings.target_fps;
+    status.corpse_limit = settings.corpse_limit;
+    update_adaptive_policy_status(status);
+    if (!settings.adaptive_optimization_enabled) {
+        status.adaptive_state = L"off";
+        status.adaptive_action = L"none";
+        status.adaptive_reason =
+            L"Adaptive optimization is off; monitoring remains active";
+        status.adaptive_safety = L"no adaptive actuator";
+        status.adaptive_evidence = L"TELEMETRY_ONLY";
+        status.adaptive_corpse_action_status = L"DISABLED";
+    }
+    status.restore_config_after_game = settings.restore_config_after_game;
+    status.overlay_enabled = overlay_enabled;
+    status.overlay_show_fps = settings.overlay_show_fps;
+    status.overlay_show_frame_time = settings.overlay_show_frame_time;
+    status.overlay_show_cpu = settings.overlay_show_cpu;
+    status.overlay_show_gpu = settings.overlay_show_gpu;
+    status.overlay_show_memory = settings.overlay_show_memory;
+    status.debug_corpse_markers = settings.debug_corpse_markers;
+    status.debug_zed_markers = settings.debug_zed_markers;
+    status.overlay_scale_percent = settings.overlay_scale_percent;
+    status.overlay_position = settings.overlay_position == "top_left"
+        ? L"top left"
+        : settings.overlay_position == "bottom_left"
+            ? L"bottom left"
+            : settings.overlay_position == "bottom_right"
+                ? L"bottom right"
+                : L"top right";
+    status.hardware_summary = query_hardware_summary();
+    status.profile = L"user settings";
+    status.quality = std::wstring{
+        settings.quality_policy.begin(), settings.quality_policy.end()};
+    status.recommended_profile = L"user settings";
+    status.recommendation_reason =
+        L"KF2 starts from the user's saved graphics; Adaptive reacts only to validated gameplay telemetry";
+    return status;
+}
+
+void UiRuntime::enforce_saved_frame_control_compatibility() {
+    // Prevent VSync and disabled frame-rate smoothing from competing with
+    // Target FPS. Do not describe an already-running game as changed live.
+    if (start_mode != StartMode::normal || !installation || !video_pending ||
+        game::find_running_game_process(installation->executable).has_value()) {
+        return;
+    }
+    const auto vsync = static_cast<std::size_t>(game::VideoOption::vsync);
+    const auto variable = static_cast<std::size_t>(
+        game::VideoOption::variable_frame_rate);
+    if (video_pending->choices[vsync] == 0 &&
+        video_pending->choices[variable] == 0) {
+        return;
+    }
+    video_pending->choices[vsync] = 0;
+    video_pending->choices[variable] = 0;
+    save_video_selection();
+}
+
+void UiRuntime::initialize_update_state(const config::Settings& settings) {
+    const auto persisted_update = update::load_update_state(updates.state_path);
+    const auto cached_update = persisted_update.has_value()
+        ? persisted_update.value() : update::PersistedUpdateState{};
+    updates.controller.restore_preferences(
+        settings.automatic_update_checks,
+        cached_update.last_check_unix_seconds,
+        cached_update.last_result != update::PersistedCheckResult::unknown,
+        cached_update.last_result == update::PersistedCheckResult::available
+            ? cached_update.available_version : std::string{},
+        cached_update.ignored_version);
+    refresh_update_presentation();
+}
+
 UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_required,
           const config::Settings& settings, diagnostics::EventLog& event_log,
           const std::optional<game::GameDiscoveryInput>& discovery,
@@ -380,8 +472,8 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
       executable_root{std::move(executable_directory)},
       optimizer_settings{settings},
       backups{state_root}, discovery_input{discovery}, start_mode{mode},
-      update_controller{current_build_identity().version},
-      update_state_path{state_root / L"update-state.ini"} {
+      updates{current_build_identity().version,
+              state_root / L"update-state.ini"} {
     // Build the immutable target registry during startup. No first-use
     // allocation is then possible in the measurement/control hot path.
     static_cast<void>(optimizer::adaptive_target_registry());
@@ -397,56 +489,12 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
             L"The legacy 70% Adaptive quality floor was expanded to 10%",
             L"optimizer"});
     }
-    overlay_enabled = settings.overlay_enabled;
-    overlay_scale = static_cast<float>(settings.overlay_scale_percent) / 100.0F;
-    if (settings.overlay_position == "top_left") {
-        overlay_corner = overlay::OverlayCorner::top_left;
-    } else if (settings.overlay_position == "bottom_left") {
-        overlay_corner = overlay::OverlayCorner::bottom_left;
-    } else if (settings.overlay_position == "bottom_right") {
-        overlay_corner = overlay::OverlayCorner::bottom_right;
-    }
+    configure_overlay_from_settings(settings);
     model.set_state_path(state_root.wstring());
     const auto identity = format_build_identity(current_build_identity());
     model.set_build_identity(std::wstring{identity.begin(), identity.end()});
     model.set_recovery_required(recovery_required);
-    ui::UiStatus status;
-    status.mode = mode == StartMode::read_only
-        ? L"Read-only" : L"Adaptive / Automatic";
-    status.adaptive_optimization_enabled =
-        settings.adaptive_optimization_enabled;
-    status.target_fps = settings.target_fps;
-    status.corpse_limit = settings.corpse_limit;
-    update_adaptive_policy_status(status);
-    if (!settings.adaptive_optimization_enabled) {
-        status.adaptive_state = L"off";
-        status.adaptive_action = L"none";
-        status.adaptive_reason =
-            L"Adaptive optimization is off; monitoring remains active";
-        status.adaptive_safety = L"no adaptive actuator";
-        status.adaptive_evidence = L"TELEMETRY_ONLY";
-        status.adaptive_corpse_action_status = L"DISABLED";
-    }
-    status.restore_config_after_game = settings.restore_config_after_game;
-    status.overlay_enabled = overlay_enabled;
-    status.overlay_show_fps = settings.overlay_show_fps;
-    status.overlay_show_frame_time = settings.overlay_show_frame_time;
-    status.overlay_show_cpu = settings.overlay_show_cpu;
-    status.overlay_show_gpu = settings.overlay_show_gpu;
-    status.overlay_show_memory = settings.overlay_show_memory;
-    status.debug_corpse_markers = settings.debug_corpse_markers;
-    status.debug_zed_markers = settings.debug_zed_markers;
-    status.overlay_scale_percent = settings.overlay_scale_percent;
-    status.overlay_position = settings.overlay_position == "top_left" ? L"top left" :
-        settings.overlay_position == "bottom_left" ? L"bottom left" :
-        settings.overlay_position == "bottom_right" ? L"bottom right" : L"top right";
-    status.hardware_summary = query_hardware_summary();
-    status.profile = L"user settings";
-    status.quality = std::wstring{settings.quality_policy.begin(),
-                                  settings.quality_policy.end()};
-    status.recommended_profile = L"user settings";
-    status.recommendation_reason =
-        L"KF2 starts from the user's saved graphics; Adaptive reacts only to validated gameplay telemetry";
+    auto status = make_initial_status(settings, mode);
     if (discovery) {
         auto found = game::discover_game_installation(*discovery);
         if (found.has_value()) {
@@ -573,33 +621,10 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
     model.set_recovery_required(recovery_required);
     model.set_status(std::move(status));
     reload_video_settings();
-    // Prevent VSync and disabled frame-rate smoothing from competing with
-    // Target FPS. Do not describe an already-running game as changed live.
-    if (start_mode == StartMode::normal && installation && video_pending &&
-        (video_pending->choices[static_cast<std::size_t>(
-             game::VideoOption::vsync)] != 0 ||
-         video_pending->choices[static_cast<std::size_t>(
-             game::VideoOption::variable_frame_rate)] != 0) &&
-        !game::find_running_game_process(installation->executable).has_value()) {
-        video_pending->choices[static_cast<std::size_t>(
-            game::VideoOption::vsync)] = 0;
-        video_pending->choices[static_cast<std::size_t>(
-            game::VideoOption::variable_frame_rate)] = 0;
-        save_video_selection();
-    }
+    enforce_saved_frame_control_compatibility();
     reload_advanced_settings();
     start_startup_prewarm();
-    const auto persisted_update = update::load_update_state(update_state_path);
-    const auto cached_update = persisted_update.has_value()
-        ? persisted_update.value() : update::PersistedUpdateState{};
-    update_controller.restore_preferences(
-        settings.automatic_update_checks,
-        cached_update.last_check_unix_seconds,
-        cached_update.last_result != update::PersistedCheckResult::unknown,
-        cached_update.last_result == update::PersistedCheckResult::available
-            ? cached_update.available_version : std::string{},
-        cached_update.ignored_version);
-    refresh_update_presentation();
+    initialize_update_state(settings);
     callbacks_ready = true;
     if (current_build_identity().channel == "release") {
         start_update_check(update::CheckTrigger::automatic);

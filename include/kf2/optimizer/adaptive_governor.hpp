@@ -250,6 +250,12 @@ public:
     [[nodiscard]] std::size_t quality_debt_count() const noexcept;
 
 private:
+    struct FrameAnalysis {
+        double frame_time_ms{0.0};
+        double p95_frame_time_ms{0.0};
+        double predicted_frame_time_ms{0.0};
+        double prediction_confidence{0.0};
+    };
     struct HistorySample {
         std::uint64_t timestamp_ns{0};
         double frame_time_ms{0.0};
@@ -262,6 +268,18 @@ private:
         double measured_benefit{0.0};
         bool recovery_eligible{false};
     };
+
+    void reset_for_boundary(
+        std::uint64_t now_ns, bool telemetry_transition) noexcept;
+    [[nodiscard]] FrameAnalysis update_frame_analysis(
+        const AdaptivePolicy& policy, const AdaptiveSample& sample,
+        double confidence_factor) noexcept;
+    void update_pressure_hysteresis(
+        AdaptivePressure desired, const AdaptivePolicy& policy,
+        bool catastrophic_live_drop, std::uint64_t now_ns) noexcept;
+    void update_bottleneck_hysteresis(
+        AdaptiveDecision& decision, const AdaptiveSample& sample,
+        std::uint64_t now_ns) noexcept;
 
     std::array<HistorySample, 128> history_{};
     std::size_t history_size_{0};

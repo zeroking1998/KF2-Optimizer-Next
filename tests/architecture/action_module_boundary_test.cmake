@@ -56,9 +56,9 @@ foreach(expected IN LISTS canonical_feature_sources)
 endforeach()
 
 list(LENGTH app_sources app_source_count)
-if(NOT app_source_count EQUAL 13)
+if(NOT app_source_count EQUAL 15)
     message(FATAL_ERROR
-        "Shared app action list must contain six runtime plus seven feature sources")
+        "Shared app action list must contain eight runtime plus seven feature sources")
 endif()
 set(unique_app_sources ${app_sources})
 list(REMOVE_DUPLICATES unique_app_sources)
@@ -164,10 +164,10 @@ string(FIND "${game_actions_content}"
     "runtime.session_config_waiting_for_launch = true" launch_wait_armed)
 string(FIND "${game_actions_content}"
     "ShellExecuteExW(&launch_request)" shell_execute)
-set(application_actions
-    "${project_root}/src/app/application_actions.cpp")
-file(READ "${application_actions}" application_actions_content)
-string(FIND "${application_actions_content}"
+set(application_launch_actions
+    "${project_root}/src/app/application_launch_actions.cpp")
+file(READ "${application_launch_actions}" application_launch_actions_content)
+string(FIND "${application_launch_actions_content}"
     "should_prepare_protected_gameplay_provider" protected_provider_policy)
 string(FIND "${game_actions_content}"
     "prepare_automatic_protected_launch_capabilities" protected_provider_install)
@@ -182,4 +182,4 @@ if(protected_provider_policy EQUAL -1 OR protected_provider_install EQUAL -1)
 endif()
 
 message(STATUS
-    "Action architecture verified: 6 feature sources, one shared source list, no migration or raw action-name drift")
+    "Action architecture verified: 7 feature sources, one shared source list, no migration or raw action-name drift")

@@ -77,6 +77,23 @@ struct AdaptiveRuntimePendingRequest final {
     int requested_quality{100};
 };
 
+struct UpdateRuntimeState final {
+    UpdateRuntimeState(std::string installed_version,
+                       std::filesystem::path persisted_state_path)
+        : controller{std::move(installed_version)},
+          state_path{std::move(persisted_state_path)} {}
+
+    update::UpdateController controller;
+    std::filesystem::path state_path;
+    std::shared_ptr<UpdateCheckAsyncState> check;
+    std::shared_ptr<UpdateInstallAsyncState> install;
+};
+
+struct AdvancedSettingsRuntimeState final {
+    std::optional<game::AdvancedGameSettings> saved;
+    std::optional<game::AdvancedGameSettings> pending;
+};
+
 optimizer::AdaptivePolicy adaptive_policy_from(
     const config::Settings& settings) noexcept;
 std::wstring adaptive_profile_reason(
@@ -238,10 +255,7 @@ struct UiRuntime {
     bool flex_minimum_limited{false};
     StartMode start_mode{StartMode::normal};
     std::shared_ptr<PackageRepairAsyncState> package_repair_state;
-    update::UpdateController update_controller;
-    std::filesystem::path update_state_path;
-    std::shared_ptr<UpdateCheckAsyncState> update_check_state;
-    std::shared_ptr<UpdateInstallAsyncState> update_install_state;
+    UpdateRuntimeState updates;
     std::optional<game::VideoSettings> video_saved;
     std::optional<game::VideoSettings> video_pending;
     std::optional<game::GameMenuGraphicsReadback> game_menu_graphics_readback;
@@ -251,8 +265,7 @@ struct UiRuntime {
     std::optional<std::array<std::optional<std::filesystem::file_time_type>, 3>>
         video_config_write_times;
     std::uint64_t last_video_config_poll_ns{0};
-    std::optional<game::AdvancedGameSettings> advanced_saved;
-    std::optional<game::AdvancedGameSettings> advanced_pending;
+    AdvancedSettingsRuntimeState advanced_settings;
 
     void append_gameplay_report_fields(
         diagnostics::ProductReport& report) const noexcept;
@@ -268,6 +281,12 @@ struct UiRuntime {
     void update_adaptive_policy_status(ui::UiStatus& status) const;
 
     void update_animation_cadence();
+
+    void configure_overlay_from_settings(const config::Settings& settings);
+    [[nodiscard]] ui::UiStatus make_initial_status(
+        const config::Settings& settings, StartMode mode) const;
+    void enforce_saved_frame_control_compatibility();
+    void initialize_update_state(const config::Settings& settings);
 
     UiRuntime(const std::filesystem::path& state_root, bool recovery_required,
               const config::Settings& settings, diagnostics::EventLog& event_log,
@@ -376,6 +395,22 @@ struct UiRuntime {
 
     void update_adaptive_controller(
         const telemetry_pipeline::TelemetryFrame& frame);
+
+    void poll_adaptive_runtime_mode();
+    void reconcile_adaptive_runtime_mode(
+        const telemetry_pipeline::TelemetryFrame& frame);
+    void log_adaptive_performance_sample(
+        const telemetry_pipeline::TelemetryFrame& frame);
+    telemetry_pipeline::CorpseTelemetryTracker::Result
+    update_adaptive_corpse_status(
+        const telemetry_pipeline::TelemetryFrame& frame,
+        ui::UiStatus& status);
+    bool present_pending_adaptive_runtime_mode(ui::UiStatus& status);
+    optimizer::QualityResponse::Context observe_adaptive_quality_response(
+        const telemetry_pipeline::TelemetryFrame& frame);
+    void log_adaptive_quality_response(
+        const std::optional<optimizer::QualityResponse::Report>& report);
+    void poll_adaptive_quality_dispatcher();
 
     void telemetry_tick();
 

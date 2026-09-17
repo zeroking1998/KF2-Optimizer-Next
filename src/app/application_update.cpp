@@ -83,7 +83,7 @@ struct UpdateInstallAsyncState {
 
 void UiRuntime::refresh_update_presentation() {
     auto status = model.status();
-    const auto& snapshot = update_controller.snapshot();
+    const auto& snapshot = updates.controller.snapshot();
     status.update_installed_version = widen_utf8(snapshot.installed_version);
     status.update_available_version = snapshot.available_release
         ? widen_utf8(snapshot.available_release->version)
@@ -123,16 +123,16 @@ void UiRuntime::refresh_update_presentation() {
 }
 
 void UiRuntime::start_update_check(update::CheckTrigger trigger) {
-    const auto started = update_controller.begin_check(trigger, unix_now());
+    const auto started = updates.controller.begin_check(trigger, unix_now());
     if (started != update::CheckStart::started) {
         refresh_update_presentation();
         return;
     }
     static_cast<void>(update::save_update_state(
-        update_state_path, persisted_state(update_controller.snapshot())));
+        updates.state_path, persisted_state(updates.controller.snapshot())));
     const auto state = std::make_shared<UpdateCheckAsyncState>();
-    update_check_state = state;
-    const std::string installed = update_controller.snapshot().installed_version;
+    updates.check = state;
+    const std::string installed = updates.controller.snapshot().installed_version;
     std::thread([state, installed] {
         auto result = update::query_official_github_releases(installed);
         std::scoped_lock lock{state->mutex};
@@ -142,17 +142,17 @@ void UiRuntime::start_update_check(update::CheckTrigger trigger) {
 }
 
 void UiRuntime::poll_update_check() {
-    if (!update_check_state) return;
+    if (!updates.check) return;
     std::optional<Result<std::optional<update::ReleaseInfo>>> outcome;
     {
-        std::scoped_lock lock{update_check_state->mutex};
-        if (!update_check_state->outcome) return;
-        outcome.emplace(std::move(*update_check_state->outcome));
+        std::scoped_lock lock{updates.check->mutex};
+        if (!updates.check->outcome) return;
+        outcome.emplace(std::move(*updates.check->outcome));
     }
-    update_check_state.reset();
-    update_controller.complete_check(std::move(*outcome));
+    updates.check.reset();
+    updates.controller.complete_check(std::move(*outcome));
     static_cast<void>(update::save_update_state(
-        update_state_path, persisted_state(update_controller.snapshot())));
+        updates.state_path, persisted_state(updates.controller.snapshot())));
     refresh_update_presentation();
 }
 
@@ -170,7 +170,7 @@ void UiRuntime::toggle_automatic_update_checks() {
                           L"UPDATE_SETTING_SAVE_FAILED",
                           saved.error().message, L""});
     } else {
-        update_controller.set_automatic_checks_enabled(
+        updates.controller.set_automatic_checks_enabled(
             optimizer_settings.automatic_update_checks);
     }
     refresh_update_presentation();
@@ -306,37 +306,37 @@ void UiRuntime::toggle_adaptive_optimization() {
 }
 
 void UiRuntime::dismiss_update() {
-    update_controller.dismiss();
+    updates.controller.dismiss();
     refresh_update_presentation();
 }
 
 void UiRuntime::ignore_update() {
-    update_controller.ignore_available_version();
+    updates.controller.ignore_available_version();
     static_cast<void>(update::save_update_state(
-        update_state_path, persisted_state(update_controller.snapshot())));
+        updates.state_path, persisted_state(updates.controller.snapshot())));
     refresh_update_presentation();
 }
 
 void UiRuntime::start_update_install() {
-    if (!update_controller.begin_install_with_user_consent()) {
+    if (!updates.controller.begin_install_with_user_consent()) {
         refresh_update_presentation();
         return;
     }
     wchar_t temporary[MAX_PATH + 1]{};
     const DWORD count = GetTempPathW(MAX_PATH, temporary);
     if (count == 0 || count > MAX_PATH) {
-        update_controller.complete_install_failure(
+        updates.controller.complete_install_failure(
             L"The temporary update folder is unavailable.");
         refresh_update_presentation();
         return;
     }
-    const auto release = *update_controller.snapshot().available_release;
+    const auto release = *updates.controller.snapshot().available_release;
     const auto work = std::filesystem::path{temporary} /
         L"KF2OptimizerNext-Update" /
         (std::to_wstring(GetCurrentProcessId()) + L"-" +
          std::to_wstring(static_cast<unsigned long long>(monotonic_ns())));
     const auto state = std::make_shared<UpdateInstallAsyncState>();
-    update_install_state = state;
+    updates.install = state;
     std::thread([state, release, work] {
         auto result = update::prepare_update_package(release, work);
         std::scoped_lock lock{state->mutex};
@@ -346,18 +346,18 @@ void UiRuntime::start_update_install() {
 }
 
 void UiRuntime::poll_update_install() {
-    if (!update_install_state) return;
+    if (!updates.install) return;
     std::optional<Result<update::PreparedUpdatePackage>> outcome;
     {
-        std::scoped_lock lock{update_install_state->mutex};
-        if (!update_install_state->outcome) return;
-        outcome.emplace(std::move(*update_install_state->outcome));
+        std::scoped_lock lock{updates.install->mutex};
+        if (!updates.install->outcome) return;
+        outcome.emplace(std::move(*updates.install->outcome));
     }
-    update_install_state.reset();
+    updates.install.reset();
     if (!outcome->has_value()) {
-        update_controller.complete_install_failure(outcome->error().message);
+        updates.controller.complete_install_failure(outcome->error().message);
     } else {
-        const auto release = update_controller.snapshot().available_release;
+        const auto release = updates.controller.snapshot().available_release;
         const auto launched = release && window
             ? update::launch_update_helper(
                   outcome->value(), executable_root, release->version,
@@ -372,7 +372,7 @@ void UiRuntime::poll_update_install() {
         }
         std::error_code ignored;
         std::filesystem::remove_all(outcome->value().work_root, ignored);
-        update_controller.complete_install_failure(launched.error().message);
+        updates.controller.complete_install_failure(launched.error().message);
     }
     refresh_update_presentation();
 }
