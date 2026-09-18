@@ -109,35 +109,6 @@ private:
     std::optional<telemetry_pipeline::TelemetryPresentation> presentation_;
 };
 
-std::optional<std::wstring> selected_local_map(
-    const std::filesystem::path& config_root) {
-    std::ifstream input(config_root / L"KFEngine.ini", std::ios::binary);
-    if (!input) return std::nullopt;
-    const std::string bytes{std::istreambuf_iterator<char>{input},
-                            std::istreambuf_iterator<char>{}};
-    auto parsed = config::IniDocument::parse(bytes);
-    if (!parsed.has_value()) return std::nullopt;
-    auto map = parsed.value().find(L"URL", L"ServerLocalMap");
-    if (!map || map->empty()) return std::nullopt;
-    return *map;
-}
-
-std::optional<std::wstring> next_rotated_map(
-    const std::filesystem::path& config_root,
-    std::string_view current_map) {
-    std::wstring wide_current;
-    wide_current.reserve(current_map.size());
-    for (const unsigned char character : current_map) {
-        if (character > 0x7f) return std::nullopt;
-        wide_current.push_back(static_cast<wchar_t>(character));
-    }
-    std::ifstream input(config_root / L"KFGame.ini", std::ios::binary);
-    if (!input) return std::nullopt;
-    const std::string bytes{std::istreambuf_iterator<char>{input},
-                            std::istreambuf_iterator<char>{}};
-    return game::next_map_from_game_config(bytes, wide_current);
-}
-
 int prewarm_percent(const game::StartupPrewarmSnapshot& snapshot) noexcept {
     if (snapshot.bytes_planned == 0) return 0;
     return static_cast<int>(std::min<std::uint64_t>(
@@ -166,7 +137,7 @@ void UiRuntime::runtime_tick() {
     poll_update_check();
     poll_update_install();
     const auto now = monotonic_ns();
-    poll_map_prewarm(now);
+    poll_map_prewarm();
     if ((model.selected() == ui::Destination::graphics ||
          (session_config_snapshot && session_video_runtime)) &&
         (last_video_config_poll_ns == 0 || now < last_video_config_poll_ns ||
@@ -193,8 +164,6 @@ void UiRuntime::start_startup_prewarm() {
     }
     startup_prewarm_announced = false;
     game::StartupPrewarmOptions options;
-    options.map_name = selected_local_map(installation->config_root)
-        .value_or(L"");
     startup_prewarmer.start(installation->install_root, std::move(options));
 }
 
@@ -260,7 +229,7 @@ void UiRuntime::poll_startup_prewarm() {
     }
 }
 
-void UiRuntime::poll_map_prewarm(std::uint64_t now_ns) {
+void UiRuntime::poll_map_prewarm() {
     const bool menu_window = installation && game_process &&
         game_log_session && game_log_session->main_menu;
     const bool offline_rotation_window = installation && game_process &&
@@ -276,21 +245,12 @@ void UiRuntime::poll_map_prewarm(std::uint64_t now_ns) {
         return;
     }
 
-    constexpr std::uint64_t kMapConfigPollNs = 500'000'000ULL;
-    if (last_map_prewarm_config_poll_ns == 0 ||
-        now_ns < last_map_prewarm_config_poll_ns ||
-        now_ns - last_map_prewarm_config_poll_ns >= kMapConfigPollNs) {
-        last_map_prewarm_config_poll_ns = now_ns;
-        const auto selected = menu_window
-            ? selected_local_map(installation->config_root)
-            : next_rotated_map(
-                  installation->config_root, game_log_session->map);
-        if (selected && *selected != map_prewarm_last_attempted &&
-            *selected != map_prewarm_active &&
-            *selected != map_prewarm_pending) {
-            map_prewarm_pending = *selected;
-            if (!map_prewarm_active.empty()) map_prewarmer.request_stop();
-        }
+    if (!map_prewarm_observed.empty() &&
+        map_prewarm_observed != map_prewarm_last_attempted &&
+        map_prewarm_observed != map_prewarm_active &&
+        map_prewarm_observed != map_prewarm_pending) {
+        map_prewarm_pending = map_prewarm_observed;
+        if (!map_prewarm_active.empty()) map_prewarmer.request_stop();
     }
 
     const auto current = map_prewarmer.snapshot();
@@ -348,12 +308,17 @@ void UiRuntime::poll_map_prewarm(std::uint64_t now_ns) {
     }
 }
 
+void UiRuntime::observe_map_prewarm_selection(std::wstring map_name) {
+    if (map_name.empty() || map_name == map_prewarm_observed) return;
+    map_prewarm_observed = std::move(map_name);
+}
+
 void UiRuntime::stop_map_prewarm_for_load() {
     map_prewarmer.request_stop();
     map_prewarm_pending.clear();
     map_prewarm_active.clear();
     map_prewarm_last_attempted.clear();
-    last_map_prewarm_config_poll_ns = 0;
+    map_prewarm_observed.clear();
     auto status = model.status();
     status.prewarm_active = false;
     status.prewarm_percent = 0;

@@ -520,6 +520,10 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
                             L"graphics"});
                         invalidate();
                     }
+                    if (const auto selected_map =
+                            game::map_prewarm_request_from_log_line(line)) {
+                        observe_map_prewarm_selection(*selected_map);
+                    }
                 }
                 line_start = line_end + 1;
             }

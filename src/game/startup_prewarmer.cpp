@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <charconv>
 #include <cstddef>
 #include <cwctype>
 #include <stop_token>
@@ -144,68 +143,6 @@ bool safe_map_name(std::wstring_view map_name) noexcept {
     });
 }
 
-std::string_view trim_ascii(std::string_view value) noexcept {
-    while (!value.empty() && (value.front() == ' ' || value.front() == '\t' ||
-                              value.front() == '\r')) {
-        value.remove_prefix(1);
-    }
-    while (!value.empty() && (value.back() == ' ' || value.back() == '\t' ||
-                              value.back() == '\r')) {
-        value.remove_suffix(1);
-    }
-    return value;
-}
-
-bool ascii_iequals(std::string_view left, std::string_view right) noexcept {
-    if (left.size() != right.size()) return false;
-    for (std::size_t index = 0; index < left.size(); ++index) {
-        const auto lower = [](unsigned char value) {
-            return value >= 'A' && value <= 'Z'
-                ? static_cast<unsigned char>(value + ('a' - 'A')) : value;
-        };
-        if (lower(static_cast<unsigned char>(left[index])) !=
-            lower(static_cast<unsigned char>(right[index]))) return false;
-    }
-    return true;
-}
-
-std::optional<std::string_view> assignment_value(
-    std::string_view line, std::string_view wanted_key) noexcept {
-    const auto equals = line.find('=');
-    if (equals == std::string_view::npos ||
-        !ascii_iequals(trim_ascii(line.substr(0, equals)), wanted_key)) {
-        return std::nullopt;
-    }
-    auto value = trim_ascii(line.substr(equals + 1));
-    const auto comment = value.find_first_of(";#");
-    if (comment != std::string_view::npos) {
-        value = trim_ascii(value.substr(0, comment));
-    }
-    return value;
-}
-
-std::vector<std::wstring> cycle_maps(std::string_view value) {
-    std::vector<std::wstring> result;
-    std::size_t offset = 0;
-    while (offset < value.size()) {
-        const auto begin = value.find('"', offset);
-        if (begin == std::string_view::npos) break;
-        const auto end = value.find('"', begin + 1);
-        if (end == std::string_view::npos) return {};
-        const auto token = value.substr(begin + 1, end - begin - 1);
-        std::wstring wide;
-        wide.reserve(token.size());
-        for (const unsigned char character : token) {
-            if (character > 0x7f) return {};
-            wide.push_back(static_cast<wchar_t>(character));
-        }
-        if (!safe_map_name(wide)) return {};
-        result.push_back(std::move(wide));
-        offset = end + 1;
-    }
-    return result;
-}
-
 std::vector<std::filesystem::path> map_packages(
     const std::filesystem::path& install_root,
     std::wstring_view requested_map) {
@@ -261,66 +198,25 @@ std::vector<std::filesystem::path> map_packages(
 
 }  // namespace
 
-std::optional<std::wstring> next_map_from_game_config(
-    std::string_view ini_bytes, std::wstring_view current_map) {
-    if (!safe_map_name(current_map) || ini_bytes.find('\0') !=
-            std::string_view::npos) {
-        return std::nullopt;
+std::optional<std::wstring> map_prewarm_request_from_log_line(
+    std::string_view line) {
+    constexpr std::string_view marker =
+        "KF2OPT_MAP_SELECTION schema=1 state=";
+    const auto marker_offset = line.find(marker);
+    if (marker_offset == std::string_view::npos) return std::nullopt;
+    const auto map_offset = line.find(" map=", marker_offset + marker.size());
+    if (map_offset == std::string_view::npos) return std::nullopt;
+    auto map = line.substr(map_offset + 5);
+    const auto end = map.find_first_of(" \t\r\n");
+    if (end != std::string_view::npos) map = map.substr(0, end);
+    std::wstring wide;
+    wide.reserve(map.size());
+    for (const unsigned char character : map) {
+        if (character > 0x7f) return std::nullopt;
+        wide.push_back(static_cast<wchar_t>(character));
     }
-    bool in_game_info = false;
-    bool use_map_list = false;
-    std::optional<std::size_t> active_cycle;
-    std::vector<std::vector<std::wstring>> cycles;
-    std::size_t offset = 0;
-    while (offset <= ini_bytes.size()) {
-        const auto end = ini_bytes.find('\n', offset);
-        auto line = trim_ascii(ini_bytes.substr(
-            offset, end == std::string_view::npos
-                ? ini_bytes.size() - offset : end - offset));
-        if (!line.empty() && line.front() == '[' && line.back() == ']') {
-            in_game_info = ascii_iequals(
-                trim_ascii(line.substr(1, line.size() - 2)),
-                "KFGame.KFGameInfo");
-        } else if (in_game_info && !line.empty() &&
-                   line.front() != ';' && line.front() != '#') {
-            if (const auto map_list_value =
-                    assignment_value(line, "bUseMapList")) {
-                use_map_list = ascii_iequals(*map_list_value, "true") ||
-                    *map_list_value == "1";
-            } else if (const auto cycle_index_value =
-                           assignment_value(line, "ActiveMapCycle")) {
-                std::size_t parsed = 0;
-                const auto conversion = std::from_chars(
-                    cycle_index_value->data(),
-                    cycle_index_value->data() + cycle_index_value->size(),
-                    parsed);
-                if (conversion.ec == std::errc{} &&
-                    conversion.ptr == cycle_index_value->data() +
-                        cycle_index_value->size()) {
-                    active_cycle = parsed;
-                }
-            } else if (const auto cycle_value =
-                           assignment_value(line, "GameMapCycles")) {
-                auto maps = cycle_maps(*cycle_value);
-                if (maps.empty()) return std::nullopt;
-                cycles.push_back(std::move(maps));
-            }
-        }
-        if (end == std::string_view::npos) break;
-        offset = end + 1;
-    }
-    if (!use_map_list || !active_cycle || *active_cycle >= cycles.size()) {
-        return std::nullopt;
-    }
-    const auto& maps = cycles[*active_cycle];
-    std::optional<std::size_t> current_index;
-    for (std::size_t index = 0; index < maps.size(); ++index) {
-        if (!ascii_iequals(maps[index], current_map)) continue;
-        if (current_index) return std::nullopt;
-        current_index = index;
-    }
-    if (!current_index || maps.size() < 2) return std::nullopt;
-    return maps[(*current_index + 1) % maps.size()];
+    if (!safe_map_name(wide)) return std::nullopt;
+    return wide;
 }
 
 std::uint64_t startup_prewarm_budget(

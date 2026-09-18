@@ -55,8 +55,8 @@ struct StartupPrewarmOptions {
     bool include_common_startup_files = true);
 [[nodiscard]] StorageKind storage_kind_for_path(
     const std::filesystem::path& path) noexcept;
-[[nodiscard]] std::optional<std::wstring> next_map_from_game_config(
-    std::string_view ini_bytes, std::wstring_view current_map);
+[[nodiscard]] std::optional<std::wstring> map_prewarm_request_from_log_line(
+    std::string_view line);
 
 class StartupPrewarmer final {
 public:

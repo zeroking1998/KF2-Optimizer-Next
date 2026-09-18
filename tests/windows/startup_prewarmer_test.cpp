@@ -32,25 +32,18 @@ void write_sparse_file(const std::filesystem::path& path,
 
 int main(int argc, char** argv) {
     using namespace kf2::game;
-    const std::string map_cycles =
-        "[KFGame.KFGameInfo]\r\n"
-        "bUseMapList=True\r\n"
-        "ActiveMapCycle=1\r\n"
-        "GameMapCycles=(Maps=(\"KF-Airship\",\"KF-BioticsLab\"))\r\n"
-        "GameMapCycles=(Maps=(\"KF-Outpost\",\"KF-Prison\",\"KF-Rig\"))\r\n";
-    CHECK(next_map_from_game_config(map_cycles, L"KF-Prison") ==
-          std::optional<std::wstring>{L"KF-Rig"});
-    CHECK(next_map_from_game_config(map_cycles, L"KF-Rig") ==
-          std::optional<std::wstring>{L"KF-Outpost"});
-    CHECK(!next_map_from_game_config(map_cycles, L"KF-Unknown"));
-    CHECK(!next_map_from_game_config(
-        "[KFGame.KFGameInfo]\nbUseMapList=False\nActiveMapCycle=0\n"
-        "GameMapCycles=(Maps=(\"KF-Airship\",\"KF-Rig\"))\n",
-        L"KF-Airship"));
-    CHECK(!next_map_from_game_config(
-        "[KFGame.KFGameInfo]\nbUseMapList=True\nActiveMapCycle=4\n"
-        "GameMapCycles=(Maps=(\"KF-Airship\",\"KF-Rig\"))\n",
-        L"KF-Airship"));
+    CHECK(map_prewarm_request_from_log_line(
+        "[12.3] ScriptLog: KF2OPT_MAP_SELECTION schema=1 state=menu "
+        "map=KF-BurningParis\r") ==
+        std::optional<std::wstring>{L"KF-BurningParis"});
+    CHECK(map_prewarm_request_from_log_line(
+        "ScriptLog: KF2OPT_MAP_SELECTION schema=1 state=vote "
+        "map=KF-CastleVolter") ==
+        std::optional<std::wstring>{L"KF-CastleVolter"});
+    CHECK(!map_prewarm_request_from_log_line(
+        "KF2OPT_MAP_SELECTION schema=1 state=menu map=../unsafe"));
+    CHECK(!map_prewarm_request_from_log_line(
+        "KF2OPT_MAP_SELECTION schema=2 state=menu map=KF-Airship"));
     constexpr std::uint64_t gib = 1024ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t mib = 1024ULL * 1024ULL;
     CHECK(startup_prewarm_budget(StorageKind::rotational, 2 * gib) == 0);
