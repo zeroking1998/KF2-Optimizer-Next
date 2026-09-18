@@ -36,6 +36,7 @@ constexpr TooltipEntry kTooltips[]{
 
     {"debug-corpse-markers", L"Shows the Optimizer action, distance in metres, and Actor ID above recently changed corpses. It is off by default, adds debug rendering work, and applies on the next protected KF2 start."},
     {"debug-zed-markers", L"Shows distance in metres and Actor ID for up to 64 recently visible living Zeds. It is off by default, refreshes at most every 100 ms, and applies on the next protected KF2 start."},
+    {"debug-corpse-physics-control", L"Switches the next protected offline test between Candidate and Control. Control keeps telemetry active but disables all Optimizer-owned corpse cleanup, sleep, freeze, collision, tick, animation, and LOD reductions. It does not change living-Zed gameplay physics."},
 
     {"settings-target-slider", L"Sets KF2's native FPS limit from 30 to 240. Adaptive uses the same target. An external driver limit or a screen refresh limit can still keep displayed FPS below it."},
     {"settings-corpses-slider", L"Sets the maximum corpse ceiling and saves it immediately. Adaptive may use fewer corpses under confirmed scene or frame-time pressure."},

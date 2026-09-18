@@ -10,7 +10,7 @@ namespace {
 constexpr AccessPolicy kRestricted = AccessPolicy::restricted_mode_allowed;
 constexpr AccessPolicy kNormal = AccessPolicy::normal_mode_required;
 
-constexpr std::array<ActionDefinition, 60> kActions{{
+constexpr std::array<ActionDefinition, 61> kActions{{
     {ActionId::diagnostics_export_support, "diagnostics-export-support", FeatureId::diagnostics, kRestricted},
     {ActionId::diagnostics_flex_restore, "diagnostics-flex-restore", FeatureId::diagnostics, kNormal},
     {ActionId::diagnostics_full_check, "diagnostics-full-check", FeatureId::diagnostics, kRestricted},
@@ -71,9 +71,10 @@ constexpr std::array<ActionDefinition, 60> kActions{{
     {ActionId::advanced_reset, "advanced-reset", FeatureId::advanced, kNormal},
     {ActionId::debug_corpse_markers, "debug-corpse-markers", FeatureId::diagnostics, kNormal},
     {ActionId::debug_zed_markers, "debug-zed-markers", FeatureId::diagnostics, kNormal},
+    {ActionId::debug_corpse_physics_control, "debug-corpse-physics-control", FeatureId::diagnostics, kNormal},
 }};
 
-constexpr std::array<ActionBinding, 62> kBindings{{
+constexpr std::array<ActionBinding, 63> kBindings{{
     {"dashboard-launch", ActionId::game_launch},
     {"diagnostics-backup", ActionId::optimizer_backup},
     {"diagnostics-export-support", ActionId::diagnostics_export_support},
@@ -132,6 +133,7 @@ constexpr std::array<ActionBinding, 62> kBindings{{
     {"advanced-reset", ActionId::advanced_reset},
     {"debug-corpse-markers", ActionId::debug_corpse_markers},
     {"debug-zed-markers", ActionId::debug_zed_markers},
+    {"debug-corpse-physics-control", ActionId::debug_corpse_physics_control},
 }};
 
 constexpr std::array<ControlDefinition, 7> kControls{{

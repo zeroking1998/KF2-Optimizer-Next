@@ -367,7 +367,9 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
         return Result<bool>::failure(telemetry_module.error());
     }
     const auto enabled = game::enable_offline_gameplay_logging(
-        installation->config_root, true, optimizer_settings.corpse_limit,
+        installation->config_root,
+        !optimizer_settings.debug_corpse_physics_control,
+        optimizer_settings.corpse_limit,
         optimizer_settings.target_fps,
         optimizer_settings.debug_corpse_markers,
         optimizer_settings.adaptive_quality_change_budget,
@@ -381,6 +383,12 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
         "GAMEPLAY_PROVIDER_PREPARED",
         L"The protected Published provider was staged for the next KF2 start; runtime capabilities remain unavailable until KF2 confirms telemetry",
         L"game"});
+    events->append({0, diagnostics::Severity::info,
+        "CORPSE_PHYSICS_AB_SESSION",
+        optimizer_settings.debug_corpse_physics_control
+            ? L"Control: telemetry remains active while Optimizer-owned corpse reductions are disabled for the next protected KF2 session"
+            : L"Candidate: Optimizer-owned corpse reductions are enabled for the next protected KF2 session",
+        L"optimizer"});
     return Result<bool>::success(true);
 }
 

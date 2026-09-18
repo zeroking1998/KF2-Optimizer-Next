@@ -489,6 +489,7 @@ int main() {
         "overlay_enabled=true\noverlay_show_fps=true\noverlay_show_frame_time=true\n"
         "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=true\n"
         "debug_corpse_markers=false\ndebug_zed_markers=false\n"
+        "debug_corpse_physics_control=false\n"
         "restore_config_after_game=true\n"
         "adaptive_aggressiveness=balanced\n"
         "adaptive_minimum_quality=10\nadaptive_maximum_quality=100\n"
@@ -729,16 +730,27 @@ int main() {
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(zed_markers->x, zed_markers->y));
     CHECK(graphical.value().ui_model().status().debug_zed_markers);
+    const auto physics_control = node_center(
+        hwnd, graphical.value().ui_model(),
+        "debug-corpse-physics-control");
+    CHECK(physics_control.has_value());
+    SendMessageW(hwnd, WM_LBUTTONUP, 0,
+                 MAKELPARAM(physics_control->x, physics_control->y));
+    CHECK(graphical.value().ui_model().status().debug_corpse_physics_control);
     const auto debug_settings_bytes =
         read_bytes(options.state_root / L"settings.ini");
     CHECK(debug_settings_bytes.find("debug_corpse_markers=true\n") !=
           std::string::npos);
     CHECK(debug_settings_bytes.find("debug_zed_markers=true\n") !=
           std::string::npos);
+    CHECK(debug_settings_bytes.find(
+              "debug_corpse_physics_control=true\n") != std::string::npos);
     CHECK(read_bytes(config_root / L"KFEngine.ini").find(
               "bAdaptiveCorpseDebugMarkers=True") != std::string::npos);
     CHECK(read_bytes(config_root / L"KFEngine.ini").find(
               "bAdaptiveZedDebugMarkers=True") != std::string::npos);
+    CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+              "bAdaptiveCorpseStagger=False") != std::string::npos);
     const auto diagnostics_navigation =
         node_center(hwnd, graphical.value().ui_model(), "nav-5");
     CHECK(diagnostics_navigation.has_value());
