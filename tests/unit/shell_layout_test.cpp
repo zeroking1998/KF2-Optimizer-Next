@@ -328,6 +328,16 @@ int main() {
               L"Maximum corpses 2000") != std::wstring::npos);
     CHECK(node(staged_target_home, "status")->text.find(
               L"20 next start") != std::wstring::npos);
+    home_status.prewarm_active = true;
+    home_status.prewarm_percent = 47;
+    home_status.prewarm_map = L"KF-BioticsLab";
+    model.set_status(home_status);
+    const auto warming_home = layout_shell(model, 1440, 900);
+    CHECK(node(warming_home, "status")->text.find(
+              L"Warm-up 47%") != std::wstring::npos);
+    home_status.prewarm_active = false;
+    home_status.prewarm_percent = 0;
+    home_status.prewarm_map.clear();
     home_status.active_target_fps.reset();
     home_status.active_corpse_limit.reset();
     model.set_status(home_status);

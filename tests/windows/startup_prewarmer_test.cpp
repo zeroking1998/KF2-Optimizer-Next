@@ -1,5 +1,6 @@
 #include "kf2/game/startup_prewarmer.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -31,6 +32,25 @@ void write_sparse_file(const std::filesystem::path& path,
 
 int main(int argc, char** argv) {
     using namespace kf2::game;
+    const std::string map_cycles =
+        "[KFGame.KFGameInfo]\r\n"
+        "bUseMapList=True\r\n"
+        "ActiveMapCycle=1\r\n"
+        "GameMapCycles=(Maps=(\"KF-Airship\",\"KF-BioticsLab\"))\r\n"
+        "GameMapCycles=(Maps=(\"KF-Outpost\",\"KF-Prison\",\"KF-Rig\"))\r\n";
+    CHECK(next_map_from_game_config(map_cycles, L"KF-Prison") ==
+          std::optional<std::wstring>{L"KF-Rig"});
+    CHECK(next_map_from_game_config(map_cycles, L"KF-Rig") ==
+          std::optional<std::wstring>{L"KF-Outpost"});
+    CHECK(!next_map_from_game_config(map_cycles, L"KF-Unknown"));
+    CHECK(!next_map_from_game_config(
+        "[KFGame.KFGameInfo]\nbUseMapList=False\nActiveMapCycle=0\n"
+        "GameMapCycles=(Maps=(\"KF-Airship\",\"KF-Rig\"))\n",
+        L"KF-Airship"));
+    CHECK(!next_map_from_game_config(
+        "[KFGame.KFGameInfo]\nbUseMapList=True\nActiveMapCycle=4\n"
+        "GameMapCycles=(Maps=(\"KF-Airship\",\"KF-Rig\"))\n",
+        L"KF-Airship"));
     constexpr std::uint64_t gib = 1024ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t mib = 1024ULL * 1024ULL;
     CHECK(startup_prewarm_budget(StorageKind::rotational, 2 * gib) == 0);
@@ -94,6 +114,55 @@ int main(int argc, char** argv) {
         CHECK(rotational_plan[3].bytes == 96 * mib);
     }
 
+    const auto map_root = fair_root /
+        L"KFGame/BrewedPC/Maps/BioticsLab";
+    write_file(map_root / L"SND_BioticsLab.kfm", 1024);
+    write_file(map_root / L"LIGHTS_BioticsLab.kfm", 2048);
+    write_sparse_file(map_root / L"KF-BioticsLab.kfm", 80 * mib);
+    const auto map_plan = build_startup_prewarm_plan(
+        fair_root, StorageKind::solid_state, 8 * gib, L"KF-BioticsLab");
+    CHECK(map_plan.size() == 7);
+    if (map_plan.size() == 7) {
+        CHECK(map_plan[0].path.filename() == L"LIGHTS_BioticsLab.kfm");
+        CHECK(map_plan[1].path.filename() == L"SND_BioticsLab.kfm");
+        CHECK(map_plan[2].path.filename() == L"KFMainMenu.kfm");
+        CHECK(map_plan[3].path.filename() == L"KF-BioticsLab.kfm");
+        CHECK(map_plan[3].bytes == 80 * mib);
+        CHECK(map_plan[4].path.filename() == L"EngineDebugMaterials.upk");
+    }
+    const auto extension_plan = build_startup_prewarm_plan(
+        fair_root, StorageKind::solid_state, 8 * gib, L"KF-BioticsLab.kfm");
+    CHECK(extension_plan.size() == map_plan.size());
+    const auto map_only_plan = build_startup_prewarm_plan(
+        fair_root, StorageKind::solid_state, 8 * gib, L"KF-BioticsLab",
+        false);
+    CHECK(map_only_plan.size() == 3);
+    CHECK(std::ranges::all_of(
+        map_only_plan, [&map_root](const StartupPrewarmFile& file) {
+            return file.path.parent_path() == map_root;
+        }));
+    const auto constrained_map_plan = build_startup_prewarm_plan(
+        fair_root, StorageKind::solid_state, 3 * gib, L"KF-BioticsLab");
+    const auto selected_map = std::find_if(
+        constrained_map_plan.begin(), constrained_map_plan.end(),
+        [](const StartupPrewarmFile& file) {
+            return file.path.filename() == L"KF-BioticsLab.kfm";
+        });
+    CHECK(selected_map != constrained_map_plan.end());
+    if (selected_map != constrained_map_plan.end()) {
+        CHECK(selected_map->bytes == 80 * mib);
+    }
+    CHECK(build_startup_prewarm_plan(
+        fair_root, StorageKind::solid_state, 8 * gib,
+        L"../KF-BioticsLab").size() == fair_plan.size());
+
+    const auto duplicate_map_root = fair_root /
+        L"KFGame/BrewedPC/Maps/WorkshopCopy";
+    write_file(duplicate_map_root / L"KF-BioticsLab.kfm", 4096);
+    CHECK(build_startup_prewarm_plan(
+        fair_root, StorageKind::solid_state, 8 * gib,
+        L"KF-BioticsLab").size() == fair_plan.size());
+
     const auto before = std::filesystem::last_write_time(plan[0].path);
     StartupPrewarmer prewarmer;
     prewarmer.start(root, {
@@ -143,7 +212,13 @@ int main(int argc, char** argv) {
         std::cout << "STORAGE_KIND=" << static_cast<int>(kind) << '\n';
         StartupPrewarmer real;
         const auto started = std::chrono::steady_clock::now();
-        real.start(real_root, {.idle_delay = std::chrono::milliseconds{0}});
+        StartupPrewarmOptions real_options{
+            .idle_delay = std::chrono::milliseconds{0}};
+        if (argc > 2) {
+            const std::filesystem::path map_argument{argv[2]};
+            real_options.map_name = map_argument.wstring();
+        }
+        real.start(real_root, std::move(real_options));
         for (int attempt = 0; attempt < 2000; ++attempt) {
             const auto state = real.snapshot().state;
             if (state == StartupPrewarmState::complete ||

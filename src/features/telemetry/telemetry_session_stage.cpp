@@ -264,6 +264,7 @@ bool UiRuntime::set_live_adaptive_enabled(
 }
 
 void UiRuntime::detach_telemetry(bool restore_live_quality) {
+    stop_map_prewarm_for_load();
     if (restore_live_quality) {
         static_cast<void>(restore_live_adaptive_quality(
             L"Adaptive telemetry detached"));
@@ -532,6 +533,9 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
             // boundary markers; structured parsing happens off the UI thread.
             const std::string marker_input =
                 game_log_marker_tail + chunk.bytes;
+            if (marker_input.find("Log: LoadMap: ") != std::string::npos) {
+                stop_map_prewarm_for_load();
+            }
             if (!game_log_new_settings_restart_requested &&
                 game::game_log_requests_settings_restart(marker_input)) {
                 game_log_new_settings_restart_requested = true;
