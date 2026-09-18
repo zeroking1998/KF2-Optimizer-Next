@@ -16,9 +16,11 @@ namespace {
 
 constexpr std::uint64_t kMiB = 1024ULL * 1024ULL;
 constexpr std::uint64_t kGiB = 1024ULL * kMiB;
-constexpr std::uint64_t kMaximumPrewarmBytes = 256ULL * kMiB;
-constexpr std::uint64_t kSolidStatePrewarmBytes = 128ULL * kMiB;
+constexpr std::uint64_t kRotationalPrewarmBytes = 4ULL * kGiB;
+constexpr std::uint64_t kSolidStatePrewarmBytes = 2ULL * kGiB;
 constexpr std::uint64_t kMemoryReserveBytes = 2ULL * kGiB;
+constexpr std::uint64_t kSmallFileThresholdBytes = 32ULL * kMiB;
+constexpr std::uint64_t kLargeFileSliceBytes = 512ULL * kMiB;
 constexpr std::size_t kReadBufferBytes = 256U * 1024U;
 
 constexpr std::array<std::wstring_view, 8> kStartupFiles{
@@ -127,9 +129,15 @@ std::uint64_t startup_prewarm_budget(
     if (storage == StorageKind::unknown) return 0;
     if (available_memory_bytes <= kMemoryReserveBytes) return 0;
     const auto storage_limit = storage == StorageKind::rotational
-        ? kMaximumPrewarmBytes : kSolidStatePrewarmBytes;
+        ? kRotationalPrewarmBytes : kSolidStatePrewarmBytes;
     return std::min(storage_limit,
                     (available_memory_bytes - kMemoryReserveBytes) / 4ULL);
+}
+
+std::uint64_t startup_prewarm_file_budget(
+    std::uint64_t file_size_bytes) noexcept {
+    if (file_size_bytes <= kSmallFileThresholdBytes) return file_size_bytes;
+    return std::min(file_size_bytes, kLargeFileSliceBytes);
 }
 
 std::vector<StartupPrewarmFile> build_startup_prewarm_plan(
@@ -139,14 +147,32 @@ std::vector<StartupPrewarmFile> build_startup_prewarm_plan(
     std::uint64_t remaining = startup_prewarm_budget(
         storage, available_memory_bytes);
     if (remaining == 0) return result;
+
+    struct Candidate {
+        std::filesystem::path path;
+        std::uint64_t bytes;
+        bool large;
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(kStartupFiles.size());
     for (const auto relative : kStartupFiles) {
         const auto path = install_root / relative;
         std::error_code error;
         if (!std::filesystem::is_regular_file(path, error) || error) continue;
         const auto size = std::filesystem::file_size(path, error);
         if (error || size == 0) continue;
-        const auto selected = std::min<std::uint64_t>(size, remaining);
-        result.push_back({path, selected});
+        candidates.push_back({path, size, size > kSmallFileThresholdBytes});
+    }
+    std::stable_partition(candidates.begin(), candidates.end(),
+                          [](const Candidate& candidate) {
+                              return !candidate.large;
+                          });
+    for (const auto& candidate : candidates) {
+        const auto file_limit = startup_prewarm_file_budget(candidate.bytes);
+        const auto selected = std::min(
+            {candidate.bytes, file_limit, remaining});
+        if (selected == 0) break;
+        result.push_back({candidate.path, selected});
         remaining -= selected;
         if (remaining == 0) break;
     }
