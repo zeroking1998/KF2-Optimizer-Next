@@ -1195,6 +1195,45 @@ int main() {
         CHECK(stored.value().corpse_limit == 2000);
     }
 
+    // Changing the saved target after KF2 has started must not retarget the
+    // current Adaptive session. KF2's native cap is launch-bound, so grading
+    // the running 60 FPS process against the newly saved 119 FPS target would
+    // cause a false deficit and unnecessary quality reductions.
+    {
+        kf2::diagnostics::EventLog target_events{128};
+        kf2::config::Settings initial;
+        initial.target_fps = 60;
+        kf2::app::UiRuntime target_runtime{
+            root / L"Data-target-staged-for-restart", false,
+            initial, target_events, options.game_discovery,
+            kf2::app::StartMode::normal, root / L"portable"};
+        CHECK(target_runtime.installation.has_value());
+        wchar_t current_executable[MAX_PATH + 1]{};
+        const DWORD current_executable_length = GetModuleFileNameW(
+            nullptr, current_executable, MAX_PATH);
+        CHECK(current_executable_length > 0);
+        CHECK(current_executable_length < MAX_PATH);
+        target_runtime.installation->executable = std::wstring{
+            current_executable, current_executable_length};
+        target_runtime.adaptive_session_policy =
+            kf2::game::OfflineAdaptiveSessionPolicy{20, 60, 2};
+        auto status = target_runtime.model.status();
+        status.active_target_fps = 60;
+        target_runtime.model.set_status(std::move(status));
+
+        target_runtime.set_slider_value("settings-target-slider", 119);
+
+        CHECK(target_runtime.optimizer_settings.target_fps == 119);
+        CHECK(target_runtime.adaptive_session_policy->target_fps == 60);
+        CHECK(target_runtime.effective_target_fps() == 60);
+        CHECK(target_runtime.model.status().target_fps == 119);
+        CHECK(target_runtime.model.status().active_target_fps == 60);
+        const auto stored = kf2::config::parse_settings(
+            read_bytes(target_runtime.settings_path));
+        CHECK(stored.has_value());
+        CHECK(stored.value().target_fps == 119);
+    }
+
     // A real filesystem failure must roll both Home sliders back to their
     // authoritative saved values instead of leaving a misleading preview.
     {

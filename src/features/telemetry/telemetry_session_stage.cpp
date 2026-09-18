@@ -736,7 +736,6 @@ void UiRuntime::try_attach_telemetry() {
                     observed.error().message,
                 L"optimizer"});
         }
-        active_policy.target_fps = optimizer_settings.target_fps;
         adaptive_session_policy = active_policy;
         auto status = model.status();
         status.active_target_fps = active_policy.target_fps;
