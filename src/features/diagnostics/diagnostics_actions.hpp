@@ -24,8 +24,10 @@ app::runtime::DispatchResult toggle_corpse_markers(
     app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult toggle_zed_markers(
     app::UiRuntime&, const app::runtime::NoPayload&);
+app::runtime::DispatchResult toggle_corpse_physics_control(
+    app::UiRuntime&, const app::runtime::NoPayload&);
 
-inline constexpr std::array<app::runtime::ActionImplementation, 9> kActions{{
+inline constexpr std::array<app::runtime::ActionImplementation, 10> kActions{{
     {app::runtime::ActionId::diagnostics_export_support,
      &app::runtime::bind_no_payload<&export_support>},
     {app::runtime::ActionId::diagnostics_flex_restore,
@@ -44,6 +46,8 @@ inline constexpr std::array<app::runtime::ActionImplementation, 9> kActions{{
      &app::runtime::bind_no_payload<&toggle_corpse_markers>},
     {app::runtime::ActionId::debug_zed_markers,
      &app::runtime::bind_no_payload<&toggle_zed_markers>},
+    {app::runtime::ActionId::debug_corpse_physics_control,
+     &app::runtime::bind_no_payload<&toggle_corpse_physics_control>},
 }};
 
 inline constexpr app::runtime::FeatureDefinition kFeature{

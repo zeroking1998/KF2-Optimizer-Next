@@ -378,6 +378,8 @@ ui::UiStatus UiRuntime::make_initial_status(
     status.overlay_show_memory = settings.overlay_show_memory;
     status.debug_corpse_markers = settings.debug_corpse_markers;
     status.debug_zed_markers = settings.debug_zed_markers;
+    status.debug_corpse_physics_control =
+        settings.debug_corpse_physics_control;
     status.overlay_scale_percent = settings.overlay_scale_percent;
     status.overlay_position = settings.overlay_position == "top_left"
         ? L"top left"

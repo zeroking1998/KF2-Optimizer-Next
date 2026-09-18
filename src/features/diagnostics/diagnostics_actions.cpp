@@ -46,7 +46,8 @@ app::runtime::DispatchResult toggle_debug_marker(
     if (runtime.installation && !runtime.adaptive_control_token.empty() &&
         verified_stopped) {
         const auto staged = game::enable_offline_gameplay_logging(
-            runtime.installation->config_root, true,
+            runtime.installation->config_root,
+            !runtime.optimizer_settings.debug_corpse_physics_control,
             runtime.optimizer_settings.corpse_limit,
             runtime.optimizer_settings.target_fps,
             runtime.optimizer_settings.debug_corpse_markers,
@@ -263,6 +264,76 @@ app::runtime::DispatchResult toggle_zed_markers(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
     return toggle_debug_marker(
         runtime, runtime.optimizer_settings.debug_zed_markers, false);
+}
+
+app::runtime::DispatchResult toggle_corpse_physics_control(
+    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
+    const bool previous =
+        runtime.optimizer_settings.debug_corpse_physics_control;
+    runtime.optimizer_settings.debug_corpse_physics_control = !previous;
+    const auto saved = platform::windows::atomic_replace_utf8(
+        runtime.settings_path,
+        config::serialize_settings(runtime.optimizer_settings));
+    if (!saved.has_value()) {
+        runtime.optimizer_settings.debug_corpse_physics_control = previous;
+        show_notice(runtime, ui::NoticeSeverity::error,
+                    L"SETTINGS_SAVE_FAILED", saved.error().message);
+        return app::runtime::DispatchResult::handled;
+    }
+
+    auto status = runtime.model.status();
+    status.debug_corpse_physics_control =
+        runtime.optimizer_settings.debug_corpse_physics_control;
+    runtime.model.set_status(std::move(status));
+
+    bool staged_now = false;
+    bool verified_stopped = false;
+    if (runtime.installation) {
+        const auto process = game::find_running_game_process(
+            runtime.installation->executable);
+        verified_stopped = !process.has_value() &&
+            process.error().code == ErrorCode::not_found;
+    }
+    if (runtime.installation && !runtime.adaptive_control_token.empty() &&
+        verified_stopped) {
+        const auto staged = game::enable_offline_gameplay_logging(
+            runtime.installation->config_root,
+            !runtime.optimizer_settings.debug_corpse_physics_control,
+            runtime.optimizer_settings.corpse_limit,
+            runtime.optimizer_settings.target_fps,
+            runtime.optimizer_settings.debug_corpse_markers,
+            runtime.optimizer_settings.adaptive_quality_change_budget,
+            runtime.adaptive_control_token,
+            runtime.optimizer_settings.debug_zed_markers,
+            runtime.optimizer_settings.adaptive_optimization_enabled);
+        if (!staged.has_value()) {
+            show_notice(
+                runtime, ui::NoticeSeverity::error,
+                L"CORPSE_PHYSICS_AB_STAGE_FAILED",
+                L"The A/B preference was saved, but the prepared KF2 start could not be updated: " +
+                    staged.error().message +
+                    L" Restart KF2 Optimizer before the next test.");
+            return app::runtime::DispatchResult::handled;
+        }
+        staged_now = true;
+    }
+    runtime.events->append({
+        0, ::kf2::diagnostics::Severity::info,
+        "CORPSE_PHYSICS_AB_MODE_CHANGED",
+        runtime.optimizer_settings.debug_corpse_physics_control
+            ? L"Physics A/B control selected for the next protected KF2 start; telemetry remains enabled while optimizer-owned corpse reductions are disabled"
+            : L"Physics A/B candidate selected for the next protected KF2 start; optimizer-owned corpse reductions are enabled",
+        L"debug"});
+    show_notice(
+        runtime, ui::NoticeSeverity::info,
+        L"CORPSE_PHYSICS_AB_MODE_CHANGED",
+        (runtime.optimizer_settings.debug_corpse_physics_control
+             ? L"Control selected: telemetry stays active and optimizer-owned corpse reductions are disabled."
+             : L"Candidate selected: optimizer-owned corpse reductions are enabled.") +
+            std::wstring{staged_now
+                             ? L" The prepared KF2 start was updated."
+                             : L" It applies on the next protected KF2 start."});
+    return app::runtime::DispatchResult::handled;
 }
 
 app::runtime::DispatchResult flex_restore(

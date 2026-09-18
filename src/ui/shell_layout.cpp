@@ -691,6 +691,11 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                        ? L"✓ LIVING ZED DISTANCES"
                        : L"LIVING ZED DISTANCES",
                    true, status.debug_zed_markers);
+        add_action("debug-corpse-physics-control",
+                   status.debug_corpse_physics_control
+                       ? L"✓ PHYSICS A/B: CONTROL"
+                       : L"PHYSICS A/B: CANDIDATE",
+                   true, status.debug_corpse_physics_control);
         cursor = grid_base +
             static_cast<float>((action_index + action_columns - 1) /
                                action_columns) * kActionStride + 8.0F;

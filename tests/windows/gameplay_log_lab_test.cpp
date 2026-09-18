@@ -2025,6 +2025,21 @@ int main() {
             root, true, 350, 137, true, 2, control_token, true);
     CHECK(adaptive_unchanged.has_value());
     CHECK(!adaptive_unchanged.value());
+    const auto physics_control =
+        kf2::game::enable_offline_gameplay_logging(
+            root, false, 350, 137, true, 2, control_token, true);
+    CHECK(physics_control.has_value());
+    CHECK(physics_control.value());
+    const auto physics_control_engine = read_bytes(engine_ini);
+    CHECK(physics_control_engine.find(
+              "bAdaptiveCorpseStagger=False\r\n") != std::string::npos);
+    CHECK(physics_control_engine.find(
+              "AdaptiveCorpseMaximum=350\r\n") != std::string::npos);
+    CHECK(physics_control_engine.find(
+              "AdaptiveTargetFPS=137\r\n") != std::string::npos);
+    CHECK(physics_control_engine.find(
+              "AdaptiveControlToken=0123456789abcdef0123456789abcdef\r\n") !=
+          std::string::npos);
     const auto adaptive_initially_off =
         kf2::game::enable_offline_gameplay_logging(
             root, true, 350, 137, true, 2, control_token, true, false);

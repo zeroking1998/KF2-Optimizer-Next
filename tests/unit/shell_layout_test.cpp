@@ -271,6 +271,7 @@ int main() {
     auto debug_status = model.status();
     debug_status.debug_corpse_markers = false;
     debug_status.debug_zed_markers = true;
+    debug_status.debug_corpse_physics_control = true;
     model.set_status(debug_status);
     const auto debug = layout_shell(model, 1440, 900);
     CHECK(node(debug, "debug-markers-section") != nullptr);
@@ -279,10 +280,13 @@ int main() {
     CHECK(!action(debug, "debug-corpse-markers")->selected);
     CHECK(action(debug, "debug-zed-markers") != nullptr);
     CHECK(action(debug, "debug-zed-markers")->selected);
+    CHECK(action(debug, "debug-corpse-physics-control") != nullptr);
+    CHECK(action(debug, "debug-corpse-physics-control")->selected);
     CHECK(action(debug, "diagnostics-open-data") != nullptr);
     CHECK(action(debug, "diagnostics-open-log") != nullptr);
     CHECK(action_help_text("debug-corpse-markers").has_value());
     CHECK(action_help_text("debug-zed-markers").has_value());
+    CHECK(action_help_text("debug-corpse-physics-control").has_value());
 
     static_cast<void>(model.focus_destination(Destination::diagnostics));
     static_cast<void>(model.activate_focused());
