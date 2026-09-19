@@ -72,6 +72,8 @@ are visible immediately.
 - Fixed Maximum corpses reaching the end of its range, interrupted slider
   capture, failed setting writes, and startup readback so the UI always returns
   to the authoritative saved value.
+- Information, warning, and error banners now use distinct semantic colors,
+  and the compact status line has consistent horizontal spacing.
 - Synchronized the Optimizer's Game graphics page with KF2's own saved menu
   values. User-owned graphics and FleX selections survive protected sessions,
   settings restarts, app restarts, and exact post-session restoration.

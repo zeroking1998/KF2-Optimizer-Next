@@ -58,6 +58,8 @@ int main() {
     CHECK((dashboard.footer == DipRect{0, 900, 1440, 0}));
     CHECK(node(dashboard, "footer") == nullptr);
     CHECK(node(dashboard, "status") != nullptr);
+    CHECK(node(dashboard, "status")->bounds.x == 12.0F);
+    CHECK(node(dashboard, "status")->bounds.width == 1416.0F);
     CHECK(node(dashboard, "dashboard-quick-section") != nullptr);
     CHECK(node(dashboard, "dashboard-support-section") == nullptr);
     CHECK(node(dashboard, "dashboard-goals-section") != nullptr);
@@ -186,9 +188,18 @@ int main() {
     const auto* top_heading = node(graphics_notice_top, "page-heading");
     CHECK(top_notice != nullptr);
     CHECK(top_heading != nullptr);
+    CHECK(top_notice->notice_severity == NoticeSeverity::info);
     CHECK(!intersects(top_notice->bounds, top_heading->bounds));
     CHECK(std::abs((top_heading->bounds.y - top_notice->bounds.y) - 52.0F) <
           0.01F);
+    model.set_notice({NoticeSeverity::warning, L"GRAPHICS_WARNING",
+                      L"Graphics settings need attention.", L""});
+    CHECK(node(layout_shell(model, 1440, 900), "notice")->notice_severity ==
+          NoticeSeverity::warning);
+    model.set_notice({NoticeSeverity::error, L"GRAPHICS_ERROR",
+                      L"Graphics settings could not be saved.", L""});
+    CHECK(node(layout_shell(model, 1440, 900), "notice")->notice_severity ==
+          NoticeSeverity::error);
     model.set_scroll_extent(graphics_notice_top.scroll_extent);
     for (const float requested_scroll : {20.0F, 51.0F, 96.0F}) {
         static_cast<void>(model.set_scroll(requested_scroll));

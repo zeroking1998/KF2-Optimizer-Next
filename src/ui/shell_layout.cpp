@@ -237,8 +237,15 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
             !status.update_installing, "header-repair"});
     }
 
-    result.nodes.push_back({"status", SemanticRole::status, result.status_strip,
-                            status_text(model)});
+    constexpr float status_horizontal_padding = 12.0F;
+    result.nodes.push_back({
+        "status", SemanticRole::status,
+        {result.status_strip.x + status_horizontal_padding,
+         result.status_strip.y,
+         std::max(0.0F,
+                  result.status_strip.width - status_horizontal_padding * 2.0F),
+         result.status_strip.height},
+        status_text(model)});
 
     constexpr std::size_t metric_count = 4;
     constexpr float metric_gap = 8.0F;
@@ -290,10 +297,13 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         banner_offset += 52.0F;
     }
     if (model.notice().has_value()) {
-        result.nodes.push_back({"notice", SemanticRole::notice,
-                                {result.content.x, banner_y - scroll,
-                                 result.content.width, 44.0F},
-                                model.notice()->message});
+        SemanticNode notice{
+            "notice", SemanticRole::notice,
+            {result.content.x, banner_y - scroll,
+             result.content.width, 44.0F},
+            model.notice()->message};
+        notice.notice_severity = model.notice()->severity;
+        result.nodes.push_back(std::move(notice));
         banner_offset += 52.0F;
     }
 
