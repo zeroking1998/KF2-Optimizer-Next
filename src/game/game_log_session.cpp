@@ -71,12 +71,15 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
             } else if (const auto receipt =
                            detail::parse_optimizer_session_context_line(line);
                        current_ && !current_->main_menu && receipt &&
-                       current_->net_mode &&
-                       *current_->net_mode == receipt->net_mode &&
-                       current_->map == receipt->map) {
+                       current_->map == receipt->map &&
+                       (!current_->net_mode ||
+                        *current_->net_mode == "NM_Standalone" ||
+                        *current_->net_mode == receipt->net_mode)) {
                 if (!current_->optimizer_online_read_only ||
+                    current_->net_mode != receipt->net_mode ||
                     current_->optimizer_session_context_observed_ns !=
                         observed_at_ns) {
+                    current_->net_mode = std::string{receipt->net_mode};
                     current_->optimizer_online_read_only = true;
                     current_->optimizer_session_context_observed_ns =
                         observed_at_ns;
