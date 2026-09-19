@@ -4,6 +4,7 @@ class KF2OptimizerGraphicsInteraction extends Interaction
     within GameViewportClient;
 
 var float NextReadRealTime;
+var transient WorldInfo LastObservedWorld;
 var string LastReadback;
 var string LastSelectedMap;
 var string LastVotedMap;
@@ -32,8 +33,19 @@ event Tick(float DeltaTime)
         return;
     }
     CurrentWorld = PrimaryController.WorldInfo;
-    if (CurrentWorld == None || CurrentWorld.NetMode != NM_Standalone ||
-        CurrentWorld.RealTimeSeconds < NextReadRealTime)
+    if (CurrentWorld == None || CurrentWorld.NetMode != NM_Standalone)
+    {
+        return;
+    }
+    // RealTimeSeconds starts at zero for each newly loaded world. Reset the
+    // polling deadline as well, otherwise a short map can inherit a deadline
+    // that it can never reach and later map/menu selections are missed.
+    if (CurrentWorld != LastObservedWorld)
+    {
+        LastObservedWorld = CurrentWorld;
+        NextReadRealTime = 0.0;
+    }
+    if (CurrentWorld.RealTimeSeconds < NextReadRealTime)
     {
         return;
     }

@@ -60,6 +60,8 @@ int main() {
         read_bytes(KF2_TELEMETRY_MUTATOR_SOURCE));
     const auto interaction_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_INTERACTION_SOURCE));
+    const auto graphics_interaction_source = normalize_newlines(
+        read_bytes(KF2_GRAPHICS_INTERACTION_SOURCE));
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto connection_source = read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE);
     const auto graphics_source = normalize_newlines(
@@ -170,6 +172,23 @@ int main() {
     const auto interaction_tick = interaction_source.find(
         "event Tick(float DeltaTime)");
     CHECK(interaction_tick != std::string::npos);
+    const auto graphics_interaction_tick = graphics_interaction_source.find(
+        "event Tick(float DeltaTime)");
+    CHECK(graphics_interaction_tick != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "var transient WorldInfo LastObservedWorld;") != std::string::npos);
+    const auto graphics_world_reset = graphics_interaction_source.find(
+        "if (CurrentWorld != LastObservedWorld)",
+        graphics_interaction_tick);
+    const auto graphics_timer_guard = graphics_interaction_source.find(
+        "CurrentWorld.RealTimeSeconds < NextReadRealTime",
+        graphics_interaction_tick);
+    CHECK(graphics_world_reset != std::string::npos);
+    CHECK(graphics_timer_guard != std::string::npos);
+    CHECK(graphics_world_reset < graphics_timer_guard);
+    CHECK(graphics_interaction_source.find(
+        "NextReadRealTime = 0.0;", graphics_world_reset) <
+          graphics_timer_guard);
     CHECK(interaction_source.find(
         "KF2OPT_GAMEPLAY_CONTEXT schema=1 state=") != std::string::npos);
     CHECK(interaction_source.find(
