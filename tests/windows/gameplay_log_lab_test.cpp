@@ -242,6 +242,17 @@ int main() {
     CHECK(online_context_source.find(
         "KF2OPT_ONLINE_CORPSE_ACTION state=sleep") != std::string::npos);
     CHECK(online_context_source.find(
+        "function bool TryEnforceOnlineCorpseCapacity(WorldInfo CurrentWorld)") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "GoreManager.RemoveAndDeleteCorpse(Index)") != std::string::npos);
+    CHECK(online_context_source.find(
+        "GoreManager.MaxDeadBodies = Quality") != std::string::npos);
+    CHECK(online_context_source.find(
+        "GoreManager.MaxDeadBodies != Quality") != std::string::npos);
+    CHECK(online_context_source.find(
+        "KF2OPT_ONLINE_CORPSE_ACTION state=capacity") != std::string::npos);
+    CHECK(online_context_source.find(
         "local_only=true readback=verified") != std::string::npos);
     CHECK(online_context_source.find("bOnlineCorpseSleepArmed = true") !=
           std::string::npos);

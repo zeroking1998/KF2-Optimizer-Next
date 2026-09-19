@@ -233,7 +233,7 @@ bool UiRuntime::set_live_adaptive_enabled(
         .sequence = next_sequence,
         .resource = enabled ? game::AdaptiveResourceControl::enable
                             : game::AdaptiveResourceControl::disable,
-        .quality = 100,
+        .quality = enabled ? effective_corpse_limit() : 100,
         .timeout_ms = game::kAdaptiveControlReadbackTimeoutMs});
     adaptive_control_sequence = next_sequence;
     if (!changed.has_value()) {

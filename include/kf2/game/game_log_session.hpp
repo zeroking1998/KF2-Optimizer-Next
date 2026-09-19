@@ -30,6 +30,7 @@ struct GameLogSession {
     std::optional<int> online_corpse_pool;
     std::optional<int> online_corpse_maximum;
     bool online_corpse_sleep_verified{false};
+    bool online_corpse_capacity_verified{false};
     std::uint64_t online_corpse_capability_observed_ns{0};
     std::uint64_t online_corpse_action_observed_ns{0};
     std::optional<int> zeds_remaining;

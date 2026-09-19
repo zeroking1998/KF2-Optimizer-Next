@@ -74,7 +74,7 @@ void UiRuntime::reconcile_adaptive_runtime_mode(
                 .resource = desired_enabled
                     ? game::AdaptiveResourceControl::enable
                     : game::AdaptiveResourceControl::disable,
-                .quality = 100});
+                .quality = desired_enabled ? effective_corpse_limit() : 100});
             if (started.has_value() && started.value()) {
                 adaptive_control_sequence = next_sequence;
                 adaptive_runtime_mode_pending = desired_enabled;

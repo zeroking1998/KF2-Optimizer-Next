@@ -70,12 +70,25 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                 }
             } else if (const auto receipt =
                            detail::parse_optimizer_session_context_line(line);
-                       current_ && !current_->main_menu && receipt &&
-                       current_->map == receipt->map &&
+                       current_ && receipt &&
                        (!current_->net_mode ||
                         *current_->net_mode == "NM_Standalone" ||
                         *current_->net_mode == receipt->net_mode)) {
-                if (!current_->optimizer_online_read_only ||
+                const bool map_changed = current_->map != receipt->map;
+                if (map_changed) {
+                    detail::clear_gameplay_snapshot(*current_);
+                    current_->map = std::string{receipt->map};
+                    current_->phase = GameLogPhase::map_loaded;
+                    current_->main_menu = false;
+                    current_->loading_movie_active = false;
+                    current_->online_corpse_pool.reset();
+                    current_->online_corpse_maximum.reset();
+                    current_->online_corpse_sleep_verified = false;
+                    current_->online_corpse_capacity_verified = false;
+                    current_->online_corpse_capability_observed_ns = 0;
+                    current_->online_corpse_action_observed_ns = 0;
+                }
+                if (map_changed || !current_->optimizer_online_read_only ||
                     current_->net_mode != receipt->net_mode ||
                     current_->optimizer_session_context_observed_ns !=
                         observed_at_ns) {

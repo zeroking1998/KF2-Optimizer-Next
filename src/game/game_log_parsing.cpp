@@ -162,8 +162,10 @@ std::optional<bool> apply_online_corpse_line(
     std::uint64_t observed_at_ns) {
     constexpr std::string_view capability_marker =
         "KF2OPT_ONLINE_CORPSE state=";
-    constexpr std::string_view action_marker =
+    constexpr std::string_view sleep_action_marker =
         "KF2OPT_ONLINE_CORPSE_ACTION state=sleep ";
+    constexpr std::string_view capacity_action_marker =
+        "KF2OPT_ONLINE_CORPSE_ACTION state=capacity ";
     if (line.find(" local_only=true readback=verified") ==
         std::string_view::npos) {
         return std::nullopt;
@@ -202,10 +204,48 @@ std::optional<bool> apply_online_corpse_line(
         session.online_corpse_capability_observed_ns = observed_at_ns;
         return changed;
     }
-    if (line.find(action_marker) != std::string_view::npos &&
+    if (line.find(sleep_action_marker) != std::string_view::npos &&
         line.find(" awake=false ") != std::string_view::npos) {
         const bool changed = !session.online_corpse_sleep_verified;
         session.online_corpse_sleep_verified = true;
+        session.online_corpse_action_observed_ns = observed_at_ns;
+        return changed;
+    }
+    if (line.find(capacity_action_marker) != std::string_view::npos) {
+        constexpr std::string_view before_marker = " pool_before=";
+        constexpr std::string_view after_marker = " pool_after=";
+        constexpr std::string_view maximum_marker = " maximum=";
+        const auto before_at = line.find(before_marker);
+        const auto after_at = line.find(after_marker);
+        const auto maximum_at = line.find(maximum_marker);
+        if (before_at == std::string_view::npos ||
+            after_at == std::string_view::npos ||
+            maximum_at == std::string_view::npos ||
+            !(before_at < after_at && after_at < maximum_at)) {
+            return std::nullopt;
+        }
+        const auto before = parse_bounded_count(line.substr(
+            before_at + before_marker.size(),
+            after_at - (before_at + before_marker.size())));
+        const auto after = parse_bounded_count(line.substr(
+            after_at + after_marker.size(),
+            maximum_at - (after_at + after_marker.size())));
+        auto maximum_text = line.substr(maximum_at + maximum_marker.size());
+        const auto maximum_end = maximum_text.find(' ');
+        if (maximum_end != std::string_view::npos) {
+            maximum_text = maximum_text.substr(0, maximum_end);
+        }
+        const auto maximum = parse_bounded_count(maximum_text);
+        if (!before || !after || !maximum || *before != *after + 1 ||
+            *after < *maximum) {
+            return std::nullopt;
+        }
+        const bool changed = !session.online_corpse_capacity_verified ||
+            session.online_corpse_pool != after ||
+            session.online_corpse_maximum != maximum;
+        session.online_corpse_capacity_verified = true;
+        session.online_corpse_pool = *after;
+        session.online_corpse_maximum = *maximum;
         session.online_corpse_action_observed_ns = observed_at_ns;
         return changed;
     }

@@ -1,6 +1,6 @@
-// Authenticated loopback connection for process-local graphics controls in a
-// joined or listen-server session. It deliberately has no reference to the
-// offline telemetry probe and never enumerates or mutates gameplay actors.
+// Authenticated loopback connection for process-local controls in a joined or
+// listen-server session. It deliberately has no reference to the offline
+// telemetry probe and cannot issue replicated writes.
 class KF2OptimizerOnlineGraphicsControlConnection extends TcpLink;
 
 function string TakeToken(out string Line)

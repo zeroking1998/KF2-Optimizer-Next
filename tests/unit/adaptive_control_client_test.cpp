@@ -67,10 +67,24 @@ int main() {
     CHECK(disable_command.has_value());
     CHECK(disable_command.value() ==
           "KF2OPT 0123456789abcdef0123456789abcdef 45 disable 100\n");
+    const auto enable_command = build_adaptive_control_command({
+        .port = 17777, .token = token, .sequence = 46,
+        .resource = AdaptiveResourceControl::enable, .quality = 1939,
+        .timeout_ms = 200});
+    CHECK(enable_command.has_value());
+    CHECK(enable_command.value() ==
+          "KF2OPT 0123456789abcdef0123456789abcdef 46 enable 1939\n");
     const auto enable_receipt = parse_adaptive_control_receipt(
-        "KF2OPT_ACK 46 applied enable 100\r\n");
+        "KF2OPT_ACK 46 applied enable 1939\r\n");
     CHECK(enable_receipt.has_value());
     CHECK(enable_receipt->resource == AdaptiveResourceControl::enable);
+    CHECK(enable_receipt->quality == 1939);
+    CHECK(!build_adaptive_control_command({
+        .port = 17777, .token = token, .sequence = 47,
+        .resource = AdaptiveResourceControl::enable,
+        .quality = 2001}).has_value());
+    CHECK(!parse_adaptive_control_receipt(
+        "KF2OPT_ACK 47 applied enable 2001\r\n").has_value());
     CHECK(!build_adaptive_control_command({
         .port = 0, .token = token, .sequence = 1}).has_value());
     CHECK(!build_adaptive_control_command({
