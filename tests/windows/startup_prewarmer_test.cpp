@@ -1,11 +1,15 @@
 #include "kf2/game/startup_prewarmer.hpp"
 
+#include <windows.h>
+#include <winioctl.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <system_error>
 #include <thread>
 
 namespace {
@@ -24,9 +28,29 @@ void write_file(const std::filesystem::path& path, std::size_t bytes) {
 void write_sparse_file(const std::filesystem::path& path,
                        std::uintmax_t bytes) {
     std::filesystem::create_directories(path.parent_path());
-    std::ofstream output(path, std::ios::binary | std::ios::trunc);
-    output.close();
-    std::filesystem::resize_file(path, bytes);
+    HANDLE output = CreateFileW(
+        path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (output == INVALID_HANDLE_VALUE) {
+        throw std::system_error(
+            static_cast<int>(GetLastError()), std::system_category());
+    }
+    DWORD returned = 0;
+    FILE_SET_SPARSE_BUFFER sparse{TRUE};
+    LARGE_INTEGER size{};
+    size.QuadPart = static_cast<LONGLONG>(bytes);
+    const bool configured = DeviceIoControl(
+        output, FSCTL_SET_SPARSE, &sparse, sizeof(sparse), nullptr, 0,
+        &returned, nullptr) != FALSE;
+    const bool resized = configured &&
+        SetFilePointerEx(output, size, nullptr, FILE_BEGIN) != FALSE &&
+        SetEndOfFile(output) != FALSE;
+    const DWORD error = resized ? ERROR_SUCCESS : GetLastError();
+    CloseHandle(output);
+    if (!resized) {
+        throw std::system_error(
+            static_cast<int>(error), std::system_category());
+    }
 }
 }  // namespace
 
@@ -57,8 +81,9 @@ int main(int argc, char** argv) {
     CHECK(startup_prewarm_file_budget(1024 * mib) == 512 * mib);
     CHECK(startup_prewarm_budget(StorageKind::unknown, 32 * gib) == 0);
 
+    const auto process_suffix = std::to_wstring(GetCurrentProcessId());
     const auto root = std::filesystem::temp_directory_path() /
-        L"kf2-startup-prewarmer-test";
+        (L"kf2-startup-prewarmer-test-" + process_suffix);
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     write_file(root / L"KFGame/BrewedPC/GlobalShaderCache-PC-D3D-SM5.bin",
@@ -73,11 +98,15 @@ int main(int argc, char** argv) {
     const auto plan = build_startup_prewarm_plan(
         root, StorageKind::rotational, 4 * gib);
     CHECK(plan.size() == 2);
+    if (plan.size() != 2) {
+        std::filesystem::remove_all(root, cleanup_error);
+        return EXIT_FAILURE;
+    }
     CHECK(plan[0].bytes == 1024);
     CHECK(plan[1].bytes == 2048);
 
     const auto fair_root = std::filesystem::temp_directory_path() /
-        L"kf2-startup-prewarmer-fair-plan-test";
+        (L"kf2-startup-prewarmer-fair-plan-test-" + process_suffix);
     std::filesystem::remove_all(fair_root, cleanup_error);
     write_sparse_file(
         fair_root / L"KFGame/BrewedPC/EngineDebugMaterials.upk", 48 * mib);
