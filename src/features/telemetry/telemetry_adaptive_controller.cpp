@@ -327,6 +327,7 @@ void UiRuntime::update_adaptive_controller(
     bool bridge_available = frame.gameplay &&
         frame.gameplay->telemetry_control_port.has_value() &&
         game::valid_adaptive_control_token(adaptive_control_token) &&
+        adaptive_runtime_mode_confirmed &&
         !adaptive_control_dispatcher.busy();
     const auto pressure_resource =
         telemetry_pipeline::adaptive_runtime_resource(
@@ -374,6 +375,12 @@ void UiRuntime::update_adaptive_controller(
                 adaptive_decision.quality_recovery_eligible,
             .active_gameplay = active_gameplay,
             .verified_offline = sample.session_class ==
+                optimizer::AdaptiveSessionClass::verified_offline,
+            .verified_online_graphics = sample.session_class ==
+                optimizer::AdaptiveSessionClass::verified_online ||
+                sample.session_class ==
+                    optimizer::AdaptiveSessionClass::host_or_listen_server,
+            .local_graphics_only = sample.session_class !=
                 optimizer::AdaptiveSessionClass::verified_offline,
             .bridge_available = bridge_available,
             .zed_time_active = sample.zed_time_protected,
@@ -580,7 +587,10 @@ void UiRuntime::update_adaptive_controller(
         adaptive_actuation.current(runtime_control);
     if (runtime_record) {
         status.adaptive_source = L"authenticated KF2 loopback";
-        status.adaptive_safety = L"VERIFIED_OFFLINE / EXACT_READBACK";
+        status.adaptive_safety = sample.session_class ==
+                optimizer::AdaptiveSessionClass::verified_offline
+            ? L"VERIFIED_OFFLINE / EXACT_READBACK"
+            : L"VERIFIED_ONLINE / LOCAL_GRAPHICS_ONLY / EXACT_READBACK";
         status.adaptive_evidence = widen(
             optimizer::adaptive_action_status_name(runtime_record->status));
     } else if (adaptive_decision.selected_setting ==

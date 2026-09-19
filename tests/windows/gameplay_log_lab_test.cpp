@@ -68,6 +68,8 @@ int main() {
         read_bytes(KF2_GRAPHICS_VIEWPORT_SOURCE));
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto connection_source = read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE);
+    const auto online_graphics_connection_source = normalize_newlines(
+        read_bytes(KF2_ONLINE_GRAPHICS_CONNECTION_SOURCE));
     const auto graphics_source = normalize_newlines(
         read_bytes(KF2_ADAPTIVE_GRAPHICS_SOURCE));
     const auto telemetry_session_source = normalize_newlines(
@@ -210,10 +212,71 @@ int main() {
     CHECK(online_context_source.find("NM_ListenServer") != std::string::npos);
     CHECK(online_context_source.find("online_host_read_only") !=
           std::string::npos);
+    CHECK(online_context_source.find(
+        "function ReportOnlineCorpseCapability(WorldInfo CurrentWorld)") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "KFGoreManager(CurrentWorld.MyGoreEffectManager)") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "KF2OPT_ONLINE_CORPSE state=available") != std::string::npos);
+    CHECK(online_context_source.find(
+        "KF2OPT_ONLINE_CORPSE state=populated") != std::string::npos);
+    CHECK(online_context_source.find(
+        "GoreManager.CorpsePool.Length > 0") != std::string::npos);
+    CHECK(online_context_source.find("local_only=true readback=verified") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "function bool TrySleepOneOnlineCorpse(WorldInfo CurrentWorld)") !=
+          std::string::npos);
+    CHECK(online_context_source.find("Candidate.TimeOfDeath <= 0.0") !=
+          std::string::npos);
+    CHECK(online_context_source.find("Candidate.IsAliveAndWell()") !=
+          std::string::npos);
+    CHECK(online_context_source.find("Candidate.SpecialMove == SM_DeathAnim") !=
+          std::string::npos);
+    CHECK(online_context_source.find("Candidate.Mesh.PutRigidBodyToSleep()") !=
+          std::string::npos);
+    CHECK(online_context_source.find("Candidate.Mesh.RigidBodyIsAwake()") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "KF2OPT_ONLINE_CORPSE_ACTION state=sleep") != std::string::npos);
+    CHECK(online_context_source.find(
+        "local_only=true readback=verified") != std::string::npos);
+    CHECK(online_context_source.find("bOnlineCorpseSleepArmed = true") !=
+          std::string::npos);
     CHECK(online_context_source.find("DynamicActors") == std::string::npos);
-    CHECK(online_context_source.find("Spawn(") == std::string::npos);
+    CHECK(online_context_source.find(
+        "PrimaryController.Spawn(\n"
+        "            class'KF2OptimizerAdaptiveControlListener'") !=
+          std::string::npos);
     CHECK(online_context_source.find("SetTimer(") == std::string::npos);
     CHECK(online_context_source.find("ConsoleCommand(") == std::string::npos);
+    CHECK(online_context_source.find(
+        "function bool ApplyOnlineGraphicsControl(") != std::string::npos);
+    CHECK(online_context_source.find(
+        "class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "KF2OptimizerTelemetryProbe'.default.AdaptiveControlToken") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "var KF2OptimizerAdaptiveControlListener") == std::string::npos);
+    CHECK(online_context_source.find(
+        "bOnlineGraphicsListenerStarted") != std::string::npos);
+    CHECK(listener_source.find(
+        "AcceptClass = class'KF2OptimizerOnlineGraphicsControlConnection'") !=
+          std::string::npos);
+    CHECK(online_graphics_connection_source.find(
+        "ApplyOnlineGraphicsControl(") != std::string::npos);
+    CHECK(online_graphics_connection_source.find("DynamicActors") ==
+          std::string::npos);
+    CHECK(online_graphics_connection_source.find("AllActors") ==
+          std::string::npos);
+    CHECK(online_graphics_connection_source.find("SetPhysics") ==
+          std::string::npos);
+    CHECK(online_graphics_connection_source.find("KF2Pawn") ==
+          std::string::npos);
     CHECK(interaction_source.find(
         "KF2OPT_GAMEPLAY_CONTEXT schema=1 state=") != std::string::npos);
     CHECK(interaction_source.find(
