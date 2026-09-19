@@ -102,6 +102,7 @@ private:
     std::optional<std::string> pressed_node_id_;
     std::optional<std::string> dragged_slider_id_;
     std::optional<int> dragged_slider_value_;
+    bool suppress_orphaned_slider_release_{false};
 };
 
 }  // namespace kf2::ui

@@ -421,6 +421,14 @@ void UiRuntime::begin_game_restart_handoff(
     telemetry_failure = new_settings_restart
         ? L"KF2 is applying new settings; waiting for its replacement process"
         : L"KF2 process ended; checking briefly for a replacement process";
+    // The process-bound values are no longer active once the verified process
+    // has ended. Keeping them in the presentation makes settings changed
+    // during Steam's bootstrap/restart gap look as though they were deferred
+    // to a later launch, even though the replacement process has not started.
+    auto status = model.status();
+    status.active_target_fps.reset();
+    status.active_corpse_limit.reset();
+    model.set_status(std::move(status));
     events->append({0, diagnostics::Severity::info,
         "KF2_SESSION_RESTART_WAIT",
         new_settings_restart

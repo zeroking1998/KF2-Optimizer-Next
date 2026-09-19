@@ -150,9 +150,14 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
         return;
     }
 
+    const bool game_running = installation &&
+        game::find_running_game_process(
+            installation->executable).has_value();
+    const bool policy_bound_to_running_process =
+        adaptive_session_policy.has_value() && game_running;
     if (adaptive_policy_changed) {
         const bool session_value_staged_for_restart =
-            adaptive_session_policy.has_value() &&
+            policy_bound_to_running_process &&
             control->id == runtime::ControlId::corpse_limit;
         if (session_value_staged_for_restart) {
             adaptive_policy_changed = false;
@@ -160,7 +165,39 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     }
     const bool target_staged_for_restart =
         optimizer_settings.target_fps != previous.target_fps &&
-        adaptive_session_policy.has_value();
+        policy_bound_to_running_process;
+
+    // Steam can briefly create and end a KF2 bootstrap process before the
+    // real process appears. While no verified process is running, update the
+    // protected provider policy so a direct slider click still applies to the
+    // imminent replacement process instead of being mislabeled "next start".
+    if (adaptive_policy_changed && installation && session_config_snapshot &&
+        !game_running &&
+        game::valid_adaptive_control_token(adaptive_control_token)) {
+        const auto restaged = game::enable_offline_gameplay_logging(
+            installation->config_root,
+            !optimizer_settings.debug_corpse_physics_control,
+            optimizer_settings.corpse_limit,
+            optimizer_settings.target_fps,
+            optimizer_settings.debug_corpse_markers,
+            optimizer_settings.adaptive_quality_change_budget,
+            adaptive_control_token, optimizer_settings.debug_zed_markers,
+            optimizer_settings.adaptive_optimization_enabled);
+        if (!restaged.has_value()) {
+            events->append({0, diagnostics::Severity::warning,
+                "ADAPTIVE_PENDING_POLICY_UPDATE_FAILED",
+                restaged.error().message, L"optimizer"});
+        } else {
+            adaptive_session_policy = game::OfflineAdaptiveSessionPolicy{
+                optimizer_settings.corpse_limit,
+                optimizer_settings.target_fps,
+                optimizer_settings.adaptive_quality_change_budget};
+            events->append({0, diagnostics::Severity::info,
+                "ADAPTIVE_PENDING_POLICY_UPDATED",
+                L"The protected policy was updated before KF2's replacement process started",
+                L"optimizer"});
+        }
+    }
     if (adaptive_policy_changed) {
         auto generation = adaptive_actuation.generation();
         generation.settings = ++adaptive_settings_generation;
@@ -176,12 +213,14 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     status.target_fps = optimizer_settings.target_fps;
     status.corpse_limit = optimizer_settings.corpse_limit;
     status.overlay_scale_percent = optimizer_settings.overlay_scale_percent;
+    if (!game_running) {
+        status.active_target_fps.reset();
+        status.active_corpse_limit.reset();
+    }
     update_adaptive_policy_status(status);
     model.set_status(std::move(status));
 
     if (optimizer_settings.target_fps != previous.target_fps && installation) {
-        const bool game_running = game::find_running_game_process(
-            installation->executable).has_value();
         if (game_running) {
             message += target_staged_for_restart
                 ? L"; saved for the next KF2 start; this session keeps its active native FPS target"
