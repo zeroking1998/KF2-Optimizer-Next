@@ -30,8 +30,8 @@ float advance_hover_strength(
 }
 
 float control_press_scale(float interaction_strength) noexcept {
-    return 1.0F - 0.008F *
-        std::clamp(interaction_strength, 0.0F, 1.0F);
+    return 1.0F - 0.014F * smooth_motion(
+        std::clamp(interaction_strength, 0.0F, 1.0F));
 }
 
 float advance_startup_progress(
@@ -78,12 +78,18 @@ float smooth_motion(float progress) noexcept {
     return progress * progress * (3.0F - 2.0F * progress);
 }
 
+float emphasized_motion(float progress) noexcept {
+    progress = std::clamp(progress, 0.0F, 1.0F);
+    const float inverse = 1.0F - progress;
+    return 1.0F - inverse * inverse * inverse;
+}
+
 float startup_logo_scale(float progress) noexcept {
-    return interpolate_motion(0.82F, 1.0F, smooth_motion(progress));
+    return interpolate_motion(0.82F, 1.0F, emphasized_motion(progress));
 }
 
 float startup_title_offset_x(float progress) noexcept {
-    return interpolate_motion(-18.0F, 0.0F, smooth_motion(progress));
+    return interpolate_motion(-18.0F, 0.0F, emphasized_motion(progress));
 }
 
 float page_motion_opacity(float progress) noexcept {
@@ -91,7 +97,7 @@ float page_motion_opacity(float progress) noexcept {
 }
 
 float page_motion_offset_x(float progress) noexcept {
-    return interpolate_motion(14.0F, 0.0F, smooth_motion(progress));
+    return interpolate_motion(14.0F, 0.0F, emphasized_motion(progress));
 }
 
 float tooltip_motion_offset_y(float opacity) noexcept {

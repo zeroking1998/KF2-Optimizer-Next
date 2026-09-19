@@ -51,15 +51,15 @@ int main() {
     model.set_build_identity(L"0.0.2-alpha+test");
 
     const auto dashboard = layout_shell(model, 1440, 900);
-    CHECK((dashboard.header == DipRect{0, 0, 1440, 72}));
-    CHECK((dashboard.status_strip == DipRect{0, 72, 1440, 34}));
-    CHECK((dashboard.metrics_strip == DipRect{0, 106, 1440, 100}));
-    CHECK((dashboard.sidebar == DipRect{0, 206, 210, 694}));
+    CHECK((dashboard.header == DipRect{0, 0, 1440, 78}));
+    CHECK((dashboard.status_strip == DipRect{0, 78, 1440, 38}));
+    CHECK((dashboard.metrics_strip == DipRect{0, 116, 1440, 112}));
+    CHECK((dashboard.sidebar == DipRect{0, 228, 218, 672}));
     CHECK((dashboard.footer == DipRect{0, 900, 1440, 0}));
     CHECK(node(dashboard, "footer") == nullptr);
     CHECK(node(dashboard, "status") != nullptr);
-    CHECK(node(dashboard, "status")->bounds.x == 12.0F);
-    CHECK(node(dashboard, "status")->bounds.width == 1416.0F);
+    CHECK(node(dashboard, "status")->bounds.x == 32.0F);
+    CHECK(node(dashboard, "status")->bounds.width == 1396.0F);
     CHECK(node(dashboard, "dashboard-quick-section") != nullptr);
     CHECK(node(dashboard, "dashboard-support-section") == nullptr);
     CHECK(node(dashboard, "dashboard-goals-section") != nullptr);
@@ -153,8 +153,8 @@ int main() {
     CHECK(node(graphics, "page-body") == nullptr);
     CHECK(node(graphics, "graphics-foliage-detail") == nullptr);
     CHECK(node(graphics, "graphics-flex-section") == nullptr);
-    CHECK(node(graphics, "graphics-display-info") != nullptr);
-    CHECK(node(graphics, "graphics-display-info")->text.find(L"Gamma") ==
+    CHECK(node(graphics, "graphics-aspect-ratio") != nullptr);
+    CHECK(node(graphics, "graphics-aspect-ratio")->text.find(L"Gamma") ==
           std::wstring::npos);
     const auto* film_grain = node(graphics, "graphics-film-grain-slider");
     CHECK(film_grain != nullptr);
@@ -164,7 +164,7 @@ int main() {
     CHECK(film_grain->slider->maximum == 100);
     CHECK(film_grain->slider->small_step == 5);
     CHECK(film_grain->slider->unit == L"%");
-    CHECK(action(graphics, "graphics-display") != nullptr);
+    CHECK(action(graphics, "graphics-display") == nullptr);
     CHECK(action(graphics, "graphics-vsync") == nullptr);
     CHECK(action(graphics, "graphics-variable-frame-rate") == nullptr);
     CHECK(action(graphics, "graphics-light-shafts") != nullptr);
@@ -289,10 +289,16 @@ int main() {
     CHECK(node(debug, "debug-tools-section") != nullptr);
     CHECK(action(debug, "debug-corpse-markers") != nullptr);
     CHECK(!action(debug, "debug-corpse-markers")->selected);
+    CHECK(action(debug, "debug-corpse-markers")->text ==
+          L"CORPSE ACTIONS AND DISTANCES: OFF");
     CHECK(action(debug, "debug-zed-markers") != nullptr);
     CHECK(action(debug, "debug-zed-markers")->selected);
+    CHECK(action(debug, "debug-zed-markers")->text ==
+          L"LIVING ZED DISTANCES: ON");
     CHECK(action(debug, "debug-corpse-physics-control") != nullptr);
     CHECK(action(debug, "debug-corpse-physics-control")->selected);
+    CHECK(action(debug, "debug-corpse-physics-control")->text ==
+          L"PHYSICS A/B: CONTROL");
     CHECK(action(debug, "diagnostics-open-data") != nullptr);
     CHECK(action(debug, "diagnostics-open-log") != nullptr);
     CHECK(action_help_text("debug-corpse-markers").has_value());
@@ -453,6 +459,25 @@ int main() {
             CHECK(help->size() >= 24);
         }
     }
+    auto rich_tooltip_layout = home;
+    const auto* target_slider = node(rich_tooltip_layout,
+                                     "settings-target-slider");
+    CHECK(target_slider != nullptr);
+    const DipRect target_slider_bounds = target_slider->bounds;
+    set_hover_tooltip(rich_tooltip_layout, target_slider, 1.0F);
+    const auto* rich_tooltip = node(rich_tooltip_layout, "hover-tooltip");
+    CHECK(rich_tooltip != nullptr);
+    CHECK(rich_tooltip->text.find(L"Target FPS") != std::wstring::npos);
+    CHECK(rich_tooltip->text.find(L" FPS") != std::wstring::npos);
+    CHECK(rich_tooltip->detail_text.size() >= 24);
+    CHECK(rich_tooltip->bounds.height >= 86.0F);
+    CHECK(rich_tooltip->bounds.height <= 132.0F);
+    CHECK(rich_tooltip->bounds.width >= 380.0F);
+    CHECK(rich_tooltip->bounds.width <= 480.0F);
+    CHECK(rich_tooltip->bounds.x >= rich_tooltip_layout.content.x);
+    CHECK(rich_tooltip->bounds.x + rich_tooltip->bounds.width <=
+          rich_tooltip_layout.content.x + rich_tooltip_layout.content.width);
+    CHECK(!intersects(rich_tooltip->bounds, target_slider_bounds));
     std::set<std::string> visible_action_ids;
     for (const auto* candidate_layout : tooltip_layouts) {
         for (const auto& item : candidate_layout->nodes) {

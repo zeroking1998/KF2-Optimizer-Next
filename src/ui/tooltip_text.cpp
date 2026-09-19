@@ -41,7 +41,6 @@ constexpr TooltipEntry kTooltips[]{
     {"settings-target-slider", L"Sets KF2's native FPS limit from 30 to 240. Adaptive uses the same target. An external driver limit or a screen refresh limit can still keep displayed FPS below it."},
     {"settings-corpses-slider", L"Sets the maximum corpse ceiling and saves it immediately. Adaptive may use fewer corpses under confirmed scene or frame-time pressure."},
 
-    {"graphics-display", L"Windowed is easy to switch away from. Borderless fullscreen keeps the desktop overlay visible. Exclusive fullscreen bypasses desktop overlays, so the app temporarily uses borderless fullscreen while the overlay is enabled and restores your selected mode after KF2 exits."},
     {"graphics-resolution", L"Sets the number of output pixels. Higher resolutions look sharper but increase GPU work and VRAM use."},
     {"graphics-overall-quality", L"Changes the main quality controls together. Higher presets improve detail and effects but increase CPU, GPU, and VRAM demand."},
     {"graphics-environment-detail", L"Higher values keep detailed scenery visible farther away, increasing CPU work, GPU work, and VRAM use."},

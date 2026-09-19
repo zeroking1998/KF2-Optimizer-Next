@@ -74,6 +74,12 @@ are visible immediately.
   to the authoritative saved value.
 - Information, warning, and error banners now use distinct semantic colors,
   and the compact status line has consistent horizontal spacing.
+- Tooltips now separate the control name, current slider value, and detailed
+  explanation in a larger adaptive card. Refined easing, navigation emphasis,
+  and metric-card typography improve readability without adding a UI runtime.
+- Removed the redundant Display control from Game graphics because protected
+  Optimizer sessions already use borderless fullscreen. Display-mode reading,
+  validation, and safe session handling remain internal.
 - Synchronized the Optimizer's Game graphics page with KF2's own saved menu
   values. User-owned graphics and FleX selections survive protected sessions,
   settings restarts, app restarts, and exact post-session restoration.

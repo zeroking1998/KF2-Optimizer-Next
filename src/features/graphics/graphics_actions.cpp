@@ -19,7 +19,6 @@ app::runtime::DispatchResult cycle(app::UiRuntime& runtime,
         return cycle(runtime, game::VideoOption::option);                     \
     }
 
-KF2_CYCLE_HANDLER(display, display)
 KF2_CYCLE_HANDLER(resolution, resolution)
 KF2_CYCLE_HANDLER(overall_quality, overall_quality)
 KF2_CYCLE_HANDLER(environment_detail, environment_detail)

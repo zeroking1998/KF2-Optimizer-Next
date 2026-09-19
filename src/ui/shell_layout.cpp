@@ -12,16 +12,30 @@
 namespace kf2::ui {
 namespace {
 
-constexpr float kHeaderHeight = 72.0F;
-constexpr float kStatusHeight = 34.0F;
-constexpr float kMetricsHeight = 100.0F;
-constexpr float kSidebarWidth = 210.0F;
+constexpr float kHeaderHeight = 78.0F;
+constexpr float kStatusHeight = 38.0F;
+constexpr float kMetricsHeight = 112.0F;
+constexpr float kSidebarWidth = 218.0F;
 constexpr float kFooterHeight = 0.0F;
-constexpr float kActionGap = 12.0F;
-constexpr float kActionHeight = 44.0F;
+constexpr float kActionGap = 14.0F;
+constexpr float kActionHeight = 46.0F;
 constexpr float kActionStride = kActionHeight + kActionGap;
-constexpr float kTooltipHeight = 64.0F;
-constexpr float kSliderHeight = 88.0F;
+constexpr float kTooltipMinimumHeight = 86.0F;
+constexpr float kTooltipMaximumHeight = 132.0F;
+constexpr float kSliderHeight = 94.0F;
+
+float tooltip_height(std::wstring_view text, float width) noexcept {
+    // DirectWrite performs the final wrapping. This conservative estimate keeps
+    // detailed explanations readable without making every tooltip oversized.
+    constexpr float body_line_height = 18.0F;
+    const float approximate_characters_per_line =
+        std::max(32.0F, (width - 28.0F) / 6.8F);
+    const float body_lines = std::max(
+        1.0F, std::ceil(static_cast<float>(text.size()) /
+                        approximate_characters_per_line));
+    return std::clamp(52.0F + body_lines * body_line_height,
+                      kTooltipMinimumHeight, kTooltipMaximumHeight);
+}
 
 std::wstring status_text(const UiModel& model) {
     const auto& status = model.status();
@@ -160,9 +174,9 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
     result.sidebar = {0, main_top, sidebar_width,
                       std::max(0.0F, footer_y - main_top)};
     result.footer = {0, footer_y, width, std::min(kFooterHeight, height)};
-    result.content = {sidebar_width + 16.0F, main_top + 12.0F,
-                      std::max(0.0F, width - sidebar_width - 28.0F),
-                      std::max(0.0F, footer_y - main_top - 24.0F)};
+    result.content = {sidebar_width + 20.0F, main_top + 16.0F,
+                      std::max(0.0F, width - sidebar_width - 36.0F),
+                      std::max(0.0F, footer_y - main_top - 30.0F)};
 
     const float preferred_action_width = 230.0F;
     const std::size_t maximum_columns = 3U;
@@ -191,11 +205,11 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         ? width - 12.0F - header_actions_width
         : width;
     result.nodes.push_back({"brand-mark", SemanticRole::brand,
-                            {22.0F, 8.0F, 58.0F, 54.0F}, L"///"});
+                            {24.0F, 11.0F, 58.0F, 54.0F}, L"///"});
     std::wstring brand = L"KF2 OPTIMIZER";
     result.nodes.push_back({"brand", SemanticRole::brand,
-                            {92.0F, 18.0F,
-                             std::max(0.0F, header_actions_left - 108.0F), 36.0F},
+                            {94.0F, 21.0F,
+                             std::max(0.0F, header_actions_left - 110.0F), 36.0F},
                             std::move(brand)});
 
     if (show_global_actions) {
@@ -214,14 +228,14 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         float x = header_actions_left;
         result.nodes.push_back({
             "header-update", SemanticRole::action,
-            {x, 14.0F, header_action_widths[0], 42.0F}, update_text,
+            {x, 17.0F, header_action_widths[0], 44.0F}, update_text,
             std::nullopt, false, model.focused_action() == update_id,
             update_enabled, update_id, std::nullopt,
             status.update_newer_version_known});
         x += header_action_widths[0] + header_action_gap;
         result.nodes.push_back({
             "header-auto-updates", SemanticRole::action,
-            {x, 14.0F, header_action_widths[1], 42.0F},
+            {x, 17.0F, header_action_widths[1], 44.0F},
             status.automatic_update_checks
                 ? L"✓ UPDATE CHECK" : L"UPDATE CHECK",
             std::nullopt, status.automatic_update_checks,
@@ -231,19 +245,21 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         x += header_action_widths[1] + header_action_gap;
         result.nodes.push_back({
             "header-repair", SemanticRole::action,
-            {x, 14.0F, header_action_widths[2], 42.0F}, L"REPAIR",
+            {x, 17.0F, header_action_widths[2], 44.0F}, L"REPAIR",
             std::nullopt, false,
             model.focused_action() == "header-repair",
             !status.update_installing, "header-repair"});
     }
 
-    constexpr float status_horizontal_padding = 12.0F;
+    constexpr float status_left_padding = 32.0F;
+    constexpr float status_right_padding = 12.0F;
     result.nodes.push_back({
         "status", SemanticRole::status,
-        {result.status_strip.x + status_horizontal_padding,
+        {result.status_strip.x + status_left_padding,
          result.status_strip.y,
          std::max(0.0F,
-                  result.status_strip.width - status_horizontal_padding * 2.0F),
+                  result.status_strip.width - status_left_padding -
+                      status_right_padding),
          result.status_strip.height},
         status_text(model)});
 
@@ -501,12 +517,11 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         cursor += graphics_section_advance;
         grid_base = cursor;
         action_index = 0;
-        graphics_action("graphics-display", L"Display", 0);
         graphics_action("graphics-resolution", L"Resolution", 1);
         cursor = grid_base +
             static_cast<float>((action_index + graphics_columns - 1) /
                                graphics_columns) * graphics_action_stride + 4.0F;
-        add_section("graphics-display-info",
+        add_section("graphics-aspect-ratio",
                     L"Aspect ratio:  " + status.graphics_aspect_ratio,
                     cursor);
         cursor += 26.0F;
@@ -698,17 +713,17 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         action_index = 0;
         add_action("debug-corpse-markers",
                    status.debug_corpse_markers
-                       ? L"✓ CORPSE ACTIONS AND DISTANCES"
-                       : L"CORPSE ACTIONS AND DISTANCES",
+                       ? L"CORPSE ACTIONS AND DISTANCES: ON"
+                       : L"CORPSE ACTIONS AND DISTANCES: OFF",
                    true, status.debug_corpse_markers);
         add_action("debug-zed-markers",
                    status.debug_zed_markers
-                       ? L"✓ LIVING ZED DISTANCES"
-                       : L"LIVING ZED DISTANCES",
+                       ? L"LIVING ZED DISTANCES: ON"
+                       : L"LIVING ZED DISTANCES: OFF",
                    true, status.debug_zed_markers);
         add_action("debug-corpse-physics-control",
                    status.debug_corpse_physics_control
-                       ? L"✓ PHYSICS A/B: CONTROL"
+                       ? L"PHYSICS A/B: CONTROL"
                        : L"PHYSICS A/B: CANDIDATE",
                    true, status.debug_corpse_physics_control);
         cursor = grid_base +
@@ -812,21 +827,43 @@ void set_hover_tooltip(ShellLayoutResult& layout,
     const auto help = action_help_text(*target_copy->action_id);
     if (!help) return;
 
-    const float width = std::min(520.0F, layout.content.width);
+    const float width = std::min(
+        layout.content.width,
+        std::clamp(340.0F + static_cast<float>(help->size()) * 0.55F,
+                   380.0F, 480.0F));
+    const float height = tooltip_height(*help, width);
     const float maximum_x = layout.content.x + layout.content.width - width;
-    const float x = std::clamp(target_copy->bounds.x, layout.content.x,
-                               maximum_x);
-    float y = target_copy->bounds.y + target_copy->bounds.height + 6.0F;
-    if (y + kTooltipHeight > layout.content.y + layout.content.height) {
-        y = target_copy->bounds.y - kTooltipHeight - 6.0F;
+    const float target_center_x = target_copy->bounds.x +
+                                  target_copy->bounds.width * 0.5F;
+    const float x = std::clamp(target_center_x - width * 0.5F,
+                               layout.content.x, maximum_x);
+    constexpr float gap = 10.0F;
+    const float viewport_top = layout.content.y;
+    const float viewport_bottom = layout.content.y + layout.content.height;
+    const float below = target_copy->bounds.y + target_copy->bounds.height + gap;
+    const float above = target_copy->bounds.y - height - gap;
+    const bool fits_below = below + height <= viewport_bottom;
+    const bool fits_above = above >= viewport_top;
+    float y = below;
+    if (!fits_below && fits_above) {
+        y = above;
+    } else if (!fits_below && !fits_above) {
+        const float room_below = viewport_bottom - below;
+        const float room_above = target_copy->bounds.y - gap - viewport_top;
+        y = room_above >= room_below ? above : below;
     }
-    y = std::clamp(y, layout.content.y,
-                   std::max(layout.content.y,
-                            layout.content.y + layout.content.height -
-                                kTooltipHeight));
-    layout.nodes.push_back({"hover-tooltip", SemanticRole::tooltip,
-                            {x, y, width, kTooltipHeight}, *help});
-    layout.nodes.back().opacity = std::clamp(opacity, 0.0F, 1.0F);
+    y = std::clamp(y, viewport_top,
+                   std::max(viewport_top, viewport_bottom - height));
+    std::wstring title = target_copy->text;
+    if (target_copy->slider) {
+        title += L"  •  " + std::to_wstring(target_copy->slider->value) +
+                 target_copy->slider->unit;
+    }
+    SemanticNode tooltip{"hover-tooltip", SemanticRole::tooltip,
+                         {x, y, width, height}, std::move(title)};
+    tooltip.detail_text = *help;
+    tooltip.opacity = std::clamp(opacity, 0.0F, 1.0F);
+    layout.nodes.push_back(std::move(tooltip));
 }
 
 }  // namespace kf2::ui
