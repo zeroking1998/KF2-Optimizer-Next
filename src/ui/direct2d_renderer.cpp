@@ -318,7 +318,15 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
             brush->SetColor(color(theme.surface_raised));
             target->FillRoundedRectangle(
                 {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get());
-            brush->SetColor(color(theme.warning));
+            const std::uint32_t notice_color =
+                node.role == SemanticRole::recovery_banner
+                    ? theme.warning
+                    : node.notice_severity == NoticeSeverity::error
+                        ? theme.error
+                        : node.notice_severity == NoticeSeverity::warning
+                            ? theme.warning
+                            : theme.info;
+            brush->SetColor(color(notice_color));
             target->DrawRoundedRectangle(
                 {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get(), 2.0F);
         } else if (node.role == SemanticRole::action) {
