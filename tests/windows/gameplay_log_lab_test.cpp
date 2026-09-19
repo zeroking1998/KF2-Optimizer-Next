@@ -212,6 +212,20 @@ int main() {
     CHECK(online_context_source.find("NM_ListenServer") != std::string::npos);
     CHECK(online_context_source.find("online_host_read_only") !=
           std::string::npos);
+    CHECK(online_context_source.find(
+        "function ReportOnlineCorpseCapability(WorldInfo CurrentWorld)") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "KFGoreManager(CurrentWorld.MyGoreEffectManager)") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "KF2OPT_ONLINE_CORPSE state=available") != std::string::npos);
+    CHECK(online_context_source.find(
+        "KF2OPT_ONLINE_CORPSE state=populated") != std::string::npos);
+    CHECK(online_context_source.find(
+        "GoreManager.CorpsePool.Length > 0") != std::string::npos);
+    CHECK(online_context_source.find("local_only=true readback=verified") !=
+          std::string::npos);
     CHECK(online_context_source.find("DynamicActors") == std::string::npos);
     CHECK(online_context_source.find(
         "PrimaryController.Spawn(\n"

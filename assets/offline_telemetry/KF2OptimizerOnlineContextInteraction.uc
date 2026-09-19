@@ -11,6 +11,8 @@ var KF2OptimizerAdaptiveGraphicsState OnlineGraphicsState;
 var int OnlineGraphicsLastSequence;
 var bool bOnlineGraphicsEnabled;
 var bool bOnlineGraphicsListenerStarted;
+var bool bOnlineCorpseCapabilityReported;
+var bool bOnlineCorpsePoolObserved;
 
 function bool ValidOnlineGraphicsToken(string Candidate)
 {
@@ -121,6 +123,37 @@ function EnsureOnlineGraphicsListener(PlayerController PrimaryController)
     bOnlineGraphicsListenerStarted = true;
 }
 
+function ReportOnlineCorpseCapability(WorldInfo CurrentWorld)
+{
+    local KFGoreManager GoreManager;
+
+    if (CurrentWorld == None)
+    {
+        return;
+    }
+    GoreManager = KFGoreManager(CurrentWorld.MyGoreEffectManager);
+    if (GoreManager == None)
+    {
+        `log("KF2OPT_ONLINE_CORPSE state=unavailable reason=no_gore_manager"$
+             " local_only=true readback=verified");
+        return;
+    }
+    if (!bOnlineCorpseCapabilityReported)
+    {
+        bOnlineCorpseCapabilityReported = true;
+        `log("KF2OPT_ONLINE_CORPSE state=available pool="$
+             GoreManager.CorpsePool.Length$" maximum="$GoreManager.MaxDeadBodies$
+             " local_only=true readback=verified");
+    }
+    if (!bOnlineCorpsePoolObserved && GoreManager.CorpsePool.Length > 0)
+    {
+        bOnlineCorpsePoolObserved = true;
+        `log("KF2OPT_ONLINE_CORPSE state=populated pool="$
+             GoreManager.CorpsePool.Length$" maximum="$GoreManager.MaxDeadBodies$
+             " local_only=true readback=verified");
+    }
+}
+
 function RestoreOnlineGraphicsAtMainMenu()
 {
     if (OnlineGraphicsState != None &&
@@ -139,6 +172,8 @@ function RestoreOnlineGraphicsAtMainMenu()
     bOnlineGraphicsEnabled = false;
     OnlineGraphicsLastSequence = 0;
     bOnlineGraphicsListenerStarted = false;
+    bOnlineCorpseCapabilityReported = false;
+    bOnlineCorpsePoolObserved = false;
 }
 
 function ReportSessionContext(
@@ -189,6 +224,8 @@ event Tick(float DeltaTime)
     {
         LastReportedContext = "";
         bOnlineGraphicsListenerStarted = false;
+        bOnlineCorpseCapabilityReported = false;
+        bOnlineCorpsePoolObserved = false;
     }
     LastObservedRealTime = CurrentWorld.RealTimeSeconds;
     MapName = CurrentWorld.GetMapName(true);
@@ -203,12 +240,14 @@ event Tick(float DeltaTime)
         ReportSessionContext(
             "online_client_read_only", "NM_Client", MapName);
         EnsureOnlineGraphicsListener(PrimaryController);
+        ReportOnlineCorpseCapability(CurrentWorld);
     }
     else if (CurrentWorld.NetMode == NM_ListenServer)
     {
         ReportSessionContext(
             "online_host_read_only", "NM_ListenServer", MapName);
         EnsureOnlineGraphicsListener(PrimaryController);
+        ReportOnlineCorpseCapability(CurrentWorld);
     }
     else if (CurrentWorld.NetMode == NM_Standalone)
     {
