@@ -61,6 +61,11 @@ std::wstring status_text(const UiModel& model) {
              << *presented_fps << L" FPS";
         text += live.str();
     }
+    if (status.prewarm_active) {
+        text += L"   •   Warm-up " +
+                std::to_wstring(std::clamp(status.prewarm_percent, 0, 100)) +
+                L"%";
+    }
     return text;
 }
 

@@ -109,6 +109,12 @@ private:
     std::optional<telemetry_pipeline::TelemetryPresentation> presentation_;
 };
 
+int prewarm_percent(const game::StartupPrewarmSnapshot& snapshot) noexcept {
+    if (snapshot.bytes_planned == 0) return 0;
+    return static_cast<int>(std::min<std::uint64_t>(
+        100, snapshot.bytes_read * 100 / snapshot.bytes_planned));
+}
+
 }  // namespace
 
 std::uint64_t UiRuntime::monotonic_ns() const {
@@ -131,6 +137,7 @@ void UiRuntime::runtime_tick() {
     poll_update_check();
     poll_update_install();
     const auto now = monotonic_ns();
+    poll_map_prewarm();
     if ((model.selected() == ui::Destination::graphics ||
          (session_config_snapshot && session_video_runtime)) &&
         (last_video_config_poll_ns == 0 || now < last_video_config_poll_ns ||
@@ -156,15 +163,36 @@ void UiRuntime::start_startup_prewarm() {
         return;
     }
     startup_prewarm_announced = false;
-    startup_prewarmer.start(installation->install_root);
+    game::StartupPrewarmOptions options;
+    startup_prewarmer.start(installation->install_root, std::move(options));
 }
 
 void UiRuntime::poll_startup_prewarm() {
-    if (startup_prewarm_announced) return;
     const auto current = startup_prewarmer.snapshot();
+    if (!game_process && (current.state == game::StartupPrewarmState::waiting ||
+                          current.state == game::StartupPrewarmState::running)) {
+        auto status = model.status();
+        const int percent = prewarm_percent(current);
+        if (!status.prewarm_active || status.prewarm_percent != percent ||
+            !status.prewarm_map.empty()) {
+            status.prewarm_active = true;
+            status.prewarm_percent = percent;
+            status.prewarm_map.clear();
+            model.set_status(std::move(status));
+            invalidate();
+        }
+    }
+    if (startup_prewarm_announced) return;
     switch (current.state) {
         case game::StartupPrewarmState::complete:
             startup_prewarm_announced = true;
+            {
+                auto status = model.status();
+                status.prewarm_active = false;
+                status.prewarm_percent = 100;
+                status.prewarm_map.clear();
+                model.set_status(std::move(status));
+            }
             events->append({0, diagnostics::Severity::info,
                 "STARTUP_PREWARM_COMPLETED",
                 L"Prepared " + std::to_wstring(current.files_read) +
@@ -175,6 +203,12 @@ void UiRuntime::poll_startup_prewarm() {
             break;
         case game::StartupPrewarmState::cancelled:
             startup_prewarm_announced = true;
+            {
+                auto status = model.status();
+                status.prewarm_active = false;
+                status.prewarm_map.clear();
+                model.set_status(std::move(status));
+            }
             if (current.bytes_read != 0) {
                 events->append({0, diagnostics::Severity::info,
                     "STARTUP_PREWARM_CANCELLED",
@@ -193,6 +227,104 @@ void UiRuntime::poll_startup_prewarm() {
         default:
             break;
     }
+}
+
+void UiRuntime::poll_map_prewarm() {
+    const bool menu_window = installation && game_process &&
+        game_log_session && game_log_session->main_menu;
+    const bool offline_rotation_window = installation && game_process &&
+        game_log_session && !game_log_session->main_menu &&
+        game_log_session->phase == game::GameLogPhase::match_ended &&
+        game_log_session->net_mode == "NM_Standalone" &&
+        game_log_session->game_class ==
+            "KFGameContent.KFGameInfo_Survival";
+    if (!menu_window && !offline_rotation_window) {
+        if (!map_prewarm_active.empty() || !map_prewarm_pending.empty()) {
+            stop_map_prewarm_for_load();
+        }
+        return;
+    }
+
+    if (!map_prewarm_observed.empty() &&
+        map_prewarm_observed != map_prewarm_last_attempted &&
+        map_prewarm_observed != map_prewarm_active &&
+        map_prewarm_observed != map_prewarm_pending) {
+        map_prewarm_pending = map_prewarm_observed;
+        if (!map_prewarm_active.empty()) map_prewarmer.request_stop();
+    }
+
+    const auto current = map_prewarmer.snapshot();
+    const bool terminal = current.state == game::StartupPrewarmState::idle ||
+        current.state == game::StartupPrewarmState::complete ||
+        current.state == game::StartupPrewarmState::cancelled ||
+        current.state == game::StartupPrewarmState::skipped_unknown_storage ||
+        current.state == game::StartupPrewarmState::skipped_low_memory ||
+        current.state == game::StartupPrewarmState::skipped_no_files;
+    if (!map_prewarm_active.empty() && terminal) {
+        const auto completed_map = std::exchange(map_prewarm_active, {});
+        auto status = model.status();
+        status.prewarm_active = false;
+        status.prewarm_map.clear();
+        status.prewarm_percent = current.state ==
+            game::StartupPrewarmState::complete ? 100 : 0;
+        model.set_status(std::move(status));
+        if (current.state == game::StartupPrewarmState::complete) {
+            events->append({0, diagnostics::Severity::info,
+                "MAP_PREWARM_COMPLETED",
+                L"Prepared " + completed_map + L" (" +
+                    std::to_wstring(current.bytes_read / (1024ULL * 1024ULL)) +
+                    L" MiB) in the Windows file cache before map loading",
+                L"performance"});
+        }
+        invalidate();
+    } else if (!map_prewarm_active.empty()) {
+        auto status = model.status();
+        const int percent = prewarm_percent(current);
+        if (!status.prewarm_active || status.prewarm_percent != percent ||
+            status.prewarm_map != map_prewarm_active) {
+            status.prewarm_active = true;
+            status.prewarm_percent = percent;
+            status.prewarm_map = map_prewarm_active;
+            model.set_status(std::move(status));
+            invalidate();
+        }
+    }
+
+    if (terminal && map_prewarm_active.empty() &&
+        !map_prewarm_pending.empty()) {
+        map_prewarm_active = std::exchange(map_prewarm_pending, {});
+        map_prewarm_last_attempted = map_prewarm_active;
+        game::StartupPrewarmOptions options;
+        options.idle_delay = std::chrono::milliseconds{0};
+        options.map_name = map_prewarm_active;
+        options.include_common_startup_files = false;
+        map_prewarmer.start(installation->install_root, std::move(options));
+        auto status = model.status();
+        status.prewarm_active = true;
+        status.prewarm_percent = 0;
+        status.prewarm_map = map_prewarm_active;
+        model.set_status(std::move(status));
+        invalidate();
+    }
+}
+
+void UiRuntime::observe_map_prewarm_selection(std::wstring map_name) {
+    if (map_name.empty() || map_name == map_prewarm_observed) return;
+    map_prewarm_observed = std::move(map_name);
+}
+
+void UiRuntime::stop_map_prewarm_for_load() {
+    map_prewarmer.request_stop();
+    map_prewarm_pending.clear();
+    map_prewarm_active.clear();
+    map_prewarm_last_attempted.clear();
+    map_prewarm_observed.clear();
+    auto status = model.status();
+    status.prewarm_active = false;
+    status.prewarm_percent = 0;
+    status.prewarm_map.clear();
+    model.set_status(std::move(status));
+    invalidate();
 }
 
 void UiRuntime::system_resume() {

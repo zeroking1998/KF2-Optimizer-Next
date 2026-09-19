@@ -254,6 +254,7 @@ std::wstring query_hardware_summary() {
 
 UiRuntime::~UiRuntime() {
     startup_prewarmer.stop_and_wait();
+    map_prewarmer.stop_and_wait();
     resource_telemetry_worker.stop();
     static_cast<void>(restore_live_adaptive_quality(
         L"KF2 Optimizer closed"));
