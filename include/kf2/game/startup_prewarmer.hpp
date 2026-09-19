@@ -42,6 +42,8 @@ struct StartupPrewarmOptions {
 
 [[nodiscard]] std::uint64_t startup_prewarm_budget(
     StorageKind storage, std::uint64_t available_memory_bytes) noexcept;
+[[nodiscard]] std::uint64_t startup_prewarm_file_budget(
+    std::uint64_t file_size_bytes) noexcept;
 [[nodiscard]] std::vector<StartupPrewarmFile> build_startup_prewarm_plan(
     const std::filesystem::path& install_root, StorageKind storage,
     std::uint64_t available_memory_bytes);
