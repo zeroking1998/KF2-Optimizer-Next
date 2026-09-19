@@ -97,6 +97,8 @@ $adaptiveListenerSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerAdaptiveControlListener.uc'
 $adaptiveConnectionSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerAdaptiveControlConnection.uc'
+$onlineGraphicsConnectionSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerOnlineGraphicsControlConnection.uc'
 $adaptiveGraphicsSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerAdaptiveGraphics.uc'
 $adaptiveGraphicsStateSource = Join-Path $projectRoot `
@@ -108,7 +110,9 @@ foreach ($required in @($editorPath, $configPath,
                          $graphicsViewportSource, $graphicsInteractionSource,
                          $onlineContextInteractionSource,
                          $adaptiveListenerSource,
-                         $adaptiveConnectionSource, $adaptiveGraphicsSource,
+                         $adaptiveConnectionSource,
+                         $onlineGraphicsConnectionSource,
+                         $adaptiveGraphicsSource,
                          $adaptiveGraphicsStateSource)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Required KF2 telemetry build input is missing: $required"
@@ -188,6 +192,8 @@ try {
         (Join-Path $classesRoot 'KF2OptimizerAdaptiveControlListener.uc')
     Copy-Item -LiteralPath $adaptiveConnectionSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerAdaptiveControlConnection.uc')
+    Copy-Item -LiteralPath $onlineGraphicsConnectionSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerOnlineGraphicsControlConnection.uc')
     # KFEditor uses source timestamps for its incremental make decision. Touch
     # only the disposable staging copies so a missing output is really rebuilt.
     # Copying the bootstrap package can give it the current timestamp on some
