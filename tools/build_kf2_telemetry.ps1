@@ -207,10 +207,11 @@ try {
     }
     New-Item -ItemType Directory -Path (Split-Path -Parent $compiledPath) `
         -Force | Out-Null
-    # The SDK mod compiler reads source from KFGame\Src. Keep the debug script
-    # symbol enabled because the protected runtime protocol is carried by
-    # explicit KF2OPT_* Launch.log receipts. A final-release script compile
-    # removes those receipts and would make every live capability unverifiable.
+    # The SDK mod compiler reads source from KFGame\Src. Do not enable its
+    # optional debug-symbol payload: this package has no DEBUG-conditional
+    # source, and the additional metadata only increases the shipped module.
+    # Also do not use final-release compilation because that removes the
+    # KF2OPT_* Launch.log receipts required by the protected runtime protocol.
     # Remove loadable binary copies transactionally so only staged source wins.
     if (Test-Path -LiteralPath $shippingSeedPath -PathType Leaf) {
         Remove-Item -LiteralPath $shippingSeedPath -Force
@@ -222,7 +223,7 @@ try {
         Remove-Item -LiteralPath $publishedPath -Force
     }
     $process = Start-Process -FilePath $editorPath -ArgumentList @(
-        'make', '-debug', '-full', '-user', '-installed', '-modini',
+        'make', '-full', '-user', '-installed', '-modini',
         '-unattended', '-nopause'
     ) -WorkingDirectory (Split-Path -Parent $editorPath) -Wait -PassThru `
         -WindowStyle Hidden
