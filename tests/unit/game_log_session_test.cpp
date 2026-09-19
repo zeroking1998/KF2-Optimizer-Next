@@ -300,6 +300,30 @@ int main() {
         "state=online_client_read_only net_mode=NM_Standalone "
         "map=KF-BioticsLab\n").has_value());
 
+    GameLogSessionParser public_server_stream;
+    const auto public_server_map = public_server_stream.feed(
+        "[0039.13] Log: LoadMap: 192.169.93.205:60011/"
+        "KF-SHOPPINGSPREE?Name=Player?Team=255?"
+        "Mutator=KF2OptimizerTelemetry.KF2OptimizerTelemetryMutator?"
+        "game=kfgamecontent.KFGameInfo_Survival\n");
+    CHECK(public_server_map.has_value());
+    CHECK(public_server_map && public_server_map->map == "KF-SHOPPINGSPREE");
+    CHECK(public_server_map && !public_server_map->main_menu);
+    const auto public_server_context = public_server_stream.feed(
+        "[0040.93] ScriptLog: KF2OPT_SESSION_CONTEXT schema=1 "
+        "state=online_client_read_only net_mode=NM_Client "
+        "map=KF-SHOPPINGSPREE\n",
+        7'000'000'000ULL);
+    CHECK(public_server_context.has_value());
+    CHECK(public_server_context &&
+          public_server_context->optimizer_online_read_only);
+    const auto public_server_bridge = public_server_stream.feed(
+        "[0040.93] ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready "
+        "port=64298\n");
+    CHECK(public_server_bridge.has_value());
+    CHECK(public_server_bridge &&
+          public_server_bridge->telemetry_control_port == 64298);
+
     const auto remaining = stream.feed(
         "[0060.10] ScriptLog: @@@@ ZED COUNT DEBUG: "
         "MyKFGRI.AIRemaining = 93\n", 1'000'000'000ULL);

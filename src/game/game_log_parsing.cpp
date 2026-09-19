@@ -206,7 +206,16 @@ std::optional<GameLogSession> parse_load_map_line(std::string_view line) {
     if (payload.empty() || payload.size() > detail::kMaximumLineBytes) return std::nullopt;
 
     const auto first_separator = payload.find('?');
-    const auto map = payload.substr(0, first_separator);
+    auto map = payload.substr(0, first_separator);
+    if (const auto server_separator = map.rfind('/');
+        server_separator != std::string_view::npos) {
+        const auto server = map.substr(0, server_separator);
+        map.remove_prefix(server_separator + 1);
+        if (server.find(':') == std::string_view::npos ||
+            !detail::safe_token(server, 256, true)) {
+            return std::nullopt;
+        }
+    }
     if (!detail::safe_token(map, 128)) return std::nullopt;
 
     GameLogSession result;
