@@ -526,7 +526,8 @@ select_adaptive_runtime_control(
         if (frame.offline_gameplay) {
             sample.session_class =
                 optimizer::AdaptiveSessionClass::verified_offline;
-        } else if (frame.gameplay->net_mode) {
+        } else if (frame.gameplay->net_mode &&
+                   frame.gameplay->optimizer_online_read_only) {
             sample.session_class =
                 frame.gameplay->net_mode->find("Listen") != std::string::npos
                     ? optimizer::AdaptiveSessionClass::host_or_listen_server

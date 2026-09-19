@@ -438,6 +438,13 @@ int main() {
     auto online = frame;
     online.offline_gameplay = false;
     online.gameplay->net_mode = "NM_Client";
+    const auto unverified_online_sample =
+        build_adaptive_sample(online, context).sample;
+    CHECK(unverified_online_sample.session_class ==
+          optimizer::AdaptiveSessionClass::unknown);
+    online.gameplay->optimizer_online_read_only = true;
+    online.gameplay->optimizer_session_context_observed_ns =
+        online.observed_at_ns;
     const auto online_sample = build_adaptive_sample(online, context).sample;
     CHECK(online_sample.session_class ==
           optimizer::AdaptiveSessionClass::verified_online);

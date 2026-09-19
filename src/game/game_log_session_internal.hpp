@@ -10,6 +10,12 @@
 
 namespace kf2::game::detail {
 
+struct OptimizerSessionContextReceipt {
+    std::string_view state;
+    std::string_view net_mode;
+    std::string_view map;
+};
+
 inline constexpr std::size_t kMaximumLineBytes = 16 * 1024;
 
 [[nodiscard]] bool equals_ascii_case_insensitive(
@@ -22,6 +28,8 @@ inline constexpr std::size_t kMaximumLineBytes = 16 * 1024;
     std::string_view line);
 [[nodiscard]] std::optional<GameplayUiContext> parse_gameplay_ui_context_line(
     std::string_view line);
+[[nodiscard]] std::optional<OptimizerSessionContextReceipt>
+parse_optimizer_session_context_line(std::string_view line);
 [[nodiscard]] std::optional<double> parse_seconds_after(
     std::string_view line, std::string_view marker);
 [[nodiscard]] std::optional<bool> apply_offline_telemetry_line(

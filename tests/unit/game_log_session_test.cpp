@@ -277,6 +277,28 @@ int main() {
         "[0052.80] ScriptLog: WI.NetMode:  NM_Client\n");
     CHECK(early_online.has_value());
     CHECK(early_online && !early_online->telemetry_control_port.has_value());
+    CHECK(early_online && !early_online->optimizer_online_read_only);
+    // KF2 commonly keeps the main-menu NM_Standalone value and emits no
+    // WI.NetMode line after joining a server. The process-local receipt must
+    // replace that stale value for the same active map.
+    const auto stale_menu_mode = early_bridge_stream.feed(
+        "[0052.805] ScriptLog: WI.NetMode:  NM_Standalone\n");
+    CHECK(stale_menu_mode.has_value());
+    CHECK(stale_menu_mode && stale_menu_mode->net_mode == "NM_Standalone");
+    const auto online_provider = early_bridge_stream.feed(
+        "[0052.81] ScriptLog: KF2OPT_SESSION_CONTEXT schema=1 "
+        "state=online_client_read_only net_mode=NM_Client map=KF-BioticsLab\n",
+        6'000'000'000ULL);
+    CHECK(online_provider.has_value());
+    CHECK(online_provider && online_provider->optimizer_online_read_only);
+    CHECK(online_provider && online_provider->net_mode == "NM_Client");
+    CHECK(online_provider &&
+          online_provider->optimizer_session_context_observed_ns ==
+              6'000'000'000ULL);
+    CHECK(!early_bridge_stream.feed(
+        "[0052.82] ScriptLog: KF2OPT_SESSION_CONTEXT schema=1 "
+        "state=online_client_read_only net_mode=NM_Standalone "
+        "map=KF-BioticsLab\n").has_value());
 
     const auto remaining = stream.feed(
         "[0060.10] ScriptLog: @@@@ ZED COUNT DEBUG: "

@@ -72,6 +72,34 @@ std::optional<GameplayUiContext> parse_gameplay_ui_context_line(
     return std::nullopt;
 }
 
+std::optional<OptimizerSessionContextReceipt>
+parse_optimizer_session_context_line(std::string_view line) {
+    constexpr std::string_view marker =
+        "KF2OPT_SESSION_CONTEXT schema=1 state=";
+    constexpr std::string_view net_marker = " net_mode=";
+    constexpr std::string_view map_marker = " map=";
+    const auto marker_offset = line.find(marker);
+    if (marker_offset == std::string_view::npos) return std::nullopt;
+    const auto state_start = marker_offset + marker.size();
+    const auto net_offset = line.find(net_marker, state_start);
+    if (net_offset == std::string_view::npos) return std::nullopt;
+    const auto map_offset = line.find(map_marker, net_offset + net_marker.size());
+    if (map_offset == std::string_view::npos) return std::nullopt;
+    const auto state = line.substr(state_start, net_offset - state_start);
+    const auto net_mode = line.substr(
+        net_offset + net_marker.size(),
+        map_offset - (net_offset + net_marker.size()));
+    auto map = line.substr(map_offset + map_marker.size());
+    const auto delimiter = map.find_first_of(" \t\r\n");
+    if (delimiter != std::string_view::npos) map = map.substr(0, delimiter);
+    const bool client = state == "online_client_read_only" &&
+        net_mode == "NM_Client";
+    const bool host = state == "online_host_read_only" &&
+        net_mode == "NM_ListenServer";
+    if ((!client && !host) || !safe_token(map, 128)) return std::nullopt;
+    return OptimizerSessionContextReceipt{state, net_mode, map};
+}
+
 std::optional<double> parse_real(std::string_view text) {
     double value = 0.0;
     const auto parsed = std::from_chars(

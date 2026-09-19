@@ -91,6 +91,8 @@ $graphicsViewportSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerGraphicsViewport.uc'
 $graphicsInteractionSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerGraphicsInteraction.uc'
+$onlineContextInteractionSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerOnlineContextInteraction.uc'
 $adaptiveListenerSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerAdaptiveControlListener.uc'
 $adaptiveConnectionSource = Join-Path $projectRoot `
@@ -104,6 +106,7 @@ foreach ($required in @($editorPath, $configPath,
                          $probeSource,
                          $mutatorSource, $interactionSource,
                          $graphicsViewportSource, $graphicsInteractionSource,
+                         $onlineContextInteractionSource,
                          $adaptiveListenerSource,
                          $adaptiveConnectionSource, $adaptiveGraphicsSource,
                          $adaptiveGraphicsStateSource)) {
@@ -175,6 +178,8 @@ try {
         (Join-Path $classesRoot 'KF2OptimizerGraphicsViewport.uc')
     Copy-Item -LiteralPath $graphicsInteractionSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerGraphicsInteraction.uc')
+    Copy-Item -LiteralPath $onlineContextInteractionSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerOnlineContextInteraction.uc')
     Copy-Item -LiteralPath $adaptiveGraphicsSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerAdaptiveGraphics.uc')
     Copy-Item -LiteralPath $adaptiveGraphicsStateSource -Destination `
