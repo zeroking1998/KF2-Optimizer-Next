@@ -111,6 +111,38 @@ workflow run. It contains the tested executable and license files, but not the
 locally SDK-compiled telemetry package. Official Releases use the complete
 package flow from the previous section.
 
+## Optional: profile-guided native build
+
+Profile-guided optimization (PGO) is an explicit two-phase MSVC workflow for
+the native `KF2Optimizer.exe`. It does not alter KF2 or the UnrealScript
+telemetry module, and normal contributor builds remain unchanged.
+
+First create a fresh instrumented build:
+
+```powershell
+pwsh -NoProfile -File ./tools/build_pgo.ps1 `
+  -Phase Instrument -ResetProfile
+```
+
+Run the printed executable through representative app workflows, including
+Home, graphics, overlay, diagnostics, update checking, launching KF2, and a
+normal shutdown. Then consume that exact training profile:
+
+```powershell
+pwsh -NoProfile -File ./tools/build_pgo.ps1 -Phase Optimize
+```
+
+Both phases use `out/pgo`; generated `.pgc` and `.pgd` files remain ignored.
+The Optimize phase lets the MSVC linker merge every completed training run
+into the selected profile database while relinking with `/USEPROFILE`.
+The instrumented directory also receives MSVC's `pgort140.dll` training
+runtime from the active compiler toolchain. The Optimize phase removes it;
+the final executable does not depend on that training-only DLL.
+The Optimize phase fails closed if no training data exists. Do not distribute
+a PGO build trained only on startup: unrepresentative profiles can make cold
+or rarely used paths worse. Validate the optimized executable against the
+normal Release build before selecting it for packaging.
+
 ## Common problems
 
 ### `pwsh` is not recognized
