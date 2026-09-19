@@ -9,7 +9,6 @@ namespace kf2::features::graphics {
 #define KF2_GRAPHICS_HANDLER(name) \
     app::runtime::DispatchResult name(app::UiRuntime&, const app::runtime::NoPayload&)
 
-KF2_GRAPHICS_HANDLER(display);
 KF2_GRAPHICS_HANDLER(resolution);
 KF2_GRAPHICS_HANDLER(overall_quality);
 KF2_GRAPHICS_HANDLER(environment_detail);
@@ -32,8 +31,7 @@ KF2_GRAPHICS_HANDLER(reset);
 
 #undef KF2_GRAPHICS_HANDLER
 
-inline constexpr std::array<app::runtime::ActionImplementation, 20> kActions{{
-    {app::runtime::ActionId::graphics_display, &app::runtime::bind_no_payload<&display>},
+inline constexpr std::array<app::runtime::ActionImplementation, 19> kActions{{
     {app::runtime::ActionId::graphics_resolution, &app::runtime::bind_no_payload<&resolution>},
     {app::runtime::ActionId::graphics_overall_quality, &app::runtime::bind_no_payload<&overall_quality>},
     {app::runtime::ActionId::graphics_environment_detail, &app::runtime::bind_no_payload<&environment_detail>},

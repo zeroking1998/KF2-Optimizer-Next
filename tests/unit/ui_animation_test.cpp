@@ -47,8 +47,9 @@ int main() {
     CHECK(interaction == 0.0F);
     CHECK(advance_interaction_strength(1.0F, false, false) == 0.0F);
     CHECK(control_press_scale(1.0F) < 1.0F);
-    CHECK(control_press_scale(1.0F) > 0.99F);
+    CHECK(control_press_scale(1.0F) > 0.98F);
     CHECK(std::abs(control_press_scale(0.0F) - 1.0F) < 0.0001F);
+    CHECK(control_press_scale(1.0F) < 0.99F);
 
     float hover = 0.0F;
     for (int frame = 0; frame < 34; ++frame) {
@@ -86,6 +87,7 @@ int main() {
     CHECK(page_motion_opacity(1.0F) == 1.0F);
     CHECK(page_motion_offset_x(0.0F) == 14.0F);
     CHECK(page_motion_offset_x(1.0F) == 0.0F);
+    CHECK(emphasized_motion(0.5F) > smooth_motion(0.5F));
 
     float navigation = 0.0F;
     for (int frame = 0; frame < 57; ++frame) {

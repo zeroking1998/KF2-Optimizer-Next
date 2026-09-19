@@ -33,6 +33,7 @@ inline constexpr float kUpdateGlowAnimationStep = 1.0F / 200.0F; // 1.6 s
     float current, bool animations_enabled) noexcept;
 
 [[nodiscard]] float smooth_motion(float progress) noexcept;
+[[nodiscard]] float emphasized_motion(float progress) noexcept;
 [[nodiscard]] float startup_logo_scale(float progress) noexcept;
 [[nodiscard]] float startup_title_offset_x(float progress) noexcept;
 [[nodiscard]] float page_motion_opacity(float progress) noexcept;

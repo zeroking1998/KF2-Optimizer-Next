@@ -23,8 +23,8 @@ int main() {
         "settings-target-slider",
     }};
 
-    CHECK(action_bindings().size() == 63);
-    CHECK(action_definitions().size() == 61);
+    CHECK(action_bindings().size() == 62);
+    CHECK(action_definitions().size() == 60);
     CHECK(control_definitions().size() == kExistingControls.size() + 4);
 
     for (const auto name : kExistingControls) {
@@ -86,7 +86,7 @@ int main() {
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::overlay)] == 8);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::diagnostics)] == 10);
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::backup)] == 1);
-    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::graphics)] == 20);
+    CHECK(feature_counts[static_cast<std::size_t>(FeatureId::graphics)] == 19);
     CHECK(!parse_action("graphics-apply").has_value());
     CHECK(feature_counts[static_cast<std::size_t>(FeatureId::advanced)] == 13);
 

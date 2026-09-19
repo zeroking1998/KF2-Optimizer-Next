@@ -10,7 +10,7 @@ namespace {
 constexpr AccessPolicy kRestricted = AccessPolicy::restricted_mode_allowed;
 constexpr AccessPolicy kNormal = AccessPolicy::normal_mode_required;
 
-constexpr std::array<ActionDefinition, 61> kActions{{
+constexpr std::array<ActionDefinition, 60> kActions{{
     {ActionId::diagnostics_export_support, "diagnostics-export-support", FeatureId::diagnostics, kRestricted},
     {ActionId::diagnostics_flex_restore, "diagnostics-flex-restore", FeatureId::diagnostics, kNormal},
     {ActionId::diagnostics_full_check, "diagnostics-full-check", FeatureId::diagnostics, kRestricted},
@@ -36,7 +36,6 @@ constexpr std::array<ActionDefinition, 61> kActions{{
     {ActionId::settings_updates_later, "settings-updates-later", FeatureId::settings, kRestricted},
     {ActionId::settings_updates_ignore, "settings-updates-ignore", FeatureId::settings, kRestricted},
     {ActionId::settings_adaptive_toggle, "settings-adaptive-toggle", FeatureId::settings, kNormal},
-    {ActionId::graphics_display, "graphics-display", FeatureId::graphics, kNormal},
     {ActionId::graphics_resolution, "graphics-resolution", FeatureId::graphics, kNormal},
     {ActionId::graphics_overall_quality, "graphics-overall-quality", FeatureId::graphics, kNormal},
     {ActionId::graphics_environment_detail, "graphics-environment-detail", FeatureId::graphics, kNormal},
@@ -74,7 +73,7 @@ constexpr std::array<ActionDefinition, 61> kActions{{
     {ActionId::debug_corpse_physics_control, "debug-corpse-physics-control", FeatureId::diagnostics, kNormal},
 }};
 
-constexpr std::array<ActionBinding, 63> kBindings{{
+constexpr std::array<ActionBinding, 62> kBindings{{
     {"dashboard-launch", ActionId::game_launch},
     {"diagnostics-backup", ActionId::optimizer_backup},
     {"diagnostics-export-support", ActionId::diagnostics_export_support},
@@ -98,7 +97,6 @@ constexpr std::array<ActionBinding, 63> kBindings{{
     {"settings-updates-later", ActionId::settings_updates_later},
     {"settings-updates-ignore", ActionId::settings_updates_ignore},
     {"settings-adaptive-toggle", ActionId::settings_adaptive_toggle},
-    {"graphics-display", ActionId::graphics_display},
     {"graphics-resolution", ActionId::graphics_resolution},
     {"graphics-overall-quality", ActionId::graphics_overall_quality},
     {"graphics-environment-detail", ActionId::graphics_environment_detail},
