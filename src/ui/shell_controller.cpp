@@ -160,7 +160,9 @@ void ShellController::on_system_resume() {
 
 void ShellController::on_pointer(platform::windows::PointerEvent event) {
     if (event.kind == platform::windows::PointerKind::capture_lost) {
+        const bool interrupted_slider = dragged_slider_id_.has_value();
         finish_slider_drag(std::nullopt);
+        suppress_orphaned_slider_release_ = interrupted_slider;
         return;
     }
     if (event.kind == platform::windows::PointerKind::leave) {
@@ -180,6 +182,7 @@ void ShellController::on_pointer(platform::windows::PointerEvent event) {
     }
     const auto* node = hit_test(layout_, {event.position.x_dip, event.position.y_dip});
     if (event.kind == platform::windows::PointerKind::press) {
+        suppress_orphaned_slider_release_ = false;
         pressed_node_id_ = node && node->enabled
             ? std::optional<std::string>{node->id} : std::nullopt;
         if (node != nullptr && node->enabled &&
@@ -226,6 +229,27 @@ void ShellController::on_pointer(platform::windows::PointerEvent event) {
     if (event.kind == platform::windows::PointerKind::release &&
         dragged_slider_id_) {
         finish_slider_drag(event.position.x_dip);
+        return;
+    }
+    if (event.kind == platform::windows::PointerKind::release &&
+        suppress_orphaned_slider_release_) {
+        suppress_orphaned_slider_release_ = false;
+        return;
+    }
+    // Window activation can consume the matching press. Keep click-to-jump
+    // reliable by committing an otherwise orphaned release over the track.
+    if (event.kind == platform::windows::PointerKind::release &&
+        !pressed_node_id_ && node != nullptr && node->enabled &&
+        node->role == SemanticRole::slider && node->action_id) {
+        const auto value = slider_value_at(*node, event.position.x_dip);
+        if (value) {
+            const std::string id = node->id;
+            const std::string action = *node->action_id;
+            begin_interaction(id);
+            apply(model_.focus_action(action));
+            commit_slider(id, *value);
+            end_interaction();
+        }
         return;
     }
     if (event.kind != platform::windows::PointerKind::release &&

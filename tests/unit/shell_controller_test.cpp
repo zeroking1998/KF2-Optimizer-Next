@@ -261,6 +261,33 @@ int main() {
     CHECK(!released_slider->pressed);
     CHECK(released_slider->interaction == 1.0F);
 
+    // Clicking a new position on the track without moving the pointer must
+    // commit exactly like a drag. This is the normal mouse path when users
+    // jump directly to a desired value.
+    last_slider.clear();
+    last_slider_value = -1;
+    const float click_x = target_bounds.x + target_bounds.width * 0.50F;
+    controller.on_pointer(
+        {PointerKind::press, {click_x, drag_y}, 0});
+    controller.on_pointer(
+        {PointerKind::release, {click_x, drag_y}, 0});
+    CHECK(last_slider == "settings-target-slider");
+    CHECK(last_slider_value >= 130);
+    CHECK(last_slider_value <= 140);
+
+    // Windows can activate an unfocused top-level window without delivering
+    // the matching press to the controller. A release over the track must
+    // still perform the same click-to-jump commit when no other press exists.
+    last_slider.clear();
+    last_slider_value = -1;
+    const float activation_click_x =
+        target_bounds.x + target_bounds.width * 0.25F;
+    controller.on_pointer(
+        {PointerKind::release, {activation_click_x, drag_y}, 0});
+    CHECK(last_slider == "settings-target-slider");
+    CHECK(last_slider_value >= 75);
+    CHECK(last_slider_value <= 85);
+
     const auto corpses = std::find_if(
         controller.layout().nodes.begin(), controller.layout().nodes.end(),
         [](const SemanticNode& item) {
