@@ -25,6 +25,8 @@ struct GameLogSession {
     std::optional<double> difficulty;
     std::optional<int> game_length;
     std::optional<std::string> net_mode;
+    bool optimizer_online_read_only{false};
+    std::uint64_t optimizer_session_context_observed_ns{0};
     std::optional<int> zeds_remaining;
     std::optional<int> zeds_alive;
     std::optional<int> wave_number;

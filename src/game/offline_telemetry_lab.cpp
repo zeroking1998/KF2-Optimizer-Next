@@ -250,6 +250,10 @@ bool optimizer_module_signature(std::string_view bytes) {
         static_cast<unsigned char>(bytes[3]) != 0x9EU) {
         return false;
     }
+    // Keep this compatibility signature limited to the historical core
+    // classes so previous optimizer-owned packages remain recoverable. The
+    // currently shipped package is authenticated separately by its pinned
+    // SHA-256 digest.
     constexpr std::array<std::string_view, 5> owned_classes{
         "KF2OptimizerTelemetryProbe",
         "KF2OptimizerTelemetryMutator",

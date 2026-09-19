@@ -62,6 +62,10 @@ int main() {
         read_bytes(KF2_TELEMETRY_INTERACTION_SOURCE));
     const auto graphics_interaction_source = normalize_newlines(
         read_bytes(KF2_GRAPHICS_INTERACTION_SOURCE));
+    const auto online_context_source = normalize_newlines(
+        read_bytes(KF2_ONLINE_CONTEXT_INTERACTION_SOURCE));
+    const auto graphics_viewport_source = normalize_newlines(
+        read_bytes(KF2_GRAPHICS_VIEWPORT_SOURCE));
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto connection_source = read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE);
     const auto graphics_source = normalize_newlines(
@@ -194,6 +198,22 @@ int main() {
     CHECK(graphics_interaction_source.find(
         "LastObservedRealTime = CurrentWorld.RealTimeSeconds;",
         graphics_world_reset) < graphics_timer_guard);
+    CHECK(graphics_viewport_source.find(
+        "class'KF2OptimizerOnlineContextInteraction'") != std::string::npos);
+    CHECK(graphics_viewport_source.find(
+        "InsertInteraction(OnlineMonitor)") != std::string::npos);
+    CHECK(online_context_source.find(
+        "KF2OPT_SESSION_CONTEXT schema=1 state=") != std::string::npos);
+    CHECK(online_context_source.find("NM_Client") != std::string::npos);
+    CHECK(online_context_source.find("online_client_read_only") !=
+          std::string::npos);
+    CHECK(online_context_source.find("NM_ListenServer") != std::string::npos);
+    CHECK(online_context_source.find("online_host_read_only") !=
+          std::string::npos);
+    CHECK(online_context_source.find("DynamicActors") == std::string::npos);
+    CHECK(online_context_source.find("Spawn(") == std::string::npos);
+    CHECK(online_context_source.find("SetTimer(") == std::string::npos);
+    CHECK(online_context_source.find("ConsoleCommand(") == std::string::npos);
     CHECK(interaction_source.find(
         "KF2OPT_GAMEPLAY_CONTEXT schema=1 state=") != std::string::npos);
     CHECK(interaction_source.find(

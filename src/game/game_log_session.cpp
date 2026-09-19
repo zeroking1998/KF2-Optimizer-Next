@@ -61,9 +61,25 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
             } else if (auto mode = parse_net_mode_line(line); mode && current_) {
                 if (current_->net_mode != mode) {
                     current_->net_mode = std::move(*mode);
+                    current_->optimizer_online_read_only = false;
+                    current_->optimizer_session_context_observed_ns = 0;
                     if (*current_->net_mode != "NM_Standalone") {
                         detail::clear_gameplay_snapshot(*current_);
                     }
+                    changed = *current_;
+                }
+            } else if (const auto receipt =
+                           detail::parse_optimizer_session_context_line(line);
+                       current_ && !current_->main_menu && receipt &&
+                       current_->net_mode &&
+                       *current_->net_mode == receipt->net_mode &&
+                       current_->map == receipt->map) {
+                if (!current_->optimizer_online_read_only ||
+                    current_->optimizer_session_context_observed_ns !=
+                        observed_at_ns) {
+                    current_->optimizer_online_read_only = true;
+                    current_->optimizer_session_context_observed_ns =
+                        observed_at_ns;
                     changed = *current_;
                 }
             } else if (const auto port =
