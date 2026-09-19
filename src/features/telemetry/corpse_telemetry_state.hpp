@@ -29,8 +29,19 @@ public:
         const bool explicit_online = game && game->net_mode &&
             (*game->net_mode == "NM_Client" || *game->net_mode == "NM_ListenServer" ||
              *game->net_mode == "NM_DedicatedServer");
+        const bool verified_online = explicit_online && game &&
+            game->optimizer_online_read_only && frame.active_gameplay &&
+            !game->main_menu && game->phase != game::GameLogPhase::match_ended &&
+            game->online_corpse_pool.has_value() &&
+            game->online_corpse_maximum.has_value() &&
+            *game->online_corpse_pool >= 0 &&
+            *game->online_corpse_maximum >= *game->online_corpse_pool &&
+            game->online_corpse_capability_observed_ns != 0 &&
+            game->online_corpse_sleep_verified &&
+            game->online_corpse_action_observed_ns != 0;
         if (!permitted || !frame.identity.pid || !frame.identity.process_start_id ||
-            explicit_online || (game && game->telemetry_observed_ns > now)) {
+            (explicit_online && !verified_online) ||
+            (game && game->telemetry_observed_ns > now)) {
             limit_.reset();
             state_ = CorpseTelemetryState::unavailable;
             gap_since_.reset();
@@ -52,7 +63,7 @@ public:
             if (game && game->telemetry_sample) sample_ = game->telemetry_sample;
             const bool map_changed = game && !map_.empty() && game->map != map_;
             if (game) map_ = game->map;
-            const bool fresh = game && frame.active_gameplay && frame.offline_gameplay &&
+            const bool fresh_offline = game && frame.active_gameplay && frame.offline_gameplay &&
                 game->net_mode == "NM_Standalone" && !game->main_menu &&
                 game->phase != game::GameLogPhase::match_ended &&
                 game->telemetry_sample.value_or(0) > 0 &&
@@ -62,9 +73,13 @@ public:
                 now - game->telemetry_observed_ns <= game::kGameLogObservationFreshnessNs &&
                 ((!map_changed && state_ == CorpseTelemetryState::available) ||
                  game->telemetry_observed_ns > last_verified_);
-            if (fresh) {
-                limit_ = game->telemetry_corpse_limit;
-                last_verified_ = game->telemetry_observed_ns;
+            if (fresh_offline || verified_online) {
+                limit_ = verified_online
+                    ? game->online_corpse_maximum
+                    : game->telemetry_corpse_limit;
+                last_verified_ = verified_online
+                    ? game->online_corpse_action_observed_ns
+                    : game->telemetry_observed_ns;
                 gap_since_.reset();
                 state_ = CorpseTelemetryState::available;
             } else if (limit_) {

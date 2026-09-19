@@ -93,6 +93,14 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                     current_->telemetry_control_port = port;
                     changed = *current_;
                 }
+            } else if (const auto online_corpse_changed =
+                           current_ && !current_->main_menu &&
+                                   current_->optimizer_online_read_only
+                               ? detail::apply_online_corpse_line(
+                                     *current_, line, observed_at_ns)
+                               : std::optional<bool>{};
+                       online_corpse_changed) {
+                if (*online_corpse_changed) changed = *current_;
             } else if (const auto ui_context =
                            detail::parse_gameplay_ui_context_line(line);
                        current_ && !current_->main_menu &&

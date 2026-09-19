@@ -370,6 +370,20 @@ private:
                             if (!log_chunk->bytes.empty()) {
                                 log_chunk->parsed_session = log_parser.feed(
                                     log_chunk->bytes, request.sampled_at_ns);
+                                // Online corpse capability/action receipts are
+                                // intentionally emitted only once per World.
+                                // Always hand the parser's current snapshot to
+                                // the UI boundary for a chunk containing one,
+                                // even when the receipt only refreshed an
+                                // already-known value and feed() therefore had
+                                // no value-change snapshot to publish.
+                                if (log_chunk->bytes.find(
+                                        "KF2OPT_ONLINE_CORPSE") !=
+                                        std::string::npos &&
+                                    log_parser.current()) {
+                                    log_chunk->parsed_session =
+                                        *log_parser.current();
+                                }
                             }
                             log_chunk->parser_stats = log_parser.stats();
                         } else if (const auto expired =

@@ -157,6 +157,61 @@ std::optional<double> parse_seconds_after(
     return seconds;
 }
 
+std::optional<bool> apply_online_corpse_line(
+    GameLogSession& session, std::string_view line,
+    std::uint64_t observed_at_ns) {
+    constexpr std::string_view capability_marker =
+        "KF2OPT_ONLINE_CORPSE state=";
+    constexpr std::string_view action_marker =
+        "KF2OPT_ONLINE_CORPSE_ACTION state=sleep ";
+    if (line.find(" local_only=true readback=verified") ==
+        std::string_view::npos) {
+        return std::nullopt;
+    }
+    if (const auto offset = line.find(capability_marker);
+        offset != std::string_view::npos) {
+        auto payload = line.substr(offset + capability_marker.size());
+        const auto state_end = payload.find(' ');
+        if (state_end == std::string_view::npos) return std::nullopt;
+        const auto state = payload.substr(0, state_end);
+        if (state != "available" && state != "populated") {
+            return std::nullopt;
+        }
+        constexpr std::string_view pool_marker = " pool=";
+        constexpr std::string_view maximum_marker = " maximum=";
+        const auto pool_at = payload.find(pool_marker, state_end);
+        const auto maximum_at = payload.find(maximum_marker, state_end);
+        if (pool_at == std::string_view::npos ||
+            maximum_at == std::string_view::npos || maximum_at <= pool_at) {
+            return std::nullopt;
+        }
+        const auto pool = parse_bounded_count(payload.substr(
+            pool_at + pool_marker.size(),
+            maximum_at - (pool_at + pool_marker.size())));
+        auto maximum_text = payload.substr(maximum_at + maximum_marker.size());
+        const auto maximum_end = maximum_text.find(' ');
+        if (maximum_end != std::string_view::npos) {
+            maximum_text = maximum_text.substr(0, maximum_end);
+        }
+        const auto maximum = parse_bounded_count(maximum_text);
+        if (!pool || !maximum || *pool > *maximum) return std::nullopt;
+        const bool changed = session.online_corpse_pool != pool ||
+            session.online_corpse_maximum != maximum;
+        session.online_corpse_pool = *pool;
+        session.online_corpse_maximum = *maximum;
+        session.online_corpse_capability_observed_ns = observed_at_ns;
+        return changed;
+    }
+    if (line.find(action_marker) != std::string_view::npos &&
+        line.find(" awake=false ") != std::string_view::npos) {
+        const bool changed = !session.online_corpse_sleep_verified;
+        session.online_corpse_sleep_verified = true;
+        session.online_corpse_action_observed_ns = observed_at_ns;
+        return changed;
+    }
+    return std::nullopt;
+}
+
 std::optional<std::pair<bool, int>> parse_zed_count_line(
     std::string_view line) {
     constexpr std::string_view remaining_marker =
@@ -206,7 +261,16 @@ std::optional<GameLogSession> parse_load_map_line(std::string_view line) {
     if (payload.empty() || payload.size() > detail::kMaximumLineBytes) return std::nullopt;
 
     const auto first_separator = payload.find('?');
-    const auto map = payload.substr(0, first_separator);
+    auto map = payload.substr(0, first_separator);
+    if (const auto server_separator = map.rfind('/');
+        server_separator != std::string_view::npos) {
+        const auto server = map.substr(0, server_separator);
+        map.remove_prefix(server_separator + 1);
+        if (server.find(':') == std::string_view::npos ||
+            !detail::safe_token(server, 256, true)) {
+            return std::nullopt;
+        }
+    }
     if (!detail::safe_token(map, 128)) return std::nullopt;
 
     GameLogSession result;

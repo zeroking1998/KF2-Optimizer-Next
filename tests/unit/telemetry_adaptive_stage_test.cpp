@@ -187,6 +187,37 @@ int main() {
         gap.gameplay->telemetry_corpse_limit.reset();
         CHECK(tracker.observe(gap).state == CorpseTelemetryState::unavailable);
         CHECK(!tracker.observe(gap).runtime_limit);
+
+        // Online remains fail-closed until both the authenticated local pool
+        // and an exact local Sleep readback have been observed for this map.
+        tracker.reset();
+        auto online = ready;
+        online.offline_gameplay = false;
+        online.gameplay->net_mode = "NM_Client";
+        online.gameplay->optimizer_online_read_only = true;
+        online.gameplay->telemetry_corpse_limit.reset();
+        online.gameplay->telemetry_corpse_total.reset();
+        online.gameplay->telemetry_observed_ns = 0;
+        online.gameplay->online_corpse_pool = 2;
+        online.gameplay->online_corpse_maximum = 20;
+        online.gameplay->online_corpse_capability_observed_ns =
+            online.observed_at_ns;
+        CHECK(tracker.observe(online).state ==
+              CorpseTelemetryState::unavailable);
+        online.gameplay->online_corpse_sleep_verified = true;
+        online.gameplay->online_corpse_action_observed_ns =
+            online.observed_at_ns;
+        result = tracker.observe(online);
+        CHECK(result.state == CorpseTelemetryState::available);
+        CHECK(result.runtime_limit == 20);
+        CHECK(std::string_view{result.event} ==
+              "CORPSE_TELEMETRY_AVAILABLE");
+
+        auto unverified_online = online;
+        unverified_online.gameplay->optimizer_online_read_only = false;
+        tracker.reset();
+        CHECK(tracker.observe(unverified_online).state ==
+              CorpseTelemetryState::unavailable);
     }
     using namespace kf2;
     using namespace kf2::telemetry_pipeline;
@@ -445,6 +476,16 @@ int main() {
     online.gameplay->optimizer_online_read_only = true;
     online.gameplay->optimizer_session_context_observed_ns =
         online.observed_at_ns;
+    online.gameplay->telemetry_corpse_limit.reset();
+    online.gameplay->telemetry_corpse_total.reset();
+    online.gameplay->telemetry_observed_ns = 0;
+    online.gameplay->online_corpse_pool = 2;
+    online.gameplay->online_corpse_maximum = 20;
+    online.gameplay->online_corpse_capability_observed_ns =
+        online.observed_at_ns;
+    online.gameplay->online_corpse_sleep_verified = true;
+    online.gameplay->online_corpse_action_observed_ns =
+        online.observed_at_ns;
     const auto online_sample = build_adaptive_sample(online, context).sample;
     CHECK(online_sample.session_class ==
           optimizer::AdaptiveSessionClass::verified_online);
@@ -452,7 +493,15 @@ int main() {
     CHECK(online_sample.capabilities.corpse_telemetry ==
           optimizer::AdaptiveCapabilityState::available);
     CHECK(online_sample.capabilities.corpse_control ==
+          optimizer::AdaptiveCapabilityState::available);
+    CHECK(online_sample.capabilities.ragdoll_control ==
+          optimizer::AdaptiveCapabilityState::available);
+    CHECK(online_sample.capabilities.corpse_lod_control ==
           optimizer::AdaptiveCapabilityState::unavailable);
+    CHECK(online_sample.capabilities.skeleton_update_control ==
+          optimizer::AdaptiveCapabilityState::unavailable);
+    CHECK(online_sample.live_corpse_burden == 2);
+    CHECK(online_sample.adaptive_corpse_runtime_limit == 20);
     CHECK(online_sample.capabilities.gore_control ==
           optimizer::AdaptiveCapabilityState::unavailable);
     CHECK(online_sample.capabilities.particle_control ==
@@ -751,6 +800,32 @@ int main() {
     CHECK(!select_adaptive_runtime_control(control).has_value());
     control.shadow_mode = false;
     control.verified_offline = false;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
+    control.verified_online_graphics = true;
+    control.local_graphics_only = true;
+    control.data_quality = optimizer::AdaptiveDataQuality::valid;
+    control.bottleneck = optimizer::AdaptiveBottleneck::unknown;
+    control.bottleneck_confidence = 0.0;
+    control.state = optimizer::AdaptiveControllerState::intervention;
+    control.current_quality = 100;
+    control.recovery_eligible = false;
+    control.current_frame_pressure = true;
+    control.primary_confidence = 0.8;
+    control.primary_resource = optimizer::ResourceKind::gpu;
+    CHECK(select_adaptive_runtime_control(control).has_value());
+    control.primary_resource = optimizer::ResourceKind::vram;
+    CHECK(select_adaptive_runtime_control(control).has_value());
+    control.primary_resource = optimizer::ResourceKind::ram;
+    CHECK(select_adaptive_runtime_control(control).has_value());
+    control.primary_resource = optimizer::ResourceKind::cpu;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
+    control.primary_resource = optimizer::ResourceKind::unknown;
+    CHECK(!select_adaptive_runtime_control(control).has_value());
+    control.state = optimizer::AdaptiveControllerState::stable;
+    control.current_quality = 75;
+    control.recovery_eligible = true;
+    CHECK(select_adaptive_runtime_control(control).has_value());
+    control.verified_online_graphics = false;
     CHECK(!select_adaptive_runtime_control(control).has_value());
     control.verified_offline = true;
     control.data_quality = optimizer::AdaptiveDataQuality::degraded;

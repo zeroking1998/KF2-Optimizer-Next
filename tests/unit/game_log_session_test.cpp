@@ -300,6 +300,89 @@ int main() {
         "state=online_client_read_only net_mode=NM_Standalone "
         "map=KF-BioticsLab\n").has_value());
 
+    GameLogSessionParser public_server_stream;
+    const auto public_server_map = public_server_stream.feed(
+        "[0039.13] Log: LoadMap: 192.169.93.205:60011/"
+        "KF-SHOPPINGSPREE?Name=Player?Team=255?"
+        "Mutator=KF2OptimizerTelemetry.KF2OptimizerTelemetryMutator?"
+        "game=kfgamecontent.KFGameInfo_Survival\n");
+    CHECK(public_server_map.has_value());
+    CHECK(public_server_map && public_server_map->map == "KF-SHOPPINGSPREE");
+    CHECK(public_server_map && !public_server_map->main_menu);
+    const auto public_server_context = public_server_stream.feed(
+        "[0040.93] ScriptLog: KF2OPT_SESSION_CONTEXT schema=1 "
+        "state=online_client_read_only net_mode=NM_Client "
+        "map=KF-SHOPPINGSPREE\n",
+        7'000'000'000ULL);
+    CHECK(public_server_context.has_value());
+    CHECK(public_server_context &&
+          public_server_context->optimizer_online_read_only);
+    const auto public_server_bridge = public_server_stream.feed(
+        "[0040.93] ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready "
+        "port=64298\n");
+    CHECK(public_server_bridge.has_value());
+    CHECK(public_server_bridge &&
+          public_server_bridge->telemetry_control_port == 64298);
+    const auto online_corpse_available = public_server_stream.feed(
+        "[0040.94] ScriptLog: KF2OPT_ONLINE_CORPSE state=available "
+        "pool=0 maximum=20 local_only=true readback=verified\n",
+        1'100'000'000ULL);
+    CHECK(online_corpse_available.has_value());
+    CHECK(online_corpse_available->online_corpse_pool == 0);
+    CHECK(online_corpse_available->online_corpse_maximum == 20);
+    CHECK(online_corpse_available->online_corpse_capability_observed_ns ==
+          1'100'000'000ULL);
+    const auto online_corpse_populated = public_server_stream.feed(
+        "[0041.00] ScriptLog: KF2OPT_ONLINE_CORPSE state=populated "
+        "pool=2 maximum=20 local_only=true readback=verified\n",
+        1'200'000'000ULL);
+    CHECK(online_corpse_populated.has_value());
+    CHECK(online_corpse_populated->online_corpse_pool == 2);
+    const auto online_corpse_sleep = public_server_stream.feed(
+        "[0041.10] ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=sleep "
+        "corpse_id=KFPawn_ZedGorefast_0 pool=2 awake=false "
+        "local_only=true readback=verified\n",
+        1'300'000'000ULL);
+    CHECK(online_corpse_sleep.has_value());
+    CHECK(online_corpse_sleep->online_corpse_sleep_verified);
+    CHECK(online_corpse_sleep->online_corpse_action_observed_ns ==
+          1'300'000'000ULL);
+    CHECK(!public_server_stream.feed(
+        "[0041.11] ScriptLog: KF2OPT_ONLINE_CORPSE state=populated "
+        "pool=2 maximum=20 local_only=false readback=verified\n",
+        1'400'000'000ULL).has_value());
+    const auto retained_online_corpse = public_server_stream.expire_observations(
+        17'000'000'001ULL, 15'000'000'000ULL);
+    CHECK(!retained_online_corpse.has_value());
+    CHECK(public_server_stream.current()->online_corpse_pool == 2);
+    CHECK(public_server_stream.current()->online_corpse_maximum == 20);
+    CHECK(public_server_stream.current()->online_corpse_sleep_verified);
+
+    // NativeGameLogSampler normally delivers several complete Launch.log
+    // records in one chunk. Keep the authenticated online receipt and the
+    // immediately following capability/action records covered in that shape,
+    // not only as one-feed-per-line fixtures.
+    GameLogSessionParser chunked_online_stream;
+    const auto chunked_online = chunked_online_stream.feed(
+        "[0044.41] Log: LoadMap: 188.42.129.12:29215/KF-CRASH?"
+        "Name=Player?Team=255?game=kfgamecontent.KFGameInfo_Survival\n"
+        "[0046.22] ScriptLog: KF2OPT_SESSION_CONTEXT schema=1 "
+        "state=online_client_read_only net_mode=NM_Client map=KF-CRASH\n"
+        "[0046.22] ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready port=59545\n"
+        "[0046.22] ScriptLog: KF2OPT_ONLINE_CORPSE state=available pool=0 "
+        "maximum=1282 local_only=true readback=verified\n"
+        "[0057.36] ScriptLog: KF2OPT_ONLINE_CORPSE state=populated pool=1 "
+        "maximum=1282 local_only=true readback=verified\n"
+        "[0058.84] ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=sleep "
+        "corpse_id=KFPawn_ZedCrawler_1 pool=1 awake=false local_only=true "
+        "readback=verified\n",
+        1'500'000'000ULL);
+    CHECK(chunked_online.has_value());
+    CHECK(chunked_online->optimizer_online_read_only);
+    CHECK(chunked_online->online_corpse_pool == 1);
+    CHECK(chunked_online->online_corpse_maximum == 1282);
+    CHECK(chunked_online->online_corpse_sleep_verified);
+
     const auto remaining = stream.feed(
         "[0060.10] ScriptLog: @@@@ ZED COUNT DEBUG: "
         "MyKFGRI.AIRemaining = 93\n", 1'000'000'000ULL);

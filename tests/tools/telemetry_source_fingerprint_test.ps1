@@ -17,6 +17,7 @@ $sourceNames = @(
     'KF2OptimizerOnlineContextInteraction.uc'
     'KF2OptimizerAdaptiveControlListener.uc'
     'KF2OptimizerAdaptiveControlConnection.uc'
+    'KF2OptimizerOnlineGraphicsControlConnection.uc'
     'KF2OptimizerAdaptiveGraphics.uc'
     'KF2OptimizerAdaptiveGraphicsState.uc'
 )
