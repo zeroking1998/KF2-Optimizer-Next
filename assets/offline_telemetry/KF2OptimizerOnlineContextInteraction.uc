@@ -13,6 +13,8 @@ var bool bOnlineGraphicsEnabled;
 var bool bOnlineGraphicsListenerStarted;
 var bool bOnlineCorpseCapabilityReported;
 var bool bOnlineCorpsePoolObserved;
+var bool bOnlineCorpseSleepArmed;
+var bool bOnlineCorpseSleepApplied;
 
 function bool ValidOnlineGraphicsToken(string Candidate)
 {
@@ -65,6 +67,8 @@ function bool ApplyOnlineGraphicsControl(
     if (Resource ~= "enable")
     {
         bOnlineGraphicsEnabled = true;
+        bOnlineCorpseSleepArmed = true;
+        bOnlineCorpseSleepApplied = false;
         OnlineGraphicsLastSequence = Sequence;
         `log("KF2OPT_ONLINE_GRAPHICS state=enabled readback=verified");
         return true;
@@ -79,6 +83,7 @@ function bool ApplyOnlineGraphicsControl(
             return false;
         }
         bOnlineGraphicsEnabled = false;
+        bOnlineCorpseSleepArmed = false;
         OnlineGraphicsLastSequence = Sequence;
         `log("KF2OPT_ONLINE_GRAPHICS state=disabled readback=verified");
         return true;
@@ -100,6 +105,54 @@ function bool ApplyOnlineGraphicsControl(
          " resource="$Resource$" quality="$Quality$
          " readback=verified");
     return true;
+}
+
+function bool TrySleepOneOnlineCorpse(WorldInfo CurrentWorld)
+{
+    local int Index;
+    local KFGoreManager GoreManager;
+    local KFPawn Candidate;
+
+    if (!bOnlineGraphicsEnabled || !bOnlineCorpseSleepArmed ||
+        bOnlineCorpseSleepApplied || CurrentWorld == None)
+    {
+        return false;
+    }
+    GoreManager = KFGoreManager(CurrentWorld.MyGoreEffectManager);
+    if (GoreManager == None)
+    {
+        return false;
+    }
+    for (Index = 0; Index < GoreManager.CorpsePool.Length; ++Index)
+    {
+        Candidate = GoreManager.CorpsePool[Index];
+        if (Candidate == None || Candidate.bDeleteMe ||
+            KFPawn_Monster(Candidate) == None ||
+            Candidate.IsAliveAndWell() || Candidate.Mesh == None ||
+            Candidate.TimeOfDeath <= 0.0 ||
+            CurrentWorld.TimeSeconds - Candidate.TimeOfDeath < 1.5 ||
+            Candidate.SpecialMove == SM_DeathAnim ||
+            Candidate.Physics != PHYS_RigidBody ||
+            !Candidate.Mesh.RigidBodyIsAwake())
+        {
+            continue;
+        }
+        Candidate.Mesh.PutRigidBodyToSleep();
+        if (Candidate.Mesh.RigidBodyIsAwake())
+        {
+            `log("KF2OPT_ONLINE_CORPSE_ACTION state=failed action=sleep"$
+                 " corpse_id="$string(Candidate.Name)$
+                 " reason=readback_mismatch local_only=true");
+            return false;
+        }
+        bOnlineCorpseSleepApplied = true;
+        bOnlineCorpseSleepArmed = false;
+        `log("KF2OPT_ONLINE_CORPSE_ACTION state=sleep corpse_id="$
+             string(Candidate.Name)$" pool="$GoreManager.CorpsePool.Length$
+             " awake=false local_only=true readback=verified");
+        return true;
+    }
+    return false;
 }
 
 function EnsureOnlineGraphicsListener(PlayerController PrimaryController)
@@ -174,6 +227,8 @@ function RestoreOnlineGraphicsAtMainMenu()
     bOnlineGraphicsListenerStarted = false;
     bOnlineCorpseCapabilityReported = false;
     bOnlineCorpsePoolObserved = false;
+    bOnlineCorpseSleepArmed = false;
+    bOnlineCorpseSleepApplied = false;
 }
 
 function ReportSessionContext(
@@ -226,6 +281,8 @@ event Tick(float DeltaTime)
         bOnlineGraphicsListenerStarted = false;
         bOnlineCorpseCapabilityReported = false;
         bOnlineCorpsePoolObserved = false;
+        bOnlineCorpseSleepArmed = bOnlineGraphicsEnabled;
+        bOnlineCorpseSleepApplied = false;
     }
     LastObservedRealTime = CurrentWorld.RealTimeSeconds;
     MapName = CurrentWorld.GetMapName(true);
@@ -241,6 +298,7 @@ event Tick(float DeltaTime)
             "online_client_read_only", "NM_Client", MapName);
         EnsureOnlineGraphicsListener(PrimaryController);
         ReportOnlineCorpseCapability(CurrentWorld);
+        TrySleepOneOnlineCorpse(CurrentWorld);
     }
     else if (CurrentWorld.NetMode == NM_ListenServer)
     {
@@ -248,6 +306,7 @@ event Tick(float DeltaTime)
             "online_host_read_only", "NM_ListenServer", MapName);
         EnsureOnlineGraphicsListener(PrimaryController);
         ReportOnlineCorpseCapability(CurrentWorld);
+        TrySleepOneOnlineCorpse(CurrentWorld);
     }
     else if (CurrentWorld.NetMode == NM_Standalone)
     {

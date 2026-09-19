@@ -226,6 +226,25 @@ int main() {
         "GoreManager.CorpsePool.Length > 0") != std::string::npos);
     CHECK(online_context_source.find("local_only=true readback=verified") !=
           std::string::npos);
+    CHECK(online_context_source.find(
+        "function bool TrySleepOneOnlineCorpse(WorldInfo CurrentWorld)") !=
+          std::string::npos);
+    CHECK(online_context_source.find("Candidate.TimeOfDeath <= 0.0") !=
+          std::string::npos);
+    CHECK(online_context_source.find("Candidate.IsAliveAndWell()") !=
+          std::string::npos);
+    CHECK(online_context_source.find("Candidate.SpecialMove == SM_DeathAnim") !=
+          std::string::npos);
+    CHECK(online_context_source.find("Candidate.Mesh.PutRigidBodyToSleep()") !=
+          std::string::npos);
+    CHECK(online_context_source.find("Candidate.Mesh.RigidBodyIsAwake()") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "KF2OPT_ONLINE_CORPSE_ACTION state=sleep") != std::string::npos);
+    CHECK(online_context_source.find(
+        "local_only=true readback=verified") != std::string::npos);
+    CHECK(online_context_source.find("bOnlineCorpseSleepArmed = true") !=
+          std::string::npos);
     CHECK(online_context_source.find("DynamicActors") == std::string::npos);
     CHECK(online_context_source.find(
         "PrimaryController.Spawn(\n"
