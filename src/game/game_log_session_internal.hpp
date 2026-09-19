@@ -30,6 +30,9 @@ inline constexpr std::size_t kMaximumLineBytes = 16 * 1024;
     std::string_view line);
 [[nodiscard]] std::optional<OptimizerSessionContextReceipt>
 parse_optimizer_session_context_line(std::string_view line);
+[[nodiscard]] std::optional<bool> apply_online_corpse_line(
+    GameLogSession& session, std::string_view line,
+    std::uint64_t observed_at_ns);
 [[nodiscard]] std::optional<double> parse_seconds_after(
     std::string_view line, std::string_view marker);
 [[nodiscard]] std::optional<bool> apply_offline_telemetry_line(

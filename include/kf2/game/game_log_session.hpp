@@ -27,6 +27,11 @@ struct GameLogSession {
     std::optional<std::string> net_mode;
     bool optimizer_online_read_only{false};
     std::uint64_t optimizer_session_context_observed_ns{0};
+    std::optional<int> online_corpse_pool;
+    std::optional<int> online_corpse_maximum;
+    bool online_corpse_sleep_verified{false};
+    std::uint64_t online_corpse_capability_observed_ns{0};
+    std::uint64_t online_corpse_action_observed_ns{0};
     std::optional<int> zeds_remaining;
     std::optional<int> zeds_alive;
     std::optional<int> wave_number;

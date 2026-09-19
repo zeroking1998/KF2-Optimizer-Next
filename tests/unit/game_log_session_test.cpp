@@ -323,6 +323,40 @@ int main() {
     CHECK(public_server_bridge.has_value());
     CHECK(public_server_bridge &&
           public_server_bridge->telemetry_control_port == 64298);
+    const auto online_corpse_available = public_server_stream.feed(
+        "[0040.94] ScriptLog: KF2OPT_ONLINE_CORPSE state=available "
+        "pool=0 maximum=20 local_only=true readback=verified\n",
+        1'100'000'000ULL);
+    CHECK(online_corpse_available.has_value());
+    CHECK(online_corpse_available->online_corpse_pool == 0);
+    CHECK(online_corpse_available->online_corpse_maximum == 20);
+    CHECK(online_corpse_available->online_corpse_capability_observed_ns ==
+          1'100'000'000ULL);
+    const auto online_corpse_populated = public_server_stream.feed(
+        "[0041.00] ScriptLog: KF2OPT_ONLINE_CORPSE state=populated "
+        "pool=2 maximum=20 local_only=true readback=verified\n",
+        1'200'000'000ULL);
+    CHECK(online_corpse_populated.has_value());
+    CHECK(online_corpse_populated->online_corpse_pool == 2);
+    const auto online_corpse_sleep = public_server_stream.feed(
+        "[0041.10] ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=sleep "
+        "corpse_id=KFPawn_ZedGorefast_0 pool=2 awake=false "
+        "local_only=true readback=verified\n",
+        1'300'000'000ULL);
+    CHECK(online_corpse_sleep.has_value());
+    CHECK(online_corpse_sleep->online_corpse_sleep_verified);
+    CHECK(online_corpse_sleep->online_corpse_action_observed_ns ==
+          1'300'000'000ULL);
+    CHECK(!public_server_stream.feed(
+        "[0041.11] ScriptLog: KF2OPT_ONLINE_CORPSE state=populated "
+        "pool=2 maximum=20 local_only=false readback=verified\n",
+        1'400'000'000ULL).has_value());
+    const auto retained_online_corpse = public_server_stream.expire_observations(
+        17'000'000'001ULL, 15'000'000'000ULL);
+    CHECK(!retained_online_corpse.has_value());
+    CHECK(public_server_stream.current()->online_corpse_pool == 2);
+    CHECK(public_server_stream.current()->online_corpse_maximum == 20);
+    CHECK(public_server_stream.current()->online_corpse_sleep_verified);
 
     const auto remaining = stream.feed(
         "[0060.10] ScriptLog: @@@@ ZED COUNT DEBUG: "
