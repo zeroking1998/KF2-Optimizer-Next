@@ -176,9 +176,11 @@ int main() {
         "event Tick(float DeltaTime)");
     CHECK(graphics_interaction_tick != std::string::npos);
     CHECK(graphics_interaction_source.find(
-        "var transient WorldInfo LastObservedWorld;") != std::string::npos);
+        "var float LastObservedRealTime;") != std::string::npos);
+    CHECK(graphics_interaction_source.find("LastObservedWorld") ==
+          std::string::npos);
     const auto graphics_world_reset = graphics_interaction_source.find(
-        "if (CurrentWorld != LastObservedWorld)",
+        "if (CurrentWorld.RealTimeSeconds < LastObservedRealTime)",
         graphics_interaction_tick);
     const auto graphics_timer_guard = graphics_interaction_source.find(
         "CurrentWorld.RealTimeSeconds < NextReadRealTime",
@@ -189,6 +191,9 @@ int main() {
     CHECK(graphics_interaction_source.find(
         "NextReadRealTime = 0.0;", graphics_world_reset) <
           graphics_timer_guard);
+    CHECK(graphics_interaction_source.find(
+        "LastObservedRealTime = CurrentWorld.RealTimeSeconds;",
+        graphics_world_reset) < graphics_timer_guard);
     CHECK(interaction_source.find(
         "KF2OPT_GAMEPLAY_CONTEXT schema=1 state=") != std::string::npos);
     CHECK(interaction_source.find(

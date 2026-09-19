@@ -4,7 +4,7 @@ class KF2OptimizerGraphicsInteraction extends Interaction
     within GameViewportClient;
 
 var float NextReadRealTime;
-var transient WorldInfo LastObservedWorld;
+var float LastObservedRealTime;
 var string LastReadback;
 var string LastSelectedMap;
 var string LastVotedMap;
@@ -37,14 +37,14 @@ event Tick(float DeltaTime)
     {
         return;
     }
-    // RealTimeSeconds starts at zero for each newly loaded world. Reset the
-    // polling deadline as well, otherwise a short map can inherit a deadline
-    // that it can never reach and later map/menu selections are missed.
-    if (CurrentWorld != LastObservedWorld)
+    // RealTimeSeconds starts at zero for each newly loaded world. Detect that
+    // clock reset without retaining the old WorldInfo, which would prevent
+    // Unreal's garbage collector from releasing the previous map.
+    if (CurrentWorld.RealTimeSeconds < LastObservedRealTime)
     {
-        LastObservedWorld = CurrentWorld;
         NextReadRealTime = 0.0;
     }
+    LastObservedRealTime = CurrentWorld.RealTimeSeconds;
     if (CurrentWorld.RealTimeSeconds < NextReadRealTime)
     {
         return;
