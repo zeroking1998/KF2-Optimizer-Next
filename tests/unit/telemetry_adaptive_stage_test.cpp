@@ -187,6 +187,37 @@ int main() {
         gap.gameplay->telemetry_corpse_limit.reset();
         CHECK(tracker.observe(gap).state == CorpseTelemetryState::unavailable);
         CHECK(!tracker.observe(gap).runtime_limit);
+
+        // Online remains fail-closed until both the authenticated local pool
+        // and an exact local Sleep readback have been observed for this map.
+        tracker.reset();
+        auto online = ready;
+        online.offline_gameplay = false;
+        online.gameplay->net_mode = "NM_Client";
+        online.gameplay->optimizer_online_read_only = true;
+        online.gameplay->telemetry_corpse_limit.reset();
+        online.gameplay->telemetry_corpse_total.reset();
+        online.gameplay->telemetry_observed_ns = 0;
+        online.gameplay->online_corpse_pool = 2;
+        online.gameplay->online_corpse_maximum = 20;
+        online.gameplay->online_corpse_capability_observed_ns =
+            online.observed_at_ns;
+        CHECK(tracker.observe(online).state ==
+              CorpseTelemetryState::unavailable);
+        online.gameplay->online_corpse_sleep_verified = true;
+        online.gameplay->online_corpse_action_observed_ns =
+            online.observed_at_ns;
+        result = tracker.observe(online);
+        CHECK(result.state == CorpseTelemetryState::available);
+        CHECK(result.runtime_limit == 20);
+        CHECK(std::string_view{result.event} ==
+              "CORPSE_TELEMETRY_AVAILABLE");
+
+        auto unverified_online = online;
+        unverified_online.gameplay->optimizer_online_read_only = false;
+        tracker.reset();
+        CHECK(tracker.observe(unverified_online).state ==
+              CorpseTelemetryState::unavailable);
     }
     using namespace kf2;
     using namespace kf2::telemetry_pipeline;

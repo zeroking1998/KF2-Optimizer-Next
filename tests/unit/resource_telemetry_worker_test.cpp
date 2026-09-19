@@ -372,6 +372,40 @@ int main() {
             CHECK(!chunks.front().parsed_session->zeds_alive.has_value());
 
             {
+                std::ofstream output(log, std::ios::binary | std::ios::app);
+                output << "[0061.00] ScriptLog: KF2OPT_SESSION_CONTEXT schema=1 "
+                          "state=online_client_read_only net_mode=NM_Client "
+                          "map=KF-BioticsLab\n"
+                          "[0061.01] ScriptLog: KF2OPT_ONLINE_CORPSE "
+                          "state=available pool=0 maximum=20 local_only=true "
+                          "readback=verified\n";
+            }
+            worker.request(17'100'000'000ULL);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(chunks.front().parsed_session.has_value());
+            CHECK(chunks.front().parsed_session->online_corpse_pool == 0);
+            CHECK(chunks.front().parsed_session->online_corpse_maximum == 20);
+
+            // An identical one-shot receipt refreshes its timestamp without
+            // changing the parser model. The worker must still publish the
+            // current authenticated snapshot to the UI boundary.
+            {
+                std::ofstream output(log, std::ios::binary | std::ios::app);
+                output << "[0061.02] ScriptLog: KF2OPT_ONLINE_CORPSE "
+                          "state=available pool=0 maximum=20 local_only=true "
+                          "readback=verified\n";
+            }
+            worker.request(17'200'000'000ULL);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(chunks.front().parsed_session.has_value());
+            CHECK(chunks.front().parsed_session->online_corpse_pool == 0);
+            CHECK(chunks.front().parsed_session->online_corpse_maximum == 20);
+
+            {
                 std::ofstream output(log, std::ios::binary | std::ios::trunc);
                 output << "new\n";
             }

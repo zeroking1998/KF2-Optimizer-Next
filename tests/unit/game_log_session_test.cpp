@@ -358,6 +358,31 @@ int main() {
     CHECK(public_server_stream.current()->online_corpse_maximum == 20);
     CHECK(public_server_stream.current()->online_corpse_sleep_verified);
 
+    // NativeGameLogSampler normally delivers several complete Launch.log
+    // records in one chunk. Keep the authenticated online receipt and the
+    // immediately following capability/action records covered in that shape,
+    // not only as one-feed-per-line fixtures.
+    GameLogSessionParser chunked_online_stream;
+    const auto chunked_online = chunked_online_stream.feed(
+        "[0044.41] Log: LoadMap: 188.42.129.12:29215/KF-CRASH?"
+        "Name=Player?Team=255?game=kfgamecontent.KFGameInfo_Survival\n"
+        "[0046.22] ScriptLog: KF2OPT_SESSION_CONTEXT schema=1 "
+        "state=online_client_read_only net_mode=NM_Client map=KF-CRASH\n"
+        "[0046.22] ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready port=59545\n"
+        "[0046.22] ScriptLog: KF2OPT_ONLINE_CORPSE state=available pool=0 "
+        "maximum=1282 local_only=true readback=verified\n"
+        "[0057.36] ScriptLog: KF2OPT_ONLINE_CORPSE state=populated pool=1 "
+        "maximum=1282 local_only=true readback=verified\n"
+        "[0058.84] ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=sleep "
+        "corpse_id=KFPawn_ZedCrawler_1 pool=1 awake=false local_only=true "
+        "readback=verified\n",
+        1'500'000'000ULL);
+    CHECK(chunked_online.has_value());
+    CHECK(chunked_online->optimizer_online_read_only);
+    CHECK(chunked_online->online_corpse_pool == 1);
+    CHECK(chunked_online->online_corpse_maximum == 1282);
+    CHECK(chunked_online->online_corpse_sleep_verified);
+
     const auto remaining = stream.feed(
         "[0060.10] ScriptLog: @@@@ ZED COUNT DEBUG: "
         "MyKFGRI.AIRemaining = 93\n", 1'000'000'000ULL);
