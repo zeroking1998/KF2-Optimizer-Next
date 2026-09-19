@@ -227,6 +227,10 @@ int main() {
     CHECK(online_context_source.find(
         "KF2OptimizerTelemetryProbe'.default.AdaptiveControlToken") !=
           std::string::npos);
+    CHECK(online_context_source.find(
+        "var KF2OptimizerAdaptiveControlListener") == std::string::npos);
+    CHECK(online_context_source.find(
+        "bOnlineGraphicsListenerStarted") != std::string::npos);
     CHECK(listener_source.find(
         "AcceptClass = class'KF2OptimizerOnlineGraphicsControlConnection'") !=
           std::string::npos);

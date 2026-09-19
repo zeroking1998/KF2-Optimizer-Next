@@ -7,10 +7,10 @@ class KF2OptimizerOnlineContextInteraction extends Interaction
 
 var string LastReportedContext;
 var float LastObservedRealTime;
-var KF2OptimizerAdaptiveControlListener OnlineGraphicsListener;
 var KF2OptimizerAdaptiveGraphicsState OnlineGraphicsState;
 var int OnlineGraphicsLastSequence;
 var bool bOnlineGraphicsEnabled;
+var bool bOnlineGraphicsListenerStarted;
 
 function bool ValidOnlineGraphicsToken(string Candidate)
 {
@@ -102,17 +102,23 @@ function bool ApplyOnlineGraphicsControl(
 
 function EnsureOnlineGraphicsListener(PlayerController PrimaryController)
 {
-    if (OnlineGraphicsListener != None &&
-        !OnlineGraphicsListener.bDeleteMe)
+    local KF2OptimizerAdaptiveControlListener NewListener;
+
+    if (bOnlineGraphicsListenerStarted)
     {
         return;
     }
-    OnlineGraphicsListener = PrimaryController.Spawn(
+    NewListener = PrimaryController.Spawn(
             class'KF2OptimizerAdaptiveControlListener');
-    if (OnlineGraphicsListener == None || OnlineGraphicsListener.bDeleteMe)
+    if (NewListener == None || NewListener.bDeleteMe)
     {
         `log("KF2OPT_ONLINE_GRAPHICS_BRIDGE state=unavailable reason=spawn_failed");
+        return;
     }
+    // Do not retain an Actor reference from this viewport-owned Interaction.
+    // The listener belongs to the current World and must be collectible with
+    // it during server map travel.
+    bOnlineGraphicsListenerStarted = true;
 }
 
 function RestoreOnlineGraphicsAtMainMenu()
@@ -132,7 +138,7 @@ function RestoreOnlineGraphicsAtMainMenu()
     }
     bOnlineGraphicsEnabled = false;
     OnlineGraphicsLastSequence = 0;
-    OnlineGraphicsListener = None;
+    bOnlineGraphicsListenerStarted = false;
 }
 
 function ReportSessionContext(
@@ -182,7 +188,7 @@ event Tick(float DeltaTime)
     if (CurrentWorld.RealTimeSeconds < LastObservedRealTime)
     {
         LastReportedContext = "";
-        OnlineGraphicsListener = None;
+        bOnlineGraphicsListenerStarted = false;
     }
     LastObservedRealTime = CurrentWorld.RealTimeSeconds;
     MapName = CurrentWorld.GetMapName(true);
