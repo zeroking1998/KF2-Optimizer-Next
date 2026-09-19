@@ -154,6 +154,11 @@ struct UiRuntime {
     std::optional<game::GameProcessIdentity> game_process;
     game::StartupPrewarmer startup_prewarmer;
     bool startup_prewarm_announced{false};
+    game::StartupPrewarmer map_prewarmer;
+    std::wstring map_prewarm_active;
+    std::wstring map_prewarm_pending;
+    std::wstring map_prewarm_last_attempted;
+    std::wstring map_prewarm_observed;
     std::uint64_t last_game_process_scan_ns{0};
     std::optional<game::GameProcessIdentity>
         game_restart_handoff_previous_process;
@@ -342,6 +347,9 @@ struct UiRuntime {
     void runtime_tick();
     void start_startup_prewarm();
     void poll_startup_prewarm();
+    void poll_map_prewarm();
+    void observe_map_prewarm_selection(std::wstring map_name);
+    void stop_map_prewarm_for_load();
 
     void start_auto_package_repair();
 

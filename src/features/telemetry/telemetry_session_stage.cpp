@@ -264,6 +264,7 @@ bool UiRuntime::set_live_adaptive_enabled(
 }
 
 void UiRuntime::detach_telemetry(bool restore_live_quality) {
+    stop_map_prewarm_for_load();
     if (restore_live_quality) {
         static_cast<void>(restore_live_adaptive_quality(
             L"Adaptive telemetry detached"));
@@ -420,6 +421,14 @@ void UiRuntime::begin_game_restart_handoff(
     telemetry_failure = new_settings_restart
         ? L"KF2 is applying new settings; waiting for its replacement process"
         : L"KF2 process ended; checking briefly for a replacement process";
+    // The process-bound values are no longer active once the verified process
+    // has ended. Keeping them in the presentation makes settings changed
+    // during Steam's bootstrap/restart gap look as though they were deferred
+    // to a later launch, even though the replacement process has not started.
+    auto status = model.status();
+    status.active_target_fps.reset();
+    status.active_corpse_limit.reset();
+    model.set_status(std::move(status));
     events->append({0, diagnostics::Severity::info,
         "KF2_SESSION_RESTART_WAIT",
         new_settings_restart
@@ -519,6 +528,10 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
                             L"graphics"});
                         invalidate();
                     }
+                    if (const auto selected_map =
+                            game::map_prewarm_request_from_log_line(line)) {
+                        observe_map_prewarm_selection(*selected_map);
+                    }
                 }
                 line_start = line_end + 1;
             }
@@ -532,6 +545,9 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
             // boundary markers; structured parsing happens off the UI thread.
             const std::string marker_input =
                 game_log_marker_tail + chunk.bytes;
+            if (marker_input.find("Log: LoadMap: ") != std::string::npos) {
+                stop_map_prewarm_for_load();
+            }
             if (!game_log_new_settings_restart_requested &&
                 game::game_log_requests_settings_restart(marker_input)) {
                 game_log_new_settings_restart_requested = true;
@@ -736,7 +752,6 @@ void UiRuntime::try_attach_telemetry() {
                     observed.error().message,
                 L"optimizer"});
         }
-        active_policy.target_fps = optimizer_settings.target_fps;
         adaptive_session_policy = active_policy;
         auto status = model.status();
         status.active_target_fps = active_policy.target_fps;

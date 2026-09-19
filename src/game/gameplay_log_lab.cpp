@@ -267,19 +267,19 @@ Result<bool> enable_offline_gameplay_logging(
             {ErrorCode::invalid_argument,
              L"Offline gameplay log configuration root is invalid", 0});
     }
-    if ((adaptive_corpse_stagger &&
+    const bool configured_session = adaptive_corpse_maximum != 0 ||
+        adaptive_target_fps != 0 || adaptive_corpse_debug_markers ||
+        adaptive_zed_debug_markers || !adaptive_control_token.empty();
+    if ((configured_session &&
          (adaptive_corpse_maximum < 4 || adaptive_corpse_maximum > 2000 ||
-           !optimizer::valid_target_fps(adaptive_target_fps) ||
-           adaptive_quality_change_budget < 1 ||
-           adaptive_quality_change_budget > 5 ||
-           !valid_adaptive_control_token(adaptive_control_token))) ||
-        (!adaptive_corpse_stagger &&
-         (adaptive_corpse_maximum != 0 || adaptive_target_fps != 0 ||
-          adaptive_corpse_debug_markers || adaptive_zed_debug_markers ||
-          !adaptive_control_token.empty()))) {
+          !optimizer::valid_target_fps(adaptive_target_fps) ||
+          adaptive_quality_change_budget < 1 ||
+          adaptive_quality_change_budget > 5 ||
+          !valid_adaptive_control_token(adaptive_control_token))) ||
+        (!configured_session && adaptive_corpse_stagger)) {
         return Result<bool>::failure(
             {ErrorCode::invalid_argument,
-             L"Adaptive corpse maximum must be 4..2000 and target FPS 30..240 when Adaptive is active",
+             L"Configured telemetry requires corpse maximum 4..2000, target FPS 30..240 and a valid control token",
              0});
     }
     const auto game_ini = config_root / L"KFGame.ini";

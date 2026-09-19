@@ -77,7 +77,7 @@ int main() {
     AdaptivePolicy adaptive;
 
     CHECK(effective_adaptive_target_fps(60, std::nullopt) == 60);
-    CHECK(effective_adaptive_target_fps(60, 240) == 60);
+    CHECK(effective_adaptive_target_fps(60, 240) == 240);
     CHECK(effective_adaptive_target_fps(10, 240) == 240);
     CHECK(effective_adaptive_target_fps(60, 241) == 60);
     for (int target = kTargetFpsMinimum;
@@ -86,7 +86,7 @@ int main() {
             target == kTargetFpsMaximum ? kTargetFpsMinimum
                                         : kTargetFpsMaximum;
         CHECK(effective_adaptive_target_fps(
-                  target, stale_session_target) == target);
+                  target, stale_session_target) == stale_session_target);
     }
     CHECK(effective_adaptive_corpse_limit(20, 2000) == 2000);
     CHECK(effective_adaptive_corpse_limit(20, 2001) == 20);

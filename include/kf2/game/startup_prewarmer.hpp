@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace kf2::game {
@@ -38,15 +40,23 @@ struct StartupPrewarmOptions {
     std::chrono::milliseconds idle_delay{std::chrono::seconds{2}};
     std::optional<StorageKind> storage_override;
     std::optional<std::uint64_t> available_memory_override;
+    std::wstring map_name;
+    bool include_common_startup_files{true};
 };
 
 [[nodiscard]] std::uint64_t startup_prewarm_budget(
     StorageKind storage, std::uint64_t available_memory_bytes) noexcept;
+[[nodiscard]] std::uint64_t startup_prewarm_file_budget(
+    std::uint64_t file_size_bytes) noexcept;
 [[nodiscard]] std::vector<StartupPrewarmFile> build_startup_prewarm_plan(
     const std::filesystem::path& install_root, StorageKind storage,
-    std::uint64_t available_memory_bytes);
+    std::uint64_t available_memory_bytes,
+    std::wstring_view map_name = {},
+    bool include_common_startup_files = true);
 [[nodiscard]] StorageKind storage_kind_for_path(
     const std::filesystem::path& path) noexcept;
+[[nodiscard]] std::optional<std::wstring> map_prewarm_request_from_log_line(
+    std::string_view line);
 
 class StartupPrewarmer final {
 public:

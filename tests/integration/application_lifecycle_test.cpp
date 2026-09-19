@@ -489,6 +489,7 @@ int main() {
         "overlay_enabled=true\noverlay_show_fps=true\noverlay_show_frame_time=true\n"
         "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=true\n"
         "debug_corpse_markers=false\ndebug_zed_markers=false\n"
+        "debug_corpse_physics_control=false\n"
         "restore_config_after_game=true\n"
         "adaptive_aggressiveness=balanced\n"
         "adaptive_minimum_quality=10\nadaptive_maximum_quality=100\n"
@@ -729,16 +730,27 @@ int main() {
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(zed_markers->x, zed_markers->y));
     CHECK(graphical.value().ui_model().status().debug_zed_markers);
+    const auto physics_control = node_center(
+        hwnd, graphical.value().ui_model(),
+        "debug-corpse-physics-control");
+    CHECK(physics_control.has_value());
+    SendMessageW(hwnd, WM_LBUTTONUP, 0,
+                 MAKELPARAM(physics_control->x, physics_control->y));
+    CHECK(graphical.value().ui_model().status().debug_corpse_physics_control);
     const auto debug_settings_bytes =
         read_bytes(options.state_root / L"settings.ini");
     CHECK(debug_settings_bytes.find("debug_corpse_markers=true\n") !=
           std::string::npos);
     CHECK(debug_settings_bytes.find("debug_zed_markers=true\n") !=
           std::string::npos);
+    CHECK(debug_settings_bytes.find(
+              "debug_corpse_physics_control=true\n") != std::string::npos);
     CHECK(read_bytes(config_root / L"KFEngine.ini").find(
               "bAdaptiveCorpseDebugMarkers=True") != std::string::npos);
     CHECK(read_bytes(config_root / L"KFEngine.ini").find(
               "bAdaptiveZedDebugMarkers=True") != std::string::npos);
+    CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+              "bAdaptiveCorpseStagger=False") != std::string::npos);
     const auto diagnostics_navigation =
         node_center(hwnd, graphical.value().ui_model(), "nav-5");
     CHECK(diagnostics_navigation.has_value());
@@ -1195,6 +1207,45 @@ int main() {
         CHECK(stored.value().corpse_limit == 2000);
     }
 
+    // Changing the saved target after KF2 has started must not retarget the
+    // current Adaptive session. KF2's native cap is launch-bound, so grading
+    // the running 60 FPS process against the newly saved 119 FPS target would
+    // cause a false deficit and unnecessary quality reductions.
+    {
+        kf2::diagnostics::EventLog target_events{128};
+        kf2::config::Settings initial;
+        initial.target_fps = 60;
+        kf2::app::UiRuntime target_runtime{
+            root / L"Data-target-staged-for-restart", false,
+            initial, target_events, options.game_discovery,
+            kf2::app::StartMode::normal, root / L"portable"};
+        CHECK(target_runtime.installation.has_value());
+        wchar_t current_executable[MAX_PATH + 1]{};
+        const DWORD current_executable_length = GetModuleFileNameW(
+            nullptr, current_executable, MAX_PATH);
+        CHECK(current_executable_length > 0);
+        CHECK(current_executable_length < MAX_PATH);
+        target_runtime.installation->executable = std::wstring{
+            current_executable, current_executable_length};
+        target_runtime.adaptive_session_policy =
+            kf2::game::OfflineAdaptiveSessionPolicy{20, 60, 2};
+        auto status = target_runtime.model.status();
+        status.active_target_fps = 60;
+        target_runtime.model.set_status(std::move(status));
+
+        target_runtime.set_slider_value("settings-target-slider", 119);
+
+        CHECK(target_runtime.optimizer_settings.target_fps == 119);
+        CHECK(target_runtime.adaptive_session_policy->target_fps == 60);
+        CHECK(target_runtime.effective_target_fps() == 60);
+        CHECK(target_runtime.model.status().target_fps == 119);
+        CHECK(target_runtime.model.status().active_target_fps == 60);
+        const auto stored = kf2::config::parse_settings(
+            read_bytes(target_runtime.settings_path));
+        CHECK(stored.has_value());
+        CHECK(stored.value().target_fps == 119);
+    }
+
     // A real filesystem failure must roll both Home sliders back to their
     // authoritative saved values instead of leaving a misleading preview.
     {
@@ -1340,6 +1391,12 @@ int main() {
                 ? 1 : 0;
 
         rearm_runtime.game_log_new_settings_restart_requested = true;
+        rearm_runtime.adaptive_session_policy =
+            kf2::game::OfflineAdaptiveSessionPolicy{20, 60, 2};
+        auto bound_status = rearm_runtime.model.status();
+        bound_status.active_target_fps = 60;
+        bound_status.active_corpse_limit = 20;
+        rearm_runtime.model.set_status(std::move(bound_status));
         const auto restart_wait_started = rearm_runtime.monotonic_ns();
         rearm_runtime.begin_game_restart_handoff({
             4242, 123456, rearm_runtime.installation->executable});
@@ -1349,6 +1406,8 @@ int main() {
               restart_wait_started +
                   kf2::telemetry_pipeline::kNewSettingsRestartHandoffNs);
         CHECK(rearm_runtime.session_config_snapshot.has_value());
+        CHECK(!rearm_runtime.model.status().active_target_fps.has_value());
+        CHECK(!rearm_runtime.model.status().active_corpse_limit.has_value());
         CHECK(fs::exists(published_telemetry));
         CHECK(read_bytes(config_root / L"KFEngine.ini").find(
                   "LocalOptions=?Mutator=KF2OptimizerTelemetry."
@@ -1358,6 +1417,28 @@ int main() {
                           restart_wait_events.end(),
             [](const auto& event) {
                 return event.code == "KF2_SESSION_RESTART_WAIT";
+            }));
+
+        // A Steam bootstrap/restart gap has no active KF2 process. Home slider
+        // clicks made here must update the imminent replacement policy and
+        // must not be presented as values for a later start.
+        rearm_runtime.set_slider_value("settings-target-slider", 119);
+        rearm_runtime.set_slider_value("settings-corpses-slider", 1242);
+        CHECK(rearm_runtime.model.status().target_fps == 119);
+        CHECK(rearm_runtime.model.status().corpse_limit == 1242);
+        CHECK(!rearm_runtime.model.status().active_target_fps.has_value());
+        CHECK(!rearm_runtime.model.status().active_corpse_limit.has_value());
+        const auto pending_policy =
+            kf2::game::read_offline_adaptive_session_policy(config_root);
+        CHECK(pending_policy.has_value());
+        CHECK(pending_policy.value().has_value());
+        CHECK(pending_policy.value()->target_fps == 119);
+        CHECK(pending_policy.value()->corpse_maximum == 1242);
+        const auto pending_policy_events = rearm_events.snapshot();
+        CHECK(std::any_of(pending_policy_events.begin(),
+                          pending_policy_events.end(),
+            [](const auto& event) {
+                return event.code == "ADAPTIVE_PENDING_POLICY_UPDATED";
             }));
 
         auto restarted_engine = read_bytes(config_root / L"KFEngine.ini");

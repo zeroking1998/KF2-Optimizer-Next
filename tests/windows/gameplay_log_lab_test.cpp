@@ -60,6 +60,8 @@ int main() {
         read_bytes(KF2_TELEMETRY_MUTATOR_SOURCE));
     const auto interaction_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_INTERACTION_SOURCE));
+    const auto graphics_interaction_source = normalize_newlines(
+        read_bytes(KF2_GRAPHICS_INTERACTION_SOURCE));
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto connection_source = read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE);
     const auto graphics_source = normalize_newlines(
@@ -170,6 +172,28 @@ int main() {
     const auto interaction_tick = interaction_source.find(
         "event Tick(float DeltaTime)");
     CHECK(interaction_tick != std::string::npos);
+    const auto graphics_interaction_tick = graphics_interaction_source.find(
+        "event Tick(float DeltaTime)");
+    CHECK(graphics_interaction_tick != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "var float LastObservedRealTime;") != std::string::npos);
+    CHECK(graphics_interaction_source.find("LastObservedWorld") ==
+          std::string::npos);
+    const auto graphics_world_reset = graphics_interaction_source.find(
+        "if (CurrentWorld.RealTimeSeconds < LastObservedRealTime)",
+        graphics_interaction_tick);
+    const auto graphics_timer_guard = graphics_interaction_source.find(
+        "CurrentWorld.RealTimeSeconds < NextReadRealTime",
+        graphics_interaction_tick);
+    CHECK(graphics_world_reset != std::string::npos);
+    CHECK(graphics_timer_guard != std::string::npos);
+    CHECK(graphics_world_reset < graphics_timer_guard);
+    CHECK(graphics_interaction_source.find(
+        "NextReadRealTime = 0.0;", graphics_world_reset) <
+          graphics_timer_guard);
+    CHECK(graphics_interaction_source.find(
+        "LastObservedRealTime = CurrentWorld.RealTimeSeconds;",
+        graphics_world_reset) < graphics_timer_guard);
     CHECK(interaction_source.find(
         "KF2OPT_GAMEPLAY_CONTEXT schema=1 state=") != std::string::npos);
     CHECK(interaction_source.find(
@@ -2025,6 +2049,21 @@ int main() {
             root, true, 350, 137, true, 2, control_token, true);
     CHECK(adaptive_unchanged.has_value());
     CHECK(!adaptive_unchanged.value());
+    const auto physics_control =
+        kf2::game::enable_offline_gameplay_logging(
+            root, false, 350, 137, true, 2, control_token, true);
+    CHECK(physics_control.has_value());
+    CHECK(physics_control.value());
+    const auto physics_control_engine = read_bytes(engine_ini);
+    CHECK(physics_control_engine.find(
+              "bAdaptiveCorpseStagger=False\r\n") != std::string::npos);
+    CHECK(physics_control_engine.find(
+              "AdaptiveCorpseMaximum=350\r\n") != std::string::npos);
+    CHECK(physics_control_engine.find(
+              "AdaptiveTargetFPS=137\r\n") != std::string::npos);
+    CHECK(physics_control_engine.find(
+              "AdaptiveControlToken=0123456789abcdef0123456789abcdef\r\n") !=
+          std::string::npos);
     const auto adaptive_initially_off =
         kf2::game::enable_offline_gameplay_logging(
             root, true, 350, 137, true, 2, control_token, true, false);

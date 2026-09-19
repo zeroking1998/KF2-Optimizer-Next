@@ -1,10 +1,15 @@
 #include "kf2/game/startup_prewarmer.hpp"
 
+#include <windows.h>
+#include <winioctl.h>
+
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <system_error>
 #include <thread>
 
 namespace {
@@ -19,21 +24,66 @@ void write_file(const std::filesystem::path& path, std::size_t bytes) {
     const std::string data(bytes, 'x');
     output.write(data.data(), static_cast<std::streamsize>(data.size()));
 }
+
+void write_sparse_file(const std::filesystem::path& path,
+                       std::uintmax_t bytes) {
+    std::filesystem::create_directories(path.parent_path());
+    HANDLE output = CreateFileW(
+        path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (output == INVALID_HANDLE_VALUE) {
+        throw std::system_error(
+            static_cast<int>(GetLastError()), std::system_category());
+    }
+    DWORD returned = 0;
+    FILE_SET_SPARSE_BUFFER sparse{TRUE};
+    LARGE_INTEGER size{};
+    size.QuadPart = static_cast<LONGLONG>(bytes);
+    const bool configured = DeviceIoControl(
+        output, FSCTL_SET_SPARSE, &sparse, sizeof(sparse), nullptr, 0,
+        &returned, nullptr) != FALSE;
+    const bool resized = configured &&
+        SetFilePointerEx(output, size, nullptr, FILE_BEGIN) != FALSE &&
+        SetEndOfFile(output) != FALSE;
+    const DWORD error = resized ? ERROR_SUCCESS : GetLastError();
+    CloseHandle(output);
+    if (!resized) {
+        throw std::system_error(
+            static_cast<int>(error), std::system_category());
+    }
+}
 }  // namespace
 
 int main(int argc, char** argv) {
     using namespace kf2::game;
+    CHECK(map_prewarm_request_from_log_line(
+        "[12.3] ScriptLog: KF2OPT_MAP_SELECTION schema=1 state=menu "
+        "map=KF-BurningParis\r") ==
+        std::optional<std::wstring>{L"KF-BurningParis"});
+    CHECK(map_prewarm_request_from_log_line(
+        "ScriptLog: KF2OPT_MAP_SELECTION schema=1 state=vote "
+        "map=KF-CastleVolter") ==
+        std::optional<std::wstring>{L"KF-CastleVolter"});
+    CHECK(!map_prewarm_request_from_log_line(
+        "KF2OPT_MAP_SELECTION schema=1 state=menu map=../unsafe"));
+    CHECK(!map_prewarm_request_from_log_line(
+        "KF2OPT_MAP_SELECTION schema=2 state=menu map=KF-Airship"));
     constexpr std::uint64_t gib = 1024ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t mib = 1024ULL * 1024ULL;
     CHECK(startup_prewarm_budget(StorageKind::rotational, 2 * gib) == 0);
     CHECK(startup_prewarm_budget(StorageKind::rotational, 3 * gib) ==
           256 * mib);
     CHECK(startup_prewarm_budget(StorageKind::solid_state, 32 * gib) ==
-          128 * mib);
+          2 * gib);
+    CHECK(startup_prewarm_budget(StorageKind::rotational, 32 * gib) ==
+          4 * gib);
+    CHECK(startup_prewarm_file_budget(16 * mib) == 16 * mib);
+    CHECK(startup_prewarm_file_budget(1024 * mib) == 512 * mib);
     CHECK(startup_prewarm_budget(StorageKind::unknown, 32 * gib) == 0);
 
+    const auto process_suffix = std::to_wstring(GetCurrentProcessId());
     const auto root = std::filesystem::temp_directory_path() /
-        L"kf2-startup-prewarmer-test";
+        (L"kf2-startup-prewarmer-test-" + process_suffix);
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     write_file(root / L"KFGame/BrewedPC/GlobalShaderCache-PC-D3D-SM5.bin",
@@ -48,8 +98,92 @@ int main(int argc, char** argv) {
     const auto plan = build_startup_prewarm_plan(
         root, StorageKind::rotational, 4 * gib);
     CHECK(plan.size() == 2);
+    if (plan.size() != 2) {
+        std::filesystem::remove_all(root, cleanup_error);
+        return EXIT_FAILURE;
+    }
     CHECK(plan[0].bytes == 1024);
     CHECK(plan[1].bytes == 2048);
+
+    const auto fair_root = std::filesystem::temp_directory_path() /
+        (L"kf2-startup-prewarmer-fair-plan-test-" + process_suffix);
+    std::filesystem::remove_all(fair_root, cleanup_error);
+    write_sparse_file(
+        fair_root / L"KFGame/BrewedPC/EngineDebugMaterials.upk", 48 * mib);
+    write_sparse_file(
+        fair_root / L"KFGame/BrewedPC/RefShaderCache-PC-D3D-SM5.upk",
+        96 * mib);
+    write_sparse_file(fair_root / L"KFGame/Movies/MenuBG.bik", 96 * mib);
+    write_file(fair_root / L"KFGame/BrewedPC/Maps/KFMainMenu.kfm", 4096);
+    const auto fair_plan = build_startup_prewarm_plan(
+        fair_root, StorageKind::solid_state, 4 * gib);
+    CHECK(fair_plan.size() == 4);
+    if (fair_plan.size() == 4) {
+        CHECK(fair_plan[0].path.filename() == L"KFMainMenu.kfm");
+        CHECK(fair_plan[0].bytes == 4096);
+        CHECK(fair_plan[1].bytes == 48 * mib);
+        CHECK(fair_plan[2].bytes == 96 * mib);
+        CHECK(fair_plan[3].bytes == 96 * mib);
+    }
+    const auto rotational_plan = build_startup_prewarm_plan(
+        fair_root, StorageKind::rotational, 4 * gib);
+    CHECK(rotational_plan.size() == 4);
+    if (rotational_plan.size() == 4) {
+        CHECK(rotational_plan[0].path.filename() == L"KFMainMenu.kfm");
+        CHECK(rotational_plan[0].bytes == 4096);
+        CHECK(rotational_plan[1].bytes == 48 * mib);
+        CHECK(rotational_plan[2].bytes == 96 * mib);
+        CHECK(rotational_plan[3].bytes == 96 * mib);
+    }
+
+    const auto map_root = fair_root /
+        L"KFGame/BrewedPC/Maps/BioticsLab";
+    write_file(map_root / L"SND_BioticsLab.kfm", 1024);
+    write_file(map_root / L"LIGHTS_BioticsLab.kfm", 2048);
+    write_sparse_file(map_root / L"KF-BioticsLab.kfm", 80 * mib);
+    const auto map_plan = build_startup_prewarm_plan(
+        fair_root, StorageKind::solid_state, 8 * gib, L"KF-BioticsLab");
+    CHECK(map_plan.size() == 7);
+    if (map_plan.size() == 7) {
+        CHECK(map_plan[0].path.filename() == L"LIGHTS_BioticsLab.kfm");
+        CHECK(map_plan[1].path.filename() == L"SND_BioticsLab.kfm");
+        CHECK(map_plan[2].path.filename() == L"KFMainMenu.kfm");
+        CHECK(map_plan[3].path.filename() == L"KF-BioticsLab.kfm");
+        CHECK(map_plan[3].bytes == 80 * mib);
+        CHECK(map_plan[4].path.filename() == L"EngineDebugMaterials.upk");
+    }
+    const auto extension_plan = build_startup_prewarm_plan(
+        fair_root, StorageKind::solid_state, 8 * gib, L"KF-BioticsLab.kfm");
+    CHECK(extension_plan.size() == map_plan.size());
+    const auto map_only_plan = build_startup_prewarm_plan(
+        fair_root, StorageKind::solid_state, 8 * gib, L"KF-BioticsLab",
+        false);
+    CHECK(map_only_plan.size() == 3);
+    CHECK(std::ranges::all_of(
+        map_only_plan, [&map_root](const StartupPrewarmFile& file) {
+            return file.path.parent_path() == map_root;
+        }));
+    const auto constrained_map_plan = build_startup_prewarm_plan(
+        fair_root, StorageKind::solid_state, 3 * gib, L"KF-BioticsLab");
+    const auto selected_map = std::find_if(
+        constrained_map_plan.begin(), constrained_map_plan.end(),
+        [](const StartupPrewarmFile& file) {
+            return file.path.filename() == L"KF-BioticsLab.kfm";
+        });
+    CHECK(selected_map != constrained_map_plan.end());
+    if (selected_map != constrained_map_plan.end()) {
+        CHECK(selected_map->bytes == 80 * mib);
+    }
+    CHECK(build_startup_prewarm_plan(
+        fair_root, StorageKind::solid_state, 8 * gib,
+        L"../KF-BioticsLab").size() == fair_plan.size());
+
+    const auto duplicate_map_root = fair_root /
+        L"KFGame/BrewedPC/Maps/WorkshopCopy";
+    write_file(duplicate_map_root / L"KF-BioticsLab.kfm", 4096);
+    CHECK(build_startup_prewarm_plan(
+        fair_root, StorageKind::solid_state, 8 * gib,
+        L"KF-BioticsLab").size() == fair_plan.size());
 
     const auto before = std::filesystem::last_write_time(plan[0].path);
     StartupPrewarmer prewarmer;
@@ -100,7 +234,13 @@ int main(int argc, char** argv) {
         std::cout << "STORAGE_KIND=" << static_cast<int>(kind) << '\n';
         StartupPrewarmer real;
         const auto started = std::chrono::steady_clock::now();
-        real.start(real_root, {.idle_delay = std::chrono::milliseconds{0}});
+        StartupPrewarmOptions real_options{
+            .idle_delay = std::chrono::milliseconds{0}};
+        if (argc > 2) {
+            const std::filesystem::path map_argument{argv[2]};
+            real_options.map_name = map_argument.wstring();
+        }
+        real.start(real_root, std::move(real_options));
         for (int attempt = 0; attempt < 2000; ++attempt) {
             const auto state = real.snapshot().state;
             if (state == StartupPrewarmState::complete ||
@@ -120,5 +260,6 @@ int main(int argc, char** argv) {
     }
 
     std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::remove_all(fair_root, cleanup_error);
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

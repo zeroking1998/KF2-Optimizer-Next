@@ -236,7 +236,8 @@ int wmain(int argument_count, wchar_t** arguments) {
         graphics_tooltip_layout.nodes.begin(),
         graphics_tooltip_layout.nodes.end(), [](const auto& item) {
             return item.role == kf2::ui::SemanticRole::tooltip &&
-                   item.text.find(L"Adaptive never") != std::wstring::npos;
+                   item.detail_text.find(L"Adaptive never") !=
+                       std::wstring::npos;
         }));
     const auto fading_tooltip = std::find_if(
         graphics_tooltip_layout.nodes.begin(),

@@ -13,6 +13,26 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(KF2_VERSION "${PROJECT_VERSION}-alpha" CACHE STRING "Product version")
 set(KF2_BUILD_COMMIT "unknown" CACHE STRING "Source commit identity")
 set(KF2_BUILD_CHANNEL "dev" CACHE STRING "Build channel")
+set(KF2_PGO_MODE "OFF" CACHE STRING
+    "MSVC profile-guided optimization mode: OFF, INSTRUMENT, or OPTIMIZE")
+set_property(CACHE KF2_PGO_MODE PROPERTY STRINGS OFF INSTRUMENT OPTIMIZE)
+set(KF2_PGO_PGD "" CACHE FILEPATH
+    "Absolute MSVC PGO database path used by the KF2Optimizer target")
+string(TOUPPER "${KF2_PGO_MODE}" KF2_PGO_MODE)
+if(NOT KF2_PGO_MODE MATCHES "^(OFF|INSTRUMENT|OPTIMIZE)$")
+    message(FATAL_ERROR
+        "KF2_PGO_MODE must be OFF, INSTRUMENT, or OPTIMIZE")
+endif()
+if(NOT KF2_PGO_MODE STREQUAL "OFF")
+    if(NOT MSVC)
+        message(FATAL_ERROR "KF2 PGO currently requires the MSVC toolchain")
+    endif()
+    if(KF2_PGO_PGD STREQUAL "" OR NOT IS_ABSOLUTE "${KF2_PGO_PGD}")
+        message(FATAL_ERROR
+            "KF2_PGO_PGD must be an absolute path when PGO is enabled")
+    endif()
+    cmake_path(NORMAL_PATH KF2_PGO_PGD)
+endif()
 set(KF2_OFFLINE_TELEMETRY_SHA256
     "a3525dc520a3785566e96b01701e2101ca7b85f3c8e2362c90bd3deaf1e1d0d0"
     CACHE STRING "SHA-256 of the exact locally compiled offline telemetry module")
@@ -222,6 +242,13 @@ if(MSVC)
         $<$<CONFIG:Release>:/LTCG>
         /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA /guard:cf /CETCOMPAT
     )
+    if(KF2_PGO_MODE STREQUAL "INSTRUMENT")
+        target_link_options(KF2Optimizer PRIVATE
+            $<$<CONFIG:Release>:/GENPROFILE:PGD=${KF2_PGO_PGD}>)
+    elseif(KF2_PGO_MODE STREQUAL "OPTIMIZE")
+        target_link_options(KF2Optimizer PRIVATE
+            $<$<CONFIG:Release>:/USEPROFILE:PGD=${KF2_PGO_PGD}>)
+    endif()
 endif()
 target_link_libraries(KF2Optimizer PRIVATE
     user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs uiautomationcore bcrypt dwmapi psapi advapi32 pdh dxgi version winhttp ws2_32

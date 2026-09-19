@@ -164,6 +164,13 @@ Result<Settings> parse_settings(std::string_view text) {
                     return invalid_settings(L"debug_zed_markers is invalid");
                 }
                 settings.debug_zed_markers = parsed.value();
+            } else if (key == "debug_corpse_physics_control") {
+                const auto parsed = parse_boolean(value);
+                if (!parsed.has_value()) {
+                    return invalid_settings(
+                        L"debug_corpse_physics_control is invalid");
+                }
+                settings.debug_corpse_physics_control = parsed.value();
             } else if (key == "restore_config_after_game") {
                 const auto parsed = parse_boolean(value);
                 if (!parsed.has_value()) {
@@ -392,6 +399,9 @@ std::string serialize_settings(const Settings& settings) {
            << (settings.debug_corpse_markers ? "true" : "false") << '\n'
            << "debug_zed_markers="
            << (settings.debug_zed_markers ? "true" : "false") << '\n'
+           << "debug_corpse_physics_control="
+           << (settings.debug_corpse_physics_control ? "true" : "false")
+           << '\n'
            << "restore_config_after_game="
            << (settings.restore_config_after_game ? "true" : "false") << '\n'
            << "adaptive_aggressiveness="

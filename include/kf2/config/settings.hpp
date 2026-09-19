@@ -20,6 +20,9 @@ struct Settings {
     bool overlay_show_memory{true};
     bool debug_corpse_markers{false};
     bool debug_zed_markers{false};
+    // Diagnostics-only A/B control. When true, the protected provider remains
+    // active but all optimizer-owned corpse reductions are disabled.
+    bool debug_corpse_physics_control{false};
     bool restore_config_after_game{true};
     std::string adaptive_aggressiveness{"balanced"};
     int adaptive_minimum_quality{10};

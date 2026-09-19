@@ -46,6 +46,18 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
         &body_format);
     if (FAILED(result)) return result;
     body_format->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+    body_format->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
+                                19.0F, 14.5F);
+
+    ComPtr<IDWriteTextFormat> section_format;
+    result = write_factory->CreateTextFormat(
+        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12.5F, L"de-de",
+        &section_format);
+    if (FAILED(result)) return result;
+    section_format->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+    section_format->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
+                                   17.0F, 13.0F);
 
     ComPtr<IDWriteTextFormat> heading_format;
     result = write_factory->CreateTextFormat(
@@ -77,6 +89,16 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
     action_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     action_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
+    ComPtr<IDWriteTextFormat> navigation_format;
+    result = write_factory->CreateTextFormat(
+        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0F, L"de-de",
+        &navigation_format);
+    if (FAILED(result)) return result;
+    navigation_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    navigation_format->SetParagraphAlignment(
+        DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
     ComPtr<IDWriteTextFormat> metric_format;
     result = write_factory->CreateTextFormat(
         L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
@@ -85,6 +107,17 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
     if (FAILED(result)) return result;
     metric_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     metric_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    ComPtr<IDWriteTextFormat> metric_value_format;
+    result = write_factory->CreateTextFormat(
+        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_BOLD,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 15.0F, L"de-de",
+        &metric_value_format);
+    if (FAILED(result)) return result;
+    metric_value_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    metric_value_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    metric_value_format->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
+                                        19.0F, 14.5F);
 
     ComPtr<IDWriteTextFormat> slider_label_format;
     result = write_factory->CreateTextFormat(
@@ -100,6 +133,23 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
         &slider_value_format);
     if (FAILED(result)) return result;
     slider_value_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+
+    ComPtr<IDWriteTextFormat> tooltip_title_format;
+    result = write_factory->CreateTextFormat(
+        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0F, L"de-de",
+        &tooltip_title_format);
+    if (FAILED(result)) return result;
+
+    ComPtr<IDWriteTextFormat> tooltip_body_format;
+    result = write_factory->CreateTextFormat(
+        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0F, L"de-de",
+        &tooltip_body_format);
+    if (FAILED(result)) return result;
+    tooltip_body_format->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+    tooltip_body_format->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
+                                        18.0F, 13.5F);
 
     target->BeginDraw();
     target->Clear(color(theme.background));
@@ -120,6 +170,16 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
     target->DrawRectangle(rectangle(layout.status_strip), brush.Get(), 1.0F);
     target->DrawRectangle(rectangle(layout.metrics_strip), brush.Get(), 1.0F);
     target->DrawRectangle(rectangle(layout.sidebar), brush.Get(), 1.0F);
+    if (layout.header.width > 230.0F) {
+        brush->SetOpacity(exit_visibility * 0.85F);
+        brush->SetColor(color(theme.accent));
+        target->FillRoundedRectangle(
+            {{22.0F, layout.header.y + layout.header.height - 3.0F,
+              210.0F, layout.header.y + layout.header.height - 1.0F},
+             1.0F, 1.0F},
+            brush.Get());
+        brush->SetOpacity(exit_visibility);
+    }
 
     if (layout.navigation_indicator) {
         DipRect rail = *layout.navigation_indicator;
@@ -133,8 +193,10 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
 
     for (const auto& node : layout.nodes) {
         if (node.role == SemanticRole::root) continue;
+        const float visible_opacity = node.role == SemanticRole::tooltip
+            ? smooth_motion(node.opacity) : node.opacity;
         float node_opacity =
-            std::clamp(node.opacity, 0.0F, 1.0F) * exit_visibility;
+            std::clamp(visible_opacity, 0.0F, 1.0F) * exit_visibility;
         const bool header_action = node.role == SemanticRole::action &&
             node.id.starts_with("header-");
         const bool page_node = node.role == SemanticRole::page_heading ||
@@ -165,6 +227,13 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
         if (node.role == SemanticRole::tooltip) {
             motion_transform = motion_transform * D2D1::Matrix3x2F::Translation(
                 0.0F, tooltip_motion_offset_y(node.opacity));
+            animated_transform = true;
+        }
+        if ((node.role == SemanticRole::navigation_item ||
+             node.role == SemanticRole::action) &&
+            node.hover > 0.0F && !node.pressed) {
+            motion_transform = motion_transform * D2D1::Matrix3x2F::Translation(
+                0.0F, -1.5F * emphasized_motion(node.hover));
             animated_transform = true;
         }
         if ((node.role == SemanticRole::navigation_item ||
@@ -210,33 +279,80 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
         }
 
         if (node.role == SemanticRole::metric_card) {
+            brush->SetOpacity(node_opacity * 0.55F);
+            brush->SetColor(color(theme.background));
+            target->FillRoundedRectangle(
+                {rectangle({node.bounds.x, node.bounds.y + 3.0F,
+                            node.bounds.width, node.bounds.height}),
+                 9.0F, 9.0F},
+                brush.Get());
+            brush->SetOpacity(node_opacity);
             brush->SetColor(color(theme.surface_raised));
             target->FillRoundedRectangle(
-                {rectangle(node.bounds), 6.0F, 6.0F}, brush.Get());
+                {rectangle(node.bounds), 9.0F, 9.0F}, brush.Get());
             brush->SetColor(color(theme.border));
             target->DrawRoundedRectangle(
-                {rectangle(node.bounds), 6.0F, 6.0F}, brush.Get(), 1.0F);
+                {rectangle(node.bounds), 9.0F, 9.0F}, brush.Get(), 1.0F);
+            brush->SetColor(color(theme.accent));
+            target->FillRoundedRectangle(
+                {{node.bounds.x + 14.0F, node.bounds.y + 7.0F,
+                  node.bounds.x + 46.0F, node.bounds.y + 9.0F},
+                 1.0F, 1.0F},
+                brush.Get());
+            const auto divider = node.text.find(L'\n');
+            const std::wstring title = node.text.substr(0, divider);
+            const std::wstring value = divider == std::wstring::npos
+                ? std::wstring{} : node.text.substr(divider + 1);
+            const D2D1_RECT_F title_bounds{
+                node.bounds.x + 8.0F, node.bounds.y + 10.0F,
+                node.bounds.x + node.bounds.width - 8.0F,
+                node.bounds.y + 34.0F};
+            const D2D1_RECT_F value_bounds{
+                node.bounds.x + 8.0F, node.bounds.y + 30.0F,
+                node.bounds.x + node.bounds.width - 8.0F,
+                node.bounds.y + node.bounds.height - 8.0F};
             brush->SetColor(color(theme.warning));
-            target->DrawTextW(node.text.c_str(), static_cast<UINT32>(node.text.size()),
-                              metric_format.Get(), rectangle(node.bounds), brush.Get(),
+            target->DrawTextW(title.c_str(), static_cast<UINT32>(title.size()),
+                              metric_format.Get(), title_bounds, brush.Get(),
                               D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            brush->SetColor(color(value.empty() ? theme.muted_text : theme.text));
+            target->DrawTextW(value.c_str(), static_cast<UINT32>(value.size()),
+                              metric_value_format.Get(), value_bounds,
+                              brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
             continue;
         }
 
+        if (node.role == SemanticRole::status) {
+            brush->SetColor(color(theme.success));
+            target->FillEllipse(
+                {{node.bounds.x - 15.0F,
+                  node.bounds.y + node.bounds.height / 2.0F},
+                 3.5F, 3.5F},
+                brush.Get());
+        }
+
         if (node.role == SemanticRole::slider && node.slider) {
+            brush->SetOpacity(node_opacity * 0.45F);
+            brush->SetColor(color(theme.background));
+            target->FillRoundedRectangle(
+                {rectangle({node.bounds.x, node.bounds.y + 3.0F,
+                            node.bounds.width, node.bounds.height}),
+                 10.0F, 10.0F},
+                brush.Get());
+            brush->SetOpacity(node_opacity);
             brush->SetColor(color(theme.surface_raised));
             target->FillRoundedRectangle(
-                {rectangle(node.bounds), 7.0F, 7.0F}, brush.Get());
+                {rectangle(node.bounds), 10.0F, 10.0F}, brush.Get());
             if (node.hover > 0.0F) {
                 brush->SetOpacity(node_opacity * node.hover * 0.12F);
                 brush->SetColor(color(theme.info));
                 target->FillRoundedRectangle(
-                    {rectangle(node.bounds), 7.0F, 7.0F}, brush.Get());
+                    {rectangle(node.bounds), 10.0F, 10.0F}, brush.Get());
                 brush->SetOpacity(node_opacity);
             }
             brush->SetColor(color(node.focused ? theme.accent : theme.border));
             target->DrawRoundedRectangle(
-                {rectangle(node.bounds), 7.0F, 7.0F}, brush.Get(),
+                {rectangle(node.bounds), 10.0F, 10.0F}, brush.Get(),
                 node.focused ? 2.0F : 1.0F);
             if (node.interaction > 0.0F) {
                 brush->SetOpacity(node_opacity * node.interaction);
@@ -247,18 +363,29 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
             }
 
             brush->SetColor(color(node.enabled ? theme.text : theme.muted_text));
+            const D2D1_RECT_F value_pill{
+                node.bounds.x + node.bounds.width - 148.0F,
+                node.bounds.y + 8.0F,
+                node.bounds.x + node.bounds.width - 18.0F,
+                node.bounds.y + 38.0F};
             const D2D1_RECT_F label_bounds{
                 node.bounds.x + 18.0F, node.bounds.y + 10.0F,
-                node.bounds.x + node.bounds.width * 0.68F,
+                value_pill.left - 12.0F,
                 node.bounds.y + 36.0F};
             target->DrawTextW(node.text.c_str(), static_cast<UINT32>(node.text.size()),
                               slider_label_format.Get(), label_bounds, brush.Get(),
                               D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            brush->SetColor(color(theme.background));
+            target->FillRoundedRectangle(
+                {value_pill, 6.0F, 6.0F}, brush.Get());
+            brush->SetColor(color(node.focused ? theme.accent : theme.border));
+            target->DrawRoundedRectangle(
+                {value_pill, 6.0F, 6.0F}, brush.Get(), 1.0F);
             const std::wstring visible_value =
                 std::to_wstring(node.slider->value) + node.slider->unit;
             const D2D1_RECT_F value_bounds{
-                node.bounds.x + node.bounds.width * 0.55F, node.bounds.y + 7.0F,
-                node.bounds.x + node.bounds.width - 18.0F,
+                value_pill.left + 10.0F, value_pill.top,
+                value_pill.right - 10.0F,
                 node.bounds.y + 38.0F};
             brush->SetColor(color(node.enabled ? theme.accent_hover
                                                : theme.muted_text));
@@ -269,7 +396,7 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
 
             const float track_left = node.bounds.x + 28.0F;
             const float track_right = node.bounds.x + node.bounds.width - 28.0F;
-            const float track_y = node.bounds.y + node.bounds.height - 25.0F;
+            const float track_y = node.bounds.y + node.bounds.height - 27.0F;
             const float ratio = node.slider->maximum > node.slider->minimum
                 ? std::clamp(
                       static_cast<float>(node.slider->value - node.slider->minimum) /
@@ -280,47 +407,94 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
             const float thumb_x = track_left + (track_right - track_left) * ratio;
             brush->SetColor(color(theme.border));
             target->FillRoundedRectangle(
-                {{track_left, track_y - 2.0F, track_right, track_y + 2.0F},
-                 2.0F, 2.0F}, brush.Get());
+                {{track_left, track_y - 3.0F, track_right, track_y + 3.0F},
+                 3.0F, 3.0F}, brush.Get());
             brush->SetColor(color(node.enabled ? theme.accent : theme.muted_text));
             target->FillRoundedRectangle(
-                {{track_left, track_y - 2.0F, thumb_x, track_y + 2.0F},
-                 2.0F, 2.0F}, brush.Get());
-            brush->SetColor(color(theme.text));
-            target->FillEllipse({{thumb_x, track_y}, 7.0F, 7.0F}, brush.Get());
+                {{track_left, track_y - 3.0F, thumb_x, track_y + 3.0F},
+                 3.0F, 3.0F}, brush.Get());
+            brush->SetColor(color(theme.surface_raised));
+            target->FillEllipse({{thumb_x, track_y}, 9.0F, 9.0F}, brush.Get());
             brush->SetColor(color(node.enabled ? theme.accent : theme.muted_text));
-            target->DrawEllipse({{thumb_x, track_y}, 8.0F, 8.0F},
+            target->DrawEllipse({{thumb_x, track_y}, 9.0F, 9.0F},
                                 brush.Get(), 2.0F);
+            target->FillEllipse({{thumb_x, track_y}, 3.0F, 3.0F}, brush.Get());
             if (animated_transform) target->SetTransform(original_transform);
             if (page_node) target->PopAxisAlignedClip();
             continue;
         }
 
-        if (node.role == SemanticRole::navigation_item &&
+        if (node.role == SemanticRole::page_heading) {
+            brush->SetColor(color(theme.accent));
+            target->FillRoundedRectangle(
+                {{node.bounds.x, node.bounds.y + node.bounds.height - 3.0F,
+                  node.bounds.x + 46.0F,
+                  node.bounds.y + node.bounds.height - 1.0F},
+                 1.0F, 1.0F},
+                brush.Get());
+        } else if (node.role == SemanticRole::section_heading) {
+            brush->SetColor(color(theme.border));
+            target->FillRectangle(
+                {node.bounds.x, node.bounds.y + node.bounds.height - 2.0F,
+                 node.bounds.x + node.bounds.width,
+                 node.bounds.y + node.bounds.height - 1.0F},
+                brush.Get());
+            brush->SetColor(color(theme.warning));
+            target->FillRoundedRectangle(
+                {{node.bounds.x, node.bounds.y + node.bounds.height - 3.0F,
+                  node.bounds.x + 30.0F,
+                  node.bounds.y + node.bounds.height},
+                 1.5F, 1.5F},
+                brush.Get());
+        } else if (node.role == SemanticRole::navigation_item &&
             (node.selected || node.focused)) {
             brush->SetColor(color(theme.surface_raised));
             target->FillRoundedRectangle(
                 {rectangle(node.bounds), 6.0F, 6.0F}, brush.Get());
+            if (node.selected) {
+                brush->SetOpacity(node_opacity * 0.10F);
+                brush->SetColor(color(theme.accent));
+                target->FillRoundedRectangle(
+                    {rectangle(node.bounds), 6.0F, 6.0F}, brush.Get());
+                brush->SetOpacity(node_opacity);
+            }
             brush->SetColor(color(node.selected ? theme.accent_hover : theme.border));
             target->DrawRoundedRectangle(
-                {rectangle(node.bounds), 6.0F, 6.0F}, brush.Get(), 1.0F);
+                {rectangle(node.bounds), 6.0F, 6.0F}, brush.Get(),
+                node.selected ? 2.0F : 1.0F);
         } else if (node.role == SemanticRole::navigation_item) {
             if (!node.selected) {
+                brush->SetOpacity(node_opacity * 0.72F);
                 brush->SetColor(color(theme.surface_raised));
                 target->FillRoundedRectangle(
-                    {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get());
+                    {rectangle(node.bounds), 7.0F, 7.0F}, brush.Get());
                 brush->SetColor(color(theme.border));
                 target->DrawRoundedRectangle(
-                    {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get(), 1.0F);
+                    {rectangle(node.bounds), 7.0F, 7.0F}, brush.Get(), 1.0F);
+                brush->SetOpacity(node_opacity);
             }
         } else if (node.role == SemanticRole::recovery_banner ||
                    node.role == SemanticRole::notice) {
             brush->SetColor(color(theme.surface_raised));
             target->FillRoundedRectangle(
                 {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get());
-            brush->SetColor(color(theme.warning));
+            const std::uint32_t notice_color =
+                node.role == SemanticRole::recovery_banner
+                    ? theme.warning
+                    : node.notice_severity == NoticeSeverity::error
+                        ? theme.error
+                        : node.notice_severity == NoticeSeverity::warning
+                            ? theme.warning
+                            : theme.info;
+            brush->SetColor(color(notice_color));
             target->DrawRoundedRectangle(
-                {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get(), 2.0F);
+                {rectangle(node.bounds), 8.0F, 8.0F}, brush.Get(), 1.5F);
+            target->FillRoundedRectangle(
+                {{node.bounds.x, node.bounds.y + 8.0F,
+                  node.bounds.x + 4.0F,
+                  node.bounds.y + node.bounds.height - 8.0F},
+                 2.0F, 2.0F},
+                brush.Get());
         } else if (node.role == SemanticRole::action) {
             const bool primary = node.action_id &&
                 (*node.action_id == "dashboard-launch" ||
@@ -338,19 +512,34 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
                     brush.Get(), 3.0F);
                 brush->SetOpacity(node_opacity);
             }
+            brush->SetOpacity(node_opacity * 0.50F);
+            brush->SetColor(color(theme.background));
+            target->FillRoundedRectangle(
+                {rectangle({node.bounds.x, node.bounds.y + 2.0F,
+                            node.bounds.width, node.bounds.height}),
+                 8.0F, 8.0F},
+                brush.Get());
+            brush->SetOpacity(node_opacity);
             brush->SetColor(color(!node.enabled ? theme.surface_raised
                                                 : node.attention ? theme.warning
                                                 : emphasized ? theme.accent
                                                           : theme.surface_raised));
             target->FillRoundedRectangle(
-                {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get());
+                {rectangle(node.bounds), 8.0F, 8.0F}, brush.Get());
+            if (node.selected && node.enabled && !emphasized) {
+                brush->SetOpacity(node_opacity * 0.10F);
+                brush->SetColor(color(theme.success));
+                target->FillRoundedRectangle(
+                    {rectangle(node.bounds), 8.0F, 8.0F}, brush.Get());
+                brush->SetOpacity(node_opacity);
+            }
             brush->SetColor(color(node.focused ? theme.info :
                                   node.enabled ? (node.selected ? theme.success
                                                 : emphasized ? theme.accent_hover
                                                              : theme.border)
                                                : theme.border));
             target->DrawRoundedRectangle(
-                {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get(),
+                {rectangle(node.bounds), 8.0F, 8.0F}, brush.Get(),
                 node.focused || node.selected ? 2.0F : 1.0F);
             if (node.interaction > 0.0F) {
                 brush->SetOpacity(node_opacity * node.interaction);
@@ -360,17 +549,49 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
                 brush->SetOpacity(node_opacity);
             }
         } else if (node.role == SemanticRole::tooltip) {
+            const float tooltip_card_opacity =
+                node_opacity > 0.0F ? 1.0F : 0.0F;
+            brush->SetOpacity(tooltip_card_opacity * 0.60F);
+            brush->SetColor(color(theme.background));
+            target->FillRoundedRectangle(
+                {rectangle({node.bounds.x + 2.0F, node.bounds.y + 5.0F,
+                            node.bounds.width, node.bounds.height}),
+                 10.0F, 10.0F},
+                brush.Get());
+            brush->SetOpacity(tooltip_card_opacity);
             brush->SetColor(color(theme.surface_raised));
             target->FillRoundedRectangle(
-                {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get());
-            brush->SetColor(color(theme.border));
+                {rectangle(node.bounds), 8.0F, 8.0F}, brush.Get());
+            brush->SetColor(color(theme.info));
             target->DrawRoundedRectangle(
-                {rectangle(node.bounds), 5.0F, 5.0F}, brush.Get(), 1.0F);
+                {rectangle(node.bounds), 8.0F, 8.0F}, brush.Get(), 1.5F);
+
+            const D2D1_RECT_F title_bounds{
+                node.bounds.x + 14.0F, node.bounds.y + 9.0F,
+                node.bounds.x + node.bounds.width - 14.0F,
+                node.bounds.y + 31.0F};
+            brush->SetColor(color(theme.text));
+            target->DrawTextW(
+                node.text.c_str(), static_cast<UINT32>(node.text.size()),
+                tooltip_title_format.Get(), title_bounds, brush.Get(),
+                D2D1_DRAW_TEXT_OPTIONS_CLIP);
+
+            const D2D1_RECT_F body_bounds{
+                node.bounds.x + 14.0F, node.bounds.y + 32.0F,
+                node.bounds.x + node.bounds.width - 14.0F,
+                node.bounds.y + node.bounds.height - 10.0F};
+            brush->SetColor(color(theme.muted_text));
+            target->DrawTextW(
+                node.detail_text.c_str(),
+                static_cast<UINT32>(node.detail_text.size()),
+                tooltip_body_format.Get(), body_bounds, brush.Get(),
+                D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
 
         if ((node.role == SemanticRole::navigation_item ||
              node.role == SemanticRole::action) && node.hover > 0.0F) {
-            brush->SetOpacity(node_opacity * node.hover * 0.12F);
+            brush->SetOpacity(node_opacity *
+                              emphasized_motion(node.hover) * 0.12F);
             brush->SetColor(color(theme.info));
             target->FillRoundedRectangle(
                 {rectangle(node.bounds), 6.0F, 6.0F}, brush.Get());
@@ -389,13 +610,33 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
                                             node.role == SemanticRole::footer
                                       ? theme.muted_text
                                   : theme.text));
-        const auto bounds = rectangle(node.bounds);
-        target->DrawTextW(node.text.c_str(), static_cast<UINT32>(node.text.size()),
-                          heading ? heading_format.Get()
-                                  : node.role == SemanticRole::action
-                                      ? action_format.Get()
-                                      : body_format.Get(),
-                          bounds, brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        auto bounds = rectangle(node.bounds);
+        if (node.role == SemanticRole::navigation_item) {
+            bounds.left += 12.0F;
+            bounds.right -= 8.0F;
+        } else if (node.role == SemanticRole::notice ||
+                   node.role == SemanticRole::recovery_banner) {
+            bounds.left += 16.0F;
+            bounds.top += 5.0F;
+            bounds.right -= 12.0F;
+            bounds.bottom -= 4.0F;
+        }
+        if (node.role != SemanticRole::tooltip) {
+            IDWriteTextFormat* text_format = body_format.Get();
+            if (heading) {
+                text_format = heading_format.Get();
+            } else if (node.role == SemanticRole::action) {
+                text_format = action_format.Get();
+            } else if (node.role == SemanticRole::navigation_item) {
+                text_format = navigation_format.Get();
+            } else if (section) {
+                text_format = section_format.Get();
+            }
+            target->DrawTextW(node.text.c_str(),
+                              static_cast<UINT32>(node.text.size()),
+                              text_format,
+                              bounds, brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        }
         if (animated_transform) target->SetTransform(original_transform);
         if (page_node) target->PopAxisAlignedClip();
     }
@@ -410,15 +651,18 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
         const float travel = std::max(0.0F, track_height - thumb_height);
         const float ratio = std::clamp(
             layout.scroll_offset / layout.scroll_extent, 0.0F, 1.0F);
+        brush->SetOpacity(exit_visibility * 0.65F);
         brush->SetColor(color(theme.border));
         target->FillRoundedRectangle(
-            {{track_x, track_top, track_x + 3.0F, track_top + track_height},
-             1.5F, 1.5F}, brush.Get());
+            {{track_x - 1.0F, track_top, track_x + 5.0F,
+              track_top + track_height},
+             3.0F, 3.0F}, brush.Get());
+        brush->SetOpacity(exit_visibility);
         brush->SetColor(color(theme.accent));
         target->FillRoundedRectangle(
             {{track_x - 1.0F, track_top + travel * ratio,
-              track_x + 4.0F, track_top + travel * ratio + thumb_height},
-             2.5F, 2.5F}, brush.Get());
+              track_x + 5.0F, track_top + travel * ratio + thumb_height},
+             3.0F, 3.0F}, brush.Get());
     }
     return target->EndDraw();
 }

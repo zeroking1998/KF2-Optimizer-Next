@@ -4,82 +4,159 @@ Release notes stay short and user-focused. Every release uses only **What's
 new**, **Bug fixes**, and optional **Important notes** so the important changes
 are visible immediately.
 
-## Unreleased
+## 0.0.5-alpha - Unreleased
 
 ### What's new
 
+- Reworked Adaptive into one protected, user-controlled runtime with separate
+  CPU, GPU, VRAM, RAM, overdraw, effects, physics, LOD, and corpse-pressure
+  paths. Confirmed pressure changes only its matching group, and stable
+  headroom restores quality gradually.
+- Expanded Adaptive coverage to verified KF2 shadow distance and fade,
+  post-processing, lighting, shadow-map textures, wound decals, blood, gore,
+  destruction lifetimes, particle LOD, emitter capacity, and cosmetic corpse
+  collision controls. Every live action requires an applied receipt before it
+  is treated as active.
+- Added conservative scene-pressure classification from frame time, sustained
+  resource use, visible particle occupancy, decal saturation, active effects,
+  enemy pressure, and corpse density. Unknown pressure no longer triggers an
+  unrelated broad quality change.
+- Added bounded corpse management with capacity control, staggered processing,
+  distance sleep, settled-ragdoll sleep, stable low corpse LOD, final-pose
+  skeleton handling, and a frozen state outside rigid-body simulation. Frozen
+  corpses no longer keep unnecessary actor ticks or collision work.
+- Added safe fixed-minimum visual tiers for living Zeds and old corpses while
+  preserving attacks, hits, current death animations, active physics, and the
+  player's close-range view.
+- Added a persistent Home switch for Adaptive optimization. Changes are saved
+  safely even during map transitions or temporary telemetry loss and are
+  confirmed by the protected runtime before live control resumes.
 - Replaced the embedded PresentMon analysis library with a small native DXGI
-  frame-timing session. The existing overlay keeps the same FPS, frame-time,
-  average, 1% low, percentile, and stutter output without injection, a helper
-  process, or an extra runtime DLL.
-- Adaptive live quality now keeps independent CPU, GPU, VRAM, RAM, and
-  overdraw levels.
-  Each confirmed bottleneck changes only its matching group, while recovery
-  restores the groups gradually. The live groups now also cover verified KF2
-  shadow distance/fade, post-processing quality, lighting, shadowmap textures,
-  wound decals, blood effects, and destruction lifetime controls.
-- Adaptive now derives a conservative overdraw signal from fresh visible
-  particle occupancy and active decal saturation. Confirmed rendering pressure
-  uses its own reversible quality group for particle distortion, particle LOD,
-  blood effects, and decal budgets instead of lowering unrelated graphics.
-- Real KF2 gameplay calibration now recognizes the rare upper tail of that
-  signal at 50% only when independent KF2 GPU pressure is also confirmed; the
-  stronger 80% fallback remains required without GPU attribution.
-- Effect-heavy combat now has an independent adaptive quality channel for
-  particle LOD, effect lifetimes, emitter capacity, blood, gore, and decals.
-  Verified gore or particle pressure can use it directly, and rendering
-  pressure falls back to it after overdraw reaches minimum quality.
-- CPU Adaptive quality now progressively reduces the three official cosmetic
-  corpse-collision options at 80%, 60%, and 40%, with exact engine readback and
-  restoration of the user's original values.
-- Added a protected startup performance profile that enables KF2's native
-  asynchronous physics scene and real one-frame render-thread pipeline. It
-  also selects a bounded 160-6000 MB texture pool from the renderer confirmed
-  by KF2 and adjusts the native streaming memory margin and hysteresis.
+  frame-timing session. The overlay retains Live FPS, frame time, average,
+  1% low, percentiles, and stutter information without injection, a helper
+  process, or an additional runtime DLL.
+- Added readable in-game Zed and corpse distance diagnostics plus actor-level
+  telemetry for controlled gameplay investigations. Diagnostic markers remain
+  optional and are kept separate from normal optimization behavior.
+- Added a protected native startup profile with asynchronous physics scenes,
+  real one-frame render-thread pipelining, and hardware-aware texture-streaming
+  memory, margin, and hysteresis values.
+- Added storage-aware startup warming for frequently used KF2 files, Steam
+  achievement data, and selected map data. Work is bounded, visible in the UI,
+  stops when KF2 needs the resources, and avoids blindly loading large files.
+- Skips the four vendor startup logos while preserving the main-menu background
+  and map-loading movies.
+- Moved expensive desktop telemetry, game-log parsing, persistence, frame
+  aggregation, and selected diagnostics off the UI path. Remaining world,
+  emitter, corpse, Zed, and effect scans are cached, phased, or budgeted across
+  frames to reduce periodic CPU spikes.
+- Added a controlled corpse-physics A/B mode for repeatable performance tests
+  without changing normal user behavior.
+- Added reproducible release optimization through interprocedural optimization
+  and an optional two-phase MSVC profile-guided optimization workflow.
+- Simplified contributor setup, Windows builds, GitHub issue reporting, and
+  portable packaging. Parallel local builds, stronger package verification,
+  current-source telemetry binding, and clearer public documentation are now
+  included.
 
 ### Bug fixes
 
-- Kept the overlay visible for exclusive-fullscreen users by temporarily using
-  borderless fullscreen during the protected session and restoring the selected
-  display mode after KF2 exits.
-- Aligned Live FPS with the one-second observation window used by common
-  external overlays, reducing display differences without extra sampling.
-- Prevented transient frame-percentile lows immediately after a map becomes
-  playable from causing an unnecessary quality reduction and rollback cycle.
-- Fixed the first launch after a Windows GPU-preference change inheriting the
-  previous adapter's texture-memory profile. Multi-GPU startup now uses the
-  configured physical adapter identity or a conservative cross-adapter budget.
-- Fixed adaptive mixed-pressure corrections consuming the dedicated overdraw
-  quality channel before verified overdraw pressure could select it.
-- Fixed repeated native corpse wakes being fought by Distance Sleep. Backoff
-  now grows from 2 to 30 seconds for only the affected corpse, while expired
-  actor records are reclaimed and other eligible corpses remain unrestricted.
-- Fixed live gore, blood, impact, and explosion managers keeping their old
-  limits after an adaptive effect change. Their active pools, including KF2's
-  impact-particle emitter pool, now receive and verify the same reversible
-  limits before an APPLIED receipt is accepted.
-- Filtered vendor-neutral GPU utilization by physical adapter, sample age and
-  continuity so isolated 0%/100% readings cannot redirect Adaptive decisions;
-  sustained saturation is confirmed within one additional sampling interval.
-- Preserved one native adaptive-graphics baseline across consecutive maps so
-  recovery and exact readback no longer treat previously reduced settings as
-  the new 100% quality state.
+- Target FPS now uses KF2's native, vendor-independent startup cap for launches
+  from the optimizer, Steam, and shortcuts. A running session remains bound to
+  the target it actually started with, preventing false Adaptive pressure after
+  the saved target changes.
+- Direct clicks anywhere on Target FPS, Maximum corpses, and other slider
+  tracks now save exactly once. Values changed during Steam's startup handoff
+  are applied to the imminent KF2 process instead of being mislabeled as
+  belonging to a later start.
+- Fixed Maximum corpses reaching the end of its range, interrupted slider
+  capture, failed setting writes, and startup readback so the UI always returns
+  to the authoritative saved value.
+- Information, warning, and error banners now use distinct semantic colors,
+  and the compact status line has consistent horizontal spacing.
+- Tooltips now separate the control name, current slider value, and detailed
+  explanation in a larger adaptive card. Refined easing, navigation emphasis,
+  and metric-card typography improve readability without adding a UI runtime.
+- Removed the redundant Display control from Game graphics because protected
+  Optimizer sessions already use borderless fullscreen. Display-mode reading,
+  validation, and safe session handling remain internal.
+- Synchronized the Optimizer's Game graphics page with KF2's own saved menu
+  values. User-owned graphics and FleX selections survive protected sessions,
+  settings restarts, app restarts, and exact post-session restoration.
+- Preserved protected sessions across KF2's automatic settings restart and
+  Steam process handoff without restoring temporary files too early.
+- Fixed map polling retaining a completed Unreal world and causing garbage-
+  collection failures during later map loads. World-bound cursors, caches,
+  telemetry interactions, and map-ready state now reset safely across repeated
+  transitions.
 - Fixed duplicate telemetry viewport interactions accumulating after map
-  changes, and ensured the one persistent interaction safely stops and rearms
-  for every consecutive gameplay world.
-- Ragdoll Sleep now preserves an unconditional 800-unit safety radius around
-  the player, even under severe frame, enemy, or corpse-density pressure.
-- Fixed hybrid-GPU systems sizing KF2's texture pool from the adapter with the
-  most VRAM instead of the GPU that KF2 actually uses.
-- Fixed resource-specific quality changes being tracked as one shared value,
-  which could make a later CPU, GPU, VRAM, or RAM correction start from the
-  wrong quality level.
-- Target FPS now uses KF2's native startup cap independently of telemetry and
-  Adaptive runtime capabilities, including Steam and shortcut launches.
-- Removed the redundant telemetry-side FPS actuator and its unused application
-  preview path.
-- Fixed low or unstable overlay FPS values caused by mixing multiple KF2
-  swapchains and excluding successful presents later discarded by Windows.
+  changes. One persistent interaction stops and rearms for each gameplay world.
+- Prevented transient loading, menu, trader, and early post-map frames from
+  entering Adaptive decisions or depressing the displayed 1% low window.
+- Preserved one native graphics baseline across consecutive maps so recovery
+  never treats a previously reduced value as the user's new 100% setting.
+- Fixed Adaptive recovery restoring quality without verified improvement,
+  getting stuck below the user's quality, or rolling back through the wrong
+  resource group. Pending and applied actions now retain their exact cause and
+  generation.
+- Prevented broad `mixed` reductions without an attributed CPU, GPU, VRAM, RAM,
+  paging, effects, or overdraw cause. Runtime effects and memory controls no
+  longer invoke unrelated native graphics work.
+- Fixed sustained 1% low pressure, stale frame pressure after recovery, and
+  frame-rate-mode changes carrying old Adaptive windows into a new target.
+- Fixed effect, gore, blood, impact, explosion, and impact-particle managers
+  retaining old limits after a live effect change. Active pools now confirm the
+  same reversible values before an applied receipt is accepted.
+- Fixed repeated native corpse wakes being fought by Distance Sleep. Per-corpse
+  backoff grows from 2 to 30 seconds, expired records are reclaimed, and other
+  eligible corpses remain unrestricted.
+- Corpse sleep now requires settled motion, preserves current death animation,
+  avoids rapid sleep/wake loops, and keeps an unconditional 800-unit safety
+  radius around the player under every pressure level.
+- Fixed reduced corpse LOD, final-pose skeleton state, frozen physics, tick, and
+  collision being unnecessarily restored after a corpse was already finalized.
+- Fixed temporary corpse-telemetry gaps disabling otherwise safe processing or
+  presenting unconfirmed capability and action states.
+- Filtered GPU utilization by physical adapter, sample age, and continuity so
+  isolated 0% or 100% readings cannot redirect Adaptive decisions. Sustained
+  saturation is still recognized quickly.
+- Fixed hybrid-GPU systems choosing the adapter with the most VRAM instead of
+  the GPU KF2 actually uses. Startup now uses the confirmed adapter or a safe
+  cross-adapter memory budget when selection is uncertain.
+- Kept the overlay visible across focus changes and exclusive-fullscreen use by
+  using protected borderless presentation when required and restoring the
+  user's selected display mode after KF2 exits.
+- Fixed low, unstable, or stale overlay FPS caused by mixing KF2 swap chains,
+  dropping successful presents later discarded by Windows, or carrying timing
+  state across maps. Live FPS now uses the same one-second observation window
+  as common external overlays.
+- Fixed FleX detection after graphics changes and settings restarts. User-
+  enabled FleX runs at the verified minimum solver level; user-disabled FleX
+  remains off and is never enabled by Adaptive.
+- Fixed invalid Ultra shadow validation and other catalog/readback mismatches
+  that could incorrectly report a safe KF2 setting as missing or out of range.
+- Fixed stale or mismatched compiled telemetry modules entering a package.
+  Builds now bind the executable to the current source module and verify the
+  module, manifest, hashes, documentation, and portable package shape.
+- Fixed Adaptive and telemetry work continuing while the game was not ready,
+  while Zed Time prohibited an action, or after its process/session identity
+  changed.
+- Preserved bounded applied-action history so early receipts remain available
+  for diagnostics after long gameplay sessions.
+- Removed unreachable legacy control paths, the redundant telemetry-side FPS
+  actuator, obsolete preview behavior, and idle animation-timer work that no
+  longer serves the current interface.
+
+### Important notes
+
+- This remains an unsigned alpha release. Windows SmartScreen may display a
+  warning on first launch.
+- Existing user graphics, FleX choices, portable settings, logs, backups, and
+  profiles remain user-owned and are preserved by protected sessions and
+  updates.
+- Several changes affect startup, map transitions, telemetry, and protected
+  restoration together. Final release acceptance must use the exact packaged
+  executable and telemetry module that will be published.
 
 ## 0.0.4-alpha - 2026-08-22
 

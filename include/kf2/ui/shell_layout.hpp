@@ -66,6 +66,8 @@ struct SemanticNode {
     float hover{0.0F};
     float interaction{0.0F};
     bool pressed{false};
+    NoticeSeverity notice_severity{NoticeSeverity::info};
+    std::wstring detail_text;
 };
 
 struct ShellLayoutResult {

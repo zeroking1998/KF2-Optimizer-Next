@@ -43,7 +43,6 @@ enum class ActionId : std::uint16_t {
     settings_updates_install = 87,
     settings_updates_later = 88,
     settings_updates_ignore = 89,
-    graphics_display = 90,
     graphics_resolution = 91,
     graphics_overall_quality = 92,
     graphics_environment_detail = 95,
@@ -79,6 +78,7 @@ enum class ActionId : std::uint16_t {
     debug_corpse_markers = 128,
     debug_zed_markers = 129,
     settings_adaptive_toggle = 130,
+    debug_corpse_physics_control = 131,
 };
 
 enum class ControlId : std::uint8_t {

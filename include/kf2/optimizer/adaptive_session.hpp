@@ -6,14 +6,15 @@
 
 namespace kf2::optimizer {
 
-// Target FPS is an optimizer policy and follows the current user setting even
-// while KF2 is running. The process-bound value remains a safe fallback for an
-// invalid or unavailable configured value.
+// The process-bound target describes the native cap KF2 actually started
+// with. A newly selected target is persisted for the next launch, but must not
+// make Adaptive grade the current process against a cap that is not active.
 [[nodiscard]] constexpr int effective_adaptive_target_fps(
     int configured_value, std::optional<int> session_value) noexcept {
-    if (valid_target_fps(configured_value)) return configured_value;
-    return session_value && valid_target_fps(*session_value)
-        ? *session_value : configured_value;
+    if (session_value && valid_target_fps(*session_value)) {
+        return *session_value;
+    }
+    return configured_value;
 }
 
 [[nodiscard]] constexpr int effective_adaptive_corpse_limit(

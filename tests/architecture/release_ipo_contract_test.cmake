@@ -41,3 +41,30 @@ if(NOT global_ipo EQUAL -1)
     message(FATAL_ERROR
         "IPO must not be enabled globally for tests or UnrealScript tooling")
 endif()
+
+foreach(required_pgo_contract IN ITEMS
+        "set(KF2_PGO_MODE \"OFF\" CACHE STRING"
+        "KF2_PGO_MODE STREQUAL \"INSTRUMENT\""
+        "$<$<CONFIG:Release>:/GENPROFILE:PGD=\${KF2_PGO_PGD}>"
+        "KF2_PGO_MODE STREQUAL \"OPTIMIZE\""
+        "$<$<CONFIG:Release>:/USEPROFILE:PGD=\${KF2_PGO_PGD}>")
+    string(FIND "${project_cmake}" "${required_pgo_contract}" pgo_contract)
+    if(pgo_contract EQUAL -1)
+        message(FATAL_ERROR
+            "Release PGO contract is missing: ${required_pgo_contract}")
+    endif()
+endforeach()
+
+file(READ "${PROJECT_SOURCE_DIR}/tools/build_pgo.ps1" pgo_script)
+foreach(required_pgo_guard IN ITEMS
+        "ValidateSet('Instrument', 'Optimize')"
+        "No PGO training data exists"
+        "pgort140.dll"
+        "KF2Optimizer*.pgc"
+        "-DKF2_PGO_MODE=$mode")
+    string(FIND "${pgo_script}" "${required_pgo_guard}" pgo_guard)
+    if(pgo_guard EQUAL -1)
+        message(FATAL_ERROR
+            "PGO build workflow guard is missing: ${required_pgo_guard}")
+    endif()
+endforeach()
