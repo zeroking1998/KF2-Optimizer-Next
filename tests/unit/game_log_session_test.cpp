@@ -405,6 +405,27 @@ int main() {
         1'340'000'000ULL);
     CHECK(online_corpse_restore.has_value());
     CHECK(online_corpse_restore->online_corpse_restore_verified);
+    const auto online_corpse_lod = corpse_stream.feed(
+        "[0041.120] ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=lod "
+        "corpse_id=KFPawn_ZedGorefast_0 target_lod=3 fixed_minimum=true "
+        "local_only=true readback=verified\n",
+        1'345'000'000ULL);
+    CHECK(online_corpse_lod.has_value());
+    CHECK(online_corpse_lod->online_corpse_lod_verified);
+    const auto online_corpse_skeleton = corpse_stream.feed(
+        "[0041.121] ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=skeleton "
+        "corpse_id=KFPawn_ZedGorefast_0 skip_asleep=true "
+        "no_skeleton_update=true fixed_minimum=true local_only=true "
+        "readback=verified\n",
+        1'350'000'000ULL);
+    CHECK(online_corpse_skeleton.has_value());
+    CHECK(online_corpse_skeleton->online_corpse_skeleton_verified);
+    CHECK(!corpse_stream.feed(
+        "[0041.122] ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=skeleton "
+        "corpse_id=KFPawn_ZedGorefast_1 skip_asleep=false "
+        "no_skeleton_update=true fixed_minimum=true local_only=true "
+        "readback=verified\n",
+        1'355'000'000ULL).has_value());
     const auto online_corpse_capacity = corpse_stream.feed(
         "[0041.12] ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=capacity "
         "corpse_id=KFPawn_ZedCrawler_1 pool_before=21 pool_after=20 "

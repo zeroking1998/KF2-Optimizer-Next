@@ -621,6 +621,14 @@ select_adaptive_runtime_control(
                 sample.capabilities.ragdoll_control =
                     optimizer::AdaptiveCapabilityState::available;
             }
+            if (frame.gameplay->online_corpse_lod_verified) {
+                sample.capabilities.corpse_lod_control =
+                    optimizer::AdaptiveCapabilityState::available;
+            }
+            if (frame.gameplay->online_corpse_skeleton_verified) {
+                sample.capabilities.skeleton_update_control =
+                    optimizer::AdaptiveCapabilityState::available;
+            }
         }
         if (sample.gameplay_context_fresh) {
             const auto normalized = [](

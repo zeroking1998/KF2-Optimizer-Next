@@ -33,6 +33,8 @@ struct GameLogSession {
     bool online_corpse_capacity_verified{false};
     bool online_corpse_freeze_verified{false};
     bool online_corpse_restore_verified{false};
+    bool online_corpse_lod_verified{false};
+    bool online_corpse_skeleton_verified{false};
     std::uint64_t online_corpse_capability_observed_ns{0};
     std::uint64_t online_corpse_action_observed_ns{0};
     std::optional<int> zeds_remaining;

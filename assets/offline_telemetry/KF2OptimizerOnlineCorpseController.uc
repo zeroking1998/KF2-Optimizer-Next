@@ -16,9 +16,14 @@ struct OnlineFrozenCorpseState
 
 var array<OnlineFrozenCorpseState> FrozenCorpses;
 var int FreezeScanCursor;
+var int VisualScanCursor;
+var int VisualControlPhase;
 var float LastPhysicsMutationRealTime;
+var float LastVisualMutationRealTime;
 var bool bFreezeReceiptReported;
 var bool bRestoreReceiptReported;
+var bool bLodReceiptReported;
+var bool bSkeletonReceiptReported;
 
 function KF2OptimizerOnlineContextInteraction GetOnlineInteraction()
 {
@@ -225,11 +230,161 @@ function bool FreezeOneOnlineCorpse()
     return false;
 }
 
+function bool ApplyOneFixedMinimumCorpseLod()
+{
+    local int Index;
+    local int Offset;
+    local int PoolLength;
+    local int ScanCount;
+    local int TargetMinLod;
+    local KFGoreManager GoreManager;
+    local KFPawn Candidate;
+
+    GoreManager = KFGoreManager(WorldInfo.MyGoreEffectManager);
+    if (GoreManager == None)
+    {
+        return false;
+    }
+    PoolLength = GoreManager.CorpsePool.Length;
+    if (PoolLength <= 0)
+    {
+        VisualScanCursor = 0;
+        return false;
+    }
+    VisualScanCursor = Clamp(VisualScanCursor, 0, PoolLength - 1);
+    ScanCount = Min(8, PoolLength);
+    for (Offset = 0; Offset < ScanCount; ++Offset)
+    {
+        Index = (VisualScanCursor + Offset) % PoolLength;
+        Candidate = GoreManager.CorpsePool[Index];
+        if (Candidate == None || Candidate.bDeleteMe ||
+            KFPawn_Monster(Candidate) == None || Candidate.Mesh == None ||
+            Candidate.Mesh.SkeletalMesh == None ||
+            Candidate.Mesh.SkeletalMesh.LODInfo.Length < 2 ||
+            Candidate.Mesh.ForcedLodModel != 0 ||
+            Candidate.IsAliveAndWell() || Candidate.TimeOfDeath <= 0.0 ||
+            WorldInfo.TimeSeconds - Candidate.TimeOfDeath < 0.75 ||
+            Candidate.SpecialMove == SM_DeathAnim)
+        {
+            continue;
+        }
+        TargetMinLod = Candidate.Mesh.SkeletalMesh.LODInfo.Length - 1;
+        if (Candidate.Mesh.MinLodModel >= TargetMinLod)
+        {
+            continue;
+        }
+        Candidate.Mesh.MinLodModel = TargetMinLod;
+        if (Candidate.Mesh.MinLodModel != TargetMinLod)
+        {
+            return false;
+        }
+        LastVisualMutationRealTime = WorldInfo.RealTimeSeconds;
+        VisualScanCursor = (Index + 1) % PoolLength;
+        if (!bLodReceiptReported)
+        {
+            bLodReceiptReported = true;
+            `log("KF2OPT_ONLINE_CORPSE_ACTION state=lod corpse_id="$
+                 string(Candidate.Name)$" target_lod="$TargetMinLod$
+                 " fixed_minimum=true local_only=true readback=verified");
+        }
+        return true;
+    }
+    VisualScanCursor = (VisualScanCursor + ScanCount) % PoolLength;
+    return false;
+}
+
+function bool ApplyOneSleepingCorpseSkeletonMinimum()
+{
+    local int Index;
+    local int Offset;
+    local int PoolLength;
+    local int ScanCount;
+    local KFGoreManager GoreManager;
+    local KFPawn Candidate;
+
+    GoreManager = KFGoreManager(WorldInfo.MyGoreEffectManager);
+    if (GoreManager == None)
+    {
+        return false;
+    }
+    PoolLength = GoreManager.CorpsePool.Length;
+    if (PoolLength <= 0)
+    {
+        VisualScanCursor = 0;
+        return false;
+    }
+    VisualScanCursor = Clamp(VisualScanCursor, 0, PoolLength - 1);
+    ScanCount = Min(8, PoolLength);
+    for (Offset = 0; Offset < ScanCount; ++Offset)
+    {
+        Index = (VisualScanCursor + Offset) % PoolLength;
+        Candidate = GoreManager.CorpsePool[Index];
+        if (Candidate == None || Candidate.bDeleteMe ||
+            KFPawn_Monster(Candidate) == None || Candidate.Mesh == None ||
+            Candidate.IsAliveAndWell() || Candidate.TimeOfDeath <= 0.0 ||
+            WorldInfo.TimeSeconds - Candidate.TimeOfDeath < 0.75 ||
+            Candidate.SpecialMove == SM_DeathAnim ||
+            (Candidate.Physics != PHYS_None &&
+             (Candidate.Physics != PHYS_RigidBody ||
+              Candidate.Mesh.RigidBodyIsAwake())) ||
+            (Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep &&
+             Candidate.Mesh.bNoSkeletonUpdate))
+        {
+            continue;
+        }
+        Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
+        Candidate.Mesh.bNoSkeletonUpdate = true;
+        if (!Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep ||
+            !Candidate.Mesh.bNoSkeletonUpdate)
+        {
+            return false;
+        }
+        LastVisualMutationRealTime = WorldInfo.RealTimeSeconds;
+        VisualScanCursor = (Index + 1) % PoolLength;
+        if (!bSkeletonReceiptReported)
+        {
+            bSkeletonReceiptReported = true;
+            `log("KF2OPT_ONLINE_CORPSE_ACTION state=skeleton corpse_id="$
+                 string(Candidate.Name)$
+                 " skip_asleep=true no_skeleton_update=true"$
+                 " fixed_minimum=true local_only=true readback=verified");
+        }
+        return true;
+    }
+    VisualScanCursor = (VisualScanCursor + ScanCount) % PoolLength;
+    return false;
+}
+
+function bool RunOneFixedMinimumVisualAction()
+{
+    local bool bActionTaken;
+
+    if (WorldInfo == None ||
+        WorldInfo.RealTimeSeconds - LastVisualMutationRealTime < 0.20)
+    {
+        return false;
+    }
+    if (VisualControlPhase == 0)
+    {
+        bActionTaken = ApplyOneFixedMinimumCorpseLod();
+    }
+    else
+    {
+        bActionTaken = ApplyOneSleepingCorpseSkeletonMinimum();
+    }
+    VisualControlPhase = (VisualControlPhase + 1) % 2;
+    return bActionTaken;
+}
+
 event Tick(float DeltaTime)
 {
     local KF2OptimizerOnlineContextInteraction CurrentInteraction;
 
     Super.Tick(DeltaTime);
+    if (RunOneFixedMinimumVisualAction())
+    {
+        return;
+    }
     CurrentInteraction = GetOnlineInteraction();
     if (CurrentInteraction != None &&
         CurrentInteraction.IsOnlineAdaptiveEnabled())

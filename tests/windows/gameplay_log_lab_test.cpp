@@ -307,6 +307,26 @@ int main() {
         "KF2OPT_ONLINE_CORPSE_ACTION state=freeze") != std::string::npos);
     CHECK(online_corpse_controller_source.find(
         "KF2OPT_ONLINE_CORPSE_ACTION state=restored") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "function bool ApplyOneFixedMinimumCorpseLod()") !=
+          std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "Candidate.Mesh.MinLodModel = TargetMinLod") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "function bool ApplyOneSleepingCorpseSkeletonMinimum()") !=
+          std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true") !=
+          std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "Candidate.Mesh.bNoSkeletonUpdate = true") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "KF2OPT_ONLINE_CORPSE_ACTION state=lod") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "KF2OPT_ONLINE_CORPSE_ACTION state=skeleton") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "fixed_minimum=true local_only=true readback=verified") !=
+          std::string::npos);
     CHECK(online_corpse_controller_source.find("DynamicActors") ==
           std::string::npos);
     CHECK(online_corpse_controller_source.find("AllActors") ==

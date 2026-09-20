@@ -500,6 +500,14 @@ int main() {
           optimizer::AdaptiveCapabilityState::unavailable);
     CHECK(online_sample.capabilities.skeleton_update_control ==
           optimizer::AdaptiveCapabilityState::unavailable);
+    online.gameplay->online_corpse_lod_verified = true;
+    online.gameplay->online_corpse_skeleton_verified = true;
+    const auto online_visual_sample =
+        build_adaptive_sample(online, context).sample;
+    CHECK(online_visual_sample.capabilities.corpse_lod_control ==
+          optimizer::AdaptiveCapabilityState::available);
+    CHECK(online_visual_sample.capabilities.skeleton_update_control ==
+          optimizer::AdaptiveCapabilityState::available);
     CHECK(online_sample.live_corpse_burden == 2);
     CHECK(online_sample.adaptive_corpse_runtime_limit == 20);
     CHECK(online_sample.capabilities.gore_control ==

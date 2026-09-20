@@ -170,6 +170,10 @@ std::optional<bool> apply_online_corpse_line(
         "KF2OPT_ONLINE_CORPSE_ACTION state=freeze ";
     constexpr std::string_view restore_action_marker =
         "KF2OPT_ONLINE_CORPSE_ACTION state=restored ";
+    constexpr std::string_view lod_action_marker =
+        "KF2OPT_ONLINE_CORPSE_ACTION state=lod ";
+    constexpr std::string_view skeleton_action_marker =
+        "KF2OPT_ONLINE_CORPSE_ACTION state=skeleton ";
     if (line.find(" local_only=true readback=verified") ==
         std::string_view::npos) {
         return std::nullopt;
@@ -231,6 +235,23 @@ std::optional<bool> apply_online_corpse_line(
         line.find(" tick=original ") != std::string_view::npos) {
         const bool changed = !session.online_corpse_restore_verified;
         session.online_corpse_restore_verified = true;
+        session.online_corpse_action_observed_ns = observed_at_ns;
+        return changed;
+    }
+    if (line.find(lod_action_marker) != std::string_view::npos &&
+        line.find(" target_lod=") != std::string_view::npos &&
+        line.find(" fixed_minimum=true ") != std::string_view::npos) {
+        const bool changed = !session.online_corpse_lod_verified;
+        session.online_corpse_lod_verified = true;
+        session.online_corpse_action_observed_ns = observed_at_ns;
+        return changed;
+    }
+    if (line.find(skeleton_action_marker) != std::string_view::npos &&
+        line.find(" skip_asleep=true ") != std::string_view::npos &&
+        line.find(" no_skeleton_update=true ") != std::string_view::npos &&
+        line.find(" fixed_minimum=true ") != std::string_view::npos) {
+        const bool changed = !session.online_corpse_skeleton_verified;
+        session.online_corpse_skeleton_verified = true;
         session.online_corpse_action_observed_ns = observed_at_ns;
         return changed;
     }
