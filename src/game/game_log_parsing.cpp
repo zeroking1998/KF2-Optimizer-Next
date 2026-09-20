@@ -166,6 +166,10 @@ std::optional<bool> apply_online_corpse_line(
         "KF2OPT_ONLINE_CORPSE_ACTION state=sleep ";
     constexpr std::string_view capacity_action_marker =
         "KF2OPT_ONLINE_CORPSE_ACTION state=capacity ";
+    constexpr std::string_view freeze_action_marker =
+        "KF2OPT_ONLINE_CORPSE_ACTION state=freeze ";
+    constexpr std::string_view restore_action_marker =
+        "KF2OPT_ONLINE_CORPSE_ACTION state=restored ";
     if (line.find(" local_only=true readback=verified") ==
         std::string_view::npos) {
         return std::nullopt;
@@ -208,6 +212,25 @@ std::optional<bool> apply_online_corpse_line(
         line.find(" awake=false ") != std::string_view::npos) {
         const bool changed = !session.online_corpse_sleep_verified;
         session.online_corpse_sleep_verified = true;
+        session.online_corpse_action_observed_ns = observed_at_ns;
+        return changed;
+    }
+    if (line.find(freeze_action_marker) != std::string_view::npos &&
+        line.find(" physics=PHYS_None ") != std::string_view::npos &&
+        line.find(" collision=false ") != std::string_view::npos &&
+        line.find(" rigid_body_block=false ") != std::string_view::npos &&
+        line.find(" tick_disabled=true ") != std::string_view::npos) {
+        const bool changed = !session.online_corpse_freeze_verified;
+        session.online_corpse_freeze_verified = true;
+        session.online_corpse_action_observed_ns = observed_at_ns;
+        return changed;
+    }
+    if (line.find(restore_action_marker) != std::string_view::npos &&
+        line.find(" physics=PHYS_RigidBody ") != std::string_view::npos &&
+        line.find(" collision=original ") != std::string_view::npos &&
+        line.find(" tick=original ") != std::string_view::npos) {
+        const bool changed = !session.online_corpse_restore_verified;
+        session.online_corpse_restore_verified = true;
         session.online_corpse_action_observed_ns = observed_at_ns;
         return changed;
     }

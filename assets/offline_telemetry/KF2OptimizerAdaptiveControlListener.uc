@@ -2,6 +2,8 @@
 // probe verifies a fresh random token before accepting an Adaptive action.
 class KF2OptimizerAdaptiveControlListener extends TcpLink;
 
+var KF2OptimizerOnlineCorpseController OnlineCorpseController;
+
 event PreBeginPlay()
 {
     local int BoundPort;
@@ -41,6 +43,17 @@ event PreBeginPlay()
         return;
     }
     `log("KF2OPT_ADAPTIVE_BRIDGE state=ready port="$BoundPort);
+    if (WorldInfo.NetMode == NM_Client ||
+        WorldInfo.NetMode == NM_ListenServer)
+    {
+        OnlineCorpseController = Spawn(
+            class'KF2OptimizerOnlineCorpseController');
+        if (OnlineCorpseController == None)
+        {
+            `log("KF2OPT_ONLINE_CORPSE state=unavailable"$
+                 " reason=controller_spawn_failed local_only=true");
+        }
+    }
 }
 
 defaultproperties

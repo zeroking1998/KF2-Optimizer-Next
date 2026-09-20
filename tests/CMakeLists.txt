@@ -714,6 +714,7 @@ target_compile_definitions(kf2_gameplay_log_lab_test PRIVATE
     KF2_ONLINE_CONTEXT_INTERACTION_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerOnlineContextInteraction.uc"
     KF2_GRAPHICS_VIEWPORT_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerGraphicsViewport.uc"
     KF2_ADAPTIVE_LISTENER_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerAdaptiveControlListener.uc"
+    KF2_ONLINE_CORPSE_CONTROLLER_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerOnlineCorpseController.uc"
     KF2_ADAPTIVE_CONNECTION_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerAdaptiveControlConnection.uc"
     KF2_ONLINE_GRAPHICS_CONNECTION_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerOnlineGraphicsControlConnection.uc"
     KF2_ADAPTIVE_GRAPHICS_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerAdaptiveGraphics.uc"

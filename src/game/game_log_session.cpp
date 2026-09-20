@@ -85,6 +85,8 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                     current_->online_corpse_maximum.reset();
                     current_->online_corpse_sleep_verified = false;
                     current_->online_corpse_capacity_verified = false;
+                    current_->online_corpse_freeze_verified = false;
+                    current_->online_corpse_restore_verified = false;
                     current_->online_corpse_capability_observed_ns = 0;
                     current_->online_corpse_action_observed_ns = 0;
                 }

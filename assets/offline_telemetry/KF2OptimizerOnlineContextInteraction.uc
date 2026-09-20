@@ -52,6 +52,11 @@ function KF2OptimizerAdaptiveGraphicsState GetOnlineGraphicsState()
     return OnlineGraphicsState;
 }
 
+function bool IsOnlineAdaptiveEnabled()
+{
+    return bOnlineGraphicsEnabled;
+}
+
 function bool ApplyOnlineGraphicsControl(
     string Token, int Sequence, string Resource, int Quality)
 {
