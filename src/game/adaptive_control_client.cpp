@@ -239,7 +239,11 @@ Result<std::string> generate_adaptive_control_token() {
 
 Result<std::string> build_adaptive_control_command(
     const AdaptiveControlRequest& request) {
-    const bool valid_value = request.quality >= 10 && request.quality <= 100;
+    const bool mode_enable =
+        request.resource == AdaptiveResourceControl::enable;
+    const bool valid_value = mode_enable
+        ? request.quality >= 4 && request.quality <= 2000
+        : request.quality >= 10 && request.quality <= 100;
     if (request.port == 0 || !valid_adaptive_control_token(request.token) ||
         request.sequence == 0 || !valid_value || request.timeout_ms < 25 ||
         request.timeout_ms > 2000) {
@@ -281,7 +285,11 @@ std::optional<AdaptiveControlReceipt> parse_adaptive_control_receipt(
         return std::nullopt;
     }
     receipt.resource = *resource;
-    const bool valid_value = receipt.quality >= 10 && receipt.quality <= 100;
+    const bool mode_enable =
+        receipt.resource == AdaptiveResourceControl::enable;
+    const bool valid_value = mode_enable
+        ? receipt.quality >= 4 && receipt.quality <= 2000
+        : receipt.quality >= 10 && receipt.quality <= 100;
     if (!valid_value) return std::nullopt;
     return receipt;
 }

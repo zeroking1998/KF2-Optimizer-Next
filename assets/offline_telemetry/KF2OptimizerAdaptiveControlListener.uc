@@ -22,8 +22,9 @@ event PreBeginPlay()
     else if (WorldInfo.NetMode == NM_Client ||
              WorldInfo.NetMode == NM_ListenServer)
     {
-        // This connection can change only the local GFXSettings snapshot. It
-        // has no telemetry-probe or gameplay-actor path.
+        // This connection reaches only the process-local viewport interaction.
+        // That interaction permits authenticated graphics and bounded local
+        // corpse-pool actions, never replicated writes.
         AcceptClass = class'KF2OptimizerOnlineGraphicsControlConnection';
     }
     else

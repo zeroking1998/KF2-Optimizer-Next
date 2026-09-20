@@ -457,7 +457,8 @@ function bool ApplyAdaptiveResourceControl(
 
     if (!ValidAdaptiveControlToken(Token) || Sequence <= 0 ||
         Sequence <= AdaptiveLastControlSequence ||
-        Quality < 10 || Quality > 100 ||
+        (((Resource ~= "enable") && (Quality < 4 || Quality > 2000)) ||
+         (!(Resource ~= "enable") && (Quality < 10 || Quality > 100))) ||
         !((Resource ~= "gpu") || (Resource ~= "vram") ||
           (Resource ~= "cpu") || (Resource ~= "ram") ||
           (Resource ~= "overdraw") ||
