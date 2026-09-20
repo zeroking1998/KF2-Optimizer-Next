@@ -383,6 +383,28 @@ int main() {
     CHECK(online_corpse_sleep->online_corpse_sleep_verified);
     CHECK(online_corpse_sleep->online_corpse_action_observed_ns ==
           1'300'000'000ULL);
+    const auto online_corpse_freeze = corpse_stream.feed(
+        "[0041.11] ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=freeze "
+        "corpse_id=KFPawn_ZedGorefast_0 physics=PHYS_None "
+        "collision=false rigid_body_block=false tick_disabled=true "
+        "local_only=true readback=verified\n",
+        1'325'000'000ULL);
+    CHECK(online_corpse_freeze.has_value());
+    CHECK(online_corpse_freeze->online_corpse_freeze_verified);
+    CHECK(!corpse_stream.feed(
+        "[0041.115] ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=freeze "
+        "corpse_id=KFPawn_ZedGorefast_1 physics=PHYS_None "
+        "collision=false rigid_body_block=true tick_disabled=true "
+        "local_only=true readback=verified\n",
+        1'330'000'000ULL).has_value());
+    const auto online_corpse_restore = corpse_stream.feed(
+        "[0041.119] ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=restored "
+        "corpse_id=KFPawn_ZedGorefast_0 physics=PHYS_RigidBody "
+        "collision=original tick=original local_only=true "
+        "readback=verified\n",
+        1'340'000'000ULL);
+    CHECK(online_corpse_restore.has_value());
+    CHECK(online_corpse_restore->online_corpse_restore_verified);
     const auto online_corpse_capacity = corpse_stream.feed(
         "[0041.12] ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=capacity "
         "corpse_id=KFPawn_ZedCrawler_1 pool_before=21 pool_after=20 "

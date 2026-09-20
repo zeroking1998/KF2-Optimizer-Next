@@ -67,6 +67,8 @@ int main() {
     const auto graphics_viewport_source = normalize_newlines(
         read_bytes(KF2_GRAPHICS_VIEWPORT_SOURCE));
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
+    const auto online_corpse_controller_source = normalize_newlines(
+        read_bytes(KF2_ONLINE_CORPSE_CONTROLLER_SOURCE));
     const auto connection_source = read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE);
     const auto online_graphics_connection_source = normalize_newlines(
         read_bytes(KF2_ONLINE_GRAPHICS_CONNECTION_SOURCE));
@@ -278,6 +280,41 @@ int main() {
     CHECK(listener_source.find(
         "AcceptClass = class'KF2OptimizerOnlineGraphicsControlConnection'") !=
           std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "struct OnlineFrozenCorpseState") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "function bool FreezeOneOnlineCorpse()") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "function bool RestoreOneOnlineCorpse()") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "WorldInfo.TimeSeconds - Candidate.TimeOfDeath < 10.0") !=
+          std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "VSizeSq(Candidate.Location - LocalPC.Pawn.Location) < 640000.0") !=
+          std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "Candidate.Mesh.RigidBodyIsAwake()") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "Candidate.SetCollision(false, false,") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "Candidate.CollisionComponent.SetBlockRigidBody(false)") !=
+          std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "Candidate.SetTickIsDisabled(true)") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "Candidate.SetPhysics(PHYS_None)") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "KF2OPT_ONLINE_CORPSE_ACTION state=freeze") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "KF2OPT_ONLINE_CORPSE_ACTION state=restored") != std::string::npos);
+    CHECK(online_corpse_controller_source.find("DynamicActors") ==
+          std::string::npos);
+    CHECK(online_corpse_controller_source.find("AllActors") ==
+          std::string::npos);
+    CHECK(online_corpse_controller_source.find("RemoteRole=ROLE_None") !=
+          std::string::npos);
+    CHECK(listener_source.find(
+        "class'KF2OptimizerOnlineCorpseController'") != std::string::npos);
     CHECK(online_graphics_connection_source.find(
         "ApplyOnlineGraphicsControl(") != std::string::npos);
     CHECK(online_graphics_connection_source.find("DynamicActors") ==
