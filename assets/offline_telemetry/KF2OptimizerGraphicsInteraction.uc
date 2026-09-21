@@ -8,6 +8,82 @@ var float LastObservedRealTime;
 var string LastReadback;
 var string LastSelectedMap;
 var string LastVotedMap;
+var float NextWeaponMaterialGuardRealTime;
+
+function bool EnsureTurretWeaponMaterial(KFWeapon Weapon)
+{
+    local MaterialInstanceConstant LedMaterial;
+    local KFWeap_HRG_Warthog Warthog;
+    local KFWeap_AutoTurret AutoTurret;
+
+    if (Weapon == None || Weapon.bDeleteMe || Weapon.Mesh == None ||
+        !Weapon.WeaponContentLoaded || Weapon.Mesh.GetNumElements() <= 2)
+    {
+        return false;
+    }
+    Warthog = KFWeap_HRG_Warthog(Weapon);
+    AutoTurret = KFWeap_AutoTurret(Weapon);
+    if (Warthog == None && AutoTurret == None)
+    {
+        return false;
+    }
+    if (Weapon.WeaponMICs.Length > 2 && Weapon.WeaponMICs[2] != None)
+    {
+        return false;
+    }
+
+    if (Weapon.WeaponMICs.Length < 3)
+    {
+        Weapon.WeaponMICs.Length = 3;
+    }
+    LedMaterial = Weapon.Mesh.CreateAndSetMaterialInstanceConstant(2);
+    if (LedMaterial == None)
+    {
+        return false;
+    }
+    Weapon.WeaponMICs[2] = LedMaterial;
+    if (Weapon.WeaponMICs[2] != LedMaterial)
+    {
+        return false;
+    }
+
+    if (Warthog != None)
+    {
+        Warthog.UpdateMaterialColor(Warthog.CurrentAmmoPercentage);
+    }
+    else
+    {
+        AutoTurret.UpdateMaterialColor(AutoTurret.CurrentAmmoPercentage);
+    }
+    `log("KF2OPT_WEAPON_MIC state=repaired weapon="$PathName(Weapon)$
+         " material=2 local_only=true readback=verified");
+    return true;
+}
+
+function GuardTurretWeaponMaterials(WorldInfo CurrentWorld)
+{
+    local KFWeap_HRG_Warthog Warthog;
+    local KFWeap_AutoTurret AutoTurret;
+
+    if (CurrentWorld == None ||
+        CurrentWorld.RealTimeSeconds < NextWeaponMaterialGuardRealTime)
+    {
+        return;
+    }
+    NextWeaponMaterialGuardRealTime = CurrentWorld.RealTimeSeconds + 0.10;
+    // Deployed turret throwers are detached world actors, not members of the
+    // local pawn's inventory chain. Cover every locally replicated instance so
+    // remote and local Warthogs receive the missing third MIC before their
+    // replicated ammo callbacks use it.
+    foreach CurrentWorld.DynamicActors(class'KFWeap_HRG_Warthog', Warthog)
+    {
+        EnsureTurretWeaponMaterial(Warthog);
+    }
+    foreach CurrentWorld.DynamicActors(class'KFWeap_AutoTurret', AutoTurret)
+    {
+        EnsureTurretWeaponMaterial(AutoTurret);
+    }
+}
 
 event Tick(float DeltaTime)
 {
@@ -33,7 +109,7 @@ event Tick(float DeltaTime)
         return;
     }
     CurrentWorld = PrimaryController.WorldInfo;
-    if (CurrentWorld == None || CurrentWorld.NetMode != NM_Standalone)
+    if (CurrentWorld == None)
     {
         return;
     }
@@ -43,8 +119,14 @@ event Tick(float DeltaTime)
     if (CurrentWorld.RealTimeSeconds < LastObservedRealTime)
     {
         NextReadRealTime = 0.0;
+        NextWeaponMaterialGuardRealTime = 0.0;
     }
     LastObservedRealTime = CurrentWorld.RealTimeSeconds;
+    GuardTurretWeaponMaterials(CurrentWorld);
+    if (CurrentWorld.NetMode != NM_Standalone)
+    {
+        return;
+    }
     if (CurrentWorld.RealTimeSeconds < NextReadRealTime)
     {
         return;
