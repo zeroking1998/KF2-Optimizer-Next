@@ -16,6 +16,7 @@ $sourceNames = @(
     'KF2OptimizerGraphicsInteraction.uc'
     'KF2OptimizerOnlineContextInteraction.uc'
     'KF2OptimizerAdaptiveControlListener.uc'
+    'KF2OptimizerOnlineCorpseController.uc'
     'KF2OptimizerAdaptiveControlConnection.uc'
     'KF2OptimizerOnlineGraphicsControlConnection.uc'
     'KF2OptimizerAdaptiveGraphics.uc'
@@ -42,6 +43,17 @@ try {
     $changed = (& $FingerprintScript -SourceRoot $temporaryRoot).Trim()
     if ($changed -eq $expected) {
         throw 'A telemetry source change did not invalidate the fingerprint.'
+    }
+
+    Copy-Item -LiteralPath (Join-Path $SourceRoot $sourceNames[0]) `
+        -Destination (Join-Path $temporaryRoot $sourceNames[0]) -Force
+    Add-Content -LiteralPath (Join-Path $temporaryRoot `
+        'KF2OptimizerOnlineCorpseController.uc') `
+        -Value "`n// online corpse controller fingerprint mutation"
+    $controllerChanged = (& $FingerprintScript `
+        -SourceRoot $temporaryRoot).Trim()
+    if ($controllerChanged -eq $expected) {
+        throw 'An online corpse controller change did not invalidate the fingerprint.'
     }
 
     Remove-Item -LiteralPath (Join-Path $temporaryRoot $sourceNames[-1])
