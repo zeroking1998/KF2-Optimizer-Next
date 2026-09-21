@@ -101,6 +101,19 @@ int main() {
     CHECK(trap_replaced.has_value());
     CHECK(read_bytes(trap_target) == "safe");
     CHECK(read_bytes(legacy_temporary) == "unrelated legacy file");
+    auto long_parent = root;
+    while (long_parent.wstring().size() < 220) {
+        long_parent /= L"long-path-segment";
+    }
+    fs::create_directories(long_parent);
+    const auto long_target = long_parent / L"settings.ini";
+    CHECK(long_target.wstring().size() < MAX_PATH);
+    CHECK(long_target.wstring().size() + 32 >= MAX_PATH);
+    const auto long_replaced =
+        kf2::platform::windows::atomic_replace_utf8(
+            long_target, "long path settings\n");
+    CHECK(long_replaced.has_value());
+    CHECK(read_bytes(long_target) == "long path settings\n");
 
     const auto corrupt = root / L"corrupt.ini";
     for (int iteration = 0; iteration < 7; ++iteration) {

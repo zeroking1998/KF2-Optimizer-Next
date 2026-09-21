@@ -224,7 +224,7 @@ add_executable(kf2_release_package_repair_test
 target_include_directories(kf2_release_package_repair_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_release_package_repair_test PRIVATE
-    KF2_RELEASE_REPOSITORY="${KF2_RELEASE_REPOSITORY}")
+    KF2_RELEASE_REPOSITORY="https://github.com/example/KF2-Optimizer-Next")
 target_link_libraries(kf2_release_package_repair_test PRIVATE
     bcrypt ole32 oleaut32 shell32 winhttp)
 add_test(NAME kf2_release_package_repair_test
