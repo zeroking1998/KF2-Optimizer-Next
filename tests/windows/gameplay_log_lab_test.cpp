@@ -202,6 +202,35 @@ int main() {
     CHECK(graphics_interaction_source.find(
         "LastObservedRealTime = CurrentWorld.RealTimeSeconds;",
         graphics_world_reset) < graphics_timer_guard);
+    CHECK(graphics_interaction_source.find(
+        "function bool EnsureTurretWeaponMaterial(KFWeapon Weapon)") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "KFWeap_HRG_Warthog(Weapon)") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "KFWeap_AutoTurret(Weapon)") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "Weapon.Mesh.GetNumElements() <= 2") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "Weapon.WeaponMICs.Length = 3") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "Weapon.Mesh.CreateAndSetMaterialInstanceConstant(2)") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "KF2OPT_WEAPON_MIC state=repaired") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "DynamicActors(class'KFWeap_HRG_Warthog', Warthog)") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "DynamicActors(class'KFWeap_AutoTurret', AutoTurret)") !=
+          std::string::npos);
+    const auto weapon_guard = graphics_interaction_source.find(
+        "GuardTurretWeaponMaterials(CurrentWorld);");
+    const auto weapon_standalone_guard = graphics_interaction_source.find(
+        "if (CurrentWorld.NetMode != NM_Standalone)", weapon_guard);
+    CHECK(weapon_guard != std::string::npos);
+    CHECK(weapon_standalone_guard != std::string::npos);
+    CHECK(weapon_guard < weapon_standalone_guard);
     CHECK(graphics_viewport_source.find(
         "class'KF2OptimizerOnlineContextInteraction'") != std::string::npos);
     CHECK(graphics_viewport_source.find(
