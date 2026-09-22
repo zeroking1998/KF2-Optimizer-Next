@@ -16,6 +16,7 @@
 
 #include "kf2/security/package_integrity.hpp"
 #include "kf2/security/sha256.hpp"
+#include "kf2/platform/windows/state_environment.hpp"
 #include "kf2/update/github_release_client.hpp"
 #include "kf2/update/update_transaction.hpp"
 
@@ -56,7 +57,8 @@ struct WorkRootCleanup {
 };
 
 bool normal_directory(const std::filesystem::path& path) {
-    const DWORD attributes = GetFileAttributesW(path.c_str());
+    const DWORD attributes = GetFileAttributesW(
+        platform::windows::extended_length_path(path).c_str());
     return attributes != INVALID_FILE_ATTRIBUTES &&
         (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
         (attributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
@@ -115,10 +117,11 @@ Result<bool> validate_release_identity(const ReleaseInfo& release) {
 Result<bool> create_new_work_root(const std::filesystem::path& root) {
     if (root.empty() || !root.is_absolute()) return Result<bool>::failure(
         {ErrorCode::invalid_argument, L"Update working directory is invalid", 0});
+    const auto native_root = platform::windows::extended_length_path(root);
     std::error_code error;
-    if (std::filesystem::exists(root, error) || error ||
-        !std::filesystem::create_directories(root, error) || error ||
-        !normal_directory(root)) {
+    if (std::filesystem::exists(native_root, error) || error ||
+        !std::filesystem::create_directories(native_root, error) || error ||
+        !normal_directory(native_root)) {
         return Result<bool>::failure(
             {ErrorCode::access_denied,
              L"Update working directory must be new and safe",
@@ -197,7 +200,8 @@ Result<bool> download(const ReleaseAsset& asset,
         verified_url.error());
 
     FileHandle file{CreateFileW(
-        destination.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+        platform::windows::extended_length_path(destination).c_str(),
+        GENERIC_WRITE, 0, nullptr, CREATE_NEW,
         FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_WRITE_THROUGH, nullptr)};
     if (file.value == INVALID_HANDLE_VALUE) return Result<bool>::failure(
         {ErrorCode::io_failure, L"Update temporary file could not be created",
@@ -237,9 +241,15 @@ Result<bool> download(const ReleaseAsset& asset,
 
 Result<bool> extract(const std::filesystem::path& archive,
                      const std::filesystem::path& destination) {
+    const auto native_destination = destination.wstring().size() >= MAX_PATH
+        ? platform::windows::extended_length_path(destination)
+        : destination;
+    const auto native_archive = archive.wstring().size() >= MAX_PATH
+        ? platform::windows::extended_length_path(archive)
+        : archive;
     std::error_code error;
-    std::filesystem::create_directories(destination, error);
-    if (error || !normal_directory(destination)) return Result<bool>::failure(
+    std::filesystem::create_directories(native_destination, error);
+    if (error || !normal_directory(native_destination)) return Result<bool>::failure(
         {ErrorCode::io_failure, L"Update extraction directory is invalid",
          static_cast<std::uint32_t>(error.value())});
     ComApartment apartment;
@@ -257,10 +267,10 @@ Result<bool> extract(const std::filesystem::path& archive,
     shell.Attach(raw);
     VariantOwner archive_value;
     archive_value.value.vt = VT_BSTR;
-    archive_value.value.bstrVal = SysAllocString(archive.c_str());
+    archive_value.value.bstrVal = SysAllocString(native_archive.c_str());
     VariantOwner destination_value;
     destination_value.value.vt = VT_BSTR;
-    destination_value.value.bstrVal = SysAllocString(destination.c_str());
+    destination_value.value.bstrVal = SysAllocString(native_destination.c_str());
     Folder* source_raw = nullptr;
     Folder* target_raw = nullptr;
     if (!archive_value.value.bstrVal || !destination_value.value.bstrVal ||
@@ -299,7 +309,7 @@ Result<bool> extract(const std::filesystem::path& archive,
         {ErrorCode::io_failure, L"Update ZIP extraction failed",
          static_cast<std::uint32_t>(copied)});
 
-    const auto expected = destination / L"KF2OptimizerNext" /
+    const auto expected = native_destination / L"KF2OptimizerNext" /
         L"Data" / L"package-integrity.ini";
     const auto deadline = std::chrono::steady_clock::now() +
         std::chrono::seconds{30};
@@ -322,15 +332,17 @@ Result<bool> verify_update_archive(const std::filesystem::path& archive,
         asset.size_bytes == 0 || asset.size_bytes > kMaximumArchiveBytes ||
         !safe_hex_digest(asset.sha256)) return Result<bool>::failure(
         {ErrorCode::invalid_argument, L"Update verification input is invalid", 0});
-    const DWORD attributes = GetFileAttributesW(archive.c_str());
+    const auto native_archive =
+        platform::windows::extended_length_path(archive);
+    const DWORD attributes = GetFileAttributesW(native_archive.c_str());
     std::error_code error;
-    const auto size = std::filesystem::file_size(archive, error);
+    const auto size = std::filesystem::file_size(native_archive, error);
     if (attributes == INVALID_FILE_ATTRIBUTES ||
         (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) ||
         error || size != asset.size_bytes) return Result<bool>::failure(
         {ErrorCode::access_denied,
          L"Update package size does not match the release", 0});
-    const auto hash = security::sha256_file_hex(archive);
+    const auto hash = security::sha256_file_hex(native_archive);
     if (!hash.has_value() || !std::ranges::equal(
             hash.value(), asset.sha256, [](char left, char right) {
                 return std::tolower(static_cast<unsigned char>(left)) ==
@@ -377,14 +389,17 @@ Result<PreparedUpdatePackage> prepare_update_package_with_operations(
     const auto identity = validate_release_identity(release);
     if (!identity.has_value()) return Result<PreparedUpdatePackage>::failure(
         identity.error());
-    const auto created = create_new_work_root(new_work_root);
+    const auto work_root = new_work_root.wstring().size() >= MAX_PATH
+        ? platform::windows::extended_length_path(new_work_root)
+        : new_work_root;
+    const auto created = create_new_work_root(work_root);
     if (!created.has_value()) return Result<PreparedUpdatePackage>::failure(
         created.error());
-    WorkRootCleanup cleanup{new_work_root};
+    WorkRootCleanup cleanup{work_root};
     PreparedUpdatePackage result{
-        .work_root = new_work_root,
-        .archive_path = new_work_root / L"update.zip",
-        .staged_root = new_work_root / L"extracted" / L"KF2OptimizerNext"};
+        .work_root = work_root,
+        .archive_path = work_root / L"update.zip",
+        .staged_root = work_root / L"extracted" / L"KF2OptimizerNext"};
     if (!operations.download || !operations.extract) {
         return Result<PreparedUpdatePackage>::failure(
             {ErrorCode::invalid_argument,
@@ -399,7 +414,7 @@ Result<PreparedUpdatePackage> prepare_update_package_with_operations(
     if (!verified.has_value()) return Result<PreparedUpdatePackage>::failure(
         verified.error());
     const auto extracted = operations.extract(
-        result.archive_path, new_work_root / L"extracted");
+        result.archive_path, work_root / L"extracted");
     if (!extracted.has_value()) return Result<PreparedUpdatePackage>::failure(
         extracted.error());
     const auto staged = validate_staged_update_package(result.staged_root,

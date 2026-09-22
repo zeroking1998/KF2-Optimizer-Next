@@ -7,6 +7,8 @@
 #include <limits>
 #include <vector>
 
+#include "kf2/platform/windows/state_environment.hpp"
+
 namespace kf2::security {
 namespace {
 
@@ -83,7 +85,8 @@ Result<std::string> sha256_file_hex(const std::filesystem::path& path,
             {ErrorCode::invalid_argument, L"SHA-256 file request is invalid", 0});
     }
     HANDLE file = CreateFileW(
-        path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+        platform::windows::extended_length_path(path).c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN |
             FILE_FLAG_OPEN_REPARSE_POINT,
         nullptr);

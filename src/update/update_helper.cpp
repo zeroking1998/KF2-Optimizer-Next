@@ -15,6 +15,7 @@
 #include <thread>
 
 #include "kf2/platform/windows/atomic_file.hpp"
+#include "kf2/platform/windows/state_environment.hpp"
 #include "kf2/update/semantic_version.hpp"
 #include "kf2/update/update_transaction.hpp"
 
@@ -299,9 +300,11 @@ Result<bool> launch_update_helper(
     const std::filesystem::path& target_root,
     std::string_view expected_version,
     std::uint32_t parent_process_id) {
+    const auto native_target_root =
+        platform::windows::extended_length_path(target_root);
     if (!normal_directory(package.work_root) ||
         !normal_directory(package.staged_root) ||
-        !normal_directory(target_root) ||
+        !normal_directory(native_target_root) ||
         !parse_semantic_version(expected_version).has_value() ||
         parent_process_id == 0) {
         return Result<bool>::failure(
@@ -310,13 +313,13 @@ Result<bool> launch_update_helper(
     const std::string token = make_token();
     if (!safe_token(token)) return Result<bool>::failure(
         {ErrorCode::platform_failure, L"Update authorization token could not be created", 0});
-    wchar_t module[MAX_PATH + 1]{};
-    const DWORD length = GetModuleFileNameW(nullptr, module, MAX_PATH);
-    if (length == 0 || length >= MAX_PATH) return Result<bool>::failure(
-        {ErrorCode::platform_failure, L"Current executable path is unavailable", GetLastError()});
+    const auto module = platform::windows::executable_path();
+    if (!module.has_value()) return Result<bool>::failure(module.error());
     const auto helper = package.work_root / L"KF2UpdateHelper.exe";
     std::error_code error;
-    std::filesystem::copy_file(module, helper,
+    std::filesystem::copy_file(
+        platform::windows::extended_length_path(module.value()),
+        platform::windows::extended_length_path(helper),
                                std::filesystem::copy_options::none, error);
     if (error || !normal_file(helper)) return Result<bool>::failure(
         {ErrorCode::io_failure, L"Temporary update helper could not be created",
@@ -326,7 +329,7 @@ Result<bool> launch_update_helper(
     if (!marker.has_value()) return marker;
     HelperRequest request{
         .parent_process_id = parent_process_id,
-        .target_root = target_root,
+        .target_root = native_target_root,
         .staged_root = package.staged_root,
         .backup_root = package.work_root / L"backup",
         .receipt_path = package.work_root / L"ready.receipt",

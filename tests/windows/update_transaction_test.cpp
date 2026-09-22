@@ -1,3 +1,5 @@
+#include <Windows.h>
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -5,6 +7,7 @@
 #include <string>
 #include <string_view>
 
+#include "kf2/platform/windows/state_environment.hpp"
 #include "kf2/security/package_integrity.hpp"
 #include "kf2/security/sha256.hpp"
 #include "kf2/update/update_transaction.hpp"
@@ -32,13 +35,16 @@ constexpr std::pair<const wchar_t*, const char*> kFiles[]{
 };
 
 void write_file(const std::filesystem::path& path, std::string_view bytes) {
-    std::filesystem::create_directories(path.parent_path());
-    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    const auto native =
+        kf2::platform::windows::extended_length_path(path);
+    std::filesystem::create_directories(native.parent_path());
+    std::ofstream output(native, std::ios::binary | std::ios::trunc);
     output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 }
 
 std::string read_file(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
+    std::ifstream input(
+        kf2::platform::windows::extended_length_path(path), std::ios::binary);
     return {std::istreambuf_iterator<char>{input},
             std::istreambuf_iterator<char>{}};
 }
@@ -54,7 +60,8 @@ void write_package(const std::filesystem::path& root,
         const std::string bytes = std::string{generation} + " " + base;
         const auto path = root / relative;
         write_file(path, bytes);
-        const auto hash = kf2::security::sha256_file_hex(path);
+        const auto hash = kf2::security::sha256_file_hex(
+            kf2::platform::windows::extended_length_path(path));
         if (!hash.has_value()) std::abort();
         std::string narrow;
         for (const wchar_t character : std::wstring_view{relative}) {
@@ -85,7 +92,8 @@ bool user_data_unchanged(const std::filesystem::path& root) {
 
 void reset_root(const std::filesystem::path& root) {
     std::error_code error;
-    std::filesystem::remove_all(root, error);
+    std::filesystem::remove_all(
+        kf2::platform::windows::extended_length_path(root), error);
     std::filesystem::create_directories(root);
 }
 
@@ -159,5 +167,32 @@ int main() {
     CHECK(!wrong.has_value());
     CHECK(kf2::update::package_version(wrong_target).value() ==
           "0.0.2-alpha");
+
+    auto long_root = root;
+    while (long_root.wstring().size() < MAX_PATH + 32) {
+        long_root /= L"long-path-segment";
+    }
+    const auto native_long_root =
+        kf2::platform::windows::extended_length_path(long_root);
+    const auto long_target = native_long_root / L"target";
+    const auto long_staged = native_long_root / L"staged";
+    const auto long_backup = native_long_root / L"backup";
+    write_package(long_target, "old-build", "0.0.2-alpha", "old");
+    write_package(long_staged, "new-build", "0.0.3-alpha", "new");
+    write_user_data(long_target);
+    const auto long_applied = kf2::update::apply_update_transaction({
+        .target_root = long_target,
+        .staged_root = long_staged,
+        .backup_root = long_backup,
+        .expected_new_version = "0.0.3-alpha",
+    });
+    CHECK(long_applied.has_value());
+    CHECK(kf2::update::package_version(long_target).value() ==
+          "0.0.3-alpha");
+    CHECK(user_data_unchanged(long_target));
+    std::error_code cleanup_error;
+    fs::remove_all(native_long_root, cleanup_error);
+    fs::remove_all(
+        kf2::platform::windows::extended_length_path(root), cleanup_error);
     return EXIT_SUCCESS;
 }

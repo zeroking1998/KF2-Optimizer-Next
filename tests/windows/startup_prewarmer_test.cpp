@@ -1,4 +1,5 @@
 #include "kf2/game/startup_prewarmer.hpp"
+#include "kf2/platform/windows/state_environment.hpp"
 
 #include <windows.h>
 #include <winioctl.h>
@@ -86,6 +87,19 @@ int main(int argc, char** argv) {
         (L"kf2-startup-prewarmer-test-" + process_suffix);
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
+
+    auto long_root = std::filesystem::temp_directory_path() /
+        (L"kf2-startup-prewarmer-long-path-" + process_suffix);
+    while (long_root.wstring().size() < MAX_PATH + 32) {
+        long_root /= L"long-path-segment";
+    }
+    const auto native_long_root =
+        kf2::platform::windows::extended_length_path(long_root);
+    std::filesystem::create_directories(native_long_root, cleanup_error);
+    CHECK(!cleanup_error);
+    CHECK(storage_kind_for_path(long_root) ==
+          storage_kind_for_path(std::filesystem::temp_directory_path()));
+    std::filesystem::remove_all(native_long_root, cleanup_error);
     write_file(root / L"KFGame/BrewedPC/GlobalShaderCache-PC-D3D-SM5.bin",
                1024);
     write_file(root / L"KFGame/BrewedPC/Engine.u", 2048);

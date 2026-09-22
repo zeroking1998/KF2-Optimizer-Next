@@ -1,3 +1,5 @@
+#include <Windows.h>
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -6,6 +8,7 @@
 #include <string_view>
 
 #include "kf2/core/result.hpp"
+#include "kf2/platform/windows/state_environment.hpp"
 #include "kf2/security/sha256.hpp"
 #include "kf2/update/update_package.hpp"
 
@@ -32,8 +35,10 @@ constexpr std::pair<const wchar_t*, const char*> kFiles[]{
 };
 
 void write_file(const std::filesystem::path& path, std::string_view bytes) {
-    std::filesystem::create_directories(path.parent_path());
-    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    const auto native =
+        kf2::platform::windows::extended_length_path(path);
+    std::filesystem::create_directories(native.parent_path());
+    std::ofstream output(native, std::ios::binary | std::ios::trunc);
     output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 }
 
@@ -44,7 +49,8 @@ void write_package(const std::filesystem::path& root) {
     for (const auto& [relative, bytes] : kFiles) {
         const auto path = root / relative;
         write_file(path, bytes);
-        const auto hash = kf2::security::sha256_file_hex(path);
+        const auto hash = kf2::security::sha256_file_hex(
+            kf2::platform::windows::extended_length_path(path));
         if (!hash.has_value()) std::abort();
         std::string narrow;
         for (const wchar_t character : std::wstring_view{relative}) {
@@ -83,7 +89,8 @@ int main() {
     namespace fs = std::filesystem;
     const fs::path root{KF2_TEST_ROOT};
     std::error_code error;
-    fs::remove_all(root, error);
+    fs::remove_all(
+        kf2::platform::windows::extended_length_path(root), error);
     fs::create_directories(root);
 
     const auto archive = root / L"archive.zip";
@@ -118,6 +125,33 @@ int main() {
     CHECK(prepared.value().staged_root ==
           work / L"extracted" / L"KF2OptimizerNext");
 
+    auto long_work = root;
+    while (long_work.wstring().size() < MAX_PATH + 32) {
+        long_work /= L"long-path-segment";
+    }
+    const auto long_prepared =
+        kf2::update::prepare_update_package_with_operations(
+            release, long_work,
+            {.download = [](const kf2::update::ReleaseAsset&,
+                            const fs::path& destination) {
+                 write_file(
+                     kf2::platform::windows::extended_length_path(destination),
+                     "verified archive bytes");
+                 return kf2::Result<bool>::success(true);
+             },
+             .extract = [](const fs::path&, const fs::path& destination) {
+                 write_package(
+                     kf2::platform::windows::extended_length_path(destination) /
+                     L"KF2OptimizerNext");
+                 return kf2::Result<bool>::success(true);
+             }});
+    CHECK(long_prepared.has_value());
+    if (long_prepared.has_value()) {
+        CHECK(long_prepared.value().staged_root ==
+              kf2::platform::windows::extended_length_path(long_work) /
+                  L"extracted" / L"KF2OptimizerNext");
+    }
+
     const auto failed_work = root / L"download-failure";
     const auto failed = kf2::update::prepare_update_package_with_operations(
         release, failed_work,
@@ -130,5 +164,7 @@ int main() {
          }});
     CHECK(!failed.has_value());
     CHECK(!fs::exists(failed_work));
+    fs::remove_all(
+        kf2::platform::windows::extended_length_path(root), error);
     return EXIT_SUCCESS;
 }
