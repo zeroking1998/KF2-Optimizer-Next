@@ -177,20 +177,13 @@ struct AdaptiveRuntimeControlSelection final {
     double bottleneck_confidence = 0.0,
     bool overdraw_minimum_reached = false,
     bool effects_control_available = false) noexcept {
-    if (bottleneck == optimizer::AdaptiveBottleneck::rendering &&
-        bottleneck_confidence >= 0.55) {
-        if (!overdraw_minimum_reached) {
-            return game::AdaptiveResourceControl::overdraw;
-        }
-        if (effects_control_available) {
-            return game::AdaptiveResourceControl::effects;
-        }
-    }
-    if ((bottleneck == optimizer::AdaptiveBottleneck::particles ||
-         bottleneck == optimizer::AdaptiveBottleneck::gore) &&
-        bottleneck_confidence >= 0.55 && effects_control_available) {
-        return game::AdaptiveResourceControl::effects;
-    }
+    static_cast<void>(bottleneck);
+    static_cast<void>(bottleneck_confidence);
+    static_cast<void>(overdraw_minimum_reached);
+    static_cast<void>(effects_control_available);
+    // Effects and pixel-overdraw budgets use a fixed, reversible session
+    // baseline.  The Governor no longer changes them in response to transient
+    // frame-pressure attribution.
     if (confidence < 0.55) return game::AdaptiveResourceControl::mixed;
     switch (resource) {
         case optimizer::ResourceKind::cpu:

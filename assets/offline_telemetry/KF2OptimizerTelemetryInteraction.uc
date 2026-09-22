@@ -275,6 +275,11 @@ event Tick(float DeltaTime)
         ReportOptimizerProbeState("graphics_state_unavailable");
         return;
     }
+    if (!CurrentProbe.EnsureFixedSessionEffects())
+    {
+        ReportOptimizerProbeState("fixed_effect_baseline_failed");
+        return;
+    }
     if (!bProcessAdaptiveRuntimeStateInitialized)
     {
         SetProcessAdaptiveRuntimeEnabled(
@@ -345,7 +350,7 @@ function NotifyGameSessionEnded()
                 // Restore the process-owned graphics snapshot while the world
                 // and its live managers are still valid. Quiesce/Destroyed is
                 // intentionally read-only because UE3 is tearing them down.
-                if (!CurrentProbe.SetAdaptiveRuntimeEnabled(false))
+                if (!CurrentProbe.RestoreSessionGraphics())
                 {
                     `log("KF2OPT_ADAPTIVE_MODE state=restore_failed"$
                          " reason=world_teardown_readback_mismatch");
