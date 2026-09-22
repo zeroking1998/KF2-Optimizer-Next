@@ -9,8 +9,9 @@ var string LastReadback;
 var string LastSelectedMap;
 var string LastVotedMap;
 var float NextWeaponMaterialGuardRealTime;
-var float NextFireAfflictionGuardRealTime;
+var float NextPawnRuntimeGuardRealTime;
 var bool bFireAfflictionGuardReported;
+var bool bWeaponClassFallbackGuardReported;
 
 function bool EnsureTurretWeaponMaterial(KFWeapon Weapon)
 {
@@ -87,20 +88,55 @@ function GuardTurretWeaponMaterials(WorldInfo CurrentWorld)
     }
 }
 
-function GuardFireAfflictionClasses(WorldInfo CurrentWorld)
+function bool EnsureWeaponClassFallback(KFPawn Pawn)
+{
+    local KFWeapon CurrentWeapon;
+
+    if (Pawn == None || Pawn.bDeleteMe ||
+        KFPawn_Human(Pawn) == None ||
+        Pawn.WeaponClassForAttachmentTemplate != None)
+    {
+        return false;
+    }
+
+    // A remote fire notification can arrive before the replicated weapon
+    // class. KFPawn.WeaponFired dereferences that class without a null guard.
+    // Prefer the exact local weapon class when it exists. Otherwise the base
+    // neutral fallback always returns no projectile, which preserves KF2's
+    // generic-impact fallback until replication supplies the real class. Do
+    // not rebuild the attachment from this temporary value.
+    CurrentWeapon = KFWeapon(Pawn.Weapon);
+    if (CurrentWeapon != None)
+    {
+        Pawn.WeaponClassForAttachmentTemplate = CurrentWeapon.Class;
+    }
+    else
+    {
+        Pawn.WeaponClassForAttachmentTemplate =
+            class'KF2OptimizerWeaponFallback';
+    }
+    return Pawn.WeaponClassForAttachmentTemplate != None;
+}
+
+function GuardPawnRuntimeClasses(WorldInfo CurrentWorld)
 {
     local KFPawn Pawn;
-    local int UpdatedCount;
+    local int UpdatedAfflictionCount;
+    local int UpdatedWeaponClassCount;
 
     if (CurrentWorld == None ||
-        CurrentWorld.RealTimeSeconds < NextFireAfflictionGuardRealTime)
+        CurrentWorld.RealTimeSeconds < NextPawnRuntimeGuardRealTime)
     {
         return;
     }
-    NextFireAfflictionGuardRealTime = CurrentWorld.RealTimeSeconds + 0.10;
+    NextPawnRuntimeGuardRealTime = CurrentWorld.RealTimeSeconds + 0.10;
 
     foreach CurrentWorld.DynamicActors(class'KFPawn', Pawn)
     {
+        if (EnsureWeaponClassFallback(Pawn))
+        {
+            ++UpdatedWeaponClassCount;
+        }
         if (Pawn == None || Pawn.bDeleteMe ||
             Pawn.AfflictionHandler == None ||
             Pawn.AfflictionHandler.AfflictionClasses.Length <= AF_FirePanic ||
@@ -114,13 +150,21 @@ function GuardFireAfflictionClasses(WorldInfo CurrentWorld)
         if (Pawn.AfflictionHandler.AfflictionClasses[AF_FirePanic] ==
             class'KF2OptimizerFireAffliction')
         {
-            ++UpdatedCount;
+            ++UpdatedAfflictionCount;
         }
     }
-    if (UpdatedCount > 0 && !bFireAfflictionGuardReported)
+    if (UpdatedWeaponClassCount > 0 && !bWeaponClassFallbackGuardReported)
+    {
+        bWeaponClassFallbackGuardReported = true;
+        `log("KF2OPT_WEAPON_CLASS_FALLBACK state=active initial_pawns="$
+             UpdatedWeaponClassCount$
+             " local_only=true exact_weapon_preferred=true");
+    }
+    if (UpdatedAfflictionCount > 0 && !bFireAfflictionGuardReported)
     {
         bFireAfflictionGuardReported = true;
-        `log("KF2OPT_FIRE_AFFLICTION state=active initial_pawns="$UpdatedCount$
+        `log("KF2OPT_FIRE_AFFLICTION state=active initial_pawns="$
+             UpdatedAfflictionCount$
              " local_only=true behavior=preserved warning=removed");
     }
 }
@@ -160,12 +204,13 @@ event Tick(float DeltaTime)
     {
         NextReadRealTime = 0.0;
         NextWeaponMaterialGuardRealTime = 0.0;
-        NextFireAfflictionGuardRealTime = 0.0;
+        NextPawnRuntimeGuardRealTime = 0.0;
         bFireAfflictionGuardReported = false;
+        bWeaponClassFallbackGuardReported = false;
     }
     LastObservedRealTime = CurrentWorld.RealTimeSeconds;
     GuardTurretWeaponMaterials(CurrentWorld);
-    GuardFireAfflictionClasses(CurrentWorld);
+    GuardPawnRuntimeClasses(CurrentWorld);
     if (CurrentWorld.NetMode != NM_Standalone)
     {
         return;

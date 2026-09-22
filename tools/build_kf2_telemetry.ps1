@@ -93,6 +93,8 @@ $graphicsInteractionSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerGraphicsInteraction.uc'
 $fireAfflictionSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerFireAffliction.uc'
+$weaponFallbackSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerWeaponFallback.uc'
 $onlineContextInteractionSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerOnlineContextInteraction.uc'
 $adaptiveListenerSource = Join-Path $projectRoot `
@@ -112,7 +114,7 @@ foreach ($required in @($editorPath, $configPath,
                          $probeSource,
                          $mutatorSource, $interactionSource,
                          $graphicsViewportSource, $graphicsInteractionSource,
-                         $fireAfflictionSource,
+                         $fireAfflictionSource, $weaponFallbackSource,
                          $onlineContextInteractionSource,
                          $adaptiveListenerSource,
                          $onlineCorpseControllerSource,
@@ -190,6 +192,8 @@ try {
         (Join-Path $classesRoot 'KF2OptimizerGraphicsInteraction.uc')
     Copy-Item -LiteralPath $fireAfflictionSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerFireAffliction.uc')
+    Copy-Item -LiteralPath $weaponFallbackSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerWeaponFallback.uc')
     Copy-Item -LiteralPath $onlineContextInteractionSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerOnlineContextInteraction.uc')
     Copy-Item -LiteralPath $adaptiveGraphicsSource -Destination `

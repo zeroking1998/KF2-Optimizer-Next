@@ -714,6 +714,7 @@ target_compile_definitions(kf2_gameplay_log_lab_test PRIVATE
     KF2_TELEMETRY_INTERACTION_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetryInteraction.uc"
     KF2_GRAPHICS_INTERACTION_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerGraphicsInteraction.uc"
     KF2_FIRE_AFFLICTION_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerFireAffliction.uc"
+    KF2_WEAPON_FALLBACK_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerWeaponFallback.uc"
     KF2_ONLINE_CONTEXT_INTERACTION_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerOnlineContextInteraction.uc"
     KF2_GRAPHICS_VIEWPORT_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerGraphicsViewport.uc"
     KF2_ADAPTIVE_LISTENER_SOURCE=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerAdaptiveControlListener.uc"

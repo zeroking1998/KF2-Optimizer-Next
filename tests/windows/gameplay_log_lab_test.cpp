@@ -64,6 +64,8 @@ int main() {
         read_bytes(KF2_GRAPHICS_INTERACTION_SOURCE));
     const auto fire_affliction_source = normalize_newlines(
         read_bytes(KF2_FIRE_AFFLICTION_SOURCE));
+    const auto weapon_fallback_source = normalize_newlines(
+        read_bytes(KF2_WEAPON_FALLBACK_SOURCE));
     const auto online_context_source = normalize_newlines(
         read_bytes(KF2_ONLINE_CONTEXT_INTERACTION_SOURCE));
     const auto graphics_viewport_source = normalize_newlines(
@@ -246,10 +248,32 @@ int main() {
     CHECK(fire_affliction_source.find(
         "PawnOwner.PlaySoundBase(OnFireEndSound, true, true)") !=
           std::string::npos);
-    const auto fire_guard = graphics_interaction_source.find(
-        "GuardFireAfflictionClasses(CurrentWorld);");
-    CHECK(fire_guard != std::string::npos);
-    CHECK(fire_guard < weapon_standalone_guard);
+    const auto pawn_runtime_guard = graphics_interaction_source.find(
+        "GuardPawnRuntimeClasses(CurrentWorld);");
+    CHECK(pawn_runtime_guard != std::string::npos);
+    CHECK(pawn_runtime_guard < weapon_standalone_guard);
+    CHECK(graphics_interaction_source.find(
+        "function bool EnsureWeaponClassFallback(KFPawn Pawn)") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "KFPawn_Human(Pawn) == None") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "Pawn.WeaponClassForAttachmentTemplate = CurrentWeapon.Class") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "class'KF2OptimizerWeaponFallback'") !=
+          std::string::npos);
+    CHECK(weapon_fallback_source.find(
+        "class KF2OptimizerWeaponFallback extends KFWeapon") !=
+          std::string::npos);
+    CHECK(weapon_fallback_source.find(
+        "GetKFProjectileClassByFiringMode(") != std::string::npos);
+    CHECK(weapon_fallback_source.find("return None;") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "KF2OPT_WEAPON_CLASS_FALLBACK state=active") !=
+          std::string::npos);
+    CHECK(count_occurrences(graphics_interaction_source,
+        "foreach CurrentWorld.DynamicActors(class'KFPawn', Pawn)") == 1);
     CHECK(graphics_interaction_source.find(
         "AfflictionClasses[AF_FirePanic] =\n"
         "            class'KF2OptimizerFireAffliction'") !=
@@ -257,7 +281,7 @@ int main() {
     CHECK(graphics_interaction_source.find(
         "KF2OPT_FIRE_AFFLICTION state=active") != std::string::npos);
     CHECK(graphics_interaction_source.find(
-        "UpdatedCount > 0 && !bFireAfflictionGuardReported") !=
+        "UpdatedAfflictionCount > 0 && !bFireAfflictionGuardReported") !=
           std::string::npos);
     CHECK(graphics_viewport_source.find(
         "class'KF2OptimizerOnlineContextInteraction'") != std::string::npos);
