@@ -14,9 +14,24 @@ namespace {
 
 volatile LONG temporary_sequence = 0;
 
+std::filesystem::path native_path(const std::filesystem::path& path) {
+    auto value = path.wstring();
+    std::replace(value.begin(), value.end(), L'/', L'\\');
+    if (value.starts_with(L"\\\\?\\")) {
+        return std::filesystem::path{value};
+    }
+    if (value.starts_with(L"\\\\")) {
+        return std::filesystem::path{L"\\\\?\\UNC\\" + value.substr(2)};
+    }
+    return std::filesystem::path{L"\\\\?\\" + value};
+}
+
 Result<bool> fail(const wchar_t* message, DWORD native_code,
                   const std::filesystem::path& temporary) {
-    if (!temporary.empty()) static_cast<void>(DeleteFileW(temporary.c_str()));
+    if (!temporary.empty()) {
+        const auto native_temporary = native_path(temporary);
+        static_cast<void>(DeleteFileW(native_temporary.c_str()));
+    }
     return Result<bool>::failure(
         {ErrorCode::io_failure, message, static_cast<std::uint32_t>(native_code)});
 }
@@ -28,8 +43,9 @@ Result<bool> unsafe_target(const wchar_t* message, DWORD native_code = 0) {
 }
 
 bool safe_directory(const std::filesystem::path& path) {
+    const auto native = native_path(path);
     HANDLE directory = CreateFileW(
-        path.c_str(), FILE_READ_ATTRIBUTES,
+        native.c_str(), FILE_READ_ATTRIBUTES,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
         OPEN_EXISTING,
         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
@@ -43,8 +59,9 @@ bool safe_directory(const std::filesystem::path& path) {
 }
 
 bool safe_existing_file(const std::filesystem::path& path) {
+    const auto native = native_path(path);
     HANDLE file = CreateFileW(
-        path.c_str(), FILE_READ_ATTRIBUTES,
+        native.c_str(), FILE_READ_ATTRIBUTES,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
         OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (file == INVALID_HANDLE_VALUE) return false;
@@ -65,8 +82,9 @@ Result<std::pair<HANDLE, std::filesystem::path>> create_unique_temporary(
             target.wstring() + L".tmp." + std::to_wstring(GetCurrentProcessId()) +
             L"." + std::to_wstring(GetCurrentThreadId()) + L"." +
             std::to_wstring(static_cast<unsigned long>(sequence))};
+        const auto native_temporary = native_path(temporary);
         HANDLE file = CreateFileW(
-            temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+            native_temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
             FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_WRITE_THROUGH, nullptr);
         if (file != INVALID_HANDLE_VALUE) {
             return Result<std::pair<HANDLE, std::filesystem::path>>::success(
@@ -106,7 +124,8 @@ Result<bool> atomic_replace_utf8(const std::filesystem::path& target,
                              GetLastError());
     }
 
-    const DWORD attributes = GetFileAttributesW(target.c_str());
+    const auto native_target = native_path(target);
+    const DWORD attributes = GetFileAttributesW(native_target.c_str());
     const bool target_exists = attributes != INVALID_FILE_ATTRIBUTES;
     if (target_exists) {
         if (!safe_existing_file(target)) {
@@ -159,10 +178,13 @@ Result<bool> atomic_replace_utf8(const std::filesystem::path& target,
     // errors; all other failures remain fail-closed.
     for (unsigned attempt = 0; attempt != 8; ++attempt) {
         if (target_exists) {
-            replaced = ReplaceFileW(target.c_str(), temporary.c_str(), nullptr,
+            const auto native_temporary = native_path(temporary);
+            replaced = ReplaceFileW(native_target.c_str(),
+                                    native_temporary.c_str(), nullptr,
                                     REPLACEFILE_WRITE_THROUGH, nullptr, nullptr);
         } else {
-            replaced = MoveFileExW(temporary.c_str(), target.c_str(),
+            const auto native_temporary = native_path(temporary);
+            replaced = MoveFileExW(native_temporary.c_str(), native_target.c_str(),
                                    MOVEFILE_WRITE_THROUGH);
         }
         if (replaced != FALSE) break;
@@ -219,7 +241,7 @@ Result<std::filesystem::path> quarantine_regular_file(
               });
     while (candidates.size() >= maximum_retained) {
         if (!safe_existing_file(candidates.front()) ||
-            DeleteFileW(candidates.front().c_str()) == FALSE) {
+            DeleteFileW(native_path(candidates.front()).c_str()) == FALSE) {
             return Result<std::filesystem::path>::failure(
                 {ErrorCode::io_failure,
                  L"Old quarantined file cannot be removed", GetLastError()});
@@ -230,7 +252,8 @@ Result<std::filesystem::path> quarantine_regular_file(
     for (unsigned attempt = 0; attempt != 32; ++attempt) {
         std::filesystem::path destination{source.wstring() + std::wstring{suffix}};
         if (attempt != 0) destination += L"." + std::to_wstring(attempt + 1);
-        if (MoveFileExW(source.c_str(), destination.c_str(),
+        if (MoveFileExW(native_path(source).c_str(),
+                        native_path(destination).c_str(),
                         MOVEFILE_WRITE_THROUGH) != FALSE) {
             return Result<std::filesystem::path>::success(std::move(destination));
         }
