@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "kf2/platform/windows/atomic_file.hpp"
+#include "kf2/platform/windows/state_environment.hpp"
 #include "kf2/security/package_integrity.hpp"
 #include "kf2/update/semantic_version.hpp"
 
@@ -37,14 +38,16 @@ std::vector<std::string_view> managed_paths() {
 }
 
 bool normal_directory(const std::filesystem::path& path) {
-    const DWORD attributes = GetFileAttributesW(path.c_str());
+    const DWORD attributes = GetFileAttributesW(
+        platform::windows::extended_length_path(path).c_str());
     return attributes != INVALID_FILE_ATTRIBUTES &&
         (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
         (attributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
 }
 
 Result<std::string> read_managed_file(const std::filesystem::path& path) {
-    const DWORD attributes = GetFileAttributesW(path.c_str());
+    const auto native_path = platform::windows::extended_length_path(path);
+    const DWORD attributes = GetFileAttributesW(native_path.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES ||
         (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
         return Result<std::string>::failure(
@@ -52,14 +55,14 @@ Result<std::string> read_managed_file(const std::filesystem::path& path) {
              L"A managed update file has an unsafe identity", GetLastError()});
     }
     std::error_code error;
-    const auto size = std::filesystem::file_size(path, error);
+    const auto size = std::filesystem::file_size(native_path, error);
     if (error || size > kMaximumManagedFileBytes) {
         return Result<std::string>::failure(
             {ErrorCode::access_denied,
              L"A managed update file has an invalid size",
              static_cast<std::uint32_t>(error.value())});
     }
-    std::ifstream input(path, std::ios::binary);
+    std::ifstream input(native_path, std::ios::binary);
     if (!input) return Result<std::string>::failure(
         {ErrorCode::io_failure, L"A managed update file cannot be read", 0});
     return Result<std::string>::success(
@@ -68,9 +71,10 @@ Result<std::string> read_managed_file(const std::filesystem::path& path) {
 }
 
 Result<bool> ensure_parent(const std::filesystem::path& path) {
+    const auto native_path = platform::windows::extended_length_path(path);
     std::error_code error;
-    std::filesystem::create_directories(path, error);
-    if (error || !normal_directory(path)) return Result<bool>::failure(
+    std::filesystem::create_directories(native_path, error);
+    if (error || !normal_directory(native_path)) return Result<bool>::failure(
         {ErrorCode::access_denied,
          L"An update directory has an unsafe identity",
          static_cast<std::uint32_t>(error.value())});

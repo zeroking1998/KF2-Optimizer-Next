@@ -1,5 +1,7 @@
 #include "kf2/game/startup_prewarmer.hpp"
 
+#include "kf2/platform/windows/state_environment.hpp"
+
 #include <windows.h>
 #include <winioctl.h>
 
@@ -42,11 +44,15 @@ std::uint64_t available_physical_memory() noexcept {
 
 std::optional<std::vector<std::uint32_t>> disk_numbers_for_path(
     const std::filesystem::path& path) noexcept {
-    wchar_t volume_root[MAX_PATH]{};
-    if (!GetVolumePathNameW(path.c_str(), volume_root, MAX_PATH)) {
+    std::vector<wchar_t> volume_root(32768);
+    const auto native_path =
+        platform::windows::extended_length_path(path);
+    if (!GetVolumePathNameW(native_path.c_str(), volume_root.data(),
+                            static_cast<DWORD>(volume_root.size()))) {
         return std::nullopt;
     }
-    const std::wstring_view root{volume_root};
+    std::wstring_view root{volume_root.data()};
+    if (root.starts_with(L"\\\\?\\")) root.remove_prefix(4);
     if (root.size() < 2 || root[1] != L':') return std::nullopt;
 
     const std::wstring volume_device = L"\\\\.\\" +

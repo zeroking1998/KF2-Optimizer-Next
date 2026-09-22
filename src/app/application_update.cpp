@@ -10,6 +10,7 @@
 #include <thread>
 
 #include "kf2/platform/windows/atomic_file.hpp"
+#include "kf2/platform/windows/state_environment.hpp"
 #include "kf2/update/github_release_client.hpp"
 #include "kf2/update/update_helper.hpp"
 #include "kf2/update/update_package.hpp"
@@ -322,16 +323,15 @@ void UiRuntime::start_update_install() {
         refresh_update_presentation();
         return;
     }
-    wchar_t temporary[MAX_PATH + 1]{};
-    const DWORD count = GetTempPathW(MAX_PATH, temporary);
-    if (count == 0 || count > MAX_PATH) {
+    const auto temporary = platform::windows::temporary_directory();
+    if (!temporary.has_value()) {
         updates.controller.complete_install_failure(
             L"The temporary update folder is unavailable.");
         refresh_update_presentation();
         return;
     }
     const auto release = *updates.controller.snapshot().available_release;
-    const auto work = std::filesystem::path{temporary} /
+    const auto work = temporary.value() /
         L"KF2OptimizerNext-Update" /
         (std::to_wstring(GetCurrentProcessId()) + L"-" +
          std::to_wstring(static_cast<unsigned long long>(monotonic_ns())));

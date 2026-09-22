@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "kf2/platform/windows/atomic_file.hpp"
+#include "kf2/platform/windows/state_environment.hpp"
 #include "kf2/security/sha256.hpp"
 
 namespace kf2::security {
@@ -61,7 +62,8 @@ bool equal_ascii_case_insensitive(std::string_view left,
 
 Result<std::string> read_manifest(const std::filesystem::path& path) {
     HANDLE file = CreateFileW(
-        path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+        platform::windows::extended_length_path(path).c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
         nullptr);
     if (file == INVALID_HANDLE_VALUE) {
@@ -204,7 +206,8 @@ Result<std::string> read_repair_source(
     const std::filesystem::path& path) {
     constexpr std::uint64_t kMaximumBytes = 64ULL * 1024ULL * 1024ULL;
     HANDLE file = CreateFileW(
-        path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
+        platform::windows::extended_length_path(path).c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_DELETE,
         nullptr, OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN |
             FILE_FLAG_OPEN_REPARSE_POINT,
@@ -270,15 +273,16 @@ Result<std::string> read_repair_source(
 }
 
 Result<bool> ensure_repair_parent(const std::filesystem::path& path) {
+    const auto native_path = platform::windows::extended_length_path(path);
     std::error_code error;
-    std::filesystem::create_directories(path, error);
+    std::filesystem::create_directories(native_path, error);
     if (error) {
         return Result<bool>::failure(
             {ErrorCode::io_failure,
              L"A required package directory could not be created",
              static_cast<std::uint32_t>(error.value())});
     }
-    const DWORD attributes = GetFileAttributesW(path.c_str());
+    const DWORD attributes = GetFileAttributesW(native_path.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES ||
         (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
         (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
@@ -342,7 +346,8 @@ Result<PackageIntegrityAudit> audit_package_integrity(
     }
     const auto manifest =
         executable_directory / L"Data" / L"package-integrity.ini";
-    const DWORD attributes = GetFileAttributesW(manifest.c_str());
+    const DWORD attributes = GetFileAttributesW(
+        platform::windows::extended_length_path(manifest).c_str());
     const DWORD attribute_error = attributes == INVALID_FILE_ATTRIBUTES
         ? GetLastError() : ERROR_SUCCESS;
     if (attributes == INVALID_FILE_ATTRIBUTES &&

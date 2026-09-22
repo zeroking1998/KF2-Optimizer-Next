@@ -105,6 +105,7 @@ add_test(NAME kf2_update_package_test COMMAND kf2_update_package_test)
 add_executable(kf2_update_helper_test
     windows/update_helper_test.cpp
     ${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp
+    ${PROJECT_SOURCE_DIR}/src/platform/windows/state_environment.cpp
     ${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp
     ${PROJECT_SOURCE_DIR}/src/security/sha256.cpp
     ${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp
@@ -485,6 +486,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/platform/windows/dxgi_frame_timing_session.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/process_security.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/single_instance.cpp"
+    "${PROJECT_SOURCE_DIR}/src/platform/windows/state_environment.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/release_package_repair.cpp"
