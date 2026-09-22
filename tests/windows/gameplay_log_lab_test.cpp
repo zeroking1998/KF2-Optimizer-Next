@@ -85,9 +85,13 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find("KF2OPT_ADAPTIVE_QUALITY state=applied") !=
           std::string::npos);
-    CHECK(telemetry_source.find("Resource ~= \"overdraw\"") !=
+    CHECK(telemetry_source.find("Resource ~= \"overdraw\"") ==
           std::string::npos);
-    CHECK(telemetry_source.find("Resource ~= \"effects\"") !=
+    CHECK(telemetry_source.find("Resource ~= \"effects\"") ==
+          std::string::npos);
+    CHECK(online_context_source.find("Resource ~= \"overdraw\"") ==
+          std::string::npos);
+    CHECK(online_context_source.find("Resource ~= \"effects\"") ==
           std::string::npos);
     CHECK(telemetry_source.find("var globalconfig bool bAdaptiveRuntimeEnabled") !=
           std::string::npos);
@@ -663,6 +667,13 @@ int main() {
     CHECK(graphics_source.find(
         "static function bool ApplyFixedSessionEffects") !=
           std::string::npos);
+    CHECK(graphics_source.find("Snapshot.OverdrawQuality = Max(") ==
+          std::string::npos);
+    CHECK(graphics_source.find("Snapshot.EffectsQuality = Max(") ==
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "return ApplyResource(Snapshot, \"fixed\", FixedSessionEffectsQuality)") !=
+          std::string::npos);
     CHECK(telemetry_source.find("ApplyFixedSessionEffects(") !=
           std::string::npos);
     CHECK(telemetry_source.find("EnsureFixedSessionEffects()") !=
@@ -759,14 +770,6 @@ int main() {
           std::string::npos);
     CHECK(graphics_source.find(
         "Snapshot.RamQuality = Max(Snapshot.RamQuality, Quality)") !=
-          std::string::npos);
-    CHECK(graphics_source.find(
-        "Snapshot.OverdrawQuality = Max(\n"
-        "            Snapshot.OverdrawQuality, Quality)") !=
-          std::string::npos);
-    CHECK(graphics_source.find(
-        "Snapshot.EffectsQuality = Max(\n"
-        "            Snapshot.EffectsQuality, Quality)") !=
           std::string::npos);
     CHECK(graphics_source.find("Snapshot.EffectsQuality = 100") !=
           std::string::npos);

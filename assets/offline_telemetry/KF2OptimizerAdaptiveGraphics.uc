@@ -768,10 +768,6 @@ static function bool ApplyResource(
         Snapshot.CpuQuality = Max(Snapshot.CpuQuality, Quality);
         Snapshot.VramQuality = Max(Snapshot.VramQuality, Quality);
         Snapshot.RamQuality = Max(Snapshot.RamQuality, Quality);
-        Snapshot.OverdrawQuality = Max(
-            Snapshot.OverdrawQuality, Quality);
-        Snapshot.EffectsQuality = Max(
-            Snapshot.EffectsQuality, Quality);
     }
     else if (Resource ~= "gpu") Snapshot.GpuQuality = Quality;
     else if (Resource ~= "cpu") Snapshot.CpuQuality = Quality;

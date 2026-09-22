@@ -154,8 +154,7 @@ function bool ApplyOnlineGraphicsControl(
     }
     if (!bOnlineGraphicsEnabled ||
         !((Resource ~= "gpu") || (Resource ~= "vram") ||
-          (Resource ~= "ram") || (Resource ~= "overdraw") ||
-          (Resource ~= "effects") || (Resource ~= "recover")))
+          (Resource ~= "ram") || (Resource ~= "recover")))
     {
         return false;
     }
