@@ -222,6 +222,7 @@ var globalconfig int AdaptiveTargetFPS;
 var globalconfig int AdaptiveQualityChangeBudget;
 var globalconfig string AdaptiveControlToken;
 var transient KF2OptimizerAdaptiveGraphicsState AdaptiveGraphicsState;
+var transient bool bFixedSessionEffectsApplied;
 var int AdaptiveGraphicsQuality;
 var string AdaptiveGraphicsResource;
 var int AdaptiveLastControlSequence;
@@ -377,6 +378,10 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
     }
     if (bEnabled)
     {
+        if (!EnsureFixedSessionEffects())
+        {
+            return false;
+        }
         bAdaptiveRuntimeEnabled = true;
         if (bAdaptiveCorpseStagger)
         {
@@ -391,7 +396,9 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
                     AdaptiveCorpseControlInitialDelay);
             }
         }
-        `log("KF2OPT_ADAPTIVE_MODE state=enabled readback=verified");
+        `log("KF2OPT_ADAPTIVE_MODE state=enabled fixed_effect_quality="$
+             class'KF2OptimizerAdaptiveGraphics'.static.
+                GetFixedSessionEffectsQuality()$" readback=verified");
         return true;
     }
 
@@ -401,7 +408,8 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
     {
         return false;
     }
-    if (!ApplyAdaptiveEffectRuntimeReadback("recover", 100))
+    bFixedSessionEffectsApplied = false;
+    if (!EnsureFixedSessionEffects())
     {
         return false;
     }
@@ -438,9 +446,61 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
     AdaptiveCachedAwakeCorpses = 0;
     AdaptiveCorpseCountsObservedRealTime = 0.0;
     AdaptiveFramePressureObservedRealTime = 0.0;
-    `log("KF2OPT_ADAPTIVE_MODE state=disabled readback=verified"$
+    `log("KF2OPT_ADAPTIVE_MODE state=disabled fixed_effect_quality="$
+         class'KF2OptimizerAdaptiveGraphics'.static.
+            GetFixedSessionEffectsQuality()$" readback=verified"$
          " corpse_limit="$AdaptiveCorpseRuntimeLimit$
          " telemetry=active");
+    return true;
+}
+
+function bool EnsureFixedSessionEffects()
+{
+    if (bFixedSessionEffectsApplied)
+    {
+        return true;
+    }
+    if (AdaptiveGraphicsState == None ||
+        !class'KF2OptimizerAdaptiveGraphics'.static.
+            ApplyFixedSessionEffects(AdaptiveGraphicsState))
+    {
+        return false;
+    }
+    if (!ApplyAdaptiveEffectRuntimeReadback(
+            "fixed", class'KF2OptimizerAdaptiveGraphics'.static.
+                GetFixedSessionEffectsQuality()))
+    {
+        if (!class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
+                AdaptiveGraphicsState) ||
+            !ApplyAdaptiveEffectRuntimeReadback("rollback", 100))
+        {
+            `log("KF2OPT_FIXED_EFFECT_BASELINE state=rollback_failed"$
+                 " mode=offline");
+        }
+        return false;
+    }
+    bFixedSessionEffectsApplied = true;
+    `log("KF2OPT_FIXED_EFFECT_BASELINE state=applied mode=offline"$
+         " quality="$class'KF2OptimizerAdaptiveGraphics'.static.
+            GetFixedSessionEffectsQuality()$" readback=verified");
+    return true;
+}
+
+function bool RestoreSessionGraphics()
+{
+    if (AdaptiveGraphicsState == None)
+    {
+        return true;
+    }
+    if (!class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
+            AdaptiveGraphicsState) ||
+        !ApplyAdaptiveEffectRuntimeReadback("restore", 100))
+    {
+        return false;
+    }
+    bFixedSessionEffectsApplied = false;
+    `log("KF2OPT_FIXED_EFFECT_BASELINE state=restored"$
+         " boundary=session_end readback=verified");
     return true;
 }
 
@@ -461,8 +521,6 @@ function bool ApplyAdaptiveResourceControl(
          (!(Resource ~= "enable") && (Quality < 10 || Quality > 100))) ||
         !((Resource ~= "gpu") || (Resource ~= "vram") ||
           (Resource ~= "cpu") || (Resource ~= "ram") ||
-          (Resource ~= "overdraw") ||
-          (Resource ~= "effects") ||
           (Resource ~= "mixed") || (Resource ~= "recover") ||
           (Resource ~= "enable") || (Resource ~= "disable")))
     {

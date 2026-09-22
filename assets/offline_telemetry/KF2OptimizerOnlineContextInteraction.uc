@@ -10,6 +10,7 @@ var float LastObservedRealTime;
 var KF2OptimizerAdaptiveGraphicsState OnlineGraphicsState;
 var int OnlineGraphicsLastSequence;
 var bool bOnlineGraphicsEnabled;
+var bool bOnlineFixedEffectsApplied;
 var bool bOnlineGraphicsListenerStarted;
 var bool bOnlineCorpseCapabilityReported;
 var bool bOnlineCorpsePoolObserved;
@@ -57,6 +58,28 @@ function bool IsOnlineAdaptiveEnabled()
     return bOnlineGraphicsEnabled;
 }
 
+function bool EnsureOnlineFixedEffectsBaseline()
+{
+    local KF2OptimizerAdaptiveGraphicsState CurrentState;
+
+    if (bOnlineFixedEffectsApplied)
+    {
+        return true;
+    }
+    CurrentState = GetOnlineGraphicsState();
+    if (CurrentState == None ||
+        !class'KF2OptimizerAdaptiveGraphics'.static.
+            ApplyFixedSessionEffects(CurrentState))
+    {
+        return false;
+    }
+    bOnlineFixedEffectsApplied = true;
+    `log("KF2OPT_FIXED_EFFECT_BASELINE state=applied mode=online"$
+         " quality="$class'KF2OptimizerAdaptiveGraphics'.static.
+            GetFixedSessionEffectsQuality()$" readback=verified");
+    return true;
+}
+
 function bool ApplyOnlineGraphicsControl(
     string Token, int Sequence, string Resource, int Quality)
 {
@@ -86,11 +109,19 @@ function bool ApplyOnlineGraphicsControl(
         {
             return false;
         }
+        CurrentState = GetOnlineGraphicsState();
+        if (CurrentState == None || !EnsureOnlineFixedEffectsBaseline())
+        {
+            return false;
+        }
         bOnlineGraphicsEnabled = true;
         bOnlineCorpseSleepArmed = true;
         bOnlineCorpseSleepApplied = false;
         OnlineGraphicsLastSequence = Sequence;
         `log("KF2OPT_ONLINE_GRAPHICS state=enabled corpse_maximum="$Quality$
+             " fixed_effect_quality="$
+             class'KF2OptimizerAdaptiveGraphics'.static.
+                GetFixedSessionEffectsQuality()$
              " local_only=true readback=verified");
         return true;
     }
@@ -107,16 +138,23 @@ function bool ApplyOnlineGraphicsControl(
         {
             return false;
         }
+        bOnlineFixedEffectsApplied = false;
+        if (!EnsureOnlineFixedEffectsBaseline())
+        {
+            return false;
+        }
         bOnlineGraphicsEnabled = false;
         bOnlineCorpseSleepArmed = false;
         OnlineGraphicsLastSequence = Sequence;
-        `log("KF2OPT_ONLINE_GRAPHICS state=disabled readback=verified");
+        `log("KF2OPT_ONLINE_GRAPHICS state=disabled fixed_effect_quality="$
+             class'KF2OptimizerAdaptiveGraphics'.static.
+                GetFixedSessionEffectsQuality()$
+             " readback=verified");
         return true;
     }
     if (!bOnlineGraphicsEnabled ||
         !((Resource ~= "gpu") || (Resource ~= "vram") ||
-          (Resource ~= "ram") || (Resource ~= "overdraw") ||
-          (Resource ~= "effects") || (Resource ~= "recover")))
+          (Resource ~= "ram") || (Resource ~= "recover")))
     {
         return false;
     }
@@ -301,6 +339,7 @@ function RestoreOnlineGraphicsAtMainMenu()
         }
     }
     bOnlineGraphicsEnabled = false;
+    bOnlineFixedEffectsApplied = false;
     OnlineGraphicsLastSequence = 0;
     bOnlineGraphicsListenerStarted = false;
     bOnlineCorpseCapabilityReported = false;
@@ -374,6 +413,7 @@ event Tick(float DeltaTime)
     }
     if (CurrentWorld.NetMode == NM_Client)
     {
+        EnsureOnlineFixedEffectsBaseline();
         ReportSessionContext(
             "online_client_read_only", "NM_Client", MapName);
         EnsureOnlineGraphicsListener(PrimaryController);
@@ -383,6 +423,7 @@ event Tick(float DeltaTime)
     }
     else if (CurrentWorld.NetMode == NM_ListenServer)
     {
+        EnsureOnlineFixedEffectsBaseline();
         ReportSessionContext(
             "online_host_read_only", "NM_ListenServer", MapName);
         EnsureOnlineGraphicsListener(PrimaryController);

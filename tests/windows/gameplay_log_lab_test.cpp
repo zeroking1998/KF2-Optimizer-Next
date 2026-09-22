@@ -85,9 +85,13 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find("KF2OPT_ADAPTIVE_QUALITY state=applied") !=
           std::string::npos);
-    CHECK(telemetry_source.find("Resource ~= \"overdraw\"") !=
+    CHECK(telemetry_source.find("Resource ~= \"overdraw\"") ==
           std::string::npos);
-    CHECK(telemetry_source.find("Resource ~= \"effects\"") !=
+    CHECK(telemetry_source.find("Resource ~= \"effects\"") ==
+          std::string::npos);
+    CHECK(online_context_source.find("Resource ~= \"overdraw\"") ==
+          std::string::npos);
+    CHECK(online_context_source.find("Resource ~= \"effects\"") ==
           std::string::npos);
     CHECK(telemetry_source.find("var globalconfig bool bAdaptiveRuntimeEnabled") !=
           std::string::npos);
@@ -102,7 +106,7 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find("WakeCount < 1") != std::string::npos);
     CHECK(telemetry_source.find(
-        "KF2OPT_ADAPTIVE_MODE state=disabled readback=verified") !=
+        "KF2OPT_ADAPTIVE_MODE state=disabled fixed_effect_quality=") !=
           std::string::npos);
     const auto adaptive_runtime_function = telemetry_source.find(
         "function bool SetAdaptiveRuntimeEnabled");
@@ -120,6 +124,13 @@ int main() {
         "class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(\n"
         "            AdaptiveGraphicsState, \"recover\", 100)") ==
           std::string::npos);
+    CHECK(telemetry_source.find("function bool RestoreSessionGraphics()") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_FIXED_EFFECT_BASELINE state=restored") !=
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "CurrentProbe.RestoreSessionGraphics()") != std::string::npos);
     const auto app_restore_function = telemetry_session_source.find(
         "bool UiRuntime::restore_live_adaptive_quality(");
     const auto app_toggle_function = telemetry_session_source.find(
@@ -522,7 +533,7 @@ int main() {
         interaction_source.find("function NotifyGameSessionEnded()")) !=
           std::string::npos);
     const auto teardown_restore = interaction_source.find(
-        "CurrentProbe.SetAdaptiveRuntimeEnabled(false)", session_ended);
+        "CurrentProbe.RestoreSessionGraphics()", session_ended);
     const auto teardown_quiesce = interaction_source.find(
         "CurrentProbe.QuiesceForWorldTeardown()", session_ended);
     CHECK(teardown_restore != std::string::npos);
@@ -651,6 +662,31 @@ int main() {
         "static function ApplyOverdraw") != std::string::npos);
     CHECK(graphics_source.find(
         "static function ApplyEffects") != std::string::npos);
+    CHECK(graphics_source.find("const FixedSessionEffectsQuality=50") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "static function bool ApplyFixedSessionEffects") !=
+          std::string::npos);
+    CHECK(graphics_source.find("Snapshot.OverdrawQuality = Max(") ==
+          std::string::npos);
+    CHECK(graphics_source.find("Snapshot.EffectsQuality = Max(") ==
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "return ApplyResource(Snapshot, \"fixed\", FixedSessionEffectsQuality)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("ApplyFixedSessionEffects(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("EnsureFixedSessionEffects()") !=
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "CurrentProbe.EnsureFixedSessionEffects()") != std::string::npos);
+    CHECK(online_context_source.find("ApplyFixedSessionEffects(") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "EnsureOnlineFixedEffectsBaseline()") != std::string::npos);
+    CHECK(online_context_source.find(
+        "KF2OPT_FIXED_EFFECT_BASELINE state=applied mode=online") !=
+          std::string::npos);
     CHECK(graphics_source.find(
         "ApplyOverdraw(Requested, Snapshot.OverdrawQuality)") !=
           std::string::npos);
@@ -734,14 +770,6 @@ int main() {
           std::string::npos);
     CHECK(graphics_source.find(
         "Snapshot.RamQuality = Max(Snapshot.RamQuality, Quality)") !=
-          std::string::npos);
-    CHECK(graphics_source.find(
-        "Snapshot.OverdrawQuality = Max(\n"
-        "            Snapshot.OverdrawQuality, Quality)") !=
-          std::string::npos);
-    CHECK(graphics_source.find(
-        "Snapshot.EffectsQuality = Max(\n"
-        "            Snapshot.EffectsQuality, Quality)") !=
           std::string::npos);
     CHECK(graphics_source.find("Snapshot.EffectsQuality = 100") !=
           std::string::npos);

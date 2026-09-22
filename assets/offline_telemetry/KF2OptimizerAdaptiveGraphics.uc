@@ -2,6 +2,17 @@
 // This avoids exporting KF2's large native GFXSettings struct across classes.
 class KF2OptimizerAdaptiveGraphics extends KFGFxOptionsMenu_Graphics;
 
+// A fixed session baseline keeps the most expensive transient effect work
+// bounded without waiting for an attributed Adaptive pressure event.  It is
+// intentionally independent from the Governor and is restored with the
+// captured user graphics at the session boundary.
+const FixedSessionEffectsQuality=50;
+
+static function int GetFixedSessionEffectsQuality()
+{
+    return FixedSessionEffectsQuality;
+}
+
 static function ApplyGpu(out GFXSettings Requested, int Quality)
 {
     local int ShadowResolution;
@@ -757,10 +768,6 @@ static function bool ApplyResource(
         Snapshot.CpuQuality = Max(Snapshot.CpuQuality, Quality);
         Snapshot.VramQuality = Max(Snapshot.VramQuality, Quality);
         Snapshot.RamQuality = Max(Snapshot.RamQuality, Quality);
-        Snapshot.OverdrawQuality = Max(
-            Snapshot.OverdrawQuality, Quality);
-        Snapshot.EffectsQuality = Max(
-            Snapshot.EffectsQuality, Quality);
     }
     else if (Resource ~= "gpu") Snapshot.GpuQuality = Quality;
     else if (Resource ~= "cpu") Snapshot.CpuQuality = Quality;
@@ -774,6 +781,11 @@ static function bool ApplyResource(
         Snapshot.CpuQuality = Quality;
         Snapshot.VramQuality = Quality;
         Snapshot.RamQuality = Quality;
+    }
+    else if (Resource ~= "fixed")
+    {
+        Snapshot.OverdrawQuality = Quality;
+        Snapshot.EffectsQuality = Quality;
     }
     else return false;
 
@@ -816,6 +828,14 @@ static function bool ApplyResource(
         `log("KF2OPT_ADAPTIVE_ROLLBACK state=failed reason=readback_mismatch");
     }
     return false;
+}
+
+static function bool ApplyFixedSessionEffects(
+    KF2OptimizerAdaptiveGraphicsState Snapshot)
+{
+    // Apply both groups through one composition and one verified readback.
+    // ApplyResource restores the previous qualities if that readback fails.
+    return ApplyResource(Snapshot, "fixed", FixedSessionEffectsQuality);
 }
 
 static function bool RestoreOriginal(KF2OptimizerAdaptiveGraphicsState Snapshot)
