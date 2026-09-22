@@ -238,6 +238,23 @@ int main() {
     CHECK(fire_affliction_source.find(
         "class KF2OptimizerFireAffliction extends KFAffliction_Fire") !=
           std::string::npos);
+    CHECK(fire_affliction_source.find(
+        "function bool AdoptExisting(KFAffliction_Fire Existing)") !=
+          std::string::npos);
+    CHECK(fire_affliction_source.find(
+        "Existing.Class != class'KFAffliction_Fire'") !=
+          std::string::npos);
+    CHECK(fire_affliction_source.find(
+        "RemainingActiveTime = PawnOwner.GetTimerRate(") !=
+          std::string::npos);
+    CHECK(fire_affliction_source.find(
+        "PawnOwner.ClearTimer(nameof(DeActivate), Existing)") !=
+          std::string::npos);
+    CHECK(fire_affliction_source.find(
+        "RemainingActiveTime, false, nameof(DeActivate), self") !=
+          std::string::npos);
+    CHECK(fire_affliction_source.find(
+        "Existing.BurningEffect = None") != std::string::npos);
     CHECK(fire_affliction_source.find("`warn(\"FIRE\")") ==
           std::string::npos);
     CHECK(fire_affliction_source.find(
@@ -275,13 +292,27 @@ int main() {
     CHECK(count_occurrences(graphics_interaction_source,
         "foreach CurrentWorld.DynamicActors(class'KFPawn', Pawn)") == 1);
     CHECK(graphics_interaction_source.find(
+        "function bool ReplaceExistingFireAffliction(KFPawn Pawn)") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "ExistingBase.Class != class'KFAffliction_Fire'") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "AfflictionTickArray.Find(ExistingBase)") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "AfflictionTickArray[TickIndex] = Replacement") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "Afflictions[AF_FirePanic] = Replacement") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
         "AfflictionClasses[AF_FirePanic] =\n"
         "            class'KF2OptimizerFireAffliction'") !=
           std::string::npos);
     CHECK(graphics_interaction_source.find(
         "KF2OPT_FIRE_AFFLICTION state=active") != std::string::npos);
     CHECK(graphics_interaction_source.find(
-        "UpdatedAfflictionCount > 0 && !bFireAfflictionGuardReported") !=
+        "UpdatedAfflictionCount > 0 || ReplacedAfflictionCount > 0") !=
           std::string::npos);
     CHECK(graphics_viewport_source.find(
         "class'KF2OptimizerOnlineContextInteraction'") != std::string::npos);
