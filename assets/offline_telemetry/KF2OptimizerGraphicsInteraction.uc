@@ -9,6 +9,8 @@ var string LastReadback;
 var string LastSelectedMap;
 var string LastVotedMap;
 var float NextWeaponMaterialGuardRealTime;
+var float NextFireAfflictionGuardRealTime;
+var bool bFireAfflictionGuardReported;
 
 function bool EnsureTurretWeaponMaterial(KFWeapon Weapon)
 {
@@ -85,6 +87,44 @@ function GuardTurretWeaponMaterials(WorldInfo CurrentWorld)
     }
 }
 
+function GuardFireAfflictionClasses(WorldInfo CurrentWorld)
+{
+    local KFPawn Pawn;
+    local int UpdatedCount;
+
+    if (CurrentWorld == None ||
+        CurrentWorld.RealTimeSeconds < NextFireAfflictionGuardRealTime)
+    {
+        return;
+    }
+    NextFireAfflictionGuardRealTime = CurrentWorld.RealTimeSeconds + 0.10;
+
+    foreach CurrentWorld.DynamicActors(class'KFPawn', Pawn)
+    {
+        if (Pawn == None || Pawn.bDeleteMe ||
+            Pawn.AfflictionHandler == None ||
+            Pawn.AfflictionHandler.AfflictionClasses.Length <= AF_FirePanic ||
+            Pawn.AfflictionHandler.AfflictionClasses[AF_FirePanic] ==
+                class'KF2OptimizerFireAffliction')
+        {
+            continue;
+        }
+        Pawn.AfflictionHandler.AfflictionClasses[AF_FirePanic] =
+            class'KF2OptimizerFireAffliction';
+        if (Pawn.AfflictionHandler.AfflictionClasses[AF_FirePanic] ==
+            class'KF2OptimizerFireAffliction')
+        {
+            ++UpdatedCount;
+        }
+    }
+    if (UpdatedCount > 0 && !bFireAfflictionGuardReported)
+    {
+        bFireAfflictionGuardReported = true;
+        `log("KF2OPT_FIRE_AFFLICTION state=active initial_pawns="$UpdatedCount$
+             " local_only=true behavior=preserved warning=removed");
+    }
+}
+
 event Tick(float DeltaTime)
 {
     local LocalPlayer PrimaryPlayer;
@@ -120,9 +160,12 @@ event Tick(float DeltaTime)
     {
         NextReadRealTime = 0.0;
         NextWeaponMaterialGuardRealTime = 0.0;
+        NextFireAfflictionGuardRealTime = 0.0;
+        bFireAfflictionGuardReported = false;
     }
     LastObservedRealTime = CurrentWorld.RealTimeSeconds;
     GuardTurretWeaponMaterials(CurrentWorld);
+    GuardFireAfflictionClasses(CurrentWorld);
     if (CurrentWorld.NetMode != NM_Standalone)
     {
         return;

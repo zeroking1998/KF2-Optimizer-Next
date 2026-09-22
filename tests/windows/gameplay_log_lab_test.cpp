@@ -62,6 +62,8 @@ int main() {
         read_bytes(KF2_TELEMETRY_INTERACTION_SOURCE));
     const auto graphics_interaction_source = normalize_newlines(
         read_bytes(KF2_GRAPHICS_INTERACTION_SOURCE));
+    const auto fire_affliction_source = normalize_newlines(
+        read_bytes(KF2_FIRE_AFFLICTION_SOURCE));
     const auto online_context_source = normalize_newlines(
         read_bytes(KF2_ONLINE_CONTEXT_INTERACTION_SOURCE));
     const auto graphics_viewport_source = normalize_newlines(
@@ -231,6 +233,32 @@ int main() {
     CHECK(weapon_guard != std::string::npos);
     CHECK(weapon_standalone_guard != std::string::npos);
     CHECK(weapon_guard < weapon_standalone_guard);
+    CHECK(fire_affliction_source.find(
+        "class KF2OptimizerFireAffliction extends KFAffliction_Fire") !=
+          std::string::npos);
+    CHECK(fire_affliction_source.find("`warn(\"FIRE\")") ==
+          std::string::npos);
+    CHECK(fire_affliction_source.find(
+        "BurningEffect.SetTemplate(BurningTemplate)") != std::string::npos);
+    CHECK(fire_affliction_source.find(
+        "PawnOwner.PlaySoundBase(OnFireSound, true, true, true)") !=
+          std::string::npos);
+    CHECK(fire_affliction_source.find(
+        "PawnOwner.PlaySoundBase(OnFireEndSound, true, true)") !=
+          std::string::npos);
+    const auto fire_guard = graphics_interaction_source.find(
+        "GuardFireAfflictionClasses(CurrentWorld);");
+    CHECK(fire_guard != std::string::npos);
+    CHECK(fire_guard < weapon_standalone_guard);
+    CHECK(graphics_interaction_source.find(
+        "AfflictionClasses[AF_FirePanic] =\n"
+        "            class'KF2OptimizerFireAffliction'") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "KF2OPT_FIRE_AFFLICTION state=active") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "UpdatedCount > 0 && !bFireAfflictionGuardReported") !=
+          std::string::npos);
     CHECK(graphics_viewport_source.find(
         "class'KF2OptimizerOnlineContextInteraction'") != std::string::npos);
     CHECK(graphics_viewport_source.find(
