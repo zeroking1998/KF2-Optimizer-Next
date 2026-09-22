@@ -118,10 +118,49 @@ function bool EnsureWeaponClassFallback(KFPawn Pawn)
     return Pawn.WeaponClassForAttachmentTemplate != None;
 }
 
+function bool ReplaceExistingFireAffliction(KFPawn Pawn)
+{
+    local KFAfflictionBase ExistingBase;
+    local KFAffliction_Fire ExistingFire;
+    local KF2OptimizerFireAffliction Replacement;
+    local int TickIndex;
+
+    if (Pawn == None || Pawn.AfflictionHandler == None ||
+        Pawn.AfflictionHandler.Afflictions.Length <= AF_FirePanic)
+    {
+        return false;
+    }
+    ExistingBase = Pawn.AfflictionHandler.Afflictions[AF_FirePanic];
+    if (ExistingBase == None ||
+        ExistingBase.Class != class'KFAffliction_Fire')
+    {
+        return false;
+    }
+    ExistingFire = KFAffliction_Fire(ExistingBase);
+    Replacement = new(Pawn) class'KF2OptimizerFireAffliction';
+    if (Replacement == None || !Replacement.AdoptExisting(ExistingFire))
+    {
+        return false;
+    }
+
+    TickIndex = Pawn.AfflictionHandler.AfflictionTickArray.Find(ExistingBase);
+    if (TickIndex != INDEX_NONE)
+    {
+        Pawn.AfflictionHandler.AfflictionTickArray[TickIndex] = Replacement;
+    }
+    else if (Replacement.bNeedsTick && Replacement.DissipationRate > 0.0)
+    {
+        Pawn.AfflictionHandler.AfflictionTickArray.AddItem(Replacement);
+    }
+    Pawn.AfflictionHandler.Afflictions[AF_FirePanic] = Replacement;
+    return Pawn.AfflictionHandler.Afflictions[AF_FirePanic] == Replacement;
+}
+
 function GuardPawnRuntimeClasses(WorldInfo CurrentWorld)
 {
     local KFPawn Pawn;
     local int UpdatedAfflictionCount;
+    local int ReplacedAfflictionCount;
     local int UpdatedWeaponClassCount;
 
     if (CurrentWorld == None ||
@@ -136,6 +175,10 @@ function GuardPawnRuntimeClasses(WorldInfo CurrentWorld)
         if (EnsureWeaponClassFallback(Pawn))
         {
             ++UpdatedWeaponClassCount;
+        }
+        if (ReplaceExistingFireAffliction(Pawn))
+        {
+            ++ReplacedAfflictionCount;
         }
         if (Pawn == None || Pawn.bDeleteMe ||
             Pawn.AfflictionHandler == None ||
@@ -160,11 +203,13 @@ function GuardPawnRuntimeClasses(WorldInfo CurrentWorld)
              UpdatedWeaponClassCount$
              " local_only=true exact_weapon_preferred=true");
     }
-    if (UpdatedAfflictionCount > 0 && !bFireAfflictionGuardReported)
+    if ((UpdatedAfflictionCount > 0 || ReplacedAfflictionCount > 0) &&
+        !bFireAfflictionGuardReported)
     {
         bFireAfflictionGuardReported = true;
         `log("KF2OPT_FIRE_AFFLICTION state=active initial_pawns="$
              UpdatedAfflictionCount$
+             " replaced_instances="$ReplacedAfflictionCount$
              " local_only=true behavior=preserved warning=removed");
     }
 }
