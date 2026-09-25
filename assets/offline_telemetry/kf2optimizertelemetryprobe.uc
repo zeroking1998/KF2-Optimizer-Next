@@ -27,6 +27,8 @@ const AdaptiveCorpseFreezeBurstAwakeThreshold=24;
 const FixedMinimumVisualControlInterval=0.10;
 const FixedMinimumVisualControlIdleInterval=0.50;
 const FixedMinimumVisualControlPhaseCount=5;
+const FixedMinimumLivingVisualBurstInterval=0.05;
+const FixedMinimumLivingVisualBurstLimit=16;
 
 struct DiagnosticEffectTelemetrySnapshot
 {
@@ -290,6 +292,8 @@ var array<int> FixedMinimumLivingAppliedMinLods;
 var array<float> FixedMinimumLivingAppliedAnimDistances;
 var array<int> FixedMinimumLivingAppliedAnimRates;
 var int FixedMinimumLivingVisualReductions;
+var int FixedMinimumLivingVisualBurstCount;
+var bool bFixedMinimumLivingVisualUrgentRepeat;
 var int AdaptiveLivingEnemyPressureLevel;
 var int AdaptiveLivingEnemyPendingPressureLevel;
 var float AdaptiveLivingEnemyPendingSinceRealTime;
@@ -1127,6 +1131,8 @@ function InitializeAdaptiveCorpseStagger(KFGoreManager GoreManager)
     FixedMinimumCorpseLodPruneCursor = 0;
     FixedMinimumLivingScanPawn = None;
     FixedMinimumLivingPruneCursor = 0;
+    FixedMinimumLivingVisualBurstCount = 0;
+    bFixedMinimumLivingVisualUrgentRepeat = false;
     bAdaptiveCorpseControlUrgentRepeat = false;
     AdaptiveCachedLivingEnemyPressureScale = 0.0;
     AdaptiveCachedVisibleCorpses = 0;
@@ -4265,6 +4271,7 @@ function bool RunFixedMinimumVisualControl()
     {
         return false;
     }
+    bFixedMinimumLivingVisualUrgentRepeat = false;
     switch (FixedMinimumVisualControlPhase)
     {
         case 0:
@@ -4272,6 +4279,27 @@ function bool RunFixedMinimumVisualControl()
             break;
         case 1:
             bActionTaken = ApplyLivingEnemyMinimumVisuals();
+            if (bActionTaken)
+            {
+                ++FixedMinimumLivingVisualBurstCount;
+                if (FixedMinimumLivingVisualBurstCount <
+                    FixedMinimumLivingVisualBurstLimit)
+                {
+                    // Keep one mesh update per callback and consume a rapid
+                    // spawn backlog across separate frames. The bounded burst
+                    // then yields to corpse LOD, sleeping-corpse animation and
+                    // both prune phases.
+                    bFixedMinimumLivingVisualUrgentRepeat = true;
+                }
+                else
+                {
+                    FixedMinimumLivingVisualBurstCount = 0;
+                }
+            }
+            else
+            {
+                FixedMinimumLivingVisualBurstCount = 0;
+            }
             break;
         case 2:
             RefreshSleepingCorpseMinimumAnimationState(GoreManager);
@@ -4283,9 +4311,12 @@ function bool RunFixedMinimumVisualControl()
             PruneFixedMinimumLivingVisualEntries();
             break;
     }
-    FixedMinimumVisualControlPhase =
-        (FixedMinimumVisualControlPhase + 1) %
-        FixedMinimumVisualControlPhaseCount;
+    if (!bFixedMinimumLivingVisualUrgentRepeat)
+    {
+        FixedMinimumVisualControlPhase =
+            (FixedMinimumVisualControlPhase + 1) %
+            FixedMinimumVisualControlPhaseCount;
+    }
     return bActionTaken;
 }
 
@@ -4754,6 +4785,8 @@ function FixedMinimumVisualControl()
 
     bActionTaken = RunFixedMinimumVisualControl();
     ScheduleFixedMinimumVisualControlTimer(
+        bFixedMinimumLivingVisualUrgentRepeat ?
+        FixedMinimumLivingVisualBurstInterval :
         bActionTaken ? FixedMinimumVisualControlInterval :
         FixedMinimumVisualControlIdleInterval);
 }
@@ -6333,6 +6366,8 @@ function QuiesceForWorldTeardown()
     FixedMinimumCorpseLodPruneCursor = 0;
     FixedMinimumLivingScanPawn = None;
     FixedMinimumLivingPruneCursor = 0;
+    FixedMinimumLivingVisualBurstCount = 0;
+    bFixedMinimumLivingVisualUrgentRepeat = false;
     bAdaptiveCorpseControlUrgentRepeat = false;
     AdaptiveCachedVisibleCorpses = 0;
     AdaptiveCachedVisibleAwakeCorpses = 0;
