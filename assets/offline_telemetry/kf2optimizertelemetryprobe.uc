@@ -21,6 +21,9 @@ const AdaptiveCorpseControlUrgentInterval=0.125;
 const AdaptiveCorpseControlSliceInterval=0.05;
 const AdaptiveCorpseControlPhaseCount=8;
 const AdaptiveCorpseScanBudget=64;
+const AdaptiveCorpseFreezeBurstInterval=0.05;
+const AdaptiveCorpseFreezeBurstLimit=12;
+const AdaptiveCorpseFreezeBurstAwakeThreshold=24;
 const FixedMinimumVisualControlInterval=0.10;
 const FixedMinimumVisualControlIdleInterval=0.50;
 const FixedMinimumVisualControlPhaseCount=5;
@@ -293,6 +296,7 @@ var float AdaptiveLivingEnemyPendingSinceRealTime;
 var float AdaptiveLivingEnemyLastChangeRealTime;
 var float AdaptiveCachedLivingEnemyPressureScale;
 var int AdaptiveCorpseControlPhase;
+var int AdaptiveCorpseBurstFreezeCount;
 var int FixedMinimumVisualControlPhase;
 var int AdaptiveCleanupScanCursor;
 var int AdaptiveBaselineScanCursor;
@@ -322,6 +326,11 @@ function float GetAdaptiveCorpseControlDelay(bool bActionTaken)
 {
     if (bAdaptiveCorpseControlUrgentRepeat)
     {
+        if (AdaptiveCorpseControlPhase == 0 &&
+            AdaptiveCorpseBurstFreezeCount > 0)
+        {
+            return AdaptiveCorpseFreezeBurstInterval;
+        }
         return AdaptiveCorpseControlUrgentInterval;
     }
     // Finish a split cycle quickly. Only pause after the complete cycle, so a
@@ -423,6 +432,7 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
         AdaptiveCorpseManager.MaxDeadBodies = AdaptiveCorpseTarget;
     }
     AdaptiveCorpseControlPhase = 0;
+    AdaptiveCorpseBurstFreezeCount = 0;
     AdaptiveCleanupScanCursor = 0;
     AdaptiveBaselineScanCursor = 0;
     AdaptiveFreezeScanCursor = 0;
@@ -1102,6 +1112,7 @@ function InitializeAdaptiveCorpseStagger(KFGoreManager GoreManager)
     AdaptiveLastNearRagdollRejectRealTime =
         WorldInfo.RealTimeSeconds - 2.0;
     AdaptiveCorpseControlPhase = 0;
+    AdaptiveCorpseBurstFreezeCount = 0;
     AdaptiveCleanupScanCursor = 0;
     AdaptiveBaselineScanCursor = 0;
     AdaptiveFreezeScanCursor = 0;
@@ -1127,7 +1138,11 @@ function InitializeAdaptiveCorpseStagger(KFGoreManager GoreManager)
          AdaptiveCorpseTarget$" runtime_limit="$AdaptiveCorpseRuntimeLimit$
          " quality_steps="$GetAdaptiveCorpseAttackScale()$
          " physics=distance_visibility_density frame_pressure=amplifier"$
-         " cleanup_batch=1 cleanup_interval_ms=450");
+         " cleanup_batch=1 cleanup_interval_ms=450"$
+         " freeze_burst_awake="$AdaptiveCorpseFreezeBurstAwakeThreshold$
+         " freeze_burst_limit="$AdaptiveCorpseFreezeBurstLimit$
+         " freeze_burst_interval_ms="$
+         int(AdaptiveCorpseFreezeBurstInterval * 1000.0));
 }
 
 function AdjustAdaptiveCorpseCapacity(
@@ -2901,6 +2916,7 @@ function bool FreezeOnePressureEligibleCorpse(
     local int MinimumAgeSeconds;
     local int MinimumDistanceUnits;
     local int TrackedSleepIndex;
+    local float MinimumFreezeInterval;
     local float Score;
     local float SelectedScore;
     local string CorpseId;
@@ -2919,8 +2935,15 @@ function bool FreezeOnePressureEligibleCorpse(
         MinimumAgeSeconds = 10;
         MinimumDistanceUnits = 800;
     }
+    MinimumFreezeInterval = 0.25;
+    if (AdaptiveCachedAwakeCorpses >=
+        AdaptiveCorpseFreezeBurstAwakeThreshold)
+    {
+        MinimumFreezeInterval = AdaptiveCorpseFreezeBurstInterval;
+    }
     if (GoreManager == None || WorldInfo == None ||
-        WorldInfo.RealTimeSeconds - AdaptiveLastCorpseFreezeRealTime < 0.25)
+        WorldInfo.RealTimeSeconds - AdaptiveLastCorpseFreezeRealTime <
+            MinimumFreezeInterval)
     {
         return false;
     }
@@ -4128,6 +4151,7 @@ function bool RunAdaptiveCorpseLoadControl()
         case 0:
             if (WakeNearAdaptiveDistanceSleptCorpses() > 0)
             {
+                AdaptiveCorpseBurstFreezeCount = 0;
                 bActionTaken = true;
                 bAdaptiveCorpseControlUrgentRepeat = true;
             }
@@ -4135,6 +4159,28 @@ function bool RunAdaptiveCorpseLoadControl()
             {
                 bActionTaken = FreezeOnePressureEligibleCorpse(
                     GoreManager, AdaptiveCorpsePhysicsPressureLevel);
+                if (bActionTaken && AwakeTotal >=
+                        AdaptiveCorpseFreezeBurstAwakeThreshold)
+                {
+                    ++AdaptiveCorpseBurstFreezeCount;
+                    if (AdaptiveCorpseBurstFreezeCount <
+                        AdaptiveCorpseFreezeBurstLimit)
+                    {
+                        // One mutation is still reserved per game frame. The
+                        // short one-shot timer merely consumes an urgent
+                        // backlog across separate frames and yields after a
+                        // bounded burst so sleep, cleanup and pruning run.
+                        bAdaptiveCorpseControlUrgentRepeat = true;
+                    }
+                    else
+                    {
+                        AdaptiveCorpseBurstFreezeCount = 0;
+                    }
+                }
+                else
+                {
+                    AdaptiveCorpseBurstFreezeCount = 0;
+                }
             }
             break;
         case 1:
@@ -6271,6 +6317,7 @@ function QuiesceForWorldTeardown()
     ClearTimer(nameof(FixedMinimumVisualControl), self);
     ClearTimer(nameof(AdaptiveCorpsePhysicsRelease), self);
     AdaptiveCorpseControlPhase = 0;
+    AdaptiveCorpseBurstFreezeCount = 0;
     FixedMinimumVisualControlPhase = 0;
     AdaptiveCleanupScanCursor = 0;
     AdaptiveBaselineScanCursor = 0;
