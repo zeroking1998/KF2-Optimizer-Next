@@ -1968,6 +1968,25 @@ int main() {
         "bActionTaken = ApplyLivingEnemyMinimumVisuals();",
         fixed_visual_start) != std::string::npos);
     CHECK(telemetry_source.find(
+        "const FixedMinimumLivingVisualBurstInterval=0.05;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "const FixedMinimumLivingVisualBurstLimit=16;") !=
+          std::string::npos);
+    const auto living_burst_scheduler = telemetry_source.find(
+        "FixedMinimumLivingVisualBurstCount <",
+        fixed_visual_start);
+    CHECK(living_burst_scheduler != std::string::npos);
+    CHECK(telemetry_source.find(
+        "bFixedMinimumLivingVisualUrgentRepeat = true;",
+        living_burst_scheduler) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "FixedMinimumLivingVisualBurstCount = 0;",
+        living_burst_scheduler) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "if (!bFixedMinimumLivingVisualUrgentRepeat)",
+        living_burst_scheduler) != std::string::npos);
+    CHECK(telemetry_source.find(
         "while (ScanPawn != None && Scanned < AdaptiveCorpseScanBudget)") !=
           std::string::npos);
     const auto living_apply_start = telemetry_source.find(
