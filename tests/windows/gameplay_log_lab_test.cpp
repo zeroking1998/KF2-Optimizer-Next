@@ -1777,9 +1777,28 @@ int main() {
              "MinimumAgeSeconds = 10", "MinimumAgeSeconds = 5",
              "MinimumDistanceUnits = 1000", "MinimumDistanceUnits = 800",
              "MinimumDistanceUnits = 500",
-             "AdaptiveLastCorpseFreezeRealTime < 0.25"}) {
+             "MinimumFreezeInterval = 0.25",
+             "MinimumFreezeInterval = AdaptiveCorpseFreezeBurstInterval"}) {
         CHECK(pressure_freeze_body.find(threshold) != std::string::npos);
     }
+    CHECK(telemetry_source.find(
+        "const AdaptiveCorpseFreezeBurstInterval=0.05;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "const AdaptiveCorpseFreezeBurstLimit=12;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "const AdaptiveCorpseFreezeBurstAwakeThreshold=24;") !=
+          std::string::npos);
+    const auto burst_scheduler = telemetry_source.find(
+        "AdaptiveCorpseBurstFreezeCount <");
+    CHECK(burst_scheduler != std::string::npos);
+    CHECK(telemetry_source.find(
+        "bAdaptiveCorpseControlUrgentRepeat = true;",
+        burst_scheduler) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveCorpseBurstFreezeCount = 0;",
+        burst_scheduler) != std::string::npos);
     CHECK(pressure_freeze_body.find("Candidate.Mesh.RigidBodyIsAwake()") !=
           std::string::npos);
     CHECK(pressure_freeze_body.find("Candidate.SetPhysics(PHYS_None)") !=
