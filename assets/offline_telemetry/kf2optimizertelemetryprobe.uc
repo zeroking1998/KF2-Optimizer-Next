@@ -291,7 +291,12 @@ var array<KFPawn_Monster> FixedMinimumLivingVisualZeds;
 var array<int> FixedMinimumLivingAppliedMinLods;
 var array<float> FixedMinimumLivingAppliedAnimDistances;
 var array<int> FixedMinimumLivingAppliedAnimRates;
+var array<bool> FixedMinimumLivingOriginalTickAnimOffscreen;
+var array<bool> FixedMinimumLivingOriginalUpdateSkelOffscreen;
+var array<bool> FixedMinimumLivingOffscreenAnimReduced;
 var int FixedMinimumLivingVisualReductions;
+var int FixedMinimumLivingOffscreenAnimReductions;
+var int FixedMinimumLivingOffscreenAnimRestores;
 var int FixedMinimumLivingVisualBurstCount;
 var bool bFixedMinimumLivingVisualUrgentRepeat;
 var int AdaptiveLivingEnemyPressureLevel;
@@ -1390,7 +1395,10 @@ function RemoveFixedMinimumLivingVisualEntry(int Index)
     if (Index < 0 || Index >= FixedMinimumLivingVisualZeds.Length ||
         Index >= FixedMinimumLivingAppliedMinLods.Length ||
         Index >= FixedMinimumLivingAppliedAnimDistances.Length ||
-        Index >= FixedMinimumLivingAppliedAnimRates.Length)
+        Index >= FixedMinimumLivingAppliedAnimRates.Length ||
+        Index >= FixedMinimumLivingOriginalTickAnimOffscreen.Length ||
+        Index >= FixedMinimumLivingOriginalUpdateSkelOffscreen.Length ||
+        Index >= FixedMinimumLivingOffscreenAnimReduced.Length)
     {
         return;
     }
@@ -1398,6 +1406,47 @@ function RemoveFixedMinimumLivingVisualEntry(int Index)
     FixedMinimumLivingAppliedMinLods.Remove(Index, 1);
     FixedMinimumLivingAppliedAnimDistances.Remove(Index, 1);
     FixedMinimumLivingAppliedAnimRates.Remove(Index, 1);
+    FixedMinimumLivingOriginalTickAnimOffscreen.Remove(Index, 1);
+    FixedMinimumLivingOriginalUpdateSkelOffscreen.Remove(Index, 1);
+    FixedMinimumLivingOffscreenAnimReduced.Remove(Index, 1);
+}
+
+function bool RestoreLivingOffscreenAnimation(int Index, string Reason)
+{
+    local KFPawn_Monster Candidate;
+
+    if (Index < 0 || Index >= FixedMinimumLivingVisualZeds.Length ||
+        Index >= FixedMinimumLivingOriginalTickAnimOffscreen.Length ||
+        Index >= FixedMinimumLivingOriginalUpdateSkelOffscreen.Length ||
+        Index >= FixedMinimumLivingOffscreenAnimReduced.Length ||
+        !FixedMinimumLivingOffscreenAnimReduced[Index])
+    {
+        return false;
+    }
+    Candidate = FixedMinimumLivingVisualZeds[Index];
+    if (Candidate == None || Candidate.bDeleteMe || Candidate.Mesh == None)
+    {
+        return false;
+    }
+    Candidate.Mesh.bTickAnimNodesWhenNotRendered =
+        FixedMinimumLivingOriginalTickAnimOffscreen[Index];
+    Candidate.Mesh.bUpdateSkelWhenNotRendered =
+        FixedMinimumLivingOriginalUpdateSkelOffscreen[Index];
+    if (Candidate.Mesh.bTickAnimNodesWhenNotRendered !=
+            FixedMinimumLivingOriginalTickAnimOffscreen[Index] ||
+        Candidate.Mesh.bUpdateSkelWhenNotRendered !=
+            FixedMinimumLivingOriginalUpdateSkelOffscreen[Index])
+    {
+        return false;
+    }
+    FixedMinimumLivingOffscreenAnimReduced[Index] = false;
+    ++FixedMinimumLivingOffscreenAnimRestores;
+    `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=restored reason="$Reason$
+         " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
+         " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+             GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+         " readback=verified");
+    return true;
 }
 
 function PruneFixedMinimumLivingVisualEntries()
@@ -1424,6 +1473,11 @@ function PruneFixedMinimumLivingVisualEntries()
         if (Candidate == None || Candidate.bDeleteMe ||
             !Candidate.IsAliveAndWell() || Candidate.Mesh == None)
         {
+            if (Candidate != None && !Candidate.bDeleteMe &&
+                Candidate.Mesh != None)
+            {
+                RestoreLivingOffscreenAnimation(Index, "not_alive");
+            }
             RemoveFixedMinimumLivingVisualEntry(Index);
         }
         else if (Candidate.Mesh.MinLodModel !=
@@ -1435,6 +1489,7 @@ function PruneFixedMinimumLivingVisualEntries()
         {
             // Another KF2 system changed the mesh. Drop the stale readback;
             // the fixed controller will verify and reapply it on a later scan.
+            RestoreLivingOffscreenAnimation(Index, "native_visual_state");
             RemoveFixedMinimumLivingVisualEntry(Index);
         }
         else
@@ -1450,8 +1505,33 @@ function PruneFixedMinimumLivingVisualEntries()
     }
 }
 
+function bool LivingOffscreenAnimationRequiresNativeTick(
+    KFPawn_Monster Candidate)
+{
+    if (Candidate == None || Candidate.Mesh == None || WorldInfo == None ||
+        Candidate.IsABoss() || Candidate.SpecialMove != SM_None ||
+        Candidate.Mesh.bUpdateKinematicBonesFromAnimation ||
+        Candidate.Mesh.RootMotionMode != RMM_Ignore ||
+        Candidate.Mesh.LastRenderTime > WorldInfo.TimeSeconds - 0.3)
+    {
+        return true;
+    }
+    return false;
+}
+
+function bool ShouldReduceLivingOffscreenAnimation(KFPawn_Monster Candidate)
+{
+    if (LivingOffscreenAnimationRequiresNativeTick(Candidate))
+    {
+        return false;
+    }
+    return Candidate.Mesh.LastRenderTime <= WorldInfo.TimeSeconds - 0.5;
+}
+
 function bool ApplyLivingEnemyMinimumVisuals()
 {
+    local bool bOffscreenChanged;
+    local bool bVisualChanged;
     local int EntryIndex;
     local int MaximumMinLod;
     local int Scanned;
@@ -1493,6 +1573,11 @@ function bool ApplyLivingEnemyMinimumVisuals()
             FixedMinimumLivingAppliedMinLods.AddItem(TargetMinLod);
             FixedMinimumLivingAppliedAnimDistances.AddItem(TargetAnimDistance);
             FixedMinimumLivingAppliedAnimRates.AddItem(TargetAnimRate);
+            FixedMinimumLivingOriginalTickAnimOffscreen.AddItem(
+                Candidate.Mesh.bTickAnimNodesWhenNotRendered);
+            FixedMinimumLivingOriginalUpdateSkelOffscreen.AddItem(
+                Candidate.Mesh.bUpdateSkelWhenNotRendered);
+            FixedMinimumLivingOffscreenAnimReduced.AddItem(false);
         }
         else
         {
@@ -1501,32 +1586,79 @@ function bool ApplyLivingEnemyMinimumVisuals()
                 TargetAnimDistance;
             FixedMinimumLivingAppliedAnimRates[EntryIndex] = TargetAnimRate;
         }
-        if (Candidate.Mesh.MinLodModel == TargetMinLod &&
-            Candidate.Mesh.AnimationLODDistanceFactor == TargetAnimDistance &&
-            Candidate.Mesh.AnimationLODFrameRate == TargetAnimRate)
+        if (FixedMinimumLivingOffscreenAnimReduced[EntryIndex] &&
+            LivingOffscreenAnimationRequiresNativeTick(Candidate))
         {
-            ScanPawn = FixedMinimumLivingScanPawn;
-            continue;
+            if (RestoreLivingOffscreenAnimation(EntryIndex, "visible_or_gameplay"))
+            {
+                return true;
+            }
         }
-        Candidate.Mesh.MinLodModel = TargetMinLod;
-        Candidate.Mesh.AnimationLODDistanceFactor = TargetAnimDistance;
-        Candidate.Mesh.AnimationLODFrameRate = TargetAnimRate;
-        if (Candidate.Mesh.MinLodModel != TargetMinLod ||
+        if (FixedMinimumLivingOffscreenAnimReduced[EntryIndex] &&
+            (Candidate.Mesh.bTickAnimNodesWhenNotRendered ||
+             Candidate.Mesh.bUpdateSkelWhenNotRendered))
+        {
+            // A native KF2 path changed either controller-owned flag while
+            // hidden. Restore the complete original pair before retrying.
+            if (RestoreLivingOffscreenAnimation(EntryIndex, "native_override"))
+            {
+                return true;
+            }
+        }
+        bVisualChanged =
+            Candidate.Mesh.MinLodModel != TargetMinLod ||
             Candidate.Mesh.AnimationLODDistanceFactor != TargetAnimDistance ||
-            Candidate.Mesh.AnimationLODFrameRate != TargetAnimRate)
+            Candidate.Mesh.AnimationLODFrameRate != TargetAnimRate;
+        if (bVisualChanged)
         {
-            RemoveFixedMinimumLivingVisualEntry(EntryIndex);
+            Candidate.Mesh.MinLodModel = TargetMinLod;
+            Candidate.Mesh.AnimationLODDistanceFactor = TargetAnimDistance;
+            Candidate.Mesh.AnimationLODFrameRate = TargetAnimRate;
+            if (Candidate.Mesh.MinLodModel != TargetMinLod ||
+                Candidate.Mesh.AnimationLODDistanceFactor !=
+                    TargetAnimDistance ||
+                Candidate.Mesh.AnimationLODFrameRate != TargetAnimRate)
+            {
+                RestoreLivingOffscreenAnimation(EntryIndex, "visual_readback");
+                RemoveFixedMinimumLivingVisualEntry(EntryIndex);
+                ScanPawn = FixedMinimumLivingScanPawn;
+                continue;
+            }
+            ++FixedMinimumLivingVisualReductions;
+            `log("KF2OPT_LIVING_VISUAL state=fixed_minimum min_lod="$
+                 TargetMinLod$" anim_factor="$
+                 TargetAnimDistance$" anim_rate="$TargetAnimRate$
+                 " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
+                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                 " readback=verified");
+        }
+        bOffscreenChanged = false;
+        if (!FixedMinimumLivingOffscreenAnimReduced[EntryIndex] &&
+            ShouldReduceLivingOffscreenAnimation(Candidate) &&
+            (Candidate.Mesh.bTickAnimNodesWhenNotRendered ||
+             Candidate.Mesh.bUpdateSkelWhenNotRendered))
+        {
+            Candidate.Mesh.bTickAnimNodesWhenNotRendered = false;
+            Candidate.Mesh.bUpdateSkelWhenNotRendered = false;
+            if (!Candidate.Mesh.bTickAnimNodesWhenNotRendered &&
+                !Candidate.Mesh.bUpdateSkelWhenNotRendered)
+            {
+                FixedMinimumLivingOffscreenAnimReduced[EntryIndex] = true;
+                ++FixedMinimumLivingOffscreenAnimReductions;
+                bOffscreenChanged = true;
+                `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=reduced distance_units="$
+                     GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
+                     FormatAdaptiveCorpseDistanceMeters(
+                         GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                     " readback=verified");
+            }
+        }
+        if (!bVisualChanged && !bOffscreenChanged)
+        {
             ScanPawn = FixedMinimumLivingScanPawn;
             continue;
         }
-        ++FixedMinimumLivingVisualReductions;
-        `log("KF2OPT_LIVING_VISUAL state=fixed_minimum min_lod="$
-             TargetMinLod$" anim_factor="$
-             TargetAnimDistance$" anim_rate="$TargetAnimRate$" distance_units="$
-             GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
-             FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
-             " readback=verified");
         return true;
     }
     return false;
@@ -5399,6 +5531,7 @@ function SampleTelemetry()
     local int LivingBoneInterpolation;
     local int LivingKinematicDistanceSkipped;
     local int LivingTicksOffscreen;
+    local int LivingUpdatesSkeletonOffscreen;
     local int LivingSpecialMoves;
     local int LivingAttackMoves;
     local int LivingGrappleMoves;
@@ -5605,6 +5738,10 @@ function SampleTelemetry()
                 if (Zed.Mesh.bTickAnimNodesWhenNotRendered)
                 {
                     ++LivingTicksOffscreen;
+                }
+                if (Zed.Mesh.bUpdateSkelWhenNotRendered)
+                {
+                    ++LivingUpdatesSkeletonOffscreen;
                 }
                 if (Zed.Mesh.LastRenderTime > WorldInfo.TimeSeconds - 0.3)
                 {
@@ -6239,6 +6376,7 @@ function SampleTelemetry()
          " living_bone_interpolation="$LivingBoneInterpolation$
          " living_kinematic_distance_skipped="$LivingKinematicDistanceSkipped$
          " living_ticks_offscreen="$LivingTicksOffscreen$
+         " living_updates_skeleton_offscreen="$LivingUpdatesSkeletonOffscreen$
          " living_special_moves="$LivingSpecialMoves$
          " living_attack_moves="$LivingAttackMoves$
          " living_grapple_moves="$LivingGrappleMoves$
@@ -6411,6 +6549,13 @@ function QuiesceForWorldTeardown()
         `log("KF2OPT_LIVING_VISUAL state=stopped reduced="$
              FixedMinimumLivingVisualReductions);
     }
+    if (FixedMinimumLivingOffscreenAnimReductions > 0 ||
+        FixedMinimumLivingOffscreenAnimRestores > 0)
+    {
+        `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=stopped reduced="$
+             FixedMinimumLivingOffscreenAnimReductions$" restored="$
+             FixedMinimumLivingOffscreenAnimRestores);
+    }
     // The process-owned graphics snapshot was restored by the persistent
     // interaction before teardown. Do not write rendering,
     // skeletal-mesh or WorldInfo state from Destroyed(): those objects are on
@@ -6426,6 +6571,9 @@ function QuiesceForWorldTeardown()
     FixedMinimumLivingAppliedMinLods.Length = 0;
     FixedMinimumLivingAppliedAnimDistances.Length = 0;
     FixedMinimumLivingAppliedAnimRates.Length = 0;
+    FixedMinimumLivingOriginalTickAnimOffscreen.Length = 0;
+    FixedMinimumLivingOriginalUpdateSkelOffscreen.Length = 0;
+    FixedMinimumLivingOffscreenAnimReduced.Length = 0;
     AdaptiveDistanceSleptCorpses.Length = 0;
     AdaptiveBaselineSettleEntries.Length = 0;
     AdaptiveFrozenCorpses.Length = 0;

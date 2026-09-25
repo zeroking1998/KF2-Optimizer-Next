@@ -1200,11 +1200,11 @@ int main() {
     CHECK(telemetry_source.find(
         "DistanceDecimeters = (DistanceUnits + 5) / 10") !=
           std::string::npos);
-    // All settle and LOD ownership paths emit actor-correlated receipts
-    // without changing the twelve action receipts with measured distance.
+    // All settle and LOD ownership paths emit actor-correlated receipts and
+    // the isolated living offscreen animation policy adds two distance receipts.
     CHECK(count_occurrences(telemetry_source, "corpse_id=") == 19);
-    CHECK(count_occurrences(telemetry_source, " distance_units=") == 12);
-    CHECK(count_occurrences(telemetry_source, " distance_m=") == 12);
+    CHECK(count_occurrences(telemetry_source, " distance_units=") == 14);
+    CHECK(count_occurrences(telemetry_source, " distance_m=") == 14);
     const auto distance_marker = telemetry_source.find(
         "FormatAdaptiveDebugMarkerAction(");
     CHECK(distance_marker != std::string::npos);
@@ -2019,10 +2019,55 @@ int main() {
         "TargetAnimRate = 6") != std::string::npos);
     CHECK(living_apply_body.find(
         "TargetAnimDistance = 0.55") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "FixedMinimumLivingOffscreenDistanceSquared") == std::string::npos);
+    const auto living_offscreen_policy_start = telemetry_source.find(
+        "function bool LivingOffscreenAnimationRequiresNativeTick(");
+    const auto living_offscreen_policy_end = telemetry_source.find(
+        "function bool ApplyLivingEnemyMinimumVisuals()",
+        living_offscreen_policy_start);
+    CHECK(living_offscreen_policy_start != std::string::npos);
+    CHECK(living_offscreen_policy_end != std::string::npos);
+    const auto living_offscreen_policy_body = telemetry_source.substr(
+        living_offscreen_policy_start,
+        living_offscreen_policy_end - living_offscreen_policy_start);
+    CHECK(living_apply_body.find(
+        "Candidate.Mesh.bTickAnimNodesWhenNotRendered = false;") !=
+          std::string::npos);
+    CHECK(living_apply_body.find(
+        "Candidate.Mesh.bUpdateSkelWhenNotRendered = false;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "FixedMinimumLivingOriginalTickAnimOffscreen") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "FixedMinimumLivingOriginalUpdateSkelOffscreen") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "living_updates_skeleton_offscreen=") != std::string::npos);
+    CHECK(living_offscreen_policy_body.find(
+        "Candidate.Mesh.LastRenderTime > WorldInfo.TimeSeconds - 0.3") !=
+          std::string::npos);
+    CHECK(living_offscreen_policy_body.find(
+        "Candidate.SpecialMove != SM_None") != std::string::npos);
+    CHECK(living_offscreen_policy_body.find("Candidate.IsABoss()") !=
+          std::string::npos);
+    CHECK(living_offscreen_policy_body.find(
+        "Candidate.Mesh.bUpdateKinematicBonesFromAnimation") !=
+          std::string::npos);
+    CHECK(living_offscreen_policy_body.find(
+        "Candidate.Mesh.RootMotionMode != RMM_Ignore") !=
+          std::string::npos);
+    CHECK(living_apply_body.find(
+        "KF2OPT_LIVING_OFFSCREEN_ANIM state=reduced") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "KF2OPT_LIVING_OFFSCREEN_ANIM state=restored") !=
+          std::string::npos);
     CHECK(living_apply_body.find("EnemyPressureLevel") ==
           std::string::npos);
     CHECK(telemetry_source.find(
-        "Candidate.Mesh.MinLodModel == TargetMinLod") != std::string::npos);
+        "Candidate.Mesh.MinLodModel != TargetMinLod") != std::string::npos);
     CHECK(telemetry_source.substr(
         lod_selector, lod_apply - lod_selector).find(
             "DistanceSquared < 640000.0") == std::string::npos);
