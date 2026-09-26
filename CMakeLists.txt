@@ -343,6 +343,27 @@ if(BUILD_TESTING)
         "${PROJECT_SOURCE_DIR}/include"
     )
 
+    add_library(KF2TestOverlayCore STATIC
+        src/overlay/overlay_mascot.cpp
+        src/overlay/overlay_policy.cpp
+        src/overlay/overlay_window_animation.cpp
+        src/overlay/overlay_window_metrics.cpp
+        src/overlay/overlay_window_native.cpp
+        src/overlay/overlay_window_render.cpp
+        src/overlay/overlay_window_static.cpp
+        src/overlay/overlay_window.cpp
+    )
+    target_include_directories(KF2TestOverlayCore PUBLIC
+        "${PROJECT_SOURCE_DIR}/include"
+    )
+
+    add_library(KF2TestWindowCore STATIC
+        src/platform/windows/window.cpp
+    )
+    target_include_directories(KF2TestWindowCore PUBLIC
+        "${PROJECT_SOURCE_DIR}/include"
+    )
+
     find_program(KF2_LLD_LINK NAMES lld-link
         PATHS "C:/Program Files/Swift/Toolchains/6.2.1+Asserts/usr/bin")
     if(KF2_LLD_LINK)
