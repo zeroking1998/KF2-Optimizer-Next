@@ -1,5 +1,7 @@
 #include <Windows.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -44,6 +46,19 @@ int main(int argc, char** argv) {
     CHECK((optional->DllCharacteristics & IMAGE_DLLCHARACTERISTICS_NX_COMPAT) != 0);
     CHECK((optional->DllCharacteristics & IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA) != 0);
     CHECK((optional->DllCharacteristics & IMAGE_DLLCHARACTERISTICS_GUARD_CF) != 0);
+
+    std::string lower_image{bytes.begin(), bytes.end()};
+    std::transform(
+        lower_image.begin(), lower_image.end(), lower_image.begin(),
+        [](char value) {
+            return static_cast<char>(
+                std::tolower(static_cast<unsigned char>(value)));
+        });
+    CHECK(lower_image.find("playsoundw") == std::string::npos);
+    CHECK(lower_image.find("messagebeep") == std::string::npos);
+    CHECK(lower_image.find("systemasterisk") == std::string::npos);
+    CHECK(lower_image.find("systemexclamation") == std::string::npos);
+    CHECK(lower_image.find("winmm.dll") == std::string::npos);
 
     const HMODULE image = LoadLibraryExW(
         executable.c_str(), nullptr,
