@@ -164,7 +164,6 @@ add_test(NAME kf2_pe_contract_test
 
 add_executable(kf2_window_smoke_test
     windows/window_smoke_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
 )
 target_include_directories(kf2_window_smoke_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_window_smoke_test PRIVATE user32)
@@ -419,14 +418,6 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/game/startup_prewarmer.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/advanced_settings.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/video_settings.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_mascot.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_policy.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_animation.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_metrics.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_native.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_render.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_static.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_profile.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_actuation.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/startup_gpu_profile.cpp"
@@ -434,7 +425,6 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/platform/windows/process_security.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/single_instance.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/state_environment.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/release_package_repair.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/resource_telemetry_worker.cpp"
     "${PROJECT_SOURCE_DIR}/src/update/github_release_client.cpp"
@@ -517,7 +507,6 @@ add_test(NAME kf2_shell_controller_test COMMAND kf2_shell_controller_test)
 
 add_executable(kf2_direct2d_renderer_test
     windows/direct2d_renderer_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/direct2d_renderer.cpp"
 )
 target_include_directories(kf2_direct2d_renderer_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
@@ -533,7 +522,6 @@ set_tests_properties(kf2_direct2d_renderer_test PROPERTIES
 
 add_executable(kf2_automation_provider_test
     windows/automation_provider_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/automation_provider.cpp"
 )
 target_include_directories(kf2_automation_provider_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
@@ -878,14 +866,6 @@ add_test(NAME kf2_dxgi_frame_timing_session_test COMMAND kf2_dxgi_frame_timing_s
 
 add_executable(kf2_dxgi_frame_timing_integration_test
     windows/dxgi_frame_timing_integration_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_mascot.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_policy.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_animation.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_metrics.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_native.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_render.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_static.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/dxgi_frame_timing_session.cpp"
 )
 target_include_directories(kf2_dxgi_frame_timing_integration_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
@@ -906,14 +886,12 @@ add_test(NAME kf2_gpu_metrics_test COMMAND kf2_gpu_metrics_test)
 
 add_executable(kf2_overlay_policy_test
     unit/overlay_policy_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_policy.cpp"
 )
 target_include_directories(kf2_overlay_policy_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_overlay_policy_test COMMAND kf2_overlay_policy_test)
 
 add_executable(kf2_overlay_position_contract_test
-    unit/overlay_position_contract_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_policy.cpp")
+    unit/overlay_position_contract_test.cpp)
 target_include_directories(kf2_overlay_position_contract_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_overlay_position_contract_test
@@ -921,13 +899,6 @@ add_test(NAME kf2_overlay_position_contract_test
 
 add_executable(kf2_overlay_window_test
     windows/overlay_window_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_mascot.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_animation.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_metrics.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_native.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_render.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_static.cpp"
-    "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window.cpp"
 )
 target_include_directories(kf2_overlay_window_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_overlay_window_test PRIVATE user32 gdi32 d2d1 dwrite)
@@ -1110,4 +1081,27 @@ set(KF2_GAME_CORE_TEST_TARGETS
 )
 foreach(KF2_GAME_CORE_TEST_TARGET IN LISTS KF2_GAME_CORE_TEST_TARGETS)
     target_link_libraries(${KF2_GAME_CORE_TEST_TARGET} PRIVATE KF2TestGameCore)
+endforeach()
+
+set(KF2_OVERLAY_CORE_TEST_TARGETS
+    kf2_application_lifecycle_test
+    kf2_dxgi_frame_timing_integration_test
+    kf2_overlay_policy_test
+    kf2_overlay_position_contract_test
+    kf2_overlay_window_test
+)
+foreach(KF2_OVERLAY_CORE_TEST_TARGET IN LISTS KF2_OVERLAY_CORE_TEST_TARGETS)
+    target_link_libraries(${KF2_OVERLAY_CORE_TEST_TARGET} PRIVATE
+        KF2TestOverlayCore)
+endforeach()
+
+set(KF2_WINDOW_CORE_TEST_TARGETS
+    kf2_application_lifecycle_test
+    kf2_automation_provider_test
+    kf2_direct2d_renderer_test
+    kf2_window_smoke_test
+)
+foreach(KF2_WINDOW_CORE_TEST_TARGET IN LISTS KF2_WINDOW_CORE_TEST_TARGETS)
+    target_link_libraries(${KF2_WINDOW_CORE_TEST_TARGET} PRIVATE
+        KF2TestWindowCore)
 endforeach()
