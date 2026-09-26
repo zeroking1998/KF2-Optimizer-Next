@@ -288,6 +288,22 @@ if(BUILD_TESTING)
     )
     target_link_libraries(KF2TestFoundation PUBLIC bcrypt)
 
+    add_library(KF2TestConfigCore STATIC
+        src/backup/backup_store.cpp
+        src/backup/restore_transaction.cpp
+        src/config/adaptive_locks.cpp
+        src/config/apply_transaction.cpp
+        src/config/config_preview.cpp
+        src/config/session_guard.cpp
+        src/config/setting_catalog.cpp
+        src/config/settings.cpp
+        src/config/startup_movies.cpp
+    )
+    target_include_directories(KF2TestConfigCore PUBLIC
+        "${PROJECT_SOURCE_DIR}/include"
+    )
+    target_link_libraries(KF2TestConfigCore PUBLIC KF2TestFoundation)
+
     add_library(KF2TestTelemetryCore STATIC
         src/telemetry/gpu_metrics.cpp
         src/telemetry/present_source.cpp

@@ -209,14 +209,12 @@ add_test(NAME kf2_state_paths_test COMMAND kf2_state_paths_test)
 
 add_executable(kf2_settings_test
     unit/settings_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/config/settings.cpp"
 )
 target_include_directories(kf2_settings_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_settings_test COMMAND kf2_settings_test)
 
 add_executable(kf2_session_config_guard_test
     integration/session_config_guard_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/config/session_guard.cpp"
 )
 target_include_directories(kf2_session_config_guard_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_session_config_guard_test PRIVATE
@@ -236,7 +234,6 @@ add_test(NAME kf2_frame_rate_cap_test COMMAND kf2_frame_rate_cap_test)
 
 add_executable(kf2_startup_movies_test
     integration/startup_movies_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/config/startup_movies.cpp"
 )
 target_include_directories(kf2_startup_movies_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -395,15 +392,6 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/app/application_window.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/build_identity.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/session.cpp"
-    "${PROJECT_SOURCE_DIR}/src/backup/backup_store.cpp"
-    "${PROJECT_SOURCE_DIR}/src/backup/restore_transaction.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/apply_transaction.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/config_preview.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/adaptive_locks.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/setting_catalog.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/settings.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/startup_movies.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/session_guard.cpp"
     "${PROJECT_SOURCE_DIR}/src/diagnostics/event_log.cpp"
     "${PROJECT_SOURCE_DIR}/src/diagnostics/crash_recorder.cpp"
     "${PROJECT_SOURCE_DIR}/src/diagnostics/feature_inventory.cpp"
@@ -638,7 +626,6 @@ add_test(NAME kf2_catalog_test COMMAND kf2_catalog_test)
 
 add_executable(kf2_setting_catalog_test
     unit/setting_catalog_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/config/setting_catalog.cpp"
 )
 target_include_directories(kf2_setting_catalog_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_setting_catalog_test PRIVATE user32)
@@ -646,15 +633,12 @@ add_test(NAME kf2_setting_catalog_test COMMAND kf2_setting_catalog_test)
 
 add_executable(kf2_config_preview_test
     unit/config_preview_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/config/config_preview.cpp"
 )
 target_include_directories(kf2_config_preview_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_config_preview_test COMMAND kf2_config_preview_test)
 
 add_executable(kf2_config_apply_test
     integration/config_apply_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/backup/backup_store.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/apply_transaction.cpp"
 )
 target_include_directories(kf2_config_apply_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_config_apply_test PRIVATE
@@ -665,10 +649,6 @@ add_test(NAME kf2_config_apply_test COMMAND kf2_config_apply_test)
 
 add_executable(kf2_backup_restore_test
     integration/backup_restore_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/backup/backup_store.cpp"
-    "${PROJECT_SOURCE_DIR}/src/backup/restore_transaction.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/apply_transaction.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/setting_catalog.cpp"
 )
 target_include_directories(kf2_backup_restore_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_backup_restore_test PRIVATE
@@ -922,7 +902,6 @@ add_test(NAME kf2_startup_gpu_profile_test
 add_executable(kf2_adaptive_profile_test
     unit/adaptive_profile_test.cpp
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_profile.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/setting_catalog.cpp"
 )
 target_include_directories(kf2_adaptive_profile_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -946,7 +925,6 @@ add_test(NAME kf2_adaptive_actuation_test COMMAND kf2_adaptive_actuation_test)
 
 add_executable(kf2_adaptive_locks_test
     unit/adaptive_locks_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/config/adaptive_locks.cpp"
 )
 target_include_directories(kf2_adaptive_locks_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -1002,6 +980,23 @@ set(KF2_FOUNDATION_TEST_TARGETS
 )
 foreach(KF2_FOUNDATION_TEST_TARGET IN LISTS KF2_FOUNDATION_TEST_TARGETS)
     target_link_libraries(${KF2_FOUNDATION_TEST_TARGET} PRIVATE KF2TestFoundation)
+endforeach()
+
+set(KF2_CONFIG_CORE_TEST_TARGETS
+    kf2_adaptive_locks_test
+    kf2_adaptive_profile_test
+    kf2_application_lifecycle_test
+    kf2_backup_restore_test
+    kf2_config_apply_test
+    kf2_config_preview_test
+    kf2_session_config_guard_test
+    kf2_setting_catalog_test
+    kf2_settings_test
+    kf2_startup_movies_test
+)
+foreach(KF2_CONFIG_CORE_TEST_TARGET IN LISTS KF2_CONFIG_CORE_TEST_TARGETS)
+    target_link_libraries(${KF2_CONFIG_CORE_TEST_TARGET} PRIVATE
+        KF2TestConfigCore)
 endforeach()
 
 set(KF2_TELEMETRY_CORE_TEST_TARGETS
