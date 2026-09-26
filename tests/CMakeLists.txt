@@ -37,7 +37,6 @@ add_test(NAME kf2_github_release_client_test
 
 add_executable(kf2_update_state_test
     windows/update_state_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
     "${PROJECT_SOURCE_DIR}/src/update/update_state.cpp")
 target_include_directories(kf2_update_state_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -47,9 +46,7 @@ add_test(NAME kf2_update_state_test COMMAND kf2_update_state_test)
 
 add_executable(kf2_update_transaction_test
     windows/update_transaction_test.cpp
-    ${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp
     ${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp
-    ${PROJECT_SOURCE_DIR}/src/security/sha256.cpp
     ${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp
     ${PROJECT_SOURCE_DIR}/src/update/update_transaction.cpp
 )
@@ -78,13 +75,11 @@ add_test(NAME kf2_release_notes_test COMMAND kf2_release_notes_test)
 add_executable(kf2_update_package_test
     windows/update_package_test.cpp
     ${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp
-    ${PROJECT_SOURCE_DIR}/src/security/sha256.cpp
     ${PROJECT_SOURCE_DIR}/src/update/github_release_client.cpp
     ${PROJECT_SOURCE_DIR}/src/update/release_notes.cpp
     ${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp
     ${PROJECT_SOURCE_DIR}/src/update/update_package.cpp
     ${PROJECT_SOURCE_DIR}/src/update/update_transaction.cpp
-    ${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp
 )
 target_include_directories(kf2_update_package_test PRIVATE
     ${PROJECT_SOURCE_DIR}/include
@@ -104,10 +99,8 @@ add_test(NAME kf2_update_package_test COMMAND kf2_update_package_test)
 
 add_executable(kf2_update_helper_test
     windows/update_helper_test.cpp
-    ${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp
     ${PROJECT_SOURCE_DIR}/src/platform/windows/state_environment.cpp
     ${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp
-    ${PROJECT_SOURCE_DIR}/src/security/sha256.cpp
     ${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp
     ${PROJECT_SOURCE_DIR}/src/update/update_helper.cpp
     ${PROJECT_SOURCE_DIR}/src/update/update_transaction.cpp
@@ -204,9 +197,7 @@ add_test(NAME kf2_process_security_test COMMAND kf2_process_security_test)
 
 add_executable(kf2_package_integrity_test
     windows/package_integrity_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp"
-    "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp"
 )
 target_include_directories(kf2_package_integrity_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -217,10 +208,8 @@ add_test(NAME kf2_package_integrity_test COMMAND kf2_package_integrity_test)
 
 add_executable(kf2_release_package_repair_test
     windows/release_package_repair_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/release_package_repair.cpp"
-    "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp"
 )
 target_include_directories(kf2_release_package_repair_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -247,10 +236,8 @@ add_test(NAME kf2_settings_test COMMAND kf2_settings_test)
 
 add_executable(kf2_session_config_guard_test
     integration/session_config_guard_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/session_guard.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
-    "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp")
+)
 target_include_directories(kf2_session_config_guard_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_session_config_guard_test PRIVATE
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/session-config-guard")
@@ -260,8 +247,7 @@ add_test(NAME kf2_session_config_guard_test COMMAND kf2_session_config_guard_tes
 add_executable(kf2_frame_rate_cap_test
     integration/frame_rate_cap_test.cpp
     "${PROJECT_SOURCE_DIR}/src/game/frame_rate_cap.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp")
+)
 target_include_directories(kf2_frame_rate_cap_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_frame_rate_cap_test PRIVATE
@@ -271,7 +257,7 @@ add_test(NAME kf2_frame_rate_cap_test COMMAND kf2_frame_rate_cap_test)
 add_executable(kf2_startup_movies_test
     integration/startup_movies_test.cpp
     "${PROJECT_SOURCE_DIR}/src/config/startup_movies.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp")
+)
 target_include_directories(kf2_startup_movies_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_startup_movies_test PRIVATE
@@ -280,7 +266,6 @@ add_test(NAME kf2_startup_movies_test COMMAND kf2_startup_movies_test)
 
 add_executable(kf2_atomic_file_test
     windows/atomic_file_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
 )
 target_include_directories(kf2_atomic_file_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_atomic_file_test PRIVATE
@@ -291,7 +276,6 @@ add_test(NAME kf2_atomic_file_test COMMAND kf2_atomic_file_test)
 add_executable(kf2_async_file_writer_test
     windows/async_file_writer_test.cpp
     "${PROJECT_SOURCE_DIR}/src/platform/windows/async_file_writer.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
 )
 target_include_directories(kf2_async_file_writer_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -303,7 +287,6 @@ add_test(NAME kf2_async_file_writer_test COMMAND kf2_async_file_writer_test)
 add_executable(kf2_session_test
     unit/session_test.cpp
     "${PROJECT_SOURCE_DIR}/src/app/session.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
 )
 target_include_directories(kf2_session_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_session_test PRIVATE
@@ -321,7 +304,6 @@ add_test(NAME kf2_single_instance_test COMMAND kf2_single_instance_test)
 add_executable(kf2_event_log_test
     unit/event_log_test.cpp
     "${PROJECT_SOURCE_DIR}/src/diagnostics/event_log.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
 )
 target_include_directories(kf2_event_log_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_event_log_test COMMAND kf2_event_log_test)
@@ -348,7 +330,6 @@ add_test(NAME kf2_crash_recorder_test COMMAND kf2_crash_recorder_test)
 add_executable(kf2_flex_audit_test
     unit/flex_audit_test.cpp
     "${PROJECT_SOURCE_DIR}/src/flex/flex_audit.cpp"
-    "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp"
 )
 target_include_directories(kf2_flex_audit_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_flex_audit_test PRIVATE
@@ -362,8 +343,7 @@ add_executable(kf2_flex_lab_test
     integration/flex_lab_test.cpp
     "${PROJECT_SOURCE_DIR}/src/flex/flex_lab.cpp"
     "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
-    "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp")
+)
 target_include_directories(kf2_flex_lab_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_flex_lab_test PRIVATE
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/flex-lab")
@@ -373,8 +353,7 @@ add_test(NAME kf2_flex_lab_test COMMAND kf2_flex_lab_test)
 add_executable(kf2_offline_telemetry_lab_test
     windows/offline_telemetry_lab_test.cpp
     "${PROJECT_SOURCE_DIR}/src/game/offline_telemetry_lab.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
-    "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp")
+)
 target_include_directories(kf2_offline_telemetry_lab_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_offline_telemetry_lab_test PRIVATE
@@ -441,8 +420,6 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/config/apply_transaction.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/config_preview.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/adaptive_locks.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/setting_catalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/settings.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/startup_movies.cpp"
@@ -482,7 +459,6 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/optimizer/resource_pressure.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/startup_gpu_profile.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/optimizer_engine.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/dxgi_frame_timing_session.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/process_security.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/single_instance.cpp"
@@ -490,7 +466,6 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/release_package_repair.cpp"
-    "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/gpu_metrics.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/resource_telemetry_worker.cpp"
@@ -654,7 +629,7 @@ add_test(NAME kf2_game_discovery_test COMMAND kf2_game_discovery_test)
 add_executable(kf2_video_settings_test
     integration/video_settings_test.cpp
     "${PROJECT_SOURCE_DIR}/src/game/video_settings.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp")
+)
 target_include_directories(kf2_video_settings_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_video_settings_test PRIVATE
@@ -665,8 +640,7 @@ add_test(NAME kf2_video_settings_test COMMAND kf2_video_settings_test)
 add_executable(kf2_advanced_settings_test
     integration/advanced_settings_test.cpp
     "${PROJECT_SOURCE_DIR}/src/game/advanced_settings.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp")
+)
 target_include_directories(kf2_advanced_settings_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_advanced_settings_test PRIVATE
@@ -702,8 +676,6 @@ add_executable(kf2_gameplay_log_lab_test
     windows/gameplay_log_lab_test.cpp
     "${PROJECT_SOURCE_DIR}/src/game/gameplay_log_lab.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/adaptive_control_client.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
 )
 target_include_directories(kf2_gameplay_log_lab_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -746,14 +718,12 @@ add_test(NAME kf2_adaptive_control_client_test
 
 add_executable(kf2_ini_document_test
     unit/ini_document_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp"
 )
 target_include_directories(kf2_ini_document_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_ini_document_test COMMAND kf2_ini_document_test)
 
 add_executable(kf2_catalog_test
     unit/kf2_catalog_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
 )
 target_include_directories(kf2_catalog_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_catalog_test COMMAND kf2_catalog_test)
@@ -761,8 +731,6 @@ add_test(NAME kf2_catalog_test COMMAND kf2_catalog_test)
 add_executable(kf2_setting_catalog_test
     unit/setting_catalog_test.cpp
     "${PROJECT_SOURCE_DIR}/src/config/setting_catalog.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
 )
 target_include_directories(kf2_setting_catalog_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_setting_catalog_test PRIVATE user32)
@@ -770,8 +738,6 @@ add_test(NAME kf2_setting_catalog_test COMMAND kf2_setting_catalog_test)
 
 add_executable(kf2_config_preview_test
     unit/config_preview_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/config_preview.cpp"
 )
 target_include_directories(kf2_config_preview_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
@@ -781,8 +747,6 @@ add_executable(kf2_config_apply_test
     integration/config_apply_test.cpp
     "${PROJECT_SOURCE_DIR}/src/backup/backup_store.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/apply_transaction.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
-    "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp"
 )
 target_include_directories(kf2_config_apply_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_config_apply_test PRIVATE
@@ -796,11 +760,7 @@ add_executable(kf2_backup_restore_test
     "${PROJECT_SOURCE_DIR}/src/backup/backup_store.cpp"
     "${PROJECT_SOURCE_DIR}/src/backup/restore_transaction.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/apply_transaction.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/setting_catalog.cpp"
-    "${PROJECT_SOURCE_DIR}/src/platform/windows/atomic_file.cpp"
-    "${PROJECT_SOURCE_DIR}/src/security/sha256.cpp"
 )
 target_include_directories(kf2_backup_restore_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_backup_restore_test PRIVATE
@@ -896,7 +856,6 @@ add_executable(kf2_adaptive_quality_response_test
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_governor.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/resource_pressure.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
 )
 add_executable(kf2_quality_response_test
     integration/quality_response_test.cpp
@@ -1100,7 +1059,6 @@ add_test(NAME kf2_overlay_window_test COMMAND kf2_overlay_window_test)
 add_executable(kf2_optimizer_engine_test
     unit/optimizer_engine_test.cpp
     "${PROJECT_SOURCE_DIR}/src/optimizer/optimizer_engine.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
 )
 target_include_directories(kf2_optimizer_engine_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_optimizer_engine_test COMMAND kf2_optimizer_engine_test)
@@ -1109,7 +1067,6 @@ add_executable(kf2_startup_gpu_profile_test
     unit/startup_gpu_profile_test.cpp
     "${PROJECT_SOURCE_DIR}/src/optimizer/startup_gpu_profile.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/optimizer_engine.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
 )
 target_include_directories(kf2_startup_gpu_profile_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -1120,8 +1077,6 @@ add_executable(kf2_adaptive_profile_test
     unit/adaptive_profile_test.cpp
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_profile.cpp"
     "${PROJECT_SOURCE_DIR}/src/config/setting_catalog.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/ini_document.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
 )
 target_include_directories(kf2_adaptive_profile_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -1131,7 +1086,6 @@ add_test(NAME kf2_adaptive_profile_test COMMAND kf2_adaptive_profile_test)
 add_executable(kf2_adaptive_registry_test
     unit/adaptive_registry_test.cpp
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
 )
 target_include_directories(kf2_adaptive_registry_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -1149,7 +1103,6 @@ add_executable(kf2_adaptive_locks_test
     unit/adaptive_locks_test.cpp
     "${PROJECT_SOURCE_DIR}/src/config/adaptive_locks.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
 )
 target_include_directories(kf2_adaptive_locks_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -1160,7 +1113,6 @@ add_executable(kf2_adaptive_governor_test
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_governor.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/resource_pressure.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
-    "${PROJECT_SOURCE_DIR}/src/config/kf2_catalog.cpp"
 )
 target_include_directories(kf2_adaptive_governor_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -1172,3 +1124,42 @@ add_executable(kf2_resource_pressure_test
 target_include_directories(kf2_resource_pressure_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_resource_pressure_test COMMAND kf2_resource_pressure_test)
+
+set(KF2_FOUNDATION_TEST_TARGETS
+    kf2_update_state_test
+    kf2_update_transaction_test
+    kf2_update_package_test
+    kf2_update_helper_test
+    kf2_package_integrity_test
+    kf2_release_package_repair_test
+    kf2_session_config_guard_test
+    kf2_frame_rate_cap_test
+    kf2_startup_movies_test
+    kf2_atomic_file_test
+    kf2_async_file_writer_test
+    kf2_session_test
+    kf2_event_log_test
+    kf2_flex_audit_test
+    kf2_flex_lab_test
+    kf2_offline_telemetry_lab_test
+    kf2_application_lifecycle_test
+    kf2_video_settings_test
+    kf2_advanced_settings_test
+    kf2_gameplay_log_lab_test
+    kf2_ini_document_test
+    kf2_catalog_test
+    kf2_setting_catalog_test
+    kf2_config_preview_test
+    kf2_config_apply_test
+    kf2_backup_restore_test
+    kf2_adaptive_quality_response_test
+    kf2_optimizer_engine_test
+    kf2_startup_gpu_profile_test
+    kf2_adaptive_profile_test
+    kf2_adaptive_registry_test
+    kf2_adaptive_locks_test
+    kf2_adaptive_governor_test
+)
+foreach(KF2_FOUNDATION_TEST_TARGET IN LISTS KF2_FOUNDATION_TEST_TARGETS)
+    target_link_libraries(${KF2_FOUNDATION_TEST_TARGET} PRIVATE KF2TestFoundation)
+endforeach()

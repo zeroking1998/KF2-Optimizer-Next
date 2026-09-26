@@ -277,6 +277,17 @@ target_include_directories(KF2InventoryExport PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 if(BUILD_TESTING)
+    add_library(KF2TestFoundation STATIC
+        src/config/ini_document.cpp
+        src/config/kf2_catalog.cpp
+        src/platform/windows/atomic_file.cpp
+        src/security/sha256.cpp
+    )
+    target_include_directories(KF2TestFoundation PUBLIC
+        "${PROJECT_SOURCE_DIR}/include"
+    )
+    target_link_libraries(KF2TestFoundation PUBLIC bcrypt)
+
     find_program(KF2_LLD_LINK NAMES lld-link
         PATHS "C:/Program Files/Swift/Toolchains/6.2.1+Asserts/usr/bin")
     if(KF2_LLD_LINK)
