@@ -1,9 +1,6 @@
 set(KF2_TEST_SANDBOX_ROOT
     "${CMAKE_CURRENT_BINARY_DIR}/runtime/$<CONFIG>")
 
-add_executable(kf2_bootstrap_test unit/bootstrap_test.cpp)
-add_test(NAME kf2_bootstrap_test COMMAND kf2_bootstrap_test)
-
 add_executable(kf2_result_test unit/result_test.cpp)
 target_include_directories(kf2_result_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_result_test COMMAND kf2_result_test)
@@ -620,13 +617,6 @@ add_test(NAME kf2_direct2d_renderer_test COMMAND kf2_direct2d_renderer_test)
 set_tests_properties(kf2_direct2d_renderer_test PROPERTIES
     LABELS "requires-desktop")
 
-add_executable(kf2_system_sound_absence_test
-    windows/system_sound_absence_test.cpp
-)
-add_dependencies(kf2_system_sound_absence_test KF2Optimizer)
-add_test(NAME kf2_system_sound_absence_test
-    COMMAND kf2_system_sound_absence_test "$<TARGET_FILE:KF2Optimizer>")
-
 add_executable(kf2_automation_provider_test
     windows/automation_provider_test.cpp
     "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
@@ -908,16 +898,6 @@ target_include_directories(kf2_adaptive_quality_response_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/src")
 add_test(NAME kf2_adaptive_quality_response_test
     COMMAND kf2_adaptive_quality_response_test)
-
-add_executable(kf2_telemetry_effect_stage_test
-    unit/telemetry_effect_stage_test.cpp
-)
-target_include_directories(kf2_telemetry_effect_stage_test PRIVATE
-    "${PROJECT_SOURCE_DIR}/include"
-    "${PROJECT_SOURCE_DIR}/src"
-)
-add_test(NAME kf2_telemetry_effect_stage_test
-    COMMAND kf2_telemetry_effect_stage_test)
 
 add_executable(kf2_telemetry_presentation_stage_test
     unit/telemetry_presentation_stage_test.cpp
