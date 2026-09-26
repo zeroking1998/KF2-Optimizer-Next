@@ -8,6 +8,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $preset = "windows-x64-$($Configuration.ToLowerInvariant())"
+$parallelJobs = if ($env:GITHUB_ACTIONS -eq 'true') {
+    4
+} else {
+    [Math]::Max(1, [Environment]::ProcessorCount)
+}
 $commit = (& git -C $projectRoot rev-parse --short=12 HEAD 2>$null)
 if ([string]::IsNullOrWhiteSpace($commit)) { $commit = 'local' }
 $dirty = (& git -C $projectRoot status --porcelain --untracked-files=normal 2>$null)
@@ -30,7 +35,7 @@ try {
         exit $LASTEXITCODE
     }
 
-    & cmake --build --preset $preset --parallel 4
+    & cmake --build --preset $preset --parallel $parallelJobs
     exit $LASTEXITCODE
 }
 finally {
