@@ -9,8 +9,7 @@ target_include_directories(kf2_result_test PRIVATE "${PROJECT_SOURCE_DIR}/includ
 add_test(NAME kf2_result_test COMMAND kf2_result_test)
 
 add_executable(kf2_semantic_version_test
-    unit/semantic_version_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp")
+    unit/semantic_version_test.cpp)
 target_include_directories(kf2_semantic_version_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_semantic_version_test COMMAND kf2_semantic_version_test)
@@ -24,9 +23,7 @@ add_test(NAME kf2_update_controller_test COMMAND kf2_update_controller_test)
 
 add_executable(kf2_github_release_client_test
     unit/github_release_client_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/update/github_release_client.cpp"
-    "${PROJECT_SOURCE_DIR}/src/update/release_notes.cpp"
-    "${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp")
+    "${PROJECT_SOURCE_DIR}/src/update/github_release_client.cpp")
 target_include_directories(kf2_github_release_client_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_github_release_client_test PRIVATE
@@ -46,9 +43,6 @@ add_test(NAME kf2_update_state_test COMMAND kf2_update_state_test)
 
 add_executable(kf2_update_transaction_test
     windows/update_transaction_test.cpp
-    ${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp
-    ${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp
-    ${PROJECT_SOURCE_DIR}/src/update/update_transaction.cpp
 )
 target_include_directories(kf2_update_transaction_test PRIVATE
     ${PROJECT_SOURCE_DIR}/include
@@ -65,7 +59,6 @@ add_test(NAME kf2_update_transaction_test COMMAND kf2_update_transaction_test)
 
 add_executable(kf2_release_notes_test
     unit/release_notes_test.cpp
-    ${PROJECT_SOURCE_DIR}/src/update/release_notes.cpp
 )
 target_include_directories(kf2_release_notes_test PRIVATE
     ${PROJECT_SOURCE_DIR}/include
@@ -74,12 +67,8 @@ add_test(NAME kf2_release_notes_test COMMAND kf2_release_notes_test)
 
 add_executable(kf2_update_package_test
     windows/update_package_test.cpp
-    ${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp
     ${PROJECT_SOURCE_DIR}/src/update/github_release_client.cpp
-    ${PROJECT_SOURCE_DIR}/src/update/release_notes.cpp
-    ${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp
     ${PROJECT_SOURCE_DIR}/src/update/update_package.cpp
-    ${PROJECT_SOURCE_DIR}/src/update/update_transaction.cpp
 )
 target_include_directories(kf2_update_package_test PRIVATE
     ${PROJECT_SOURCE_DIR}/include
@@ -100,10 +89,7 @@ add_test(NAME kf2_update_package_test COMMAND kf2_update_package_test)
 add_executable(kf2_update_helper_test
     windows/update_helper_test.cpp
     ${PROJECT_SOURCE_DIR}/src/platform/windows/state_environment.cpp
-    ${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp
-    ${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp
     ${PROJECT_SOURCE_DIR}/src/update/update_helper.cpp
-    ${PROJECT_SOURCE_DIR}/src/update/update_transaction.cpp
 )
 target_include_directories(kf2_update_helper_test PRIVATE
     ${PROJECT_SOURCE_DIR}/include
@@ -197,7 +183,6 @@ add_test(NAME kf2_process_security_test COMMAND kf2_process_security_test)
 
 add_executable(kf2_package_integrity_test
     windows/package_integrity_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp"
 )
 target_include_directories(kf2_package_integrity_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -208,7 +193,6 @@ add_test(NAME kf2_package_integrity_test COMMAND kf2_package_integrity_test)
 
 add_executable(kf2_release_package_repair_test
     windows/release_package_repair_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/release_package_repair.cpp"
 )
 target_include_directories(kf2_release_package_repair_test PRIVATE
@@ -435,12 +419,6 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/game/gameplay_log_lab.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/adaptive_control_client.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/offline_telemetry_lab.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_description.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_locator.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_parsing.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_session.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_telemetry.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_session.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/startup_prewarmer.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/advanced_settings.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/video_settings.cpp"
@@ -453,41 +431,23 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_static.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_profile.cpp"
-    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_actuation.cpp"
-    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_governor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/optimizer/resource_pressure.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/startup_gpu_profile.cpp"
-    "${PROJECT_SOURCE_DIR}/src/optimizer/optimizer_engine.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/dxgi_frame_timing_session.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/process_security.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/single_instance.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/state_environment.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
-    "${PROJECT_SOURCE_DIR}/src/security/package_integrity.cpp"
     "${PROJECT_SOURCE_DIR}/src/security/release_package_repair.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/gpu_metrics.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/resource_telemetry_worker.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/system_metrics.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/telemetry_snapshot.cpp"
     "${PROJECT_SOURCE_DIR}/src/update/github_release_client.cpp"
-    "${PROJECT_SOURCE_DIR}/src/update/release_notes.cpp"
-    "${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp"
     "${PROJECT_SOURCE_DIR}/src/update/update_controller.cpp"
     "${PROJECT_SOURCE_DIR}/src/update/update_helper.cpp"
     "${PROJECT_SOURCE_DIR}/src/update/update_package.cpp"
     "${PROJECT_SOURCE_DIR}/src/update/update_state.cpp"
-    "${PROJECT_SOURCE_DIR}/src/update/update_transaction.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/automation_provider.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/direct2d_renderer.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/shell_controller.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/shell_layout.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/tooltip_text.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/theme.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/ui_animation.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/ui_model.cpp"
 )
 target_include_directories(kf2_application_lifecycle_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include"
@@ -522,7 +482,6 @@ add_test(NAME kf2_state_environment_test COMMAND kf2_state_environment_test)
 
 add_executable(kf2_numeric_presentation_test
     unit/numeric_presentation_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
 )
 target_include_directories(kf2_numeric_presentation_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -531,7 +490,6 @@ add_test(NAME kf2_numeric_presentation_test
 
 add_executable(kf2_ui_animation_test
     unit/ui_animation_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/ui/ui_animation.cpp"
 )
 target_include_directories(kf2_ui_animation_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -539,8 +497,6 @@ add_test(NAME kf2_ui_animation_test COMMAND kf2_ui_animation_test)
 
 add_executable(kf2_ui_model_test
     unit/ui_model_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/ui_model.cpp"
 )
 target_include_directories(kf2_ui_model_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_ui_model_test COMMAND kf2_ui_model_test)
@@ -548,11 +504,6 @@ add_test(NAME kf2_ui_model_test COMMAND kf2_ui_model_test)
 add_executable(kf2_shell_layout_test
     unit/shell_layout_test.cpp
     "${PROJECT_SOURCE_DIR}/src/app/runtime/action_contract.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/ui_model.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/shell_layout.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/tooltip_text.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/theme.cpp"
 )
 target_include_directories(kf2_shell_layout_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include"
@@ -562,12 +513,6 @@ add_test(NAME kf2_shell_layout_test COMMAND kf2_shell_layout_test)
 
 add_executable(kf2_shell_controller_test
     unit/shell_controller_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/ui_model.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/shell_layout.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/tooltip_text.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/theme.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/ui_animation.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/shell_controller.cpp"
 )
 target_include_directories(kf2_shell_controller_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
@@ -576,12 +521,6 @@ add_test(NAME kf2_shell_controller_test COMMAND kf2_shell_controller_test)
 add_executable(kf2_direct2d_renderer_test
     windows/direct2d_renderer_test.cpp
     "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/ui_model.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/shell_layout.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/tooltip_text.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/theme.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/ui_animation.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/direct2d_renderer.cpp"
 )
 target_include_directories(kf2_direct2d_renderer_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
@@ -606,10 +545,6 @@ add_executable(kf2_automation_provider_test
     windows/automation_provider_test.cpp
     "${PROJECT_SOURCE_DIR}/src/platform/windows/window.cpp"
     "${PROJECT_SOURCE_DIR}/src/ui/automation_provider.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/numeric_presentation.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/ui_model.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/shell_layout.cpp"
-    "${PROJECT_SOURCE_DIR}/src/ui/tooltip_text.cpp"
 )
 target_include_directories(kf2_automation_provider_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_automation_provider_test PRIVATE user32 ole32 uiautomationcore)
@@ -649,17 +584,12 @@ add_test(NAME kf2_advanced_settings_test COMMAND kf2_advanced_settings_test)
 
 add_executable(kf2_game_log_session_test
     unit/game_log_session_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_description.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_parsing.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_session.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_telemetry.cpp"
 )
 target_include_directories(kf2_game_log_session_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_game_log_session_test COMMAND kf2_game_log_session_test)
 
 add_executable(kf2_game_log_locator_test
     windows/game_log_locator_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_locator.cpp"
 )
 target_include_directories(kf2_game_log_locator_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -771,7 +701,6 @@ add_test(NAME kf2_backup_restore_test COMMAND kf2_backup_restore_test)
 
 add_executable(kf2_telemetry_snapshot_test
     unit/telemetry_snapshot_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/telemetry/telemetry_snapshot.cpp"
 )
 target_include_directories(kf2_telemetry_snapshot_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_telemetry_snapshot_test COMMAND kf2_telemetry_snapshot_test)
@@ -779,8 +708,6 @@ add_test(NAME kf2_telemetry_snapshot_test COMMAND kf2_telemetry_snapshot_test)
 add_executable(kf2_telemetry_frame_test
     unit/telemetry_frame_test.cpp
     "${PROJECT_SOURCE_DIR}/src/features/telemetry/telemetry_frame.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_description.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/gpu_metrics.cpp"
 )
 target_include_directories(kf2_telemetry_frame_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include"
@@ -822,13 +749,6 @@ add_test(NAME kf2_telemetry_collection_stage_test
 add_executable(kf2_resource_telemetry_worker_test
     unit/resource_telemetry_worker_test.cpp
     "${PROJECT_SOURCE_DIR}/src/telemetry/resource_telemetry_worker.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/system_metrics.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/gpu_metrics.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_locator.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_parsing.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_session.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_log_telemetry.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_session.cpp"
 )
 target_include_directories(kf2_resource_telemetry_worker_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -851,16 +771,9 @@ add_test(NAME kf2_telemetry_adaptive_stage_test
 
 add_executable(kf2_adaptive_quality_response_test
     integration/adaptive_quality_response_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/telemetry_snapshot.cpp"
-    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_governor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/optimizer/resource_pressure.cpp"
-    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
 )
 add_executable(kf2_quality_response_test
-    integration/quality_response_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/telemetry_snapshot.cpp")
+    integration/quality_response_test.cpp)
 target_include_directories(kf2_quality_response_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_quality_response_test COMMAND kf2_quality_response_test)
 target_include_directories(kf2_adaptive_quality_response_test PRIVATE
@@ -930,7 +843,6 @@ set_tests_properties(kf2_release_ipo_contract_test PROPERTIES
 
 add_executable(kf2_game_session_test
     windows/game_session_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/game/game_session.cpp"
 )
 target_include_directories(kf2_game_session_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_game_session_test PRIVATE user32 dwmapi)
@@ -947,18 +859,13 @@ add_test(NAME kf2_startup_prewarmer_test
 
 add_executable(kf2_system_metrics_test
     windows/system_metrics_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/game/game_session.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/system_metrics.cpp"
 )
 target_include_directories(kf2_system_metrics_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_system_metrics_test PRIVATE psapi dwmapi)
 add_test(NAME kf2_system_metrics_test COMMAND kf2_system_metrics_test)
 
 add_executable(kf2_hardware_overview_contract_test
-    windows/hardware_overview_contract_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/telemetry/system_metrics.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/gpu_metrics.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_session.cpp")
+    windows/hardware_overview_contract_test.cpp)
 target_include_directories(kf2_hardware_overview_contract_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_hardware_overview_contract_test PRIVATE
@@ -967,10 +874,7 @@ add_test(NAME kf2_hardware_overview_contract_test
     COMMAND kf2_hardware_overview_contract_test)
 
 add_executable(kf2_hardware_refresh_contract_test
-    windows/hardware_refresh_contract_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/telemetry/system_metrics.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/gpu_metrics.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/game_session.cpp")
+    windows/hardware_refresh_contract_test.cpp)
 target_include_directories(kf2_hardware_refresh_contract_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_hardware_refresh_contract_test PRIVATE
@@ -980,8 +884,6 @@ add_test(NAME kf2_hardware_refresh_contract_test
 
 add_executable(kf2_present_source_test
     integration/present_source_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/telemetry_snapshot.cpp"
 )
 target_include_directories(kf2_present_source_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_present_source_test COMMAND kf2_present_source_test)
@@ -989,8 +891,6 @@ add_test(NAME kf2_present_source_test COMMAND kf2_present_source_test)
 add_executable(kf2_dxgi_frame_timing_session_test
     windows/dxgi_frame_timing_session_test.cpp
     "${PROJECT_SOURCE_DIR}/src/platform/windows/dxgi_frame_timing_session.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/telemetry_snapshot.cpp"
 )
 target_include_directories(kf2_dxgi_frame_timing_session_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_dxgi_frame_timing_session_test PRIVATE advapi32)
@@ -1007,8 +907,6 @@ add_executable(kf2_dxgi_frame_timing_integration_test
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window_static.cpp"
     "${PROJECT_SOURCE_DIR}/src/overlay/overlay_window.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/dxgi_frame_timing_session.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/present_source.cpp"
-    "${PROJECT_SOURCE_DIR}/src/telemetry/telemetry_snapshot.cpp"
 )
 target_include_directories(kf2_dxgi_frame_timing_integration_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_dxgi_frame_timing_integration_test PRIVATE
@@ -1021,7 +919,6 @@ set_tests_properties(kf2_dxgi_frame_timing_integration_test PROPERTIES
 
 add_executable(kf2_gpu_metrics_test
     windows/gpu_metrics_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/telemetry/gpu_metrics.cpp"
 )
 target_include_directories(kf2_gpu_metrics_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(kf2_gpu_metrics_test PRIVATE pdh dxgi gdi32 advapi32)
@@ -1058,7 +955,6 @@ add_test(NAME kf2_overlay_window_test COMMAND kf2_overlay_window_test)
 
 add_executable(kf2_optimizer_engine_test
     unit/optimizer_engine_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/optimizer/optimizer_engine.cpp"
 )
 target_include_directories(kf2_optimizer_engine_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_optimizer_engine_test COMMAND kf2_optimizer_engine_test)
@@ -1066,7 +962,6 @@ add_test(NAME kf2_optimizer_engine_test COMMAND kf2_optimizer_engine_test)
 add_executable(kf2_startup_gpu_profile_test
     unit/startup_gpu_profile_test.cpp
     "${PROJECT_SOURCE_DIR}/src/optimizer/startup_gpu_profile.cpp"
-    "${PROJECT_SOURCE_DIR}/src/optimizer/optimizer_engine.cpp"
 )
 target_include_directories(kf2_startup_gpu_profile_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -1085,7 +980,6 @@ add_test(NAME kf2_adaptive_profile_test COMMAND kf2_adaptive_profile_test)
 
 add_executable(kf2_adaptive_registry_test
     unit/adaptive_registry_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
 )
 target_include_directories(kf2_adaptive_registry_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -1102,7 +996,6 @@ add_test(NAME kf2_adaptive_actuation_test COMMAND kf2_adaptive_actuation_test)
 add_executable(kf2_adaptive_locks_test
     unit/adaptive_locks_test.cpp
     "${PROJECT_SOURCE_DIR}/src/config/adaptive_locks.cpp"
-    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
 )
 target_include_directories(kf2_adaptive_locks_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -1110,16 +1003,12 @@ add_test(NAME kf2_adaptive_locks_test COMMAND kf2_adaptive_locks_test)
 
 add_executable(kf2_adaptive_governor_test
     unit/adaptive_governor_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_governor.cpp"
-    "${PROJECT_SOURCE_DIR}/src/optimizer/resource_pressure.cpp"
-    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_registry.cpp"
 )
 target_include_directories(kf2_adaptive_governor_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_adaptive_governor_test COMMAND kf2_adaptive_governor_test)
 add_executable(kf2_resource_pressure_test
     unit/resource_pressure_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/optimizer/resource_pressure.cpp"
 )
 target_include_directories(kf2_resource_pressure_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
@@ -1162,4 +1051,83 @@ set(KF2_FOUNDATION_TEST_TARGETS
 )
 foreach(KF2_FOUNDATION_TEST_TARGET IN LISTS KF2_FOUNDATION_TEST_TARGETS)
     target_link_libraries(${KF2_FOUNDATION_TEST_TARGET} PRIVATE KF2TestFoundation)
+endforeach()
+
+set(KF2_TELEMETRY_CORE_TEST_TARGETS
+    kf2_application_lifecycle_test
+    kf2_adaptive_quality_response_test
+    kf2_dxgi_frame_timing_integration_test
+    kf2_dxgi_frame_timing_session_test
+    kf2_present_source_test
+    kf2_quality_response_test
+    kf2_telemetry_snapshot_test
+    kf2_gpu_metrics_test
+    kf2_hardware_overview_contract_test
+    kf2_hardware_refresh_contract_test
+    kf2_resource_telemetry_worker_test
+    kf2_telemetry_frame_test
+    kf2_system_metrics_test
+)
+foreach(KF2_TELEMETRY_CORE_TEST_TARGET IN LISTS KF2_TELEMETRY_CORE_TEST_TARGETS)
+    target_link_libraries(${KF2_TELEMETRY_CORE_TEST_TARGET} PRIVATE
+        KF2TestTelemetryCore)
+endforeach()
+
+set(KF2_UI_CORE_TEST_TARGETS
+    kf2_application_lifecycle_test
+    kf2_automation_provider_test
+    kf2_direct2d_renderer_test
+    kf2_numeric_presentation_test
+    kf2_shell_controller_test
+    kf2_shell_layout_test
+    kf2_ui_model_test
+    kf2_ui_animation_test
+)
+foreach(KF2_UI_CORE_TEST_TARGET IN LISTS KF2_UI_CORE_TEST_TARGETS)
+    target_link_libraries(${KF2_UI_CORE_TEST_TARGET} PRIVATE KF2TestUiCore)
+endforeach()
+
+set(KF2_UPDATE_CORE_TEST_TARGETS
+    kf2_semantic_version_test
+    kf2_github_release_client_test
+    kf2_update_transaction_test
+    kf2_release_notes_test
+    kf2_update_package_test
+    kf2_update_helper_test
+    kf2_package_integrity_test
+    kf2_release_package_repair_test
+    kf2_application_lifecycle_test
+)
+foreach(KF2_UPDATE_CORE_TEST_TARGET IN LISTS KF2_UPDATE_CORE_TEST_TARGETS)
+    target_link_libraries(${KF2_UPDATE_CORE_TEST_TARGET} PRIVATE KF2TestUpdateCore)
+endforeach()
+
+set(KF2_OPTIMIZER_CORE_TEST_TARGETS
+    kf2_adaptive_governor_test
+    kf2_adaptive_locks_test
+    kf2_adaptive_quality_response_test
+    kf2_adaptive_registry_test
+    kf2_application_lifecycle_test
+    kf2_resource_pressure_test
+    kf2_optimizer_engine_test
+    kf2_startup_gpu_profile_test
+)
+foreach(KF2_OPTIMIZER_CORE_TEST_TARGET IN LISTS KF2_OPTIMIZER_CORE_TEST_TARGETS)
+    target_link_libraries(${KF2_OPTIMIZER_CORE_TEST_TARGET} PRIVATE
+        KF2TestOptimizerCore)
+endforeach()
+
+set(KF2_GAME_CORE_TEST_TARGETS
+    kf2_application_lifecycle_test
+    kf2_game_session_test
+    kf2_hardware_overview_contract_test
+    kf2_hardware_refresh_contract_test
+    kf2_resource_telemetry_worker_test
+    kf2_system_metrics_test
+    kf2_game_log_session_test
+    kf2_game_log_locator_test
+    kf2_telemetry_frame_test
+)
+foreach(KF2_GAME_CORE_TEST_TARGET IN LISTS KF2_GAME_CORE_TEST_TARGETS)
+    target_link_libraries(${KF2_GAME_CORE_TEST_TARGET} PRIVATE KF2TestGameCore)
 endforeach()

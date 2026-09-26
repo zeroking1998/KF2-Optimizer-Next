@@ -288,6 +288,61 @@ if(BUILD_TESTING)
     )
     target_link_libraries(KF2TestFoundation PUBLIC bcrypt)
 
+    add_library(KF2TestTelemetryCore STATIC
+        src/telemetry/gpu_metrics.cpp
+        src/telemetry/present_source.cpp
+        src/telemetry/system_metrics.cpp
+        src/telemetry/telemetry_snapshot.cpp
+    )
+    target_include_directories(KF2TestTelemetryCore PUBLIC
+        "${PROJECT_SOURCE_DIR}/include"
+    )
+
+    add_library(KF2TestUiCore STATIC
+        src/ui/numeric_presentation.cpp
+        src/ui/shell_layout.cpp
+        src/ui/theme.cpp
+        src/ui/tooltip_text.cpp
+        src/ui/ui_animation.cpp
+        src/ui/ui_model.cpp
+    )
+    target_include_directories(KF2TestUiCore PUBLIC
+        "${PROJECT_SOURCE_DIR}/include"
+        "${PROJECT_SOURCE_DIR}/src"
+    )
+
+    add_library(KF2TestUpdateCore STATIC
+        src/security/package_integrity.cpp
+        src/update/release_notes.cpp
+        src/update/semantic_version.cpp
+        src/update/update_transaction.cpp
+    )
+    target_include_directories(KF2TestUpdateCore PUBLIC
+        "${PROJECT_SOURCE_DIR}/include"
+    )
+
+    add_library(KF2TestOptimizerCore STATIC
+        src/optimizer/adaptive_governor.cpp
+        src/optimizer/adaptive_registry.cpp
+        src/optimizer/optimizer_engine.cpp
+        src/optimizer/resource_pressure.cpp
+    )
+    target_include_directories(KF2TestOptimizerCore PUBLIC
+        "${PROJECT_SOURCE_DIR}/include"
+    )
+
+    add_library(KF2TestGameCore STATIC
+        src/game/game_log_description.cpp
+        src/game/game_log_locator.cpp
+        src/game/game_log_parsing.cpp
+        src/game/game_log_session.cpp
+        src/game/game_log_telemetry.cpp
+        src/game/game_session.cpp
+    )
+    target_include_directories(KF2TestGameCore PUBLIC
+        "${PROJECT_SOURCE_DIR}/include"
+    )
+
     find_program(KF2_LLD_LINK NAMES lld-link
         PATHS "C:/Program Files/Swift/Toolchains/6.2.1+Asserts/usr/bin")
     if(KF2_LLD_LINK)
