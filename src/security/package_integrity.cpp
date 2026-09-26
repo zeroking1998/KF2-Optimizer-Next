@@ -324,15 +324,16 @@ Result<std::string> package_source_identity(
     }
     const auto value_begin = begin + key.size();
     const auto end = document.value().find('\n', value_begin);
-    const std::string identity = document.value().substr(
+    auto identity = std::string_view{document.value()}.substr(
         value_begin, end == std::string::npos
                          ? std::string::npos : end - value_begin);
+    if (!identity.empty() && identity.back() == '\r') identity.remove_suffix(1);
     if (!safe_identity(identity)) {
         return Result<std::string>::failure(
             {ErrorCode::invalid_argument,
              L"Package source identity is invalid", 0});
     }
-    return Result<std::string>::success(identity);
+    return Result<std::string>::success(std::string{identity});
 }
 
 Result<PackageIntegrityAudit> audit_package_integrity(
