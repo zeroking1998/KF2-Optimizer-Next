@@ -244,7 +244,9 @@ add_test(NAME kf2_startup_movies_test COMMAND kf2_startup_movies_test)
 add_executable(kf2_atomic_file_test
     windows/atomic_file_test.cpp
 )
-target_include_directories(kf2_atomic_file_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
+target_include_directories(kf2_atomic_file_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include"
+    "${PROJECT_SOURCE_DIR}/src")
 target_compile_definitions(kf2_atomic_file_test PRIVATE
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/atomic-file"
 )

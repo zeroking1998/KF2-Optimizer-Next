@@ -1,5 +1,7 @@
 #include "kf2/platform/windows/atomic_file.hpp"
 
+#include "atomic_file_retry.hpp"
+
 #include <Windows.h>
 
 #include <algorithm>
@@ -176,7 +178,8 @@ Result<bool> atomic_replace_utf8(const std::filesystem::path& target,
     // Indexers and real-time scanners can briefly open a just-created test or
     // settings file without delete sharing. Retry only these transient Windows
     // errors; all other failures remain fail-closed.
-    for (unsigned attempt = 0; attempt != 8; ++attempt) {
+    for (unsigned attempt = 0;
+         attempt != detail::atomic_replace_attempt_count; ++attempt) {
         if (target_exists) {
             const auto native_temporary = native_path(temporary);
             replaced = ReplaceFileW(native_target.c_str(),
@@ -189,10 +192,13 @@ Result<bool> atomic_replace_utf8(const std::filesystem::path& target,
         }
         if (replaced != FALSE) break;
         replace_error = GetLastError();
-        if (replace_error != ERROR_SHARING_VIOLATION &&
-            replace_error != ERROR_ACCESS_DENIED &&
-            replace_error != ERROR_UNABLE_TO_REMOVE_REPLACED) break;
-        Sleep(10U << attempt);
+        const bool retryable = replace_error == ERROR_SHARING_VIOLATION ||
+                               replace_error == ERROR_ACCESS_DENIED ||
+                               replace_error == ERROR_UNABLE_TO_REMOVE_REPLACED;
+        const auto backoff = detail::atomic_replace_backoff_after(
+            attempt, retryable);
+        if (!backoff.has_value()) break;
+        Sleep(backoff.value());
     }
     if (replaced == FALSE) {
         return fail(L"Atomic file replacement failed", replace_error, temporary);
