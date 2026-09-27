@@ -160,6 +160,8 @@ are visible immediately.
 - Fixed stale or mismatched compiled telemetry modules entering a package.
   Builds now bind the executable to the current source module and verify the
   module, manifest, hashes, documentation, and portable package shape.
+- Restored KF2's original AI-count and wave-timing log switches after normal
+  shutdown and stale-session recovery, including settings that were absent.
 - Fixed Adaptive and telemetry work continuing while the game was not ready,
   while Zed Time prohibited an action, or after its process/session identity
   changed.

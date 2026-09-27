@@ -2496,7 +2496,13 @@ int main() {
         "\xEF\xBB\xBF[Other]\r\nKeep=1\r\n\r\n"
         "[KFGameContent.KFGameInfo_Survival]\r\n"
         "bLogAICount=False ; temporary lab switch\r\n"
-        "MaxPlayers=6\r\n";
+        "MaxPlayers=6\r\n"
+        "\r\n[KFGame.KFAISpawnManager_Short]\r\n"
+        "bLogWaveSpawnTiming=True\r\n"
+        "\r\n[KFGame.KFAISpawnManager_Normal]\r\n"
+        "bLogWaveSpawnTiming=False\r\n"
+        "\r\n[KFGame.KFAISpawnManager_Long]\r\n"
+        "MaxZeds=42\r\n";
     write_bytes(game_ini, original);
     constexpr std::string_view original_engine =
         "[URL]\r\n"
@@ -2552,14 +2558,25 @@ int main() {
           std::string::npos);
     CHECK(changed_engine.find("AdaptiveQualityChangeBudget=1\r\n") !=
           std::string::npos);
-    for (const auto section : {
-             "KFGame.KFAISpawnManager_Short",
-             "KFGame.KFAISpawnManager_Normal",
-             "KFGame.KFAISpawnManager_Long"}) {
-        CHECK(changed.find("[" + std::string{section} + "]\r\n"
-                           "bLogWaveSpawnTiming=True\r\n") !=
-              std::string::npos);
+    CHECK(changed_engine.find("OriginalLogAICount=False\r\n") !=
+          std::string::npos);
+    CHECK(changed_engine.find(
+              "OriginalLogWaveSpawnTimingShort=True\r\n") !=
+          std::string::npos);
+    CHECK(changed_engine.find(
+              "OriginalLogWaveSpawnTimingNormal=False\r\n") !=
+          std::string::npos);
+    CHECK(changed_engine.find(
+              "OriginalLogWaveSpawnTimingLong=Missing\r\n") !=
+          std::string::npos);
+    std::size_t wave_logging_count = 0;
+    for (std::size_t position = 0;
+         (position = changed.find("bLogWaveSpawnTiming=True", position)) !=
+         std::string::npos;
+         position += std::string_view{"bLogWaveSpawnTiming=True"}.size()) {
+        ++wave_logging_count;
     }
+    CHECK(wave_logging_count == 3);
 
     const auto already_enabled =
         kf2::game::enable_offline_gameplay_logging(root);
@@ -2651,10 +2668,28 @@ int main() {
     CHECK(cleaned_engine.find("[KF2OptimizerTelemetry.") ==
           std::string::npos);
     CHECK(cleaned_engine.find("AdaptiveControlToken=") == std::string::npos);
+    CHECK(read_bytes(game_ini) == original);
     const auto already_clean =
         kf2::game::cleanup_stale_offline_gameplay_configuration(root, false);
     CHECK(already_clean.has_value());
     CHECK(!already_clean.value());
+
+    constexpr std::string_view unowned_game =
+        "[KFGameContent.KFGameInfo_Survival]\r\n"
+        "bLogAICount=True\r\n";
+    constexpr std::string_view unowned_engine =
+        "[Engine.Engine]\r\n"
+        "GameViewportClientClassName=KF2OptimizerTelemetry."
+        "KF2OptimizerTelemetryViewport\r\n"
+        "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\r\n"
+        "AdaptiveControlToken=0123456789abcdef0123456789abcdef\r\n";
+    write_bytes(game_ini, unowned_game);
+    write_bytes(engine_ini, unowned_engine);
+    CHECK(!kf2::game::cleanup_stale_offline_gameplay_configuration(
+        root, false).has_value());
+    CHECK(read_bytes(game_ini) == unowned_game);
+    CHECK(read_bytes(engine_ini) == unowned_engine);
+    write_bytes(game_ini, original);
 
     const std::string existing_local_options_engine =
         "[URL]\r\n"
@@ -2700,10 +2735,8 @@ int main() {
     write_bytes(engine_ini, legacy_absolute_path_engine);
     const auto legacy_path_cleaned =
         kf2::game::cleanup_stale_offline_gameplay_configuration(root, false);
-    CHECK(legacy_path_cleaned.has_value());
-    CHECK(legacy_path_cleaned.value());
-    CHECK(read_bytes(engine_ini).find(
-        "ScriptPaths=..\\..\\KFGame\\Script") != std::string::npos);
+    CHECK(!legacy_path_cleaned.has_value());
+    CHECK(read_bytes(engine_ini) == legacy_absolute_path_engine);
 
     const std::string foreign_viewport_engine =
         "[Engine.Engine]\r\n"
@@ -2713,14 +2746,8 @@ int main() {
     write_bytes(engine_ini, foreign_viewport_engine);
     const auto foreign_viewport_cleaned =
         kf2::game::cleanup_stale_offline_gameplay_configuration(root, false);
-    CHECK(foreign_viewport_cleaned.has_value());
-    CHECK(foreign_viewport_cleaned.value());
-    const auto foreign_viewport_after = read_bytes(engine_ini);
-    CHECK(foreign_viewport_after.find(
-        "GameViewportClientClassName=Example.CustomViewport") !=
-          std::string::npos);
-    CHECK(foreign_viewport_after.find("[KF2OptimizerTelemetry.") ==
-          std::string::npos);
+    CHECK(!foreign_viewport_cleaned.has_value());
+    CHECK(read_bytes(engine_ini) == foreign_viewport_engine);
 
     const std::string ambiguous_engine =
         "[Engine.Engine]\r\n"
@@ -2788,16 +2815,19 @@ int main() {
     CHECK(!kf2::game::enable_offline_gameplay_logging(
         root, true, 350, 60, false, 2, "invalid").has_value());
 
+    write_bytes(engine_ini, original_engine);
     write_bytes(game_ini,
         "[KFGameContent.KFGameInfo_Survival]\n"
         "bLogAICount=False\nbLogAICount=False\n");
     CHECK(!kf2::game::enable_offline_gameplay_logging(root).has_value());
 
+    write_bytes(engine_ini, original_engine);
     write_bytes(game_ini,
         "[KFGameContent.KFGameInfo_Survival]\n"
         "bLogAICount=Maybe\n");
     CHECK(!kf2::game::enable_offline_gameplay_logging(root).has_value());
 
+    write_bytes(engine_ini, original_engine);
     write_bytes(game_ini,
         "[KFGameContent.KFGameInfo_Survival]\nMaxPlayers=6\n");
     const auto missing_ai_count =
@@ -2809,6 +2839,7 @@ int main() {
         "MaxPlayers=6\n"
         "bLogAICount=True\n") != std::string::npos);
 
+    write_bytes(engine_ini, original_engine);
     write_bytes(game_ini,
         "[Other]\nbLogAICount=False\n");
     const auto unrelated_ai_count =
@@ -2819,6 +2850,7 @@ int main() {
         "[KFGameContent.KFGameInfo_Survival]\n"
         "bLogAICount=True\n") != std::string::npos);
 
+    write_bytes(engine_ini, original_engine);
     write_bytes(game_ini,
         "[KFGameContent.KFGameInfo_Survival]\n"
         "bLogAICount=False\n"
@@ -2826,6 +2858,7 @@ int main() {
         "bLogWaveSpawnTiming=Maybe\n");
     CHECK(!kf2::game::enable_offline_gameplay_logging(root).has_value());
 
+    write_bytes(engine_ini, original_engine);
     write_bytes(game_ini,
         "[KFGameContent.KFGameInfo_Survival]\n"
         "bLogAICount=False\n"
@@ -2834,6 +2867,7 @@ int main() {
         "bLogWaveSpawnTiming=False\n");
     CHECK(!kf2::game::enable_offline_gameplay_logging(root).has_value());
 
+    write_bytes(engine_ini, original_engine);
     write_bytes(game_ini,
         "[KFGameContent.KFGameInfo_Survival]\n"
         "bLogAICount=True\n");
@@ -2844,6 +2878,7 @@ int main() {
         "[KFGame.KFAISpawnManager_Short]\n"
         "bLogWaveSpawnTiming=True\n") != std::string::npos);
 
+    write_bytes(engine_ini, original_engine);
     write_bytes(game_ini,
         "[KFGameContent.KFGameInfo_Survival]\n"
         "bLogAICount=False\n");
