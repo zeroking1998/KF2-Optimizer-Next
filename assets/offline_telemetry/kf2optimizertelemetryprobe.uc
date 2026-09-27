@@ -21,6 +21,9 @@ const AdaptiveCorpseControlUrgentInterval=0.125;
 const AdaptiveCorpseControlSliceInterval=0.05;
 const AdaptiveCorpseControlPhaseCount=8;
 const AdaptiveCorpseScanBudget=64;
+// A 2000-entry pool needs 32 bounded category visits. Even the slowest
+// supported split/burst schedule revisits an entry within 40 seconds.
+const AdaptiveCorpseSettleTrackingTimeout=60.0;
 const AdaptiveCorpseFreezeBurstInterval=0.05;
 const AdaptiveCorpseFreezeBurstLimit=12;
 const AdaptiveCorpseFreezeBurstAwakeThreshold=24;
@@ -159,6 +162,7 @@ struct AdaptiveBaselineSettleEntry
 {
     var KFPawn Corpse;
     var string CorpseId;
+    var float CorpseTimeOfDeath;
     var vector StableLocation;
     var float StableSinceRealTime;
     var float LastObservedRealTime;
@@ -2004,6 +2008,8 @@ function bool IsAdaptiveCorpseSettled(
         AdaptiveBaselineSettleEntries[EntryIndex].Corpse = Candidate;
         AdaptiveBaselineSettleEntries[EntryIndex].CorpseId =
             GetAdaptiveCorpseActionId(Candidate);
+        AdaptiveBaselineSettleEntries[EntryIndex].CorpseTimeOfDeath =
+            Candidate.TimeOfDeath;
         AdaptiveBaselineSettleEntries[EntryIndex].StableLocation =
             Candidate.Mesh.Bounds.Origin;
         AdaptiveBaselineSettleEntries[EntryIndex].StableSinceRealTime =
@@ -2015,9 +2021,35 @@ function bool IsAdaptiveCorpseSettled(
     }
 
     Entry = AdaptiveBaselineSettleEntries[EntryIndex];
+    if (Entry.CorpseTimeOfDeath != Candidate.TimeOfDeath)
+    {
+        AdaptiveBaselineSettleEntries[EntryIndex].CorpseId =
+            GetAdaptiveCorpseActionId(Candidate);
+        AdaptiveBaselineSettleEntries[EntryIndex].CorpseTimeOfDeath =
+            Candidate.TimeOfDeath;
+        AdaptiveBaselineSettleEntries[EntryIndex].StableLocation =
+            Candidate.Mesh.Bounds.Origin;
+        AdaptiveBaselineSettleEntries[EntryIndex].StableSinceRealTime =
+            CurrentRealTime;
+        AdaptiveBaselineSettleEntries[EntryIndex].LastObservedRealTime =
+            CurrentRealTime;
+        RejectReason = "collecting";
+        return false;
+    }
     PositionChange = VSize(Candidate.Mesh.Bounds.Origin - Entry.StableLocation);
-    if (CurrentRealTime - Entry.LastObservedRealTime > MinimumStableTime ||
-        VSizeSq(Candidate.Mesh.Bounds.Origin - Entry.StableLocation) >
+    if (CurrentRealTime - Entry.LastObservedRealTime >
+            AdaptiveCorpseSettleTrackingTimeout)
+    {
+        AdaptiveBaselineSettleEntries[EntryIndex].StableLocation =
+            Candidate.Mesh.Bounds.Origin;
+        AdaptiveBaselineSettleEntries[EntryIndex].StableSinceRealTime =
+            CurrentRealTime;
+        AdaptiveBaselineSettleEntries[EntryIndex].LastObservedRealTime =
+            CurrentRealTime;
+        RejectReason = "tracking_stale";
+        return false;
+    }
+    if (VSizeSq(Candidate.Mesh.Bounds.Origin - Entry.StableLocation) >
             MaximumPositionChangeSquared)
     {
         AdaptiveBaselineSettleEntries[EntryIndex].StableLocation =
