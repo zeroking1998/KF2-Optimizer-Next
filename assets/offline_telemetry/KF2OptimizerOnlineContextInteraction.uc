@@ -15,6 +15,16 @@ var float OnlineGraphicsListenerNextCheckRealTime;
 var float OnlineGraphicsListenerRetryDelay;
 var string OnlineGraphicsListenerMapName;
 var string LastOnlineGraphicsListenerStatus;
+var string OnlineGraphicsRetryMapName;
+var int OnlineFixedEffectsBaselineAttempts;
+var float OnlineFixedEffectsBaselineNextAttemptRealTime;
+var float OnlineFixedEffectsBaselineRetryDelay;
+var string OnlineFixedEffectsBaselineRetryStatus;
+var int OnlineMainMenuRestoreAttempts;
+var float OnlineMainMenuRestoreNextAttemptRealTime;
+var float OnlineMainMenuRestoreRetryDelay;
+var string OnlineMainMenuRestoreRetryStatus;
+var bool bOnlineMainMenuRestoreComplete;
 var bool bOnlineCorpseCapabilityReported;
 var bool bOnlineCorpsePoolObserved;
 var bool bOnlineCorpseSleepArmed;
@@ -64,25 +74,93 @@ function bool IsOnlineAdaptiveEnabled()
     return bOnlineGraphicsEnabled;
 }
 
-function bool EnsureOnlineFixedEffectsBaseline()
+function ResetOnlineGraphicsRetryState(string MapName)
 {
+    OnlineGraphicsRetryMapName = MapName;
+    OnlineFixedEffectsBaselineAttempts = 0;
+    OnlineFixedEffectsBaselineNextAttemptRealTime = 0.0;
+    OnlineFixedEffectsBaselineRetryDelay = 0.5;
+    OnlineFixedEffectsBaselineRetryStatus = "";
+    OnlineMainMenuRestoreAttempts = 0;
+    OnlineMainMenuRestoreNextAttemptRealTime = 0.0;
+    OnlineMainMenuRestoreRetryDelay = 0.5;
+    OnlineMainMenuRestoreRetryStatus = "";
+    bOnlineMainMenuRestoreComplete = false;
+}
+
+function ReportOnlineGraphicsRetry(
+    string Operation, string State, string Reason,
+    int Attempt, int NextRetryMs)
+{
+    local string Status;
+
+    Status = State$"|"$Reason;
+    if (Operation == "baseline")
+    {
+        if (Status == OnlineFixedEffectsBaselineRetryStatus)
+        {
+            return;
+        }
+        OnlineFixedEffectsBaselineRetryStatus = Status;
+    }
+    else
+    {
+        if (Status == OnlineMainMenuRestoreRetryStatus)
+        {
+            return;
+        }
+        OnlineMainMenuRestoreRetryStatus = Status;
+    }
+    `log("KF2OPT_GRAPHICS_RETRY mode=online operation="$Operation$
+         " state="$State$" reason="$Reason$" attempt="$Attempt$
+         " next_retry_ms="$NextRetryMs);
+}
+
+function bool EnsureOnlineFixedEffectsBaseline(WorldInfo CurrentWorld)
+{
+    local int CompletedAttempts;
     local KF2OptimizerAdaptiveGraphicsState CurrentState;
 
     if (bOnlineFixedEffectsApplied)
     {
         return true;
     }
+    if (CurrentWorld == None || CurrentWorld.RealTimeSeconds <
+        OnlineFixedEffectsBaselineNextAttemptRealTime)
+    {
+        return false;
+    }
+    ++OnlineFixedEffectsBaselineAttempts;
     CurrentState = GetOnlineGraphicsState();
     if (CurrentState == None ||
         !class'KF2OptimizerAdaptiveGraphics'.static.
             ApplyFixedSessionEffects(CurrentState))
     {
+        if (OnlineFixedEffectsBaselineRetryDelay <= 0.0)
+        {
+            OnlineFixedEffectsBaselineRetryDelay = 0.5;
+        }
+        OnlineFixedEffectsBaselineNextAttemptRealTime =
+            CurrentWorld.RealTimeSeconds +
+            OnlineFixedEffectsBaselineRetryDelay;
+        ReportOnlineGraphicsRetry(
+            "baseline", "deferred", "readback_failed",
+            OnlineFixedEffectsBaselineAttempts,
+            int(OnlineFixedEffectsBaselineRetryDelay * 1000.0));
+        OnlineFixedEffectsBaselineRetryDelay =
+            FMin(8.0, OnlineFixedEffectsBaselineRetryDelay * 2.0);
         return false;
     }
     bOnlineFixedEffectsApplied = true;
+    CompletedAttempts = OnlineFixedEffectsBaselineAttempts;
+    OnlineFixedEffectsBaselineAttempts = 0;
+    OnlineFixedEffectsBaselineNextAttemptRealTime = 0.0;
+    OnlineFixedEffectsBaselineRetryDelay = 0.5;
+    OnlineFixedEffectsBaselineRetryStatus = "";
     `log("KF2OPT_FIXED_EFFECT_BASELINE state=applied mode=online"$
          " quality="$class'KF2OptimizerAdaptiveGraphics'.static.
-            GetFixedSessionEffectsQuality()$" readback=verified");
+            GetFixedSessionEffectsQuality()$" attempts="$CompletedAttempts$
+         " readback=verified");
     return true;
 }
 
@@ -218,7 +296,8 @@ function bool ApplyOnlineGraphicsControl(
             return false;
         }
         CurrentState = GetOnlineGraphicsState();
-        if (CurrentState == None || !EnsureOnlineFixedEffectsBaseline())
+        if (CurrentState == None ||
+            !EnsureOnlineFixedEffectsBaseline(CurrentWorld))
         {
             RestoreOnlineCorpseMaximum(CurrentWorld, "enable_failure");
             return false;
@@ -248,7 +327,7 @@ function bool ApplyOnlineGraphicsControl(
             return false;
         }
         bOnlineFixedEffectsApplied = false;
-        if (!EnsureOnlineFixedEffectsBaseline())
+        if (!EnsureOnlineFixedEffectsBaseline(CurrentWorld))
         {
             return false;
         }
@@ -551,7 +630,11 @@ function bool RestoreOnlineSessionState(
         else
         {
             bGraphicsRestored = false;
-            `log("KF2OPT_ONLINE_GRAPHICS state=restore_failed boundary="$Boundary);
+            if (Boundary != "main_menu")
+            {
+                `log("KF2OPT_ONLINE_GRAPHICS state=restore_failed boundary="$
+                     Boundary);
+            }
         }
     }
     if (!RestoreOnlineCorpseMaximum(CurrentWorld, Boundary) ||
@@ -573,7 +656,43 @@ function bool RestoreOnlineSessionState(
 
 function RestoreOnlineGraphicsAtMainMenu(WorldInfo CurrentWorld)
 {
-    RestoreOnlineSessionState(CurrentWorld, "main_menu");
+    local int CompletedAttempts;
+
+    if (CurrentWorld == None || bOnlineMainMenuRestoreComplete ||
+        CurrentWorld.RealTimeSeconds <
+            OnlineMainMenuRestoreNextAttemptRealTime)
+    {
+        return;
+    }
+    ++OnlineMainMenuRestoreAttempts;
+    if (RestoreOnlineSessionState(CurrentWorld, "main_menu"))
+    {
+        CompletedAttempts = OnlineMainMenuRestoreAttempts;
+        OnlineMainMenuRestoreAttempts = 0;
+        OnlineMainMenuRestoreNextAttemptRealTime = 0.0;
+        OnlineMainMenuRestoreRetryDelay = 0.5;
+        OnlineMainMenuRestoreRetryStatus = "";
+        bOnlineMainMenuRestoreComplete = true;
+        if (CompletedAttempts > 1)
+        {
+            `log("KF2OPT_GRAPHICS_RETRY mode=online operation=restore"$
+                 " state=recovered attempts="$CompletedAttempts$
+                 " readback=verified");
+        }
+        return;
+    }
+    if (OnlineMainMenuRestoreRetryDelay <= 0.0)
+    {
+        OnlineMainMenuRestoreRetryDelay = 0.5;
+    }
+    OnlineMainMenuRestoreNextAttemptRealTime =
+        CurrentWorld.RealTimeSeconds + OnlineMainMenuRestoreRetryDelay;
+    ReportOnlineGraphicsRetry(
+        "restore", "deferred", "restore_failed",
+        OnlineMainMenuRestoreAttempts,
+        int(OnlineMainMenuRestoreRetryDelay * 1000.0));
+    OnlineMainMenuRestoreRetryDelay =
+        FMin(8.0, OnlineMainMenuRestoreRetryDelay * 2.0);
 }
 
 function NotifyGameSessionEnded()
@@ -647,9 +766,14 @@ event Tick(float DeltaTime)
         bOnlineCorpseSleepArmed = bOnlineGraphicsEnabled;
         bOnlineCorpseSleepApplied = false;
         OnlineCorpseLastCapacityRealTime = 0.0;
+        ResetOnlineGraphicsRetryState("");
     }
     LastObservedRealTime = CurrentWorld.RealTimeSeconds;
     MapName = CurrentWorld.GetMapName(true);
+    if (OnlineGraphicsRetryMapName != MapName)
+    {
+        ResetOnlineGraphicsRetryState(MapName);
+    }
     if (MapName ~= "KFMainMenu")
     {
         RestoreOnlineGraphicsAtMainMenu(CurrentWorld);
@@ -658,7 +782,8 @@ event Tick(float DeltaTime)
     }
     if (CurrentWorld.NetMode == NM_Client)
     {
-        EnsureOnlineFixedEffectsBaseline();
+        bOnlineMainMenuRestoreComplete = false;
+        EnsureOnlineFixedEffectsBaseline(CurrentWorld);
         ReportSessionContext(
             "online_client_read_only", "NM_Client", MapName);
         EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController);
@@ -668,7 +793,8 @@ event Tick(float DeltaTime)
     }
     else if (CurrentWorld.NetMode == NM_ListenServer)
     {
-        EnsureOnlineFixedEffectsBaseline();
+        bOnlineMainMenuRestoreComplete = false;
+        EnsureOnlineFixedEffectsBaseline(CurrentWorld);
         ReportSessionContext(
             "online_host_read_only", "NM_ListenServer", MapName);
         EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController);
