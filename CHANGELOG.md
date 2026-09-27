@@ -112,6 +112,8 @@ are visible immediately.
 - Fixed effect, gore, blood, impact, explosion, and impact-particle managers
   retaining old limits after a live effect change. Active pools now confirm the
   same reversible values before an applied receipt is accepted.
+- Bound ambient-particle idle recovery to each emitter lifetime, so a recreated
+  component cannot inherit or restore another component's saved value.
 - Fixed repeated native corpse wakes being fought by Distance Sleep. Per-corpse
   backoff grows from 2 to 30 seconds, expired records are reclaimed, and other
   eligible corpses remain unrestricted.

@@ -109,13 +109,16 @@ struct WorldParticleGroupTelemetrySnapshot
     var int FlexComponents;
 };
 
-// Value-only ownership records keep the control reversible without retaining
-// level actors or particle components across world teardown.
+// The component path plus its owning emitter's creation time identifies one
+// lifetime without retaining level actors or components across teardown.
 struct AdaptiveWorldParticleIdleSnapshot
 {
     var string ComponentPath;
+    var float OwnerCreationTime;
     var float OriginalSecondsBeforeInactive;
     var float AppliedSecondsBeforeInactive;
+    var int LastSeenGeneration;
+    var bool bRestorePending;
 };
 
 struct AdaptiveCorpseDebugMarkerEntry
@@ -215,6 +218,7 @@ var array<WorldEmitterTemplateTelemetrySnapshot> CachedWorldEmitterTraversalSnap
 var array<WorldParticleGroupTelemetrySnapshot> ScannedWorldParticleGroups;
 var int ScannedWorldParticleGroupOverflow;
 var array<AdaptiveWorldParticleIdleSnapshot> AdaptiveWorldParticleIdleStates;
+var int AdaptiveWorldParticleIdleScanGeneration;
 var int ProfileWorldEmitterTemplateCacheHits;
 var int ProfileWorldEmitterTemplateCacheMisses;
 var int ProfileWorldEmitterTemplatePositionHits;
@@ -712,6 +716,19 @@ function int FindAdaptiveWorldParticleIdleState(
     return INDEX_NONE;
 }
 
+function bool AdaptiveWorldParticleIdleOwnerMatches(
+    int StateIndex, Emitter WorldEmitter)
+{
+    return StateIndex >= 0 &&
+        StateIndex < AdaptiveWorldParticleIdleStates.Length &&
+        WorldEmitter != None &&
+        WorldEmitter.ParticleSystemComponent != None &&
+        AdaptiveWorldParticleIdleStates[StateIndex].ComponentPath ==
+            PathName(WorldEmitter.ParticleSystemComponent) &&
+        AdaptiveWorldParticleIdleStates[StateIndex].OwnerCreationTime ==
+            WorldEmitter.CreationTime;
+}
+
 function float GetAdaptiveWorldParticleInactiveSeconds(int Quality)
 {
     if (Quality >= 80) return 1.0;
@@ -727,9 +744,13 @@ function bool RestoreAdaptiveWorldParticleIdleControl()
     local ParticleSystemComponent ParticleComponent;
     local int StateIndex;
     local int IgnoredInsertionIndex;
+    local int CurrentGeneration;
+    local int CleanupIndex;
     local int RestoredComponents;
     local bool bReadbackMatches;
 
+    ++AdaptiveWorldParticleIdleScanGeneration;
+    CurrentGeneration = AdaptiveWorldParticleIdleScanGeneration;
     bReadbackMatches = true;
     foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
     {
@@ -740,10 +761,14 @@ function bool RestoreAdaptiveWorldParticleIdleControl()
         }
         StateIndex = FindAdaptiveWorldParticleIdleState(
             PathName(ParticleComponent), IgnoredInsertionIndex);
-        if (StateIndex == INDEX_NONE)
+        if (StateIndex == INDEX_NONE ||
+            !AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter))
         {
             continue;
         }
+        AdaptiveWorldParticleIdleStates[StateIndex].LastSeenGeneration =
+            CurrentGeneration;
+        AdaptiveWorldParticleIdleStates[StateIndex].bRestorePending = true;
         ParticleComponent.SecondsBeforeInactive =
             AdaptiveWorldParticleIdleStates[StateIndex].OriginalSecondsBeforeInactive;
         if (Abs(ParticleComponent.SecondsBeforeInactive -
@@ -751,8 +776,20 @@ function bool RestoreAdaptiveWorldParticleIdleControl()
             0.001)
         {
             bReadbackMatches = false;
+            continue;
         }
+        AdaptiveWorldParticleIdleStates[StateIndex].bRestorePending = false;
         ++RestoredComponents;
+    }
+    for (CleanupIndex = AdaptiveWorldParticleIdleStates.Length - 1;
+         CleanupIndex >= 0; --CleanupIndex)
+    {
+        if (AdaptiveWorldParticleIdleStates[CleanupIndex].LastSeenGeneration !=
+                CurrentGeneration ||
+            !AdaptiveWorldParticleIdleStates[CleanupIndex].bRestorePending)
+        {
+            AdaptiveWorldParticleIdleStates.Remove(CleanupIndex, 1);
+        }
     }
     if (!bReadbackMatches)
     {
@@ -762,7 +799,6 @@ function bool RestoreAdaptiveWorldParticleIdleControl()
     }
     `log("KF2OPT_WORLD_PARTICLE_IDLE state=restored components="$
          RestoredComponents$" readback=verified");
-    AdaptiveWorldParticleIdleStates.Length = 0;
     return true;
 }
 
@@ -773,36 +809,63 @@ function bool ApplyAdaptiveWorldParticleIdleControl(int Quality)
     local AdaptiveWorldParticleIdleSnapshot NewState;
     local int StateIndex;
     local int NewStateIndex;
+    local int CurrentGeneration;
+    local int CleanupIndex;
     local int AppliedComponents;
     local float DesiredSeconds;
     local float EffectiveSeconds;
+    local bool bReadbackMatches;
 
     if (Quality >= 100)
     {
         return RestoreAdaptiveWorldParticleIdleControl();
     }
+    ++AdaptiveWorldParticleIdleScanGeneration;
+    CurrentGeneration = AdaptiveWorldParticleIdleScanGeneration;
     DesiredSeconds = GetAdaptiveWorldParticleInactiveSeconds(Quality);
+    bReadbackMatches = true;
     foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
     {
         ParticleComponent = WorldEmitter.ParticleSystemComponent;
-        if (ParticleComponent == None || ParticleComponent.Template == None ||
-            !IsAdaptiveWorldParticleCosmetic(
-                PathName(ParticleComponent.Template)))
+        if (ParticleComponent == None)
         {
             continue;
         }
         StateIndex = FindAdaptiveWorldParticleIdleState(
             PathName(ParticleComponent), NewStateIndex);
-        if (StateIndex == INDEX_NONE)
+        if (StateIndex != INDEX_NONE &&
+            AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter))
+        {
+            AdaptiveWorldParticleIdleStates[StateIndex].LastSeenGeneration =
+                CurrentGeneration;
+        }
+        if (ParticleComponent.Template == None ||
+            !IsAdaptiveWorldParticleCosmetic(
+                PathName(ParticleComponent.Template)))
+        {
+            continue;
+        }
+        if (StateIndex == INDEX_NONE ||
+            !AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter))
         {
             NewState.ComponentPath = PathName(ParticleComponent);
+            NewState.OwnerCreationTime = WorldEmitter.CreationTime;
             NewState.OriginalSecondsBeforeInactive =
                 ParticleComponent.SecondsBeforeInactive;
             NewState.AppliedSecondsBeforeInactive =
                 FMin(NewState.OriginalSecondsBeforeInactive, DesiredSeconds);
-            AdaptiveWorldParticleIdleStates.Insert(NewStateIndex, 1);
-            AdaptiveWorldParticleIdleStates[NewStateIndex] = NewState;
-            StateIndex = NewStateIndex;
+            NewState.LastSeenGeneration = CurrentGeneration;
+            NewState.bRestorePending = false;
+            if (StateIndex == INDEX_NONE)
+            {
+                AdaptiveWorldParticleIdleStates.Insert(NewStateIndex, 1);
+                AdaptiveWorldParticleIdleStates[NewStateIndex] = NewState;
+                StateIndex = NewStateIndex;
+            }
+            else
+            {
+                AdaptiveWorldParticleIdleStates[StateIndex] = NewState;
+            }
         }
         EffectiveSeconds = FMin(
             AdaptiveWorldParticleIdleStates[StateIndex].OriginalSecondsBeforeInactive,
@@ -813,12 +876,26 @@ function bool ApplyAdaptiveWorldParticleIdleControl(int Quality)
         if (Abs(ParticleComponent.SecondsBeforeInactive - EffectiveSeconds) >=
             0.001)
         {
+            bReadbackMatches = false;
             `log("KF2OPT_WORLD_PARTICLE_IDLE state=failed quality="$Quality$
                  " reason=readback_mismatch component="$
                  PathName(ParticleComponent));
-            return false;
+            continue;
         }
         ++AppliedComponents;
+    }
+    for (CleanupIndex = AdaptiveWorldParticleIdleStates.Length - 1;
+         CleanupIndex >= 0; --CleanupIndex)
+    {
+        if (AdaptiveWorldParticleIdleStates[CleanupIndex].LastSeenGeneration !=
+            CurrentGeneration)
+        {
+            AdaptiveWorldParticleIdleStates.Remove(CleanupIndex, 1);
+        }
+    }
+    if (!bReadbackMatches)
+    {
+        return false;
     }
     `log("KF2OPT_WORLD_PARTICLE_IDLE state=applied quality="$Quality$
          " inactive_seconds="$DesiredSeconds$
@@ -6571,6 +6648,7 @@ function QuiesceForWorldTeardown()
     // the actors.
     AdaptiveGraphicsState = None;
     AdaptiveWorldParticleIdleStates.Length = 0;
+    AdaptiveWorldParticleIdleScanGeneration = 0;
     AdaptiveCorpseManager = None;
     FixedMinimumCorpseLodCorpses.Length = 0;
     FixedMinimumCorpseLodAppliedMinModels.Length = 0;

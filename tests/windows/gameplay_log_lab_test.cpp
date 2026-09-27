@@ -1648,8 +1648,26 @@ int main() {
         "KF2OPT_WORLD_PARTICLE_GROUP schema=1") != std::string::npos);
     CHECK(telemetry_source.find(
         "struct AdaptiveWorldParticleIdleSnapshot") != std::string::npos);
+    const auto idle_snapshot_start = telemetry_source.find(
+        "struct AdaptiveWorldParticleIdleSnapshot");
+    const auto idle_snapshot_end = telemetry_source.find(
+        "};", idle_snapshot_start);
+    CHECK(idle_snapshot_start != std::string::npos);
+    CHECK(idle_snapshot_end != std::string::npos);
+    const auto idle_snapshot = telemetry_source.substr(
+        idle_snapshot_start, idle_snapshot_end - idle_snapshot_start);
+    CHECK(idle_snapshot.find("var float OwnerCreationTime;") !=
+          std::string::npos);
+    CHECK(idle_snapshot.find("var int LastSeenGeneration;") !=
+          std::string::npos);
+    CHECK(idle_snapshot.find("Emitter ") == std::string::npos);
+    CHECK(idle_snapshot.find("ParticleSystemComponent") == std::string::npos);
+    CHECK(idle_snapshot.find("Object ") == std::string::npos);
     CHECK(telemetry_source.find(
         "function bool IsAdaptiveWorldParticleCosmetic(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function bool AdaptiveWorldParticleIdleOwnerMatches(") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "function bool ApplyAdaptiveWorldParticleIdleControl(") !=
@@ -1667,6 +1685,46 @@ int main() {
     CHECK(telemetry_source.find(
         "AdaptiveWorldParticleIdleStates.Length = 0;") !=
           std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveWorldParticleIdleScanGeneration = 0;") !=
+          std::string::npos);
+    const auto idle_restore_start = telemetry_source.find(
+        "function bool RestoreAdaptiveWorldParticleIdleControl(");
+    const auto idle_apply_start = telemetry_source.find(
+        "function bool ApplyAdaptiveWorldParticleIdleControl(");
+    const auto idle_apply_end = telemetry_source.find(
+        "function bool ApplyAdaptiveEffectRuntimeReadback(",
+        idle_apply_start);
+    CHECK(idle_restore_start != std::string::npos);
+    CHECK(idle_apply_start != std::string::npos);
+    CHECK(idle_apply_end != std::string::npos);
+    const auto idle_restore = telemetry_source.substr(
+        idle_restore_start, idle_apply_start - idle_restore_start);
+    const auto idle_apply = telemetry_source.substr(
+        idle_apply_start, idle_apply_end - idle_apply_start);
+    const auto restore_owner_check = idle_restore.find(
+        "AdaptiveWorldParticleIdleOwnerMatches(");
+    const auto restore_write = idle_restore.find(
+        "ParticleComponent.SecondsBeforeInactive =");
+    CHECK(restore_owner_check != std::string::npos);
+    CHECK(restore_write != std::string::npos);
+    CHECK(restore_owner_check < restore_write);
+    const auto replacement_check = idle_apply.find(
+        "!AdaptiveWorldParticleIdleOwnerMatches(");
+    const auto replacement_capture = idle_apply.find(
+        "OriginalSecondsBeforeInactive =");
+    CHECK(replacement_check != std::string::npos);
+    CHECK(replacement_capture != std::string::npos);
+    CHECK(replacement_check < replacement_capture);
+    CHECK(idle_apply.find(
+        "OwnerCreationTime = WorldEmitter.CreationTime;") !=
+          std::string::npos);
+    CHECK(idle_apply.find("LastSeenGeneration = CurrentGeneration;") !=
+          std::string::npos);
+    CHECK(idle_apply.find(
+        "AdaptiveWorldParticleIdleStates.Remove(") != std::string::npos);
+    CHECK(idle_restore.find(
+        "AdaptiveWorldParticleIdleStates.Remove(") != std::string::npos);
     CHECK(telemetry_source.find(
         "FX_Gameplay_EMIT.FX_Objective_White_Trail") ==
           std::string::npos);
