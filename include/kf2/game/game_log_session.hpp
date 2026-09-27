@@ -178,6 +178,7 @@ struct GameLogParserStats {
     std::uint64_t lines_processed{0};
     std::uint64_t oversized_input_resets{0};
     std::uint64_t oversized_line_drops{0};
+    std::uint64_t session_snapshot_copies{0};
 };
 
 inline constexpr std::uint64_t kGameLogObservationFreshnessNs =

@@ -514,166 +514,208 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
     return result;
 }
 
-void apply_offline_telemetry_snapshot(
+bool apply_offline_telemetry_snapshot(
     GameLogSession& session,
     const OfflineTelemetrySnapshot& telemetry) noexcept {
-    session.telemetry_sample = telemetry.sample;
-    session.telemetry_living_zeds = telemetry.living;
-    session.telemetry_living_classes = telemetry.living_classes;
-    session.telemetry_living_bosses = telemetry.living_bosses;
-    session.telemetry_living_visible = telemetry.living_visible;
-    session.telemetry_living_offscreen = telemetry.living_offscreen;
-    session.telemetry_living_lod_total = telemetry.living_lod_total;
-    session.telemetry_living_anim_rate_total =
-        telemetry.living_anim_rate_total;
-    session.telemetry_living_injured_zones = telemetry.living_injured_zones;
-    session.telemetry_living_required_bones = telemetry.living_required_bones;
-    session.telemetry_living_material_slots = telemetry.living_material_slots;
-    session.telemetry_living_attachments = telemetry.living_attachments;
-    session.telemetry_living_anim_skipped = telemetry.living_anim_skipped;
-    session.telemetry_living_bone_atoms_skipped =
-        telemetry.living_bone_atoms_skipped;
-    session.telemetry_living_bone_interpolation =
-        telemetry.living_bone_interpolation;
-    session.telemetry_living_kinematic_distance_skipped =
-        telemetry.living_kinematic_distance_skipped;
-    session.telemetry_living_ticks_offscreen = telemetry.living_ticks_offscreen;
-    session.telemetry_living_updates_skeleton_offscreen =
-        telemetry.living_updates_skeleton_offscreen;
-    session.telemetry_living_special_moves = telemetry.living_special_moves;
-    session.telemetry_living_attack_moves = telemetry.living_attack_moves;
-    session.telemetry_living_grapple_moves = telemetry.living_grapple_moves;
-    session.telemetry_living_stumbles = telemetry.living_stumbles;
-    session.telemetry_living_knockdowns = telemetry.living_knockdowns;
-    session.telemetry_living_hit_reactions = telemetry.living_hit_reactions;
-    session.telemetry_living_other_special_moves =
-        telemetry.living_other_special_moves;
-    session.telemetry_corpse_total = telemetry.corpse_total;
-    session.telemetry_corpse_awake = telemetry.corpse_awake;
-    session.telemetry_corpse_sleeping = telemetry.corpse_sleeping;
-    session.telemetry_corpse_other = telemetry.corpse_other;
-    session.telemetry_corpse_final_pose = telemetry.corpse_final;
-    session.telemetry_corpse_visible = telemetry.corpse_visible;
-    session.telemetry_corpse_offscreen = telemetry.corpse_offscreen;
-    session.telemetry_corpse_lod_total = telemetry.corpse_lod_total;
-    session.telemetry_corpse_injured_zones = telemetry.corpse_injured_zones;
-    session.telemetry_corpse_max_age_ms = telemetry.corpse_max_age_ms;
-    session.telemetry_corpse_limit = telemetry.corpse_limit;
-    session.telemetry_corpse_offscreen_time_ms =
-        telemetry.corpse_offscreen_time_ms;
-    session.telemetry_corpse_offscreen_distance =
-        telemetry.corpse_offscreen_distance;
-    session.telemetry_dismembered_corpses = telemetry.dismembered;
-    session.telemetry_dismembered_limbs = telemetry.dismembered_limbs;
-    session.telemetry_ragdoll_warned_corpses = telemetry.ragdoll_warned;
-    session.telemetry_ragdoll_warning_max = telemetry.ragdoll_warning_max;
-    session.telemetry_corpse_collide_dead = telemetry.corpse_collide_dead;
-    session.telemetry_corpse_collide_living = telemetry.corpse_collide_living;
-    session.telemetry_corpse_collide_dead_after_sleep =
-        telemetry.corpse_collide_dead_after_sleep;
-    session.telemetry_corpse_collide_living_after_sleep =
-        telemetry.corpse_collide_living_after_sleep;
-    session.telemetry_visible_gibs = telemetry.gibs;
-    session.telemetry_spray_actors = telemetry.spray_actors;
-    session.telemetry_fire_spray_actors = telemetry.fire_spray_actors;
-    session.telemetry_toxic_spray_actors = telemetry.toxic_spray_actors;
-    session.telemetry_other_spray_actors = telemetry.other_spray_actors;
-    session.telemetry_explosion_actors = telemetry.explosion_actors;
-    session.telemetry_damaging_explosion_actors =
-        telemetry.damaging_explosion_actors;
-    session.telemetry_fire_explosion_actors = telemetry.fire_explosion_actors;
-    session.telemetry_toxic_explosion_actors = telemetry.toxic_explosion_actors;
-    session.telemetry_other_damaging_explosion_actors =
-        telemetry.other_damaging_explosion_actors;
-    session.telemetry_unclassified_explosion_actors =
-        telemetry.unclassified_explosion_actors;
-    session.telemetry_lingering_explosion_actors =
-        telemetry.lingering_explosion_actors;
-    session.telemetry_smoke_explosion_actors =
-        telemetry.smoke_explosion_actors;
-    session.telemetry_bloat_king_fart_explosion_actors =
-        telemetry.bloat_king_fart_explosion_actors;
-    session.telemetry_smoke_grenade_projectiles =
-        telemetry.smoke_grenade_projectiles;
-    session.telemetry_puke_mine_projectiles = telemetry.puke_mine_projectiles;
-    session.telemetry_bloat_king_puke_mine_projectiles =
-        telemetry.bloat_king_puke_mine_projectiles;
-    session.telemetry_wound_decals = telemetry.wound_decals;
-    session.telemetry_splatter_decals = telemetry.splatter_decals;
-    session.telemetry_pool_decals = telemetry.pool_decals;
-    session.telemetry_impact_decals = telemetry.impact_decals;
-    session.telemetry_explosion_decals = telemetry.explosion_decals;
-    session.telemetry_wound_decal_limit = telemetry.wound_decal_limit;
-    session.telemetry_splatter_decal_limit = telemetry.splatter_decal_limit;
-    session.telemetry_pool_decal_limit = telemetry.pool_decal_limit;
-    session.telemetry_impact_decal_limit = telemetry.impact_decal_limit;
-    session.telemetry_explosion_decal_limit = telemetry.explosion_decal_limit;
-    session.telemetry_blood_effect_limit = telemetry.blood_effect_limit;
-    session.telemetry_gore_effect_limit = telemetry.gore_effect_limit;
-    session.telemetry_wound_lifetime_ms = telemetry.wound_lifetime_ms;
-    session.telemetry_splatter_lifetime_ms = telemetry.splatter_lifetime_ms;
-    session.telemetry_pool_lifetime_ms = telemetry.pool_lifetime_ms;
-    session.telemetry_gib_lifetime_ms = telemetry.gib_lifetime_ms;
-    session.telemetry_gore_particle_components =
-        telemetry.gore_particle_components;
-    session.telemetry_gore_particles = telemetry.gore_particles;
-    session.telemetry_gore_particle_visible_components =
-        telemetry.gore_particle_visible_components;
-    session.telemetry_gore_particle_lod_total =
-        telemetry.gore_particle_lod_total;
-    session.telemetry_gore_particle_bounded_components =
-        telemetry.gore_particle_bounded_components;
-    session.telemetry_world_particle_components =
-        telemetry.world_particle_components;
-    session.telemetry_world_particles = telemetry.world_particles;
-    session.telemetry_world_particle_visible_components =
-        telemetry.world_particle_visible_components;
-    session.telemetry_world_particle_lod_total =
-        telemetry.world_particle_lod_total;
-    session.telemetry_world_particle_bounded_components =
-        telemetry.world_particle_bounded_components;
-    session.telemetry_ground_fire_particle_components =
-        telemetry.ground_fire_particle_components;
-    session.telemetry_ground_fire_particles = telemetry.ground_fire_particles;
-    session.telemetry_impact_particle_components =
-        telemetry.impact_particle_components;
-    session.telemetry_impact_particles = telemetry.impact_particles;
-    session.telemetry_gore_particle_pool_capacity =
-        telemetry.gore_particle_pool_capacity;
-    session.telemetry_world_particle_pool_capacity =
-        telemetry.world_particle_pool_capacity;
-    session.telemetry_ground_fire_particle_pool_capacity =
-        telemetry.ground_fire_particle_pool_capacity;
-    session.telemetry_impact_particle_pool_capacity =
-        telemetry.impact_particle_pool_capacity;
-    session.telemetry_particle_constant_spawn_emitters =
-        telemetry.particle_constant_spawn_emitters;
-    session.telemetry_particle_dynamic_spawn_emitters =
-        telemetry.particle_dynamic_spawn_emitters;
-    session.telemetry_particle_constant_spawn_rate_milli =
-        telemetry.particle_constant_spawn_rate_milli;
-    session.telemetry_particle_burst_entries =
-        telemetry.particle_burst_entries;
-    session.telemetry_particle_peak_capacity =
-        telemetry.particle_peak_capacity;
-    session.telemetry_particle_flex_components =
-        telemetry.particle_flex_components;
-    session.telemetry_particle_flex_fluid_components =
-        telemetry.particle_flex_fluid_components;
-    session.telemetry_particle_flex_nonfluid_components =
-        telemetry.particle_flex_nonfluid_components;
-    session.telemetry_particle_flex_mixed_components =
-        telemetry.particle_flex_mixed_components;
-    session.telemetry_particle_nonflex_components =
-        telemetry.particle_nonflex_components;
-    session.telemetry_particle_unclassified_components =
-        telemetry.particle_unclassified_components;
-    session.telemetry_flex_surrogate_active = telemetry.flex_surrogate_active;
-    session.telemetry_flex_surrogate_particles =
-        telemetry.flex_surrogate_particles;
-    session.telemetry_flex_surrogate_visible = telemetry.flex_surrogate_visible;
-    session.telemetry_flex_surrogate_lod = telemetry.flex_surrogate_lod;
-    session.telemetry_zed_time_active = telemetry.zed_time;
+    bool changed = false;
+    const auto update = [&changed](auto& target, const auto value) noexcept {
+        if (!target || *target != value) changed = true;
+        target = value;
+    };
+    update(session.telemetry_sample, telemetry.sample);
+    update(session.telemetry_living_zeds, telemetry.living);
+    update(session.telemetry_living_classes, telemetry.living_classes);
+    update(session.telemetry_living_bosses, telemetry.living_bosses);
+    update(session.telemetry_living_visible, telemetry.living_visible);
+    update(session.telemetry_living_offscreen, telemetry.living_offscreen);
+    update(session.telemetry_living_lod_total, telemetry.living_lod_total);
+    update(session.telemetry_living_anim_rate_total, telemetry.living_anim_rate_total);
+    update(session.telemetry_living_injured_zones, telemetry.living_injured_zones);
+    update(session.telemetry_living_required_bones, telemetry.living_required_bones);
+    update(session.telemetry_living_material_slots, telemetry.living_material_slots);
+    update(session.telemetry_living_attachments, telemetry.living_attachments);
+    update(session.telemetry_living_anim_skipped, telemetry.living_anim_skipped);
+    update(
+        session.telemetry_living_bone_atoms_skipped,
+        telemetry.living_bone_atoms_skipped);
+    update(
+        session.telemetry_living_bone_interpolation,
+        telemetry.living_bone_interpolation);
+    update(
+        session.telemetry_living_kinematic_distance_skipped,
+        telemetry.living_kinematic_distance_skipped);
+    update(session.telemetry_living_ticks_offscreen, telemetry.living_ticks_offscreen);
+    update(
+        session.telemetry_living_updates_skeleton_offscreen,
+        telemetry.living_updates_skeleton_offscreen);
+    update(session.telemetry_living_special_moves, telemetry.living_special_moves);
+    update(session.telemetry_living_attack_moves, telemetry.living_attack_moves);
+    update(session.telemetry_living_grapple_moves, telemetry.living_grapple_moves);
+    update(session.telemetry_living_stumbles, telemetry.living_stumbles);
+    update(session.telemetry_living_knockdowns, telemetry.living_knockdowns);
+    update(session.telemetry_living_hit_reactions, telemetry.living_hit_reactions);
+    update(
+        session.telemetry_living_other_special_moves,
+        telemetry.living_other_special_moves);
+    update(session.telemetry_corpse_total, telemetry.corpse_total);
+    update(session.telemetry_corpse_awake, telemetry.corpse_awake);
+    update(session.telemetry_corpse_sleeping, telemetry.corpse_sleeping);
+    update(session.telemetry_corpse_other, telemetry.corpse_other);
+    update(session.telemetry_corpse_final_pose, telemetry.corpse_final);
+    update(session.telemetry_corpse_visible, telemetry.corpse_visible);
+    update(session.telemetry_corpse_offscreen, telemetry.corpse_offscreen);
+    update(session.telemetry_corpse_lod_total, telemetry.corpse_lod_total);
+    update(session.telemetry_corpse_injured_zones, telemetry.corpse_injured_zones);
+    update(session.telemetry_corpse_max_age_ms, telemetry.corpse_max_age_ms);
+    update(session.telemetry_corpse_limit, telemetry.corpse_limit);
+    update(
+        session.telemetry_corpse_offscreen_time_ms,
+        telemetry.corpse_offscreen_time_ms);
+    update(
+        session.telemetry_corpse_offscreen_distance,
+        telemetry.corpse_offscreen_distance);
+    update(session.telemetry_dismembered_corpses, telemetry.dismembered);
+    update(session.telemetry_dismembered_limbs, telemetry.dismembered_limbs);
+    update(session.telemetry_ragdoll_warned_corpses, telemetry.ragdoll_warned);
+    update(session.telemetry_ragdoll_warning_max, telemetry.ragdoll_warning_max);
+    update(session.telemetry_corpse_collide_dead, telemetry.corpse_collide_dead);
+    update(session.telemetry_corpse_collide_living, telemetry.corpse_collide_living);
+    update(
+        session.telemetry_corpse_collide_dead_after_sleep,
+        telemetry.corpse_collide_dead_after_sleep);
+    update(
+        session.telemetry_corpse_collide_living_after_sleep,
+        telemetry.corpse_collide_living_after_sleep);
+    update(session.telemetry_visible_gibs, telemetry.gibs);
+    update(session.telemetry_spray_actors, telemetry.spray_actors);
+    update(session.telemetry_fire_spray_actors, telemetry.fire_spray_actors);
+    update(session.telemetry_toxic_spray_actors, telemetry.toxic_spray_actors);
+    update(session.telemetry_other_spray_actors, telemetry.other_spray_actors);
+    update(session.telemetry_explosion_actors, telemetry.explosion_actors);
+    update(
+        session.telemetry_damaging_explosion_actors,
+        telemetry.damaging_explosion_actors);
+    update(session.telemetry_fire_explosion_actors, telemetry.fire_explosion_actors);
+    update(session.telemetry_toxic_explosion_actors, telemetry.toxic_explosion_actors);
+    update(
+        session.telemetry_other_damaging_explosion_actors,
+        telemetry.other_damaging_explosion_actors);
+    update(
+        session.telemetry_unclassified_explosion_actors,
+        telemetry.unclassified_explosion_actors);
+    update(
+        session.telemetry_lingering_explosion_actors,
+        telemetry.lingering_explosion_actors);
+    update(session.telemetry_smoke_explosion_actors, telemetry.smoke_explosion_actors);
+    update(
+        session.telemetry_bloat_king_fart_explosion_actors,
+        telemetry.bloat_king_fart_explosion_actors);
+    update(
+        session.telemetry_smoke_grenade_projectiles,
+        telemetry.smoke_grenade_projectiles);
+    update(session.telemetry_puke_mine_projectiles, telemetry.puke_mine_projectiles);
+    update(
+        session.telemetry_bloat_king_puke_mine_projectiles,
+        telemetry.bloat_king_puke_mine_projectiles);
+    update(session.telemetry_wound_decals, telemetry.wound_decals);
+    update(session.telemetry_splatter_decals, telemetry.splatter_decals);
+    update(session.telemetry_pool_decals, telemetry.pool_decals);
+    update(session.telemetry_impact_decals, telemetry.impact_decals);
+    update(session.telemetry_explosion_decals, telemetry.explosion_decals);
+    update(session.telemetry_wound_decal_limit, telemetry.wound_decal_limit);
+    update(session.telemetry_splatter_decal_limit, telemetry.splatter_decal_limit);
+    update(session.telemetry_pool_decal_limit, telemetry.pool_decal_limit);
+    update(session.telemetry_impact_decal_limit, telemetry.impact_decal_limit);
+    update(session.telemetry_explosion_decal_limit, telemetry.explosion_decal_limit);
+    update(session.telemetry_blood_effect_limit, telemetry.blood_effect_limit);
+    update(session.telemetry_gore_effect_limit, telemetry.gore_effect_limit);
+    update(session.telemetry_wound_lifetime_ms, telemetry.wound_lifetime_ms);
+    update(session.telemetry_splatter_lifetime_ms, telemetry.splatter_lifetime_ms);
+    update(session.telemetry_pool_lifetime_ms, telemetry.pool_lifetime_ms);
+    update(session.telemetry_gib_lifetime_ms, telemetry.gib_lifetime_ms);
+    update(
+        session.telemetry_gore_particle_components,
+        telemetry.gore_particle_components);
+    update(session.telemetry_gore_particles, telemetry.gore_particles);
+    update(
+        session.telemetry_gore_particle_visible_components,
+        telemetry.gore_particle_visible_components);
+    update(
+        session.telemetry_gore_particle_lod_total,
+        telemetry.gore_particle_lod_total);
+    update(
+        session.telemetry_gore_particle_bounded_components,
+        telemetry.gore_particle_bounded_components);
+    update(
+        session.telemetry_world_particle_components,
+        telemetry.world_particle_components);
+    update(session.telemetry_world_particles, telemetry.world_particles);
+    update(
+        session.telemetry_world_particle_visible_components,
+        telemetry.world_particle_visible_components);
+    update(
+        session.telemetry_world_particle_lod_total,
+        telemetry.world_particle_lod_total);
+    update(
+        session.telemetry_world_particle_bounded_components,
+        telemetry.world_particle_bounded_components);
+    update(
+        session.telemetry_ground_fire_particle_components,
+        telemetry.ground_fire_particle_components);
+    update(session.telemetry_ground_fire_particles, telemetry.ground_fire_particles);
+    update(
+        session.telemetry_impact_particle_components,
+        telemetry.impact_particle_components);
+    update(session.telemetry_impact_particles, telemetry.impact_particles);
+    update(
+        session.telemetry_gore_particle_pool_capacity,
+        telemetry.gore_particle_pool_capacity);
+    update(
+        session.telemetry_world_particle_pool_capacity,
+        telemetry.world_particle_pool_capacity);
+    update(
+        session.telemetry_ground_fire_particle_pool_capacity,
+        telemetry.ground_fire_particle_pool_capacity);
+    update(
+        session.telemetry_impact_particle_pool_capacity,
+        telemetry.impact_particle_pool_capacity);
+    update(
+        session.telemetry_particle_constant_spawn_emitters,
+        telemetry.particle_constant_spawn_emitters);
+    update(
+        session.telemetry_particle_dynamic_spawn_emitters,
+        telemetry.particle_dynamic_spawn_emitters);
+    update(
+        session.telemetry_particle_constant_spawn_rate_milli,
+        telemetry.particle_constant_spawn_rate_milli);
+    update(session.telemetry_particle_burst_entries, telemetry.particle_burst_entries);
+    update(session.telemetry_particle_peak_capacity, telemetry.particle_peak_capacity);
+    update(
+        session.telemetry_particle_flex_components,
+        telemetry.particle_flex_components);
+    update(
+        session.telemetry_particle_flex_fluid_components,
+        telemetry.particle_flex_fluid_components);
+    update(
+        session.telemetry_particle_flex_nonfluid_components,
+        telemetry.particle_flex_nonfluid_components);
+    update(
+        session.telemetry_particle_flex_mixed_components,
+        telemetry.particle_flex_mixed_components);
+    update(
+        session.telemetry_particle_nonflex_components,
+        telemetry.particle_nonflex_components);
+    update(
+        session.telemetry_particle_unclassified_components,
+        telemetry.particle_unclassified_components);
+    update(session.telemetry_flex_surrogate_active, telemetry.flex_surrogate_active);
+    update(
+        session.telemetry_flex_surrogate_particles,
+        telemetry.flex_surrogate_particles);
+    update(session.telemetry_flex_surrogate_visible, telemetry.flex_surrogate_visible);
+    update(session.telemetry_flex_surrogate_lod, telemetry.flex_surrogate_lod);
+    update(session.telemetry_zed_time_active, telemetry.zed_time);
+    return changed;
 }
 
 }  // namespace
@@ -685,10 +727,8 @@ std::optional<bool> apply_offline_telemetry_line(
     std::uint64_t observed_at_ns) {
     const auto telemetry = parse_offline_telemetry_line(line);
     if (!telemetry) return std::nullopt;
-    auto updated = session;
-    apply_offline_telemetry_snapshot(updated, *telemetry);
-    const bool value_changed = updated != session;
-    apply_offline_telemetry_snapshot(session, *telemetry);
+    const bool value_changed =
+        apply_offline_telemetry_snapshot(session, *telemetry);
     if (observed_at_ns != 0) session.telemetry_observed_ns = observed_at_ns;
     return value_changed;
 }

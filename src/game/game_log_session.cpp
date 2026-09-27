@@ -38,7 +38,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
         add_saturated(stats_.oversized_input_resets);
     }
     pending_.append(bytes);
-    std::optional<GameLogSession> changed;
+    bool changed = false;
     for (;;) {
         const auto newline = pending_.find('\n');
         if (newline == std::string::npos) {
@@ -56,7 +56,9 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                 if (!parsed->main_menu && observed_at_ns != 0) {
                     parsed->load_map_observed_ns = observed_at_ns;
                 }
-                if (!current_ || *parsed != *current_) changed = *parsed;
+                if (!current_ || *parsed != *current_) {
+                    changed = true;
+                }
                 current_ = *parsed;
             } else if (auto mode = parse_net_mode_line(line); mode && current_) {
                 if (current_->net_mode != mode) {
@@ -66,7 +68,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                     if (*current_->net_mode != "NM_Standalone") {
                         detail::clear_gameplay_snapshot(*current_);
                     }
-                    changed = *current_;
+                    changed = true;
                 }
             } else if (const auto receipt =
                            detail::parse_optimizer_session_context_line(line);
@@ -100,7 +102,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                     current_->optimizer_online_read_only = true;
                     current_->optimizer_session_context_observed_ns =
                         observed_at_ns;
-                    changed = *current_;
+                    changed = true;
                 }
             } else if (const auto port =
                            detail::parse_adaptive_bridge_line(line);
@@ -108,7 +110,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                        current_->phase != GameLogPhase::match_ended && port) {
                 if (current_->telemetry_control_port != port) {
                     current_->telemetry_control_port = port;
-                    changed = *current_;
+                    changed = true;
                 }
             } else if (const auto online_corpse_changed =
                            current_ && !current_->main_menu &&
@@ -117,7 +119,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                                      *current_, line, observed_at_ns)
                                : std::optional<bool>{};
                        online_corpse_changed) {
-                if (*online_corpse_changed) changed = *current_;
+                if (*online_corpse_changed) changed = true;
             } else if (const auto ui_context =
                            detail::parse_gameplay_ui_context_line(line);
                        current_ && !current_->main_menu &&
@@ -125,14 +127,14 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                        ui_context) {
                 if (current_->gameplay_ui_context != ui_context) {
                     current_->gameplay_ui_context = *ui_context;
-                    changed = *current_;
+                    changed = true;
                 }
             } else if (current_ && !current_->main_menu &&
                        line.find("Log: --- LOADING MOVIE START ---") !=
                            std::string_view::npos) {
                 if (!current_->loading_movie_active) {
                     current_->loading_movie_active = true;
-                    changed = *current_;
+                    changed = true;
                 }
             } else if (current_ && !current_->main_menu) {
                 constexpr std::string_view level_marker =
@@ -146,13 +148,13 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                     if (current_->level_load_seconds != level_seconds) {
                         current_->level_load_seconds = level_seconds;
                         current_->level_loaded_observed_ns = observed_at_ns;
-                        changed = *current_;
+                        changed = true;
                     }
                 } else if (const auto stream_seconds =
                                detail::parse_seconds_after(line, stream_marker)) {
                     if (current_->stream_all_resources_seconds != stream_seconds) {
                         current_->stream_all_resources_seconds = stream_seconds;
-                        changed = *current_;
+                        changed = true;
                     }
                 } else if (const auto movie_seconds =
                                detail::parse_seconds_after(line, movie_marker)) {
@@ -162,7 +164,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                         current_->loading_movie_seconds = movie_seconds;
                         current_->loading_movie_finished_observed_ns =
                             observed_at_ns;
-                        changed = *current_;
+                        changed = true;
                     }
                 } else if (current_->net_mode == "NM_Standalone") {
                     if (const auto count = detail::parse_zed_count_line(line);
@@ -175,7 +177,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                         const bool value_changed = target != count->second;
                         target = count->second;
                         if (observed_at_ns != 0) observed = observed_at_ns;
-                        if (value_changed) changed = *current_;
+                        if (value_changed) changed = true;
                     } else if (const auto wave =
                                    detail::parse_wave_snapshot_line(line);
                                wave && current_->game_class &&
@@ -191,12 +193,12 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                         if (observed_at_ns != 0) {
                             current_->wave_observed_ns = observed_at_ns;
                         }
-                        if (value_changed) changed = *current_;
+                        if (value_changed) changed = true;
                     } else if (const auto telemetry_changed =
                                    detail::apply_offline_telemetry_line(
                                        *current_, line, observed_at_ns);
                                telemetry_changed) {
-                        if (*telemetry_changed) changed = *current_;
+                        if (*telemetry_changed) changed = true;
                     } else if (current_->phase != GameLogPhase::match_ended &&
                                line.find("ScriptLog: KFGameInfo_") !=
                                    std::string_view::npos &&
@@ -204,7 +206,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                                    std::string_view::npos) {
                         current_->phase = GameLogPhase::match_ended;
                         detail::clear_gameplay_snapshot(*current_);
-                        changed = *current_;
+                        changed = true;
                     }
                 } else if (current_->phase != GameLogPhase::match_ended &&
                            line.find("ScriptLog: KFGameInfo_") !=
@@ -213,7 +215,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                                std::string_view::npos) {
                     current_->phase = GameLogPhase::match_ended;
                     detail::clear_gameplay_snapshot(*current_);
-                    changed = *current_;
+                    changed = true;
                 }
             }
         } else {
@@ -221,7 +223,10 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
         }
         pending_.erase(0, newline + 1);
     }
-    return changed;
+    if (!changed || !current_) return std::nullopt;
+    auto snapshot = std::optional<GameLogSession>{*current_};
+    add_saturated(stats_.session_snapshot_copies);
+    return snapshot;
 }
 
 std::optional<GameLogSession> GameLogSessionParser::expire_observations(

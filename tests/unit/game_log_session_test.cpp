@@ -152,6 +152,22 @@ bool rejects_offline_telemetry(std::string line) {
 
 int main() {
     using namespace kf2::game;
+
+    GameLogSessionParser batch_stream;
+    const auto batch = batch_stream.feed(
+        "Log: LoadMap: KF-BioticsLab\n"
+        "ScriptLog: WI.NetMode:  NM_Standalone\n" +
+        telemetry_line(1) + telemetry_line(2) + telemetry_line(3),
+        1'000'000'000ULL);
+    CHECK(batch.has_value());
+    CHECK(batch->telemetry_sample == 3);
+    CHECK(batch_stream.stats().lines_processed == 5);
+    CHECK(batch_stream.stats().session_snapshot_copies == 1);
+    CHECK(!batch_stream.feed(telemetry_line(3), 2'000'000'000ULL)
+               .has_value());
+    CHECK(batch_stream.current()->telemetry_observed_ns == 2'000'000'000ULL);
+    CHECK(batch_stream.stats().session_snapshot_copies == 1);
+
     const auto parsed = parse_load_map_line(
         "[0053.20] Log: LoadMap: KF-BioticsLab?Name=Player?Team=255?"
         "Game=KFGameContent.KFGameInfo_Survival?Difficulty=1.0000?"

@@ -307,7 +307,8 @@ int main() {
                             .overwritten = 1, .persistence_failures = 0},
         .game_log_stats = {.bytes_received = 100, .lines_processed = 5,
                            .oversized_input_resets = 1,
-                           .oversized_line_drops = 2},
+                           .oversized_line_drops = 2,
+                           .session_snapshot_copies = 3},
         .retained_crash_records = 3,
         .events = events,
     };
@@ -412,6 +413,8 @@ int main() {
     CHECK(product.find("\"crash_records\":{\"retained\":3,\"content_included\":false}") !=
           std::string::npos);
     CHECK(product.find("\"game_log_stats\":{\"bytes_received\":100") !=
+          std::string::npos);
+    CHECK(product.find("\"session_snapshot_copies\":3") !=
           std::string::npos);
     const auto support = kf2::diagnostics::serialize_support_bundle_json(
         report, "{\"schema\":\"KF2_ISSUE72_INVENTORY_V3\"}");
