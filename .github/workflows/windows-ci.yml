@@ -13,11 +13,16 @@ permissions:
 env:
   SCCACHE_GHA_ENABLED: "true"
   SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+  SCCACHE_CACHE_SIZE: "2G"
+  SCCACHE_MULTILEVEL_CHAIN: "disk,gha"
+  SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "ignore"
 
 jobs:
   test:
     name: Test ${{ matrix.configuration }}
     runs-on: windows-2022
+    env:
+      SCCACHE_DIR: ${{ runner.temp }}\sccache
     strategy:
       fail-fast: false
       matrix:
@@ -26,6 +31,12 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v5
+
+      - name: Restore local compiler cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}\sccache
+          key: sccache-disk-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.configuration }}-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt', 'tools/validate_ninja.ps1') }}
 
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
