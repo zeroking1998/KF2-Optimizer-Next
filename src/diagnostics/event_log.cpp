@@ -525,6 +525,8 @@ std::string serialize_product_report_json(const ProductReport& report) {
            << report.game_log_stats.oversized_input_resets
            << ",\"oversized_line_drops\":"
            << report.game_log_stats.oversized_line_drops
+           << ",\"session_snapshot_copies\":"
+           << report.game_log_stats.session_snapshot_copies
            << "},\"crash_records\":{\"retained\":"
            << report.retained_crash_records
            << ",\"content_included\":false}"
