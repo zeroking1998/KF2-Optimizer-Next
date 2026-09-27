@@ -288,6 +288,9 @@ struct UiRuntime {
     // Keep the temporary live profile separate from the user's saved graphics.
     std::optional<game::VideoSettings> session_video_runtime;
     std::optional<game::VideoSettings> session_video_native_changes;
+    bool final_graphics_capture_pending{false};
+    bool final_graphics_owns_recovery_requirement{false};
+    std::uint64_t final_graphics_retry_after_ns{0};
     std::optional<std::array<std::optional<std::filesystem::file_time_type>, 3>>
         video_config_write_times;
     std::uint64_t last_video_config_poll_ns{0};
@@ -356,6 +359,10 @@ struct UiRuntime {
         const game::GameProcessIdentity& previous_process);
 
     void finalize_ended_game_session();
+
+    VideoSyncDisposition synchronize_final_video_settings_from_game();
+
+    bool preserve_final_graphics_evidence();
 
     bool restore_live_adaptive_quality(std::wstring_view reason);
 
