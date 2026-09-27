@@ -61,6 +61,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Failed automatic update checks now keep the last successful result and retry
+  after a bounded short delay instead of suppressing retries for 24 hours.
 - Failed offline and online graphics baseline or menu-restore readbacks now
   retry with bounded backoff instead of repeating writes every frame.
 - The online Adaptive listener now recovers with bounded backoff after socket
