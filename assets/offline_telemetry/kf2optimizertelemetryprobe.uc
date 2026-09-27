@@ -32,6 +32,7 @@ const FixedMinimumVisualControlIdleInterval=0.50;
 const FixedMinimumVisualControlPhaseCount=5;
 const FixedMinimumLivingVisualBurstInterval=0.05;
 const FixedMinimumLivingVisualBurstLimit=16;
+const AdaptiveLivingEnemyNoPendingPressureLevel=-1;
 
 struct DiagnosticEffectTelemetrySnapshot
 {
@@ -467,7 +468,10 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
     AdaptiveCorpseCurrentFramePressureLevel = 0;
     AdaptiveCorpseScenePressureLevel = 0;
     AdaptiveLivingEnemyPressureLevel = 0;
-    AdaptiveLivingEnemyPendingPressureLevel = 0;
+    AdaptiveLivingEnemyPendingPressureLevel =
+        AdaptiveLivingEnemyNoPendingPressureLevel;
+    AdaptiveLivingEnemyPendingSinceRealTime = 0.0;
+    AdaptiveLivingEnemyLastChangeRealTime = 0.0;
     AdaptiveCachedLivingEnemyPressureScale = 0.0;
     AdaptiveCachedVisibleCorpses = 0;
     AdaptiveCachedVisibleAwakeCorpses = 0;
@@ -1244,6 +1248,11 @@ function InitializeAdaptiveCorpseStagger(KFGoreManager GoreManager)
     AdaptiveCorpseCurrentFramePressureLevel = 0;
     AdaptiveCorpsePhysicsPressureLevel = 0;
     AdaptiveFramePressureObservedRealTime = 0.0;
+    AdaptiveLivingEnemyPressureLevel = 0;
+    AdaptiveLivingEnemyPendingPressureLevel =
+        AdaptiveLivingEnemyNoPendingPressureLevel;
+    AdaptiveLivingEnemyPendingSinceRealTime = 0.0;
+    AdaptiveLivingEnemyLastChangeRealTime = 0.0;
     AdaptiveLastCorpseFreezeRealTime =
         WorldInfo.RealTimeSeconds - 0.25;
     AdaptiveBaselineSettleEntries.Length = 0;
@@ -1457,7 +1466,8 @@ function int ResolveAdaptiveLivingEnemyPressureLevel(float PressureScale)
     RequestedLevel = GetAdaptiveLivingEnemyPressureLevel(PressureScale);
     if (RequestedLevel == AdaptiveLivingEnemyPressureLevel)
     {
-        AdaptiveLivingEnemyPendingPressureLevel = 0;
+        AdaptiveLivingEnemyPendingPressureLevel =
+            AdaptiveLivingEnemyNoPendingPressureLevel;
         AdaptiveLivingEnemyPendingSinceRealTime = 0.0;
         return AdaptiveLivingEnemyPressureLevel;
     }
@@ -1470,7 +1480,8 @@ function int ResolveAdaptiveLivingEnemyPressureLevel(float PressureScale)
         HoldSeconds = 0.75;
         if (PressureScale < RequiredScale)
         {
-            AdaptiveLivingEnemyPendingPressureLevel = 0;
+            AdaptiveLivingEnemyPendingPressureLevel =
+                AdaptiveLivingEnemyNoPendingPressureLevel;
             AdaptiveLivingEnemyPendingSinceRealTime = 0.0;
             return AdaptiveLivingEnemyPressureLevel;
         }
@@ -1482,7 +1493,8 @@ function int ResolveAdaptiveLivingEnemyPressureLevel(float PressureScale)
         HoldSeconds = 1.25;
         if (PressureScale > RequiredScale)
         {
-            AdaptiveLivingEnemyPendingPressureLevel = 0;
+            AdaptiveLivingEnemyPendingPressureLevel =
+                AdaptiveLivingEnemyNoPendingPressureLevel;
             AdaptiveLivingEnemyPendingSinceRealTime = 0.0;
             return AdaptiveLivingEnemyPressureLevel;
         }
@@ -1504,7 +1516,8 @@ function int ResolveAdaptiveLivingEnemyPressureLevel(float PressureScale)
         return AdaptiveLivingEnemyPressureLevel;
     }
     AdaptiveLivingEnemyPressureLevel = RequestedLevel;
-    AdaptiveLivingEnemyPendingPressureLevel = 0;
+    AdaptiveLivingEnemyPendingPressureLevel =
+        AdaptiveLivingEnemyNoPendingPressureLevel;
     AdaptiveLivingEnemyPendingSinceRealTime = 0.0;
     AdaptiveLivingEnemyLastChangeRealTime = WorldInfo.RealTimeSeconds;
     return AdaptiveLivingEnemyPressureLevel;
@@ -6884,6 +6897,7 @@ defaultproperties
     RemoteRole=ROLE_None
     bAdaptiveCorpseDebugMarkers=false
     bAdaptiveZedDebugMarkers=false
+    AdaptiveLivingEnemyPendingPressureLevel=-1
     AdaptiveLastPhysicsMutationWorldTime=-1.0
     bAdaptiveRuntimeEnabled=true
 }

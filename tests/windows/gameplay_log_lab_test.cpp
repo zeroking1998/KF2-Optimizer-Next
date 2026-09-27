@@ -1808,6 +1808,12 @@ int main() {
         "function int ResolveAdaptiveLivingEnemyPressureLevel(") !=
           std::string::npos);
     CHECK(telemetry_source.find(
+        "const AdaptiveLivingEnemyNoPendingPressureLevel=-1;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveLivingEnemyPendingPressureLevel=-1") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
         "AdaptiveLivingEnemyPressureLevel") != std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveLivingEnemyPendingPressureLevel") != std::string::npos);
@@ -1816,6 +1822,40 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find("HoldSeconds = 0.75") != std::string::npos);
     CHECK(telemetry_source.find("HoldSeconds = 1.25") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveLivingEnemyPendingPressureLevel = 0;") ==
+          std::string::npos);
+    CHECK(count_occurrences(telemetry_source,
+        "AdaptiveLivingEnemyNoPendingPressureLevel") >= 7);
+    CHECK(telemetry_source.find(
+        "AdaptiveLivingEnemyPendingPressureLevel != RequestedLevel") !=
+          std::string::npos);
+    CHECK(count_occurrences(telemetry_source,
+        "AdaptiveLivingEnemyLastChangeRealTime = 0.0") >= 2);
+    {
+        constexpr int no_pending = -1;
+        int current = 3;
+        int pending = no_pending;
+        double pending_since = 0.0;
+        const auto advance = [&](int requested, double now,
+                                 double hold_seconds) {
+            if (pending != requested) {
+                pending = requested;
+                pending_since = now;
+                return current;
+            }
+            if (now - pending_since < hold_seconds) return current;
+            current = requested;
+            pending = no_pending;
+            pending_since = 0.0;
+            return current;
+        };
+        CHECK(advance(0, 10.0, 1.25) == 3);
+        CHECK(pending == 0);
+        CHECK(advance(0, 11.249, 1.25) == 3);
+        CHECK(advance(0, 11.25, 1.25) == 0);
+        CHECK(pending == no_pending);
+    }
     CHECK(telemetry_source.find(
         "AdaptiveLivingEnemyLastChangeRealTime < 1.5") !=
           std::string::npos);
