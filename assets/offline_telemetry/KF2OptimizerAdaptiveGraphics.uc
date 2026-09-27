@@ -13,6 +13,18 @@ static function int GetFixedSessionEffectsQuality()
     return FixedSessionEffectsQuality;
 }
 
+static function int GetEffectiveOverdrawQuality(
+    KF2OptimizerAdaptiveGraphicsState Snapshot)
+{
+    return Min(Snapshot.OverdrawQuality, Snapshot.FixedOverdrawQuality);
+}
+
+static function int GetEffectiveEffectsQuality(
+    KF2OptimizerAdaptiveGraphicsState Snapshot)
+{
+    return Min(Snapshot.EffectsQuality, Snapshot.FixedEffectsQuality);
+}
+
 static function ApplyGpu(out GFXSettings Requested, int Quality)
 {
     local int ShadowResolution;
@@ -532,6 +544,8 @@ static function CaptureOriginal(
     Snapshot.RamQuality = 100;
     Snapshot.OverdrawQuality = 100;
     Snapshot.EffectsQuality = 100;
+    Snapshot.FixedOverdrawQuality = 100;
+    Snapshot.FixedEffectsQuality = 100;
     Snapshot.bOriginalCaptured = true;
 }
 
@@ -750,6 +764,8 @@ static function bool ApplyResource(
     local int PreviousRamQuality;
     local int PreviousOverdrawQuality;
     local int PreviousEffectsQuality;
+    local int PreviousFixedOverdrawQuality;
+    local int PreviousFixedEffectsQuality;
 
     if (Snapshot == None || Quality < 10 || Quality > 100) return false;
     GetCurrentGFXSettings(Current);
@@ -760,6 +776,8 @@ static function bool ApplyResource(
     PreviousRamQuality = Snapshot.RamQuality;
     PreviousOverdrawQuality = Snapshot.OverdrawQuality;
     PreviousEffectsQuality = Snapshot.EffectsQuality;
+    PreviousFixedOverdrawQuality = Snapshot.FixedOverdrawQuality;
+    PreviousFixedEffectsQuality = Snapshot.FixedEffectsQuality;
 
     if (Resource ~= "recover")
     {
@@ -768,6 +786,8 @@ static function bool ApplyResource(
         Snapshot.CpuQuality = Max(Snapshot.CpuQuality, Quality);
         Snapshot.VramQuality = Max(Snapshot.VramQuality, Quality);
         Snapshot.RamQuality = Max(Snapshot.RamQuality, Quality);
+        Snapshot.OverdrawQuality = Max(Snapshot.OverdrawQuality, Quality);
+        Snapshot.EffectsQuality = Max(Snapshot.EffectsQuality, Quality);
     }
     else if (Resource ~= "gpu") Snapshot.GpuQuality = Quality;
     else if (Resource ~= "cpu") Snapshot.CpuQuality = Quality;
@@ -784,8 +804,8 @@ static function bool ApplyResource(
     }
     else if (Resource ~= "fixed")
     {
-        Snapshot.OverdrawQuality = Quality;
-        Snapshot.EffectsQuality = Quality;
+        Snapshot.FixedOverdrawQuality = Quality;
+        Snapshot.FixedEffectsQuality = Quality;
     }
     else return false;
 
@@ -795,8 +815,8 @@ static function bool ApplyResource(
     ApplyCpu(Requested, Snapshot.CpuQuality);
     ApplyVram(Requested, Snapshot.VramQuality);
     ApplyRam(Requested, Snapshot.RamQuality);
-    ApplyOverdraw(Requested, Snapshot.OverdrawQuality);
-    ApplyEffects(Requested, Snapshot.EffectsQuality);
+    ApplyOverdraw(Requested, GetEffectiveOverdrawQuality(Snapshot));
+    ApplyEffects(Requested, GetEffectiveEffectsQuality(Snapshot));
     SetNativeSettings(Requested);
     SetScriptSettings(Requested);
     GetCurrentGFXSettings(Observed);
@@ -808,14 +828,16 @@ static function bool ApplyResource(
     Snapshot.RamQuality = PreviousRamQuality;
     Snapshot.OverdrawQuality = PreviousOverdrawQuality;
     Snapshot.EffectsQuality = PreviousEffectsQuality;
+    Snapshot.FixedOverdrawQuality = PreviousFixedOverdrawQuality;
+    Snapshot.FixedEffectsQuality = PreviousFixedEffectsQuality;
     Requested = Observed;
     RestoreOwnedSettings(Snapshot, Requested);
     ApplyGpu(Requested, Snapshot.GpuQuality);
     ApplyCpu(Requested, Snapshot.CpuQuality);
     ApplyVram(Requested, Snapshot.VramQuality);
     ApplyRam(Requested, Snapshot.RamQuality);
-    ApplyOverdraw(Requested, Snapshot.OverdrawQuality);
-    ApplyEffects(Requested, Snapshot.EffectsQuality);
+    ApplyOverdraw(Requested, GetEffectiveOverdrawQuality(Snapshot));
+    ApplyEffects(Requested, GetEffectiveEffectsQuality(Snapshot));
     SetNativeSettings(Requested);
     SetScriptSettings(Requested);
     GetCurrentGFXSettings(Observed);
@@ -858,6 +880,8 @@ static function bool RestoreOriginal(KF2OptimizerAdaptiveGraphicsState Snapshot)
     Snapshot.RamQuality = 100;
     Snapshot.OverdrawQuality = 100;
     Snapshot.EffectsQuality = 100;
+    Snapshot.FixedOverdrawQuality = 100;
+    Snapshot.FixedEffectsQuality = 100;
     Snapshot.bOriginalCaptured = false;
     return true;
 }

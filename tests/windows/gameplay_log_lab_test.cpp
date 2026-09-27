@@ -933,9 +933,21 @@ int main() {
     CHECK(graphics_source.find(
         "static function bool ApplyFixedSessionEffects") !=
           std::string::npos);
-    CHECK(graphics_source.find("Snapshot.OverdrawQuality = Max(") ==
+    CHECK(graphics_source.find(
+        "Snapshot.OverdrawQuality = Max(Snapshot.OverdrawQuality, Quality)") !=
           std::string::npos);
-    CHECK(graphics_source.find("Snapshot.EffectsQuality = Max(") ==
+    CHECK(graphics_source.find(
+        "Snapshot.EffectsQuality = Max(Snapshot.EffectsQuality, Quality)") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.FixedOverdrawQuality = Quality") != std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.FixedEffectsQuality = Quality") != std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.FixedOverdrawQuality = PreviousFixedOverdrawQuality") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.FixedEffectsQuality = PreviousFixedEffectsQuality") !=
           std::string::npos);
     CHECK(graphics_source.find(
         "return ApplyResource(Snapshot, \"fixed\", FixedSessionEffectsQuality)") !=
@@ -1020,10 +1032,16 @@ int main() {
         "KF2OPT_FIXED_EFFECT_BASELINE state=applied mode=online") !=
           std::string::npos);
     CHECK(graphics_source.find(
-        "ApplyOverdraw(Requested, Snapshot.OverdrawQuality)") !=
+        "ApplyOverdraw(Requested, GetEffectiveOverdrawQuality(Snapshot))") !=
           std::string::npos);
     CHECK(graphics_source.find(
-        "ApplyEffects(Requested, Snapshot.EffectsQuality)") !=
+        "ApplyEffects(Requested, GetEffectiveEffectsQuality(Snapshot))") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "return Min(Snapshot.OverdrawQuality, Snapshot.FixedOverdrawQuality)") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "return Min(Snapshot.EffectsQuality, Snapshot.FixedEffectsQuality)") !=
           std::string::npos);
     CHECK(graphics_source.find(
         "else if (Resource ~= \"overdraw\") Snapshot.OverdrawQuality = Quality") !=
@@ -1103,7 +1121,18 @@ int main() {
     CHECK(graphics_source.find(
         "Snapshot.RamQuality = Max(Snapshot.RamQuality, Quality)") !=
           std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.OverdrawQuality = Max(Snapshot.OverdrawQuality, Quality)") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "Snapshot.EffectsQuality = Max(Snapshot.EffectsQuality, Quality)") !=
+          std::string::npos);
     CHECK(graphics_source.find("Snapshot.EffectsQuality = 100") !=
+          std::string::npos);
+    CHECK(graphics_source.find("Snapshot.FixedEffectsQuality = 100") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "GetEffectiveEffectsQuality(\n            AdaptiveGraphicsState)") !=
           std::string::npos);
     CHECK(graphics_source.find(
         "Requested.FX.MaxGoreEffects, Max(2, Quality / 10)") !=

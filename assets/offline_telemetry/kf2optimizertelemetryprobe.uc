@@ -983,7 +983,8 @@ function bool ApplyAdaptiveEffectRuntimeReadback(
     }
     WorldParticleQuality = AdaptiveGraphicsState == None ? 100 : Min(
         AdaptiveGraphicsState.CpuQuality,
-        AdaptiveGraphicsState.EffectsQuality);
+        class'KF2OptimizerAdaptiveGraphics'.static.GetEffectiveEffectsQuality(
+            AdaptiveGraphicsState));
     if (!ApplyAdaptiveWorldParticleIdleControl(WorldParticleQuality))
     {
         `log("KF2OPT_EFFECT_RUNTIME state=failed resource="$Resource$

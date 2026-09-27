@@ -130,23 +130,59 @@ int main() {
     CHECK(quality.effective_quality() == 60);
     CHECK(quality.control_quality(AdaptiveResourceControl::cpu) == 100);
     quality.apply({2, AdaptiveResourceControl::overdraw, 70});
-    CHECK(quality.overdraw == 70);
+    CHECK(quality.cpu == 100 && quality.gpu == 60 &&
+          quality.vram == 100 && quality.ram == 100 &&
+          quality.overdraw == 70 && quality.effects == 100);
     CHECK(quality.effective_quality() == 60);
     quality.apply({3, AdaptiveResourceControl::effects, 75});
-    CHECK(quality.effects == 75);
+    CHECK(quality.cpu == 100 && quality.gpu == 60 &&
+          quality.vram == 100 && quality.ram == 100 &&
+          quality.overdraw == 70 && quality.effects == 75);
     CHECK(quality.control_quality(AdaptiveResourceControl::effects) == 75);
     quality.apply({2, AdaptiveResourceControl::cpu, 80});
-    CHECK(quality.cpu == 80);
-    CHECK(quality.gpu == 60);
+    CHECK(quality.cpu == 80 && quality.gpu == 60 &&
+          quality.vram == 100 && quality.ram == 100 &&
+          quality.overdraw == 70 && quality.effects == 75);
     quality.apply({3, AdaptiveResourceControl::recover, 65});
     CHECK(quality.gpu == 65);
     CHECK(quality.cpu == 80);
     CHECK(quality.vram == 100);
+    CHECK(quality.ram == 100);
+    CHECK(quality.overdraw == 70);
     CHECK(quality.effects == 75);
-    quality.apply({4, AdaptiveResourceControl::mixed, 50});
+    quality.apply({4, AdaptiveResourceControl::overdraw, 40});
+    CHECK(quality.cpu == 80 && quality.gpu == 65 &&
+          quality.vram == 100 && quality.ram == 100 &&
+          quality.overdraw == 40 && quality.effects == 75);
+    quality.apply({5, AdaptiveResourceControl::effects, 30});
+    CHECK(quality.cpu == 80 && quality.gpu == 65 &&
+          quality.vram == 100 && quality.ram == 100 &&
+          quality.overdraw == 40 && quality.effects == 30);
+    constexpr int fixed_session_effects_quality = 50;
+    CHECK(std::min(quality.overdraw, fixed_session_effects_quality) == 40);
+    CHECK(std::min(quality.effects, fixed_session_effects_quality) == 30);
+    quality.apply({6, AdaptiveResourceControl::recover, 50});
+    CHECK(quality.cpu == 80 && quality.gpu == 65 &&
+          quality.vram == 100 && quality.ram == 100 &&
+          quality.overdraw == 50 && quality.effects == 50);
+    CHECK(std::min(quality.overdraw, fixed_session_effects_quality) == 50);
+    CHECK(std::min(quality.effects, fixed_session_effects_quality) == 50);
+    quality.apply({7, AdaptiveResourceControl::recover, 70});
+    CHECK(quality.cpu == 80 && quality.gpu == 70 &&
+          quality.vram == 100 && quality.ram == 100 &&
+          quality.overdraw == 70 && quality.effects == 70);
+    CHECK(std::min(quality.overdraw, fixed_session_effects_quality) == 50);
+    CHECK(std::min(quality.effects, fixed_session_effects_quality) == 50);
+    quality.apply({8, AdaptiveResourceControl::recover, 100});
+    CHECK(quality.cpu == 100 && quality.gpu == 100 &&
+          quality.vram == 100 && quality.ram == 100 &&
+          quality.overdraw == 100 && quality.effects == 100);
+    CHECK(std::min(quality.overdraw, fixed_session_effects_quality) == 50);
+    CHECK(std::min(quality.effects, fixed_session_effects_quality) == 50);
+    quality.apply({9, AdaptiveResourceControl::mixed, 50});
     CHECK(quality.cpu == 50 && quality.gpu == 50 &&
           quality.vram == 50 && quality.ram == 50 &&
-          quality.overdraw == 70 && quality.effects == 75);
+          quality.overdraw == 100 && quality.effects == 100);
     // Mixed runtime control changes only CPU, GPU, VRAM and RAM. A low
     // independent effects/overdraw value must not erase a held mixed floor.
     AdaptiveResourceQualityState mixed_floor{10};
