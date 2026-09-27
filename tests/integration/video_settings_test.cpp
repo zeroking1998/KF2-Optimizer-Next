@@ -199,7 +199,17 @@ int main() {
     CHECK(kf2::game::aspect_ratio_label(loaded.value()) == L"16:9");
     CHECK(loaded.value().film_grain_percent == 0);
 
-    const auto defaults = kf2::game::recommended_video_defaults(loaded.value());
+    auto custom_before_reset = loaded.value();
+    custom_before_reset.choices[static_cast<std::size_t>(
+        kf2::game::VideoOption::nvidia_flex)] = 2;
+    custom_before_reset.flex_level = 2;
+    custom_before_reset.choices[static_cast<std::size_t>(
+        kf2::game::VideoOption::vsync)] = 1;
+    custom_before_reset.choices[static_cast<std::size_t>(
+        kf2::game::VideoOption::variable_frame_rate)] = 0;
+    custom_before_reset.film_grain_percent = 75;
+    const auto defaults =
+        kf2::game::recommended_video_defaults(custom_before_reset);
     CHECK(kf2::game::video_choice_label(
               kf2::game::VideoOption::display, defaults) ==
           L"Borderless fullscreen");
@@ -208,31 +218,39 @@ int main() {
           kf2::game::video_choice_label(
               kf2::game::VideoOption::resolution, loaded.value()));
     CHECK(defaults.choices[static_cast<std::size_t>(
-              kf2::game::VideoOption::overall_quality)] == 2);
+              kf2::game::VideoOption::overall_quality)] == 1);
+    CHECK(kf2::game::video_choice_label(
+              kf2::game::VideoOption::overall_quality, defaults) ==
+          L"Medium");
     CHECK(defaults.choices[static_cast<std::size_t>(
-              kf2::game::VideoOption::depth_of_field)] == 1);
+              kf2::game::VideoOption::depth_of_field)] == 0);
     CHECK(defaults.choices[static_cast<std::size_t>(
-              kf2::game::VideoOption::nvidia_flex)] == 0);
+              kf2::game::VideoOption::nvidia_flex)] == 2);
+    CHECK(defaults.flex_level == 2);
+    CHECK(defaults.choices[static_cast<std::size_t>(
+              kf2::game::VideoOption::vsync)] == 0);
+    CHECK(defaults.choices[static_cast<std::size_t>(
+              kf2::game::VideoOption::variable_frame_rate)] == 1);
     CHECK(defaults.film_grain_percent == 0);
     // Reset is KF2's exact shipped Medium preset, not an Optimizer-created
     // "Balanced" startup profile. Adaptive never calls this user action.
     constexpr std::array<std::pair<kf2::game::VideoOption, int>, 15>
         vanilla_medium{{
-            {kf2::game::VideoOption::environment_detail, 2},
-            {kf2::game::VideoOption::character_detail, 1},
-            {kf2::game::VideoOption::fx_quality, 2},
-            {kf2::game::VideoOption::texture_resolution, 2},
-            {kf2::game::VideoOption::texture_filtering, 2},
-            {kf2::game::VideoOption::shadow_quality, 2},
+            {kf2::game::VideoOption::environment_detail, 1},
+            {kf2::game::VideoOption::character_detail, 0},
+            {kf2::game::VideoOption::fx_quality, 1},
+            {kf2::game::VideoOption::texture_resolution, 1},
+            {kf2::game::VideoOption::texture_filtering, 1},
+            {kf2::game::VideoOption::shadow_quality, 1},
             {kf2::game::VideoOption::realtime_reflections, 0},
             {kf2::game::VideoOption::anti_aliasing, 1},
-            {kf2::game::VideoOption::bloom, 2},
+            {kf2::game::VideoOption::bloom, 1},
             {kf2::game::VideoOption::motion_blur, 0},
-            {kf2::game::VideoOption::ambient_occlusion, 1},
-            {kf2::game::VideoOption::depth_of_field, 1},
-            {kf2::game::VideoOption::volumetric_lighting, 1},
-            {kf2::game::VideoOption::lens_flares, 1},
-            {kf2::game::VideoOption::light_shafts, 1},
+            {kf2::game::VideoOption::ambient_occlusion, 0},
+            {kf2::game::VideoOption::depth_of_field, 0},
+            {kf2::game::VideoOption::volumetric_lighting, 0},
+            {kf2::game::VideoOption::lens_flares, 0},
+            {kf2::game::VideoOption::light_shafts, 0},
         }};
     for (const auto& [option, expected] : vanilla_medium) {
         CHECK(defaults.choices[static_cast<std::size_t>(option)] == expected);
@@ -357,10 +375,17 @@ int main() {
         defaults_preview.value().files[0].proposed_bytes);
     CHECK(default_system.has_value());
     CHECK(default_system.value().find(
-              L"SystemSettings", L"MaxAnisotropy") == L"4");
+              L"SystemSettings", L"MaxAnisotropy") == L"1");
     CHECK(default_system.value().find(
               L"SystemSettings",
-              L"MaxWholeSceneDominantShadowResolution") == L"1280");
+              L"MaxWholeSceneDominantShadowResolution") == L"1204");
+    CHECK(default_system.value().find(
+              L"SystemSettings", L"MaxDeadBodies") == L"550");
+    const auto default_engine = kf2::config::IniDocument::parse(
+        defaults_preview.value().files[1].proposed_bytes);
+    CHECK(default_engine.has_value());
+    CHECK(default_engine.value().find(L"Engine.Engine", L"PhysXLevel") ==
+          L"2");
     for (const auto& file : defaults_preview.value().files) {
         write_file(root / file.relative_path, file.proposed_bytes);
     }
@@ -381,11 +406,11 @@ int main() {
     const auto reloaded_defaults = kf2::game::read_video_settings(root);
     CHECK(reloaded_defaults.has_value());
     CHECK(reloaded_defaults.value().choices[static_cast<std::size_t>(
-              kf2::game::VideoOption::texture_resolution)] == 2);
+              kf2::game::VideoOption::texture_resolution)] == 1);
     CHECK(reloaded_defaults.value().choices[static_cast<std::size_t>(
-              kf2::game::VideoOption::texture_filtering)] == 2);
+              kf2::game::VideoOption::texture_filtering)] == 1);
     CHECK(reloaded_defaults.value().choices[static_cast<std::size_t>(
-              kf2::game::VideoOption::overall_quality)] == 2);
+              kf2::game::VideoOption::overall_quality)] == 1);
 
     // KF2 can rewrite ResX/ResY while keeping the selected list index at 0.
     // Compare the physical resolution, not that index, when rebasing/saving.
@@ -424,7 +449,7 @@ int main() {
         grain_only_preview.value().files[0].proposed_bytes);
     CHECK(grain_only_system.has_value());
     CHECK(grain_only_system.value().find(L"SystemSettings", L"ImageGrainScaler") == L"14.19");
-    CHECK(grain_only_system.value().find(L"SystemSettings", L"MaxAnisotropy") == L"4");
+    CHECK(grain_only_system.value().find(L"SystemSettings", L"MaxAnisotropy") == L"1");
 
     auto only_texture_resolution = reloaded_defaults.value();
     only_texture_resolution.choices[static_cast<std::size_t>(
@@ -435,9 +460,9 @@ int main() {
     const auto texture_only_system = kf2::config::IniDocument::parse(
         texture_only_preview.value().files[0].proposed_bytes);
     CHECK(texture_only_system.has_value());
-    CHECK(texture_only_system.value().find(L"SystemSettings", L"MaxAnisotropy") == L"4");
+    CHECK(texture_only_system.value().find(L"SystemSettings", L"MaxAnisotropy") == L"1");
     CHECK(texture_only_system.value().find(L"SystemSettings", L"TEXTUREGROUP_World") ==
-          L"(LODBias=2,MinMagFilter=Aniso,MipFilter=Linear)");
+          L"(LODBias=2,MinMagFilter=Linear,MipFilter=Linear)");
 
     // KF2's native Graphics menu controls exactly these texture groups.
     // Other engine groups (for example Vehicle) must remain untouched.
@@ -558,33 +583,7 @@ int main() {
     // particular, Ultra and Low must not come back as Custom.
     for (int preset : {0, 3}) {
         auto desired = reloaded_defaults.value();
-        desired.choices[static_cast<std::size_t>(
-            kf2::game::VideoOption::overall_quality)] = preset;
-        constexpr std::array<kf2::game::VideoOption, 15> targets{{
-            kf2::game::VideoOption::environment_detail,
-            kf2::game::VideoOption::character_detail,
-            kf2::game::VideoOption::fx_quality,
-            kf2::game::VideoOption::texture_resolution,
-            kf2::game::VideoOption::texture_filtering,
-            kf2::game::VideoOption::shadow_quality,
-            kf2::game::VideoOption::realtime_reflections,
-            kf2::game::VideoOption::anti_aliasing,
-            kf2::game::VideoOption::bloom,
-            kf2::game::VideoOption::motion_blur,
-            kf2::game::VideoOption::ambient_occlusion,
-            kf2::game::VideoOption::depth_of_field,
-            kf2::game::VideoOption::volumetric_lighting,
-            kf2::game::VideoOption::lens_flares,
-            kf2::game::VideoOption::light_shafts,
-        }};
-        constexpr std::array<std::array<int, 15>, 2> expected{{
-            {{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},
-            {{3,2,3,3,3,3,1,1,2,1,2,1,1,1,1}},
-        }};
-        for (std::size_t i = 0; i < targets.size(); ++i) {
-            desired.choices[static_cast<std::size_t>(targets[i])] =
-                expected[preset == 0 ? 0 : 1][i];
-        }
+        CHECK(kf2::game::apply_overall_quality_preset(desired, preset));
         const auto preset_preview = kf2::game::build_video_preview(root, desired);
         CHECK(preset_preview.has_value());
         for (const auto& file : preset_preview.value().files) {

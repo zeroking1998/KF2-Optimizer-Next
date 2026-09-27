@@ -670,6 +670,21 @@ int video_choice_count(VideoOption option, const VideoSettings& settings) noexce
     }
 }
 
+bool apply_overall_quality_preset(
+    VideoSettings& settings, int preset) noexcept {
+    if (preset < 0 ||
+        preset >= static_cast<int>(kOverallQualityPresets.size())) {
+        return false;
+    }
+    settings.choices[index(VideoOption::overall_quality)] = preset;
+    for (std::size_t component = 0;
+         component < kOverallQualityTargets.size(); ++component) {
+        settings.choices[index(kOverallQualityTargets[component])] =
+            kOverallQualityPresets[static_cast<std::size_t>(preset)][component];
+    }
+    return true;
+}
+
 VideoSettings recommended_video_defaults(const VideoSettings& current) {
     VideoSettings defaults = current;
     const auto set = [&](VideoOption option, int value) {
@@ -677,30 +692,12 @@ VideoSettings recommended_video_defaults(const VideoSettings& current) {
     };
 
     // Keep the monitor-dependent display mode and resolution. Reset the
-    // quality controls to KF2's shipped Medium preset values and leave costly
-    // optional FleX effects disabled until the user explicitly enables them
-    // again. This is an explicit user action; Adaptive never selects this
-    // preset at startup.
-    set(VideoOption::overall_quality, 2);
+    // quality controls to KF2's shipped Medium preset values. FleX remains an
+    // independent explicit user choice. This is an explicit user action;
+    // Adaptive never selects this preset at startup.
+    static_cast<void>(apply_overall_quality_preset(defaults, 1));
     set(VideoOption::vsync, 0);
     set(VideoOption::variable_frame_rate, 1);
-    set(VideoOption::environment_detail, 2);
-    set(VideoOption::character_detail, 1);
-    set(VideoOption::fx_quality, 2);
-    set(VideoOption::texture_resolution, 2);
-    set(VideoOption::texture_filtering, 2);
-    set(VideoOption::shadow_quality, 2);
-    set(VideoOption::realtime_reflections, 0);
-    set(VideoOption::anti_aliasing, 1);
-    set(VideoOption::bloom, 2);
-    set(VideoOption::motion_blur, 0);
-    set(VideoOption::ambient_occlusion, 1);
-    set(VideoOption::depth_of_field, 1);
-    set(VideoOption::volumetric_lighting, 1);
-    set(VideoOption::lens_flares, 1);
-    set(VideoOption::light_shafts, 1);
-    set(VideoOption::nvidia_flex, 0);
-    defaults.flex_level = 0;
     defaults.film_grain_percent = 0;
     return defaults;
 }
