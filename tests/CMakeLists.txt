@@ -175,6 +175,8 @@ add_executable(kf2_process_security_test
 )
 target_include_directories(kf2_process_security_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_process_security_test PRIVATE
+    KF2_PROCESS_SECURITY_TESTING)
 add_test(NAME kf2_process_security_test COMMAND kf2_process_security_test)
 
 add_executable(kf2_package_integrity_test

@@ -51,10 +51,7 @@ std::uint64_t current_process_start_id() {
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int show_command) {
     namespace windows = kf2::platform::windows;
 
-    const auto secured_search = windows::harden_process_dll_search();
-    if (!secured_search.has_value()) {
-        return show_fatal(secured_search.error(), 9);
-    }
+    if (!windows::harden_process_dll_search_for_startup()) return 9;
 
     std::vector<std::wstring> arguments;
     int argument_count = 0;
