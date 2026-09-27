@@ -34,10 +34,17 @@ struct AdaptiveControlRequest final {
     std::uint32_t timeout_ms{kAdaptiveControlReadbackTimeoutMs};
 };
 
+enum class AdaptiveControlReceiptStatus : std::uint8_t {
+    applied,
+    restored,
+    state_unknown,
+};
+
 struct AdaptiveControlReceipt final {
     std::uint64_t sequence{0};
     AdaptiveResourceControl resource{AdaptiveResourceControl::mixed};
     int quality{100};
+    AdaptiveControlReceiptStatus status{AdaptiveControlReceiptStatus::applied};
 };
 
 struct AdaptiveResourceQualityState final {

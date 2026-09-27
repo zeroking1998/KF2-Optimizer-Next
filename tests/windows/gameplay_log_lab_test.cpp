@@ -1272,6 +1272,44 @@ int main() {
         "KF2OPT_ADAPTIVE_ROLLBACK state=applied") != std::string::npos);
     CHECK(graphics_source.find(
         "KF2OPT_ADAPTIVE_ROLLBACK state=failed") != std::string::npos);
+    const auto rollback_start = telemetry_source.find(
+        "function bool RollbackAdaptiveResourceControl(");
+    const auto restore_debt_start = telemetry_source.find(
+        "function bool ResolveAdaptiveQualityRestoreDebt()", rollback_start);
+    CHECK(rollback_start != std::string::npos);
+    CHECK(restore_debt_start != std::string::npos);
+    const auto rollback_body = telemetry_source.substr(
+        rollback_start, restore_debt_start - rollback_start);
+    CHECK(rollback_body.find("SetQualityRestoreDebt(") != std::string::npos);
+    CHECK(rollback_body.find("ApplyResource(") == std::string::npos);
+    CHECK(rollback_body.find("ResolveAdaptiveQualityRestoreDebt()") !=
+          std::string::npos);
+    CHECK(rollback_body.find(
+        "bAdaptiveQualityRestoreCompletedForLastCommand = true") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "static function bool ApplyQualityComposition(") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "static function bool ApplyQualityRestoreDebt(") !=
+          std::string::npos);
+    CHECK(graphics_source.find("Snapshot.RestoreGpuQuality") !=
+          std::string::npos);
+    CHECK(graphics_source.find("Snapshot.RestoreEffectsQuality") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveGraphicsState.bQualityRestorePending") !=
+          std::string::npos);
+    CHECK(telemetry_source.find("reason=restore_pending") !=
+          std::string::npos);
+    CHECK(connection_source.find(
+        "KF2OPT_ACK \"$Sequence$\" unknown \"$Resource") !=
+          std::string::npos);
+    CHECK(connection_source.find(
+        "KF2OPT_ACK \"$Sequence$\" restored \"$Resource") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "request_applied=false readback=verified") != std::string::npos);
     CHECK(telemetry_source.find(
         "WorldInfo.NetMode != NM_Standalone") != std::string::npos);
     CHECK(telemetry_source.find(

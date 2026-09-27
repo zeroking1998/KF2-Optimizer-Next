@@ -155,6 +155,15 @@ event ReceivedLine(string Line)
     {
         SendText("KF2OPT_ACK "$Sequence$" applied "$Resource$" "$Quality);
     }
+    else if (Probe != None &&
+             Probe.WasAdaptiveQualityRestoreCompletedForLastCommand())
+    {
+        SendText("KF2OPT_ACK "$Sequence$" restored "$Resource$" "$Quality);
+    }
+    else if (Probe != None && !Probe.IsAdaptiveQualityStateKnown())
+    {
+        SendText("KF2OPT_ACK "$Sequence$" unknown "$Resource$" "$Quality);
+    }
     else
     {
         SendText("KF2OPT_ACK "$Sequence$" failed rejected");

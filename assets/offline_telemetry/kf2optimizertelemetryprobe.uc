@@ -240,6 +240,7 @@ var transient bool bFixedSessionEffectsApplied;
 var int AdaptiveGraphicsQuality;
 var string AdaptiveGraphicsResource;
 var int AdaptiveLastControlSequence;
+var transient bool bAdaptiveQualityRestoreCompletedForLastCommand;
 var bool bAdaptiveCorpseStaggerInitialized;
 var int AdaptiveCorpseTarget;
 var int AdaptiveCorpseOriginalLimit;
@@ -575,6 +576,7 @@ function bool ApplyAdaptiveResourceControl(
     local int PreviousOverdrawQuality;
     local int PreviousEffectsQuality;
 
+    bAdaptiveQualityRestoreCompletedForLastCommand = false;
     if (!ValidAdaptiveControlToken(Token) || Sequence <= 0 ||
         Sequence <= AdaptiveLastControlSequence ||
         (((Resource ~= "enable") && (Quality < 4 || Quality > 2000)) ||
@@ -584,6 +586,23 @@ function bool ApplyAdaptiveResourceControl(
           (Resource ~= "mixed") || (Resource ~= "recover") ||
           (Resource ~= "enable") || (Resource ~= "disable")))
     {
+        return false;
+    }
+    if (AdaptiveGraphicsState != None &&
+        AdaptiveGraphicsState.bQualityRestorePending)
+    {
+        if (!ResolveAdaptiveQualityRestoreDebt())
+        {
+            `log("KF2OPT_ADAPTIVE_QUALITY state=unknown seq="$Sequence$
+                 " resource="$Resource$" quality="$Quality$
+                 " reason=restore_pending");
+            return false;
+        }
+        bAdaptiveQualityRestoreCompletedForLastCommand = true;
+        AdaptiveLastControlSequence = Sequence;
+        `log("KF2OPT_ADAPTIVE_QUALITY state=restored seq="$Sequence$
+             " requested_resource="$Resource$" requested_quality="$Quality$
+             " request_applied=false readback=verified");
         return false;
     }
     if ((Resource ~= "enable") || (Resource ~= "disable"))
@@ -632,9 +651,7 @@ function bool ApplyAdaptiveResourceControl(
         if (!RollbackAdaptiveResourceControl(
                 PreviousGpuQuality, PreviousCpuQuality,
                 PreviousVramQuality, PreviousRamQuality,
-                PreviousOverdrawQuality, PreviousEffectsQuality) ||
-            !ApplyAdaptiveEffectRuntimeReadback(
-                "rollback", PreviousEffectsQuality))
+                PreviousOverdrawQuality, PreviousEffectsQuality))
         {
             `log("KF2OPT_EFFECT_RUNTIME state=rollback_failed resource="$
                  Resource$" quality="$Quality);
@@ -661,38 +678,52 @@ function bool RollbackAdaptiveResourceControl(
 {
     local bool bRestored;
 
-    bRestored = true;
-    if (!class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
-            AdaptiveGraphicsState, "gpu", GpuQuality))
+    class'KF2OptimizerAdaptiveGraphics'.static.SetQualityRestoreDebt(
+        AdaptiveGraphicsState, GpuQuality, CpuQuality, VramQuality, RamQuality,
+        OverdrawQuality, EffectsQuality);
+    bRestored = ResolveAdaptiveQualityRestoreDebt();
+    if (bRestored)
     {
-        bRestored = false;
-    }
-    if (!class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
-            AdaptiveGraphicsState, "cpu", CpuQuality))
-    {
-        bRestored = false;
-    }
-    if (!class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
-            AdaptiveGraphicsState, "vram", VramQuality))
-    {
-        bRestored = false;
-    }
-    if (!class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
-            AdaptiveGraphicsState, "ram", RamQuality))
-    {
-        bRestored = false;
-    }
-    if (!class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
-            AdaptiveGraphicsState, "overdraw", OverdrawQuality))
-    {
-        bRestored = false;
-    }
-    if (!class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
-            AdaptiveGraphicsState, "effects", EffectsQuality))
-    {
-        bRestored = false;
+        bAdaptiveQualityRestoreCompletedForLastCommand = true;
     }
     return bRestored;
+}
+
+function bool ResolveAdaptiveQualityRestoreDebt()
+{
+    local bool bGraphicsRestored;
+    local bool bEffectRuntimeRestored;
+
+    if (AdaptiveGraphicsState == None ||
+        !AdaptiveGraphicsState.bQualityRestorePending)
+    {
+        return true;
+    }
+    bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.
+        ApplyQualityRestoreDebt(AdaptiveGraphicsState);
+    bEffectRuntimeRestored = bGraphicsRestored &&
+        ApplyAdaptiveEffectRuntimeReadback(
+            "rollback", AdaptiveGraphicsState.RestoreEffectsQuality);
+    if (!bGraphicsRestored || !bEffectRuntimeRestored)
+    {
+        return false;
+    }
+    class'KF2OptimizerAdaptiveGraphics'.static.ClearQualityRestoreDebt(
+        AdaptiveGraphicsState);
+    `log("KF2OPT_ADAPTIVE_ROLLBACK state=applied reason=restore_debt"$
+         " readback=verified");
+    return true;
+}
+
+function bool IsAdaptiveQualityStateKnown()
+{
+    return AdaptiveGraphicsState == None ||
+        AdaptiveGraphicsState.bQualityStateKnown;
+}
+
+function bool WasAdaptiveQualityRestoreCompletedForLastCommand()
+{
+    return bAdaptiveQualityRestoreCompletedForLastCommand;
 }
 
 function bool IsAdaptiveWorldParticleCosmetic(string TemplatePath)

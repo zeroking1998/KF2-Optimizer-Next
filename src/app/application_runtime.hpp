@@ -77,6 +77,7 @@ struct AdaptiveRuntimePendingRequest final {
     optimizer::AdaptiveGeneration generation;
     int previous_quality{100};
     int requested_quality{100};
+    game::AdaptiveResourceControl resource{game::AdaptiveResourceControl::mixed};
 };
 
 struct UpdateRuntimeState final {
@@ -213,6 +214,7 @@ struct UiRuntime {
     std::optional<std::uint16_t> adaptive_runtime_mode_port;
     std::uint64_t adaptive_runtime_mode_last_attempt_ns{0};
     bool adaptive_runtime_mode_confirmed{false};
+    bool adaptive_quality_state_known{true};
     std::optional<bool> adaptive_runtime_mode_pending;
     std::uint64_t adaptive_quality_last_dispatch_ns{0};
     std::uint64_t adaptive_quality_last_applied_ns{0};

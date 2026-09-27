@@ -112,6 +112,7 @@ struct AdaptiveRuntimeControlInput final {
     int reduction_floor_quality{10};
     std::optional<int> rollback_quality;
     std::optional<game::AdaptiveResourceControl> rollback_resource;
+    bool quality_state_known{true};
     bool current_frame_pressure{false};
     bool current_resource_pressure{false};
     bool recovery_eligible{false};
@@ -215,6 +216,17 @@ select_adaptive_runtime_control(
         input.current_quality < input.minimum_quality ||
         input.current_quality > input.maximum_quality || input.now_ns == 0) {
         return std::nullopt;
+    }
+
+    // A failed composite rollback makes the live composition unknown. Verify
+    // the exact pre-command target before observing normal settling windows;
+    // equality with the last confirmed value is intentional in this case.
+    if (!input.quality_state_known && input.rollback_quality &&
+        input.rollback_resource) {
+        return AdaptiveRuntimeControlSelection{
+            *input.rollback_resource,
+            std::clamp(*input.rollback_quality,
+                       input.minimum_quality, input.maximum_quality)};
     }
 
     constexpr std::uint64_t kPostMapTargetedQualityStabilizationNs =
