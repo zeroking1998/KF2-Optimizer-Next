@@ -139,6 +139,8 @@ are visible immediately.
   reports an unsupported event schema, preventing stale Adaptive samples.
 - Preserved the authenticated Adaptive command sequence across recoverable
   telemetry rebinds and stopped safely instead of reusing sequence numbers.
+- Bounded Adaptive control connections with a one-request deadline and
+  destroyed their child actors after success, rejection, disconnect, or timeout.
 - Fixed FleX detection after graphics changes and settings restarts. User-
   enabled FleX runs at the verified minimum solver level; user-disabled FleX
   remains off and is never enabled by Adaptive.
