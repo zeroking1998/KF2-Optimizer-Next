@@ -58,6 +58,29 @@ ResourceTelemetryBinding binding(std::uint32_t pid,
 
 int main() {
     std::chrono::microseconds request_batch_elapsed{};
+
+    // Repeatedly exercise the complete lifetime boundary. The worker thread
+    // must start only after its shared state exists and must join before that
+    // state is destroyed.
+    for (std::uint32_t iteration = 0; iteration < 32; ++iteration) {
+        std::atomic<int> calls{0};
+        ResourceTelemetryWorker worker{
+            [&](const ResourceSampleRequest& request, std::stop_token) {
+                ++calls;
+                ResourceSampleBatch batch;
+                batch.group = request.group;
+                return batch;
+            }};
+        CHECK(calls == 0);
+        const auto generation = worker.bind(
+            binding(100 + iteration, 10'000 + iteration));
+        worker.request(100'000 + iteration);
+        CHECK(wait_for_generation(worker, generation));
+        CHECK(calls == 1);
+        worker.clear();
+        CHECK(!worker.latest());
+    }
+
     {
         std::atomic<int> calls{0};
         std::atomic<int> priority{THREAD_PRIORITY_ERROR_RETURN};

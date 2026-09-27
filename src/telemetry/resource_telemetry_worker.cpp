@@ -457,7 +457,6 @@ private:
     ResourceSampleFunction custom_sample_;
     mutable std::mutex mutex_;
     std::condition_variable_any condition_;
-    std::jthread thread_;
     bool stopped_{false};
     bool pending_{false};
     bool active_{false};
@@ -469,6 +468,9 @@ private:
     ResourceTelemetrySnapshot current_;
     std::shared_ptr<const ResourceTelemetrySnapshot> published_;
     std::deque<GameLogChunk> log_chunks_;
+    // Construct last and destroy first. The worker may access every state
+    // member above as soon as its thread begins running.
+    std::jthread thread_;
 };
 
 ResourceTelemetryWorker::ResourceTelemetryWorker()
