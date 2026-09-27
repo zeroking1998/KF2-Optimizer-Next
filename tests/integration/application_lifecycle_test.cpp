@@ -488,6 +488,21 @@ int main(int argc, char** argv) {
     // A historically poisoned snapshot can leave the legacy optimizer viewport
     // and token behind after the module marker is already gone. Startup must
     // remove that owned residue before capturing the next protected snapshot.
+    const auto stale_game_baseline = read_bytes(config_root / L"KFGame.ini");
+    auto poisoned_game = stale_game_baseline;
+    const std::string native_ai_logging = "bLogAICount=False";
+    const auto ai_logging_offset = poisoned_game.find(native_ai_logging);
+    CHECK(ai_logging_offset != std::string::npos);
+    poisoned_game.replace(
+        ai_logging_offset, native_ai_logging.size(), "bLogAICount=True");
+    poisoned_game +=
+        "[KFGame.KFAISpawnManager_Short]\r\n"
+        "bLogWaveSpawnTiming=True\r\n"
+        "[KFGame.KFAISpawnManager_Normal]\r\n"
+        "bLogWaveSpawnTiming=True\r\n"
+        "[KFGame.KFAISpawnManager_Long]\r\n"
+        "bLogWaveSpawnTiming=True\r\n";
+    write_bytes(config_root / L"KFGame.ini", poisoned_game);
     auto poisoned_engine = read_bytes(config_root / L"KFEngine.ini");
     const std::string native_viewport =
         "GameViewportClientClassName=KFGame.KFGameViewportClient";
@@ -500,7 +515,11 @@ int main(int argc, char** argv) {
     poisoned_engine +=
         "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\r\n"
         "AdaptiveTargetFPS=120\r\n"
-        "AdaptiveControlToken=0123456789abcdef0123456789abcdef\r\n";
+        "AdaptiveControlToken=0123456789abcdef0123456789abcdef\r\n"
+        "OriginalLogAICount=False\r\n"
+        "OriginalLogWaveSpawnTimingShort=Missing\r\n"
+        "OriginalLogWaveSpawnTimingNormal=Missing\r\n"
+        "OriginalLogWaveSpawnTimingLong=Missing\r\n";
     write_bytes(config_root / L"KFEngine.ini", poisoned_engine);
     options.identity.process_start_id = 10011;
     {
@@ -515,6 +534,9 @@ int main(int argc, char** argv) {
     CHECK(recovered_engine.find("[KF2OptimizerTelemetry.") ==
           std::string::npos);
     CHECK(recovered_engine.find("AdaptiveControlToken=") == std::string::npos);
+    const auto recovered_game = read_bytes(config_root / L"KFGame.ini");
+    CHECK(recovered_game.find("bLogAICount=False") != std::string::npos);
+    CHECK(recovered_game.find("bLogWaveSpawnTiming=") == std::string::npos);
     CHECK(read_bytes(options.state_root / L"logs/session-events.json").find(
         "STALE_TELEMETRY_CONFIG_RECOVERED") != std::string::npos);
 

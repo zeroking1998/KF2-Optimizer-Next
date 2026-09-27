@@ -26,6 +26,17 @@ constexpr std::array<std::wstring_view, 3> kWaveSections{
     L"KFGame.KFAISpawnManager_Normal",
     L"KFGame.KFAISpawnManager_Long"};
 constexpr std::wstring_view kWaveKey = L"bLogWaveSpawnTiming";
+struct LoggingSetting final {
+    std::wstring_view section;
+    std::wstring_view key;
+    std::wstring_view baseline_key;
+};
+constexpr std::array<LoggingSetting, 4> kLoggingSettings{{
+    {kCountSection, kCountKey, L"OriginalLogAICount"},
+    {kWaveSections[0], kWaveKey, L"OriginalLogWaveSpawnTimingShort"},
+    {kWaveSections[1], kWaveKey, L"OriginalLogWaveSpawnTimingNormal"},
+    {kWaveSections[2], kWaveKey, L"OriginalLogWaveSpawnTimingLong"},
+}};
 constexpr std::wstring_view kCoreSystemSection = L"Core.System";
 constexpr std::wstring_view kRuntimePathsKey = L"Paths";
 constexpr std::wstring_view kScriptPathsKey = L"ScriptPaths";
@@ -123,6 +134,114 @@ std::wstring normalized_boolean(std::wstring value) {
     std::transform(value.begin(), value.end(), value.begin(),
         [](wchar_t character) { return std::towlower(character); });
     return value;
+}
+
+Result<std::wstring> capture_logging_baseline(
+    const std::optional<std::wstring>& value) {
+    if (!value) return Result<std::wstring>::success(L"Missing");
+    const auto normalized = normalized_boolean(*value);
+    if (normalized == L"true") return Result<std::wstring>::success(L"True");
+    if (normalized == L"false") return Result<std::wstring>::success(L"False");
+    return Result<std::wstring>::failure(
+        {ErrorCode::invalid_argument,
+         L"KF2 gameplay logging setting is malformed", 0});
+}
+
+Result<std::wstring> normalize_logging_baseline(std::wstring value) {
+    const auto normalized = normalized_boolean(std::move(value));
+    if (normalized == L"true") return Result<std::wstring>::success(L"True");
+    if (normalized == L"false") return Result<std::wstring>::success(L"False");
+    if (normalized == L"missing") {
+        return Result<std::wstring>::success(L"Missing");
+    }
+    return Result<std::wstring>::failure(
+        {ErrorCode::invalid_argument,
+         L"KF2 gameplay logging recovery baseline is malformed", 0});
+}
+
+Result<bool> restore_logging_setting(config::IniDocument& document,
+                                     const LoggingSetting& setting,
+                                     std::wstring_view baseline) {
+    const auto current = document.find(setting.section, setting.key);
+    const auto current_state = capture_logging_baseline(current);
+    if (!current_state.has_value()) {
+        return Result<bool>::failure(current_state.error());
+    }
+    if (current_state.value() != L"True" &&
+        current_state.value() != baseline) {
+        return Result<bool>::failure(
+            {ErrorCode::stale_data,
+             L"KF2 gameplay logging changed after the optimizer session", 0});
+    }
+
+    config::ReplaceResult restored;
+    if (baseline == L"Missing") {
+        restored = document.remove_exact(setting.section, setting.key, L"True");
+    } else {
+        restored = document.replace(setting.section, setting.key, baseline);
+    }
+    if (restored.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"KF2 gameplay logging setting is ambiguous", 0});
+    }
+    if ((baseline == L"Missing" && current && !restored.changed) ||
+        (baseline != L"Missing" && !current)) {
+        return Result<bool>::failure(
+            {ErrorCode::stale_data,
+             L"KF2 gameplay logging no longer matches optimizer ownership", 0});
+    }
+    return Result<bool>::success(restored.changed);
+}
+
+Result<bool> verify_logging_baseline(
+    const config::IniDocument& document,
+    const std::array<std::wstring, kLoggingSettings.size()>& baseline) {
+    for (std::size_t index = 0; index < kLoggingSettings.size(); ++index) {
+        auto copy = document;
+        const auto restored = restore_logging_setting(
+            copy, kLoggingSettings[index], baseline[index]);
+        if (!restored.has_value() || restored.value()) {
+            return Result<bool>::failure(
+                {ErrorCode::io_failure,
+                 L"KF2 gameplay logging baseline could not be verified", 0});
+        }
+    }
+    return Result<bool>::success(true);
+}
+
+Result<bool> verify_stored_logging_baseline(
+    const config::IniDocument& document,
+    const std::array<std::wstring, kLoggingSettings.size()>& baseline) {
+    auto section_check = document;
+    const auto section = section_check.remove_section(kTelemetrySection);
+    if (!section.changed || section.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::stale_data,
+             L"KF2 gameplay logging recovery section is ambiguous", 0});
+    }
+    for (std::size_t index = 0; index < kLoggingSettings.size(); ++index) {
+        const auto& setting = kLoggingSettings[index];
+        const auto stored = document.find(
+            kTelemetrySection, setting.baseline_key);
+        if (!stored) {
+            return Result<bool>::failure(
+                {ErrorCode::stale_data,
+                 L"KF2 gameplay logging recovery baseline is incomplete", 0});
+        }
+        const auto normalized = normalize_logging_baseline(*stored);
+        auto copy = document;
+        const auto duplicate_check = copy.upsert(
+            kTelemetrySection, setting.baseline_key, *stored);
+        if (!normalized.has_value() ||
+            normalized.value() != baseline[index] ||
+            duplicate_check.shadowed_occurrences != 0) {
+            return Result<bool>::failure(
+                {ErrorCode::stale_data,
+                 L"KF2 gameplay logging recovery baseline is invalid", 0});
+        }
+    }
+    return Result<bool>::success(true);
 }
 
 Result<config::IniDocument> parse_verified(
@@ -289,43 +408,70 @@ Result<bool> enable_offline_gameplay_logging(
     auto engine = parse_verified(engine_ini);
     if (!engine.has_value()) return Result<bool>::failure(engine.error());
 
-    const auto current = parsed.value().find(kCountSection, kCountKey);
-    if (current) {
-        const auto boolean = normalized_boolean(*current);
-        if (boolean != L"true" && boolean != L"false") {
-            return Result<bool>::failure(
-                {ErrorCode::invalid_argument,
-                 L"KF2 AI-count logging setting is malformed", 0});
+    std::array<std::wstring, kLoggingSettings.size()> logging_baseline;
+    std::size_t stored_baseline_count = 0;
+    for (std::size_t index = 0; index < kLoggingSettings.size(); ++index) {
+        const auto stored = engine.value().find(
+            kTelemetrySection, kLoggingSettings[index].baseline_key);
+        if (!stored) continue;
+        ++stored_baseline_count;
+        const auto normalized = normalize_logging_baseline(*stored);
+        if (!normalized.has_value()) {
+            return Result<bool>::failure(normalized.error());
+        }
+        logging_baseline[index] = normalized.value();
+    }
+    if (stored_baseline_count != 0 &&
+        stored_baseline_count != kLoggingSettings.size()) {
+        return Result<bool>::failure(
+            {ErrorCode::stale_data,
+             L"KF2 gameplay logging recovery baseline is incomplete", 0});
+    }
+    if (stored_baseline_count == kLoggingSettings.size()) {
+        const auto verified_baseline = verify_stored_logging_baseline(
+            engine.value(), logging_baseline);
+        if (!verified_baseline.has_value()) {
+            return Result<bool>::failure(verified_baseline.error());
         }
     }
 
-    const auto replaced = parsed.value().upsert(
-        kCountSection, kCountKey, L"True");
-    if (replaced.shadowed_occurrences != 0) {
-        return Result<bool>::failure(
-            {ErrorCode::invalid_argument,
-             L"KF2 AI-count logging setting is ambiguous", 0});
-    }
-    bool wave_changed = false;
-    for (const auto wave_section : kWaveSections) {
-        if (const auto current_wave =
-                parsed.value().find(wave_section, kWaveKey);
-            current_wave) {
-            const auto wave_boolean = normalized_boolean(*current_wave);
-            if (wave_boolean != L"true" && wave_boolean != L"false") {
+    bool logging_baseline_changed = false;
+    bool logging_changed = false;
+    for (std::size_t index = 0; index < kLoggingSettings.size(); ++index) {
+        const auto& setting = kLoggingSettings[index];
+        const auto current = parsed.value().find(setting.section, setting.key);
+        const auto current_state = capture_logging_baseline(current);
+        if (!current_state.has_value()) {
+            return Result<bool>::failure(current_state.error());
+        }
+        if (stored_baseline_count == 0) {
+            logging_baseline[index] = current_state.value();
+            const auto stored = engine.value().upsert(
+                kTelemetrySection, setting.baseline_key,
+                logging_baseline[index]);
+            if (stored.shadowed_occurrences != 0) {
                 return Result<bool>::failure(
                     {ErrorCode::invalid_argument,
-                     L"KF2 wave-timing logging setting is malformed", 0});
+                     L"KF2 gameplay logging recovery baseline is ambiguous",
+                     0});
             }
+            logging_baseline_changed =
+                logging_baseline_changed || stored.changed;
+        } else if (current_state.value() != L"True" &&
+                   current_state.value() != logging_baseline[index]) {
+            return Result<bool>::failure(
+                {ErrorCode::stale_data,
+                 L"KF2 gameplay logging changed after baseline capture", 0});
         }
-        const auto wave_replaced = parsed.value().upsert(
-            wave_section, kWaveKey, L"True");
-        if (wave_replaced.shadowed_occurrences != 0) {
+
+        const auto staged = parsed.value().upsert(
+            setting.section, setting.key, L"True");
+        if (staged.shadowed_occurrences != 0) {
             return Result<bool>::failure(
                 {ErrorCode::invalid_argument,
-                 L"KF2 wave-timing logging setting is ambiguous", 0});
+                 L"KF2 gameplay logging setting is ambiguous", 0});
         }
-        wave_changed = wave_changed || wave_replaced.changed;
+        logging_changed = logging_changed || staged.changed;
     }
     const auto current_viewport = engine.value().find(
         kEngineSection, kViewportClientKey);
@@ -495,33 +641,34 @@ Result<bool> enable_offline_gameplay_logging(
             {ErrorCode::invalid_argument,
              L"Adaptive control-token setting is ambiguous", 0});
     }
-    if (!replaced.changed && !wave_changed && !viewport_replaced.changed &&
-        !local_options_replaced.changed &&
-        !runtime_path_appended.changed &&
-        !startup_package_removed.changed &&
-        !stagger_replaced.changed && !runtime_enabled_replaced.changed &&
-        !markers_replaced.changed &&
-        !zed_markers_replaced.changed &&
-        !maximum_replaced.changed &&
-        !target_replaced.changed && !quality_budget_replaced.changed &&
-        !control_token_replaced.changed) {
+    const bool engine_changed = viewport_replaced.changed ||
+        local_options_replaced.changed || runtime_path_appended.changed ||
+        startup_package_removed.changed || stagger_replaced.changed ||
+        runtime_enabled_replaced.changed || markers_replaced.changed ||
+        zed_markers_replaced.changed || maximum_replaced.changed ||
+        target_replaced.changed || quality_budget_replaced.changed ||
+        control_token_replaced.changed || logging_baseline_changed;
+    if (!logging_changed && !engine_changed) {
         return Result<bool>::success(false);
     }
 
-    if (replaced.changed || wave_changed) {
-        const auto written = platform::windows::atomic_replace_utf8(
-            game_ini, parsed.value().serialize());
-        if (!written.has_value()) return Result<bool>::failure(written.error());
-    }
-    if (viewport_replaced.changed || local_options_replaced.changed ||
-        runtime_path_appended.changed || startup_package_removed.changed ||
-        stagger_replaced.changed || runtime_enabled_replaced.changed ||
-        markers_replaced.changed || zed_markers_replaced.changed ||
-        maximum_replaced.changed ||
-        target_replaced.changed || quality_budget_replaced.changed ||
-        control_token_replaced.changed) {
+    if (engine_changed) {
         const auto written = platform::windows::atomic_replace_utf8(
             engine_ini, engine.value().serialize());
+        if (!written.has_value()) return Result<bool>::failure(written.error());
+    }
+    if (logging_changed) {
+        auto verified_ownership = parse_verified(engine_ini);
+        if (!verified_ownership.has_value()) {
+            return Result<bool>::failure(verified_ownership.error());
+        }
+        const auto ownership_matches = verify_stored_logging_baseline(
+            verified_ownership.value(), logging_baseline);
+        if (!ownership_matches.has_value()) {
+            return Result<bool>::failure(ownership_matches.error());
+        }
+        const auto written = platform::windows::atomic_replace_utf8(
+            game_ini, parsed.value().serialize());
         if (!written.has_value()) return Result<bool>::failure(written.error());
     }
 
@@ -596,6 +743,12 @@ Result<bool> enable_offline_gameplay_logging(
         ? verified_engine.value().find(
               kTelemetrySection, kAdaptiveControlTokenKey)
         : std::optional<std::wstring>{};
+    const auto verified_logging_baseline = verified_engine.has_value()
+        ? verify_stored_logging_baseline(
+              verified_engine.value(), logging_baseline)
+        : Result<bool>::failure(
+              {ErrorCode::not_found,
+               L"KF2 gameplay logging recovery baseline is missing", 0});
     if (!verified_engine.has_value() || !verified_viewport ||
         *verified_viewport != kGraphicsViewportClient ||
         !verified_local_options || !verified_mutator_option.has_value() ||
@@ -623,7 +776,8 @@ Result<bool> enable_offline_gameplay_logging(
         !verified_quality_budget ||
         *verified_quality_budget !=
             std::to_wstring(adaptive_quality_change_budget) ||
-        !verified_control_token || *verified_control_token != control_token) {
+        !verified_control_token || *verified_control_token != control_token ||
+        !verified_logging_baseline.has_value()) {
         return Result<bool>::failure(
             {ErrorCode::io_failure,
              L"KF2 offline telemetry bootstrap policy could not be verified after writing",
@@ -648,6 +802,33 @@ Result<bool> cleanup_stale_offline_gameplay_configuration(
     const auto engine_ini = config_root / L"KFEngine.ini";
     auto engine = parse_verified(engine_ini);
     if (!engine.has_value()) return Result<bool>::failure(engine.error());
+
+    std::array<std::wstring, kLoggingSettings.size()> logging_baseline;
+    std::size_t stored_baseline_count = 0;
+    for (std::size_t index = 0; index < kLoggingSettings.size(); ++index) {
+        const auto stored = engine.value().find(
+            kTelemetrySection, kLoggingSettings[index].baseline_key);
+        if (!stored) continue;
+        ++stored_baseline_count;
+        const auto normalized = normalize_logging_baseline(*stored);
+        if (!normalized.has_value()) {
+            return Result<bool>::failure(normalized.error());
+        }
+        logging_baseline[index] = normalized.value();
+    }
+    if (stored_baseline_count != 0 &&
+        stored_baseline_count != kLoggingSettings.size()) {
+        return Result<bool>::failure(
+            {ErrorCode::stale_data,
+             L"KF2 gameplay logging recovery baseline is incomplete", 0});
+    }
+    if (stored_baseline_count == kLoggingSettings.size()) {
+        const auto verified_baseline = verify_stored_logging_baseline(
+            engine.value(), logging_baseline);
+        if (!verified_baseline.has_value()) {
+            return Result<bool>::failure(verified_baseline.error());
+        }
+    }
 
     bool changed = false;
     const auto viewport = engine.value().find(
@@ -751,6 +932,40 @@ Result<bool> cleanup_stale_offline_gameplay_configuration(
     changed = changed || removed.changed;
     if (!changed) return Result<bool>::success(false);
 
+    if (stored_baseline_count != kLoggingSettings.size()) {
+        return Result<bool>::failure(
+            {ErrorCode::stale_data,
+             L"Stale optimizer configuration has no verified gameplay logging baseline",
+             0});
+    }
+
+    const auto game_ini = config_root / L"KFGame.ini";
+    auto game = parse_verified(game_ini);
+    if (!game.has_value()) return Result<bool>::failure(game.error());
+    bool game_changed = false;
+    for (std::size_t index = 0; index < kLoggingSettings.size(); ++index) {
+        const auto restored = restore_logging_setting(
+            game.value(), kLoggingSettings[index], logging_baseline[index]);
+        if (!restored.has_value()) {
+            return Result<bool>::failure(restored.error());
+        }
+        game_changed = game_changed || restored.value();
+    }
+    if (game_changed) {
+        const auto written = platform::windows::atomic_replace_utf8(
+            game_ini, game.value().serialize());
+        if (!written.has_value()) return Result<bool>::failure(written.error());
+    }
+    auto verified_game = parse_verified(game_ini);
+    if (!verified_game.has_value()) {
+        return Result<bool>::failure(verified_game.error());
+    }
+    const auto game_restored = verify_logging_baseline(
+        verified_game.value(), logging_baseline);
+    if (!game_restored.has_value()) {
+        return Result<bool>::failure(game_restored.error());
+    }
+
     const auto written = platform::windows::atomic_replace_utf8(
         engine_ini, engine.value().serialize());
     if (!written.has_value()) return Result<bool>::failure(written.error());
@@ -777,7 +992,13 @@ Result<bool> cleanup_stale_offline_gameplay_configuration(
     const auto verified_legacy_runtime_path =
         verified_legacy_runtime_path_document.remove_exact(
             kCoreSystemSection, kRuntimePathsKey, kLegacyPublishedRuntimePath);
-    if ((verified_viewport &&
+    auto finally_verified_game = parse_verified(game_ini);
+    const auto final_game_restored = finally_verified_game.has_value()
+        ? verify_logging_baseline(
+              finally_verified_game.value(), logging_baseline)
+        : Result<bool>::failure(finally_verified_game.error());
+    if (!final_game_restored.has_value() ||
+        (verified_viewport &&
          (*verified_viewport == kTelemetryViewportClient ||
           *verified_viewport == kGraphicsViewportClient)) ||
         !verified_cleaned_options.has_value() ||
