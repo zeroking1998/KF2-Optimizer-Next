@@ -203,13 +203,17 @@ int main() {
           std::string::npos);
     const auto fixed_effects_start = telemetry_source.find(
         "function bool EnsureFixedSessionEffects()");
+    const auto restore_world_runtime_start = telemetry_source.find(
+        "function bool RestoreSessionWorldRuntime()");
     CHECK(telemetry_source.find("function bool RestoreSessionGraphics()") !=
           std::string::npos);
     const auto restore_session_start = telemetry_source.find(
-        "function bool RestoreSessionGraphics()");
+        "function bool RestoreSessionGraphics()", restore_world_runtime_start);
     CHECK(fixed_effects_start != std::string::npos);
+    CHECK(restore_world_runtime_start != std::string::npos);
     const auto fixed_effects_body = telemetry_source.substr(
-        fixed_effects_start, restore_session_start - fixed_effects_start);
+        fixed_effects_start,
+        restore_world_runtime_start - fixed_effects_start);
     CHECK(fixed_effects_body.find(
         "bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.\n"
         "            RestoreOriginal(AdaptiveGraphicsState)") !=
@@ -226,18 +230,28 @@ int main() {
     const auto adaptive_control_start = telemetry_source.find(
         "function bool ApplyAdaptiveResourceControl(", restore_session_start);
     CHECK(adaptive_control_start != std::string::npos);
+    const auto restore_world_runtime_body = telemetry_source.substr(
+        restore_world_runtime_start,
+        restore_session_start - restore_world_runtime_start);
+    CHECK(restore_world_runtime_body.find(
+        "ApplyAdaptiveEffectRuntimeReadback(\n"
+        "        \"restore\", 100, true)") != std::string::npos);
+    CHECK(restore_world_runtime_body.find("RestoreOriginal(") ==
+          std::string::npos);
+    CHECK(restore_world_runtime_body.find(
+        "domain=world_runtime") != std::string::npos);
     const auto restore_session_body = telemetry_source.substr(
         restore_session_start, adaptive_control_start - restore_session_start);
     CHECK(restore_session_body.find(
         "bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.\n"
         "        RestoreOriginal(AdaptiveGraphicsState)") != std::string::npos);
     CHECK(restore_session_body.find(
-        "bEffectRuntimeRestored = ApplyAdaptiveEffectRuntimeReadback(\n"
-        "        \"restore\", 100, true)") != std::string::npos);
+        "bEffectRuntimeRestored = RestoreSessionWorldRuntime()") !=
+          std::string::npos);
     CHECK(restore_session_body.find(
         "domain=graphics") != std::string::npos);
     CHECK(restore_session_body.find(
-        "domain=effect_runtime") != std::string::npos);
+        "domain=effect_runtime") == std::string::npos);
     CHECK(restore_session_body.find(
         "if (!bGraphicsRestored || !bEffectRuntimeRestored)") !=
           std::string::npos);
@@ -248,7 +262,9 @@ int main() {
         "KF2OPT_FIXED_EFFECT_BASELINE state=restored") !=
           std::string::npos);
     CHECK(interaction_source.find(
-        "CurrentProbe.RestoreSessionGraphics()") != std::string::npos);
+        "CurrentProbe.RestoreSessionGraphics()") == std::string::npos);
+    CHECK(interaction_source.find(
+        "CurrentProbe.RestoreSessionWorldRuntime()") != std::string::npos);
     const auto app_restore_function = telemetry_session_source.find(
         "bool UiRuntime::restore_live_adaptive_quality(");
     const auto app_toggle_function = telemetry_session_source.find(
@@ -934,13 +950,36 @@ int main() {
     CHECK(interaction_source.find("bGameSessionEnding = true",
         interaction_source.find("function NotifyGameSessionEnded()")) !=
           std::string::npos);
-    const auto teardown_restore = interaction_source.find(
-        "CurrentProbe.RestoreSessionGraphics()", session_ended);
+    const auto session_ended_body = interaction_source.substr(
+        session_ended, player_added - session_ended);
+    const auto teardown_process_restore = session_ended_body.find(
+        "RestoreOriginal(\n        ProcessAdaptiveGraphicsState)");
+    const auto teardown_world_lookup = session_ended_body.find(
+        "if (CurrentWorld != None)");
+    const auto teardown_restore = session_ended_body.find(
+        "CurrentProbe.RestoreSessionWorldRuntime()");
     const auto teardown_quiesce = interaction_source.find(
         "CurrentProbe.QuiesceForWorldTeardown()", session_ended);
+    CHECK(teardown_process_restore != std::string::npos);
+    CHECK(teardown_world_lookup != std::string::npos);
+    CHECK(teardown_process_restore < teardown_world_lookup);
     CHECK(teardown_restore != std::string::npos);
     CHECK(teardown_quiesce != std::string::npos);
-    CHECK(teardown_restore < teardown_quiesce);
+    CHECK(session_ended + teardown_restore < teardown_quiesce);
+    CHECK(session_ended_body.find(
+        "bProcessGraphicsRestorePending = true") != std::string::npos);
+    CHECK(session_ended_body.find(
+        "bProcessGraphicsRestorePending = false") != std::string::npos);
+    CHECK(session_ended_body.find(
+        "state=probe_missing") != std::string::npos);
+    CHECK(session_ended_body.find(
+        "boundary=session_end") != std::string::npos);
+    CHECK(session_ended_body.find(
+        "domain=process_graphics") != std::string::npos);
+    CHECK(count_occurrences(
+        session_ended_body, "domain=world_runtime") == 1);
+    CHECK(session_ended_body.find(
+        "ProcessAdaptiveGraphicsState = None") == std::string::npos);
     CHECK(interaction_source.find("CurrentProbe.QuiesceForWorldTeardown()",
         interaction_source.find("function NotifyGameSessionEnded()")) !=
           std::string::npos);
@@ -954,6 +993,35 @@ int main() {
           player_added);
     CHECK(interaction_source.find("bGameSessionEnding = false",
         player_added) == std::string::npos);
+    CHECK(interaction_source.find(
+        "var bool bProcessGraphicsRestorePending;") != std::string::npos);
+    const auto process_restore_retry_start = interaction_source.find(
+        "function bool RestorePendingProcessGraphicsWithBackoff(");
+    const auto process_restore_retry_end = interaction_source.find(
+        "function UpdateGameplayUiState(", process_restore_retry_start);
+    CHECK(process_restore_retry_start != std::string::npos);
+    CHECK(process_restore_retry_end != std::string::npos);
+    const auto process_restore_retry_body = interaction_source.substr(
+        process_restore_retry_start,
+        process_restore_retry_end - process_restore_retry_start);
+    CHECK(process_restore_retry_body.find(
+        "ProcessGraphicsRestoreNextAttemptRealTime") <
+          process_restore_retry_body.find(
+              "RestoreOriginal(ProcessAdaptiveGraphicsState)"));
+    CHECK(process_restore_retry_body.find(
+        "FMin(8.0, ProcessGraphicsRestoreRetryDelay * 2.0)") !=
+          std::string::npos);
+    CHECK(process_restore_retry_body.find(
+        "bProcessGraphicsRestorePending = false") != std::string::npos);
+    const auto process_restore_retry_call = interaction_source.find(
+        "RestorePendingProcessGraphicsWithBackoff(CurrentWorld)",
+        interaction_tick);
+    const auto fixed_effects_retry_call = interaction_source.find(
+        "EnsureFixedEffectsBaselineWithBackoff(CurrentProbe, CurrentWorld)",
+        interaction_tick);
+    CHECK(process_restore_retry_call != std::string::npos);
+    CHECK(fixed_effects_retry_call != std::string::npos);
+    CHECK(process_restore_retry_call < fixed_effects_retry_call);
     CHECK(mutator_source.find("InsertInteraction(CurrentInteraction)") !=
           std::string::npos);
     const auto interaction_path = mutator_source.find(
