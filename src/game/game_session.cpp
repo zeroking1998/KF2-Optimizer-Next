@@ -29,7 +29,7 @@ std::wstring folded(std::filesystem::path path) {
 bool is_nonblocking_overlay(HWND window) {
     const LONG_PTR style = GetWindowLongPtrW(window, GWL_EXSTYLE);
     if ((style & WS_EX_LAYERED) == 0) return false;
-    return (style & (WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)) != 0;
+    return (style & WS_EX_TRANSPARENT) != 0;
 }
 
 bool is_overlay_window(HWND window) {

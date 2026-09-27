@@ -114,22 +114,66 @@ int wmain(int argc, wchar_t** argv) {
                  game_bounds.bottom - game_bounds.top,
                  SWP_SHOWWINDOW | SWP_NOACTIVATE);
 
-    HWND overlay_cover = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
-        class_name, L"overlay fixture", WS_POPUP,
+    const auto create_layered_cover =
+        [&](DWORD extended_style, const wchar_t* title, BYTE alpha) {
+            HWND candidate = CreateWindowExW(
+                WS_EX_LAYERED | extended_style, class_name, title, WS_POPUP,
+                game_bounds.left, game_bounds.top,
+                game_bounds.right - game_bounds.left,
+                game_bounds.bottom - game_bounds.top,
+                nullptr, nullptr, window_class.hInstance, nullptr);
+            if (!candidate ||
+                !SetLayeredWindowAttributes(candidate, 0, alpha, LWA_ALPHA)) {
+                if (candidate) DestroyWindow(candidate);
+                return static_cast<HWND>(nullptr);
+            }
+            ShowWindow(candidate, SW_SHOWNA);
+            SetWindowPos(candidate, HWND_TOPMOST, game_bounds.left, game_bounds.top,
+                         game_bounds.right - game_bounds.left,
+                         game_bounds.bottom - game_bounds.top,
+                         SWP_SHOWWINDOW | SWP_NOACTIVATE);
+            return candidate;
+        };
+
+    HWND transparent_cover = create_layered_cover(
+        WS_EX_TRANSPARENT, L"transparent overlay fixture", 180);
+    CHECK(transparent_cover != nullptr);
+    CHECK(!kf2::game::is_game_area_covered(visible.value(), game_bounds));
+    DestroyWindow(transparent_cover);
+
+    HWND no_activate_cover = create_layered_cover(
+        WS_EX_NOACTIVATE, L"no-activate opaque fixture", 255);
+    CHECK(no_activate_cover != nullptr);
+    CHECK(kf2::game::is_game_area_covered(visible.value(), game_bounds));
+    DestroyWindow(no_activate_cover);
+
+    HWND tool_cover = create_layered_cover(
+        WS_EX_TOOLWINDOW, L"tool-window opaque fixture", 255);
+    CHECK(tool_cover != nullptr);
+    CHECK(kf2::game::is_game_area_covered(visible.value(), game_bounds));
+    DestroyWindow(tool_cover);
+
+    const wchar_t* overlay_class_name = L"KF2OptimizerNext-Overlay";
+    WNDCLASSW overlay_class{};
+    overlay_class.lpfnWndProc = test_window_proc;
+    overlay_class.hInstance = window_class.hInstance;
+    overlay_class.lpszClassName = overlay_class_name;
+    CHECK(RegisterClassW(&overlay_class) != 0);
+    HWND own_overlay = CreateWindowExW(
+        0, overlay_class_name, L"optimizer overlay fixture", WS_POPUP,
         game_bounds.left, game_bounds.top,
         game_bounds.right - game_bounds.left,
         game_bounds.bottom - game_bounds.top,
-        nullptr, nullptr, window_class.hInstance, nullptr);
-    CHECK(overlay_cover != nullptr);
-    SetLayeredWindowAttributes(overlay_cover, 0, 180, LWA_ALPHA);
-    ShowWindow(overlay_cover, SW_SHOWNA);
-    SetWindowPos(overlay_cover, HWND_TOPMOST, game_bounds.left, game_bounds.top,
+        nullptr, nullptr, overlay_class.hInstance, nullptr);
+    CHECK(own_overlay != nullptr);
+    ShowWindow(own_overlay, SW_SHOWNA);
+    SetWindowPos(own_overlay, HWND_TOPMOST, game_bounds.left, game_bounds.top,
                  game_bounds.right - game_bounds.left,
                  game_bounds.bottom - game_bounds.top,
                  SWP_SHOWWINDOW | SWP_NOACTIVATE);
     CHECK(!kf2::game::is_game_area_covered(visible.value(), game_bounds));
-    DestroyWindow(overlay_cover);
+    DestroyWindow(own_overlay);
+    CHECK(UnregisterClassW(overlay_class_name, overlay_class.hInstance));
 
     HWND origin_window = CreateWindowExW(0, class_name, L"origin fixture", WS_POPUP,
                                          0, 0, 640, 480, nullptr, nullptr,
