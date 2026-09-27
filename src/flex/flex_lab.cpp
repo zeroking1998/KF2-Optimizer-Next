@@ -19,6 +19,14 @@ constexpr wchar_t original_name[] = L"flexRelease_original.dll";
 constexpr wchar_t backup_name[] = L"flexRelease_x64.pre-lab.dll";
 constexpr wchar_t marker_name[] = L"flex-lab-transaction.marker";
 
+#if defined(KF2_FLEX_LAB_TEST_HOOKS)
+LabInstallTestHook install_test_hook{};
+
+void run_install_test_hook(LabInstallTestCheckpoint checkpoint) {
+    if (install_test_hook != nullptr) install_test_hook(checkpoint);
+}
+#endif
+
 Result<std::string> hash_file(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) return Result<std::string>::failure(
@@ -30,19 +38,21 @@ Result<std::string> hash_file(const std::filesystem::path& path) {
 }
 
 Result<bool> copy_verified(const std::filesystem::path& source,
-                           const std::filesystem::path& target) {
+                           const std::filesystem::path& target,
+                           std::string_view expected_hash) {
     if (!CopyFileW(source.c_str(), target.c_str(), FALSE)) return Result<bool>::failure(
         {ErrorCode::io_failure, L"FleX laboratory copy failed", GetLastError()});
-    const auto a = hash_file(source); const auto b = hash_file(target);
-    if (!a.has_value()) return Result<bool>::failure(a.error());
-    if (!b.has_value()) return Result<bool>::failure(b.error());
-    if (a.value() != b.value()) return Result<bool>::failure(
-        {ErrorCode::io_failure, L"FleX laboratory copy hash mismatch", 0});
+    const auto copied_hash = hash_file(target);
+    if (!copied_hash.has_value()) return Result<bool>::failure(copied_hash.error());
+    if (copied_hash.value() != expected_hash) return Result<bool>::failure(
+        {ErrorCode::stale_data,
+         L"FleX laboratory source changed before the verified copy completed", 0});
     return Result<bool>::success(true);
 }
 
 Result<bool> replace_verified(const std::filesystem::path& source,
-                              const std::filesystem::path& target) {
+                              const std::filesystem::path& target,
+                              std::string_view expected_hash) {
     const auto temporary = target.parent_path() /
         (target.filename().wstring() + L".kf2lab." +
          std::to_wstring(GetCurrentProcessId()) + L"." +
@@ -57,13 +67,12 @@ Result<bool> replace_verified(const std::filesystem::path& source,
         std::error_code ec;
         std::filesystem::remove(temporary, ec);
     };
-    const auto source_hash = hash_file(source);
     const auto staged_hash = hash_file(temporary);
-    if (!source_hash.has_value() || !staged_hash.has_value() ||
-        source_hash.value() != staged_hash.value()) {
+    if (!staged_hash.has_value() || staged_hash.value() != expected_hash) {
         cleanup();
         return Result<bool>::failure(
-            {ErrorCode::io_failure, L"FleX laboratory staged hash mismatch", 0});
+            {ErrorCode::stale_data,
+             L"FleX laboratory source changed before staging completed", 0});
     }
 
     HANDLE staged = CreateFileW(temporary.c_str(), GENERIC_READ | GENERIC_WRITE,
@@ -89,7 +98,7 @@ Result<bool> replace_verified(const std::filesystem::path& source,
                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
             const auto installed_hash = hash_file(target);
             if (installed_hash.has_value() &&
-                installed_hash.value() == source_hash.value())
+                installed_hash.value() == expected_hash)
                 return Result<bool>::success(true);
             return Result<bool>::failure(
                 {ErrorCode::io_failure, L"FleX laboratory replacement hash mismatch", 0});
@@ -177,6 +186,12 @@ Result<std::string> parse_legacy_original_hash(
 
 }  // namespace
 
+#if defined(KF2_FLEX_LAB_TEST_HOOKS)
+void set_lab_install_test_hook(LabInstallTestHook hook) noexcept {
+    install_test_hook = hook;
+}
+#endif
+
 Result<LabTransactionResult> install_offline_lab(const LabTransactionOptions& o) {
     const auto checked = preflight(o.game_directory, o.state_directory, o.game_running);
     if (!checked.has_value()) return Result<LabTransactionResult>::failure(checked.error());
@@ -197,9 +212,12 @@ Result<LabTransactionResult> install_offline_lab(const LabTransactionOptions& o)
     const auto forwarder_hash = hash_file(o.forwarder_dll);
     if (!original_hash.has_value()) return Result<LabTransactionResult>::failure(original_hash.error());
     if (!forwarder_hash.has_value()) return Result<LabTransactionResult>::failure(forwarder_hash.error());
-    auto copied = copy_verified(active, backup);
+#if defined(KF2_FLEX_LAB_TEST_HOOKS)
+    run_install_test_hook(LabInstallTestCheckpoint::sources_hashed);
+#endif
+    auto copied = copy_verified(active, backup, original_hash.value());
     if (!copied.has_value()) return Result<LabTransactionResult>::failure(copied.error());
-    copied = copy_verified(active, original);
+    copied = copy_verified(active, original, original_hash.value());
     if (!copied.has_value()) return Result<LabTransactionResult>::failure(copied.error());
     const auto marker_text = [&](std::string_view state) {
         return "schema=2\nstate=" + std::string{state} +
@@ -209,7 +227,10 @@ Result<LabTransactionResult> install_offline_lab(const LabTransactionOptions& o)
     const auto marked = platform::windows::atomic_replace_utf8(
         marker, marker_text("installing"));
     if (!marked.has_value()) return Result<LabTransactionResult>::failure(marked.error());
-    copied = replace_verified(o.forwarder_dll, active);
+#if defined(KF2_FLEX_LAB_TEST_HOOKS)
+    run_install_test_hook(LabInstallTestCheckpoint::marker_written);
+#endif
+    copied = replace_verified(o.forwarder_dll, active, forwarder_hash.value());
     if (!copied.has_value() || o.simulate_failure_after_install) {
         const auto restored = restore_offline_lab(o.game_directory, o.state_directory, false);
         if (!restored.has_value()) return Result<LabTransactionResult>::failure(restored.error());
@@ -252,7 +273,7 @@ Result<bool> restore_offline_lab(const std::filesystem::path& game,
     if (expected_hash && source_before.value() != *expected_hash)
         return Result<bool>::failure(
             {ErrorCode::stale_data, L"FleX backup does not match the transaction marker", 0});
-    auto copied = replace_verified(source, active);
+    auto copied = replace_verified(source, active, source_before.value());
     if (!copied.has_value()) return copied;
     const auto source_hash = hash_file(source); const auto active_hash = hash_file(active);
     if (!source_hash.has_value() || !active_hash.has_value() || source_hash.value() != active_hash.value())

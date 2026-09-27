@@ -152,6 +152,9 @@ are visible immediately.
 - Fixed FleX detection after graphics changes and settings restarts. User-
   enabled FleX runs at the verified minimum solver level; user-disabled FleX
   remains off and is never enabled by Adaptive.
+- Bound FleX laboratory backups, transaction markers, and installed forwarders
+  to the exact bytes that were verified, rejecting source-file replacement
+  races without replacing the active runtime or losing recovery evidence.
 - Fixed invalid Ultra shadow validation and other catalog/readback mismatches
   that could incorrectly report a safe KF2 setting as missing or out of range.
 - Fixed stale or mismatched compiled telemetry modules entering a package.

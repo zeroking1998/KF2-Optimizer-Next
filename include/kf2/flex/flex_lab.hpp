@@ -7,6 +7,16 @@
 
 namespace kf2::flex {
 
+#if defined(KF2_FLEX_LAB_TEST_HOOKS)
+enum class LabInstallTestCheckpoint {
+    sources_hashed,
+    marker_written,
+};
+
+using LabInstallTestHook = void (*)(LabInstallTestCheckpoint checkpoint);
+void set_lab_install_test_hook(LabInstallTestHook hook) noexcept;
+#endif
+
 struct LabTransactionOptions {
     std::filesystem::path game_directory;
     std::filesystem::path state_directory;
