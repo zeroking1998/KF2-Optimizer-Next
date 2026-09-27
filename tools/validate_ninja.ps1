@@ -1,12 +1,18 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')]
-    [string] $Configuration = 'Debug'
+    [string] $Configuration = 'Debug',
+
+    [switch] $PublicCI,
+
+    [switch] $EnableCompilerCache
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
-$buildRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'out\build\ninja-contract'))
+$configurationName = $Configuration.ToLowerInvariant()
+$buildRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot `
+    "out\build\ninja-contract-$configurationName"))
 $allowedRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'out\build'))
 if (-not $buildRoot.StartsWith($allowedRoot.TrimEnd('\') + '\',
         [StringComparison]::OrdinalIgnoreCase)) {
@@ -47,17 +53,54 @@ if ([string]::IsNullOrWhiteSpace($commit)) { $commit = 'local' }
 $dirty = (& git -C $projectRoot status --porcelain --untracked-files=normal 2>$null)
 if ($dirty) { $commit = "$commit.dirty" }
 $channel = if ($Configuration -eq 'Release') { 'release' } else { 'dev' }
+$releaseRepository = (& git -C $projectRoot remote get-url origin 2>$null)
+if ($releaseRepository -notmatch '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$') {
+    $releaseRepository = (& git -C $projectRoot remote get-url upstream 2>$null)
+}
+if ($releaseRepository -match '\.git$') {
+    $releaseRepository = $releaseRepository.Substring(
+        0, $releaseRepository.Length - 4)
+}
+$telemetryModule = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerTelemetry.u'
+$telemetryHash = if (Test-Path -LiteralPath $telemetryModule -PathType Leaf) {
+    (Get-FileHash -LiteralPath $telemetryModule -Algorithm SHA256).Hash.ToLowerInvariant()
+} else {
+    '589aa708392e2c26abc753ce272c6e146f274623181015e8f6bdc201ccb8e2f0'
+}
 
-& cmake -S $projectRoot -B $buildRoot -G Ninja `
-    "-DCMAKE_MAKE_PROGRAM=$ninja" `
-    "-DCMAKE_BUILD_TYPE=$Configuration" `
-    '-DBUILD_TESTING=ON' `
-    "-DKF2_BUILD_COMMIT=$commit" `
-    "-DKF2_BUILD_CHANNEL=$channel"
+$configureArguments = @(
+    '-S', $projectRoot,
+    '-B', $buildRoot,
+    '-G', 'Ninja',
+    "-DCMAKE_MAKE_PROGRAM=$ninja",
+    "-DCMAKE_BUILD_TYPE=$Configuration",
+    '-DBUILD_TESTING=ON',
+    '-DKF2_VERSION=0.0.4-alpha',
+    "-DKF2_BUILD_COMMIT=$commit",
+    "-DKF2_BUILD_CHANNEL=$channel",
+    "-DKF2_OFFLINE_TELEMETRY_SHA256=$telemetryHash"
+)
+if ($releaseRepository -match '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
+    $configureArguments += "-DKF2_RELEASE_REPOSITORY=$releaseRepository"
+}
+if ($EnableCompilerCache) {
+    $sccache = Get-Command sccache -CommandType Application -ErrorAction Stop
+    $configureArguments += "-DCMAKE_CXX_COMPILER_LAUNCHER=$($sccache.Source)"
+    if ($Configuration -eq 'Debug') {
+        $configureArguments += '-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded'
+    }
+}
+
+& cmake @configureArguments
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & cmake --build $buildRoot --parallel
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& ctest --test-dir $buildRoot --output-on-failure
+$ctestArguments = @('--test-dir', $buildRoot, '--output-on-failure')
+if ($PublicCI) {
+    $ctestArguments += @('--label-exclude', 'requires-desktop')
+}
+& ctest @ctestArguments
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "PASS: Ninja $Configuration build and all tests passed"

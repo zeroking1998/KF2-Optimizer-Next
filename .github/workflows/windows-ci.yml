@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+env:
+  SCCACHE_GHA_ENABLED: "true"
+  SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+
 jobs:
   test:
     name: Test ${{ matrix.configuration }}
@@ -23,6 +27,11 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v5
 
+      - name: Set up compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+        with:
+          version: v0.17.0
+
       - name: Validate documentation
         if: matrix.configuration == 'Debug'
         shell: pwsh
@@ -32,7 +41,11 @@ jobs:
 
       - name: Build and test
         shell: pwsh
-        run: ./tools/test.ps1 -Configuration ${{ matrix.configuration }} -PublicCI
+        run: >-
+          ./tools/validate_ninja.ps1
+          -Configuration ${{ matrix.configuration }}
+          -PublicCI
+          -EnableCompilerCache
 
       - name: Upload Windows x64 developer build
         if: matrix.configuration == 'Release'
@@ -40,7 +53,7 @@ jobs:
         with:
           name: KF2Optimizer-Windows-x64-${{ github.sha }}
           path: |
-            out/build/windows-x64-release/Release/KF2Optimizer.exe
+            out/build/ninja-contract-release/KF2Optimizer.exe
             README.md
             LICENSE
             THIRD_PARTY_NOTICES.md

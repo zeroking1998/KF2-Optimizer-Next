@@ -218,10 +218,14 @@ target_include_directories(KF2Optimizer PRIVATE
     "${PROJECT_SOURCE_DIR}/include"
     "${PROJECT_SOURCE_DIR}/src"
 )
-target_compile_definitions(KF2Optimizer PRIVATE
+set_property(SOURCE src/app/build_identity.cpp APPEND PROPERTY
+    COMPILE_DEFINITIONS
     KF2_VERSION="${KF2_VERSION}"
     KF2_BUILD_COMMIT="${KF2_BUILD_COMMIT}"
     KF2_BUILD_CHANNEL="${KF2_BUILD_CHANNEL}"
+)
+set_property(SOURCE src/security/release_package_repair.cpp APPEND PROPERTY
+    COMPILE_DEFINITIONS
     KF2_RELEASE_REPOSITORY="${KF2_RELEASE_REPOSITORY}"
 )
 include(CheckIPOSupported)
