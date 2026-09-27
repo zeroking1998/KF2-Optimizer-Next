@@ -201,7 +201,48 @@ int main() {
         "class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(\n"
         "            AdaptiveGraphicsState, \"recover\", 100)") ==
           std::string::npos);
+    const auto fixed_effects_start = telemetry_source.find(
+        "function bool EnsureFixedSessionEffects()");
     CHECK(telemetry_source.find("function bool RestoreSessionGraphics()") !=
+          std::string::npos);
+    const auto restore_session_start = telemetry_source.find(
+        "function bool RestoreSessionGraphics()");
+    CHECK(fixed_effects_start != std::string::npos);
+    const auto fixed_effects_body = telemetry_source.substr(
+        fixed_effects_start, restore_session_start - fixed_effects_start);
+    CHECK(fixed_effects_body.find(
+        "bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.\n"
+        "            RestoreOriginal(AdaptiveGraphicsState)") !=
+          std::string::npos);
+    CHECK(fixed_effects_body.find(
+        "bEffectRuntimeRestored = ApplyAdaptiveEffectRuntimeReadback(\n"
+        "            \"rollback\", 100, true)") != std::string::npos);
+    CHECK(fixed_effects_body.find("domain=graphics") != std::string::npos);
+    CHECK(fixed_effects_body.find("domain=effect_runtime") !=
+          std::string::npos);
+    CHECK(fixed_effects_body.find(
+        "RestoreOriginal(\n                AdaptiveGraphicsState) ||") ==
+          std::string::npos);
+    const auto adaptive_control_start = telemetry_source.find(
+        "function bool ApplyAdaptiveResourceControl(", restore_session_start);
+    CHECK(adaptive_control_start != std::string::npos);
+    const auto restore_session_body = telemetry_source.substr(
+        restore_session_start, adaptive_control_start - restore_session_start);
+    CHECK(restore_session_body.find(
+        "bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.\n"
+        "        RestoreOriginal(AdaptiveGraphicsState)") != std::string::npos);
+    CHECK(restore_session_body.find(
+        "bEffectRuntimeRestored = ApplyAdaptiveEffectRuntimeReadback(\n"
+        "        \"restore\", 100, true)") != std::string::npos);
+    CHECK(restore_session_body.find(
+        "domain=graphics") != std::string::npos);
+    CHECK(restore_session_body.find(
+        "domain=effect_runtime") != std::string::npos);
+    CHECK(restore_session_body.find(
+        "if (!bGraphicsRestored || !bEffectRuntimeRestored)") !=
+          std::string::npos);
+    CHECK(restore_session_body.find(
+        "RestoreOriginal(\n            AdaptiveGraphicsState) ||") ==
           std::string::npos);
     CHECK(telemetry_source.find(
         "KF2OPT_FIXED_EFFECT_BASELINE state=restored") !=
@@ -262,6 +303,24 @@ int main() {
     CHECK(restore_adaptive_graphics != std::string::npos);
     CHECK(select_staggered_corpse != std::string::npos);
     CHECK(restore_adaptive_graphics < select_staggered_corpse);
+    const auto restore_adaptive_body = telemetry_source.substr(
+        restore_adaptive_graphics,
+        select_staggered_corpse - restore_adaptive_graphics);
+    CHECK(restore_adaptive_body.find(
+        "bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.\n"
+        "        RestoreOriginal(AdaptiveGraphicsState)") != std::string::npos);
+    CHECK(restore_adaptive_body.find(
+        "bEffectRuntimeRestored = ApplyAdaptiveEffectRuntimeReadback(\n"
+        "        \"restore\", 100, true)") != std::string::npos);
+    CHECK(restore_adaptive_body.find("domain=graphics") != std::string::npos);
+    CHECK(restore_adaptive_body.find("domain=effect_runtime") !=
+          std::string::npos);
+    CHECK(restore_adaptive_body.find(
+        "if (!bGraphicsRestored || !bEffectRuntimeRestored)") !=
+          std::string::npos);
+    CHECK(restore_adaptive_body.find(
+        "RestoreOriginal(\n            AdaptiveGraphicsState) ||") ==
+          std::string::npos);
     const auto restore_freezes = telemetry_source.find(
         "BeginAdaptiveCorpsePhysicsRelease();", restore_adaptive_graphics);
     CHECK(restore_freezes != std::string::npos);
@@ -1132,13 +1191,20 @@ int main() {
     CHECK(graphics_source.find("Snapshot.FixedEffectsQuality = 100") !=
           std::string::npos);
     CHECK(telemetry_source.find(
-        "GetEffectiveEffectsQuality(\n            AdaptiveGraphicsState)") !=
+        "GetEffectiveEffectsQuality(AdaptiveGraphicsState)") !=
           std::string::npos);
     CHECK(graphics_source.find(
         "Requested.FX.MaxGoreEffects, Max(2, Quality / 10)") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "function bool ApplyAdaptiveEffectRuntimeReadback(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "string Resource, int Quality, optional bool "
+        "bRestoreWorldParticleOriginals") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "if (bRestoreWorldParticleOriginals || AdaptiveGraphicsState == None)\n"
+        "    {\n        WorldParticleQuality = 100;") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "GoreManager.MaxBloodEffects =\n"

@@ -484,6 +484,9 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
 
 function bool EnsureFixedSessionEffects()
 {
+    local bool bGraphicsRestored;
+    local bool bEffectRuntimeRestored;
+
     if (bFixedSessionEffectsApplied)
     {
         return true;
@@ -498,12 +501,20 @@ function bool EnsureFixedSessionEffects()
             "fixed", class'KF2OptimizerAdaptiveGraphics'.static.
                 GetFixedSessionEffectsQuality()))
     {
-        if (!class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
-                AdaptiveGraphicsState) ||
-            !ApplyAdaptiveEffectRuntimeReadback("rollback", 100))
+        bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.
+            RestoreOriginal(AdaptiveGraphicsState);
+        bEffectRuntimeRestored = ApplyAdaptiveEffectRuntimeReadback(
+            "rollback", 100, true);
+        if (!bGraphicsRestored)
         {
             `log("KF2OPT_FIXED_EFFECT_BASELINE state=rollback_failed"$
-                 " mode=offline");
+                 " mode=offline domain=graphics reason=readback_mismatch");
+        }
+        if (!bEffectRuntimeRestored)
+        {
+            `log("KF2OPT_FIXED_EFFECT_BASELINE state=rollback_failed"$
+                 " mode=offline domain=effect_runtime"$
+                 " reason=readback_mismatch");
         }
         return false;
     }
@@ -516,13 +527,30 @@ function bool EnsureFixedSessionEffects()
 
 function bool RestoreSessionGraphics()
 {
+    local bool bGraphicsRestored;
+    local bool bEffectRuntimeRestored;
+
     if (AdaptiveGraphicsState == None)
     {
         return true;
     }
-    if (!class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
-            AdaptiveGraphicsState) ||
-        !ApplyAdaptiveEffectRuntimeReadback("restore", 100))
+    bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.
+        RestoreOriginal(AdaptiveGraphicsState);
+    bEffectRuntimeRestored = ApplyAdaptiveEffectRuntimeReadback(
+        "restore", 100, true);
+    if (!bGraphicsRestored)
+    {
+        `log("KF2OPT_FIXED_EFFECT_BASELINE state=restore_failed"$
+             " boundary=session_end domain=graphics"$
+             " reason=readback_mismatch");
+    }
+    if (!bEffectRuntimeRestored)
+    {
+        `log("KF2OPT_FIXED_EFFECT_BASELINE state=restore_failed"$
+             " boundary=session_end domain=effect_runtime"$
+             " reason=readback_mismatch");
+    }
+    if (!bGraphicsRestored || !bEffectRuntimeRestored)
     {
         return false;
     }
@@ -913,7 +941,7 @@ function bool ApplyAdaptiveWorldParticleIdleControl(int Quality)
 // created earlier in the current world keep their old limits. Synchronize the
 // already-live instances and include them in the authenticated APPLIED result.
 function bool ApplyAdaptiveEffectRuntimeReadback(
-    string Resource, int Quality)
+    string Resource, int Quality, optional bool bRestoreWorldParticleOriginals)
 {
     local KFGoreManager GoreManager;
     local KFImpactEffectManager ImpactEffectManager;
@@ -981,10 +1009,17 @@ function bool ApplyAdaptiveEffectRuntimeReadback(
         WorldInfo.ImpactFXEmitterPool.MaxActiveEffects =
             DesiredImpactEffects;
     }
-    WorldParticleQuality = AdaptiveGraphicsState == None ? 100 : Min(
-        AdaptiveGraphicsState.CpuQuality,
-        class'KF2OptimizerAdaptiveGraphics'.static.GetEffectiveEffectsQuality(
-            AdaptiveGraphicsState));
+    if (bRestoreWorldParticleOriginals || AdaptiveGraphicsState == None)
+    {
+        WorldParticleQuality = 100;
+    }
+    else
+    {
+        WorldParticleQuality = Min(
+            AdaptiveGraphicsState.CpuQuality,
+            class'KF2OptimizerAdaptiveGraphics'.static.
+                GetEffectiveEffectsQuality(AdaptiveGraphicsState));
+    }
     if (!ApplyAdaptiveWorldParticleIdleControl(WorldParticleQuality))
     {
         `log("KF2OPT_EFFECT_RUNTIME state=failed resource="$Resource$
@@ -1067,15 +1102,29 @@ function bool ApplyAdaptiveEffectRuntimeReadback(
 
 function RestoreAdaptiveGraphics()
 {
+    local bool bGraphicsRestored;
+    local bool bEffectRuntimeRestored;
+
     // Physics ownership must be released even if a separate graphics restore
     // readback fails; Adaptive-off cannot leave a corpse outside simulation.
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
     BeginAdaptiveCorpsePhysicsRelease();
-    if (!class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
-            AdaptiveGraphicsState) ||
-        !ApplyAdaptiveEffectRuntimeReadback("restore", 100))
+    bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.
+        RestoreOriginal(AdaptiveGraphicsState);
+    bEffectRuntimeRestored = ApplyAdaptiveEffectRuntimeReadback(
+        "restore", 100, true);
+    if (!bGraphicsRestored)
     {
-        `log("KF2OPT_ADAPTIVE_QUALITY state=restore_failed reason=readback_mismatch");
+        `log("KF2OPT_ADAPTIVE_QUALITY state=restore_failed"$
+             " domain=graphics reason=readback_mismatch");
+    }
+    if (!bEffectRuntimeRestored)
+    {
+        `log("KF2OPT_ADAPTIVE_QUALITY state=restore_failed"$
+             " domain=effect_runtime reason=readback_mismatch");
+    }
+    if (!bGraphicsRestored || !bEffectRuntimeRestored)
+    {
         return;
     }
     AdaptiveGraphicsQuality = 100;
