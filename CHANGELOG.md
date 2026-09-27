@@ -95,6 +95,9 @@ are visible immediately.
   entering Adaptive decisions or depressing the displayed 1% low window.
 - Preserved one native graphics baseline across consecutive maps so recovery
   never treats a previously reduced value as the user's new 100% setting.
+- Restored the exact server- or mod-provided online corpse limit when Adaptive
+  is disabled or an online world ends, with verified readback before the
+  captured value is released.
 - Fixed Adaptive recovery restoring quality without verified improvement,
   getting stuck below the user's quality, or rolling back through the wrong
   resource group. Pending and applied actions now retain their exact cause and
