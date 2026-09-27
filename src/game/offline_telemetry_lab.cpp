@@ -44,6 +44,8 @@ struct Marker {
     std::array<bool, 2> created{};
 };
 
+OfflineTelemetryCleanupTestHook cleanup_test_hook{};
+
 Result<bool> delete_file_after_transient_release(
     const std::filesystem::path& path, std::wstring_view failure_message) {
     DWORD native = ERROR_SUCCESS;
@@ -400,17 +402,29 @@ Result<bool> ensure_state_directory(const std::filesystem::path& state_root) {
     return Result<bool>::success(true);
 }
 
-void remove_created_empty_directories(
+bool remove_created_empty_directories(
     const std::filesystem::path& config_root,
     const std::array<bool, 2>& created) noexcept {
-    const auto root = config_root.parent_path() / L"Published";
-    const auto brewed = root / L"BrewedPC";
-    const std::array<std::filesystem::path, 2> paths{brewed, root};
-    const std::array<bool, 2> flags{created[1], created[0]};
-    for (std::size_t index = 0; index < paths.size(); ++index) {
-        if (flags[index]) {
-            static_cast<void>(RemoveDirectoryW(paths[index].c_str()));
+    try {
+        if (cleanup_test_hook != nullptr) cleanup_test_hook();
+        const auto root = config_root.parent_path() / L"Published";
+        const auto brewed = root / L"BrewedPC";
+        const std::array<std::filesystem::path, 2> paths{brewed, root};
+        const std::array<bool, 2> flags{created[1], created[0]};
+        bool complete = true;
+        for (std::size_t index = 0; index < paths.size(); ++index) {
+            if (!flags[index] || RemoveDirectoryW(paths[index].c_str())) {
+                continue;
+            }
+            const DWORD native = GetLastError();
+            if (native != ERROR_FILE_NOT_FOUND &&
+                native != ERROR_PATH_NOT_FOUND) {
+                complete = false;
+            }
         }
+        return complete;
+    } catch (...) {
+        return false;
     }
 }
 
@@ -429,6 +443,11 @@ Result<bool> validate_binding(const std::filesystem::path& config_root,
 }
 
 }  // namespace
+
+void set_offline_telemetry_cleanup_test_hook(
+    OfflineTelemetryCleanupTestHook hook) noexcept {
+    cleanup_test_hook = hook;
+}
 
 Result<bool> install_offline_telemetry_lab(
     const OfflineTelemetryLabOptions& options) {
@@ -476,39 +495,39 @@ Result<bool> install_offline_telemetry_lab(
     }
     auto state_directory = ensure_state_directory(options.state_root);
     if (!state_directory.has_value()) {
-        remove_created_empty_directories(options.config_root,
-                                         directories.value());
-        return Result<bool>::failure(state_directory.error());
+        static_cast<void>(remove_created_empty_directories(
+            options.config_root, directories.value()));
+        return Result<bool>::failure(std::move(state_directory.error()));
     }
     auto root_identity = directory_identity(options.config_root.parent_path());
     if (!root_identity.has_value()) {
-        remove_created_empty_directories(options.config_root,
-                                         directories.value());
-        return Result<bool>::failure(root_identity.error());
+        static_cast<void>(remove_created_empty_directories(
+            options.config_root, directories.value()));
+        return Result<bool>::failure(std::move(root_identity.error()));
     }
     auto marked = platform::windows::atomic_replace_utf8(
         marker, marker_bytes("installing", root_identity.value(),
                              directories.value()));
     if (!marked.has_value()) {
-        remove_created_empty_directories(options.config_root,
-                                         directories.value());
-        return Result<bool>::failure(marked.error());
+        static_cast<void>(remove_created_empty_directories(
+            options.config_root, directories.value()));
+        return Result<bool>::failure(std::move(marked.error()));
     }
     auto installed = platform::windows::atomic_replace_utf8(
         target, source.value());
     if (!installed.has_value()) {
         static_cast<void>(DeleteFileW(marker.c_str()));
-        remove_created_empty_directories(options.config_root,
-                                         directories.value());
-        return Result<bool>::failure(installed.error());
+        static_cast<void>(remove_created_empty_directories(
+            options.config_root, directories.value()));
+        return Result<bool>::failure(std::move(installed.error()));
     }
     auto target_hash = security::sha256_file_hex(target, kMaximumModuleBytes);
     if (!target_hash.has_value() ||
         target_hash.value() != kOfflineTelemetryModuleSha256) {
         static_cast<void>(DeleteFileW(target.c_str()));
         static_cast<void>(DeleteFileW(marker.c_str()));
-        remove_created_empty_directories(options.config_root,
-                                         directories.value());
+        static_cast<void>(remove_created_empty_directories(
+            options.config_root, directories.value()));
         return Result<bool>::failure(
             {ErrorCode::io_failure,
              L"Offline telemetry installation hash verification failed", 0});
@@ -519,9 +538,9 @@ Result<bool> install_offline_telemetry_lab(
     if (!committed.has_value()) {
         static_cast<void>(DeleteFileW(target.c_str()));
         static_cast<void>(DeleteFileW(marker.c_str()));
-        remove_created_empty_directories(options.config_root,
-                                         directories.value());
-        return Result<bool>::failure(committed.error());
+        static_cast<void>(remove_created_empty_directories(
+            options.config_root, directories.value()));
+        return Result<bool>::failure(std::move(committed.error()));
     }
     return Result<bool>::success(true);
 }
@@ -552,6 +571,9 @@ Result<bool> restore_offline_telemetry_lab(
     if (!marker.has_value()) return Result<bool>::failure(marker.error());
     auto bound = validate_binding(config_root, marker.value());
     if (!bound.has_value()) return bound;
+    Error cleanup_error{
+        ErrorCode::io_failure,
+        L"Offline telemetry directory cleanup is incomplete", 0};
     const auto target = target_module(config_root);
     const DWORD target_attributes = GetFileAttributesW(target.c_str());
     if (target_attributes != INVALID_FILE_ATTRIBUTES) {
@@ -578,12 +600,15 @@ Result<bool> restore_offline_telemetry_lab(
                  L"Offline telemetry target cannot be inspected", native});
         }
     }
+    if (!remove_created_empty_directories(config_root,
+                                          marker.value().created)) {
+        return Result<bool>::failure(std::move(cleanup_error));
+    }
     if (!DeleteFileW(marker_file.c_str())) {
         return Result<bool>::failure(
             {ErrorCode::io_failure,
              L"Offline telemetry marker could not be removed", GetLastError()});
     }
-    remove_created_empty_directories(config_root, marker.value().created);
     static_cast<void>(RemoveDirectoryW(
         (state_root / kStateDirectoryName).c_str()));
     return Result<bool>::success(true);

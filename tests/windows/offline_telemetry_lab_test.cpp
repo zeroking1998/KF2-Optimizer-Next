@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <new>
 #include <string>
 #include <thread>
 
@@ -53,6 +54,10 @@ std::string legacy_optimizer_module_bytes() {
         offset += name.size() + 64;
     }
     return bytes;
+}
+
+void throw_cleanup_allocation_failure() {
+    throw std::bad_alloc{};
 }
 
 }  // namespace
@@ -201,6 +206,62 @@ int main() {
     write_bytes(target, "changed after installation");
     CHECK(!restore_offline_telemetry_lab(config, state, false).has_value());
     CHECK(read_bytes(target) == "changed after installation");
+
+    const auto rollback_root = root / L"rollback";
+    const auto rollback_config =
+        rollback_root / L"profile" / L"KFGame" / L"Config";
+    const auto rollback_state = rollback_root / L"portable" / L"Data";
+    fs::create_directories(rollback_config);
+    fs::create_directories(rollback_state);
+    write_bytes(rollback_state / L"offline-telemetry-lab", "blocked");
+    const OfflineTelemetryLabOptions rollback_options{
+        .config_root = rollback_config,
+        .state_root = rollback_state,
+        .module_asset = asset,
+        .game_running = false};
+    set_offline_telemetry_cleanup_test_hook(
+        throw_cleanup_allocation_failure);
+    const auto rollback_failure =
+        install_offline_telemetry_lab(rollback_options);
+    set_offline_telemetry_cleanup_test_hook(nullptr);
+    CHECK(!rollback_failure.has_value());
+    CHECK(rollback_failure.error().code == kf2::ErrorCode::access_denied);
+    CHECK(rollback_failure.error().message !=
+          L"Offline telemetry directory cleanup is incomplete");
+    CHECK(fs::exists(rollback_config.parent_path() / L"Published" /
+                     L"BrewedPC"));
+
+    const auto restore_root = root / L"restore-cleanup";
+    const auto restore_config =
+        restore_root / L"profile" / L"KFGame" / L"Config";
+    const auto restore_state = restore_root / L"portable" / L"Data";
+    fs::create_directories(restore_config);
+    fs::create_directories(restore_state);
+    const OfflineTelemetryLabOptions restore_options{
+        .config_root = restore_config,
+        .state_root = restore_state,
+        .module_asset = asset,
+        .game_running = false};
+    CHECK(install_offline_telemetry_lab(restore_options).has_value());
+    const auto restore_target = restore_config.parent_path() / L"Published" /
+        L"BrewedPC" / L"KF2OptimizerTelemetry.u";
+    const auto restore_marker = restore_state / L"offline-telemetry-lab" /
+        L"module.marker";
+    set_offline_telemetry_cleanup_test_hook(
+        throw_cleanup_allocation_failure);
+    const auto restore_cleanup_failure = restore_offline_telemetry_lab(
+        restore_config, restore_state, false);
+    set_offline_telemetry_cleanup_test_hook(nullptr);
+    CHECK(!restore_cleanup_failure.has_value());
+    CHECK(restore_cleanup_failure.error().message ==
+          L"Offline telemetry directory cleanup is incomplete");
+    CHECK(!fs::exists(restore_target));
+    CHECK(fs::exists(restore_marker));
+    const auto restored_after_cleanup_failure = restore_offline_telemetry_lab(
+        restore_config, restore_state, false);
+    CHECK(restored_after_cleanup_failure.has_value());
+    CHECK(restored_after_cleanup_failure.value());
+    CHECK(!fs::exists(restore_marker));
 
     fs::remove_all(root, error);
     return EXIT_SUCCESS;
