@@ -6,6 +6,7 @@ class KF2OptimizerOnlineCorpseController extends Actor;
 struct OnlineFrozenCorpseState
 {
     var KFPawn Corpse;
+    var string CorpseId;
     var bool bOriginalTickDisabled;
     var bool bOriginalCollideActors;
     var bool bOriginalBlockActors;
@@ -16,6 +17,7 @@ struct OnlineFrozenCorpseState
 
 var array<OnlineFrozenCorpseState> FrozenCorpses;
 var int FreezeScanCursor;
+var int ReleaseScanCursor;
 var int VisualScanCursor;
 var int VisualControlPhase;
 var float LastPhysicsMutationRealTime;
@@ -24,6 +26,7 @@ var bool bFreezeReceiptReported;
 var bool bRestoreReceiptReported;
 var bool bLodReceiptReported;
 var bool bSkeletonReceiptReported;
+var float LastReleaseFailureRealTime;
 
 function KF2OptimizerOnlineContextInteraction GetOnlineInteraction()
 {
@@ -58,60 +61,201 @@ function int FindFrozenCorpse(KFPawn Candidate)
     return -1;
 }
 
-function bool RestoreOneOnlineCorpse()
+function string GetOnlineCorpseId(KFPawn Candidate)
 {
-    local int Index;
+    if (Candidate == None)
+    {
+        return "none";
+    }
+    return string(Candidate.Name)$":"$
+        int(Candidate.TimeOfDeath * 1000.0);
+}
+
+function bool IsOnlineCorpseInPool(
+    KFPawn Candidate, KFGoreManager GoreManager)
+{
+    return Candidate != None && GoreManager != None &&
+        GoreManager.CorpsePool.Find(Candidate) >= 0;
+}
+
+function bool IsOnlineCorpseRecycledStateSafe(KFPawn Candidate)
+{
+    if (Candidate == None || Candidate.bDeleteMe)
+    {
+        return false;
+    }
+    return Candidate.Physics != PHYS_None &&
+        !Candidate.bTickIsDisabled &&
+        (Candidate.bCollideActors || Candidate.bBlockActors ||
+         (Candidate.CollisionComponent != None &&
+          Candidate.CollisionComponent.BlockRigidBody));
+}
+
+function LogOnlineCorpseReleaseFailure(string CorpseId, string Reason)
+{
+    if (WorldInfo != None &&
+        WorldInfo.RealTimeSeconds - LastReleaseFailureRealTime < 1.0)
+    {
+        return;
+    }
+    if (WorldInfo != None)
+    {
+        LastReleaseFailureRealTime = WorldInfo.RealTimeSeconds;
+    }
+    `log("KF2OPT_ONLINE_CORPSE_ACTION state=release_failed corpse_id="$
+         CorpseId$" reason="$Reason$
+         " ownership=retained local_only=true");
+}
+
+function bool TryRestoreOnlineCorpse(int Index, string Reason)
+{
     local KFPawn Candidate;
     local OnlineFrozenCorpseState Original;
 
-    for (Index = FrozenCorpses.Length - 1; Index >= 0; --Index)
+    if (Index < 0 || Index >= FrozenCorpses.Length)
     {
+        return false;
+    }
+    Original = FrozenCorpses[Index];
+    Candidate = Original.Corpse;
+    if (Candidate == None || Candidate.bDeleteMe ||
+        GetOnlineCorpseId(Candidate) != Original.CorpseId)
+    {
+        LogOnlineCorpseReleaseFailure(
+            Original.CorpseId, "identity_not_owned");
+        return false;
+    }
+    Candidate.SetPhysics(PHYS_RigidBody);
+    Candidate.SetCollision(
+        Original.bOriginalCollideActors,
+        Original.bOriginalBlockActors,
+        Original.bOriginalIgnoreEncroachers);
+    if (Original.bHadCollisionComponent)
+    {
+        if (Candidate.CollisionComponent == None)
+        {
+            LogOnlineCorpseReleaseFailure(
+                Original.CorpseId, "collision_component_missing");
+            return false;
+        }
+        Candidate.CollisionComponent.SetBlockRigidBody(
+            Original.bOriginalBlockRigidBody);
+    }
+    Candidate.SetTickIsDisabled(Original.bOriginalTickDisabled);
+    if (Candidate.Physics != PHYS_RigidBody ||
+        Candidate.bCollideActors != Original.bOriginalCollideActors ||
+        Candidate.bBlockActors != Original.bOriginalBlockActors ||
+        Candidate.bIgnoreEncroachers != Original.bOriginalIgnoreEncroachers ||
+        Candidate.bTickIsDisabled != Original.bOriginalTickDisabled ||
+        (Original.bHadCollisionComponent &&
+         Candidate.CollisionComponent.BlockRigidBody !=
+             Original.bOriginalBlockRigidBody))
+    {
+        LogOnlineCorpseReleaseFailure(
+            Original.CorpseId, "restore_readback_mismatch");
+        return false;
+    }
+    LastPhysicsMutationRealTime = WorldInfo.RealTimeSeconds;
+    if (!bRestoreReceiptReported)
+    {
+        bRestoreReceiptReported = true;
+        `log("KF2OPT_ONLINE_CORPSE_ACTION state=restored corpse_id="$
+             Original.CorpseId$" reason="$Reason$
+             " physics=PHYS_RigidBody collision=original"$
+             " tick=original local_only=true readback=verified");
+    }
+    return true;
+}
+
+function bool ReleaseOneOnlineCorpse(bool bRestoreAll)
+{
+    local bool bRemoved;
+    local int Index;
+    local int Scanned;
+    local string CurrentId;
+    local KFGoreManager GoreManager;
+    local KFPawn Candidate;
+
+    if (WorldInfo == None ||
+        WorldInfo.RealTimeSeconds - LastPhysicsMutationRealTime < 0.45)
+    {
+        return false;
+    }
+    if (FrozenCorpses.Length <= 0)
+    {
+        ReleaseScanCursor = 0;
+        return false;
+    }
+    if (!bRestoreAll)
+    {
+        GoreManager = KFGoreManager(WorldInfo.MyGoreEffectManager);
+        if (GoreManager == None)
+        {
+            return false;
+        }
+    }
+    ReleaseScanCursor = Clamp(
+        ReleaseScanCursor, 0, FrozenCorpses.Length - 1);
+    while (FrozenCorpses.Length > 0 && Scanned < 8)
+    {
+        Index = Clamp(ReleaseScanCursor, 0, FrozenCorpses.Length - 1);
         Candidate = FrozenCorpses[Index].Corpse;
+        bRemoved = false;
+        ++Scanned;
         if (Candidate == None || Candidate.bDeleteMe)
         {
             FrozenCorpses.Remove(Index, 1);
-            continue;
+            bRemoved = true;
         }
-        Original = FrozenCorpses[Index];
-        Candidate.SetPhysics(PHYS_RigidBody);
-        Candidate.SetCollision(
-            Original.bOriginalCollideActors,
-            Original.bOriginalBlockActors,
-            Original.bOriginalIgnoreEncroachers);
-        if (Original.bHadCollisionComponent &&
-            Candidate.CollisionComponent != None)
+        else
         {
-            Candidate.CollisionComponent.SetBlockRigidBody(
-                Original.bOriginalBlockRigidBody);
+            CurrentId = GetOnlineCorpseId(Candidate);
+            if (CurrentId != FrozenCorpses[Index].CorpseId)
+            {
+                if (IsOnlineCorpseRecycledStateSafe(Candidate))
+                {
+                    `log("KF2OPT_ONLINE_CORPSE_ACTION"$
+                         " state=ownership_released"$
+                         " reason=reused_state_verified old_corpse_id="$
+                         FrozenCorpses[Index].CorpseId$
+                         " current_corpse_id="$CurrentId$
+                         " local_only=true readback=verified");
+                    FrozenCorpses.Remove(Index, 1);
+                    bRemoved = true;
+                }
+                else
+                {
+                    LogOnlineCorpseReleaseFailure(
+                        FrozenCorpses[Index].CorpseId,
+                        "reused_state_unverified");
+                }
+            }
+            else if ((bRestoreAll ||
+                      !IsOnlineCorpseInPool(Candidate, GoreManager)) &&
+                     TryRestoreOnlineCorpse(Index, bRestoreAll ?
+                         "adaptive_disabled" : "removed_from_pool"))
+            {
+                FrozenCorpses.Remove(Index, 1);
+                ReleaseScanCursor = FrozenCorpses.Length > 0 ?
+                    Index % FrozenCorpses.Length : 0;
+                return true;
+            }
         }
-        Candidate.SetTickIsDisabled(Original.bOriginalTickDisabled);
-        if (Candidate.Physics != PHYS_RigidBody ||
-            Candidate.bCollideActors != Original.bOriginalCollideActors ||
-            Candidate.bBlockActors != Original.bOriginalBlockActors ||
-            Candidate.bTickIsDisabled != Original.bOriginalTickDisabled ||
-            (Original.bHadCollisionComponent &&
-             Candidate.CollisionComponent != None &&
-             Candidate.CollisionComponent.BlockRigidBody !=
-                 Original.bOriginalBlockRigidBody))
-        {
-            `log("KF2OPT_ONLINE_CORPSE_ACTION state=failed action=restore"$
-                 " corpse_id="$string(Candidate.Name)$
-                 " reason=readback_mismatch local_only=true");
-            return false;
-        }
-        FrozenCorpses.Remove(Index, 1);
-        LastPhysicsMutationRealTime = WorldInfo.RealTimeSeconds;
-        if (!bRestoreReceiptReported)
-        {
-            bRestoreReceiptReported = true;
-            `log("KF2OPT_ONLINE_CORPSE_ACTION state=restored corpse_id="$
-                 string(Candidate.Name)$
-                 " physics=PHYS_RigidBody collision=original"$
-                 " tick=original local_only=true readback=verified");
-        }
-        return true;
+        ReleaseScanCursor = FrozenCorpses.Length > 0 ?
+            (bRemoved ? Index % FrozenCorpses.Length :
+             (Index + 1) % FrozenCorpses.Length) : 0;
     }
     return false;
+}
+
+function bool RestoreOneOnlineCorpse()
+{
+    return ReleaseOneOnlineCorpse(true);
+}
+
+function bool PruneOneOnlineFrozenCorpse()
+{
+    return ReleaseOneOnlineCorpse(false);
 }
 
 function bool FreezeOneOnlineCorpse()
@@ -161,6 +305,7 @@ function bool FreezeOneOnlineCorpse()
             continue;
         }
         Original.Corpse = Candidate;
+        Original.CorpseId = GetOnlineCorpseId(Candidate);
         Original.bOriginalTickDisabled = Candidate.bTickIsDisabled;
         Original.bOriginalCollideActors = Candidate.bCollideActors;
         Original.bOriginalBlockActors = Candidate.bBlockActors;
@@ -390,6 +535,10 @@ event Tick(float DeltaTime)
         CurrentInteraction.IsOnlineAdaptiveEnabled())
     {
         bRestoreReceiptReported = false;
+        if (PruneOneOnlineFrozenCorpse())
+        {
+            return;
+        }
         FreezeOneOnlineCorpse();
     }
     else if (WorldInfo != None &&
@@ -399,9 +548,22 @@ event Tick(float DeltaTime)
     }
 }
 
+event Destroyed()
+{
+    if (FrozenCorpses.Length > 0)
+    {
+        `log("KF2OPT_ONLINE_CORPSE_ACTION state=ownership_released"$
+             " reason=world_teardown count="$FrozenCorpses.Length$
+             " safe_boundary=world_destroy local_only=true");
+    }
+    FrozenCorpses.Length = 0;
+    Super.Destroyed();
+}
+
 defaultproperties
 {
     bAlwaysTick=true
     bHidden=true
+    LastReleaseFailureRealTime=-1.0
     RemoteRole=ROLE_None
 }

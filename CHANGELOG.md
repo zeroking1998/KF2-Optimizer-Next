@@ -61,6 +61,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Frozen-corpse ownership is now released only after verified restoration,
+  confirmed actor reuse, or world destruction. Pool removal and reused actors
+  can no longer leave a live corpse non-physical, non-colliding, or unticked.
 - Kept schema 6 living-Zed telemetry in sync between the UnrealScript producer
   and native parser, preventing complete snapshots from being discarded when
   offscreen skeleton-update counts are present.

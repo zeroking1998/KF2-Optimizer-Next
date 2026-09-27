@@ -518,6 +518,58 @@ int main() {
     CHECK(online_corpse_controller_source.find(
         "function bool RestoreOneOnlineCorpse()") != std::string::npos);
     CHECK(online_corpse_controller_source.find(
+        "var string CorpseId;") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "var int ReleaseScanCursor;") != std::string::npos);
+    const auto online_release_start = online_corpse_controller_source.find(
+        "function bool ReleaseOneOnlineCorpse(bool bRestoreAll)");
+    const auto online_release_end = online_corpse_controller_source.find(
+        "function bool RestoreOneOnlineCorpse()", online_release_start);
+    CHECK(online_release_start != std::string::npos);
+    CHECK(online_release_end != std::string::npos);
+    const auto online_release_body = online_corpse_controller_source.substr(
+        online_release_start, online_release_end - online_release_start);
+    CHECK(online_release_body.find(
+        "while (FrozenCorpses.Length > 0 && Scanned < 8)") !=
+          std::string::npos);
+    CHECK(online_release_body.find(
+        "Candidate == None || Candidate.bDeleteMe") != std::string::npos);
+    CHECK(online_release_body.find(
+        "CurrentId != FrozenCorpses[Index].CorpseId") !=
+          std::string::npos);
+    CHECK(online_release_body.find(
+        "IsOnlineCorpseRecycledStateSafe(Candidate)") !=
+          std::string::npos);
+    CHECK(online_release_body.find(
+        "reused_state_unverified") != std::string::npos);
+    CHECK(online_release_body.find(
+        "!IsOnlineCorpseInPool(Candidate, GoreManager)") !=
+          std::string::npos);
+    CHECK(online_release_body.find(
+        "TryRestoreOnlineCorpse(Index, bRestoreAll ?") !=
+          std::string::npos);
+    CHECK(online_release_body.find(
+        "(Index + 1) % FrozenCorpses.Length") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "state=release_failed corpse_id=") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "ownership=retained local_only=true") != std::string::npos);
+    const auto online_tick_start = online_corpse_controller_source.find(
+        "event Tick(float DeltaTime)");
+    const auto online_tick_prune = online_corpse_controller_source.find(
+        "PruneOneOnlineFrozenCorpse()", online_tick_start);
+    const auto online_tick_freeze = online_corpse_controller_source.find(
+        "FreezeOneOnlineCorpse()", online_tick_start);
+    CHECK(online_tick_start != std::string::npos);
+    CHECK(online_tick_prune != std::string::npos);
+    CHECK(online_tick_freeze != std::string::npos);
+    CHECK(online_tick_prune < online_tick_freeze);
+    CHECK(online_corpse_controller_source.find(
+        "reason=world_teardown count=") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "safe_boundary=world_destroy local_only=true") !=
+          std::string::npos);
+    CHECK(online_corpse_controller_source.find(
         "WorldInfo.TimeSeconds - Candidate.TimeOfDeath < 10.0") !=
           std::string::npos);
     CHECK(online_corpse_controller_source.find(
@@ -1912,7 +1964,7 @@ int main() {
         "AdaptiveLastPhysicsMutationWorldTime=-1.0") != std::string::npos);
     const char* physics_mutation_functions[] = {
         "function int SleepBaselineAwakeMonsterCorpses(",
-        "function int RestoreOneAdaptiveCorpseFreeze()",
+        "function bool TryRestoreAdaptiveCorpseFreeze(",
         "function bool FreezeOnePressureEligibleCorpse(",
         "function int WakeNearAdaptiveDistanceSleptCorpses()",
         "function int WakeAdaptiveDistanceSleptCorpseBatch()",
@@ -2039,11 +2091,13 @@ int main() {
           std::string::npos);
     CHECK(pressure_freeze_body.find("Candidate.Mesh.RigidBodyIsAwake()") <
           pressure_freeze_body.find("Candidate.SetPhysics(PHYS_None)"));
+    CHECK(pressure_freeze_body.find(
+        "FindAdaptiveCorpseFreeze(Candidate) >= 0") != std::string::npos);
     const auto restore_freeze_function = telemetry_source.find(
-        "function int RestoreOneAdaptiveCorpseFreeze()");
+        "function bool TryRestoreAdaptiveCorpseFreeze(");
     CHECK(restore_freeze_function != std::string::npos);
     const auto restore_freeze_end = telemetry_source.find(
-        "function bool FreezeOnePressureEligibleCorpse(",
+        "function int ReleaseOneAdaptiveCorpseFreeze(bool bRestoreAll)",
         restore_freeze_function);
     CHECK(restore_freeze_end != std::string::npos);
     const auto restore_freeze_body = telemetry_source.substr(
@@ -2058,11 +2112,61 @@ int main() {
     CHECK(restore_freeze_body.find("Candidate.SetTickIsDisabled(") !=
           std::string::npos);
     CHECK(restore_freeze_body.find(
-        "state=unfrozen reason=adaptive_disabled") != std::string::npos);
+        "state=unfrozen reason=\"$Reason") != std::string::npos);
     CHECK(restore_freeze_body.find("physics=rigid_body readback=verified") !=
           std::string::npos);
     CHECK(restore_freeze_body.find(
         "collision=restored tick=restored") != std::string::npos);
+    CHECK(restore_freeze_body.find(
+        "GetAdaptiveCorpseActionId(Candidate) !=") != std::string::npos);
+    CHECK(restore_freeze_body.find(
+        "LogAdaptiveCorpseFreezeReleaseFailure(") != std::string::npos);
+
+    const auto freeze_release_function = telemetry_source.find(
+        "function int ReleaseOneAdaptiveCorpseFreeze(bool bRestoreAll)");
+    const auto freeze_release_end = telemetry_source.find(
+        "function PruneAdaptiveCorpseFreezes()", freeze_release_function);
+    CHECK(freeze_release_function != std::string::npos);
+    CHECK(freeze_release_end != std::string::npos);
+    const auto freeze_release_body = telemetry_source.substr(
+        freeze_release_function,
+        freeze_release_end - freeze_release_function);
+    CHECK(freeze_release_body.find(
+        "Candidate == None || Candidate.bDeleteMe") != std::string::npos);
+    CHECK(freeze_release_body.find(
+        "CurrentId != AdaptiveFrozenCorpses[Index].CorpseId") !=
+          std::string::npos);
+    CHECK(freeze_release_body.find(
+        "IsAdaptiveCorpseRecycledStateSafe(Candidate)") !=
+          std::string::npos);
+    CHECK(freeze_release_body.find(
+        "reason=reused_state_verified") != std::string::npos);
+    CHECK(freeze_release_body.find(
+        "reused_state_unverified") != std::string::npos);
+    CHECK(freeze_release_body.find(
+        "bRestoreAll || !IsAdaptiveCorpseInPool(Candidate)") !=
+          std::string::npos);
+    CHECK(freeze_release_body.find(
+        "Index, bRestoreAll ?") != std::string::npos);
+    CHECK(freeze_release_body.find(
+        "(Index + 1) % AdaptiveFrozenCorpses.Length") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function PruneAdaptiveCorpseFreezes()\n"
+        "{\n    ReleaseOneAdaptiveCorpseFreeze(false);") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "function int RestoreOneAdaptiveCorpseFreeze()\n"
+        "{\n    return ReleaseOneAdaptiveCorpseFreeze(true);") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "state=release_failed corpse_id=") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "ownership=retained") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "reason=world_teardown count=") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "safe_boundary=world_destroy") != std::string::npos);
 
     const auto cleanup_start = telemetry_source.find(
         "function bool StaggerCorpseCleanup()");
