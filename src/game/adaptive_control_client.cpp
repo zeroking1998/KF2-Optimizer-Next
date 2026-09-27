@@ -217,6 +217,14 @@ bool valid_adaptive_control_token(std::string_view token) noexcept {
     return true;
 }
 
+std::optional<std::uint64_t> next_adaptive_control_sequence(
+    std::uint64_t current) noexcept {
+    if (current == std::numeric_limits<std::uint64_t>::max()) {
+        return std::nullopt;
+    }
+    return current + 1;
+}
+
 Result<std::string> generate_adaptive_control_token() {
     std::array<unsigned char, 16> bytes{};
     const auto status = BCryptGenRandom(

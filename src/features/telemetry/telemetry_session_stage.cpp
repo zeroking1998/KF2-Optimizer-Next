@@ -164,17 +164,24 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
             L"optimizer"});
         return false;
     }
-    const auto next_sequence =
-        adaptive_control_sequence == std::numeric_limits<std::uint64_t>::max()
-            ? 1 : adaptive_control_sequence + 1;
+    const auto next_sequence = game::next_adaptive_control_sequence(
+        adaptive_control_sequence);
+    if (!next_sequence) {
+        events->append({0, diagnostics::Severity::error,
+            "ADAPTIVE_CONTROL_SEQUENCE_EXHAUSTED",
+            std::wstring{reason} +
+                L"; the authenticated command sequence is exhausted and will not be reused against the live KF2 receiver",
+            L"optimizer"});
+        return false;
+    }
     const auto restored = game::send_adaptive_control({
         .port = *port,
         .token = adaptive_control_token,
-        .sequence = next_sequence,
+        .sequence = *next_sequence,
         .resource = game::AdaptiveResourceControl::disable,
         .quality = 100,
         .timeout_ms = 500});
-    adaptive_control_sequence = next_sequence;
+    adaptive_control_sequence = *next_sequence;
     if (!restored.has_value()) {
         events->append({0, diagnostics::Severity::error,
             "ADAPTIVE_RUNTIME_RESTORE_FAILED",
@@ -224,18 +231,25 @@ bool UiRuntime::set_live_adaptive_enabled(
     }
     if (!port || adaptive_mode_dispatcher.busy()) return false;
 
-    const auto next_sequence =
-        adaptive_control_sequence == std::numeric_limits<std::uint64_t>::max()
-            ? 1 : adaptive_control_sequence + 1;
+    const auto next_sequence = game::next_adaptive_control_sequence(
+        adaptive_control_sequence);
+    if (!next_sequence) {
+        events->append({0, diagnostics::Severity::error,
+            "ADAPTIVE_CONTROL_SEQUENCE_EXHAUSTED",
+            std::wstring{reason} +
+                L"; the authenticated command sequence is exhausted and will not be reused against the live KF2 receiver",
+            L"optimizer"});
+        return false;
+    }
     const auto changed = game::send_adaptive_control({
         .port = *port,
         .token = adaptive_control_token,
-        .sequence = next_sequence,
+        .sequence = *next_sequence,
         .resource = enabled ? game::AdaptiveResourceControl::enable
                             : game::AdaptiveResourceControl::disable,
         .quality = enabled ? effective_corpse_limit() : 100,
         .timeout_ms = game::kAdaptiveControlReadbackTimeoutMs});
-    adaptive_control_sequence = next_sequence;
+    adaptive_control_sequence = *next_sequence;
     if (!changed.has_value()) {
         events->append({0, diagnostics::Severity::error,
             enabled ? "ADAPTIVE_RUNTIME_ENABLE_FAILED"
@@ -319,7 +333,9 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     adaptive_actuation.disable(monotonic_ns());
     adaptive_actuation.rebase({}, monotonic_ns());
     adaptive_control_pending.reset();
-    adaptive_control_sequence = 0;
+    // The token and its anti-replay sequence belong to the protected KF2
+    // session, not to one DXGI/PDH binding. Recoverable detach/rebind paths
+    // must keep both values monotonically aligned with the live receiver.
     adaptive_runtime_mode_process_start_id = 0;
     adaptive_runtime_mode_port.reset();
     adaptive_runtime_mode_last_attempt_ns = 0;

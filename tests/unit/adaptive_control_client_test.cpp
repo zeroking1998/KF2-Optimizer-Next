@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <thread>
@@ -25,6 +26,10 @@ int main() {
     CHECK(!valid_adaptive_control_token("0123"));
     CHECK(!valid_adaptive_control_token(
         "0123456789ABCDEF0123456789ABCDEF"));
+    CHECK(next_adaptive_control_sequence(0) == 1);
+    CHECK(next_adaptive_control_sequence(41) == 42);
+    CHECK(!next_adaptive_control_sequence(
+        std::numeric_limits<std::uint64_t>::max()).has_value());
 
     const auto generated = generate_adaptive_control_token();
     CHECK(generated.has_value());
