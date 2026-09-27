@@ -13,6 +13,7 @@ struct OnlineFrozenCorpseState
     var bool bOriginalIgnoreEncroachers;
     var bool bHadCollisionComponent;
     var bool bOriginalBlockRigidBody;
+    var bool bRestorePending;
 };
 
 var array<OnlineFrozenCorpseState> FrozenCorpses;
@@ -160,7 +161,10 @@ function bool TryRestoreOnlineCorpse(int Index, string Reason)
             Original.CorpseId, "identity_not_owned");
         return false;
     }
-    Candidate.SetPhysics(PHYS_RigidBody);
+    if (Candidate.Physics != PHYS_RigidBody)
+    {
+        Candidate.SetPhysics(PHYS_RigidBody);
+    }
     Candidate.SetCollision(
         Original.bOriginalCollideActors,
         Original.bOriginalBlockActors,
@@ -182,6 +186,8 @@ function bool TryRestoreOnlineCorpse(int Index, string Reason)
         Candidate.bBlockActors != Original.bOriginalBlockActors ||
         Candidate.bIgnoreEncroachers != Original.bOriginalIgnoreEncroachers ||
         Candidate.bTickIsDisabled != Original.bOriginalTickDisabled ||
+        (Candidate.CollisionComponent != None) !=
+            Original.bHadCollisionComponent ||
         (Original.bHadCollisionComponent &&
          Candidate.CollisionComponent.BlockRigidBody !=
              Original.bOriginalBlockRigidBody))
@@ -266,9 +272,12 @@ function bool ReleaseOneOnlineCorpse(bool bRestoreAll)
                 }
             }
             else if ((bRestoreAll ||
+                      FrozenCorpses[Index].bRestorePending ||
                       !IsOnlineCorpseInPool(Candidate, GoreManager)) &&
                      TryRestoreOnlineCorpse(Index, bRestoreAll ?
-                         "adaptive_disabled" : "removed_from_pool"))
+                         "adaptive_disabled" :
+                         (FrozenCorpses[Index].bRestorePending ?
+                          "freeze_rollback" : "removed_from_pool")))
             {
                 FrozenCorpses.Remove(Index, 1);
                 ReleaseScanCursor = FrozenCorpses.Length > 0 ?
@@ -296,6 +305,7 @@ function bool PruneOneOnlineFrozenCorpse()
 function bool FreezeOneOnlineCorpse()
 {
     local int Index;
+    local int LedgerIndex;
     local int Offset;
     local int PoolLength;
     local int ScanCount;
@@ -351,6 +361,9 @@ function bool FreezeOneOnlineCorpse()
             Original.bOriginalBlockRigidBody =
                 Candidate.CollisionComponent.BlockRigidBody;
         }
+        Original.bRestorePending = false;
+        LedgerIndex = FrozenCorpses.Length;
+        FrozenCorpses.AddItem(Original);
         Candidate.SetCollision(false, false, Candidate.bIgnoreEncroachers);
         if (Candidate.CollisionComponent != None)
         {
@@ -362,37 +375,25 @@ function bool FreezeOneOnlineCorpse()
             (Candidate.CollisionComponent != None &&
              Candidate.CollisionComponent.BlockRigidBody))
         {
-            Candidate.SetCollision(
-                Original.bOriginalCollideActors,
-                Original.bOriginalBlockActors,
-                Original.bOriginalIgnoreEncroachers);
-            if (Original.bHadCollisionComponent &&
-                Candidate.CollisionComponent != None)
+            FrozenCorpses[LedgerIndex].bRestorePending = true;
+            if (TryRestoreOnlineCorpse(
+                    LedgerIndex, "freeze_prephysics_rollback"))
             {
-                Candidate.CollisionComponent.SetBlockRigidBody(
-                    Original.bOriginalBlockRigidBody);
+                FrozenCorpses.Remove(LedgerIndex, 1);
             }
-            Candidate.SetTickIsDisabled(Original.bOriginalTickDisabled);
             return false;
         }
         Candidate.SetPhysics(PHYS_None);
         if (Candidate.Physics != PHYS_None)
         {
-            Candidate.SetPhysics(PHYS_RigidBody);
-            Candidate.SetCollision(
-                Original.bOriginalCollideActors,
-                Original.bOriginalBlockActors,
-                Original.bOriginalIgnoreEncroachers);
-            if (Original.bHadCollisionComponent &&
-                Candidate.CollisionComponent != None)
+            FrozenCorpses[LedgerIndex].bRestorePending = true;
+            if (TryRestoreOnlineCorpse(
+                    LedgerIndex, "freeze_postphysics_rollback"))
             {
-                Candidate.CollisionComponent.SetBlockRigidBody(
-                    Original.bOriginalBlockRigidBody);
+                FrozenCorpses.Remove(LedgerIndex, 1);
             }
-            Candidate.SetTickIsDisabled(Original.bOriginalTickDisabled);
             return false;
         }
-        FrozenCorpses.AddItem(Original);
         LastPhysicsMutationRealTime = WorldInfo.RealTimeSeconds;
         if (!bFreezeReceiptReported)
         {
