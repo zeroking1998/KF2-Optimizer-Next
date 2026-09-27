@@ -54,37 +54,260 @@ const std::vector<ProcessorCoreMask>& processor_core_masks() {
     return masks;
 }
 
+const std::vector<detail::ProcessorGroupMask>& processor_group_masks() {
+    static const auto masks = [] {
+        DWORD length = 0;
+        if (GetLogicalProcessorInformationEx(RelationGroup, nullptr, &length) ||
+            GetLastError() != ERROR_INSUFFICIENT_BUFFER || length == 0) {
+            return std::vector<detail::ProcessorGroupMask>{};
+        }
+        std::vector<std::byte> storage(length);
+        auto* information = reinterpret_cast<
+            PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(storage.data());
+        if (!GetLogicalProcessorInformationEx(
+                RelationGroup, information, &length) ||
+            information->Relationship != RelationGroup ||
+            information->Group.ActiveGroupCount == 0 ||
+            information->Group.ActiveGroupCount >
+                information->Group.MaximumGroupCount) {
+            return std::vector<detail::ProcessorGroupMask>{};
+        }
+        std::vector<detail::ProcessorGroupMask> result;
+        result.reserve(information->Group.ActiveGroupCount);
+        for (WORD group = 0;
+             group < information->Group.ActiveGroupCount; ++group) {
+            const auto mask = information->Group.GroupInfo[group]
+                                  .ActiveProcessorMask;
+            if (mask == 0) return std::vector<detail::ProcessorGroupMask>{};
+            result.push_back({group, static_cast<std::uintptr_t>(mask)});
+        }
+        return result;
+    }();
+    return masks;
+}
+
 struct ProcessCpuCapacity {
     std::uint32_t affinity_logical_processors{0};
     std::optional<std::uint32_t> affinity_physical_cores;
     std::uint32_t system_logical_processors{0};
 };
 
-std::optional<ProcessCpuCapacity> query_process_cpu_capacity(HANDLE process) {
-    DWORD_PTR process_mask = 0;
-    DWORD_PTR system_mask = 0;
-    if (!GetProcessAffinityMask(process, &process_mask, &system_mask) ||
-        process_mask == 0) {
+std::optional<std::vector<std::uint16_t>> query_process_groups(
+    HANDLE process) {
+    const WORD active_groups = GetActiveProcessorGroupCount();
+    if (active_groups == 0) return std::nullopt;
+    std::vector<USHORT> groups(active_groups);
+    USHORT count = active_groups;
+    if (!GetProcessGroupAffinity(process, &count, groups.data()) ||
+        count == 0 || count > groups.size()) {
         return std::nullopt;
     }
+    groups.resize(count);
+    return groups;
+}
+
+struct CpuSetMaskQuery {
+    detail::CpuSetQueryState state{detail::CpuSetQueryState::unavailable};
+    std::vector<detail::ProcessorGroupMask> masks;
+    bool default_affinity_spans_groups{false};
+};
+
+CpuSetMaskQuery query_process_default_cpu_set_masks(HANDLE process) {
+    using QueryMasks = BOOL(WINAPI*)(
+        HANDLE, PGROUP_AFFINITY, USHORT, PUSHORT);
+    const HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
+    const auto query_masks = kernel ? reinterpret_cast<QueryMasks>(
+        GetProcAddress(kernel, "GetProcessDefaultCpuSetMasks")) : nullptr;
+    if (query_masks) {
+        USHORT required = 0;
+        if (query_masks(process, nullptr, 0, &required)) {
+            return required == 0
+                ? CpuSetMaskQuery{
+                      detail::CpuSetQueryState::succeeded, {}, true}
+                : CpuSetMaskQuery{
+                      detail::CpuSetQueryState::failed, {}, true};
+        }
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || required == 0) {
+            return {detail::CpuSetQueryState::failed, {}, true};
+        }
+        std::vector<GROUP_AFFINITY> affinities(required);
+        USHORT written = required;
+        if (!query_masks(
+                process, affinities.data(), required, &written) ||
+            written == 0 || written > required) {
+            return {detail::CpuSetQueryState::failed, {}, true};
+        }
+        CpuSetMaskQuery result{
+            detail::CpuSetQueryState::succeeded, {}, true};
+        result.masks.reserve(written);
+        for (USHORT index = 0; index < written; ++index) {
+            result.masks.push_back({
+                affinities[index].Group,
+                static_cast<std::uintptr_t>(affinities[index].Mask)});
+        }
+        return result;
+    }
+
+    // Windows 10 exposes CPU Set IDs but not their group masks through the
+    // process query. An empty list proves that the group affinity is exact;
+    // a non-empty list is deliberately left unavailable instead of guessed.
+    ULONG required_ids = 0;
+    if (GetProcessDefaultCpuSets(process, nullptr, 0, &required_ids)) {
+        return required_ids == 0
+            ? CpuSetMaskQuery{detail::CpuSetQueryState::succeeded, {}, false}
+            : CpuSetMaskQuery{detail::CpuSetQueryState::failed, {}, false};
+    }
+    return {detail::CpuSetQueryState::failed, {}, false};
+}
+
+std::optional<ProcessCpuCapacity> query_process_cpu_capacity(HANDLE process) {
+    const auto& system_masks = processor_group_masks();
+    const auto process_groups = query_process_groups(process);
+    if (system_masks.empty() || !process_groups) return std::nullopt;
+
+    detail::CpuCapacityObservation observation;
+    observation.system_group_masks = system_masks;
+    observation.process_groups = process_groups;
+    const auto cpu_sets = query_process_default_cpu_set_masks(process);
+    observation.cpu_set_query = cpu_sets.state;
+    observation.default_cpu_set_masks = cpu_sets.masks;
+    observation.default_affinity_spans_groups =
+        cpu_sets.default_affinity_spans_groups;
+
+    DWORD_PTR process_mask = 0;
+    DWORD_PTR primary_system_mask = 0;
+    if (GetProcessAffinityMask(
+            process, &process_mask, &primary_system_mask) &&
+        process_mask != 0 && primary_system_mask != 0) {
+        observation.primary_group_affinity = detail::ProcessorGroupMask{
+            process_groups->front(),
+            static_cast<std::uintptr_t>(process_mask)};
+        observation.primary_group_affinity_is_full =
+            process_mask == primary_system_mask;
+    }
+
+    const auto allowed = detail::resolve_process_capacity_masks(observation);
+    if (!allowed) return std::nullopt;
+
     ProcessCpuCapacity result;
-    result.affinity_logical_processors = static_cast<std::uint32_t>(
-        std::popcount(static_cast<std::uintptr_t>(process_mask)));
-    result.system_logical_processors =
-        GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
-    // GetProcessAffinityMask describes one processor group. Report physical
-    // affinity capacity only when the machine itself has one group; this
-    // avoids presenting an incomplete count on >64-logical-processor hosts.
-    if (GetActiveProcessorGroupCount() == 1) {
+    for (const auto& group : *allowed) {
+        result.affinity_logical_processors += static_cast<std::uint32_t>(
+            std::popcount(group.mask));
+    }
+    for (const auto& group : system_masks) {
+        result.system_logical_processors += static_cast<std::uint32_t>(
+            std::popcount(group.mask));
+    }
+    if (result.affinity_logical_processors == 0 ||
+        result.system_logical_processors == 0 ||
+        result.affinity_logical_processors >
+            result.system_logical_processors) {
+        return std::nullopt;
+    }
+
+    const auto& cores = processor_core_masks();
+    if (!cores.empty()) {
         std::uint32_t physical = 0;
-        for (const auto& core : processor_core_masks()) {
-            if (core.group == 0 && (core.mask & process_mask) != 0) ++physical;
+        for (const auto& core : cores) {
+            const auto group = std::find_if(
+                allowed->begin(), allowed->end(), [&](const auto& candidate) {
+                    return candidate.group == core.group;
+                });
+            if (group != allowed->end() && (group->mask & core.mask) != 0) {
+                ++physical;
+            }
         }
         if (physical > 0) result.affinity_physical_cores = physical;
     }
     return result;
 }
 
+}
+
+std::optional<std::vector<detail::ProcessorGroupMask>>
+detail::resolve_process_capacity_masks(
+    const CpuCapacityObservation& observation) {
+    if (!observation.process_groups || observation.process_groups->empty() ||
+        observation.system_group_masks.empty() ||
+        observation.cpu_set_query == CpuSetQueryState::failed) {
+        return std::nullopt;
+    }
+
+    auto system_masks = observation.system_group_masks;
+    std::sort(system_masks.begin(), system_masks.end(),
+              [](const auto& left, const auto& right) {
+                  return left.group < right.group;
+              });
+    for (std::size_t index = 0; index < system_masks.size(); ++index) {
+        if (system_masks[index].mask == 0 ||
+            (index > 0 && system_masks[index - 1].group ==
+                              system_masks[index].group)) {
+            return std::nullopt;
+        }
+    }
+
+    auto process_groups = *observation.process_groups;
+    std::sort(process_groups.begin(), process_groups.end());
+    if (std::adjacent_find(process_groups.begin(), process_groups.end()) !=
+        process_groups.end()) {
+        return std::nullopt;
+    }
+    for (const auto group : process_groups) {
+        if (std::ranges::none_of(system_masks, [&](const auto& system) {
+                return system.group == group;
+            })) {
+            return std::nullopt;
+        }
+    }
+
+    const auto normalize = [&](std::vector<ProcessorGroupMask> masks,
+                               bool require_process_group)
+        -> std::optional<std::vector<ProcessorGroupMask>> {
+        if (masks.empty()) return std::nullopt;
+        std::sort(masks.begin(), masks.end(),
+                  [](const auto& left, const auto& right) {
+                      return left.group < right.group;
+                  });
+        std::vector<ProcessorGroupMask> normalized;
+        for (const auto& mask : masks) {
+            const auto system = std::find_if(
+                system_masks.begin(), system_masks.end(),
+                [&](const auto& candidate) {
+                    return candidate.group == mask.group;
+                });
+            if (mask.mask == 0 || system == system_masks.end() ||
+                (mask.mask & ~system->mask) != 0 ||
+                (require_process_group &&
+                 !std::binary_search(process_groups.begin(),
+                                     process_groups.end(), mask.group))) {
+                return std::nullopt;
+            }
+            if (!normalized.empty() &&
+                normalized.back().group == mask.group) {
+                normalized.back().mask |= mask.mask;
+            } else {
+                normalized.push_back(mask);
+            }
+        }
+        return normalized;
+    };
+
+    if (observation.cpu_set_query == CpuSetQueryState::succeeded &&
+        !observation.default_cpu_set_masks.empty()) {
+        return normalize(observation.default_cpu_set_masks, false);
+    }
+    if (observation.cpu_set_query == CpuSetQueryState::succeeded &&
+        observation.default_cpu_set_masks.empty() &&
+        observation.primary_group_affinity &&
+        observation.primary_group_affinity_is_full &&
+        observation.default_affinity_spans_groups &&
+        system_masks.size() > 1) {
+        return system_masks;
+    }
+    if (observation.primary_group_affinity) {
+        return normalize({*observation.primary_group_affinity}, true);
+    }
+    return std::nullopt;
 }
 
 class ProcessMetricSampler::ThreadTracker final {
