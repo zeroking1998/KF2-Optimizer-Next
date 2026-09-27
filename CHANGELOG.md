@@ -61,6 +61,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Overlay fullscreen compatibility now stages only the display-mode delta and
+  rejects invalid graphics choices before any preset lookup.
 - Malformed KF2 texture-group tuples now fail closed instead of reporting
   unverified texture-resolution or filtering changes as saved.
 - Failed automatic update checks now keep the last successful result and retry

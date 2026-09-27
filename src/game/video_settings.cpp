@@ -908,6 +908,33 @@ Result<config::ConfigPreview> build_video_preview(
         const auto& saved = baseline->resolutions[static_cast<std::size_t>(previous)];
         return current.width != saved.width || current.height != saved.height;
     };
+    for (std::size_t option_index = 0;
+         option_index < kVideoOptionCount; ++option_index) {
+        const auto option = static_cast<VideoOption>(option_index);
+        // Overall quality is a derived label. Custom (-1) is valid and the
+        // builder never uses it as an array index.
+        if (option == VideoOption::overall_quality ||
+            !option_changed(option)) {
+            continue;
+        }
+        const int requested = selected(option);
+        const int count = video_choice_count(option, settings);
+        if (requested < 0 || requested >= count) {
+            return Result<config::ConfigPreview>::failure({
+                ErrorCode::invalid_argument,
+                std::wstring{video_option_label(option)} +
+                    L" selection is invalid",
+                0});
+        }
+    }
+    if ((!baseline ||
+         settings.film_grain_percent != baseline->film_grain_percent) &&
+        (settings.film_grain_percent < 0 ||
+         settings.film_grain_percent > 100)) {
+        return Result<config::ConfigPreview>::failure({
+            ErrorCode::invalid_argument,
+            L"Film grain selection is invalid", 0});
+    }
     bool changed = false;
     const auto apply_result = [&](Result<bool> result) -> bool {
         if (!result.has_value()) return false;

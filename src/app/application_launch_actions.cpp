@@ -280,9 +280,11 @@ Result<bool> UiRuntime::apply_overlay_compatible_display_mode() {
     if (current.value().choices[display] != kExclusiveFullscreen) {
         return Result<bool>::success(false);
     }
-    current.value().choices[display] = kBorderlessFullscreen;
+    const auto baseline = current.value();
+    auto desired = baseline;
+    desired.choices[display] = kBorderlessFullscreen;
     auto prepared = game::build_video_preview(
-        installation->config_root, current.value());
+        installation->config_root, desired, &baseline);
     if (!prepared.has_value()) {
         return Result<bool>::failure(prepared.error());
     }
