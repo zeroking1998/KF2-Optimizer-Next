@@ -216,6 +216,9 @@ int main() {
         "NextReadRealTime = 0.0;", graphics_world_reset) <
           graphics_timer_guard);
     CHECK(graphics_interaction_source.find(
+        "LastVotedMap = \"\";", graphics_world_reset) <
+          graphics_timer_guard);
+    CHECK(graphics_interaction_source.find(
         "LastObservedRealTime = CurrentWorld.RealTimeSeconds;",
         graphics_world_reset) < graphics_timer_guard);
     CHECK(graphics_interaction_source.find(

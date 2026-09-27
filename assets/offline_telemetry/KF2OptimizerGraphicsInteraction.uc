@@ -248,6 +248,7 @@ event Tick(float DeltaTime)
     if (CurrentWorld.RealTimeSeconds < LastObservedRealTime)
     {
         NextReadRealTime = 0.0;
+        LastVotedMap = "";
         NextWeaponMaterialGuardRealTime = 0.0;
         NextPawnRuntimeGuardRealTime = 0.0;
         bFireAfflictionGuardReported = false;
