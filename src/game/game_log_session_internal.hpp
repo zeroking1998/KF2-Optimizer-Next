@@ -14,6 +14,14 @@ struct OptimizerSessionContextReceipt {
     std::string_view state;
     std::string_view net_mode;
     std::string_view map;
+    std::optional<std::uint64_t> generation;
+};
+
+struct GameplayUiContextReceipt {
+    GameplayUiContext context{GameplayUiContext::unavailable};
+    std::optional<std::string_view> net_mode;
+    std::optional<std::string_view> map;
+    std::optional<std::uint64_t> generation;
 };
 
 inline constexpr std::size_t kMaximumLineBytes = 16 * 1024;
@@ -26,7 +34,8 @@ inline constexpr std::size_t kMaximumLineBytes = 16 * 1024;
     std::string_view line);
 [[nodiscard]] std::optional<std::uint16_t> parse_adaptive_bridge_line(
     std::string_view line);
-[[nodiscard]] std::optional<GameplayUiContext> parse_gameplay_ui_context_line(
+[[nodiscard]] std::optional<GameplayUiContextReceipt>
+parse_gameplay_ui_context_line(
     std::string_view line);
 [[nodiscard]] std::optional<OptimizerSessionContextReceipt>
 parse_optimizer_session_context_line(std::string_view line);

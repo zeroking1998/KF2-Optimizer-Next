@@ -57,29 +57,89 @@ std::optional<std::uint16_t> parse_adaptive_bridge_line(
     return static_cast<std::uint16_t>(port);
 }
 
-std::optional<GameplayUiContext> parse_gameplay_ui_context_line(
+std::optional<std::uint64_t> parse_generation(std::string_view value) {
+    std::uint64_t generation = 0;
+    const auto [end, error] = std::from_chars(
+        value.data(), value.data() + value.size(), generation);
+    if (error != std::errc{} || end != value.data() + value.size() ||
+        generation == 0) {
+        return std::nullopt;
+    }
+    return generation;
+}
+
+std::optional<GameplayUiContextReceipt> parse_gameplay_ui_context_line(
     std::string_view line) {
-    constexpr std::string_view marker =
+    constexpr std::string_view marker_v1 =
         "KF2OPT_GAMEPLAY_CONTEXT schema=1 state=";
-    const auto marker_offset = line.find(marker);
+    constexpr std::string_view marker_v2 =
+        "KF2OPT_GAMEPLAY_CONTEXT schema=2 state=";
+    const auto v2_offset = line.find(marker_v2);
+    const auto v1_offset = line.find(marker_v1);
+    const bool schema_v2 = v2_offset != std::string_view::npos;
+    const auto marker_offset = schema_v2 ? v2_offset : v1_offset;
     if (marker_offset == std::string_view::npos) return std::nullopt;
-    auto state = line.substr(marker_offset + marker.size());
-    const auto delimiter = state.find_first_of(" \t\r\n");
-    if (delimiter != std::string_view::npos) state = state.substr(0, delimiter);
-    if (state == "gameplay") return GameplayUiContext::gameplay;
-    if (state == "menu") return GameplayUiContext::menu;
-    if (state == "trader") return GameplayUiContext::trader;
-    return std::nullopt;
+    const auto marker = schema_v2 ? marker_v2 : marker_v1;
+    const auto state_start = marker_offset + marker.size();
+    const auto state_end = line.find_first_of(" \t\r\n", state_start);
+    const auto state = line.substr(
+        state_start, state_end == std::string_view::npos
+            ? std::string_view::npos : state_end - state_start);
+    GameplayUiContext context;
+    if (state == "gameplay") context = GameplayUiContext::gameplay;
+    else if (state == "menu") context = GameplayUiContext::menu;
+    else if (state == "trader") context = GameplayUiContext::trader;
+    else if (state == "unavailable") context = GameplayUiContext::unavailable;
+    else return std::nullopt;
+    if (!schema_v2) return GameplayUiContextReceipt{context};
+
+    constexpr std::string_view net_marker = " net_mode=";
+    constexpr std::string_view map_marker = " map=";
+    constexpr std::string_view generation_marker = " generation=";
+    const auto net_offset = line.find(net_marker, state_end);
+    const auto map_offset = line.find(map_marker, net_offset);
+    const auto generation_offset = line.find(generation_marker, map_offset);
+    if (state_end == std::string_view::npos ||
+        net_offset == std::string_view::npos ||
+        map_offset == std::string_view::npos ||
+        generation_offset == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const auto net_mode = line.substr(
+        net_offset + net_marker.size(),
+        map_offset - (net_offset + net_marker.size()));
+    const auto map = line.substr(
+        map_offset + map_marker.size(),
+        generation_offset - (map_offset + map_marker.size()));
+    auto generation_text = line.substr(
+        generation_offset + generation_marker.size());
+    const auto delimiter = generation_text.find_first_of(" \t\r\n");
+    if (delimiter != std::string_view::npos) {
+        generation_text = generation_text.substr(0, delimiter);
+    }
+    const auto generation = parse_generation(generation_text);
+    if ((net_mode != "NM_Client" && net_mode != "NM_ListenServer") ||
+        !safe_token(map, 128) || !generation) {
+        return std::nullopt;
+    }
+    return GameplayUiContextReceipt{
+        context, net_mode, map, generation};
 }
 
 std::optional<OptimizerSessionContextReceipt>
 parse_optimizer_session_context_line(std::string_view line) {
-    constexpr std::string_view marker =
+    constexpr std::string_view marker_v1 =
         "KF2OPT_SESSION_CONTEXT schema=1 state=";
+    constexpr std::string_view marker_v2 =
+        "KF2OPT_SESSION_CONTEXT schema=2 state=";
     constexpr std::string_view net_marker = " net_mode=";
     constexpr std::string_view map_marker = " map=";
-    const auto marker_offset = line.find(marker);
+    const auto v2_offset = line.find(marker_v2);
+    const auto v1_offset = line.find(marker_v1);
+    const bool schema_v2 = v2_offset != std::string_view::npos;
+    const auto marker_offset = schema_v2 ? v2_offset : v1_offset;
     if (marker_offset == std::string_view::npos) return std::nullopt;
+    const auto marker = schema_v2 ? marker_v2 : marker_v1;
     const auto state_start = marker_offset + marker.size();
     const auto net_offset = line.find(net_marker, state_start);
     if (net_offset == std::string_view::npos) return std::nullopt;
@@ -90,6 +150,22 @@ parse_optimizer_session_context_line(std::string_view line) {
         net_offset + net_marker.size(),
         map_offset - (net_offset + net_marker.size()));
     auto map = line.substr(map_offset + map_marker.size());
+    std::optional<std::uint64_t> generation;
+    if (schema_v2) {
+        constexpr std::string_view generation_marker = " generation=";
+        const auto generation_offset = map.find(generation_marker);
+        if (generation_offset == std::string_view::npos) return std::nullopt;
+        auto generation_text = map.substr(
+            generation_offset + generation_marker.size());
+        const auto generation_delimiter =
+            generation_text.find_first_of(" \t\r\n");
+        if (generation_delimiter != std::string_view::npos) {
+            generation_text = generation_text.substr(0, generation_delimiter);
+        }
+        generation = parse_generation(generation_text);
+        if (!generation) return std::nullopt;
+        map = map.substr(0, generation_offset);
+    }
     const auto delimiter = map.find_first_of(" \t\r\n");
     if (delimiter != std::string_view::npos) map = map.substr(0, delimiter);
     const bool client = state == "online_client_read_only" &&
@@ -97,7 +173,7 @@ parse_optimizer_session_context_line(std::string_view line) {
     const bool host = state == "online_host_read_only" &&
         net_mode == "NM_ListenServer";
     if ((!client && !host) || !safe_token(map, 128)) return std::nullopt;
-    return OptimizerSessionContextReceipt{state, net_mode, map};
+    return OptimizerSessionContextReceipt{state, net_mode, map, generation};
 }
 
 std::optional<double> parse_real(std::string_view text) {

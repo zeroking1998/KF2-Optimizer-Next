@@ -857,6 +857,8 @@ void clear_gameplay_snapshot(GameLogSession& session) noexcept {
     session.wave_number.reset();
     session.wave_total_ai.reset();
     session.gameplay_ui_context.reset();
+    session.gameplay_ui_context_map.reset();
+    session.gameplay_ui_context_generation.reset();
     clear_offline_telemetry_snapshot(session);
     session.zeds_remaining_observed_ns = 0;
     session.zeds_alive_observed_ns = 0;

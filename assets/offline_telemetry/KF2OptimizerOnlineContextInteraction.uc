@@ -6,6 +6,11 @@ class KF2OptimizerOnlineContextInteraction extends Interaction
     within GameViewportClient;
 
 var string LastReportedContext;
+var string LastReportedGameplayUiState;
+var string LastReportedGameplayUiNetMode;
+var int LastReportedGameplayUiGeneration;
+var string LastOnlineContextMapName;
+var int OnlineContextGeneration;
 var float LastObservedRealTime;
 var KF2OptimizerAdaptiveGraphicsState OnlineGraphicsState;
 var int OnlineGraphicsLastSequence;
@@ -739,14 +744,58 @@ function ReportSessionContext(
 {
     local string Context;
 
-    Context = State$"|"$NetModeName$"|"$MapName;
+    Context = State$"|"$NetModeName$"|"$MapName$"|"$
+        OnlineContextGeneration;
     if (Context == LastReportedContext)
     {
         return;
     }
     LastReportedContext = Context;
-    `log("KF2OPT_SESSION_CONTEXT schema=1 state="$State$
-         " net_mode="$NetModeName$" map="$MapName);
+    `log("KF2OPT_SESSION_CONTEXT schema=2 state="$State$
+         " net_mode="$NetModeName$" map="$MapName$
+         " generation="$OnlineContextGeneration);
+}
+
+function ReportOnlineGameplayUiState(
+    string State, string NetModeName, string MapName)
+{
+    if (State ~= LastReportedGameplayUiState &&
+        NetModeName ~= LastReportedGameplayUiNetMode &&
+        OnlineContextGeneration == LastReportedGameplayUiGeneration)
+    {
+        return;
+    }
+    LastReportedGameplayUiState = State;
+    LastReportedGameplayUiNetMode = NetModeName;
+    LastReportedGameplayUiGeneration = OnlineContextGeneration;
+    `log("KF2OPT_GAMEPLAY_CONTEXT schema=2 state="$State$
+         " net_mode="$NetModeName$" map="$MapName$
+         " generation="$OnlineContextGeneration);
+}
+
+function UpdateOnlineGameplayUiState(
+    PlayerController PrimaryController, string NetModeName, string MapName)
+{
+    local KFPlayerController KFPC;
+
+    KFPC = KFPlayerController(PrimaryController);
+    if (KFPC == None || KFPC.MyGFxManager == None)
+    {
+        ReportOnlineGameplayUiState(
+            "unavailable", NetModeName, MapName);
+    }
+    else if (!KFPC.MyGFxManager.bMenusOpen)
+    {
+        ReportOnlineGameplayUiState("gameplay", NetModeName, MapName);
+    }
+    else if (KFPC.MyGFxManager.CurrentMenu == KFPC.MyGFxManager.TraderMenu)
+    {
+        ReportOnlineGameplayUiState("trader", NetModeName, MapName);
+    }
+    else
+    {
+        ReportOnlineGameplayUiState("menu", NetModeName, MapName);
+    }
 }
 
 event Tick(float DeltaTime)
@@ -776,12 +825,22 @@ event Tick(float DeltaTime)
         return;
     }
 
-    // RealTimeSeconds restarts with each world. Clear the value-only receipt
-    // without retaining WorldInfo across map teardown.
-    if (CurrentWorld.RealTimeSeconds < LastObservedRealTime)
+    MapName = CurrentWorld.GetMapName(true);
+    // RealTimeSeconds restarts with each World. The map check also covers a
+    // travel boundary observed before the new World's clock advances. Both
+    // receipts carry this generation, so a delayed old UI state cannot make a
+    // new online session look like active gameplay.
+    if (OnlineContextGeneration <= 0 ||
+        CurrentWorld.RealTimeSeconds < LastObservedRealTime ||
+        (Len(LastOnlineContextMapName) > 0 &&
+         !(MapName ~= LastOnlineContextMapName)))
     {
+        ++OnlineContextGeneration;
         DiscardOnlineCorpseMaximumSnapshot("world_change");
         LastReportedContext = "";
+        LastReportedGameplayUiState = "";
+        LastReportedGameplayUiNetMode = "";
+        LastReportedGameplayUiGeneration = 0;
         ResetOnlineGraphicsListenerHealth("");
         bOnlineCorpseCapabilityReported = false;
         bOnlineCorpsePoolObserved = false;
@@ -793,7 +852,7 @@ event Tick(float DeltaTime)
         OnlineSessionEndingMapName = "";
     }
     LastObservedRealTime = CurrentWorld.RealTimeSeconds;
-    MapName = CurrentWorld.GetMapName(true);
+    LastOnlineContextMapName = MapName;
     if (bOnlineSessionEnding && Len(OnlineSessionEndingMapName) > 0 &&
         !(MapName ~= OnlineSessionEndingMapName))
     {
@@ -802,6 +861,16 @@ event Tick(float DeltaTime)
     }
     if (bOnlineSessionEnding)
     {
+        if (CurrentWorld.NetMode == NM_Client)
+        {
+            ReportOnlineGameplayUiState(
+                "unavailable", "NM_Client", MapName);
+        }
+        else if (CurrentWorld.NetMode == NM_ListenServer)
+        {
+            ReportOnlineGameplayUiState(
+                "unavailable", "NM_ListenServer", MapName);
+        }
         return;
     }
     if (OnlineGraphicsRetryMapName != MapName)
@@ -812,6 +881,9 @@ event Tick(float DeltaTime)
     {
         RestoreOnlineGraphicsAtMainMenu(CurrentWorld);
         LastReportedContext = "";
+        LastReportedGameplayUiState = "";
+        LastReportedGameplayUiNetMode = "";
+        LastReportedGameplayUiGeneration = 0;
         return;
     }
     if (CurrentWorld.NetMode == NM_Client)
@@ -820,6 +892,8 @@ event Tick(float DeltaTime)
         EnsureOnlineFixedEffectsBaseline(CurrentWorld);
         ReportSessionContext(
             "online_client_read_only", "NM_Client", MapName);
+        UpdateOnlineGameplayUiState(
+            PrimaryController, "NM_Client", MapName);
         EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController);
         ReportOnlineCorpseCapability(CurrentWorld);
         TrySleepOneOnlineCorpse(CurrentWorld);
@@ -831,6 +905,8 @@ event Tick(float DeltaTime)
         EnsureOnlineFixedEffectsBaseline(CurrentWorld);
         ReportSessionContext(
             "online_host_read_only", "NM_ListenServer", MapName);
+        UpdateOnlineGameplayUiState(
+            PrimaryController, "NM_ListenServer", MapName);
         EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController);
         ReportOnlineCorpseCapability(CurrentWorld);
         TrySleepOneOnlineCorpse(CurrentWorld);

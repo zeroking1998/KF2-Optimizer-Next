@@ -200,6 +200,7 @@ function UpdateGameplayUiState(PlayerController PrimaryController)
     KFPC = KFPlayerController(PrimaryController);
     if (KFPC == None || KFPC.MyGFxManager == None)
     {
+        ReportGameplayUiState("unavailable");
         return;
     }
     if (!KFPC.MyGFxManager.bMenusOpen)
