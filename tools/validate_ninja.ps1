@@ -3,6 +3,9 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string] $Configuration = 'Debug',
 
+    [ValidateSet('Full', 'Application')]
+    [string] $ValidationScope = 'Full',
+
     [switch] $PublicCI,
 
     [switch] $EnableCompilerCache
@@ -68,6 +71,7 @@ $telemetryHash = if (Test-Path -LiteralPath $telemetryModule -PathType Leaf) {
 } else {
     '589aa708392e2c26abc753ce272c6e146f274623181015e8f6bdc201ccb8e2f0'
 }
+$buildTesting = if ($ValidationScope -eq 'Full') { 'ON' } else { 'OFF' }
 
 $configureArguments = @(
     '-S', $projectRoot,
@@ -75,7 +79,7 @@ $configureArguments = @(
     '-G', 'Ninja',
     "-DCMAKE_MAKE_PROGRAM=$ninja",
     "-DCMAKE_BUILD_TYPE=$Configuration",
-    '-DBUILD_TESTING=ON',
+    "-DBUILD_TESTING=$buildTesting",
     '-DKF2_VERSION=0.0.4-alpha',
     "-DKF2_BUILD_COMMIT=$commit",
     "-DKF2_BUILD_CHANNEL=$channel",
@@ -96,6 +100,10 @@ if ($EnableCompilerCache) {
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & cmake --build $buildRoot --parallel
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($ValidationScope -eq 'Application') {
+    Write-Host "PASS: Ninja $Configuration application build passed"
+    exit 0
+}
 $ctestArguments = @('--test-dir', $buildRoot, '--output-on-failure')
 if ($PublicCI) {
     $ctestArguments += @('--label-exclude', 'requires-desktop')

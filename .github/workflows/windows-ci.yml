@@ -54,6 +54,7 @@ jobs:
         run: >-
           ./tools/validate_ninja.ps1
           -Configuration ${{ matrix.configuration }}
+          -ValidationScope ${{ matrix.configuration == 'Release' && 'Application' || 'Full' }}
           -PublicCI
           -EnableCompilerCache
 
