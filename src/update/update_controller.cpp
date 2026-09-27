@@ -1,8 +1,26 @@
 #include "kf2/update/update_controller.hpp"
 
+#include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace kf2::update {
+namespace {
+
+std::int64_t automatic_failure_retry_seconds(
+    std::uint32_t failure_count) noexcept {
+    std::int64_t delay = kAutomaticFailureRetryInitialSeconds;
+    for (std::uint32_t failure = 1;
+         failure < failure_count &&
+         delay < kAutomaticFailureRetryMaximumSeconds;
+         ++failure) {
+        delay = std::min(delay * 2,
+                         kAutomaticFailureRetryMaximumSeconds);
+    }
+    return delay;
+}
+
+}  // namespace
 
 UpdateController::UpdateController(std::string installed_version) {
     snapshot_.installed_version = std::move(installed_version);
@@ -13,12 +31,19 @@ void UpdateController::restore_preferences(
     std::int64_t last_check_unix_seconds,
     bool cached_check_completed,
     std::string cached_available_version,
-    std::string ignored_version) noexcept {
+    std::string ignored_version,
+    std::int64_t last_attempt_unix_seconds,
+    std::uint32_t automatic_failure_count) noexcept {
     snapshot_.automatic_checks_enabled = automatic_checks_enabled;
     snapshot_.last_check_unix_seconds = last_check_unix_seconds > 0
         ? last_check_unix_seconds : 0;
     snapshot_.cached_check_completed = cached_check_completed &&
         snapshot_.last_check_unix_seconds > 0;
+    snapshot_.last_attempt_unix_seconds = last_attempt_unix_seconds > 0
+        ? last_attempt_unix_seconds : 0;
+    snapshot_.automatic_failure_count =
+        snapshot_.last_attempt_unix_seconds > 0
+            ? automatic_failure_count : 0;
     snapshot_.ignored_version = std::move(ignored_version);
     if (snapshot_.cached_check_completed &&
         !cached_available_version.empty()) {
@@ -44,15 +69,25 @@ CheckStart UpdateController::begin_check(
         if (snapshot_.last_check_unix_seconds > 0 && now_unix_seconds >= 0 &&
             now_unix_seconds - snapshot_.last_check_unix_seconds <
                 kAutomaticCheckIntervalSeconds) return CheckStart::throttled;
+        if (snapshot_.automatic_failure_count > 0 &&
+            snapshot_.last_attempt_unix_seconds > 0 &&
+            now_unix_seconds >= 0 &&
+            now_unix_seconds - snapshot_.last_attempt_unix_seconds <
+                automatic_failure_retry_seconds(
+                    snapshot_.automatic_failure_count)) {
+            return CheckStart::throttled;
+        }
     }
-    snapshot_.last_check_unix_seconds = now_unix_seconds > 0
-        ? now_unix_seconds : snapshot_.last_check_unix_seconds;
+    snapshot_.last_attempt_unix_seconds = now_unix_seconds > 0
+        ? now_unix_seconds : snapshot_.last_attempt_unix_seconds;
+    if (trigger == CheckTrigger::automatic && now_unix_seconds > 0 &&
+        snapshot_.automatic_failure_count <
+            std::numeric_limits<std::uint32_t>::max()) {
+        ++snapshot_.automatic_failure_count;
+    }
     snapshot_.phase = UpdatePhase::checking;
     snapshot_.status = L"Checking official GitHub Releases...";
     snapshot_.available_release.reset();
-    snapshot_.cached_check_completed = false;
-    snapshot_.cached_available_version.reset();
-    snapshot_.dismissed = false;
     return CheckStart::started;
 }
 
@@ -64,6 +99,11 @@ void UpdateController::complete_check(
         snapshot_.status = result.error().message;
         return;
     }
+    snapshot_.last_check_unix_seconds =
+        snapshot_.last_attempt_unix_seconds > 0
+            ? snapshot_.last_attempt_unix_seconds
+            : snapshot_.last_check_unix_seconds;
+    snapshot_.automatic_failure_count = 0;
     snapshot_.available_release = std::move(result.value());
     snapshot_.cached_check_completed = true;
     snapshot_.cached_available_version = snapshot_.available_release

@@ -29,6 +29,30 @@ int main() {
           kf2::update::PersistedCheckResult::available);
     CHECK(loaded.value().available_version == "0.0.4-alpha");
     CHECK(loaded.value().ignored_version == "0.0.3-alpha");
+    CHECK(loaded.value().last_attempt_unix_seconds == 0);
+    CHECK(loaded.value().automatic_failure_count == 0);
+    CHECK(kf2::update::save_update_state(
+        path, {1'765'000'000,
+               kf2::update::PersistedCheckResult::current,
+               {}, {}, 1'765'000'300, 2}).has_value());
+    const auto retry = kf2::update::load_update_state(path);
+    CHECK(retry.has_value());
+    CHECK(retry.value().last_check_unix_seconds == 1'765'000'000);
+    CHECK(retry.value().last_attempt_unix_seconds == 1'765'000'300);
+    CHECK(retry.value().automatic_failure_count == 2);
+    CHECK(retry.value().last_result ==
+          kf2::update::PersistedCheckResult::current);
+    std::ofstream(path, std::ios::binary | std::ios::trunc)
+        << "schema_version=2\n"
+           "last_check_unix_seconds=1765000000\n"
+           "last_result=current\n"
+           "available_version=\n"
+           "ignored_version=\n";
+    const auto version_two = kf2::update::load_update_state(path);
+    CHECK(version_two.has_value());
+    CHECK(version_two.value().last_check_unix_seconds == 1'765'000'000);
+    CHECK(version_two.value().last_attempt_unix_seconds == 0);
+    CHECK(version_two.value().automatic_failure_count == 0);
     std::ofstream(path, std::ios::binary | std::ios::trunc)
         << "schema_version=1\nlast_check_unix_seconds=1765000000\n";
     const auto legacy = kf2::update::load_update_state(path);
@@ -43,5 +67,8 @@ int main() {
     CHECK(!kf2::update::save_update_state(
         path, {1, kf2::update::PersistedCheckResult::available, "bad/version", {}})
               .has_value());
+    CHECK(!kf2::update::save_update_state(
+        path, {1, kf2::update::PersistedCheckResult::unknown,
+               {}, {}, 0, 1}).has_value());
     return EXIT_SUCCESS;
 }

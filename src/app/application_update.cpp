@@ -59,7 +59,9 @@ update::PersistedUpdateState persisted_state(
     const update::UpdateSnapshot& snapshot) {
     update::PersistedUpdateState state{
         .last_check_unix_seconds = snapshot.last_check_unix_seconds,
-        .ignored_version = snapshot.ignored_version};
+        .ignored_version = snapshot.ignored_version,
+        .last_attempt_unix_seconds = snapshot.last_attempt_unix_seconds,
+        .automatic_failure_count = snapshot.automatic_failure_count};
     if (!snapshot.cached_check_completed) return state;
     if (snapshot.cached_available_version) {
         state.last_result = update::PersistedCheckResult::available;

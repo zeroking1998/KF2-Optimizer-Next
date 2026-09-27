@@ -19,6 +19,8 @@ struct PersistedUpdateState {
     PersistedCheckResult last_result{PersistedCheckResult::unknown};
     std::string available_version;
     std::string ignored_version;
+    std::int64_t last_attempt_unix_seconds{};
+    std::uint32_t automatic_failure_count{};
 };
 
 [[nodiscard]] Result<PersistedUpdateState> load_update_state(

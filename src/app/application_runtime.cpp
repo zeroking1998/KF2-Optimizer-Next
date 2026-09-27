@@ -438,7 +438,9 @@ void UiRuntime::initialize_update_state(const config::Settings& settings) {
         cached_update.last_result != update::PersistedCheckResult::unknown,
         cached_update.last_result == update::PersistedCheckResult::available
             ? cached_update.available_version : std::string{},
-        cached_update.ignored_version);
+        cached_update.ignored_version,
+        cached_update.last_attempt_unix_seconds,
+        cached_update.automatic_failure_count);
     refresh_update_presentation();
 }
 

@@ -9,6 +9,8 @@
 namespace kf2::update {
 
 inline constexpr std::int64_t kAutomaticCheckIntervalSeconds = 24 * 60 * 60;
+inline constexpr std::int64_t kAutomaticFailureRetryInitialSeconds = 5 * 60;
+inline constexpr std::int64_t kAutomaticFailureRetryMaximumSeconds = 60 * 60;
 
 enum class CheckTrigger { automatic, manual };
 enum class CheckStart { started, automatic_disabled, throttled, busy };
@@ -35,6 +37,8 @@ struct UpdateSnapshot {
     std::string installed_version;
     bool automatic_checks_enabled{true};
     std::int64_t last_check_unix_seconds{};
+    std::int64_t last_attempt_unix_seconds{};
+    std::uint32_t automatic_failure_count{};
     UpdatePhase phase{UpdatePhase::idle};
     std::optional<ReleaseInfo> available_release;
     bool cached_check_completed{false};
@@ -51,7 +55,9 @@ public:
                              std::int64_t last_check_unix_seconds,
                              bool cached_check_completed = false,
                              std::string cached_available_version = {},
-                             std::string ignored_version = {}) noexcept;
+                             std::string ignored_version = {},
+                             std::int64_t last_attempt_unix_seconds = 0,
+                             std::uint32_t automatic_failure_count = 0) noexcept;
     [[nodiscard]] CheckStart begin_check(CheckTrigger trigger,
                                          std::int64_t now_unix_seconds) noexcept;
     void complete_check(Result<std::optional<ReleaseInfo>> result);
