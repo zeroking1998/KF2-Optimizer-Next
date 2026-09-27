@@ -123,6 +123,7 @@ struct ProductReport {
     std::optional<int> living_bone_interpolation;
     std::optional<int> living_kinematic_distance_skipped;
     std::optional<int> living_ticks_offscreen;
+    std::optional<int> living_updates_skeleton_offscreen;
     std::optional<int> living_special_moves;
     std::optional<int> living_attack_moves;
     std::optional<int> living_grapple_moves;

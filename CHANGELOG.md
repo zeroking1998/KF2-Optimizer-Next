@@ -61,6 +61,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Kept schema 6 living-Zed telemetry in sync between the UnrealScript producer
+  and native parser, preventing complete snapshots from being discarded when
+  offscreen skeleton-update counts are present.
 - Target FPS now uses KF2's native, vendor-independent startup cap for launches
   from the optimizer, Steam, and shortcuts. A running session remains bound to
   the target it actually started with, preventing false Adaptive pressure after

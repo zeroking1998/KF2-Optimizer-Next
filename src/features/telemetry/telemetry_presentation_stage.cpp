@@ -239,6 +239,9 @@ void UiRuntime::append_gameplay_report_fields(
     include(session->telemetry_living_ticks_offscreen,
             session->telemetry_observed_ns,
             report.living_ticks_offscreen);
+    include(session->telemetry_living_updates_skeleton_offscreen,
+            session->telemetry_observed_ns,
+            report.living_updates_skeleton_offscreen);
     include(session->telemetry_living_special_moves,
             session->telemetry_observed_ns, report.living_special_moves);
     include(session->telemetry_living_attack_moves,

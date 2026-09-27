@@ -8,6 +8,8 @@
 #include <iterator>
 #include <set>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "kf2/game/gameplay_log_lab.hpp"
 
@@ -48,6 +50,33 @@ std::size_t count_occurrences(std::string_view text, std::string_view needle) {
     return count;
 }
 
+std::vector<std::string> telemetry_schema_fields(
+    std::string_view source, std::string_view block_start,
+    std::string_view block_end) {
+    const auto start = source.find(block_start);
+    if (start == std::string_view::npos) return {};
+    const auto end = source.find(block_end, start + block_start.size());
+    if (end == std::string_view::npos) return {};
+
+    std::vector<std::string> fields{"sample"};
+    auto cursor = start + block_start.size();
+    while (true) {
+        const auto name_start = source.find("\" ", cursor);
+        if (name_start == std::string_view::npos || name_start >= end) break;
+        const auto equals = source.find('=', name_start + 2);
+        if (equals == std::string_view::npos || equals >= end) return {};
+        const auto name = source.substr(name_start + 2,
+                                        equals - (name_start + 2));
+        if (name.empty() || name.find_first_of(" \t\r\n\"") !=
+                                std::string_view::npos) {
+            return {};
+        }
+        fields.emplace_back(name);
+        cursor = equals + 1;
+    }
+    return fields;
+}
+
 }  // namespace
 
 int main() {
@@ -56,6 +85,8 @@ int main() {
         "0123456789abcdef0123456789abcdef";
     const auto telemetry_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_SOURCE));
+    const auto telemetry_parser_source = normalize_newlines(
+        read_bytes(KF2_GAME_LOG_TELEMETRY_PARSER_SOURCE));
     const auto mutator_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_MUTATOR_SOURCE));
     const auto interaction_source = normalize_newlines(
@@ -81,6 +112,13 @@ int main() {
         read_bytes(KF2_ADAPTIVE_GRAPHICS_SOURCE));
     const auto telemetry_session_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_SESSION_SOURCE));
+    const auto producer_schema_fields = telemetry_schema_fields(
+        telemetry_source, "KF2OPT_TELEMETRY schema=6 sample=", ");\n}");
+    const auto parser_schema_fields = telemetry_schema_fields(
+        telemetry_parser_source, "KF2OPT_TELEMETRY schema=6 sample=",
+        "if (!sample");
+    CHECK(!producer_schema_fields.empty());
+    CHECK(producer_schema_fields == parser_schema_fields);
     CHECK(telemetry_source.find("AdaptiveControlToken") != std::string::npos);
     CHECK(telemetry_source.find("ValidAdaptiveControlToken") !=
           std::string::npos);
