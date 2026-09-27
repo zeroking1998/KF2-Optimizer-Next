@@ -23,6 +23,7 @@ struct OfflineTelemetrySnapshot {
     int living_bone_interpolation{0};
     int living_kinematic_distance_skipped{0};
     int living_ticks_offscreen{0};
+    int living_updates_skeleton_offscreen{0};
     int living_special_moves{0};
     int living_attack_moves{0};
     int living_grapple_moves{0};
@@ -122,6 +123,9 @@ struct OfflineTelemetrySnapshot {
 
 std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
     std::string_view line) {
+    // Schema 6 is an exact positional contract. Older schemas remain ignored;
+    // adding or reordering a required field needs a new schema or synchronized
+    // producer, parser and contract-test updates.
     constexpr std::string_view marker =
         "KF2OPT_TELEMETRY schema=6 sample=";
     const auto marker_position = line.find(marker);
@@ -168,7 +172,10 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
     const auto living_bone_atoms_skipped = take(" living_bone_interpolation=", entity_max);
     const auto living_bone_interpolation = take(" living_kinematic_distance_skipped=", entity_max);
     const auto living_kinematic_distance_skipped = take(" living_ticks_offscreen=", entity_max);
-    const auto living_ticks_offscreen = take(" living_special_moves=", entity_max);
+    const auto living_ticks_offscreen = take(
+        " living_updates_skeleton_offscreen=", entity_max);
+    const auto living_updates_skeleton_offscreen = take(
+        " living_special_moves=", entity_max);
     const auto living_special_moves = take(" living_attack_moves=", entity_max);
     const auto living_attack_moves = take(" living_grapple_moves=", entity_max);
     const auto living_grapple_moves = take(" living_stumbles=", entity_max);
@@ -293,6 +300,7 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
         !living_material_slots || !living_attachments || !living_anim_skipped ||
         !living_bone_atoms_skipped || !living_bone_interpolation ||
         !living_kinematic_distance_skipped || !living_ticks_offscreen ||
+        !living_updates_skeleton_offscreen ||
         !living_special_moves || !living_attack_moves ||
         !living_grapple_moves || !living_stumbles || !living_knockdowns ||
         !living_hit_reactions || !living_other_special_moves ||
@@ -335,6 +343,7 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
         *living_bone_interpolation > *living ||
         *living_kinematic_distance_skipped > *living ||
         *living_ticks_offscreen > *living ||
+        *living_updates_skeleton_offscreen > *living ||
         *living_special_moves > *living ||
         static_cast<std::int64_t>(*living_attack_moves) +
                 *living_grapple_moves + *living_stumbles +
@@ -400,6 +409,8 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
     result.living_kinematic_distance_skipped =
         *living_kinematic_distance_skipped;
     result.living_ticks_offscreen = *living_ticks_offscreen;
+    result.living_updates_skeleton_offscreen =
+        *living_updates_skeleton_offscreen;
     result.living_special_moves = *living_special_moves;
     result.living_attack_moves = *living_attack_moves;
     result.living_grapple_moves = *living_grapple_moves;
@@ -527,6 +538,8 @@ void apply_offline_telemetry_snapshot(
     session.telemetry_living_kinematic_distance_skipped =
         telemetry.living_kinematic_distance_skipped;
     session.telemetry_living_ticks_offscreen = telemetry.living_ticks_offscreen;
+    session.telemetry_living_updates_skeleton_offscreen =
+        telemetry.living_updates_skeleton_offscreen;
     session.telemetry_living_special_moves = telemetry.living_special_moves;
     session.telemetry_living_attack_moves = telemetry.living_attack_moves;
     session.telemetry_living_grapple_moves = telemetry.living_grapple_moves;
@@ -699,6 +712,7 @@ void clear_offline_telemetry_snapshot(GameLogSession& session) noexcept {
     session.telemetry_living_bone_interpolation.reset();
     session.telemetry_living_kinematic_distance_skipped.reset();
     session.telemetry_living_ticks_offscreen.reset();
+    session.telemetry_living_updates_skeleton_offscreen.reset();
     session.telemetry_living_special_moves.reset();
     session.telemetry_living_attack_moves.reset();
     session.telemetry_living_grapple_moves.reset();

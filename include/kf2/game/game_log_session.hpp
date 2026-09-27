@@ -57,6 +57,7 @@ struct GameLogSession {
     std::optional<int> telemetry_living_bone_interpolation;
     std::optional<int> telemetry_living_kinematic_distance_skipped;
     std::optional<int> telemetry_living_ticks_offscreen;
+    std::optional<int> telemetry_living_updates_skeleton_offscreen;
     std::optional<int> telemetry_living_special_moves;
     std::optional<int> telemetry_living_attack_moves;
     std::optional<int> telemetry_living_grapple_moves;

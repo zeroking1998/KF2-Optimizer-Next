@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <string_view>
 
 #include "kf2/game/game_log_session.hpp"
 
@@ -19,6 +20,7 @@ std::string telemetry_line(int sample, int corpse_awake = 2) {
         " living_attachments=17 living_anim_skipped=3"
         " living_bone_atoms_skipped=4 living_bone_interpolation=2"
         " living_kinematic_distance_skipped=1 living_ticks_offscreen=23"
+        " living_updates_skeleton_offscreen=7"
         " living_special_moves=8 living_attack_moves=3"
         " living_grapple_moves=1 living_stumbles=1 living_knockdowns=1"
         " living_hit_reactions=1 living_other_special_moves=1"
@@ -80,6 +82,7 @@ std::string empty_telemetry_line() {
         " living_attachments=1 living_anim_skipped=0"
         " living_bone_atoms_skipped=0 living_bone_interpolation=0"
         " living_kinematic_distance_skipped=0 living_ticks_offscreen=1"
+        " living_updates_skeleton_offscreen=1"
         " living_special_moves=0 living_attack_moves=0"
         " living_grapple_moves=0 living_stumbles=0 living_knockdowns=0"
         " living_hit_reactions=0 living_other_special_moves=0"
@@ -125,6 +128,24 @@ std::string empty_telemetry_line() {
         " particle_nonflex_components=0 particle_unclassified_components=0"
         " flex_surrogate_active=0 flex_surrogate_particles=0"
         " flex_surrogate_visible=0 flex_surrogate_lod=0\n";
+}
+
+std::string replace_once(std::string text, std::string_view from,
+                         std::string_view to) {
+    const auto position = text.find(from);
+    if (position != std::string::npos) {
+        text.replace(position, from.size(), to);
+    }
+    return text;
+}
+
+bool rejects_offline_telemetry(std::string line) {
+    kf2::game::GameLogSessionParser parser;
+    (void)parser.feed("Log: LoadMap: KF-BioticsLab\n");
+    (void)parser.feed("ScriptLog: WI.NetMode:  NM_Standalone\n");
+    const auto result = parser.feed(line);
+    return !result.has_value() && parser.current().has_value() &&
+           !parser.current()->telemetry_sample.has_value();
 }
 
 }  // namespace
@@ -521,6 +542,28 @@ int main() {
         "[0060.14] ScriptLog: @@@@ ZED COUNT DEBUG: AIAliveCount = -1\n")
                .has_value());
 
+    const auto missing_offscreen_skeleton = replace_once(
+        telemetry_line(7), " living_updates_skeleton_offscreen=7", "");
+    CHECK(rejects_offline_telemetry(missing_offscreen_skeleton));
+    const auto duplicated_offscreen_skeleton = replace_once(
+        telemetry_line(7), " living_updates_skeleton_offscreen=7",
+        " living_updates_skeleton_offscreen=7"
+        " living_updates_skeleton_offscreen=7");
+    CHECK(rejects_offline_telemetry(duplicated_offscreen_skeleton));
+    const auto reordered_offscreen_skeleton = replace_once(
+        telemetry_line(7),
+        " living_ticks_offscreen=23 living_updates_skeleton_offscreen=7",
+        " living_updates_skeleton_offscreen=7 living_ticks_offscreen=23");
+    CHECK(rejects_offline_telemetry(reordered_offscreen_skeleton));
+    const auto malformed_offscreen_skeleton = replace_once(
+        telemetry_line(7), " living_updates_skeleton_offscreen=7",
+        " living_updates_skeleton_offscreen=invalid");
+    CHECK(rejects_offline_telemetry(malformed_offscreen_skeleton));
+    const auto out_of_range_offscreen_skeleton = replace_once(
+        telemetry_line(7), " living_updates_skeleton_offscreen=7",
+        " living_updates_skeleton_offscreen=24");
+    CHECK(rejects_offline_telemetry(out_of_range_offscreen_skeleton));
+
     const auto probe = stream.feed(telemetry_line(7), 4'500'000'000ULL);
     CHECK(probe.has_value());
     CHECK(probe->telemetry_sample == 7);
@@ -540,6 +583,7 @@ int main() {
     CHECK(probe->telemetry_living_bone_interpolation == 2);
     CHECK(probe->telemetry_living_kinematic_distance_skipped == 1);
     CHECK(probe->telemetry_living_ticks_offscreen == 23);
+    CHECK(probe->telemetry_living_updates_skeleton_offscreen == 7);
     CHECK(probe->telemetry_living_special_moves == 8);
     CHECK(probe->telemetry_living_attack_moves == 3);
     CHECK(probe->telemetry_living_grapple_moves == 1);
@@ -641,6 +685,8 @@ int main() {
           std::wstring::npos);
     CHECK(!stream.feed(telemetry_line(8, 4),
                        4'600'000'000ULL).has_value());
+    // Previous telemetry schemas remain unsupported rather than being parsed
+    // as the exact positional schema 6 contract.
     CHECK(!stream.feed(
         "ScriptLog: KF2OPT_TELEMETRY schema=1 sample=9 living=23\n",
         4'700'000'000ULL).has_value());
@@ -658,6 +704,8 @@ int main() {
     CHECK(!probe_expired->telemetry_corpse_total.has_value());
     CHECK(!probe_expired->telemetry_dismembered_limbs.has_value());
     CHECK(!probe_expired->telemetry_living_special_moves.has_value());
+    CHECK(!probe_expired->telemetry_living_updates_skeleton_offscreen
+               .has_value());
     CHECK(!probe_expired->telemetry_puke_mine_projectiles.has_value());
     CHECK(!probe_expired->telemetry_corpse_collide_living_after_sleep.has_value());
     CHECK(!probe_expired->telemetry_world_particles.has_value());

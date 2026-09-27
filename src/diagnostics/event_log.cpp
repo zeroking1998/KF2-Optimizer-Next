@@ -354,6 +354,8 @@ std::string serialize_product_report_json(const ProductReport& report) {
     optional_integer("living_kinematic_distance_skipped",
                      report.living_kinematic_distance_skipped);
     optional_integer("living_ticks_offscreen", report.living_ticks_offscreen);
+    optional_integer("living_updates_skeleton_offscreen",
+                     report.living_updates_skeleton_offscreen);
     optional_integer("living_special_moves", report.living_special_moves);
     optional_integer("living_attack_moves", report.living_attack_moves);
     optional_integer("living_grapple_moves", report.living_grapple_moves);

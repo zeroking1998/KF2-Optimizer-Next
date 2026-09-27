@@ -204,6 +204,7 @@ int main() {
         .living_bone_interpolation = 2,
         .living_kinematic_distance_skipped = 1,
         .living_ticks_offscreen = 16,
+        .living_updates_skeleton_offscreen = 7,
         .living_special_moves = 8,
         .living_attack_moves = 3,
         .living_grapple_moves = 1,
@@ -329,6 +330,7 @@ int main() {
                        "\"living_bone_interpolation\":2,"
                        "\"living_kinematic_distance_skipped\":1,"
                        "\"living_ticks_offscreen\":16,"
+                       "\"living_updates_skeleton_offscreen\":7,"
                        "\"living_special_moves\":8,"
                        "\"living_attack_moves\":3,"
                        "\"living_grapple_moves\":1,"
