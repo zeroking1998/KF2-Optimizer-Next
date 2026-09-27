@@ -186,5 +186,33 @@ int main() {
     CHECK(asynchronous_metrics->fps.has_value());
     CHECK(*asynchronous_metrics->fps > 62.0 &&
           *asynchronous_metrics->fps < 63.0);
+
+    constexpr std::uint64_t asynchronous_boundary_ns = 8'500'000'000ULL;
+    asynchronous.request_drain(
+        9'921'000'000ULL, 500'000'000ULL, asynchronous_boundary_ns);
+    CHECK(asynchronous.wait_for_drain(std::chrono::seconds{2}));
+    const auto asynchronous_bounded =
+        asynchronous.latest_drain(asynchronous_boundary_ns);
+    CHECK(asynchronous_bounded.has_value());
+    CHECK(asynchronous_bounded->fps.has_value());
+
+    // A schema failure must revoke both previously published paths and any
+    // replacement request that the worker has already accepted. Waiting for
+    // the worker afterward proves the old generation cannot publish late.
+    asynchronous.request_drain(9'921'000'000ULL, 500'000'000ULL);
+    asynchronous.request_drain(
+        9'921'000'000ULL, 500'000'000ULL, asynchronous_boundary_ns);
+    CHECK(!asynchronous.ingest(
+        {game, 9'937'000'000ULL, 99, true, 0}));
+    CHECK(!asynchronous.latest_drain().has_value());
+    CHECK(!asynchronous.latest_drain(asynchronous_boundary_ns).has_value());
+    CHECK(asynchronous.wait_for_drain(std::chrono::seconds{2}));
+    CHECK(!asynchronous.latest_drain().has_value());
+    CHECK(!asynchronous.latest_drain(asynchronous_boundary_ns).has_value());
+    const auto asynchronous_schema_failure = asynchronous.drain(
+        9'937'000'000ULL, 500'000'000ULL);
+    CHECK(!asynchronous_schema_failure.fps.has_value());
+    CHECK(asynchronous_schema_failure.reason ==
+          UnavailableReason::source_failure);
     return EXIT_SUCCESS;
 }

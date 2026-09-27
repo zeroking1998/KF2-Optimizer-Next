@@ -135,6 +135,8 @@ are visible immediately.
   dropping successful presents later discarded by Windows, or carrying timing
   state across maps. Live FPS now uses the same one-second observation window
   as common external overlays.
+- Invalidated published and in-flight frame metrics immediately when DXGI
+  reports an unsupported event schema, preventing stale Adaptive samples.
 - Fixed FleX detection after graphics changes and settings restarts. User-
   enabled FleX runs at the verified minimum solver level; user-disabled FleX
   remains off and is never enabled by Adaptive.
