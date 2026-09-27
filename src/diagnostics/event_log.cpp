@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <system_error>
 #include <utility>
 #include <Windows.h>
 
@@ -207,13 +208,21 @@ const std::filesystem::path& EventLog::persistence_path() const noexcept {
 }
 
 bool EventLog::persistence_ready() const noexcept {
-    std::scoped_lock lock{mutex_};
-    return persistence_ready_;
+    try {
+        std::scoped_lock lock{mutex_};
+        return persistence_ready_;
+    } catch (const std::system_error&) {
+        return false;
+    }
 }
 
 EventLogStats EventLog::stats() const noexcept {
-    std::scoped_lock lock{mutex_};
-    return stats_;
+    try {
+        std::scoped_lock lock{mutex_};
+        return stats_;
+    } catch (const std::system_error&) {
+        return {};
+    }
 }
 
 void EventLog::schedule_persist_locked() noexcept {

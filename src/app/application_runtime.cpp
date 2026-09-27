@@ -2,6 +2,8 @@
 
 #include "kf2/update/update_state.hpp"
 
+#include <system_error>
+
 namespace kf2::app {
 
 optimizer::AdaptivePolicy adaptive_policy_from(
@@ -253,8 +255,16 @@ std::wstring query_hardware_summary() {
 }
 
 UiRuntime::~UiRuntime() {
-    startup_prewarmer.stop_and_wait();
-    map_prewarmer.stop_and_wait();
+    const auto stop_prewarmer = [](game::StartupPrewarmer& prewarmer) noexcept {
+        try {
+            prewarmer.stop_and_wait();
+        } catch (const std::system_error&) {
+            // The member destructor retries and contains any persistent join
+            // failure without aborting application shutdown.
+        }
+    };
+    stop_prewarmer(startup_prewarmer);
+    stop_prewarmer(map_prewarmer);
     resource_telemetry_worker.stop();
     static_cast<void>(restore_live_adaptive_quality(
         L"KF2 Optimizer closed"));

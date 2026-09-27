@@ -12,8 +12,12 @@
 #include <iostream>
 #include <system_error>
 #include <thread>
+#include <utility>
 
 namespace {
+static_assert(!noexcept(
+    std::declval<kf2::game::StartupPrewarmer&>().stop_and_wait()));
+
 int failures = 0;
 #define CHECK(condition) do { if (!(condition)) { \
     std::cerr << "FAIL line " << __LINE__ << ": " #condition "\n"; ++failures; \
