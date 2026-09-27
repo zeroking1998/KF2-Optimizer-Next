@@ -1,5 +1,8 @@
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <thread>
 #include "kf2/telemetry/present_source.hpp"
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
@@ -195,6 +198,48 @@ int main() {
         asynchronous.latest_drain(asynchronous_boundary_ns);
     CHECK(asynchronous_bounded.has_value());
     CHECK(asynchronous_bounded->fps.has_value());
+
+    // Live collection can continuously replace its coalesced request while a
+    // drain is running. A queued Adaptive boundary must still be selected on
+    // the next completed drain instead of waiting for live traffic to stop.
+    PresentSource fair{game, 50'000};
+    CHECK(fair.start().has_value());
+    constexpr std::uint64_t fair_start_ns = 20'000'000'000ULL;
+    constexpr std::uint64_t fair_interval_ns = 200'000ULL;
+    for (std::uint64_t index = 0; index < 50'000; ++index) {
+        CHECK(fair.ingest(
+            {game, fair_start_ns + index * fair_interval_ns,
+             1, true, 0}));
+    }
+    constexpr std::uint64_t fair_now_ns =
+        fair_start_ns + 49'999 * fair_interval_ns;
+    constexpr std::uint64_t fair_boundary_ns =
+        fair_start_ns + 25'000 * fair_interval_ns;
+    std::atomic_bool keep_requesting_live{true};
+    std::jthread live_requester{[&](std::stop_token stop) {
+        while (!stop.stop_requested() &&
+               keep_requesting_live.load(std::memory_order_relaxed)) {
+            fair.request_drain(fair_now_ns, 500'000'000ULL);
+            std::this_thread::yield();
+        }
+    }};
+    std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    fair.request_drain(
+        fair_now_ns, 500'000'000ULL, fair_boundary_ns);
+    const auto fair_deadline = std::chrono::steady_clock::now() +
+                               std::chrono::milliseconds{500};
+    while (!fair.latest_drain(fair_boundary_ns).has_value() &&
+           std::chrono::steady_clock::now() < fair_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    const auto fair_bounded = fair.latest_drain(fair_boundary_ns);
+    keep_requesting_live.store(false, std::memory_order_relaxed);
+    live_requester.request_stop();
+    live_requester.join();
+    CHECK(fair_bounded.has_value());
+    CHECK(fair_bounded->fps.has_value());
+    CHECK(fair.wait_for_drain(std::chrono::seconds{2}));
+    CHECK(fair.latest_drain().has_value());
 
     // A schema failure must revoke both previously published paths and any
     // replacement request that the worker has already accepted. Waiting for
