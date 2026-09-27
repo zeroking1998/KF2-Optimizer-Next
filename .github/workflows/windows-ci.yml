@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 env:
-  SCCACHE_GHA_ENABLED: "true"
   SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+  SCCACHE_CACHE_SIZE: "2G"
 
 jobs:
   test:
@@ -26,6 +26,18 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v5
+
+      - name: Restore local compiler cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}\sccache
+          key: sccache-disk-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.configuration }}-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt', 'tools/validate_ninja.ps1') }}
+          restore-keys: |
+            sccache-disk-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.configuration }}-
+
+      - name: Configure local compiler cache
+        shell: pwsh
+        run: '"SCCACHE_DIR=$env:RUNNER_TEMP\sccache" >> $env:GITHUB_ENV'
 
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
@@ -44,6 +56,7 @@ jobs:
         run: >-
           ./tools/validate_ninja.ps1
           -Configuration ${{ matrix.configuration }}
+          -ValidationScope ${{ matrix.configuration == 'Release' && 'Application' || 'Full' }}
           -PublicCI
           -EnableCompilerCache
 
