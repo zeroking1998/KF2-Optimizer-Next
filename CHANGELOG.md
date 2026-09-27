@@ -91,6 +91,8 @@ are visible immediately.
   transitions.
 - Fixed duplicate telemetry viewport interactions accumulating after map
   changes. One persistent interaction stops and rearms for each gameplay world.
+- Re-armed selected-map warming after travel so consecutive rotations to the
+  same map are prepared again without retaining the previous world.
 - Prevented transient loading, menu, trader, and early post-map frames from
   entering Adaptive decisions or depressing the displayed 1% low window.
 - Preserved one native graphics baseline across consecutive maps so recovery

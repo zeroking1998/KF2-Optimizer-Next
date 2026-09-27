@@ -70,6 +70,12 @@ int main(int argc, char** argv) {
         "map=KF-CastleVolter") ==
         std::optional<std::wstring>{L"KF-CastleVolter"});
     CHECK(!map_prewarm_request_from_log_line(
+        "Log: LoadMap: KF-CastleVolter"));
+    CHECK(map_prewarm_request_from_log_line(
+        "ScriptLog: KF2OPT_MAP_SELECTION schema=1 state=vote "
+        "map=KF-CastleVolter") ==
+        std::optional<std::wstring>{L"KF-CastleVolter"});
+    CHECK(!map_prewarm_request_from_log_line(
         "KF2OPT_MAP_SELECTION schema=1 state=menu map=../unsafe"));
     CHECK(!map_prewarm_request_from_log_line(
         "KF2OPT_MAP_SELECTION schema=2 state=menu map=KF-Airship"));
