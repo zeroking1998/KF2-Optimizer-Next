@@ -32,6 +32,14 @@ struct HelperRequest {
     std::string token;
 };
 
+struct DirectoryIdentity {
+    DWORD volume_serial{};
+    DWORD file_index_high{};
+    DWORD file_index_low{};
+
+    bool operator==(const DirectoryIdentity&) const = default;
+};
+
 std::optional<std::string> utf8_from_wide(std::wstring_view value) {
     if (value.empty()) return std::string{};
     const int size = WideCharToMultiByte(
@@ -93,6 +101,79 @@ bool child_of(const std::filesystem::path& child,
     return child_value.size() > parent_value.size() &&
         _wcsnicmp(child_value.c_str(), parent_value.c_str(),
                   parent_value.size()) == 0;
+}
+
+bool same_path(const std::filesystem::path& left,
+               const std::filesystem::path& right) {
+    const auto left_value = normalized(left).native();
+    const auto right_value = normalized(right).native();
+    return !left_value.empty() && left_value.size() == right_value.size() &&
+        _wcsnicmp(left_value.c_str(), right_value.c_str(),
+                  left_value.size()) == 0;
+}
+
+bool has_dot_component(const std::filesystem::path& path) {
+    return std::ranges::any_of(path, [](const auto& component) {
+        return component == L"." || component == L"..";
+    });
+}
+
+std::optional<std::pair<std::uint32_t, std::uint64_t>> work_identity(
+    const std::filesystem::path& work) {
+    const auto name = work.filename().wstring();
+    const auto separator = name.find(L'-');
+    if (separator == std::wstring::npos || separator == 0 ||
+        separator + 1U >= name.size() ||
+        name.find(L'-', separator + 1U) != std::wstring::npos) return std::nullopt;
+    const auto parse_decimal = [](std::wstring_view value)
+        -> std::optional<std::uint64_t> {
+        std::uint64_t result = 0;
+        for (const wchar_t character : value) {
+            if (character < L'0' || character > L'9') return std::nullopt;
+            const auto digit = static_cast<std::uint64_t>(character - L'0');
+            if (result > (UINT64_MAX - digit) / 10U) return std::nullopt;
+            result = result * 10U + digit;
+        }
+        return result == 0 ? std::nullopt
+                           : std::optional<std::uint64_t>{result};
+    };
+    const auto process = parse_decimal(
+        std::wstring_view{name}.substr(0, separator));
+    const auto nonce = parse_decimal(
+        std::wstring_view{name}.substr(separator + 1U));
+    if (!process || *process > UINT32_MAX || !nonce) return std::nullopt;
+    return std::pair{static_cast<std::uint32_t>(*process), *nonce};
+}
+
+bool canonical_update_work_root(const std::filesystem::path& work,
+                                std::uint32_t expected_process_id) {
+    const auto temporary = platform::windows::temporary_directory();
+    if (!temporary.has_value() || !work.is_absolute() ||
+        has_dot_component(work) || !normal_directory(work)) return false;
+    const auto parent = temporary.value() / L"KF2OptimizerNext-Update";
+    const auto identity = work_identity(work);
+    return identity && identity->first == expected_process_id &&
+        normal_directory(parent) && same_path(work.parent_path(), parent);
+}
+
+std::optional<DirectoryIdentity> directory_identity(
+    const std::filesystem::path& path) {
+    HANDLE directory = CreateFileW(
+        path.c_str(), FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr);
+    if (directory == INVALID_HANDLE_VALUE) return std::nullopt;
+    BY_HANDLE_FILE_INFORMATION information{};
+    const bool valid = GetFileInformationByHandle(directory, &information) != FALSE &&
+        (information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+        (information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
+    CloseHandle(directory);
+    if (!valid) return std::nullopt;
+    return DirectoryIdentity{
+        information.dwVolumeSerialNumber,
+        information.nFileIndexHigh,
+        information.nFileIndexLow};
 }
 
 std::string make_token() {
@@ -221,7 +302,8 @@ Result<HelperRequest> parse_request(const std::filesystem::path& path) {
         .token = values["token"]};
     const auto work = path.parent_path();
     const auto marker = read_small_file(work / L"update.marker");
-    if (!path.is_absolute() || !normal_directory(work) ||
+    if (!path.is_absolute() ||
+        !canonical_update_work_root(work, request.parent_process_id) ||
         !normal_directory(request.target_root) ||
         !normal_directory(request.staged_root) ||
         !child_of(request.staged_root, work) ||
@@ -233,6 +315,16 @@ Result<HelperRequest> parse_request(const std::filesystem::path& path) {
             {ErrorCode::access_denied, L"Update helper path validation failed", 0});
     }
     return Result<HelperRequest>::success(std::move(request));
+}
+
+std::optional<DirectoryIdentity> validated_cleanup_identity(
+    const std::filesystem::path& work, std::string_view token) {
+    const auto request = parse_request(work / L"update-request.ini");
+    const auto marker = read_small_file(work / L"update.marker");
+    if (!request.has_value() || request.value().token != token ||
+        !canonical_update_work_root(work, request.value().parent_process_id) ||
+        !marker.has_value() || marker.value() != token) return std::nullopt;
+    return directory_identity(work);
 }
 
 Result<bool> write_request(const std::filesystem::path& path,
@@ -425,19 +517,25 @@ Result<bool> signal_update_ready_and_schedule_cleanup(
 Result<bool> schedule_update_cleanup(
     std::uint32_t helper_process_id, const std::filesystem::path& work_root,
     std::string_view token) {
-    if (!safe_token(token) || helper_process_id == 0 ||
-        !normal_directory(work_root) || !marker_matches(work_root, token)) {
+    const auto identity = safe_token(token) && helper_process_id != 0
+        ? validated_cleanup_identity(work_root, token)
+        : std::nullopt;
+    if (!identity) {
         return Result<bool>::failure(
             {ErrorCode::access_denied, L"Update cleanup handshake is invalid", 0});
     }
-    const auto work = work_root;
+    const auto work = normalized(work_root);
     const auto helper_id = helper_process_id;
-    std::thread([work, helper_id] {
+    const std::string owned_token{token};
+    std::thread([work, helper_id, owned_token, identity = *identity] {
         HANDLE helper = OpenProcess(SYNCHRONIZE, FALSE, helper_id);
         if (helper) {
             WaitForSingleObject(helper, 30'000);
             CloseHandle(helper);
         }
+        const auto current_identity = validated_cleanup_identity(
+            work, owned_token);
+        if (!current_identity || *current_identity != identity) return;
         std::error_code ignored;
         std::filesystem::remove_all(work, ignored);
         const auto parent = work.parent_path();
