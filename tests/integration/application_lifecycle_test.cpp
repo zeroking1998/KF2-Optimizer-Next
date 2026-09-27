@@ -1282,17 +1282,80 @@ int main(int argc, char** argv) {
         write_bytes(system_path, system_config);
         fs::last_write_time(system_path, old_write_time +
             std::chrono::seconds{2});
-        CHECK(graphics_runtime.synchronize_video_settings_from_game());
+        CHECK(graphics_runtime.synchronize_video_settings_from_game() ==
+              kf2::app::VideoSyncDisposition::synchronized);
         CHECK(graphics_runtime.video_saved->choices[vsync_index] !=
               old_vsync);
         CHECK(graphics_runtime.video_pending->choices[vsync_index] !=
               old_vsync);
         CHECK(graphics_runtime.video_pending->film_grain_percent == 75);
-        CHECK(!graphics_runtime.synchronize_video_settings_from_game());
+        CHECK(graphics_runtime.synchronize_video_settings_from_game() ==
+              kf2::app::VideoSyncDisposition::unchanged);
         fs::remove(graphics_config / L"KFEngine.ini");
-        CHECK(graphics_runtime.synchronize_video_settings_from_game());
+        CHECK(graphics_runtime.synchronize_video_settings_from_game() ==
+              kf2::app::VideoSyncDisposition::synchronized);
         CHECK(graphics_runtime.video_saved->choices[static_cast<std::size_t>(
                   kf2::game::VideoOption::nvidia_flex)] == 0);
+
+        // A temporarily unreadable file is treated as an overlapping KF2
+        // write. The staged choice remains available for a later retry.
+        const auto game_path = graphics_config / L"KFGame.ini";
+        const auto game_bytes = read_bytes(game_path);
+        const auto game_write_time = fs::last_write_time(game_path);
+        fs::remove(game_path);
+        fs::create_directory(game_path);
+        fs::last_write_time(game_path, game_write_time +
+            std::chrono::seconds{4});
+        const auto staged_film_grain =
+            graphics_runtime.video_pending->film_grain_percent;
+        CHECK(graphics_runtime.synchronize_video_settings_from_game() ==
+              kf2::app::VideoSyncDisposition::retryable_unstable);
+        CHECK(graphics_runtime.video_pending->film_grain_percent ==
+              staged_film_grain);
+        fs::remove(game_path);
+        write_bytes(game_path, game_bytes);
+        fs::last_write_time(game_path, game_write_time +
+            std::chrono::seconds{5});
+        CHECK(graphics_runtime.synchronize_video_settings_from_game() ==
+              kf2::app::VideoSyncDisposition::synchronized);
+
+        // A second write-time change after a successful read blocks the save
+        // until a later stable pass can rebase it.
+        const auto overlap_time = fs::last_write_time(system_path) +
+            std::chrono::seconds{2};
+        fs::last_write_time(system_path, overlap_time);
+        bool overlapped = false;
+        graphics_runtime.video_sync_before_verification_for_testing = [&] {
+            if (overlapped) return;
+            fs::last_write_time(system_path,
+                                overlap_time + std::chrono::seconds{2});
+            overlapped = true;
+        };
+        CHECK(graphics_runtime.synchronize_video_settings_from_game() ==
+              kf2::app::VideoSyncDisposition::retryable_unstable);
+        graphics_runtime.video_sync_before_verification_for_testing = {};
+        CHECK(graphics_runtime.synchronize_video_settings_from_game() ==
+              kf2::app::VideoSyncDisposition::synchronized);
+
+        // An invalid staged resolution makes rebasing fail closed. Neither a
+        // direct apply nor the UI save path discards that selection.
+        const auto resolution_index = static_cast<std::size_t>(
+            kf2::game::VideoOption::resolution);
+        const int invalid_resolution = static_cast<int>(
+            graphics_runtime.video_pending->resolutions.size()) + 1;
+        graphics_runtime.video_pending->choices[resolution_index] =
+            invalid_resolution;
+        fs::last_write_time(system_path, fs::last_write_time(system_path) +
+            std::chrono::seconds{2});
+        const auto blocked = graphics_runtime.apply_video_settings();
+        CHECK(!blocked.has_value());
+        CHECK(blocked.error().code == kf2::ErrorCode::stale_data);
+        CHECK(graphics_runtime.video_pending->choices[resolution_index] ==
+              invalid_resolution);
+        graphics_runtime.save_video_selection();
+        CHECK(graphics_runtime.video_pending->choices[resolution_index] ==
+              invalid_resolution);
+        graphics_runtime.video_pending = graphics_runtime.video_saved;
     }
 
     // Releasing a graphics slider and selecting Reset both save directly to
@@ -1568,7 +1631,8 @@ int main(int argc, char** argv) {
         }
         CHECK(staged_native_graphics.value().film_grain_percent ==
               personal_graphics.film_grain_percent);
-        CHECK(!rearm_runtime.synchronize_video_settings_from_game());
+        CHECK(rearm_runtime.synchronize_video_settings_from_game() ==
+              kf2::app::VideoSyncDisposition::unchanged);
         CHECK(rearm_runtime.video_saved->choices == personal_graphics.choices);
         CHECK(rearm_runtime.video_saved->film_grain_percent ==
               personal_graphics.film_grain_percent);
@@ -1588,7 +1652,8 @@ int main(int argc, char** argv) {
         CHECK(rearm_runtime.video_saved->choices == personal_graphics.choices);
         rearm_runtime.refresh_game_configuration_for_process_start(false);
         CHECK(rearm_runtime.video_saved->choices == personal_graphics.choices);
-        CHECK(!rearm_runtime.synchronize_video_settings_from_game());
+        CHECK(rearm_runtime.synchronize_video_settings_from_game() ==
+              kf2::app::VideoSyncDisposition::unchanged);
         const auto motion_index = static_cast<std::size_t>(
             kf2::game::VideoOption::motion_blur);
         const int native_motion =
@@ -1662,7 +1727,8 @@ int main(int argc, char** argv) {
         restarted_system.replace(motion_setting, old_motion.size(),
             native_motion == 0 ? "MotionBlur=False" : "MotionBlur=True");
         write_bytes(config_root / L"KFSystemSettings.ini", restarted_system);
-        CHECK(rearm_runtime.synchronize_video_settings_from_game());
+        CHECK(rearm_runtime.synchronize_video_settings_from_game() ==
+              kf2::app::VideoSyncDisposition::synchronized);
         CHECK(rearm_runtime.video_saved->choices == personal_graphics.choices);
         rearm_runtime.refresh_game_configuration_for_process_start(true);
         CHECK(rearm_runtime.video_saved->choices == personal_graphics.choices);

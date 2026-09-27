@@ -440,6 +440,7 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_BUILD_CHANNEL="dev"
     KF2_RELEASE_REPOSITORY="${KF2_RELEASE_REPOSITORY}"
     KF2_TELEMETRY_ASSET=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetry.u"
+    KF2_APPLICATION_VIDEO_TESTING
 )
 target_link_libraries(kf2_application_lifecycle_test PRIVATE
     user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs uiautomationcore bcrypt

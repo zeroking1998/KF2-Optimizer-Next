@@ -94,28 +94,40 @@ void UiRuntime::reload_video_settings() {
     refresh_video_presentation();
 }
 
-bool UiRuntime::synchronize_video_settings_from_game() {
-    if (!installation || !video_saved || !video_pending) return false;
+VideoSyncDisposition UiRuntime::synchronize_video_settings_from_game() {
+    if (!installation || !video_saved || !video_pending) {
+        return VideoSyncDisposition::hard_failure;
+    }
     // During a protected session, compare only with the already observed
     // temporary runtime profile. The original personal graphics remain
     // untouched until the snapshot has been restored.
-    if (session_config_snapshot && !session_video_runtime) return false;
+    if (session_config_snapshot && !session_video_runtime) {
+        return VideoSyncDisposition::unchanged;
+    }
     const auto write_times = read_video_config_write_times(
         installation->config_root);
-    if (!write_times ||
-        (video_config_write_times && *video_config_write_times == *write_times)) {
-        return false;
+    if (!write_times) return VideoSyncDisposition::hard_failure;
+    if (video_config_write_times &&
+        *video_config_write_times == *write_times) {
+        return VideoSyncDisposition::unchanged;
     }
     const auto current = game::read_video_settings(installation->config_root);
-    if (!current.has_value()) return false;  // Retry after KF2 finishes writing.
+    if (!current.has_value()) {
+        return VideoSyncDisposition::retryable_unstable;
+    }
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+    if (video_sync_before_verification_for_testing) {
+        video_sync_before_verification_for_testing();
+    }
+#endif
     if (read_video_config_write_times(installation->config_root) != write_times) {
-        return false;  // A game write overlapped the read.
+        return VideoSyncDisposition::retryable_unstable;
     }
     if (session_config_snapshot) {
         const auto rebased = game::rebase_video_changes(
             session_video_native_changes.value_or(*video_saved),
             *session_video_runtime, current.value());
-        if (!rebased.has_value()) return false;
+        if (!rebased.has_value()) return VideoSyncDisposition::hard_failure;
         session_video_native_changes = rebased.value();
         session_video_runtime = current.value();
         video_config_write_times = *write_times;
@@ -123,17 +135,17 @@ bool UiRuntime::synchronize_video_settings_from_game() {
             "KF2_RUNTIME_GRAPHICS_INI_CHANGED",
             L"KF2's live graphics INI changed; its confirmed delta will be retained separately from temporary session changes",
             L"graphics"});
-        return true;
+        return VideoSyncDisposition::synchronized;
     }
     const auto rebased = game::rebase_video_changes(
         current.value(), *video_saved, *video_pending);
-    if (!rebased.has_value()) return false;
+    if (!rebased.has_value()) return VideoSyncDisposition::hard_failure;
     video_saved = current.value();
     video_pending = rebased.value();
     video_config_write_times = *write_times;
     refresh_video_presentation();
     invalidate();
-    return true;
+    return VideoSyncDisposition::synchronized;
 }
 
 void UiRuntime::refresh_game_configuration_for_process_start(
@@ -287,7 +299,7 @@ void UiRuntime::cycle_video_option(game::VideoOption option) {
 
 void UiRuntime::save_video_selection() {
     const auto result = apply_video_settings();
-    if (!result.has_value()) {
+    if (!result.has_value() && result.error().code != ErrorCode::stale_data) {
         if (session_config_snapshot && video_saved) {
             video_pending = video_saved;
             refresh_video_presentation();
@@ -322,10 +334,21 @@ void UiRuntime::reset_video_settings() {
 }
 
 Result<config::ApplyResult> UiRuntime::apply_video_settings() {
-    static_cast<void>(synchronize_video_settings_from_game());
     if (!installation || !video_pending || !video_saved) {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::not_found, L"KF2 video settings are unavailable", 0});
+    }
+    const auto synchronization = synchronize_video_settings_from_game();
+    if (synchronization == VideoSyncDisposition::retryable_unstable) {
+        return Result<config::ApplyResult>::failure({
+            ErrorCode::stale_data,
+            L"KF2 graphics are still being written; retry after the files settle",
+            0});
+    }
+    if (synchronization == VideoSyncDisposition::hard_failure) {
+        return Result<config::ApplyResult>::failure({
+            ErrorCode::stale_data,
+            L"KF2 graphics changed but could not be safely synchronized", 0});
     }
     video_pending->choices[static_cast<std::size_t>(
         game::VideoOption::vsync)] = 0;
