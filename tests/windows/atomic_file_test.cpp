@@ -6,8 +6,10 @@
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 #include "kf2/platform/windows/atomic_file.hpp"
+#include "platform/windows/atomic_file_retry.hpp"
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -25,6 +27,25 @@ std::string read_bytes(const std::filesystem::path& path) {
 
 int main() {
     namespace fs = std::filesystem;
+
+    std::vector<unsigned> attempts;
+    std::vector<std::uint32_t> backoffs;
+    for (unsigned attempt = 0;
+         attempt != kf2::platform::windows::detail::atomic_replace_attempt_count;
+         ++attempt) {
+        attempts.push_back(attempt);
+        const auto backoff =
+            kf2::platform::windows::detail::atomic_replace_backoff_after(
+                attempt, true);
+        if (!backoff.has_value()) break;
+        backoffs.push_back(backoff.value());
+    }
+    CHECK(attempts.size() == 8);
+    CHECK((backoffs == std::vector<std::uint32_t>{10, 20, 40, 80, 160,
+                                                  320, 640}));
+    CHECK(kf2::platform::windows::detail::atomic_replace_backoff_after(
+              0, false) == std::nullopt);
+
     const fs::path root{KF2_TEST_ROOT};
     fs::remove_all(root);
     fs::create_directories(root);
