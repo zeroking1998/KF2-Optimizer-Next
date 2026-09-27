@@ -540,8 +540,10 @@ void append_area(std::vector<FeatureRecord>& records, std::uint16_t area,
     }
 }
 
-const std::vector<FeatureRecord>& inventory() {
-    static const std::vector<FeatureRecord> records = [] {
+const std::vector<FeatureRecord>& inventory(
+    FeatureInventoryInitializationProbe initialization_probe) {
+    static const std::vector<FeatureRecord> records = [initialization_probe] {
+        if (initialization_probe) initialization_probe();
         std::vector<FeatureRecord> result;
         result.reserve(149);
         append_area(result, 1, area01, area01_items);
@@ -593,8 +595,9 @@ std::string escape(std::string_view value) {
 
 }  // namespace
 
-std::span<const FeatureRecord> issue72_feature_inventory() noexcept {
-    return inventory();
+std::span<const FeatureRecord> issue72_feature_inventory(
+    FeatureInventoryInitializationProbe initialization_probe) {
+    return inventory(initialization_probe);
 }
 
 FeatureStatusCounts feature_status_counts(

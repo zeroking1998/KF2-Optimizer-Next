@@ -55,7 +55,10 @@ struct RemainingScopeCounts {
     std::size_t user_authority{0};
 };
 
-[[nodiscard]] std::span<const FeatureRecord> issue72_feature_inventory() noexcept;
+using FeatureInventoryInitializationProbe = void (*)();
+
+[[nodiscard]] std::span<const FeatureRecord> issue72_feature_inventory(
+    FeatureInventoryInitializationProbe initialization_probe = nullptr);
 struct FeatureStatusCounts {
     std::size_t present{0};
     std::size_t partial{0};
@@ -64,11 +67,11 @@ struct FeatureStatusCounts {
     std::size_t implementation_ready{0};
 };
 [[nodiscard]] FeatureStatusCounts feature_status_counts(
-    std::span<const FeatureRecord> records = issue72_feature_inventory()) noexcept;
+    std::span<const FeatureRecord> records) noexcept;
 [[nodiscard]] RemainingScopeCounts remaining_scope_counts(
-    std::span<const FeatureRecord> records = issue72_feature_inventory()) noexcept;
+    std::span<const FeatureRecord> records) noexcept;
 [[nodiscard]] std::string serialize_feature_inventory_json(
     std::string_view build_identity,
-    std::span<const FeatureRecord> records = issue72_feature_inventory());
+    std::span<const FeatureRecord> records);
 
 }  // namespace kf2::diagnostics
