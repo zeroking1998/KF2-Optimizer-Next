@@ -11,7 +11,10 @@ var KF2OptimizerAdaptiveGraphicsState OnlineGraphicsState;
 var int OnlineGraphicsLastSequence;
 var bool bOnlineGraphicsEnabled;
 var bool bOnlineFixedEffectsApplied;
-var bool bOnlineGraphicsListenerStarted;
+var float OnlineGraphicsListenerNextCheckRealTime;
+var float OnlineGraphicsListenerRetryDelay;
+var string OnlineGraphicsListenerMapName;
+var string LastOnlineGraphicsListenerStatus;
 var bool bOnlineCorpseCapabilityReported;
 var bool bOnlineCorpsePoolObserved;
 var bool bOnlineCorpseSleepArmed;
@@ -381,25 +384,123 @@ function bool TryEnforceOnlineCorpseCapacity(WorldInfo CurrentWorld)
     return false;
 }
 
-function EnsureOnlineGraphicsListener(PlayerController PrimaryController)
+function ResetOnlineGraphicsListenerHealth(string MapName)
+{
+    OnlineGraphicsListenerNextCheckRealTime = 0.0;
+    OnlineGraphicsListenerRetryDelay = 0.5;
+    OnlineGraphicsListenerMapName = MapName;
+    LastOnlineGraphicsListenerStatus = "";
+}
+
+function ReportOnlineGraphicsListenerStatus(string State, string Reason)
+{
+    local string Status;
+
+    Status = State$"|"$Reason;
+    if (Status == LastOnlineGraphicsListenerStatus)
+    {
+        return;
+    }
+    LastOnlineGraphicsListenerStatus = Status;
+    `log("KF2OPT_ONLINE_GRAPHICS_BRIDGE state="$State$" reason="$Reason);
+}
+
+function bool FindHealthyOnlineGraphicsListener(
+    WorldInfo CurrentWorld, out string FailureReason)
+{
+    local KF2OptimizerAdaptiveControlListener CurrentListener;
+
+    FailureReason = "missing";
+    foreach CurrentWorld.DynamicActors(
+        class'KF2OptimizerAdaptiveControlListener', CurrentListener)
+    {
+        if (CurrentListener == None || CurrentListener.bDeleteMe)
+        {
+            continue;
+        }
+        if (CurrentListener.LinkState != STATE_Listening)
+        {
+            FailureReason = "not_listening";
+            CurrentListener.Destroy();
+            continue;
+        }
+        if (CurrentListener.OnlineCorpseController == None ||
+            CurrentListener.OnlineCorpseController.bDeleteMe)
+        {
+            FailureReason = "corpse_controller_unavailable";
+            CurrentListener.Destroy();
+            continue;
+        }
+        return true;
+    }
+    return false;
+}
+
+function EnsureOnlineGraphicsListener(
+    WorldInfo CurrentWorld, PlayerController PrimaryController)
 {
     local KF2OptimizerAdaptiveControlListener NewListener;
+    local string FailureReason;
+    local string MapName;
 
-    if (bOnlineGraphicsListenerStarted)
+    if (CurrentWorld == None || PrimaryController == None)
     {
+        return;
+    }
+    MapName = CurrentWorld.GetMapName(true);
+    if (OnlineGraphicsListenerMapName != MapName)
+    {
+        ResetOnlineGraphicsListenerHealth(MapName);
+    }
+    if (CurrentWorld.RealTimeSeconds <
+        OnlineGraphicsListenerNextCheckRealTime)
+    {
+        return;
+    }
+    if (FindHealthyOnlineGraphicsListener(CurrentWorld, FailureReason))
+    {
+        OnlineGraphicsListenerRetryDelay = 0.5;
+        OnlineGraphicsListenerNextCheckRealTime =
+            CurrentWorld.RealTimeSeconds + 1.0;
+        ReportOnlineGraphicsListenerStatus("ready", "verified");
         return;
     }
     NewListener = PrimaryController.Spawn(
             class'KF2OptimizerAdaptiveControlListener');
-    if (NewListener == None || NewListener.bDeleteMe)
+    if (NewListener != None && !NewListener.bDeleteMe &&
+        NewListener.LinkState == STATE_Listening &&
+        NewListener.OnlineCorpseController != None &&
+        !NewListener.OnlineCorpseController.bDeleteMe)
     {
-        `log("KF2OPT_ONLINE_GRAPHICS_BRIDGE state=unavailable reason=spawn_failed");
+        OnlineGraphicsListenerRetryDelay = 0.5;
+        OnlineGraphicsListenerNextCheckRealTime =
+            CurrentWorld.RealTimeSeconds + 1.0;
+        ReportOnlineGraphicsListenerStatus("ready", "recovered");
         return;
     }
+    if (NewListener != None && !NewListener.bDeleteMe)
+    {
+        if (NewListener.LinkState != STATE_Listening)
+        {
+            FailureReason = "listen_failed";
+        }
+        else
+        {
+            FailureReason = "corpse_controller_spawn_failed";
+        }
+        NewListener.Destroy();
+    }
+    else if (FailureReason == "missing")
+    {
+        FailureReason = "spawn_failed";
+    }
     // Do not retain an Actor reference from this viewport-owned Interaction.
-    // The listener belongs to the current World and must be collectible with
-    // it during server map travel.
-    bOnlineGraphicsListenerStarted = true;
+    // Health is rediscovered at a bounded interval, and retry work backs off.
+    ReportOnlineGraphicsListenerStatus("unavailable", FailureReason);
+    OnlineGraphicsListenerNextCheckRealTime =
+        CurrentWorld.RealTimeSeconds + OnlineGraphicsListenerRetryDelay;
+    OnlineGraphicsListenerRetryDelay =
+        FMin(8.0, OnlineGraphicsListenerRetryDelay * 2.0);
 }
 
 function ReportOnlineCorpseCapability(WorldInfo CurrentWorld)
@@ -461,7 +562,7 @@ function bool RestoreOnlineSessionState(
     bOnlineGraphicsEnabled = false;
     bOnlineFixedEffectsApplied = false;
     OnlineGraphicsLastSequence = 0;
-    bOnlineGraphicsListenerStarted = false;
+    ResetOnlineGraphicsListenerHealth("");
     bOnlineCorpseCapabilityReported = false;
     bOnlineCorpsePoolObserved = false;
     bOnlineCorpseSleepArmed = false;
@@ -540,7 +641,7 @@ event Tick(float DeltaTime)
     {
         DiscardOnlineCorpseMaximumSnapshot("world_change");
         LastReportedContext = "";
-        bOnlineGraphicsListenerStarted = false;
+        ResetOnlineGraphicsListenerHealth("");
         bOnlineCorpseCapabilityReported = false;
         bOnlineCorpsePoolObserved = false;
         bOnlineCorpseSleepArmed = bOnlineGraphicsEnabled;
@@ -560,7 +661,7 @@ event Tick(float DeltaTime)
         EnsureOnlineFixedEffectsBaseline();
         ReportSessionContext(
             "online_client_read_only", "NM_Client", MapName);
-        EnsureOnlineGraphicsListener(PrimaryController);
+        EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController);
         ReportOnlineCorpseCapability(CurrentWorld);
         TrySleepOneOnlineCorpse(CurrentWorld);
         TryEnforceOnlineCorpseCapacity(CurrentWorld);
@@ -570,7 +671,7 @@ event Tick(float DeltaTime)
         EnsureOnlineFixedEffectsBaseline();
         ReportSessionContext(
             "online_host_read_only", "NM_ListenServer", MapName);
-        EnsureOnlineGraphicsListener(PrimaryController);
+        EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController);
         ReportOnlineCorpseCapability(CurrentWorld);
         TrySleepOneOnlineCorpse(CurrentWorld);
         TryEnforceOnlineCorpseCapacity(CurrentWorld);

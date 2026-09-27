@@ -491,7 +491,10 @@ int main() {
         "local_only=true readback=verified") != std::string::npos);
     CHECK(online_context_source.find("bOnlineCorpseSleepArmed = true") !=
           std::string::npos);
-    CHECK(online_context_source.find("DynamicActors") == std::string::npos);
+    CHECK(online_context_source.find(
+        "CurrentWorld.DynamicActors(\n"
+        "        class'KF2OptimizerAdaptiveControlListener'") !=
+          std::string::npos);
     CHECK(online_context_source.find(
         "PrimaryController.Spawn(\n"
         "            class'KF2OptimizerAdaptiveControlListener'") !=
@@ -509,7 +512,32 @@ int main() {
     CHECK(online_context_source.find(
         "var KF2OptimizerAdaptiveControlListener") == std::string::npos);
     CHECK(online_context_source.find(
-        "bOnlineGraphicsListenerStarted") != std::string::npos);
+        "bOnlineGraphicsListenerStarted") == std::string::npos);
+    CHECK(online_context_source.find(
+        "CurrentListener.LinkState != STATE_Listening") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "CurrentListener.OnlineCorpseController == None") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "OnlineGraphicsListenerNextCheckRealTime") != std::string::npos);
+    CHECK(online_context_source.find(
+        "CurrentWorld.RealTimeSeconds + 1.0") != std::string::npos);
+    CHECK(online_context_source.find(
+        "FMin(8.0, OnlineGraphicsListenerRetryDelay * 2.0)") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "if (OnlineGraphicsListenerMapName != MapName)") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "ResetOnlineGraphicsListenerHealth(\"\")") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "if (Status == LastOnlineGraphicsListenerStatus)") !=
+          std::string::npos);
+    CHECK(listener_source.find("event Destroyed()") != std::string::npos);
+    CHECK(listener_source.find("OnlineCorpseController.Destroy()") !=
+          std::string::npos);
     CHECK(listener_source.find(
         "AcceptClass = class'KF2OptimizerOnlineGraphicsControlConnection'") !=
           std::string::npos);

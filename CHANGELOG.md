@@ -61,6 +61,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- The online Adaptive listener now recovers with bounded backoff after socket
+  or corpse-controller loss, including safe reset across map travel.
 - The live KF2 graphics-menu readback now includes the applied film-grain
   slider value, so its verified snapshot can no longer show a stale local
   percentage.

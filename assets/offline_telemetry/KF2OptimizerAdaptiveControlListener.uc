@@ -56,6 +56,17 @@ event PreBeginPlay()
     }
 }
 
+event Destroyed()
+{
+    if (OnlineCorpseController != None &&
+        !OnlineCorpseController.bDeleteMe)
+    {
+        OnlineCorpseController.Destroy();
+    }
+    OnlineCorpseController = None;
+    Super.Destroyed();
+}
+
 defaultproperties
 {
     bAlwaysTick=true
