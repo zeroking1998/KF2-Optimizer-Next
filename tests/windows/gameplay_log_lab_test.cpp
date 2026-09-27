@@ -647,6 +647,8 @@ int main() {
     CHECK(online_corpse_controller_source.find(
         "struct OnlineFrozenCorpseState") != std::string::npos);
     CHECK(online_corpse_controller_source.find(
+        "var bool bRestorePending;") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
         "function bool FreezeOneOnlineCorpse()") != std::string::npos);
     CHECK(online_corpse_controller_source.find(
         "function bool RestoreOneOnlineCorpse()") != std::string::npos);
@@ -700,6 +702,11 @@ int main() {
         "!IsOnlineCorpseInPool(Candidate, GoreManager)") !=
           std::string::npos);
     CHECK(online_release_body.find(
+        "FrozenCorpses[Index].bRestorePending ||") !=
+          std::string::npos);
+    CHECK(online_release_body.find("\"freeze_rollback\"") !=
+          std::string::npos);
+    CHECK(online_release_body.find(
         "TryRestoreOnlineCorpse(Index, bRestoreAll ?") !=
           std::string::npos);
     CHECK(online_release_body.find(
@@ -740,6 +747,55 @@ int main() {
         "Candidate.SetTickIsDisabled(true)") != std::string::npos);
     CHECK(online_corpse_controller_source.find(
         "Candidate.SetPhysics(PHYS_None)") != std::string::npos);
+    const auto online_freeze_start = online_corpse_controller_source.find(
+        "function bool FreezeOneOnlineCorpse()");
+    const auto online_freeze_end = online_corpse_controller_source.find(
+        "function bool ApplyOneFixedMinimumCorpseLod()", online_freeze_start);
+    CHECK(online_freeze_start != std::string::npos);
+    CHECK(online_freeze_end != std::string::npos);
+    const auto online_freeze_body = online_corpse_controller_source.substr(
+        online_freeze_start, online_freeze_end - online_freeze_start);
+    const auto online_ledger = online_freeze_body.find(
+        "FrozenCorpses.AddItem(Original)");
+    const auto online_mutation = online_freeze_body.find(
+        "Candidate.SetCollision(false, false,");
+    CHECK(online_ledger != std::string::npos);
+    CHECK(online_ledger < online_mutation);
+    CHECK(count_occurrences(
+        online_freeze_body, ".bRestorePending = true;") == 2);
+    CHECK(count_occurrences(
+        online_freeze_body, "TryRestoreOnlineCorpse(") == 2);
+    CHECK(count_occurrences(
+        online_freeze_body, "FrozenCorpses.Remove(LedgerIndex, 1)") == 2);
+    const auto online_prephysics_failure = online_freeze_body.find(
+        "if (Candidate.bCollideActors || Candidate.bBlockActors ||");
+    const auto online_postphysics_failure = online_freeze_body.find(
+        "if (Candidate.Physics != PHYS_None)");
+    CHECK(online_prephysics_failure != std::string::npos);
+    CHECK(online_postphysics_failure != std::string::npos);
+    CHECK(online_freeze_body.find(
+        ".bRestorePending = true;", online_prephysics_failure) <
+          online_postphysics_failure);
+    CHECK(online_freeze_body.find(
+        "TryRestoreOnlineCorpse(", online_prephysics_failure) <
+          online_postphysics_failure);
+    CHECK(online_freeze_body.find(
+        ".bRestorePending = true;", online_postphysics_failure) !=
+          std::string::npos);
+    CHECK(online_freeze_body.find(
+        "TryRestoreOnlineCorpse(", online_postphysics_failure) !=
+          std::string::npos);
+    const auto online_restore_start = online_corpse_controller_source.find(
+        "function bool TryRestoreOnlineCorpse(");
+    CHECK(online_restore_start != std::string::npos);
+    const auto online_restore_body = online_corpse_controller_source.substr(
+        online_restore_start, online_release_start - online_restore_start);
+    CHECK(online_restore_body.find(
+        "if (Candidate.Physics != PHYS_RigidBody)") != std::string::npos);
+    CHECK(online_restore_body.find(
+        "(Candidate.CollisionComponent != None) !=\n"
+        "            Original.bHadCollisionComponent") !=
+          std::string::npos);
     CHECK(online_corpse_controller_source.find(
         "KF2OPT_ONLINE_CORPSE_ACTION state=freeze") != std::string::npos);
     CHECK(online_corpse_controller_source.find(
@@ -2423,6 +2479,9 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find("var bool bOriginalBlockRigidBody;") !=
           std::string::npos);
+    CHECK(pressure_freeze_body.find(
+        "AdaptiveFrozenCorpses[Index].bRestorePending = false;") !=
+          std::string::npos);
     const auto freeze_disable_collision = pressure_freeze_body.find(
         "Candidate.SetCollision(false, false,");
     const auto freeze_disable_rigid_body_collision = pressure_freeze_body.find(
@@ -2437,6 +2496,31 @@ int main() {
     CHECK(freeze_disable_collision < freeze_physics_none);
     CHECK(freeze_disable_rigid_body_collision < freeze_physics_none);
     CHECK(freeze_disable_tick < freeze_physics_none);
+    CHECK(count_occurrences(
+        pressure_freeze_body, ".bRestorePending = true;") == 2);
+    CHECK(count_occurrences(
+        pressure_freeze_body, "TryRestoreAdaptiveCorpseFreeze(") == 2);
+    CHECK(count_occurrences(
+        pressure_freeze_body,
+        "AdaptiveFrozenCorpses.Remove(Index, 1)") == 2);
+    const auto offline_prephysics_failure = pressure_freeze_body.find(
+        "if (Candidate.bCollideActors || Candidate.bBlockActors ||");
+    const auto offline_postphysics_failure = pressure_freeze_body.find(
+        "if (Candidate.Physics != PHYS_None)");
+    CHECK(offline_prephysics_failure != std::string::npos);
+    CHECK(offline_postphysics_failure != std::string::npos);
+    CHECK(pressure_freeze_body.find(
+        ".bRestorePending = true;", offline_prephysics_failure) <
+          offline_postphysics_failure);
+    CHECK(pressure_freeze_body.find(
+        "TryRestoreAdaptiveCorpseFreeze(", offline_prephysics_failure) <
+          offline_postphysics_failure);
+    CHECK(pressure_freeze_body.find(
+        ".bRestorePending = true;", offline_postphysics_failure) !=
+          std::string::npos);
+    CHECK(pressure_freeze_body.find(
+        "TryRestoreAdaptiveCorpseFreeze(", offline_postphysics_failure) !=
+          std::string::npos);
     CHECK(pressure_freeze_body.find(
         "state=frozen reason=pressure_eligible") != std::string::npos);
     CHECK(pressure_freeze_body.find("physics=none readback=verified") !=
@@ -2481,6 +2565,10 @@ int main() {
         "GetAdaptiveCorpseActionId(Candidate) !=") != std::string::npos);
     CHECK(restore_freeze_body.find(
         "LogAdaptiveCorpseFreezeReleaseFailure(") != std::string::npos);
+    CHECK(restore_freeze_body.find(
+        "(Candidate.CollisionComponent != None) !=\n"
+        "            AdaptiveFrozenCorpses[Index].bHadCollisionComponent") !=
+          std::string::npos);
 
     const auto freeze_release_function = telemetry_source.find(
         "function int ReleaseOneAdaptiveCorpseFreeze(bool bRestoreAll)");
@@ -2504,7 +2592,12 @@ int main() {
     CHECK(freeze_release_body.find(
         "reused_state_unverified") != std::string::npos);
     CHECK(freeze_release_body.find(
-        "bRestoreAll || !IsAdaptiveCorpseInPool(Candidate)") !=
+        "!IsAdaptiveCorpseInPool(Candidate)") !=
+          std::string::npos);
+    CHECK(freeze_release_body.find(
+        "AdaptiveFrozenCorpses[Index].bRestorePending ||") !=
+          std::string::npos);
+    CHECK(freeze_release_body.find("\"freeze_rollback\"") !=
           std::string::npos);
     CHECK(freeze_release_body.find(
         "Index, bRestoreAll ?") != std::string::npos);

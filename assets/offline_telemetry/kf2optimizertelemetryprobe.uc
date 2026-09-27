@@ -182,6 +182,7 @@ struct AdaptiveCorpseFreezeEntry
     var bool bOriginalIgnoreEncroachers;
     var bool bHadCollisionComponent;
     var bool bOriginalBlockRigidBody;
+    var bool bRestorePending;
 };
 
 struct AdaptiveDistanceSleepTransitionEntry
@@ -3243,6 +3244,8 @@ function bool TryRestoreAdaptiveCorpseFreeze(int Index, string Reason)
             AdaptiveFrozenCorpses[Index].bOriginalIgnoreEncroachers ||
         Candidate.bTickIsDisabled !=
             AdaptiveFrozenCorpses[Index].bOriginalTickDisabled ||
+        (Candidate.CollisionComponent != None) !=
+            AdaptiveFrozenCorpses[Index].bHadCollisionComponent ||
         (AdaptiveFrozenCorpses[Index].bHadCollisionComponent &&
          Candidate.CollisionComponent.BlockRigidBody !=
             AdaptiveFrozenCorpses[Index].bOriginalBlockRigidBody))
@@ -3324,11 +3327,15 @@ function int ReleaseOneAdaptiveCorpseFreeze(bool bRestoreAll)
                         "reused_state_unverified");
                 }
             }
-            else if (bRestoreAll || !IsAdaptiveCorpseInPool(Candidate))
+            else if (bRestoreAll ||
+                     AdaptiveFrozenCorpses[Index].bRestorePending ||
+                     !IsAdaptiveCorpseInPool(Candidate))
             {
                 if (TryRestoreAdaptiveCorpseFreeze(
                         Index, bRestoreAll ?
-                        "adaptive_disabled" : "removed_from_pool"))
+                        "adaptive_disabled" :
+                        (AdaptiveFrozenCorpses[Index].bRestorePending ?
+                         "freeze_rollback" : "removed_from_pool")))
                 {
                     AdaptiveFrozenCorpses.Remove(Index, 1);
                     AdaptiveFreezePruneCursor =
@@ -3483,6 +3490,7 @@ function bool FreezeOnePressureEligibleCorpse(
         AdaptiveFrozenCorpses[Index].bOriginalBlockRigidBody =
             Candidate.CollisionComponent.BlockRigidBody;
     }
+    AdaptiveFrozenCorpses[Index].bRestorePending = false;
     // Match the engine's shutdown order for a corpse that has already settled:
     // detach it from collision and ticking before the single bounded physics
     // mutation. KFGoreManager remains responsible for pool cleanup.
@@ -3497,37 +3505,23 @@ function bool FreezeOnePressureEligibleCorpse(
         (Candidate.CollisionComponent != None &&
          Candidate.CollisionComponent.BlockRigidBody))
     {
-        Candidate.SetCollision(
-            AdaptiveFrozenCorpses[Index].bOriginalCollideActors,
-            AdaptiveFrozenCorpses[Index].bOriginalBlockActors,
-            AdaptiveFrozenCorpses[Index].bOriginalIgnoreEncroachers);
-        if (AdaptiveFrozenCorpses[Index].bHadCollisionComponent &&
-            Candidate.CollisionComponent != None)
+        AdaptiveFrozenCorpses[Index].bRestorePending = true;
+        if (TryRestoreAdaptiveCorpseFreeze(
+                Index, "freeze_prephysics_rollback"))
         {
-            Candidate.CollisionComponent.SetBlockRigidBody(
-                AdaptiveFrozenCorpses[Index].bOriginalBlockRigidBody);
+            AdaptiveFrozenCorpses.Remove(Index, 1);
         }
-        Candidate.SetTickIsDisabled(
-            AdaptiveFrozenCorpses[Index].bOriginalTickDisabled);
-        AdaptiveFrozenCorpses.Remove(Index, 1);
         return false;
     }
     Candidate.SetPhysics(PHYS_None);
     if (Candidate.Physics != PHYS_None)
     {
-        Candidate.SetCollision(
-            AdaptiveFrozenCorpses[Index].bOriginalCollideActors,
-            AdaptiveFrozenCorpses[Index].bOriginalBlockActors,
-            AdaptiveFrozenCorpses[Index].bOriginalIgnoreEncroachers);
-        if (AdaptiveFrozenCorpses[Index].bHadCollisionComponent &&
-            Candidate.CollisionComponent != None)
+        AdaptiveFrozenCorpses[Index].bRestorePending = true;
+        if (TryRestoreAdaptiveCorpseFreeze(
+                Index, "freeze_postphysics_rollback"))
         {
-            Candidate.CollisionComponent.SetBlockRigidBody(
-                AdaptiveFrozenCorpses[Index].bOriginalBlockRigidBody);
+            AdaptiveFrozenCorpses.Remove(Index, 1);
         }
-        Candidate.SetTickIsDisabled(
-            AdaptiveFrozenCorpses[Index].bOriginalTickDisabled);
-        AdaptiveFrozenCorpses.Remove(Index, 1);
         return false;
     }
     if (!RegisterAdaptiveCorpsePhysicsAction(Candidate, "aging_freeze"))
