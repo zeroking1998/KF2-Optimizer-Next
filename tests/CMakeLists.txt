@@ -556,6 +556,7 @@ add_executable(kf2_advanced_settings_test
 target_include_directories(kf2_advanced_settings_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_advanced_settings_test PRIVATE
+    KF2_ADVANCED_SETTINGS_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/advanced-settings")
 add_test(NAME kf2_advanced_settings_test COMMAND kf2_advanced_settings_test)
 

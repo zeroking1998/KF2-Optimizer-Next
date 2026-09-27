@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <new>
 #include <string>
 
 #include "kf2/game/advanced_settings.hpp"
@@ -59,6 +60,10 @@ void write_selected_catalog(const std::filesystem::path& root) {
     }
 }
 
+bool reject_mutation() { return false; }
+
+bool throw_mutation() { throw std::bad_alloc{}; }
+
 }  // namespace
 
 int main() {
@@ -73,6 +78,10 @@ int main() {
     const auto loaded = game::read_advanced_game_settings(root);
     CHECK(loaded.has_value());
     auto pending = loaded.value();
+    static_assert(!noexcept(game::set_advanced_slider_value(
+        pending, game::AdvancedOption::screen_percentage, 100)));
+    static_assert(!noexcept(game::cycle_advanced_option(
+        pending, game::AdvancedOption::one_frame_thread_lag)));
     CHECK(game::advanced_value_label(
               game::AdvancedOption::one_frame_thread_lag, pending) == L"On");
     CHECK(game::cycle_advanced_option(
@@ -94,6 +103,35 @@ int main() {
         pending, game::AdvancedOption::particle_percentage, 86));
     CHECK(game::set_advanced_slider_value(
         pending, game::AdvancedOption::decal_lifetime, 45));
+
+    const auto before_rejection = pending;
+    game::set_advanced_mutation_probe_for_testing(&reject_mutation);
+    CHECK(!game::set_advanced_slider_value(
+        pending, game::AdvancedOption::screen_percentage, 138));
+    CHECK(!game::cycle_advanced_option(
+        pending, game::AdvancedOption::one_frame_thread_lag));
+    CHECK(pending == before_rejection);
+
+    game::set_advanced_mutation_probe_for_testing(&throw_mutation);
+    bool slider_threw = false;
+    try {
+        static_cast<void>(game::set_advanced_slider_value(
+            pending, game::AdvancedOption::screen_percentage, 138));
+    } catch (const std::bad_alloc&) {
+        slider_threw = true;
+    }
+    CHECK(slider_threw);
+    CHECK(pending == before_rejection);
+    bool cycle_threw = false;
+    try {
+        static_cast<void>(game::cycle_advanced_option(
+            pending, game::AdvancedOption::one_frame_thread_lag));
+    } catch (const std::bad_alloc&) {
+        cycle_threw = true;
+    }
+    CHECK(cycle_threw);
+    CHECK(pending == before_rejection);
+    game::set_advanced_mutation_probe_for_testing(nullptr);
 
     const auto defaults = game::recommended_advanced_defaults();
     CHECK(game::advanced_value_label(
