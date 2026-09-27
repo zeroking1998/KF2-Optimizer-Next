@@ -376,6 +376,72 @@ int main() {
     CHECK(online_context_source.find(
         "GoreManager.MaxDeadBodies != Quality") != std::string::npos);
     CHECK(online_context_source.find(
+        "var int OnlineCorpseOriginalMaximum") != std::string::npos);
+    CHECK(online_context_source.find(
+        "var bool bOnlineCorpseOriginalMaximumCaptured") !=
+          std::string::npos);
+    const auto corpse_capture_function = online_context_source.find(
+        "function bool CaptureOnlineCorpseMaximum(");
+    const auto corpse_restore_function = online_context_source.find(
+        "function bool RestoreOnlineCorpseMaximum(");
+    const auto online_apply_function = online_context_source.find(
+        "function bool ApplyOnlineGraphicsControl(");
+    const auto online_sleep_function = online_context_source.find(
+        "function bool TrySleepOneOnlineCorpse(");
+    CHECK(corpse_capture_function != std::string::npos);
+    CHECK(corpse_restore_function != std::string::npos);
+    CHECK(online_apply_function != std::string::npos);
+    CHECK(online_sleep_function != std::string::npos);
+    const auto corpse_capture_body = online_context_source.substr(
+        corpse_capture_function,
+        corpse_restore_function - corpse_capture_function);
+    CHECK(corpse_capture_body.find(
+        "if (bOnlineCorpseOriginalMaximumCaptured)") != std::string::npos);
+    CHECK(corpse_capture_body.find(
+        "OnlineCorpseOriginalMaximum = GoreManager.MaxDeadBodies") !=
+          std::string::npos);
+    const auto corpse_restore_body = online_context_source.substr(
+        corpse_restore_function,
+        online_apply_function - corpse_restore_function);
+    CHECK(corpse_restore_body.find(
+        "GoreManager.MaxDeadBodies = OnlineCorpseOriginalMaximum") !=
+          std::string::npos);
+    const auto corpse_restore_mismatch = corpse_restore_body.find(
+        "GoreManager.MaxDeadBodies != OnlineCorpseOriginalMaximum");
+    const auto corpse_snapshot_clear = corpse_restore_body.find(
+        "ClearOnlineCorpseMaximumSnapshot()");
+    CHECK(corpse_restore_mismatch != std::string::npos);
+    CHECK(corpse_snapshot_clear != std::string::npos);
+    CHECK(corpse_restore_mismatch < corpse_snapshot_clear);
+    CHECK(corpse_restore_body.find("return false", corpse_restore_mismatch) <
+          corpse_snapshot_clear);
+    const auto online_apply_body = online_context_source.substr(
+        online_apply_function, online_sleep_function - online_apply_function);
+    const auto corpse_capture_call = online_apply_body.find(
+        "CaptureOnlineCorpseMaximum(CurrentWorld, GoreManager)");
+    const auto corpse_limit_write = online_apply_body.find(
+        "GoreManager.MaxDeadBodies = Quality");
+    CHECK(corpse_capture_call != std::string::npos);
+    CHECK(corpse_limit_write != std::string::npos);
+    CHECK(corpse_capture_call < corpse_limit_write);
+    const auto enable_failure_restore = online_apply_body.find(
+        "RestoreOnlineCorpseMaximum(CurrentWorld, \"enable_failure\")",
+        corpse_limit_write);
+    CHECK(enable_failure_restore != std::string::npos);
+    CHECK(enable_failure_restore < online_apply_body.find(
+        "bOnlineGraphicsEnabled = true"));
+    CHECK(online_apply_body.find(
+        "RestoreOnlineCorpseMaximum(CurrentWorld, \"disable\")") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "RestoreOnlineSessionState(CurrentWorld, \"main_menu\")") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "function NotifyGameSessionEnded()") != std::string::npos);
+    CHECK(online_context_source.find(
+        "RestoreOnlineSessionState(CurrentWorld, \"session_end\")") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
         "KF2OPT_ONLINE_CORPSE_ACTION state=capacity") != std::string::npos);
     CHECK(online_context_source.find(
         "local_only=true readback=verified") != std::string::npos);

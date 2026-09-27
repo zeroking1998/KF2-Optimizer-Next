@@ -17,6 +17,9 @@ var bool bOnlineCorpsePoolObserved;
 var bool bOnlineCorpseSleepArmed;
 var bool bOnlineCorpseSleepApplied;
 var float OnlineCorpseLastCapacityRealTime;
+var int OnlineCorpseOriginalMaximum;
+var bool bOnlineCorpseOriginalMaximumCaptured;
+var string OnlineCorpseOriginalMapName;
 
 function bool ValidOnlineGraphicsToken(string Candidate)
 {
@@ -80,6 +83,98 @@ function bool EnsureOnlineFixedEffectsBaseline()
     return true;
 }
 
+function ClearOnlineCorpseMaximumSnapshot()
+{
+    OnlineCorpseOriginalMaximum = 0;
+    OnlineCorpseOriginalMapName = "";
+    bOnlineCorpseOriginalMaximumCaptured = false;
+}
+
+function DiscardOnlineCorpseMaximumSnapshot(string Boundary)
+{
+    if (!bOnlineCorpseOriginalMaximumCaptured)
+    {
+        return;
+    }
+    `log("KF2OPT_ONLINE_CORPSE_MAXIMUM state=discarded boundary="$Boundary$
+         " reason=world_changed original="$OnlineCorpseOriginalMaximum$
+         " map="$OnlineCorpseOriginalMapName);
+    ClearOnlineCorpseMaximumSnapshot();
+}
+
+function bool CaptureOnlineCorpseMaximum(
+    WorldInfo CurrentWorld, KFGoreManager GoreManager)
+{
+    local string CurrentMapName;
+
+    if (CurrentWorld == None || GoreManager == None)
+    {
+        return false;
+    }
+    CurrentMapName = CurrentWorld.GetMapName(true);
+    if (bOnlineCorpseOriginalMaximumCaptured)
+    {
+        if (OnlineCorpseOriginalMapName == CurrentMapName)
+        {
+            return true;
+        }
+        DiscardOnlineCorpseMaximumSnapshot("world_change");
+    }
+    OnlineCorpseOriginalMaximum = GoreManager.MaxDeadBodies;
+    OnlineCorpseOriginalMapName = CurrentMapName;
+    bOnlineCorpseOriginalMaximumCaptured = true;
+    `log("KF2OPT_ONLINE_CORPSE_MAXIMUM state=captured original="$
+         OnlineCorpseOriginalMaximum$" map="$OnlineCorpseOriginalMapName$
+         " local_only=true readback=verified");
+    return true;
+}
+
+function bool RestoreOnlineCorpseMaximum(
+    WorldInfo CurrentWorld, string Boundary)
+{
+    local KFGoreManager GoreManager;
+    local string CurrentMapName;
+
+    if (!bOnlineCorpseOriginalMaximumCaptured)
+    {
+        return true;
+    }
+    if (CurrentWorld == None)
+    {
+        `log("KF2OPT_ONLINE_CORPSE_MAXIMUM state=restore_failed boundary="$
+             Boundary$" reason=world_unavailable expected="$
+             OnlineCorpseOriginalMaximum);
+        return false;
+    }
+    CurrentMapName = CurrentWorld.GetMapName(true);
+    if (CurrentMapName != OnlineCorpseOriginalMapName)
+    {
+        DiscardOnlineCorpseMaximumSnapshot(Boundary);
+        return true;
+    }
+    GoreManager = KFGoreManager(CurrentWorld.MyGoreEffectManager);
+    if (GoreManager == None)
+    {
+        `log("KF2OPT_ONLINE_CORPSE_MAXIMUM state=restore_failed boundary="$
+             Boundary$" reason=no_gore_manager expected="$
+             OnlineCorpseOriginalMaximum);
+        return false;
+    }
+    GoreManager.MaxDeadBodies = OnlineCorpseOriginalMaximum;
+    if (GoreManager.MaxDeadBodies != OnlineCorpseOriginalMaximum)
+    {
+        `log("KF2OPT_ONLINE_CORPSE_MAXIMUM state=restore_failed boundary="$
+             Boundary$" reason=readback_mismatch expected="$
+             OnlineCorpseOriginalMaximum$" actual="$GoreManager.MaxDeadBodies);
+        return false;
+    }
+    `log("KF2OPT_ONLINE_CORPSE_MAXIMUM state=restored boundary="$Boundary$
+         " maximum="$OnlineCorpseOriginalMaximum$
+         " local_only=true readback=verified");
+    ClearOnlineCorpseMaximumSnapshot();
+    return true;
+}
+
 function bool ApplyOnlineGraphicsControl(
     string Token, int Sequence, string Resource, int Quality)
 {
@@ -104,14 +199,25 @@ function bool ApplyOnlineGraphicsControl(
         {
             return false;
         }
+        if (bOnlineCorpseOriginalMaximumCaptured &&
+            CurrentWorld.RealTimeSeconds < LastObservedRealTime)
+        {
+            DiscardOnlineCorpseMaximumSnapshot("world_change");
+        }
+        if (!CaptureOnlineCorpseMaximum(CurrentWorld, GoreManager))
+        {
+            return false;
+        }
         GoreManager.MaxDeadBodies = Quality;
         if (GoreManager.MaxDeadBodies != Quality)
         {
+            RestoreOnlineCorpseMaximum(CurrentWorld, "enable_failure");
             return false;
         }
         CurrentState = GetOnlineGraphicsState();
         if (CurrentState == None || !EnsureOnlineFixedEffectsBaseline())
         {
+            RestoreOnlineCorpseMaximum(CurrentWorld, "enable_failure");
             return false;
         }
         bOnlineGraphicsEnabled = true;
@@ -140,6 +246,10 @@ function bool ApplyOnlineGraphicsControl(
         }
         bOnlineFixedEffectsApplied = false;
         if (!EnsureOnlineFixedEffectsBaseline())
+        {
+            return false;
+        }
+        if (!RestoreOnlineCorpseMaximum(CurrentWorld, "disable"))
         {
             return false;
         }
@@ -323,20 +433,30 @@ function ReportOnlineCorpseCapability(WorldInfo CurrentWorld)
     }
 }
 
-function RestoreOnlineGraphicsAtMainMenu()
+function bool RestoreOnlineSessionState(
+    WorldInfo CurrentWorld, string Boundary)
 {
+    local bool bGraphicsRestored;
+
+    bGraphicsRestored = true;
     if (OnlineGraphicsState != None &&
         OnlineGraphicsState.bOriginalCaptured)
     {
         if (class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
                 OnlineGraphicsState))
         {
-            `log("KF2OPT_ONLINE_GRAPHICS state=restored boundary=main_menu");
+            `log("KF2OPT_ONLINE_GRAPHICS state=restored boundary="$Boundary);
         }
         else
         {
-            `log("KF2OPT_ONLINE_GRAPHICS state=restore_failed boundary=main_menu");
+            bGraphicsRestored = false;
+            `log("KF2OPT_ONLINE_GRAPHICS state=restore_failed boundary="$Boundary);
         }
+    }
+    if (!RestoreOnlineCorpseMaximum(CurrentWorld, Boundary) ||
+        !bGraphicsRestored)
+    {
+        return false;
     }
     bOnlineGraphicsEnabled = false;
     bOnlineFixedEffectsApplied = false;
@@ -347,6 +467,29 @@ function RestoreOnlineGraphicsAtMainMenu()
     bOnlineCorpseSleepArmed = false;
     bOnlineCorpseSleepApplied = false;
     OnlineCorpseLastCapacityRealTime = 0.0;
+    return true;
+}
+
+function RestoreOnlineGraphicsAtMainMenu(WorldInfo CurrentWorld)
+{
+    RestoreOnlineSessionState(CurrentWorld, "main_menu");
+}
+
+function NotifyGameSessionEnded()
+{
+    local WorldInfo CurrentWorld;
+
+    if (!GetOnlineWorld(CurrentWorld))
+    {
+        if (bOnlineCorpseOriginalMaximumCaptured)
+        {
+            `log("KF2OPT_ONLINE_CORPSE_MAXIMUM state=restore_failed"$
+                 " boundary=session_end reason=world_unavailable expected="$
+                 OnlineCorpseOriginalMaximum);
+        }
+        return;
+    }
+    RestoreOnlineSessionState(CurrentWorld, "session_end");
 }
 
 function ReportSessionContext(
@@ -395,6 +538,7 @@ event Tick(float DeltaTime)
     // without retaining WorldInfo across map teardown.
     if (CurrentWorld.RealTimeSeconds < LastObservedRealTime)
     {
+        DiscardOnlineCorpseMaximumSnapshot("world_change");
         LastReportedContext = "";
         bOnlineGraphicsListenerStarted = false;
         bOnlineCorpseCapabilityReported = false;
@@ -407,7 +551,7 @@ event Tick(float DeltaTime)
     MapName = CurrentWorld.GetMapName(true);
     if (MapName ~= "KFMainMenu")
     {
-        RestoreOnlineGraphicsAtMainMenu();
+        RestoreOnlineGraphicsAtMainMenu(CurrentWorld);
         LastReportedContext = "";
         return;
     }
