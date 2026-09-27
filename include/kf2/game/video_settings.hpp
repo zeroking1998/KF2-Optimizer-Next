@@ -61,6 +61,11 @@ struct GameMenuGraphicsReadback {
     bool operator==(const GameMenuGraphicsReadback&) const = default;
 };
 
+#ifdef KF2_VIDEO_SETTINGS_TESTING
+using VideoReadHook = void (*)(const std::filesystem::path&);
+void set_video_read_hook_for_testing(VideoReadHook hook) noexcept;
+#endif
+
 [[nodiscard]] std::optional<GameMenuGraphicsReadback>
 parse_game_menu_graphics_readback(std::string_view line);
 [[nodiscard]] VideoSettings present_game_menu_graphics_readback(

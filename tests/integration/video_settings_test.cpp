@@ -25,6 +25,81 @@ void write_file(const std::filesystem::path& path, std::string_view bytes) {
     output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 }
 
+enum class MutationKind {
+    truncate,
+    grow_past_limit,
+    same_size_rewrite,
+    replace,
+};
+
+struct MutationPlan {
+    MutationKind kind{MutationKind::truncate};
+    std::filesystem::path trigger;
+    std::filesystem::path target;
+    std::filesystem::path replacement;
+    std::string payload;
+    bool attempted{};
+    bool blocked{};
+};
+
+MutationPlan* g_mutation_plan{};
+
+void mutate_during_read(const std::filesystem::path& path) {
+    if (!g_mutation_plan || g_mutation_plan->attempted ||
+        path != g_mutation_plan->trigger) {
+        return;
+    }
+    auto& plan = *g_mutation_plan;
+    plan.attempted = true;
+
+    if (plan.kind == MutationKind::replace) {
+        const BOOL replaced = ReplaceFileW(
+            plan.target.c_str(), plan.replacement.c_str(), nullptr,
+            REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr);
+        plan.blocked = replaced == FALSE;
+        return;
+    }
+
+    const HANDLE output = CreateFileW(
+        plan.target.c_str(), GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (output == INVALID_HANDLE_VALUE) {
+        plan.blocked = true;
+        return;
+    }
+
+    LARGE_INTEGER position{};
+    if (plan.kind == MutationKind::truncate) {
+        position.QuadPart = 1;
+        plan.blocked = !SetFilePointerEx(output, position, nullptr, FILE_BEGIN) ||
+            !SetEndOfFile(output);
+    } else if (plan.kind == MutationKind::grow_past_limit) {
+        position.QuadPart = 4LL * 1024LL * 1024LL + 1LL;
+        plan.blocked = !SetFilePointerEx(output, position, nullptr, FILE_BEGIN) ||
+            !SetEndOfFile(output);
+    } else {
+        DWORD written{};
+        plan.blocked = !WriteFile(
+            output, plan.payload.data(),
+            static_cast<DWORD>(plan.payload.size()), &written, nullptr) ||
+            written != static_cast<DWORD>(plan.payload.size());
+    }
+    FlushFileBuffers(output);
+    CloseHandle(output);
+}
+
+bool rejects_or_blocks_mutation(MutationPlan& plan,
+                                const std::filesystem::path& root) {
+    g_mutation_plan = &plan;
+    kf2::game::set_video_read_hook_for_testing(&mutate_during_read);
+    const auto loaded = kf2::game::read_video_settings(root);
+    kf2::game::set_video_read_hook_for_testing(nullptr);
+    g_mutation_plan = nullptr;
+    return plan.attempted && (plan.blocked ? loaded.has_value()
+                                           : !loaded.has_value());
+}
+
 }  // namespace
 
 int main() {
@@ -56,6 +131,46 @@ int main() {
 
     auto loaded = kf2::game::read_video_settings(root);
     CHECK(loaded.has_value());
+
+    // A graphics snapshot holds all three INIs against writes and replacement
+    // until every exact, bounded read and metadata check has completed.
+    for (const auto kind : {MutationKind::truncate,
+                            MutationKind::grow_past_limit,
+                            MutationKind::same_size_rewrite}) {
+        MutationPlan plan;
+        plan.kind = kind;
+        plan.trigger = root / L"KFSystemSettings.ini";
+        plan.target = plan.trigger;
+        plan.payload.assign(system.size(), 'X');
+        CHECK(rejects_or_blocks_mutation(plan, root));
+        write_file(root / L"KFSystemSettings.ini", system);
+    }
+
+    const auto replacement = root / L"KFSystemSettings.replacement";
+    write_file(replacement, std::string(system.size(), 'X'));
+    MutationPlan replacement_plan;
+    replacement_plan.kind = MutationKind::replace;
+    replacement_plan.trigger = root / L"KFSystemSettings.ini";
+    replacement_plan.target = replacement_plan.trigger;
+    replacement_plan.replacement = replacement;
+    CHECK(rejects_or_blocks_mutation(replacement_plan, root));
+    write_file(root / L"KFSystemSettings.ini", system);
+
+    // The first file stays protected while later files are read, so a
+    // multi-file read cannot silently combine two KF2 write generations.
+    MutationPlan generation_plan;
+    generation_plan.kind = MutationKind::same_size_rewrite;
+    generation_plan.trigger = root / L"KFGame.ini";
+    generation_plan.target = root / L"KFSystemSettings.ini";
+    generation_plan.payload.assign(system.size(), 'Y');
+    CHECK(rejects_or_blocks_mutation(generation_plan, root));
+    write_file(root / L"KFSystemSettings.ini", system);
+
+    std::string oversized(4U * 1024U * 1024U + 1U, 'Z');
+    write_file(root / L"KFSystemSettings.ini", oversized);
+    CHECK(!kf2::game::read_video_settings(root).has_value());
+    write_file(root / L"KFSystemSettings.ini", system);
+    CHECK(kf2::game::read_video_settings(root).has_value());
 
     // FleX is part of the verified graphics baseline. Missing, unreadable,
     // partial, malformed, and out-of-range evidence must never become Off.
@@ -89,7 +204,9 @@ int main() {
         (flex_root / L"KFEngine.ini").c_str(), GENERIC_READ | GENERIC_WRITE,
         0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     CHECK(locked_engine != INVALID_HANDLE_VALUE);
-    CHECK(!kf2::game::read_video_settings(flex_root).has_value());
+    const auto updating = kf2::game::read_video_settings(flex_root);
+    CHECK(!updating.has_value());
+    CHECK(updating.error().code == kf2::ErrorCode::stale_data);
     CHECK(CloseHandle(locked_engine) != FALSE);
     CHECK(kf2::game::read_video_settings(flex_root).has_value());
 

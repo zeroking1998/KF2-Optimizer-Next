@@ -545,6 +545,7 @@ target_include_directories(kf2_video_settings_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_video_settings_test PRIVATE
     UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN
+    KF2_VIDEO_SETTINGS_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/video-settings")
 add_test(NAME kf2_video_settings_test COMMAND kf2_video_settings_test)
 
