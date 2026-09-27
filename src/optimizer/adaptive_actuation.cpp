@@ -186,6 +186,19 @@ void AdaptiveActuationTracker::rebase(AdaptiveGeneration generation,
     generation_ = generation;
 }
 
+void AdaptiveActuationTracker::invalidate_control(
+    AdaptiveControlId control) noexcept {
+    if (control == AdaptiveControlId::count) return;
+    Slot& slot = slots_[index(control)];
+    const auto consecutive_failures = slot.consecutive_failures;
+    const auto retry_after_ns = slot.retry_after_ns;
+    const bool circuit_open = slot.circuit_open;
+    slot = {};
+    slot.consecutive_failures = consecutive_failures;
+    slot.retry_after_ns = retry_after_ns;
+    slot.circuit_open = circuit_open;
+}
+
 void AdaptiveActuationTracker::disable(std::uint64_t now_ns) noexcept {
     for (auto& slot : slots_) {
         if (!slot.occupied) continue;

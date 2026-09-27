@@ -114,6 +114,32 @@ int main() {
     assert(tracker.receive(success(capability_pending, 120.0, 904)) ==
            AdaptiveReceiptResult::stale_generation);
 
+    // A transient FleX capability change invalidates only FleX work. A
+    // graphics receipt dispatched in the same process/map/settings generation
+    // remains valid, while the old FleX receipt cannot cross the local rebase.
+    AdaptiveActuationTracker independent(generation(3, 1));
+    auto independent_quality = independent.propose(
+        AdaptiveControlId::runtime_quality, 80.0, 100.0,
+        AdaptiveCapabilityState::available, 910, "adaptive_loopback");
+    assert(independent.dispatch(AdaptiveControlId::runtime_quality, 911));
+    independent_quality = *independent.current(
+        AdaptiveControlId::runtime_quality);
+    auto independent_flex = independent.propose(
+        AdaptiveControlId::flex_solver_substeps, 1.0, 2.0,
+        AdaptiveCapabilityState::available, 912, "flex_shared_memory");
+    assert(independent.dispatch(
+        AdaptiveControlId::flex_solver_substeps, 913));
+    independent_flex = *independent.current(
+        AdaptiveControlId::flex_solver_substeps);
+    independent.invalidate_control(
+        AdaptiveControlId::flex_solver_substeps);
+    assert(independent.receive(success(independent_quality, 80.0, 914)) ==
+           AdaptiveReceiptResult::accepted);
+    assert(independent.effective_value(
+        AdaptiveControlId::runtime_quality) == 80.0);
+    assert(independent.receive(success(independent_flex, 1.0, 915)) ==
+           AdaptiveReceiptResult::unknown_action);
+
     // A10: disabling cancels pending work without changing the user/effective value.
     action = tracker.propose(AdaptiveControlId::corpse_runtime_limit, 120.0, 130.0,
         AdaptiveCapabilityState::available, 905);
