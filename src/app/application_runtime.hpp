@@ -71,6 +71,13 @@ struct PackageRepairAsyncState;
 struct UpdateCheckAsyncState;
 struct UpdateInstallAsyncState;
 
+enum class VideoSyncDisposition {
+    unchanged,
+    synchronized,
+    retryable_unstable,
+    hard_failure,
+};
+
 struct AdaptiveRuntimePendingRequest final {
     std::uint64_t sequence{0};
     std::uint64_t action_id{0};
@@ -274,6 +281,9 @@ struct UiRuntime {
     UpdateRuntimeState updates;
     std::optional<game::VideoSettings> video_saved;
     std::optional<game::VideoSettings> video_pending;
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+    std::function<void()> video_sync_before_verification_for_testing;
+#endif
     std::optional<game::GameMenuGraphicsReadback> game_menu_graphics_readback;
     // Keep the temporary live profile separate from the user's saved graphics.
     std::optional<game::VideoSettings> session_video_runtime;
@@ -376,7 +386,7 @@ struct UiRuntime {
     void ignore_update();
     void refresh_update_presentation();
     void reload_video_settings();
-    bool synchronize_video_settings_from_game();
+    VideoSyncDisposition synchronize_video_settings_from_game();
     void refresh_game_configuration_for_process_start(bool settings_restart);
     bool reset_adaptive_frame_window_for_rate_mode_change(
         std::uint64_t now_ns, bool active_gameplay);
