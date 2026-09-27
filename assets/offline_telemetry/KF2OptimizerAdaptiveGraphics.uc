@@ -752,6 +752,84 @@ static function bool ReadbackMatches(
                Requested.CharacterDetail.MaxBodyWoundDecals;
 }
 
+static function SetQualityRestoreDebt(
+    KF2OptimizerAdaptiveGraphicsState Snapshot,
+    int GpuQuality, int CpuQuality, int VramQuality, int RamQuality,
+    int OverdrawQuality, int EffectsQuality)
+{
+    if (Snapshot == None) return;
+    Snapshot.RestoreGpuQuality = GpuQuality;
+    Snapshot.RestoreCpuQuality = CpuQuality;
+    Snapshot.RestoreVramQuality = VramQuality;
+    Snapshot.RestoreRamQuality = RamQuality;
+    Snapshot.RestoreOverdrawQuality = OverdrawQuality;
+    Snapshot.RestoreEffectsQuality = EffectsQuality;
+    Snapshot.bQualityRestorePending = true;
+    Snapshot.bQualityStateKnown = false;
+}
+
+static function ClearQualityRestoreDebt(
+    KF2OptimizerAdaptiveGraphicsState Snapshot)
+{
+    if (Snapshot == None) return;
+    Snapshot.bQualityRestorePending = false;
+    Snapshot.bQualityStateKnown = true;
+}
+
+// Writes one exact six-group composition and verifies it with one readback.
+// The caller owns the restore debt until graphics and runtime effects both
+// verify; this function never substitutes the rejected composition.
+static function bool ApplyQualityComposition(
+    KF2OptimizerAdaptiveGraphicsState Snapshot,
+    int GpuQuality, int CpuQuality, int VramQuality, int RamQuality,
+    int OverdrawQuality, int EffectsQuality)
+{
+    local GFXSettings Current;
+    local GFXSettings Requested;
+    local GFXSettings Observed;
+
+    if (Snapshot == None ||
+        GpuQuality < 10 || GpuQuality > 100 ||
+        CpuQuality < 10 || CpuQuality > 100 ||
+        VramQuality < 10 || VramQuality > 100 ||
+        RamQuality < 10 || RamQuality > 100 ||
+        OverdrawQuality < 10 || OverdrawQuality > 100 ||
+        EffectsQuality < 10 || EffectsQuality > 100)
+    {
+        return false;
+    }
+    GetCurrentGFXSettings(Current);
+    if (!Snapshot.bOriginalCaptured) CaptureOriginal(Snapshot, Current);
+    Snapshot.GpuQuality = GpuQuality;
+    Snapshot.CpuQuality = CpuQuality;
+    Snapshot.VramQuality = VramQuality;
+    Snapshot.RamQuality = RamQuality;
+    Snapshot.OverdrawQuality = OverdrawQuality;
+    Snapshot.EffectsQuality = EffectsQuality;
+    Requested = Current;
+    RestoreOwnedSettings(Snapshot, Requested);
+    ApplyGpu(Requested, GpuQuality);
+    ApplyCpu(Requested, CpuQuality);
+    ApplyVram(Requested, VramQuality);
+    ApplyRam(Requested, RamQuality);
+    ApplyOverdraw(Requested, GetEffectiveOverdrawQuality(Snapshot));
+    ApplyEffects(Requested, GetEffectiveEffectsQuality(Snapshot));
+    SetNativeSettings(Requested);
+    SetScriptSettings(Requested);
+    GetCurrentGFXSettings(Observed);
+    return ReadbackMatches(Observed, Requested);
+}
+
+static function bool ApplyQualityRestoreDebt(
+    KF2OptimizerAdaptiveGraphicsState Snapshot)
+{
+    return Snapshot != None && Snapshot.bQualityRestorePending &&
+        ApplyQualityComposition(
+            Snapshot, Snapshot.RestoreGpuQuality, Snapshot.RestoreCpuQuality,
+            Snapshot.RestoreVramQuality, Snapshot.RestoreRamQuality,
+            Snapshot.RestoreOverdrawQuality, Snapshot.RestoreEffectsQuality);
+}
+
 static function bool ApplyResource(
     KF2OptimizerAdaptiveGraphicsState Snapshot, string Resource, int Quality)
 {
@@ -820,7 +898,11 @@ static function bool ApplyResource(
     SetNativeSettings(Requested);
     SetScriptSettings(Requested);
     GetCurrentGFXSettings(Observed);
-    if (ReadbackMatches(Observed, Requested)) return true;
+    if (ReadbackMatches(Observed, Requested))
+    {
+        Snapshot.bQualityStateKnown = true;
+        return true;
+    }
 
     Snapshot.GpuQuality = PreviousGpuQuality;
     Snapshot.CpuQuality = PreviousCpuQuality;
@@ -843,10 +925,15 @@ static function bool ApplyResource(
     GetCurrentGFXSettings(Observed);
     if (ReadbackMatches(Observed, Requested))
     {
+        Snapshot.bQualityStateKnown = true;
         `log("KF2OPT_ADAPTIVE_ROLLBACK state=applied reason=readback_mismatch");
     }
     else
     {
+        SetQualityRestoreDebt(
+            Snapshot, PreviousGpuQuality, PreviousCpuQuality,
+            PreviousVramQuality, PreviousRamQuality,
+            PreviousOverdrawQuality, PreviousEffectsQuality);
         `log("KF2OPT_ADAPTIVE_ROLLBACK state=failed reason=readback_mismatch");
     }
     return false;
@@ -883,6 +970,7 @@ static function bool RestoreOriginal(KF2OptimizerAdaptiveGraphicsState Snapshot)
     Snapshot.FixedOverdrawQuality = 100;
     Snapshot.FixedEffectsQuality = 100;
     Snapshot.bOriginalCaptured = false;
+    ClearQualityRestoreDebt(Snapshot);
     return true;
 }
 

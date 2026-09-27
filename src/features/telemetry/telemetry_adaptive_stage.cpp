@@ -22,6 +22,8 @@ void UiRuntime::poll_adaptive_runtime_mode() {
             : game::AdaptiveResourceControl::disable;
         adaptive_runtime_mode_confirmed =
             mode_outcome->has_value() &&
+            mode_outcome->value().status ==
+                game::AdaptiveControlReceiptStatus::applied &&
             mode_outcome->value().resource == expected_resource;
         events->append({
             0,
@@ -289,7 +291,57 @@ void UiRuntime::poll_adaptive_quality_dispatcher() {
         if (adaptive_control_pending) {
             const auto pending = *adaptive_control_pending;
             const auto completed_ns = monotonic_ns();
-            if (outcome->has_value()) {
+            if (outcome->has_value() &&
+                outcome->value().status ==
+                    game::AdaptiveControlReceiptStatus::restored) {
+                static_cast<void>(adaptive_actuation.receive({
+                    pending.action_id,
+                    optimizer::AdaptiveControlId::runtime_quality,
+                    optimizer::AdaptiveActionStatus::rolled_back,
+                    static_cast<double>(pending.requested_quality),
+                    static_cast<double>(pending.previous_quality),
+                    pending.generation,
+                    completed_ns,
+                    "kf2_loopback_readback",
+                    {},
+                    false}));
+                adaptive_quality_state_known = true;
+                adaptive_quality_rollback_target.reset();
+                adaptive_quality_rollback_resource.reset();
+                adaptive_quality_last_applied_ns = completed_ns;
+                adaptive_frame_not_before_ns = completed_ns;
+                adaptive_governor.notify_quality_applied(completed_ns);
+                log_adaptive_quality_response(
+                    quality_response.cancel("pre_command_composition_restored"));
+                events->append({
+                    0, diagnostics::Severity::info,
+                    "ADAPTIVE_RUNTIME_QUALITY_RESTORED",
+                    L"KF2 verified the exact pre-command quality composition; the rejected follow-up request was not applied",
+                    L"optimizer"});
+            } else if (outcome->has_value() &&
+                outcome->value().status ==
+                    game::AdaptiveControlReceiptStatus::state_unknown) {
+                static_cast<void>(adaptive_actuation.receive({
+                    pending.action_id,
+                    optimizer::AdaptiveControlId::runtime_quality,
+                    optimizer::AdaptiveActionStatus::failed,
+                    static_cast<double>(pending.requested_quality),
+                    {},
+                    pending.generation,
+                    completed_ns,
+                    "kf2_loopback_readback",
+                    "runtime_quality_state_unknown"}));
+                adaptive_quality_state_known = false;
+                adaptive_quality_rollback_target = pending.previous_quality;
+                adaptive_quality_rollback_resource = pending.resource;
+                log_adaptive_quality_response(
+                    quality_response.cancel("runtime_quality_state_unknown"));
+                events->append({
+                    0, diagnostics::Severity::error,
+                    "ADAPTIVE_RUNTIME_QUALITY_STATE_UNKNOWN",
+                    L"KF2 could not verify the complete pre-command quality composition; the exact previous composition remains queued for verified restoration",
+                    L"optimizer"});
+            } else if (outcome->has_value()) {
                 const auto receipt_result = adaptive_actuation.receive({
                     pending.action_id,
                     optimizer::AdaptiveControlId::runtime_quality,
@@ -304,6 +356,7 @@ void UiRuntime::poll_adaptive_quality_dispatcher() {
                     static_cast<double>(pending.previous_quality)});
                 if (receipt_result ==
                     optimizer::AdaptiveReceiptResult::accepted) {
+                    adaptive_quality_state_known = true;
                     quality_response.confirm(pending.sequence, completed_ns);
                     adaptive_resource_quality.apply(outcome->value());
                     if (adaptive_quality_rollback_resource &&

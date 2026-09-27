@@ -635,6 +635,27 @@ int main() {
     CHECK(selected);
     CHECK(selected->resource == game::AdaptiveResourceControl::mixed);
     CHECK(selected->quality == 20);
+    // Inject a runtime-readback failure followed by one composite rollback
+    // readback failure for every quality group. Native must re-verify the exact
+    // previous value even though it equals the last confirmed value.
+    auto unknown_composition = rollback;
+    unknown_composition.current_quality = 70;
+    unknown_composition.rollback_quality = 70;
+    unknown_composition.quality_state_known = false;
+    unknown_composition.map_ready_ns = unknown_composition.now_ns;
+    unknown_composition.last_applied_ns = unknown_composition.now_ns;
+    for (const auto resource : {game::AdaptiveResourceControl::gpu,
+             game::AdaptiveResourceControl::cpu,
+             game::AdaptiveResourceControl::vram,
+             game::AdaptiveResourceControl::ram,
+             game::AdaptiveResourceControl::overdraw,
+             game::AdaptiveResourceControl::effects}) {
+        unknown_composition.rollback_resource = resource;
+        selected = select_adaptive_runtime_control(unknown_composition);
+        CHECK(selected);
+        CHECK(selected->resource == resource);
+        CHECK(selected->quality == 70);
+    }
     rollback.current_quality = 20;
     rollback.rollback_quality.reset();
     rollback.rollback_resource.reset();

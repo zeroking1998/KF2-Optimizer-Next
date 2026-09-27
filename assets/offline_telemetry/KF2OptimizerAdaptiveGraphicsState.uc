@@ -12,6 +12,16 @@ var int OverdrawQuality;
 var int EffectsQuality;
 var int FixedOverdrawQuality;
 var int FixedEffectsQuality;
+// A failed verified rollback must survive map-probe replacement. The
+// persistent viewport interaction owns this object for the whole process.
+var bool bQualityStateKnown;
+var bool bQualityRestorePending;
+var int RestoreGpuQuality;
+var int RestoreCpuQuality;
+var int RestoreVramQuality;
+var int RestoreRamQuality;
+var int RestoreOverdrawQuality;
+var int RestoreEffectsQuality;
 var int OriginalMaxWholeSceneShadowResolution;
 var int OriginalMaxShadowResolution;
 var int OriginalShadowFadeResolution;
@@ -79,4 +89,5 @@ defaultproperties
     EffectsQuality=100
     FixedOverdrawQuality=100
     FixedEffectsQuality=100
+    bQualityStateKnown=true
 }

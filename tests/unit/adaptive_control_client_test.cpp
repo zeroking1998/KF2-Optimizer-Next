@@ -102,6 +102,26 @@ int main() {
     CHECK(receipt->sequence == 42);
     CHECK(receipt->resource == AdaptiveResourceControl::vram);
     CHECK(receipt->quality == 50);
+    CHECK(receipt->status == AdaptiveControlReceiptStatus::applied);
+    for (const auto resource : {AdaptiveResourceControl::gpu,
+             AdaptiveResourceControl::cpu, AdaptiveResourceControl::vram,
+             AdaptiveResourceControl::ram, AdaptiveResourceControl::overdraw,
+             AdaptiveResourceControl::effects}) {
+        const std::string response = "KF2OPT_ACK 42 unknown " +
+            std::string{adaptive_resource_control_name(resource)} + " 50\r\n";
+        const auto unknown = parse_adaptive_control_receipt(response);
+        CHECK(unknown.has_value());
+        CHECK(unknown->resource == resource);
+        CHECK(unknown->quality == 50);
+        CHECK(unknown->status == AdaptiveControlReceiptStatus::state_unknown);
+        const std::string restored_response = "KF2OPT_ACK 43 restored " +
+            std::string{adaptive_resource_control_name(resource)} + " 50\r\n";
+        const auto restored = parse_adaptive_control_receipt(restored_response);
+        CHECK(restored.has_value());
+        CHECK(restored->resource == resource);
+        CHECK(restored->quality == 50);
+        CHECK(restored->status == AdaptiveControlReceiptStatus::restored);
+    }
     const auto overdraw_receipt = parse_adaptive_control_receipt(
         "KF2OPT_ACK 43 applied overdraw 70\r\n");
     CHECK(overdraw_receipt.has_value());

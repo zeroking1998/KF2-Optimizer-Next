@@ -141,6 +141,7 @@ void UiRuntime::update_adaptive_controller(
         adaptive_decision = {};
         adaptive_resource_quality.reset(
             optimizer_settings.adaptive_maximum_quality);
+        adaptive_quality_state_known = true;
         adaptive_quality_reduction_floor.reset(
             optimizer_settings.adaptive_minimum_quality);
         adaptive_quality_rollback_target.reset();
@@ -367,6 +368,7 @@ void UiRuntime::update_adaptive_controller(
                     pressure_resource),
             .rollback_quality = adaptive_quality_rollback_target,
             .rollback_resource = adaptive_quality_rollback_resource,
+            .quality_state_known = adaptive_quality_state_known,
             .current_frame_pressure =
                 adaptive_decision.current_frame_pressure,
             .current_resource_pressure =
@@ -441,7 +443,8 @@ void UiRuntime::update_adaptive_controller(
                     .action_id = proposed.action_id,
                     .generation = proposed.generation,
                     .previous_quality = previous_quality,
-                    .requested_quality = runtime_selection->quality};
+                    .requested_quality = runtime_selection->quality,
+                    .resource = runtime_selection->resource};
                 // Record the exact dispatch evidence separately from the
                 // throttled decision log. This is a request, not an APPLIED
                 // receipt; never include the authenticated bridge token.
@@ -563,6 +566,12 @@ void UiRuntime::update_adaptive_controller(
             : adaptive_decision.data.quality ==
                       optimizer::AdaptiveDataQuality::degraded
                 ? L"DEGRADED" : L"NOT_AVAILABLE";
+    if (!adaptive_quality_state_known) {
+        status.adaptive_action = L"verify queued restore";
+        status.adaptive_reason =
+            L"Live quality is unknown until KF2 verifies the exact pre-command composition";
+        status.adaptive_data_quality = L"DEGRADED";
+    }
     if (adaptive_decision.predicted_frame_time_ms) {
         std::wostringstream prediction;
         prediction << std::fixed << std::setprecision(2)

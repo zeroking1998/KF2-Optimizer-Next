@@ -282,7 +282,9 @@ std::optional<AdaptiveControlReceipt> parse_adaptive_control_receipt(
     const auto status = take_token(response);
     const auto resource_text = take_token(response);
     const auto quality_text = take_token(response);
-    if (prefix != "KF2OPT_ACK" || status != "applied" || !response.empty()) {
+    if (prefix != "KF2OPT_ACK" ||
+        (status != "applied" && status != "restored" &&
+         status != "unknown") || !response.empty()) {
         return std::nullopt;
     }
     AdaptiveControlReceipt receipt;
@@ -293,6 +295,10 @@ std::optional<AdaptiveControlReceipt> parse_adaptive_control_receipt(
         return std::nullopt;
     }
     receipt.resource = *resource;
+    receipt.status = status == "applied"
+        ? AdaptiveControlReceiptStatus::applied
+        : status == "restored" ? AdaptiveControlReceiptStatus::restored
+                               : AdaptiveControlReceiptStatus::state_unknown;
     const bool mode_enable =
         receipt.resource == AdaptiveResourceControl::enable;
     const bool valid_value = mode_enable
