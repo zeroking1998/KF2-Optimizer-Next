@@ -19,6 +19,13 @@
 namespace kf2::backup {
 namespace {
 
+constexpr std::uintmax_t max_journal_bytes = 4U * 1024U;
+
+struct RecoveryJournal {
+    std::string state;
+    std::string id;
+};
+
 std::string utf8(std::wstring_view value) {
     if (value.empty()) return {};
     const int size = WideCharToMultiByte(
@@ -100,13 +107,109 @@ Result<bool> journal_state(const BackupSet& backup, std::string_view state) {
         "version=1\nstate=" + std::string{state} + "\nid=" + backup.id + "\n");
 }
 
-std::string parse_state(std::string_view journal) {
-    constexpr std::string_view prefix = "state=";
-    const auto start = journal.find(prefix);
-    if (start == std::string_view::npos) return {};
-    const auto value_start = start + prefix.size();
-    const auto end = journal.find_first_of("\r\n", value_start);
-    return std::string{journal.substr(value_start, end - value_start)};
+Result<std::string> read_recovery_journal(const std::filesystem::path& path) {
+    HANDLE file = CreateFileW(
+        path.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
+        nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return Result<std::string>::failure(
+            {ErrorCode::not_found, L"Recovery journal cannot be opened",
+             GetLastError()});
+    }
+    BY_HANDLE_FILE_INFORMATION information{};
+    LARGE_INTEGER size{};
+    if (!GetFileInformationByHandle(file, &information) ||
+        !GetFileSizeEx(file, &size)) {
+        const DWORD native = GetLastError();
+        CloseHandle(file);
+        return Result<std::string>::failure(
+            {ErrorCode::io_failure, L"Recovery journal cannot be inspected", native});
+    }
+    if (size.QuadPart < 0 ||
+        (information.dwFileAttributes &
+         (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+        information.nNumberOfLinks != 1 ||
+        static_cast<std::uintmax_t>(size.QuadPart) > max_journal_bytes) {
+        CloseHandle(file);
+        return Result<std::string>::failure(
+            {ErrorCode::access_denied,
+             L"Recovery journal identity or size is unsafe", ERROR_INVALID_DATA});
+    }
+    std::string bytes(static_cast<std::size_t>(size.QuadPart), '\0');
+    std::size_t offset = 0;
+    while (offset < bytes.size()) {
+        DWORD read = 0;
+        const DWORD requested = static_cast<DWORD>(bytes.size() - offset);
+        if (!ReadFile(file, bytes.data() + offset, requested, &read, nullptr) ||
+            read == 0) {
+            const DWORD native = GetLastError();
+            CloseHandle(file);
+            return Result<std::string>::failure(
+                {ErrorCode::io_failure, L"Recovery journal cannot be read", native});
+        }
+        offset += read;
+    }
+    CloseHandle(file);
+    return Result<std::string>::success(std::move(bytes));
+}
+
+Result<RecoveryJournal> parse_journal(std::string_view bytes,
+                                      std::string_view expected_id) {
+    bool version_seen = false;
+    bool state_seen = false;
+    bool id_seen = false;
+    std::string version;
+    RecoveryJournal journal;
+
+    std::size_t offset = 0;
+    while (offset < bytes.size()) {
+        const auto newline = bytes.find('\n', offset);
+        auto line = bytes.substr(
+            offset, newline == std::string_view::npos
+                        ? bytes.size() - offset
+                        : newline - offset);
+        offset = newline == std::string_view::npos ? bytes.size() : newline + 1;
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        const auto separator = line.find('=');
+        if (line.empty() || separator == std::string_view::npos || separator == 0) {
+            return Result<RecoveryJournal>::failure(
+                {ErrorCode::io_failure, L"Recovery journal record is malformed", 0});
+        }
+        const auto key = line.substr(0, separator);
+        const auto value = line.substr(separator + 1);
+        if (key == "version" && !version_seen) {
+            version_seen = true;
+            version = value;
+        } else if (key == "state" && !state_seen) {
+            state_seen = true;
+            journal.state = value;
+        } else if (key == "id" && !id_seen) {
+            id_seen = true;
+            journal.id = value;
+        } else {
+            return Result<RecoveryJournal>::failure(
+                {ErrorCode::io_failure,
+                 L"Recovery journal contains a duplicate or unknown record", 0});
+        }
+    }
+
+    const bool state_allowed =
+        journal.state == "backup_complete" ||
+        journal.state == "replacement_started" ||
+        journal.state == "verification_complete" ||
+        journal.state == "complete";
+    const bool id_valid =
+        journal.id.size() == 64 &&
+        journal.id.find_first_not_of("0123456789abcdef") == std::string::npos;
+    if (!version_seen || !state_seen || !id_seen || version != "1" ||
+        !state_allowed || !id_valid || journal.id != expected_id) {
+        return Result<RecoveryJournal>::failure(
+            {ErrorCode::io_failure,
+             L"Recovery journal schema or identity is invalid", 0});
+    }
+    return Result<RecoveryJournal>::success(std::move(journal));
 }
 
 bool safe_relative(const std::filesystem::path& path) {
@@ -404,7 +507,29 @@ Result<RecoveryResult> recover_transactions(
     for (const auto& entry : std::filesystem::directory_iterator(journals, error)) {
         if (error) break;
         if (!entry.is_regular_file() || entry.path().extension() != L".journal") continue;
-        const auto state = parse_state(read_bytes(entry.path()));
+        const auto expected_id = entry.path().stem().string();
+        auto journal_bytes = read_recovery_journal(entry.path());
+        auto journal = journal_bytes.has_value()
+            ? parse_journal(journal_bytes.value(), expected_id)
+            : Result<RecoveryJournal>::failure(journal_bytes.error());
+        if (!journal.has_value()) {
+            const auto journal_error = journal.error();
+            auto quarantined =
+                platform::windows::quarantine_regular_file(entry.path());
+            if (!quarantined.has_value()) {
+                auto quarantine_error = quarantined.error();
+                quarantine_error.message =
+                    L"Recovery journal is invalid (" + journal_error.message +
+                    L") and cannot be safely quarantined (" +
+                    quarantine_error.message + L")";
+                return Result<RecoveryResult>::failure(
+                    std::move(quarantine_error));
+            }
+            continue;
+        }
+        const auto& state = journal.value().state;
+        auto backup = store.load_backup(journal.value().id);
+        if (!backup.has_value()) return Result<RecoveryResult>::failure(backup.error());
         if (state == "complete") continue;
         if (!expected_config_root) {
             return Result<RecoveryResult>::failure(
@@ -412,8 +537,6 @@ Result<RecoveryResult> recover_transactions(
                  L"Interrupted configuration recovery requires a verified KF2 configuration directory",
                  0});
         }
-        auto backup = store.load_backup(entry.path().stem().string());
-        if (!backup.has_value()) return Result<RecoveryResult>::failure(backup.error());
         if (!same_existing_directory(backup.value().config_root,
                                      *expected_config_root)) {
             return Result<RecoveryResult>::failure(

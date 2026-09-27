@@ -38,6 +38,21 @@ void write_journal(const kf2::backup::BackupSet& backup, std::string_view state)
         "version=1\nstate=" + std::string{state} + "\nid=" + backup.id + "\n");
 }
 
+bool has_quarantined_copy(const std::filesystem::path& source,
+                          std::string_view expected_bytes) {
+    const auto prefix = source.filename().wstring() + L".corrupt";
+    std::error_code error;
+    for (const auto& entry :
+         std::filesystem::directory_iterator(source.parent_path(), error)) {
+        if (error) return false;
+        if (entry.path().filename().wstring().starts_with(prefix) &&
+            read_bytes(entry.path()) == expected_bytes) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 int main() {
@@ -91,6 +106,46 @@ int main() {
     const auto listed = store.list_backups();
     CHECK(listed.has_value());
     CHECK(listed.value().size() >= 2);
+
+    write_bytes(standalone.value().journal_path,
+                "version=1\nnotstate=complete\nid=" +
+                    standalone.value().id + "\n");
+    const auto malformed_journal_recovery =
+        kf2::backup::recover_transactions(store, config_root);
+    CHECK(malformed_journal_recovery.has_value());
+    CHECK(!fs::exists(standalone.value().journal_path));
+    CHECK(fs::exists(fs::path{
+        standalone.value().journal_path.wstring() + L".corrupt"}));
+    write_journal(standalone.value(), "complete");
+
+    const auto expect_invalid_journal_quarantined =
+        [&](const std::string& bytes) {
+            write_bytes(standalone.value().journal_path, bytes);
+            const auto recovery =
+                kf2::backup::recover_transactions(store, config_root);
+            return recovery.has_value() &&
+                   !fs::exists(standalone.value().journal_path) &&
+                   has_quarantined_copy(standalone.value().journal_path, bytes);
+        };
+    const auto valid_id = standalone.value().id;
+    CHECK(expect_invalid_journal_quarantined(
+        "version=1\nstate=complete\nstate=replacement_started\nid=" +
+        valid_id + "\n"));
+    CHECK(expect_invalid_journal_quarantined(
+        "version=1\nstate=complete\nid=" + std::string(64, 'f') + "\n"));
+    CHECK(expect_invalid_journal_quarantined(
+        "state=complete\nid=" + valid_id + "\n"));
+    CHECK(expect_invalid_journal_quarantined(
+        "version=2\nstate=complete\nid=" + valid_id + "\n"));
+    CHECK(expect_invalid_journal_quarantined(
+        "version=1\nstate=complete\n"));
+    CHECK(expect_invalid_journal_quarantined(
+        "version=1\nstate=replace"));
+    CHECK(expect_invalid_journal_quarantined(
+        "version=1\nstate=complete\nid=" + valid_id + "\ngarbage\n"));
+    CHECK(expect_invalid_journal_quarantined(std::string(4097, 'x')));
+    write_journal(standalone.value(), "complete");
+
     const auto recovered = kf2::backup::recover_transactions(store, config_root);
     CHECK(recovered.has_value());
     CHECK(recovered.value().outcome == kf2::backup::RecoveryOutcome::clean);
@@ -136,6 +191,8 @@ int main() {
     const std::string missing_id(64, '0');
     const auto orphan = store.state_root() / L"backups/journals" /
         (std::wstring(64, L'0') + L".journal");
+    write_bytes(orphan, "version=1\nstate=complete\nid=" + missing_id + "\n");
+    CHECK(!kf2::backup::recover_transactions(store, config_root).has_value());
     write_bytes(orphan, "version=1\nstate=replacement_started\nid=" + missing_id + "\n");
     CHECK(!kf2::backup::recover_transactions(store, config_root).has_value());
     fs::remove(orphan);
