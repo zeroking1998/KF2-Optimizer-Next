@@ -143,6 +143,8 @@ are visible immediately.
   destroyed their child actors after success, rejection, disconnect, or timeout.
 - Prevented continuous live-FPS drain requests from starving the bounded frame
   windows Adaptive needs after maps, target changes, and quality actions.
+- Isolated transient FleX availability changes from in-flight graphics actions,
+  while stale FleX receipts remain rejected after their own capability change.
 - Fixed FleX detection after graphics changes and settings restarts. User-
   enabled FleX runs at the verified minimum solver level; user-disabled FleX
   remains off and is never enabled by Adaptive.

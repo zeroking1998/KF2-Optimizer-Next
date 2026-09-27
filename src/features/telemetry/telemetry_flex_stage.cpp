@@ -1,5 +1,7 @@
 #include "features/telemetry/telemetry_flex_stage.hpp"
 
+#include <array>
+
 #include "app/application_runtime.hpp"
 #include "features/telemetry/telemetry_effect_stage.hpp"
 
@@ -21,12 +23,24 @@ void run_flex_control_stage(app::UiRuntime& runtime,
         frame.identity.process_start_id,
         runtime.adaptive_map_generation,
         runtime.adaptive_settings_generation,
-        (frame.offline_gameplay ? 1ULL : 0ULL) |
-            (capability == optimizer::AdaptiveCapabilityState::available
-                 ? 2ULL : 0ULL)};
+        frame.offline_gameplay ? 1ULL : 0ULL};
     if (!(runtime.adaptive_actuation.generation() == generation)) {
         runtime.adaptive_actuation.rebase(generation, frame.observed_at_ns);
     }
+    if (runtime.adaptive_flex_capability &&
+        *runtime.adaptive_flex_capability != capability) {
+        constexpr std::array flex_controls{
+            optimizer::AdaptiveControlId::flex_solver_substeps,
+            optimizer::AdaptiveControlId::flex_particle_budget,
+            optimizer::AdaptiveControlId::flex_particle_spawn,
+            optimizer::AdaptiveControlId::flex_particle_lifetime,
+            optimizer::AdaptiveControlId::flex_fluid_particles,
+            optimizer::AdaptiveControlId::flex_nonfluid_particles};
+        for (const auto control : flex_controls) {
+            runtime.adaptive_actuation.invalidate_control(control);
+        }
+    }
+    runtime.adaptive_flex_capability = capability;
     const bool observed_solver_ready = capability ==
             optimizer::AdaptiveCapabilityState::available &&
         frame.flex && frame.flex->last_forwarded_substeps >= 1 &&

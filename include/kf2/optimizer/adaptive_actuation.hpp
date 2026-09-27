@@ -107,6 +107,7 @@ public:
         noexcept;
     void poll(std::uint64_t now_ns) noexcept;
     void rebase(AdaptiveGeneration generation, std::uint64_t now_ns) noexcept;
+    void invalidate_control(AdaptiveControlId control) noexcept;
     void disable(std::uint64_t now_ns) noexcept;
 
     [[nodiscard]] const AdaptiveActionRecord* current(
