@@ -61,6 +61,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- The live KF2 graphics-menu readback now includes the applied film-grain
+  slider value, so its verified snapshot can no longer show a stale local
+  percentage.
 - Frozen-corpse ownership is now released only after verified restoration,
   confirmed actor reuse, or world destruction. Pool removal and reused actors
   can no longer leave a live corpse non-physical, non-colliding, or unticked.

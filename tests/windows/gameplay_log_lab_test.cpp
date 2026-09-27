@@ -260,6 +260,8 @@ int main() {
         "LastObservedRealTime = CurrentWorld.RealTimeSeconds;",
         graphics_world_reset) < graphics_timer_guard);
     CHECK(graphics_interaction_source.find(
+        "KF2OPT_GFX_MENU schema=2 state=applied") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
         "function bool EnsureTurretWeaponMaterial(KFWeapon Weapon)") !=
           std::string::npos);
     CHECK(graphics_interaction_source.find(
@@ -850,6 +852,12 @@ int main() {
           std::string::npos);
     CHECK(connection_source.find("Len(Line) > 128") != std::string::npos);
     CHECK(graphics_source.find("Requested.Flex") == std::string::npos);
+    CHECK(graphics_source.find(
+        "Current.FilmGrain.FilmGrainScale") != std::string::npos);
+    CHECK(graphics_source.find(
+        "\" variable_fps=\" $ int(Current.VariableFPS.VariableFramerate) $\n"
+        "        \" film_grain=\" $ FilmGrainPercent $\n"
+        "        \" environment=\"") != std::string::npos);
     CHECK(graphics_source.find(
         "static function ApplyOverdraw") != std::string::npos);
     CHECK(graphics_source.find(

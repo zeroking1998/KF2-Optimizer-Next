@@ -286,7 +286,7 @@ event Tick(float DeltaTime)
         if (Readback != "" && Readback != LastReadback)
         {
             LastReadback = Readback;
-            `log("KF2OPT_GFX_MENU schema=1 state=applied " $ Readback);
+            `log("KF2OPT_GFX_MENU schema=2 state=applied " $ Readback);
         }
         return;
     }
