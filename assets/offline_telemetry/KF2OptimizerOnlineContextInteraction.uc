@@ -33,6 +33,8 @@ var float OnlineCorpseLastCapacityRealTime;
 var int OnlineCorpseOriginalMaximum;
 var bool bOnlineCorpseOriginalMaximumCaptured;
 var string OnlineCorpseOriginalMapName;
+var bool bOnlineSessionEnding;
+var string OnlineSessionEndingMapName;
 
 function bool ValidOnlineGraphicsToken(string Candidate)
 {
@@ -72,6 +74,11 @@ function KF2OptimizerAdaptiveGraphicsState GetOnlineGraphicsState()
 function bool IsOnlineAdaptiveEnabled()
 {
     return bOnlineGraphicsEnabled;
+}
+
+function bool IsOnlineSessionEnding()
+{
+    return bOnlineSessionEnding;
 }
 
 function ResetOnlineGraphicsRetryState(string MapName)
@@ -506,9 +513,12 @@ function bool FindHealthyOnlineGraphicsListener(
         if (CurrentListener.OnlineCorpseController == None ||
             CurrentListener.OnlineCorpseController.bDeleteMe)
         {
-            FailureReason = "corpse_controller_unavailable";
-            CurrentListener.Destroy();
-            continue;
+            if (!CurrentListener.EnsureOnlineCorpseController())
+            {
+                FailureReason = "corpse_controller_unavailable";
+                CurrentListener.Destroy();
+                continue;
+            }
         }
         return true;
     }
@@ -697,8 +707,11 @@ function RestoreOnlineGraphicsAtMainMenu(WorldInfo CurrentWorld)
 
 function NotifyGameSessionEnded()
 {
+    local KF2OptimizerOnlineCorpseController CurrentController;
     local WorldInfo CurrentWorld;
 
+    bOnlineSessionEnding = true;
+    OnlineSessionEndingMapName = OnlineGraphicsListenerMapName;
     if (!GetOnlineWorld(CurrentWorld))
     {
         if (bOnlineCorpseOriginalMaximumCaptured)
@@ -708,6 +721,15 @@ function NotifyGameSessionEnded()
                  OnlineCorpseOriginalMaximum);
         }
         return;
+    }
+    OnlineSessionEndingMapName = CurrentWorld.GetMapName(true);
+    foreach CurrentWorld.DynamicActors(
+        class'KF2OptimizerOnlineCorpseController', CurrentController)
+    {
+        if (CurrentController != None && !CurrentController.bDeleteMe)
+        {
+            CurrentController.PrepareForWorldTeardown();
+        }
     }
     RestoreOnlineSessionState(CurrentWorld, "session_end");
 }
@@ -767,9 +789,21 @@ event Tick(float DeltaTime)
         bOnlineCorpseSleepApplied = false;
         OnlineCorpseLastCapacityRealTime = 0.0;
         ResetOnlineGraphicsRetryState("");
+        bOnlineSessionEnding = false;
+        OnlineSessionEndingMapName = "";
     }
     LastObservedRealTime = CurrentWorld.RealTimeSeconds;
     MapName = CurrentWorld.GetMapName(true);
+    if (bOnlineSessionEnding && Len(OnlineSessionEndingMapName) > 0 &&
+        !(MapName ~= OnlineSessionEndingMapName))
+    {
+        bOnlineSessionEnding = false;
+        OnlineSessionEndingMapName = "";
+    }
+    if (bOnlineSessionEnding)
+    {
+        return;
+    }
     if (OnlineGraphicsRetryMapName != MapName)
     {
         ResetOnlineGraphicsRetryState(MapName);

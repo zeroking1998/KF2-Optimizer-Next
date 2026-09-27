@@ -633,7 +633,13 @@ int main() {
         "if (Status == LastOnlineGraphicsListenerStatus)") !=
           std::string::npos);
     CHECK(listener_source.find("event Destroyed()") != std::string::npos);
-    CHECK(listener_source.find("OnlineCorpseController.Destroy()") !=
+    CHECK(listener_source.find("OnlineCorpseController.Destroy()") ==
+          std::string::npos);
+    CHECK(listener_source.find(
+        "function bool EnsureOnlineCorpseController()") !=
+          std::string::npos);
+    CHECK(listener_source.find(
+        "class'KF2OptimizerOnlineCorpseController', CurrentController") !=
           std::string::npos);
     CHECK(listener_source.find(
         "AcceptClass = class'KF2OptimizerOnlineGraphicsControlConnection'") !=
@@ -648,6 +654,27 @@ int main() {
         "var string CorpseId;") != std::string::npos);
     CHECK(online_corpse_controller_source.find(
         "var int ReleaseScanCursor;") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "function int AdoptRestoreOwnership(") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "Replacement.AdoptRestoreOwnership(self)") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "state=ownership_transferred") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "function PrepareForWorldTeardown()") != std::string::npos);
+    CHECK(online_context_source.find(
+        "CurrentListener.EnsureOnlineCorpseController()") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "CurrentController.PrepareForWorldTeardown()") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "bOnlineSessionEnding = true") != std::string::npos);
+    CHECK(online_context_source.find(
+        "function bool IsOnlineSessionEnding()") != std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "CurrentInteraction.IsOnlineSessionEnding()") !=
+          std::string::npos);
     const auto online_release_start = online_corpse_controller_source.find(
         "function bool ReleaseOneOnlineCorpse(bool bRestoreAll)");
     const auto online_release_end = online_corpse_controller_source.find(

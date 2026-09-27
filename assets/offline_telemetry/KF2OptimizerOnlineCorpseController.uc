@@ -27,6 +27,7 @@ var bool bRestoreReceiptReported;
 var bool bLodReceiptReported;
 var bool bSkeletonReceiptReported;
 var float LastReleaseFailureRealTime;
+var bool bWorldTeardownAuthorized;
 
 function KF2OptimizerOnlineContextInteraction GetOnlineInteraction()
 {
@@ -59,6 +60,40 @@ function int FindFrozenCorpse(KFPawn Candidate)
         }
     }
     return -1;
+}
+
+function int AdoptRestoreOwnership(
+    KF2OptimizerOnlineCorpseController PreviousOwner)
+{
+    local int Covered;
+    local int Index;
+    local OnlineFrozenCorpseState Original;
+
+    if (PreviousOwner == None || PreviousOwner == self)
+    {
+        return 0;
+    }
+    for (Index = 0; Index < PreviousOwner.FrozenCorpses.Length; ++Index)
+    {
+        Original = PreviousOwner.FrozenCorpses[Index];
+        if (FindFrozenCorpse(Original.Corpse) >= 0)
+        {
+            ++Covered;
+            continue;
+        }
+        FrozenCorpses.AddItem(Original);
+        ++Covered;
+    }
+    if (Covered > 0)
+    {
+        ReleaseScanCursor = 0;
+    }
+    return Covered;
+}
+
+function PrepareForWorldTeardown()
+{
+    bWorldTeardownAuthorized = true;
 }
 
 function string GetOnlineCorpseId(KFPawn Candidate)
@@ -550,11 +585,48 @@ event Tick(float DeltaTime)
 
 event Destroyed()
 {
+    local int Outstanding;
+    local int Transferred;
+    local KF2OptimizerOnlineContextInteraction CurrentInteraction;
+    local KF2OptimizerOnlineCorpseController Replacement;
+
+    CurrentInteraction = GetOnlineInteraction();
+    if (CurrentInteraction != None &&
+        CurrentInteraction.IsOnlineSessionEnding())
+    {
+        bWorldTeardownAuthorized = true;
+    }
+    Outstanding = FrozenCorpses.Length;
+    if (!bWorldTeardownAuthorized && Outstanding > 0 && WorldInfo != None)
+    {
+        Replacement = Spawn(class'KF2OptimizerOnlineCorpseController');
+        if (Replacement != None && Replacement != self &&
+            !Replacement.bDeleteMe)
+        {
+            Transferred = Replacement.AdoptRestoreOwnership(self);
+            if (Transferred == Outstanding)
+            {
+                `log("KF2OPT_ONLINE_CORPSE_ACTION state=ownership_transferred"$
+                     " reason=controller_replaced count="$Transferred$
+                     " local_only=true");
+                FrozenCorpses.Length = 0;
+            }
+        }
+    }
     if (FrozenCorpses.Length > 0)
     {
-        `log("KF2OPT_ONLINE_CORPSE_ACTION state=ownership_released"$
-             " reason=world_teardown count="$FrozenCorpses.Length$
-             " safe_boundary=world_destroy local_only=true");
+        if (bWorldTeardownAuthorized)
+        {
+            `log("KF2OPT_ONLINE_CORPSE_ACTION state=ownership_released"$
+                 " reason=world_teardown count="$FrozenCorpses.Length$
+                 " safe_boundary=world_destroy local_only=true");
+        }
+        else
+        {
+            `log("KF2OPT_ONLINE_CORPSE_ACTION state=ownership_transfer_failed"$
+                 " reason=replacement_unavailable count="$
+                 FrozenCorpses.Length$" local_only=true");
+        }
     }
     FrozenCorpses.Length = 0;
     Super.Destroyed();

@@ -4,6 +4,35 @@ class KF2OptimizerAdaptiveControlListener extends TcpLink;
 
 var KF2OptimizerOnlineCorpseController OnlineCorpseController;
 
+function bool EnsureOnlineCorpseController()
+{
+    local KF2OptimizerOnlineCorpseController CurrentController;
+
+    if (OnlineCorpseController != None &&
+        !OnlineCorpseController.bDeleteMe)
+    {
+        return true;
+    }
+    OnlineCorpseController = None;
+    if (WorldInfo == None)
+    {
+        return false;
+    }
+    foreach WorldInfo.DynamicActors(
+        class'KF2OptimizerOnlineCorpseController', CurrentController)
+    {
+        if (CurrentController != None && !CurrentController.bDeleteMe)
+        {
+            OnlineCorpseController = CurrentController;
+            return true;
+        }
+    }
+    OnlineCorpseController = Spawn(
+        class'KF2OptimizerOnlineCorpseController');
+    return OnlineCorpseController != None &&
+        !OnlineCorpseController.bDeleteMe;
+}
+
 event PreBeginPlay()
 {
     local int BoundPort;
@@ -46,9 +75,7 @@ event PreBeginPlay()
     if (WorldInfo.NetMode == NM_Client ||
         WorldInfo.NetMode == NM_ListenServer)
     {
-        OnlineCorpseController = Spawn(
-            class'KF2OptimizerOnlineCorpseController');
-        if (OnlineCorpseController == None)
+        if (!EnsureOnlineCorpseController())
         {
             `log("KF2OPT_ONLINE_CORPSE state=unavailable"$
                  " reason=controller_spawn_failed local_only=true");
@@ -58,11 +85,9 @@ event PreBeginPlay()
 
 event Destroyed()
 {
-    if (OnlineCorpseController != None &&
-        !OnlineCorpseController.bDeleteMe)
-    {
-        OnlineCorpseController.Destroy();
-    }
+    // The controller owns the exact restore ledger and is scoped to the
+    // current World, not this recoverable TCP listener. World teardown
+    // destroys it safely; a replacement listener adopts it in the same map.
     OnlineCorpseController = None;
     Super.Destroyed();
 }
