@@ -74,6 +74,8 @@ parse_game_menu_graphics_readback(std::string_view line);
 [[nodiscard]] std::wstring flex_state_label(int level);
 [[nodiscard]] int video_choice_count(
     VideoOption option, const VideoSettings& settings) noexcept;
+[[nodiscard]] bool apply_overall_quality_preset(
+    VideoSettings& settings, int preset) noexcept;
 [[nodiscard]] VideoSettings recommended_video_defaults(
     const VideoSettings& current);
 [[nodiscard]] Result<VideoSettings> rebase_video_changes(

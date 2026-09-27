@@ -275,32 +275,9 @@ void UiRuntime::cycle_video_option(game::VideoOption option) {
         current < 0 || current >= count - 1 ? 0 : current + 1;
     if (option == game::VideoOption::overall_quality) {
         const int preset = video_pending->choices[selected];
-        constexpr std::array<std::array<int, 15>, 4> presets{{
-            {{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},
-            {{1,0,1,1,1,1,0,1,1,0,0,0,0,0,0}},
-            {{2,1,2,2,2,2,0,1,2,0,1,1,1,1,1}},
-            {{3,2,3,3,3,3,1,1,2,1,2,1,1,1,1}},
-        }};
-        constexpr std::array<game::VideoOption, 15> targets{{
-            game::VideoOption::environment_detail,
-            game::VideoOption::character_detail,
-            game::VideoOption::fx_quality,
-            game::VideoOption::texture_resolution,
-            game::VideoOption::texture_filtering,
-            game::VideoOption::shadow_quality,
-            game::VideoOption::realtime_reflections,
-            game::VideoOption::anti_aliasing,
-            game::VideoOption::bloom,
-            game::VideoOption::motion_blur,
-            game::VideoOption::ambient_occlusion,
-            game::VideoOption::depth_of_field,
-            game::VideoOption::volumetric_lighting,
-            game::VideoOption::lens_flares,
-            game::VideoOption::light_shafts,
-        }};
-        for (std::size_t index = 0; index < targets.size(); ++index) {
-            video_pending->choices[static_cast<std::size_t>(targets[index])] =
-                presets[preset][index];
+        if (!game::apply_overall_quality_preset(*video_pending, preset)) {
+            reload_video_settings();
+            return;
         }
         // Overall quality deliberately does not touch NVIDIA FleX. FleX is a
         // separate explicit user choice and Adaptive never enables it.
