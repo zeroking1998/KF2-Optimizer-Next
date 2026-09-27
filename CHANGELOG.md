@@ -61,6 +61,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Malformed KF2 texture-group tuples now fail closed instead of reporting
+  unverified texture-resolution or filtering changes as saved.
 - Failed automatic update checks now keep the last successful result and retry
   after a bounded short delay instead of suppressing retries for 24 hours.
 - Failed offline and online graphics baseline or menu-restore readbacks now

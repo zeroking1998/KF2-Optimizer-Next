@@ -15,6 +15,7 @@
 #include <string>
 #include <system_error>
 #include <tuple>
+#include <vector>
 
 #include "kf2/config/ini_document.hpp"
 
@@ -219,32 +220,85 @@ double class_number(const config::IniDocument& document,
     return end != value->c_str() && std::isfinite(parsed) ? parsed : fallback;
 }
 
+std::optional<std::size_t> tuple_field_value_start(
+    std::wstring_view tuple, std::wstring_view field) {
+    const std::wstring needle = std::wstring{field} + L"=";
+    const auto normalized = lower(std::wstring{tuple});
+    const auto normalized_needle = lower(needle);
+    std::size_t search_from = 0;
+    while (search_from < normalized.size()) {
+        const auto field_start = normalized.find(
+            normalized_needle, search_from);
+        if (field_start == std::wstring::npos) return std::nullopt;
+        auto boundary = field_start;
+        while (boundary > 0 &&
+               (normalized[boundary - 1] == L' ' ||
+                normalized[boundary - 1] == L'\t')) {
+            --boundary;
+        }
+        if (boundary > 0 &&
+            (normalized[boundary - 1] == L'(' ||
+             normalized[boundary - 1] == L',')) {
+            return field_start + needle.size();
+        }
+        search_from = field_start + 1;
+    }
+    return std::nullopt;
+}
+
 bool update_tuple_field(std::wstring& tuple, std::wstring_view field,
                         std::wstring_view value) {
-    const std::wstring needle = std::wstring{field} + L"=";
-    auto start = lower(tuple).find(lower(needle));
-    if (start == std::wstring::npos) {
+    const auto value_start = tuple_field_value_start(tuple, field);
+    if (!value_start) {
         const auto close = tuple.rfind(L')');
         if (close == std::wstring::npos) return false;
-        tuple.insert(close, L"," + needle + std::wstring{value});
+        tuple.insert(close, L"," + std::wstring{field} + L"=" +
+                                std::wstring{value});
         return true;
     }
-    start += needle.size();
-    auto end = tuple.find_first_of(L",)", start);
+    const auto end = tuple.find_first_of(L",)", *value_start);
     if (end == std::wstring::npos) return false;
-    tuple.replace(start, end - start, value);
+    tuple.replace(*value_start, end - *value_start, value);
+    return true;
+}
+
+bool valid_tuple_syntax(std::wstring_view tuple) {
+    const auto first = tuple.find_first_not_of(L" \t");
+    const auto last = tuple.find_last_not_of(L" \t");
+    if (first == std::wstring_view::npos || tuple[first] != L'(' ||
+        tuple[last] != L')' || first + 1 == last) {
+        return false;
+    }
+    std::size_t field_start = first + 1;
+    while (field_start < last) {
+        const auto field_end = tuple.find(L',', field_start);
+        const auto end = field_end == std::wstring_view::npos
+            ? last : std::min(field_end, last);
+        const auto token = tuple.substr(field_start, end - field_start);
+        const auto token_first = token.find_first_not_of(L" \t");
+        const auto token_last = token.find_last_not_of(L" \t");
+        if (token_first == std::wstring_view::npos) return false;
+        const auto assignment = token.find(L'=', token_first);
+        if (assignment == std::wstring_view::npos || assignment == token_first ||
+            assignment >= token_last ||
+            token.find(L'=', assignment + 1) != std::wstring_view::npos) {
+            return false;
+        }
+        if (field_end != std::wstring_view::npos && end + 1 >= last) {
+            return false;
+        }
+        field_start = end + 1;
+    }
     return true;
 }
 
 std::optional<std::wstring> tuple_field(
     std::wstring_view tuple, std::wstring_view field) {
-    const auto normalized = lower(std::wstring{tuple});
-    const auto needle = lower(std::wstring{field}) + L"=";
-    auto start = normalized.find(needle);
-    if (start == std::wstring::npos) return std::nullopt;
-    start += needle.size();
-    const auto end = normalized.find_first_of(L",)", start);
-    auto value = std::wstring{tuple.substr(start, end - start)};
+    const auto start = tuple_field_value_start(tuple, field);
+    if (!start) return std::nullopt;
+    const auto end = tuple.find_first_of(L",)", *start);
+    if (end == std::wstring_view::npos) return std::nullopt;
+    auto value = std::wstring{tuple.substr(*start, end - *start)};
     const auto first = value.find_first_not_of(L" \t");
     if (first == std::wstring::npos) return std::nullopt;
     const auto last = value.find_last_not_of(L" \t");
@@ -310,26 +364,66 @@ int texture_filtering_choice(const config::IniDocument& document) {
 Result<bool> update_texture_groups(
     config::IniDocument& document, int resolution, int filtering,
     bool update_resolution, bool update_filtering) {
-    bool changed = false;
+    if (!update_resolution && !update_filtering) {
+        return Result<bool>::success(false);
+    }
+    constexpr std::array<std::wstring_view, 4> minmag{
+        L"Linear", L"Linear", L"Aniso", L"Aniso"};
+    constexpr std::array<std::wstring_view, 4> mip{
+        L"Point", L"Linear", L"Linear", L"Linear"};
+    struct PendingTextureGroup {
+        const TextureGroup* group;
+        std::wstring tuple;
+    };
+    std::vector<PendingTextureGroup> pending;
+    pending.reserve(kTextureGroups.size());
     for (const auto& group : kTextureGroups) {
         auto tuple = document.find(kSystem, group.name);
         if (!tuple) continue;
-        if (update_resolution) {
-            update_tuple_field(*tuple, L"LODBias",
-                               std::to_wstring(group.bias[resolution]));
+        if (!valid_tuple_syntax(*tuple) ||
+            (update_resolution &&
+             !update_tuple_field(*tuple, L"LODBias",
+                                 std::to_wstring(group.bias[resolution]))) ||
+            (update_filtering &&
+             (!update_tuple_field(*tuple, L"MinMagFilter",
+                                  minmag[filtering]) ||
+              !update_tuple_field(*tuple, L"MipFilter",
+                                  group.no_mip_filter
+                                      ? L"Point" : mip[filtering])))) {
+            return Result<bool>::failure({
+                ErrorCode::stale_data,
+                L"A KF2 texture-group setting is malformed; restore the "
+                L"game's graphics defaults and retry", 0});
         }
-        constexpr std::array<std::wstring_view, 4> minmag{
-            L"Linear", L"Linear", L"Aniso", L"Aniso"};
-        constexpr std::array<std::wstring_view, 4> mip{
-            L"Point", L"Linear", L"Linear", L"Linear"};
-        if (update_filtering) {
-            update_tuple_field(*tuple, L"MinMagFilter", minmag[filtering]);
-            update_tuple_field(*tuple, L"MipFilter",
-                               group.no_mip_filter ? L"Point" : mip[filtering]);
-        }
-        const auto result = put(document, group.name, *tuple);
+        pending.push_back({&group, std::move(*tuple)});
+    }
+    bool changed = false;
+    for (const auto& update : pending) {
+        const auto result = put(document, update.group->name, update.tuple);
         if (!result.has_value()) return result;
         changed = changed || result.value();
+    }
+    const auto serialized = config::IniDocument::parse(document.serialize());
+    if (!serialized.has_value()) {
+        return Result<bool>::failure(serialized.error());
+    }
+    for (const auto& update : pending) {
+        const auto tuple = serialized.value().find(
+            kSystem, update.group->name);
+        if (!tuple ||
+            (update_resolution &&
+             tuple_integer(*tuple, L"LODBias") !=
+                 update.group->bias[resolution]) ||
+            (update_filtering &&
+             (!same(tuple_field(*tuple, L"MinMagFilter"),
+                    minmag[filtering]) ||
+              !same(tuple_field(*tuple, L"MipFilter"),
+                    update.group->no_mip_filter
+                        ? L"Point" : mip[filtering])))) {
+            return Result<bool>::failure({
+                ErrorCode::stale_data,
+                L"KF2 texture-group changes could not be verified", 0});
+        }
     }
     return Result<bool>::success(changed);
 }
