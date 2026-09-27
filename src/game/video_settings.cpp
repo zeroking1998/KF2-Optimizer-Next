@@ -9,8 +9,7 @@
 #include <cmath>
 #include <cwchar>
 #include <cwctype>
-#include <fstream>
-#include <iterator>
+#include <cstdint>
 #include <numeric>
 #include <optional>
 #include <string>
@@ -83,34 +82,189 @@ constexpr std::array<std::array<int, 15>, 4> kOverallQualityPresets{{
     {{2,1,2,2,2,2,0,1,2,0,1,1,1,1,1}},
     {{3,2,3,3,3,3,1,1,2,1,2,1,1,1,1}}}};
 
+constexpr DWORD kMaximumVideoConfigBytes = 4U * 1024U * 1024U;
+
+#ifdef KF2_VIDEO_SETTINGS_TESTING
+VideoReadHook g_video_read_hook{};
+#endif
+
+class OpenVideoFile final {
+public:
+    OpenVideoFile(std::filesystem::path path, HANDLE handle,
+                  BY_HANDLE_FILE_INFORMATION information) noexcept
+        : path_{std::move(path)}, handle_{handle}, information_{information} {}
+    ~OpenVideoFile() {
+        if (handle_ != INVALID_HANDLE_VALUE) CloseHandle(handle_);
+    }
+    OpenVideoFile(const OpenVideoFile&) = delete;
+    OpenVideoFile& operator=(const OpenVideoFile&) = delete;
+    OpenVideoFile(OpenVideoFile&& other) noexcept
+        : path_{std::move(other.path_)}, handle_{other.handle_},
+          information_{other.information_} {
+        other.handle_ = INVALID_HANDLE_VALUE;
+    }
+    OpenVideoFile& operator=(OpenVideoFile&&) = delete;
+
+    [[nodiscard]] const std::filesystem::path& path() const noexcept {
+        return path_;
+    }
+    [[nodiscard]] HANDLE handle() const noexcept { return handle_; }
+    [[nodiscard]] const BY_HANDLE_FILE_INFORMATION& information() const noexcept {
+        return information_;
+    }
+
+private:
+    std::filesystem::path path_;
+    HANDLE handle_{INVALID_HANDLE_VALUE};
+    BY_HANDLE_FILE_INFORMATION information_{};
+};
+
+struct VideoFileSnapshot {
+    OpenVideoFile system;
+    OpenVideoFile game;
+    OpenVideoFile engine;
+};
+
+struct VideoSnapshotBytes {
+    std::string system;
+    std::string game;
+    std::string engine;
+};
+
+bool same_file_state(const BY_HANDLE_FILE_INFORMATION& left,
+                     const BY_HANDLE_FILE_INFORMATION& right) noexcept {
+    return left.dwVolumeSerialNumber == right.dwVolumeSerialNumber &&
+        left.nFileIndexHigh == right.nFileIndexHigh &&
+        left.nFileIndexLow == right.nFileIndexLow &&
+        left.nFileSizeHigh == right.nFileSizeHigh &&
+        left.nFileSizeLow == right.nFileSizeLow &&
+        CompareFileTime(&left.ftLastWriteTime, &right.ftLastWriteTime) == 0;
+}
+
+bool safe_file_state(const BY_HANDLE_FILE_INFORMATION& information) noexcept {
+    return (information.dwFileAttributes &
+            (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0 &&
+        information.nFileSizeHigh == 0 &&
+        information.nFileSizeLow <= kMaximumVideoConfigBytes;
+}
+
+Result<OpenVideoFile> open_video_file(const std::filesystem::path& path) {
+    // Excluding FILE_SHARE_WRITE and FILE_SHARE_DELETE gives the reader a
+    // short, stable snapshot instead of trying to recognize every possible
+    // torn-write pattern after parsing it.
+    const HANDLE handle = CreateFileW(
+        path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        const DWORD native_error = GetLastError();
+        return Result<OpenVideoFile>::failure({
+            native_error == ERROR_SHARING_VIOLATION ? ErrorCode::stale_data
+                                                    : ErrorCode::io_failure,
+            native_error == ERROR_SHARING_VIOLATION
+                ? L"KF2 is updating its video configuration"
+                : L"KF2 video configuration cannot be opened",
+            native_error});
+    }
+
+    BY_HANDLE_FILE_INFORMATION information{};
+    const bool inspected = GetFileInformationByHandle(handle, &information) != FALSE;
+    if (!inspected || !safe_file_state(information)) {
+        const DWORD native_error = inspected ? ERROR_FILE_INVALID : GetLastError();
+        CloseHandle(handle);
+        return Result<OpenVideoFile>::failure({
+            ErrorCode::io_failure,
+            L"KF2 video configuration is unsafe or exceeds 4 MiB",
+            native_error});
+    }
+    return Result<OpenVideoFile>::success(
+        OpenVideoFile{path, handle, information});
+}
+
+Result<std::string> read_open_video_file(OpenVideoFile& file) {
+#ifdef KF2_VIDEO_SETTINGS_TESTING
+    if (g_video_read_hook) {
+        g_video_read_hook(file.path());
+    }
+#endif
+
+    const DWORD expected = file.information().nFileSizeLow;
+    std::string bytes(expected, '\0');
+    DWORD total{};
+    while (total < expected) {
+        DWORD transferred{};
+        if (!ReadFile(file.handle(), bytes.data() + total, expected - total,
+                      &transferred, nullptr) || transferred == 0) {
+            return Result<std::string>::failure({
+                ErrorCode::stale_data,
+                L"KF2 video configuration changed while it was read",
+                GetLastError()});
+        }
+        total += transferred;
+    }
+
+    BY_HANDLE_FILE_INFORMATION after{};
+    const bool inspected_after =
+        GetFileInformationByHandle(file.handle(), &after) != FALSE;
+    if (!inspected_after || !safe_file_state(after) ||
+        !same_file_state(file.information(), after)) {
+        return Result<std::string>::failure({
+            ErrorCode::stale_data,
+            L"KF2 video configuration changed while it was read",
+            inspected_after ? ERROR_FILE_INVALID : GetLastError()});
+    }
+    return Result<std::string>::success(std::move(bytes));
+}
+
+Result<VideoFileSnapshot> open_video_snapshot(
+    const std::filesystem::path& config_root) {
+    auto system = open_video_file(config_root / kSystemFile);
+    if (!system.has_value()) {
+        return Result<VideoFileSnapshot>::failure(system.error());
+    }
+    auto game = open_video_file(config_root / kGameFile);
+    if (!game.has_value()) {
+        return Result<VideoFileSnapshot>::failure(game.error());
+    }
+    auto engine = open_video_file(config_root / kEngineFile);
+    if (!engine.has_value()) {
+        return Result<VideoFileSnapshot>::failure(engine.error());
+    }
+    return Result<VideoFileSnapshot>::success(VideoFileSnapshot{
+        std::move(system.value()), std::move(game.value()),
+        std::move(engine.value())});
+}
+
+Result<VideoSnapshotBytes> read_video_snapshot(
+    const std::filesystem::path& config_root) {
+    auto files = open_video_snapshot(config_root);
+    if (!files.has_value()) {
+        return Result<VideoSnapshotBytes>::failure(files.error());
+    }
+    auto system = read_open_video_file(files.value().system);
+    if (!system.has_value()) {
+        return Result<VideoSnapshotBytes>::failure(system.error());
+    }
+    auto game = read_open_video_file(files.value().game);
+    if (!game.has_value()) {
+        return Result<VideoSnapshotBytes>::failure(game.error());
+    }
+    auto engine = read_open_video_file(files.value().engine);
+    if (!engine.has_value()) {
+        return Result<VideoSnapshotBytes>::failure(engine.error());
+    }
+    return Result<VideoSnapshotBytes>::success(VideoSnapshotBytes{
+        std::move(system.value()), std::move(game.value()),
+        std::move(engine.value())});
+}
+
 std::size_t index(VideoOption option) noexcept {
     return static_cast<std::size_t>(option);
 }
 
-bool safe_regular_file(const std::filesystem::path& path) {
-    const DWORD attributes = GetFileAttributesW(path.c_str());
-    return attributes != INVALID_FILE_ATTRIBUTES &&
-        (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0;
-}
-
 Result<std::string> read_file(const std::filesystem::path& path) {
-    if (!safe_regular_file(path)) {
-        return Result<std::string>::failure(
-            {ErrorCode::access_denied, L"KF2 video configuration file is unsafe or missing", 0});
-    }
-    std::error_code error;
-    const auto size = std::filesystem::file_size(path, error);
-    if (error || size > 4U * 1024U * 1024U) {
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure, L"KF2 video configuration is too large to read safely", 0});
-    }
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure, L"KF2 video configuration cannot be opened", 0});
-    }
-    return Result<std::string>::success({
-        std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}});
+    auto file = open_video_file(path);
+    if (!file.has_value()) return Result<std::string>::failure(file.error());
+    return read_open_video_file(file.value());
 }
 
 std::wstring lower(std::wstring value) {
@@ -454,6 +608,12 @@ std::wstring choice(std::initializer_list<std::wstring_view> values, int selecte
 
 }  // namespace
 
+#ifdef KF2_VIDEO_SETTINGS_TESTING
+void set_video_read_hook_for_testing(VideoReadHook hook) noexcept {
+    g_video_read_hook = hook;
+}
+#endif
+
 std::optional<GameMenuGraphicsReadback>
 parse_game_menu_graphics_readback(std::string_view line) {
     constexpr std::string_view marker =
@@ -764,9 +924,11 @@ Result<VideoSettings> rebase_video_changes(
 }
 
 Result<VideoSettings> read_video_settings(const std::filesystem::path& config_root) {
-    auto bytes = read_file(config_root / kSystemFile);
-    if (!bytes.has_value()) return Result<VideoSettings>::failure(bytes.error());
-    auto parsed = config::IniDocument::parse(bytes.value());
+    auto snapshot = read_video_snapshot(config_root);
+    if (!snapshot.has_value()) {
+        return Result<VideoSettings>::failure(snapshot.error());
+    }
+    auto parsed = config::IniDocument::parse(snapshot.value().system);
     if (!parsed.has_value()) return Result<VideoSettings>::failure(parsed.error());
     const auto& document = parsed.value();
     VideoSettings settings;
@@ -781,11 +943,7 @@ Result<VideoSettings> read_video_settings(const std::filesystem::path& config_ro
     const bool borderless = same(document.find(kSystem, L"Borderless"), L"true");
     settings.choices[index(VideoOption::display)] = fullscreen ? 2 : borderless ? 1 : 0;
     settings.choices[index(VideoOption::vsync)] = bool_choice(document, L"UseVsync");
-    auto game_bytes = read_file(config_root / kGameFile);
-    if (!game_bytes.has_value()) {
-        return Result<VideoSettings>::failure(game_bytes.error());
-    }
-    auto game_document = config::IniDocument::parse(game_bytes.value());
+    auto game_document = config::IniDocument::parse(snapshot.value().game);
     if (!game_document.has_value()) {
         return Result<VideoSettings>::failure(game_document.error());
     }
@@ -848,11 +1006,7 @@ Result<VideoSettings> read_video_settings(const std::filesystem::path& config_ro
         }
     }
 
-    auto engine_bytes = read_file(config_root / kEngineFile);
-    if (!engine_bytes.has_value()) {
-        return Result<VideoSettings>::failure(engine_bytes.error());
-    }
-    auto engine = config::IniDocument::parse(engine_bytes.value());
+    auto engine = config::IniDocument::parse(snapshot.value().engine);
     if (!engine.has_value()) {
         return Result<VideoSettings>::failure(engine.error());
     }
@@ -893,9 +1047,11 @@ Result<bool> read_variable_frame_rate_enabled(
 Result<config::ConfigPreview> build_video_preview(
     const std::filesystem::path& config_root, const VideoSettings& settings,
     const VideoSettings* baseline) {
-    auto bytes = read_file(config_root / kSystemFile);
-    if (!bytes.has_value()) return Result<config::ConfigPreview>::failure(bytes.error());
-    auto parsed = config::IniDocument::parse(bytes.value());
+    auto snapshot = read_video_snapshot(config_root);
+    if (!snapshot.has_value()) {
+        return Result<config::ConfigPreview>::failure(snapshot.error());
+    }
+    auto parsed = config::IniDocument::parse(snapshot.value().system);
     if (!parsed.has_value()) return Result<config::ConfigPreview>::failure(parsed.error());
     auto document = std::move(parsed.value());
     const auto selected = [&](VideoOption option) { return settings.choices[index(option)]; };
@@ -1112,11 +1268,7 @@ Result<config::ConfigPreview> build_video_preview(
     changed = changed || textures.value();
     static_cast<void>(changed);
 
-    auto engine_bytes = read_file(config_root / kEngineFile);
-    if (!engine_bytes.has_value()) {
-        return Result<config::ConfigPreview>::failure(engine_bytes.error());
-    }
-    auto engine_parsed = config::IniDocument::parse(engine_bytes.value());
+    auto engine_parsed = config::IniDocument::parse(snapshot.value().engine);
     if (!engine_parsed.has_value()) {
         return Result<config::ConfigPreview>::failure(engine_parsed.error());
     }
@@ -1130,11 +1282,7 @@ Result<config::ConfigPreview> build_video_preview(
                 {ErrorCode::stale_data, L"Duplicate FleX setting was rejected", 0});
         }
     }
-    auto game_bytes = read_file(config_root / kGameFile);
-    if (!game_bytes.has_value()) {
-        return Result<config::ConfigPreview>::failure(game_bytes.error());
-    }
-    auto game_parsed = config::IniDocument::parse(game_bytes.value());
+    auto game_parsed = config::IniDocument::parse(snapshot.value().game);
     if (!game_parsed.has_value()) {
         return Result<config::ConfigPreview>::failure(game_parsed.error());
     }
@@ -1210,9 +1358,9 @@ Result<config::ConfigPreview> build_video_preview(
 
     config::ConfigPreview preview;
     preview.config_root = config_root;
-    preview.files.push_back({kSystemFile, bytes.value(), document.serialize()});
-    preview.files.push_back({kEngineFile, engine_bytes.value(), engine.serialize()});
-    preview.files.push_back({kGameFile, game_bytes.value(), game.serialize()});
+    preview.files.push_back({kSystemFile, snapshot.value().system, document.serialize()});
+    preview.files.push_back({kEngineFile, snapshot.value().engine, engine.serialize()});
+    preview.files.push_back({kGameFile, snapshot.value().game, game.serialize()});
     return Result<config::ConfigPreview>::success(std::move(preview));
 }
 
