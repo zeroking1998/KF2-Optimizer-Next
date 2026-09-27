@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cwchar>
@@ -848,19 +849,29 @@ Result<VideoSettings> read_video_settings(const std::filesystem::path& config_ro
     }
 
     auto engine_bytes = read_file(config_root / kEngineFile);
-    if (engine_bytes.has_value()) {
-        auto engine = config::IniDocument::parse(engine_bytes.value());
-        if (engine.has_value()) {
-            const auto value = engine.value().find(kEngine, L"PhysXLevel");
-            if (value) {
-                wchar_t* end{};
-                const long level = std::wcstol(value->c_str(), &end, 10);
-                if (end != value->c_str()) {
-                    settings.flex_level = std::clamp(static_cast<int>(level), 0, 2);
-                }
-            }
-        }
+    if (!engine_bytes.has_value()) {
+        return Result<VideoSettings>::failure(engine_bytes.error());
     }
+    auto engine = config::IniDocument::parse(engine_bytes.value());
+    if (!engine.has_value()) {
+        return Result<VideoSettings>::failure(engine.error());
+    }
+    const auto flex_value = engine.value().find(kEngine, L"PhysXLevel");
+    if (!flex_value) {
+        return Result<VideoSettings>::failure({
+            ErrorCode::stale_data,
+            L"KF2's NVIDIA FleX setting could not be verified", 0});
+    }
+    wchar_t* end{};
+    errno = 0;
+    const long flex_level = std::wcstol(flex_value->c_str(), &end, 10);
+    if (errno == ERANGE || end == flex_value->c_str() || *end != L'\0' ||
+        flex_level < 0 || flex_level > 2) {
+        return Result<VideoSettings>::failure({
+            ErrorCode::stale_data,
+            L"KF2's NVIDIA FleX setting is invalid", 0});
+    }
+    settings.flex_level = static_cast<int>(flex_level);
     settings.choices[index(VideoOption::nvidia_flex)] = settings.flex_level;
     return Result<VideoSettings>::success(std::move(settings));
 }

@@ -1,3 +1,5 @@
+#include <Windows.h>
+
 #include <array>
 #include <cstdlib>
 #include <filesystem>
@@ -54,6 +56,42 @@ int main() {
 
     auto loaded = kf2::game::read_video_settings(root);
     CHECK(loaded.has_value());
+
+    // FleX is part of the verified graphics baseline. Missing, unreadable,
+    // partial, malformed, and out-of-range evidence must never become Off.
+    const fs::path flex_root = root / L"flex-readback";
+    fs::create_directories(flex_root, error);
+    CHECK(!error);
+    write_file(flex_root / L"KFSystemSettings.ini", system);
+    write_file(flex_root / L"KFGame.ini", game);
+    CHECK(!kf2::game::read_video_settings(flex_root).has_value());
+
+    const auto read_flex = [&](std::string_view bytes) {
+        write_file(flex_root / L"KFEngine.ini", bytes);
+        return kf2::game::read_video_settings(flex_root);
+    };
+    CHECK(!read_flex("[Engine.Engine]\r\nPhysXLe").has_value());
+    CHECK(!read_flex("[Engine.Engine]\r\nPhysXLevel=two\r\n").has_value());
+    CHECK(!read_flex("[Engine.Engine]\r\nPhysXLevel=2junk\r\n").has_value());
+    CHECK(!read_flex("[Engine.Engine]\r\nPhysXLevel=-1\r\n").has_value());
+    CHECK(!read_flex("[Engine.Engine]\r\nPhysXLevel=3\r\n").has_value());
+    for (int level = 0; level <= 2; ++level) {
+        const auto verified = read_flex(
+            "[Engine.Engine]\r\nPhysXLevel=" + std::to_string(level) + "\r\n");
+        CHECK(verified.has_value());
+        CHECK(verified.value().flex_level == level);
+        CHECK(verified.value().choices[static_cast<std::size_t>(
+                  kf2::game::VideoOption::nvidia_flex)] == level);
+    }
+
+    write_file(flex_root / L"KFEngine.ini", engine);
+    const HANDLE locked_engine = CreateFileW(
+        (flex_root / L"KFEngine.ini").c_str(), GENERIC_READ | GENERIC_WRITE,
+        0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(locked_engine != INVALID_HANDLE_VALUE);
+    CHECK(!kf2::game::read_video_settings(flex_root).has_value());
+    CHECK(CloseHandle(locked_engine) != FALSE);
+    CHECK(kf2::game::read_video_settings(flex_root).has_value());
 
     // Every externally supplied choice must be rejected before it can index
     // one of the preset tables.
