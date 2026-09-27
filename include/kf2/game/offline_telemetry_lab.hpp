@@ -25,6 +25,11 @@ struct OfflineTelemetryRecovery {
     bool cleaned{false};
 };
 
+// Test-only fault injection at the bounded directory-cleanup boundary.
+using OfflineTelemetryCleanupTestHook = void (*)();
+void set_offline_telemetry_cleanup_test_hook(
+    OfflineTelemetryCleanupTestHook hook) noexcept;
+
 // Installs the pinned UnrealScript package into KF2's normal per-user
 // Published/BrewedPC directory for one protected session, regardless of
 // whether KF2 is then started from the optimizer, Steam or a shortcut.
