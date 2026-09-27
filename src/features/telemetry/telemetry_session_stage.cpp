@@ -2,8 +2,10 @@
 
 #include "app/application_runtime.hpp"
 
+#include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <thread>
 
 namespace kf2::telemetry_pipeline {
 
@@ -454,14 +456,97 @@ void UiRuntime::begin_game_restart_handoff(
     invalidate();
 }
 
+VideoSyncDisposition UiRuntime::synchronize_final_video_settings_from_game() {
+    constexpr int maximum_attempts = 4;
+    constexpr auto settle_delay = std::chrono::milliseconds{25};
+    auto disposition = VideoSyncDisposition::hard_failure;
+    for (int attempt = 0; attempt < maximum_attempts; ++attempt) {
+        disposition = synchronize_video_settings_from_game();
+        if (disposition == VideoSyncDisposition::unchanged ||
+            disposition == VideoSyncDisposition::synchronized) {
+            return disposition;
+        }
+        if (attempt + 1 < maximum_attempts) {
+            std::this_thread::sleep_for(settle_delay);
+        }
+    }
+    return disposition;
+}
+
+bool UiRuntime::preserve_final_graphics_evidence() {
+    if (!installation) return false;
+    config::ConfigPreview evidence;
+    evidence.config_root = installation->config_root;
+    constexpr std::array<const wchar_t*, 3> files{
+        L"KFEngine.ini", L"KFGame.ini", L"KFSystemSettings.ini"};
+    for (const auto* name : files) {
+        const auto relative = std::filesystem::path{name};
+        auto bytes = read_verified_local_file(
+            installation->config_root / relative, 16U * 1024U * 1024U);
+        if (!bytes.has_value()) {
+            events->append({0, diagnostics::Severity::error,
+                "FINAL_GRAPHICS_EVIDENCE_FAILED", bytes.error().message,
+                L"graphics"});
+            return false;
+        }
+        evidence.files.push_back(
+            {relative, bytes.value(), bytes.value()});
+    }
+    const auto created = backups.create_standalone(evidence);
+    if (!created.has_value()) {
+        events->append({0, diagnostics::Severity::error,
+            "FINAL_GRAPHICS_EVIDENCE_FAILED", created.error().message,
+            L"graphics"});
+        return false;
+    }
+    last_backup_id = created.value().id;
+    events->append({0, diagnostics::Severity::warning,
+        "FINAL_GRAPHICS_EVIDENCE_PRESERVED",
+        L"A verified standalone backup preserved KF2's three final graphics INIs before recovery",
+        L"graphics"});
+    return true;
+}
+
 void UiRuntime::finalize_ended_game_session() {
     game_restart_handoff_previous_process.reset();
     game_restart_handoff_deadline_ns = 0;
     game_restart_handoff_new_settings = false;
     bool session_restored = true;
     if (session_config_snapshot) {
-        static_cast<void>(synchronize_video_settings_from_game());
-        session_restored = restore_protected_session_config(L"KF2 closed");
+        const auto synchronized =
+            synchronize_final_video_settings_from_game();
+        if (synchronized == VideoSyncDisposition::unchanged ||
+            synchronized == VideoSyncDisposition::synchronized) {
+            final_graphics_capture_pending = false;
+            final_graphics_owns_recovery_requirement = false;
+            final_graphics_retry_after_ns = 0;
+            session_restored = restore_protected_session_config(L"KF2 closed");
+        } else {
+            final_graphics_capture_pending = true;
+            final_graphics_owns_recovery_requirement =
+                !model.recovery_required();
+            constexpr std::uint64_t retry_delay_ns = 1'000'000'000ULL;
+            const auto now = monotonic_ns();
+            final_graphics_retry_after_ns =
+                now > std::numeric_limits<std::uint64_t>::max() - retry_delay_ns
+                    ? std::numeric_limits<std::uint64_t>::max()
+                    : now + retry_delay_ns;
+            const bool evidence_preserved = preserve_final_graphics_evidence();
+            session_restored = false;
+            model.set_recovery_required(true);
+            model.set_notice({ui::NoticeSeverity::error,
+                L"FINAL_GRAPHICS_CAPTURE_PENDING",
+                evidence_preserved
+                    ? L"KF2's final graphics write was not stable. The live INIs were left untouched and a verified recovery backup was preserved."
+                    : L"KF2's final graphics write was not stable. The live INIs and protected original snapshot were left untouched, but an additional recovery backup could not be created.",
+                L"Keep KF2 closed while the Optimizer retries the final readback."});
+            events->append({0, diagnostics::Severity::error,
+                "FINAL_GRAPHICS_CAPTURE_PENDING",
+                evidence_preserved
+                    ? L"Protected restore was deferred because KF2's final graphics generation was unstable; a verified standalone INI backup preserves the source bytes"
+                    : L"Protected restore was deferred because KF2's final graphics generation was unstable; the live source and original snapshot remain untouched",
+                L"graphics"});
+        }
     } else if (installation) {
         const auto capped = synchronize_frame_rate_cap();
         if (!capped.has_value()) {
@@ -482,10 +567,15 @@ void UiRuntime::finalize_ended_game_session() {
             {ui::NoticeSeverity::info, L"KF2_SESSION_ENDED",
              L"KF2 closed; telemetry and protected INIs were finalized.", L""});
     }
-    events->append(
-        {0, diagnostics::Severity::info, "KF2_SESSION_ENDED",
-         L"No verified replacement process appeared; session telemetry was finalized",
-         L"game"});
+    events->append({0,
+        session_restored ? diagnostics::Severity::info
+                         : diagnostics::Severity::warning,
+        session_restored ? "KF2_SESSION_ENDED"
+                         : "KF2_SESSION_RECOVERY_PENDING",
+        session_restored
+            ? L"No verified replacement process appeared; session telemetry was finalized"
+            : L"No verified replacement process appeared; protected INI finalization is waiting for a stable graphics readback",
+        L"game"});
     if (session_restored) {
         static_cast<void>(rearm_automatic_external_launch_profile());
     }
@@ -735,10 +825,40 @@ void UiRuntime::try_attach_telemetry() {
             now >= session_config_launch_deadline_ns;
         if (session_config_snapshot &&
             (!session_config_waiting_for_launch || launch_wait_expired)) {
-            static_cast<void>(restore_protected_session_config(
-                launch_wait_expired
-                    ? L"KF2 did not start before the safety timeout"
-                    : L"KF2 closed"));
+            if (final_graphics_capture_pending) {
+                if (now < final_graphics_retry_after_ns) {
+                    telemetry_failure =
+                        L"Waiting to retry KF2's final graphics readback";
+                    return;
+                }
+                constexpr std::uint64_t retry_delay_ns = 1'000'000'000ULL;
+                final_graphics_retry_after_ns =
+                    now > std::numeric_limits<std::uint64_t>::max() -
+                              retry_delay_ns
+                        ? std::numeric_limits<std::uint64_t>::max()
+                        : now + retry_delay_ns;
+                const auto synchronized =
+                    synchronize_video_settings_from_game();
+                if (synchronized != VideoSyncDisposition::unchanged &&
+                    synchronized != VideoSyncDisposition::synchronized) {
+                    telemetry_failure =
+                        L"KF2's final graphics readback still requires recovery";
+                    return;
+                }
+                final_graphics_capture_pending = false;
+                final_graphics_retry_after_ns = 0;
+                const bool restored = restore_protected_session_config(
+                    L"KF2 final graphics readback settled");
+                if (restored && final_graphics_owns_recovery_requirement) {
+                    model.set_recovery_required(false);
+                }
+                final_graphics_owns_recovery_requirement = false;
+            } else {
+                static_cast<void>(restore_protected_session_config(
+                    launch_wait_expired
+                        ? L"KF2 did not start before the safety timeout"
+                        : L"KF2 closed"));
+            }
         }
         telemetry_failure = session_config_waiting_for_launch
             ? (session_config_launch_deadline_ns == 0
