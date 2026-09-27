@@ -1,10 +1,32 @@
 #include <Windows.h>
 
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <new>
 
 #include "kf2/flex/flex_observation.hpp"
 #include "kf2/flex/flex_observation_shared.hpp"
+
+namespace {
+
+bool fail_allocations = false;
+
+}  // namespace
+
+void* operator new(std::size_t size) {
+    if (fail_allocations) throw std::bad_alloc{};
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+
+void operator delete(void* memory) noexcept {
+    std::free(memory);
+}
+
+void operator delete(void* memory, std::size_t) noexcept {
+    std::free(memory);
+}
 
 int wmain() {
     FILETIME created{}, exited{}, kernel{}, user{};
@@ -74,6 +96,8 @@ int wmain() {
     std::memcpy(const_cast<LONG*>(&shared->last_delta_time_bits), &dt, sizeof(dt));
     shared->last_update_tick = GetTickCount64();
     kf2::game::GameProcessIdentity identity{pid, start, {}};
+    static_assert(noexcept(kf2::flex::read_observation(identity)));
+    static_assert(noexcept(kf2::flex::write_adaptive_control(identity, 1)));
     const auto result = kf2::flex::read_observation(identity);
     if (!result || !result->fresh || !result->pass_through_healthy ||
         result->last_substeps != 3 || result->min_substeps != 2 ||
@@ -119,6 +143,13 @@ int wmain() {
     shared->update_calls = 120;
     shared->successful_updates = 120;
     shared->last_update_tick = GetTickCount64();
+    fail_allocations = true;
+    const auto allocation_free_read = kf2::flex::read_observation(identity);
+    const bool allocation_free_write =
+        kf2::flex::write_adaptive_control(identity, 2);
+    fail_allocations = false;
+    if (!allocation_free_read || !allocation_free_write ||
+        shared->desired_substeps != 2) return 13;
     if (!kf2::flex::write_adaptive_control(identity, 1) ||
         shared->desired_substeps != 1 || shared->control_heartbeat_tick == 0) return 6;
     if (!kf2::flex::write_adaptive_control(identity, 5) || shared->desired_substeps != 5) return 7;
