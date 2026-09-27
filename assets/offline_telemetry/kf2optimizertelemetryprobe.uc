@@ -531,36 +531,43 @@ function bool EnsureFixedSessionEffects()
     return true;
 }
 
+function bool RestoreSessionWorldRuntime()
+{
+    local bool bEffectRuntimeRestored;
+
+    bEffectRuntimeRestored = ApplyAdaptiveEffectRuntimeReadback(
+        "restore", 100, true);
+    if (!bEffectRuntimeRestored)
+    {
+        `log("KF2OPT_FIXED_EFFECT_BASELINE state=restore_failed"$
+             " boundary=session_end domain=world_runtime"$
+             " reason=readback_mismatch");
+        return false;
+    }
+    bFixedSessionEffectsApplied = false;
+    `log("KF2OPT_FIXED_EFFECT_BASELINE state=world_runtime_restored"$
+         " boundary=session_end domain=world_runtime readback=verified");
+    return true;
+}
+
 function bool RestoreSessionGraphics()
 {
     local bool bGraphicsRestored;
     local bool bEffectRuntimeRestored;
 
-    if (AdaptiveGraphicsState == None)
-    {
-        return true;
-    }
     bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.
         RestoreOriginal(AdaptiveGraphicsState);
-    bEffectRuntimeRestored = ApplyAdaptiveEffectRuntimeReadback(
-        "restore", 100, true);
+    bEffectRuntimeRestored = RestoreSessionWorldRuntime();
     if (!bGraphicsRestored)
     {
         `log("KF2OPT_FIXED_EFFECT_BASELINE state=restore_failed"$
              " boundary=session_end domain=graphics"$
              " reason=readback_mismatch");
     }
-    if (!bEffectRuntimeRestored)
-    {
-        `log("KF2OPT_FIXED_EFFECT_BASELINE state=restore_failed"$
-             " boundary=session_end domain=effect_runtime"$
-             " reason=readback_mismatch");
-    }
     if (!bGraphicsRestored || !bEffectRuntimeRestored)
     {
         return false;
     }
-    bFixedSessionEffectsApplied = false;
     `log("KF2OPT_FIXED_EFFECT_BASELINE state=restored"$
          " boundary=session_end readback=verified");
     return true;

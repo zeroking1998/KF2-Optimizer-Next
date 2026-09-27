@@ -21,6 +21,11 @@ var int FixedEffectsBaselineAttempts;
 var float FixedEffectsBaselineNextAttemptRealTime;
 var float FixedEffectsBaselineRetryDelay;
 var string FixedEffectsBaselineRetryStatus;
+var bool bProcessGraphicsRestorePending;
+var int ProcessGraphicsRestoreAttempts;
+var float ProcessGraphicsRestoreNextAttemptRealTime;
+var float ProcessGraphicsRestoreRetryDelay;
+var string ProcessGraphicsRestoreRetryStatus;
 
 function SetProcessAdaptiveRuntimeEnabled(bool bEnabled)
 {
@@ -123,6 +128,68 @@ function bool EnsureFixedEffectsBaselineWithBackoff(
         int(FixedEffectsBaselineRetryDelay * 1000.0));
     FixedEffectsBaselineRetryDelay =
         FMin(8.0, FixedEffectsBaselineRetryDelay * 2.0);
+    return false;
+}
+
+function ResetProcessGraphicsRestoreRetry()
+{
+    ProcessGraphicsRestoreAttempts = 0;
+    ProcessGraphicsRestoreNextAttemptRealTime = 0.0;
+    ProcessGraphicsRestoreRetryDelay = 0.5;
+    ProcessGraphicsRestoreRetryStatus = "";
+}
+
+function ReportProcessGraphicsRestoreRetry(
+    string State, string Reason, int NextRetryMs)
+{
+    local string Status;
+
+    Status = State$"|"$Reason;
+    if (Status == ProcessGraphicsRestoreRetryStatus)
+    {
+        return;
+    }
+    ProcessGraphicsRestoreRetryStatus = Status;
+    `log("KF2OPT_PROCESS_GRAPHICS_RETRY state="$State$
+         " reason="$Reason$" attempt="$ProcessGraphicsRestoreAttempts$
+         " next_retry_ms="$NextRetryMs$" ownership=retained");
+}
+
+function bool RestorePendingProcessGraphicsWithBackoff(WorldInfo CurrentWorld)
+{
+    local int CompletedAttempts;
+
+    if (!bProcessGraphicsRestorePending)
+    {
+        return true;
+    }
+    if (CurrentWorld == None || CurrentWorld.RealTimeSeconds <
+        ProcessGraphicsRestoreNextAttemptRealTime)
+    {
+        return false;
+    }
+    ++ProcessGraphicsRestoreAttempts;
+    if (class'KF2OptimizerAdaptiveGraphics'.static.
+            RestoreOriginal(ProcessAdaptiveGraphicsState))
+    {
+        CompletedAttempts = ProcessGraphicsRestoreAttempts;
+        bProcessGraphicsRestorePending = false;
+        ResetProcessGraphicsRestoreRetry();
+        `log("KF2OPT_PROCESS_GRAPHICS_RETRY state=recovered attempts="$
+             CompletedAttempts$" readback=verified ownership=released");
+        return true;
+    }
+    if (ProcessGraphicsRestoreRetryDelay <= 0.0)
+    {
+        ProcessGraphicsRestoreRetryDelay = 0.5;
+    }
+    ProcessGraphicsRestoreNextAttemptRealTime =
+        CurrentWorld.RealTimeSeconds + ProcessGraphicsRestoreRetryDelay;
+    ReportProcessGraphicsRestoreRetry(
+        "deferred", "readback_mismatch",
+        int(ProcessGraphicsRestoreRetryDelay * 1000.0));
+    ProcessGraphicsRestoreRetryDelay =
+        FMin(8.0, ProcessGraphicsRestoreRetryDelay * 2.0);
     return false;
 }
 
@@ -250,6 +317,17 @@ function PrepareForGameplayWorld()
     AchievementPrewarmAttempts = 0;
     AchievementPrewarmNextAttemptRealTime = 0.0;
     ResetFixedEffectsBaselineRetry();
+    if (bProcessGraphicsRestorePending)
+    {
+        // RealTimeSeconds restarts with the world. Keep ownership and retry
+        // immediately in the new valid gameplay context.
+        ProcessGraphicsRestoreNextAttemptRealTime = 0.0;
+        ProcessGraphicsRestoreRetryStatus = "";
+    }
+    else
+    {
+        ResetProcessGraphicsRestoreRetry();
+    }
     OptimizerContextState = "";
     OptimizerProbeState = "";
     OptimizerGameplayUiState = "";
@@ -315,6 +393,11 @@ event Tick(float DeltaTime)
     }
     if (!GetStandaloneGameplayContext(PrimaryController, CurrentWorld))
     {
+        return;
+    }
+    if (!RestorePendingProcessGraphicsWithBackoff(CurrentWorld))
+    {
+        ReportOptimizerProbeState("process_graphics_restore_pending");
         return;
     }
     TryPrewarmAchievements(PrimaryController);
@@ -386,6 +469,8 @@ event Tick(float DeltaTime)
 
 function NotifyGameSessionEnded()
 {
+    local bool bProcessGraphicsRestored;
+    local bool bProbeFound;
     local LocalPlayer PrimaryPlayer;
     local PlayerController PrimaryController;
     local WorldInfo CurrentWorld;
@@ -401,6 +486,24 @@ function NotifyGameSessionEnded()
     // touch a controller, world or render object while UE3 tears them down.
     bGameSessionEnding = true;
     ClearAchievementPrewarmDelegate();
+    bProcessGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.
+        RestoreOriginal(
+        ProcessAdaptiveGraphicsState);
+    if (bProcessGraphicsRestored)
+    {
+        bProcessGraphicsRestorePending = false;
+        ResetProcessGraphicsRestoreRetry();
+        `log("KF2OPT_SESSION_TEARDOWN state=restored boundary=session_end"$
+             " domain=process_graphics readback=verified ownership=released");
+    }
+    else
+    {
+        bProcessGraphicsRestorePending = true;
+        ResetProcessGraphicsRestoreRetry();
+        `log("KF2OPT_SESSION_TEARDOWN state=restore_deferred"$
+             " boundary=session_end domain=process_graphics"$
+             " reason=readback_mismatch ownership=retained");
+    }
     if (GamePlayers.Length > 0)
     {
         PrimaryPlayer = GamePlayers[0];
@@ -420,22 +523,33 @@ function NotifyGameSessionEnded()
         {
             if (CurrentProbe != None && !CurrentProbe.bDeleteMe)
             {
-                // Restore the process-owned graphics snapshot while the world
-                // and its live managers are still valid. Quiesce/Destroyed is
-                // intentionally read-only because UE3 is tearing them down.
-                if (!CurrentProbe.RestoreSessionGraphics())
-                {
-                    `log("KF2OPT_ADAPTIVE_MODE state=restore_failed"$
-                         " reason=world_teardown_readback_mismatch");
-                }
+                bProbeFound = true;
+                // Only world-owned manager/emitter state depends on the probe.
+                // The interaction restored process graphics independently.
+                CurrentProbe.RestoreSessionWorldRuntime();
                 CurrentProbe.QuiesceForWorldTeardown();
             }
         }
     }
+    if (!bProbeFound)
+    {
+        `log("KF2OPT_SESSION_TEARDOWN state=probe_missing"$
+             " boundary=session_end domain=world_runtime"$
+             " reason="$((CurrentWorld == None) ?
+                "world_unavailable" : "probe_unavailable"));
+    }
     OptimizerContextState = "";
     OptimizerProbeState = "";
     OptimizerGameplayUiState = "";
-    `log("KF2OPT_INTERACTION schema=1 state=session_ended");
+    if (bProcessGraphicsRestorePending)
+    {
+        `log("KF2OPT_INTERACTION schema=1"$
+             " state=session_end_restore_pending");
+    }
+    else
+    {
+        `log("KF2OPT_INTERACTION schema=1 state=session_ended");
+    }
 }
 
 function NotifyPlayerAdded(int PlayerIndex, LocalPlayer AddedPlayer)
