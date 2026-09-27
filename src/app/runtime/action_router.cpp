@@ -17,7 +17,11 @@ DispatchResult dispatch_action(
     const auto* implementation =
         find_action_implementation(request.id, features);
     if (implementation == nullptr) return DispatchResult::invalid_registry;
-    return implementation->handler(runtime, request.payload);
+    try {
+        return implementation->handler(runtime, request.payload);
+    } catch (...) {
+        return DispatchResult::handler_failure;
+    }
 }
 
 }  // namespace kf2::app::runtime

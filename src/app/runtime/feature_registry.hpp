@@ -14,6 +14,7 @@ namespace kf2::app::runtime {
 
 enum class DispatchResult : std::uint8_t {
     handled,
+    handler_failure,
     unknown_action,
     invalid_payload,
     invalid_registry,

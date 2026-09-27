@@ -1,6 +1,7 @@
 #include <array>
 #include <cstdlib>
 #include <iostream>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 
@@ -28,6 +29,17 @@ using namespace kf2::app::runtime;
 DispatchResult handled(kf2::app::UiRuntime& runtime, const ActionPayload&) {
     ++runtime.calls;
     return DispatchResult::handled;
+}
+
+DispatchResult throw_before_mutation(kf2::app::UiRuntime&,
+                                     const ActionPayload&) {
+    throw std::runtime_error{"injected action failure"};
+}
+
+DispatchResult throw_after_mutation(kf2::app::UiRuntime& runtime,
+                                    const ActionPayload&) {
+    ++runtime.calls;
+    throw std::runtime_error{"injected action failure after mutation"};
 }
 
 constexpr std::array<std::string_view, 7> kFeatureNames{{
@@ -129,6 +141,24 @@ int main() {
               request(ActionId::game_launch, "dashboard-launch"), {}) ==
           DispatchResult::invalid_registry);
     CHECK(runtime.calls == 0);
+
+    CompleteRegistryFixture throwing_before;
+    throwing_before.implementations[0][0].handler = &throw_before_mutation;
+    runtime = {};
+    CHECK(dispatch_action(
+              runtime,
+              request(ActionId::game_launch, "dashboard-launch"),
+              throwing_before.features) == DispatchResult::handler_failure);
+    CHECK(runtime.calls == 0);
+
+    CompleteRegistryFixture throwing_after;
+    throwing_after.implementations[0][0].handler = &throw_after_mutation;
+    runtime = {};
+    CHECK(dispatch_action(
+              runtime,
+              request(ActionId::game_launch, "dashboard-launch"),
+              throwing_after.features) == DispatchResult::handler_failure);
+    CHECK(runtime.calls == 1);
 
     CompleteRegistryFixture duplicate_feature_fixture;
     duplicate_feature_fixture.features[1] =

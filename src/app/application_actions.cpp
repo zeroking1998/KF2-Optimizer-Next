@@ -256,11 +256,18 @@ void UiRuntime::execute_action(std::string_view action) {
         return;
     }
 
-    static_cast<void>(runtime::dispatch_action(
+    const auto dispatched = runtime::dispatch_action(
         *this,
         runtime::ActionRequest{
             resolved->id, action, runtime::NoPayload{}},
-        runtime::feature_definitions()));
+        runtime::feature_definitions());
+    if (dispatched == runtime::DispatchResult::handler_failure) {
+        model.set_notice({
+            ui::NoticeSeverity::error, L"ACTION_FAILED",
+            L"The requested action encountered an unexpected local error.",
+            L"No successful result was reported. Try the action again."});
+        invalidate();
+    }
 }
 
 Result<config::ApplyResult> UiRuntime::apply(
