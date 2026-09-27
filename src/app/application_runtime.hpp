@@ -10,12 +10,14 @@
 #include <array>
 #include <ole2.h>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <iomanip>
 #include <limits>
 #include <locale>
 #include <sstream>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 #include <memory>
@@ -260,6 +262,10 @@ struct UiRuntime {
     bool flex_minimum_limited{false};
     StartMode start_mode{StartMode::normal};
     std::shared_ptr<PackageRepairAsyncState> package_repair_state;
+    std::function<void(std::function<void()>)> package_repair_worker_launcher{
+        [](std::function<void()> worker) {
+            std::thread{std::move(worker)}.detach();
+        }};
     UpdateRuntimeState updates;
     std::optional<game::VideoSettings> video_saved;
     std::optional<game::VideoSettings> video_pending;

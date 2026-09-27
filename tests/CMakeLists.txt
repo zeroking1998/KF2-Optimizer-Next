@@ -443,6 +443,8 @@ target_link_libraries(kf2_application_lifecycle_test PRIVATE
 add_test(NAME kf2_application_lifecycle_test COMMAND kf2_application_lifecycle_test)
 set_tests_properties(kf2_application_lifecycle_test PROPERTIES
     LABELS "requires-desktop")
+add_test(NAME kf2_package_repair_worker_start_test
+    COMMAND kf2_application_lifecycle_test --package-repair-start-failure)
 
 add_executable(kf2_state_environment_test
     windows/state_environment_test.cpp

@@ -27,7 +27,6 @@ void UiRuntime::start_auto_package_repair() {
             return;
         }
     }
-
     const auto identity = current_build_identity();
     const auto plan = security::exact_release_repair_plan(identity.version);
     if (!plan.has_value()) {
@@ -37,22 +36,11 @@ void UiRuntime::start_auto_package_repair() {
         invalidate();
         return;
     }
+    package_repair_state.reset();
     auto state = std::make_shared<PackageRepairAsyncState>();
-    package_repair_state = state;
-    events->append(
-        {0, diagnostics::Severity::info, "PACKAGE_AUTO_REPAIR_STARTED",
-         L"Downloading only the exact installed release " + plan.value().tag +
-             L" from the official GitHub repository",
-         L"package"});
-    model.set_notice({
-        ui::NoticeSeverity::info, L"PACKAGE_AUTO_REPAIR_STARTED",
-        L"Downloading and verifying " + plan.value().asset_name + L".",
-        L"Only the exact installed version is accepted."});
-    invalidate();
-
     const auto root = executable_root;
     const auto working = settings_path.parent_path() / L"package-repair";
-    std::thread{
+    std::function<void()> worker =
         [state, root, working, version = identity.version,
          source_identity = identity.commit]() {
             Result<security::PackageRepairResult> result =
@@ -73,8 +61,32 @@ void UiRuntime::start_auto_package_repair() {
             }
             std::scoped_lock lock{state->mutex};
             state->outcome.emplace(std::move(result));
-        }}
-        .detach();
+        };
+    try {
+        package_repair_worker_launcher(std::move(worker));
+    } catch (...) {
+        events->append(
+            {0, diagnostics::Severity::error, "PACKAGE_AUTO_REPAIR_FAILED",
+             L"Auto Repair could not start its background worker", L"package"});
+        model.set_notice({
+            ui::NoticeSeverity::error, L"PACKAGE_AUTO_REPAIR_FAILED",
+            L"Auto Repair could not start its background worker.",
+            L"Try Auto Repair again. No installed file was changed."});
+        invalidate();
+        return;
+    }
+
+    package_repair_state = std::move(state);
+    events->append(
+        {0, diagnostics::Severity::info, "PACKAGE_AUTO_REPAIR_STARTED",
+         L"Downloading only the exact installed release " + plan.value().tag +
+             L" from the official GitHub repository",
+         L"package"});
+    model.set_notice({
+        ui::NoticeSeverity::info, L"PACKAGE_AUTO_REPAIR_STARTED",
+        L"Downloading and verifying " + plan.value().asset_name + L".",
+        L"Only the exact installed version is accepted."});
+    invalidate();
 }
 
 void UiRuntime::poll_auto_package_repair() {
