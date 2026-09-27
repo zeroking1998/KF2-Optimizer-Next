@@ -54,8 +54,8 @@ void write_package(const std::filesystem::path& root,
                    std::string_view version,
                    std::string_view generation) {
     std::string integrity =
-        "schema_version=1\nproduct=KF2OptimizerNext\nsource_identity=" +
-        std::string{identity} + "\nfile_count=13\n";
+        "schema_version=1\r\nproduct=KF2OptimizerNext\r\nsource_identity=" +
+        std::string{identity} + "\r\nfile_count=13\r\n";
     for (const auto& [relative, base] : kFiles) {
         const std::string bytes = std::string{generation} + " " + base;
         const auto path = root / relative;
@@ -68,7 +68,7 @@ void write_package(const std::filesystem::path& root,
             narrow.push_back(character == L'\\' ? '/' :
                              static_cast<char>(character));
         }
-        integrity += "file=" + narrow + "|" + hash.value() + "\n";
+        integrity += "file=" + narrow + "|" + hash.value() + "\r\n";
     }
     write_file(root / L"Data/package-integrity.ini", integrity);
     write_file(root / L"Data/package-manifest.json",

@@ -44,8 +44,8 @@ std::string read_file(const std::filesystem::path& path) {
 void write_package(const std::filesystem::path& root,
                    std::string_view identity) {
     std::string manifest =
-        "schema_version=1\nproduct=KF2OptimizerNext\nsource_identity=" +
-        std::string{identity} + "\nfile_count=13\n";
+        "schema_version=1\r\nproduct=KF2OptimizerNext\r\nsource_identity=" +
+        std::string{identity} + "\r\nfile_count=13\r\n";
     for (const auto& [relative, content] : kFiles) {
         const auto path = root / relative;
         write_file(path, content);
@@ -56,7 +56,7 @@ void write_package(const std::filesystem::path& root,
             narrow.push_back(character == L'\\' ? '/' :
                              static_cast<char>(character));
         }
-        manifest += "file=" + narrow + "|" + hash.value() + "\n";
+        manifest += "file=" + narrow + "|" + hash.value() + "\r\n";
     }
     write_file(root / L"Data/package-integrity.ini", manifest);
 }
@@ -81,6 +81,15 @@ int main() {
     const auto source_identity = kf2::security::package_source_identity(root);
     CHECK(source_identity.has_value());
     CHECK(source_identity.value() == "test-build");
+    auto invalid_identity = read_file(root / L"Data/package-integrity.ini");
+    const auto identity_offset = invalid_identity.find("source_identity=test-build");
+    CHECK(identity_offset != std::string::npos);
+    invalid_identity.replace(identity_offset,
+                             std::string_view{"source_identity=test-build"}.size(),
+                             "source_identity=bad identity");
+    write_file(root / L"Data/package-integrity.ini", invalid_identity);
+    CHECK(!kf2::security::package_source_identity(root).has_value());
+    write_package(root, "test-build");
     const auto verified =
         kf2::security::audit_package_integrity(root, "test-build");
     CHECK(verified.has_value());
