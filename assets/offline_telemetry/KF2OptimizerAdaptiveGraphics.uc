@@ -867,14 +867,27 @@ static function bool RestoreOriginal(KF2OptimizerAdaptiveGraphicsState Snapshot)
 static function string MenuReadback()
 {
     local GFXSettings Current;
+    local float FilmGrainRange;
+    local int FilmGrainPercent;
 
     GetCurrentGFXSettings(Current);
+    FilmGrainRange = default.FilmGrainMinMaxPreset[1].FilmGrainScale -
+        default.FilmGrainMinMaxPreset[0].FilmGrainScale;
+    if (FilmGrainRange <= 0.0)
+    {
+        return "";
+    }
+    FilmGrainPercent = Clamp(int(100.0 *
+        (Current.FilmGrain.FilmGrainScale -
+            default.FilmGrainMinMaxPreset[0].FilmGrainScale) /
+        FilmGrainRange + 0.5), 0, 100);
     return "resx=" $ Current.Resolution.ResX $
         " resy=" $ Current.Resolution.ResY $
         " display_full=" $ int(Current.Display.Fullscreen) $
         " display_borderless=" $ int(Current.Display.BorderlessWindow) $
         " vsync=" $ int(Current.VSync.VSync) $
         " variable_fps=" $ int(Current.VariableFPS.VariableFramerate) $
+        " film_grain=" $ FilmGrainPercent $
         " environment=" $ FindEnvironmentDetailIndex(
             Current.EnvironmentDetail, default.EnvironmentDetailPresets) $
         " character=" $ FindCharacterDetailIndex(

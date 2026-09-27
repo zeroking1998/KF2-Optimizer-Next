@@ -362,15 +362,15 @@ std::wstring choice(std::initializer_list<std::wstring_view> values, int selecte
 std::optional<GameMenuGraphicsReadback>
 parse_game_menu_graphics_readback(std::string_view line) {
     constexpr std::string_view marker =
-        "KF2OPT_GFX_MENU schema=1 state=applied ";
+        "KF2OPT_GFX_MENU schema=2 state=applied ";
     const auto start = line.find(marker);
     if (start == std::string_view::npos || line.size() > 4096) {
         return std::nullopt;
     }
     std::string_view payload = line.substr(start + marker.size());
-    constexpr std::array<std::string_view, 22> names{{
+    constexpr std::array<std::string_view, 23> names{{
         "resx", "resy", "display_full", "display_borderless", "vsync",
-        "variable_fps", "environment", "character", "fx",
+        "variable_fps", "film_grain", "environment", "character", "fx",
         "texture_resolution", "texture_filtering", "shadows", "reflections",
         "aa", "bloom", "motion_blur", "ao", "dof", "volumetric",
         "lens_flares", "light_shafts", "flex"}};
@@ -402,13 +402,14 @@ parse_game_menu_graphics_readback(std::string_view line) {
         values[3] < 0 || values[3] > 1 ||
         (values[2] != 0 && values[3] != 0) ||
         values[4] < 0 || values[4] > 1 ||
-        values[5] < 0 || values[5] > 1) {
+        values[5] < 0 || values[5] > 1 ||
+        values[6] < 0 || values[6] > 100) {
         return std::nullopt;
     }
     constexpr std::array<int, 16> maxima{{
         3, 2, 3, 3, 3, 3, 1, 1, 2, 1, 2, 3, 1, 1, 1, 2}};
     for (std::size_t field = 0; field < maxima.size(); ++field) {
-        if (values[field + 6] < -1 || values[field + 6] > maxima[field]) {
+        if (values[field + 7] < -1 || values[field + 7] > maxima[field]) {
             return std::nullopt;
         }
     }
@@ -418,6 +419,7 @@ parse_game_menu_graphics_readback(std::string_view line) {
     result.choices[index(VideoOption::display)] = values[2] ? 2 : values[3] ? 1 : 0;
     result.choices[index(VideoOption::vsync)] = values[4];
     result.choices[index(VideoOption::variable_frame_rate)] = values[5];
+    result.film_grain_percent = values[6];
     constexpr std::array<VideoOption, 16> options{{
         VideoOption::environment_detail, VideoOption::character_detail,
         VideoOption::fx_quality, VideoOption::texture_resolution,
@@ -428,7 +430,7 @@ parse_game_menu_graphics_readback(std::string_view line) {
         VideoOption::volumetric_lighting, VideoOption::lens_flares,
         VideoOption::light_shafts, VideoOption::nvidia_flex}};
     for (std::size_t field = 0; field < options.size(); ++field) {
-        result.choices[index(options[field])] = values[field + 6];
+        result.choices[index(options[field])] = values[field + 7];
     }
     return result;
 }
@@ -437,6 +439,7 @@ VideoSettings present_game_menu_graphics_readback(
     const VideoSettings& baseline,
     const GameMenuGraphicsReadback& readback) {
     VideoSettings result = baseline;
+    result.film_grain_percent = readback.film_grain_percent;
     add_resolutions(result, readback.resolution);
     const auto selected = std::find_if(
         result.resolutions.begin(), result.resolutions.end(),

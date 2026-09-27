@@ -55,9 +55,9 @@ int main() {
     auto loaded = kf2::game::read_video_settings(root);
     CHECK(loaded.has_value());
     const std::string menu_line =
-        "[12.3] ScriptLog: KF2OPT_GFX_MENU schema=1 state=applied "
+        "[12.3] ScriptLog: KF2OPT_GFX_MENU schema=2 state=applied "
         "resx=2560 resy=1440 display_full=0 display_borderless=1 "
-        "vsync=0 variable_fps=0 environment=-1 character=-1 fx=1 "
+        "vsync=0 variable_fps=0 film_grain=25 environment=-1 character=-1 fx=1 "
         "texture_resolution=1 texture_filtering=-1 shadows=1 reflections=0 "
         "aa=1 bloom=1 motion_blur=0 ao=0 dof=0 volumetric=0 "
         "lens_flares=0 light_shafts=0 flex=0";
@@ -65,10 +65,15 @@ int main() {
         kf2::game::parse_game_menu_graphics_readback(menu_line);
     CHECK(menu_readback.has_value());
     CHECK(menu_readback->resolution.width == 2560);
+    CHECK(menu_readback->film_grain_percent == 25);
     CHECK(menu_readback->choices[static_cast<std::size_t>(
         kf2::game::VideoOption::environment_detail)] == -1);
+    auto pending = loaded.value();
+    pending.film_grain_percent = 75;
     const auto menu_presented = kf2::game::present_game_menu_graphics_readback(
-        loaded.value(), *menu_readback);
+        pending, *menu_readback);
+    CHECK(loaded.value().film_grain_percent == 0);
+    CHECK(menu_presented.film_grain_percent == 25);
     CHECK(kf2::game::video_choice_label(
         kf2::game::VideoOption::environment_detail, menu_presented) ==
         L"Custom");
@@ -80,9 +85,9 @@ int main() {
     // Exact readback captured from KF2's native Medium preset. Overall
     // quality must match KF2 even though FleX remains an independent control.
     const std::string medium_menu_line =
-        "[19.37] ScriptLog: KF2OPT_GFX_MENU schema=1 state=applied "
+        "[19.37] ScriptLog: KF2OPT_GFX_MENU schema=2 state=applied "
         "resx=2560 resy=1440 display_full=0 display_borderless=1 "
-        "vsync=0 variable_fps=0 environment=1 character=0 fx=1 "
+        "vsync=0 variable_fps=0 film_grain=67 environment=1 character=0 fx=1 "
         "texture_resolution=1 texture_filtering=1 shadows=1 reflections=0 "
         "aa=1 bloom=1 motion_blur=0 ao=0 dof=0 volumetric=0 "
         "lens_flares=0 light_shafts=0 flex=0";
@@ -95,6 +100,15 @@ int main() {
     CHECK(kf2::game::video_choice_label(
         kf2::game::VideoOption::overall_quality, medium_presented) ==
         L"Medium");
+    CHECK(medium_presented.film_grain_percent == 67);
+    CHECK(!kf2::game::parse_game_menu_graphics_readback(
+        std::string{menu_line}.replace(
+            menu_line.find("schema=2"), 8, "schema=1")).has_value());
+    auto invalid_grain = menu_line;
+    invalid_grain.replace(invalid_grain.find("film_grain=25"), 13,
+                          "film_grain=101");
+    CHECK(!kf2::game::parse_game_menu_graphics_readback(
+        invalid_grain).has_value());
     CHECK(!kf2::game::parse_game_menu_graphics_readback(
         menu_line + " shadows=3").has_value());
     auto malformed_menu = menu_line;

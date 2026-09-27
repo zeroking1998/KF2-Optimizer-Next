@@ -57,6 +57,7 @@ struct VideoSettings {
 struct GameMenuGraphicsReadback {
     std::array<int, kVideoOptionCount> choices{};
     Resolution resolution{};
+    int film_grain_percent{};
     bool operator==(const GameMenuGraphicsReadback&) const = default;
 };
 
