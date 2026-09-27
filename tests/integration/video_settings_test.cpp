@@ -426,6 +426,62 @@ int main() {
     CHECK(group_document.value().find(L"SystemSettings", L"TEXTUREGROUP_Vehicle") ==
           L"(LODBias=9,MinMagFilter=Aniso,MipFilter=Linear)");
 
+    const fs::path malformed_groups_root = root / L"malformed-texture-groups";
+    fs::create_directories(malformed_groups_root, error);
+    CHECK(!error);
+    write_file(malformed_groups_root / L"KFEngine.ini", engine);
+    write_file(malformed_groups_root / L"KFGame.ini", game);
+    const auto request_texture_change = [&]() {
+        auto baseline = kf2::game::read_video_settings(malformed_groups_root);
+        if (!baseline.has_value()) {
+            return kf2::Result<kf2::config::ConfigPreview>::failure(
+                baseline.error());
+        }
+        auto desired = baseline.value();
+        desired.choices[static_cast<std::size_t>(
+            kf2::game::VideoOption::texture_resolution)] = 0;
+        desired.choices[static_cast<std::size_t>(
+            kf2::game::VideoOption::texture_filtering)] = 1;
+        return kf2::game::build_video_preview(
+            malformed_groups_root, desired, &baseline.value());
+    };
+
+    write_file(malformed_groups_root / L"KFSystemSettings.ini",
+        "[SystemSettings]\r\nMaxAnisotropy=4\r\n"
+        "TEXTUREGROUP_World=(LODBias=1,MinMagFilter=Aniso,MipFilter=Linear\r\n");
+    CHECK(!request_texture_change().has_value());
+
+    // Repairing the tuple makes the exact same request succeed on retry.
+    write_file(malformed_groups_root / L"KFSystemSettings.ini",
+        "[SystemSettings]\r\nMaxAnisotropy=4\r\n"
+        "TEXTUREGROUP_World=(LODBias=1,MinMagFilter=Aniso,MipFilter=Linear)\r\n");
+    CHECK(request_texture_change().has_value());
+
+    write_file(malformed_groups_root / L"KFSystemSettings.ini",
+        "[SystemSettings]\r\nMaxAnisotropy=4\r\n"
+        "TEXTUREGROUP_World=(LODBias=1 MinMagFilter=Aniso,MipFilter=Linear)\r\n");
+    CHECK(!request_texture_change().has_value());
+
+    // Missing controlled fields in an otherwise valid tuple are inserted and
+    // verified after serialization.
+    write_file(malformed_groups_root / L"KFSystemSettings.ini",
+        "[SystemSettings]\r\nMaxAnisotropy=4\r\n"
+        "TEXTUREGROUP_World=(NumStreamedMips=3)\r\n");
+    const auto missing_fields_preview = request_texture_change();
+    CHECK(missing_fields_preview.has_value());
+    const auto missing_fields_document = kf2::config::IniDocument::parse(
+        missing_fields_preview.value().files[0].proposed_bytes);
+    CHECK(missing_fields_document.has_value());
+    CHECK(missing_fields_document.value().find(
+        L"SystemSettings", L"TEXTUREGROUP_World") ==
+          L"(NumStreamedMips=3,LODBias=2,MinMagFilter=Linear,MipFilter=Linear)");
+
+    write_file(malformed_groups_root / L"KFSystemSettings.ini",
+        "[SystemSettings]\r\nMaxAnisotropy=4\r\n"
+        "TEXTUREGROUP_World=(LODBias=1,MinMagFilter=Aniso,MipFilter=Linear)\r\n"
+        "TEXTUREGROUP_Character=(LODBias=1,MinMagFilter=Aniso,MipFilter=Linear\r\n");
+    CHECK(!request_texture_change().has_value());
+
     // Every named preset must survive an INI write/read round-trip. In
     // particular, Ultra and Low must not come back as Custom.
     for (int preset : {0, 3}) {
