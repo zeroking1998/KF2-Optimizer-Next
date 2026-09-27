@@ -1,20 +1,35 @@
 #include "kf2/flex/flex_observation.hpp"
 
 #include <Windows.h>
+#include <array>
 #include <cmath>
+#include <cwchar>
 #include <cstring>
-#include <string>
 
 #include "kf2/flex/flex_observation_shared.hpp"
 
 namespace kf2::flex {
+namespace {
+
+constexpr std::size_t observation_mapping_name_capacity = 64;
+
+bool make_observation_mapping_name(
+    std::uint32_t pid,
+    std::array<wchar_t, observation_mapping_name_capacity>& name) noexcept {
+    return std::swprintf(
+        name.data(), name.size(),
+        L"Local\\KF2OptimizerNext_FlexObservation_v1_%u",
+        static_cast<unsigned int>(pid)) > 0;
+}
+
+}  // namespace
 
 std::optional<ObservationSnapshot> read_observation(
     const game::GameProcessIdentity& process) noexcept {
     if (process.pid == 0 || process.process_start_id == 0) return std::nullopt;
-    const auto name = L"Local\\KF2OptimizerNext_FlexObservation_v1_" +
-                      std::to_wstring(process.pid);
-    HANDLE mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, name.c_str());
+    std::array<wchar_t, observation_mapping_name_capacity> name{};
+    if (!make_observation_mapping_name(process.pid, name)) return std::nullopt;
+    HANDLE mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, name.data());
     if (!mapping) return std::nullopt;
     const auto* shared = static_cast<const ObservationShared*>(MapViewOfFile(
         mapping, FILE_MAP_READ, 0, 0, sizeof(ObservationShared)));
@@ -187,9 +202,10 @@ bool write_adaptive_control(const game::GameProcessIdentity& process,
                             int maximum_substeps) noexcept {
     if (process.pid == 0 || process.process_start_id == 0 ||
         maximum_substeps < 0 || maximum_substeps > 5) return false;
-    const auto name = L"Local\\KF2OptimizerNext_FlexObservation_v1_" +
-                      std::to_wstring(process.pid);
-    HANDLE mapping = OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, name.c_str());
+    std::array<wchar_t, observation_mapping_name_capacity> name{};
+    if (!make_observation_mapping_name(process.pid, name)) return false;
+    HANDLE mapping = OpenFileMappingW(
+        FILE_MAP_READ | FILE_MAP_WRITE, FALSE, name.data());
     if (!mapping) return false;
     auto* shared = static_cast<ObservationShared*>(MapViewOfFile(
         mapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, sizeof(ObservationShared)));
