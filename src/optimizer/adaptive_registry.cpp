@@ -336,7 +336,9 @@ AdaptiveSettingRecord make_record(const SpecItem& item) {
     return record;
 }
 
-std::vector<AdaptiveSettingRecord> build_registry() {
+std::vector<AdaptiveSettingRecord> build_registry(
+    AdaptiveRegistryInitializationProbe initialization_probe) {
+    if (initialization_probe) initialization_probe();
     std::vector<AdaptiveSettingRecord> records;
     records.reserve(std::size(kSpecItems) + kAdditionalModelItems.size());
     std::unordered_set<std::string> seen;
@@ -392,13 +394,15 @@ std::vector<AdaptiveSettingRecord> build_registry() {
 
 }  // namespace
 
-std::span<const AdaptiveSettingRecord> adaptive_target_registry() noexcept {
-    static const std::vector<AdaptiveSettingRecord> records = build_registry();
+std::span<const AdaptiveSettingRecord> adaptive_target_registry(
+    AdaptiveRegistryInitializationProbe initialization_probe) {
+    static const std::vector<AdaptiveSettingRecord> records =
+        build_registry(initialization_probe);
     return records;
 }
 
 const AdaptiveSettingRecord* find_adaptive_setting(
-    std::string_view name) noexcept {
+    std::string_view name) {
     const auto records = adaptive_target_registry();
     const auto found = std::ranges::find(records, name,
         &AdaptiveSettingRecord::name);

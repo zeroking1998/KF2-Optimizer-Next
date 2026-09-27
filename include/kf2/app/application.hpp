@@ -56,6 +56,7 @@ struct StartOptions {
     std::optional<game::GameDiscoveryInput> game_discovery;
     StartMode mode{StartMode::normal};
     std::wstring startup_warning;
+    void (*adaptive_registry_initialization_probe)(){nullptr};
 };
 
 class Application final {

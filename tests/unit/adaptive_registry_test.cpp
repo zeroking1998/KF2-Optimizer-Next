@@ -12,6 +12,8 @@
 
 int main() {
     using namespace kf2::optimizer;
+    static_assert(!noexcept(adaptive_target_registry()));
+    static_assert(!noexcept(find_adaptive_setting("FPS")));
     const auto registry = adaptive_target_registry();
     CHECK(registry.size() >= 900);
 

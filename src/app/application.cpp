@@ -1,5 +1,7 @@
 #include "application_runtime.hpp"
 
+#include "kf2/optimizer/adaptive_registry.hpp"
+
 #include <chrono>
 
 namespace kf2::app {
@@ -55,6 +57,18 @@ Result<Application> Application::start(const StartOptions& options) {
         options.instance_name.empty()) {
         return Result<Application>::failure(
             {ErrorCode::invalid_argument, L"Application start options are invalid", 0});
+    }
+
+    try {
+        // Function-local static initialization is all-or-nothing and retries
+        // after an exception. Convert a construction failure before any
+        // process or filesystem state is acquired.
+        static_cast<void>(optimizer::adaptive_target_registry(
+            options.adaptive_registry_initialization_probe));
+    } catch (...) {
+        return Result<Application>::failure({
+            ErrorCode::internal_failure,
+            L"Adaptive target registry could not be initialized", 0});
     }
 
     const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);

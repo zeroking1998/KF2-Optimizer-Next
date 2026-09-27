@@ -14,6 +14,7 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -460,6 +461,19 @@ int main(int argc, char** argv) {
             .allowed_config_parent = documents,
         },
     };
+    auto registry_failure_options = options;
+    registry_failure_options.state_root = root / L"RegistryFailureData";
+    registry_failure_options.instance_name += L"-RegistryFailure";
+    registry_failure_options.adaptive_registry_initialization_probe = [] {
+        throw std::runtime_error{"injected registry construction failure"};
+    };
+    const auto registry_failure =
+        kf2::app::Application::start(registry_failure_options);
+    CHECK(!registry_failure.has_value());
+    CHECK(registry_failure.error().code == kf2::ErrorCode::internal_failure);
+    CHECK(registry_failure.error().message ==
+          L"Adaptive target registry could not be initialized");
+    CHECK(!fs::exists(registry_failure_options.state_root));
     write_bytes(options.state_root / L"settings.ini",
                 "schema_version=1\nadaptive_shadow_mode=true\n");
 
