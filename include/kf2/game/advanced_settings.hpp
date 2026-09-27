@@ -40,6 +40,12 @@ struct AdvancedGameSettings {
                            const AdvancedGameSettings&) = default;
 };
 
+#ifdef KF2_ADVANCED_SETTINGS_TESTING
+using AdvancedMutationProbe = bool (*)();
+void set_advanced_mutation_probe_for_testing(
+    AdvancedMutationProbe probe) noexcept;
+#endif
+
 [[nodiscard]] config::SettingId advanced_setting_id(
     AdvancedOption option) noexcept;
 [[nodiscard]] std::wstring_view advanced_option_label(
@@ -50,9 +56,9 @@ struct AdvancedGameSettings {
 [[nodiscard]] int advanced_slider_value(
     AdvancedOption option, const AdvancedGameSettings& settings) noexcept;
 [[nodiscard]] bool set_advanced_slider_value(
-    AdvancedGameSettings& settings, AdvancedOption option, int value) noexcept;
+    AdvancedGameSettings& settings, AdvancedOption option, int value);
 [[nodiscard]] bool cycle_advanced_option(
-    AdvancedGameSettings& settings, AdvancedOption option) noexcept;
+    AdvancedGameSettings& settings, AdvancedOption option);
 [[nodiscard]] AdvancedGameSettings recommended_advanced_defaults();
 
 [[nodiscard]] Result<AdvancedGameSettings> read_advanced_game_settings(

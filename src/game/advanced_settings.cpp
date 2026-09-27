@@ -50,6 +50,14 @@ constexpr std::array<std::wstring_view, kAdvancedOptionCount> kLabels{{
     L"Decal lifetime",
 }};
 
+#ifdef KF2_ADVANCED_SETTINGS_TESTING
+AdvancedMutationProbe g_advanced_mutation_probe{};
+
+bool mutation_helper_available() {
+    return !g_advanced_mutation_probe || g_advanced_mutation_probe();
+}
+#endif
+
 std::size_t index(AdvancedOption option) noexcept {
     return static_cast<std::size_t>(option);
 }
@@ -85,6 +93,13 @@ Result<std::string> read_file(const std::filesystem::path& path) {
 }
 
 }  // namespace
+
+#ifdef KF2_ADVANCED_SETTINGS_TESTING
+void set_advanced_mutation_probe_for_testing(
+    AdvancedMutationProbe probe) noexcept {
+    g_advanced_mutation_probe = probe;
+}
+#endif
 
 config::SettingId advanced_setting_id(AdvancedOption option) noexcept {
     const auto selected = index(option);
@@ -140,32 +155,41 @@ int advanced_slider_value(
 }
 
 bool set_advanced_slider_value(
-    AdvancedGameSettings& settings, AdvancedOption option, int value) noexcept {
+    AdvancedGameSettings& settings, AdvancedOption option, int value) {
     if (!advanced_option_is_slider(option)) return false;
     const auto selected = index(option);
+    if (selected >= settings.values.size()) return false;
     const auto* definition = config::find_setting(advanced_setting_id(option));
     if (!definition || value < definition->minimum ||
         value > definition->maximum) {
         return false;
     }
+    config::SettingValue candidate{value};
     if (definition->type == config::SettingType::real) {
-        settings.values[selected] = static_cast<double>(value);
-    } else if (definition->type == config::SettingType::integer) {
-        settings.values[selected] = value;
-    } else {
+        candidate = static_cast<double>(value);
+    } else if (definition->type != config::SettingType::integer) {
         return false;
     }
-    return config::serialize_setting_value(
-        *definition, settings.values[selected]).has_value();
+#ifdef KF2_ADVANCED_SETTINGS_TESTING
+    if (!mutation_helper_available()) return false;
+#endif
+    if (!config::serialize_setting_value(*definition, candidate)) {
+        return false;
+    }
+    settings.values[selected] = std::move(candidate);
+    return true;
 }
 
 bool cycle_advanced_option(
-    AdvancedGameSettings& settings, AdvancedOption option) noexcept {
+    AdvancedGameSettings& settings, AdvancedOption option) {
     if (advanced_option_is_slider(option)) return false;
     const auto selected = index(option);
     if (selected >= settings.values.size()) return false;
     const auto* definition = config::find_setting(advanced_setting_id(option));
     if (!definition) return false;
+#ifdef KF2_ADVANCED_SETTINGS_TESTING
+    if (!mutation_helper_available()) return false;
+#endif
     auto next = config::step_setting_value(
         *definition, settings.values[selected], 1);
     if (!next) return false;
