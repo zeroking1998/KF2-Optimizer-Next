@@ -50,6 +50,44 @@ std::size_t count_occurrences(std::string_view text, std::string_view needle) {
     return count;
 }
 
+std::size_t settled_after_bounded_scans(
+    std::size_t pool_size, std::size_t scan_budget,
+    double category_visit_interval, double tracking_timeout) {
+    struct SettleSample {
+        bool initialized{};
+        bool settled{};
+        double stable_since{};
+        double last_observed{};
+    };
+
+    std::vector<SettleSample> samples(pool_size);
+    std::size_t cursor = 0;
+    std::size_t settled = 0;
+    double now = 0.0;
+    for (std::size_t visit = 0; visit < 96 && settled < pool_size; ++visit) {
+        const auto scan_count = std::min(scan_budget, pool_size);
+        for (std::size_t offset = 0; offset < scan_count; ++offset) {
+            auto& sample = samples[(cursor + offset) % pool_size];
+            if (sample.settled) continue;
+            if (!sample.initialized ||
+                now - sample.last_observed > tracking_timeout) {
+                sample.initialized = true;
+                sample.stable_since = now;
+                sample.last_observed = now;
+                continue;
+            }
+            sample.last_observed = now;
+            if (now - sample.stable_since >= 0.75) {
+                sample.settled = true;
+                ++settled;
+            }
+        }
+        cursor = (cursor + scan_count) % pool_size;
+        now += category_visit_interval;
+    }
+    return settled;
+}
+
 std::vector<std::string> telemetry_schema_fields(
     std::string_view source, std::string_view block_start,
     std::string_view block_end) {
@@ -1225,6 +1263,12 @@ int main() {
     CHECK(telemetry_source.find(
         "const AdaptiveCorpseScanBudget=64;") != std::string::npos);
     CHECK(telemetry_source.find(
+        "const AdaptiveCorpseSettleTrackingTimeout=60.0;") !=
+          std::string::npos);
+    CHECK(settled_after_bounded_scans(2000, 64, 0.85, 0.75) == 0);
+    CHECK(settled_after_bounded_scans(2000, 64, 0.85, 60.0) == 2000);
+    CHECK(settled_after_bounded_scans(2000, 64, 1.20, 60.0) == 2000);
+    CHECK(telemetry_source.find(
         "SetTimer(FMax(0.05, DelaySeconds), false,") !=
           std::string::npos);
     CHECK(telemetry_source.find(
@@ -1255,6 +1299,20 @@ int main() {
     CHECK(telemetry_source.find(
         "VSizeSq(Candidate.Mesh.Bounds.Origin - Entry.StableLocation)") !=
           std::string::npos);
+    CHECK(telemetry_source.find(
+        "CurrentRealTime - Entry.LastObservedRealTime >\n"
+        "            AdaptiveCorpseSettleTrackingTimeout") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "CurrentRealTime - Entry.LastObservedRealTime > MinimumStableTime") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "var float CorpseTimeOfDeath;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "Entry.CorpseTimeOfDeath != Candidate.TimeOfDeath") !=
+          std::string::npos);
+    CHECK(count_occurrences(
+        telemetry_source, "AdaptiveBaselineSettleEntries.Length = 0;") >= 2);
     CHECK(telemetry_source.find(
         "KF2OPT_CORPSE_BASELINE state=deferred reason=") !=
           std::string::npos);
