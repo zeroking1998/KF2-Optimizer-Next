@@ -280,6 +280,21 @@ AdaptiveSettingRecord make_record(const SpecItem& item) {
         return record;
     }
 
+    if (item.name == "QualityDebtLedger") {
+        record.source = "Planned recovery model";
+        record.source_trust = SourceTrustClass::unavailable;
+        record.safety_class = AdaptiveSafetyClass::protected_value;
+        record.evidence_state = AdaptiveEvidenceState::not_available;
+        record.offline_status = OfflineSafetyStatus::blocked;
+        record.online_status = OnlineSafetyStatus::blocked;
+        record.actuation_class = ActuationClass::shadow_only;
+        record.visual_impact = ImpactLevel::none;
+        record.gameplay_risk = ImpactLevel::none;
+        record.rollback_possible = false;
+        record.confidence = 0.0;
+        return record;
+    }
+
     if (one_of(item.name, kSafeControllerSettings)) {
         record.source = "Portable optimizer setting";
         record.source_trust = SourceTrustClass::verified;

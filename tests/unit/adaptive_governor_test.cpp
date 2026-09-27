@@ -480,6 +480,12 @@ int main() {
     CHECK(recovery.quality_recovery_eligible);
     CHECK(recovery.reason ==
           "stable_headroom_slow_quality_recovery_eligible");
+    recovery_governor.reset();
+    recovery_sample.timestamp_ns = start + 7'000'000'000ULL;
+    const auto recovery_after_reset = recovery_governor.evaluate(
+        adaptive, recovery_sample, recovery_sample.timestamp_ns);
+    CHECK(recovery_after_reset.state == AdaptiveControllerState::observing);
+    CHECK(!recovery_after_reset.quality_recovery_eligible);
 
     AdaptiveGovernor gpu_governor;
     const auto gpu = drive(
@@ -1062,7 +1068,7 @@ int main() {
         CHECK(a.corrective_frame_time_ms > a.warning_frame_time_ms);
         CHECK(a.critical_frame_time_ms > a.corrective_frame_time_ms);
         CHECK(!a.watchdog_frozen);
-        CHECK(soak_a.quality_debt_count() <= 32);
+        CHECK(a.quality_recovery_eligible == b.quality_recovery_eligible);
         if (a.selected_setting == "AdaptiveCorpseRuntimeLimit" &&
             a.proposed_value) {
             CHECK(*a.proposed_value >= 4.0);

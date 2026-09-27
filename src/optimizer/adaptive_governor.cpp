@@ -1283,8 +1283,6 @@ void AdaptiveGovernor::reset() noexcept {
     history_ = {};
     history_size_ = 0;
     history_next_ = 0;
-    quality_debt_ = {};
-    quality_debt_size_ = 0;
     smoothed_frame_time_ms_.reset();
     smoothed_p95_ms_.reset();
     resource_pressure_estimator_.reset();
@@ -1306,10 +1304,6 @@ void AdaptiveGovernor::reset() noexcept {
     quality_applied_not_before_ns_ = 0;
     direction_changes_ = 0;
     frozen_ = false;
-}
-
-std::size_t AdaptiveGovernor::quality_debt_count() const noexcept {
-    return quality_debt_size_;
 }
 
 std::wstring_view adaptive_controller_state_name(
