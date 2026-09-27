@@ -11,6 +11,7 @@
 #include <cmath>
 #include <functional>
 #include <memory>
+#include <new>
 #include <utility>
 #include <vector>
 
@@ -20,7 +21,18 @@ namespace {
 struct Context;
 class RootProvider;
 
-HRESULT string_value(VARIANT* value, const std::wstring& text) {
+template <typename Function>
+HRESULT automation_boundary(Function&& function) noexcept {
+    try {
+        return std::forward<Function>(function)();
+    } catch (const std::bad_alloc&) {
+        return E_OUTOFMEMORY;
+    } catch (...) {
+        return E_FAIL;
+    }
+}
+
+HRESULT string_value(VARIANT* value, std::wstring_view text) noexcept {
     VariantInit(value);
     value->vt = VT_BSTR;
     value->bstrVal = SysAllocStringLen(text.data(), static_cast<UINT>(text.size()));
@@ -58,6 +70,9 @@ struct Context {
     std::function<void()> invalidate;
     std::function<void(std::string_view, int)> set_slider_value;
     std::atomic_bool connected{true};
+#if defined(KF2_AUTOMATION_PROVIDER_TESTING)
+    bool fail_next_child_allocation{false};
+#endif
 };
 
 class NodeProvider final : public IRawElementProviderSimple,
@@ -93,6 +108,7 @@ public:
     IFACEMETHODIMP GetRuntimeId(SAFEARRAY** runtime_id) override;
     IFACEMETHODIMP get_BoundingRectangle(UiaRect* bounds) override {
         if (!bounds) return E_POINTER;
+        *bounds = {};
         *bounds = screen_bounds(context_->window, node().bounds);
         return S_OK;
     }
@@ -102,40 +118,45 @@ public:
         return S_OK;
     }
     IFACEMETHODIMP SetFocus() override {
-        if (!context_->connected || !context_->model) {
-            return UIA_E_ELEMENTNOTAVAILABLE;
-        }
-        const auto& current = node();
-        if (current.destination) {
-            (void)context_->model->focus_destination(*current.destination);
-        } else if (current.action_id && current.enabled) {
-            (void)context_->model->focus_action(*current.action_id);
-        } else {
-            return UIA_E_NOTSUPPORTED;
-        }
-        ::SetFocus(context_->window);
-        if (context_->invalidate) context_->invalidate();
-        return S_OK;
+        return automation_boundary([&]() -> HRESULT {
+            if (!context_->connected || !context_->model) {
+                return UIA_E_ELEMENTNOTAVAILABLE;
+            }
+            const auto& current = node();
+            if (current.destination) {
+                (void)context_->model->focus_destination(*current.destination);
+            } else if (current.action_id && current.enabled) {
+                (void)context_->model->focus_action(*current.action_id);
+            } else {
+                return UIA_E_NOTSUPPORTED;
+            }
+            ::SetFocus(context_->window);
+            if (context_->invalidate) context_->invalidate();
+            return S_OK;
+        });
     }
     IFACEMETHODIMP get_FragmentRoot(IRawElementProviderFragmentRoot** root) override;
     IFACEMETHODIMP Invoke() override {
-        if (!context_->connected || !context_->model) {
-            return UIA_E_ELEMENTNOTAVAILABLE;
-        }
-        const auto current = node();
-        if (current.destination) {
-            (void)context_->model->focus_destination(*current.destination);
-            (void)context_->model->activate_focused();
+        return automation_boundary([&]() -> HRESULT {
+            if (!context_->connected || !context_->model) {
+                return UIA_E_ELEMENTNOTAVAILABLE;
+            }
+            const auto current = node();
+            if (current.destination) {
+                (void)context_->model->focus_destination(*current.destination);
+                (void)context_->model->activate_focused();
+                if (context_->invalidate) context_->invalidate();
+                return S_OK;
+            }
+            if (!current.action_id || !current.enabled ||
+                !context_->activate_action) {
+                return UIA_E_NOTSUPPORTED;
+            }
+            (void)context_->model->focus_action(*current.action_id);
             if (context_->invalidate) context_->invalidate();
+            context_->activate_action(*current.action_id);
             return S_OK;
-        }
-        if (!current.action_id || !current.enabled || !context_->activate_action) {
-            return UIA_E_NOTSUPPORTED;
-        }
-        (void)context_->model->focus_action(*current.action_id);
-        if (context_->invalidate) context_->invalidate();
-        context_->activate_action(*current.action_id);
-        return S_OK;
+        });
     }
     IFACEMETHODIMP Select() override {
         return node().destination ? Invoke() : UIA_E_NOTSUPPORTED;
@@ -144,6 +165,7 @@ public:
     IFACEMETHODIMP RemoveFromSelection() override { return UIA_E_INVALIDOPERATION; }
     IFACEMETHODIMP get_IsSelected(BOOL* selected) override {
         if (!selected) return E_POINTER;
+        *selected = FALSE;
         *selected = node().selected ? TRUE : FALSE;
         return S_OK;
     }
@@ -158,9 +180,7 @@ public:
 
 private:
     const SemanticNode& node() const {
-        static const SemanticNode unavailable{
-            "unavailable", SemanticRole::status, {}, L"Unavailable", std::nullopt,
-            false, false, false, std::nullopt};
+        static const SemanticNode unavailable{};
         return index_ + 1 < context_->layout.nodes.size()
                    ? context_->layout.nodes[index_ + 1]
                    : unavailable;
@@ -179,9 +199,17 @@ public:
         const std::size_t count = context_->layout.nodes.empty()
                                       ? 0
                                       : context_->layout.nodes.size() - 1;
-        children_.reserve(count);
-        for (std::size_t index = 0; index < count; ++index) {
-            children_.push_back(new NodeProvider(context_, index));
+        try {
+            children_.reserve(count);
+            for (std::size_t index = 0; index < count; ++index) {
+                auto child = std::make_unique<NodeProvider>(context_, index);
+                children_.push_back(child.get());
+                static_cast<void>(child.release());
+            }
+        } catch (...) {
+            for (auto* child : children_) child->Release();
+            children_.clear();
+            throw;
         }
     }
     ~RootProvider() {
@@ -192,13 +220,22 @@ public:
         return index < visible_child_count() ? children_[index] : nullptr;
     }
     std::size_t child_count() const { return children_.size(); }
-    void synchronize_children() {
-        const std::size_t required = context_->layout.nodes.empty()
-                                         ? 0
-                                         : context_->layout.nodes.size() - 1;
-        while (children_.size() < required) {
-            children_.push_back(new NodeProvider(context_, children_.size()));
-        }
+    HRESULT synchronize_children(std::size_t required) noexcept {
+        return automation_boundary([&]() -> HRESULT {
+            while (children_.size() < required) {
+#if defined(KF2_AUTOMATION_PROVIDER_TESTING)
+                if (context_->fail_next_child_allocation) {
+                    context_->fail_next_child_allocation = false;
+                    throw std::bad_alloc{};
+                }
+#endif
+                auto child = std::make_unique<NodeProvider>(
+                    context_, children_.size());
+                children_.push_back(child.get());
+                static_cast<void>(child.release());
+            }
+            return S_OK;
+        });
     }
     std::size_t visible_child_count() const {
         return context_->layout.nodes.empty()
@@ -225,13 +262,14 @@ public:
     }
     IFACEMETHODIMP GetPropertyValue(PROPERTYID property, VARIANT* value) override {
         if (!value) return E_POINTER;
+        VariantInit(value);
         if (property == UIA_NamePropertyId) return string_value(value, L"KF2 Optimizer Next");
         if (property == UIA_ControlTypePropertyId) return integer_value(value, UIA_WindowControlTypeId);
-        VariantInit(value);
         return S_OK;
     }
     IFACEMETHODIMP get_HostRawElementProvider(IRawElementProviderSimple** provider) override {
         if (!provider) return E_POINTER;
+        *provider = nullptr;
         return UiaHostProviderFromHwnd(context_->window, provider);
     }
     IFACEMETHODIMP Navigate(NavigateDirection direction,
@@ -253,6 +291,7 @@ public:
     }
     IFACEMETHODIMP get_BoundingRectangle(UiaRect* bounds) override {
         if (!bounds) return E_POINTER;
+        *bounds = {};
         *bounds = screen_bounds(context_->window, context_->layout.root);
         return S_OK;
     }
@@ -322,6 +361,7 @@ HRESULT NodeProvider::GetPatternProvider(PATTERNID pattern, IUnknown** provider)
 
 HRESULT NodeProvider::GetPropertyValue(PROPERTYID property, VARIANT* value) {
     if (!value) return E_POINTER;
+    VariantInit(value);
     if (property == UIA_NamePropertyId) return string_value(value, node().text);
     if (property == UIA_ControlTypePropertyId) {
         return integer_value(value, node().destination
@@ -348,7 +388,6 @@ HRESULT NodeProvider::GetPropertyValue(PROPERTYID property, VARIANT* value) {
         return boolean_value(value, node().role == SemanticRole::slider &&
                                         node().slider.has_value());
     }
-    VariantInit(value);
     return S_OK;
 }
 
@@ -364,17 +403,26 @@ HRESULT NodeProvider::Navigate(NavigateDirection direction, IRawElementProviderF
 
 HRESULT NodeProvider::GetRuntimeId(SAFEARRAY** runtime_id) {
     if (!runtime_id) return E_POINTER;
+    *runtime_id = nullptr;
     int values[] = {UiaAppendRuntimeId, static_cast<int>(index_ + 1)};
     *runtime_id = SafeArrayCreateVector(VT_I4, 0, 2);
     if (!*runtime_id) return E_OUTOFMEMORY;
-    for (LONG position = 0; position < 2; ++position) SafeArrayPutElement(*runtime_id, &position, &values[position]);
+    for (LONG position = 0; position < 2; ++position) {
+        const auto written = SafeArrayPutElement(
+            *runtime_id, &position, &values[position]);
+        if (FAILED(written)) {
+            SafeArrayDestroy(*runtime_id);
+            *runtime_id = nullptr;
+            return written;
+        }
+    }
     return S_OK;
 }
 
 HRESULT NodeProvider::get_FragmentRoot(IRawElementProviderFragmentRoot** root) {
     if (!root) return E_POINTER;
+    *root = nullptr;
     if (!context_->connected || !context_->root) {
-        *root = nullptr;
         return UIA_E_ELEMENTNOTAVAILABLE;
     }
     *root = context_->root;
@@ -384,12 +432,11 @@ HRESULT NodeProvider::get_FragmentRoot(IRawElementProviderFragmentRoot** root) {
 
 HRESULT NodeProvider::get_SelectionContainer(IRawElementProviderSimple** container) {
     if (!container) return E_POINTER;
+    *container = nullptr;
     if (!context_->connected || !context_->root) {
-        *container = nullptr;
         return UIA_E_ELEMENTNOTAVAILABLE;
     }
     if (!node().destination) {
-        *container = nullptr;
         return UIA_E_NOTSUPPORTED;
     }
     *container = static_cast<IRawElementProviderSimple*>(context_->root);
@@ -398,28 +445,32 @@ HRESULT NodeProvider::get_SelectionContainer(IRawElementProviderSimple** contain
 }
 
 HRESULT NodeProvider::SetValue(double requested) {
-    const auto current = node();
-    if (!context_->connected || current.role != SemanticRole::slider ||
-        !current.slider || !current.action_id || !current.enabled) {
-        return UIA_E_ELEMENTNOTENABLED;
-    }
-    if (!std::isfinite(requested) || !context_->set_slider_value) {
-        return UIA_E_NOTSUPPORTED;
-    }
-    const int step = std::max(1, current.slider->small_step);
-    int value = current.slider->minimum + static_cast<int>(std::lround(
-        (requested - static_cast<double>(current.slider->minimum)) /
-        static_cast<double>(step))) * step;
-    value = std::clamp(value, current.slider->minimum,
-                       current.slider->maximum);
-    (void)context_->model->focus_action(*current.action_id);
-    context_->set_slider_value(*current.action_id, value);
-    if (context_->invalidate) context_->invalidate();
-    return S_OK;
+    return automation_boundary([&]() -> HRESULT {
+        const auto current = node();
+        if (!context_->connected || !context_->model ||
+            current.role != SemanticRole::slider || !current.slider ||
+            !current.action_id || !current.enabled) {
+            return UIA_E_ELEMENTNOTENABLED;
+        }
+        if (!std::isfinite(requested) || !context_->set_slider_value) {
+            return UIA_E_NOTSUPPORTED;
+        }
+        const int step = std::max(1, current.slider->small_step);
+        int value = current.slider->minimum + static_cast<int>(std::lround(
+            (requested - static_cast<double>(current.slider->minimum)) /
+            static_cast<double>(step))) * step;
+        value = std::clamp(value, current.slider->minimum,
+                           current.slider->maximum);
+        (void)context_->model->focus_action(*current.action_id);
+        context_->set_slider_value(*current.action_id, value);
+        if (context_->invalidate) context_->invalidate();
+        return S_OK;
+    });
 }
 
 HRESULT NodeProvider::get_Value(double* value) {
     if (!value) return E_POINTER;
+    *value = 0.0;
     if (!node().slider) return UIA_E_NOTSUPPORTED;
     *value = node().slider->value;
     return S_OK;
@@ -427,12 +478,14 @@ HRESULT NodeProvider::get_Value(double* value) {
 
 HRESULT NodeProvider::get_IsReadOnly(BOOL* read_only) {
     if (!read_only) return E_POINTER;
+    *read_only = TRUE;
     *read_only = node().enabled ? FALSE : TRUE;
     return node().slider ? S_OK : UIA_E_NOTSUPPORTED;
 }
 
 HRESULT NodeProvider::get_Maximum(double* maximum) {
     if (!maximum) return E_POINTER;
+    *maximum = 0.0;
     if (!node().slider) return UIA_E_NOTSUPPORTED;
     *maximum = node().slider->maximum;
     return S_OK;
@@ -440,6 +493,7 @@ HRESULT NodeProvider::get_Maximum(double* maximum) {
 
 HRESULT NodeProvider::get_Minimum(double* minimum) {
     if (!minimum) return E_POINTER;
+    *minimum = 0.0;
     if (!node().slider) return UIA_E_NOTSUPPORTED;
     *minimum = node().slider->minimum;
     return S_OK;
@@ -447,6 +501,7 @@ HRESULT NodeProvider::get_Minimum(double* minimum) {
 
 HRESULT NodeProvider::get_LargeChange(double* change) {
     if (!change) return E_POINTER;
+    *change = 0.0;
     if (!node().slider) return UIA_E_NOTSUPPORTED;
     *change = node().slider->large_step;
     return S_OK;
@@ -454,6 +509,7 @@ HRESULT NodeProvider::get_LargeChange(double* change) {
 
 HRESULT NodeProvider::get_SmallChange(double* change) {
     if (!change) return E_POINTER;
+    *change = 0.0;
     if (!node().slider) return UIA_E_NOTSUPPORTED;
     *change = node().slider->small_step;
     return S_OK;
@@ -538,18 +594,29 @@ Result<AutomationProvider> AutomationProvider::create(HWND window, UiModel& mode
         return Result<AutomationProvider>::failure(
             {ErrorCode::invalid_argument, L"Automation requires a valid window", 0});
     }
-    auto implementation = std::make_unique<Impl>();
-    implementation->context = std::make_shared<Context>();
-    implementation->context->window = window;
-    implementation->context->model = &model;
-    implementation->context->layout = std::move(layout);
-    implementation->context->activate_action = std::move(activate_action);
-    implementation->context->invalidate = std::move(invalidate);
-    implementation->context->set_slider_value =
-        std::move(set_slider_value);
-    implementation->root = new RootProvider(implementation->context);
-    implementation->context->root = implementation->root;
-    return Result<AutomationProvider>::success(AutomationProvider{std::move(implementation)});
+    try {
+        auto implementation = std::make_unique<Impl>();
+        implementation->context = std::make_shared<Context>();
+        implementation->context->window = window;
+        implementation->context->model = &model;
+        implementation->context->layout = std::move(layout);
+        implementation->context->activate_action = std::move(activate_action);
+        implementation->context->invalidate = std::move(invalidate);
+        implementation->context->set_slider_value =
+            std::move(set_slider_value);
+        implementation->root = new RootProvider(implementation->context);
+        implementation->context->root = implementation->root;
+        return Result<AutomationProvider>::success(
+            AutomationProvider{std::move(implementation)});
+    } catch (const std::bad_alloc&) {
+        return Result<AutomationProvider>::failure({
+            ErrorCode::internal_failure,
+            L"Automation provider allocation failed", ERROR_NOT_ENOUGH_MEMORY});
+    } catch (...) {
+        return Result<AutomationProvider>::failure({
+            ErrorCode::internal_failure,
+            L"Automation provider initialization failed", 0});
+    }
 }
 
 LRESULT AutomationProvider::handle_get_object(WPARAM wparam, LPARAM lparam) noexcept {
@@ -559,10 +626,25 @@ LRESULT AutomationProvider::handle_get_object(WPARAM wparam, LPARAM lparam) noex
         static_cast<IRawElementProviderSimple*>(implementation_->root));
 }
 
-void AutomationProvider::update_layout(ShellLayoutResult layout) {
-    if (!implementation_->context->connected) return;
-    implementation_->context->layout = std::move(layout);
-    implementation_->root->synchronize_children();
+bool AutomationProvider::update_layout(ShellLayoutResult layout) noexcept {
+    if (!implementation_->context->connected) return false;
+    try {
+        const std::size_t required = layout.nodes.empty()
+            ? 0 : layout.nodes.size() - 1;
+        if (FAILED(implementation_->root->synchronize_children(required))) {
+            return false;
+        }
+        implementation_->context->layout = std::move(layout);
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
+
+#if defined(KF2_AUTOMATION_PROVIDER_TESTING)
+void AutomationProvider::fail_next_child_allocation_for_testing() noexcept {
+    implementation_->context->fail_next_child_allocation = true;
+}
+#endif
 
 }  // namespace kf2::ui

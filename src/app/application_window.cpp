@@ -70,7 +70,9 @@ Result<bool> UiRuntime::create_window(const std::wstring& title) {
 void UiRuntime::invalidate() {
     if (!callbacks_ready) return;
     controller.synchronize_model();
-    if (automation) automation->update_layout(controller.layout());
+    if (automation) {
+        static_cast<void>(automation->update_layout(controller.layout()));
+    }
     update_animation_cadence();
     if (window) window->invalidate();
 }
