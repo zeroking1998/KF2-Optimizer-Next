@@ -392,8 +392,13 @@ AdaptiveControlDispatcher::AdaptiveControlDispatcher()
     : state_{std::make_shared<State>()} {}
 
 bool AdaptiveControlDispatcher::busy() const noexcept {
-    std::scoped_lock lock{state_->mutex};
-    return state_->busy;
+    try {
+        std::scoped_lock lock{state_->mutex};
+        return state_->busy;
+    } catch (const std::system_error&) {
+        // Conservatively reject another dispatch when state cannot be locked.
+        return true;
+    }
 }
 
 Result<bool> AdaptiveControlDispatcher::start(AdaptiveControlRequest request) {

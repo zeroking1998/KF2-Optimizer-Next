@@ -68,7 +68,7 @@ public:
     void start(std::filesystem::path install_root,
                StartupPrewarmOptions options = {});
     void request_stop() noexcept;
-    void stop_and_wait() noexcept;
+    void stop_and_wait();
     [[nodiscard]] StartupPrewarmSnapshot snapshot() const noexcept;
 
 private:

@@ -12,6 +12,7 @@
 #include <cwctype>
 #include <stop_token>
 #include <string>
+#include <system_error>
 #include <thread>
 
 namespace kf2::game {
@@ -389,7 +390,16 @@ struct StartupPrewarmer::Impl final {
 
 StartupPrewarmer::StartupPrewarmer()
     : implementation_{std::make_unique<Impl>()} {}
-StartupPrewarmer::~StartupPrewarmer() { stop_and_wait(); }
+StartupPrewarmer::~StartupPrewarmer() {
+    try {
+        stop_and_wait();
+    } catch (const std::system_error&) {
+        // A join failure must not terminate shutdown or destroy state that a
+        // still-running worker can access. This exceptional path deliberately
+        // leaves that state process-owned until exit.
+        static_cast<void>(implementation_.release());
+    }
+}
 
 void StartupPrewarmer::start(std::filesystem::path install_root,
                              StartupPrewarmOptions options) {
@@ -409,7 +419,7 @@ void StartupPrewarmer::request_stop() noexcept {
     }
 }
 
-void StartupPrewarmer::stop_and_wait() noexcept {
+void StartupPrewarmer::stop_and_wait() {
     if (!implementation_ || !implementation_->worker.joinable()) return;
     implementation_->worker.request_stop();
     implementation_->worker.join();
