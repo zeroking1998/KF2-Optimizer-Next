@@ -54,6 +54,78 @@ int main() {
 
     auto loaded = kf2::game::read_video_settings(root);
     CHECK(loaded.has_value());
+
+    // Every externally supplied choice must be rejected before it can index
+    // one of the preset tables.
+    for (std::size_t option_index = 0;
+         option_index < kf2::game::kVideoOptionCount; ++option_index) {
+        const auto option =
+            static_cast<kf2::game::VideoOption>(option_index);
+        if (option == kf2::game::VideoOption::overall_quality) continue;
+        auto invalid = loaded.value();
+        invalid.choices[option_index] =
+            kf2::game::video_choice_count(option, invalid);
+        CHECK(!kf2::game::build_video_preview(
+            root, invalid, &loaded.value()).has_value());
+    }
+    auto invalid_grain_setting = loaded.value();
+    invalid_grain_setting.film_grain_percent = 101;
+    CHECK(!kf2::game::build_video_preview(
+        root, invalid_grain_setting, &loaded.value()).has_value());
+    auto negative_fx_setting = loaded.value();
+    negative_fx_setting.choices[static_cast<std::size_t>(
+        kf2::game::VideoOption::fx_quality)] = -2;
+    CHECK(!kf2::game::build_video_preview(
+        root, negative_fx_setting, &loaded.value()).has_value());
+
+    // Overlay compatibility is a display-only delta. Custom texture values
+    // must remain byte-for-byte intact while exclusive fullscreen becomes
+    // borderless fullscreen.
+    const fs::path overlay_root = root / L"overlay-display-delta";
+    fs::create_directories(overlay_root, error);
+    CHECK(!error);
+    auto custom_system = system;
+    const auto replace_once = [](std::string& bytes,
+                                 std::string_view before,
+                                 std::string_view after) {
+        const auto position = bytes.find(before);
+        if (position == std::string::npos) return false;
+        bytes.replace(position, before.size(), after);
+        return true;
+    };
+    CHECK(replace_once(custom_system, "Fullscreen=False", "Fullscreen=True"));
+    CHECK(replace_once(custom_system, "Borderless=True", "Borderless=False"));
+    CHECK(replace_once(custom_system, "MaxAnisotropy=16", "MaxAnisotropy=4"));
+    CHECK(replace_once(
+        custom_system,
+        "TEXTUREGROUP_World=(LODBias=0,MinMagFilter=Aniso,MipFilter=Linear)",
+        "TEXTUREGROUP_World=(LODBias=9,MinMagFilter=Custom,MipFilter=Point)"));
+    write_file(overlay_root / L"KFSystemSettings.ini", custom_system);
+    write_file(overlay_root / L"KFEngine.ini", engine);
+    write_file(overlay_root / L"KFGame.ini", game);
+    const auto overlay_baseline =
+        kf2::game::read_video_settings(overlay_root);
+    CHECK(overlay_baseline.has_value());
+    CHECK(overlay_baseline.value().choices[static_cast<std::size_t>(
+        kf2::game::VideoOption::texture_resolution)] == -1);
+    CHECK(overlay_baseline.value().choices[static_cast<std::size_t>(
+        kf2::game::VideoOption::texture_filtering)] == -1);
+    auto overlay_desired = overlay_baseline.value();
+    overlay_desired.choices[static_cast<std::size_t>(
+        kf2::game::VideoOption::display)] = 1;
+    const auto overlay_preview = kf2::game::build_video_preview(
+        overlay_root, overlay_desired, &overlay_baseline.value());
+    CHECK(overlay_preview.has_value());
+    auto expected_overlay_system = custom_system;
+    CHECK(replace_once(
+        expected_overlay_system, "Fullscreen=True", "Fullscreen=False"));
+    CHECK(replace_once(
+        expected_overlay_system, "Borderless=False", "Borderless=True"));
+    CHECK(overlay_preview.value().files[0].proposed_bytes ==
+          expected_overlay_system);
+    CHECK(overlay_preview.value().files[1].proposed_bytes == engine);
+    CHECK(overlay_preview.value().files[2].proposed_bytes == game);
+
     const std::string menu_line =
         "[12.3] ScriptLog: KF2OPT_GFX_MENU schema=2 state=applied "
         "resx=2560 resy=1440 display_full=0 display_borderless=1 "
