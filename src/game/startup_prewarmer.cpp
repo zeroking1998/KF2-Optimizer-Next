@@ -314,6 +314,12 @@ StorageKind storage_kind_for_path(
     return StorageKind::solid_state;
 }
 
+bool startup_prewarm_retryable(StartupPrewarmState state) noexcept {
+    return state == StartupPrewarmState::skipped_unknown_storage ||
+        state == StartupPrewarmState::skipped_low_memory ||
+        state == StartupPrewarmState::skipped_no_files;
+}
+
 struct StartupPrewarmer::Impl final {
     std::jthread worker;
     std::atomic<StartupPrewarmState> state{StartupPrewarmState::idle};

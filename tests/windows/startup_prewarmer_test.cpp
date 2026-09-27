@@ -57,6 +57,20 @@ void write_sparse_file(const std::filesystem::path& path,
             static_cast<int>(error), std::system_category());
     }
 }
+
+kf2::game::StartupPrewarmSnapshot wait_for_terminal(
+    kf2::game::StartupPrewarmer& prewarmer) {
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        const auto current = prewarmer.snapshot();
+        if (current.state == kf2::game::StartupPrewarmState::complete ||
+            current.state == kf2::game::StartupPrewarmState::cancelled ||
+            kf2::game::startup_prewarm_retryable(current.state)) {
+            return current;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    return prewarmer.snapshot();
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -91,6 +105,15 @@ int main(int argc, char** argv) {
     CHECK(startup_prewarm_file_budget(16 * mib) == 16 * mib);
     CHECK(startup_prewarm_file_budget(1024 * mib) == 512 * mib);
     CHECK(startup_prewarm_budget(StorageKind::unknown, 32 * gib) == 0);
+    CHECK(startup_prewarm_retryable(
+        StartupPrewarmState::skipped_unknown_storage));
+    CHECK(startup_prewarm_retryable(
+        StartupPrewarmState::skipped_low_memory));
+    CHECK(startup_prewarm_retryable(
+        StartupPrewarmState::skipped_no_files));
+    CHECK(!startup_prewarm_retryable(StartupPrewarmState::idle));
+    CHECK(!startup_prewarm_retryable(StartupPrewarmState::complete));
+    CHECK(!startup_prewarm_retryable(StartupPrewarmState::cancelled));
 
     const auto process_suffix = std::to_wstring(GetCurrentProcessId());
     const auto root = std::filesystem::temp_directory_path() /
@@ -252,6 +275,42 @@ int main(int argc, char** argv) {
     CHECK(cancelled.snapshot().state == StartupPrewarmState::cancelled);
     CHECK(cancelled.snapshot().bytes_read == 0);
 
+    const auto retry_root = std::filesystem::temp_directory_path() /
+        (L"kf2-map-prewarm-retry-test-" + process_suffix);
+    std::filesystem::remove_all(retry_root, cleanup_error);
+    StartupPrewarmer retry;
+    const auto retry_options = [](StorageKind storage,
+                                  std::uint64_t memory) {
+        return StartupPrewarmOptions{
+            .idle_delay = std::chrono::milliseconds{0},
+            .storage_override = storage,
+            .available_memory_override = memory,
+            .map_name = L"KF-Retry",
+            .include_common_startup_files = false,
+        };
+    };
+    retry.start(retry_root, retry_options(StorageKind::solid_state, 4 * gib));
+    CHECK(wait_for_terminal(retry).state ==
+          StartupPrewarmState::skipped_no_files);
+    write_file(retry_root /
+        L"KFGame/BrewedPC/Maps/Retry/KF-Retry.kfm", 4096);
+    retry.start(retry_root, retry_options(StorageKind::solid_state, 4 * gib));
+    const auto appeared = wait_for_terminal(retry);
+    CHECK(appeared.state == StartupPrewarmState::complete);
+    CHECK(appeared.files_read == 1);
+
+    retry.start(retry_root, retry_options(StorageKind::unknown, 4 * gib));
+    CHECK(wait_for_terminal(retry).state ==
+          StartupPrewarmState::skipped_unknown_storage);
+    retry.start(retry_root, retry_options(StorageKind::solid_state, 4 * gib));
+    CHECK(wait_for_terminal(retry).state == StartupPrewarmState::complete);
+
+    retry.start(retry_root, retry_options(StorageKind::solid_state, 2 * gib));
+    CHECK(wait_for_terminal(retry).state ==
+          StartupPrewarmState::skipped_low_memory);
+    retry.start(retry_root, retry_options(StorageKind::solid_state, 4 * gib));
+    CHECK(wait_for_terminal(retry).state == StartupPrewarmState::complete);
+
     if (argc > 1) {
         const std::filesystem::path real_root{argv[1]};
         const auto kind = storage_kind_for_path(real_root);
@@ -285,5 +344,6 @@ int main(int argc, char** argv) {
 
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::remove_all(fair_root, cleanup_error);
+    std::filesystem::remove_all(retry_root, cleanup_error);
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -55,6 +55,8 @@ struct StartupPrewarmOptions {
     bool include_common_startup_files = true);
 [[nodiscard]] StorageKind storage_kind_for_path(
     const std::filesystem::path& path) noexcept;
+[[nodiscard]] bool startup_prewarm_retryable(
+    StartupPrewarmState state) noexcept;
 [[nodiscard]] std::optional<std::wstring> map_prewarm_request_from_log_line(
     std::string_view line);
 

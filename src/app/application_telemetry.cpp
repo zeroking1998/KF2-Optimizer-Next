@@ -9,6 +9,8 @@
 namespace kf2::app {
 namespace {
 
+constexpr std::uint64_t kMapPrewarmRetryDelayNs = 15'000'000'000ULL;
+
 class RuntimeTelemetryPipeline final {
 public:
     explicit RuntimeTelemetryPipeline(UiRuntime& runtime)
@@ -239,7 +241,10 @@ void UiRuntime::poll_map_prewarm() {
         game_log_session->game_class ==
             "KFGameContent.KFGameInfo_Survival";
     if (!menu_window && !offline_rotation_window) {
-        if (!map_prewarm_active.empty() || !map_prewarm_pending.empty()) {
+        if (!map_prewarm_active.empty() || !map_prewarm_pending.empty() ||
+            !map_prewarm_last_attempted.empty() ||
+            !map_prewarm_observed.empty() ||
+            map_prewarm_retry_not_before_ns != 0) {
             stop_map_prewarm_for_load();
         }
         return;
@@ -250,16 +255,17 @@ void UiRuntime::poll_map_prewarm() {
         map_prewarm_observed != map_prewarm_active &&
         map_prewarm_observed != map_prewarm_pending) {
         map_prewarm_pending = map_prewarm_observed;
+        map_prewarm_retry_not_before_ns = 0;
         if (!map_prewarm_active.empty()) map_prewarmer.request_stop();
     }
 
     const auto current = map_prewarmer.snapshot();
-    const bool terminal = current.state == game::StartupPrewarmState::idle ||
+    const bool worker_available =
+        current.state == game::StartupPrewarmState::idle;
+    const bool terminal =
         current.state == game::StartupPrewarmState::complete ||
         current.state == game::StartupPrewarmState::cancelled ||
-        current.state == game::StartupPrewarmState::skipped_unknown_storage ||
-        current.state == game::StartupPrewarmState::skipped_low_memory ||
-        current.state == game::StartupPrewarmState::skipped_no_files;
+        game::startup_prewarm_retryable(current.state);
     if (!map_prewarm_active.empty() && terminal) {
         const auto completed_map = std::exchange(map_prewarm_active, {});
         auto status = model.status();
@@ -269,12 +275,17 @@ void UiRuntime::poll_map_prewarm() {
             game::StartupPrewarmState::complete ? 100 : 0;
         model.set_status(std::move(status));
         if (current.state == game::StartupPrewarmState::complete) {
+            map_prewarm_retry_not_before_ns = 0;
             events->append({0, diagnostics::Severity::info,
                 "MAP_PREWARM_COMPLETED",
                 L"Prepared " + completed_map + L" (" +
                     std::to_wstring(current.bytes_read / (1024ULL * 1024ULL)) +
                     L" MiB) in the Windows file cache before map loading",
                 L"performance"});
+        } else if (game::startup_prewarm_retryable(current.state) &&
+                   completed_map == map_prewarm_observed) {
+            map_prewarm_retry_not_before_ns =
+                monotonic_ns() + kMapPrewarmRetryDelayNs;
         }
         invalidate();
     } else if (!map_prewarm_active.empty()) {
@@ -290,7 +301,16 @@ void UiRuntime::poll_map_prewarm() {
         }
     }
 
-    if (terminal && map_prewarm_active.empty() &&
+    if (map_prewarm_active.empty() && map_prewarm_pending.empty() &&
+        !map_prewarm_observed.empty() &&
+        map_prewarm_observed == map_prewarm_last_attempted &&
+        map_prewarm_retry_not_before_ns != 0 &&
+        monotonic_ns() >= map_prewarm_retry_not_before_ns) {
+        map_prewarm_pending = map_prewarm_observed;
+        map_prewarm_retry_not_before_ns = 0;
+    }
+
+    if ((worker_available || terminal) && map_prewarm_active.empty() &&
         !map_prewarm_pending.empty()) {
         map_prewarm_active = std::exchange(map_prewarm_pending, {});
         map_prewarm_last_attempted = map_prewarm_active;
@@ -311,6 +331,7 @@ void UiRuntime::poll_map_prewarm() {
 void UiRuntime::observe_map_prewarm_selection(std::wstring map_name) {
     if (map_name.empty() || map_name == map_prewarm_observed) return;
     map_prewarm_observed = std::move(map_name);
+    map_prewarm_retry_not_before_ns = 0;
 }
 
 void UiRuntime::stop_map_prewarm_for_load() {
@@ -319,6 +340,7 @@ void UiRuntime::stop_map_prewarm_for_load() {
     map_prewarm_active.clear();
     map_prewarm_last_attempted.clear();
     map_prewarm_observed.clear();
+    map_prewarm_retry_not_before_ns = 0;
     auto status = model.status();
     status.prewarm_active = false;
     status.prewarm_percent = 0;
