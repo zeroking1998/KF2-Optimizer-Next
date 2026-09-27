@@ -3,6 +3,45 @@
 // telemetry probe and cannot issue replicated writes.
 class KF2OptimizerOnlineGraphicsControlConnection extends TcpLink;
 
+var bool bCleanupStarted;
+
+const ConnectionDeadlineSeconds=5.0;
+
+function RequestClose()
+{
+    if (bCleanupStarted || bDeleteMe)
+    {
+        return;
+    }
+    bCleanupStarted = true;
+    Close();
+}
+
+function ConnectionTimedOut()
+{
+    if (bDeleteMe)
+    {
+        return;
+    }
+    bCleanupStarted = true;
+    ClearTimer(nameof(ConnectionTimedOut), self);
+    Close();
+    if (!bDeleteMe)
+    {
+        Destroy();
+    }
+}
+
+event Closed()
+{
+    bCleanupStarted = true;
+    ClearTimer(nameof(ConnectionTimedOut), self);
+    if (!bDeleteMe)
+    {
+        Destroy();
+    }
+}
+
 function string TakeToken(out string Line)
 {
     local int Space;
@@ -24,10 +63,12 @@ event Accepted()
 {
     LinkMode = MODE_Line;
     ReceiveMode = RMODE_Event;
+    SetTimer(ConnectionDeadlineSeconds, false,
+        nameof(ConnectionTimedOut), self);
     if (Left(IpAddrToString(RemoteAddr), 10) != "127.0.0.1:")
     {
         `log("KF2OPT_ONLINE_GRAPHICS_BRIDGE state=rejected reason=non_loopback");
-        Close();
+        RequestClose();
     }
 }
 
@@ -46,11 +87,15 @@ event ReceivedLine(string Line)
     local string InteractionPath;
     local bool Applied;
 
+    if (bCleanupStarted)
+    {
+        return;
+    }
     if (Left(IpAddrToString(RemoteAddr), 10) != "127.0.0.1:" ||
         Len(Line) > 128)
     {
         SendText("KF2OPT_ACK 0 failed rejected");
-        Close();
+        RequestClose();
         return;
     }
 
@@ -64,7 +109,7 @@ event ReceivedLine(string Line)
     if (Prefix != "KF2OPT" || Len(Line) != 0)
     {
         SendText("KF2OPT_ACK "$SequenceText$" failed malformed");
-        Close();
+        RequestClose();
         return;
     }
 
@@ -91,7 +136,7 @@ event ReceivedLine(string Line)
     {
         SendText("KF2OPT_ACK "$Sequence$" failed rejected");
     }
-    Close();
+    RequestClose();
 }
 
 defaultproperties

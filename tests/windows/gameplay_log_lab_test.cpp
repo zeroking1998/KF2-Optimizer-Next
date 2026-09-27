@@ -73,7 +73,8 @@ int main() {
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto online_corpse_controller_source = normalize_newlines(
         read_bytes(KF2_ONLINE_CORPSE_CONTROLLER_SOURCE));
-    const auto connection_source = read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE);
+    const auto connection_source = normalize_newlines(
+        read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE));
     const auto online_graphics_connection_source = normalize_newlines(
         read_bytes(KF2_ONLINE_GRAPHICS_CONNECTION_SOURCE));
     const auto graphics_source = normalize_newlines(
@@ -534,6 +535,38 @@ int main() {
           std::string::npos);
     CHECK(online_graphics_connection_source.find("KF2Pawn") ==
           std::string::npos);
+    for (const auto source : {std::string_view{connection_source},
+                              std::string_view{online_graphics_connection_source}}) {
+        CHECK(source.find("var bool bCleanupStarted;") !=
+              std::string::npos);
+        CHECK(source.find("SetTimer(ConnectionDeadlineSeconds, false,") !=
+              std::string::npos);
+        CHECK(source.find("nameof(ConnectionTimedOut), self") !=
+              std::string::npos);
+        CHECK(source.find("function RequestClose()") !=
+              std::string::npos);
+        CHECK(source.find("function ConnectionTimedOut()") !=
+              std::string::npos);
+        CHECK(source.find("event Closed()") != std::string::npos);
+        CHECK(source.find("ClearTimer(nameof(ConnectionTimedOut), self)") !=
+              std::string::npos);
+        CHECK(count_occurrences(source, "\n    Close();") == 2);
+        CHECK(count_occurrences(source, "RequestClose();") >= 4);
+        CHECK(count_occurrences(source, "Destroy();") == 2);
+
+        const auto receive_start = source.find("event ReceivedLine(");
+        const auto properties_start = source.find("defaultproperties");
+        CHECK(receive_start != std::string::npos);
+        CHECK(properties_start != std::string::npos);
+        CHECK(receive_start < properties_start);
+        const auto receive_body = source.substr(
+            receive_start, properties_start - receive_start);
+        CHECK(receive_body.find("if (bCleanupStarted)") !=
+              std::string::npos);
+        CHECK(receive_body.find("\n    Close();") == std::string::npos);
+        CHECK(receive_body.find("\n        Close();") == std::string::npos);
+        CHECK(receive_body.find("RequestClose();") != std::string::npos);
+    }
     CHECK(interaction_source.find(
         "KF2OPT_GAMEPLAY_CONTEXT schema=1 state=") != std::string::npos);
     CHECK(interaction_source.find(
