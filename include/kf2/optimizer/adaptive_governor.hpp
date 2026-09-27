@@ -247,7 +247,6 @@ public:
     // frame evidence at or after this timestamp may drive the next change.
     void notify_quality_applied(std::uint64_t applied_ns) noexcept;
     void reset() noexcept;
-    [[nodiscard]] std::size_t quality_debt_count() const noexcept;
 
 private:
     struct FrameAnalysis {
@@ -261,14 +260,6 @@ private:
         double frame_time_ms{0.0};
         double p95_frame_time_ms{0.0};
     };
-    struct QualityDebt {
-        std::string_view setting;
-        std::uint64_t created_ns{0};
-        double visual_cost{0.0};
-        double measured_benefit{0.0};
-        bool recovery_eligible{false};
-    };
-
     void reset_for_boundary(
         std::uint64_t now_ns, bool telemetry_transition) noexcept;
     [[nodiscard]] FrameAnalysis update_frame_analysis(
@@ -284,8 +275,6 @@ private:
     std::array<HistorySample, 128> history_{};
     std::size_t history_size_{0};
     std::size_t history_next_{0};
-    std::array<QualityDebt, 32> quality_debt_{};
-    std::size_t quality_debt_size_{0};
     std::optional<double> smoothed_frame_time_ms_;
     std::optional<double> smoothed_p95_ms_;
     ResourcePressureEstimator resource_pressure_estimator_;

@@ -64,6 +64,20 @@ int main() {
     CHECK(retired_online_gate->actuation_class == ActuationClass::shadow_only);
     CHECK(retired_online_gate->evidence_state ==
           AdaptiveEvidenceState::not_available);
+    const auto* planned_quality_debt =
+        find_adaptive_setting("QualityDebtLedger");
+    CHECK(planned_quality_debt != nullptr);
+    CHECK(planned_quality_debt->role == AdaptiveRole::recovery);
+    CHECK(planned_quality_debt->source == "Planned recovery model");
+    CHECK(planned_quality_debt->source_trust ==
+          SourceTrustClass::unavailable);
+    CHECK(planned_quality_debt->evidence_state ==
+          AdaptiveEvidenceState::not_available);
+    CHECK(planned_quality_debt->actuation_class ==
+          ActuationClass::shadow_only);
+    CHECK(!planned_quality_debt->rollback_possible);
+    CHECK(!adaptive_setting_active_ready(
+        *planned_quality_debt, AdaptiveCapabilityState::available));
 
     AdaptiveSettingRecord ready;
     ready.name = "SyntheticProvenCanary";
