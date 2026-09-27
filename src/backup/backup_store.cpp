@@ -440,9 +440,29 @@ Result<std::vector<BackupSet>> BackupStore::list_backups() const {
     }
     for (const auto& entry : std::filesystem::directory_iterator(manifests, error)) {
         if (error) break;
-        if (!entry.is_regular_file() || entry.path().extension() != L".manifest") continue;
+        std::error_code type_error;
+        const bool regular_file = entry.is_regular_file(type_error);
+        if (type_error) {
+            return Result<std::vector<BackupSet>>::failure(
+                {ErrorCode::io_failure, L"Backup manifest identity cannot be inspected",
+                 static_cast<std::uint32_t>(type_error.value())});
+        }
+        if (!regular_file || entry.path().extension() != L".manifest") continue;
         auto loaded = load_backup(entry.path().stem().string());
-        if (!loaded.has_value()) return Result<std::vector<BackupSet>>::failure(loaded.error());
+        if (!loaded.has_value()) {
+            const auto load_error = loaded.error();
+            auto quarantined = platform::windows::quarantine_regular_file(entry.path());
+            if (!quarantined.has_value()) {
+                auto quarantine_error = quarantined.error();
+                quarantine_error.message =
+                    L"Backup manifest is corrupt (" + load_error.message +
+                    L") and cannot be safely quarantined (" +
+                    quarantine_error.message + L")";
+                return Result<std::vector<BackupSet>>::failure(
+                    std::move(quarantine_error));
+            }
+            continue;
+        }
         backups.push_back(std::move(loaded.value()));
     }
     if (error) return Result<std::vector<BackupSet>>::failure(

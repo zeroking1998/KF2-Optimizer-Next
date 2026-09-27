@@ -1,3 +1,5 @@
+#include <Windows.h>
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -223,6 +225,68 @@ int main() {
     CHECK(!kf2::backup::import_requested_changes_json(
         R"({"version":1,"changes":[]} trailing)").has_value());
 
+    const auto healthy_before_corruption = store.list_backups();
+    CHECK(healthy_before_corruption.has_value());
+    const auto healthy_count = healthy_before_corruption.value().size();
+    const auto manifests = store.state_root() / L"backups/manifests";
+    const auto stray_manifest = manifests / L"unfinished.manifest";
+    write_bytes(stray_manifest, "not a backup manifest");
+    const auto listed_around_stray = store.list_backups();
+    CHECK(listed_around_stray.has_value());
+    CHECK(listed_around_stray.value().size() == healthy_count);
+    CHECK(!fs::exists(stray_manifest));
+    CHECK(fs::exists(manifests / L"unfinished.manifest.corrupt"));
+
+    const auto truncated_manifest =
+        manifests / (std::wstring(64, L'b') + L".manifest");
+    write_bytes(truncated_manifest, "version=2\nid=");
+    const auto listed_around_truncated = store.list_backups();
+    CHECK(listed_around_truncated.has_value());
+    CHECK(listed_around_truncated.value().size() == healthy_count);
+    CHECK(!fs::exists(truncated_manifest));
+    CHECK(fs::exists(fs::path{truncated_manifest.wstring() + L".corrupt"}));
+
+    const std::string mismatched_id(64, 'c');
+    auto mismatched_bytes = original_manifest;
+    const auto manifest_id = std::string{"id="} + applied.value().backup.id;
+    const auto id_offset = mismatched_bytes.find(manifest_id);
+    CHECK(id_offset != std::string::npos);
+    mismatched_bytes.replace(id_offset, manifest_id.size(), "id=" + mismatched_id);
+    const auto mismatched_manifest =
+        manifests / (std::wstring(64, L'c') + L".manifest");
+    write_bytes(mismatched_manifest, mismatched_bytes);
+    const auto listed_around_mismatch = store.list_backups();
+    CHECK(listed_around_mismatch.has_value());
+    CHECK(listed_around_mismatch.value().size() == healthy_count);
+    CHECK(!fs::exists(mismatched_manifest));
+    CHECK(fs::exists(fs::path{mismatched_manifest.wstring() + L".corrupt"}));
+
+    const auto unreadable_manifest =
+        manifests / (std::wstring(64, L'd') + L".manifest");
+    write_bytes(unreadable_manifest, "version=2\nid=");
+    HANDLE locked_manifest = CreateFileW(
+        unreadable_manifest.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(locked_manifest != INVALID_HANDLE_VALUE);
+    const auto blocked_listing = store.list_backups();
+    CHECK(!blocked_listing.has_value());
+    CHECK(blocked_listing.error().message.find(L"cannot be safely quarantined") !=
+          std::wstring::npos);
+
+    const auto orphan_object = store.state_root() / L"backups/objects" /
+        (std::wstring(64, L'e') + L".blob");
+    write_bytes(orphan_object, "unreferenced");
+    const auto blocked_prune = store.prune_verified({.keep_latest = 1});
+    CHECK(!blocked_prune.has_value());
+    CHECK(fs::exists(orphan_object));
+    CHECK(CloseHandle(locked_manifest) != FALSE);
+
+    const auto listed_after_unlock = store.list_backups();
+    CHECK(listed_after_unlock.has_value());
+    CHECK(listed_after_unlock.value().size() == healthy_count);
+    CHECK(!fs::exists(unreadable_manifest));
+    CHECK(fs::exists(fs::path{unreadable_manifest.wstring() + L".corrupt"}));
+
     const auto pruned = store.prune_verified({.keep_latest = 1});
     CHECK(pruned.has_value());
     const auto retained = store.list_backups();
@@ -241,6 +305,7 @@ int main() {
         CHECK(referenced_objects.contains(object.path().stem().string()));
     }
     CHECK(object_count == referenced_objects.size());
+    CHECK(!fs::exists(orphan_object));
 
     const auto blocked = kf2::backup::restore_backup(
         store, applied.value().backup.id, config_root, {.game_running = true});
