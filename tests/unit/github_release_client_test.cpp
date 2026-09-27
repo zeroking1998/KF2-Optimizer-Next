@@ -1,3 +1,4 @@
+#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -76,5 +77,39 @@ int main() {
         "not-json", repository, "0.0.2-alpha").has_value());
     CHECK(!kf2::update::parse_github_releases(
         "[]", "https://evil.example/repo", "0.0.2-alpha").has_value());
+
+    const auto release_with_unknown_number = [](
+        std::string_view value, bool asset_scope) {
+        const std::string unknown = "\"unknown\":" + std::string{value} + ',';
+        return std::string{"[{\"tag_name\":\"v1.0.0\",\"draft\":false,"} +
+            (asset_scope ? "" : unknown) +
+            "\"published_at\":\"2026-08-22T12:00:00Z\",\"body\":\"ok\"," +
+            "\"assets\":[{" + (asset_scope ? unknown : "") +
+            "\"name\":\"KF2OptimizerNext-v1.0.0-win64.zip\"," +
+            "\"size\":12,\"digest\":\"sha256:" + std::string(64, 'a') +
+            "\",\"browser_download_url\":" +
+            "\"https://github.com/example/KF2-Optimizer-Next/releases/download/" +
+            "v1.0.0/KF2OptimizerNext-v1.0.0-win64.zip\"}]}]";
+    };
+    constexpr std::array malformed_numbers{
+        "-", "1+2", "1..2", "01", "-01", "1e", "1e+", ".1"};
+    for (const auto* value : malformed_numbers) {
+        CHECK(!kf2::update::parse_github_releases(
+            release_with_unknown_number(value, false), repository,
+            "0.0.2-alpha").has_value());
+        CHECK(!kf2::update::parse_github_releases(
+            release_with_unknown_number(value, true), repository,
+            "0.0.2-alpha").has_value());
+    }
+    constexpr std::array valid_numbers{
+        "0", "-1", "12", "1.25", "1e2", "-1.25E-2"};
+    for (const auto* value : valid_numbers) {
+        CHECK(kf2::update::parse_github_releases(
+            release_with_unknown_number(value, false), repository,
+            "0.0.2-alpha").has_value());
+        CHECK(kf2::update::parse_github_releases(
+            release_with_unknown_number(value, true), repository,
+            "0.0.2-alpha").has_value());
+    }
     return EXIT_SUCCESS;
 }

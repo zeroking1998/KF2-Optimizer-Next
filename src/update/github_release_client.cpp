@@ -177,17 +177,46 @@ public:
         if (text_.substr(offset_).starts_with("true")) { offset_ += 4; return true; }
         if (text_.substr(offset_).starts_with("false")) { offset_ += 5; return true; }
         if (text_.substr(offset_).starts_with("null")) { offset_ += 4; return true; }
-        const std::size_t start = offset_;
-        if (text_[offset_] == '-') ++offset_;
-        while (offset_ < text_.size() &&
-               (std::isdigit(static_cast<unsigned char>(text_[offset_])) ||
-                text_[offset_] == '.' || text_[offset_] == 'e' ||
-                text_[offset_] == 'E' || text_[offset_] == '+' ||
-                text_[offset_] == '-')) ++offset_;
-        return offset_ != start;
+        return skip_number();
     }
 
 private:
+    bool skip_number() noexcept {
+        if (offset_ >= text_.size()) return false;
+        if (text_[offset_] == '-') ++offset_;
+        if (offset_ >= text_.size()) return false;
+        if (text_[offset_] == '0') {
+            ++offset_;
+            if (offset_ < text_.size() && std::isdigit(
+                    static_cast<unsigned char>(text_[offset_]))) return false;
+        } else if (text_[offset_] >= '1' && text_[offset_] <= '9') {
+            do {
+                ++offset_;
+            } while (offset_ < text_.size() && std::isdigit(
+                         static_cast<unsigned char>(text_[offset_])));
+        } else {
+            return false;
+        }
+        if (offset_ < text_.size() && text_[offset_] == '.') {
+            ++offset_;
+            const auto fraction = offset_;
+            while (offset_ < text_.size() && std::isdigit(
+                       static_cast<unsigned char>(text_[offset_]))) ++offset_;
+            if (offset_ == fraction) return false;
+        }
+        if (offset_ < text_.size() &&
+            (text_[offset_] == 'e' || text_[offset_] == 'E')) {
+            ++offset_;
+            if (offset_ < text_.size() &&
+                (text_[offset_] == '+' || text_[offset_] == '-')) ++offset_;
+            const auto exponent = offset_;
+            while (offset_ < text_.size() && std::isdigit(
+                       static_cast<unsigned char>(text_[offset_]))) ++offset_;
+            if (offset_ == exponent) return false;
+        }
+        return true;
+    }
+
     Result<std::string> invalid() const {
         return Result<std::string>::failure(
             {ErrorCode::invalid_argument, L"GitHub returned malformed JSON", 0});
