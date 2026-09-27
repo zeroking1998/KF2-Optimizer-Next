@@ -221,11 +221,123 @@ int test_package_repair_worker_start_failure() {
     return EXIT_SUCCESS;
 }
 
+int test_map_prewarm_retry_scheduler() {
+    namespace fs = std::filesystem;
+    using kf2::game::StartupPrewarmOptions;
+    using kf2::game::StartupPrewarmState;
+    using kf2::game::StorageKind;
+    constexpr std::uint64_t gib = 1024ULL * 1024ULL * 1024ULL;
+
+    const fs::path root{KF2_TEST_ROOT};
+    const auto test_root = root / L"map-prewarm-retry";
+    fs::remove_all(test_root);
+    fs::create_directories(test_root);
+    kf2::diagnostics::EventLog events{128};
+    kf2::app::UiRuntime runtime{test_root / L"Data", false,
+        kf2::config::Settings{}, events, std::nullopt,
+        kf2::app::StartMode::read_only, test_root / L"portable"};
+    runtime.installation = kf2::game::GameInstallation{
+        .install_root = test_root};
+    runtime.game_process = kf2::game::GameProcessIdentity{.pid = 1};
+    runtime.game_log_session = kf2::game::GameLogSession{};
+    runtime.game_log_session->main_menu = true;
+
+    const auto wait_for_state = [&](StartupPrewarmState expected) {
+        for (int attempt = 0; attempt < 200; ++attempt) {
+            if (runtime.map_prewarmer.snapshot().state == expected) {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        }
+        return runtime.map_prewarmer.snapshot().state == expected;
+    };
+    const auto arrange_terminal_skip = [&](StartupPrewarmOptions options,
+                                           StartupPrewarmState expected) {
+        runtime.map_prewarm_observed = L"KF-Retry";
+        runtime.map_prewarm_active = L"KF-Retry";
+        runtime.map_prewarm_last_attempted = L"KF-Retry";
+        runtime.map_prewarmer.start(test_root, std::move(options));
+        return wait_for_state(expected);
+    };
+    const auto verify_bounded_retry = [&](StartupPrewarmOptions options,
+                                          StartupPrewarmState expected) {
+        CHECK(arrange_terminal_skip(std::move(options), expected));
+        runtime.poll_map_prewarm();
+        CHECK(runtime.map_prewarm_active.empty());
+        CHECK(runtime.map_prewarm_pending.empty());
+        CHECK(runtime.map_prewarm_retry_not_before_ns >
+              runtime.monotonic_ns());
+        runtime.map_prewarm_retry_not_before_ns = 1;
+        runtime.poll_map_prewarm();
+        CHECK(runtime.map_prewarm_active == L"KF-Retry");
+        runtime.stop_map_prewarm_for_load();
+        runtime.map_prewarmer.stop_and_wait();
+        return EXIT_SUCCESS;
+    };
+
+    CHECK(verify_bounded_retry({
+        .idle_delay = std::chrono::milliseconds{0},
+        .storage_override = StorageKind::solid_state,
+        .available_memory_override = 4 * gib,
+        .map_name = L"KF-Retry",
+        .include_common_startup_files = false,
+    }, StartupPrewarmState::skipped_no_files) == EXIT_SUCCESS);
+    CHECK(verify_bounded_retry({
+        .idle_delay = std::chrono::milliseconds{0},
+        .storage_override = StorageKind::unknown,
+        .available_memory_override = 4 * gib,
+        .map_name = L"KF-Retry",
+        .include_common_startup_files = false,
+    }, StartupPrewarmState::skipped_unknown_storage) == EXIT_SUCCESS);
+    CHECK(verify_bounded_retry({
+        .idle_delay = std::chrono::milliseconds{0},
+        .storage_override = StorageKind::solid_state,
+        .available_memory_override = 2 * gib,
+        .map_name = L"KF-Retry",
+        .include_common_startup_files = false,
+    }, StartupPrewarmState::skipped_low_memory) == EXIT_SUCCESS);
+
+    CHECK(arrange_terminal_skip({
+        .idle_delay = std::chrono::milliseconds{0},
+        .storage_override = StorageKind::solid_state,
+        .available_memory_override = 4 * gib,
+        .map_name = L"KF-Retry",
+        .include_common_startup_files = false,
+    }, StartupPrewarmState::skipped_no_files));
+    runtime.poll_map_prewarm();
+    CHECK(runtime.map_prewarm_retry_not_before_ns != 0);
+    runtime.observe_map_prewarm_selection(L"KF-Other");
+    CHECK(runtime.map_prewarm_retry_not_before_ns == 0);
+    runtime.poll_map_prewarm();
+    CHECK(runtime.map_prewarm_active == L"KF-Other");
+    runtime.stop_map_prewarm_for_load();
+    runtime.map_prewarmer.stop_and_wait();
+
+    CHECK(arrange_terminal_skip({
+        .idle_delay = std::chrono::milliseconds{0},
+        .storage_override = StorageKind::solid_state,
+        .available_memory_override = 4 * gib,
+        .map_name = L"KF-Retry",
+        .include_common_startup_files = false,
+    }, StartupPrewarmState::skipped_no_files));
+    runtime.poll_map_prewarm();
+    CHECK(runtime.map_prewarm_retry_not_before_ns != 0);
+    runtime.game_log_session->main_menu = false;
+    runtime.poll_map_prewarm();
+    CHECK(runtime.map_prewarm_observed.empty());
+    CHECK(runtime.map_prewarm_last_attempted.empty());
+    CHECK(runtime.map_prewarm_retry_not_before_ns == 0);
+
+    fs::remove_all(test_root);
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 &&
         std::string_view{argv[1]} == "--package-repair-start-failure") {
         return test_package_repair_worker_start_failure();
     }
+    CHECK(test_map_prewarm_retry_scheduler() == EXIT_SUCCESS);
     CHECK(kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::normal));
     CHECK(!kf2::app::should_prepare_protected_gameplay_provider(
