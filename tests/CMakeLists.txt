@@ -521,6 +521,8 @@ add_executable(kf2_automation_provider_test
     "${PROJECT_SOURCE_DIR}/src/ui/automation_provider.cpp"
 )
 target_include_directories(kf2_automation_provider_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_automation_provider_test PRIVATE
+    KF2_AUTOMATION_PROVIDER_TESTING)
 target_link_libraries(kf2_automation_provider_test PRIVATE user32 ole32 uiautomationcore)
 add_test(NAME kf2_automation_provider_test COMMAND kf2_automation_provider_test)
 

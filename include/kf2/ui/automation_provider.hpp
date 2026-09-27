@@ -27,7 +27,10 @@ public:
     ~AutomationProvider();
 
     [[nodiscard]] LRESULT handle_get_object(WPARAM wparam, LPARAM lparam) noexcept;
-    void update_layout(ShellLayoutResult layout);
+    [[nodiscard]] bool update_layout(ShellLayoutResult layout) noexcept;
+#if defined(KF2_AUTOMATION_PROVIDER_TESTING)
+    void fail_next_child_allocation_for_testing() noexcept;
+#endif
 
 private:
     struct Impl;
