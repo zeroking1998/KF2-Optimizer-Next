@@ -487,7 +487,7 @@ int main() {
     CHECK(graphics_viewport_source.find(
         "InsertInteraction(OnlineMonitor)") != std::string::npos);
     CHECK(online_context_source.find(
-        "KF2OPT_SESSION_CONTEXT schema=1 state=") != std::string::npos);
+        "KF2OPT_SESSION_CONTEXT schema=2 state=") != std::string::npos);
     CHECK(online_context_source.find("NM_Client") != std::string::npos);
     CHECK(online_context_source.find("online_client_read_only") !=
           std::string::npos);
@@ -893,6 +893,43 @@ int main() {
     CHECK(interaction_source.find(
         "KFPC.MyGFxManager.CurrentMenu == KFPC.MyGFxManager.TraderMenu") !=
         std::string::npos);
+    CHECK(interaction_source.find(
+        "ReportGameplayUiState(\"unavailable\")") != std::string::npos);
+    CHECK(online_context_source.find(
+        "KF2OPT_GAMEPLAY_CONTEXT schema=2 state=") != std::string::npos);
+    CHECK(online_context_source.find(
+        "function UpdateOnlineGameplayUiState(") != std::string::npos);
+    CHECK(online_context_source.find(
+        "KFPC.MyGFxManager.CurrentMenu == KFPC.MyGFxManager.TraderMenu") !=
+        std::string::npos);
+    CHECK(online_context_source.find(
+        "\"unavailable\", NetModeName, MapName") != std::string::npos);
+    CHECK(online_context_source.find(
+        "var int OnlineContextGeneration;") != std::string::npos);
+    CHECK(online_context_source.find(
+        "CurrentWorld.RealTimeSeconds < LastObservedRealTime") !=
+        std::string::npos);
+    CHECK(online_context_source.find(
+        "!(MapName ~= LastOnlineContextMapName)") != std::string::npos);
+    CHECK(online_context_source.find("replication") == std::string::npos);
+    const auto online_tick = online_context_source.find(
+        "event Tick(float DeltaTime)");
+    const auto client_context = online_context_source.find(
+        "\"online_client_read_only\", \"NM_Client\", MapName)",
+        online_tick);
+    const auto client_ui = online_context_source.find(
+        "PrimaryController, \"NM_Client\", MapName)", client_context);
+    const auto client_listener = online_context_source.find(
+        "EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController)",
+        client_ui);
+    const auto listen_context = online_context_source.find(
+        "\"online_host_read_only\", \"NM_ListenServer\", MapName)",
+        client_listener);
+    const auto listen_ui = online_context_source.find(
+        "PrimaryController, \"NM_ListenServer\", MapName)", listen_context);
+    CHECK(online_tick != std::string::npos);
+    CHECK(client_context < client_ui && client_ui < client_listener);
+    CHECK(client_listener < listen_context && listen_context < listen_ui);
     CHECK(interaction_source.find(
         "if (bGameSessionEnding)", interaction_tick) !=
           std::string::npos);

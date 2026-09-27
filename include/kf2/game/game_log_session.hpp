@@ -17,6 +17,7 @@ enum class GameplayUiContext {
     gameplay,
     menu,
     trader,
+    unavailable,
 };
 
 struct GameLogSession {
@@ -27,6 +28,7 @@ struct GameLogSession {
     std::optional<std::string> net_mode;
     bool optimizer_online_read_only{false};
     std::uint64_t optimizer_session_context_observed_ns{0};
+    std::optional<std::uint64_t> optimizer_session_generation;
     std::optional<int> online_corpse_pool;
     std::optional<int> online_corpse_maximum;
     bool online_corpse_sleep_verified{false};
@@ -156,6 +158,8 @@ struct GameLogSession {
     std::optional<std::uint16_t> telemetry_control_port;
     std::optional<int> telemetry_sample;
     std::optional<GameplayUiContext> gameplay_ui_context;
+    std::optional<std::string> gameplay_ui_context_map;
+    std::optional<std::uint64_t> gameplay_ui_context_generation;
     std::optional<double> level_load_seconds;
     std::optional<double> stream_all_resources_seconds;
     std::optional<double> loading_movie_seconds;

@@ -147,11 +147,18 @@ std::wstring describe_game_log_session(const GameLogSession& session) {
 }
 
 bool game_log_is_active_gameplay(const GameLogSession& session) noexcept {
-    return !session.main_menu && !session.map.empty() &&
-           session.phase == GameLogPhase::map_loaded &&
-           !session.loading_movie_active &&
-           (!session.gameplay_ui_context ||
-            *session.gameplay_ui_context == GameplayUiContext::gameplay);
+    if (session.main_menu || session.map.empty() ||
+        session.phase != GameLogPhase::map_loaded ||
+        session.loading_movie_active ||
+        session.gameplay_ui_context != GameplayUiContext::gameplay) {
+        return false;
+    }
+    if (!session.optimizer_online_read_only) return true;
+    return session.gameplay_ui_context_map &&
+           *session.gameplay_ui_context_map == session.map &&
+           session.optimizer_session_generation &&
+           session.gameplay_ui_context_generation ==
+               session.optimizer_session_generation;
 }
 
 bool game_log_is_offline_gameplay(const GameLogSession& session) noexcept {

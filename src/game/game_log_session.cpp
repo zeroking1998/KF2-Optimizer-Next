@@ -65,6 +65,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                     current_->net_mode = std::move(*mode);
                     current_->optimizer_online_read_only = false;
                     current_->optimizer_session_context_observed_ns = 0;
+                    current_->optimizer_session_generation.reset();
                     if (*current_->net_mode != "NM_Standalone") {
                         detail::clear_gameplay_snapshot(*current_);
                     }
@@ -77,8 +78,13 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                         *current_->net_mode == "NM_Standalone" ||
                         *current_->net_mode == receipt->net_mode)) {
                 const bool map_changed = current_->map != receipt->map;
-                if (map_changed) {
+                const bool generation_changed =
+                    current_->optimizer_session_generation !=
+                    receipt->generation;
+                if (map_changed || generation_changed) {
                     detail::clear_gameplay_snapshot(*current_);
+                }
+                if (map_changed) {
                     current_->map = std::string{receipt->map};
                     current_->phase = GameLogPhase::map_loaded;
                     current_->main_menu = false;
@@ -96,12 +102,15 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                 }
                 if (map_changed || !current_->optimizer_online_read_only ||
                     current_->net_mode != receipt->net_mode ||
+                    generation_changed ||
                     current_->optimizer_session_context_observed_ns !=
                         observed_at_ns) {
                     current_->net_mode = std::string{receipt->net_mode};
                     current_->optimizer_online_read_only = true;
                     current_->optimizer_session_context_observed_ns =
                         observed_at_ns;
+                    current_->optimizer_session_generation =
+                        receipt->generation;
                     changed = true;
                 }
             } else if (const auto port =
@@ -122,11 +131,32 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                 if (*online_corpse_changed) changed = true;
             } else if (const auto ui_context =
                            detail::parse_gameplay_ui_context_line(line);
-                       current_ && !current_->main_menu &&
-                       current_->phase != GameLogPhase::match_ended &&
-                       ui_context) {
-                if (current_->gameplay_ui_context != ui_context) {
-                    current_->gameplay_ui_context = *ui_context;
+                        current_ && !current_->main_menu &&
+                        current_->phase != GameLogPhase::match_ended &&
+                        ui_context) {
+                const bool online = current_->optimizer_online_read_only;
+                const bool receipt_matches_session = !online ||
+                    (ui_context->net_mode && ui_context->map &&
+                     ui_context->generation && current_->net_mode &&
+                     *ui_context->net_mode == *current_->net_mode &&
+                     detail::equals_ascii_case_insensitive(
+                         *ui_context->map, current_->map) &&
+                     current_->optimizer_session_generation ==
+                         ui_context->generation);
+                if (receipt_matches_session &&
+                    (current_->gameplay_ui_context != ui_context->context ||
+                     current_->gameplay_ui_context_map !=
+                         (ui_context->map
+                              ? std::optional<std::string>{*ui_context->map}
+                              : std::nullopt) ||
+                     current_->gameplay_ui_context_generation !=
+                         ui_context->generation)) {
+                    current_->gameplay_ui_context = ui_context->context;
+                    current_->gameplay_ui_context_map = ui_context->map
+                        ? std::optional<std::string>{*ui_context->map}
+                        : std::nullopt;
+                    current_->gameplay_ui_context_generation =
+                        ui_context->generation;
                     changed = true;
                 }
             } else if (current_ && !current_->main_menu &&

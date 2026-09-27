@@ -77,6 +77,7 @@ kf2::telemetry_pipeline::TelemetryFrameInput complete_input() {
     session.map = "KF-BioticsLab";
     session.net_mode = "NM_Standalone";
     session.phase = game::GameLogPhase::map_loaded;
+    session.gameplay_ui_context = game::GameplayUiContext::gameplay;
     session.telemetry_corpse_awake = 9;
     session.telemetry_corpse_sleeping = 14;
     session.telemetry_observed_ns = 7'900'000'000ULL;
@@ -167,6 +168,15 @@ int main() {
     CHECK(input.gameplay->map == "KF-BioticsLab");
     CHECK(input.flex->aggregate_active_particles == 120);
 
+    auto missing_context_input = complete_input();
+    missing_context_input.gameplay->gameplay_ui_context.reset();
+    const auto missing_context_frame = build_telemetry_frame(
+        missing_context_input);
+    CHECK(missing_context_frame.has_value());
+    CHECK(!missing_context_frame.value().active_gameplay);
+    CHECK(!missing_context_frame.value().offline_gameplay);
+    CHECK(!missing_context_frame.value().evidence.fresh);
+
     auto menu_input = complete_input();
     menu_input.gameplay->gameplay_ui_context = game::GameplayUiContext::menu;
     const auto menu_context_frame = build_telemetry_frame(menu_input);
@@ -189,6 +199,32 @@ int main() {
     CHECK(gameplay_frame.has_value());
     CHECK(gameplay_frame.value().active_gameplay);
     CHECK(gameplay_frame.value().offline_gameplay);
+
+    auto online_gameplay_input = complete_input();
+    online_gameplay_input.gameplay->net_mode = "NM_Client";
+    online_gameplay_input.gameplay->optimizer_online_read_only = true;
+    online_gameplay_input.gameplay->optimizer_session_generation = 4;
+    online_gameplay_input.gameplay->gameplay_ui_context_map =
+        "KF-BioticsLab";
+    online_gameplay_input.gameplay->gameplay_ui_context_generation = 4;
+    const auto online_gameplay_frame = build_telemetry_frame(
+        online_gameplay_input);
+    CHECK(online_gameplay_frame.has_value());
+    CHECK(online_gameplay_frame.value().active_gameplay);
+    CHECK(!online_gameplay_frame.value().offline_gameplay);
+    online_gameplay_input.gameplay->gameplay_ui_context =
+        game::GameplayUiContext::menu;
+    const auto online_menu_frame = build_telemetry_frame(
+        online_gameplay_input);
+    CHECK(online_menu_frame.has_value());
+    CHECK(!online_menu_frame.value().active_gameplay);
+    online_gameplay_input.gameplay->gameplay_ui_context =
+        game::GameplayUiContext::gameplay;
+    online_gameplay_input.gameplay->gameplay_ui_context_generation = 3;
+    const auto stale_online_frame = build_telemetry_frame(
+        online_gameplay_input);
+    CHECK(stale_online_frame.has_value());
+    CHECK(!stale_online_frame.value().active_gameplay);
 
     auto adapter_fallback = complete_input();
     adapter_fallback.driver_gpu_percent.reset();

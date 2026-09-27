@@ -180,7 +180,10 @@ int main() {
     CHECK(parsed->phase == GameLogPhase::map_loaded);
     CHECK(!parsed->net_mode.has_value());
     CHECK(!parsed->main_menu);
-    CHECK(game_log_is_active_gameplay(*parsed));
+    // A loaded map is not proof that the local player has left Escape,
+    // Trader, or another menu. Gameplay must be confirmed by the protected
+    // process-local UI receipt.
+    CHECK(!game_log_is_active_gameplay(*parsed));
     CHECK(!game_log_is_offline_gameplay(*parsed));
     CHECK(describe_game_log_session(*parsed).find(L"KF-BioticsLab") !=
           std::wstring::npos);
@@ -336,6 +339,79 @@ int main() {
         "[0052.82] ScriptLog: KF2OPT_SESSION_CONTEXT schema=1 "
         "state=online_client_read_only net_mode=NM_Standalone "
         "map=KF-BioticsLab\n").has_value());
+
+    GameLogSessionParser online_ui_stream;
+    CHECK(online_ui_stream.feed(
+        "[0039.13] Log: LoadMap: KF-BioticsLab?"
+        "Game=KFGameContent.KFGameInfo_Survival\n").has_value());
+    const auto online_generation = online_ui_stream.feed(
+        "[0040.90] ScriptLog: KF2OPT_SESSION_CONTEXT schema=2 "
+        "state=online_client_read_only net_mode=NM_Client "
+        "map=KF-BioticsLab generation=7\n",
+        7'000'000'000ULL);
+    CHECK(online_generation.has_value());
+    CHECK(online_generation->optimizer_session_generation == 7);
+    CHECK(!game_log_is_active_gameplay(*online_generation));
+    const auto online_gameplay = online_ui_stream.feed(
+        "[0040.91] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=2 "
+        "state=gameplay net_mode=NM_Client map=KF-BioticsLab generation=7\n",
+        7'100'000'000ULL);
+    CHECK(online_gameplay.has_value());
+    CHECK(game_log_is_active_gameplay(*online_gameplay));
+    const auto online_escape = online_ui_stream.feed(
+        "[0040.92] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=2 "
+        "state=menu net_mode=NM_Client map=KF-BioticsLab generation=7\n");
+    CHECK(online_escape.has_value());
+    CHECK(!game_log_is_active_gameplay(*online_escape));
+    const auto online_trader = online_ui_stream.feed(
+        "[0040.93] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=2 "
+        "state=trader net_mode=NM_Client map=KF-BioticsLab generation=7\n");
+    CHECK(online_trader.has_value());
+    CHECK(!game_log_is_active_gameplay(*online_trader));
+    const auto missing_gfx = online_ui_stream.feed(
+        "[0040.94] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=2 "
+        "state=unavailable net_mode=NM_Client map=KF-BioticsLab generation=7\n");
+    CHECK(missing_gfx.has_value());
+    CHECK(!game_log_is_active_gameplay(*missing_gfx));
+    CHECK(!online_ui_stream.feed(
+        "[0040.95] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=2 "
+        "state=gameplay net_mode=NM_Client map=KF-Outpost generation=7\n")
+               .has_value());
+    CHECK(!game_log_is_active_gameplay(*online_ui_stream.current()));
+
+    // A same-map travel is still a new World. Until the UI receipt carries
+    // the new session generation, old gameplay evidence must remain rejected.
+    const auto same_map_generation = online_ui_stream.feed(
+        "[0080.00] ScriptLog: KF2OPT_SESSION_CONTEXT schema=2 "
+        "state=online_client_read_only net_mode=NM_Client "
+        "map=KF-BioticsLab generation=8\n",
+        8'000'000'000ULL);
+    CHECK(same_map_generation.has_value());
+    CHECK(!same_map_generation->gameplay_ui_context.has_value());
+    CHECK(!game_log_is_active_gameplay(*same_map_generation));
+    CHECK(!online_ui_stream.feed(
+        "[0080.01] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=2 "
+        "state=gameplay net_mode=NM_Client map=KF-BioticsLab generation=7\n")
+               .has_value());
+    const auto current_generation_gameplay = online_ui_stream.feed(
+        "[0080.02] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=2 "
+        "state=gameplay net_mode=NM_Client map=KF-BioticsLab generation=8\n");
+    CHECK(current_generation_gameplay.has_value());
+    CHECK(game_log_is_active_gameplay(*current_generation_gameplay));
+
+    GameLogSessionParser listen_ui_stream;
+    CHECK(listen_ui_stream.feed(
+        "[0039.13] Log: LoadMap: KF-Outpost\n").has_value());
+    CHECK(listen_ui_stream.feed(
+        "[0040.90] ScriptLog: KF2OPT_SESSION_CONTEXT schema=2 "
+        "state=online_host_read_only net_mode=NM_ListenServer "
+        "map=KF-Outpost generation=3\n").has_value());
+    const auto listen_gameplay = listen_ui_stream.feed(
+        "[0040.91] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=2 "
+        "state=gameplay net_mode=NM_ListenServer map=KF-Outpost "
+        "generation=3\n");
+    CHECK(listen_gameplay.has_value());
+    CHECK(game_log_is_active_gameplay(*listen_gameplay));
 
     GameLogSessionParser public_server_stream;
     const auto public_server_map = public_server_stream.feed(
