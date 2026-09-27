@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "kf2/platform/windows/atomic_file.hpp"
+#include "kf2/platform/windows/state_environment.hpp"
 #include "kf2/update/update_helper.hpp"
 
 #define CHECK(condition) do { if (!(condition)) {                              \
@@ -20,6 +21,27 @@ std::string read_file(const std::filesystem::path& path) {
             std::istreambuf_iterator<char>{}};
 }
 
+bool write_request(const std::filesystem::path& work,
+                   const std::filesystem::path& target,
+                   std::string_view token) {
+    namespace fs = std::filesystem;
+    std::error_code error;
+    fs::create_directories(work / L"staged", error);
+    if (error) return false;
+    const std::string bytes =
+        "schema_version=1\nparent_process_id=" +
+        std::to_string(GetCurrentProcessId()) +
+        "\ntarget_root=" + target.string() +
+        "\nstaged_root=" + (work / L"staged").string() +
+        "\nbackup_root=" + (work / L"backup").string() +
+        "\nreceipt_path=" + (work / L"ready.receipt").string() +
+        "\nexpected_version=0.0.5\ntoken=" + std::string{token} + "\n";
+    return kf2::platform::windows::atomic_replace_utf8(
+               work / L"update.marker", token).has_value() &&
+        kf2::platform::windows::atomic_replace_utf8(
+               work / L"update-request.ini", bytes).has_value();
+}
+
 int wmain(int argc, wchar_t** argv) {
     if (argc == 2 && std::wstring_view{argv[1]} == L"--child") {
         Sleep(400);
@@ -29,11 +51,17 @@ int wmain(int argc, wchar_t** argv) {
     const fs::path root{KF2_TEST_ROOT};
     std::error_code error;
     fs::remove_all(root, error);
-    const auto work = root / L"KF2OptimizerNext-Update" / L"test-token";
-    fs::create_directories(work);
+    fs::create_directories(root / L"target");
+    const auto temporary = kf2::platform::windows::temporary_directory();
+    CHECK(temporary.has_value());
+    const auto update_root =
+        temporary.value() / L"KF2OptimizerNext-Update";
+    const auto work_name = std::to_wstring(GetCurrentProcessId()) + L"-" +
+        std::to_wstring(GetTickCount64());
+    const auto work = update_root / work_name;
+    fs::remove_all(work, error);
     const std::string token = "0123456789abcdef0123456789abcdef";
-    CHECK(kf2::platform::windows::atomic_replace_utf8(
-              work / L"update.marker", token).has_value());
+    CHECK(write_request(work, root / L"target", token));
 
     wchar_t executable[MAX_PATH + 1]{};
     CHECK(GetModuleFileNameW(nullptr, executable, MAX_PATH) > 0);
@@ -61,11 +89,57 @@ int wmain(int argc, wchar_t** argv) {
     while (fs::exists(work) && GetTickCount64() < deadline) Sleep(25);
     CHECK(!fs::exists(work));
 
-    fs::create_directories(work);
+    // A matching marker alone must never authorize recursive deletion.
+    const auto marker_only = update_root /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" +
+         std::to_wstring(GetTickCount64() + 1U));
+    fs::create_directories(marker_only);
     CHECK(kf2::platform::windows::atomic_replace_utf8(
-              work / L"update.marker", token).has_value());
+              marker_only / L"update.marker", token).has_value());
     CHECK(!kf2::update::schedule_update_cleanup(
-               1, work, "not-a-valid-token").has_value());
+               1, marker_only, token).has_value());
+    CHECK(fs::exists(marker_only));
+
+    // A complete-looking transaction outside the canonical update root is
+    // still unrelated data and must be rejected.
+    const auto unrelated = root /
+        (std::to_wstring(GetCurrentProcessId()) + L"-1");
+    CHECK(write_request(unrelated, root / L"target", token));
+    CHECK(!kf2::update::schedule_update_cleanup(
+               1, unrelated, token).has_value());
+    CHECK(fs::exists(unrelated));
+
+    // Only direct children are valid; nested workspaces and lexical aliases
+    // cannot cross or disguise the cleanup boundary.
+    const auto nested = marker_only /
+        (std::to_wstring(GetCurrentProcessId()) + L"-2");
+    CHECK(write_request(nested, root / L"target", token));
+    CHECK(!kf2::update::schedule_update_cleanup(
+               1, nested, token).has_value());
+    const auto alias_component = update_root / L"alias-component";
+    fs::create_directories(alias_component);
+    const auto aliased = alias_component / L".." / marker_only.filename();
+    CHECK(!kf2::update::schedule_update_cleanup(
+               1, aliased, token).has_value());
+
+    // Reparse-point substitution is rejected when the platform permits the
+    // unprivileged test to create a directory symlink.
+    const auto reparse_target = root / L"reparse-target";
+    CHECK(write_request(reparse_target, root / L"target", token));
+    const auto reparse_work = update_root /
+        (std::to_wstring(GetCurrentProcessId()) + L"-3");
+    fs::create_directories(update_root);
+    fs::create_directory_symlink(reparse_target, reparse_work, error);
+    if (!error) {
+        CHECK(!kf2::update::schedule_update_cleanup(
+                   1, reparse_work, token).has_value());
+        fs::remove(reparse_work, error);
+    }
+
+    CHECK(!kf2::update::schedule_update_cleanup(
+               1, marker_only, "not-a-valid-token").has_value());
+    fs::remove_all(marker_only, error);
+    fs::remove(alias_component, error);
     fs::remove_all(root, error);
     CHECK(kf2::update::run_update_helper(
               root / L"missing-request.ini") == 20);
