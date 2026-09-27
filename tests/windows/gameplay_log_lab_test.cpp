@@ -2103,6 +2103,26 @@ int main() {
     CHECK(living_apply_body.find(
         "Candidate.Mesh.bUpdateSkelWhenNotRendered = false;") !=
           std::string::npos);
+    const auto living_offscreen_reduce_guard = living_apply_body.find(
+        "if (!FixedMinimumLivingOffscreenAnimReduced[EntryIndex]");
+    const auto living_tick_original_rebase = living_apply_body.find(
+        "FixedMinimumLivingOriginalTickAnimOffscreen[EntryIndex] =\n"
+        "                Candidate.Mesh.bTickAnimNodesWhenNotRendered",
+        living_offscreen_reduce_guard);
+    const auto living_skeleton_original_rebase = living_apply_body.find(
+        "FixedMinimumLivingOriginalUpdateSkelOffscreen[EntryIndex] =\n"
+        "                Candidate.Mesh.bUpdateSkelWhenNotRendered",
+        living_offscreen_reduce_guard);
+    const auto living_tick_reduction = living_apply_body.find(
+        "Candidate.Mesh.bTickAnimNodesWhenNotRendered = false;",
+        living_offscreen_reduce_guard);
+    CHECK(living_offscreen_reduce_guard != std::string::npos);
+    CHECK(living_tick_original_rebase != std::string::npos);
+    CHECK(living_skeleton_original_rebase != std::string::npos);
+    CHECK(living_tick_reduction != std::string::npos);
+    CHECK(living_offscreen_reduce_guard < living_tick_original_rebase);
+    CHECK(living_tick_original_rebase < living_skeleton_original_rebase);
+    CHECK(living_skeleton_original_rebase < living_tick_reduction);
     CHECK(telemetry_source.find(
         "FixedMinimumLivingOriginalTickAnimOffscreen") !=
           std::string::npos);
