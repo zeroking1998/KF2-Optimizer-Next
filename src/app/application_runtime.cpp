@@ -489,9 +489,6 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
       backups{state_root}, discovery_input{discovery}, start_mode{mode},
       updates{current_build_identity().version,
               state_root / L"update-state.ini"} {
-    // Build the immutable target registry during startup. No first-use
-    // allocation is then possible in the measurement/control hot path.
-    static_cast<void>(optimizer::adaptive_target_registry());
     if (settings.target_fps_migrated) {
         events->append({0, diagnostics::Severity::info,
             "TARGET_FPS_LEGACY_MIGRATED",

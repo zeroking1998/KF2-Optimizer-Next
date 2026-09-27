@@ -103,10 +103,13 @@ struct AdaptiveSettingRecord {
     std::string driver_binding;
 };
 
+using AdaptiveRegistryInitializationProbe = void (*)();
+
 [[nodiscard]] std::span<const AdaptiveSettingRecord>
-adaptive_target_registry() noexcept;
+adaptive_target_registry(
+    AdaptiveRegistryInitializationProbe initialization_probe = nullptr);
 [[nodiscard]] const AdaptiveSettingRecord* find_adaptive_setting(
-    std::string_view name) noexcept;
+    std::string_view name);
 [[nodiscard]] bool adaptive_setting_active_ready(
     const AdaptiveSettingRecord& setting,
     AdaptiveCapabilityState capability) noexcept;
