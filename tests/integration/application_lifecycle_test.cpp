@@ -1263,6 +1263,10 @@ int main(int argc, char** argv) {
             kf2::game::VideoOption::vsync);
         const int old_vsync =
             graphics_runtime.video_saved->choices[vsync_index];
+        const auto flex_index = static_cast<std::size_t>(
+            kf2::game::VideoOption::nvidia_flex);
+        const int verified_flex =
+            graphics_runtime.video_saved->choices[flex_index];
         graphics_runtime.video_pending->film_grain_percent = 75;
         graphics_runtime.refresh_video_presentation();
 
@@ -1291,11 +1295,21 @@ int main(int argc, char** argv) {
         CHECK(graphics_runtime.video_pending->film_grain_percent == 75);
         CHECK(graphics_runtime.synchronize_video_settings_from_game() ==
               kf2::app::VideoSyncDisposition::unchanged);
-        fs::remove(graphics_config / L"KFEngine.ini");
+        const auto engine_path = graphics_config / L"KFEngine.ini";
+        const auto engine_bytes = read_bytes(engine_path);
+        const auto engine_write_time = fs::last_write_time(engine_path);
+        fs::remove(engine_path);
+        CHECK(graphics_runtime.synchronize_video_settings_from_game() ==
+              kf2::app::VideoSyncDisposition::retryable_unstable);
+        CHECK(graphics_runtime.video_saved->choices[flex_index] ==
+              verified_flex);
+        CHECK(graphics_runtime.video_pending->choices[flex_index] ==
+              verified_flex);
+        write_bytes(engine_path, engine_bytes);
+        fs::last_write_time(engine_path, engine_write_time +
+            std::chrono::seconds{3});
         CHECK(graphics_runtime.synchronize_video_settings_from_game() ==
               kf2::app::VideoSyncDisposition::synchronized);
-        CHECK(graphics_runtime.video_saved->choices[static_cast<std::size_t>(
-                  kf2::game::VideoOption::nvidia_flex)] == 0);
 
         // A temporarily unreadable file is treated as an overlapping KF2
         // write. The staged choice remains available for a later retry.
