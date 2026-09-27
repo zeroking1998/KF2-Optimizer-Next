@@ -11,7 +11,13 @@ int wmain(int argc, wchar_t** argv) {
         std::wcerr << L"Usage: KF2InventoryExport <output.json> <build-identity>\n";
         return EXIT_FAILURE;
     }
-    const auto records = kf2::diagnostics::issue72_feature_inventory();
+    std::span<const kf2::diagnostics::FeatureRecord> records;
+    try {
+        records = kf2::diagnostics::issue72_feature_inventory();
+    } catch (...) {
+        std::wcerr << L"Issue 72 inventory could not be initialized\n";
+        return EXIT_FAILURE;
+    }
     if (records.size() != 149) {
         std::wcerr << L"Issue 72 inventory count is not 149\n";
         return EXIT_FAILURE;
@@ -40,8 +46,14 @@ int wmain(int argc, wchar_t** argv) {
         std::wcerr << L"Inventory output cannot be opened\n";
         return EXIT_FAILURE;
     }
-    const auto document =
-        kf2::diagnostics::serialize_feature_inventory_json(identity, records);
+    std::string document;
+    try {
+        document = kf2::diagnostics::serialize_feature_inventory_json(
+            identity, records);
+    } catch (...) {
+        std::wcerr << L"Issue 72 inventory could not be serialized\n";
+        return EXIT_FAILURE;
+    }
     output.write(document.data(), static_cast<std::streamsize>(document.size()));
     output.flush();
     if (!output) {

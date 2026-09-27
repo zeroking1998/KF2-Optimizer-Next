@@ -3,6 +3,7 @@
 #include <iostream>
 #include <sstream>
 #include <set>
+#include <stdexcept>
 #include <string>
 
 #include "kf2/diagnostics/feature_inventory.hpp"
@@ -12,6 +13,17 @@
 
 int main() {
     using namespace kf2::diagnostics;
+    static_assert(!noexcept(issue72_feature_inventory()));
+    bool initialization_failed = false;
+    try {
+        static_cast<void>(issue72_feature_inventory([] {
+            throw std::runtime_error{
+                "injected feature-inventory construction failure"};
+        }));
+    } catch (const std::runtime_error&) {
+        initialization_failed = true;
+    }
+    CHECK(initialization_failed);
     const auto records = issue72_feature_inventory();
     CHECK(records.size() == 149);
     const auto counts = feature_status_counts(records);
@@ -63,7 +75,7 @@ int main() {
               record.decision == "IMPLEMENTATION_READY");
       }
     }
-    const auto json = serialize_feature_inventory_json("test+abc");
+    const auto json = serialize_feature_inventory_json("test+abc", records);
     CHECK(json.find("KF2_ISSUE72_INVENTORY_V3") != std::string::npos);
     CHECK(json.find("\"build_identity\":\"test+abc\"") != std::string::npos);
     CHECK(json.find("\"function_count\":149") != std::string::npos);

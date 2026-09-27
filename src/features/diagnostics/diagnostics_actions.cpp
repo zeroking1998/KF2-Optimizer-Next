@@ -151,9 +151,25 @@ app::runtime::DispatchResult open_log(
 
 app::runtime::DispatchResult export_support(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
-    const auto inventory =
-        product_diagnostics::serialize_feature_inventory_json(
-            app::format_build_identity(app::current_build_identity()));
+    std::string inventory;
+    try {
+        const auto records =
+            product_diagnostics::issue72_feature_inventory();
+        inventory = product_diagnostics::serialize_feature_inventory_json(
+            app::format_build_identity(app::current_build_identity()),
+            records);
+    } catch (...) {
+        runtime.events->append(
+            {0, product_diagnostics::Severity::error,
+             "FEATURE_INVENTORY_UNAVAILABLE",
+             L"The diagnostic feature inventory could not be initialized",
+             L"diagnostics"});
+        show_notice(runtime, ui::NoticeSeverity::error,
+                    L"FEATURE_INVENTORY_UNAVAILABLE",
+                    L"The diagnostic feature inventory could not be "
+                    L"initialized. No support bundle was written.");
+        return app::runtime::DispatchResult::handled;
+    }
     const auto document = product_diagnostics::serialize_support_bundle_json(
         make_product_report(runtime), inventory);
     const auto exported = platform::windows::atomic_replace_utf8(
@@ -391,9 +407,14 @@ app::runtime::DispatchResult full_check(
            runtime.events->persistence_ready()
                ? L"Bounded atomic event persistence is ready"
                : L"Bounded event persistence is unavailable");
-    record(product_diagnostics::issue72_feature_inventory().size() == 149,
-           "SELF_CHECK_INVENTORY",
-           L"All 149 Issue 72 function records are available");
+    try {
+        record(product_diagnostics::issue72_feature_inventory().size() == 149,
+               "SELF_CHECK_INVENTORY",
+               L"All 149 Issue 72 function records are available");
+    } catch (...) {
+        record(false, "SELF_CHECK_INVENTORY",
+               L"The diagnostic feature inventory could not be initialized");
+    }
     const auto settings_roundtrip = config::parse_settings(
         config::serialize_settings(runtime.optimizer_settings));
     record(settings_roundtrip.has_value(), "SELF_CHECK_SETTINGS",
