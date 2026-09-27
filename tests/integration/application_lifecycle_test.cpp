@@ -187,7 +187,45 @@ std::optional<POINT> scroll_to_node(HWND window,
     return std::nullopt;
 }
 
-int main() {
+int test_package_repair_worker_start_failure() {
+    namespace fs = std::filesystem;
+    const fs::path root{KF2_TEST_ROOT};
+    const auto test_root = root / L"repair-worker-start";
+    fs::remove_all(test_root);
+
+    kf2::diagnostics::EventLog repair_events{128};
+    kf2::app::UiRuntime runtime{test_root / L"Data", false,
+        kf2::config::Settings{}, repair_events, std::nullopt,
+        kf2::app::StartMode::read_only, test_root / L"portable"};
+    int launch_attempts = 0;
+    runtime.package_repair_worker_launcher =
+        [&](std::function<void()>) {
+            ++launch_attempts;
+            throw std::system_error{
+                std::make_error_code(std::errc::resource_unavailable_try_again)};
+        };
+
+    runtime.start_auto_package_repair();
+    CHECK(launch_attempts == 1);
+    CHECK(!runtime.package_repair_state);
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"PACKAGE_AUTO_REPAIR_FAILED");
+    const auto events = repair_events.snapshot();
+    CHECK(std::none_of(events.begin(), events.end(), [](const auto& event) {
+        return event.code == "PACKAGE_AUTO_REPAIR_STARTED";
+    }));
+
+    runtime.start_auto_package_repair();
+    CHECK(launch_attempts == 2);
+    CHECK(!runtime.package_repair_state);
+    return EXIT_SUCCESS;
+}
+
+int main(int argc, char** argv) {
+    if (argc == 2 &&
+        std::string_view{argv[1]} == "--package-repair-start-failure") {
+        return test_package_repair_worker_start_failure();
+    }
     CHECK(kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::normal));
     CHECK(!kf2::app::should_prepare_protected_gameplay_provider(
