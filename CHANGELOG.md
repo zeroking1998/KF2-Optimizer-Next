@@ -118,6 +118,8 @@ are visible immediately.
   radius around the player under every pressure level.
 - Fixed reduced corpse LOD, final-pose skeleton state, frozen physics, tick, and
   collision being unnecessarily restored after a corpse was already finalized.
+- Preserved newer KF2-owned living-Zed offscreen animation flags across repeated
+  optimizer reduce/restore cycles, including asymmetric native flag pairs.
 - Fixed temporary corpse-telemetry gaps disabling otherwise safe processing or
   presenting unconfirmed capability and action states.
 - Filtered GPU utilization by physical adapter, sample age, and continuity so

@@ -1639,6 +1639,13 @@ function bool ApplyLivingEnemyMinimumVisuals()
             (Candidate.Mesh.bTickAnimNodesWhenNotRendered ||
              Candidate.Mesh.bUpdateSkelWhenNotRendered))
         {
+            // Ownership ended after the previous verified restore. Rebase the
+            // independent native pair only after all safety checks pass and
+            // immediately before taking ownership again.
+            FixedMinimumLivingOriginalTickAnimOffscreen[EntryIndex] =
+                Candidate.Mesh.bTickAnimNodesWhenNotRendered;
+            FixedMinimumLivingOriginalUpdateSkelOffscreen[EntryIndex] =
+                Candidate.Mesh.bUpdateSkelWhenNotRendered;
             Candidate.Mesh.bTickAnimNodesWhenNotRendered = false;
             Candidate.Mesh.bUpdateSkelWhenNotRendered = false;
             if (!Candidate.Mesh.bTickAnimNodesWhenNotRendered &&
