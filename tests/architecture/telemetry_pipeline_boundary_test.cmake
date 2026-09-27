@@ -161,6 +161,47 @@ reject_literals("${stage_root}/telemetry_effect_stage.cpp"
     "->drain(")
 
 file(READ "${stage_root}/telemetry_session_stage.cpp" session_stage_text)
+string(FIND "${session_stage_text}"
+    "void UiRuntime::detach_telemetry" detach_start)
+string(FIND "${session_stage_text}"
+    "void UiRuntime::begin_game_restart_handoff" detach_end)
+if(detach_start EQUAL -1 OR detach_end EQUAL -1 OR
+   NOT detach_start LESS detach_end)
+    message(FATAL_ERROR
+        "Session stage must retain an inspectable telemetry detach boundary")
+endif()
+math(EXPR detach_length "${detach_end} - ${detach_start}")
+string(SUBSTRING "${session_stage_text}" ${detach_start} ${detach_length}
+    detach_text)
+string(FIND "${detach_text}"
+    "adaptive_control_sequence = 0" recoverable_sequence_reset)
+if(NOT recoverable_sequence_reset EQUAL -1)
+    message(FATAL_ERROR
+        "Recoverable telemetry detach must preserve the authenticated command sequence")
+endif()
+string(FIND "${orchestrator_text}"
+    "runtime_.detach_telemetry()" rejected_frame_detach)
+string(FIND "${orchestrator_text}"
+    "void UiRuntime::system_resume()" resume_start)
+if(resume_start EQUAL -1)
+    set(resume_text "")
+else()
+    string(SUBSTRING "${orchestrator_text}" ${resume_start} -1 resume_text)
+endif()
+string(FIND "${resume_text}" "detach_telemetry()" resume_detach)
+if(rejected_frame_detach EQUAL -1 OR resume_detach EQUAL -1)
+    message(FATAL_ERROR
+        "Rejected frames and system resume must share the recoverable detach path")
+endif()
+file(READ "${stage_root}/telemetry_effect_stage.cpp" effect_stage_text)
+string(FIND "${effect_stage_text}"
+    "adaptive_control_token.clear()" final_token_reset)
+string(FIND "${effect_stage_text}"
+    "adaptive_control_sequence = 0" final_sequence_reset)
+if(final_token_reset EQUAL -1 OR final_sequence_reset EQUAL -1)
+    message(FATAL_ERROR
+        "Final protected-session teardown must reset both token and sequence")
+endif()
 foreach(forbidden_sync_log_call
         "find_active_game_log"
         "CreateFileW"

@@ -63,20 +63,25 @@ void UiRuntime::reconcile_adaptive_runtime_mode(
             adaptive_runtime_mode_confirmed = false;
             const bool desired_enabled =
                 optimizer_settings.adaptive_optimization_enabled;
-            const auto next_sequence =
-                adaptive_control_sequence ==
-                        std::numeric_limits<std::uint64_t>::max()
-                    ? 1 : adaptive_control_sequence + 1;
+            const auto next_sequence = game::next_adaptive_control_sequence(
+                adaptive_control_sequence);
+            if (!next_sequence) {
+                events->append({0, diagnostics::Severity::error,
+                    "ADAPTIVE_CONTROL_SEQUENCE_EXHAUSTED",
+                    L"The authenticated command sequence is exhausted; automatic actions remain blocked until a new protected KF2 session starts",
+                    L"optimizer"});
+                return;
+            }
             const auto started = adaptive_mode_dispatcher.start({
                 .port = port,
                 .token = adaptive_control_token,
-                .sequence = next_sequence,
+                .sequence = *next_sequence,
                 .resource = desired_enabled
                     ? game::AdaptiveResourceControl::enable
                     : game::AdaptiveResourceControl::disable,
                 .quality = desired_enabled ? effective_corpse_limit() : 100});
             if (started.has_value() && started.value()) {
-                adaptive_control_sequence = next_sequence;
+                adaptive_control_sequence = *next_sequence;
                 adaptive_runtime_mode_pending = desired_enabled;
             } else {
                 events->append({0, diagnostics::Severity::warning,

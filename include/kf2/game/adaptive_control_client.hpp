@@ -61,6 +61,8 @@ struct AdaptiveResourceQualityState final {
     AdaptiveResourceControl resource) noexcept;
 [[nodiscard]] bool valid_adaptive_control_token(
     std::string_view token) noexcept;
+[[nodiscard]] std::optional<std::uint64_t> next_adaptive_control_sequence(
+    std::uint64_t current) noexcept;
 [[nodiscard]] Result<std::string> generate_adaptive_control_token();
 [[nodiscard]] Result<std::string> build_adaptive_control_command(
     const AdaptiveControlRequest& request);

@@ -137,6 +137,8 @@ are visible immediately.
   as common external overlays.
 - Invalidated published and in-flight frame metrics immediately when DXGI
   reports an unsupported event schema, preventing stale Adaptive samples.
+- Preserved the authenticated Adaptive command sequence across recoverable
+  telemetry rebinds and stopped safely instead of reusing sequence numbers.
 - Fixed FleX detection after graphics changes and settings restarts. User-
   enabled FleX runs at the verified minimum solver level; user-disabled FleX
   remains off and is never enabled by Adaptive.

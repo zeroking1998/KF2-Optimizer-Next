@@ -398,7 +398,16 @@ void UiRuntime::update_adaptive_controller(
             .last_dispatch_ns = adaptive_quality_last_dispatch_ns,
             .last_applied_ns = adaptive_quality_last_applied_ns,
             .sample_timestamp_ns = sample.timestamp_ns});
-    if (runtime_selection) {
+    const auto next_sequence = runtime_selection
+        ? game::next_adaptive_control_sequence(adaptive_control_sequence)
+        : std::nullopt;
+    if (runtime_selection && !next_sequence) {
+        events->append({0, diagnostics::Severity::error,
+            "ADAPTIVE_CONTROL_SEQUENCE_EXHAUSTED",
+            L"The authenticated command sequence is exhausted; live quality control remains unchanged until a new protected KF2 session starts",
+            L"optimizer"});
+    }
+    if (runtime_selection && next_sequence) {
         const auto previous_quality = selected_runtime_quality;
         const auto& proposed = adaptive_actuation.propose(
             runtime_control,
@@ -408,18 +417,14 @@ void UiRuntime::update_adaptive_controller(
             now_ns, "kf2_loopback_readback");
         if (proposed.status == optimizer::AdaptiveActionStatus::proposed &&
             adaptive_actuation.dispatch(runtime_control, now_ns)) {
-            const auto next_sequence =
-                adaptive_control_sequence ==
-                        std::numeric_limits<std::uint64_t>::max()
-                    ? 1 : adaptive_control_sequence + 1;
             const auto started = adaptive_control_dispatcher.start({
                 .port = *frame.gameplay->telemetry_control_port,
                 .token = adaptive_control_token,
-                .sequence = next_sequence,
+                .sequence = *next_sequence,
                 .resource = runtime_selection->resource,
                 .quality = runtime_selection->quality});
             if (started.has_value() && started.value()) {
-                adaptive_control_sequence = next_sequence;
+                adaptive_control_sequence = *next_sequence;
                 adaptive_quality_last_dispatch_ns = now_ns;
                 log_adaptive_quality_response(
                     quality_response.cancel("superseded_by_next_action"));
@@ -427,12 +432,12 @@ void UiRuntime::update_adaptive_controller(
                     now_ns - optimizer::QualityResponse::window_ns >= adaptive_frame_not_before_ns
                     ? present_source->measure_window(now_ns - optimizer::QualityResponse::window_ns, now_ns)
                     : telemetry::PresentSource::Window{};
-                quality_response.begin(next_sequence,
+                quality_response.begin(*next_sequence,
                     std::string{game::adaptive_resource_control_name(runtime_selection->resource)},
                     previous_quality, runtime_selection->quality, now_ns,
                     response_context, baseline);
                 adaptive_control_pending = AdaptiveRuntimePendingRequest{
-                    .sequence = next_sequence,
+                    .sequence = *next_sequence,
                     .action_id = proposed.action_id,
                     .generation = proposed.generation,
                     .previous_quality = previous_quality,
@@ -444,7 +449,7 @@ void UiRuntime::update_adaptive_controller(
                     const auto resource_name = game::adaptive_resource_control_name(
                         runtime_selection->resource);
                     std::wostringstream request_log;
-                    request_log << L"seq=" << next_sequence
+                    request_log << L"seq=" << *next_sequence
                         << L"; resource=" << widen(resource_name)
                         << L"; quality=" << previous_quality << L"->"
                         << runtime_selection->quality
