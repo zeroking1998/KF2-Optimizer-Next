@@ -141,6 +141,8 @@ are visible immediately.
   telemetry rebinds and stopped safely instead of reusing sequence numbers.
 - Bounded Adaptive control connections with a one-request deadline and
   destroyed their child actors after success, rejection, disconnect, or timeout.
+- Prevented continuous live-FPS drain requests from starving the bounded frame
+  windows Adaptive needs after maps, target changes, and quality actions.
 - Fixed FleX detection after graphics changes and settings restarts. User-
   enabled FleX runs at the verified minimum solver level; user-disabled FleX
   remains off and is never enabled by Adaptive.

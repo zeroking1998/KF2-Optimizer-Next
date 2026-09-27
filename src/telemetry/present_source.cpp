@@ -236,12 +236,12 @@ void PresentSource::drain_worker(std::stop_token stop) {
                        pending_bounded_drain_.has_value() ||
                        stop.stop_requested();
             });
-            if (pending_default_drain_) {
-                request = *pending_default_drain_;
-                pending_default_drain_.reset();
-            } else if (pending_bounded_drain_) {
+            if (pending_bounded_drain_) {
                 request = *pending_bounded_drain_;
                 pending_bounded_drain_.reset();
+            } else if (pending_default_drain_) {
+                request = *pending_default_drain_;
+                pending_default_drain_.reset();
             } else {
                 return;
             }
