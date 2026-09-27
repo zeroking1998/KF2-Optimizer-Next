@@ -907,11 +907,77 @@ int main() {
     CHECK(telemetry_source.find("EnsureFixedSessionEffects()") !=
           std::string::npos);
     CHECK(interaction_source.find(
-        "CurrentProbe.EnsureFixedSessionEffects()") != std::string::npos);
+        "EnsureFixedEffectsBaselineWithBackoff(CurrentProbe, CurrentWorld)") !=
+          std::string::npos);
+    const auto offline_baseline_retry_start = interaction_source.find(
+        "function bool EnsureFixedEffectsBaselineWithBackoff(");
+    const auto offline_baseline_retry_end = interaction_source.find(
+        "function UpdateGameplayUiState(", offline_baseline_retry_start);
+    CHECK(offline_baseline_retry_start != std::string::npos);
+    CHECK(offline_baseline_retry_end != std::string::npos);
+    const auto offline_baseline_retry_body = interaction_source.substr(
+        offline_baseline_retry_start,
+        offline_baseline_retry_end - offline_baseline_retry_start);
+    CHECK(offline_baseline_retry_body.find(
+        "CurrentWorld.RealTimeSeconds <\n"
+        "        FixedEffectsBaselineNextAttemptRealTime") <
+          offline_baseline_retry_body.find(
+              "CurrentProbe.EnsureFixedSessionEffects()"));
+    CHECK(offline_baseline_retry_body.find(
+        "FMin(8.0, FixedEffectsBaselineRetryDelay * 2.0)") !=
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "ResetFixedEffectsBaselineRetry();") != std::string::npos);
+    CHECK(interaction_source.find(
+        "KF2OPT_FIXED_EFFECT_RETRY mode=offline state=") !=
+          std::string::npos);
     CHECK(online_context_source.find("ApplyFixedSessionEffects(") !=
           std::string::npos);
     CHECK(online_context_source.find(
-        "EnsureOnlineFixedEffectsBaseline()") != std::string::npos);
+        "EnsureOnlineFixedEffectsBaseline(CurrentWorld)") !=
+          std::string::npos);
+    const auto online_baseline_retry_start = online_context_source.find(
+        "function bool EnsureOnlineFixedEffectsBaseline(");
+    const auto online_baseline_retry_end = online_context_source.find(
+        "function ClearOnlineCorpseMaximumSnapshot(",
+        online_baseline_retry_start);
+    CHECK(online_baseline_retry_start != std::string::npos);
+    CHECK(online_baseline_retry_end != std::string::npos);
+    const auto online_baseline_retry_body = online_context_source.substr(
+        online_baseline_retry_start,
+        online_baseline_retry_end - online_baseline_retry_start);
+    CHECK(online_baseline_retry_body.find(
+        "OnlineFixedEffectsBaselineNextAttemptRealTime") <
+          online_baseline_retry_body.find("ApplyFixedSessionEffects"));
+    CHECK(online_baseline_retry_body.find(
+        "FMin(8.0, OnlineFixedEffectsBaselineRetryDelay * 2.0)") !=
+          std::string::npos);
+    const auto online_restore_retry_start = online_context_source.find(
+        "function RestoreOnlineGraphicsAtMainMenu(");
+    const auto online_restore_retry_end = online_context_source.find(
+        "function NotifyGameSessionEnded()", online_restore_retry_start);
+    CHECK(online_restore_retry_start != std::string::npos);
+    CHECK(online_restore_retry_end != std::string::npos);
+    const auto online_restore_retry_body = online_context_source.substr(
+        online_restore_retry_start,
+        online_restore_retry_end - online_restore_retry_start);
+    CHECK(online_restore_retry_body.find(
+        "OnlineMainMenuRestoreNextAttemptRealTime") <
+          online_restore_retry_body.find(
+              "RestoreOnlineSessionState(CurrentWorld, \"main_menu\")"));
+    CHECK(online_restore_retry_body.find(
+        "FMin(8.0, OnlineMainMenuRestoreRetryDelay * 2.0)") !=
+          std::string::npos);
+    CHECK(online_restore_retry_body.find(
+        "bOnlineMainMenuRestoreComplete = true") != std::string::npos);
+    CHECK(online_context_source.find(
+        "if (OnlineGraphicsRetryMapName != MapName)") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "ResetOnlineGraphicsRetryState(MapName)") != std::string::npos);
+    CHECK(online_context_source.find(
+        "KF2OPT_GRAPHICS_RETRY mode=online operation=") !=
+          std::string::npos);
     CHECK(online_context_source.find(
         "KF2OPT_FIXED_EFFECT_BASELINE state=applied mode=online") !=
           std::string::npos);

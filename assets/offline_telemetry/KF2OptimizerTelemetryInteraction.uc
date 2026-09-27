@@ -17,6 +17,10 @@ var bool bAchievementPrewarmDelegateRegistered;
 var byte AchievementPrewarmPlayerControllerId;
 var int AchievementPrewarmAttempts;
 var float AchievementPrewarmNextAttemptRealTime;
+var int FixedEffectsBaselineAttempts;
+var float FixedEffectsBaselineNextAttemptRealTime;
+var float FixedEffectsBaselineRetryDelay;
+var string FixedEffectsBaselineRetryStatus;
 
 function SetProcessAdaptiveRuntimeEnabled(bool bEnabled)
 {
@@ -52,6 +56,74 @@ function ReportGameplayUiState(string State)
     }
     OptimizerGameplayUiState = State;
     `log("KF2OPT_GAMEPLAY_CONTEXT schema=1 state="$State);
+}
+
+function ResetFixedEffectsBaselineRetry()
+{
+    FixedEffectsBaselineAttempts = 0;
+    FixedEffectsBaselineNextAttemptRealTime = 0.0;
+    FixedEffectsBaselineRetryDelay = 0.5;
+    FixedEffectsBaselineRetryStatus = "";
+}
+
+function ReportFixedEffectsBaselineRetry(
+    string State, string Reason, int NextRetryMs)
+{
+    local string Status;
+
+    Status = State$"|"$Reason;
+    if (Status == FixedEffectsBaselineRetryStatus)
+    {
+        return;
+    }
+    FixedEffectsBaselineRetryStatus = Status;
+    `log("KF2OPT_FIXED_EFFECT_RETRY mode=offline state="$State$
+         " reason="$Reason$" attempt="$FixedEffectsBaselineAttempts$
+         " next_retry_ms="$NextRetryMs);
+}
+
+function bool EnsureFixedEffectsBaselineWithBackoff(
+    KF2OptimizerTelemetryProbe CurrentProbe, WorldInfo CurrentWorld)
+{
+    local int CompletedAttempts;
+
+    if (CurrentProbe == None || CurrentWorld == None)
+    {
+        return false;
+    }
+    if (CurrentProbe.bFixedSessionEffectsApplied)
+    {
+        return true;
+    }
+    if (CurrentWorld.RealTimeSeconds <
+        FixedEffectsBaselineNextAttemptRealTime)
+    {
+        return false;
+    }
+    ++FixedEffectsBaselineAttempts;
+    if (CurrentProbe.EnsureFixedSessionEffects())
+    {
+        CompletedAttempts = FixedEffectsBaselineAttempts;
+        ResetFixedEffectsBaselineRetry();
+        if (CompletedAttempts > 1)
+        {
+            `log("KF2OPT_FIXED_EFFECT_RETRY mode=offline state=recovered"$
+                 " attempts="$CompletedAttempts$" readback=verified");
+        }
+        return true;
+    }
+    if (FixedEffectsBaselineRetryDelay <= 0.0)
+    {
+        FixedEffectsBaselineRetryDelay = 0.5;
+    }
+    FixedEffectsBaselineNextAttemptRealTime =
+        CurrentWorld.RealTimeSeconds + FixedEffectsBaselineRetryDelay;
+    ReportFixedEffectsBaselineRetry(
+        "deferred", "readback_failed",
+        int(FixedEffectsBaselineRetryDelay * 1000.0));
+    FixedEffectsBaselineRetryDelay =
+        FMin(8.0, FixedEffectsBaselineRetryDelay * 2.0);
+    return false;
 }
 
 function UpdateGameplayUiState(PlayerController PrimaryController)
@@ -177,6 +249,7 @@ function PrepareForGameplayWorld()
     bAchievementPrewarmComplete = false;
     AchievementPrewarmAttempts = 0;
     AchievementPrewarmNextAttemptRealTime = 0.0;
+    ResetFixedEffectsBaselineRetry();
     OptimizerContextState = "";
     OptimizerProbeState = "";
     OptimizerGameplayUiState = "";
@@ -275,7 +348,7 @@ event Tick(float DeltaTime)
         ReportOptimizerProbeState("graphics_state_unavailable");
         return;
     }
-    if (!CurrentProbe.EnsureFixedSessionEffects())
+    if (!EnsureFixedEffectsBaselineWithBackoff(CurrentProbe, CurrentWorld))
     {
         ReportOptimizerProbeState("fixed_effect_baseline_failed");
         return;

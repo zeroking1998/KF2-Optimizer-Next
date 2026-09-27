@@ -61,6 +61,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Failed offline and online graphics baseline or menu-restore readbacks now
+  retry with bounded backoff instead of repeating writes every frame.
 - The online Adaptive listener now recovers with bounded backoff after socket
   or corpse-controller loss, including safe reset across map travel.
 - The live KF2 graphics-menu readback now includes the applied film-grain
