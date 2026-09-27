@@ -206,6 +206,38 @@ int main() {
     CHECK(releasing_action->interaction < 1.0F);
     for (int frame = 0; frame < 29; ++frame) controller.on_timer();
 
+    last_action.clear();
+    controller.on_pointer({PointerKind::press,
+        {full_check_bounds.x + 4, full_check_bounds.y + 4}, 0});
+    controller.on_pointer({PointerKind::capture_lost, {}, 0});
+    const auto cancelled_action = std::find_if(
+        controller.layout().nodes.begin(), controller.layout().nodes.end(),
+        [](const SemanticNode& item) {
+            return item.id == "diagnostics-full-check";
+        });
+    CHECK(cancelled_action != controller.layout().nodes.end());
+    CHECK(!cancelled_action->pressed);
+    controller.on_pointer({PointerKind::release,
+        {full_check_bounds.x + 4, full_check_bounds.y + 4}, 0});
+    CHECK(last_action.empty());
+    controller.on_pointer({PointerKind::release,
+        {full_check_bounds.x + 4, full_check_bounds.y + 4}, 0});
+    CHECK(last_action == "diagnostics-full-check");
+
+    const auto graphics_nav = std::find_if(
+        controller.layout().nodes.begin(), controller.layout().nodes.end(),
+        [](const SemanticNode& item) {
+            return item.destination == Destination::graphics;
+        });
+    CHECK(graphics_nav != controller.layout().nodes.end());
+    const DipRect graphics_nav_bounds = graphics_nav->bounds;
+    controller.on_pointer({PointerKind::press,
+        {graphics_nav_bounds.x + 4, graphics_nav_bounds.y + 4}, 0});
+    controller.on_pointer({PointerKind::capture_lost, {}, 0});
+    controller.on_pointer({PointerKind::release,
+        {graphics_nav_bounds.x + 4, graphics_nav_bounds.y + 4}, 0});
+    CHECK(model.selected() == Destination::diagnostics);
+
     auto adaptive_status = model.status();
     adaptive_status.mode = L"Adaptive / Automatic";
     adaptive_status.game_detected = true;

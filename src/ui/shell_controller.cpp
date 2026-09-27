@@ -161,8 +161,15 @@ void ShellController::on_system_resume() {
 void ShellController::on_pointer(platform::windows::PointerEvent event) {
     if (event.kind == platform::windows::PointerKind::capture_lost) {
         const bool interrupted_slider = dragged_slider_id_.has_value();
+        const bool interrupted_control =
+            pressed_node_id_.has_value() && !interrupted_slider;
         finish_slider_drag(std::nullopt);
-        suppress_orphaned_slider_release_ = interrupted_slider;
+        if (interrupted_control) {
+            pressed_node_id_.reset();
+            end_interaction();
+        }
+        suppress_orphaned_release_ = suppress_orphaned_release_ ||
+            interrupted_slider || interrupted_control;
         return;
     }
     if (event.kind == platform::windows::PointerKind::leave) {
@@ -182,7 +189,7 @@ void ShellController::on_pointer(platform::windows::PointerEvent event) {
     }
     const auto* node = hit_test(layout_, {event.position.x_dip, event.position.y_dip});
     if (event.kind == platform::windows::PointerKind::press) {
-        suppress_orphaned_slider_release_ = false;
+        suppress_orphaned_release_ = false;
         pressed_node_id_ = node && node->enabled
             ? std::optional<std::string>{node->id} : std::nullopt;
         if (node != nullptr && node->enabled &&
@@ -232,8 +239,8 @@ void ShellController::on_pointer(platform::windows::PointerEvent event) {
         return;
     }
     if (event.kind == platform::windows::PointerKind::release &&
-        suppress_orphaned_slider_release_) {
-        suppress_orphaned_slider_release_ = false;
+        suppress_orphaned_release_) {
+        suppress_orphaned_release_ = false;
         return;
     }
     // Window activation can consume the matching press. Keep click-to-jump
