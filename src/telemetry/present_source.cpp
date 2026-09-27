@@ -57,7 +57,10 @@ bool PresentSource::ingest(const PresentEvent& event) {
     std::scoped_lock lock{mutex_};
     if (!running_ || event.identity != identity_) return false;
     if (event.schema_version != 1) {
-        schema_failure_ = true; streams_.clear(); return false;
+        schema_failure_ = true;
+        streams_.clear();
+        invalidate_drain_locked();
+        return false;
     }
     if (!event.completed) { ++reported_loss_; return false; }
     if (last_stream_ && *last_stream_ != event.stream_id) {
