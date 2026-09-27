@@ -32,6 +32,8 @@ jobs:
         with:
           path: ${{ runner.temp }}\sccache
           key: sccache-disk-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.configuration }}-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt', 'tools/validate_ninja.ps1') }}
+          restore-keys: |
+            sccache-disk-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.configuration }}-
 
       - name: Configure local compiler cache
         shell: pwsh
