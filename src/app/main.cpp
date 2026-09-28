@@ -111,6 +111,15 @@ int run_application(int show_command) {
     if (!executable_directory.has_value()) {
         return show_fatal(executable_directory.error(), 10);
     }
+    if (!update_ready && !update_cleanup) {
+        const auto recovered =
+            kf2::update::recover_interrupted_updates_on_startup(
+                executable_directory.value());
+        if (!recovered.has_value()) {
+            return show_fatal(recovered.error(), 17);
+        }
+        if (recovered.value()) return 0;
+    }
 
     const auto build = kf2::app::current_build_identity();
     const auto package_audit = kf2::security::audit_package_integrity(

@@ -40,6 +40,16 @@ struct DirectoryIdentity {
     bool operator==(const DirectoryIdentity&) const = default;
 };
 
+UpdateTransactionRequest transaction_request(
+    const HelperRequest& request) {
+    return {
+        .target_root = request.target_root,
+        .staged_root = request.staged_root,
+        .backup_root = request.backup_root,
+        .expected_new_version = request.expected_version,
+    };
+}
+
 std::optional<std::string> utf8_from_wide(std::wstring_view value) {
     if (value.empty()) return std::string{};
     const int size = WideCharToMultiByte(
@@ -324,6 +334,11 @@ std::optional<DirectoryIdentity> validated_cleanup_identity(
     if (!request.has_value() || request.value().token != token ||
         !canonical_update_work_root(work, request.value().parent_process_id) ||
         !marker.has_value() || marker.value() != token) return std::nullopt;
+    const auto cleanup_allowed = update_transaction_allows_cleanup(
+        transaction_request(request.value()));
+    if (!cleanup_allowed.has_value() || !cleanup_allowed.value()) {
+        return std::nullopt;
+    }
     return directory_identity(work);
 }
 
@@ -372,7 +387,7 @@ bool marker_matches(const std::filesystem::path& work,
     return marker.has_value() && marker.value() == token;
 }
 
-void launch_cleanup_instance(const HelperRequest& request) {
+Result<bool> launch_cleanup_instance(const HelperRequest& request) {
     const auto executable = request.target_root / L"KF2Optimizer.exe";
     auto process = start_process(
         executable, L"--portable-update-cleanup " +
@@ -382,7 +397,9 @@ void launch_cleanup_instance(const HelperRequest& request) {
     if (process.has_value()) {
         CloseHandle(process.value().hThread);
         CloseHandle(process.value().hProcess);
+        return Result<bool>::success(true);
     }
+    return Result<bool>::failure(process.error());
 }
 
 }  // namespace
@@ -439,35 +456,43 @@ Result<bool> launch_update_helper(
 }
 
 int run_update_helper(const std::filesystem::path& request_path) noexcept {
+    std::optional<HelperRequest> request;
     try {
-        const auto request = parse_request(request_path);
-        if (!request.has_value()) return 20;
-        if (!wait_for_parent(request.value().parent_process_id)) return 25;
-        const auto applied = apply_update_transaction({
-            .target_root = request.value().target_root,
-            .staged_root = request.value().staged_root,
-            .backup_root = request.value().backup_root,
-            .expected_new_version = request.value().expected_version});
+        auto parsed = parse_request(request_path);
+        if (!parsed.has_value()) return 20;
+        request = std::move(parsed.value());
+        if (!wait_for_parent(request->parent_process_id)) return 25;
+        const auto applied = apply_update_transaction(
+            transaction_request(*request));
         if (!applied.has_value()) {
-            launch_cleanup_instance(request.value());
+            const auto recovered = recover_update_transaction(
+                transaction_request(*request));
+            if (!recovered.has_value() ||
+                (recovered.value().state !=
+                     UpdateRecoveryState::rollback_verified &&
+                 recovered.value().state !=
+                     UpdateRecoveryState::not_started)) {
+                return 22;
+            }
+            static_cast<void>(launch_cleanup_instance(*request));
             return 21;
         }
-        const auto executable = request.value().target_root /
+        const auto executable = request->target_root /
             L"KF2Optimizer.exe";
         auto process = start_process(
             executable, L"--portable-update-ready " +
-                quote(request.value().receipt_path.wstring()) + L" " +
+                quote(request->receipt_path.wstring()) + L" " +
                 std::to_wstring(GetCurrentProcessId()) + L" " +
-                quote(request.value().backup_root.parent_path().wstring()) +
-                L" " + quote(std::wstring{request.value().token.begin(),
-                                           request.value().token.end()}));
+                quote(request->backup_root.parent_path().wstring()) + L" " +
+                quote(std::wstring{request->token.begin(),
+                                   request->token.end()}));
         bool ready = false;
         if (process.has_value()) {
             const auto deadline = std::chrono::steady_clock::now() +
                 std::chrono::seconds{20};
             while (std::chrono::steady_clock::now() < deadline) {
-                if (receipt_ready(request.value().receipt_path,
-                                  request.value().token)) {
+                if (receipt_ready(request->receipt_path,
+                                  request->token)) {
                     ready = true;
                     break;
                 }
@@ -488,28 +513,137 @@ int run_update_helper(const std::filesystem::path& request_path) noexcept {
             CloseHandle(process.value().hProcess);
         }
         const auto rolled_back = rollback_update_transaction(
-            request.value().target_root, request.value().backup_root);
+            request->target_root, request->backup_root);
         if (!rolled_back.has_value()) return 22;
-        launch_cleanup_instance(request.value());
+        static_cast<void>(launch_cleanup_instance(*request));
         return 23;
     } catch (...) {
+        if (request) {
+            const auto recovered = recover_update_transaction(
+                transaction_request(*request));
+            if (recovered.has_value() &&
+                (recovered.value().state ==
+                     UpdateRecoveryState::rollback_verified ||
+                 recovered.value().state ==
+                     UpdateRecoveryState::not_started)) {
+                static_cast<void>(launch_cleanup_instance(*request));
+            }
+        }
         return 24;
     }
 }
 
+Result<bool> recover_interrupted_updates_on_startup(
+    const std::filesystem::path& target_root) {
+    if (!target_root.is_absolute() || !normal_directory(target_root)) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"Interrupted update target is invalid", 0});
+    }
+    const auto temporary = platform::windows::temporary_directory();
+    if (!temporary.has_value()) return Result<bool>::failure(temporary.error());
+    const auto update_root = temporary.value() / L"KF2OptimizerNext-Update";
+    std::error_code error;
+    if (!std::filesystem::exists(update_root, error)) {
+        if (error) {
+            return Result<bool>::failure(
+                {ErrorCode::io_failure,
+                 L"Interrupted update directory cannot be inspected",
+                 static_cast<std::uint32_t>(error.value())});
+        }
+        return Result<bool>::success(false);
+    }
+    if (!normal_directory(update_root)) {
+        return Result<bool>::failure(
+            {ErrorCode::access_denied,
+             L"Interrupted update directory has an unsafe identity", 0});
+    }
+    const auto target_identity = directory_identity(target_root);
+    if (!target_identity) {
+        return Result<bool>::failure(
+            {ErrorCode::access_denied,
+             L"Interrupted update target identity is unavailable", 0});
+    }
+    std::size_t inspected = 0;
+    std::filesystem::directory_iterator iterator{update_root, error};
+    const std::filesystem::directory_iterator end;
+    while (!error && iterator != end) {
+        const auto work = iterator->path();
+        iterator.increment(error);
+        if (++inspected > 128U) {
+            return Result<bool>::failure(
+                {ErrorCode::access_denied,
+                 L"Too many interrupted update directories were found", 0});
+        }
+        if (!normal_directory(work)) continue;
+        auto request = parse_request(work / L"update-request.ini");
+        const auto request_target_identity = request.has_value()
+            ? directory_identity(request.value().target_root)
+            : std::nullopt;
+        if (!request.has_value() || !request_target_identity ||
+            *request_target_identity != *target_identity) {
+            continue;
+        }
+        auto recovered = recover_update_transaction(
+            transaction_request(request.value()));
+        if (!recovered.has_value()) {
+            return Result<bool>::failure(recovered.error());
+        }
+        if (recovered.value().state == UpdateRecoveryState::owner_active) {
+            return Result<bool>::success(true);
+        }
+        if (recovered.value().state ==
+                UpdateRecoveryState::rollback_verified ||
+            recovered.value().state == UpdateRecoveryState::not_started) {
+            auto launched = launch_cleanup_instance(request.value());
+            if (!launched.has_value()) return launched;
+            return Result<bool>::success(true);
+        }
+        const auto executable = request.value().target_root /
+            L"KF2Optimizer.exe";
+        auto process = start_process(
+            executable, L"--portable-update-ready " +
+                quote(request.value().receipt_path.wstring()) + L" " +
+                std::to_wstring(GetCurrentProcessId()) + L" " +
+                quote(work.wstring()) + L" " +
+                quote(std::wstring{request.value().token.begin(),
+                                   request.value().token.end()}));
+        if (!process.has_value()) {
+            return Result<bool>::failure(process.error());
+        }
+        CloseHandle(process.value().hThread);
+        CloseHandle(process.value().hProcess);
+        return Result<bool>::success(true);
+    }
+    if (error) {
+        return Result<bool>::failure(
+            {ErrorCode::io_failure,
+             L"Interrupted update directory enumeration failed",
+             static_cast<std::uint32_t>(error.value())});
+    }
+    return Result<bool>::success(false);
+}
+
 Result<bool> signal_update_ready_and_schedule_cleanup(
     const UpdateReadyArguments& arguments) {
+    const auto request = parse_request(
+        arguments.work_root / L"update-request.ini");
     if (!safe_token(arguments.token) || arguments.helper_process_id == 0 ||
         !arguments.receipt_path.is_absolute() ||
         !normal_directory(arguments.work_root) ||
         !child_of(arguments.receipt_path, arguments.work_root) ||
-        !marker_matches(arguments.work_root, arguments.token)) {
+        !marker_matches(arguments.work_root, arguments.token) ||
+        !request.has_value() || request.value().token != arguments.token ||
+        !same_path(request.value().receipt_path, arguments.receipt_path)) {
         return Result<bool>::failure(
             {ErrorCode::access_denied, L"Update restart handshake is invalid", 0});
     }
     const auto signaled = platform::windows::atomic_replace_utf8(
         arguments.receipt_path, arguments.token);
     if (!signaled.has_value()) return signaled;
+    const auto handed_off = mark_update_transaction_handoff_ready(
+        transaction_request(request.value()));
+    if (!handed_off.has_value()) return handed_off;
     return schedule_update_cleanup(arguments.helper_process_id,
                                    arguments.work_root, arguments.token);
 }

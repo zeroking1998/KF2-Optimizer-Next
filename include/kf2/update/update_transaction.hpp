@@ -11,6 +11,16 @@ namespace kf2::update {
 enum class UpdateFaultInjection {
     none,
     after_first_replacement,
+    interrupt_after_replacement,
+    interrupt_after_verification,
+    rollback_failure,
+};
+
+enum class UpdateRecoveryState {
+    not_started,
+    owner_active,
+    update_verified,
+    rollback_verified,
 };
 
 struct UpdateTransactionRequest {
@@ -19,6 +29,7 @@ struct UpdateTransactionRequest {
     std::filesystem::path backup_root;
     std::string expected_new_version;
     UpdateFaultInjection fault{UpdateFaultInjection::none};
+    std::size_t fault_after_replacements{};
 };
 
 struct UpdateTransactionResult {
@@ -26,6 +37,11 @@ struct UpdateTransactionResult {
     bool rolled_back{false};
     std::string previous_version;
     std::string installed_version;
+};
+
+struct UpdateRecoveryResult {
+    UpdateRecoveryState state{UpdateRecoveryState::owner_active};
+    std::size_t replaced_files{};
 };
 
 #if defined(KF2_UPDATE_TRANSACTION_TESTING)
@@ -42,5 +58,14 @@ void set_managed_read_hook_for_testing(ManagedReadHook hook) noexcept;
 [[nodiscard]] Result<bool> rollback_update_transaction(
     const std::filesystem::path& target_root,
     const std::filesystem::path& backup_root);
+
+[[nodiscard]] Result<UpdateRecoveryResult> recover_update_transaction(
+    const UpdateTransactionRequest& request);
+
+[[nodiscard]] Result<bool> mark_update_transaction_handoff_ready(
+    const UpdateTransactionRequest& request);
+
+[[nodiscard]] Result<bool> update_transaction_allows_cleanup(
+    const UpdateTransactionRequest& request);
 
 }  // namespace kf2::update
