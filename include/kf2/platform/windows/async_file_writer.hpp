@@ -32,4 +32,10 @@ private:
     std::unique_ptr<Impl> implementation_;
 };
 
+#ifdef KF2_ASYNC_FILE_WRITER_TESTING
+namespace detail {
+void fail_next_async_file_outcome_publication() noexcept;
+}
+#endif
+
 }  // namespace kf2::platform::windows

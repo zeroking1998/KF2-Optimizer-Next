@@ -299,6 +299,26 @@ int main() {
         CHECK(snapshot->gpu->adapter_gpu_percent == 54.0);
     }
 
+    // Publication failures must release the active state and preserve the
+    // single worker for a later successful sample.
+    {
+        ResourceTelemetryWorker worker{
+            [](const ResourceSampleRequest& request, std::stop_token) {
+                ResourceSampleBatch batch;
+                batch.group = request.group;
+                return batch;
+            }};
+        const auto generation = worker.bind(binding(58, 5800));
+        worker.request(8'400);
+        CHECK(wait_for_generation(worker, generation));
+        kf2::telemetry::detail::fail_next_resource_telemetry_publication();
+        worker.request(8'500);
+        CHECK(worker.wait_until_idle(2s));
+        CHECK(!worker.latest());
+        worker.request(8'600);
+        CHECK(wait_for_generation(worker, generation));
+    }
+
     // Shutdown cancellation is cooperative and joins the only worker thread.
     {
         std::mutex mutex;

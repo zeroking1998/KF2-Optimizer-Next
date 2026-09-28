@@ -1,6 +1,7 @@
 #include "kf2/telemetry/present_source.hpp"
 #include <Windows.h>
 #include <algorithm>
+#include <atomic>
 #include <iterator>
 
 namespace kf2::telemetry {
@@ -11,7 +12,16 @@ namespace {
 constexpr std::uint64_t kLiveWindowNs = 1'000'000'000ULL;
 constexpr std::uint64_t kSustainedWindowNs = 3'000'000'000ULL;
 constexpr std::uint64_t kTailWindowNs = 5'000'000'000ULL;
+#ifdef KF2_PRESENT_SOURCE_TESTING
+std::atomic_bool fail_next_drain_publication{false};
+#endif
 }
+
+#ifdef KF2_PRESENT_SOURCE_TESTING
+void detail::fail_next_present_drain_publication() noexcept {
+    fail_next_drain_publication.store(true, std::memory_order_release);
+}
+#endif
 
 PresentSource::PresentSource(SampleIdentity identity, std::size_t capacity)
     : identity_{identity},
@@ -190,6 +200,18 @@ void PresentSource::request_drain(std::uint64_t now_ns,
     std::scoped_lock lock{mutex_};
     auto request = DrainRequest{
         drain_generation_, now_ns, stale_after_ns, not_before_ns};
+    if (drain_worker_failed_) {
+        FrameMetrics unavailable;
+        unavailable.reason = UnavailableReason::source_failure;
+        if (not_before_ns == 0) {
+            latest_default_drain_ = unavailable;
+        } else {
+            latest_bounded_drain_ = unavailable;
+            latest_bounded_not_before_ns_ = not_before_ns;
+        }
+        drain_changed_.notify_all();
+        return;
+    }
     if (not_before_ns == 0) {
         pending_default_drain_ = request;
     } else {
@@ -224,44 +246,88 @@ void PresentSource::invalidate_drain_locked() {
     drain_changed_.notify_all();
 }
 
-void PresentSource::drain_worker(std::stop_token stop) {
+void PresentSource::drain_worker(std::stop_token stop) noexcept {
     static_cast<void>(SetThreadPriority(
         GetCurrentThread(), THREAD_PRIORITY_NORMAL));
-    while (!stop.stop_requested()) {
-        DrainRequest request;
-        {
-            std::unique_lock lock{mutex_};
-            drain_changed_.wait(lock, [&] {
-                return pending_default_drain_.has_value() ||
-                       pending_bounded_drain_.has_value() ||
-                       stop.stop_requested();
-            });
-            if (pending_bounded_drain_) {
-                request = *pending_bounded_drain_;
-                pending_bounded_drain_.reset();
-            } else if (pending_default_drain_) {
-                request = *pending_default_drain_;
-                pending_default_drain_.reset();
-            } else {
-                return;
-            }
-            drain_active_ = true;
-        }
-
-        auto metrics = drain(request.now_ns, request.stale_after_ns,
-                             request.not_before_ns);
-        {
-            std::scoped_lock lock{mutex_};
-            drain_active_ = false;
-            if (!stop.stop_requested() &&
-                request.generation == drain_generation_) {
-                if (request.not_before_ns == 0) {
-                    latest_default_drain_ = std::move(metrics);
+    try {
+        while (!stop.stop_requested()) {
+            DrainRequest request;
+            {
+                std::unique_lock lock{mutex_};
+                drain_changed_.wait(lock, [&] {
+                    return pending_default_drain_.has_value() ||
+                           pending_bounded_drain_.has_value() ||
+                           stop.stop_requested();
+                });
+                if (pending_bounded_drain_) {
+                    request = *pending_bounded_drain_;
+                    pending_bounded_drain_.reset();
+                } else if (pending_default_drain_) {
+                    request = *pending_default_drain_;
+                    pending_default_drain_.reset();
                 } else {
-                    latest_bounded_drain_ = std::move(metrics);
-                    latest_bounded_not_before_ns_ = request.not_before_ns;
+                    return;
+                }
+                drain_active_ = true;
+            }
+
+            try {
+                auto metrics = drain(request.now_ns, request.stale_after_ns,
+                                     request.not_before_ns);
+#ifdef KF2_PRESENT_SOURCE_TESTING
+                if (fail_next_drain_publication.exchange(
+                        false, std::memory_order_acq_rel)) {
+                    throw std::bad_alloc{};
+                }
+#endif
+                std::scoped_lock lock{mutex_};
+                drain_active_ = false;
+                if (!stop.stop_requested() &&
+                    request.generation == drain_generation_) {
+                    if (request.not_before_ns == 0) {
+                        latest_default_drain_ = std::move(metrics);
+                    } else {
+                        latest_bounded_drain_ = std::move(metrics);
+                        latest_bounded_not_before_ns_ = request.not_before_ns;
+                    }
+                }
+            } catch (...) {
+                try {
+                    FrameMetrics unavailable;
+                    unavailable.reason = UnavailableReason::source_failure;
+                    std::scoped_lock lock{mutex_};
+                    drain_active_ = false;
+                    if (!stop.stop_requested() &&
+                        request.generation == drain_generation_) {
+                        if (request.not_before_ns == 0) {
+                            latest_default_drain_ = unavailable;
+                        } else {
+                            latest_bounded_drain_ = unavailable;
+                            latest_bounded_not_before_ns_ =
+                                request.not_before_ns;
+                        }
+                    }
+                } catch (...) {
+                    // Preserve the worker exception boundary even if state
+                    // publication itself cannot acquire its lock.
                 }
             }
+            drain_changed_.notify_all();
+        }
+    } catch (...) {
+        try {
+            std::scoped_lock lock{mutex_};
+            drain_worker_failed_ = true;
+            drain_active_ = false;
+            pending_default_drain_.reset();
+            pending_bounded_drain_.reset();
+            FrameMetrics unavailable;
+            unavailable.reason = UnavailableReason::source_failure;
+            latest_default_drain_ = unavailable;
+            latest_bounded_drain_ = unavailable;
+            latest_bounded_not_before_ns_ = 0;
+        } catch (...) {
+            // No exception may cross the jthread entry point.
         }
         drain_changed_.notify_all();
     }

@@ -104,4 +104,10 @@ private:
     std::unique_ptr<Impl> implementation_;
 };
 
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+namespace detail {
+void fail_next_resource_telemetry_publication() noexcept;
+}
+#endif
+
 }  // namespace kf2::telemetry

@@ -264,6 +264,7 @@ add_executable(kf2_async_file_writer_test
 target_include_directories(kf2_async_file_writer_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_async_file_writer_test PRIVATE
+    KF2_ASYNC_FILE_WRITER_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/async-file-writer"
 )
 add_test(NAME kf2_async_file_writer_test COMMAND kf2_async_file_writer_test)
@@ -627,6 +628,8 @@ add_executable(kf2_adaptive_control_client_test
     "${PROJECT_SOURCE_DIR}/src/game/adaptive_control_client.cpp")
 target_include_directories(kf2_adaptive_control_client_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_adaptive_control_client_test PRIVATE
+    KF2_ADAPTIVE_CONTROL_CLIENT_TESTING)
 target_link_libraries(kf2_adaptive_control_client_test PRIVATE bcrypt ws2_32)
 add_test(NAME kf2_adaptive_control_client_test
     COMMAND kf2_adaptive_control_client_test)
@@ -732,6 +735,7 @@ add_executable(kf2_resource_telemetry_worker_test
 target_include_directories(kf2_resource_telemetry_worker_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_resource_telemetry_worker_test PRIVATE
+    KF2_RESOURCE_TELEMETRY_WORKER_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/resource-telemetry-worker")
 target_link_libraries(kf2_resource_telemetry_worker_test PRIVATE
     psapi dwmapi pdh dxgi gdi32 advapi32)
@@ -823,6 +827,8 @@ add_executable(kf2_startup_prewarmer_test
 )
 target_include_directories(kf2_startup_prewarmer_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_startup_prewarmer_test PRIVATE
+    KF2_STARTUP_PREWARMER_TESTING)
 add_test(NAME kf2_startup_prewarmer_test
     COMMAND kf2_startup_prewarmer_test)
 
@@ -855,6 +861,8 @@ add_executable(kf2_present_source_test
     integration/present_source_test.cpp
 )
 target_include_directories(kf2_present_source_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_present_source_test PRIVATE
+    KF2_PRESENT_SOURCE_TESTING)
 add_test(NAME kf2_present_source_test COMMAND kf2_present_source_test)
 
 add_executable(kf2_dxgi_frame_timing_session_test
@@ -862,6 +870,8 @@ add_executable(kf2_dxgi_frame_timing_session_test
     "${PROJECT_SOURCE_DIR}/src/platform/windows/dxgi_frame_timing_session.cpp"
 )
 target_include_directories(kf2_dxgi_frame_timing_session_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_dxgi_frame_timing_session_test PRIVATE
+    KF2_DXGI_FRAME_TIMING_SESSION_TESTING)
 target_link_libraries(kf2_dxgi_frame_timing_session_test PRIVATE advapi32)
 add_test(NAME kf2_dxgi_frame_timing_session_test COMMAND kf2_dxgi_frame_timing_session_test)
 

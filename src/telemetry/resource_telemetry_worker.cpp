@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <exception>
@@ -15,6 +16,10 @@
 
 namespace kf2::telemetry {
 namespace {
+
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+std::atomic_bool fail_next_telemetry_publication{false};
+#endif
 
 bool same_binding(const ResourceTelemetryBinding& left,
                   const ResourceTelemetryBinding& right) noexcept {
@@ -219,6 +224,12 @@ private:
 
 }  // namespace
 
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+void detail::fail_next_resource_telemetry_publication() noexcept {
+    fail_next_telemetry_publication.store(true, std::memory_order_release);
+}
+#endif
+
 class ResourceTelemetryWorker::Impl final {
 public:
     explicit Impl(ResourceSampleFunction sample)
@@ -235,7 +246,6 @@ public:
         binding_ = std::move(binding);
         pending_ = false;
         next_group_ = ResourceSampleGroup::process_and_memory;
-        current_ = {};
         published_.reset();
         if (!preserve_log) log_chunks_.clear();
         condition_.notify_all();
@@ -248,7 +258,6 @@ public:
         ++generation_;
         pending_ = false;
         next_group_ = ResourceSampleGroup::process_and_memory;
-        current_ = {};
         published_.reset();
         condition_.notify_all();
         return generation_;
@@ -260,7 +269,6 @@ public:
         binding_.reset();
         pending_ = false;
         next_group_ = ResourceSampleGroup::process_and_memory;
-        current_ = {};
         published_.reset();
         log_chunks_.clear();
         condition_.notify_all();
@@ -268,7 +276,7 @@ public:
 
     void request(std::uint64_t sampled_at_ns) {
         std::scoped_lock lock{mutex_};
-        if (!binding_ || stopped_) return;
+        if (!binding_ || stopped_ || worker_failed_) return;
         pending_at_ns_ = sampled_at_ns;
         pending_ = true;
         condition_.notify_one();
@@ -313,7 +321,33 @@ public:
     }
 
 private:
-    void run(std::stop_token stop) {
+    void finish_failed_sample() noexcept {
+        try {
+            std::scoped_lock lock{mutex_};
+            active_ = false;
+            published_.reset();
+        } catch (...) {
+        }
+        condition_.notify_all();
+    }
+
+    void run(std::stop_token stop) noexcept {
+        try {
+            run_loop(stop);
+        } catch (...) {
+            try {
+                std::scoped_lock lock{mutex_};
+                worker_failed_ = true;
+                pending_ = false;
+                active_ = false;
+                published_.reset();
+            } catch (...) {
+            }
+            condition_.notify_all();
+        }
+    }
+
+    void run_loop(std::stop_token stop) {
         static_cast<void>(SetThreadPriority(
             GetCurrentThread(), THREAD_PRIORITY_NORMAL));
         std::optional<ResourceTelemetryBinding> sampler_binding;
@@ -417,40 +451,55 @@ private:
             }
             batch.group = request.group;
 
-            std::scoped_lock lock{mutex_};
-            active_ = false;
-            if (log_chunk && binding_ &&
-                same_session(*binding_, request.binding)) {
-                log_chunks_.push_back(std::move(*log_chunk));
-            }
-            if (stop.stop_requested() || !binding_ ||
-                generation_ != request_generation ||
-                !same_binding(*binding_, request.binding)) {
+            try {
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+                if (fail_next_telemetry_publication.exchange(
+                        false, std::memory_order_acq_rel)) {
+                    throw std::bad_alloc{};
+                }
+#endif
+                std::scoped_lock lock{mutex_};
+                if (log_chunk && binding_ &&
+                    same_session(*binding_, request.binding)) {
+                    log_chunks_.push_back(std::move(*log_chunk));
+                }
+                if (stop.stop_requested() || !binding_ ||
+                    generation_ != request_generation ||
+                    !same_binding(*binding_, request.binding)) {
+                    active_ = false;
+                    condition_.notify_all();
+                    continue;
+                }
+
+                auto next = published_
+                    ? std::make_shared<ResourceTelemetrySnapshot>(*published_)
+                    : std::make_shared<ResourceTelemetrySnapshot>();
+                if (next->generation != request_generation) {
+                    *next = {};
+                    next->generation = request_generation;
+                    next->identity = request.binding.identity;
+                    next->adapter_luid = request.binding.adapter_luid;
+                }
+                if (batch.group == ResourceSampleGroup::process_and_memory) {
+                    next->process_sampled_at_ns = request.sampled_at_ns;
+                    next->process = std::move(batch.process);
+                    next->system_memory = std::move(batch.system_memory);
+                } else {
+                    next->gpu_sampled_at_ns = request.sampled_at_ns;
+                    next->gpu = std::move(batch.gpu);
+                    next->driver_gpu_percent = batch.driver_gpu_percent;
+                    next->nvidia_source = batch.nvidia_source;
+                    next->detected_process_adapter =
+                        std::move(batch.detected_process_adapter);
+                }
+                next->publication_sequence = publication_sequence_ + 1;
+                publication_sequence_ = next->publication_sequence;
+                published_ = std::move(next);
+                active_ = false;
                 condition_.notify_all();
-                continue;
+            } catch (...) {
+                finish_failed_sample();
             }
-            if (current_.generation != request_generation) {
-                current_ = {};
-                current_.generation = request_generation;
-                current_.identity = request.binding.identity;
-                current_.adapter_luid = request.binding.adapter_luid;
-            }
-            if (batch.group == ResourceSampleGroup::process_and_memory) {
-                current_.process_sampled_at_ns = request.sampled_at_ns;
-                current_.process = std::move(batch.process);
-                current_.system_memory = std::move(batch.system_memory);
-            } else {
-                current_.gpu_sampled_at_ns = request.sampled_at_ns;
-                current_.gpu = std::move(batch.gpu);
-                current_.driver_gpu_percent = batch.driver_gpu_percent;
-                current_.nvidia_source = batch.nvidia_source;
-                current_.detected_process_adapter =
-                    std::move(batch.detected_process_adapter);
-            }
-            current_.publication_sequence = ++publication_sequence_;
-            published_ = std::make_shared<const ResourceTelemetrySnapshot>(
-                current_);
-            condition_.notify_all();
         }
     }
 
@@ -458,6 +507,7 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable_any condition_;
     bool stopped_{false};
+    bool worker_failed_{false};
     bool pending_{false};
     bool active_{false};
     std::uint64_t pending_at_ns_{0};
@@ -465,7 +515,6 @@ private:
     std::uint64_t publication_sequence_{0};
     ResourceSampleGroup next_group_{ResourceSampleGroup::process_and_memory};
     std::optional<ResourceTelemetryBinding> binding_;
-    ResourceTelemetrySnapshot current_;
     std::shared_ptr<const ResourceTelemetrySnapshot> published_;
     std::deque<GameLogChunk> log_chunks_;
     // Construct last and destroy first. The worker may access every state

@@ -164,6 +164,7 @@ int main(int argc, char** argv) {
         StartupPrewarmState::skipped_low_memory));
     CHECK(startup_prewarm_retryable(
         StartupPrewarmState::skipped_no_files));
+    CHECK(startup_prewarm_retryable(StartupPrewarmState::failed));
     CHECK(!startup_prewarm_retryable(StartupPrewarmState::idle));
     CHECK(!startup_prewarm_retryable(StartupPrewarmState::complete));
     CHECK(!startup_prewarm_retryable(StartupPrewarmState::cancelled));
@@ -316,6 +317,23 @@ int main(int argc, char** argv) {
     }
     CHECK(solid_state.snapshot().state == StartupPrewarmState::complete);
     CHECK(solid_state.snapshot().bytes_read == 3072);
+
+    StartupPrewarmer failed_then_recovered;
+    detail::fail_next_startup_prewarm_plan();
+    failed_then_recovered.start(root, {
+        .idle_delay = std::chrono::milliseconds{0},
+        .storage_override = StorageKind::solid_state,
+        .available_memory_override = 4 * gib,
+    });
+    CHECK(wait_for_terminal(failed_then_recovered).state ==
+          StartupPrewarmState::failed);
+    failed_then_recovered.start(root, {
+        .idle_delay = std::chrono::milliseconds{0},
+        .storage_override = StorageKind::solid_state,
+        .available_memory_override = 4 * gib,
+    });
+    CHECK(wait_for_terminal(failed_then_recovered).state ==
+          StartupPrewarmState::complete);
 
     StartupPrewarmer cancelled;
     cancelled.start(root, {

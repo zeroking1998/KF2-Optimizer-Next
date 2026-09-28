@@ -20,6 +20,10 @@ namespace kf2::game {
 
 namespace {
 
+#ifdef KF2_STARTUP_PREWARMER_TESTING
+std::atomic_bool fail_next_prewarm_plan{false};
+#endif
+
 constexpr std::size_t kVolumeExtentHeaderBytes =
     offsetof(VOLUME_DISK_EXTENTS, Extents);
 
@@ -36,6 +40,12 @@ std::optional<std::size_t> volume_extent_bytes(DWORD extent_count) noexcept {
 }
 
 }  // namespace
+
+#ifdef KF2_STARTUP_PREWARMER_TESTING
+void detail::fail_next_startup_prewarm_plan() noexcept {
+    fail_next_prewarm_plan.store(true, std::memory_order_release);
+}
+#endif
 
 std::optional<std::vector<std::uint32_t>>
 detail::parse_volume_disk_extents(std::span<const std::byte> storage,
@@ -382,7 +392,8 @@ StorageKind storage_kind_for_path(
 bool startup_prewarm_retryable(StartupPrewarmState state) noexcept {
     return state == StartupPrewarmState::skipped_unknown_storage ||
         state == StartupPrewarmState::skipped_low_memory ||
-        state == StartupPrewarmState::skipped_no_files;
+        state == StartupPrewarmState::skipped_no_files ||
+        state == StartupPrewarmState::failed;
 }
 
 struct StartupPrewarmer::Impl final {
@@ -394,6 +405,16 @@ struct StartupPrewarmer::Impl final {
 
     void run(std::stop_token stop, const std::filesystem::path& install_root,
              const StartupPrewarmOptions& options) noexcept {
+        try {
+            run_unchecked(stop, install_root, options);
+        } catch (...) {
+            state = StartupPrewarmState::failed;
+        }
+    }
+
+    void run_unchecked(std::stop_token stop,
+                       const std::filesystem::path& install_root,
+                       const StartupPrewarmOptions& options) {
         state = StartupPrewarmState::waiting;
         if (!wait_interruptibly(stop, options.idle_delay)) {
             state = StartupPrewarmState::cancelled;
@@ -411,6 +432,12 @@ struct StartupPrewarmer::Impl final {
             state = StartupPrewarmState::skipped_low_memory;
             return;
         }
+#ifdef KF2_STARTUP_PREWARMER_TESTING
+        if (fail_next_prewarm_plan.exchange(false,
+                                            std::memory_order_acq_rel)) {
+            throw std::bad_alloc{};
+        }
+#endif
         const auto plan = build_startup_prewarm_plan(
             install_root, storage, memory, options.map_name,
             options.include_common_startup_files);
