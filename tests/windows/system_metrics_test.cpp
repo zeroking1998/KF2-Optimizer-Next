@@ -118,6 +118,32 @@ int main() {
     CHECK(calculate_thread_cpu_percent(100, 50'100, 100).value() == 5.0);
     CHECK(calculate_thread_cpu_percent(100, 2'000'100, 100).value() == 100.0);
 
+    const detail::ThreadPressureMetrics pressure{
+        98.0, 1.25, 78.4, 3};
+    detail::ThreadPressureCache terminated_threads;
+    terminated_threads.observe(pressure, 1'000);
+    terminated_threads.miss(1'500);
+    CHECK(terminated_threads.current().has_value());
+    terminated_threads.miss(2'000);
+    CHECK(terminated_threads.current().has_value());
+    terminated_threads.miss(2'500);
+    CHECK(!terminated_threads.current().has_value());
+
+    // One empty GetThreadTimes sample is a transient gap, not zero pressure.
+    detail::ThreadPressureCache empty_thread_times;
+    empty_thread_times.observe(pressure, 3'000);
+    empty_thread_times.miss(3'500);
+    CHECK(empty_thread_times.current().has_value());
+    CHECK(empty_thread_times.current()->critical_core_percent == 98.0);
+
+    // Repeated thread-enumeration failures age out the previous workload.
+    detail::ThreadPressureCache failed_enumeration;
+    failed_enumeration.observe(pressure, 4'000);
+    failed_enumeration.miss(4'500);
+    failed_enumeration.miss(5'000);
+    failed_enumeration.miss(5'500);
+    CHECK(!failed_enumeration.current().has_value());
+
     wchar_t path[MAX_PATH]{};
     CHECK(GetModuleFileNameW(nullptr, path, MAX_PATH) > 0);
     const auto identity = kf2::game::bind_game_process(GetCurrentProcessId(), path);

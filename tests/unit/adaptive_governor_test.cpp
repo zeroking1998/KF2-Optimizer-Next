@@ -723,6 +723,20 @@ int main() {
           "main_thread_dominant_parallelism_evidence");
     CHECK(measured_cpu.selected_setting == "FarAnimationUpdateRate");
 
+    auto expired_thread_evidence = measured_parallelism;
+    expired_thread_evidence.critical_core_percent.reset();
+    expired_thread_evidence.effective_core_usage.reset();
+    expired_thread_evidence.dominant_thread_share_percent.reset();
+    expired_thread_evidence.active_cpu_threads.reset();
+    AdaptiveGovernor expired_thread_governor;
+    const auto expired_thread = drive(
+        expired_thread_governor, adaptive, expired_thread_evidence,
+        start, 1'000'000'000ULL);
+    CHECK(expired_thread.cpu.workload == AdaptiveCpuWorkload::unknown);
+    CHECK(!expired_thread.cpu.critical_thread_percent.has_value());
+    CHECK(!expired_thread.cpu.effective_core_usage.has_value());
+    CHECK(expired_thread.bottleneck.type != AdaptiveBottleneck::cpu);
+
     AdaptiveGovernor multi_group_governor;
     auto multi_group = sample(start, 30.0, 33.33, 35.0, 5.0, 16.0);
     multi_group.critical_core_percent = 45.0;
