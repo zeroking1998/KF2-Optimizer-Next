@@ -47,7 +47,7 @@ Application& Application::operator=(Application&& other) noexcept {
     return *this;
 }
 
-Application::~Application() {
+Application::~Application() noexcept {
     ui_runtime_.reset();
     if (com_initialized_) CoUninitialize();
 }
@@ -254,15 +254,31 @@ Result<bool> Application::shutdown_cleanly() {
     if (clean_shutdown_) {
         return Result<bool>::success(true);
     }
-    ui_runtime_.reset();
-    if (events_) {
-        (void)events_->flush(std::chrono::seconds{5});
+    try {
+        if (ui_runtime_) {
+            const auto stopped = ui_runtime_->shutdown();
+            if (!stopped.has_value()) {
+                return Result<bool>::failure(stopped.error());
+            }
+        }
+        if (events_ && !events_->flush(std::chrono::seconds{5})) {
+            return Result<bool>::failure({
+                ErrorCode::io_failure,
+                L"Shutdown diagnostics could not be persisted; recovery remains armed",
+                0});
+        }
+        auto result = session_.mark_clean();
+        if (result.has_value()) {
+            clean_shutdown_ = true;
+            ui_runtime_.reset();
+        }
+        return result;
+    } catch (...) {
+        return Result<bool>::failure({
+            ErrorCode::internal_failure,
+            L"Application shutdown encountered an unexpected local error; recovery remains armed",
+            0});
     }
-    auto result = session_.mark_clean();
-    if (result.has_value()) {
-        clean_shutdown_ = true;
-    }
-    return result;
 }
 
 const std::filesystem::path& Application::state_root() const noexcept {

@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 #include "kf2/app/application.hpp"
@@ -51,6 +52,20 @@ kf2::Result<bool> fail_gpu_profile_settings_write(
         kf2::ErrorCode::io_failure,
         L"Injected confirmed GPU profile persistence failure", 0});
 }
+
+#if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
+std::optional<kf2::app::UiRuntimeShutdownPhase>
+    shutdown_phase_to_throw;
+std::array<unsigned int, 3> shutdown_phase_calls{};
+
+void throw_selected_shutdown_phase(
+    kf2::app::UiRuntimeShutdownPhase phase) {
+    ++shutdown_phase_calls[static_cast<std::size_t>(phase)];
+    if (shutdown_phase_to_throw == phase) {
+        throw std::runtime_error{"injected runtime shutdown failure"};
+    }
+}
+#endif
 
 std::string read_bytes(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
@@ -234,6 +249,116 @@ int test_package_repair_worker_start_failure() {
     CHECK(launch_attempts == 2);
     CHECK(!runtime.package_repair_state);
     return EXIT_SUCCESS;
+}
+
+int test_runtime_shutdown_exception_boundaries() {
+#if !defined(KF2_APPLICATION_SHUTDOWN_TESTING)
+    return EXIT_FAILURE;
+#else
+    namespace fs = std::filesystem;
+    using kf2::app::UiRuntimeShutdownPhase;
+    static_assert(std::is_nothrow_move_assignable_v<kf2::app::Application>);
+    const fs::path root = fs::path{KF2_TEST_ROOT} /
+        L"runtime-shutdown-exceptions";
+    fs::remove_all(root);
+
+    const std::array phases{
+        UiRuntimeShutdownPhase::live_adaptive_restore,
+        UiRuntimeShutdownPhase::protected_config_restore,
+        UiRuntimeShutdownPhase::event_publication,
+    };
+    std::uint64_t identity = 8000;
+    for (std::size_t index = 0; index < phases.size(); ++index) {
+        const auto state_root = root / std::to_wstring(index) / L"Data";
+        fs::create_directories(root / std::to_wstring(index) / L"portable");
+        const std::wstring instance_name =
+            L"Local\\KF2OptimizerNext-ShutdownTest-" +
+            std::to_wstring(GetCurrentProcessId()) + L"-" +
+            std::to_wstring(index);
+        kf2::app::StartOptions options{
+            .state_root = state_root,
+            .executable_root = root / std::to_wstring(index) / L"portable",
+            .instance_name = instance_name,
+            .identity = {GetCurrentProcessId(), identity++},
+            .create_window = false,
+            .mode = kf2::app::StartMode::read_only,
+        };
+        {
+            auto application = kf2::app::Application::start(options);
+            CHECK(application.has_value());
+            CHECK(read_bytes(state_root / L"session.marker").ends_with(
+                "clean_shutdown=false\n"));
+            shutdown_phase_to_throw = phases[index];
+            shutdown_phase_calls.fill(0);
+            kf2::app::set_ui_runtime_shutdown_probe_for_testing(
+                throw_selected_shutdown_phase);
+            const auto stopped = application.value().shutdown_cleanly();
+            CHECK(!stopped.has_value());
+            CHECK(stopped.error().code == kf2::ErrorCode::internal_failure);
+            CHECK(std::all_of(shutdown_phase_calls.begin(),
+                              shutdown_phase_calls.end(),
+                              [](unsigned int calls) { return calls == 1; }));
+            CHECK(read_bytes(state_root / L"session.marker").ends_with(
+                "clean_shutdown=false\n"));
+        }
+        // Destruction retries the independent restore surfaces but must never
+        // propagate the still-armed injected exception.
+        CHECK(read_bytes(state_root / L"session.marker").ends_with(
+            "clean_shutdown=false\n"));
+        shutdown_phase_to_throw.reset();
+        kf2::app::set_ui_runtime_shutdown_probe_for_testing(nullptr);
+
+        options.identity.process_start_id = identity++;
+        auto recovered = kf2::app::Application::start(options);
+        CHECK(recovered.has_value());
+        CHECK(recovered.value().shutdown_cleanly().has_value());
+        CHECK(read_bytes(state_root / L"session.marker").ends_with(
+            "clean_shutdown=true\n"));
+    }
+
+    {
+        const auto move_root = root / L"move-assignment";
+        const auto destination_root = move_root / L"destination";
+        const auto source_root = move_root / L"source";
+        fs::create_directories(move_root / L"portable");
+        kf2::app::StartOptions destination_options{
+            .state_root = destination_root,
+            .executable_root = move_root / L"portable",
+            .instance_name =
+                L"Local\\KF2OptimizerNext-ShutdownMoveDestination-" +
+                std::to_wstring(GetCurrentProcessId()),
+            .identity = {GetCurrentProcessId(), identity++},
+            .create_window = false,
+            .mode = kf2::app::StartMode::read_only,
+        };
+        auto source_options = destination_options;
+        source_options.state_root = source_root;
+        source_options.instance_name =
+            L"Local\\KF2OptimizerNext-ShutdownMoveSource-" +
+            std::to_wstring(GetCurrentProcessId());
+        source_options.identity.process_start_id = identity++;
+        auto destination = kf2::app::Application::start(
+            destination_options);
+        auto source = kf2::app::Application::start(source_options);
+        CHECK(destination.has_value());
+        CHECK(source.has_value());
+        shutdown_phase_to_throw =
+            UiRuntimeShutdownPhase::protected_config_restore;
+        kf2::app::set_ui_runtime_shutdown_probe_for_testing(
+            throw_selected_shutdown_phase);
+        destination.value() = std::move(source.value());
+        CHECK(read_bytes(destination_root / L"session.marker").ends_with(
+            "clean_shutdown=false\n"));
+        shutdown_phase_to_throw.reset();
+        kf2::app::set_ui_runtime_shutdown_probe_for_testing(nullptr);
+        CHECK(destination.value().shutdown_cleanly().has_value());
+        CHECK(read_bytes(source_root / L"session.marker").ends_with(
+            "clean_shutdown=true\n"));
+    }
+
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+#endif
 }
 
 int test_update_worker_exception_boundaries() {
@@ -678,6 +803,11 @@ int main(int argc, char** argv) {
         std::string_view{argv[1]} ==
             "--map-prewarm-start-visibility") {
         return test_map_prewarm_start_is_visible_before_worker_entry();
+    }
+    if (argc == 2 &&
+        std::string_view{argv[1]} ==
+            "--runtime-shutdown-exceptions") {
+        return test_runtime_shutdown_exception_boundaries();
     }
     try {
         const auto inaccessible = kf2::app::load_or_create_settings(
