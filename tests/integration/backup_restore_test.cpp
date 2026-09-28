@@ -38,6 +38,12 @@ void write_journal(const kf2::backup::BackupSet& backup, std::string_view state)
         "version=1\nstate=" + std::string{state} + "\nid=" + backup.id + "\n");
 }
 
+HANDLE lock_without_read_sharing(const std::filesystem::path& path) {
+    return CreateFileW(path.c_str(), GENERIC_READ,
+                       FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+}
+
 bool has_quarantined_copy(const std::filesystem::path& source,
                           std::string_view expected_bytes) {
     const auto prefix = source.filename().wstring() + L".corrupt";
@@ -102,6 +108,70 @@ int main() {
     CHECK(restored.value().files_restored == 1);
     CHECK(read_bytes(target) == original);
     CHECK(store.verify(restored.value().pre_restore_backup).has_value());
+
+    const auto unreadable_restore_root = root / L"UnreadableRestoreConfig";
+    const auto unreadable_restore_target =
+        unreadable_restore_root / L"KFEngine.ini";
+    write_bytes(unreadable_restore_target, "");
+    kf2::config::ConfigPreview unreadable_restore_preview;
+    unreadable_restore_preview.config_root = unreadable_restore_root;
+    unreadable_restore_preview.files.push_back(
+        {L"KFEngine.ini", "", "replacement"});
+    kf2::backup::BackupStore unreadable_restore_store{
+        root / L"UnreadableRestoreState"};
+    const auto unreadable_restore_applied = kf2::config::apply_preview(
+        unreadable_restore_preview, unreadable_restore_store,
+        {.game_running = false});
+    CHECK(unreadable_restore_applied.has_value());
+    const auto restore_backups_before =
+        unreadable_restore_store.list_backups();
+    CHECK(restore_backups_before.has_value());
+    HANDLE locked_restore =
+        lock_without_read_sharing(unreadable_restore_target);
+    CHECK(locked_restore != INVALID_HANDLE_VALUE);
+    const auto unreadable_restore = kf2::backup::restore_backup(
+        unreadable_restore_store,
+        unreadable_restore_applied.value().backup.id,
+        unreadable_restore_root, {.game_running = false});
+    CHECK(!unreadable_restore.has_value());
+    CHECK(unreadable_restore.error().message.find(L"read") !=
+          std::wstring::npos);
+    CHECK(CloseHandle(locked_restore) != FALSE);
+    CHECK(read_bytes(unreadable_restore_target) == "replacement");
+    const auto restore_backups_after =
+        unreadable_restore_store.list_backups();
+    CHECK(restore_backups_after.has_value());
+    CHECK(restore_backups_after.value().size() ==
+          restore_backups_before.value().size());
+
+    const auto unreadable_recovery_root = root / L"UnreadableRecoveryConfig";
+    const auto unreadable_recovery_target =
+        unreadable_recovery_root / L"KFEngine.ini";
+    write_bytes(unreadable_recovery_target, "");
+    kf2::config::ConfigPreview unreadable_recovery_preview;
+    unreadable_recovery_preview.config_root = unreadable_recovery_root;
+    unreadable_recovery_preview.files.push_back(
+        {L"KFEngine.ini", "", "replacement"});
+    kf2::backup::BackupStore unreadable_recovery_store{
+        root / L"UnreadableRecoveryState"};
+    const auto unreadable_recovery_applied = kf2::config::apply_preview(
+        unreadable_recovery_preview, unreadable_recovery_store,
+        {.game_running = false});
+    CHECK(unreadable_recovery_applied.has_value());
+    write_journal(unreadable_recovery_applied.value().backup,
+                  "replacement_started");
+    HANDLE locked_recovery =
+        lock_without_read_sharing(unreadable_recovery_target);
+    CHECK(locked_recovery != INVALID_HANDLE_VALUE);
+    const auto unreadable_recovery = kf2::backup::recover_transactions(
+        unreadable_recovery_store, unreadable_recovery_root);
+    CHECK(!unreadable_recovery.has_value());
+    CHECK(unreadable_recovery.error().message.find(L"read") !=
+          std::wstring::npos);
+    CHECK(CloseHandle(locked_recovery) != FALSE);
+    CHECK(read_bytes(unreadable_recovery_target) == "replacement");
+    CHECK(read_bytes(unreadable_recovery_applied.value().backup.journal_path)
+              .find("state=replacement_started") != std::string::npos);
 
     const auto listed = store.list_backups();
     CHECK(listed.has_value());

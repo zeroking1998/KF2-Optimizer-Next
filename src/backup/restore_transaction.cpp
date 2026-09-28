@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
-#include <iterator>
 #include <locale>
 #include <optional>
 #include <set>
@@ -20,6 +19,7 @@ namespace kf2::backup {
 namespace {
 
 constexpr std::uintmax_t max_journal_bytes = 4U * 1024U;
+constexpr std::uintmax_t max_configuration_bytes = 16U * 1024U * 1024U;
 
 struct RecoveryJournal {
     std::string state;
@@ -65,9 +65,38 @@ std::string json_escape(std::string_view value) {
     return output.str();
 }
 
-std::string read_bytes(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    return {std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+Result<std::string> read_bytes(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    if (!input.is_open()) {
+        return Result<std::string>::failure(
+            {ErrorCode::io_failure,
+             L"Restore file cannot be opened for reading", 0});
+    }
+    const auto end = input.tellg();
+    if (end < 0 || static_cast<std::uintmax_t>(end) >
+                       max_configuration_bytes) {
+        return Result<std::string>::failure(
+            {ErrorCode::io_failure,
+             L"Restore file size cannot be read safely", 0});
+    }
+    std::string bytes(static_cast<std::size_t>(end), '\0');
+    input.seekg(0, std::ios::beg);
+    if (!input || (!bytes.empty() &&
+                   (!input.read(bytes.data(),
+                                static_cast<std::streamsize>(bytes.size())) ||
+                    input.gcount() !=
+                        static_cast<std::streamsize>(bytes.size())))) {
+        return Result<std::string>::failure(
+            {ErrorCode::io_failure,
+             L"Restore file cannot be read completely", 0});
+    }
+    char extra = 0;
+    if (input.read(&extra, 1) || !input.eof()) {
+        return Result<std::string>::failure(
+            {ErrorCode::stale_data,
+             L"Restore file changed while it was being read", 0});
+    }
+    return Result<std::string>::success(std::move(bytes));
 }
 
 bool same_existing_directory(const std::filesystem::path& left,
@@ -228,7 +257,9 @@ Result<std::string> current_digest(const std::filesystem::path& path) {
             {ErrorCode::access_denied, L"Recovery target identity is unsafe",
              GetLastError()});
     }
-    return security::sha256_hex(read_bytes(path));
+    auto bytes = read_bytes(path);
+    if (!bytes.has_value()) return Result<std::string>::failure(bytes.error());
+    return security::sha256_hex(bytes.value());
 }
 
 std::optional<config::SettingId> setting_id(std::string_view name) {
@@ -482,9 +513,17 @@ Result<RestoreResult> restore_backup(
             return Result<RestoreResult>::failure(
                 {ErrorCode::access_denied, L"Restore target is outside allowlist", 0});
         }
-        const auto current = read_bytes(restore.config_root / snapshot.relative_path);
-        const auto original = read_bytes(snapshot.object_path);
-        restore.files.push_back({snapshot.relative_path, current, original});
+        auto current = read_bytes(restore.config_root / snapshot.relative_path);
+        if (!current.has_value()) {
+            return Result<RestoreResult>::failure(current.error());
+        }
+        auto original = read_bytes(snapshot.object_path);
+        if (!original.has_value()) {
+            return Result<RestoreResult>::failure(original.error());
+        }
+        restore.files.push_back({snapshot.relative_path,
+                                 std::move(current.value()),
+                                 std::move(original.value())});
     }
     auto applied = config::apply_preview(restore, store, preconditions);
     if (!applied.has_value()) return Result<RestoreResult>::failure(applied.error());
@@ -573,8 +612,13 @@ Result<RecoveryResult> recover_transactions(
                         {ErrorCode::stale_data, L"Recovery target has conflicting changes", 0});
                 }
                 if (digest.value() == snapshot.desired_sha256) {
+                    auto original = read_bytes(snapshot.object_path);
+                    if (!original.has_value()) {
+                        return Result<RecoveryResult>::failure(
+                            original.error());
+                    }
                     auto restored = platform::windows::atomic_replace_utf8(
-                        target, read_bytes(snapshot.object_path));
+                        target, original.value());
                     if (!restored.has_value()) {
                         return Result<RecoveryResult>::failure(restored.error());
                     }

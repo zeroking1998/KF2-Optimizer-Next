@@ -1,3 +1,5 @@
+#include <Windows.h>
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -25,6 +27,12 @@ void write_bytes(const std::filesystem::path& path, const std::string& bytes) {
     std::filesystem::create_directories(path.parent_path());
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     output << bytes;
+}
+
+HANDLE lock_without_read_sharing(const std::filesystem::path& path) {
+    return CreateFileW(path.c_str(), GENERIC_READ,
+                       FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 }
 
 int main() {
@@ -84,6 +92,26 @@ int main() {
     CHECK(mixed_applied.value().files_changed == 1);
     CHECK(read_bytes(unchanged_target) == "same");
     CHECK(read_bytes(changed_target) == "after");
+
+    const auto locked_root = root / L"LockedApply";
+    const auto locked_target = locked_root / L"KFEngine.ini";
+    write_bytes(locked_target, "");
+    kf2::config::ConfigPreview locked_preview;
+    locked_preview.config_root = locked_root;
+    locked_preview.files.push_back({L"KFEngine.ini", "", "replacement"});
+    kf2::backup::BackupStore locked_store{root / L"LockedApplyState"};
+    HANDLE locked_file = lock_without_read_sharing(locked_target);
+    CHECK(locked_file != INVALID_HANDLE_VALUE);
+    const auto unreadable_apply = kf2::config::apply_preview(
+        locked_preview, locked_store, {.game_running = false});
+    CHECK(!unreadable_apply.has_value());
+    CHECK(unreadable_apply.error().message.find(L"read") !=
+          std::wstring::npos);
+    CHECK(CloseHandle(locked_file) != FALSE);
+    CHECK(read_bytes(locked_target).empty());
+    const auto locked_backups = locked_store.list_backups();
+    CHECK(locked_backups.has_value());
+    CHECK(locked_backups.value().empty());
 
     const auto retained = store.prune_verified({.keep_latest = 2});
     CHECK(retained.has_value());
