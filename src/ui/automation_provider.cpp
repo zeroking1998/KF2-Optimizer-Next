@@ -18,6 +18,16 @@
 namespace kf2::ui {
 namespace {
 
+constexpr ProviderOptions kStaProviderOptions = static_cast<ProviderOptions>(
+    ProviderOptions_ServerSideProvider | ProviderOptions_UseComThreading);
+
+bool current_thread_owns_sta() noexcept {
+    APTTYPE apartment{};
+    APTTYPEQUALIFIER qualifier{};
+    if (FAILED(CoGetApartmentType(&apartment, &qualifier))) return false;
+    return apartment == APTTYPE_STA || apartment == APTTYPE_MAINSTA;
+}
+
 struct Context;
 class RootProvider;
 
@@ -93,7 +103,7 @@ public:
     }
     IFACEMETHODIMP get_ProviderOptions(ProviderOptions* options) override {
         if (!options) return E_POINTER;
-        *options = ProviderOptions_ServerSideProvider;
+        *options = kStaProviderOptions;
         return S_OK;
     }
     IFACEMETHODIMP GetPatternProvider(PATTERNID pattern, IUnknown** provider) override;
@@ -252,7 +262,7 @@ public:
     }
     IFACEMETHODIMP get_ProviderOptions(ProviderOptions* options) override {
         if (!options) return E_POINTER;
-        *options = ProviderOptions_ServerSideProvider;
+        *options = kStaProviderOptions;
         return S_OK;
     }
     IFACEMETHODIMP GetPatternProvider(PATTERNID, IUnknown** provider) override {
@@ -594,6 +604,12 @@ Result<AutomationProvider> AutomationProvider::create(HWND window, UiModel& mode
         return Result<AutomationProvider>::failure(
             {ErrorCode::invalid_argument, L"Automation requires a valid window", 0});
     }
+    if (!current_thread_owns_sta()) {
+        return Result<AutomationProvider>::failure({
+            ErrorCode::platform_failure,
+            L"Automation requires its owning UI thread to use a COM STA",
+            static_cast<std::uint32_t>(RPC_E_WRONG_THREAD)});
+    }
     try {
         auto implementation = std::make_unique<Impl>();
         implementation->context = std::make_shared<Context>();
@@ -644,6 +660,20 @@ bool AutomationProvider::update_layout(ShellLayoutResult layout) noexcept {
 #if defined(KF2_AUTOMATION_PROVIDER_TESTING)
 void AutomationProvider::fail_next_child_allocation_for_testing() noexcept {
     implementation_->context->fail_next_child_allocation = true;
+}
+
+std::uint32_t AutomationProvider::provider_options_for_testing(
+    bool child) const noexcept {
+    ProviderOptions options{};
+    IRawElementProviderSimple* provider =
+        static_cast<IRawElementProviderSimple*>(implementation_->root);
+    if (child) {
+        provider = static_cast<IRawElementProviderSimple*>(
+            implementation_->root->child(0));
+    }
+    return provider && SUCCEEDED(provider->get_ProviderOptions(&options))
+        ? static_cast<std::uint32_t>(options)
+        : 0U;
 }
 #endif
 

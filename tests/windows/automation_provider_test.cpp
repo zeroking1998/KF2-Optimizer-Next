@@ -5,9 +5,12 @@
 #include <wrl/client.h>
 
 #include <cstdlib>
+#include <atomic>
+#include <chrono>
 #include <iostream>
 #include <new>
 #include <stdexcept>
+#include <thread>
 
 #include "kf2/platform/windows/window.hpp"
 #include "kf2/platform/windows/window_events.hpp"
@@ -55,22 +58,33 @@ int main() {
     std::string invoked_action;
     std::string changed_slider;
     int changed_slider_value = -1;
+    const DWORD owning_thread = GetCurrentThreadId();
+    std::atomic_bool callback_left_owning_thread{false};
     enum class CallbackFailure { none, activation, invalidation, slider };
     CallbackFailure callback_failure = CallbackFailure::none;
     auto provider = kf2::ui::AutomationProvider::create(
         hwnd, model, kf2::ui::layout_shell(model, 800.0F, 520.0F),
         [&](std::string_view action) {
+            if (GetCurrentThreadId() != owning_thread) {
+                callback_left_owning_thread = true;
+            }
             if (callback_failure == CallbackFailure::activation) {
                 throw std::runtime_error{"activation failed"};
             }
             invoked_action.assign(action);
         },
         [&] {
+            if (GetCurrentThreadId() != owning_thread) {
+                callback_left_owning_thread = true;
+            }
             if (callback_failure == CallbackFailure::invalidation) {
                 throw std::bad_alloc{};
             }
         },
         [&](std::string_view id, int value) {
+            if (GetCurrentThreadId() != owning_thread) {
+                callback_left_owning_thread = true;
+            }
             if (callback_failure == CallbackFailure::slider) {
                 throw std::runtime_error{"slider failed"};
             }
@@ -79,6 +93,12 @@ int main() {
         });
     CHECK(provider.has_value());
     sink.provider = &provider.value();
+    constexpr auto com_threading =
+        static_cast<std::uint32_t>(ProviderOptions_UseComThreading);
+    CHECK((provider.value().provider_options_for_testing(false) &
+           com_threading) != 0);
+    CHECK((provider.value().provider_options_for_testing(true) &
+           com_threading) != 0);
 
     ComPtr<IUIAutomation> automation;
     CHECK(SUCCEEDED(CoCreateInstance(CLSID_CUIAutomation, nullptr,
@@ -194,6 +214,101 @@ int main() {
     provider.value().fail_next_child_allocation_for_testing();
     CHECK(!provider.value().update_layout(std::move(expanded_layout)));
     CHECK(SUCCEEDED(home_invoke->Invoke()));
+
+    std::atomic_bool mta_complete{false};
+    std::atomic_bool mta_failed{false};
+    std::thread mta_client{[&] {
+        const HRESULT initialized =
+            CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        if (FAILED(initialized)) {
+            mta_failed = true;
+            mta_complete = true;
+            return;
+        }
+        ComPtr<IUIAutomation> client;
+        if (FAILED(CoCreateInstance(CLSID_CUIAutomation, nullptr,
+                                    CLSCTX_INPROC_SERVER,
+                                    IID_PPV_ARGS(&client)))) {
+            mta_failed = true;
+        }
+        VARIANT item_type{};
+        item_type.vt = VT_I4;
+        item_type.lVal = UIA_ListItemControlTypeId;
+        ComPtr<IUIAutomationCondition> mta_condition;
+        if (!mta_failed &&
+            FAILED(client->CreatePropertyCondition(
+                UIA_ControlTypePropertyId, item_type, &mta_condition))) {
+            mta_failed = true;
+        }
+        for (int iteration = 0; iteration < 8 && !mta_failed; ++iteration) {
+            ComPtr<IUIAutomationElement> queried_root;
+            if (FAILED(client->ElementFromHandle(hwnd, &queried_root))) {
+                mta_failed = true;
+                break;
+            }
+            BSTR name = nullptr;
+            if (FAILED(queried_root->get_CurrentName(&name)) ||
+                std::wstring_view{name ? name : L""} !=
+                    L"KF2 Optimizer Next") {
+                mta_failed = true;
+            }
+            SysFreeString(name);
+            ComPtr<IUIAutomationElementArray> children;
+            if (FAILED(queried_root->FindAll(TreeScope_Children,
+                                             mta_condition.Get(), &children))) {
+                mta_failed = true;
+                continue;
+            }
+            int child_count = 0;
+            ComPtr<IUIAutomationElement> first_child;
+            ComPtr<IUIAutomationInvokePattern> invoke;
+            if (FAILED(children->get_Length(&child_count)) || child_count == 0 ||
+                FAILED(children->GetElement(0, &first_child)) ||
+                FAILED(first_child->GetCurrentPatternAs(
+                    UIA_InvokePatternId, IID_PPV_ARGS(&invoke))) ||
+                FAILED(invoke->Invoke())) {
+                mta_failed = true;
+            }
+        }
+        CoUninitialize();
+        mta_complete = true;
+    }};
+    const auto stress_deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{30};
+    while (!mta_complete && std::chrono::steady_clock::now() < stress_deadline) {
+        if (!provider.value().update_layout(
+                kf2::ui::layout_shell(model, 800.0F, 520.0F))) {
+            mta_failed = true;
+        }
+        MSG message{};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+        Sleep(1);
+    }
+    if (!mta_complete) {
+        std::cerr << __FILE__ << ':' << __LINE__
+                  << ": MTA UI Automation client did not shut down\n";
+        std::_Exit(EXIT_FAILURE);
+    }
+    mta_client.join();
+    CHECK(!mta_failed);
+    CHECK(!callback_left_owning_thread);
+
+    std::atomic_bool mta_creation_failed_closed{false};
+    std::thread mta_creator{[&] {
+        const HRESULT initialized =
+            CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        if (SUCCEEDED(initialized)) {
+            auto rejected = kf2::ui::AutomationProvider::create(
+                hwnd, model, kf2::ui::layout_shell(model, 800.0F, 520.0F));
+            mta_creation_failed_closed = !rejected.has_value();
+            CoUninitialize();
+        }
+    }};
+    mta_creator.join();
+    CHECK(mta_creation_failed_closed);
 
     sink.provider = nullptr;
     CoUninitialize();
