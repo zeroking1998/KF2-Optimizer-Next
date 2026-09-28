@@ -277,6 +277,9 @@ function bool RestoreOnlineCorpseMaximum(
 function bool ApplyOnlineGraphicsControl(
     string Token, int Sequence, string Resource, int Quality)
 {
+    local bool bCorpseMaximumRestored;
+    local bool bFixedEffectsApplied;
+    local bool bGraphicsRestored;
     local WorldInfo CurrentWorld;
     local KF2OptimizerAdaptiveGraphicsState CurrentState;
     local KFGoreManager GoreManager;
@@ -343,25 +346,31 @@ function bool ApplyOnlineGraphicsControl(
     }
     if (Resource ~= "disable")
     {
-        CurrentState = GetOnlineGraphicsState();
-        if (CurrentState == None) return false;
-        if (!class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
-                CurrentState))
-        {
-            return false;
-        }
-        bOnlineFixedEffectsApplied = false;
-        if (!EnsureOnlineFixedEffectsBaseline(CurrentWorld))
-        {
-            return false;
-        }
-        if (!RestoreOnlineCorpseMaximum(CurrentWorld, "disable"))
-        {
-            return false;
-        }
+        // Commit the mode transition first. The World-owned corpse controller
+        // observes this flag and performs its bounded restore independently
+        // from graphics readback and the fixed-effects baseline.
         bOnlineGraphicsEnabled = false;
         bOnlineCorpseSleepArmed = false;
+        bOnlineCorpseSleepApplied = false;
         OnlineGraphicsLastSequence = Sequence;
+        CurrentState = GetOnlineGraphicsState();
+        bGraphicsRestored = CurrentState != None &&
+            class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
+                CurrentState);
+        bOnlineFixedEffectsApplied = false;
+        bFixedEffectsApplied = EnsureOnlineFixedEffectsBaseline(CurrentWorld);
+        bCorpseMaximumRestored =
+            RestoreOnlineCorpseMaximum(CurrentWorld, "disable");
+        if (!bGraphicsRestored || !bFixedEffectsApplied ||
+            !bCorpseMaximumRestored)
+        {
+            `log("KF2OPT_ONLINE_GRAPHICS state=disabled"$
+                 " readback=deferred local_only=true");
+            // A failed corpse-limit restore needs another authenticated
+            // request. Graphics/fixed effects already have an internal
+            // backoff retry and must not keep Adaptive physics enabled.
+            return bCorpseMaximumRestored;
+        }
         `log("KF2OPT_ONLINE_GRAPHICS state=disabled fixed_effect_quality="$
              class'KF2OptimizerAdaptiveGraphics'.static.
                 GetFixedSessionEffectsQuality()$
