@@ -1,15 +1,12 @@
 #include "kf2/game/advanced_settings.hpp"
 
-#include <Windows.h>
-
 #include <algorithm>
-#include <fstream>
-#include <iterator>
 #include <map>
 #include <optional>
 #include <utility>
 
 #include "kf2/config/ini_document.hpp"
+#include "kf2/platform/windows/atomic_file.hpp"
 
 namespace kf2::game {
 namespace {
@@ -62,34 +59,9 @@ std::size_t index(AdvancedOption option) noexcept {
     return static_cast<std::size_t>(option);
 }
 
-bool safe_regular_file(const std::filesystem::path& path) {
-    const DWORD attributes = GetFileAttributesW(path.c_str());
-    return attributes != INVALID_FILE_ATTRIBUTES &&
-        (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0;
-}
-
 Result<std::string> read_file(const std::filesystem::path& path) {
-    if (!safe_regular_file(path)) {
-        return Result<std::string>::failure(
-            {ErrorCode::access_denied,
-             L"A required KF2 advanced-settings file is unsafe or missing", 0});
-    }
-    std::error_code error;
-    const auto size = std::filesystem::file_size(path, error);
-    if (error || size > 4U * 1024U * 1024U) {
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure,
-             L"A KF2 advanced-settings file is too large to read safely", 0});
-    }
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure,
-             L"A KF2 advanced-settings file cannot be opened", 0});
-    }
-    return Result<std::string>::success({
-        std::istreambuf_iterator<char>{input},
-        std::istreambuf_iterator<char>{}});
+    return platform::windows::read_bounded_verified_file(
+        path, 4U * 1024U * 1024U);
 }
 
 }  // namespace

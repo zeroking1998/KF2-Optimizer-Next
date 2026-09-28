@@ -3,7 +3,6 @@
 #include <Windows.h>
 
 #include <cstdint>
-#include <fstream>
 #include <iomanip>
 #include <locale>
 #include <optional>
@@ -70,37 +69,8 @@ std::string json_escape(std::string_view value) {
 }
 
 Result<std::string> read_bytes(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary | std::ios::ate);
-    if (!input.is_open()) {
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure,
-             L"Restore file cannot be opened for reading", 0});
-    }
-    const auto end = input.tellg();
-    if (end < 0 || static_cast<std::uintmax_t>(end) >
-                       max_configuration_bytes) {
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure,
-             L"Restore file size cannot be read safely", 0});
-    }
-    std::string bytes(static_cast<std::size_t>(end), '\0');
-    input.seekg(0, std::ios::beg);
-    if (!input || (!bytes.empty() &&
-                   (!input.read(bytes.data(),
-                                static_cast<std::streamsize>(bytes.size())) ||
-                    input.gcount() !=
-                        static_cast<std::streamsize>(bytes.size())))) {
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure,
-             L"Restore file cannot be read completely", 0});
-    }
-    char extra = 0;
-    if (input.read(&extra, 1) || !input.eof()) {
-        return Result<std::string>::failure(
-            {ErrorCode::stale_data,
-             L"Restore file changed while it was being read", 0});
-    }
-    return Result<std::string>::success(std::move(bytes));
+    return platform::windows::read_bounded_verified_file(
+        path, max_configuration_bytes);
 }
 
 bool same_existing_directory(const std::filesystem::path& left,
@@ -141,51 +111,8 @@ Result<bool> journal_state(const BackupSet& backup, std::string_view state) {
 }
 
 Result<std::string> read_recovery_journal(const std::filesystem::path& path) {
-    HANDLE file = CreateFileW(
-        path.c_str(), GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
-        OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return Result<std::string>::failure(
-            {ErrorCode::not_found, L"Recovery journal cannot be opened",
-             GetLastError()});
-    }
-    BY_HANDLE_FILE_INFORMATION information{};
-    LARGE_INTEGER size{};
-    if (!GetFileInformationByHandle(file, &information) ||
-        !GetFileSizeEx(file, &size)) {
-        const DWORD native = GetLastError();
-        CloseHandle(file);
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure, L"Recovery journal cannot be inspected", native});
-    }
-    if (size.QuadPart < 0 ||
-        (information.dwFileAttributes &
-         (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
-        information.nNumberOfLinks != 1 ||
-        static_cast<std::uintmax_t>(size.QuadPart) > max_journal_bytes) {
-        CloseHandle(file);
-        return Result<std::string>::failure(
-            {ErrorCode::access_denied,
-             L"Recovery journal identity or size is unsafe", ERROR_INVALID_DATA});
-    }
-    std::string bytes(static_cast<std::size_t>(size.QuadPart), '\0');
-    std::size_t offset = 0;
-    while (offset < bytes.size()) {
-        DWORD read = 0;
-        const DWORD requested = static_cast<DWORD>(bytes.size() - offset);
-        if (!ReadFile(file, bytes.data() + offset, requested, &read, nullptr) ||
-            read == 0) {
-            const DWORD native = GetLastError();
-            CloseHandle(file);
-            return Result<std::string>::failure(
-                {ErrorCode::io_failure, L"Recovery journal cannot be read", native});
-        }
-        offset += read;
-    }
-    CloseHandle(file);
-    return Result<std::string>::success(std::move(bytes));
+    return platform::windows::read_bounded_verified_file(
+        path, max_journal_bytes);
 }
 
 Result<RecoveryJournal> parse_journal(std::string_view bytes,

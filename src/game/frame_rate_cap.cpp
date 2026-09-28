@@ -1,8 +1,6 @@
 #include "kf2/game/frame_rate_cap.hpp"
 
-#include <fstream>
 #include <iomanip>
-#include <iterator>
 #include <sstream>
 #include <string>
 
@@ -16,17 +14,11 @@ namespace {
 constexpr std::wstring_view kStartupSection = L"Startup";
 constexpr std::wstring_view kConsoleCapKey = L"t.MaxFPS";
 constexpr std::wstring_view kGameEngineSection = L"KFGame.KFGameEngine";
+constexpr std::uintmax_t kMaximumFrameCapConfigBytes = 4U * 1024U * 1024U;
 
 Result<std::string> read_file(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-        return Result<std::string>::failure(
-            {ErrorCode::not_found,
-             L"Required KF2 frame-cap configuration file is missing", 0});
-    }
-    return Result<std::string>::success(
-        {std::istreambuf_iterator<char>{input},
-         std::istreambuf_iterator<char>{}});
+    return platform::windows::read_bounded_verified_file(
+        path, kMaximumFrameCapConfigBytes);
 }
 
 std::wstring fixed_fps(int value) {

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "kf2/game/game_discovery.hpp"
+#include "kf2/platform/windows/atomic_file.hpp"
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -31,6 +32,21 @@ void write_test_pe(const std::filesystem::path& path, WORD machine) {
     std::ofstream output(path, std::ios::binary);
     output.write(reinterpret_cast<const char*>(bytes.data()),
                  static_cast<std::streamsize>(bytes.size()));
+}
+
+bool metadata_mutation_succeeded = false;
+std::filesystem::path metadata_replacement;
+
+void grow_metadata_during_read(const std::filesystem::path& path) {
+    std::ofstream output(path, std::ios::binary | std::ios::app);
+    output << std::string(1024, 'x');
+    metadata_mutation_succeeded = output.good();
+}
+
+void replace_metadata_during_read(const std::filesystem::path& path) {
+    metadata_mutation_succeeded = ReplaceFileW(
+        path.c_str(), metadata_replacement.c_str(), nullptr,
+        REPLACEFILE_WRITE_THROUGH, nullptr, nullptr) != FALSE;
 }
 
 int main() {
@@ -57,6 +73,41 @@ int main() {
     const auto config = documents / L"My Games/KillingFloor2/KFGame/Config";
     fs::create_directories(config);
     write_test_pe(executable, IMAGE_FILE_MACHINE_AMD64);
+
+    const auto metadata = fixture / L"Steam/steamapps/libraryfolders.vdf";
+    fs::create_directories(metadata.parent_path());
+    {
+        std::ofstream output(metadata, std::ios::binary);
+        output << R"("libraryfolders" { "0" { "path" "D:\\Steam" } })";
+    }
+    metadata_mutation_succeeded = false;
+    kf2::platform::windows::set_bounded_read_hook_for_testing(
+        &grow_metadata_during_read);
+    const auto grown_metadata =
+        kf2::game::read_steam_library_metadata_for_testing(metadata);
+    kf2::platform::windows::set_bounded_read_hook_for_testing(nullptr);
+    CHECK(metadata_mutation_succeeded);
+    CHECK(!grown_metadata.has_value());
+    CHECK(grown_metadata.error().code == kf2::ErrorCode::stale_data);
+
+    {
+        std::ofstream output(metadata, std::ios::binary | std::ios::trunc);
+        output << "original";
+    }
+    metadata_replacement = fixture / L"Steam/steamapps/replacement.vdf";
+    {
+        std::ofstream output(metadata_replacement, std::ios::binary);
+        output << "replacement";
+    }
+    metadata_mutation_succeeded = false;
+    kf2::platform::windows::set_bounded_read_hook_for_testing(
+        &replace_metadata_during_read);
+    const auto replaced_metadata =
+        kf2::game::read_steam_library_metadata_for_testing(metadata);
+    kf2::platform::windows::set_bounded_read_hook_for_testing(nullptr);
+    CHECK(metadata_mutation_succeeded);
+    CHECK(!replaced_metadata.has_value());
+    CHECK(replaced_metadata.error().code == kf2::ErrorCode::stale_data);
 
     kf2::game::GameDiscoveryInput input{
         .manual_candidates = {install, install / L"."},

@@ -355,7 +355,7 @@ Result<std::string> read_bounded_verified_file(
                      native_error == ERROR_PATH_NOT_FOUND
                  ? ErrorCode::not_found
                  : ErrorCode::io_failure,
-             L"Bounded file cannot be opened", native_error});
+             L"Bounded file cannot be opened for reading", native_error});
     }
 
     BY_HANDLE_FILE_INFORMATION before{};

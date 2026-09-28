@@ -551,6 +551,8 @@ add_executable(kf2_game_discovery_test
 )
 target_include_directories(kf2_game_discovery_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_game_discovery_test PRIVATE
+    KF2_ATOMIC_FILE_TESTING
+    KF2_GAME_DISCOVERY_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/game-discovery"
 )
 target_link_libraries(kf2_game_discovery_test PRIVATE user32)
@@ -1006,6 +1008,7 @@ set(KF2_FOUNDATION_TEST_TARGETS
     kf2_application_lifecycle_test
     kf2_video_settings_test
     kf2_advanced_settings_test
+    kf2_game_discovery_test
     kf2_gameplay_log_lab_test
     kf2_ini_document_test
     kf2_catalog_test

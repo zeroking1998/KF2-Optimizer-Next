@@ -11,8 +11,12 @@
 #include <string>
 #include <string_view>
 
+#include "kf2/platform/windows/atomic_file.hpp"
+
 namespace kf2::game {
 namespace {
+
+constexpr std::uintmax_t kMaximumSteamMetadataBytes = 4U * 1024U * 1024U;
 
 std::wstring normalized_key(const std::filesystem::path& path) {
     std::wstring value = path.lexically_normal().wstring();
@@ -101,32 +105,7 @@ Result<std::wstring> utf8_path(std::string_view text) {
 
 Result<std::string> read_bounded_regular_file(const std::filesystem::path& path,
                                               std::uintmax_t maximum) {
-    const DWORD attributes = GetFileAttributesW(path.c_str());
-    if (attributes == INVALID_FILE_ATTRIBUTES ||
-        (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
-        return Result<std::string>::failure(
-            {ErrorCode::not_found, L"Steam library metadata was not found", 0});
-    }
-    std::error_code error;
-    const auto size = std::filesystem::file_size(path, error);
-    if (error || size > maximum) {
-        return Result<std::string>::failure(
-            {ErrorCode::invalid_argument,
-             L"Steam library metadata exceeds the safe size limit", 0});
-    }
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure, L"Steam library metadata cannot be opened", 0});
-    }
-    std::string bytes{std::istreambuf_iterator<char>{input},
-                      std::istreambuf_iterator<char>{}};
-    if (bytes.size() != size) {
-        return Result<std::string>::failure(
-            {ErrorCode::stale_data,
-             L"Steam library metadata changed while being read", 0});
-    }
-    return Result<std::string>::success(std::move(bytes));
+    return platform::windows::read_bounded_verified_file(path, maximum);
 }
 
 void add_steam_root(GameDiscoveryInput& input,
@@ -135,7 +114,8 @@ void add_steam_root(GameDiscoveryInput& input,
     input.steam_registry_candidates.push_back(
         steam_root / L"steamapps/common/KillingFloor2");
     const auto metadata = read_bounded_regular_file(
-        steam_root / L"steamapps/libraryfolders.vdf", 4 * 1024 * 1024);
+        steam_root / L"steamapps/libraryfolders.vdf",
+        kMaximumSteamMetadataBytes);
     if (!metadata.has_value()) return;
     const auto libraries = parse_steam_library_folders(metadata.value());
     if (!libraries.has_value()) return;
@@ -146,6 +126,13 @@ void add_steam_root(GameDiscoveryInput& input,
 }
 
 }  // namespace
+
+#if defined(KF2_GAME_DISCOVERY_TESTING)
+Result<std::string> read_steam_library_metadata_for_testing(
+    const std::filesystem::path& path) {
+    return read_bounded_regular_file(path, kMaximumSteamMetadataBytes);
+}
+#endif
 
 Result<std::vector<std::filesystem::path>>
 parse_steam_library_folders(std::string_view document) {

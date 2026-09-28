@@ -182,6 +182,12 @@ int main() {
     CHECK(no_space.error().message.find(L"Insufficient space") !=
           std::wstring::npos);
     CHECK(read_bytes(target) == original);
+
+    fs::resize_file(target, 16U * 1024U * 1024U + 1U);
+    const auto oversized_live_ini = kf2::config::apply_preview(
+        preview, store, {.game_running = false});
+    CHECK(!oversized_live_ini.has_value());
+    CHECK(oversized_live_ini.error().code == kf2::ErrorCode::access_denied);
     fs::remove_all(root);
     return EXIT_SUCCESS;
 }

@@ -266,6 +266,11 @@ int main() {
     CHECK(recovered.value().outcome == kf2::backup::RecoveryOutcome::clean);
 
     const auto object_path = applied.value().backup.snapshots[0].object_path;
+    fs::resize_file(object_path, 16U * 1024U * 1024U + 1U);
+    const auto oversized_object = store.verify(applied.value().backup);
+    CHECK(!oversized_object.has_value());
+    CHECK(oversized_object.error().code == kf2::ErrorCode::access_denied);
+    write_bytes(object_path, original);
     write_bytes(object_path, "corrupt");
     write_journal(applied.value().backup, "replacement_started");
     CHECK(!kf2::backup::recover_transactions(store, config_root).has_value());
