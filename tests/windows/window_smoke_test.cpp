@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <stdexcept>
 #include <vector>
 
 #include "kf2/platform/windows/window.hpp"
@@ -59,6 +60,62 @@ public:
     kf2::platform::windows::WindowSize last_size{};
     kf2::platform::windows::WindowKey last_key{};
 };
+
+class ThrowingSink final : public kf2::platform::windows::WindowEventSink {
+public:
+    enum class Failure { none, paint, timer, pointer, accessibility, close, theme };
+
+    void on_paint() override {
+        ++paints;
+        fail(Failure::paint);
+    }
+    void on_resize(kf2::platform::windows::WindowSize) override {}
+    void on_dpi_changed(
+        kf2::platform::windows::DpiChangedEvent) override {}
+    void on_key(kf2::platform::windows::KeyEvent) override {}
+    void on_pointer(kf2::platform::windows::PointerEvent) override {
+        ++pointers;
+        fail(Failure::pointer);
+    }
+    void on_theme_changed(
+        kf2::platform::windows::ThemeChangedEvent) override {
+        ++themes;
+        fail(Failure::theme);
+    }
+    void on_system_resume() override {}
+    bool on_close() override {
+        ++closes;
+        fail(Failure::close);
+        return true;
+    }
+    LRESULT on_get_object(WPARAM, LPARAM) override {
+        ++accessibility_requests;
+        fail(Failure::accessibility);
+        return 1;
+    }
+    void on_timer(UINT_PTR) override {
+        ++timers;
+        fail(Failure::timer);
+    }
+
+    Failure failure{Failure::none};
+    int paints{0};
+    int timers{0};
+    int pointers{0};
+    int accessibility_requests{0};
+    int closes{0};
+    int themes{0};
+
+private:
+    void fail(Failure point) const {
+        if (failure == point) throw std::runtime_error{"injected callback failure"};
+    }
+};
+
+bool take_close_request(HWND window) {
+    MSG message{};
+    return PeekMessageW(&message, window, WM_CLOSE, WM_CLOSE, PM_REMOVE) != FALSE;
+}
 
 int main() {
     {
@@ -118,6 +175,94 @@ int main() {
         CHECK(size.width_dip > 0 && size.height_dip > 0);
         SendMessageW(window, WM_CLOSE, 0, 0);
         CHECK(sink.closes == 1);
+    }
+
+    {
+        ThrowingSink sink;
+        const auto created = kf2::platform::windows::Window::create(
+            {.title = L"KF2 Optimizer paint failure test",
+             .width = 320, .height = 180, .visible = false, .sink = &sink});
+        CHECK(created.has_value());
+        const auto window = static_cast<HWND>(
+            created.value().native_handle_for_testing());
+        sink.failure = ThrowingSink::Failure::paint;
+        CHECK(InvalidateRect(window, nullptr, FALSE));
+        SendMessageW(window, WM_PAINT, 0, 0);
+        CHECK(sink.paints == 1);
+        CHECK(GetUpdateRect(window, nullptr, FALSE) == FALSE);
+        CHECK(take_close_request(window));
+        SendMessageW(window, WM_PAINT, 0, 0);
+        CHECK(sink.paints == 1);
+    }
+
+    {
+        ThrowingSink sink;
+        const auto created = kf2::platform::windows::Window::create(
+            {.title = L"KF2 Optimizer timer failure test",
+             .width = 320, .height = 180, .visible = false, .sink = &sink});
+        CHECK(created.has_value());
+        const auto window = static_cast<HWND>(
+            created.value().native_handle_for_testing());
+        sink.failure = ThrowingSink::Failure::timer;
+        SendMessageW(window, WM_TIMER, 1, 0);
+        CHECK(sink.timers == 1);
+        CHECK(take_close_request(window));
+        SendMessageW(window, WM_TIMER, 1, 0);
+        CHECK(sink.timers == 1);
+    }
+
+    {
+        ThrowingSink sink;
+        const auto created = kf2::platform::windows::Window::create(
+            {.title = L"KF2 Optimizer pointer failure test",
+             .width = 320, .height = 180, .visible = false, .sink = &sink});
+        CHECK(created.has_value());
+        const auto window = static_cast<HWND>(
+            created.value().native_handle_for_testing());
+        sink.failure = ThrowingSink::Failure::pointer;
+        SendMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(20, 20));
+        CHECK(sink.pointers == 1);
+        CHECK(GetCapture() != window);
+        CHECK(take_close_request(window));
+    }
+
+    {
+        ThrowingSink sink;
+        const auto created = kf2::platform::windows::Window::create(
+            {.title = L"KF2 Optimizer accessibility failure test",
+             .width = 320, .height = 180, .visible = false, .sink = &sink});
+        CHECK(created.has_value());
+        const auto window = static_cast<HWND>(
+            created.value().native_handle_for_testing());
+        sink.failure = ThrowingSink::Failure::accessibility;
+        SendMessageW(window, WM_GETOBJECT, 0, OBJID_CLIENT);
+        CHECK(sink.accessibility_requests == 1);
+        CHECK(take_close_request(window));
+    }
+
+    {
+        ThrowingSink sink;
+        const auto created = kf2::platform::windows::Window::create(
+            {.title = L"KF2 Optimizer close failure test",
+             .width = 320, .height = 180, .visible = false, .sink = &sink});
+        CHECK(created.has_value());
+        const auto window = static_cast<HWND>(
+            created.value().native_handle_for_testing());
+        sink.failure = ThrowingSink::Failure::close;
+        SendMessageW(window, WM_CLOSE, 0, 0);
+        CHECK(sink.closes == 1);
+        CHECK(IsWindow(window) == FALSE);
+    }
+
+    {
+        ThrowingSink sink;
+        sink.failure = ThrowingSink::Failure::theme;
+        const auto created = kf2::platform::windows::Window::create(
+            {.title = L"KF2 Optimizer initial theme failure test",
+             .width = 320, .height = 180, .visible = false, .sink = &sink});
+        CHECK(!created.has_value());
+        CHECK(created.error().code == kf2::ErrorCode::internal_failure);
+        CHECK(sink.themes == 1);
     }
 
     const auto second = kf2::platform::windows::Window::create(
