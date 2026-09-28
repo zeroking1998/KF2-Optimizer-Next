@@ -28,6 +28,11 @@ struct UpdateTransactionResult {
     std::string installed_version;
 };
 
+#if defined(KF2_UPDATE_TRANSACTION_TESTING)
+using ManagedReadHook = void (*)(const std::filesystem::path& path);
+void set_managed_read_hook_for_testing(ManagedReadHook hook) noexcept;
+#endif
+
 [[nodiscard]] Result<std::string> package_version(
     const std::filesystem::path& package_root);
 

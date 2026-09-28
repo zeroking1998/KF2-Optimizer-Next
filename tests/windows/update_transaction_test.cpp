@@ -97,6 +97,12 @@ void reset_root(const std::filesystem::path& root) {
     std::filesystem::create_directories(root);
 }
 
+std::filesystem::path partial_read_target;
+
+void truncate_managed_read(const std::filesystem::path& path) {
+    if (path == partial_read_target) write_file(path, "short");
+}
+
 }  // namespace
 
 int main() {
@@ -190,6 +196,69 @@ int main() {
     CHECK(kf2::update::package_version(long_target).value() ==
           "0.0.3-alpha");
     CHECK(user_data_unchanged(long_target));
+
+    const auto partial_backup_root = root / L"partial-backup";
+    const auto partial_backup_target = partial_backup_root / L"target";
+    const auto partial_backup_staged = partial_backup_root / L"staged";
+    const auto partial_backup = partial_backup_root / L"backup";
+    write_package(partial_backup_target, "old-build", "0.0.2-alpha", "old");
+    write_package(partial_backup_staged, "new-build", "0.0.3-alpha", "new");
+    partial_read_target = partial_backup_target / L"KF2Optimizer.exe";
+    kf2::update::set_managed_read_hook_for_testing(&truncate_managed_read);
+    const auto partial_backup_result =
+        kf2::update::apply_update_transaction({
+            .target_root = partial_backup_target,
+            .staged_root = partial_backup_staged,
+            .backup_root = partial_backup,
+            .expected_new_version = "0.0.3-alpha",
+        });
+    kf2::update::set_managed_read_hook_for_testing(nullptr);
+    CHECK(!partial_backup_result.has_value());
+    CHECK(!fs::exists(partial_backup));
+
+    const auto partial_staged_root = root / L"partial-staged";
+    const auto partial_staged_target = partial_staged_root / L"target";
+    const auto partial_staged = partial_staged_root / L"staged";
+    const auto partial_staged_backup = partial_staged_root / L"backup";
+    write_package(partial_staged_target, "old-build", "0.0.2-alpha", "old");
+    write_package(partial_staged, "new-build", "0.0.3-alpha", "new");
+    partial_read_target = partial_staged / L"KF2Optimizer.exe";
+    kf2::update::set_managed_read_hook_for_testing(&truncate_managed_read);
+    const auto partial_staged_result =
+        kf2::update::apply_update_transaction({
+            .target_root = partial_staged_target,
+            .staged_root = partial_staged,
+            .backup_root = partial_staged_backup,
+            .expected_new_version = "0.0.3-alpha",
+        });
+    kf2::update::set_managed_read_hook_for_testing(nullptr);
+    CHECK(!partial_staged_result.has_value());
+    CHECK(!fs::exists(partial_staged_backup));
+    CHECK(read_file(partial_staged_target / L"KF2Optimizer.exe") ==
+          "old executable");
+
+    const auto partial_rollback_root = root / L"partial-rollback";
+    const auto partial_rollback_target = partial_rollback_root / L"target";
+    const auto partial_rollback_staged = partial_rollback_root / L"staged";
+    const auto partial_rollback_backup = partial_rollback_root / L"backup";
+    write_package(partial_rollback_target, "old-build", "0.0.2-alpha", "old");
+    write_package(partial_rollback_staged, "new-build", "0.0.3-alpha", "new");
+    CHECK(kf2::update::apply_update_transaction({
+        .target_root = partial_rollback_target,
+        .staged_root = partial_rollback_staged,
+        .backup_root = partial_rollback_backup,
+        .expected_new_version = "0.0.3-alpha",
+    }).has_value());
+    partial_read_target = partial_rollback_backup / L"KF2Optimizer.exe";
+    kf2::update::set_managed_read_hook_for_testing(&truncate_managed_read);
+    const auto partial_rollback_result =
+        kf2::update::rollback_update_transaction(
+            partial_rollback_target, partial_rollback_backup);
+    kf2::update::set_managed_read_hook_for_testing(nullptr);
+    CHECK(!partial_rollback_result.has_value());
+    CHECK(read_file(partial_rollback_target / L"KF2Optimizer.exe") ==
+          "new executable");
+
     std::error_code cleanup_error;
     fs::remove_all(native_long_root, cleanup_error);
     fs::remove_all(
