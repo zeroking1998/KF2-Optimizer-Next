@@ -25,6 +25,10 @@ constexpr std::uintmax_t maximum_file_bytes = 16U * 1024U * 1024U;
 constexpr std::uintmax_t maximum_total_bytes = 128U * 1024U * 1024U;
 constexpr std::uintmax_t maximum_manifest_bytes = 1024U * 1024U;
 
+#if defined(KF2_SESSION_GUARD_TESTING)
+SessionReadHook session_read_hook{};
+#endif
+
 Result<std::string> read_verified_file(
     const std::filesystem::path& path, std::uintmax_t limit);
 
@@ -192,7 +196,7 @@ Result<std::string> read_verified_file(const std::filesystem::path& path,
                                        std::uintmax_t maximum_size) {
     HANDLE file = CreateFileW(
         path.c_str(), GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
         OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
         nullptr);
     if (file == INVALID_HANDLE_VALUE) {
@@ -214,6 +218,9 @@ Result<std::string> read_verified_file(const std::filesystem::path& path,
             {ErrorCode::access_denied,
              L"Session configuration file identity or size is unsafe", native});
     }
+#if defined(KF2_SESSION_GUARD_TESTING)
+    if (session_read_hook) session_read_hook(path);
+#endif
     std::string bytes(static_cast<std::size_t>(size.QuadPart), '\0');
     std::size_t offset = 0;
     while (offset < bytes.size()) {
@@ -230,7 +237,26 @@ Result<std::string> read_verified_file(const std::filesystem::path& path,
         }
         offset += read;
     }
+    BY_HANDLE_FILE_INFORMATION after{};
+    const bool inspected_after =
+        GetFileInformationByHandle(file, &after) != FALSE;
+    const bool stable = inspected_after &&
+        information.dwVolumeSerialNumber == after.dwVolumeSerialNumber &&
+        information.nFileIndexHigh == after.nFileIndexHigh &&
+        information.nFileIndexLow == after.nFileIndexLow &&
+        information.nFileSizeHigh == after.nFileSizeHigh &&
+        information.nFileSizeLow == after.nFileSizeLow &&
+        CompareFileTime(&information.ftLastWriteTime,
+                        &after.ftLastWriteTime) == 0;
+    const DWORD native = stable
+        ? ERROR_SUCCESS
+        : inspected_after ? ERROR_FILE_INVALID : GetLastError();
     CloseHandle(file);
+    if (!stable) {
+        return Result<std::string>::failure(
+            {ErrorCode::stale_data,
+             L"Session configuration file changed while it was read", native});
+    }
     return Result<std::string>::success(std::move(bytes));
 }
 
@@ -416,6 +442,12 @@ Result<bool> ensure_safe_parent(const std::filesystem::path& root,
 }
 
 }  // namespace
+
+#if defined(KF2_SESSION_GUARD_TESTING)
+void set_session_read_hook_for_testing(SessionReadHook hook) noexcept {
+    session_read_hook = hook;
+}
+#endif
 
 Result<SessionConfigSnapshot> capture_session_config(
     const std::filesystem::path& config_root,

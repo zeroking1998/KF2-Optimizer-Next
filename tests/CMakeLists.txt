@@ -220,6 +220,7 @@ add_executable(kf2_session_config_guard_test
 )
 target_include_directories(kf2_session_config_guard_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_session_config_guard_test PRIVATE
+    KF2_SESSION_GUARD_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/session-config-guard")
 target_link_libraries(kf2_session_config_guard_test PRIVATE bcrypt)
 add_test(NAME kf2_session_config_guard_test COMMAND kf2_session_config_guard_test)
