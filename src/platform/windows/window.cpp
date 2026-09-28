@@ -42,6 +42,45 @@ struct WindowState {
     bool tracking_mouse{false};
 };
 
+class PaintCycle final {
+public:
+    explicit PaintCycle(HWND window) noexcept : window_{window} {
+        static_cast<void>(BeginPaint(window_, &paint_));
+    }
+    ~PaintCycle() { static_cast<void>(EndPaint(window_, &paint_)); }
+
+    PaintCycle(const PaintCycle&) = delete;
+    PaintCycle& operator=(const PaintCycle&) = delete;
+
+private:
+    HWND window_{nullptr};
+    PAINTSTRUCT paint_{};
+};
+
+LRESULT contain_callback_failure(HWND window, UINT message, WPARAM wparam,
+                                 LPARAM lparam) noexcept {
+    auto* state = reinterpret_cast<WindowState*>(
+        GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (state != nullptr) state->sink = nullptr;
+    if (GetCapture() == window) static_cast<void>(ReleaseCapture());
+
+    if (message == WM_CLOSE) {
+        if (IsWindow(window) != FALSE) static_cast<void>(DestroyWindow(window));
+        return 0;
+    }
+    if (message != WM_DESTROY && message != WM_NCDESTROY &&
+        IsWindow(window) != FALSE &&
+        PostMessageW(window, WM_CLOSE, 0, 0) == FALSE) {
+        static_cast<void>(DestroyWindow(window));
+    }
+    if (message == WM_POWERBROADCAST) return TRUE;
+    if (message == WM_GETOBJECT || message == WM_THEMECHANGED ||
+        message == WM_SYSCOLORCHANGE || message == WM_SETTINGCHANGE) {
+        return DefWindowProcW(window, message, wparam, lparam);
+    }
+    return 0;
+}
+
 WindowSize client_size(HWND window, float dpi) {
     RECT rectangle{};
     if (GetClientRect(window, &rectangle) == FALSE || dpi <= 0.0F) {
@@ -86,25 +125,24 @@ bool translate_key(WPARAM key, WindowKey& translated) {
 }
 
 LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM wparam,
-                                  LPARAM lparam) {
-    auto* state = reinterpret_cast<WindowState*>(
-        GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lparam);
-        state = static_cast<WindowState*>(create->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA,
-                          reinterpret_cast<LONG_PTR>(state));
-    }
+                                  LPARAM lparam) noexcept {
+    try {
+        auto* state = reinterpret_cast<WindowState*>(
+            GetWindowLongPtrW(window, GWLP_USERDATA));
+        if (message == WM_NCCREATE) {
+            const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lparam);
+            state = static_cast<WindowState*>(create->lpCreateParams);
+            SetWindowLongPtrW(window, GWLP_USERDATA,
+                              reinterpret_cast<LONG_PTR>(state));
+        }
 
-    WindowEventSink* sink = state != nullptr ? state->sink : nullptr;
-    switch (message) {
+        WindowEventSink* sink = state != nullptr ? state->sink : nullptr;
+        switch (message) {
         case WM_PAINT: {
-            PAINTSTRUCT paint{};
-            BeginPaint(window, &paint);
+            PaintCycle paint{window};
             if (sink != nullptr) {
                 sink->on_paint();
             }
-            EndPaint(window, &paint);
             return 0;
         }
         case WM_SIZE:
@@ -254,8 +292,11 @@ LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM wparam,
             break;
         default:
             break;
+        }
+        return DefWindowProcW(window, message, wparam, lparam);
+    } catch (...) {
+        return contain_callback_failure(window, message, wparam, lparam);
     }
-    return DefWindowProcW(window, message, wparam, lparam);
 }
 
 Result<ATOM> ensure_window_class(HINSTANCE instance) {
@@ -332,7 +373,15 @@ Result<Window> Window::create(const WindowOptions& options) {
     }
     state->dpi = static_cast<float>(GetDpiForWindow(window));
     if (options.sink != nullptr) {
-        options.sink->on_theme_changed(system_theme());
+        try {
+            options.sink->on_theme_changed(system_theme());
+        } catch (...) {
+            static_cast<void>(DestroyWindow(window));
+            delete state;
+            return Result<Window>::failure(
+                {ErrorCode::internal_failure,
+                 L"Initial window theme callback failed", 0});
+        }
     }
     return Result<Window>::success(Window{window, state});
 }
