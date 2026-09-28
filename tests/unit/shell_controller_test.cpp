@@ -585,13 +585,19 @@ int main() {
     const DipRect rejected_bounds = rejected_target->bounds;
     const float rejected_y = rejected_bounds.y + rejected_bounds.height - 25.0F;
     rejected_controller.on_pointer({PointerKind::press,
+        {rejected_bounds.x + rejected_bounds.width - 30.0F, rejected_y}, 0});
+    rejected_controller.on_pointer({PointerKind::release,
+        {rejected_bounds.x + rejected_bounds.width - 30.0F, rejected_y}, 0});
+    CHECK(rejected_requests == 3);
+    CHECK(rejected_model.presented_target_fps() == 60);
+    rejected_controller.on_pointer({PointerKind::press,
         {rejected_bounds.x + 30.0F, rejected_y}, 0});
     rejected_controller.on_pointer({PointerKind::move,
         {rejected_bounds.x + rejected_bounds.width - 30.0F, rejected_y}, 0});
     CHECK(rejected_model.presented_target_fps() > 60);
     rejected_controller.on_pointer({PointerKind::release,
         {rejected_bounds.x + rejected_bounds.width - 30.0F, rejected_y}, 0});
-    CHECK(rejected_requests == 3);
+    CHECK(rejected_requests == 4);
     CHECK(rejected_model.presented_target_fps() == 60);
 
     UiModel saved_model;
