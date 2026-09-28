@@ -13,6 +13,34 @@ static function int GetFixedSessionEffectsQuality()
     return FixedSessionEffectsQuality;
 }
 
+// This is the wire vocabulary shared by both authenticated endpoints. Keep it
+// aligned with AdaptiveResourceControl in the native client.
+static function bool IsAdaptiveControlResource(string Resource)
+{
+    return (Resource ~= "cpu") || (Resource ~= "gpu") ||
+        (Resource ~= "vram") || (Resource ~= "ram") ||
+        (Resource ~= "overdraw") || (Resource ~= "effects") ||
+        (Resource ~= "mixed") || (Resource ~= "recover") ||
+        (Resource ~= "enable") || (Resource ~= "disable");
+}
+
+static function bool IsAdaptiveQualityResource(string Resource)
+{
+    return IsAdaptiveControlResource(Resource) &&
+        !(Resource ~= "enable") && !(Resource ~= "disable");
+}
+
+// Joined servers expose only capabilities with independent client-local
+// evidence. Live effect-manager parity for overdraw/effects remains tracked in
+// issue #205, so those known protocol values receive an explicit capability
+// rejection instead of being mistaken for malformed input.
+static function bool IsOnlineAdaptiveQualityResource(string Resource)
+{
+    return (Resource ~= "cpu") || (Resource ~= "gpu") ||
+        (Resource ~= "vram") || (Resource ~= "ram") ||
+        (Resource ~= "mixed") || (Resource ~= "recover");
+}
+
 static function int GetEffectiveOverdrawQuality(
     KF2OptimizerAdaptiveGraphicsState Snapshot)
 {

@@ -22,6 +22,13 @@ namespace {
 std::atomic_bool fail_next_dispatch_publication{false};
 #endif
 
+constexpr std::array<std::string_view, 10> kAdaptiveResourceNames{
+    "cpu", "gpu", "vram", "ram", "overdraw", "effects", "mixed",
+    "recover", "enable", "disable"};
+static_assert(
+    kAdaptiveResourceNames.size() ==
+    static_cast<std::size_t>(AdaptiveResourceControl::disable) + 1);
+
 class WinsockSession final {
 public:
     WinsockSession() noexcept {
@@ -53,16 +60,12 @@ private:
 
 std::optional<AdaptiveResourceControl> parse_resource(
     std::string_view value) noexcept {
-    if (value == "cpu") return AdaptiveResourceControl::cpu;
-    if (value == "gpu") return AdaptiveResourceControl::gpu;
-    if (value == "vram") return AdaptiveResourceControl::vram;
-    if (value == "ram") return AdaptiveResourceControl::ram;
-    if (value == "overdraw") return AdaptiveResourceControl::overdraw;
-    if (value == "effects") return AdaptiveResourceControl::effects;
-    if (value == "mixed") return AdaptiveResourceControl::mixed;
-    if (value == "recover") return AdaptiveResourceControl::recover;
-    if (value == "enable") return AdaptiveResourceControl::enable;
-    if (value == "disable") return AdaptiveResourceControl::disable;
+    for (std::size_t index = 0; index < kAdaptiveResourceNames.size();
+         ++index) {
+        if (value == kAdaptiveResourceNames[index]) {
+            return static_cast<AdaptiveResourceControl>(index);
+        }
+    }
     return std::nullopt;
 }
 
@@ -137,19 +140,11 @@ bool connect_with_timeout(SOCKET socket, const sockaddr_in& address,
 
 std::string_view adaptive_resource_control_name(
     AdaptiveResourceControl resource) noexcept {
-    switch (resource) {
-        case AdaptiveResourceControl::cpu: return "cpu";
-        case AdaptiveResourceControl::gpu: return "gpu";
-        case AdaptiveResourceControl::vram: return "vram";
-        case AdaptiveResourceControl::ram: return "ram";
-        case AdaptiveResourceControl::overdraw: return "overdraw";
-        case AdaptiveResourceControl::effects: return "effects";
-        case AdaptiveResourceControl::mixed: return "mixed";
-        case AdaptiveResourceControl::recover: return "recover";
-        case AdaptiveResourceControl::enable: return "enable";
-        case AdaptiveResourceControl::disable: return "disable";
-    }
-    return "mixed";
+    const auto index = static_cast<std::size_t>(resource);
+    return index < kAdaptiveResourceNames.size()
+        ? kAdaptiveResourceNames[index]
+        : kAdaptiveResourceNames[
+              static_cast<std::size_t>(AdaptiveResourceControl::mixed)];
 }
 
 AdaptiveResourceQualityState::AdaptiveResourceQualityState(
@@ -289,7 +284,8 @@ std::optional<AdaptiveControlReceipt> parse_adaptive_control_receipt(
     const auto quality_text = take_token(response);
     if (prefix != "KF2OPT_ACK" ||
         (status != "applied" && status != "restored" &&
-         status != "unknown") || !response.empty()) {
+         status != "unknown" && status != "unsupported") ||
+        !response.empty()) {
         return std::nullopt;
     }
     AdaptiveControlReceipt receipt;
@@ -300,10 +296,15 @@ std::optional<AdaptiveControlReceipt> parse_adaptive_control_receipt(
         return std::nullopt;
     }
     receipt.resource = *resource;
-    receipt.status = status == "applied"
-        ? AdaptiveControlReceiptStatus::applied
-        : status == "restored" ? AdaptiveControlReceiptStatus::restored
-                               : AdaptiveControlReceiptStatus::state_unknown;
+    if (status == "applied") {
+        receipt.status = AdaptiveControlReceiptStatus::applied;
+    } else if (status == "restored") {
+        receipt.status = AdaptiveControlReceiptStatus::restored;
+    } else if (status == "unsupported") {
+        receipt.status = AdaptiveControlReceiptStatus::unsupported;
+    } else {
+        receipt.status = AdaptiveControlReceiptStatus::state_unknown;
+    }
     const bool mode_enable =
         receipt.resource == AdaptiveResourceControl::enable;
     const bool valid_value = mode_enable

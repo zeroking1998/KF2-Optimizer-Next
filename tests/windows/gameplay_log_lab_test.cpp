@@ -162,13 +162,47 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find("KF2OPT_ADAPTIVE_QUALITY state=applied") !=
           std::string::npos);
-    CHECK(telemetry_source.find("Resource ~= \"overdraw\"") ==
+    const auto control_vocabulary_start = graphics_source.find(
+        "static function bool IsAdaptiveControlResource(");
+    const auto quality_vocabulary_start = graphics_source.find(
+        "static function bool IsAdaptiveQualityResource(");
+    const auto online_vocabulary_start = graphics_source.find(
+        "static function bool IsOnlineAdaptiveQualityResource(");
+    const auto effective_overdraw_start = graphics_source.find(
+        "static function int GetEffectiveOverdrawQuality(");
+    CHECK(control_vocabulary_start != std::string::npos);
+    CHECK(quality_vocabulary_start != std::string::npos);
+    CHECK(online_vocabulary_start != std::string::npos);
+    CHECK(effective_overdraw_start != std::string::npos);
+    const auto control_vocabulary = graphics_source.substr(
+        control_vocabulary_start,
+        quality_vocabulary_start - control_vocabulary_start);
+    const auto quality_vocabulary = graphics_source.substr(
+        quality_vocabulary_start,
+        online_vocabulary_start - quality_vocabulary_start);
+    const auto online_vocabulary = graphics_source.substr(
+        online_vocabulary_start,
+        effective_overdraw_start - online_vocabulary_start);
+    for (const auto resource : {"cpu", "gpu", "vram", "ram", "overdraw",
+                                "effects", "mixed", "recover", "enable",
+                                "disable"}) {
+        CHECK(count_occurrences(control_vocabulary,
+            std::string{"Resource ~= \""} + resource + "\"") == 1);
+    }
+    CHECK(quality_vocabulary.find("IsAdaptiveControlResource(Resource)") !=
           std::string::npos);
-    CHECK(telemetry_source.find("Resource ~= \"effects\"") ==
+    CHECK(count_occurrences(
+        quality_vocabulary, "Resource ~= \"enable\"") == 1);
+    CHECK(count_occurrences(
+        quality_vocabulary, "Resource ~= \"disable\"") == 1);
+    for (const auto resource : {"cpu", "gpu", "vram", "ram", "mixed",
+                                "recover"}) {
+        CHECK(count_occurrences(online_vocabulary,
+            std::string{"Resource ~= \""} + resource + "\"") == 1);
+    }
+    CHECK(online_vocabulary.find("Resource ~= \"overdraw\"") ==
           std::string::npos);
-    CHECK(online_context_source.find("Resource ~= \"overdraw\"") ==
-          std::string::npos);
-    CHECK(online_context_source.find("Resource ~= \"effects\"") ==
+    CHECK(online_vocabulary.find("Resource ~= \"effects\"") ==
           std::string::npos);
     CHECK(telemetry_source.find("var globalconfig bool bAdaptiveRuntimeEnabled") !=
           std::string::npos);
@@ -191,6 +225,20 @@ int main() {
         "function bool ApplyAdaptiveResourceControl");
     CHECK(adaptive_runtime_function != std::string::npos);
     CHECK(adaptive_control_function != std::string::npos);
+    const auto adaptive_control_end = telemetry_source.find(
+        "function bool ApplyAdaptiveEffectRuntimeReadback(",
+        adaptive_control_function);
+    CHECK(adaptive_control_end != std::string::npos);
+    const auto adaptive_control_body = telemetry_source.substr(
+        adaptive_control_function,
+        adaptive_control_end - adaptive_control_function);
+    CHECK(adaptive_control_body.find("IsAdaptiveControlResource(Resource)") !=
+          std::string::npos);
+    CHECK(adaptive_control_body.find("IsAdaptiveQualityResource(Resource)") !=
+          std::string::npos);
+    CHECK(adaptive_control_body.find(
+        "ApplyAdaptiveEffectRuntimeReadback(Resource, Quality)") !=
+          std::string::npos);
     const auto adaptive_disable_body = telemetry_source.substr(
         adaptive_runtime_function,
         adaptive_control_function - adaptive_runtime_function);
@@ -574,6 +622,17 @@ int main() {
           corpse_snapshot_clear);
     const auto online_apply_body = online_context_source.substr(
         online_apply_function, online_sleep_function - online_apply_function);
+    CHECK(online_apply_body.find("IsAdaptiveControlResource(Resource)") !=
+          std::string::npos);
+    CHECK(online_apply_body.find("IsAdaptiveQualityResource(Resource)") !=
+          std::string::npos);
+    CHECK(online_apply_body.find(
+        "IsOnlineAdaptiveQualityResource(Resource)") != std::string::npos);
+    CHECK(online_apply_body.find(
+        "bLastOnlineGraphicsCapabilityRejected = true") !=
+          std::string::npos);
+    CHECK(online_apply_body.find("reason=capability_unavailable") !=
+          std::string::npos);
     const auto corpse_capture_call = online_apply_body.find(
         "CaptureOnlineCorpseMaximum(CurrentWorld, GoreManager)");
     const auto corpse_limit_write = online_apply_body.find(
@@ -846,6 +905,10 @@ int main() {
         "class'KF2OptimizerOnlineCorpseController'") != std::string::npos);
     CHECK(online_graphics_connection_source.find(
         "ApplyOnlineGraphicsControl(") != std::string::npos);
+    CHECK(online_graphics_connection_source.find(
+        "WasOnlineGraphicsCapabilityRejected()") != std::string::npos);
+    CHECK(online_graphics_connection_source.find(
+        " unsupported \"$Resource$\" \"$Quality") != std::string::npos);
     CHECK(online_graphics_connection_source.find("DynamicActors") ==
           std::string::npos);
     CHECK(online_graphics_connection_source.find("AllActors") ==

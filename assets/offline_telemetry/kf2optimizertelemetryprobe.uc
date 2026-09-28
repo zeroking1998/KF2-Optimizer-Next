@@ -587,12 +587,13 @@ function bool ApplyAdaptiveResourceControl(
     bAdaptiveQualityRestoreCompletedForLastCommand = false;
     if (!ValidAdaptiveControlToken(Token) || Sequence <= 0 ||
         Sequence <= AdaptiveLastControlSequence ||
+        !class'KF2OptimizerAdaptiveGraphics'.static.
+            IsAdaptiveControlResource(Resource) ||
         (((Resource ~= "enable") && (Quality < 4 || Quality > 2000)) ||
          (!(Resource ~= "enable") && (Quality < 10 || Quality > 100))) ||
-        !((Resource ~= "gpu") || (Resource ~= "vram") ||
-          (Resource ~= "cpu") || (Resource ~= "ram") ||
-          (Resource ~= "mixed") || (Resource ~= "recover") ||
-          (Resource ~= "enable") || (Resource ~= "disable")))
+        (!((Resource ~= "enable") || (Resource ~= "disable")) &&
+         !class'KF2OptimizerAdaptiveGraphics'.static.
+            IsAdaptiveQualityResource(Resource)))
     {
         return false;
     }

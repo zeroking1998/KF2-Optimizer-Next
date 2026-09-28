@@ -1,5 +1,6 @@
 #include <WinSock2.h>
 
+#include <array>
 #include <atomic>
 #include <cstdlib>
 #include <iostream>
@@ -34,6 +35,62 @@ int main() {
     const auto generated = generate_adaptive_control_token();
     CHECK(generated.has_value());
     CHECK(valid_adaptive_control_token(generated.value()));
+
+    struct ResourceCase final {
+        AdaptiveResourceControl resource;
+        std::string_view name;
+    };
+    constexpr std::array<ResourceCase, 10> resources{{
+        {AdaptiveResourceControl::cpu, "cpu"},
+        {AdaptiveResourceControl::gpu, "gpu"},
+        {AdaptiveResourceControl::vram, "vram"},
+        {AdaptiveResourceControl::ram, "ram"},
+        {AdaptiveResourceControl::overdraw, "overdraw"},
+        {AdaptiveResourceControl::effects, "effects"},
+        {AdaptiveResourceControl::mixed, "mixed"},
+        {AdaptiveResourceControl::recover, "recover"},
+        {AdaptiveResourceControl::enable, "enable"},
+        {AdaptiveResourceControl::disable, "disable"},
+    }};
+    std::uint64_t resource_sequence = 100;
+    for (const auto& resource : resources) {
+        CHECK(adaptive_resource_control_name(resource.resource) ==
+              resource.name);
+        const auto resource_command = build_adaptive_control_command({
+            .port = 17777,
+            .token = token,
+            .sequence = resource_sequence,
+            .resource = resource.resource,
+            .quality = 50,
+            .timeout_ms = 200});
+        CHECK(resource_command.has_value());
+        CHECK(resource_command.value() ==
+              "KF2OPT 0123456789abcdef0123456789abcdef " +
+                  std::to_string(resource_sequence) + " " +
+                  std::string{resource.name} + " 50\n");
+        for (const auto status : {std::string_view{"applied"},
+                                  std::string_view{"restored"},
+                                  std::string_view{"unknown"},
+                                  std::string_view{"unsupported"}}) {
+            const auto parsed = parse_adaptive_control_receipt(
+                "KF2OPT_ACK " + std::to_string(resource_sequence) + " " +
+                std::string{status} + " " + std::string{resource.name} +
+                " 50\r\n");
+            CHECK(parsed.has_value());
+            CHECK(parsed->sequence == resource_sequence);
+            CHECK(parsed->resource == resource.resource);
+            CHECK(parsed->quality == 50);
+            const auto expected_status = status == "applied"
+                ? AdaptiveControlReceiptStatus::applied
+                : status == "restored"
+                    ? AdaptiveControlReceiptStatus::restored
+                    : status == "unknown"
+                        ? AdaptiveControlReceiptStatus::state_unknown
+                        : AdaptiveControlReceiptStatus::unsupported;
+            CHECK(parsed->status == expected_status);
+        }
+        ++resource_sequence;
+    }
 
     const auto command = build_adaptive_control_command({
         .port = 17777,
