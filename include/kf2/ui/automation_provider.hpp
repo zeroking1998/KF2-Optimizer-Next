@@ -1,7 +1,9 @@
 #pragma once
 
 #include <Windows.h>
+#include <Unknwn.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -31,6 +33,9 @@ public:
     [[nodiscard]] bool update_layout(ShellLayoutResult layout) noexcept;
 #if defined(KF2_AUTOMATION_PROVIDER_TESTING)
     void fail_next_child_allocation_for_testing() noexcept;
+    [[nodiscard]] IUnknown* retain_child_for_testing(
+        std::size_t index) const noexcept;
+    void disconnect_for_testing() noexcept;
     [[nodiscard]] std::uint32_t provider_options_for_testing(
         bool child) const noexcept;
 #endif

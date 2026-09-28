@@ -676,7 +676,7 @@ HRESULT RootProvider::GetFocus(IRawElementProviderFragment** provider) {
 struct AutomationProvider::Impl {
     std::shared_ptr<Context> context;
     RootProvider* root{};
-    ~Impl() {
+    void disconnect() noexcept {
         if (!root) return;
         static_cast<void>(UiaDisconnectProvider(
             static_cast<IRawElementProviderSimple*>(root)));
@@ -688,6 +688,7 @@ struct AutomationProvider::Impl {
         root->Release();
         root = nullptr;
     }
+    ~Impl() { disconnect(); }
 };
 
 AutomationProvider::AutomationProvider(std::unique_ptr<Impl> implementation)
@@ -765,6 +766,18 @@ bool AutomationProvider::update_layout(ShellLayoutResult layout) noexcept {
 #if defined(KF2_AUTOMATION_PROVIDER_TESTING)
 void AutomationProvider::fail_next_child_allocation_for_testing() noexcept {
     implementation_->context->fail_next_child_allocation = true;
+}
+
+IUnknown* AutomationProvider::retain_child_for_testing(
+    std::size_t index) const noexcept {
+    if (!implementation_->root) return nullptr;
+    auto* child = implementation_->root->child(index);
+    if (child) child->AddRef();
+    return static_cast<IRawElementProviderFragment*>(child);
+}
+
+void AutomationProvider::disconnect_for_testing() noexcept {
+    implementation_->disconnect();
 }
 
 std::uint32_t AutomationProvider::provider_options_for_testing(
