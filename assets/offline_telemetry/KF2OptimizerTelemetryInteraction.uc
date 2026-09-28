@@ -9,6 +9,7 @@ const AchievementPrewarmRequestTimeoutSeconds=10.0;
 var string OptimizerContextState;
 var string OptimizerProbeState;
 var string OptimizerGameplayUiState;
+var bool bTelemetryBootstrapInserted;
 var bool bGameSessionEnding;
 var KF2OptimizerAdaptiveGraphicsState ProcessAdaptiveGraphicsState;
 var bool bProcessAdaptiveRuntimeStateInitialized;
@@ -29,6 +30,16 @@ var int ProcessGraphicsRestoreAttempts;
 var float ProcessGraphicsRestoreNextAttemptRealTime;
 var float ProcessGraphicsRestoreRetryDelay;
 var string ProcessGraphicsRestoreRetryStatus;
+
+function bool IsTelemetryBootstrapInserted()
+{
+    return bTelemetryBootstrapInserted;
+}
+
+function MarkTelemetryBootstrapInserted()
+{
+    bTelemetryBootstrapInserted = true;
+}
 
 function SetProcessAdaptiveRuntimeEnabled(bool bEnabled)
 {
