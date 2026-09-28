@@ -285,6 +285,13 @@ var float AdaptiveLastDistancePhysicsRealTime;
 var float AdaptiveLastCorpseFreezeRealTime;
 var int AdaptiveCorpsePhysicsPressureLevel;
 var array<AdaptiveCorpseFreezeEntry> AdaptiveFrozenCorpses;
+// A same-world GoreManager replacement must not discard physics ownership.
+// Retired entries drain independently so one stale actor cannot delay the new
+// manager or block current-manager work.
+var array<AdaptiveCorpseFreezeEntry> AdaptiveRetiredFrozenCorpses;
+var array<AdaptiveDistanceSleepEntry> AdaptiveRetiredDistanceSleptCorpses;
+var int AdaptiveRetiredFreezeCursor;
+var int AdaptiveRetiredDistanceWakeCursor;
 var int AdaptiveVisibleLivingZeds;
 var float AdaptiveVisibleLivingObservedRealTime;
 var int AdaptiveCachedVisibleCorpses;
@@ -1273,8 +1280,97 @@ function bool HasConfirmedAdaptivePerformancePressure()
         !(AdaptiveGraphicsResource ~= "recover");
 }
 
+function RetireAdaptiveCorpseManagerOwnership(KFGoreManager NewManager)
+{
+    local bool bOldLimitRestored;
+    local int Index;
+    local int RetiredFrozenCount;
+    local int RetiredSleptCount;
+
+    if (AdaptiveCorpseManager == NewManager ||
+        (AdaptiveCorpseManager == None &&
+         !bAdaptiveCorpseStaggerInitialized))
+    {
+        return;
+    }
+
+    if (AdaptiveCorpseManager != None &&
+        !AdaptiveCorpseManager.bDeleteMe)
+    {
+        AdaptiveCorpseManager.MaxDeadBodies = AdaptiveCorpseOriginalLimit;
+        bOldLimitRestored =
+            AdaptiveCorpseManager.MaxDeadBodies == AdaptiveCorpseOriginalLimit;
+    }
+    for (Index = 0; Index < AdaptiveFrozenCorpses.Length; ++Index)
+    {
+        AdaptiveRetiredFrozenCorpses.AddItem(
+            AdaptiveFrozenCorpses[Index]);
+        ++RetiredFrozenCount;
+    }
+    for (Index = 0; Index < AdaptiveDistanceSleptCorpses.Length; ++Index)
+    {
+        AdaptiveRetiredDistanceSleptCorpses.AddItem(
+            AdaptiveDistanceSleptCorpses[Index]);
+        ++RetiredSleptCount;
+    }
+
+    // Everything below belongs to the old manager generation. Keep only the
+    // two state-bearing physics ledgers above; their actors are released by a
+    // separate fair cursor after the new manager has initialized.
+    AdaptiveCorpseManager = None;
+    bAdaptiveCorpseStaggerInitialized = false;
+    AdaptiveFrozenCorpses.Length = 0;
+    AdaptiveDistanceSleptCorpses.Length = 0;
+    AdaptiveBaselineSettleEntries.Length = 0;
+    FixedMinimumCorpseLodCorpses.Length = 0;
+    FixedMinimumCorpseLodAppliedMinModels.Length = 0;
+    FixedMinimumLivingVisualZeds.Length = 0;
+    FixedMinimumLivingAppliedMinLods.Length = 0;
+    FixedMinimumLivingAppliedAnimDistances.Length = 0;
+    FixedMinimumLivingAppliedAnimRates.Length = 0;
+    FixedMinimumLivingOriginalTickAnimOffscreen.Length = 0;
+    FixedMinimumLivingOriginalUpdateSkelOffscreen.Length = 0;
+    FixedMinimumLivingOffscreenAnimReduced.Length = 0;
+    AdaptiveDistanceSleepTransitions.Length = 0;
+    AdaptiveDistanceSleepTransitionCount = 0;
+    AdaptiveDistanceSleepTransitionPruneCursor = 0;
+    bAdaptiveDistanceSleepTransitionFullLogged = false;
+    AdaptiveCorpsePhysicsActionIds.Length = 0;
+    AdaptiveCorpsePhysicsActionIdCount = 0;
+    AdaptiveCorpseDebugMarkers.Length = 0;
+    AdaptiveDebugMarkerScreenEntries.Length = 0;
+    AdaptiveCorpseControlPhase = 0;
+    AdaptiveCorpseBurstFreezeCount = 0;
+    FixedMinimumVisualControlPhase = 0;
+    AdaptiveCleanupScanCursor = 0;
+    AdaptiveBaselineScanCursor = 0;
+    AdaptiveFreezeScanCursor = 0;
+    AdaptiveDistanceScanCursor = 0;
+    FixedMinimumCorpseLodScanCursor = 0;
+    AdaptiveRagdollScanCursor = 0;
+    FixedMinimumAnimationScanCursor = 0;
+    AdaptiveBaselinePruneCursor = 0;
+    AdaptiveFreezePruneCursor = 0;
+    AdaptiveDistancePruneCursor = 0;
+    AdaptiveDistanceWakeScanCursor = 0;
+    AdaptiveRetiredFreezeCursor = 0;
+    AdaptiveRetiredDistanceWakeCursor = 0;
+    FixedMinimumCorpseLodPruneCursor = 0;
+    FixedMinimumLivingScanPawn = None;
+    FixedMinimumLivingPruneCursor = 0;
+    FixedMinimumLivingVisualBurstCount = 0;
+    bFixedMinimumLivingVisualUrgentRepeat = false;
+    bAdaptiveCorpseControlUrgentRepeat = false;
+
+    `log("KF2OPT_CORPSE_MANAGER state=replaced retired_frozen="$
+         RetiredFrozenCount$" retired_slept="$RetiredSleptCount$
+         " old_limit_restored="$bOldLimitRestored$
+         " release=bounded_fair");
+}
+
 function InitializeAdaptiveCorpseStagger(KFGoreManager GoreManager)
 {
+    RetireAdaptiveCorpseManagerOwnership(GoreManager);
     AdaptiveCorpseManager = GoreManager;
     AdaptiveCorpseOriginalLimit = GoreManager.MaxDeadBodies;
     if (AdaptiveCorpseMaximum >= 4 && AdaptiveCorpseMaximum <= 2000)
@@ -1307,7 +1403,6 @@ function InitializeAdaptiveCorpseStagger(KFGoreManager GoreManager)
     AdaptiveBaselineSettleEntries.Length = 0;
     AdaptiveLastBaselineDeferredRealTime =
         WorldInfo.RealTimeSeconds - 1.0;
-    AdaptiveFrozenCorpses.Length = 0;
     AdaptiveLastNearRagdollRejectRealTime =
         WorldInfo.RealTimeSeconds - 2.0;
     AdaptiveCorpseControlPhase = 0;
@@ -1323,6 +1418,8 @@ function InitializeAdaptiveCorpseStagger(KFGoreManager GoreManager)
     AdaptiveFreezePruneCursor = 0;
     AdaptiveDistancePruneCursor = 0;
     AdaptiveDistanceWakeScanCursor = 0;
+    AdaptiveRetiredFreezeCursor = 0;
+    AdaptiveRetiredDistanceWakeCursor = 0;
     FixedMinimumCorpseLodPruneCursor = 0;
     FixedMinimumLivingScanPawn = None;
     FixedMinimumLivingPruneCursor = 0;
@@ -3206,24 +3303,25 @@ function bool IsAdaptiveCorpseRecycledStateSafe(KFPawn Candidate)
           Candidate.CollisionComponent.BlockRigidBody));
 }
 
-function bool TryRestoreAdaptiveCorpseFreeze(int Index, string Reason)
+function bool RestoreAdaptiveCorpseFreezeState(
+    KFPawn Candidate,
+    string CorpseId,
+    bool bOriginalTickDisabled,
+    bool bOriginalCollideActors,
+    bool bOriginalBlockActors,
+    bool bOriginalIgnoreEncroachers,
+    bool bHadCollisionComponent,
+    bool bOriginalBlockRigidBody,
+    string Reason)
 {
     local bool bNeedsPhysicsMutation;
     local int DistanceUnits;
-    local KFPawn Candidate;
 
-    if (Index < 0 || Index >= AdaptiveFrozenCorpses.Length)
-    {
-        return false;
-    }
-    Candidate = AdaptiveFrozenCorpses[Index].Corpse;
     if (Candidate == None || Candidate.bDeleteMe ||
-        GetAdaptiveCorpseActionId(Candidate) !=
-            AdaptiveFrozenCorpses[Index].CorpseId)
+        GetAdaptiveCorpseActionId(Candidate) != CorpseId)
     {
         LogAdaptiveCorpseFreezeReleaseFailure(
-            AdaptiveFrozenCorpses[Index].CorpseId,
-            "identity_not_owned");
+            CorpseId, "identity_not_owned");
         return false;
     }
     bNeedsPhysicsMutation = Candidate.Physics != PHYS_RigidBody;
@@ -3231,45 +3329,36 @@ function bool TryRestoreAdaptiveCorpseFreeze(int Index, string Reason)
         !ReserveAdaptivePhysicsMutationForCurrentFrame())
     {
         LogAdaptiveCorpseFreezeReleaseFailure(
-            AdaptiveFrozenCorpses[Index].CorpseId,
-            "physics_frame_reserved");
+            CorpseId, "physics_frame_reserved");
         return false;
     }
     Candidate.SetCollision(
-        AdaptiveFrozenCorpses[Index].bOriginalCollideActors,
-        AdaptiveFrozenCorpses[Index].bOriginalBlockActors,
-        AdaptiveFrozenCorpses[Index].bOriginalIgnoreEncroachers);
-    if (AdaptiveFrozenCorpses[Index].bHadCollisionComponent)
+        bOriginalCollideActors,
+        bOriginalBlockActors,
+        bOriginalIgnoreEncroachers);
+    if (bHadCollisionComponent)
     {
         if (Candidate.CollisionComponent == None)
         {
             LogAdaptiveCorpseFreezeReleaseFailure(
-                AdaptiveFrozenCorpses[Index].CorpseId,
-                "collision_component_missing");
+                CorpseId, "collision_component_missing");
             return false;
         }
         Candidate.CollisionComponent.SetBlockRigidBody(
-            AdaptiveFrozenCorpses[Index].bOriginalBlockRigidBody);
+            bOriginalBlockRigidBody);
     }
-    Candidate.SetTickIsDisabled(
-        AdaptiveFrozenCorpses[Index].bOriginalTickDisabled);
-    if (Candidate.bCollideActors !=
-            AdaptiveFrozenCorpses[Index].bOriginalCollideActors ||
-        Candidate.bBlockActors !=
-            AdaptiveFrozenCorpses[Index].bOriginalBlockActors ||
-        Candidate.bIgnoreEncroachers !=
-            AdaptiveFrozenCorpses[Index].bOriginalIgnoreEncroachers ||
-        Candidate.bTickIsDisabled !=
-            AdaptiveFrozenCorpses[Index].bOriginalTickDisabled ||
-        (Candidate.CollisionComponent != None) !=
-            AdaptiveFrozenCorpses[Index].bHadCollisionComponent ||
-        (AdaptiveFrozenCorpses[Index].bHadCollisionComponent &&
+    Candidate.SetTickIsDisabled(bOriginalTickDisabled);
+    if (Candidate.bCollideActors != bOriginalCollideActors ||
+        Candidate.bBlockActors != bOriginalBlockActors ||
+        Candidate.bIgnoreEncroachers != bOriginalIgnoreEncroachers ||
+        Candidate.bTickIsDisabled != bOriginalTickDisabled ||
+        (Candidate.CollisionComponent != None) != bHadCollisionComponent ||
+        (bHadCollisionComponent &&
          Candidate.CollisionComponent.BlockRigidBody !=
-            AdaptiveFrozenCorpses[Index].bOriginalBlockRigidBody))
+            bOriginalBlockRigidBody))
     {
         LogAdaptiveCorpseFreezeReleaseFailure(
-            AdaptiveFrozenCorpses[Index].CorpseId,
-            "collision_or_tick_readback");
+            CorpseId, "collision_or_tick_readback");
         return false;
     }
     if (bNeedsPhysicsMutation)
@@ -3278,20 +3367,37 @@ function bool TryRestoreAdaptiveCorpseFreeze(int Index, string Reason)
         if (Candidate.Physics != PHYS_RigidBody)
         {
             LogAdaptiveCorpseFreezeReleaseFailure(
-                AdaptiveFrozenCorpses[Index].CorpseId,
-                "physics_readback");
+                CorpseId, "physics_readback");
             return false;
         }
     }
     DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
     `log("KF2OPT_CORPSE_DISTANCE state=unfrozen reason="$Reason$
-         " corpse_id="$AdaptiveFrozenCorpses[Index].CorpseId$
+         " corpse_id="$CorpseId$
          " distance_units="$DistanceUnits$
          " distance_m="$FormatAdaptiveCorpseDistanceMeters(
              DistanceUnits, false)$
          " physics=rigid_body readback=verified"$
          " collision=restored tick=restored");
     return true;
+}
+
+function bool TryRestoreAdaptiveCorpseFreeze(int Index, string Reason)
+{
+    if (Index < 0 || Index >= AdaptiveFrozenCorpses.Length)
+    {
+        return false;
+    }
+    return RestoreAdaptiveCorpseFreezeState(
+        AdaptiveFrozenCorpses[Index].Corpse,
+        AdaptiveFrozenCorpses[Index].CorpseId,
+        AdaptiveFrozenCorpses[Index].bOriginalTickDisabled,
+        AdaptiveFrozenCorpses[Index].bOriginalCollideActors,
+        AdaptiveFrozenCorpses[Index].bOriginalBlockActors,
+        AdaptiveFrozenCorpses[Index].bOriginalIgnoreEncroachers,
+        AdaptiveFrozenCorpses[Index].bHadCollisionComponent,
+        AdaptiveFrozenCorpses[Index].bOriginalBlockRigidBody,
+        Reason);
 }
 
 function int ReleaseOneAdaptiveCorpseFreeze(bool bRestoreAll)
@@ -3377,6 +3483,187 @@ function PruneAdaptiveCorpseFreezes()
 function int RestoreOneAdaptiveCorpseFreeze()
 {
     return ReleaseOneAdaptiveCorpseFreeze(true);
+}
+
+function int ReleaseOneRetiredAdaptiveCorpseFreeze()
+{
+    local bool bRemoved;
+    local int Index;
+    local int Scanned;
+    local string CurrentId;
+    local KFPawn Candidate;
+
+    if (AdaptiveRetiredFrozenCorpses.Length <= 0)
+    {
+        AdaptiveRetiredFreezeCursor = 0;
+        return 0;
+    }
+    AdaptiveRetiredFreezeCursor = Clamp(
+        AdaptiveRetiredFreezeCursor, 0,
+        AdaptiveRetiredFrozenCorpses.Length - 1);
+    while (AdaptiveRetiredFrozenCorpses.Length > 0 &&
+           Scanned < AdaptiveCorpseScanBudget)
+    {
+        Index = Clamp(AdaptiveRetiredFreezeCursor, 0,
+            AdaptiveRetiredFrozenCorpses.Length - 1);
+        Candidate = AdaptiveRetiredFrozenCorpses[Index].Corpse;
+        bRemoved = false;
+        ++Scanned;
+        if (Candidate == None || Candidate.bDeleteMe)
+        {
+            AdaptiveRetiredFrozenCorpses.Remove(Index, 1);
+            bRemoved = true;
+        }
+        else
+        {
+            CurrentId = GetAdaptiveCorpseActionId(Candidate);
+            if (CurrentId !=
+                    AdaptiveRetiredFrozenCorpses[Index].CorpseId)
+            {
+                if (IsAdaptiveCorpseRecycledStateSafe(Candidate))
+                {
+                    `log("KF2OPT_CORPSE_DISTANCE state=ownership_released"$
+                         " reason=manager_replaced_reused old_corpse_id="$
+                         AdaptiveRetiredFrozenCorpses[Index].CorpseId$
+                         " current_corpse_id="$CurrentId$
+                         " readback=verified");
+                    AdaptiveRetiredFrozenCorpses.Remove(Index, 1);
+                    bRemoved = true;
+                }
+                else
+                {
+                    LogAdaptiveCorpseFreezeReleaseFailure(
+                        AdaptiveRetiredFrozenCorpses[Index].CorpseId,
+                        "manager_replaced_reused_state_unverified");
+                }
+            }
+            else if (RestoreAdaptiveCorpseFreezeState(
+                    Candidate,
+                    AdaptiveRetiredFrozenCorpses[Index].CorpseId,
+                    AdaptiveRetiredFrozenCorpses[Index].bOriginalTickDisabled,
+                    AdaptiveRetiredFrozenCorpses[Index].bOriginalCollideActors,
+                    AdaptiveRetiredFrozenCorpses[Index].bOriginalBlockActors,
+                    AdaptiveRetiredFrozenCorpses[Index].bOriginalIgnoreEncroachers,
+                    AdaptiveRetiredFrozenCorpses[Index].bHadCollisionComponent,
+                    AdaptiveRetiredFrozenCorpses[Index].bOriginalBlockRigidBody,
+                    "manager_replaced"))
+            {
+                AdaptiveRetiredFrozenCorpses.Remove(Index, 1);
+                AdaptiveRetiredFreezeCursor =
+                    AdaptiveRetiredFrozenCorpses.Length > 0 ?
+                    Index % AdaptiveRetiredFrozenCorpses.Length : 0;
+                return 1;
+            }
+        }
+        AdaptiveRetiredFreezeCursor =
+            AdaptiveRetiredFrozenCorpses.Length > 0 ?
+            (bRemoved ? Index % AdaptiveRetiredFrozenCorpses.Length :
+             (Index + 1) % AdaptiveRetiredFrozenCorpses.Length) : 0;
+    }
+    return 0;
+}
+
+function int WakeOneRetiredAdaptiveDistanceSleptCorpse()
+{
+    local bool bRemoved;
+    local int Index;
+    local int Scanned;
+    local string CurrentId;
+    local KFPawn Candidate;
+
+    if (AdaptiveRetiredDistanceSleptCorpses.Length <= 0)
+    {
+        AdaptiveRetiredDistanceWakeCursor = 0;
+        return 0;
+    }
+    AdaptiveRetiredDistanceWakeCursor = Clamp(
+        AdaptiveRetiredDistanceWakeCursor, 0,
+        AdaptiveRetiredDistanceSleptCorpses.Length - 1);
+    while (AdaptiveRetiredDistanceSleptCorpses.Length > 0 &&
+           Scanned < AdaptiveCorpseScanBudget)
+    {
+        Index = Clamp(AdaptiveRetiredDistanceWakeCursor, 0,
+            AdaptiveRetiredDistanceSleptCorpses.Length - 1);
+        Candidate = AdaptiveRetiredDistanceSleptCorpses[Index].Corpse;
+        bRemoved = false;
+        ++Scanned;
+        if (Candidate == None || Candidate.bDeleteMe)
+        {
+            AdaptiveRetiredDistanceSleptCorpses.Remove(Index, 1);
+            bRemoved = true;
+        }
+        else
+        {
+            CurrentId = GetAdaptiveCorpseActionId(Candidate);
+            if (CurrentId !=
+                    AdaptiveRetiredDistanceSleptCorpses[Index].CorpseId)
+            {
+                `log("KF2OPT_CORPSE_DISTANCE state=ownership_released"$
+                     " reason=manager_replaced_reused old_corpse_id="$
+                     AdaptiveRetiredDistanceSleptCorpses[Index].CorpseId$
+                     " current_corpse_id="$CurrentId);
+                AdaptiveRetiredDistanceSleptCorpses.Remove(Index, 1);
+                bRemoved = true;
+            }
+            else if (Candidate.Mesh == None ||
+                     Candidate.Physics != PHYS_RigidBody ||
+                     Candidate.Mesh.RigidBodyIsAwake())
+            {
+                AdaptiveRetiredDistanceSleptCorpses.Remove(Index, 1);
+                bRemoved = true;
+            }
+            else if (!ReserveAdaptivePhysicsMutationForCurrentFrame())
+            {
+                AdaptiveRetiredDistanceWakeCursor =
+                    (Index + 1) %
+                    AdaptiveRetiredDistanceSleptCorpses.Length;
+                return 0;
+            }
+            else
+            {
+                Candidate.Mesh.WakeRigidBody();
+                if (Candidate.Mesh.RigidBodyIsAwake())
+                {
+                    Candidate.Mesh.bNoSkeletonUpdate = false;
+                    ++AdaptiveDistancePhysicsWakes;
+                    `log("KF2OPT_CORPSE_DISTANCE state=wake"$
+                         " reason=manager_replaced corpse_id="$CurrentId$
+                         " readback=verified");
+                    AdaptiveRetiredDistanceSleptCorpses.Remove(Index, 1);
+                    AdaptiveRetiredDistanceWakeCursor =
+                        AdaptiveRetiredDistanceSleptCorpses.Length > 0 ?
+                        Index % AdaptiveRetiredDistanceSleptCorpses.Length : 0;
+                }
+                else
+                {
+                    LogAdaptiveCorpseFreezeReleaseFailure(
+                        AdaptiveRetiredDistanceSleptCorpses[Index].CorpseId,
+                        "manager_replaced_wake_readback");
+                    AdaptiveRetiredDistanceWakeCursor =
+                        (Index + 1) %
+                        AdaptiveRetiredDistanceSleptCorpses.Length;
+                }
+                // A wake attempt consumes the one physics mutation allowed in
+                // this game frame, including a failed readback.
+                return 1;
+            }
+        }
+        AdaptiveRetiredDistanceWakeCursor =
+            AdaptiveRetiredDistanceSleptCorpses.Length > 0 ?
+            (bRemoved ?
+             Index % AdaptiveRetiredDistanceSleptCorpses.Length :
+             (Index + 1) % AdaptiveRetiredDistanceSleptCorpses.Length) : 0;
+    }
+    return 0;
+}
+
+function int ReleaseOneRetiredAdaptiveCorpseOwnership()
+{
+    if (ReleaseOneRetiredAdaptiveCorpseFreeze() > 0)
+    {
+        return 1;
+    }
+    return WakeOneRetiredAdaptiveDistanceSleptCorpse();
 }
 
 function bool FreezeOnePressureEligibleCorpse(
@@ -3819,12 +4106,16 @@ function int WakeAdaptiveDistanceSleptCorpseBatch()
 
 function AdaptiveCorpsePhysicsRelease()
 {
-    if (RestoreOneAdaptiveCorpseFreeze() <= 0)
+    if (RestoreOneAdaptiveCorpseFreeze() <= 0 &&
+        ReleaseOneRetiredAdaptiveCorpseFreeze() <= 0 &&
+        WakeAdaptiveDistanceSleptCorpseBatch() <= 0)
     {
-        WakeAdaptiveDistanceSleptCorpseBatch();
+        WakeOneRetiredAdaptiveDistanceSleptCorpse();
     }
     if (AdaptiveFrozenCorpses.Length == 0 &&
-        AdaptiveDistanceSleptCorpses.Length == 0)
+        AdaptiveDistanceSleptCorpses.Length == 0 &&
+        AdaptiveRetiredFrozenCorpses.Length == 0 &&
+        AdaptiveRetiredDistanceSleptCorpses.Length == 0)
     {
         ClearTimer(nameof(AdaptiveCorpsePhysicsRelease), self);
         if (bAdaptiveRuntimeEnabled && bAdaptiveCorpseStagger &&
@@ -3841,7 +4132,9 @@ function BeginAdaptiveCorpsePhysicsRelease()
     ClearTimer(nameof(AdaptiveCorpsePhysicsRelease), self);
     AdaptiveCorpsePhysicsRelease();
     if (AdaptiveFrozenCorpses.Length > 0 ||
-        AdaptiveDistanceSleptCorpses.Length > 0)
+        AdaptiveDistanceSleptCorpses.Length > 0 ||
+        AdaptiveRetiredFrozenCorpses.Length > 0 ||
+        AdaptiveRetiredDistanceSleptCorpses.Length > 0)
     {
         SetTimer(0.05, true, nameof(AdaptiveCorpsePhysicsRelease), self);
     }
@@ -4490,6 +4783,10 @@ function bool RunAdaptiveCorpseLoadControl()
     if (GameInfo != None && GameInfo.IsZedTimeActive())
     {
         return false;
+    }
+    if (ReleaseOneRetiredAdaptiveCorpseOwnership() > 0)
+    {
+        return true;
     }
 
     AttackScale = GetAdaptiveCorpseAttackScale();
@@ -6830,6 +7127,8 @@ function QuiesceForWorldTeardown()
     AdaptiveFreezePruneCursor = 0;
     AdaptiveDistancePruneCursor = 0;
     AdaptiveDistanceWakeScanCursor = 0;
+    AdaptiveRetiredFreezeCursor = 0;
+    AdaptiveRetiredDistanceWakeCursor = 0;
     FixedMinimumCorpseLodPruneCursor = 0;
     FixedMinimumLivingScanPawn = None;
     FixedMinimumLivingPruneCursor = 0;
@@ -6914,6 +7213,17 @@ function QuiesceForWorldTeardown()
              " safe_boundary=world_destroy");
     }
     AdaptiveFrozenCorpses.Length = 0;
+    if (AdaptiveRetiredFrozenCorpses.Length > 0 ||
+        AdaptiveRetiredDistanceSleptCorpses.Length > 0)
+    {
+        `log("KF2OPT_CORPSE_DISTANCE state=ownership_released"$
+             " reason=world_teardown retired_frozen="$
+             AdaptiveRetiredFrozenCorpses.Length$" retired_slept="$
+             AdaptiveRetiredDistanceSleptCorpses.Length$
+             " safe_boundary=world_destroy");
+    }
+    AdaptiveRetiredFrozenCorpses.Length = 0;
+    AdaptiveRetiredDistanceSleptCorpses.Length = 0;
     AdaptiveDistanceSleepTransitions.Length = 0;
     AdaptiveDistanceSleepTransitionCount = 0;
     bAdaptiveDistanceSleepTransitionFullLogged = false;
