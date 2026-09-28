@@ -304,6 +304,8 @@ var array<AdaptiveZedDebugMarkerEntry> AdaptiveZedDebugMarkers;
 var array<AdaptiveDebugMarkerScreenEntry> AdaptiveDebugMarkerScreenEntries;
 var float AdaptiveZedDebugRefreshRealTime;
 var transient HUD AdaptiveDebugMarkerHUD;
+var bool bAdaptiveDebugMarkerOriginalShowOverlays;
+var bool bAdaptiveDebugMarkerOwnsShowOverlays;
 var bool bAdaptiveDebugMarkerRenderConfirmed;
 var array<KFPawn_Monster> FixedMinimumLivingVisualZeds;
 var array<int> FixedMinimumLivingAppliedMinLods;
@@ -5814,8 +5816,18 @@ function RemoveAdaptiveDebugMarkerPostRender()
     if (AdaptiveDebugMarkerHUD != None)
     {
         AdaptiveDebugMarkerHUD.RemovePostRenderedActor(self);
+        // Compare-and-restore only while the shared HUD flag still carries
+        // the value written by this probe. A later native/user change wins.
+        if (bAdaptiveDebugMarkerOwnsShowOverlays &&
+            AdaptiveDebugMarkerHUD.bShowOverlays)
+        {
+            AdaptiveDebugMarkerHUD.bShowOverlays =
+                bAdaptiveDebugMarkerOriginalShowOverlays;
+        }
         AdaptiveDebugMarkerHUD = None;
     }
+    bAdaptiveDebugMarkerOriginalShowOverlays = false;
+    bAdaptiveDebugMarkerOwnsShowOverlays = false;
     bPostRenderIfNotVisible = default.bPostRenderIfNotVisible;
 }
 
@@ -5831,17 +5843,24 @@ function EnsureAdaptiveDebugMarkerPostRender()
     LocalPC = GetALocalPlayerController();
     if (LocalPC == None || LocalPC.MyHUD == None)
     {
+        RemoveAdaptiveDebugMarkerPostRender();
         return;
     }
-    if (AdaptiveDebugMarkerHUD != None &&
-        AdaptiveDebugMarkerHUD != LocalPC.MyHUD)
+    if (AdaptiveDebugMarkerHUD == LocalPC.MyHUD)
     {
-        AdaptiveDebugMarkerHUD.RemovePostRenderedActor(self);
-        AdaptiveDebugMarkerHUD = None;
+        return;
     }
+    RemoveAdaptiveDebugMarkerPostRender();
     AdaptiveDebugMarkerHUD = LocalPC.MyHUD;
     bPostRenderIfNotVisible = true;
-    AdaptiveDebugMarkerHUD.bShowOverlays = true;
+    bAdaptiveDebugMarkerOriginalShowOverlays =
+        AdaptiveDebugMarkerHUD.bShowOverlays;
+    bAdaptiveDebugMarkerOwnsShowOverlays =
+        !bAdaptiveDebugMarkerOriginalShowOverlays;
+    if (bAdaptiveDebugMarkerOwnsShowOverlays)
+    {
+        AdaptiveDebugMarkerHUD.bShowOverlays = true;
+    }
     AdaptiveDebugMarkerHUD.AddPostRenderedActor(self);
 }
 
