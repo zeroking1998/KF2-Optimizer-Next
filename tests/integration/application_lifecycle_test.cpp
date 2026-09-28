@@ -222,6 +222,106 @@ int test_package_repair_worker_start_failure() {
     return EXIT_SUCCESS;
 }
 
+int test_update_worker_exception_boundaries() {
+    namespace fs = std::filesystem;
+    const fs::path root{KF2_TEST_ROOT};
+    const auto test_root = root / L"update-worker-exceptions";
+    fs::remove_all(test_root);
+    kf2::diagnostics::EventLog events{128};
+    kf2::app::UiRuntime runtime{test_root / L"Data", false,
+        kf2::config::Settings{}, events, std::nullopt,
+        kf2::app::StartMode::read_only, test_root / L"portable"};
+    runtime.updates.worker_launcher = [](std::function<void()> worker) {
+        worker();
+    };
+    runtime.updates.check_operation = [](std::string_view)
+        -> kf2::Result<std::optional<kf2::update::ReleaseInfo>> {
+        throw std::runtime_error{"injected update-check failure"};
+    };
+    try {
+        runtime.start_update_check(kf2::update::CheckTrigger::manual);
+    } catch (...) {
+        return EXIT_FAILURE;
+    }
+    runtime.poll_update_check();
+    CHECK(!runtime.updates.check);
+    CHECK(runtime.updates.controller.snapshot().phase ==
+          kf2::update::UpdatePhase::error);
+    CHECK(runtime.updates.controller.snapshot().status ==
+          L"Update check encountered an unexpected local error");
+
+    kf2::update::ReleaseInfo release{
+        .repository = "zeroking1998/KF2-Optimizer-Next",
+        .tag = "v0.0.5-alpha",
+        .version = "0.0.5-alpha",
+        .asset = kf2::update::ReleaseAsset{
+            .file_name = "KF2OptimizerNext.zip",
+            .download_url = "https://example.invalid/update.zip",
+            .size_bytes = 1,
+            .sha256 = std::string(64, 'a')}};
+    CHECK(runtime.updates.controller.begin_check(
+              kf2::update::CheckTrigger::manual, 1) ==
+          kf2::update::CheckStart::started);
+    runtime.updates.controller.complete_check(
+        kf2::Result<std::optional<kf2::update::ReleaseInfo>>::success(
+            std::move(release)));
+    runtime.updates.install_operation = [](
+        const kf2::update::ReleaseInfo&, const fs::path&)
+        -> kf2::Result<kf2::update::PreparedUpdatePackage> {
+        throw std::runtime_error{"injected update-install failure"};
+    };
+    try {
+        runtime.start_update_install();
+    } catch (...) {
+        return EXIT_FAILURE;
+    }
+    runtime.poll_update_install();
+    CHECK(!runtime.updates.install);
+    CHECK(runtime.updates.controller.snapshot().phase ==
+          kf2::update::UpdatePhase::available);
+    CHECK(runtime.updates.controller.snapshot().status ==
+          L"Update preparation encountered an unexpected local error");
+
+    int launch_attempts = 0;
+    runtime.updates.worker_launcher = [&](std::function<void()>) {
+        ++launch_attempts;
+        throw std::system_error{
+            std::make_error_code(std::errc::resource_unavailable_try_again)};
+    };
+    try {
+        runtime.start_update_install();
+    } catch (...) {
+        return EXIT_FAILURE;
+    }
+    CHECK(launch_attempts == 1);
+    CHECK(!runtime.updates.install);
+    CHECK(runtime.updates.controller.snapshot().phase ==
+          kf2::update::UpdatePhase::available);
+    CHECK(runtime.updates.controller.snapshot().status ==
+          L"Update installation could not start its background worker.");
+
+    CHECK(runtime.updates.controller.begin_check(
+              kf2::update::CheckTrigger::manual, 2) ==
+          kf2::update::CheckStart::started);
+    runtime.updates.controller.complete_check(
+        kf2::Result<std::optional<kf2::update::ReleaseInfo>>::success(
+            std::nullopt));
+    try {
+        runtime.start_update_check(kf2::update::CheckTrigger::manual);
+    } catch (...) {
+        return EXIT_FAILURE;
+    }
+    CHECK(launch_attempts == 2);
+    CHECK(!runtime.updates.check);
+    CHECK(runtime.updates.controller.snapshot().phase ==
+          kf2::update::UpdatePhase::error);
+    CHECK(runtime.updates.controller.snapshot().status ==
+          L"Update check could not start its background worker");
+
+    fs::remove_all(test_root);
+    return EXIT_SUCCESS;
+}
+
 int test_map_prewarm_retry_scheduler() {
     namespace fs = std::filesystem;
     using kf2::game::StartupPrewarmOptions;
@@ -337,6 +437,10 @@ int main(int argc, char** argv) {
     if (argc == 2 &&
         std::string_view{argv[1]} == "--package-repair-start-failure") {
         return test_package_repair_worker_start_failure();
+    }
+    if (argc == 2 &&
+        std::string_view{argv[1]} == "--update-worker-exceptions") {
+        return test_update_worker_exception_boundaries();
     }
     CHECK(test_map_prewarm_retry_scheduler() == EXIT_SUCCESS);
     CHECK(kf2::app::should_prepare_protected_gameplay_provider(
