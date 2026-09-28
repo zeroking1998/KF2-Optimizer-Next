@@ -45,6 +45,13 @@ void throw_update_controller_allocation_failure() {
     throw std::bad_alloc{};
 }
 
+kf2::Result<bool> fail_gpu_profile_settings_write(
+    const std::filesystem::path&, std::string_view) {
+    return kf2::Result<bool>::failure({
+        kf2::ErrorCode::io_failure,
+        L"Injected confirmed GPU profile persistence failure", 0});
+}
+
 std::string read_bytes(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     return {std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
@@ -534,6 +541,75 @@ int test_pending_policy_restage_failure_rollback() {
     return EXIT_SUCCESS;
 }
 
+int test_gpu_profile_persistence_rollback() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::path{KF2_TEST_ROOT} /
+        L"gpu-profile-persistence-rollback";
+    fs::remove_all(root);
+
+    kf2::diagnostics::EventLog events{32};
+    kf2::config::Settings initial;
+    initial.extras["confirmed_gpu_physical_key"] = "PCI\\VEN_OLD";
+    initial.extras["confirmed_gpu_preference"] = "high_performance";
+    initial.extras["confirmed_gpu_dedicated_bytes"] = "2147483648";
+    initial.extras["unrelated"] = "preserved";
+    kf2::app::UiRuntime runtime{
+        root / L"Data", false, initial, events, std::nullopt,
+        kf2::app::StartMode::normal, root / L"portable"};
+    runtime.confirmed_game_adapter_luid = 22;
+    runtime.gpu_profile_settings_write_for_testing =
+        fail_gpu_profile_settings_write;
+    const auto durable_before =
+        kf2::config::serialize_settings(runtime.optimizer_settings);
+
+    CHECK(!runtime.remember_confirmed_gpu_profile(
+        "PCI\\VEN_NEW",
+        kf2::telemetry::ProcessGpuPreference::minimum_power,
+        8ULL * 1024ULL * 1024ULL * 1024ULL));
+    CHECK(runtime.confirmed_game_adapter_luid == 22);
+    CHECK(kf2::config::serialize_settings(runtime.optimizer_settings) ==
+          durable_before);
+    CHECK(!fs::exists(runtime.settings_path));
+
+    const std::vector<kf2::telemetry::GpuAdapter> adapters{
+        {.luid = 11,
+         .name = L"Previously persisted GPU",
+         .dedicated_memory_bytes = 2ULL * 1024ULL * 1024ULL * 1024ULL,
+         .physical_device_key = L"PCI\\VEN_OLD"},
+        {.luid = 22,
+         .name = L"Currently confirmed GPU",
+         .dedicated_memory_bytes = 8ULL * 1024ULL * 1024ULL * 1024ULL,
+         .physical_device_key = L"PCI\\VEN_NEW"},
+    };
+    const auto& persisted_key_text = runtime.optimizer_settings.extras.at(
+        "confirmed_gpu_physical_key");
+    const std::wstring persisted_key{
+        persisted_key_text.begin(), persisted_key_text.end()};
+    const bool preference_still_matches =
+        runtime.optimizer_settings.extras.at("confirmed_gpu_preference") ==
+        "high_performance";
+    const auto rebuilt = kf2::optimizer::resolve_startup_gpu_profile(
+        adapters, std::nullopt, persisted_key, preference_still_matches);
+    CHECK(rebuilt.has_value());
+    CHECK(rebuilt->source ==
+          kf2::optimizer::StartupGpuProfileSource::
+              previously_confirmed_adapter);
+    CHECK(rebuilt->adapter.has_value());
+    CHECK(rebuilt->adapter->luid == 11);
+
+    const auto log = events.snapshot();
+    const auto failure = std::find_if(log.begin(), log.end(),
+        [](const auto& event) {
+            return event.code == "GAME_GPU_PROFILE_REMEMBER_FAILED";
+        });
+    CHECK(failure != log.end());
+    CHECK(failure->severity == kf2::diagnostics::Severity::warning);
+    CHECK(failure->message.find(L"last durable settings") !=
+          std::wstring::npos);
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 &&
         std::string_view{argv[1]} == "--package-repair-start-failure") {
@@ -547,6 +623,11 @@ int main(int argc, char** argv) {
         std::string_view{argv[1]} ==
             "--pending-policy-restage-failure") {
         return test_pending_policy_restage_failure_rollback();
+    }
+    if (argc == 2 &&
+        std::string_view{argv[1]} ==
+            "--gpu-profile-persistence-rollback") {
+        return test_gpu_profile_persistence_rollback();
     }
     try {
         const auto inaccessible = kf2::app::load_or_create_settings(
