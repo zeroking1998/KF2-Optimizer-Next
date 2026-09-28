@@ -62,6 +62,29 @@ int main() {
     CHECK(read_bytes(target) == "new settings\n");
     CHECK(!fs::exists(fs::path{target.wstring() + L".tmp"}));
 
+    const auto conditional = root / L"conditional.ini";
+    {
+        std::ofstream output(conditional, std::ios::binary);
+        output << "conditional old";
+    }
+    const auto conditional_replaced =
+        kf2::platform::windows::atomic_replace_utf8_if_unchanged(
+            conditional, "conditional old", "conditional new");
+    CHECK(conditional_replaced.has_value());
+    CHECK(read_bytes(conditional) == "conditional new");
+
+    const auto conflict =
+        kf2::platform::windows::atomic_replace_utf8_if_unchanged(
+            conditional, "stale preview", "must not survive");
+    CHECK(!conflict.has_value());
+    CHECK(conflict.error().code == kf2::ErrorCode::stale_data);
+    CHECK(read_bytes(conditional) == "conditional new");
+    for (const auto& entry : fs::directory_iterator(root)) {
+        const auto name = entry.path().filename().wstring();
+        CHECK(!name.starts_with(L"conditional.ini.tmp."));
+        CHECK(!name.starts_with(L"conditional.ini.rollback."));
+    }
+
     const auto missing_parent = root / L"missing" / L"settings.ini";
     const auto failed = kf2::platform::windows::atomic_replace_utf8(
         missing_parent, "must not appear");

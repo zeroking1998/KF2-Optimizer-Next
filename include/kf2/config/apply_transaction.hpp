@@ -18,6 +18,11 @@ struct ApplyResult {
     std::size_t files_changed{0};
 };
 
+#if defined(KF2_CONFIG_APPLY_TESTING)
+using ApplyCommitHook = void (*)();
+void set_apply_commit_hook_for_testing(ApplyCommitHook hook) noexcept;
+#endif
+
 [[nodiscard]] Result<ApplyResult> apply_preview(
     const ConfigPreview& preview, backup::BackupStore& store,
     const ApplyPreconditions& preconditions);

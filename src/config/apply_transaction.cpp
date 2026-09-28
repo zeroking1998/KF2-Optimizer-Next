@@ -12,6 +12,10 @@ namespace {
 
 constexpr std::uintmax_t max_configuration_bytes = 16U * 1024U * 1024U;
 
+#if defined(KF2_CONFIG_APPLY_TESTING)
+ApplyCommitHook apply_commit_hook{};
+#endif
+
 Result<std::string> read_bytes(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary | std::ios::ate);
     if (!input.is_open()) {
@@ -95,7 +99,32 @@ Result<std::filesystem::path> existing_space_probe_path(
          static_cast<std::uint32_t>(error.value())});
 }
 
+Result<bool> rollback_written_files(
+    const ConfigPreview& preview,
+    const std::vector<const PreviewFile*>& written_files) {
+    for (auto entry = written_files.rbegin();
+         entry != written_files.rend(); ++entry) {
+        const auto* file = *entry;
+        auto restored = platform::windows::atomic_replace_utf8_if_unchanged(
+            preview.config_root / file->relative_path,
+            file->proposed_bytes, file->original_bytes);
+        // A stale target now belongs to another writer; preserving it is the
+        // safe rollback result for this file.
+        if (!restored.has_value() &&
+            restored.error().code != ErrorCode::stale_data) {
+            return restored;
+        }
+    }
+    return Result<bool>::success(true);
+}
+
 }  // namespace
+
+#if defined(KF2_CONFIG_APPLY_TESTING)
+void set_apply_commit_hook_for_testing(ApplyCommitHook hook) noexcept {
+    apply_commit_hook = hook;
+}
+#endif
 
 Result<ApplyResult> apply_preview(const ConfigPreview& preview,
                                   backup::BackupStore& store,
@@ -154,17 +183,25 @@ Result<ApplyResult> apply_preview(const ConfigPreview& preview,
     auto journal = write_journal(backup.value(), "replacement_started");
     if (!journal.has_value()) return Result<ApplyResult>::failure(journal.error());
 
+#if defined(KF2_CONFIG_APPLY_TESTING)
+    if (apply_commit_hook) apply_commit_hook();
+#endif
+
     std::vector<const PreviewFile*> written_files;
     written_files.reserve(preview.files.size());
     for (const auto& file : preview.files) {
         if (file.original_bytes == file.proposed_bytes) continue;
-        auto written = platform::windows::atomic_replace_utf8(
-            preview.config_root / file.relative_path, file.proposed_bytes);
+        auto written = platform::windows::atomic_replace_utf8_if_unchanged(
+            preview.config_root / file.relative_path,
+            file.original_bytes, file.proposed_bytes);
         if (!written.has_value()) {
-            for (const auto* rollback : written_files) {
-                static_cast<void>(platform::windows::atomic_replace_utf8(
-                    preview.config_root / rollback->relative_path,
-                    rollback->original_bytes));
+            auto rolled_back = rollback_written_files(preview, written_files);
+            if (!rolled_back.has_value()) {
+                return Result<ApplyResult>::failure(rolled_back.error());
+            }
+            auto completed = write_journal(backup.value(), "complete");
+            if (!completed.has_value()) {
+                return Result<ApplyResult>::failure(completed.error());
             }
             return Result<ApplyResult>::failure(written.error());
         }
@@ -174,10 +211,13 @@ Result<ApplyResult> apply_preview(const ConfigPreview& preview,
         const auto applied = read_bytes(
             preview.config_root / file.relative_path);
         if (!applied.has_value() || applied.value() != file.proposed_bytes) {
-            for (const auto& rollback : preview.files) {
-                static_cast<void>(platform::windows::atomic_replace_utf8(
-                    preview.config_root / rollback.relative_path,
-                    rollback.original_bytes));
+            auto rolled_back = rollback_written_files(preview, written_files);
+            if (!rolled_back.has_value()) {
+                return Result<ApplyResult>::failure(rolled_back.error());
+            }
+            auto completed = write_journal(backup.value(), "complete");
+            if (!completed.has_value()) {
+                return Result<ApplyResult>::failure(completed.error());
             }
             if (!applied.has_value()) {
                 return Result<ApplyResult>::failure(applied.error());
