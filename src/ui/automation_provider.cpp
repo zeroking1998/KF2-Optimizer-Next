@@ -10,8 +10,12 @@
 #include <atomic>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <new>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -30,6 +34,28 @@ bool current_thread_owns_sta() noexcept {
 
 struct Context;
 class RootProvider;
+
+struct ProviderIdentity {
+    std::string id;
+    SemanticRole role{SemanticRole::root};
+    std::optional<Destination> destination;
+    std::optional<std::string> action_id;
+    bool slider{false};
+
+    explicit ProviderIdentity(const SemanticNode& node)
+        : id{node.id}, role{node.role}, destination{node.destination},
+          action_id{node.action_id}, slider{node.slider.has_value()} {}
+
+    [[nodiscard]] bool matches(const SemanticNode& node) const noexcept {
+        return id == node.id && role == node.role &&
+               destination == node.destination && action_id == node.action_id &&
+               slider == node.slider.has_value();
+    }
+    [[nodiscard]] bool supports_invoke() const noexcept {
+        return destination.has_value() ||
+               (role == SemanticRole::action && action_id.has_value());
+    }
+};
 
 template <typename Function>
 HRESULT automation_boundary(Function&& function) noexcept {
@@ -91,8 +117,10 @@ class NodeProvider final : public IRawElementProviderSimple,
                            public ISelectionItemProvider,
                            public IRangeValueProvider {
 public:
-    NodeProvider(std::shared_ptr<Context> context, std::size_t index)
-        : context_{std::move(context)}, index_{index} {}
+    NodeProvider(std::shared_ptr<Context> context, const SemanticNode& node,
+                 int runtime_id, std::size_t index)
+        : context_{std::move(context)}, identity_{node},
+          runtime_id_{runtime_id}, index_{index} {}
 
     IFACEMETHODIMP QueryInterface(REFIID id, void** object) override;
     IFACEMETHODIMP_(ULONG) AddRef() override { return ++references_; }
@@ -111,7 +139,7 @@ public:
     IFACEMETHODIMP get_HostRawElementProvider(IRawElementProviderSimple** provider) override {
         if (!provider) return E_POINTER;
         *provider = nullptr;
-        return S_OK;
+        return node() ? S_OK : UIA_E_ELEMENTNOTAVAILABLE;
     }
     IFACEMETHODIMP Navigate(NavigateDirection direction,
                             IRawElementProviderFragment** provider) override;
@@ -119,24 +147,27 @@ public:
     IFACEMETHODIMP get_BoundingRectangle(UiaRect* bounds) override {
         if (!bounds) return E_POINTER;
         *bounds = {};
-        *bounds = screen_bounds(context_->window, node().bounds);
+        const auto* current = node();
+        if (!current) return UIA_E_ELEMENTNOTAVAILABLE;
+        *bounds = screen_bounds(context_->window, current->bounds);
         return S_OK;
     }
     IFACEMETHODIMP GetEmbeddedFragmentRoots(SAFEARRAY** roots) override {
         if (!roots) return E_POINTER;
         *roots = nullptr;
-        return S_OK;
+        return node() ? S_OK : UIA_E_ELEMENTNOTAVAILABLE;
     }
     IFACEMETHODIMP SetFocus() override {
         return automation_boundary([&]() -> HRESULT {
-            if (!context_->connected || !context_->model) {
+            const auto* current = node();
+            if (!current || !context_->model) {
                 return UIA_E_ELEMENTNOTAVAILABLE;
             }
-            const auto& current = node();
-            if (current.destination) {
-                (void)context_->model->focus_destination(*current.destination);
-            } else if (current.action_id && current.enabled) {
-                (void)context_->model->focus_action(*current.action_id);
+            if (current->destination) {
+                (void)context_->model->focus_destination(*current->destination);
+            } else if (current->action_id) {
+                if (!current->enabled) return UIA_E_ELEMENTNOTENABLED;
+                (void)context_->model->focus_action(*current->action_id);
             } else {
                 return UIA_E_NOTSUPPORTED;
             }
@@ -148,20 +179,21 @@ public:
     IFACEMETHODIMP get_FragmentRoot(IRawElementProviderFragmentRoot** root) override;
     IFACEMETHODIMP Invoke() override {
         return automation_boundary([&]() -> HRESULT {
-            if (!context_->connected || !context_->model) {
+            const auto* resolved = node();
+            if (!resolved || !context_->model) {
                 return UIA_E_ELEMENTNOTAVAILABLE;
             }
-            const auto current = node();
+            const auto current = *resolved;
             if (current.destination) {
                 (void)context_->model->focus_destination(*current.destination);
                 (void)context_->model->activate_focused();
                 if (context_->invalidate) context_->invalidate();
                 return S_OK;
             }
-            if (!current.action_id || !current.enabled ||
-                !context_->activate_action) {
+            if (!current.action_id || !context_->activate_action) {
                 return UIA_E_NOTSUPPORTED;
             }
+            if (!current.enabled) return UIA_E_ELEMENTNOTENABLED;
             (void)context_->model->focus_action(*current.action_id);
             if (context_->invalidate) context_->invalidate();
             context_->activate_action(*current.action_id);
@@ -169,14 +201,21 @@ public:
         });
     }
     IFACEMETHODIMP Select() override {
-        return node().destination ? Invoke() : UIA_E_NOTSUPPORTED;
+        if (!node()) return UIA_E_ELEMENTNOTAVAILABLE;
+        return identity_.destination ? Invoke() : UIA_E_NOTSUPPORTED;
     }
-    IFACEMETHODIMP AddToSelection() override { return UIA_E_INVALIDOPERATION; }
-    IFACEMETHODIMP RemoveFromSelection() override { return UIA_E_INVALIDOPERATION; }
+    IFACEMETHODIMP AddToSelection() override {
+        return node() ? UIA_E_INVALIDOPERATION : UIA_E_ELEMENTNOTAVAILABLE;
+    }
+    IFACEMETHODIMP RemoveFromSelection() override {
+        return node() ? UIA_E_INVALIDOPERATION : UIA_E_ELEMENTNOTAVAILABLE;
+    }
     IFACEMETHODIMP get_IsSelected(BOOL* selected) override {
         if (!selected) return E_POINTER;
         *selected = FALSE;
-        *selected = node().selected ? TRUE : FALSE;
+        const auto* current = node();
+        if (!current) return UIA_E_ELEMENTNOTAVAILABLE;
+        *selected = current->selected ? TRUE : FALSE;
         return S_OK;
     }
     IFACEMETHODIMP get_SelectionContainer(IRawElementProviderSimple** container) override;
@@ -188,16 +227,28 @@ public:
     IFACEMETHODIMP get_LargeChange(double* change) override;
     IFACEMETHODIMP get_SmallChange(double* change) override;
 
+    [[nodiscard]] std::string_view id() const noexcept { return identity_.id; }
+    [[nodiscard]] bool matches_identity(const SemanticNode& node) const noexcept {
+        return identity_.matches(node);
+    }
+    void set_index(std::size_t index) noexcept { index_ = index; }
+    void deactivate() noexcept { active_ = false; }
+
 private:
-    const SemanticNode& node() const {
-        static const SemanticNode unavailable{};
-        return index_ + 1 < context_->layout.nodes.size()
-                   ? context_->layout.nodes[index_ + 1]
-                   : unavailable;
+    const SemanticNode* node() const noexcept {
+        if (!active_ || !context_->connected ||
+            index_ + 1 >= context_->layout.nodes.size()) {
+            return nullptr;
+        }
+        const auto& current = context_->layout.nodes[index_ + 1];
+        return identity_.matches(current) ? &current : nullptr;
     }
     std::atomic<ULONG> references_{1};
     std::shared_ptr<Context> context_;
+    ProviderIdentity identity_;
+    int runtime_id_{};
     std::size_t index_;
+    bool active_{true};
 };
 
 class RootProvider final : public IRawElementProviderSimple,
@@ -206,51 +257,91 @@ class RootProvider final : public IRawElementProviderSimple,
 public:
     explicit RootProvider(std::shared_ptr<Context> context)
         : context_{std::move(context)} {
-        const std::size_t count = context_->layout.nodes.empty()
-                                      ? 0
-                                      : context_->layout.nodes.size() - 1;
-        try {
-            children_.reserve(count);
-            for (std::size_t index = 0; index < count; ++index) {
-                auto child = std::make_unique<NodeProvider>(context_, index);
-                children_.push_back(child.get());
-                static_cast<void>(child.release());
-            }
-        } catch (...) {
-            for (auto* child : children_) child->Release();
-            children_.clear();
-            throw;
-        }
+        bool changed = false;
+        const auto synchronized = synchronize_children(context_->layout, changed);
+        if (FAILED(synchronized)) throw std::bad_alloc{};
     }
     ~RootProvider() {
         if (context_->root == this) context_->root = nullptr;
         for (auto* child : children_) child->Release();
     }
     NodeProvider* child(std::size_t index) const {
-        return index < visible_child_count() ? children_[index] : nullptr;
+        return index < children_.size() ? children_[index] : nullptr;
+    }
+    NodeProvider* child(std::string_view id) const {
+        const auto found = children_by_id_.find(id);
+        return found == children_by_id_.end() ? nullptr : found->second;
     }
     std::size_t child_count() const { return children_.size(); }
-    HRESULT synchronize_children(std::size_t required) noexcept {
+    HRESULT synchronize_children(const ShellLayoutResult& layout,
+                                 bool& structure_changed) noexcept {
         return automation_boundary([&]() -> HRESULT {
-            while (children_.size() < required) {
-#if defined(KF2_AUTOMATION_PROVIDER_TESTING)
-                if (context_->fail_next_child_allocation) {
-                    context_->fail_next_child_allocation = false;
-                    throw std::bad_alloc{};
+            structure_changed = false;
+            const std::size_t required = layout.nodes.empty()
+                ? 0 : layout.nodes.size() - 1;
+            if (required == children_.size()) {
+                bool identical = true;
+                for (std::size_t index = 0; index < required; ++index) {
+                    if (!children_[index]->matches_identity(
+                            layout.nodes[index + 1])) {
+                        identical = false;
+                        break;
+                    }
                 }
-#endif
-                auto child = std::make_unique<NodeProvider>(
-                    context_, children_.size());
-                children_.push_back(child.get());
-                static_cast<void>(child.release());
+                if (identical) return S_OK;
             }
+
+            std::vector<NodeProvider*> next;
+            std::unordered_map<std::string_view, NodeProvider*> next_by_id;
+            std::vector<std::unique_ptr<NodeProvider>> created;
+            next.reserve(required);
+            next_by_id.reserve(required);
+            created.reserve(required);
+            for (std::size_t index = 0; index < required; ++index) {
+                const auto& node = layout.nodes[index + 1];
+                if (next_by_id.contains(node.id)) return E_INVALIDARG;
+                NodeProvider* provider = child(node.id);
+                if (!provider || !provider->matches_identity(node)) {
+#if defined(KF2_AUTOMATION_PROVIDER_TESTING)
+                    if (context_->fail_next_child_allocation) {
+                        context_->fail_next_child_allocation = false;
+                        throw std::bad_alloc{};
+                    }
+#endif
+                    if (next_runtime_id_ == std::numeric_limits<int>::max()) {
+                        return E_OUTOFMEMORY;
+                    }
+                    auto added = std::make_unique<NodeProvider>(
+                        context_, node, next_runtime_id_++, index);
+                    provider = added.get();
+                    created.push_back(std::move(added));
+                }
+                next.push_back(provider);
+                next_by_id.emplace(provider->id(), provider);
+            }
+
+            for (auto* previous : children_) {
+                const auto retained = next_by_id.find(previous->id());
+                if (retained == next_by_id.end() ||
+                    retained->second != previous) {
+                    previous->deactivate();
+                    previous->Release();
+                }
+            }
+            for (std::size_t index = 0; index < next.size(); ++index) {
+                next[index]->set_index(index);
+            }
+            children_ = std::move(next);
+            children_by_id_ = std::move(next_by_id);
+            for (auto& added : created) static_cast<void>(added.release());
+            structure_changed = true;
             return S_OK;
         });
     }
-    std::size_t visible_child_count() const {
-        return context_->layout.nodes.empty()
-                   ? 0
-                   : std::min(children_.size(), context_->layout.nodes.size() - 1);
+    void raise_structure_changed() noexcept {
+        static_cast<void>(UiaRaiseStructureChangedEvent(
+            static_cast<IRawElementProviderSimple*>(this),
+            StructureChangeType_ChildrenInvalidated, nullptr, 0));
     }
 
     IFACEMETHODIMP QueryInterface(REFIID id, void** object) override;
@@ -286,10 +377,10 @@ public:
                             IRawElementProviderFragment** provider) override {
         if (!provider) return E_POINTER;
         *provider = nullptr;
-        if (visible_child_count() == 0) return S_OK;
+        if (children_.empty()) return S_OK;
         if (direction == NavigateDirection_FirstChild) *provider = children_.front();
         if (direction == NavigateDirection_LastChild) {
-            *provider = children_[visible_child_count() - 1];
+            *provider = children_.back();
         }
         if (*provider) (*provider)->AddRef();
         return S_OK;
@@ -325,6 +416,8 @@ private:
     std::atomic<ULONG> references_{1};
     std::shared_ptr<Context> context_;
     std::vector<NodeProvider*> children_;
+    std::unordered_map<std::string_view, NodeProvider*> children_by_id_;
+    int next_runtime_id_{1};
 };
 
 HRESULT NodeProvider::QueryInterface(REFIID id, void** object) {
@@ -334,15 +427,11 @@ HRESULT NodeProvider::QueryInterface(REFIID id, void** object) {
         *object = static_cast<IRawElementProviderSimple*>(this);
     } else if (id == IID_IRawElementProviderFragment) {
         *object = static_cast<IRawElementProviderFragment*>(this);
-    } else if (id == IID_IInvokeProvider &&
-               (node().destination ||
-                (node().role == SemanticRole::action && node().action_id &&
-                 node().enabled))) {
+    } else if (id == IID_IInvokeProvider && identity_.supports_invoke()) {
         *object = static_cast<IInvokeProvider*>(this);
-    } else if (id == IID_ISelectionItemProvider && node().destination) {
+    } else if (id == IID_ISelectionItemProvider && identity_.destination) {
         *object = static_cast<ISelectionItemProvider*>(this);
-    } else if (id == IID_IRangeValueProvider &&
-               node().role == SemanticRole::slider && node().slider) {
+    } else if (id == IID_IRangeValueProvider && identity_.slider) {
         *object = static_cast<IRangeValueProvider*>(this);
     } else return E_NOINTERFACE;
     AddRef();
@@ -352,17 +441,14 @@ HRESULT NodeProvider::QueryInterface(REFIID id, void** object) {
 HRESULT NodeProvider::GetPatternProvider(PATTERNID pattern, IUnknown** provider) {
     if (!provider) return E_POINTER;
     *provider = nullptr;
-    if (pattern == UIA_InvokePatternId &&
-        (node().destination ||
-         (node().role == SemanticRole::action && node().action_id &&
-          node().enabled))) {
+    if (!node()) return UIA_E_ELEMENTNOTAVAILABLE;
+    if (pattern == UIA_InvokePatternId && identity_.supports_invoke()) {
         *provider = static_cast<IInvokeProvider*>(this);
     }
-    if (pattern == UIA_SelectionItemPatternId && node().destination) {
+    if (pattern == UIA_SelectionItemPatternId && identity_.destination) {
         *provider = static_cast<ISelectionItemProvider*>(this);
     }
-    if (pattern == UIA_RangeValuePatternId &&
-        node().role == SemanticRole::slider && node().slider) {
+    if (pattern == UIA_RangeValuePatternId && identity_.slider) {
         *provider = static_cast<IRangeValueProvider*>(this);
     }
     if (*provider) AddRef();
@@ -372,31 +458,29 @@ HRESULT NodeProvider::GetPatternProvider(PATTERNID pattern, IUnknown** provider)
 HRESULT NodeProvider::GetPropertyValue(PROPERTYID property, VARIANT* value) {
     if (!value) return E_POINTER;
     VariantInit(value);
-    if (property == UIA_NamePropertyId) return string_value(value, node().text);
+    const auto* current = node();
+    if (!current) return UIA_E_ELEMENTNOTAVAILABLE;
+    if (property == UIA_NamePropertyId) return string_value(value, current->text);
     if (property == UIA_ControlTypePropertyId) {
-        return integer_value(value, node().destination
+        return integer_value(value, current->destination
                                         ? UIA_ListItemControlTypeId
-                                        : node().role == SemanticRole::slider
+                                        : current->role == SemanticRole::slider
                                             ? UIA_SliderControlTypeId
-                                        : node().action_id ? UIA_ButtonControlTypeId
+                                        : current->action_id ? UIA_ButtonControlTypeId
                                                            : UIA_TextControlTypeId);
     }
     if (property == UIA_IsKeyboardFocusablePropertyId) {
-        return boolean_value(value, node().destination.has_value() ||
-                                        (node().action_id.has_value() && node().enabled));
+        return boolean_value(value, current->destination.has_value() ||
+                                        (current->action_id.has_value() && current->enabled));
     }
-    if (property == UIA_HasKeyboardFocusPropertyId) return boolean_value(value, node().focused);
-    if (property == UIA_IsEnabledPropertyId) return boolean_value(value, node().enabled);
+    if (property == UIA_HasKeyboardFocusPropertyId) return boolean_value(value, current->focused);
+    if (property == UIA_IsEnabledPropertyId) return boolean_value(value, current->enabled);
     if (property == UIA_IsInvokePatternAvailablePropertyId) {
-        return boolean_value(value, node().destination.has_value() ||
-                                        (node().role == SemanticRole::action &&
-                                         node().action_id.has_value() &&
-                                         node().enabled));
+        return boolean_value(value, identity_.supports_invoke());
     }
-    if (property == UIA_IsSelectionItemPatternAvailablePropertyId) return boolean_value(value, node().destination.has_value());
+    if (property == UIA_IsSelectionItemPatternAvailablePropertyId) return boolean_value(value, identity_.destination.has_value());
     if (property == UIA_IsRangeValuePatternAvailablePropertyId) {
-        return boolean_value(value, node().role == SemanticRole::slider &&
-                                        node().slider.has_value());
+        return boolean_value(value, identity_.slider);
     }
     return S_OK;
 }
@@ -404,6 +488,7 @@ HRESULT NodeProvider::GetPropertyValue(PROPERTYID property, VARIANT* value) {
 HRESULT NodeProvider::Navigate(NavigateDirection direction, IRawElementProviderFragment** provider) {
     if (!provider) return E_POINTER;
     *provider = nullptr;
+    if (!node() || !context_->root) return UIA_E_ELEMENTNOTAVAILABLE;
     if (direction == NavigateDirection_Parent) *provider = context_->root;
     if (direction == NavigateDirection_NextSibling) *provider = context_->root->child(index_ + 1);
     if (direction == NavigateDirection_PreviousSibling && index_ > 0) *provider = context_->root->child(index_ - 1);
@@ -414,7 +499,8 @@ HRESULT NodeProvider::Navigate(NavigateDirection direction, IRawElementProviderF
 HRESULT NodeProvider::GetRuntimeId(SAFEARRAY** runtime_id) {
     if (!runtime_id) return E_POINTER;
     *runtime_id = nullptr;
-    int values[] = {UiaAppendRuntimeId, static_cast<int>(index_ + 1)};
+    if (!node()) return UIA_E_ELEMENTNOTAVAILABLE;
+    int values[] = {UiaAppendRuntimeId, runtime_id_};
     *runtime_id = SafeArrayCreateVector(VT_I4, 0, 2);
     if (!*runtime_id) return E_OUTOFMEMORY;
     for (LONG position = 0; position < 2; ++position) {
@@ -432,7 +518,7 @@ HRESULT NodeProvider::GetRuntimeId(SAFEARRAY** runtime_id) {
 HRESULT NodeProvider::get_FragmentRoot(IRawElementProviderFragmentRoot** root) {
     if (!root) return E_POINTER;
     *root = nullptr;
-    if (!context_->connected || !context_->root) {
+    if (!node() || !context_->root) {
         return UIA_E_ELEMENTNOTAVAILABLE;
     }
     *root = context_->root;
@@ -443,10 +529,11 @@ HRESULT NodeProvider::get_FragmentRoot(IRawElementProviderFragmentRoot** root) {
 HRESULT NodeProvider::get_SelectionContainer(IRawElementProviderSimple** container) {
     if (!container) return E_POINTER;
     *container = nullptr;
-    if (!context_->connected || !context_->root) {
+    const auto* current = node();
+    if (!current || !context_->root) {
         return UIA_E_ELEMENTNOTAVAILABLE;
     }
-    if (!node().destination) {
+    if (!identity_.destination) {
         return UIA_E_NOTSUPPORTED;
     }
     *container = static_cast<IRawElementProviderSimple*>(context_->root);
@@ -456,9 +543,12 @@ HRESULT NodeProvider::get_SelectionContainer(IRawElementProviderSimple** contain
 
 HRESULT NodeProvider::SetValue(double requested) {
     return automation_boundary([&]() -> HRESULT {
-        const auto current = node();
-        if (!context_->connected || !context_->model ||
-            current.role != SemanticRole::slider || !current.slider ||
+        const auto* resolved = node();
+        if (!resolved || !context_->model) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        const auto current = *resolved;
+        if (current.role != SemanticRole::slider || !current.slider ||
             !current.action_id || !current.enabled) {
             return UIA_E_ELEMENTNOTENABLED;
         }
@@ -481,47 +571,59 @@ HRESULT NodeProvider::SetValue(double requested) {
 HRESULT NodeProvider::get_Value(double* value) {
     if (!value) return E_POINTER;
     *value = 0.0;
-    if (!node().slider) return UIA_E_NOTSUPPORTED;
-    *value = node().slider->value;
+    const auto* current = node();
+    if (!current) return UIA_E_ELEMENTNOTAVAILABLE;
+    if (!current->slider) return UIA_E_NOTSUPPORTED;
+    *value = current->slider->value;
     return S_OK;
 }
 
 HRESULT NodeProvider::get_IsReadOnly(BOOL* read_only) {
     if (!read_only) return E_POINTER;
     *read_only = TRUE;
-    *read_only = node().enabled ? FALSE : TRUE;
-    return node().slider ? S_OK : UIA_E_NOTSUPPORTED;
+    const auto* current = node();
+    if (!current) return UIA_E_ELEMENTNOTAVAILABLE;
+    *read_only = current->enabled ? FALSE : TRUE;
+    return current->slider ? S_OK : UIA_E_NOTSUPPORTED;
 }
 
 HRESULT NodeProvider::get_Maximum(double* maximum) {
     if (!maximum) return E_POINTER;
     *maximum = 0.0;
-    if (!node().slider) return UIA_E_NOTSUPPORTED;
-    *maximum = node().slider->maximum;
+    const auto* current = node();
+    if (!current) return UIA_E_ELEMENTNOTAVAILABLE;
+    if (!current->slider) return UIA_E_NOTSUPPORTED;
+    *maximum = current->slider->maximum;
     return S_OK;
 }
 
 HRESULT NodeProvider::get_Minimum(double* minimum) {
     if (!minimum) return E_POINTER;
     *minimum = 0.0;
-    if (!node().slider) return UIA_E_NOTSUPPORTED;
-    *minimum = node().slider->minimum;
+    const auto* current = node();
+    if (!current) return UIA_E_ELEMENTNOTAVAILABLE;
+    if (!current->slider) return UIA_E_NOTSUPPORTED;
+    *minimum = current->slider->minimum;
     return S_OK;
 }
 
 HRESULT NodeProvider::get_LargeChange(double* change) {
     if (!change) return E_POINTER;
     *change = 0.0;
-    if (!node().slider) return UIA_E_NOTSUPPORTED;
-    *change = node().slider->large_step;
+    const auto* current = node();
+    if (!current) return UIA_E_ELEMENTNOTAVAILABLE;
+    if (!current->slider) return UIA_E_NOTSUPPORTED;
+    *change = current->slider->large_step;
     return S_OK;
 }
 
 HRESULT NodeProvider::get_SmallChange(double* change) {
     if (!change) return E_POINTER;
     *change = 0.0;
-    if (!node().slider) return UIA_E_NOTSUPPORTED;
-    *change = node().slider->small_step;
+    const auto* current = node();
+    if (!current) return UIA_E_ELEMENTNOTAVAILABLE;
+    if (!current->slider) return UIA_E_NOTSUPPORTED;
+    *change = current->slider->small_step;
     return S_OK;
 }
 
@@ -550,8 +652,7 @@ HRESULT RootProvider::ElementProviderFromPoint(double x, double y,
                          static_cast<float>(y - origin.y) / scale};
     const auto* found = hit_test(context_->layout, point);
     if (!found || found->role == SemanticRole::root) return S_OK;
-    const auto index = static_cast<std::size_t>(found - context_->layout.nodes.data() - 1);
-    *provider = child(index);
+    *provider = child(found->id);
     if (*provider) (*provider)->AddRef();
     return S_OK;
 }
@@ -559,9 +660,10 @@ HRESULT RootProvider::ElementProviderFromPoint(double x, double y,
 HRESULT RootProvider::GetFocus(IRawElementProviderFragment** provider) {
     if (!provider) return E_POINTER;
     *provider = nullptr;
-    for (std::size_t index = 0; index < visible_child_count(); ++index) {
-        if (context_->layout.nodes[index + 1].focused) {
-            *provider = child(index);
+    for (const auto& node : context_->layout.nodes) {
+        if (node.role != SemanticRole::root && node.focused) {
+            *provider = child(node.id);
+            if (!*provider) return UIA_E_ELEMENTNOTAVAILABLE;
             (*provider)->AddRef();
             break;
         }
@@ -645,12 +747,15 @@ LRESULT AutomationProvider::handle_get_object(WPARAM wparam, LPARAM lparam) noex
 bool AutomationProvider::update_layout(ShellLayoutResult layout) noexcept {
     if (!implementation_->context->connected) return false;
     try {
-        const std::size_t required = layout.nodes.empty()
-            ? 0 : layout.nodes.size() - 1;
-        if (FAILED(implementation_->root->synchronize_children(required))) {
+        bool structure_changed = false;
+        if (FAILED(implementation_->root->synchronize_children(
+                layout, structure_changed))) {
             return false;
         }
         implementation_->context->layout = std::move(layout);
+        if (structure_changed) {
+            implementation_->root->raise_structure_changed();
+        }
         return true;
     } catch (...) {
         return false;

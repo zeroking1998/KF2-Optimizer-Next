@@ -2,12 +2,14 @@
 #include <ole2.h>
 #include <UIAutomationCore.h>
 #include <UIAutomationClient.h>
+#include <UIAutomationCoreApi.h>
 #include <wrl/client.h>
 
 #include <cstdlib>
 #include <atomic>
 #include <chrono>
 #include <iostream>
+#include <limits>
 #include <new>
 #include <stdexcept>
 #include <thread>
@@ -28,6 +30,20 @@
     } while (false)
 
 using Microsoft::WRL::ComPtr;
+
+int runtime_suffix(IUIAutomationElement* element) {
+    SAFEARRAY* runtime_id = nullptr;
+    if (!element || FAILED(element->GetRuntimeId(&runtime_id)) || !runtime_id) {
+        return std::numeric_limits<int>::min();
+    }
+    LONG upper = -1;
+    int value = std::numeric_limits<int>::min();
+    if (SUCCEEDED(SafeArrayGetUBound(runtime_id, 1, &upper)) && upper >= 0) {
+        static_cast<void>(SafeArrayGetElement(runtime_id, &upper, &value));
+    }
+    SafeArrayDestroy(runtime_id);
+    return value;
+}
 
 class AutomationSink final : public kf2::platform::windows::WindowEventSink {
 public:
@@ -206,6 +222,55 @@ int main() {
     CHECK(launch_invoke->Invoke() == E_FAIL);
     CHECK(invoked_action.empty());
     callback_failure = CallbackFailure::none;
+
+    const int retained_launch_runtime = runtime_suffix(launch_button.Get());
+    CHECK(retained_launch_runtime != std::numeric_limits<int>::min());
+    model.set_notice({kf2::ui::NoticeSeverity::warning, L"TEST_NOTICE",
+                      L"Retained provider identity test", L""});
+    CHECK(provider.value().update_layout(
+        kf2::ui::layout_shell(model, 800.0F, 520.0F)));
+    BSTR retained_name = nullptr;
+    CHECK(SUCCEEDED(launch_button->get_CurrentName(&retained_name)));
+    CHECK(std::wstring_view{retained_name} == L"LAUNCH KF2");
+    SysFreeString(retained_name);
+    invoked_action.clear();
+    CHECK(SUCCEEDED(launch_invoke->Invoke()));
+    CHECK(invoked_action == "dashboard-launch");
+    CHECK(runtime_suffix(launch_button.Get()) == retained_launch_runtime);
+
+    CHECK(provider.value().update_layout(
+        kf2::ui::layout_shell(model, 640.0F, 520.0F)));
+    CHECK(runtime_suffix(launch_button.Get()) == retained_launch_runtime);
+    model.set_scroll_extent(500.0F);
+    static_cast<void>(model.set_scroll(120.0F));
+    CHECK(provider.value().update_layout(
+        kf2::ui::layout_shell(model, 640.0F, 520.0F)));
+    CHECK(runtime_suffix(launch_button.Get()) == retained_launch_runtime);
+
+    model.clear_notice();
+    static_cast<void>(model.focus_destination(kf2::ui::Destination::graphics));
+    static_cast<void>(model.activate_focused());
+    CHECK(provider.value().update_layout(
+        kf2::ui::layout_shell(model, 800.0F, 520.0F)));
+    retained_name = nullptr;
+    CHECK(launch_button->get_CurrentName(&retained_name) ==
+          UIA_E_ELEMENTNOTAVAILABLE);
+    SysFreeString(retained_name);
+    CHECK(launch_invoke->Invoke() == UIA_E_ELEMENTNOTAVAILABLE);
+    const int value_before_removal = changed_slider_value;
+    const HRESULT removed_slider_result = range->SetValue(155.0);
+    CHECK(FAILED(removed_slider_result));
+    CHECK(changed_slider_value == value_before_removal);
+
+    static_cast<void>(model.focus_destination(kf2::ui::Destination::dashboard));
+    static_cast<void>(model.activate_focused());
+    CHECK(provider.value().update_layout(
+        kf2::ui::layout_shell(model, 800.0F, 520.0F)));
+    ComPtr<IUIAutomationElement> replacement_launch;
+    CHECK(SUCCEEDED(root->FindFirst(
+        TreeScope_Children, launch_condition.Get(), &replacement_launch)));
+    CHECK(replacement_launch != nullptr);
+    CHECK(runtime_suffix(replacement_launch.Get()) != retained_launch_runtime);
 
     auto expanded_layout =
         kf2::ui::layout_shell(model, 800.0F, 520.0F);
