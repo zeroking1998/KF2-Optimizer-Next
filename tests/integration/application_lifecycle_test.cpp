@@ -14,6 +14,7 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -37,6 +38,12 @@
             return EXIT_FAILURE;                                                \
         }                                                                       \
     } while (false)
+
+void throw_update_controller_allocation_failure() {
+    kf2::update::detail::set_update_controller_allocation_hook_for_testing(
+        nullptr);
+    throw std::bad_alloc{};
+}
 
 std::string read_bytes(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
@@ -228,9 +235,22 @@ int test_update_worker_exception_boundaries() {
     const auto test_root = root / L"update-worker-exceptions";
     fs::remove_all(test_root);
     kf2::diagnostics::EventLog events{128};
+    kf2::update::detail::set_update_controller_allocation_hook_for_testing(
+        throw_update_controller_allocation_failure);
     kf2::app::UiRuntime runtime{test_root / L"Data", false,
         kf2::config::Settings{}, events, std::nullopt,
         kf2::app::StartMode::read_only, test_root / L"portable"};
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"UPDATE_STATE_RESTORE_FAILED");
+    runtime.model.clear_notice();
+    kf2::update::detail::set_update_controller_allocation_hook_for_testing(
+        throw_update_controller_allocation_failure);
+    runtime.start_update_check(kf2::update::CheckTrigger::manual);
+    CHECK(runtime.updates.controller.snapshot().phase ==
+          kf2::update::UpdatePhase::idle);
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"UPDATE_CHECK_START_FAILED");
+    runtime.model.clear_notice();
     runtime.updates.worker_launcher = [](std::function<void()> worker) {
         worker();
     };
@@ -265,6 +285,14 @@ int test_update_worker_exception_boundaries() {
     runtime.updates.controller.complete_check(
         kf2::Result<std::optional<kf2::update::ReleaseInfo>>::success(
             std::move(release)));
+    kf2::update::detail::set_update_controller_allocation_hook_for_testing(
+        throw_update_controller_allocation_failure);
+    runtime.start_update_install();
+    CHECK(runtime.updates.controller.snapshot().phase ==
+          kf2::update::UpdatePhase::available);
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"UPDATE_INSTALL_START_FAILED");
+    runtime.model.clear_notice();
     runtime.updates.install_operation = [](
         const kf2::update::ReleaseInfo&, const fs::path&)
         -> kf2::Result<kf2::update::PreparedUpdatePackage> {
@@ -281,6 +309,15 @@ int test_update_worker_exception_boundaries() {
           kf2::update::UpdatePhase::available);
     CHECK(runtime.updates.controller.snapshot().status ==
           L"Update preparation encountered an unexpected local error");
+
+    kf2::update::detail::set_update_controller_allocation_hook_for_testing(
+        throw_update_controller_allocation_failure);
+    runtime.ignore_update();
+    CHECK(!runtime.updates.controller.snapshot().dismissed);
+    CHECK(runtime.updates.controller.snapshot().ignored_version.empty());
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"UPDATE_IGNORE_FAILED");
+    runtime.model.clear_notice();
 
     int launch_attempts = 0;
     runtime.updates.worker_launcher = [&](std::function<void()>) {

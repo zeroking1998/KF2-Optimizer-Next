@@ -126,7 +126,18 @@ void UiRuntime::refresh_update_presentation() {
 }
 
 void UiRuntime::start_update_check(update::CheckTrigger trigger) {
-    const auto started = updates.controller.begin_check(trigger, unix_now());
+    update::CheckStart started{update::CheckStart::busy};
+    try {
+        started = updates.controller.begin_check(trigger, unix_now());
+    } catch (...) {
+        model.set_notice({
+            ui::NoticeSeverity::error,
+            L"UPDATE_CHECK_START_FAILED",
+            L"Update Check could not start because its state could not be prepared.",
+            L"Close memory-intensive applications, then retry Update Check."});
+        refresh_update_presentation();
+        return;
+    }
     if (started != update::CheckStart::started) {
         refresh_update_presentation();
         return;
@@ -342,14 +353,37 @@ void UiRuntime::dismiss_update() {
 }
 
 void UiRuntime::ignore_update() {
-    updates.controller.ignore_available_version();
+    try {
+        updates.controller.ignore_available_version();
+    } catch (...) {
+        model.set_notice({
+            ui::NoticeSeverity::error,
+            L"UPDATE_IGNORE_FAILED",
+            L"The available version could not be ignored. The previous update state was kept.",
+            L"Close memory-intensive applications, then retry."});
+        refresh_update_presentation();
+        return;
+    }
     static_cast<void>(update::save_update_state(
         updates.state_path, persisted_state(updates.controller.snapshot())));
     refresh_update_presentation();
 }
 
 void UiRuntime::start_update_install() {
-    if (!updates.controller.begin_install_with_user_consent()) {
+    bool install_started{false};
+    try {
+        install_started =
+            updates.controller.begin_install_with_user_consent();
+    } catch (...) {
+        model.set_notice({
+            ui::NoticeSeverity::error,
+            L"UPDATE_INSTALL_START_FAILED",
+            L"Update installation could not start because its state could not be prepared.",
+            L"Close memory-intensive applications, then retry."});
+        refresh_update_presentation();
+        return;
+    }
+    if (!install_started) {
         refresh_update_presentation();
         return;
     }

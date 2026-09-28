@@ -407,18 +407,27 @@ void UiRuntime::enforce_saved_frame_control_compatibility() {
 }
 
 void UiRuntime::initialize_update_state(const config::Settings& settings) {
-    const auto persisted_update = update::load_update_state(updates.state_path);
-    const auto cached_update = persisted_update.has_value()
-        ? persisted_update.value() : update::PersistedUpdateState{};
-    updates.controller.restore_preferences(
-        settings.automatic_update_checks,
-        cached_update.last_check_unix_seconds,
-        cached_update.last_result != update::PersistedCheckResult::unknown,
-        cached_update.last_result == update::PersistedCheckResult::available
-            ? cached_update.available_version : std::string{},
-        cached_update.ignored_version,
-        cached_update.last_attempt_unix_seconds,
-        cached_update.automatic_failure_count);
+    try {
+        const auto persisted_update =
+            update::load_update_state(updates.state_path);
+        const auto cached_update = persisted_update.has_value()
+            ? persisted_update.value() : update::PersistedUpdateState{};
+        updates.controller.restore_preferences(
+            settings.automatic_update_checks,
+            cached_update.last_check_unix_seconds,
+            cached_update.last_result != update::PersistedCheckResult::unknown,
+            cached_update.last_result == update::PersistedCheckResult::available
+                ? cached_update.available_version : std::string{},
+            cached_update.ignored_version,
+            cached_update.last_attempt_unix_seconds,
+            cached_update.automatic_failure_count);
+    } catch (...) {
+        model.set_notice({
+            ui::NoticeSeverity::error,
+            L"UPDATE_STATE_RESTORE_FAILED",
+            L"Saved update state could not be restored. The current update state was kept.",
+            L"Retry Update Check after closing memory-intensive applications."});
+    }
     refresh_update_presentation();
 }
 
