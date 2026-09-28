@@ -49,6 +49,7 @@ target_compile_definitions(kf2_update_transaction_test PRIVATE
     _UNICODE
     NOMINMAX
     WIN32_LEAN_AND_MEAN
+    KF2_UPDATE_TRANSACTION_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/update-transaction"
 )
 target_link_libraries(kf2_update_transaction_test PRIVATE bcrypt)

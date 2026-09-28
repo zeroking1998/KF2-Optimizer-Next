@@ -5,6 +5,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "kf2/core/result.hpp"
 
@@ -24,8 +25,23 @@ struct PackageRepairResult {
     bool restart_required{false};
 };
 
+struct PackageIntegrityFile {
+    std::string relative_path;
+    std::string sha256;
+};
+
+struct PackageIntegrityManifest {
+    std::string source_identity;
+    std::string document;
+    std::vector<PackageIntegrityFile> files;
+};
+
 [[nodiscard]] std::span<const std::string_view>
 managed_package_payload_paths() noexcept;
+
+[[nodiscard]] Result<PackageIntegrityManifest> load_package_integrity_manifest(
+    const std::filesystem::path& executable_directory,
+    std::string_view expected_source_identity);
 
 [[nodiscard]] Result<std::string> package_source_identity(
     const std::filesystem::path& executable_directory);

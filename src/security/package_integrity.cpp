@@ -305,6 +305,32 @@ std::span<const std::string_view> managed_package_payload_paths() noexcept {
     return kPayloadPaths;
 }
 
+Result<PackageIntegrityManifest> load_package_integrity_manifest(
+    const std::filesystem::path& executable_directory,
+    std::string_view expected_source_identity) {
+    if (executable_directory.empty() ||
+        !executable_directory.is_absolute() ||
+        !safe_identity(expected_source_identity)) {
+        return Result<PackageIntegrityManifest>::failure(
+            {ErrorCode::invalid_argument,
+             L"Package integrity manifest request is invalid", 0});
+    }
+    auto parsed = parse_manifest(
+        executable_directory, expected_source_identity);
+    if (!parsed.has_value()) {
+        return Result<PackageIntegrityManifest>::failure(parsed.error());
+    }
+    PackageIntegrityManifest manifest{
+        .source_identity = parsed.value().source_identity,
+        .document = parsed.value().document};
+    manifest.files.reserve(kPayloadPaths.size());
+    for (std::size_t index = 0; index < kPayloadPaths.size(); ++index) {
+        manifest.files.push_back({
+            std::string{kPayloadPaths[index]}, parsed.value().hashes[index]});
+    }
+    return Result<PackageIntegrityManifest>::success(std::move(manifest));
+}
+
 Result<std::string> package_source_identity(
     const std::filesystem::path& executable_directory) {
     if (executable_directory.empty() || !executable_directory.is_absolute()) {

@@ -348,6 +348,8 @@ if(BUILD_TESTING)
     target_include_directories(KF2TestUpdateCore PUBLIC
         "${PROJECT_SOURCE_DIR}/include"
     )
+    target_compile_definitions(KF2TestUpdateCore PRIVATE
+        KF2_UPDATE_TRANSACTION_TESTING)
 
     add_library(KF2TestOptimizerCore STATIC
         src/optimizer/adaptive_governor.cpp
