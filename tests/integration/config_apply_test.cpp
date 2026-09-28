@@ -7,6 +7,7 @@
 #include <iterator>
 
 #include "kf2/backup/backup_store.hpp"
+#include "kf2/backup/restore_transaction.hpp"
 #include "kf2/config/apply_transaction.hpp"
 
 #define CHECK(condition)                                                        \
@@ -33,6 +34,12 @@ HANDLE lock_without_read_sharing(const std::filesystem::path& path) {
     return CreateFileW(path.c_str(), GENERIC_READ,
                        FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+}
+
+std::filesystem::path concurrent_target;
+
+void change_target_before_commit() {
+    write_bytes(concurrent_target, "concurrent-user-edit");
 }
 
 int main() {
@@ -71,6 +78,48 @@ int main() {
     CHECK(!drifted.has_value());
     CHECK(drifted.error().code == kf2::ErrorCode::stale_data);
     CHECK(read_bytes(target).ends_with("; changed after preview\r\n"));
+
+    const auto concurrent_root = root / L"ConcurrentApply";
+    const auto concurrent_first = concurrent_root / L"KFEngine.ini";
+    const auto concurrent_middle = concurrent_root / L"KFGame.ini";
+    const auto concurrent_later =
+        concurrent_root / L"KFSystemSettings.ini";
+    write_bytes(concurrent_first, "first-original");
+    write_bytes(concurrent_middle, "middle-original");
+    write_bytes(concurrent_later, "later-original");
+    kf2::config::ConfigPreview concurrent_preview;
+    concurrent_preview.config_root = concurrent_root;
+    concurrent_preview.files.push_back(
+        {L"KFEngine.ini", "first-original", "first-proposed"});
+    concurrent_preview.files.push_back(
+        {L"KFGame.ini", "middle-original", "middle-proposed"});
+    concurrent_preview.files.push_back(
+        {L"KFSystemSettings.ini", "later-original", "later-proposed"});
+    kf2::backup::BackupStore concurrent_store{
+        root / L"ConcurrentApplyState"};
+    concurrent_target = concurrent_middle;
+    kf2::config::set_apply_commit_hook_for_testing(
+        &change_target_before_commit);
+    const auto concurrent = kf2::config::apply_preview(
+        concurrent_preview, concurrent_store, {.game_running = false});
+    kf2::config::set_apply_commit_hook_for_testing(nullptr);
+    CHECK(!concurrent.has_value());
+    CHECK(concurrent.error().code == kf2::ErrorCode::stale_data);
+    CHECK(read_bytes(concurrent_first) == "first-original");
+    CHECK(read_bytes(concurrent_middle) == "concurrent-user-edit");
+    CHECK(read_bytes(concurrent_later) == "later-original");
+    const auto concurrent_backups = concurrent_store.list_backups();
+    CHECK(concurrent_backups.has_value());
+    CHECK(concurrent_backups.value().size() == 1);
+    CHECK(read_bytes(concurrent_backups.value().front().journal_path)
+              .find("state=complete") != std::string::npos);
+    const auto concurrent_recovery = kf2::backup::recover_transactions(
+        concurrent_store, concurrent_root);
+    CHECK(concurrent_recovery.has_value());
+    CHECK(concurrent_recovery.value().outcome ==
+          kf2::backup::RecoveryOutcome::clean);
+    CHECK(concurrent_recovery.value().transactions_recovered == 0);
+    CHECK(read_bytes(concurrent_middle) == "concurrent-user-edit");
 
     write_bytes(target, original);
     const auto running = kf2::config::apply_preview(

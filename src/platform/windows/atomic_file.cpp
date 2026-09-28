@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -104,6 +105,176 @@ Result<std::pair<HANDLE, std::filesystem::path>> create_unique_temporary(
          ERROR_FILE_EXISTS});
 }
 
+Result<std::filesystem::path> write_unique_temporary(
+    const std::filesystem::path& target, std::string_view bytes) {
+    auto created = create_unique_temporary(target);
+    if (!created.has_value()) {
+        return Result<std::filesystem::path>::failure(created.error());
+    }
+    HANDLE file = created.value().first;
+    auto temporary = std::move(created.value().second);
+    const auto discard = [&](const wchar_t* message, DWORD native) {
+        CloseHandle(file);
+        static_cast<void>(DeleteFileW(native_path(temporary).c_str()));
+        return Result<std::filesystem::path>::failure(
+            {ErrorCode::io_failure, message, native});
+    };
+    std::size_t total = 0;
+    while (total < bytes.size()) {
+        const DWORD requested = static_cast<DWORD>(std::min<std::size_t>(
+            bytes.size() - total, std::numeric_limits<DWORD>::max()));
+        DWORD written = 0;
+        if (!WriteFile(file, bytes.data() + total, requested, &written,
+                       nullptr) || written == 0) {
+            return discard(L"Temporary file write failed", GetLastError());
+        }
+        total += written;
+    }
+    if (!FlushFileBuffers(file)) {
+        return discard(L"Temporary file flush failed", GetLastError());
+    }
+    if (!CloseHandle(file)) {
+        const DWORD native = GetLastError();
+        file = INVALID_HANDLE_VALUE;
+        static_cast<void>(DeleteFileW(native_path(temporary).c_str()));
+        return Result<std::filesystem::path>::failure(
+            {ErrorCode::io_failure, L"Temporary file close failed",
+             native});
+    }
+    file = INVALID_HANDLE_VALUE;
+    return Result<std::filesystem::path>::success(std::move(temporary));
+}
+
+Result<std::filesystem::path> unique_unused_sibling(
+    const std::filesystem::path& target, std::wstring_view label) {
+    for (unsigned attempt = 0; attempt != 32; ++attempt) {
+        const LONG sequence = InterlockedIncrement(&temporary_sequence);
+        std::filesystem::path candidate{
+            target.wstring() + std::wstring{label} +
+            std::to_wstring(GetCurrentProcessId()) + L"." +
+            std::to_wstring(GetCurrentThreadId()) + L"." +
+            std::to_wstring(static_cast<unsigned long>(sequence))};
+        const DWORD attributes =
+            GetFileAttributesW(native_path(candidate).c_str());
+        const DWORD native = GetLastError();
+        if (attributes == INVALID_FILE_ATTRIBUTES &&
+            (native == ERROR_FILE_NOT_FOUND ||
+             native == ERROR_PATH_NOT_FOUND)) {
+            return Result<std::filesystem::path>::success(
+                std::move(candidate));
+        }
+    }
+    return Result<std::filesystem::path>::failure(
+        {ErrorCode::io_failure, L"Unique rollback file name is unavailable",
+         ERROR_FILE_EXISTS});
+}
+
+Result<bool> replace_existing_with_retry(
+    const std::filesystem::path& target,
+    const std::filesystem::path& replacement,
+    const std::filesystem::path* backup,
+    const wchar_t* failure_message) {
+    DWORD native = ERROR_SUCCESS;
+    for (unsigned attempt = 0;
+         attempt != detail::atomic_replace_attempt_count; ++attempt) {
+        const auto native_backup = backup
+            ? native_path(*backup).wstring() : std::wstring{};
+        if (ReplaceFileW(
+                native_path(target).c_str(), native_path(replacement).c_str(),
+                backup ? native_backup.c_str() : nullptr,
+                REPLACEFILE_WRITE_THROUGH, nullptr, nullptr)) {
+            return Result<bool>::success(true);
+        }
+        native = GetLastError();
+        const bool retryable = native == ERROR_SHARING_VIOLATION ||
+                               native == ERROR_ACCESS_DENIED ||
+                               native == ERROR_UNABLE_TO_REMOVE_REPLACED;
+        const auto backoff = detail::atomic_replace_backoff_after(
+            attempt, retryable);
+        if (!backoff.has_value()) break;
+        Sleep(backoff.value());
+    }
+    return Result<bool>::failure(
+        {ErrorCode::io_failure, failure_message, native});
+}
+
+Result<bool> regular_file_matches(const std::filesystem::path& path,
+                                  std::string_view expected) {
+    HANDLE file = CreateFileW(
+        native_path(path).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return Result<bool>::failure(
+            {ErrorCode::io_failure, L"Atomic rollback file cannot be opened",
+             GetLastError()});
+    }
+    BY_HANDLE_FILE_INFORMATION information{};
+    const std::uint64_t size = expected.size();
+    if (!GetFileInformationByHandle(file, &information) ||
+        (information.dwFileAttributes &
+         (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+        information.nNumberOfLinks != 1 ||
+        information.nFileSizeHigh != static_cast<DWORD>(size >> 32U) ||
+        information.nFileSizeLow != static_cast<DWORD>(size)) {
+        const DWORD native = GetLastError();
+        CloseHandle(file);
+        if ((information.dwFileAttributes &
+             (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0 &&
+            information.nNumberOfLinks == 1) {
+            return Result<bool>::success(false);
+        }
+        return Result<bool>::failure(
+            {ErrorCode::access_denied,
+             L"Atomic rollback file identity is unsafe", native});
+    }
+    std::size_t total = 0;
+    while (total < expected.size()) {
+        const DWORD requested = static_cast<DWORD>(std::min<std::size_t>(
+            expected.size() - total, std::numeric_limits<DWORD>::max()));
+        char buffer[16U * 1024U];
+        const DWORD chunk = std::min<DWORD>(requested, sizeof(buffer));
+        DWORD read = 0;
+        if (!ReadFile(file, buffer, chunk, &read, nullptr) || read == 0) {
+            const DWORD native = GetLastError();
+            CloseHandle(file);
+            return Result<bool>::failure(
+                {ErrorCode::io_failure,
+                 L"Atomic rollback file cannot be read", native});
+        }
+        if (std::memcmp(buffer, expected.data() + total, read) != 0) {
+            CloseHandle(file);
+            return Result<bool>::success(false);
+        }
+        total += read;
+    }
+    CloseHandle(file);
+    return Result<bool>::success(true);
+}
+
+Result<bool> remove_with_retry(const std::filesystem::path& path) {
+    DWORD native = ERROR_SUCCESS;
+    for (unsigned attempt = 0;
+         attempt != detail::atomic_replace_attempt_count; ++attempt) {
+        if (DeleteFileW(native_path(path).c_str())) {
+            return Result<bool>::success(true);
+        }
+        native = GetLastError();
+        if (native == ERROR_FILE_NOT_FOUND || native == ERROR_PATH_NOT_FOUND) {
+            return Result<bool>::success(false);
+        }
+        const bool retryable = native == ERROR_SHARING_VIOLATION ||
+                               native == ERROR_ACCESS_DENIED;
+        const auto backoff = detail::atomic_replace_backoff_after(
+            attempt, retryable);
+        if (!backoff.has_value()) break;
+        Sleep(backoff.value());
+    }
+    return Result<bool>::failure(
+        {ErrorCode::io_failure, L"Atomic rollback file cannot be removed",
+         native});
+}
+
 }  // namespace
 
 Result<bool> atomic_replace_utf8(const std::filesystem::path& target,
@@ -142,36 +313,9 @@ Result<bool> atomic_replace_utf8(const std::filesystem::path& target,
         }
     }
 
-    auto created = create_unique_temporary(target);
-    if (!created.has_value()) {
-        return Result<bool>::failure(created.error());
-    }
-    HANDLE file = created.value().first;
-    const std::filesystem::path temporary = std::move(created.value().second);
-
-    std::size_t written_total = 0;
-    while (written_total < bytes.size()) {
-        const std::size_t remaining = bytes.size() - written_total;
-        const DWORD requested = static_cast<DWORD>(
-            std::min<std::size_t>(remaining, std::numeric_limits<DWORD>::max()));
-        DWORD written = 0;
-        if (WriteFile(file, bytes.data() + written_total, requested, &written,
-                      nullptr) == FALSE || written == 0) {
-            const DWORD error = GetLastError();
-            CloseHandle(file);
-            return fail(L"Temporary file write failed", error, temporary);
-        }
-        written_total += written;
-    }
-
-    if (FlushFileBuffers(file) == FALSE) {
-        const DWORD error = GetLastError();
-        CloseHandle(file);
-        return fail(L"Temporary file flush failed", error, temporary);
-    }
-    if (CloseHandle(file) == FALSE) {
-        return fail(L"Temporary file close failed", GetLastError(), temporary);
-    }
+    auto prepared = write_unique_temporary(target, bytes);
+    if (!prepared.has_value()) return Result<bool>::failure(prepared.error());
+    const auto temporary = std::move(prepared.value());
 
     BOOL replaced = FALSE;
     DWORD replace_error = ERROR_SUCCESS;
@@ -204,6 +348,64 @@ Result<bool> atomic_replace_utf8(const std::filesystem::path& target,
         return fail(L"Atomic file replacement failed", replace_error, temporary);
     }
     return Result<bool>::success(true);
+}
+
+Result<bool> atomic_replace_utf8_if_unchanged(
+    const std::filesystem::path& target, std::string_view expected_bytes,
+    std::string_view replacement_bytes) {
+    if (target.empty() || target.filename().empty() || !target.is_absolute() ||
+        !target.has_root_name() ||
+        target.filename().wstring().find(L':') != std::wstring::npos) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"Conditional atomic file target is invalid", 0});
+    }
+    for (const auto& component : target.relative_path()) {
+        if (component == L"." || component == L"..") {
+            return unsafe_target(
+                L"Conditional atomic target contains an unsafe path component");
+        }
+    }
+    if (!safe_directory(target.parent_path()) || !safe_existing_file(target)) {
+        return unsafe_target(
+            L"Conditional atomic target identity is unsafe", GetLastError());
+    }
+    auto prepared = write_unique_temporary(target, replacement_bytes);
+    if (!prepared.has_value()) return Result<bool>::failure(prepared.error());
+    auto rollback = unique_unused_sibling(target, L".rollback.");
+    if (!rollback.has_value()) {
+        static_cast<void>(DeleteFileW(native_path(prepared.value()).c_str()));
+        return Result<bool>::failure(rollback.error());
+    }
+    // ReplaceFile captures the exact pre-replacement target in rollback as
+    // part of the same filesystem operation. Comparing that captured file
+    // avoids a separate check-to-use window before the commit.
+    auto replaced = replace_existing_with_retry(
+        target, prepared.value(), &rollback.value(),
+        L"Conditional atomic replacement failed");
+    if (!replaced.has_value()) {
+        static_cast<void>(DeleteFileW(native_path(prepared.value()).c_str()));
+        return replaced;
+    }
+    auto matches = regular_file_matches(rollback.value(), expected_bytes);
+    if (matches.has_value() && matches.value()) {
+        auto removed = remove_with_retry(rollback.value());
+        if (removed.has_value()) return Result<bool>::success(true);
+        auto restored = replace_existing_with_retry(
+            target, rollback.value(), nullptr,
+            L"Atomic cleanup rollback failed");
+        return restored.has_value()
+            ? Result<bool>::failure(removed.error())
+            : Result<bool>::failure(restored.error());
+    }
+    auto restored = replace_existing_with_retry(
+        target, rollback.value(), nullptr,
+        L"Concurrent configuration rollback failed");
+    if (!restored.has_value()) return restored;
+    if (!matches.has_value()) return matches;
+    return Result<bool>::failure(
+        {ErrorCode::stale_data,
+         L"Configuration changed before atomic replacement", 0});
 }
 
 Result<std::filesystem::path> quarantine_regular_file(

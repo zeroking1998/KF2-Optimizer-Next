@@ -656,6 +656,7 @@ add_executable(kf2_config_apply_test
 )
 target_include_directories(kf2_config_apply_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_config_apply_test PRIVATE
+    KF2_CONFIG_APPLY_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/config-apply"
 )
 target_link_libraries(kf2_config_apply_test PRIVATE bcrypt)
