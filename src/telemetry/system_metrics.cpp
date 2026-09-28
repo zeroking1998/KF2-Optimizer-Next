@@ -294,7 +294,7 @@ detail::resolve_process_capacity_masks(
 
     if (observation.cpu_set_query == CpuSetQueryState::succeeded &&
         !observation.default_cpu_set_masks.empty()) {
-        return normalize(observation.default_cpu_set_masks, false);
+        return normalize(observation.default_cpu_set_masks, true);
     }
     if (observation.cpu_set_query == CpuSetQueryState::succeeded &&
         observation.default_cpu_set_masks.empty() &&
@@ -302,7 +302,16 @@ detail::resolve_process_capacity_masks(
         observation.primary_group_affinity_is_full &&
         observation.default_affinity_spans_groups &&
         system_masks.size() > 1) {
-        return system_masks;
+        std::vector<ProcessorGroupMask> process_system_masks;
+        for (const auto& mask : system_masks) {
+            if (std::binary_search(process_groups.begin(),
+                                   process_groups.end(), mask.group)) {
+                process_system_masks.push_back(mask);
+            }
+        }
+        return process_system_masks.empty()
+            ? std::nullopt
+            : std::optional{std::move(process_system_masks)};
     }
     if (observation.primary_group_affinity) {
         return normalize({*observation.primary_group_affinity}, true);

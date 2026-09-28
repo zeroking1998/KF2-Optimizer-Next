@@ -40,7 +40,7 @@ int main() {
 
     CpuCapacityObservation windows_11_default{
         .system_group_masks = two_group_system,
-        .process_groups = std::vector<std::uint16_t>{0},
+        .process_groups = std::vector<std::uint16_t>{0, 1},
         .primary_group_affinity = ProcessorGroupMask{0, 0xff},
         .primary_group_affinity_is_full = true,
         .default_affinity_spans_groups = true,
@@ -50,6 +50,17 @@ int main() {
     CHECK(windows_11_capacity.has_value());
     CHECK(*windows_11_capacity == two_group_system);
     CHECK(logical_capacity(*windows_11_capacity) == 14);
+
+    auto windows_11_group_subset = windows_11_default;
+    windows_11_group_subset.process_groups =
+        std::vector<std::uint16_t>{1};
+    windows_11_group_subset.primary_group_affinity =
+        ProcessorGroupMask{1, 0x3f};
+    const auto group_subset_capacity =
+        detail::resolve_process_capacity_masks(windows_11_group_subset);
+    const std::vector<ProcessorGroupMask> group_subset_expected{{1, 0x3f}};
+    CHECK(group_subset_capacity.has_value());
+    CHECK(*group_subset_capacity == group_subset_expected);
 
     CpuCapacityObservation explicit_cross_group{
         .system_group_masks = two_group_system,
