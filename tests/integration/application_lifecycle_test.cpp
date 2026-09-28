@@ -477,6 +477,51 @@ int test_map_prewarm_retry_scheduler() {
     return EXIT_SUCCESS;
 }
 
+int test_map_prewarm_start_is_visible_before_worker_entry() {
+    namespace fs = std::filesystem;
+    using kf2::game::StartupPrewarmState;
+
+    const fs::path root{KF2_TEST_ROOT};
+    const auto test_root = root / L"map-prewarm-start-visibility";
+    fs::remove_all(test_root);
+    fs::create_directories(test_root);
+    kf2::diagnostics::EventLog events{128};
+    kf2::app::UiRuntime runtime{test_root / L"Data", false,
+        kf2::config::Settings{}, events, std::nullopt,
+        kf2::app::StartMode::read_only, test_root / L"portable"};
+    runtime.installation = kf2::game::GameInstallation{
+        .install_root = test_root};
+    runtime.game_process = kf2::game::GameProcessIdentity{.pid = 1};
+    runtime.game_log_session = kf2::game::GameLogSession{};
+    runtime.game_log_session->main_menu = true;
+
+    kf2::game::detail::delay_next_startup_prewarm_worker_entry(
+        std::chrono::seconds{30});
+    runtime.observe_map_prewarm_selection(L"KF-DelayedWorker");
+    runtime.poll_map_prewarm();
+    CHECK(runtime.map_prewarmer.snapshot().state ==
+          StartupPrewarmState::waiting);
+    CHECK(runtime.map_prewarm_active == L"KF-DelayedWorker");
+
+    runtime.poll_map_prewarm();
+    CHECK(runtime.map_prewarm_active == L"KF-DelayedWorker");
+    CHECK(runtime.model.status().prewarm_active);
+    CHECK(runtime.model.status().prewarm_map == L"KF-DelayedWorker");
+
+    runtime.game_log_session->main_menu = false;
+    runtime.poll_map_prewarm();
+    CHECK(runtime.map_prewarm_active.empty());
+    CHECK(runtime.map_prewarm_pending.empty());
+    CHECK(runtime.map_prewarm_observed.empty());
+    runtime.map_prewarmer.stop_and_wait();
+    const auto stopped = runtime.map_prewarmer.snapshot();
+    CHECK(stopped.state == StartupPrewarmState::cancelled);
+    CHECK(stopped.bytes_read == 0);
+
+    fs::remove_all(test_root);
+    return EXIT_SUCCESS;
+}
+
 int test_pending_policy_restage_failure_rollback() {
     namespace fs = std::filesystem;
     const fs::path root = fs::path{KF2_TEST_ROOT} /
@@ -628,6 +673,11 @@ int main(int argc, char** argv) {
         std::string_view{argv[1]} ==
             "--gpu-profile-persistence-rollback") {
         return test_gpu_profile_persistence_rollback();
+    }
+    if (argc == 2 &&
+        std::string_view{argv[1]} ==
+            "--map-prewarm-start-visibility") {
+        return test_map_prewarm_start_is_visible_before_worker_entry();
     }
     try {
         const auto inaccessible = kf2::app::load_or_create_settings(

@@ -22,6 +22,7 @@ namespace {
 
 #ifdef KF2_STARTUP_PREWARMER_TESTING
 std::atomic_bool fail_next_prewarm_plan{false};
+std::atomic<std::int64_t> next_prewarm_worker_entry_delay_ms{0};
 #endif
 
 constexpr std::size_t kVolumeExtentHeaderBytes =
@@ -44,6 +45,13 @@ std::optional<std::size_t> volume_extent_bytes(DWORD extent_count) noexcept {
 #ifdef KF2_STARTUP_PREWARMER_TESTING
 void detail::fail_next_startup_prewarm_plan() noexcept {
     fail_next_prewarm_plan.store(true, std::memory_order_release);
+}
+
+void detail::delay_next_startup_prewarm_worker_entry(
+    std::chrono::milliseconds delay) noexcept {
+    next_prewarm_worker_entry_delay_ms.store(
+        std::max<std::int64_t>(0, delay.count()),
+        std::memory_order_release);
 }
 #endif
 
@@ -405,6 +413,16 @@ struct StartupPrewarmer::Impl final {
 
     void run(std::stop_token stop, const std::filesystem::path& install_root,
              const StartupPrewarmOptions& options) noexcept {
+#ifdef KF2_STARTUP_PREWARMER_TESTING
+        const auto worker_entry_delay = std::chrono::milliseconds{
+            next_prewarm_worker_entry_delay_ms.exchange(
+                0, std::memory_order_acq_rel)};
+        if (worker_entry_delay.count() > 0 &&
+            !wait_interruptibly(stop, worker_entry_delay)) {
+            state = StartupPrewarmState::cancelled;
+            return;
+        }
+#endif
         try {
             run_unchecked(stop, install_root, options);
         } catch (...) {
@@ -415,7 +433,6 @@ struct StartupPrewarmer::Impl final {
     void run_unchecked(std::stop_token stop,
                        const std::filesystem::path& install_root,
                        const StartupPrewarmOptions& options) {
-        state = StartupPrewarmState::waiting;
         if (!wait_interruptibly(stop, options.idle_delay)) {
             state = StartupPrewarmState::cancelled;
             return;
@@ -502,13 +519,20 @@ StartupPrewarmer::~StartupPrewarmer() {
 void StartupPrewarmer::start(std::filesystem::path install_root,
                              StartupPrewarmOptions options) {
     stop_and_wait();
-    implementation_->state = StartupPrewarmState::idle;
     implementation_->bytes_planned = 0;
     implementation_->bytes_read = 0;
     implementation_->files_read = 0;
-    implementation_->worker = std::jthread{
-        [impl = implementation_.get(), root = std::move(install_root),
-         options](std::stop_token stop) { impl->run(stop, root, options); }};
+    implementation_->state = StartupPrewarmState::waiting;
+    try {
+        implementation_->worker = std::jthread{
+            [impl = implementation_.get(), root = std::move(install_root),
+             options = std::move(options)](std::stop_token stop) {
+                impl->run(stop, root, options);
+            }};
+    } catch (...) {
+        implementation_->state = StartupPrewarmState::failed;
+        throw;
+    }
 }
 
 void StartupPrewarmer::request_stop() noexcept {
