@@ -160,6 +160,83 @@ int main() {
     }
     std::filesystem::remove_all(persistent_root);
 
+    const auto rotation_root = std::filesystem::temp_directory_path() /
+        (L"kf2-event-log-rotation-" +
+         std::to_wstring(GetCurrentProcessId()));
+    std::filesystem::remove_all(rotation_root);
+    std::filesystem::create_directories(rotation_root);
+    const auto current_log = rotation_root / L"session-events.json";
+    const auto previous_log = rotation_root / L"previous-session-events.json";
+    const auto recovery_log = rotation_root / L"session-events-recovery.json";
+    const auto write_rotation_log = [](const std::filesystem::path& path,
+                                       std::string_view bytes) {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << bytes;
+    };
+    const auto read_rotation_log = [](const std::filesystem::path& path) {
+        std::ifstream input(path, std::ios::binary);
+        return std::string{std::istreambuf_iterator<char>{input},
+                           std::istreambuf_iterator<char>{}};
+    };
+
+    write_rotation_log(current_log, "successful rotation");
+    const auto successful_rotation =
+        kf2::diagnostics::prepare_event_log_rotation(rotation_root);
+    CHECK(successful_rotation.disposition ==
+          kf2::diagnostics::PreviousEventLogDisposition::archived);
+    CHECK(successful_rotation.persistence_path == current_log);
+    CHECK(read_rotation_log(current_log) == "successful rotation");
+    CHECK(read_rotation_log(previous_log) == "successful rotation");
+
+    write_rotation_log(current_log, "retry after read failure");
+    HANDLE blocked_current = CreateFileW(
+        current_log.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(blocked_current != INVALID_HANDLE_VALUE);
+    const auto read_failure =
+        kf2::diagnostics::prepare_event_log_rotation(rotation_root);
+    CHECK(read_failure.disposition ==
+          kf2::diagnostics::PreviousEventLogDisposition::deferred);
+    CHECK(read_failure.persistence_path == recovery_log);
+    CHECK(read_failure.warning.has_value());
+    CloseHandle(blocked_current);
+    CHECK(read_rotation_log(current_log) == "retry after read failure");
+    const auto recovered_rotation =
+        kf2::diagnostics::prepare_event_log_rotation(rotation_root);
+    CHECK(recovered_rotation.disposition ==
+          kf2::diagnostics::PreviousEventLogDisposition::archived);
+    CHECK(read_rotation_log(previous_log) == "retry after read failure");
+
+    write_rotation_log(current_log, "retained after archive failure");
+    HANDLE blocked_archive = CreateFileW(
+        previous_log.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(blocked_archive != INVALID_HANDLE_VALUE);
+    const auto archive_failure =
+        kf2::diagnostics::prepare_event_log_rotation(rotation_root);
+    CHECK(archive_failure.disposition ==
+          kf2::diagnostics::PreviousEventLogDisposition::retained);
+    CHECK(archive_failure.persistence_path == current_log);
+    CHECK(archive_failure.preserved_path.has_value());
+    CHECK(archive_failure.warning.has_value());
+    CHECK(read_rotation_log(*archive_failure.preserved_path) ==
+          "retained after archive failure");
+    CHECK(!std::filesystem::exists(current_log));
+    CloseHandle(blocked_archive);
+
+    write_rotation_log(current_log, "unsafe linked evidence");
+    const auto linked_log = rotation_root / L"linked-session-events.json";
+    CHECK(CreateHardLinkW(linked_log.c_str(), current_log.c_str(), nullptr) !=
+          FALSE);
+    const auto unsafe_rotation =
+        kf2::diagnostics::prepare_event_log_rotation(rotation_root);
+    CHECK(unsafe_rotation.disposition ==
+          kf2::diagnostics::PreviousEventLogDisposition::deferred);
+    CHECK(unsafe_rotation.persistence_path == recovery_log);
+    CHECK(read_rotation_log(current_log) == "unsafe linked evidence");
+    CHECK(read_rotation_log(linked_log) == "unsafe linked evidence");
+    std::filesystem::remove_all(rotation_root);
+
     EventLog escaped{1};
     escaped.append(Event{0, Severity::info, "QUOTE\"", L"line\ntext", L"quelle"});
     const auto escaped_json = kf2::diagnostics::serialize_events_json(escaped.snapshot());

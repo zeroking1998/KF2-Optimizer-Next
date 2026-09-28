@@ -15,6 +15,10 @@
 namespace kf2::diagnostics {
 namespace {
 
+constexpr std::uintmax_t kMaximumPreviousEventLogBytes =
+    2U * 1024U * 1024U;
+constexpr std::size_t kMaximumRetainedEventLogs = 2;
+
 bool is_retained_audit_event(const Event& event) noexcept {
     if (event.severity != Severity::info) return true;
 
@@ -86,6 +90,60 @@ void write_events(std::ostringstream& output, const std::vector<Event>& events) 
 }
 
 }  // namespace
+
+EventLogRotation prepare_event_log_rotation(
+    const std::filesystem::path& log_directory) {
+    const auto current = log_directory / L"session-events.json";
+    const auto archive = log_directory / L"previous-session-events.json";
+    const auto recovery = log_directory / L"session-events-recovery.json";
+
+    std::error_code status_error;
+    const auto directory_status =
+        std::filesystem::symlink_status(log_directory, status_error);
+    if (status_error ||
+        directory_status.type() != std::filesystem::file_type::directory) {
+        return {{}, std::nullopt,
+                PreviousEventLogDisposition::deferred,
+                Error{ErrorCode::access_denied,
+                      L"Event log directory identity is unsafe",
+                      static_cast<std::uint32_t>(status_error.value())}};
+    }
+
+    const auto previous = platform::windows::read_bounded_verified_file(
+        current, kMaximumPreviousEventLogBytes);
+    if (!previous.has_value()) {
+        if (previous.error().code == ErrorCode::not_found) {
+            return {current, std::nullopt,
+                    PreviousEventLogDisposition::none, std::nullopt};
+        }
+        return {recovery, std::nullopt,
+                PreviousEventLogDisposition::deferred, previous.error()};
+    }
+    if (previous.value().empty()) {
+        return {current, std::nullopt,
+                PreviousEventLogDisposition::empty, std::nullopt};
+    }
+
+    const auto archived = platform::windows::atomic_replace_utf8(
+        archive, previous.value());
+    if (archived.has_value() && archived.value()) {
+        return {current, archive, PreviousEventLogDisposition::archived,
+                std::nullopt};
+    }
+    const Error archive_error =
+        archived.has_value()
+            ? Error{ErrorCode::io_failure,
+                    L"Previous event log archive was not committed", 0}
+            : archived.error();
+    const auto retained = platform::windows::quarantine_regular_file(
+        current, L".retained", kMaximumRetainedEventLogs);
+    if (retained.has_value()) {
+        return {current, retained.value(),
+                PreviousEventLogDisposition::retained, archive_error};
+    }
+    return {recovery, std::nullopt,
+            PreviousEventLogDisposition::deferred, retained.error()};
+}
 
 EventLog::EventLog(std::size_t capacity,
                    std::filesystem::path persistence_path,

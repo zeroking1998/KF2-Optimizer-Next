@@ -106,35 +106,29 @@ Result<Application> Application::start(const StartOptions& options) {
         return Result<Application>::failure(session.error());
     }
 
-    const auto current_event_log =
-        options.state_root / L"logs" / L"session-events.json";
-    bool previous_event_log_archived = false;
-    std::error_code event_log_status_error;
-    const bool previous_event_log_exists = std::filesystem::exists(
-        current_event_log, event_log_status_error);
-    if (event_log_status_error) {
-        return Result<Application>::failure(
-            {ErrorCode::io_failure,
-             L"Previous event log status cannot be inspected",
-             static_cast<std::uint32_t>(event_log_status_error.value())});
-    }
-    if (previous_event_log_exists) {
-        const auto previous = read_verified_local_file(
-            current_event_log, 2U * 1024U * 1024U);
-        if (previous.has_value() && !previous.value().empty()) {
-            const auto archived = platform::windows::atomic_replace_utf8(
-                options.state_root / L"logs" / L"previous-session-events.json",
-                previous.value());
-            previous_event_log_archived = archived.has_value();
-        }
-    }
-    auto events = std::make_unique<diagnostics::EventLog>(512, current_event_log);
+    const auto event_log_rotation = diagnostics::prepare_event_log_rotation(
+        options.state_root / L"logs");
+    auto events = std::make_unique<diagnostics::EventLog>(
+        512, event_log_rotation.persistence_path);
     events->append({0, diagnostics::Severity::info, "APP_START",
                     L"Application lifecycle initialized", L"app"});
-    if (previous_event_log_archived) {
+    if (event_log_rotation.disposition ==
+        diagnostics::PreviousEventLogDisposition::archived) {
         events->append({0, diagnostics::Severity::info,
                         "PREVIOUS_EVENT_LOG_ARCHIVED",
                         L"The bounded event log from the previous application session was preserved locally",
+                        L"diagnostics"});
+    } else if (event_log_rotation.disposition ==
+               diagnostics::PreviousEventLogDisposition::retained) {
+        events->append({0, diagnostics::Severity::warning,
+                        "PREVIOUS_EVENT_LOG_RETAINED",
+                        L"The previous event log archive was unavailable; its verified contents were retained under a bounded local fallback name",
+                        L"diagnostics"});
+    } else if (event_log_rotation.disposition ==
+               diagnostics::PreviousEventLogDisposition::deferred) {
+        events->append({0, diagnostics::Severity::warning,
+                        "PREVIOUS_EVENT_LOG_PRESERVATION_DEFERRED",
+                        L"The previous event log could not be safely rotated and was left unchanged for the next start",
                         L"diagnostics"});
     }
     const auto crash_records = diagnostics::retained_crash_record_count(

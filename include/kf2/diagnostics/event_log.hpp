@@ -45,6 +45,25 @@ struct EventLogStats {
     std::uint64_t persistence_failures{0};
 };
 
+enum class PreviousEventLogDisposition {
+    none,
+    empty,
+    archived,
+    retained,
+    deferred,
+};
+
+struct EventLogRotation {
+    std::filesystem::path persistence_path;
+    std::optional<std::filesystem::path> preserved_path;
+    PreviousEventLogDisposition disposition{
+        PreviousEventLogDisposition::none};
+    std::optional<Error> warning;
+};
+
+[[nodiscard]] EventLogRotation prepare_event_log_rotation(
+    const std::filesystem::path& log_directory);
+
 class EventLog final {
 public:
     using PersistFunction = std::function<Result<bool>(
