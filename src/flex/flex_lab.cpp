@@ -2,8 +2,6 @@
 
 #include <Windows.h>
 
-#include <fstream>
-#include <iterator>
 #include <optional>
 #include <string_view>
 #include <system_error>
@@ -18,6 +16,8 @@ constexpr wchar_t active_name[] = L"flexRelease_x64.dll";
 constexpr wchar_t original_name[] = L"flexRelease_original.dll";
 constexpr wchar_t backup_name[] = L"flexRelease_x64.pre-lab.dll";
 constexpr wchar_t marker_name[] = L"flex-lab-transaction.marker";
+constexpr std::uint64_t maximum_runtime_bytes = 16ULL * 1024ULL * 1024ULL;
+constexpr std::uintmax_t maximum_marker_bytes = 4ULL * 1024ULL;
 
 #if defined(KF2_FLEX_LAB_TEST_HOOKS)
 LabInstallTestHook install_test_hook{};
@@ -29,13 +29,7 @@ void run_install_test_hook(LabInstallTestCheckpoint checkpoint) {
 #endif
 
 Result<std::string> hash_file(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return Result<std::string>::failure(
-        {ErrorCode::not_found, L"FleX laboratory file is missing", 0});
-    const std::string bytes{std::istreambuf_iterator<char>{input}, {}};
-    if (input.bad()) return Result<std::string>::failure(
-        {ErrorCode::io_failure, L"FleX laboratory file could not be read", 0});
-    return security::sha256_hex(bytes);
+    return security::sha256_file_hex(path, maximum_runtime_bytes);
 }
 
 Result<bool> copy_verified(const std::filesystem::path& source,
@@ -153,10 +147,12 @@ struct LabMarker {
 };
 
 Result<LabMarker> parse_marker(const std::filesystem::path& marker) {
-    std::ifstream input(marker, std::ios::binary);
-    if (!input) return Result<LabMarker>::failure(
-        {ErrorCode::not_found, L"FleX laboratory transaction marker is missing", 0});
-    const std::string bytes{std::istreambuf_iterator<char>{input}, {}};
+    const auto marker_bytes = platform::windows::read_bounded_verified_file(
+        marker, maximum_marker_bytes);
+    if (!marker_bytes.has_value()) {
+        return Result<LabMarker>::failure(marker_bytes.error());
+    }
+    const std::string& bytes = marker_bytes.value();
     constexpr std::string_view prefix = "schema=2\nstate=";
     if (!bytes.starts_with(prefix)) return Result<LabMarker>::failure(
         {ErrorCode::invalid_argument, L"FleX laboratory transaction marker is invalid", 0});
@@ -187,10 +183,12 @@ Result<LabMarker> parse_marker(const std::filesystem::path& marker) {
 
 Result<std::string> parse_legacy_original_hash(
     const std::filesystem::path& marker) {
-    std::ifstream input(marker, std::ios::binary);
-    if (!input) return Result<std::string>::failure(
-        {ErrorCode::not_found, L"Legacy FleX marker is missing", 0});
-    const std::string bytes{std::istreambuf_iterator<char>{input}, {}};
+    const auto marker_bytes = platform::windows::read_bounded_verified_file(
+        marker, maximum_marker_bytes);
+    if (!marker_bytes.has_value()) {
+        return Result<std::string>::failure(marker_bytes.error());
+    }
+    const std::string& bytes = marker_bytes.value();
     constexpr std::string_view prefix = "schema=1\noriginal_sha256=";
     if (!bytes.starts_with(prefix)) return Result<std::string>::failure(
         {ErrorCode::invalid_argument, L"Legacy FleX marker is invalid", 0});

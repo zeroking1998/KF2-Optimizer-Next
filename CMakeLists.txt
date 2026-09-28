@@ -295,7 +295,8 @@ if(BUILD_TESTING)
         "${PROJECT_SOURCE_DIR}/include"
     )
     target_compile_definitions(KF2TestFoundation PRIVATE
-        KF2_ATOMIC_FILE_TESTING)
+        KF2_ATOMIC_FILE_TESTING
+        KF2_SHA256_TESTING)
     target_link_libraries(KF2TestFoundation PUBLIC bcrypt)
 
     add_library(KF2TestConfigCore STATIC
