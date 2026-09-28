@@ -34,4 +34,10 @@ private:
 [[nodiscard]] std::size_t retained_crash_record_count(
     const std::filesystem::path& directory) noexcept;
 
+#if defined(KF2_CRASH_RECORDER_TESTING)
+void invalidate_crash_file_for_testing() noexcept;
+[[nodiscard]] long invoke_crash_filter_for_testing(
+    std::uint32_t exception_code, std::uintptr_t address) noexcept;
+#endif
+
 }  // namespace kf2::diagnostics

@@ -101,26 +101,43 @@ bool write_record(std::uint32_t code, std::uint32_t flags,
         static_cast<unsigned long long>(address),
         static_cast<unsigned long>(GetCurrentProcessId()),
         static_cast<unsigned long>(GetCurrentThreadId()), filetime);
-    if (length <= 0 || static_cast<std::size_t>(length) >= payload.size()) return false;
+    if (length <= 0 || static_cast<std::size_t>(length) >= payload.size()) {
+        InterlockedExchange(&record_written, 0);
+        return false;
+    }
     LARGE_INTEGER beginning{};
     if (!SetFilePointerEx(file, beginning, nullptr, FILE_BEGIN) ||
-        !SetEndOfFile(file)) return false;
+        !SetEndOfFile(file)) {
+        InterlockedExchange(&record_written, 0);
+        return false;
+    }
     DWORD written = 0;
     const bool success = WriteFile(file, payload.data(),
                                    static_cast<DWORD>(length), &written,
                                    nullptr) != FALSE &&
         written == static_cast<DWORD>(length) && FlushFileBuffers(file) != FALSE;
+    if (!success) InterlockedExchange(&record_written, 0);
     return success;
 }
 
 LONG WINAPI unhandled_exception_filter(EXCEPTION_POINTERS* pointers) noexcept {
     const EXCEPTION_RECORD* record = pointers ? pointers->ExceptionRecord : nullptr;
-    static_cast<void>(write_record(
-        record ? record->ExceptionCode : 0,
-        record ? record->ExceptionFlags : 0,
-        reinterpret_cast<std::uintptr_t>(
-            record ? record->ExceptionAddress : nullptr)));
-    return EXCEPTION_EXECUTE_HANDLER;
+    if (write_record(
+            record ? record->ExceptionCode : 0,
+            record ? record->ExceptionFlags : 0,
+            reinterpret_cast<std::uintptr_t>(
+                record ? record->ExceptionAddress : nullptr))) {
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
+
+    // A complete Optimizer record owns termination. If recording fails, keep
+    // the exact diagnostic chain that was active before arm(); without a safe
+    // predecessor, continue searching so Windows Error Reporting can run.
+    const auto fallback = previous_filter;
+    if (fallback && fallback != unhandled_exception_filter) {
+        return fallback(pointers);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 
 Result<bool> verify_directory(const std::filesystem::path& directory) noexcept {
@@ -239,6 +256,23 @@ Result<bool> CrashRecorder::write_for_testing(
     }
     return Result<bool>::success(true);
 }
+
+#if defined(KF2_CRASH_RECORDER_TESTING)
+void invalidate_crash_file_for_testing() noexcept {
+    HANDLE file = static_cast<HANDLE>(
+        InterlockedExchangePointer(&crash_file, INVALID_HANDLE_VALUE));
+    if (file && file != INVALID_HANDLE_VALUE) CloseHandle(file);
+}
+
+long invoke_crash_filter_for_testing(
+    std::uint32_t exception_code, std::uintptr_t address) noexcept {
+    EXCEPTION_RECORD record{};
+    record.ExceptionCode = exception_code;
+    record.ExceptionAddress = reinterpret_cast<void*>(address);
+    EXCEPTION_POINTERS pointers{&record, nullptr};
+    return unhandled_exception_filter(&pointers);
+}
+#endif
 
 const std::filesystem::path& CrashRecorder::pending_path() const noexcept {
     return pending_path_;
