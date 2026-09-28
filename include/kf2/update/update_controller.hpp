@@ -8,6 +8,12 @@
 
 namespace kf2::update {
 
+namespace detail {
+using UpdateControllerAllocationHook = void (*)();
+void set_update_controller_allocation_hook_for_testing(
+    UpdateControllerAllocationHook hook) noexcept;
+}  // namespace detail
+
 inline constexpr std::int64_t kAutomaticCheckIntervalSeconds = 24 * 60 * 60;
 inline constexpr std::int64_t kAutomaticFailureRetryInitialSeconds = 5 * 60;
 inline constexpr std::int64_t kAutomaticFailureRetryMaximumSeconds = 60 * 60;
@@ -57,15 +63,15 @@ public:
                              std::string cached_available_version = {},
                              std::string ignored_version = {},
                              std::int64_t last_attempt_unix_seconds = 0,
-                             std::uint32_t automatic_failure_count = 0) noexcept;
+                             std::uint32_t automatic_failure_count = 0);
     [[nodiscard]] CheckStart begin_check(CheckTrigger trigger,
-                                         std::int64_t now_unix_seconds) noexcept;
+                                         std::int64_t now_unix_seconds);
     void complete_check(Result<std::optional<ReleaseInfo>> result);
     void set_automatic_checks_enabled(bool enabled) noexcept;
-    [[nodiscard]] bool begin_install_with_user_consent() noexcept;
+    [[nodiscard]] bool begin_install_with_user_consent();
     void complete_install_failure(std::wstring message);
     void dismiss() noexcept;
-    void ignore_available_version() noexcept;
+    void ignore_available_version();
     [[nodiscard]] const UpdateSnapshot& snapshot() const noexcept;
 
 private:

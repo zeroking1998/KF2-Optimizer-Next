@@ -1,10 +1,75 @@
 #include <cstdlib>
+#include <new>
+#include <utility>
 
 #include "kf2/update/update_controller.hpp"
 
 #define CHECK(expression) do { if (!(expression)) return EXIT_FAILURE; } while (false)
 
 namespace {
+void throw_allocation_failure() {
+    kf2::update::detail::set_update_controller_allocation_hook_for_testing(
+        nullptr);
+    throw std::bad_alloc{};
+}
+
+template <typename Action>
+bool throws_on_next_allocation(Action&& action) {
+    kf2::update::detail::set_update_controller_allocation_hook_for_testing(
+        throw_allocation_failure);
+    try {
+        std::forward<Action>(action)();
+    } catch (const std::bad_alloc&) {
+        kf2::update::detail::set_update_controller_allocation_hook_for_testing(
+            nullptr);
+        return true;
+    } catch (...) {
+        kf2::update::detail::set_update_controller_allocation_hook_for_testing(
+            nullptr);
+        return false;
+    }
+    kf2::update::detail::set_update_controller_allocation_hook_for_testing(
+        nullptr);
+    return false;
+}
+
+bool same_asset(const std::optional<kf2::update::ReleaseAsset>& left,
+                const std::optional<kf2::update::ReleaseAsset>& right) {
+    if (left.has_value() != right.has_value()) return false;
+    return !left ||
+        (left->file_name == right->file_name &&
+         left->download_url == right->download_url &&
+         left->size_bytes == right->size_bytes &&
+         left->sha256 == right->sha256);
+}
+
+bool same_release(const std::optional<kf2::update::ReleaseInfo>& left,
+                  const std::optional<kf2::update::ReleaseInfo>& right) {
+    if (left.has_value() != right.has_value()) return false;
+    return !left ||
+        (left->repository == right->repository && left->tag == right->tag &&
+         left->version == right->version &&
+         left->published_at == right->published_at &&
+         left->changelog == right->changelog &&
+         same_asset(left->asset, right->asset) &&
+         left->install_block_reason == right->install_block_reason);
+}
+
+bool same_snapshot(const kf2::update::UpdateSnapshot& left,
+                   const kf2::update::UpdateSnapshot& right) {
+    return left.installed_version == right.installed_version &&
+        left.automatic_checks_enabled == right.automatic_checks_enabled &&
+        left.last_check_unix_seconds == right.last_check_unix_seconds &&
+        left.last_attempt_unix_seconds == right.last_attempt_unix_seconds &&
+        left.automatic_failure_count == right.automatic_failure_count &&
+        left.phase == right.phase &&
+        same_release(left.available_release, right.available_release) &&
+        left.cached_check_completed == right.cached_check_completed &&
+        left.cached_available_version == right.cached_available_version &&
+        left.ignored_version == right.ignored_version &&
+        left.status == right.status && left.dismissed == right.dismissed;
+}
+
 kf2::update::ReleaseInfo release(bool installable = true) {
     kf2::update::ReleaseInfo value{
         .repository = "https://github.com/example/project",
@@ -185,5 +250,47 @@ int main() {
     CHECK(manual_bypasses_backoff.snapshot().automatic_failure_count == 0);
     CHECK(manual_bypasses_backoff.snapshot().last_check_unix_seconds ==
           now + 1);
+
+    UpdateController restore_allocation_failure{
+        "0.0.2-alpha-with-a-long-installed-version"};
+    const auto restore_before = restore_allocation_failure.snapshot();
+    std::string cached_version(64, 'c');
+    std::string ignored_version(64, 'i');
+    CHECK(throws_on_next_allocation([&] {
+        restore_allocation_failure.restore_preferences(
+            false, now, true, std::move(cached_version),
+            std::move(ignored_version), now, 3);
+    }));
+    CHECK(same_snapshot(restore_allocation_failure.snapshot(),
+                        restore_before));
+
+    UpdateController check_allocation_failure{"0.0.2-alpha"};
+    const auto check_before = check_allocation_failure.snapshot();
+    CHECK(throws_on_next_allocation([&] {
+        static_cast<void>(check_allocation_failure.begin_check(
+            CheckTrigger::manual, now));
+    }));
+    CHECK(same_snapshot(check_allocation_failure.snapshot(), check_before));
+
+    UpdateController install_allocation_failure{"0.0.2-alpha"};
+    CHECK(install_allocation_failure.begin_check(
+              CheckTrigger::manual, now) == CheckStart::started);
+    install_allocation_failure.complete_check(
+        kf2::Result<std::optional<ReleaseInfo>>::success(
+            std::optional<ReleaseInfo>{release()}));
+    const auto install_before = install_allocation_failure.snapshot();
+    CHECK(throws_on_next_allocation([&] {
+        static_cast<void>(
+            install_allocation_failure.begin_install_with_user_consent());
+    }));
+    CHECK(same_snapshot(install_allocation_failure.snapshot(), install_before));
+
+    UpdateController ignore_allocation_failure{"0.0.2-alpha"};
+    ignore_allocation_failure.restore_preferences(
+        true, now, true, std::string(64, 'v'));
+    const auto ignore_before = ignore_allocation_failure.snapshot();
+    CHECK(throws_on_next_allocation(
+        [&] { ignore_allocation_failure.ignore_available_version(); }));
+    CHECK(same_snapshot(ignore_allocation_failure.snapshot(), ignore_before));
     return EXIT_SUCCESS;
 }

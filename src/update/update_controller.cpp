@@ -2,10 +2,17 @@
 
 #include <algorithm>
 #include <limits>
+#include <type_traits>
 #include <utility>
 
 namespace kf2::update {
 namespace {
+
+detail::UpdateControllerAllocationHook allocation_hook{};
+
+void run_allocation_hook() {
+    if (allocation_hook != nullptr) allocation_hook();
+}
 
 std::int64_t automatic_failure_retry_seconds(
     std::uint32_t failure_count) noexcept {
@@ -22,6 +29,11 @@ std::int64_t automatic_failure_retry_seconds(
 
 }  // namespace
 
+void detail::set_update_controller_allocation_hook_for_testing(
+    UpdateControllerAllocationHook hook) noexcept {
+    allocation_hook = hook;
+}
+
 UpdateController::UpdateController(std::string installed_version) {
     snapshot_.installed_version = std::move(installed_version);
 }
@@ -33,33 +45,40 @@ void UpdateController::restore_preferences(
     std::string cached_available_version,
     std::string ignored_version,
     std::int64_t last_attempt_unix_seconds,
-    std::uint32_t automatic_failure_count) noexcept {
-    snapshot_.automatic_checks_enabled = automatic_checks_enabled;
-    snapshot_.last_check_unix_seconds = last_check_unix_seconds > 0
+    std::uint32_t automatic_failure_count) {
+    // Build the complete result before touching the live snapshot. Its move
+    // assignment is non-throwing, so an allocation failure leaves the prior
+    // coherent controller state intact.
+    run_allocation_hook();
+    UpdateSnapshot next = snapshot_;
+    next.automatic_checks_enabled = automatic_checks_enabled;
+    next.last_check_unix_seconds = last_check_unix_seconds > 0
         ? last_check_unix_seconds : 0;
-    snapshot_.cached_check_completed = cached_check_completed &&
-        snapshot_.last_check_unix_seconds > 0;
-    snapshot_.last_attempt_unix_seconds = last_attempt_unix_seconds > 0
+    next.cached_check_completed = cached_check_completed &&
+        next.last_check_unix_seconds > 0;
+    next.last_attempt_unix_seconds = last_attempt_unix_seconds > 0
         ? last_attempt_unix_seconds : 0;
-    snapshot_.automatic_failure_count =
-        snapshot_.last_attempt_unix_seconds > 0
+    next.automatic_failure_count =
+        next.last_attempt_unix_seconds > 0
             ? automatic_failure_count : 0;
-    snapshot_.ignored_version = std::move(ignored_version);
-    if (snapshot_.cached_check_completed &&
+    next.ignored_version = std::move(ignored_version);
+    if (next.cached_check_completed &&
         !cached_available_version.empty()) {
-        snapshot_.cached_available_version =
+        next.cached_available_version =
             std::move(cached_available_version);
-        snapshot_.status = L"A new version was found during the last check.";
-        snapshot_.dismissed =
-            *snapshot_.cached_available_version == snapshot_.ignored_version;
-    } else if (snapshot_.cached_check_completed) {
-        snapshot_.cached_available_version.reset();
-        snapshot_.status = L"No newer version was available at the last check.";
+        next.status = L"A new version was found during the last check.";
+        next.dismissed =
+            *next.cached_available_version == next.ignored_version;
+    } else if (next.cached_check_completed) {
+        next.cached_available_version.reset();
+        next.status = L"No newer version was available at the last check.";
     }
+    static_assert(std::is_nothrow_move_assignable_v<UpdateSnapshot>);
+    snapshot_ = std::move(next);
 }
 
 CheckStart UpdateController::begin_check(
-    CheckTrigger trigger, std::int64_t now_unix_seconds) noexcept {
+    CheckTrigger trigger, std::int64_t now_unix_seconds) {
     if (snapshot_.phase == UpdatePhase::checking ||
         snapshot_.phase == UpdatePhase::installing) return CheckStart::busy;
     if (trigger == CheckTrigger::automatic) {
@@ -78,15 +97,21 @@ CheckStart UpdateController::begin_check(
             return CheckStart::throttled;
         }
     }
-    snapshot_.last_attempt_unix_seconds = now_unix_seconds > 0
+    const auto next_last_attempt = now_unix_seconds > 0
         ? now_unix_seconds : snapshot_.last_attempt_unix_seconds;
+    auto next_failure_count = snapshot_.automatic_failure_count;
     if (trigger == CheckTrigger::automatic && now_unix_seconds > 0 &&
-        snapshot_.automatic_failure_count <
+        next_failure_count <
             std::numeric_limits<std::uint32_t>::max()) {
-        ++snapshot_.automatic_failure_count;
+        ++next_failure_count;
     }
+    run_allocation_hook();
+    std::wstring next_status = L"Checking official GitHub Releases...";
+    snapshot_.last_attempt_unix_seconds = next_last_attempt;
+    snapshot_.automatic_failure_count = next_failure_count;
     snapshot_.phase = UpdatePhase::checking;
-    snapshot_.status = L"Checking official GitHub Releases...";
+    static_assert(std::is_nothrow_move_assignable_v<std::wstring>);
+    snapshot_.status = std::move(next_status);
     snapshot_.available_release.reset();
     return CheckStart::started;
 }
@@ -126,14 +151,17 @@ void UpdateController::set_automatic_checks_enabled(bool enabled) noexcept {
     snapshot_.automatic_checks_enabled = enabled;
 }
 
-bool UpdateController::begin_install_with_user_consent() noexcept {
+bool UpdateController::begin_install_with_user_consent() {
     if (snapshot_.phase != UpdatePhase::available ||
         !snapshot_.available_release ||
         snapshot_.dismissed ||
         !snapshot_.available_release->asset.has_value() ||
         !snapshot_.available_release->install_block_reason.empty()) return false;
+    run_allocation_hook();
+    std::wstring next_status =
+        L"Downloading and verifying the approved update...";
     snapshot_.phase = UpdatePhase::installing;
-    snapshot_.status = L"Downloading and verifying the approved update...";
+    snapshot_.status = std::move(next_status);
     return true;
 }
 
@@ -150,9 +178,12 @@ void UpdateController::dismiss() noexcept {
     }
 }
 
-void UpdateController::ignore_available_version() noexcept {
+void UpdateController::ignore_available_version() {
     if (!snapshot_.cached_available_version) return;
-    snapshot_.ignored_version = *snapshot_.cached_available_version;
+    run_allocation_hook();
+    std::string next_ignored_version = *snapshot_.cached_available_version;
+    static_assert(std::is_nothrow_move_assignable_v<std::string>);
+    snapshot_.ignored_version = std::move(next_ignored_version);
     snapshot_.dismissed = true;
 }
 
