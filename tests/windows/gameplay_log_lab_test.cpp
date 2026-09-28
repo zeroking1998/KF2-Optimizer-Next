@@ -249,6 +249,28 @@ int main() {
         "class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(\n"
         "            AdaptiveGraphicsState, \"recover\", 100)") ==
           std::string::npos);
+    const auto offline_disable_commit = adaptive_disable_body.find(
+        "bAdaptiveRuntimeEnabled = false;");
+    const auto offline_disable_release = adaptive_disable_body.find(
+        "BeginAdaptiveCorpsePhysicsRelease();", offline_disable_commit);
+    const auto offline_disable_restore = adaptive_disable_body.find(
+        "class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(",
+        offline_disable_commit);
+    const auto offline_disable_fixed = adaptive_disable_body.find(
+        "bFixedEffectsApplied = EnsureFixedSessionEffects();",
+        offline_disable_commit);
+    const auto offline_disable_deferred = adaptive_disable_body.find(
+        "readback=deferred", offline_disable_commit);
+    CHECK(offline_disable_commit != std::string::npos);
+    CHECK(offline_disable_release != std::string::npos);
+    CHECK(offline_disable_restore != std::string::npos);
+    CHECK(offline_disable_fixed != std::string::npos);
+    CHECK(offline_disable_deferred != std::string::npos);
+    CHECK(offline_disable_commit < offline_disable_release);
+    CHECK(offline_disable_release < offline_disable_restore);
+    CHECK(offline_disable_restore < offline_disable_fixed);
+    CHECK(adaptive_disable_body.find(
+        "return true;", offline_disable_deferred) != std::string::npos);
     const auto fixed_effects_start = telemetry_source.find(
         "function bool EnsureFixedSessionEffects()");
     const auto restore_world_runtime_start = telemetry_source.find(
@@ -648,6 +670,43 @@ int main() {
         "bOnlineGraphicsEnabled = true"));
     CHECK(online_apply_body.find(
         "RestoreOnlineCorpseMaximum(CurrentWorld, \"disable\")") !=
+          std::string::npos);
+    const auto online_disable_start = online_apply_body.find(
+        "if (Resource ~= \"disable\")");
+    const auto online_disable_end = online_apply_body.find(
+        "if (!class'KF2OptimizerAdaptiveGraphics'.static.\n"
+        "            IsAdaptiveQualityResource(Resource))",
+        online_disable_start);
+    CHECK(online_disable_start != std::string::npos);
+    CHECK(online_disable_end != std::string::npos);
+    const auto online_disable_body = online_apply_body.substr(
+        online_disable_start, online_disable_end - online_disable_start);
+    const auto online_disable_commit = online_disable_body.find(
+        "bOnlineGraphicsEnabled = false;");
+    const auto online_disable_disarm = online_disable_body.find(
+        "bOnlineCorpseSleepArmed = false;");
+    const auto online_disable_sequence = online_disable_body.find(
+        "OnlineGraphicsLastSequence = Sequence;");
+    const auto online_disable_restore = online_disable_body.find(
+        "class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(");
+    const auto online_disable_fixed = online_disable_body.find(
+        "EnsureOnlineFixedEffectsBaseline(CurrentWorld)");
+    const auto online_disable_corpse_limit = online_disable_body.find(
+        "RestoreOnlineCorpseMaximum(CurrentWorld, \"disable\")");
+    CHECK(online_disable_commit != std::string::npos);
+    CHECK(online_disable_disarm != std::string::npos);
+    CHECK(online_disable_sequence != std::string::npos);
+    CHECK(online_disable_restore != std::string::npos);
+    CHECK(online_disable_fixed != std::string::npos);
+    CHECK(online_disable_corpse_limit != std::string::npos);
+    CHECK(online_disable_commit < online_disable_disarm);
+    CHECK(online_disable_disarm < online_disable_sequence);
+    CHECK(online_disable_sequence < online_disable_restore);
+    CHECK(online_disable_restore < online_disable_fixed);
+    CHECK(online_disable_fixed < online_disable_corpse_limit);
+    CHECK(online_disable_body.find(
+        "return bCorpseMaximumRestored;") != std::string::npos);
+    CHECK(online_disable_body.find("readback=deferred") !=
           std::string::npos);
     CHECK(online_context_source.find(
         "RestoreOnlineSessionState(CurrentWorld, \"main_menu\")") !=

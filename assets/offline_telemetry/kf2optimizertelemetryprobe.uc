@@ -401,6 +401,9 @@ function ScheduleFixedMinimumVisualControlTimer(float DelaySeconds)
 
 function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
 {
+    local bool bFixedEffectsApplied;
+    local bool bGraphicsRestored;
+
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone ||
         bAdaptiveRuntimeQuiesced)
     {
@@ -432,17 +435,9 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
         return true;
     }
 
-    if (AdaptiveGraphicsState != None &&
-        !class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
-            AdaptiveGraphicsState))
-    {
-        return false;
-    }
-    bFixedSessionEffectsApplied = false;
-    if (!EnsureFixedSessionEffects())
-    {
-        return false;
-    }
+    // Runtime ownership must be released even when the independent visual
+    // baseline cannot be verified. The viewport interaction retries that
+    // baseline with backoff while this mode remains disabled.
     bAdaptiveRuntimeEnabled = false;
     ClearTimer(nameof(StaggerCorpseCleanup), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
@@ -480,6 +475,20 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
     AdaptiveCachedAwakeCorpses = 0;
     AdaptiveCorpseCountsObservedRealTime = 0.0;
     AdaptiveFramePressureObservedRealTime = 0.0;
+    bGraphicsRestored = AdaptiveGraphicsState == None ||
+        class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
+            AdaptiveGraphicsState);
+    bFixedSessionEffectsApplied = false;
+    bFixedEffectsApplied = EnsureFixedSessionEffects();
+    if (!bGraphicsRestored || !bFixedEffectsApplied)
+    {
+        `log("KF2OPT_ADAPTIVE_MODE state=disabled fixed_effect_quality="$
+             class'KF2OptimizerAdaptiveGraphics'.static.
+                GetFixedSessionEffectsQuality()$" readback=deferred"$
+             " corpse_limit="$AdaptiveCorpseRuntimeLimit$
+             " telemetry=active");
+        return true;
+    }
     `log("KF2OPT_ADAPTIVE_MODE state=disabled fixed_effect_quality="$
          class'KF2OptimizerAdaptiveGraphics'.static.
             GetFixedSessionEffectsQuality()$" readback=verified"$
