@@ -38,6 +38,7 @@ enum class AdaptiveControlReceiptStatus : std::uint8_t {
     applied,
     restored,
     state_unknown,
+    unsupported,
 };
 
 struct AdaptiveControlReceipt final {

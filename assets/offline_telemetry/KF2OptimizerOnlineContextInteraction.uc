@@ -15,6 +15,7 @@ var float LastObservedRealTime;
 var KF2OptimizerAdaptiveGraphicsState OnlineGraphicsState;
 var int OnlineGraphicsLastSequence;
 var bool bOnlineGraphicsEnabled;
+var bool bLastOnlineGraphicsCapabilityRejected;
 var bool bOnlineFixedEffectsApplied;
 var float OnlineGraphicsListenerNextCheckRealTime;
 var float OnlineGraphicsListenerRetryDelay;
@@ -79,6 +80,11 @@ function KF2OptimizerAdaptiveGraphicsState GetOnlineGraphicsState()
 function bool IsOnlineAdaptiveEnabled()
 {
     return bOnlineGraphicsEnabled;
+}
+
+function bool WasOnlineGraphicsCapabilityRejected()
+{
+    return bLastOnlineGraphicsCapabilityRejected;
 }
 
 function bool IsOnlineSessionEnding()
@@ -275,9 +281,15 @@ function bool ApplyOnlineGraphicsControl(
     local KF2OptimizerAdaptiveGraphicsState CurrentState;
     local KFGoreManager GoreManager;
 
+    bLastOnlineGraphicsCapabilityRejected = false;
     if (!GetOnlineWorld(CurrentWorld) ||
         !ValidOnlineGraphicsToken(Token) || Sequence <= 0 ||
         Sequence <= OnlineGraphicsLastSequence)
+    {
+        return false;
+    }
+    if (!class'KF2OptimizerAdaptiveGraphics'.static.
+            IsAdaptiveControlResource(Resource))
     {
         return false;
     }
@@ -329,10 +341,10 @@ function bool ApplyOnlineGraphicsControl(
     {
         return false;
     }
-    CurrentState = GetOnlineGraphicsState();
-    if (CurrentState == None) return false;
     if (Resource ~= "disable")
     {
+        CurrentState = GetOnlineGraphicsState();
+        if (CurrentState == None) return false;
         if (!class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
                 CurrentState))
         {
@@ -356,12 +368,26 @@ function bool ApplyOnlineGraphicsControl(
              " readback=verified");
         return true;
     }
-    if (!bOnlineGraphicsEnabled ||
-        !((Resource ~= "gpu") || (Resource ~= "vram") ||
-          (Resource ~= "ram") || (Resource ~= "recover")))
+    if (!class'KF2OptimizerAdaptiveGraphics'.static.
+            IsAdaptiveQualityResource(Resource))
     {
         return false;
     }
+    if (!class'KF2OptimizerAdaptiveGraphics'.static.
+            IsOnlineAdaptiveQualityResource(Resource))
+    {
+        bLastOnlineGraphicsCapabilityRejected = true;
+        `log("KF2OPT_ONLINE_GRAPHICS state=unsupported seq="$Sequence$
+             " resource="$Resource$" reason=capability_unavailable"$
+             " local_only=true");
+        return false;
+    }
+    if (!bOnlineGraphicsEnabled)
+    {
+        return false;
+    }
+    CurrentState = GetOnlineGraphicsState();
+    if (CurrentState == None) return false;
     if (!class'KF2OptimizerAdaptiveGraphics'.static.ApplyResource(
             CurrentState, Resource, Quality))
     {

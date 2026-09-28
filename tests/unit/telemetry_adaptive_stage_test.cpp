@@ -847,9 +847,13 @@ int main() {
     control.primary_resource = optimizer::ResourceKind::ram;
     CHECK(select_adaptive_runtime_control(control).has_value());
     control.primary_resource = optimizer::ResourceKind::cpu;
-    CHECK(!select_adaptive_runtime_control(control).has_value());
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::cpu);
     control.primary_resource = optimizer::ResourceKind::unknown;
-    CHECK(!select_adaptive_runtime_control(control).has_value());
+    selected = select_adaptive_runtime_control(control);
+    CHECK(selected.has_value());
+    CHECK(selected->resource == game::AdaptiveResourceControl::mixed);
     control.state = optimizer::AdaptiveControllerState::stable;
     control.current_quality = 75;
     control.recovery_eligible = true;

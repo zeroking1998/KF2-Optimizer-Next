@@ -341,6 +341,26 @@ void UiRuntime::poll_adaptive_quality_dispatcher() {
                     "ADAPTIVE_RUNTIME_QUALITY_STATE_UNKNOWN",
                     L"KF2 could not verify the complete pre-command quality composition; the exact previous composition remains queued for verified restoration",
                     L"optimizer"});
+            } else if (outcome->has_value() &&
+                outcome->value().status ==
+                    game::AdaptiveControlReceiptStatus::unsupported) {
+                static_cast<void>(adaptive_actuation.receive({
+                    pending.action_id,
+                    optimizer::AdaptiveControlId::runtime_quality,
+                    optimizer::AdaptiveActionStatus::failed,
+                    static_cast<double>(pending.requested_quality),
+                    {},
+                    pending.generation,
+                    completed_ns,
+                    "kf2_loopback_readback",
+                    "runtime_resource_unsupported"}));
+                log_adaptive_quality_response(
+                    quality_response.cancel("runtime_resource_unsupported"));
+                events->append({
+                    0, diagnostics::Severity::warning,
+                    "ADAPTIVE_RUNTIME_RESOURCE_UNSUPPORTED",
+                    L"The current KF2 session explicitly rejected this Adaptive resource capability; confirmed quality remains unchanged",
+                    L"optimizer"});
             } else if (outcome->has_value()) {
                 const auto receipt_result = adaptive_actuation.receive({
                     pending.action_id,

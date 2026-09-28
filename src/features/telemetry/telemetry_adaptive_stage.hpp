@@ -256,13 +256,6 @@ select_adaptive_runtime_control(
 
     if (input.rollback_quality && input.rollback_resource &&
         *input.rollback_quality > input.current_quality) {
-        if (input.local_graphics_only &&
-            (*input.rollback_resource ==
-                 game::AdaptiveResourceControl::cpu ||
-             *input.rollback_resource ==
-                 game::AdaptiveResourceControl::mixed)) {
-            return std::nullopt;
-        }
         return AdaptiveRuntimeControlSelection{
             *input.rollback_resource,
             std::clamp(*input.rollback_quality,
@@ -323,14 +316,6 @@ select_adaptive_runtime_control(
               input.bottleneck, input.bottleneck_confidence,
               input.overdraw_minimum_reached,
               input.effects_control_available);
-    // Joined servers get only process-local renderer controls. CPU and mixed
-    // groups also own entity/physics-related GFX fields and remain blocked
-    // until their separate online capability groups are proven safe.
-    if (input.local_graphics_only &&
-        (resource == game::AdaptiveResourceControl::cpu ||
-         resource == game::AdaptiveResourceControl::mixed)) {
-        return std::nullopt;
-    }
     // A broad mixed reduction has no attributed bottleneck. Give the fresh
     // ten-second percentile window one additional clean cycle after the
     // general post-map guard, otherwise its retained loading tail can trigger

@@ -132,6 +132,11 @@ event ReceivedLine(string Line)
     {
         SendText("KF2OPT_ACK "$Sequence$" applied "$Resource$" "$Quality);
     }
+    else if (CurrentInteraction != None &&
+             CurrentInteraction.WasOnlineGraphicsCapabilityRejected())
+    {
+        SendText("KF2OPT_ACK "$Sequence$" unsupported "$Resource$" "$Quality);
+    }
     else
     {
         SendText("KF2OPT_ACK "$Sequence$" failed rejected");
