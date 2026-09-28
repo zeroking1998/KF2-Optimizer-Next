@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string_view>
@@ -30,6 +31,8 @@ public:
     [[nodiscard]] bool update_layout(ShellLayoutResult layout) noexcept;
 #if defined(KF2_AUTOMATION_PROVIDER_TESTING)
     void fail_next_child_allocation_for_testing() noexcept;
+    [[nodiscard]] std::uint32_t provider_options_for_testing(
+        bool child) const noexcept;
 #endif
 
 private:
