@@ -4,6 +4,8 @@
 class KF2OptimizerTelemetryInteraction extends Interaction
     within GameViewportClient;
 
+const AchievementPrewarmRequestTimeoutSeconds=10.0;
+
 var string OptimizerContextState;
 var string OptimizerProbeState;
 var string OptimizerGameplayUiState;
@@ -17,6 +19,7 @@ var bool bAchievementPrewarmDelegateRegistered;
 var byte AchievementPrewarmPlayerControllerId;
 var int AchievementPrewarmAttempts;
 var float AchievementPrewarmNextAttemptRealTime;
+var float AchievementPrewarmRequestStartedRealTime;
 var int FixedEffectsBaselineAttempts;
 var float FixedEffectsBaselineNextAttemptRealTime;
 var float FixedEffectsBaselineRetryDelay;
@@ -249,6 +252,7 @@ function OnAchievementPrewarmComplete(int TitleId)
 {
     bAchievementPrewarmRequested = false;
     bAchievementPrewarmComplete = true;
+    AchievementPrewarmRequestStartedRealTime = 0.0;
     ClearAchievementPrewarmDelegate();
     `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=complete title="$
          TitleId$" attempts="$AchievementPrewarmAttempts);
@@ -259,8 +263,32 @@ function TryPrewarmAchievements(PlayerController PrimaryController)
     local LocalPlayer PrimaryPlayer;
     local OnlineSubsystem OnlineSub;
     local byte PlayerControllerId;
+    local int NextRetryMs;
 
-    if (bAchievementPrewarmRequested || bAchievementPrewarmComplete ||
+    if (bAchievementPrewarmRequested)
+    {
+        if (PrimaryController != None && PrimaryController.WorldInfo != None &&
+            (PrimaryController.WorldInfo.RealTimeSeconds <
+                 AchievementPrewarmRequestStartedRealTime ||
+             PrimaryController.WorldInfo.RealTimeSeconds -
+                 AchievementPrewarmRequestStartedRealTime >=
+                 AchievementPrewarmRequestTimeoutSeconds))
+        {
+            ClearAchievementPrewarmDelegate();
+            bAchievementPrewarmRequested = false;
+            AchievementPrewarmRequestStartedRealTime = 0.0;
+            if (AchievementPrewarmAttempts < 3)
+            {
+                AchievementPrewarmNextAttemptRealTime =
+                    PrimaryController.WorldInfo.RealTimeSeconds + 1.0;
+                NextRetryMs = 1000;
+            }
+            `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=timeout attempt="$
+                 AchievementPrewarmAttempts$" next_retry_ms="$NextRetryMs);
+        }
+        return;
+    }
+    if (bAchievementPrewarmComplete ||
         AchievementPrewarmAttempts >= 3 || PrimaryController == None ||
         PrimaryController.WorldInfo == None || GamePlayers.Length == 0 ||
         PrimaryController.WorldInfo.RealTimeSeconds <
@@ -290,6 +318,8 @@ function TryPrewarmAchievements(PlayerController PrimaryController)
         PlayerControllerId, OnAchievementPrewarmComplete);
     bAchievementPrewarmDelegateRegistered = true;
     bAchievementPrewarmRequested = true;
+    AchievementPrewarmRequestStartedRealTime =
+        PrimaryController.WorldInfo.RealTimeSeconds;
     ++AchievementPrewarmAttempts;
     `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=requested"$
          " text=true images=true attempt="$AchievementPrewarmAttempts);
@@ -297,6 +327,7 @@ function TryPrewarmAchievements(PlayerController PrimaryController)
             PlayerControllerId, 0, true, true))
     {
         bAchievementPrewarmRequested = false;
+        AchievementPrewarmRequestStartedRealTime = 0.0;
         ClearAchievementPrewarmDelegate();
         AchievementPrewarmNextAttemptRealTime =
             PrimaryController.WorldInfo.RealTimeSeconds + 1.0;
@@ -317,6 +348,7 @@ function PrepareForGameplayWorld()
     bAchievementPrewarmComplete = false;
     AchievementPrewarmAttempts = 0;
     AchievementPrewarmNextAttemptRealTime = 0.0;
+    AchievementPrewarmRequestStartedRealTime = 0.0;
     ResetFixedEffectsBaselineRetry();
     if (bProcessGraphicsRestorePending)
     {
@@ -487,6 +519,8 @@ function NotifyGameSessionEnded()
     // touch a controller, world or render object while UE3 tears them down.
     bGameSessionEnding = true;
     ClearAchievementPrewarmDelegate();
+    bAchievementPrewarmRequested = false;
+    AchievementPrewarmRequestStartedRealTime = 0.0;
     bProcessGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.
         RestoreOriginal(
         ProcessAdaptiveGraphicsState);
