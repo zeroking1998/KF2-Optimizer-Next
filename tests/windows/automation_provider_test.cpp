@@ -375,6 +375,20 @@ int main() {
     mta_creator.join();
     CHECK(mta_creation_failed_closed);
 
+    ComPtr<IUnknown> retained_child;
+    retained_child.Attach(provider.value().retain_child_for_testing(0));
+    CHECK(retained_child != nullptr);
+    ComPtr<IRawElementProviderFragment> retained_fragment;
+    CHECK(SUCCEEDED(retained_child.As(&retained_fragment)));
+    provider.value().disconnect_for_testing();
+    for (const auto direction : {NavigateDirection_NextSibling,
+                                 NavigateDirection_PreviousSibling}) {
+        IRawElementProviderFragment* sibling = retained_fragment.Get();
+        CHECK(retained_fragment->Navigate(direction, &sibling) ==
+              UIA_E_ELEMENTNOTAVAILABLE);
+        CHECK(sibling == nullptr);
+    }
+
     sink.provider = nullptr;
     CoUninitialize();
     return EXIT_SUCCESS;
