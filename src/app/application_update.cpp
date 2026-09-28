@@ -5,9 +5,9 @@
 #include <chrono>
 #include <ctime>
 #include <cwchar>
+#include <exception>
 #include <mutex>
 #include <optional>
-#include <thread>
 
 #include "kf2/platform/windows/atomic_file.hpp"
 #include "kf2/platform/windows/state_environment.hpp"
@@ -133,14 +133,42 @@ void UiRuntime::start_update_check(update::CheckTrigger trigger) {
     }
     static_cast<void>(update::save_update_state(
         updates.state_path, persisted_state(updates.controller.snapshot())));
-    const auto state = std::make_shared<UpdateCheckAsyncState>();
-    updates.check = state;
-    const std::string installed = updates.controller.snapshot().installed_version;
-    std::thread([state, installed] {
-        auto result = update::query_official_github_releases(installed);
-        std::scoped_lock lock{state->mutex};
-        state->outcome.emplace(std::move(result));
-    }).detach();
+    try {
+        const auto state = std::make_shared<UpdateCheckAsyncState>();
+        const std::string installed =
+            updates.controller.snapshot().installed_version;
+        const auto operation = updates.check_operation;
+        updates.worker_launcher([state, installed, operation] {
+            Result<std::optional<update::ReleaseInfo>> result =
+                Result<std::optional<update::ReleaseInfo>>::failure(
+                    {ErrorCode::internal_failure,
+                     L"Update check ended unexpectedly", 0});
+            try {
+                result = operation(installed);
+            } catch (const std::exception&) {
+                result = Result<std::optional<update::ReleaseInfo>>::failure(
+                    {ErrorCode::internal_failure,
+                     L"Update check encountered an unexpected local error",
+                     0});
+            } catch (...) {
+                result = Result<std::optional<update::ReleaseInfo>>::failure(
+                    {ErrorCode::internal_failure,
+                     L"Update check encountered an unknown local error", 0});
+            }
+            std::scoped_lock lock{state->mutex};
+            state->outcome.emplace(std::move(result));
+        });
+        updates.check = std::move(state);
+    } catch (...) {
+        updates.check.reset();
+        updates.controller.complete_check(
+            Result<std::optional<update::ReleaseInfo>>::failure(
+                {ErrorCode::internal_failure,
+                 L"Update check could not start its background worker", 0}));
+        static_cast<void>(update::save_update_state(
+            updates.state_path,
+            persisted_state(updates.controller.snapshot())));
+    }
     refresh_update_presentation();
 }
 
@@ -332,18 +360,42 @@ void UiRuntime::start_update_install() {
         refresh_update_presentation();
         return;
     }
-    const auto release = *updates.controller.snapshot().available_release;
-    const auto work = temporary.value() /
-        L"KF2OptimizerNext-Update" /
-        (std::to_wstring(GetCurrentProcessId()) + L"-" +
-         std::to_wstring(static_cast<unsigned long long>(monotonic_ns())));
-    const auto state = std::make_shared<UpdateInstallAsyncState>();
-    updates.install = state;
-    std::thread([state, release, work] {
-        auto result = update::prepare_update_package(release, work);
-        std::scoped_lock lock{state->mutex};
-        state->outcome.emplace(std::move(result));
-    }).detach();
+    try {
+        const auto release = *updates.controller.snapshot().available_release;
+        const auto work = temporary.value() /
+            L"KF2OptimizerNext-Update" /
+            (std::to_wstring(GetCurrentProcessId()) + L"-" +
+             std::to_wstring(
+                 static_cast<unsigned long long>(monotonic_ns())));
+        const auto state = std::make_shared<UpdateInstallAsyncState>();
+        const auto operation = updates.install_operation;
+        updates.worker_launcher([state, release, work, operation] {
+            Result<update::PreparedUpdatePackage> result =
+                Result<update::PreparedUpdatePackage>::failure(
+                    {ErrorCode::internal_failure,
+                     L"Update preparation ended unexpectedly", 0});
+            try {
+                result = operation(release, work);
+            } catch (const std::exception&) {
+                result = Result<update::PreparedUpdatePackage>::failure(
+                    {ErrorCode::internal_failure,
+                     L"Update preparation encountered an unexpected local error",
+                     0});
+            } catch (...) {
+                result = Result<update::PreparedUpdatePackage>::failure(
+                    {ErrorCode::internal_failure,
+                     L"Update preparation encountered an unknown local error",
+                     0});
+            }
+            std::scoped_lock lock{state->mutex};
+            state->outcome.emplace(std::move(result));
+        });
+        updates.install = std::move(state);
+    } catch (...) {
+        updates.install.reset();
+        updates.controller.complete_install_failure(
+            L"Update installation could not start its background worker.");
+    }
     refresh_update_presentation();
 }
 

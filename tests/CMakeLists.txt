@@ -453,6 +453,8 @@ set_tests_properties(kf2_application_lifecycle_test PROPERTIES
     LABELS "requires-desktop")
 add_test(NAME kf2_package_repair_worker_start_test
     COMMAND kf2_application_lifecycle_test --package-repair-start-failure)
+add_test(NAME kf2_update_worker_exception_test
+    COMMAND kf2_application_lifecycle_test --update-worker-exceptions)
 
 add_executable(kf2_state_environment_test
     windows/state_environment_test.cpp

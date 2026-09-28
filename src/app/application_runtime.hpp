@@ -56,7 +56,9 @@
 #include "kf2/ui/automation_provider.hpp"
 #include "kf2/ui/direct2d_renderer.hpp"
 #include "kf2/ui/shell_controller.hpp"
+#include "kf2/update/github_release_client.hpp"
 #include "kf2/update/update_controller.hpp"
+#include "kf2/update/update_package.hpp"
 #include "kf2/telemetry/gpu_metrics.hpp"
 #include "kf2/telemetry/resource_telemetry_worker.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
@@ -97,6 +99,16 @@ struct UpdateRuntimeState final {
     std::filesystem::path state_path;
     std::shared_ptr<UpdateCheckAsyncState> check;
     std::shared_ptr<UpdateInstallAsyncState> install;
+    std::function<Result<std::optional<update::ReleaseInfo>>(
+        std::string_view)> check_operation{
+            update::query_official_github_releases};
+    std::function<Result<update::PreparedUpdatePackage>(
+        const update::ReleaseInfo&, const std::filesystem::path&)>
+        install_operation{update::prepare_update_package};
+    std::function<void(std::function<void()>)> worker_launcher{
+        [](std::function<void()> worker) {
+            std::thread{std::move(worker)}.detach();
+        }};
 };
 
 struct AdvancedSettingsRuntimeState final {
