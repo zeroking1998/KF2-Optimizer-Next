@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <system_error>
 
 #include "kf2/core/result.hpp"
 
@@ -18,7 +19,10 @@ struct SessionConfigSnapshot {
 
 #if defined(KF2_SESSION_GUARD_TESTING)
 using SessionReadHook = void (*)(const std::filesystem::path&);
+using SessionStatusHook = bool (*)(const std::filesystem::path&,
+                                   std::error_code&);
 void set_session_read_hook_for_testing(SessionReadHook hook) noexcept;
+void set_session_status_hook_for_testing(SessionStatusHook hook) noexcept;
 #endif
 
 [[nodiscard]] Result<SessionConfigSnapshot> capture_session_config(

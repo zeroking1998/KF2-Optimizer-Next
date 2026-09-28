@@ -14,6 +14,12 @@
         }                                                                       \
     } while (false)
 
+static bool deny_status(const std::filesystem::path&,
+                        std::error_code& error) {
+    error = std::make_error_code(std::errc::permission_denied);
+    return false;
+}
+
 int main() {
     namespace fs = std::filesystem;
     using kf2::app::SessionGuard;
@@ -22,7 +28,17 @@ int main() {
     const fs::path root{KF2_TEST_ROOT};
     fs::remove_all(root);
     fs::create_directories(root);
+
     const auto marker = root / L"session.marker";
+
+    kf2::app::set_session_status_hook_for_testing(&deny_status);
+    const auto inaccessible = SessionGuard::start(
+        marker, SessionIdentity{9, 19});
+    kf2::app::set_session_status_hook_for_testing(nullptr);
+    CHECK(!inaccessible.has_value());
+    CHECK(inaccessible.error().code == kf2::ErrorCode::io_failure);
+    CHECK(inaccessible.error().native_code != 0);
+    CHECK(!fs::exists(marker));
 
     auto first = SessionGuard::start(marker, SessionIdentity{10, 20});
     CHECK(first.has_value());

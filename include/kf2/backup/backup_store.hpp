@@ -3,12 +3,19 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "kf2/config/config_preview.hpp"
 #include "kf2/core/result.hpp"
 
 namespace kf2::backup {
+
+#if defined(KF2_BACKUP_RECOVERY_TESTING)
+using BackupStatusHook = bool (*)(const std::filesystem::path&,
+                                  std::error_code&);
+void set_backup_status_hook_for_testing(BackupStatusHook hook) noexcept;
+#endif
 
 struct FileSnapshot {
     std::filesystem::path relative_path;

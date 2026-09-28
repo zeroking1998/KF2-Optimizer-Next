@@ -2,10 +2,17 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <system_error>
 
 #include "kf2/core/result.hpp"
 
 namespace kf2::app {
+
+#if defined(KF2_APP_SESSION_TESTING)
+using SessionStatusHook = bool (*)(const std::filesystem::path&,
+                                   std::error_code&);
+void set_session_status_hook_for_testing(SessionStatusHook hook) noexcept;
+#endif
 
 struct SessionIdentity {
     std::uint32_t pid{0};

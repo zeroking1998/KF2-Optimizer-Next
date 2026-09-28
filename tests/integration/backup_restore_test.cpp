@@ -50,6 +50,11 @@ HANDLE lock_without_read_sharing(const std::filesystem::path& path) {
                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 }
 
+bool deny_status(const std::filesystem::path&, std::error_code& error) {
+    error = std::make_error_code(std::errc::permission_denied);
+    return false;
+}
+
 bool has_quarantined_copy(const std::filesystem::path& source,
                           std::string_view expected_bytes) {
     const auto prefix = source.filename().wstring() + L".corrupt";
@@ -80,6 +85,15 @@ int main() {
     kf2::config::ConfigPreview preview;
     preview.config_root = config_root;
     preview.files.push_back({L"KFEngine.ini", original, proposed});
+    kf2::backup::BackupStore status_error_store{
+        root / L"StatusErrorState"};
+    kf2::backup::set_backup_status_hook_for_testing(&deny_status);
+    const auto inaccessible_backup =
+        status_error_store.create_standalone(preview);
+    kf2::backup::set_backup_status_hook_for_testing(nullptr);
+    CHECK(!inaccessible_backup.has_value());
+    CHECK(inaccessible_backup.error().code == kf2::ErrorCode::io_failure);
+    CHECK(inaccessible_backup.error().native_code != 0);
     kf2::backup::BackupStore store{root / L"State"};
     const auto standalone = store.create_standalone(preview);
     CHECK(standalone.has_value());

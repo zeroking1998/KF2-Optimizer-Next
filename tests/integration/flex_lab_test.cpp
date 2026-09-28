@@ -15,6 +15,17 @@ static void write(const std::filesystem::path& p, const char* value) {
 
 static std::filesystem::path race_active;
 static std::filesystem::path race_forwarder;
+static std::filesystem::path denied_status_path;
+
+static bool fail_selected_status(const std::filesystem::path& path,
+                                 std::error_code& error) {
+    if (path == denied_status_path) {
+        error = std::make_error_code(std::errc::permission_denied);
+        return false;
+    }
+    return std::filesystem::exists(path, error);
+}
+
 static void replace_source_at_checkpoint(
     kf2::flex::LabInstallTestCheckpoint checkpoint) {
     if (checkpoint == kf2::flex::LabInstallTestCheckpoint::sources_hashed &&
@@ -34,6 +45,15 @@ int main() {
     std::filesystem::create_directories(game); std::filesystem::create_directories(state);
     const auto forwarder = root / "flexRelease_x64.forwarder-lab.dll";
     write(game / "flexRelease_x64.dll", "original-runtime"); write(forwarder, "forwarder");
+    denied_status_path = state / "flex-lab-transaction.marker";
+    kf2::flex::set_lab_status_hook_for_testing(&fail_selected_status);
+    const auto inaccessible = kf2::flex::recover_offline_lab(
+        game, state, false);
+    kf2::flex::set_lab_status_hook_for_testing(nullptr);
+    denied_status_path.clear();
+    CHECK(!inaccessible.has_value());
+    CHECK(inaccessible.error().code == kf2::ErrorCode::io_failure);
+    CHECK(inaccessible.error().native_code != 0);
     kf2::flex::LabTransactionOptions o{game, state, forwarder, false, true, true, false};
     auto installed = kf2::flex::install_offline_lab(o);
     CHECK(installed.has_value() && installed.value().installed);

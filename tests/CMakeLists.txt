@@ -273,6 +273,7 @@ add_executable(kf2_session_test
 )
 target_include_directories(kf2_session_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_session_test PRIVATE
+    KF2_APP_SESSION_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/session"
 )
 add_test(NAME kf2_session_test COMMAND kf2_session_test)

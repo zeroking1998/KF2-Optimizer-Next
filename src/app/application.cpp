@@ -109,7 +109,16 @@ Result<Application> Application::start(const StartOptions& options) {
     const auto current_event_log =
         options.state_root / L"logs" / L"session-events.json";
     bool previous_event_log_archived = false;
-    if (std::filesystem::exists(current_event_log)) {
+    std::error_code event_log_status_error;
+    const bool previous_event_log_exists = std::filesystem::exists(
+        current_event_log, event_log_status_error);
+    if (event_log_status_error) {
+        return Result<Application>::failure(
+            {ErrorCode::io_failure,
+             L"Previous event log status cannot be inspected",
+             static_cast<std::uint32_t>(event_log_status_error.value())});
+    }
+    if (previous_event_log_exists) {
         const auto previous = read_verified_local_file(
             current_event_log, 2U * 1024U * 1024U);
         if (previous.has_value() && !previous.value().empty()) {

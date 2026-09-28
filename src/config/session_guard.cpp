@@ -27,7 +27,18 @@ constexpr std::uintmax_t maximum_manifest_bytes = 1024U * 1024U;
 
 #if defined(KF2_SESSION_GUARD_TESTING)
 SessionReadHook session_read_hook{};
+SessionStatusHook session_status_hook{};
 #endif
+
+bool path_exists(const std::filesystem::path& path,
+                 std::error_code& error) {
+#if defined(KF2_SESSION_GUARD_TESTING)
+    if (session_status_hook != nullptr) {
+        return session_status_hook(path, error);
+    }
+#endif
+    return std::filesystem::exists(path, error);
+}
 
 Result<std::string> read_verified_file(
     const std::filesystem::path& path, std::uintmax_t limit);
@@ -35,7 +46,15 @@ Result<std::string> read_verified_file(
 Result<bool> keep_temporal_aa_disabled(
     const std::filesystem::path& config_root) {
     const auto target = config_root / L"KFSystemSettings.ini";
-    if (!std::filesystem::exists(target)) {
+    std::error_code status_error;
+    const bool target_exists = path_exists(target, status_error);
+    if (status_error) {
+        return Result<bool>::failure(
+            {ErrorCode::io_failure,
+             L"Temporal anti-aliasing configuration status cannot be inspected",
+             static_cast<std::uint32_t>(status_error.value())});
+    }
+    if (!target_exists) {
         return Result<bool>::success(false);
     }
     auto bytes = read_verified_file(target, maximum_file_bytes);
@@ -291,7 +310,15 @@ Result<bool> validate_snapshot_tree(const std::filesystem::path& root) {
 }
 
 Result<bool> remove_snapshot_tree(const std::filesystem::path& root) {
-    if (!std::filesystem::exists(root)) return Result<bool>::success(true);
+    std::error_code status_error;
+    const bool root_exists = path_exists(root, status_error);
+    if (status_error) {
+        return Result<bool>::failure(
+            {ErrorCode::io_failure,
+             L"Session snapshot status cannot be inspected",
+             static_cast<std::uint32_t>(status_error.value())});
+    }
+    if (!root_exists) return Result<bool>::success(true);
     auto safe = validate_snapshot_tree(root);
     if (!safe.has_value()) return safe;
     std::error_code error;
@@ -427,7 +454,7 @@ Result<bool> ensure_safe_parent(const std::filesystem::path& root,
     for (const auto& component : relative_parent) {
         current /= component;
         std::error_code error;
-        if (!std::filesystem::exists(current, error)) {
+        if (!path_exists(current, error)) {
             if (error || !std::filesystem::create_directory(current, error) || error) {
                 return Result<bool>::failure(
                     {ErrorCode::io_failure,
@@ -447,6 +474,10 @@ Result<bool> ensure_safe_parent(const std::filesystem::path& root,
 void set_session_read_hook_for_testing(SessionReadHook hook) noexcept {
     session_read_hook = hook;
 }
+
+void set_session_status_hook_for_testing(SessionStatusHook hook) noexcept {
+    session_status_hook = hook;
+}
 #endif
 
 Result<SessionConfigSnapshot> capture_session_config(
@@ -454,9 +485,12 @@ Result<SessionConfigSnapshot> capture_session_config(
     const std::filesystem::path& state_root) {
     std::error_code error;
     const auto canonical_root = std::filesystem::weakly_canonical(config_root, error);
-    if (error || !std::filesystem::is_directory(canonical_root)) {
+    const bool root_is_directory = !error &&
+        std::filesystem::is_directory(canonical_root, error);
+    if (error || !root_is_directory) {
         return Result<SessionConfigSnapshot>::failure(
-            {ErrorCode::invalid_argument, L"KF2 configuration root is invalid", 0});
+            {ErrorCode::invalid_argument, L"KF2 configuration root is invalid",
+             static_cast<std::uint32_t>(error.value())});
     }
     auto root_identity = directory_identity(canonical_root);
     if (!root_identity.has_value()) {
@@ -472,8 +506,25 @@ Result<SessionConfigSnapshot> capture_session_config(
         return Result<SessionConfigSnapshot>::failure(session_identity.error());
     }
     const auto snapshot_root = session_root / L"active";
-    if (std::filesystem::exists(snapshot_root, error)) {
-        if (error || std::filesystem::exists(snapshot_root / L"manifest.txt")) {
+    error.clear();
+    const bool snapshot_exists = path_exists(snapshot_root, error);
+    if (error) {
+        return Result<SessionConfigSnapshot>::failure(
+            {ErrorCode::io_failure,
+             L"Session snapshot status cannot be inspected",
+             static_cast<std::uint32_t>(error.value())});
+    }
+    if (snapshot_exists) {
+        error.clear();
+        const bool manifest_exists = path_exists(
+            snapshot_root / L"manifest.txt", error);
+        if (error) {
+            return Result<SessionConfigSnapshot>::failure(
+                {ErrorCode::io_failure,
+                 L"Session manifest status cannot be inspected",
+                 static_cast<std::uint32_t>(error.value())});
+        }
+        if (manifest_exists) {
             return Result<SessionConfigSnapshot>::failure(
                 {ErrorCode::stale_data,
                  L"A verified session configuration snapshot is already active", 0});
@@ -627,11 +678,27 @@ Result<std::optional<SessionConfigSnapshot>> resume_session_config(
     const std::filesystem::path& config_root,
     const std::filesystem::path& state_root) {
     const auto snapshot_root = state_root / L"session-config" / L"active";
-    if (!std::filesystem::exists(snapshot_root)) {
+    std::error_code error;
+    const bool snapshot_exists = path_exists(snapshot_root, error);
+    if (error) {
+        return Result<std::optional<SessionConfigSnapshot>>::failure(
+            {ErrorCode::io_failure,
+             L"Session snapshot status cannot be inspected",
+             static_cast<std::uint32_t>(error.value())});
+    }
+    if (!snapshot_exists) {
         return Result<std::optional<SessionConfigSnapshot>>::success(std::nullopt);
     }
     const auto manifest_path = snapshot_root / L"manifest.txt";
-    if (!std::filesystem::exists(manifest_path)) {
+    error.clear();
+    const bool manifest_exists = path_exists(manifest_path, error);
+    if (error) {
+        return Result<std::optional<SessionConfigSnapshot>>::failure(
+            {ErrorCode::io_failure,
+             L"Session manifest status cannot be inspected",
+             static_cast<std::uint32_t>(error.value())});
+    }
+    if (!manifest_exists) {
         auto removed = remove_snapshot_tree(snapshot_root);
         if (!removed.has_value()) {
             return Result<std::optional<SessionConfigSnapshot>>::failure(
@@ -639,11 +706,13 @@ Result<std::optional<SessionConfigSnapshot>> resume_session_config(
         }
         return Result<std::optional<SessionConfigSnapshot>>::success(std::nullopt);
     }
-    std::error_code error;
     const auto canonical_root = std::filesystem::weakly_canonical(config_root, error);
-    if (error || !std::filesystem::is_directory(canonical_root)) {
+    const bool root_is_directory = !error &&
+        std::filesystem::is_directory(canonical_root, error);
+    if (error || !root_is_directory) {
         return Result<std::optional<SessionConfigSnapshot>>::failure(
-            {ErrorCode::invalid_argument, L"KF2 configuration root is invalid", 0});
+            {ErrorCode::invalid_argument, L"KF2 configuration root is invalid",
+             static_cast<std::uint32_t>(error.value())});
     }
     auto tree_safe = validate_snapshot_tree(snapshot_root);
     if (!tree_safe.has_value()) {

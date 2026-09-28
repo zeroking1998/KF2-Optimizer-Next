@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <system_error>
 
 #include "kf2/core/result.hpp"
 
@@ -14,7 +15,10 @@ enum class LabInstallTestCheckpoint {
 };
 
 using LabInstallTestHook = void (*)(LabInstallTestCheckpoint checkpoint);
+using LabStatusHook = bool (*)(const std::filesystem::path&,
+                               std::error_code&);
 void set_lab_install_test_hook(LabInstallTestHook hook) noexcept;
+void set_lab_status_hook_for_testing(LabStatusHook hook) noexcept;
 #endif
 
 struct LabTransactionOptions {

@@ -61,6 +61,38 @@ void apply_flex_control_effect(app::UiRuntime& runtime,
 }  // namespace kf2::telemetry_pipeline
 
 namespace kf2::app {
+namespace {
+
+struct FlexTransactionState {
+    bool marker_exists{};
+    bool original_exists{};
+};
+
+Result<FlexTransactionState> inspect_flex_transaction_state(
+    const std::filesystem::path& game_directory,
+    const std::filesystem::path& state_directory) {
+    std::error_code error;
+    const bool marker_exists = std::filesystem::exists(
+        state_directory / L"flex-lab-transaction.marker", error);
+    if (error) {
+        return Result<FlexTransactionState>::failure(
+            {ErrorCode::io_failure,
+             L"FleX transaction marker status cannot be inspected",
+             static_cast<std::uint32_t>(error.value())});
+    }
+    const bool original_exists = std::filesystem::exists(
+        game_directory / L"flexRelease_original.dll", error);
+    if (error) {
+        return Result<FlexTransactionState>::failure(
+            {ErrorCode::io_failure,
+             L"FleX original runtime status cannot be inspected",
+             static_cast<std::uint32_t>(error.value())});
+    }
+    return Result<FlexTransactionState>::success(
+        {marker_exists, original_exists});
+}
+
+}  // namespace
 
 Result<bool> UiRuntime::ensure_fixed_flex_runtime() {
     if (!installation) {
@@ -72,20 +104,28 @@ Result<bool> UiRuntime::ensure_fixed_flex_runtime() {
         L"Binaries" / L"Win64";
     const auto state_directory =
         settings_path.parent_path() / L"flex-lab";
-    const auto marker = state_directory /
-        L"flex-lab-transaction.marker";
     const auto preserved_original = game_directory /
         L"flexRelease_original.dll";
 
-    if (std::filesystem::exists(marker) ||
-        std::filesystem::exists(preserved_original)) {
+    const auto transaction = inspect_flex_transaction_state(
+        game_directory, state_directory);
+    if (!transaction.has_value()) {
+        return Result<bool>::failure(transaction.error());
+    }
+    if (transaction.value().marker_exists ||
+        transaction.value().original_exists) {
         const auto recovered = flex::recover_offline_lab(
             game_directory, state_directory, false);
         if (!recovered.has_value()) {
             return Result<bool>::failure(recovered.error());
         }
-        if (std::filesystem::exists(marker) &&
-            std::filesystem::exists(preserved_original)) {
+        const auto retained = inspect_flex_transaction_state(
+            game_directory, state_directory);
+        if (!retained.has_value()) {
+            return Result<bool>::failure(retained.error());
+        }
+        if (retained.value().marker_exists &&
+            retained.value().original_exists) {
             const auto audit =
                 flex::audit_runtime(preserved_original, true);
             if (audit.has_value() && audit.value().exact_known_runtime) {
@@ -134,10 +174,21 @@ bool UiRuntime::restore_fixed_flex_runtime(std::wstring_view reason) {
         L"Binaries" / L"Win64";
     const auto state_directory =
         settings_path.parent_path() / L"flex-lab";
-    if (!std::filesystem::exists(
-            state_directory / L"flex-lab-transaction.marker") &&
-        !std::filesystem::exists(
-            game_directory / L"flexRelease_original.dll")) {
+    const auto transaction = inspect_flex_transaction_state(
+        game_directory, state_directory);
+    if (!transaction.has_value()) {
+        events->append({0, diagnostics::Severity::error,
+            "FLEX_FIXED_RESTORE_FAILED", transaction.error().message,
+            L"flex"});
+        model.set_recovery_required(true);
+        model.set_notice({ui::NoticeSeverity::error,
+            L"FLEX_FIXED_RESTORE_FAILED", transaction.error().message,
+            L"Do not start KF2 again until the original FleX runtime is restored."});
+        invalidate();
+        return false;
+    }
+    if (!transaction.value().marker_exists &&
+        !transaction.value().original_exists) {
         return true;
     }
     const bool running = game::find_running_game_process(
