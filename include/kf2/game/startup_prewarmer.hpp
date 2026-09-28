@@ -1,15 +1,25 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace kf2::game {
+
+namespace detail {
+inline constexpr std::size_t kInitialVolumeExtentBufferBytes = 4096;
+inline constexpr std::size_t kMaximumVolumeExtentBufferBytes = 1024 * 1024;
+[[nodiscard]] std::optional<std::vector<std::uint32_t>>
+parse_volume_disk_extents(std::span<const std::byte> storage,
+                          std::size_t returned_bytes) noexcept;
+}  // namespace detail
 
 enum class StorageKind { unknown, solid_state, rotational };
 

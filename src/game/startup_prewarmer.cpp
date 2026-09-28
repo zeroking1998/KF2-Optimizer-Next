@@ -10,12 +10,62 @@
 #include <atomic>
 #include <cstddef>
 #include <cwctype>
+#include <cstring>
 #include <stop_token>
 #include <string>
 #include <system_error>
 #include <thread>
 
 namespace kf2::game {
+
+namespace {
+
+constexpr std::size_t kVolumeExtentHeaderBytes =
+    offsetof(VOLUME_DISK_EXTENTS, Extents);
+
+std::optional<std::size_t> volume_extent_bytes(DWORD extent_count) noexcept {
+    constexpr std::size_t maximum_extent_count =
+        (detail::kMaximumVolumeExtentBufferBytes -
+         kVolumeExtentHeaderBytes) /
+        sizeof(DISK_EXTENT);
+    if (extent_count == 0 || extent_count > maximum_extent_count) {
+        return std::nullopt;
+    }
+    return kVolumeExtentHeaderBytes +
+        static_cast<std::size_t>(extent_count) * sizeof(DISK_EXTENT);
+}
+
+}  // namespace
+
+std::optional<std::vector<std::uint32_t>>
+detail::parse_volume_disk_extents(std::span<const std::byte> storage,
+                                  std::size_t returned_bytes) noexcept {
+    if (storage.size() > kMaximumVolumeExtentBufferBytes ||
+        returned_bytes < kVolumeExtentHeaderBytes ||
+        returned_bytes > storage.size()) {
+        return std::nullopt;
+    }
+    DWORD extent_count = 0;
+    std::memcpy(&extent_count, storage.data(), sizeof(extent_count));
+    const auto required = volume_extent_bytes(extent_count);
+    if (!required || returned_bytes < *required) return std::nullopt;
+
+    std::vector<std::uint32_t> result;
+    result.reserve(extent_count);
+    for (DWORD index = 0; index < extent_count; ++index) {
+        DISK_EXTENT extent{};
+        std::memcpy(&extent,
+                    storage.data() + kVolumeExtentHeaderBytes +
+                        static_cast<std::size_t>(index) * sizeof(DISK_EXTENT),
+                    sizeof(extent));
+        if (std::find(result.begin(), result.end(), extent.DiskNumber) ==
+            result.end()) {
+            result.push_back(extent.DiskNumber);
+        }
+    }
+    return result;
+}
+
 namespace {
 
 constexpr std::uint64_t kMiB = 1024ULL * 1024ULL;
@@ -64,33 +114,48 @@ std::optional<std::vector<std::uint32_t>> disk_numbers_for_path(
         nullptr, OPEN_EXISTING, 0, nullptr);
     if (volume == INVALID_HANDLE_VALUE) return std::nullopt;
 
-    std::array<std::byte, 4096> storage{};
-    DWORD returned = 0;
-    const BOOL queried = DeviceIoControl(
-        volume, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, nullptr, 0,
-        storage.data(), static_cast<DWORD>(storage.size()), &returned, nullptr);
-    CloseHandle(volume);
-    if (!queried || returned < sizeof(VOLUME_DISK_EXTENTS)) {
-        return std::nullopt;
-    }
-
-    const auto* extents = reinterpret_cast<const VOLUME_DISK_EXTENTS*>(
-        storage.data());
-    const std::size_t required = offsetof(VOLUME_DISK_EXTENTS, Extents) +
-        static_cast<std::size_t>(extents->NumberOfDiskExtents) *
-            sizeof(DISK_EXTENT);
-    if (extents->NumberOfDiskExtents == 0 || returned < required) {
-        return std::nullopt;
-    }
-    std::vector<std::uint32_t> result;
-    result.reserve(extents->NumberOfDiskExtents);
-    for (DWORD index = 0; index < extents->NumberOfDiskExtents; ++index) {
-        const auto number = extents->Extents[index].DiskNumber;
-        if (std::find(result.begin(), result.end(), number) == result.end()) {
-            result.push_back(number);
+    std::vector<std::byte> storage(
+        detail::kInitialVolumeExtentBufferBytes);
+    while (storage.size() <= detail::kMaximumVolumeExtentBufferBytes) {
+        DWORD returned = 0;
+        const BOOL queried = DeviceIoControl(
+            volume, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, nullptr, 0,
+            storage.data(), static_cast<DWORD>(storage.size()), &returned,
+            nullptr);
+        if (queried) {
+            CloseHandle(volume);
+            return detail::parse_volume_disk_extents(storage, returned);
         }
+
+        const DWORD error = GetLastError();
+        if (error != ERROR_MORE_DATA &&
+            error != ERROR_INSUFFICIENT_BUFFER) {
+            CloseHandle(volume);
+            return std::nullopt;
+        }
+
+        std::size_t next_size = std::min(
+            storage.size() * 2,
+            detail::kMaximumVolumeExtentBufferBytes);
+        if (error == ERROR_MORE_DATA && returned >= sizeof(DWORD)) {
+            DWORD extent_count = 0;
+            std::memcpy(&extent_count, storage.data(), sizeof(extent_count));
+            const auto required = volume_extent_bytes(extent_count);
+            if (!required) {
+                CloseHandle(volume);
+                return std::nullopt;
+            }
+            next_size = std::max(next_size, *required);
+        }
+        if (next_size <= storage.size() ||
+            next_size > detail::kMaximumVolumeExtentBufferBytes) {
+            CloseHandle(volume);
+            return std::nullopt;
+        }
+        storage.resize(next_size);
     }
-    return result;
+    CloseHandle(volume);
+    return std::nullopt;
 }
 
 std::optional<bool> disk_incurs_seek_penalty(std::uint32_t number) noexcept {
