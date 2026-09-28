@@ -1106,6 +1106,57 @@ int main() {
     CHECK(process_restore_retry_call < fixed_effects_retry_call);
     CHECK(mutator_source.find("InsertInteraction(CurrentInteraction)") !=
           std::string::npos);
+    CHECK(interaction_source.find(
+        "var bool bTelemetryBootstrapInserted;") != std::string::npos);
+    CHECK(interaction_source.find(
+        "function bool IsTelemetryBootstrapInserted()") !=
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "function MarkTelemetryBootstrapInserted()") !=
+          std::string::npos);
+    CHECK(mutator_source.find(
+        "const TelemetryBootstrapMaxAttempts=5;") != std::string::npos);
+    CHECK(mutator_source.find(
+        "const TelemetryBootstrapInitialRetrySeconds=0.25;") !=
+          std::string::npos);
+    CHECK(mutator_source.find(
+        "const TelemetryBootstrapMaximumRetrySeconds=2.0;") !=
+          std::string::npos);
+    const auto bootstrap_attempt = mutator_source.find(
+        "function TryBootstrapTelemetry()");
+    const auto bootstrap_guard = mutator_source.find(
+        "function bool CanBootstrapTelemetry()");
+    const auto bootstrap_retry_schedule = mutator_source.find(
+        "function ScheduleTelemetryBootstrapRetry(");
+    const auto bootstrap_retry_callback = mutator_source.find(
+        "function RetryTelemetryBootstrap()");
+    const auto bootstrap_destroyed = mutator_source.find(
+        "event Destroyed()");
+    CHECK(bootstrap_attempt != std::string::npos);
+    CHECK(bootstrap_guard != std::string::npos);
+    CHECK(bootstrap_retry_schedule != std::string::npos);
+    CHECK(bootstrap_retry_callback != std::string::npos);
+    CHECK(bootstrap_destroyed != std::string::npos);
+    CHECK(mutator_source.find("!bDeleteMe", bootstrap_guard) <
+          bootstrap_retry_schedule);
+    CHECK(mutator_source.find(
+        "WorldInfo.NetMode == NM_Standalone", bootstrap_guard) <
+          bootstrap_retry_schedule);
+    CHECK(mutator_source.find(
+        "TelemetryBootstrapAttempts >= TelemetryBootstrapMaxAttempts",
+        bootstrap_retry_schedule) < bootstrap_attempt);
+    CHECK(mutator_source.find(
+        "SetTimer(TelemetryBootstrapRetryDelay, false,",
+        bootstrap_retry_schedule) < bootstrap_attempt);
+    CHECK(mutator_source.find(
+        "nameof(RetryTelemetryBootstrap), self)",
+        bootstrap_retry_schedule) < bootstrap_attempt);
+    const auto viewport_unavailable = mutator_source.find(
+        "state=viewport_unavailable", bootstrap_attempt);
+    const auto viewport_retry = mutator_source.find(
+        "ScheduleTelemetryBootstrapRetry(\"viewport_unavailable\")",
+        viewport_unavailable);
+    CHECK(viewport_unavailable < viewport_retry);
     const auto interaction_path = mutator_source.find(
         "InteractionPath = PathName(CurrentViewport)$\n"
         "        \".KF2OptimizerTelemetryInteraction\"");
@@ -1115,7 +1166,8 @@ int main() {
     const auto existing_interaction = mutator_source.find(
         "state=ready interaction=existing");
     const auto create_interaction = mutator_source.find(
-        "new(CurrentViewport, \"KF2OptimizerTelemetryInteraction\")");
+        "new(CurrentViewport,\n"
+        "            \"KF2OptimizerTelemetryInteraction\")");
     const auto insert_interaction = mutator_source.find(
         "InsertInteraction(CurrentInteraction)");
     CHECK(interaction_path != std::string::npos);
@@ -1126,15 +1178,52 @@ int main() {
     CHECK(interaction_path < interaction_lookup);
     CHECK(interaction_lookup < existing_interaction);
     CHECK(mutator_source.find(
+        "CurrentInteraction.IsTelemetryBootstrapInserted()",
+        interaction_lookup) < existing_interaction);
+    CHECK(mutator_source.find(
         "CurrentInteraction.PrepareForGameplayWorld();",
         interaction_lookup) < existing_interaction);
     CHECK(existing_interaction < create_interaction);
     CHECK(create_interaction < insert_interaction);
+    const auto insertion_failure = mutator_source.find(
+        "if (CurrentViewport.InsertInteraction(CurrentInteraction) == -1)",
+        create_interaction);
+    const auto insertion_failure_log = mutator_source.find(
+        "state=insertion_failed", insertion_failure);
+    const auto insertion_retry = mutator_source.find(
+        "ScheduleTelemetryBootstrapRetry(\"insertion_failed\")",
+        insertion_failure_log);
+    const auto mark_inserted = mutator_source.find(
+        "CurrentInteraction.MarkTelemetryBootstrapInserted()",
+        insertion_retry);
+    const auto inserted_prepare = mutator_source.find(
+        "CurrentInteraction.PrepareForGameplayWorld();", mark_inserted);
+    const auto inserted_ready = mutator_source.find(
+        "state=ready interaction=inserted", inserted_prepare);
+    CHECK(insertion_failure != std::string::npos);
+    CHECK(insertion_failure < insertion_failure_log);
+    CHECK(insertion_failure_log < insertion_retry);
+    CHECK(insertion_retry < mark_inserted);
+    CHECK(mark_inserted < inserted_prepare);
+    CHECK(inserted_prepare < inserted_ready);
+    CHECK(mutator_source.find("return;", insertion_retry) < mark_inserted);
+    CHECK(mutator_source.find(
+        "if (!CanBootstrapTelemetry())", bootstrap_retry_callback) <
+          mutator_source.find(
+              "TryBootstrapTelemetry();", bootstrap_retry_callback));
+    CHECK(mutator_source.find(
+        "TryBootstrapTelemetry();", bootstrap_retry_callback) <
+          bootstrap_destroyed);
+    CHECK(mutator_source.find(
+        "ClearTimer(nameof(RetryTelemetryBootstrap), self);",
+        bootstrap_destroyed) <
+          mutator_source.find("Super.Destroyed();", bootstrap_destroyed));
     CHECK(mutator_source.find(
         "FindObject(\"KF2OptimizerTelemetryInteraction\"") ==
           std::string::npos);
     CHECK(count_occurrences(mutator_source,
-        "new(CurrentViewport, \"KF2OptimizerTelemetryInteraction\")") == 1);
+        "new(CurrentViewport,\n"
+        "            \"KF2OptimizerTelemetryInteraction\")") == 1);
     CHECK(count_occurrences(mutator_source,
         "InsertInteraction(CurrentInteraction)") == 1);
     CHECK(count_occurrences(mutator_source,
@@ -1188,11 +1277,17 @@ int main() {
         "RequestInitialMapSettle();");
     const auto map_settle_receipt = mutator_source.find(
         "KF2OPT_MAP_SETTLE schema=1 state=requested map=");
+    const auto init_mutator = mutator_source.find(
+        "function InitMutator(");
+    const auto bootstrap_call = mutator_source.find(
+        "TryBootstrapTelemetry();", init_mutator);
     CHECK(map_settle_request != std::string::npos);
     CHECK(map_settle_call != std::string::npos);
     CHECK(map_settle_receipt != std::string::npos);
     CHECK(standalone_guard < map_settle_call);
-    CHECK(map_settle_call < interaction_path);
+    CHECK(init_mutator < map_settle_call);
+    CHECK(map_settle_call < bootstrap_call);
+    CHECK(bootstrap_call < bootstrap_destroyed);
     CHECK(count_occurrences(mutator_source,
         "WorldInfo.bRequestedBlockOnAsyncLoading = true;") == 1);
     CHECK(count_occurrences(mutator_source,
