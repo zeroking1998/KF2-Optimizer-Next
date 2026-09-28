@@ -52,16 +52,12 @@ Result<config::Settings> load_or_create_settings(
     }
     bool must_write = !settings_exist;
     if (!must_write) {
-        std::string bytes;
-        {
-            std::ifstream input(path, std::ios::binary);
-            if (!input) {
-                return Result<config::Settings>::failure(
-                    {ErrorCode::io_failure, L"Settings file cannot be opened", 0});
-            }
-            bytes.assign(std::istreambuf_iterator<char>{input},
-                         std::istreambuf_iterator<char>{});
+        const auto document =
+            platform::windows::read_bounded_verified_file(path, 256 * 1024);
+        if (!document.has_value()) {
+            return Result<config::Settings>::failure(document.error());
         }
+        const auto& bytes = document.value();
         auto parsed = config::parse_settings(bytes);
         if (parsed.has_value()) {
             const bool canonicalization_needed =
@@ -192,42 +188,7 @@ std::optional<std::string> path_utf8(const std::filesystem::path& path) {
 
 Result<std::string> read_verified_local_file(const std::filesystem::path& path,
                                              std::uintmax_t maximum_bytes) {
-    const DWORD attributes = GetFileAttributesW(path.c_str());
-    if (attributes == INVALID_FILE_ATTRIBUTES ||
-        (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
-        return Result<std::string>::failure(
-            {ErrorCode::access_denied, L"Local file identity is unsafe", GetLastError()});
-    }
-    HANDLE file = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure, L"Local file cannot be inspected", GetLastError()});
-    }
-    BY_HANDLE_FILE_INFORMATION information{};
-    const bool identity_ok = GetFileInformationByHandle(file, &information) &&
-        information.nNumberOfLinks == 1;
-    CloseHandle(file);
-    std::error_code error;
-    const auto size = std::filesystem::file_size(path, error);
-    if (!identity_ok || error || size > maximum_bytes) {
-        return Result<std::string>::failure(
-            {ErrorCode::access_denied, L"Local file failed identity or size validation",
-             static_cast<std::uint32_t>(error.value())});
-    }
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure, L"Local file cannot be opened", 0});
-    }
-    std::string bytes{std::istreambuf_iterator<char>{input},
-                      std::istreambuf_iterator<char>{}};
-    if (bytes.size() != size) {
-        return Result<std::string>::failure(
-            {ErrorCode::stale_data, L"Local file changed while it was being read", 0});
-    }
-    return Result<std::string>::success(std::move(bytes));
+    return platform::windows::read_bounded_verified_file(path, maximum_bytes);
 }
 
 std::wstring query_hardware_summary() {

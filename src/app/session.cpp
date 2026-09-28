@@ -1,8 +1,6 @@
 #include "kf2/app/session.hpp"
 
 #include <charconv>
-#include <fstream>
-#include <iterator>
 #include <map>
 #include <sstream>
 #include <string>
@@ -111,13 +109,12 @@ Result<SessionGuard> SessionGuard::start(
              static_cast<std::uint32_t>(status_error.value())});
     }
     if (existing_marker) {
-        std::string text;
-        {
-            std::ifstream input(marker_path, std::ios::binary);
-            text.assign(std::istreambuf_iterator<char>{input},
-                        std::istreambuf_iterator<char>{});
+        const auto document =
+            platform::windows::read_bounded_verified_file(marker_path, 256);
+        if (!document.has_value()) {
+            return Result<SessionGuard>::failure(document.error());
         }
-        const auto parsed = parse_marker(text);
+        const auto parsed = parse_marker(document.value());
         if (parsed.has_value()) {
             previous_unclean = !parsed.value().clean;
         } else {
