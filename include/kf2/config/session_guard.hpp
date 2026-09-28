@@ -16,6 +16,11 @@ struct SessionConfigSnapshot {
     std::uint64_t root_file{0};
 };
 
+#if defined(KF2_SESSION_GUARD_TESTING)
+using SessionReadHook = void (*)(const std::filesystem::path&);
+void set_session_read_hook_for_testing(SessionReadHook hook) noexcept;
+#endif
+
 [[nodiscard]] Result<SessionConfigSnapshot> capture_session_config(
     const std::filesystem::path& config_root,
     const std::filesystem::path& state_root);
