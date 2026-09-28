@@ -433,6 +433,70 @@ int test_map_prewarm_retry_scheduler() {
     return EXIT_SUCCESS;
 }
 
+int test_pending_policy_restage_failure_rollback() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::path{KF2_TEST_ROOT} /
+        L"pending-policy-transaction";
+    fs::remove_all(root);
+    const auto config_root = root / L"Config";
+    const auto install_root = root / L"KillingFloor2";
+    const auto executable = install_root / L"Binaries/Win64/KFGame.exe";
+    write_test_pe(executable);
+    CHECK(write_complete_config_catalog(config_root));
+
+    const auto state_root = root / L"Data";
+    kf2::diagnostics::EventLog events{128};
+    kf2::config::Settings initial;
+    initial.target_fps = 90;
+    initial.corpse_limit = 40;
+    kf2::app::UiRuntime runtime{
+        state_root, false, initial, events, std::nullopt,
+        kf2::app::StartMode::normal, root / L"portable"};
+    runtime.installation = kf2::game::GameInstallation{
+        .install_root = install_root,
+        .executable = executable,
+        .config_root = config_root};
+
+    auto captured = kf2::config::capture_session_config(
+        config_root, state_root);
+    CHECK(captured.has_value());
+    runtime.session_config_snapshot = std::move(captured.value());
+    const auto control_token = kf2::game::generate_adaptive_control_token();
+    CHECK(control_token.has_value());
+    runtime.adaptive_control_token = control_token.value();
+
+    int restage_attempts = 0;
+    runtime.pending_policy_restage_operation =
+        [&](const fs::path&, bool, int, int, bool, int,
+            std::string_view, bool, bool) {
+            ++restage_attempts;
+            return kf2::Result<bool>::failure({
+                kf2::ErrorCode::io_failure,
+                L"Injected pending-policy restage failure", 0});
+        };
+    runtime.set_slider_value("settings-target-slider", 144);
+
+    CHECK(restage_attempts == 1);
+    CHECK(runtime.optimizer_settings.target_fps == 90);
+    CHECK(runtime.model.status().target_fps == 90);
+    const auto rolled_back = kf2::config::parse_settings(
+        read_bytes(runtime.settings_path));
+    CHECK(rolled_back.has_value());
+    CHECK(rolled_back.value().target_fps == 90);
+    CHECK(!runtime.session_config_snapshot.has_value());
+    CHECK(!runtime.model.recovery_required());
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code ==
+          L"ADAPTIVE_PENDING_POLICY_UPDATE_FAILED");
+    const auto failure_log = events.snapshot();
+    CHECK(std::any_of(failure_log.begin(), failure_log.end(),
+        [](const auto& event) {
+            return event.code ==
+                   "ADAPTIVE_PENDING_POLICY_UPDATE_FAILED";
+        }));
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 &&
         std::string_view{argv[1]} == "--package-repair-start-failure") {
@@ -442,6 +506,11 @@ int main(int argc, char** argv) {
         std::string_view{argv[1]} == "--update-worker-exceptions") {
         return test_update_worker_exception_boundaries();
     }
+    if (argc == 2 &&
+        std::string_view{argv[1]} ==
+            "--pending-policy-restage-failure") {
+        return test_pending_policy_restage_failure_rollback();
+    }
     try {
         const auto inaccessible = kf2::app::load_or_create_settings(
             std::filesystem::path{std::wstring(40'000, L'x')});
@@ -449,6 +518,7 @@ int main(int argc, char** argv) {
     } catch (const std::filesystem::filesystem_error&) {
         return EXIT_FAILURE;
     }
+    CHECK(test_pending_policy_restage_failure_rollback() == EXIT_SUCCESS);
     CHECK(test_map_prewarm_retry_scheduler() == EXIT_SUCCESS);
     CHECK(kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::normal));

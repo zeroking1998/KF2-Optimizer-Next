@@ -174,7 +174,7 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     if (adaptive_policy_changed && installation && session_config_snapshot &&
         !game_running &&
         game::valid_adaptive_control_token(adaptive_control_token)) {
-        const auto restaged = game::enable_offline_gameplay_logging(
+        const auto restaged = pending_policy_restage_operation(
             installation->config_root,
             !optimizer_settings.debug_corpse_physics_control,
             optimizer_settings.corpse_limit,
@@ -183,15 +183,77 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
             optimizer_settings.adaptive_quality_change_budget,
             adaptive_control_token, optimizer_settings.debug_zed_markers,
             optimizer_settings.adaptive_optimization_enabled);
-        if (!restaged.has_value()) {
-            events->append({0, diagnostics::Severity::warning,
+        const auto staged_policy = restaged.has_value()
+            ? game::read_offline_adaptive_session_policy(
+                  installation->config_root)
+            : Result<std::optional<game::OfflineAdaptiveSessionPolicy>>::failure(
+                  restaged.error());
+        const bool staged_policy_matches = staged_policy.has_value() &&
+            staged_policy.value().has_value() &&
+            staged_policy.value()->corpse_maximum ==
+                optimizer_settings.corpse_limit &&
+            staged_policy.value()->target_fps ==
+                optimizer_settings.target_fps &&
+            staged_policy.value()->quality_change_budget ==
+                optimizer_settings.adaptive_quality_change_budget &&
+            staged_policy.value()->runtime_enabled ==
+                optimizer_settings.adaptive_optimization_enabled;
+        if (!staged_policy_matches) {
+            const Error restage_error = staged_policy.has_value()
+                ? Error{ErrorCode::stale_data,
+                        L"The protected Adaptive policy readback did not match the saved Home settings",
+                        0}
+                : staged_policy.error();
+            events->append({0, diagnostics::Severity::error,
                 "ADAPTIVE_PENDING_POLICY_UPDATE_FAILED",
-                restaged.error().message, L"optimizer"});
+                restage_error.message, L"optimizer"});
+
+            optimizer_settings = previous;
+            overlay_scale = static_cast<float>(
+                optimizer_settings.overlay_scale_percent) / 100.0F;
+            const auto settings_rollback =
+                platform::windows::atomic_replace_utf8(
+                    settings_path,
+                    config::serialize_settings(optimizer_settings));
+            const bool protected_state_restored =
+                restore_protected_session_config(
+                    L"Pending Adaptive policy update failed");
+            adaptive_session_policy.reset();
+            auto rolled_back_status = model.status();
+            rolled_back_status.target_fps = optimizer_settings.target_fps;
+            rolled_back_status.corpse_limit = optimizer_settings.corpse_limit;
+            rolled_back_status.active_target_fps.reset();
+            rolled_back_status.active_corpse_limit.reset();
+            update_adaptive_policy_status(rolled_back_status);
+            model.set_status(std::move(rolled_back_status));
+
+            if (!settings_rollback.has_value() ||
+                !protected_state_restored) {
+                model.set_recovery_required(true);
+                model.set_notice({
+                    ui::NoticeSeverity::error,
+                    L"ADAPTIVE_PENDING_POLICY_RECOVERY_REQUIRED",
+                    L"The pending Adaptive policy did not match and its transaction could not be fully rolled back: " +
+                        (!settings_rollback.has_value()
+                            ? settings_rollback.error().message
+                            : restage_error.message),
+                    L"Use Repair before starting KF2."});
+            } else {
+                model.set_notice({
+                    ui::NoticeSeverity::error,
+                    L"ADAPTIVE_PENDING_POLICY_UPDATE_FAILED",
+                    L"The pending Adaptive policy could not be verified. The slider and protected launch preparation were rolled back: " +
+                        restage_error.message,
+                    L"Retry the change before starting KF2."});
+            }
+            invalidate();
+            return;
         } else {
             adaptive_session_policy = game::OfflineAdaptiveSessionPolicy{
                 optimizer_settings.corpse_limit,
                 optimizer_settings.target_fps,
-                optimizer_settings.adaptive_quality_change_budget};
+                optimizer_settings.adaptive_quality_change_budget,
+                optimizer_settings.adaptive_optimization_enabled};
             events->append({0, diagnostics::Severity::info,
                 "ADAPTIVE_PENDING_POLICY_UPDATED",
                 L"The protected policy was updated before KF2's replacement process started",

@@ -73,6 +73,10 @@ struct PackageRepairAsyncState;
 struct UpdateCheckAsyncState;
 struct UpdateInstallAsyncState;
 
+using PendingPolicyRestageOperation = std::function<Result<bool>(
+    const std::filesystem::path&, bool, int, int, bool, int,
+    std::string_view, bool, bool)>;
+
 enum class VideoSyncDisposition {
     unchanged,
     synchronized,
@@ -148,6 +152,8 @@ struct UiRuntime {
     backup::BackupStore backups;
     std::optional<game::GameDiscoveryInput> discovery_input;
     std::optional<game::GameInstallation> installation;
+    PendingPolicyRestageOperation pending_policy_restage_operation{
+        game::enable_offline_gameplay_logging};
     std::optional<config::ConfigPreview> preview;
     std::wstring preview_context{L"Verified configuration changes"};
     std::string last_backup_id;

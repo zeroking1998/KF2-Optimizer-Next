@@ -297,23 +297,46 @@ read_offline_adaptive_session_policy(
         }
         return Result<std::optional<int>>::success(parsed);
     };
+    const auto read_boolean = [&](std::wstring_view key)
+        -> Result<std::optional<bool>> {
+        const auto value = document.value().find(kTelemetrySection, key);
+        if (!value) {
+            return Result<std::optional<bool>>::success(std::nullopt);
+        }
+        const auto duplicate_check = document.value().upsert(
+            kTelemetrySection, key, *value);
+        const auto normalized = normalized_boolean(*value);
+        if (duplicate_check.shadowed_occurrences != 0 ||
+            (normalized != L"true" && normalized != L"false")) {
+            return Result<std::optional<bool>>::failure({
+                ErrorCode::invalid_argument,
+                L"Adaptive session policy is ambiguous or malformed", 0});
+        }
+        return Result<std::optional<bool>>::success(normalized == L"true");
+    };
     auto corpse = read_integer(kAdaptiveCorpseMaximumKey);
     auto target = read_integer(kAdaptiveTargetFpsKey);
     auto budget = read_integer(kAdaptiveQualityChangeBudgetKey);
-    if (!corpse.has_value() || !target.has_value() || !budget.has_value()) {
+    auto runtime_enabled = read_boolean(kAdaptiveRuntimeEnabledKey);
+    if (!corpse.has_value() || !target.has_value() || !budget.has_value() ||
+        !runtime_enabled.has_value()) {
         const auto& error = !corpse.has_value() ? corpse.error()
-            : !target.has_value() ? target.error() : budget.error();
+            : !target.has_value() ? target.error()
+            : !budget.has_value() ? budget.error()
+                                  : runtime_enabled.error();
         return Result<std::optional<OfflineAdaptiveSessionPolicy>>::failure(
             error);
     }
     const bool any = corpse.value().has_value() ||
                      target.value().has_value() ||
-                     budget.value().has_value();
+                     budget.value().has_value() ||
+                     runtime_enabled.value().has_value();
     if (!any) {
         return Result<std::optional<OfflineAdaptiveSessionPolicy>>::success(
             std::nullopt);
     }
     if (!corpse.value() || !target.value() || !budget.value() ||
+        !runtime_enabled.value() ||
         *corpse.value() < 4 || *corpse.value() > 2000 ||
         !optimizer::valid_target_fps(*target.value()) ||
         *budget.value() < 1 || *budget.value() > 5) {
@@ -324,7 +347,8 @@ read_offline_adaptive_session_policy(
     }
     return Result<std::optional<OfflineAdaptiveSessionPolicy>>::success(
         OfflineAdaptiveSessionPolicy{
-            *corpse.value(), *target.value(), *budget.value()});
+            *corpse.value(), *target.value(), *budget.value(),
+            *runtime_enabled.value()});
 }
 
 std::wstring lower_copy(std::wstring_view value) {

@@ -3315,6 +3315,7 @@ int main() {
     CHECK(observed_policy.value()->target_fps == 137);
     CHECK(observed_policy.value()->corpse_maximum == 350);
     CHECK(observed_policy.value()->quality_change_budget == 2);
+    CHECK(observed_policy.value()->runtime_enabled);
     const auto adaptive_unchanged =
         kf2::game::enable_offline_gameplay_logging(
             root, true, 350, 137, true, 2, control_token, true);
@@ -3342,6 +3343,11 @@ int main() {
     CHECK(adaptive_initially_off.value());
     CHECK(read_bytes(engine_ini).find(
               "bAdaptiveRuntimeEnabled=False\r\n") != std::string::npos);
+    const auto disabled_policy =
+        kf2::game::read_offline_adaptive_session_policy(root);
+    CHECK(disabled_policy.has_value());
+    CHECK(disabled_policy.value().has_value());
+    CHECK(!disabled_policy.value()->runtime_enabled);
 
     CHECK(!kf2::game::cleanup_stale_offline_gameplay_configuration(
         root, true).has_value());

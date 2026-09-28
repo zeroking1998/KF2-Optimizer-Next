@@ -12,6 +12,7 @@ struct OfflineAdaptiveSessionPolicy final {
     int corpse_maximum{20};
     int target_fps{60};
     int quality_change_budget{2};
+    bool runtime_enabled{true};
 };
 
 // Enables KF2's own bounded AI/wave logs and registers the pinned per-user
