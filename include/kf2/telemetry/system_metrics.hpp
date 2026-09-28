@@ -81,6 +81,26 @@ struct CpuCapacityObservation {
 };
 [[nodiscard]] std::optional<std::vector<ProcessorGroupMask>>
 resolve_process_capacity_masks(const CpuCapacityObservation& observation);
+
+struct ThreadPressureMetrics {
+    double critical_core_percent{0.0};
+    double effective_core_usage{0.0};
+    double dominant_thread_share_percent{0.0};
+    std::uint32_t active_cpu_threads{0};
+};
+
+class ThreadPressureCache final {
+public:
+    void observe(ThreadPressureMetrics metrics,
+                 std::uint64_t now_ms) noexcept;
+    void miss(std::uint64_t now_ms) noexcept;
+    [[nodiscard]] const std::optional<ThreadPressureMetrics>& current()
+        const noexcept { return current_; }
+private:
+    std::optional<ThreadPressureMetrics> current_;
+    std::optional<std::uint64_t> last_observation_ms_;
+    std::uint32_t consecutive_misses_{0};
+};
 }  // namespace detail
 class ProcessMetricSampler final {
 public:
@@ -99,10 +119,7 @@ private:
     std::optional<std::uint64_t> previous_thread_refresh_ms_;
     std::unordered_map<std::uint32_t, std::uint64_t> previous_thread_ticks_;
     std::unique_ptr<ThreadTracker> thread_tracker_;
-    std::optional<double> cached_critical_core_percent_;
-    std::optional<double> cached_effective_core_usage_;
-    std::optional<double> cached_dominant_thread_share_percent_;
-    std::optional<std::uint32_t> cached_active_cpu_threads_;
+    detail::ThreadPressureCache thread_pressure_cache_;
     bool cpu_capacity_sampled_{false};
     std::optional<std::uint32_t> cached_affinity_logical_processors_;
     std::optional<std::uint32_t> cached_affinity_physical_cores_;

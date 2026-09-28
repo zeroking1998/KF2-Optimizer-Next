@@ -319,6 +319,31 @@ detail::resolve_process_capacity_masks(
     return std::nullopt;
 }
 
+void detail::ThreadPressureCache::observe(
+    ThreadPressureMetrics metrics, std::uint64_t now_ms) noexcept {
+    current_ = metrics;
+    last_observation_ms_ = now_ms;
+    consecutive_misses_ = 0;
+}
+
+void detail::ThreadPressureCache::miss(std::uint64_t now_ms) noexcept {
+    if (!current_ || !last_observation_ms_) return;
+    // Preserve brief 500 ms sampling gaps, but never carry one workload's
+    // thread pressure beyond three missed observations or 1.5 seconds.
+    constexpr std::uint32_t kMaximumConsecutiveMisses = 3;
+    constexpr std::uint64_t kMaximumAgeMs = 1'500;
+    if (consecutive_misses_ < kMaximumConsecutiveMisses) {
+        ++consecutive_misses_;
+    }
+    if (now_ms < *last_observation_ms_ ||
+        consecutive_misses_ >= kMaximumConsecutiveMisses ||
+        now_ms - *last_observation_ms_ >= kMaximumAgeMs) {
+        current_.reset();
+        last_observation_ms_.reset();
+        consecutive_misses_ = 0;
+    }
+}
+
 class ProcessMetricSampler::ThreadTracker final {
 public:
     ~ThreadTracker() {
@@ -515,9 +540,10 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
     constexpr std::uint64_t kThreadRefreshIntervalMs = 5'000;
     const std::uint64_t thread_now_ms = GetTickCount64();
     if (!previous_thread_sample_ms_ ||
-        (thread_now_ms >= *previous_thread_sample_ms_ &&
-         thread_now_ms - *previous_thread_sample_ms_ >=
-             kThreadSampleIntervalMs)) {
+        thread_now_ms < *previous_thread_sample_ms_ ||
+        thread_now_ms - *previous_thread_sample_ms_ >=
+            kThreadSampleIntervalMs) {
+        bool thread_pressure_observed = false;
         const bool refresh_due = thread_tracker_->empty() ||
             !previous_thread_refresh_ms_ ||
             thread_now_ms < *previous_thread_refresh_ms_ ||
@@ -553,27 +579,32 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
                     }
                 }
                 if (busiest) {
-                    cached_critical_core_percent_ = busiest;
-                    cached_effective_core_usage_ =
-                        summed_thread_percent / 100.0;
-                    cached_dominant_thread_share_percent_ =
+                    thread_pressure_cache_.observe({
+                        *busiest,
+                        summed_thread_percent / 100.0,
                         summed_thread_percent > 0.0
                             ? std::clamp(*busiest * 100.0 /
                                              summed_thread_percent,
                                          0.0, 100.0)
-                            : 0.0;
-                    cached_active_cpu_threads_ = active_threads;
+                            : 0.0,
+                        active_threads}, thread_now_ms);
+                    thread_pressure_observed = true;
                 }
             }
             previous_thread_ticks_ = std::move(current_thread_ticks);
-            previous_thread_sample_ms_ = thread_now_ms;
+        }
+        previous_thread_sample_ms_ = thread_now_ms;
+        if (!thread_pressure_observed) {
+            thread_pressure_cache_.miss(thread_now_ms);
         }
     }
-    result.critical_core_percent = cached_critical_core_percent_;
-    result.effective_core_usage = cached_effective_core_usage_;
-    result.dominant_thread_share_percent =
-        cached_dominant_thread_share_percent_;
-    result.active_cpu_threads = cached_active_cpu_threads_;
+    if (const auto& pressure = thread_pressure_cache_.current()) {
+        result.critical_core_percent = pressure->critical_core_percent;
+        result.effective_core_usage = pressure->effective_core_usage;
+        result.dominant_thread_share_percent =
+            pressure->dominant_thread_share_percent;
+        result.active_cpu_threads = pressure->active_cpu_threads;
+    }
     result.affinity_logical_processors =
         cached_affinity_logical_processors_;
     result.affinity_physical_cores = cached_affinity_physical_cores_;
