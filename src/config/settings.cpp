@@ -202,10 +202,7 @@ Result<Settings> parse_settings(std::string_view text) {
                     return invalid_settings(
                         L"adaptive_minimum_quality is outside 10..100");
                 }
-                settings.adaptive_minimum_quality =
-                    parsed.value() == 70 ? 10 : parsed.value();
-                settings.adaptive_quality_range_migrated =
-                    parsed.value() == 70;
+                settings.adaptive_minimum_quality = parsed.value();
             } else if (key == "adaptive_maximum_quality") {
                 const auto parsed = parse_integer(value);
                 if (!parsed.has_value() || parsed.value() < 0 ||
@@ -370,6 +367,19 @@ Result<Settings> parse_settings(std::string_view text) {
 
     if (!schema_seen) {
         return invalid_settings(L"Settings schema is missing");
+    }
+    // The first portable settings writer always emitted this complete set of
+    // now-retired keys. Only that unambiguous legacy signature identifies its
+    // old default floor; 70 is otherwise a valid current user value.
+    const bool legacy_quality_floor =
+        settings.adaptive_minimum_quality == 70 &&
+        seen.count("animations_enabled") != 0 &&
+        seen.count("offline_gameplay_telemetry") != 0 &&
+        seen.count("adaptive_shadow_mode") != 0 &&
+        seen.count("optimizer_profile") != 0;
+    if (legacy_quality_floor) {
+        settings.adaptive_minimum_quality = 10;
+        settings.adaptive_quality_range_migrated = true;
     }
     // Legacy mode keys are read above, but all supported configurations are
     // normalized to the single Adaptive controller.
