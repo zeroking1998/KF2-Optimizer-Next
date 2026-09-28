@@ -27,6 +27,44 @@ std::string read_bytes(const std::filesystem::path& path) {
 
 bool mutation_succeeded = false;
 std::filesystem::path replacement_path;
+bool atomic_swap_enabled = false;
+bool swap_parent = false;
+kf2::platform::windows::AtomicFileMutationStage atomic_swap_stage{};
+std::filesystem::path preserved_path;
+
+void swap_validated_path(
+    kf2::platform::windows::AtomicFileMutationStage stage,
+    const std::filesystem::path& path) {
+    if (!atomic_swap_enabled || stage != atomic_swap_stage) return;
+    atomic_swap_enabled = false;
+    const auto subject = swap_parent ? path.parent_path() : path;
+    const DWORD flags = swap_parent ? 0 : MOVEFILE_WRITE_THROUGH;
+    const bool preserved = MoveFileExW(
+        subject.c_str(), preserved_path.c_str(), flags) != FALSE;
+    const bool replaced = preserved && MoveFileExW(
+        replacement_path.c_str(), subject.c_str(),
+        flags) != FALSE;
+    mutation_succeeded = preserved && replaced;
+}
+
+void arm_atomic_swap(
+    kf2::platform::windows::AtomicFileMutationStage stage,
+    const std::filesystem::path& replacement,
+    const std::filesystem::path& preserved, bool parent = false) {
+    atomic_swap_stage = stage;
+    replacement_path = replacement;
+    preserved_path = preserved;
+    swap_parent = parent;
+    mutation_succeeded = false;
+    atomic_swap_enabled = true;
+    kf2::platform::windows::set_atomic_file_mutation_hook_for_testing(
+        &swap_validated_path);
+}
+
+void disarm_atomic_swap() {
+    atomic_swap_enabled = false;
+    kf2::platform::windows::set_atomic_file_mutation_hook_for_testing(nullptr);
+}
 
 void grow_during_read(const std::filesystem::path& path) {
     HANDLE file = CreateFileW(
@@ -273,6 +311,114 @@ int main() {
             long_target, "long path settings\n");
     CHECK(long_replaced.has_value());
     CHECK(read_bytes(long_target) == "long path settings\n");
+
+    const auto parent_live = root / L"parent-live";
+    const auto parent_original = root / L"parent-original";
+    const auto parent_replacement = root / L"parent-replacement";
+    fs::create_directories(parent_live);
+    fs::create_directories(parent_replacement);
+    const auto parent_target = parent_live / L"settings.ini";
+    {
+        std::ofstream output(parent_replacement / L"settings.ini",
+                             std::ios::binary);
+        output << "replacement parent content";
+    }
+    arm_atomic_swap(
+        kf2::platform::windows::AtomicFileMutationStage::
+            atomic_after_validation,
+        parent_replacement, parent_original, true);
+    const auto parent_swapped =
+        kf2::platform::windows::atomic_replace_utf8(
+            parent_target, "must not survive");
+    disarm_atomic_swap();
+    CHECK(mutation_succeeded);
+    CHECK(!parent_swapped.has_value());
+    CHECK(parent_swapped.error().code == kf2::ErrorCode::stale_data);
+    CHECK(!fs::exists(parent_original / L"settings.ini"));
+    CHECK(read_bytes(parent_live / L"settings.ini") ==
+          "replacement parent content");
+
+    const auto swapped_target = root / L"swapped-target.ini";
+    const auto swapped_target_original = root / L"swapped-target-original.ini";
+    const auto swapped_target_replacement =
+        root / L"swapped-target-replacement.ini";
+    {
+        std::ofstream output(swapped_target, std::ios::binary);
+        output << "original target content";
+    }
+    {
+        std::ofstream output(swapped_target_replacement, std::ios::binary);
+        output << "replacement target content";
+    }
+    arm_atomic_swap(
+        kf2::platform::windows::AtomicFileMutationStage::
+            atomic_after_validation,
+        swapped_target_replacement, swapped_target_original);
+    const auto target_swapped =
+        kf2::platform::windows::atomic_replace_utf8(
+            swapped_target, "must not survive");
+    disarm_atomic_swap();
+    CHECK(mutation_succeeded);
+    CHECK(!target_swapped.has_value());
+    CHECK(target_swapped.error().code == kf2::ErrorCode::stale_data);
+    CHECK(read_bytes(swapped_target_original) == "original target content");
+    CHECK(read_bytes(swapped_target) == "replacement target content");
+
+    const auto swapped_source = root / L"swapped-source.ini";
+    const auto swapped_source_original = root / L"swapped-source-original.ini";
+    const auto swapped_source_replacement =
+        root / L"swapped-source-replacement.ini";
+    {
+        std::ofstream output(swapped_source, std::ios::binary);
+        output << "original source content";
+    }
+    {
+        std::ofstream output(swapped_source_replacement, std::ios::binary);
+        output << "replacement source content";
+    }
+    arm_atomic_swap(
+        kf2::platform::windows::AtomicFileMutationStage::
+            quarantine_after_source_validation,
+        swapped_source_replacement, swapped_source_original);
+    const auto source_swapped =
+        kf2::platform::windows::quarantine_regular_file(swapped_source);
+    disarm_atomic_swap();
+    CHECK(mutation_succeeded);
+    CHECK(!source_swapped.has_value());
+    CHECK(source_swapped.error().code == kf2::ErrorCode::stale_data);
+    CHECK(read_bytes(swapped_source_original) == "original source content");
+    CHECK(read_bytes(swapped_source) == "replacement source content");
+
+    const auto candidate_source = root / L"candidate-source.ini";
+    const auto candidate = root / L"candidate-source.ini.corrupt";
+    const auto candidate_original = root / L"candidate-original.ini";
+    const auto candidate_replacement = root / L"candidate-replacement.ini";
+    {
+        std::ofstream output(candidate_source, std::ios::binary);
+        output << "source content";
+    }
+    {
+        std::ofstream output(candidate, std::ios::binary);
+        output << "original candidate content";
+    }
+    {
+        std::ofstream output(candidate_replacement, std::ios::binary);
+        output << "replacement candidate content";
+    }
+    arm_atomic_swap(
+        kf2::platform::windows::AtomicFileMutationStage::
+            quarantine_after_candidate_validation,
+        candidate_replacement, candidate_original);
+    const auto candidate_swapped =
+        kf2::platform::windows::quarantine_regular_file(
+            candidate_source, L".corrupt", 1);
+    disarm_atomic_swap();
+    CHECK(mutation_succeeded);
+    CHECK(!candidate_swapped.has_value());
+    CHECK(candidate_swapped.error().code == kf2::ErrorCode::stale_data);
+    CHECK(read_bytes(candidate_original) == "original candidate content");
+    CHECK(read_bytes(candidate) == "replacement candidate content");
+    CHECK(read_bytes(candidate_source) == "source content");
 
     const auto corrupt = root / L"corrupt.ini";
     for (int iteration = 0; iteration < 7; ++iteration) {
