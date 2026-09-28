@@ -344,8 +344,16 @@ int main() {
     CHECK(!fs::exists(unreadable_manifest));
     CHECK(fs::exists(fs::path{unreadable_manifest.wstring() + L".corrupt"}));
 
+    // Simulate interruption after the journal was pruned but before the
+    // corresponding manifest could be removed. The next retention pass must
+    // finish this backup and continue with the remaining eligible backups.
+    const auto partially_pruned = listed_after_unlock.value().back();
+    CHECK(fs::exists(partially_pruned.manifest_path));
+    CHECK(fs::remove(partially_pruned.journal_path));
+
     const auto pruned = store.prune_verified({.keep_latest = 1});
     CHECK(pruned.has_value());
+    CHECK(!fs::exists(partially_pruned.manifest_path));
     const auto retained = store.list_backups();
     CHECK(retained.has_value());
     CHECK(retained.value().size() == 1);
