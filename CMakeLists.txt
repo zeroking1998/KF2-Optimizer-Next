@@ -327,6 +327,8 @@ if(BUILD_TESTING)
     target_include_directories(KF2TestTelemetryCore PUBLIC
         "${PROJECT_SOURCE_DIR}/include"
     )
+    target_compile_definitions(KF2TestTelemetryCore PRIVATE
+        KF2_PRESENT_SOURCE_TESTING)
 
     add_library(KF2TestUiCore STATIC
         src/ui/numeric_presentation.cpp

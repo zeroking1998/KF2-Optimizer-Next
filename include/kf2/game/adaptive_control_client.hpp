@@ -93,4 +93,10 @@ private:
     std::shared_ptr<State> state_;
 };
 
+#ifdef KF2_ADAPTIVE_CONTROL_CLIENT_TESTING
+namespace detail {
+void fail_next_adaptive_dispatch_publication() noexcept;
+}
+#endif
+
 }  // namespace kf2::game

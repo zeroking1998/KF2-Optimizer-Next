@@ -372,5 +372,23 @@ int main() {
     CHECK(async_receipt->value().resource == AdaptiveResourceControl::gpu);
     CHECK(async_receipt->value().quality == 50);
     CHECK(!dispatcher.busy());
+
+    detail::fail_next_adaptive_dispatch_publication();
+    const auto failed_dispatch = dispatcher.start({
+        .port = ntohs(address.sin_port),
+        .token = token,
+        .sequence = 80,
+        .resource = AdaptiveResourceControl::gpu,
+        .quality = 50,
+        .timeout_ms = 50});
+    CHECK(failed_dispatch.has_value() && failed_dispatch.value());
+    std::optional<kf2::Result<AdaptiveControlReceipt>> failed_outcome;
+    for (int attempt = 0; attempt < 200 && !failed_outcome; ++attempt) {
+        Sleep(5);
+        failed_outcome = dispatcher.poll();
+    }
+    CHECK(failed_outcome.has_value());
+    CHECK(!failed_outcome->has_value());
+    CHECK(!dispatcher.busy());
     return EXIT_SUCCESS;
 }

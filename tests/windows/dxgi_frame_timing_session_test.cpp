@@ -10,6 +10,8 @@
 
 int main() {
     using namespace kf2::telemetry;
+    CHECK(kf2::platform::windows::DxgiFrameTimingSession::
+        test_event_callback_exception_boundary());
     const SampleIdentity identity{GetCurrentProcessId(), 1};
     PresentSource source{identity, 120};
     CHECK(source.start().has_value());

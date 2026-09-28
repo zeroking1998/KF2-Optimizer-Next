@@ -226,6 +226,21 @@ void UiRuntime::poll_startup_prewarm() {
         case game::StartupPrewarmState::skipped_no_files:
             startup_prewarm_announced = true;
             break;
+        case game::StartupPrewarmState::failed:
+            startup_prewarm_announced = true;
+            {
+                auto status = model.status();
+                status.prewarm_active = false;
+                status.prewarm_percent = 0;
+                status.prewarm_map.clear();
+                model.set_status(std::move(status));
+            }
+            events->append({0, diagnostics::Severity::warning,
+                "STARTUP_PREWARM_FAILED",
+                L"Startup preparation failed safely; KF2 launch remains "
+                L"available and preparation can be retried",
+                L"performance"});
+            break;
         default:
             break;
     }

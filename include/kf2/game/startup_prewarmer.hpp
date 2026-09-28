@@ -32,6 +32,7 @@ enum class StartupPrewarmState {
     skipped_unknown_storage,
     skipped_low_memory,
     skipped_no_files,
+    failed,
 };
 
 struct StartupPrewarmFile {
@@ -87,5 +88,11 @@ private:
     struct Impl;
     std::unique_ptr<Impl> implementation_;
 };
+
+#ifdef KF2_STARTUP_PREWARMER_TESTING
+namespace detail {
+void fail_next_startup_prewarm_plan() noexcept;
+}
+#endif
 
 }  // namespace kf2::game

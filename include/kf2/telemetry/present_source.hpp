@@ -62,7 +62,7 @@ private:
     };
 
     void invalidate_drain_locked();
-    void drain_worker(std::stop_token stop);
+    void drain_worker(std::stop_token stop) noexcept;
 
     SampleIdentity identity_;
     std::size_t capacity_;
@@ -81,6 +81,13 @@ private:
     std::optional<FrameMetrics> latest_bounded_drain_;
     std::uint64_t latest_bounded_not_before_ns_{0};
     bool drain_active_{false};
+    bool drain_worker_failed_{false};
     std::jthread drain_worker_;
 };
+
+#ifdef KF2_PRESENT_SOURCE_TESTING
+namespace detail {
+void fail_next_present_drain_publication() noexcept;
+}
+#endif
 }  // namespace kf2::telemetry

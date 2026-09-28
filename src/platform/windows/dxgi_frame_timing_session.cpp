@@ -30,6 +30,9 @@ constexpr USHORT kPresentStopEvent = 179;
 // events bracket the application call and expose its swap-chain and HRESULT.
 constexpr std::uint32_t kPresentTest = 0x1;
 constexpr wchar_t kSessionPrefix[] = L"KF2OptimizerNext-DXGI-";
+#ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+std::atomic_bool fail_next_event_callback{false};
+#endif
 
 struct PresentStartPayload {
     std::uint64_t swap_chain;
@@ -127,12 +130,25 @@ struct DxgiFrameTimingSession::Impl {
         return self->running.load(std::memory_order_acquire) ? TRUE : FALSE;
     }
 
-    static void WINAPI event_callback(EVENT_RECORD* record) {
+    static void WINAPI event_callback(EVENT_RECORD* record) noexcept {
+        if (!record) return;
         auto* self = static_cast<Impl*>(record->UserContext);
-        if (self) self->on_event(*record);
+        if (!self) return;
+        try {
+            self->on_event(*record);
+        } catch (...) {
+            self->pending_by_thread.clear();
+            self->observed_events_lost.fetch_add(1, std::memory_order_acq_rel);
+        }
     }
 
     void on_event(const EVENT_RECORD& record) {
+#ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+        if (fail_next_event_callback.exchange(false,
+                                               std::memory_order_acq_rel)) {
+            throw std::bad_alloc{};
+        }
+#endif
         const auto& header = record.EventHeader;
         if (header.ProcessId != identity.pid ||
             !IsEqualGUID(header.ProviderId, kDxgiProvider)) {
@@ -261,6 +277,19 @@ struct DxgiFrameTimingSession::Impl {
         session_handle = 0;
     }
 };
+
+#ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+bool DxgiFrameTimingSession::test_event_callback_exception_boundary() noexcept {
+    Impl implementation;
+    EVENT_RECORD event{};
+    event.UserContext = &implementation;
+    fail_next_event_callback.store(true, std::memory_order_release);
+    Impl::event_callback(&event);
+    return implementation.observed_events_lost.load(
+               std::memory_order_acquire) == 1 &&
+           implementation.pending_by_thread.empty();
+}
+#endif
 
 DxgiFrameTimingSession::DxgiFrameTimingSession(
     std::unique_ptr<Impl> implementation)

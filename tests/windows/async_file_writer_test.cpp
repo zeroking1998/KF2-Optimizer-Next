@@ -59,6 +59,18 @@ int main() {
             root / L"missing" / L"failure.json", "failure");
         CHECK(failed != 0);
         CHECK(!writer.wait(failed, std::chrono::seconds{2}));
+
+        kf2::platform::windows::detail::
+            fail_next_async_file_outcome_publication();
+        const auto unpublished = writer.submit(
+            root / L"unpublished.json", "written");
+        CHECK(unpublished != 0);
+        CHECK(!writer.wait(unpublished, std::chrono::seconds{2}));
+        CHECK(writer.wait_until_idle(std::chrono::seconds{2}));
+        const auto recovered = writer.submit(
+            root / L"recovered.json", "recovered");
+        CHECK(recovered != 0);
+        CHECK(writer.wait(recovered, std::chrono::seconds{2}));
     }
 
     const auto destructor_target = root / L"destructor.json";

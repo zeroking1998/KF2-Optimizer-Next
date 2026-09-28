@@ -19,6 +19,10 @@ public:
         telemetry::SampleIdentity identity, telemetry::PresentSource& sink);
     [[nodiscard]] Result<bool> stop();
 
+#ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+    [[nodiscard]] static bool test_event_callback_exception_boundary() noexcept;
+#endif
+
 private:
     struct Impl;
     explicit DxgiFrameTimingSession(std::unique_ptr<Impl> implementation);

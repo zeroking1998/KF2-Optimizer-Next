@@ -190,6 +190,16 @@ int main() {
     CHECK(*asynchronous_metrics->fps > 62.0 &&
           *asynchronous_metrics->fps < 63.0);
 
+    detail::fail_next_present_drain_publication();
+    asynchronous.request_drain(9'921'000'000ULL, 500'000'000ULL);
+    CHECK(asynchronous.wait_for_drain(std::chrono::seconds{2}));
+    const auto failed_drain = asynchronous.latest_drain();
+    CHECK(failed_drain.has_value());
+    CHECK(failed_drain->reason == UnavailableReason::source_failure);
+    asynchronous.request_drain(9'921'000'000ULL, 500'000'000ULL);
+    CHECK(asynchronous.wait_for_drain(std::chrono::seconds{2}));
+    CHECK(asynchronous.latest_drain()->fps.has_value());
+
     constexpr std::uint64_t asynchronous_boundary_ns = 8'500'000'000ULL;
     asynchronous.request_drain(
         9'921'000'000ULL, 500'000'000ULL, asynchronous_boundary_ns);

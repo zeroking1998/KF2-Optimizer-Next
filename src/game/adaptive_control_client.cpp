@@ -6,6 +6,7 @@
 #include <bcrypt.h>
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <charconv>
 #include <limits>
@@ -16,6 +17,10 @@
 
 namespace kf2::game {
 namespace {
+
+#ifdef KF2_ADAPTIVE_CONTROL_CLIENT_TESTING
+std::atomic_bool fail_next_dispatch_publication{false};
+#endif
 
 class WinsockSession final {
 public:
@@ -399,8 +404,15 @@ Result<AdaptiveControlReceipt> send_adaptive_control(
 struct AdaptiveControlDispatcher::State final {
     mutable std::mutex mutex;
     bool busy{false};
+    bool worker_failed{false};
     std::optional<Result<AdaptiveControlReceipt>> outcome;
 };
+
+#ifdef KF2_ADAPTIVE_CONTROL_CLIENT_TESTING
+void detail::fail_next_adaptive_dispatch_publication() noexcept {
+    fail_next_dispatch_publication.store(true, std::memory_order_release);
+}
+#endif
 
 AdaptiveControlDispatcher::AdaptiveControlDispatcher()
     : state_{std::make_shared<State>()} {}
@@ -424,14 +436,32 @@ Result<bool> AdaptiveControlDispatcher::start(AdaptiveControlRequest request) {
         std::scoped_lock lock{state_->mutex};
         if (state_->busy) return Result<bool>::success(false);
         state_->busy = true;
+        state_->worker_failed = false;
         state_->outcome.reset();
     }
     try {
         const auto state = state_;
         std::thread{[state, request = std::move(request)]() mutable {
-            auto outcome = send_adaptive_control(request);
-            std::scoped_lock lock{state->mutex};
-            state->outcome.emplace(std::move(outcome));
+            try {
+                auto outcome = send_adaptive_control(request);
+#ifdef KF2_ADAPTIVE_CONTROL_CLIENT_TESTING
+                if (fail_next_dispatch_publication.exchange(
+                        false, std::memory_order_acq_rel)) {
+                    throw std::bad_alloc{};
+                }
+#endif
+                std::scoped_lock lock{state->mutex};
+                state->outcome.emplace(std::move(outcome));
+            } catch (...) {
+                try {
+                    std::scoped_lock lock{state->mutex};
+                    state->outcome.reset();
+                    state->worker_failed = true;
+                    state->busy = false;
+                } catch (...) {
+                    // Nothing may escape this detached thread boundary.
+                }
+            }
         }}.detach();
     } catch (...) {
         std::scoped_lock lock{state_->mutex};
@@ -445,11 +475,22 @@ Result<bool> AdaptiveControlDispatcher::start(AdaptiveControlRequest request) {
 
 std::optional<Result<AdaptiveControlReceipt>>
 AdaptiveControlDispatcher::poll() {
-    std::scoped_lock lock{state_->mutex};
-    if (!state_->outcome) return std::nullopt;
-    auto outcome = std::move(*state_->outcome);
-    state_->outcome.reset();
-    state_->busy = false;
+    bool worker_failed = false;
+    std::optional<Result<AdaptiveControlReceipt>> outcome;
+    {
+        std::scoped_lock lock{state_->mutex};
+        worker_failed = std::exchange(state_->worker_failed, false);
+        if (state_->outcome) {
+            outcome.emplace(std::move(*state_->outcome));
+            state_->outcome.reset();
+            state_->busy = false;
+        }
+    }
+    if (worker_failed) {
+        return Result<AdaptiveControlReceipt>::failure({
+            ErrorCode::platform_failure,
+            L"Adaptive runtime-control worker failed", 0});
+    }
     return outcome;
 }
 
