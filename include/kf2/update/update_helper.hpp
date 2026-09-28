@@ -25,6 +25,11 @@ struct UpdateReadyArguments {
 [[nodiscard]] int run_update_helper(
     const std::filesystem::path& request_path) noexcept;
 
+// Returns true when an update owner is still active or a recovered package
+// was restarted, so the caller must not continue normal startup.
+[[nodiscard]] Result<bool> recover_interrupted_updates_on_startup(
+    const std::filesystem::path& target_root);
+
 [[nodiscard]] Result<bool> signal_update_ready_and_schedule_cleanup(
     const UpdateReadyArguments& arguments);
 
