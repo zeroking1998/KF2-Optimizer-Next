@@ -1044,6 +1044,41 @@ void UiRuntime::reset_resource_telemetry_cache(std::uint64_t generation) {
     gpu_utilization_filter.reset();
 }
 
+bool UiRuntime::remember_confirmed_gpu_profile(
+    std::string_view encoded_physical_key,
+    telemetry::ProcessGpuPreference preference,
+    std::uint64_t dedicated_memory_bytes) {
+    config::Settings staged = optimizer_settings;
+    staged.extras["confirmed_gpu_physical_key"] = encoded_physical_key;
+    staged.extras["confirmed_gpu_preference"] =
+        telemetry::process_gpu_preference_token(preference);
+    staged.extras["confirmed_gpu_dedicated_bytes"] =
+        std::to_string(dedicated_memory_bytes);
+    const auto serialized = config::serialize_settings(staged);
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+    const auto saved = gpu_profile_settings_write_for_testing
+        ? gpu_profile_settings_write_for_testing(settings_path, serialized)
+        : platform::windows::atomic_replace_utf8(settings_path, serialized);
+#else
+    const auto saved = platform::windows::atomic_replace_utf8(
+        settings_path, serialized);
+#endif
+    if (!saved.has_value()) {
+        events->append({0, diagnostics::Severity::warning,
+            "GAME_GPU_PROFILE_REMEMBER_FAILED",
+            L"The currently confirmed adapter was not saved; this session continues using it, while later launches remain based on the last durable settings and current Windows GPU preference",
+            L"telemetry"});
+        return false;
+    }
+
+    optimizer_settings = std::move(staged);
+    events->append({0, diagnostics::Severity::info,
+        "GAME_GPU_PROFILE_REMEMBERED",
+        L"The currently confirmed physical adapter and its Windows GPU preference were saved for later launches",
+        L"telemetry"});
+    return true;
+}
+
 void UiRuntime::bind_process_gpu_adapter(std::uint64_t adapter_luid) {
     if (!game_process || adapter_luid == 0) return;
     const auto adapters = telemetry::enumerate_gpu_adapters();
@@ -1074,36 +1109,19 @@ void UiRuntime::bind_process_gpu_adapter(std::uint64_t adapter_luid) {
                 telemetry::configured_gpu_adapter_for_process(
                     installation->executable);
             if (encoded_key && preference.has_value()) {
-                optimizer_settings.extras["confirmed_gpu_physical_key"] =
-                    *encoded_key;
-                optimizer_settings.extras["confirmed_gpu_preference"] =
-                    std::string{telemetry::process_gpu_preference_token(
-                        preference.value().preference)};
-                optimizer_settings.extras["confirmed_gpu_dedicated_bytes"] =
-                    std::to_string(adapter->dedicated_memory_bytes);
-                const auto saved = platform::windows::atomic_replace_utf8(
-                    settings_path,
-                    config::serialize_settings(optimizer_settings));
-                events->append({0,
-                    saved.has_value() ? diagnostics::Severity::info
-                                      : diagnostics::Severity::warning,
-                    saved.has_value()
-                        ? "GAME_GPU_PROFILE_REMEMBERED"
-                        : "GAME_GPU_PROFILE_REMEMBER_FAILED",
-                    saved.has_value()
-                        ? L"The currently confirmed physical adapter and its Windows GPU preference were saved for later launches"
-                        : L"The currently confirmed adapter could not be saved; later launches will use a conservative adapter budget",
-                    L"telemetry"});
+                static_cast<void>(remember_confirmed_gpu_profile(
+                    *encoded_key, preference.value().preference,
+                    adapter->dedicated_memory_bytes));
             } else {
                 events->append({0, diagnostics::Severity::warning,
                     "GAME_GPU_PROFILE_REMEMBER_FAILED",
-                    L"The currently confirmed adapter identity or Windows GPU preference could not be persisted; later launches will use a conservative adapter budget",
+                    L"The currently confirmed adapter identity or Windows GPU preference could not be prepared for persistence; this session continues using the adapter, while later launches remain based on the last durable settings and current Windows GPU preference",
                     L"telemetry"});
             }
         } else if (installation) {
             events->append({0, diagnostics::Severity::warning,
                 "GAME_GPU_PROFILE_REMEMBER_FAILED",
-                L"The currently confirmed adapter has no stable physical identity; later launches will use a conservative adapter budget",
+                L"The currently confirmed adapter has no stable physical identity to save; this session continues using the adapter, while later launches remain based on the last durable settings and current Windows GPU preference",
                 L"telemetry"});
         }
     }
