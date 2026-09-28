@@ -6,6 +6,17 @@
 
 namespace kf2::app {
 
+#if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
+namespace {
+UiRuntimeShutdownProbe shutdown_probe_for_testing{};
+}
+
+void set_ui_runtime_shutdown_probe_for_testing(
+    UiRuntimeShutdownProbe probe) noexcept {
+    shutdown_probe_for_testing = probe;
+}
+#endif
+
 optimizer::AdaptivePolicy adaptive_policy_from(
     const config::Settings& settings) noexcept {
     optimizer::AdaptiveAggressiveness aggressiveness =
@@ -223,28 +234,129 @@ std::wstring query_hardware_summary() {
     return result;
 }
 
-UiRuntime::~UiRuntime() {
-    const auto stop_prewarmer = [](game::StartupPrewarmer& prewarmer) noexcept {
+bool UiRuntime::stop_shutdown_workers() noexcept {
+    bool complete = true;
+    const auto stop_prewarmer = [&](game::StartupPrewarmer& prewarmer) noexcept {
         try {
             prewarmer.stop_and_wait();
-        } catch (const std::system_error&) {
+        } catch (...) {
             // The member destructor retries and contains any persistent join
             // failure without aborting application shutdown.
+            complete = false;
         }
     };
     stop_prewarmer(startup_prewarmer);
     stop_prewarmer(map_prewarmer);
-    resource_telemetry_worker.stop();
-    static_cast<void>(restore_live_adaptive_quality(
-        L"KF2 Optimizer closed"));
-    static_cast<void>(restore_protected_session_config(
-        L"KF2 Optimizer closed"));
+    try {
+        resource_telemetry_worker.stop();
+    } catch (...) {
+        complete = false;
+    }
+    return complete;
+}
+
+void UiRuntime::stop_shutdown_timers() noexcept {
     if (window) {
         const auto hwnd = static_cast<HWND>(
             window->native_handle_for_testing());
         KillTimer(hwnd, ui::kRuntimeTimerId);
         KillTimer(hwnd, ui::kAnimationTimerId);
     }
+}
+
+Result<bool> UiRuntime::shutdown() {
+    if (shutdown_complete_) return Result<bool>::success(true);
+
+    bool complete = stop_shutdown_workers();
+    try {
+#if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
+        if (shutdown_probe_for_testing) {
+            shutdown_probe_for_testing(
+                UiRuntimeShutdownPhase::live_adaptive_restore);
+        }
+#endif
+        if (!restore_live_adaptive_quality(L"KF2 Optimizer closed")) {
+            complete = false;
+        }
+    } catch (...) {
+        complete = false;
+    }
+    try {
+#if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
+        if (shutdown_probe_for_testing) {
+            shutdown_probe_for_testing(
+                UiRuntimeShutdownPhase::protected_config_restore);
+        }
+#endif
+        if (!restore_protected_session_config(L"KF2 Optimizer closed")) {
+            complete = false;
+        }
+    } catch (...) {
+        complete = false;
+    }
+    stop_shutdown_timers();
+    try {
+#if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
+        if (shutdown_probe_for_testing) {
+            shutdown_probe_for_testing(
+                UiRuntimeShutdownPhase::event_publication);
+        }
+#endif
+        if (events) {
+            events->append({0,
+                complete ? diagnostics::Severity::info
+                         : diagnostics::Severity::error,
+                complete ? "APP_RUNTIME_SHUTDOWN_COMPLETE"
+                         : "APP_RUNTIME_SHUTDOWN_INCOMPLETE",
+                complete
+                    ? L"Runtime workers stopped and protected state was restored"
+                    : L"Runtime shutdown was incomplete; durable recovery remains armed",
+                L"app"});
+        }
+    } catch (...) {
+        complete = false;
+    }
+
+    if (!complete) {
+        return Result<bool>::failure({
+            ErrorCode::internal_failure,
+            L"Runtime shutdown did not complete; protected recovery remains armed",
+            0});
+    }
+    shutdown_complete_ = true;
+    return Result<bool>::success(true);
+}
+
+void UiRuntime::shutdown_fallback() noexcept {
+    if (shutdown_complete_) return;
+    static_cast<void>(stop_shutdown_workers());
+    try {
+#if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
+        if (shutdown_probe_for_testing) {
+            shutdown_probe_for_testing(
+                UiRuntimeShutdownPhase::live_adaptive_restore);
+        }
+#endif
+        static_cast<void>(restore_live_adaptive_quality(
+            L"KF2 Optimizer closed unexpectedly"));
+    } catch (...) {
+    }
+    try {
+#if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
+        if (shutdown_probe_for_testing) {
+            shutdown_probe_for_testing(
+                UiRuntimeShutdownPhase::protected_config_restore);
+        }
+#endif
+        static_cast<void>(restore_protected_session_config(
+            L"KF2 Optimizer closed unexpectedly"));
+    } catch (...) {
+    }
+    stop_shutdown_timers();
+}
+
+UiRuntime::~UiRuntime() noexcept {
+    shutdown_fallback();
 }
 
 std::filesystem::path UiRuntime::adaptive_locks_path() const {

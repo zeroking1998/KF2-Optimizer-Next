@@ -65,7 +65,7 @@ public:
     Application& operator=(const Application&) = delete;
     Application(Application&&) noexcept;
     Application& operator=(Application&&) noexcept;
-    ~Application();
+    ~Application() noexcept;
 
     [[nodiscard]] static Result<Application> start(const StartOptions& options);
     [[nodiscard]] Result<int> run(int show_command);

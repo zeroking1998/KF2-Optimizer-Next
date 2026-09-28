@@ -73,6 +73,18 @@ struct PackageRepairAsyncState;
 struct UpdateCheckAsyncState;
 struct UpdateInstallAsyncState;
 
+#if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
+enum class UiRuntimeShutdownPhase {
+    live_adaptive_restore,
+    protected_config_restore,
+    event_publication,
+};
+
+using UiRuntimeShutdownProbe = void (*)(UiRuntimeShutdownPhase);
+void set_ui_runtime_shutdown_probe_for_testing(
+    UiRuntimeShutdownProbe probe) noexcept;
+#endif
+
 using PendingPolicyRestageOperation = std::function<Result<bool>(
     const std::filesystem::path&, bool, int, int, bool, int,
     std::string_view, bool, bool)>;
@@ -140,7 +152,8 @@ Result<std::string> read_verified_local_file(
 std::wstring query_hardware_summary();
 
 struct UiRuntime {
-    ~UiRuntime();
+    ~UiRuntime() noexcept;
+    [[nodiscard]] Result<bool> shutdown();
     ui::UiModel model;
     bool callbacks_ready{false};
     ui::ShellController controller;
@@ -511,6 +524,12 @@ struct UiRuntime {
     void invalidate();
 
     void paint(const ui::ShellLayoutResult& layout);
+
+private:
+    [[nodiscard]] bool stop_shutdown_workers() noexcept;
+    void stop_shutdown_timers() noexcept;
+    void shutdown_fallback() noexcept;
+    bool shutdown_complete_{false};
 
 };
 
