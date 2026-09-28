@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -75,6 +77,57 @@ kf2::game::StartupPrewarmSnapshot wait_for_terminal(
 
 int main(int argc, char** argv) {
     using namespace kf2::game;
+    constexpr DWORD extent_count = 300;
+    constexpr std::size_t extent_bytes =
+        offsetof(VOLUME_DISK_EXTENTS, Extents) +
+        static_cast<std::size_t>(extent_count) * sizeof(DISK_EXTENT);
+    static_assert(extent_bytes > detail::kInitialVolumeExtentBufferBytes);
+    std::vector<std::byte> extent_storage(extent_bytes);
+    VOLUME_DISK_EXTENTS extent_header{};
+    extent_header.NumberOfDiskExtents = extent_count;
+    std::memcpy(extent_storage.data(), &extent_header,
+                offsetof(VOLUME_DISK_EXTENTS, Extents));
+    for (DWORD index = 0; index < extent_count; ++index) {
+        DISK_EXTENT extent{};
+        extent.DiskNumber = index % 3;
+        std::memcpy(
+            extent_storage.data() + offsetof(VOLUME_DISK_EXTENTS, Extents) +
+                static_cast<std::size_t>(index) * sizeof(DISK_EXTENT),
+            &extent, sizeof(extent));
+    }
+    const auto parsed_extents = detail::parse_volume_disk_extents(
+        extent_storage, extent_storage.size());
+    const std::optional<std::vector<std::uint32_t>> expected_disks{
+        std::vector<std::uint32_t>{0, 1, 2}};
+    CHECK(parsed_extents == expected_disks);
+    CHECK(!detail::parse_volume_disk_extents(
+        extent_storage, extent_storage.size() - 1));
+    CHECK(!detail::parse_volume_disk_extents(
+        extent_storage, extent_storage.size() + 1));
+
+    std::vector<std::byte> single_extent_storage(
+        offsetof(VOLUME_DISK_EXTENTS, Extents) + sizeof(DISK_EXTENT));
+    VOLUME_DISK_EXTENTS single_extent_header{};
+    single_extent_header.NumberOfDiskExtents = 1;
+    std::memcpy(single_extent_storage.data(), &single_extent_header,
+                offsetof(VOLUME_DISK_EXTENTS, Extents));
+    DISK_EXTENT single_extent{};
+    single_extent.DiskNumber = 7;
+    std::memcpy(single_extent_storage.data() +
+                    offsetof(VOLUME_DISK_EXTENTS, Extents),
+                &single_extent, sizeof(single_extent));
+    const std::optional<std::vector<std::uint32_t>> expected_single_disk{
+        std::vector<std::uint32_t>{7}};
+    CHECK(detail::parse_volume_disk_extents(
+              single_extent_storage, single_extent_storage.size()) ==
+          expected_single_disk);
+
+    DWORD zero_extents = 0;
+    std::memcpy(single_extent_storage.data(), &zero_extents,
+                sizeof(zero_extents));
+    CHECK(!detail::parse_volume_disk_extents(
+        single_extent_storage, single_extent_storage.size()));
+
     CHECK(map_prewarm_request_from_log_line(
         "[12.3] ScriptLog: KF2OPT_MAP_SELECTION schema=1 state=menu "
         "map=KF-BurningParis\r") ==
