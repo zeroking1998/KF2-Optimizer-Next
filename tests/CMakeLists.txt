@@ -447,6 +447,7 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_RELEASE_REPOSITORY="${KF2_RELEASE_REPOSITORY}"
     KF2_TELEMETRY_ASSET=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetry.u"
     KF2_APPLICATION_VIDEO_TESTING
+    KF2_STARTUP_PREWARMER_TESTING
 )
 target_link_libraries(kf2_application_lifecycle_test PRIVATE
     user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs uiautomationcore bcrypt
@@ -462,6 +463,9 @@ add_test(NAME kf2_update_worker_exception_test
 add_test(NAME kf2_gpu_profile_persistence_rollback_test
     COMMAND kf2_application_lifecycle_test
         --gpu-profile-persistence-rollback)
+add_test(NAME kf2_map_prewarm_start_visibility_test
+    COMMAND kf2_application_lifecycle_test
+        --map-prewarm-start-visibility)
 
 add_executable(kf2_state_environment_test
     windows/state_environment_test.cpp

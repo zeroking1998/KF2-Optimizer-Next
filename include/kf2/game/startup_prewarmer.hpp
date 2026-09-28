@@ -92,6 +92,8 @@ private:
 #ifdef KF2_STARTUP_PREWARMER_TESTING
 namespace detail {
 void fail_next_startup_prewarm_plan() noexcept;
+void delay_next_startup_prewarm_worker_entry(
+    std::chrono::milliseconds delay) noexcept;
 }
 #endif
 
