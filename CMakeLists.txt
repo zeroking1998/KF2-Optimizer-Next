@@ -311,6 +311,7 @@ if(BUILD_TESTING)
         "${PROJECT_SOURCE_DIR}/include"
     )
     target_compile_definitions(KF2TestConfigCore PRIVATE
+        KF2_BACKUP_RECOVERY_TESTING
         KF2_CONFIG_APPLY_TESTING
         KF2_SESSION_GUARD_TESTING)
     target_link_libraries(KF2TestConfigCore PUBLIC KF2TestFoundation)

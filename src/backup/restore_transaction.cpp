@@ -26,6 +26,10 @@ struct RecoveryJournal {
     std::string id;
 };
 
+#if defined(KF2_BACKUP_RECOVERY_TESTING)
+RecoveryCommitHook recovery_commit_hook{};
+#endif
+
 std::string utf8(std::wstring_view value) {
     if (value.empty()) return {};
     const int size = WideCharToMultiByte(
@@ -249,7 +253,7 @@ bool safe_relative(const std::filesystem::path& path) {
     return true;
 }
 
-Result<std::string> current_digest(const std::filesystem::path& path) {
+Result<std::string> current_bytes(const std::filesystem::path& path) {
     const DWORD attributes = GetFileAttributesW(path.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES ||
         (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
@@ -257,9 +261,7 @@ Result<std::string> current_digest(const std::filesystem::path& path) {
             {ErrorCode::access_denied, L"Recovery target identity is unsafe",
              GetLastError()});
     }
-    auto bytes = read_bytes(path);
-    if (!bytes.has_value()) return Result<std::string>::failure(bytes.error());
-    return security::sha256_hex(bytes.value());
+    return read_bytes(path);
 }
 
 std::optional<config::SettingId> setting_id(std::string_view name) {
@@ -487,6 +489,12 @@ std::optional<std::wstring> utf8_wide(std::string_view input) {
 
 }  // namespace
 
+#if defined(KF2_BACKUP_RECOVERY_TESTING)
+void set_recovery_commit_hook_for_testing(RecoveryCommitHook hook) noexcept {
+    recovery_commit_hook = hook;
+}
+#endif
+
 Result<RestoreResult> restore_backup(
     BackupStore& store, std::string_view id,
     const std::filesystem::path& expected_config_root,
@@ -598,8 +606,14 @@ Result<RecoveryResult> recover_transactions(
             if (!safe_relative(snapshot.relative_path)) return Result<RecoveryResult>::failure(
                 {ErrorCode::access_denied, L"Recovery target is outside allowlist", 0});
             const auto target = backup.value().config_root / snapshot.relative_path;
-            auto digest = current_digest(target);
-            if (!digest.has_value()) return Result<RecoveryResult>::failure(digest.error());
+            auto current = current_bytes(target);
+            if (!current.has_value()) {
+                return Result<RecoveryResult>::failure(current.error());
+            }
+            auto digest = security::sha256_hex(current.value());
+            if (!digest.has_value()) {
+                return Result<RecoveryResult>::failure(digest.error());
+            }
             if (state == "verification_complete") {
                 if (digest.value() != snapshot.desired_sha256) {
                     return Result<RecoveryResult>::failure(
@@ -617,8 +631,12 @@ Result<RecoveryResult> recover_transactions(
                         return Result<RecoveryResult>::failure(
                             original.error());
                     }
-                    auto restored = platform::windows::atomic_replace_utf8(
-                        target, original.value());
+#if defined(KF2_BACKUP_RECOVERY_TESTING)
+                    if (recovery_commit_hook) recovery_commit_hook();
+#endif
+                    auto restored =
+                        platform::windows::atomic_replace_utf8_if_unchanged(
+                            target, current.value(), original.value());
                     if (!restored.has_value()) {
                         return Result<RecoveryResult>::failure(restored.error());
                     }

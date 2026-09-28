@@ -38,6 +38,12 @@ void write_journal(const kf2::backup::BackupSet& backup, std::string_view state)
         "version=1\nstate=" + std::string{state} + "\nid=" + backup.id + "\n");
 }
 
+std::filesystem::path concurrent_recovery_target;
+
+void change_target_before_recovery_commit() {
+    write_bytes(concurrent_recovery_target, "concurrent recovery edit");
+}
+
 HANDLE lock_without_read_sharing(const std::filesystem::path& path) {
     return CreateFileW(path.c_str(), GENERIC_READ,
                        FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
@@ -92,6 +98,31 @@ int main() {
     CHECK(read_bytes(target) == original);
     CHECK(kf2::backup::recover_transactions(store, config_root).value().outcome ==
           kf2::backup::RecoveryOutcome::clean);
+
+    const auto concurrent_root = root / L"ConcurrentRecoveryConfig";
+    const auto concurrent_target = concurrent_root / L"KFEngine.ini";
+    write_bytes(concurrent_target, original);
+    kf2::config::ConfigPreview concurrent_preview;
+    concurrent_preview.config_root = concurrent_root;
+    concurrent_preview.files.push_back(
+        {L"KFEngine.ini", original, proposed});
+    kf2::backup::BackupStore concurrent_store{
+        root / L"ConcurrentRecoveryState"};
+    const auto concurrent_applied = kf2::config::apply_preview(
+        concurrent_preview, concurrent_store, {.game_running = false});
+    CHECK(concurrent_applied.has_value());
+    write_journal(concurrent_applied.value().backup, "replacement_started");
+    concurrent_recovery_target = concurrent_target;
+    kf2::backup::set_recovery_commit_hook_for_testing(
+        &change_target_before_recovery_commit);
+    const auto concurrent_recovery = kf2::backup::recover_transactions(
+        concurrent_store, concurrent_root);
+    kf2::backup::set_recovery_commit_hook_for_testing(nullptr);
+    CHECK(!concurrent_recovery.has_value());
+    CHECK(concurrent_recovery.error().code == kf2::ErrorCode::stale_data);
+    CHECK(read_bytes(concurrent_target) == "concurrent recovery edit");
+    CHECK(read_bytes(concurrent_applied.value().backup.journal_path)
+              .find("state=replacement_started") != std::string::npos);
 
     const auto reapplied = kf2::config::apply_preview(
         preview, store, {.game_running = false});

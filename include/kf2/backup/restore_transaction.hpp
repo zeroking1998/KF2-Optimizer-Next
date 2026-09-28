@@ -21,6 +21,11 @@ struct RecoveryResult {
     std::size_t transactions_recovered{0};
 };
 
+#if defined(KF2_BACKUP_RECOVERY_TESTING)
+using RecoveryCommitHook = void (*)();
+void set_recovery_commit_hook_for_testing(RecoveryCommitHook hook) noexcept;
+#endif
+
 [[nodiscard]] Result<RestoreResult> restore_backup(
     BackupStore& store, std::string_view id,
     const std::filesystem::path& expected_config_root,
