@@ -2135,9 +2135,10 @@ int main() {
     CHECK(telemetry_source.find(
         "DistanceDecimeters = (DistanceUnits + 5) / 10") !=
           std::string::npos);
-    // All settle and LOD ownership paths emit actor-correlated receipts and
-    // the isolated living offscreen animation policy adds two distance receipts.
-    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 19);
+    // All settle, LOD and manager-generation release paths emit
+    // actor-correlated receipts; the isolated living offscreen animation
+    // policy adds two distance receipts.
+    CHECK(count_occurrences(telemetry_source, "corpse_id=") == 24);
     CHECK(count_occurrences(telemetry_source, " distance_units=") == 14);
     CHECK(count_occurrences(telemetry_source, " distance_m=") == 14);
     const auto distance_marker = telemetry_source.find(
@@ -2747,7 +2748,7 @@ int main() {
         "AdaptiveLastPhysicsMutationWorldTime=-1.0") != std::string::npos);
     const char* physics_mutation_functions[] = {
         "function int SleepBaselineAwakeMonsterCorpses(",
-        "function bool TryRestoreAdaptiveCorpseFreeze(",
+        "function bool RestoreAdaptiveCorpseFreezeState(",
         "function bool FreezeOnePressureEligibleCorpse(",
         "function int WakeNearAdaptiveDistanceSleptCorpses()",
         "function int WakeAdaptiveDistanceSleptCorpseBatch()",
@@ -2905,10 +2906,10 @@ int main() {
     CHECK(pressure_freeze_body.find(
         "FindAdaptiveCorpseFreeze(Candidate) >= 0") != std::string::npos);
     const auto restore_freeze_function = telemetry_source.find(
-        "function bool TryRestoreAdaptiveCorpseFreeze(");
+        "function bool RestoreAdaptiveCorpseFreezeState(");
     CHECK(restore_freeze_function != std::string::npos);
     const auto restore_freeze_end = telemetry_source.find(
-        "function int ReleaseOneAdaptiveCorpseFreeze(bool bRestoreAll)",
+        "function bool TryRestoreAdaptiveCorpseFreeze(",
         restore_freeze_function);
     CHECK(restore_freeze_end != std::string::npos);
     const auto restore_freeze_body = telemetry_source.substr(
@@ -2933,8 +2934,105 @@ int main() {
     CHECK(restore_freeze_body.find(
         "LogAdaptiveCorpseFreezeReleaseFailure(") != std::string::npos);
     CHECK(restore_freeze_body.find(
-        "(Candidate.CollisionComponent != None) !=\n"
-        "            AdaptiveFrozenCorpses[Index].bHadCollisionComponent") !=
+        "(Candidate.CollisionComponent != None) != bHadCollisionComponent") !=
+          std::string::npos);
+
+    const auto manager_retire_function = telemetry_source.find(
+        "function RetireAdaptiveCorpseManagerOwnership(");
+    const auto manager_retire_end = telemetry_source.find(
+        "function InitializeAdaptiveCorpseStagger(",
+        manager_retire_function);
+    CHECK(manager_retire_function != std::string::npos);
+    CHECK(manager_retire_end != std::string::npos);
+    const auto manager_retire_body = telemetry_source.substr(
+        manager_retire_function,
+        manager_retire_end - manager_retire_function);
+    CHECK(manager_retire_body.find(
+        "AdaptiveCorpseManager == None &&\n"
+        "         !bAdaptiveCorpseStaggerInitialized") !=
+          std::string::npos);
+    const auto retire_frozen = manager_retire_body.find(
+        "AdaptiveRetiredFrozenCorpses.AddItem(");
+    const auto clear_active_frozen = manager_retire_body.find(
+        "AdaptiveFrozenCorpses.Length = 0;");
+    const auto retire_slept = manager_retire_body.find(
+        "AdaptiveRetiredDistanceSleptCorpses.AddItem(");
+    const auto clear_active_slept = manager_retire_body.find(
+        "AdaptiveDistanceSleptCorpses.Length = 0;");
+    CHECK(retire_frozen != std::string::npos);
+    CHECK(clear_active_frozen != std::string::npos);
+    CHECK(retire_slept != std::string::npos);
+    CHECK(clear_active_slept != std::string::npos);
+    CHECK(retire_frozen < clear_active_frozen);
+    CHECK(retire_slept < clear_active_slept);
+    CHECK(manager_retire_body.find(
+        "AdaptiveCorpseManager.MaxDeadBodies = AdaptiveCorpseOriginalLimit") !=
+          std::string::npos);
+    for (const auto* old_manager_state : {
+             "AdaptiveBaselineSettleEntries.Length = 0",
+             "FixedMinimumCorpseLodCorpses.Length = 0",
+             "FixedMinimumLivingVisualZeds.Length = 0",
+             "AdaptiveDistanceSleepTransitions.Length = 0",
+             "AdaptiveCorpsePhysicsActionIds.Length = 0",
+             "FixedMinimumLivingScanPawn = None"}) {
+        CHECK(manager_retire_body.find(old_manager_state) !=
+              std::string::npos);
+    }
+    const auto initialize_manager = telemetry_source.find(
+        "function InitializeAdaptiveCorpseStagger(");
+    const auto initialize_manager_end = telemetry_source.find(
+        "function AdjustAdaptiveCorpseCapacity(", initialize_manager);
+    CHECK(initialize_manager != std::string::npos);
+    CHECK(initialize_manager_end != std::string::npos);
+    const auto initialize_manager_body = telemetry_source.substr(
+        initialize_manager, initialize_manager_end - initialize_manager);
+    CHECK(initialize_manager_body.find(
+        "RetireAdaptiveCorpseManagerOwnership(GoreManager);") <
+          initialize_manager_body.find(
+              "AdaptiveCorpseManager = GoreManager;"));
+    CHECK(initialize_manager_body.find(
+        "AdaptiveFrozenCorpses.Length = 0") == std::string::npos);
+
+    const auto retired_freeze_release = telemetry_source.find(
+        "function int ReleaseOneRetiredAdaptiveCorpseFreeze()");
+    const auto retired_freeze_release_end = telemetry_source.find(
+        "function int WakeOneRetiredAdaptiveDistanceSleptCorpse()",
+        retired_freeze_release);
+    CHECK(retired_freeze_release != std::string::npos);
+    CHECK(retired_freeze_release_end != std::string::npos);
+    const auto retired_freeze_release_body = telemetry_source.substr(
+        retired_freeze_release,
+        retired_freeze_release_end - retired_freeze_release);
+    CHECK(retired_freeze_release_body.find(
+        "RestoreAdaptiveCorpseFreezeState(") != std::string::npos);
+    CHECK(retired_freeze_release_body.find(
+        "(Index + 1) % AdaptiveRetiredFrozenCorpses.Length") !=
+          std::string::npos);
+
+    const auto retired_sleep_release = retired_freeze_release_end;
+    const auto retired_sleep_release_end = telemetry_source.find(
+        "function int ReleaseOneRetiredAdaptiveCorpseOwnership()",
+        retired_sleep_release);
+    CHECK(retired_sleep_release_end != std::string::npos);
+    const auto retired_sleep_release_body = telemetry_source.substr(
+        retired_sleep_release,
+        retired_sleep_release_end - retired_sleep_release);
+    CHECK(retired_sleep_release_body.find(
+        "Candidate.Mesh.WakeRigidBody()") != std::string::npos);
+    CHECK(retired_sleep_release_body.find(
+        "manager_replaced_wake_readback") != std::string::npos);
+    CHECK(retired_sleep_release_body.find(
+        "(Index + 1) %\n"
+        "                        AdaptiveRetiredDistanceSleptCorpses.Length") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "ReleaseOneRetiredAdaptiveCorpseOwnership() > 0",
+        stagger_start) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveRetiredFrozenCorpses.Length > 0 ||") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "AdaptiveRetiredDistanceSleptCorpses.Length > 0") !=
           std::string::npos);
 
     const auto freeze_release_function = telemetry_source.find(
@@ -3327,6 +3425,11 @@ int main() {
     CHECK(quiesce_body.find("FixedMinimumLivingVisualZeds.Length = 0") !=
           std::string::npos);
     CHECK(quiesce_body.find("FixedMinimumCorpseLodCorpses.Length = 0") !=
+          std::string::npos);
+    CHECK(quiesce_body.find("AdaptiveRetiredFrozenCorpses.Length = 0") !=
+          std::string::npos);
+    CHECK(quiesce_body.find(
+        "AdaptiveRetiredDistanceSleptCorpses.Length = 0") !=
           std::string::npos);
 
     const auto ragdoll_selector = telemetry_source.find(
