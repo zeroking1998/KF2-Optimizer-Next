@@ -149,9 +149,14 @@ Result<bool> remove_safe_regular_file(const std::filesystem::path& path) {
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
         OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     if (file == INVALID_HANDLE_VALUE) {
+        const DWORD native = GetLastError();
+        if (native == ERROR_FILE_NOT_FOUND ||
+            native == ERROR_PATH_NOT_FOUND) {
+            return Result<bool>::success(false);
+        }
         return Result<bool>::failure(
             {ErrorCode::io_failure, L"Backup file cannot be opened for pruning",
-             GetLastError()});
+             native});
     }
     BY_HANDLE_FILE_INFORMATION information{};
     const bool safe = GetFileInformationByHandle(file, &information) &&
