@@ -417,6 +417,67 @@ int main() {
     const auto interaction_tick = interaction_source.find(
         "event Tick(float DeltaTime)");
     CHECK(interaction_tick != std::string::npos);
+    const auto interaction_session_end = interaction_source.find(
+        "function NotifyGameSessionEnded()", interaction_tick);
+    CHECK(interaction_session_end != std::string::npos);
+    const auto interaction_tick_body = interaction_source.substr(
+        interaction_tick, interaction_session_end - interaction_tick);
+    CHECK(interaction_source.find(
+        "const TelemetryMaintenanceInitialSeconds=0.05;") !=
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "const TelemetryMaintenanceMaximumSeconds=1.0;") !=
+          std::string::npos);
+    const auto telemetry_cadence_guard = interaction_tick_body.find(
+        "TelemetryMaintenanceElapsedSeconds <\n"
+        "        TelemetryMaintenanceIntervalSeconds");
+    const auto telemetry_context_lookup = interaction_tick_body.find(
+        "GetStandaloneGameplayContext(PrimaryController, CurrentWorld)");
+    const auto telemetry_probe_scan = interaction_tick_body.find(
+        "CurrentWorld.DynamicActors(\n"
+        "        class'KF2OptimizerTelemetryProbe'");
+    const auto telemetry_listener_scan = interaction_tick_body.find(
+        "CurrentWorld.DynamicActors(\n"
+        "        class'KF2OptimizerAdaptiveControlListener'");
+    CHECK(telemetry_cadence_guard != std::string::npos);
+    CHECK(telemetry_context_lookup != std::string::npos);
+    CHECK(telemetry_probe_scan != std::string::npos);
+    CHECK(telemetry_listener_scan != std::string::npos);
+    CHECK(telemetry_cadence_guard < telemetry_context_lookup);
+    CHECK(telemetry_context_lookup < telemetry_probe_scan);
+    CHECK(telemetry_probe_scan < telemetry_listener_scan);
+    CHECK(interaction_tick_body.find(
+        "ScheduleTelemetryMaintenance(true);") != std::string::npos);
+    CHECK(count_occurrences(interaction_tick_body,
+        "ScheduleTelemetryMaintenance(false);") >= 7);
+    const auto telemetry_world_reset = interaction_tick_body.find(
+        "TelemetryMaintenanceLastObservedRealTime ||");
+    CHECK(telemetry_world_reset != std::string::npos);
+    CHECK(interaction_tick_body.find(
+        "!(CurrentMapName ~= TelemetryMaintenanceMapName)",
+        telemetry_world_reset) != std::string::npos);
+    CHECK(interaction_tick_body.find(
+        "ResetTelemetryMaintenanceCadence();", telemetry_world_reset) <
+          telemetry_probe_scan);
+    CHECK(interaction_source.find(
+        "TelemetryMaintenanceIntervalSeconds = FMin(") !=
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "TelemetryMaintenanceMaximumSeconds,") != std::string::npos);
+    CHECK(interaction_source.find(
+        "var KF2OptimizerTelemetryProbe") == std::string::npos);
+    CHECK(interaction_source.find(
+        "var KF2OptimizerAdaptiveControlListener") == std::string::npos);
+    {
+        double interval = 0.05;
+        for (int converged_pass = 0; converged_pass < 8;
+             ++converged_pass) {
+            interval = std::min(1.0, interval * 2.0);
+        }
+        CHECK(interval == 1.0);
+        interval = 0.05;
+        CHECK(interval == 0.05);
+    }
     const auto graphics_interaction_tick = graphics_interaction_source.find(
         "event Tick(float DeltaTime)");
     CHECK(graphics_interaction_tick != std::string::npos);
@@ -425,12 +486,15 @@ int main() {
     CHECK(graphics_interaction_source.find("LastObservedWorld") ==
           std::string::npos);
     const auto graphics_world_reset = graphics_interaction_source.find(
-        "if (CurrentWorld.RealTimeSeconds < LastObservedRealTime)",
+        "if (CurrentWorld.RealTimeSeconds < LastObservedRealTime ||",
         graphics_interaction_tick);
     const auto graphics_timer_guard = graphics_interaction_source.find(
         "CurrentWorld.RealTimeSeconds < NextReadRealTime",
         graphics_interaction_tick);
     CHECK(graphics_world_reset != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "!(CurrentMapName ~= LastRuntimeGuardMapName)",
+        graphics_world_reset) != std::string::npos);
     CHECK(graphics_timer_guard != std::string::npos);
     CHECK(graphics_world_reset < graphics_timer_guard);
     CHECK(graphics_interaction_source.find(
@@ -461,18 +525,48 @@ int main() {
     CHECK(graphics_interaction_source.find(
         "KF2OPT_WEAPON_MIC state=repaired") != std::string::npos);
     CHECK(graphics_interaction_source.find(
-        "DynamicActors(class'KFWeap_HRG_Warthog', Warthog)") !=
+        "const RuntimeGuardInitialSeconds=0.05;") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "const RuntimeGuardMaximumSeconds=0.25;") != std::string::npos);
+    const auto runtime_guard_function = graphics_interaction_source.find(
+        "function GuardRuntimeActors(WorldInfo CurrentWorld)");
+    const auto runtime_guard = graphics_interaction_source.find(
+        "GuardRuntimeActors(CurrentWorld);", graphics_interaction_tick);
+    const auto weapon_standalone_guard = graphics_interaction_source.find(
+        "if (CurrentWorld.NetMode != NM_Standalone)", runtime_guard);
+    CHECK(runtime_guard_function != std::string::npos);
+    CHECK(runtime_guard != std::string::npos);
+    CHECK(weapon_standalone_guard != std::string::npos);
+    CHECK(runtime_guard < weapon_standalone_guard);
+    CHECK(count_occurrences(graphics_interaction_source,
+        "foreach CurrentWorld.DynamicActors(class'Actor', Candidate)") == 1);
+    CHECK(graphics_interaction_source.find(
+        "DynamicActors(class'KFWeap_HRG_Warthog'") == std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "DynamicActors(class'KFWeap_AutoTurret'") == std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "DynamicActors(class'KFPawn'") == std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "RuntimeGuardIntervalSeconds = FMin(", runtime_guard_function) !=
           std::string::npos);
     CHECK(graphics_interaction_source.find(
-        "DynamicActors(class'KFWeap_AutoTurret', AutoTurret)") !=
+        "RuntimeGuardMaximumSeconds,", runtime_guard_function) !=
           std::string::npos);
-    const auto weapon_guard = graphics_interaction_source.find(
-        "GuardTurretWeaponMaterials(CurrentWorld);");
-    const auto weapon_standalone_guard = graphics_interaction_source.find(
-        "if (CurrentWorld.NetMode != NM_Standalone)", weapon_guard);
-    CHECK(weapon_guard != std::string::npos);
-    CHECK(weapon_standalone_guard != std::string::npos);
-    CHECK(weapon_guard < weapon_standalone_guard);
+    CHECK(graphics_interaction_source.find(
+        "RuntimeGuardIntervalSeconds = RuntimeGuardInitialSeconds;",
+        runtime_guard_function) != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "ResetRuntimeGuardCadence();", graphics_world_reset) <
+          runtime_guard);
+    {
+        double interval = 0.05;
+        for (int clean_scan = 0; clean_scan < 4; ++clean_scan) {
+            interval = std::min(0.25, interval * 2.0);
+        }
+        CHECK(interval == 0.25);
+        interval = 0.05;
+        CHECK(interval == 0.05);
+    }
     CHECK(fire_affliction_source.find(
         "class KF2OptimizerFireAffliction extends KFAffliction_Fire") !=
           std::string::npos);
@@ -503,10 +597,6 @@ int main() {
     CHECK(fire_affliction_source.find(
         "PawnOwner.PlaySoundBase(OnFireEndSound, true, true)") !=
           std::string::npos);
-    const auto pawn_runtime_guard = graphics_interaction_source.find(
-        "GuardPawnRuntimeClasses(CurrentWorld);");
-    CHECK(pawn_runtime_guard != std::string::npos);
-    CHECK(pawn_runtime_guard < weapon_standalone_guard);
     CHECK(graphics_interaction_source.find(
         "function bool EnsureWeaponClassFallback(KFPawn Pawn)") !=
           std::string::npos);
@@ -527,8 +617,6 @@ int main() {
     CHECK(graphics_interaction_source.find(
         "KF2OPT_WEAPON_CLASS_FALLBACK state=active") !=
           std::string::npos);
-    CHECK(count_occurrences(graphics_interaction_source,
-        "foreach CurrentWorld.DynamicActors(class'KFPawn', Pawn)") == 1);
     CHECK(graphics_interaction_source.find(
         "function bool ReplaceExistingFireAffliction(KFPawn Pawn)") !=
           std::string::npos);
@@ -1064,6 +1152,9 @@ int main() {
     CHECK(prepare_for_world != std::string::npos);
     CHECK(session_ended != std::string::npos);
     CHECK(player_added != std::string::npos);
+    CHECK(interaction_source.find(
+        "ResetTelemetryMaintenanceCadence();", prepare_for_world) <
+          session_ended);
     const auto achievement_prewarm = interaction_source.find(
         "function TryPrewarmAchievements(");
     const auto achievement_complete = interaction_source.find(

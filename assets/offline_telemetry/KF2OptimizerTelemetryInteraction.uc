@@ -5,6 +5,8 @@ class KF2OptimizerTelemetryInteraction extends Interaction
     within GameViewportClient;
 
 const AchievementPrewarmRequestTimeoutSeconds=10.0;
+const TelemetryMaintenanceInitialSeconds=0.05;
+const TelemetryMaintenanceMaximumSeconds=1.0;
 
 var string OptimizerContextState;
 var string OptimizerProbeState;
@@ -30,6 +32,38 @@ var int ProcessGraphicsRestoreAttempts;
 var float ProcessGraphicsRestoreNextAttemptRealTime;
 var float ProcessGraphicsRestoreRetryDelay;
 var string ProcessGraphicsRestoreRetryStatus;
+var float TelemetryMaintenanceElapsedSeconds;
+var float TelemetryMaintenanceIntervalSeconds;
+var float TelemetryMaintenanceLastObservedRealTime;
+var string TelemetryMaintenanceMapName;
+
+function ResetTelemetryMaintenanceCadence()
+{
+    TelemetryMaintenanceElapsedSeconds = 0.0;
+    TelemetryMaintenanceIntervalSeconds = 0.0;
+    TelemetryMaintenanceLastObservedRealTime = 0.0;
+    TelemetryMaintenanceMapName = "";
+}
+
+function ScheduleTelemetryMaintenance(bool bConverged)
+{
+    TelemetryMaintenanceElapsedSeconds = 0.0;
+    if (!bConverged)
+    {
+        TelemetryMaintenanceIntervalSeconds =
+            TelemetryMaintenanceInitialSeconds;
+        return;
+    }
+    if (TelemetryMaintenanceIntervalSeconds <
+        TelemetryMaintenanceInitialSeconds)
+    {
+        TelemetryMaintenanceIntervalSeconds =
+            TelemetryMaintenanceInitialSeconds;
+    }
+    TelemetryMaintenanceIntervalSeconds = FMin(
+        TelemetryMaintenanceMaximumSeconds,
+        TelemetryMaintenanceIntervalSeconds * 2.0);
+}
 
 function bool IsTelemetryBootstrapInserted()
 {
@@ -375,6 +409,7 @@ function PrepareForGameplayWorld()
     OptimizerContextState = "";
     OptimizerProbeState = "";
     OptimizerGameplayUiState = "";
+    ResetTelemetryMaintenanceCadence();
     `log("KF2OPT_INTERACTION schema=1 state=rearmed");
 }
 
@@ -430,18 +465,38 @@ event Tick(float DeltaTime)
     local KF2OptimizerAdaptiveControlListener CurrentListener;
     local PlayerController PrimaryController;
     local WorldInfo CurrentWorld;
+    local string CurrentMapName;
 
     if (bGameSessionEnding)
     {
         return;
     }
-    if (!GetStandaloneGameplayContext(PrimaryController, CurrentWorld))
+    TelemetryMaintenanceElapsedSeconds += FMax(0.0, DeltaTime);
+    if (TelemetryMaintenanceElapsedSeconds <
+        TelemetryMaintenanceIntervalSeconds)
     {
         return;
     }
+    if (!GetStandaloneGameplayContext(PrimaryController, CurrentWorld))
+    {
+        ScheduleTelemetryMaintenance(false);
+        return;
+    }
+    CurrentMapName = CurrentWorld.GetMapName(true);
+    if (CurrentWorld.RealTimeSeconds <
+            TelemetryMaintenanceLastObservedRealTime ||
+        (Len(TelemetryMaintenanceMapName) > 0 &&
+         !(CurrentMapName ~= TelemetryMaintenanceMapName)))
+    {
+        ResetTelemetryMaintenanceCadence();
+    }
+    TelemetryMaintenanceLastObservedRealTime =
+        CurrentWorld.RealTimeSeconds;
+    TelemetryMaintenanceMapName = CurrentMapName;
     if (!RestorePendingProcessGraphicsWithBackoff(CurrentWorld))
     {
         ReportOptimizerProbeState("process_graphics_restore_pending");
+        ScheduleTelemetryMaintenance(false);
         return;
     }
     TryPrewarmAchievements(PrimaryController);
@@ -463,6 +518,7 @@ event Tick(float DeltaTime)
     if (CurrentProbe == None || CurrentProbe.bDeleteMe)
     {
         ReportOptimizerProbeState("spawn_failed");
+        ScheduleTelemetryMaintenance(false);
         return;
     }
     if (CurrentProbe.AdaptiveGraphicsState == None)
@@ -473,11 +529,13 @@ event Tick(float DeltaTime)
     if (CurrentProbe.AdaptiveGraphicsState == None)
     {
         ReportOptimizerProbeState("graphics_state_unavailable");
+        ScheduleTelemetryMaintenance(false);
         return;
     }
     if (!EnsureFixedEffectsBaselineWithBackoff(CurrentProbe, CurrentWorld))
     {
         ReportOptimizerProbeState("fixed_effect_baseline_failed");
+        ScheduleTelemetryMaintenance(false);
         return;
     }
     if (!bProcessAdaptiveRuntimeStateInitialized)
@@ -491,11 +549,13 @@ event Tick(float DeltaTime)
             bProcessAdaptiveRuntimeEnabled))
     {
         ReportOptimizerProbeState("adaptive_mode_sync_failed");
+        ScheduleTelemetryMaintenance(false);
         return;
     }
     if (Len(CurrentProbe.AdaptiveControlToken) < 32)
     {
         ReportOptimizerProbeState("token_unavailable");
+        ScheduleTelemetryMaintenance(false);
         return;
     }
     ReportOptimizerProbeState("ready");
@@ -505,10 +565,13 @@ event Tick(float DeltaTime)
     {
         if (CurrentListener != None && !CurrentListener.bDeleteMe)
         {
+            ScheduleTelemetryMaintenance(true);
             return;
         }
     }
-    PrimaryController.Spawn(class'KF2OptimizerAdaptiveControlListener');
+    CurrentListener = PrimaryController.Spawn(
+        class'KF2OptimizerAdaptiveControlListener');
+    ScheduleTelemetryMaintenance(false);
 }
 
 function NotifyGameSessionEnded()
