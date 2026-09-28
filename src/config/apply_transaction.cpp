@@ -3,7 +3,6 @@
 #include <Windows.h>
 
 #include <fstream>
-#include <iterator>
 #include <vector>
 
 #include "kf2/platform/windows/atomic_file.hpp"
@@ -11,9 +10,40 @@
 namespace kf2::config {
 namespace {
 
-std::string read_bytes(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    return {std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+constexpr std::uintmax_t max_configuration_bytes = 16U * 1024U * 1024U;
+
+Result<std::string> read_bytes(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    if (!input.is_open()) {
+        return Result<std::string>::failure(
+            {ErrorCode::io_failure,
+             L"Configuration file cannot be opened for reading", 0});
+    }
+    const auto end = input.tellg();
+    if (end < 0 || static_cast<std::uintmax_t>(end) >
+                       max_configuration_bytes) {
+        return Result<std::string>::failure(
+            {ErrorCode::io_failure,
+             L"Configuration file size cannot be read safely", 0});
+    }
+    std::string bytes(static_cast<std::size_t>(end), '\0');
+    input.seekg(0, std::ios::beg);
+    if (!input || (!bytes.empty() &&
+                   (!input.read(bytes.data(),
+                                static_cast<std::streamsize>(bytes.size())) ||
+                    input.gcount() !=
+                        static_cast<std::streamsize>(bytes.size())))) {
+        return Result<std::string>::failure(
+            {ErrorCode::io_failure,
+             L"Configuration file cannot be read completely", 0});
+    }
+    char extra = 0;
+    if (input.read(&extra, 1) || !input.eof()) {
+        return Result<std::string>::failure(
+            {ErrorCode::stale_data,
+             L"Configuration file changed while it was being read", 0});
+    }
+    return Result<std::string>::success(std::move(bytes));
 }
 
 bool safe_relative_path(const std::filesystem::path& path) {
@@ -89,7 +119,11 @@ Result<ApplyResult> apply_preview(const ConfigPreview& preview,
             return Result<ApplyResult>::failure(
                 {ErrorCode::access_denied, L"Configuration target identity is unsafe", 0});
         }
-        if (read_bytes(target) != file.original_bytes) {
+        const auto current = read_bytes(target);
+        if (!current.has_value()) {
+            return Result<ApplyResult>::failure(current.error());
+        }
+        if (current.value() != file.original_bytes) {
             return Result<ApplyResult>::failure(
                 {ErrorCode::stale_data, L"Configuration changed after preview", 0});
         }
@@ -137,11 +171,16 @@ Result<ApplyResult> apply_preview(const ConfigPreview& preview,
         written_files.push_back(&file);
     }
     for (const auto& file : preview.files) {
-        if (read_bytes(preview.config_root / file.relative_path) != file.proposed_bytes) {
+        const auto applied = read_bytes(
+            preview.config_root / file.relative_path);
+        if (!applied.has_value() || applied.value() != file.proposed_bytes) {
             for (const auto& rollback : preview.files) {
                 static_cast<void>(platform::windows::atomic_replace_utf8(
                     preview.config_root / rollback.relative_path,
                     rollback.original_bytes));
+            }
+            if (!applied.has_value()) {
+                return Result<ApplyResult>::failure(applied.error());
             }
             return Result<ApplyResult>::failure(
                 {ErrorCode::io_failure, L"Applied configuration verification failed", 0});
