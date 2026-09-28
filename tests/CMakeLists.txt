@@ -334,6 +334,8 @@ add_executable(kf2_flex_lab_test
 target_include_directories(kf2_flex_lab_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_flex_lab_test PRIVATE
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/flex-lab"
+    KF2_ATOMIC_FILE_TESTING
+    KF2_SHA256_TESTING
     KF2_FLEX_LAB_TEST_HOOKS)
 target_link_libraries(kf2_flex_lab_test PRIVATE bcrypt)
 add_test(NAME kf2_flex_lab_test COMMAND kf2_flex_lab_test)

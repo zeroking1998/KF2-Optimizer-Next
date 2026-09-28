@@ -14,4 +14,9 @@ namespace kf2::security {
     const std::filesystem::path& path,
     std::uint64_t maximum_bytes = 64ULL * 1024ULL * 1024ULL);
 
+#if defined(KF2_SHA256_TESTING)
+using Sha256FileReadHook = void (*)(const std::filesystem::path&);
+void set_sha256_file_read_hook_for_testing(Sha256FileReadHook hook) noexcept;
+#endif
+
 }  // namespace kf2::security

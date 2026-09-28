@@ -36,7 +36,18 @@ bool same_file_state(const BY_HANDLE_FILE_INFORMATION& left,
             right.ftLastWriteTime.dwLowDateTime;
 }
 
+#if defined(KF2_SHA256_TESTING)
+Sha256FileReadHook sha256_file_read_hook{};
+#endif
+
 }  // namespace
+
+#if defined(KF2_SHA256_TESTING)
+void set_sha256_file_read_hook_for_testing(
+    Sha256FileReadHook hook) noexcept {
+    sha256_file_read_hook = hook;
+}
+#endif
 
 Result<std::string> sha256_hex(std::string_view bytes) {
     BCRYPT_ALG_HANDLE algorithm = nullptr;
@@ -118,6 +129,10 @@ Result<std::string> sha256_file_hex(const std::filesystem::path& path,
             {ErrorCode::access_denied, L"SHA-256 input exceeds its size limit", 0});
     }
 
+#if defined(KF2_SHA256_TESTING)
+    if (sha256_file_read_hook != nullptr) sha256_file_read_hook(path);
+#endif
+
     BCRYPT_ALG_HANDLE algorithm = nullptr;
     BCRYPT_HASH_HANDLE hash = nullptr;
     DWORD object_size = 0;
@@ -177,6 +192,27 @@ Result<std::string> sha256_file_hex(const std::filesystem::path& path,
         return Result<std::string>::failure(
             {ErrorCode::stale_data,
              L"SHA-256 input changed while it was being verified", 0});
+    }
+
+    HANDLE current = CreateFileW(
+        platform::windows::extended_length_path(path).c_str(),
+        FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (current == INVALID_HANDLE_VALUE) {
+        return Result<std::string>::failure(
+            {ErrorCode::stale_data,
+             L"SHA-256 input path changed while it was being verified",
+             GetLastError()});
+    }
+    CloseFile close_current{current};
+    BY_HANDLE_FILE_INFORMATION current_information{};
+    if (!GetFileInformationByHandle(current, &current_information) ||
+        !same_file_state(before, current_information)) {
+        return Result<std::string>::failure(
+            {ErrorCode::stale_data,
+             L"SHA-256 input identity changed while it was being verified",
+             GetLastError()});
     }
     return Result<std::string>::success(encode_digest(digest));
 }

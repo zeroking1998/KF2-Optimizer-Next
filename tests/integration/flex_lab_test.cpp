@@ -4,6 +4,11 @@
 #include <fstream>
 #include <iostream>
 
+#include <Windows.h>
+
+#include "kf2/platform/windows/atomic_file.hpp"
+#include "kf2/security/sha256.hpp"
+
 #define CHECK(x) do { if (!(x)) { std::cerr << "check failed line " << __LINE__ << '\n'; return 1; } } while (0)
 
 static std::string read(const std::filesystem::path& p) {
@@ -16,6 +21,14 @@ static void write(const std::filesystem::path& p, const char* value) {
 static std::filesystem::path race_active;
 static std::filesystem::path race_forwarder;
 static std::filesystem::path denied_status_path;
+static std::filesystem::path replacement_path;
+static bool mutation_succeeded = false;
+
+static void replace_during_read(const std::filesystem::path& path) {
+    mutation_succeeded = ReplaceFileW(
+        path.c_str(), replacement_path.c_str(), nullptr,
+        REPLACEFILE_WRITE_THROUGH, nullptr, nullptr) != FALSE;
+}
 
 static bool fail_selected_status(const std::filesystem::path& path,
                                  std::error_code& error) {
@@ -145,5 +158,111 @@ int main() {
         forwarder_race_state / "flex-lab-transaction.marker"));
     CHECK(!std::filesystem::exists(
         forwarder_race_game / "flexRelease_original.dll"));
+
+    const auto hash_race_root = root / "hash-race";
+    const auto hash_race_input = hash_race_root / "flexRelease_x64.dll";
+    replacement_path = hash_race_root / "replacement.dll";
+    std::filesystem::create_directories(hash_race_root);
+    write(hash_race_input, "original-runtime");
+    write(replacement_path, "replacement-runtime");
+    mutation_succeeded = false;
+    kf2::security::set_sha256_file_read_hook_for_testing(
+        &replace_during_read);
+    const auto replaced_hash = kf2::security::sha256_file_hex(
+        hash_race_input, 16U * 1024U * 1024U);
+    kf2::security::set_sha256_file_read_hook_for_testing(nullptr);
+    CHECK(mutation_succeeded);
+    CHECK(!replaced_hash.has_value());
+    CHECK(replaced_hash.error().code == kf2::ErrorCode::stale_data);
+
+    const auto oversized_root = root / "oversized-runtime";
+    const auto oversized_game = oversized_root / "game";
+    const auto oversized_state = oversized_root / "state";
+    const auto oversized_forwarder =
+        oversized_root / "flexRelease_x64.forwarder-lab.dll";
+    std::filesystem::create_directories(oversized_game);
+    std::filesystem::create_directories(oversized_state);
+    write(oversized_game / "flexRelease_x64.dll", "runtime");
+    std::filesystem::resize_file(
+        oversized_game / "flexRelease_x64.dll", 16U * 1024U * 1024U + 1U);
+    write(oversized_forwarder, "forwarder");
+    const auto oversized_install = kf2::flex::install_offline_lab(
+        {oversized_game, oversized_state, oversized_forwarder,
+         false, true, true, false});
+    CHECK(!oversized_install.has_value());
+    CHECK(oversized_install.error().code == kf2::ErrorCode::access_denied);
+    CHECK(!std::filesystem::exists(
+        oversized_state / "flex-lab-transaction.marker"));
+
+    const auto marker_root = root / "oversized-marker";
+    const auto marker_game = marker_root / "game";
+    const auto marker_state = marker_root / "state";
+    const auto marker_forwarder =
+        marker_root / "flexRelease_x64.forwarder-lab.dll";
+    std::filesystem::create_directories(marker_game);
+    std::filesystem::create_directories(marker_state);
+    write(marker_game / "flexRelease_x64.dll", "original-runtime");
+    write(marker_forwarder, "forwarder");
+    CHECK(kf2::flex::install_offline_lab(
+        {marker_game, marker_state, marker_forwarder,
+         false, true, true, false}).has_value());
+    write(marker_state / "flex-lab-transaction.marker", "x");
+    std::filesystem::resize_file(
+        marker_state / "flex-lab-transaction.marker", 4U * 1024U + 1U);
+    const auto oversized_marker = kf2::flex::restore_offline_lab(
+        marker_game, marker_state, false);
+    CHECK(!oversized_marker.has_value());
+    CHECK(oversized_marker.error().code == kf2::ErrorCode::access_denied);
+    CHECK(read(marker_game / "flexRelease_x64.dll") == "forwarder");
+
+    const auto linked_marker_root = root / "linked-marker";
+    const auto linked_marker_game = linked_marker_root / "game";
+    const auto linked_marker_state = linked_marker_root / "state";
+    const auto linked_marker_forwarder =
+        linked_marker_root / "flexRelease_x64.forwarder-lab.dll";
+    std::filesystem::create_directories(linked_marker_game);
+    std::filesystem::create_directories(linked_marker_state);
+    write(linked_marker_game / "flexRelease_x64.dll", "original-runtime");
+    write(linked_marker_forwarder, "forwarder");
+    CHECK(kf2::flex::install_offline_lab(
+        {linked_marker_game, linked_marker_state, linked_marker_forwarder,
+         false, true, true, false}).has_value());
+    const auto linked_marker =
+        linked_marker_state / "flex-lab-transaction.marker";
+    const auto marker_alias = linked_marker_state / "marker-alias";
+    CHECK(CreateHardLinkW(marker_alias.c_str(), linked_marker.c_str(), nullptr));
+    const auto unsafe_marker = kf2::flex::restore_offline_lab(
+        linked_marker_game, linked_marker_state, false);
+    CHECK(!unsafe_marker.has_value());
+    CHECK(unsafe_marker.error().code == kf2::ErrorCode::access_denied);
+    CHECK(read(linked_marker_game / "flexRelease_x64.dll") == "forwarder");
+
+    const auto marker_race_root = root / "marker-race";
+    const auto marker_race_game = marker_race_root / "game";
+    const auto marker_race_state = marker_race_root / "state";
+    const auto marker_race_forwarder =
+        marker_race_root / "flexRelease_x64.forwarder-lab.dll";
+    std::filesystem::create_directories(marker_race_game);
+    std::filesystem::create_directories(marker_race_state);
+    write(marker_race_game / "flexRelease_x64.dll", "original-runtime");
+    write(marker_race_forwarder, "forwarder");
+    CHECK(kf2::flex::install_offline_lab(
+        {marker_race_game, marker_race_state, marker_race_forwarder,
+         false, true, true, false}).has_value());
+    const auto marker_race_path =
+        marker_race_state / "flex-lab-transaction.marker";
+    replacement_path = marker_race_state / "replacement.marker";
+    const auto marker_race_bytes = read(marker_race_path);
+    write(replacement_path, marker_race_bytes.c_str());
+    mutation_succeeded = false;
+    kf2::platform::windows::set_bounded_read_hook_for_testing(
+        &replace_during_read);
+    const auto replaced_marker = kf2::flex::restore_offline_lab(
+        marker_race_game, marker_race_state, false);
+    kf2::platform::windows::set_bounded_read_hook_for_testing(nullptr);
+    CHECK(mutation_succeeded);
+    CHECK(!replaced_marker.has_value());
+    CHECK(replaced_marker.error().code == kf2::ErrorCode::stale_data);
+    CHECK(read(marker_race_game / "flexRelease_x64.dll") == "forwarder");
     return 0;
 }
