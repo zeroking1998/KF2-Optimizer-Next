@@ -499,11 +499,13 @@ struct UiRuntime {
         const std::vector<config::RequestedChange>& requests,
         std::wstring context = L"Verified configuration changes");
 
-    Result<config::ApplyResult> apply_adaptive_launch_profile();
+    Result<config::ApplyResult> apply_adaptive_launch_profile(
+        bool fixed_flex_launch);
 
     Result<bool> apply_overlay_compatible_display_mode();
 
-    Result<bool> prepare_automatic_protected_launch_capabilities();
+    Result<bool> prepare_automatic_protected_launch_capabilities(
+        bool fixed_flex_launch);
 
     Result<bool> prepare_automatic_external_launch_profile();
 

@@ -40,6 +40,9 @@ void enforce_temporal_aa_disabled(
     std::vector<config::RequestedChange>& changes) noexcept;
 void enforce_async_physics_enabled(
     std::vector<config::RequestedChange>& changes) noexcept;
+void enforce_fixed_flex_substeps(
+    std::vector<config::RequestedChange>& changes,
+    bool fixed_flex_launch) noexcept;
 void enforce_one_frame_thread_lag(
     std::vector<config::RequestedChange>& changes) noexcept;
 void enforce_startup_memory_profile(

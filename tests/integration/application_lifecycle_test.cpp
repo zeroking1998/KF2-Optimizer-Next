@@ -860,21 +860,35 @@ int main(int argc, char** argv) {
     CHECK(flex_preservation_changes.size() == 4);
     CHECK(std::get<bool>(flex_preservation_changes[2].value));
     CHECK(std::get<bool>(flex_preservation_changes[3].value));
-    kf2::app::enforce_one_frame_thread_lag(flex_preservation_changes);
+    kf2::app::enforce_fixed_flex_substeps(
+        flex_preservation_changes, false);
+    CHECK(flex_preservation_changes.size() == 4);
+    kf2::app::enforce_fixed_flex_substeps(
+        flex_preservation_changes, true);
     CHECK(flex_preservation_changes.size() == 5);
     CHECK(flex_preservation_changes[4].id ==
+          kf2::config::SettingId::max_physics_substeps);
+    CHECK(std::get<int>(flex_preservation_changes[4].value) == 1);
+    flex_preservation_changes[4].value = 5;
+    kf2::app::enforce_fixed_flex_substeps(
+        flex_preservation_changes, true);
+    CHECK(flex_preservation_changes.size() == 5);
+    CHECK(std::get<int>(flex_preservation_changes[4].value) == 1);
+    kf2::app::enforce_one_frame_thread_lag(flex_preservation_changes);
+    CHECK(flex_preservation_changes.size() == 6);
+    CHECK(flex_preservation_changes[5].id ==
           kf2::config::SettingId::one_frame_thread_lag);
-    CHECK(std::get<bool>(flex_preservation_changes[4].value));
+    CHECK(std::get<bool>(flex_preservation_changes[5].value));
     const kf2::optimizer::StartupMemoryProfile startup_memory{
         .texture_pool_size_mb = 6000,
         .memory_margin_mb = 128,
         .streaming_hysteresis_limit = 40};
     kf2::app::enforce_startup_memory_profile(
         flex_preservation_changes, startup_memory);
-    CHECK(flex_preservation_changes.size() == 8);
-    CHECK(std::get<int>(flex_preservation_changes[5].value) == 6000);
-    CHECK(std::get<int>(flex_preservation_changes[6].value) == 128);
-    CHECK(std::get<int>(flex_preservation_changes[7].value) == 40);
+    CHECK(flex_preservation_changes.size() == 9);
+    CHECK(std::get<int>(flex_preservation_changes[6].value) == 6000);
+    CHECK(std::get<int>(flex_preservation_changes[7].value) == 128);
+    CHECK(std::get<int>(flex_preservation_changes[8].value) == 40);
     namespace fs = std::filesystem;
     CHECK(kf2::app::runtime::feature_definitions().size() == 7);
     CHECK(kf2::app::runtime::find_feature(
