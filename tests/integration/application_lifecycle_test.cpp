@@ -442,6 +442,13 @@ int main(int argc, char** argv) {
         std::string_view{argv[1]} == "--update-worker-exceptions") {
         return test_update_worker_exception_boundaries();
     }
+    try {
+        const auto inaccessible = kf2::app::load_or_create_settings(
+            std::filesystem::path{std::wstring(40'000, L'x')});
+        CHECK(!inaccessible.has_value());
+    } catch (const std::filesystem::filesystem_error&) {
+        return EXIT_FAILURE;
+    }
     CHECK(test_map_prewarm_retry_scheduler() == EXIT_SUCCESS);
     CHECK(kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::normal));

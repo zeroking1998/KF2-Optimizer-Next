@@ -21,6 +21,7 @@ constexpr wchar_t marker_name[] = L"flex-lab-transaction.marker";
 
 #if defined(KF2_FLEX_LAB_TEST_HOOKS)
 LabInstallTestHook install_test_hook{};
+LabStatusHook status_test_hook{};
 
 void run_install_test_hook(LabInstallTestCheckpoint checkpoint) {
     if (install_test_hook != nullptr) install_test_hook(checkpoint);
@@ -127,6 +128,24 @@ Result<bool> preflight(const std::filesystem::path& game,
     return Result<bool>::success(true);
 }
 
+Result<bool> inspected_exists(const std::filesystem::path& path) {
+    std::error_code error;
+#if defined(KF2_FLEX_LAB_TEST_HOOKS)
+    const bool exists = status_test_hook != nullptr
+        ? status_test_hook(path, error)
+        : std::filesystem::exists(path, error);
+#else
+    const bool exists = std::filesystem::exists(path, error);
+#endif
+    if (error) {
+        return Result<bool>::failure(
+            {ErrorCode::io_failure,
+             L"FleX laboratory path status cannot be inspected",
+             static_cast<std::uint32_t>(error.value())});
+    }
+    return Result<bool>::success(exists);
+}
+
 struct LabMarker {
     std::string state;
     std::string original_hash;
@@ -190,6 +209,10 @@ Result<std::string> parse_legacy_original_hash(
 void set_lab_install_test_hook(LabInstallTestHook hook) noexcept {
     install_test_hook = hook;
 }
+
+void set_lab_status_hook_for_testing(LabStatusHook hook) noexcept {
+    status_test_hook = hook;
+}
 #endif
 
 Result<LabTransactionResult> install_offline_lab(const LabTransactionOptions& o) {
@@ -205,7 +228,15 @@ Result<LabTransactionResult> install_offline_lab(const LabTransactionOptions& o)
     const auto original = o.game_directory / original_name;
     const auto backup = o.state_directory / backup_name;
     const auto marker = o.state_directory / marker_name;
-    if (std::filesystem::exists(marker) || std::filesystem::exists(original))
+    const auto marker_exists = inspected_exists(marker);
+    const auto original_exists = inspected_exists(original);
+    if (!marker_exists.has_value()) {
+        return Result<LabTransactionResult>::failure(marker_exists.error());
+    }
+    if (!original_exists.has_value()) {
+        return Result<LabTransactionResult>::failure(original_exists.error());
+    }
+    if (marker_exists.value() || original_exists.value())
         return Result<LabTransactionResult>::failure({ErrorCode::stale_data,
             L"An unfinished FleX laboratory transaction requires recovery", 0});
     const auto original_hash = hash_file(active);
@@ -256,14 +287,20 @@ Result<bool> restore_offline_lab(const std::filesystem::path& game,
     const auto original = game / original_name;
     const auto backup = state / backup_name;
     const auto marker = state / marker_name;
-    if (!std::filesystem::exists(marker) && !std::filesystem::exists(original))
+    const auto marker_exists = inspected_exists(marker);
+    const auto original_exists = inspected_exists(original);
+    const auto backup_exists = inspected_exists(backup);
+    if (!marker_exists.has_value()) return marker_exists;
+    if (!original_exists.has_value()) return original_exists;
+    if (!backup_exists.has_value()) return backup_exists;
+    if (!marker_exists.value() && !original_exists.value())
         return Result<bool>::failure(
             {ErrorCode::not_found, L"No active FleX laboratory transaction exists", 0});
-    const auto source = std::filesystem::exists(backup) ? backup : original;
-    if (!std::filesystem::exists(source)) return Result<bool>::failure(
+    const auto source = backup_exists.value() ? backup : original;
+    if (!backup_exists.value() && !original_exists.value()) return Result<bool>::failure(
         {ErrorCode::not_found, L"Verified FleX laboratory backup is missing", 0});
     std::optional<std::string> expected_hash;
-    if (std::filesystem::exists(marker)) {
+    if (marker_exists.value()) {
         const auto parsed = parse_marker(marker);
         if (!parsed.has_value()) return Result<bool>::failure(parsed.error());
         expected_hash = parsed.value().original_hash;
@@ -291,9 +328,14 @@ Result<bool> restore_offline_lab(const std::filesystem::path& game,
 Result<bool> recover_offline_lab(const std::filesystem::path& game,
                                  const std::filesystem::path& state, bool running) {
     const auto marker = state / marker_name;
-    if (!std::filesystem::exists(marker) &&
-        !std::filesystem::exists(game / original_name)) return Result<bool>::success(false);
-    if (std::filesystem::exists(marker)) {
+    const auto marker_exists = inspected_exists(marker);
+    const auto original_exists = inspected_exists(game / original_name);
+    if (!marker_exists.has_value()) return marker_exists;
+    if (!original_exists.has_value()) return original_exists;
+    if (!marker_exists.value() && !original_exists.value()) {
+        return Result<bool>::success(false);
+    }
+    if (marker_exists.value()) {
         const auto parsed = parse_marker(marker);
         if (parsed.has_value() && parsed.value().state == "installed") {
             const auto active_hash = hash_file(game / active_name);
@@ -310,8 +352,7 @@ Result<bool> recover_offline_lab(const std::filesystem::path& game,
         // Schema 1 could remain after an older build had already restored the
         // active DLL but failed to remove its marker. Remove only this harmless
         // residue after both active runtime and backup match its pinned hash.
-        if (!parsed.has_value() &&
-            !std::filesystem::exists(game / original_name)) {
+        if (!parsed.has_value() && !original_exists.value()) {
             const auto legacy = parse_legacy_original_hash(marker);
             const auto active_hash = hash_file(game / active_name);
             const auto backup_hash = hash_file(state / backup_name);

@@ -553,7 +553,15 @@ Result<RecoveryResult> recover_transactions(
     }
     for (const auto& entry : std::filesystem::directory_iterator(journals, error)) {
         if (error) break;
-        if (!entry.is_regular_file() || entry.path().extension() != L".journal") continue;
+        std::error_code type_error;
+        const bool regular_file = entry.is_regular_file(type_error);
+        if (type_error) {
+            return Result<RecoveryResult>::failure(
+                {ErrorCode::io_failure,
+                 L"Recovery journal identity cannot be inspected",
+                 static_cast<std::uint32_t>(type_error.value())});
+        }
+        if (!regular_file || entry.path().extension() != L".journal") continue;
         const auto expected_id = entry.path().stem().string();
         auto journal_bytes = read_recovery_journal(entry.path());
         auto journal = journal_bytes.has_value()

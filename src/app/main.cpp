@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cwchar>
 #include <filesystem>
+#include <exception>
 #include <optional>
 #include <string>
 #include <fstream>
@@ -46,9 +47,7 @@ std::uint64_t current_process_start_id() {
            creation.dwLowDateTime;
 }
 
-}  // namespace
-
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int show_command) {
+int run_application(int show_command) {
     namespace windows = kf2::platform::windows;
 
     if (!windows::harden_process_dll_search_for_startup()) return 9;
@@ -245,4 +244,22 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int show_command) {
         return show_fatal(shutdown.error(), 15);
     }
     return run_result.value();
+}
+
+}  // namespace
+
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int show_command) {
+    try {
+        return run_application(show_command);
+    } catch (const std::exception&) {
+        MessageBoxW(nullptr,
+                    L"KF2 Optimizer encountered an unexpected local error during startup.",
+                    L"KF2 Optimizer Next", MB_OK | MB_ICONERROR);
+        return 20;
+    } catch (...) {
+        MessageBoxW(nullptr,
+                    L"KF2 Optimizer encountered an unknown local error during startup.",
+                    L"KF2 Optimizer Next", MB_OK | MB_ICONERROR);
+        return 21;
+    }
 }

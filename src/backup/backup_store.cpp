@@ -20,6 +20,20 @@ constexpr std::uintmax_t max_manifest_bytes = 256U * 1024U;
 constexpr std::uintmax_t max_object_bytes = 16U * 1024U * 1024U;
 constexpr std::size_t max_snapshot_count = 3;
 
+#if defined(KF2_BACKUP_RECOVERY_TESTING)
+BackupStatusHook backup_status_hook{};
+#endif
+
+bool path_exists(const std::filesystem::path& path,
+                 std::error_code& error) {
+#if defined(KF2_BACKUP_RECOVERY_TESTING)
+    if (backup_status_hook != nullptr) {
+        return backup_status_hook(path, error);
+    }
+#endif
+    return std::filesystem::exists(path, error);
+}
+
 Result<std::string> read_bounded_regular_file(
     const std::filesystem::path& path, std::uintmax_t maximum_size) {
     HANDLE file = CreateFileW(
@@ -244,7 +258,15 @@ Result<BackupSet> BackupStore::create(const config::ConfigPreview& preview) {
         snapshot.desired_sha256 = desired_digest.value();
         snapshot.object_path = objects / (std::wstring{digest.value().begin(), digest.value().end()} + L".blob");
         add_identity(snapshot, preview.config_root / file.relative_path);
-        if (std::filesystem::exists(snapshot.object_path)) {
+        error.clear();
+        const bool object_exists = path_exists(snapshot.object_path, error);
+        if (error) {
+            return Result<BackupSet>::failure(
+                {ErrorCode::io_failure,
+                 L"Backup object status cannot be inspected",
+                 static_cast<std::uint32_t>(error.value())});
+        }
+        if (object_exists) {
             const auto existing_bytes = read_bounded_regular_file(
                 snapshot.object_path, max_object_bytes);
             if (!existing_bytes.has_value()) {
@@ -437,7 +459,7 @@ Result<std::vector<BackupSet>> BackupStore::list_backups() const {
     std::vector<BackupSet> backups;
     std::error_code error;
     const auto manifests = state_root_ / L"backups/manifests";
-    if (!std::filesystem::exists(manifests, error)) {
+    if (!path_exists(manifests, error)) {
         if (!error) return Result<std::vector<BackupSet>>::success({});
         return Result<std::vector<BackupSet>>::failure(
             {ErrorCode::io_failure, L"Backup list cannot be read",
@@ -514,7 +536,7 @@ Result<std::size_t> BackupStore::prune_verified(RetentionPolicy policy) {
     }
     const auto objects = state_root_ / L"backups/objects";
     std::error_code error;
-    if (std::filesystem::exists(objects, error)) {
+    if (path_exists(objects, error)) {
         for (const auto& entry : std::filesystem::directory_iterator(objects, error)) {
             if (error) break;
             const auto stem = entry.path().stem().string();
@@ -539,6 +561,12 @@ Result<std::size_t> BackupStore::prune_verified(RetentionPolicy policy) {
     }
     return Result<std::size_t>::success(removed);
 }
+
+#if defined(KF2_BACKUP_RECOVERY_TESTING)
+void set_backup_status_hook_for_testing(BackupStatusHook hook) noexcept {
+    backup_status_hook = hook;
+}
+#endif
 
 const std::filesystem::path& BackupStore::state_root() const noexcept {
     return state_root_;

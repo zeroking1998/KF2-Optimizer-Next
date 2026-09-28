@@ -42,7 +42,15 @@ std::wstring adaptive_profile_reason(
 Result<config::Settings> load_or_create_settings(
     const std::filesystem::path& path) {
     config::Settings settings;
-    bool must_write = !std::filesystem::exists(path);
+    std::error_code status_error;
+    const bool settings_exist = std::filesystem::exists(path, status_error);
+    if (status_error) {
+        return Result<config::Settings>::failure(
+            {ErrorCode::io_failure,
+             L"Settings file status cannot be inspected",
+             static_cast<std::uint32_t>(status_error.value())});
+    }
+    bool must_write = !settings_exist;
     if (!must_write) {
         std::string bytes;
         {
@@ -292,7 +300,16 @@ void UiRuntime::rebuild_adaptive_lock_cache() {
 
 Result<bool> UiRuntime::load_adaptive_locks() {
     const auto path = adaptive_locks_path();
-    if (!std::filesystem::exists(path)) {
+    std::error_code status_error;
+    const bool locks_exist = std::filesystem::exists(path, status_error);
+    if (status_error) {
+        adaptive_locks_valid = false;
+        return Result<bool>::failure(
+            {ErrorCode::io_failure,
+             L"Adaptive lock file status cannot be inspected",
+             static_cast<std::uint32_t>(status_error.value())});
+    }
+    if (!locks_exist) {
         adaptive_locks.clear();
         rebuild_adaptive_lock_cache();
         adaptive_locks_valid = true;
@@ -538,16 +555,26 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
             const auto flex_directory = installation->install_root /
                 L"Binaries" / L"Win64";
             const auto flex_state = state_root / L"flex-lab";
+            std::error_code flex_status_error;
+            const bool flex_marker_exists = std::filesystem::exists(
+                flex_state / L"flex-lab-transaction.marker",
+                flex_status_error);
+            const bool flex_original_exists = !flex_status_error &&
+                std::filesystem::exists(
+                    flex_directory / L"flexRelease_original.dll",
+                    flex_status_error);
             const bool flex_transaction_exists =
-                std::filesystem::exists(
-                    flex_state / L"flex-lab-transaction.marker") ||
-                std::filesystem::exists(
-                    flex_directory / L"flexRelease_original.dll");
-            const auto recovered = !game_running && flex_transaction_exists
-                ? flex::restore_offline_lab(
-                      flex_directory, flex_state, false)
-                : flex::recover_offline_lab(
-                      flex_directory, flex_state, game_running);
+                flex_marker_exists || flex_original_exists;
+            const auto recovered = flex_status_error
+                ? Result<bool>::failure(
+                      {ErrorCode::io_failure,
+                       L"FleX recovery status cannot be inspected",
+                       static_cast<std::uint32_t>(flex_status_error.value())})
+                : (!game_running && flex_transaction_exists
+                       ? flex::restore_offline_lab(
+                             flex_directory, flex_state, false)
+                       : flex::recover_offline_lab(
+                             flex_directory, flex_state, game_running));
             if (!recovered.has_value()) {
                 event_log.append({0, diagnostics::Severity::error,
                                   "FLEX_LAB_RECOVERY_BLOCKED",

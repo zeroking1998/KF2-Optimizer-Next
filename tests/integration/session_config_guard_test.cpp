@@ -29,6 +29,16 @@ struct MutationPlan {
 };
 
 static MutationPlan* mutation_plan{};
+static std::filesystem::path denied_status_path;
+
+static bool fail_selected_status(const std::filesystem::path& path,
+                                 std::error_code& error) {
+    if (path == denied_status_path) {
+        error = std::make_error_code(std::errc::permission_denied);
+        return false;
+    }
+    return std::filesystem::exists(path, error);
+}
 
 static void mutate_during_read(const std::filesystem::path& path) {
     if (!mutation_plan || mutation_plan->attempted ||
@@ -128,6 +138,17 @@ int main() {
     write(config / L"KFSystemSettings.ini",
           "[SystemSettings]\r\nbAllowTemporalAA=True\r\n");
     write(config / L"ignored.txt", "not-protected");
+    const auto inaccessible_state = root / L"InaccessibleState";
+    denied_status_path =
+        inaccessible_state / L"session-config" / L"active";
+    kf2::config::set_session_status_hook_for_testing(&fail_selected_status);
+    const auto inaccessible = kf2::config::resume_session_config(
+        config, inaccessible_state);
+    kf2::config::set_session_status_hook_for_testing(nullptr);
+    denied_status_path.clear();
+    CHECK(!inaccessible.has_value());
+    CHECK(inaccessible.error().code == kf2::ErrorCode::io_failure);
+    CHECK(inaccessible.error().native_code != 0);
     auto snapshot = kf2::config::capture_session_config(config, root / L"State");
     if (!snapshot.has_value()) std::wcerr << snapshot.error().message << L" native=" << snapshot.error().native_code << L'\n';
     CHECK(snapshot.has_value()); CHECK(snapshot.value().file_count == 3);

@@ -13,6 +13,20 @@
 namespace kf2::app {
 namespace {
 
+#if defined(KF2_APP_SESSION_TESTING)
+SessionStatusHook session_status_hook{};
+#endif
+
+bool marker_exists(const std::filesystem::path& path,
+                   std::error_code& error) {
+#if defined(KF2_APP_SESSION_TESTING)
+    if (session_status_hook != nullptr) {
+        return session_status_hook(path, error);
+    }
+#endif
+    return std::filesystem::exists(path, error);
+}
+
 struct ParsedMarker {
     SessionIdentity identity;
     bool clean{false};
@@ -67,6 +81,12 @@ std::string serialize_marker(SessionIdentity identity, bool clean) {
 
 }  // namespace
 
+#if defined(KF2_APP_SESSION_TESTING)
+void set_session_status_hook_for_testing(SessionStatusHook hook) noexcept {
+    session_status_hook = hook;
+}
+#endif
+
 SessionGuard::SessionGuard(std::filesystem::path marker_path,
                            SessionIdentity identity, bool previous_unclean)
     : marker_path_{std::move(marker_path)},
@@ -82,7 +102,15 @@ Result<SessionGuard> SessionGuard::start(
     }
 
     bool previous_unclean = false;
-    if (std::filesystem::exists(marker_path)) {
+    std::error_code status_error;
+    const bool existing_marker = marker_exists(marker_path, status_error);
+    if (status_error) {
+        return Result<SessionGuard>::failure(
+            {ErrorCode::io_failure,
+             L"Session marker status cannot be inspected",
+             static_cast<std::uint32_t>(status_error.value())});
+    }
+    if (existing_marker) {
         std::string text;
         {
             std::ifstream input(marker_path, std::ios::binary);
