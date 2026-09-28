@@ -3,13 +3,17 @@
 class KF2OptimizerGraphicsInteraction extends Interaction
     within GameViewportClient;
 
+const RuntimeGuardInitialSeconds=0.05;
+const RuntimeGuardMaximumSeconds=0.25;
+
 var float NextReadRealTime;
 var float LastObservedRealTime;
 var string LastReadback;
 var string LastSelectedMap;
 var string LastVotedMap;
-var float NextWeaponMaterialGuardRealTime;
-var float NextPawnRuntimeGuardRealTime;
+var string LastRuntimeGuardMapName;
+var float NextRuntimeGuardRealTime;
+var float RuntimeGuardIntervalSeconds;
 var bool bFireAfflictionGuardReported;
 var bool bWeaponClassFallbackGuardReported;
 
@@ -19,14 +23,18 @@ function bool EnsureTurretWeaponMaterial(KFWeapon Weapon)
     local KFWeap_HRG_Warthog Warthog;
     local KFWeap_AutoTurret AutoTurret;
 
-    if (Weapon == None || Weapon.bDeleteMe || Weapon.Mesh == None ||
-        !Weapon.WeaponContentLoaded || Weapon.Mesh.GetNumElements() <= 2)
+    if (Weapon == None || Weapon.bDeleteMe)
     {
         return false;
     }
     Warthog = KFWeap_HRG_Warthog(Weapon);
     AutoTurret = KFWeap_AutoTurret(Weapon);
     if (Warthog == None && AutoTurret == None)
+    {
+        return false;
+    }
+    if (Weapon.Mesh == None || !Weapon.WeaponContentLoaded ||
+        Weapon.Mesh.GetNumElements() <= 2)
     {
         return false;
     }
@@ -61,31 +69,6 @@ function bool EnsureTurretWeaponMaterial(KFWeapon Weapon)
     `log("KF2OPT_WEAPON_MIC state=repaired weapon="$PathName(Weapon)$
          " material=2 local_only=true readback=verified");
     return true;
-}
-
-function GuardTurretWeaponMaterials(WorldInfo CurrentWorld)
-{
-    local KFWeap_HRG_Warthog Warthog;
-    local KFWeap_AutoTurret AutoTurret;
-
-    if (CurrentWorld == None ||
-        CurrentWorld.RealTimeSeconds < NextWeaponMaterialGuardRealTime)
-    {
-        return;
-    }
-    NextWeaponMaterialGuardRealTime = CurrentWorld.RealTimeSeconds + 0.10;
-    // Deployed turret throwers are detached world actors, not members of the
-    // local pawn's inventory chain. Cover every locally replicated instance so
-    // remote and local Warthogs receive the missing third MIC before their
-    // replicated ammo callbacks use it.
-    foreach CurrentWorld.DynamicActors(class'KFWeap_HRG_Warthog', Warthog)
-    {
-        EnsureTurretWeaponMaterial(Warthog);
-    }
-    foreach CurrentWorld.DynamicActors(class'KFWeap_AutoTurret', AutoTurret)
-    {
-        EnsureTurretWeaponMaterial(AutoTurret);
-    }
 }
 
 function bool EnsureWeaponClassFallback(KFPawn Pawn)
@@ -156,22 +139,48 @@ function bool ReplaceExistingFireAffliction(KFPawn Pawn)
     return Pawn.AfflictionHandler.Afflictions[AF_FirePanic] == Replacement;
 }
 
-function GuardPawnRuntimeClasses(WorldInfo CurrentWorld)
+function ResetRuntimeGuardCadence()
 {
+    NextRuntimeGuardRealTime = 0.0;
+    RuntimeGuardIntervalSeconds = RuntimeGuardInitialSeconds;
+}
+
+function GuardRuntimeActors(WorldInfo CurrentWorld)
+{
+    local Actor Candidate;
+    local KFWeapon Weapon;
     local KFPawn Pawn;
+    local int UpdatedWeaponMaterialCount;
     local int UpdatedAfflictionCount;
     local int ReplacedAfflictionCount;
     local int UpdatedWeaponClassCount;
+    local bool bChanged;
 
     if (CurrentWorld == None ||
-        CurrentWorld.RealTimeSeconds < NextPawnRuntimeGuardRealTime)
+        CurrentWorld.RealTimeSeconds < NextRuntimeGuardRealTime)
     {
         return;
     }
-    NextPawnRuntimeGuardRealTime = CurrentWorld.RealTimeSeconds + 0.10;
-
-    foreach CurrentWorld.DynamicActors(class'KFPawn', Pawn)
+    if (RuntimeGuardIntervalSeconds < RuntimeGuardInitialSeconds)
     {
+        RuntimeGuardIntervalSeconds = RuntimeGuardInitialSeconds;
+    }
+
+    // DynamicActors traverses the world's dynamic actor list. Handle the two
+    // guarded domains in one pass instead of repeating that traversal for two
+    // turret subclasses plus every pawn.
+    foreach CurrentWorld.DynamicActors(class'Actor', Candidate)
+    {
+        Weapon = KFWeapon(Candidate);
+        if (Weapon != None && EnsureTurretWeaponMaterial(Weapon))
+        {
+            ++UpdatedWeaponMaterialCount;
+        }
+        Pawn = KFPawn(Candidate);
+        if (Pawn == None)
+        {
+            continue;
+        }
         if (EnsureWeaponClassFallback(Pawn))
         {
             ++UpdatedWeaponClassCount;
@@ -196,6 +205,21 @@ function GuardPawnRuntimeClasses(WorldInfo CurrentWorld)
             ++UpdatedAfflictionCount;
         }
     }
+    bChanged = UpdatedWeaponMaterialCount > 0 ||
+        UpdatedWeaponClassCount > 0 || UpdatedAfflictionCount > 0 ||
+        ReplacedAfflictionCount > 0;
+    if (bChanged)
+    {
+        RuntimeGuardIntervalSeconds = RuntimeGuardInitialSeconds;
+    }
+    else
+    {
+        RuntimeGuardIntervalSeconds = FMin(
+            RuntimeGuardMaximumSeconds,
+            RuntimeGuardIntervalSeconds * 2.0);
+    }
+    NextRuntimeGuardRealTime = CurrentWorld.RealTimeSeconds +
+        RuntimeGuardIntervalSeconds;
     if (UpdatedWeaponClassCount > 0 && !bWeaponClassFallbackGuardReported)
     {
         bWeaponClassFallbackGuardReported = true;
@@ -222,6 +246,7 @@ event Tick(float DeltaTime)
     local KFPlayerController KFPC;
     local string Readback;
     local string SelectedMap;
+    local string CurrentMapName;
 
     if (GamePlayers.Length == 0)
     {
@@ -245,18 +270,20 @@ event Tick(float DeltaTime)
     // RealTimeSeconds starts at zero for each newly loaded world. Detect that
     // clock reset without retaining the old WorldInfo, which would prevent
     // Unreal's garbage collector from releasing the previous map.
-    if (CurrentWorld.RealTimeSeconds < LastObservedRealTime)
+    CurrentMapName = CurrentWorld.GetMapName(true);
+    if (CurrentWorld.RealTimeSeconds < LastObservedRealTime ||
+        (Len(LastRuntimeGuardMapName) > 0 &&
+         !(CurrentMapName ~= LastRuntimeGuardMapName)))
     {
         NextReadRealTime = 0.0;
         LastVotedMap = "";
-        NextWeaponMaterialGuardRealTime = 0.0;
-        NextPawnRuntimeGuardRealTime = 0.0;
+        ResetRuntimeGuardCadence();
         bFireAfflictionGuardReported = false;
         bWeaponClassFallbackGuardReported = false;
     }
     LastObservedRealTime = CurrentWorld.RealTimeSeconds;
-    GuardTurretWeaponMaterials(CurrentWorld);
-    GuardPawnRuntimeClasses(CurrentWorld);
+    LastRuntimeGuardMapName = CurrentMapName;
+    GuardRuntimeActors(CurrentWorld);
     if (CurrentWorld.NetMode != NM_Standalone)
     {
         return;
@@ -268,7 +295,7 @@ event Tick(float DeltaTime)
     NextReadRealTime = CurrentWorld.RealTimeSeconds + 0.5;
     KFPC = KFPlayerController(PrimaryController);
 
-    if (CurrentWorld.GetMapName(true) ~= "KFMainMenu")
+    if (CurrentMapName ~= "KFMainMenu")
     {
         LastVotedMap = "";
         if (KFPC != None && KFPC.MyGFxManager != None &&
