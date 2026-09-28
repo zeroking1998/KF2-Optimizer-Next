@@ -723,6 +723,23 @@ int main() {
           "main_thread_dominant_parallelism_evidence");
     CHECK(measured_cpu.selected_setting == "FarAnimationUpdateRate");
 
+    AdaptiveGovernor multi_group_governor;
+    auto multi_group = sample(start, 30.0, 33.33, 35.0, 5.0, 16.0);
+    multi_group.critical_core_percent = 45.0;
+    multi_group.effective_core_usage = 48.0;
+    multi_group.dominant_thread_share_percent = 2.0;
+    multi_group.active_cpu_threads = 64;
+    multi_group.affinity_logical_processors = 128;
+    multi_group.affinity_physical_cores = 64;
+    multi_group.system_logical_processors = 128;
+    const auto multi_group_cpu = drive(
+        multi_group_governor, adaptive, multi_group,
+        start, 1'000'000'000ULL);
+    CHECK(!multi_group_cpu.cpu.affinity_limited);
+    CHECK(multi_group_cpu.cpu.workload ==
+          AdaptiveCpuWorkload::partially_parallel);
+    CHECK(multi_group_cpu.bottleneck.type != AdaptiveBottleneck::cpu);
+
     auto invalid_parallelism = measured_parallelism;
     invalid_parallelism.effective_core_usage = 17.0;
     CHECK(validate_adaptive_sample(

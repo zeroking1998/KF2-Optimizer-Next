@@ -1,5 +1,6 @@
 #include <Windows.h>
 #include <atomic>
+#include <bit>
 #include <cstdlib>
 #include <iostream>
 #include <thread>
@@ -12,6 +13,78 @@
 
 int main() {
     using namespace kf2::telemetry;
+    using detail::CpuCapacityObservation;
+    using detail::CpuSetQueryState;
+    using detail::ProcessorGroupMask;
+
+    const auto logical_capacity = [](const auto& masks) {
+        std::uint32_t total = 0;
+        for (const auto& mask : masks) {
+            total += static_cast<std::uint32_t>(std::popcount(mask.mask));
+        }
+        return total;
+    };
+    const std::vector<ProcessorGroupMask> two_group_system{
+        {0, 0xff}, {1, 0x3f}};
+
+    CpuCapacityObservation single_group{
+        .system_group_masks = {{0, 0xff}},
+        .process_groups = std::vector<std::uint16_t>{0},
+        .primary_group_affinity = ProcessorGroupMask{0, 0x0f}};
+    const auto single_group_capacity =
+        detail::resolve_process_capacity_masks(single_group);
+    CHECK(single_group_capacity.has_value());
+    const std::vector<ProcessorGroupMask> single_group_expected{{0, 0x0f}};
+    CHECK(*single_group_capacity == single_group_expected);
+    CHECK(logical_capacity(*single_group_capacity) == 4);
+
+    CpuCapacityObservation windows_11_default{
+        .system_group_masks = two_group_system,
+        .process_groups = std::vector<std::uint16_t>{0, 1},
+        .primary_group_affinity = ProcessorGroupMask{0, 0xff},
+        .primary_group_affinity_is_full = true,
+        .default_affinity_spans_groups = true,
+        .cpu_set_query = CpuSetQueryState::succeeded};
+    const auto windows_11_capacity =
+        detail::resolve_process_capacity_masks(windows_11_default);
+    CHECK(windows_11_capacity.has_value());
+    CHECK(*windows_11_capacity == two_group_system);
+    CHECK(logical_capacity(*windows_11_capacity) == 14);
+
+    auto windows_11_group_subset = windows_11_default;
+    windows_11_group_subset.process_groups =
+        std::vector<std::uint16_t>{1};
+    windows_11_group_subset.primary_group_affinity =
+        ProcessorGroupMask{1, 0x3f};
+    const auto group_subset_capacity =
+        detail::resolve_process_capacity_masks(windows_11_group_subset);
+    const std::vector<ProcessorGroupMask> group_subset_expected{{1, 0x3f}};
+    CHECK(group_subset_capacity.has_value());
+    CHECK(*group_subset_capacity == group_subset_expected);
+
+    CpuCapacityObservation explicit_cross_group{
+        .system_group_masks = two_group_system,
+        .process_groups = std::vector<std::uint16_t>{0, 1},
+        .cpu_set_query = CpuSetQueryState::succeeded};
+    const auto explicit_capacity =
+        detail::resolve_process_capacity_masks(explicit_cross_group);
+    CHECK(!explicit_capacity.has_value());
+
+    auto cpu_set_limited = windows_11_default;
+    cpu_set_limited.default_cpu_set_masks = {{0, 0x03}, {1, 0x0c}};
+    const auto cpu_set_capacity =
+        detail::resolve_process_capacity_masks(cpu_set_limited);
+    CHECK(cpu_set_capacity.has_value());
+    CHECK(*cpu_set_capacity == cpu_set_limited.default_cpu_set_masks);
+    CHECK(logical_capacity(*cpu_set_capacity) == 4);
+
+    auto failed_group_query = single_group;
+    failed_group_query.process_groups.reset();
+    CHECK(!detail::resolve_process_capacity_masks(failed_group_query));
+    auto failed_cpu_set_query = windows_11_default;
+    failed_cpu_set_query.cpu_set_query = CpuSetQueryState::failed;
+    CHECK(!detail::resolve_process_capacity_masks(failed_cpu_set_query));
+
     const auto inventory = query_hardware_inventory();
     CHECK(inventory.has_value());
     CHECK(inventory.value().physical_cores >= 1);

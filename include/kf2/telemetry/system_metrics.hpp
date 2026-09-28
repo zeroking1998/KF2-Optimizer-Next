@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 #include "kf2/core/result.hpp"
 #include "kf2/game/game_session.hpp"
 
@@ -62,6 +63,25 @@ struct SystemMemoryMetrics {
     std::uint64_t previous_thread_ticks,
     std::uint64_t current_thread_ticks,
     std::uint64_t elapsed_ms);
+namespace detail {
+struct ProcessorGroupMask {
+    std::uint16_t group{0};
+    std::uintptr_t mask{0};
+    bool operator==(const ProcessorGroupMask&) const = default;
+};
+enum class CpuSetQueryState { unavailable, succeeded, failed };
+struct CpuCapacityObservation {
+    std::vector<ProcessorGroupMask> system_group_masks;
+    std::optional<std::vector<std::uint16_t>> process_groups;
+    std::optional<ProcessorGroupMask> primary_group_affinity;
+    bool primary_group_affinity_is_full{false};
+    bool default_affinity_spans_groups{false};
+    CpuSetQueryState cpu_set_query{CpuSetQueryState::unavailable};
+    std::vector<ProcessorGroupMask> default_cpu_set_masks;
+};
+[[nodiscard]] std::optional<std::vector<ProcessorGroupMask>>
+resolve_process_capacity_masks(const CpuCapacityObservation& observation);
+}  // namespace detail
 class ProcessMetricSampler final {
 public:
     explicit ProcessMetricSampler(game::GameProcessIdentity identity);
