@@ -73,18 +73,33 @@ bool PresentSource::ingest(const PresentEvent& event) {
         return false;
     }
     if (!event.completed) { ++reported_loss_; return false; }
+    reported_loss_ += event.events_lost;
+    constexpr std::size_t kMaximumStreams = 16;
+    auto stream = streams_.find(event.stream_id);
+    if (stream == streams_.end()) {
+        if (streams_.size() >= kMaximumStreams) {
+            auto oldest_inactive = streams_.end();
+            for (auto candidate = streams_.begin();
+                 candidate != streams_.end(); ++candidate) {
+                if (last_stream_ && candidate->first == *last_stream_) continue;
+                if (oldest_inactive == streams_.end() ||
+                    candidate->second.empty() ||
+                    (!oldest_inactive->second.empty() &&
+                     candidate->second.back().monotonic_ns <
+                         oldest_inactive->second.back().monotonic_ns)) {
+                    oldest_inactive = candidate;
+                }
+            }
+            if (oldest_inactive == streams_.end()) return false;
+            streams_.erase(oldest_inactive);
+        }
+        stream = streams_.try_emplace(event.stream_id).first;
+    }
     if (last_stream_ && *last_stream_ != event.stream_id) {
         ++diagnostic_generation_;
         diagnostic_boundary_ns_ = std::max(diagnostic_boundary_ns_, event.monotonic_ns);
     }
     last_stream_ = event.stream_id;
-    reported_loss_ += event.events_lost;
-    constexpr std::size_t kMaximumStreams = 16;
-    auto stream = streams_.find(event.stream_id);
-    if (stream == streams_.end()) {
-        if (streams_.size() >= kMaximumStreams) return false;
-        stream = streams_.try_emplace(event.stream_id).first;
-    }
     auto& presents = stream->second;
     const auto position = std::lower_bound(
         presents.begin(), presents.end(), event.monotonic_ns,
