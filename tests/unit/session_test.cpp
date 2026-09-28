@@ -88,6 +88,16 @@ int main() {
     }
     CHECK(quarantine_count == 4);
 
+    {
+        std::ofstream oversized(marker, std::ios::binary | std::ios::trunc);
+        oversized << std::string(257, 'x');
+    }
+    const auto oversized = SessionGuard::start(
+        marker, SessionIdentity{14, 30});
+    CHECK(!oversized.has_value());
+    CHECK(oversized.error().code == kf2::ErrorCode::access_denied);
+    CHECK(fs::file_size(marker) == 257);
+
     fs::remove_all(root);
     return EXIT_SUCCESS;
 }

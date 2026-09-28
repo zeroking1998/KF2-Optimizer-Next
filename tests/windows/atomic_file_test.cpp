@@ -25,6 +25,29 @@ std::string read_bytes(const std::filesystem::path& path) {
     return {std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
 }
 
+bool mutation_succeeded = false;
+std::filesystem::path replacement_path;
+
+void grow_during_read(const std::filesystem::path& path) {
+    HANDLE file = CreateFileW(
+        path.c_str(), GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    constexpr char replacement[] = "expanded while reading";
+    DWORD written = 0;
+    mutation_succeeded = WriteFile(
+        file, replacement, static_cast<DWORD>(sizeof(replacement) - 1),
+        &written, nullptr) != FALSE && written == sizeof(replacement) - 1;
+    CloseHandle(file);
+}
+
+void replace_during_read(const std::filesystem::path& path) {
+    mutation_succeeded = ReplaceFileW(
+        path.c_str(), replacement_path.c_str(), nullptr,
+        REPLACEFILE_WRITE_THROUGH, nullptr, nullptr) != FALSE;
+}
+
 int main() {
     namespace fs = std::filesystem;
 
@@ -55,6 +78,64 @@ int main() {
         std::ofstream old_file(target, std::ios::binary);
         old_file << "old";
     }
+
+    const auto bounded =
+        kf2::platform::windows::read_bounded_verified_file(target, 3);
+    CHECK(bounded.has_value());
+    CHECK(bounded.value() == "old");
+
+    const auto empty = root / L"empty.ini";
+    std::ofstream(empty, std::ios::binary);
+    const auto empty_read =
+        kf2::platform::windows::read_bounded_verified_file(empty, 0);
+    CHECK(empty_read.has_value());
+    CHECK(empty_read.value().empty());
+
+    const auto oversized = root / L"oversized.ini";
+    {
+        std::ofstream output(oversized, std::ios::binary);
+        output << std::string(65, 'x');
+    }
+    const auto oversized_read =
+        kf2::platform::windows::read_bounded_verified_file(oversized, 64);
+    CHECK(!oversized_read.has_value());
+    CHECK(oversized_read.error().code == kf2::ErrorCode::access_denied);
+
+    const auto changing_size = root / L"changing-size.ini";
+    {
+        std::ofstream output(changing_size, std::ios::binary);
+        output << "small";
+    }
+    mutation_succeeded = false;
+    kf2::platform::windows::set_bounded_read_hook_for_testing(
+        &grow_during_read);
+    const auto changed_size =
+        kf2::platform::windows::read_bounded_verified_file(changing_size, 64);
+    kf2::platform::windows::set_bounded_read_hook_for_testing(nullptr);
+    CHECK(mutation_succeeded);
+    CHECK(!changed_size.has_value());
+    CHECK(changed_size.error().code == kf2::ErrorCode::stale_data);
+
+    const auto changing_identity = root / L"changing-identity.ini";
+    replacement_path = root / L"changing-identity-replacement.ini";
+    {
+        std::ofstream output(changing_identity, std::ios::binary);
+        output << "original";
+    }
+    {
+        std::ofstream output(replacement_path, std::ios::binary);
+        output << "replaced";
+    }
+    mutation_succeeded = false;
+    kf2::platform::windows::set_bounded_read_hook_for_testing(
+        &replace_during_read);
+    const auto changed_identity =
+        kf2::platform::windows::read_bounded_verified_file(
+            changing_identity, 64);
+    kf2::platform::windows::set_bounded_read_hook_for_testing(nullptr);
+    CHECK(mutation_succeeded);
+    CHECK(!changed_identity.has_value());
+    CHECK(changed_identity.error().code == kf2::ErrorCode::stale_data);
 
     const auto replaced =
         kf2::platform::windows::atomic_replace_utf8(target, "new settings\n");

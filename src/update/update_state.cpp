@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <charconv>
 #include <cctype>
-#include <fstream>
-#include <iterator>
 #include <sstream>
 #include <string>
 
@@ -58,11 +56,12 @@ Result<PersistedUpdateState> load_update_state(
             {ErrorCode::io_failure, L"Update state cannot be inspected",
              static_cast<std::uint32_t>(error.value())});
     }
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return Result<PersistedUpdateState>::failure(
-        {ErrorCode::io_failure, L"Update state cannot be read", 0});
-    const std::string bytes{std::istreambuf_iterator<char>{input},
-                            std::istreambuf_iterator<char>{}};
+    const auto document =
+        platform::windows::read_bounded_verified_file(path, 384);
+    if (!document.has_value()) {
+        return Result<PersistedUpdateState>::failure(document.error());
+    }
+    const auto& bytes = document.value();
     constexpr std::string_view legacy_prefix{
         "schema_version=1\nlast_check_unix_seconds="};
     if (bytes.starts_with(legacy_prefix) && bytes.size() <= 128) {
@@ -74,10 +73,6 @@ Result<PersistedUpdateState> load_update_state(
             ? Result<PersistedUpdateState>::success(
                   {0, PersistedCheckResult::unknown, {}, {}})
             : Result<PersistedUpdateState>::failure(parsed.error());
-    }
-    if (bytes.size() > 384) {
-        return Result<PersistedUpdateState>::failure(
-            {ErrorCode::invalid_argument, L"Update state is invalid", 0});
     }
     std::istringstream stream{bytes};
     std::string schema;

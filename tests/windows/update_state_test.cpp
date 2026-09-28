@@ -62,6 +62,11 @@ int main() {
           kf2::update::PersistedCheckResult::unknown);
     std::ofstream(path, std::ios::binary | std::ios::trunc) << "damaged";
     CHECK(!kf2::update::load_update_state(path).has_value());
+    std::ofstream(path, std::ios::binary | std::ios::trunc)
+        << std::string(385, 'x');
+    const auto oversized = kf2::update::load_update_state(path);
+    CHECK(!oversized.has_value());
+    CHECK(oversized.error().code == kf2::ErrorCode::access_denied);
     CHECK(!kf2::update::save_update_state(
         path, {-1, kf2::update::PersistedCheckResult::unknown, {}, {}}).has_value());
     CHECK(!kf2::update::save_update_state(

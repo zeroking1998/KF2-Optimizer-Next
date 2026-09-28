@@ -829,6 +829,22 @@ int main(int argc, char** argv) {
         CHECK(recovered_again.value().shutdown_cleanly().has_value());
     }
 
+    {
+        std::ofstream oversized(options.state_root / L"settings.ini",
+                                std::ios::binary | std::ios::trunc);
+        oversized << std::string(256 * 1024 + 1, 'x');
+    }
+    options.identity.process_start_id = 100241;
+    const auto oversized_settings = kf2::app::Application::start(options);
+    CHECK(!oversized_settings.has_value());
+    CHECK(oversized_settings.error().code == kf2::ErrorCode::access_denied);
+    CHECK(fs::file_size(options.state_root / L"settings.ini") ==
+          256 * 1024 + 1);
+    CHECK(kf2::platform::windows::atomic_replace_utf8(
+              options.state_root / L"settings.ini",
+              kf2::config::serialize_settings(kf2::config::Settings{}))
+              .has_value());
+
     const auto discovery = options.game_discovery;
     options.game_discovery.reset();
     options.identity.process_start_id = 10025;

@@ -252,6 +252,7 @@ target_include_directories(kf2_atomic_file_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include"
     "${PROJECT_SOURCE_DIR}/src")
 target_compile_definitions(kf2_atomic_file_test PRIVATE
+    KF2_ATOMIC_FILE_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/atomic-file"
 )
 add_test(NAME kf2_atomic_file_test COMMAND kf2_atomic_file_test)

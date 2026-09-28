@@ -9,6 +9,7 @@
 #include <cstring>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <vector>
 #include <string>
 
@@ -16,6 +17,25 @@ namespace kf2::platform::windows {
 namespace {
 
 volatile LONG temporary_sequence = 0;
+
+#if defined(KF2_ATOMIC_FILE_TESTING)
+BoundedReadHook bounded_read_hook{};
+#endif
+
+class UniqueHandle final {
+public:
+    explicit UniqueHandle(HANDLE value = INVALID_HANDLE_VALUE) noexcept
+        : value_{value} {}
+    ~UniqueHandle() {
+        if (value_ != INVALID_HANDLE_VALUE) CloseHandle(value_);
+    }
+    UniqueHandle(const UniqueHandle&) = delete;
+    UniqueHandle& operator=(const UniqueHandle&) = delete;
+    [[nodiscard]] HANDLE get() const noexcept { return value_; }
+
+private:
+    HANDLE value_;
+};
 
 std::filesystem::path native_path(const std::filesystem::path& path) {
     auto value = path.wstring();
@@ -75,6 +95,28 @@ bool safe_existing_file(const std::filesystem::path& path) {
                       information.nNumberOfLinks == 1;
     CloseHandle(file);
     return safe;
+}
+
+bool safe_regular_file(const BY_HANDLE_FILE_INFORMATION& information) {
+    return (information.dwFileAttributes &
+            (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0 &&
+           information.nNumberOfLinks == 1;
+}
+
+bool same_file_identity(const BY_HANDLE_FILE_INFORMATION& left,
+                        const BY_HANDLE_FILE_INFORMATION& right) {
+    return left.dwVolumeSerialNumber == right.dwVolumeSerialNumber &&
+           left.nFileIndexHigh == right.nFileIndexHigh &&
+           left.nFileIndexLow == right.nFileIndexLow;
+}
+
+bool same_file_state(const BY_HANDLE_FILE_INFORMATION& left,
+                     const LARGE_INTEGER& left_size,
+                     const BY_HANDLE_FILE_INFORMATION& right,
+                     const LARGE_INTEGER& right_size) {
+    return safe_regular_file(right) && same_file_identity(left, right) &&
+           left_size.QuadPart == right_size.QuadPart &&
+           CompareFileTime(&left.ftLastWriteTime, &right.ftLastWriteTime) == 0;
 }
 
 Result<std::pair<HANDLE, std::filesystem::path>> create_unique_temporary(
@@ -276,6 +318,141 @@ Result<bool> remove_with_retry(const std::filesystem::path& path) {
 }
 
 }  // namespace
+
+#if defined(KF2_ATOMIC_FILE_TESTING)
+void set_bounded_read_hook_for_testing(BoundedReadHook hook) noexcept {
+    bounded_read_hook = hook;
+}
+#endif
+
+Result<std::string> read_bounded_verified_file(
+    const std::filesystem::path& path, std::uintmax_t maximum_bytes) {
+    if (path.empty() || path.filename().empty() || !path.is_absolute() ||
+        !path.has_root_name() ||
+        path.filename().wstring().find(L':') != std::wstring::npos) {
+        return Result<std::string>::failure(
+            {ErrorCode::invalid_argument,
+             L"Bounded file path is invalid", 0});
+    }
+    for (const auto& component : path.relative_path()) {
+        if (component == L"." || component == L"..") {
+            return Result<std::string>::failure(
+                {ErrorCode::access_denied,
+                 L"Bounded file path contains an unsafe component", 0});
+        }
+    }
+
+    const auto native = native_path(path);
+    UniqueHandle file{CreateFileW(
+        native.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr)};
+    if (file.get() == INVALID_HANDLE_VALUE) {
+        const DWORD native_error = GetLastError();
+        return Result<std::string>::failure(
+            {native_error == ERROR_FILE_NOT_FOUND ||
+                     native_error == ERROR_PATH_NOT_FOUND
+                 ? ErrorCode::not_found
+                 : ErrorCode::io_failure,
+             L"Bounded file cannot be opened", native_error});
+    }
+
+    BY_HANDLE_FILE_INFORMATION before{};
+    LARGE_INTEGER before_size{};
+    if (!GetFileInformationByHandle(file.get(), &before) ||
+        !GetFileSizeEx(file.get(), &before_size)) {
+        return Result<std::string>::failure(
+            {ErrorCode::io_failure,
+             L"Bounded file cannot be inspected", GetLastError()});
+    }
+    if (!safe_regular_file(before)) {
+        return Result<std::string>::failure(
+            {ErrorCode::access_denied,
+             L"Bounded file identity is unsafe", ERROR_ACCESS_DENIED});
+    }
+    if (before_size.QuadPart < 0 ||
+        static_cast<std::uintmax_t>(before_size.QuadPart) > maximum_bytes ||
+        static_cast<std::uintmax_t>(before_size.QuadPart) >
+            std::numeric_limits<std::size_t>::max()) {
+        return Result<std::string>::failure(
+            {ErrorCode::access_denied,
+             L"Bounded file exceeds its size limit", ERROR_FILE_TOO_LARGE});
+    }
+
+#if defined(KF2_ATOMIC_FILE_TESTING)
+    if (bounded_read_hook != nullptr) bounded_read_hook(path);
+#endif
+
+    std::string bytes;
+    try {
+        bytes.resize(static_cast<std::size_t>(before_size.QuadPart));
+    } catch (const std::bad_alloc&) {
+        return Result<std::string>::failure(
+            {ErrorCode::io_failure,
+             L"Bounded file buffer cannot be allocated",
+             ERROR_NOT_ENOUGH_MEMORY});
+    }
+    std::size_t total = 0;
+    while (total < bytes.size()) {
+        const DWORD requested = static_cast<DWORD>(std::min<std::size_t>(
+            bytes.size() - total, std::numeric_limits<DWORD>::max()));
+        DWORD read = 0;
+        if (!ReadFile(file.get(), bytes.data() + total, requested, &read,
+                      nullptr)) {
+            return Result<std::string>::failure(
+                {ErrorCode::io_failure,
+                 L"Bounded file cannot be read", GetLastError()});
+        }
+        if (read == 0) {
+            return Result<std::string>::failure(
+                {ErrorCode::stale_data,
+                 L"Bounded file ended before its inspected size",
+                 ERROR_HANDLE_EOF});
+        }
+        total += read;
+    }
+
+    BY_HANDLE_FILE_INFORMATION after{};
+    LARGE_INTEGER after_size{};
+    if (!GetFileInformationByHandle(file.get(), &after) ||
+        !GetFileSizeEx(file.get(), &after_size)) {
+        return Result<std::string>::failure(
+            {ErrorCode::io_failure,
+             L"Bounded file cannot be re-inspected", GetLastError()});
+    }
+    if (!same_file_state(before, before_size, after, after_size)) {
+        return Result<std::string>::failure(
+            {ErrorCode::stale_data,
+             L"Bounded file changed while it was being read", 0});
+    }
+
+    UniqueHandle current{CreateFileW(
+        native.c_str(), FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr)};
+    if (current.get() == INVALID_HANDLE_VALUE) {
+        return Result<std::string>::failure(
+            {ErrorCode::stale_data,
+             L"Bounded file path changed while it was being read",
+             GetLastError()});
+    }
+    BY_HANDLE_FILE_INFORMATION current_information{};
+    LARGE_INTEGER current_size{};
+    if (!GetFileInformationByHandle(current.get(), &current_information) ||
+        !GetFileSizeEx(current.get(), &current_size)) {
+        return Result<std::string>::failure(
+            {ErrorCode::stale_data,
+             L"Bounded file path cannot be re-inspected", GetLastError()});
+    }
+    if (!same_file_state(before, before_size, current_information,
+                         current_size)) {
+        return Result<std::string>::failure(
+            {ErrorCode::stale_data,
+             L"Bounded file identity changed while it was being read", 0});
+    }
+    return Result<std::string>::success(std::move(bytes));
+}
 
 Result<bool> atomic_replace_utf8(const std::filesystem::path& target,
                                  std::string_view bytes) {

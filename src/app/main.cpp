@@ -8,8 +8,6 @@
 #include <exception>
 #include <optional>
 #include <string>
-#include <fstream>
-#include <iterator>
 #include <shellapi.h>
 #include <tuple>
 #include <vector>
@@ -21,6 +19,7 @@
 #include "kf2/core/result.hpp"
 #include "kf2/diagnostics/crash_recorder.hpp"
 #include "kf2/game/game_discovery.hpp"
+#include "kf2/platform/windows/atomic_file.hpp"
 #include "kf2/platform/windows/state_environment.hpp"
 #include "kf2/platform/windows/process_security.hpp"
 #include "kf2/security/package_integrity.hpp"
@@ -174,11 +173,11 @@ int run_application(int show_command) {
     auto discovery = kf2::game::default_game_discovery_input();
     if (discovery.has_value()) {
         const auto settings_path = state_location.value().root / L"settings.ini";
-        std::ifstream input(settings_path, std::ios::binary);
-        if (input) {
-            const std::string bytes{std::istreambuf_iterator<char>{input},
-                                    std::istreambuf_iterator<char>{}};
-            const auto parsed = kf2::config::parse_settings(bytes);
+        const auto document =
+            kf2::platform::windows::read_bounded_verified_file(
+                settings_path, 256 * 1024);
+        if (document.has_value()) {
+            const auto parsed = kf2::config::parse_settings(document.value());
             if (parsed.has_value() && !parsed.value().manual_game_path.empty()) {
                 const int wide_size = MultiByteToWideChar(
                     CP_UTF8, MB_ERR_INVALID_CHARS,
