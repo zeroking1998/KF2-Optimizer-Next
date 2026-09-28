@@ -2261,6 +2261,49 @@ int main() {
     CHECK(telemetry_source.find(
         "AdaptiveDebugMarkerHUD.bShowOverlays = true") !=
           std::string::npos);
+    CHECK(telemetry_source.find(
+        "var bool bAdaptiveDebugMarkerOriginalShowOverlays") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "var bool bAdaptiveDebugMarkerOwnsShowOverlays") !=
+          std::string::npos);
+    const auto remove_debug_post_render = telemetry_source.find(
+        "function RemoveAdaptiveDebugMarkerPostRender()");
+    const auto ensure_debug_post_render = telemetry_source.find(
+        "function EnsureAdaptiveDebugMarkerPostRender()");
+    const auto debug_post_render = telemetry_source.find(
+        "simulated event PostRenderFor(", ensure_debug_post_render);
+    CHECK(remove_debug_post_render != std::string::npos);
+    CHECK(ensure_debug_post_render != std::string::npos);
+    CHECK(debug_post_render != std::string::npos);
+    const auto remove_debug_post_render_body = telemetry_source.substr(
+        remove_debug_post_render,
+        ensure_debug_post_render - remove_debug_post_render);
+    const auto ensure_debug_post_render_body = telemetry_source.substr(
+        ensure_debug_post_render,
+        debug_post_render - ensure_debug_post_render);
+    CHECK(remove_debug_post_render_body.find(
+        "bAdaptiveDebugMarkerOwnsShowOverlays &&") != std::string::npos);
+    CHECK(remove_debug_post_render_body.find(
+        "AdaptiveDebugMarkerHUD.bShowOverlays =\n"
+        "                bAdaptiveDebugMarkerOriginalShowOverlays;") !=
+          std::string::npos);
+    CHECK(remove_debug_post_render_body.find(
+        "bAdaptiveDebugMarkerOwnsShowOverlays = false;") !=
+          std::string::npos);
+    CHECK(count_occurrences(
+        ensure_debug_post_render_body,
+        "RemoveAdaptiveDebugMarkerPostRender();") == 3);
+    CHECK(ensure_debug_post_render_body.find(
+        "if (AdaptiveDebugMarkerHUD == LocalPC.MyHUD)") !=
+          std::string::npos);
+    CHECK(count_occurrences(
+        ensure_debug_post_render_body,
+        "AdaptiveDebugMarkerHUD.AddPostRenderedActor(self)") == 1);
+    CHECK(ensure_debug_post_render_body.find(
+        "bAdaptiveDebugMarkerOriginalShowOverlays =\n"
+        "        AdaptiveDebugMarkerHUD.bShowOverlays;") !=
+          std::string::npos);
     CHECK(telemetry_source.find("bPostRenderIfNotVisible = true") !=
           std::string::npos);
     CHECK(telemetry_source.find(
@@ -3434,6 +3477,8 @@ int main() {
         quiesce, quiesce_end - quiesce);
     const auto destroyed_body = telemetry_source.substr(
         destroyed, destroyed_end - destroyed);
+    CHECK(quiesce_body.find("RemoveAdaptiveDebugMarkerPostRender();") !=
+          std::string::npos);
     CHECK(destroyed_body.find("RestoreAdaptiveGraphics()") ==
           std::string::npos);
     CHECK(destroyed_body.find("RestoreAllAdaptiveCorpseLods()") ==
