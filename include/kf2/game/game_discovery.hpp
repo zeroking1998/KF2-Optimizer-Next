@@ -49,4 +49,9 @@ struct GameInstallation {
 [[nodiscard]] Result<std::vector<std::filesystem::path>>
 parse_steam_library_folders(std::string_view document);
 
+#if defined(KF2_GAME_DISCOVERY_TESTING)
+[[nodiscard]] Result<std::string> read_steam_library_metadata_for_testing(
+    const std::filesystem::path& path);
+#endif
+
 }  // namespace kf2::game

@@ -1,7 +1,5 @@
 #include "kf2/game/gameplay_log_lab.hpp"
 
-#include <Windows.h>
-
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -83,46 +81,8 @@ constexpr std::wstring_view kAdaptiveQualityChangeBudgetKey =
 constexpr std::wstring_view kAdaptiveControlTokenKey = L"AdaptiveControlToken";
 
 Result<std::string> read_verified_ini(const std::filesystem::path& path) {
-    HANDLE file = CreateFileW(
-        path.c_str(), GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-        OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return Result<std::string>::failure(
-            {ErrorCode::not_found, L"Required KF2 INI was not found", GetLastError()});
-    }
-    BY_HANDLE_FILE_INFORMATION information{};
-    LARGE_INTEGER size{};
-    if (!GetFileInformationByHandle(file, &information) ||
-        !GetFileSizeEx(file, &size) || size.QuadPart < 0 ||
-        (information.dwFileAttributes &
-         (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
-        information.nNumberOfLinks != 1 ||
-        static_cast<std::uintmax_t>(size.QuadPart) > kMaximumGameIniBytes) {
-        const DWORD native = GetLastError();
-        CloseHandle(file);
-        return Result<std::string>::failure(
-            {ErrorCode::access_denied,
-             L"Required KF2 INI identity or size is unsafe", native});
-    }
-    std::string bytes(static_cast<std::size_t>(size.QuadPart), '\0');
-    std::size_t offset = 0;
-    while (offset < bytes.size()) {
-        const DWORD requested = static_cast<DWORD>(std::min<std::size_t>(
-            bytes.size() - offset, std::numeric_limits<DWORD>::max()));
-        DWORD read = 0;
-        if (!ReadFile(file, bytes.data() + offset, requested, &read, nullptr) ||
-            read == 0) {
-            const DWORD native = GetLastError();
-            CloseHandle(file);
-            return Result<std::string>::failure(
-                {ErrorCode::io_failure, L"Required KF2 INI cannot be read", native});
-        }
-        offset += read;
-    }
-    CloseHandle(file);
-    return Result<std::string>::success(std::move(bytes));
+    return platform::windows::read_bounded_verified_file(
+        path, kMaximumGameIniBytes);
 }
 
 std::wstring normalized_boolean(std::wstring value) {

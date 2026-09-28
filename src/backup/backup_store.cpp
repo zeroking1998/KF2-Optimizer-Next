@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <fstream>
 #include <iterator>
-#include <limits>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -36,46 +35,8 @@ bool path_exists(const std::filesystem::path& path,
 
 Result<std::string> read_bounded_regular_file(
     const std::filesystem::path& path, std::uintmax_t maximum_size) {
-    HANDLE file = CreateFileW(
-        path.c_str(), GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-        OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
-        nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return Result<std::string>::failure(
-            {ErrorCode::not_found, L"Backup file cannot be opened", GetLastError()});
-    }
-    BY_HANDLE_FILE_INFORMATION information{};
-    LARGE_INTEGER size{};
-    if (!GetFileInformationByHandle(file, &information) ||
-        !GetFileSizeEx(file, &size) || size.QuadPart < 0 ||
-        (information.dwFileAttributes &
-         (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
-        information.nNumberOfLinks != 1 ||
-        static_cast<std::uintmax_t>(size.QuadPart) > maximum_size) {
-        const DWORD native = GetLastError();
-        CloseHandle(file);
-        return Result<std::string>::failure(
-            {ErrorCode::access_denied,
-             L"Backup file identity or size is unsafe", native});
-    }
-    std::string bytes(static_cast<std::size_t>(size.QuadPart), '\0');
-    std::size_t offset = 0;
-    while (offset < bytes.size()) {
-        const DWORD request = static_cast<DWORD>(std::min<std::size_t>(
-            bytes.size() - offset, std::numeric_limits<DWORD>::max()));
-        DWORD read = 0;
-        if (!ReadFile(file, bytes.data() + offset, request, &read, nullptr) ||
-            read == 0) {
-            const DWORD native = GetLastError();
-            CloseHandle(file);
-            return Result<std::string>::failure(
-                {ErrorCode::io_failure, L"Backup file cannot be read", native});
-        }
-        offset += read;
-    }
-    CloseHandle(file);
-    return Result<std::string>::success(std::move(bytes));
+    return platform::windows::read_bounded_verified_file(
+        path, maximum_size);
 }
 
 void add_identity(FileSnapshot& snapshot, const std::filesystem::path& target) {

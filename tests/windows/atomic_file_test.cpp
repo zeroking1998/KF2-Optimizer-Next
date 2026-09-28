@@ -42,6 +42,19 @@ void grow_during_read(const std::filesystem::path& path) {
     CloseHandle(file);
 }
 
+void truncate_during_read(const std::filesystem::path& path) {
+    HANDLE file = CreateFileW(
+        path.c_str(), GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    LARGE_INTEGER retained{};
+    retained.QuadPart = 1;
+    mutation_succeeded = SetFilePointerEx(file, retained, nullptr, FILE_BEGIN) &&
+                         SetEndOfFile(file);
+    CloseHandle(file);
+}
+
 void replace_during_read(const std::filesystem::path& path) {
     mutation_succeeded = ReplaceFileW(
         path.c_str(), replacement_path.c_str(), nullptr,
@@ -91,6 +104,12 @@ int main() {
     CHECK(empty_read.has_value());
     CHECK(empty_read.value().empty());
 
+    const auto missing_read =
+        kf2::platform::windows::read_bounded_verified_file(
+            root / L"missing.ini", 64);
+    CHECK(!missing_read.has_value());
+    CHECK(missing_read.error().code == kf2::ErrorCode::not_found);
+
     const auto oversized = root / L"oversized.ini";
     {
         std::ofstream output(oversized, std::ios::binary);
@@ -115,6 +134,21 @@ int main() {
     CHECK(mutation_succeeded);
     CHECK(!changed_size.has_value());
     CHECK(changed_size.error().code == kf2::ErrorCode::stale_data);
+
+    const auto shortened = root / L"shortened.ini";
+    {
+        std::ofstream output(shortened, std::ios::binary);
+        output << "original";
+    }
+    mutation_succeeded = false;
+    kf2::platform::windows::set_bounded_read_hook_for_testing(
+        &truncate_during_read);
+    const auto short_read =
+        kf2::platform::windows::read_bounded_verified_file(shortened, 64);
+    kf2::platform::windows::set_bounded_read_hook_for_testing(nullptr);
+    CHECK(mutation_succeeded);
+    CHECK(!short_read.has_value());
+    CHECK(short_read.error().code == kf2::ErrorCode::stale_data);
 
     const auto changing_identity = root / L"changing-identity.ini";
     replacement_path = root / L"changing-identity-replacement.ini";

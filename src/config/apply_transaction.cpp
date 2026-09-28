@@ -2,7 +2,6 @@
 
 #include <Windows.h>
 
-#include <fstream>
 #include <vector>
 
 #include "kf2/platform/windows/atomic_file.hpp"
@@ -17,37 +16,8 @@ ApplyCommitHook apply_commit_hook{};
 #endif
 
 Result<std::string> read_bytes(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary | std::ios::ate);
-    if (!input.is_open()) {
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure,
-             L"Configuration file cannot be opened for reading", 0});
-    }
-    const auto end = input.tellg();
-    if (end < 0 || static_cast<std::uintmax_t>(end) >
-                       max_configuration_bytes) {
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure,
-             L"Configuration file size cannot be read safely", 0});
-    }
-    std::string bytes(static_cast<std::size_t>(end), '\0');
-    input.seekg(0, std::ios::beg);
-    if (!input || (!bytes.empty() &&
-                   (!input.read(bytes.data(),
-                                static_cast<std::streamsize>(bytes.size())) ||
-                    input.gcount() !=
-                        static_cast<std::streamsize>(bytes.size())))) {
-        return Result<std::string>::failure(
-            {ErrorCode::io_failure,
-             L"Configuration file cannot be read completely", 0});
-    }
-    char extra = 0;
-    if (input.read(&extra, 1) || !input.eof()) {
-        return Result<std::string>::failure(
-            {ErrorCode::stale_data,
-             L"Configuration file changed while it was being read", 0});
-    }
-    return Result<std::string>::success(std::move(bytes));
+    return platform::windows::read_bounded_verified_file(
+        path, max_configuration_bytes);
 }
 
 bool safe_relative_path(const std::filesystem::path& path) {

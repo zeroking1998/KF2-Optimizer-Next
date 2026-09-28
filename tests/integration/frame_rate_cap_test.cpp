@@ -98,6 +98,15 @@ int main() {
     CHECK(read_bytes(console_variables).find("t.MaxFPS=90") ==
           std::string::npos);
 
+    write_bytes(console_variables, "[Startup]\r\nt.MaxFPS=120\r\n");
+    const auto game_before_oversized_read = read_bytes(game_ini);
+    fs::resize_file(console_variables, 4U * 1024U * 1024U + 1U);
+    const auto oversized = kf2::game::persist_frame_rate_cap(
+        installation, 90);
+    CHECK(!oversized.has_value());
+    CHECK(oversized.error().code == kf2::ErrorCode::access_denied);
+    CHECK(read_bytes(game_ini) == game_before_oversized_read);
+
     fs::remove_all(root, ignored);
     return EXIT_SUCCESS;
 }
