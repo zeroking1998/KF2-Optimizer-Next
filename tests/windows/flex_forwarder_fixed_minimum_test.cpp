@@ -1,7 +1,10 @@
 #include <Windows.h>
 
+#include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <thread>
 
 #include "kf2/flex/flex_observation_shared.hpp"
 
@@ -16,6 +19,16 @@ using Fence = void (*)();
 using BufferTransfer = void (*)(void*, void*, int, int);
 using GetBounds = void (*)(void*, float*, float*);
 using SetParams = void (*)(void*, const void*);
+using LockHook = void (*)();
+
+template <typename Predicate>
+bool wait_until(Predicate predicate) {
+    for (unsigned attempt = 0; attempt < 1000; ++attempt) {
+        if (predicate()) return true;
+        Sleep(1);
+    }
+    return false;
+}
 
 int fail(int code, const char* message) {
     std::cerr << message << " (" << code << ")\n";
@@ -114,6 +127,10 @@ int wmain(int argc, wchar_t** argv) {
         GetProcAddress(original_module, "flexTestBoundsCalls"));
     const auto params_calls = reinterpret_cast<UpdateCalls>(
         GetProcAddress(original_module, "flexTestParamsCalls"));
+    const auto acquire_solver_lock = reinterpret_cast<LockHook>(
+        GetProcAddress(forwarder_module, "flexTestAcquireSolverLock"));
+    const auto release_solver_lock = reinterpret_cast<LockHook>(
+        GetProcAddress(forwarder_module, "flexTestReleaseSolverLock"));
     if (!update || !last || !calls || !active_count || !active_calls ||
         !create || !destroy || !create_calls || !destroy_calls || !last_capacity ||
         !set_fence || !wait_fence || !fence_set_calls || !fence_wait_calls ||
@@ -122,7 +139,8 @@ int wmain(int argc, wchar_t** argv) {
         !particle_download_calls || !phase_upload_calls || !phase_download_calls ||
         !velocity_upload_calls || !velocity_download_calls ||
         !last_transfer_elements || !last_transfer_memory || !get_bounds ||
-        !set_params || !bounds_calls || !params_calls)
+        !set_params || !bounds_calls || !params_calls ||
+        !acquire_solver_lock || !release_solver_lock)
         return fail(7, "test exports missing");
 
     void* const solver = create(1024);
@@ -168,6 +186,81 @@ int wmain(int argc, wchar_t** argv) {
         shared->aggregate_counts_valid != 1 || shared->oldest_active_count_tick == 0) {
         return fail(14, "read-only active-particle relay was not observed");
     }
+
+    // flexUpdateSolver must remain completely independent of the solver lock.
+    // Holding the lock cannot delay an update or weaken the fixed clamp.
+    acquire_solver_lock();
+    std::atomic<bool> update_returned{false};
+    std::thread contended_update([&] {
+        update(solver, 1.0F / 60.0F, 2, nullptr);
+        update_returned.store(true, std::memory_order_release);
+    });
+    const bool update_completed = wait_until([&] {
+        return update_returned.load(std::memory_order_acquire);
+    });
+    release_solver_lock();
+    contended_update.join();
+    if (!update_completed || calls() != 2 || last() != 1 ||
+        shared->tracking_drop_calls != 0 ||
+        shared->solver_tracking_quarantined != 0)
+        return fail(23, "solver lock delayed or weakened an update");
+
+    // Lifecycle and active-count observations cannot be reconstructed after
+    // the native call. They wait behind the tiny fixed-storage critical
+    // section while the update path above remains non-blocking.
+    acquire_solver_lock();
+    std::atomic<bool> create_returned{false};
+    void* third_solver = nullptr;
+    std::thread contended_create([&] {
+        third_solver = create(128);
+        create_returned.store(true, std::memory_order_release);
+    });
+    const bool create_entered = wait_until([&] { return create_calls() == 3; });
+    const bool create_blocked = !create_returned.load(std::memory_order_acquire);
+    release_solver_lock();
+    contended_create.join();
+    if (!create_entered || !create_blocked || !third_solver ||
+        shared->live_solvers != 3 || shared->aggregate_particle_capacity != 1408 ||
+        shared->solver_tracking_quarantined != 0)
+        return fail(25, "contended solver creation was not preserved");
+
+    acquire_solver_lock();
+    std::atomic<bool> active_returned{false};
+    int third_active = -1;
+    std::thread contended_active([&] {
+        third_active = active_count(third_solver);
+        active_returned.store(true, std::memory_order_release);
+    });
+    const bool active_entered = wait_until([&] { return active_calls() == 3; });
+    const bool active_blocked = !active_returned.load(std::memory_order_acquire);
+    release_solver_lock();
+    contended_active.join();
+    if (!active_entered || !active_blocked || third_active != 37 ||
+        shared->aggregate_active_particles != 111 ||
+        shared->aggregate_free_particles != 1297 ||
+        shared->aggregate_counts_valid != 1)
+        return fail(26, "contended active count was not preserved");
+
+    acquire_solver_lock();
+    std::atomic<bool> destroy_started{false};
+    std::atomic<bool> destroy_returned{false};
+    std::thread contended_destroy([&] {
+        destroy_started.store(true, std::memory_order_release);
+        destroy(third_solver);
+        destroy_returned.store(true, std::memory_order_release);
+    });
+    const bool destroy_entered = wait_until([&] {
+        return destroy_started.load(std::memory_order_acquire);
+    });
+    Sleep(10);
+    const bool destroy_blocked = !destroy_returned.load(std::memory_order_acquire);
+    release_solver_lock();
+    contended_destroy.join();
+    if (!destroy_entered || !destroy_blocked || destroy_calls() != 1 ||
+        shared->live_solvers != 2 || shared->aggregate_particle_capacity != 1280 ||
+        shared->aggregate_active_particles != 74 ||
+        shared->aggregate_free_particles != 1206)
+        return fail(27, "contended solver destruction was not preserved");
 
     set_fence();
     wait_fence();
@@ -215,42 +308,42 @@ int wmain(int argc, wchar_t** argv) {
         upper[0] != 1.0F || upper[2] != 3.0F)
         return fail(22, "bounds or parameter calls were not relayed exactly");
 
-    if (calls() != 1 || last() != 1 || shared->last_substeps != 2 ||
-        shared->last_forwarded_substeps != 1 || shared->constrained_updates != 1)
+    if (calls() != 2 || last() != 1 || shared->last_substeps != 2 ||
+        shared->last_forwarded_substeps != 1 || shared->constrained_updates != 2)
         return fail(10, "the fixed minimum was not applied immediately");
 
     InterlockedExchange(&shared->desired_substeps, 5);
     InterlockedExchange64(&shared->control_heartbeat_tick,
         static_cast<LONGLONG>(GetTickCount64()));
     update(solver, 1.0F / 60.0F, 4, nullptr);
-    if (calls() != 2 || last() != 1 || shared->last_substeps != 4 ||
-        shared->last_forwarded_substeps != 1 || shared->constrained_updates != 2)
+    if (calls() != 3 || last() != 1 || shared->last_substeps != 4 ||
+        shared->last_forwarded_substeps != 1 || shared->constrained_updates != 3)
         return fail(11, "legacy adaptive control overrode the fixed minimum");
 
     InterlockedExchange64(&shared->control_heartbeat_tick,
         static_cast<LONGLONG>(GetTickCount64() - 1600));
     update(solver, 1.0F / 60.0F, 2, nullptr);
-    if (calls() != 3 || last() != 1 || shared->last_forwarded_substeps != 1 ||
-        shared->constrained_updates != 3)
+    if (calls() != 4 || last() != 1 || shared->last_forwarded_substeps != 1 ||
+        shared->constrained_updates != 4)
         return fail(12, "stale control released the fixed minimum");
 
     InterlockedExchange(&shared->desired_substeps, 0);
     update(solver, 1.0F / 60.0F, 3, nullptr);
     update(solver, 1.0F / 60.0F, 1, nullptr);
     update(solver, 1.0F / 60.0F, 0, nullptr);
-    if (calls() != 6 || last() != 0 || shared->last_forwarded_substeps != 0 ||
-        shared->constrained_updates != 4 ||
+    if (calls() != 7 || last() != 0 || shared->last_forwarded_substeps != 0 ||
+        shared->constrained_updates != 5 ||
         shared->successful_updates != shared->update_calls)
         return fail(13, "the fixed minimum did not preserve values at or below one");
 
     destroy(second_solver);
-    if (destroy_calls() != 1 || shared->destroy_calls != 1 ||
+    if (destroy_calls() != 2 || shared->destroy_calls != 2 ||
         shared->live_solvers != 1 || shared->aggregate_particle_capacity != 1024 ||
         shared->aggregate_active_particles != 37 ||
         shared->aggregate_free_particles != 987)
         return fail(17, "solver destruction did not update the aggregate");
     destroy(solver);
-    if (destroy_calls() != 2 || shared->destroy_calls != 2 ||
+    if (destroy_calls() != 3 || shared->destroy_calls != 3 ||
         shared->live_solvers != 0 || shared->aggregate_capacity_valid != 0 ||
         shared->aggregate_counts_valid != 0)
         return fail(18, "final solver retirement was not observed");

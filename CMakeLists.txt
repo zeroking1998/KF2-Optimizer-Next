@@ -421,6 +421,29 @@ if(BUILD_TESTING)
             VERBATIM)
         add_custom_target(KF2FlexForwarder DEPENDS "${KF2_FLEX_FORWARDER}")
         add_dependencies(KF2Optimizer KF2FlexForwarder)
+
+        set(KF2_FLEX_TEST_FORWARDER
+            "${CMAKE_BINARY_DIR}/flexRelease_x64.forwarder-test.dll")
+        set(KF2_FLEX_TEST_ANCHOR
+            "${CMAKE_BINARY_DIR}/flex_forwarder_test_anchor.obj")
+        add_custom_command(OUTPUT "${KF2_FLEX_TEST_FORWARDER}"
+            COMMAND "${CMAKE_CXX_COMPILER}" /nologo /c /O2 /Oi- /GS- /GR- /EHs-c- /std:c++20
+                /DKF2_FLEX_FORWARDER_TESTING
+                "/Fo${KF2_FLEX_TEST_ANCHOR}"
+                "/I${PROJECT_SOURCE_DIR}/include"
+                "${PROJECT_SOURCE_DIR}/src/flex/forwarder_stub.cpp"
+            COMMAND "${KF2_LLD_LINK}" /dll /entry:DllMain
+                "/def:${PROJECT_SOURCE_DIR}/src/flex/flex_forwarder.def"
+                "${KF2_FLEX_TEST_ANCHOR}"
+                "/out:${KF2_FLEX_TEST_FORWARDER}" /machine:x64 /nodefaultlib
+                kernel32.lib
+                /subsystem:windows /opt:ref /opt:icf /brepro
+            DEPENDS "${PROJECT_SOURCE_DIR}/src/flex/flex_forwarder.def"
+                "${PROJECT_SOURCE_DIR}/src/flex/forwarder_stub.cpp"
+                "${PROJECT_SOURCE_DIR}/include/kf2/flex/flex_observation_shared.hpp"
+            VERBATIM)
+        add_custom_target(KF2FlexForwarderTest
+            DEPENDS "${KF2_FLEX_TEST_FORWARDER}")
     endif()
     add_subdirectory(tests)
 endif()

@@ -74,7 +74,9 @@ void record_transfer(ObservationShared* shared, bool upload,
 
 void publish_quarantine(ObservationShared* shared) noexcept {
     InterlockedExchange(&solver_quarantine, 1);
-    if (shared) InterlockedExchange(&shared->solver_tracking_quarantined, 1);
+    if (shared) {
+        InterlockedExchange(&shared->solver_tracking_quarantined, 1);
+    }
 }
 
 void publish_solver_snapshot(ObservationShared* shared) noexcept {
@@ -132,12 +134,10 @@ void publish_solver_snapshot(ObservationShared* shared) noexcept {
 
 bool register_solver(void* solver, int capacity, ULONGLONG tick,
                      ObservationShared* shared) noexcept {
-    if (!solver || !TryAcquireSRWLockExclusive(&solver_lock)) {
-        publish_quarantine(shared);
-        if (shared) saturated_increment(&shared->tracking_drop_calls);
-        if (shared) InterlockedExchange(&shared->aggregate_capacity_valid, 0);
-        return false;
-    }
+    if (!solver) return false;
+    // Solver creation is rare and cannot be reconstructed after this call.
+    // Preserve it exactly. flexUpdateSolver never takes this lock.
+    AcquireSRWLockExclusive(&solver_lock);
     SolverSlot* destination = nullptr;
     for (auto& slot : solver_slots) {
         if (slot.solver == solver) {
@@ -162,24 +162,29 @@ bool register_solver(void* solver, int capacity, ULONGLONG tick,
 
 void retire_solver(void* solver, ObservationShared* shared) noexcept {
     if (!solver) return;
-    if (!TryAcquireSRWLockExclusive(&solver_lock)) {
+    // A missed destroy would leave a stale live slot permanently. Serialize
+    // this rare lifecycle edge while updates remain lock-free.
+    AcquireSRWLockExclusive(&solver_lock);
+    bool found = false;
+    for (auto& slot : solver_slots) {
+        if (slot.solver != solver) continue;
+        slot = {};
+        found = true;
+    }
+    if (!found) {
         publish_quarantine(shared);
         if (shared) saturated_increment(&shared->tracking_drop_calls);
-        return;
     }
-    for (auto& slot : solver_slots) if (slot.solver == solver) slot = {};
     publish_solver_snapshot(shared);
     ReleaseSRWLockExclusive(&solver_lock);
 }
 
 void record_active_count(void* solver, int count, ULONGLONG tick,
                          ObservationShared* shared) noexcept {
-    if (!solver || !TryAcquireSRWLockExclusive(&solver_lock)) {
-        publish_quarantine(shared);
-        if (shared) saturated_increment(&shared->tracking_drop_calls);
-        if (shared) InterlockedExchange(&shared->aggregate_counts_valid, 0);
-        return;
-    }
+    if (!solver) return;
+    // The returned count is the only exact value for this observation. Keep
+    // it instead of turning brief contention into permanent session damage.
+    AcquireSRWLockExclusive(&solver_lock);
     for (auto& slot : solver_slots) {
         if (slot.solver != solver) continue;
         slot.active_particles = count;
@@ -194,6 +199,16 @@ void record_active_count(void* solver, int count, ULONGLONG tick,
     if (shared) InterlockedExchange(&shared->aggregate_counts_valid, 0);
     ReleaseSRWLockExclusive(&solver_lock);
 }
+
+#ifdef KF2_FLEX_FORWARDER_TESTING
+extern "C" __declspec(dllexport) void flexTestAcquireSolverLock() noexcept {
+    AcquireSRWLockExclusive(&solver_lock);
+}
+
+extern "C" __declspec(dllexport) void flexTestReleaseSolverLock() noexcept {
+    ReleaseSRWLockExclusive(&solver_lock);
+}
+#endif
 
 void saturated_increment(volatile LONGLONG* value) noexcept {
     LONGLONG current = InterlockedCompareExchange64(value, 0, 0);

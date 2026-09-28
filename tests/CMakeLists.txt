@@ -379,11 +379,11 @@ if(TARGET KF2FlexForwarder)
     target_include_directories(kf2_flex_forwarder_fixed_minimum_test PRIVATE
         "${PROJECT_SOURCE_DIR}/include")
     add_dependencies(kf2_flex_forwarder_fixed_minimum_test
-        KF2FlexForwarder kf2_flex_original_test_double)
+        KF2FlexForwarderTest kf2_flex_original_test_double)
     add_test(NAME kf2_flex_forwarder_fixed_minimum_test
         COMMAND kf2_flex_forwarder_fixed_minimum_test
         "${PROJECT_SOURCE_DIR}/out/tests/flex-forwarder-fixed-minimum"
-        "${KF2_FLEX_FORWARDER}"
+        "${KF2_FLEX_TEST_FORWARDER}"
         "$<TARGET_FILE:kf2_flex_original_test_double>")
 endif()
 
