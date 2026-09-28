@@ -50,6 +50,83 @@ int main() {
     CHECK(*isolated_stream.fps > 62.0 && *isolated_stream.fps < 63.0);
     CHECK(isolated_stream.quality == SampleQuality::good);
 
+    // Retention is based on inactivity, not sample count. In particular, the
+    // active stream must survive admission of a replacement even when every
+    // older stream owns more samples.
+    PresentSource active_stream_retention{game, 64};
+    CHECK(active_stream_retention.start().has_value());
+    for (std::uint64_t stream_id = 1; stream_id <= 15; ++stream_id) {
+        for (std::uint64_t sample = 0; sample < 4; ++sample) {
+            CHECK(active_stream_retention.ingest(
+                {game, stream_id * 100'000'000ULL + sample * 16'000'000ULL,
+                 1, true, 0, stream_id}));
+        }
+    }
+    const PresentEvent previous_active{
+        game, 1'600'000'000ULL, 1, true, 0, 16};
+    CHECK(active_stream_retention.ingest(previous_active));
+    CHECK(active_stream_retention.ingest(
+        {game, 1'700'000'000ULL, 1, true, 0, 17}));
+    CHECK(!active_stream_retention.ingest(previous_active));
+
+    // A long-running process can recreate its swapchain many times without a
+    // new process binding. The bounded stream cache must retire an inactive
+    // swapchain instead of permanently rejecting the seventeenth identity.
+    PresentSource recreated_streams{game, 256};
+    CHECK(recreated_streams.start().has_value());
+    constexpr std::uint64_t recreation_start_ns = 3'000'000'000ULL;
+    constexpr std::uint64_t recreation_step_ns = 100'000'000ULL;
+    for (std::uint64_t stream_id = 1; stream_id <= 24; ++stream_id) {
+        const auto timestamp = recreation_start_ns +
+                               stream_id * recreation_step_ns;
+        CHECK(recreated_streams.ingest(
+            {game, timestamp, 1, true, 0, stream_id}));
+        CHECK(recreated_streams.ingest(
+            {game, timestamp + 16'000'000ULL, 1, true, 0, stream_id}));
+    }
+    constexpr std::uint64_t newest_stream_id = 24;
+    const auto newest_start_ns = recreation_start_ns +
+                                 newest_stream_id * recreation_step_ns;
+    for (std::uint64_t index = 2; index <= 64; ++index) {
+        CHECK(recreated_streams.ingest(
+            {game, newest_start_ns + index * 16'000'000ULL,
+             1, true, 0, newest_stream_id}));
+    }
+    const auto newest_stream = recreated_streams.drain(
+        newest_start_ns + 64 * 16'000'000ULL, 500'000'000ULL);
+    CHECK(newest_stream.fps.has_value());
+    CHECK(*newest_stream.fps > 62.0 && *newest_stream.fps < 63.0);
+
+    // Exercise many more transitions over synthetic long-session time. The
+    // current stream remains measurable, and a diagnostic interval that
+    // crosses the latest swapchain boundary remains explicitly incomplete.
+    PresentSource long_session{game, 256};
+    CHECK(long_session.start().has_value());
+    constexpr std::uint64_t long_session_step_ns = 2'000'000'000ULL;
+    for (std::uint64_t stream_id = 1; stream_id <= 64; ++stream_id) {
+        const auto timestamp = stream_id * long_session_step_ns;
+        CHECK(long_session.ingest(
+            {game, timestamp, 1, true, 0, stream_id}));
+    }
+    constexpr std::uint64_t final_stream_id = 64;
+    constexpr std::uint64_t final_boundary_ns =
+        final_stream_id * long_session_step_ns;
+    for (std::uint64_t index = 1; index <= 64; ++index) {
+        CHECK(long_session.ingest(
+            {game, final_boundary_ns + index * 16'000'000ULL,
+             1, true, 0, final_stream_id}));
+    }
+    const auto crossing_boundary = long_session.measure_window(
+        final_boundary_ns - 16'000'000ULL,
+        final_boundary_ns + 64 * 16'000'000ULL);
+    CHECK(!crossing_boundary.complete);
+    const auto final_window = long_session.measure_window(
+        final_boundary_ns + 16'000'000ULL,
+        final_boundary_ns + 64 * 16'000'000ULL);
+    CHECK(final_window.stream_id == final_stream_id);
+    CHECK(final_window.metrics.fps.has_value());
+    CHECK(final_window.complete);
+
     CHECK(!source.ingest({{99, 88}, 2'922'000'000ULL, 1, true, 0}));
     CHECK(source.ingest({game, 2'936'000'000ULL, 1, true, 4}));
     auto lossy = source.drain(2'936'000'000ULL, 500'000'000ULL);
