@@ -948,12 +948,48 @@ int main() {
         "function OnAchievementPrewarmComplete(");
     CHECK(achievement_prewarm != std::string::npos);
     CHECK(achievement_complete != std::string::npos);
+    CHECK(interaction_source.find(
+        "const AchievementPrewarmRequestTimeoutSeconds=10.0;") !=
+          std::string::npos);
+    CHECK(interaction_source.find(
+        "var float AchievementPrewarmRequestStartedRealTime;") !=
+          std::string::npos);
     const auto prewarm_read = interaction_source.find(
         "ReadAchievements(", achievement_prewarm);
     CHECK(prewarm_read != std::string::npos);
+    const auto pending_prewarm_guard = interaction_source.find(
+        "if (bAchievementPrewarmRequested)", achievement_prewarm);
+    CHECK(pending_prewarm_guard != std::string::npos);
+    const auto timed_out_prewarm = interaction_source.find(
+        "AchievementPrewarmRequestTimeoutSeconds", pending_prewarm_guard);
+    CHECK(timed_out_prewarm != std::string::npos);
+    const auto timeout_delegate_clear = interaction_source.find(
+        "ClearAchievementPrewarmDelegate();", timed_out_prewarm);
+    const auto timeout_pending_clear = interaction_source.find(
+        "bAchievementPrewarmRequested = false", timed_out_prewarm);
+    const auto timeout_retry = interaction_source.find(
+        "AchievementPrewarmNextAttemptRealTime =", timed_out_prewarm);
+    const auto timeout_log = interaction_source.find(
+        "state=timeout", timed_out_prewarm);
+    CHECK(timeout_delegate_clear < timeout_pending_clear);
+    CHECK(timeout_pending_clear < timeout_retry);
+    CHECK(timeout_retry < timeout_log);
+    CHECK(timeout_log < prewarm_read);
     CHECK(interaction_source.find(
         "PlayerControllerId, 0, true, true)", prewarm_read) !=
         std::string::npos);
+    const auto prewarm_started = interaction_source.rfind(
+        "AchievementPrewarmRequestStartedRealTime =", prewarm_read);
+    CHECK(prewarm_started != std::string::npos);
+    CHECK(pending_prewarm_guard < prewarm_started &&
+          prewarm_started < prewarm_read);
+    const auto failed_prewarm = interaction_source.find(
+        "if (!OnlineSub.PlayerInterface.ReadAchievements(",
+        achievement_prewarm);
+    CHECK(failed_prewarm != std::string::npos);
+    CHECK(interaction_source.find(
+        "AchievementPrewarmRequestStartedRealTime = 0.0;",
+        failed_prewarm) != std::string::npos);
     const auto login_guard = interaction_source.find(
         "GetLoginStatus(PlayerControllerId)", achievement_prewarm);
     CHECK(login_guard != std::string::npos);
@@ -971,6 +1007,9 @@ int main() {
     CHECK(interaction_source.find(
         "state=complete", achievement_complete) != std::string::npos);
     CHECK(interaction_source.find(
+        "AchievementPrewarmRequestStartedRealTime = 0.0;",
+        achievement_complete) < achievement_prewarm);
+    CHECK(interaction_source.find(
         "TryPrewarmAchievements(PrimaryController);", interaction_tick) <
         interaction_source.find("UpdateGameplayUiState(", interaction_tick));
     CHECK(interaction_source.find(
@@ -981,6 +1020,12 @@ int main() {
         session_ended);
     CHECK(interaction_source.find(
         "ClearAchievementPrewarmDelegate();", session_ended) < player_added);
+    CHECK(interaction_source.find(
+        "AchievementPrewarmRequestStartedRealTime = 0.0;",
+        prepare_for_world) < session_ended);
+    CHECK(interaction_source.find(
+        "AchievementPrewarmRequestStartedRealTime = 0.0;",
+        session_ended) < player_added);
     CHECK(interaction_source.find("EnableSteamStats") == std::string::npos);
     CHECK(interaction_source.find("ClearAchievements(") ==
           std::string::npos);
