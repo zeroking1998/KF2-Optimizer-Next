@@ -6977,6 +6977,7 @@ function SampleTelemetry()
         ProfileMaxWorldEmitterMilliseconds = 0;
         ProfileWorldEmitterTemplateCacheHits = 0;
         ProfileWorldEmitterTemplateCacheMisses = 0;
+        ProfileWorldEmitterTemplatePositionHits = 0;
         ProfileAdaptiveControllerSamples = 0;
         ProfileAdaptiveControllerMilliseconds = 0;
         ProfileMaxAdaptiveControllerMilliseconds = 0;

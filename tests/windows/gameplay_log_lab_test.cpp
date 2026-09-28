@@ -2497,6 +2497,24 @@ int main() {
         "world_emitter_template_cache_misses=") != std::string::npos);
     CHECK(telemetry_source.find(
         "world_emitter_template_position_hits=") != std::string::npos);
+    const auto profile_window_start = telemetry_source.find(
+        "if (SampleSequence % 10 == 0)");
+    const auto profile_window_end = telemetry_source.find(
+        "`log(\"KF2OPT_TELEMETRY schema=6 sample=", profile_window_start);
+    CHECK(profile_window_start != std::string::npos);
+    CHECK(profile_window_end != std::string::npos);
+    const auto profile_window = telemetry_source.substr(
+        profile_window_start, profile_window_end - profile_window_start);
+    CHECK(count_occurrences(
+        profile_window, "ProfileWorldEmitterTemplatePositionHits = 0;") == 1);
+    {
+        int position_hits = 0;
+        for (int window = 0; window < 2; ++window) {
+            for (int sample = 0; sample < 10; ++sample) ++position_hits;
+            CHECK(position_hits == 10);
+            position_hits = 0;
+        }
+    }
     CHECK(telemetry_source.find(
         "const WorldParticleGroupScanInterval=30;") != std::string::npos);
     CHECK(telemetry_source.find(
