@@ -124,14 +124,46 @@ int main() {
     CHECK(!adaptive.value().adaptive_shadow_mode);
     CHECK(serialize_settings(adaptive.value()).find(
               "adaptive_shadow_mode") == std::string::npos);
+    for (const int current_floor : {69, 70, 71}) {
+        const auto current_quality_range = parse_settings(
+            "schema_version=1\nadaptive_minimum_quality=" +
+            std::to_string(current_floor) +
+            "\nadaptive_maximum_quality=100\n");
+        CHECK(current_quality_range.has_value());
+        CHECK(current_quality_range.value().adaptive_minimum_quality ==
+              current_floor);
+        CHECK(!current_quality_range.value().adaptive_quality_range_migrated);
+        const auto roundtrip = parse_settings(
+            serialize_settings(current_quality_range.value()));
+        CHECK(roundtrip.has_value());
+        CHECK(roundtrip.value().adaptive_minimum_quality == current_floor);
+        CHECK(!roundtrip.value().adaptive_quality_range_migrated);
+    }
     const auto migrated_quality_range = parse_settings(
-        "schema_version=1\nadaptive_minimum_quality=70\n"
-        "adaptive_maximum_quality=100\n");
+        "schema_version=1\nanimations_enabled=true\n"
+        "offline_gameplay_telemetry=false\n"
+        "adaptive_shadow_mode=true\noptimizer_profile=balanced\n"
+        "adaptive_minimum_quality=70\nadaptive_maximum_quality=100\n");
     CHECK(migrated_quality_range.has_value());
     CHECK(migrated_quality_range.value().adaptive_minimum_quality == 10);
     CHECK(migrated_quality_range.value().adaptive_quality_range_migrated);
-    CHECK(serialize_settings(migrated_quality_range.value()).find(
-              "adaptive_minimum_quality=10\n") != std::string::npos);
+    const auto migrated_quality_serialized =
+        serialize_settings(migrated_quality_range.value());
+    CHECK(migrated_quality_serialized.find("adaptive_minimum_quality=10\n") !=
+          std::string::npos);
+    CHECK(migrated_quality_serialized.find("animations_enabled=") ==
+          std::string::npos);
+    CHECK(migrated_quality_serialized.find("offline_gameplay_telemetry=") ==
+          std::string::npos);
+    CHECK(migrated_quality_serialized.find("adaptive_shadow_mode=") ==
+          std::string::npos);
+    CHECK(migrated_quality_serialized.find("optimizer_profile=") ==
+          std::string::npos);
+    const auto migrated_quality_reloaded =
+        parse_settings(migrated_quality_serialized);
+    CHECK(migrated_quality_reloaded.has_value());
+    CHECK(migrated_quality_reloaded.value().adaptive_minimum_quality == 10);
+    CHECK(!migrated_quality_reloaded.value().adaptive_quality_range_migrated);
     CHECK(!parse_settings(
         "schema_version=1\nadaptive_minimum_quality=9\n"
         "adaptive_maximum_quality=100\n").has_value());
