@@ -309,6 +309,7 @@ add_executable(kf2_crash_recorder_test
 target_include_directories(kf2_crash_recorder_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_crash_recorder_test PRIVATE
+    KF2_CRASH_RECORDER_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/crash-recorder")
 target_link_libraries(kf2_crash_recorder_test PRIVATE bcrypt)
 add_test(NAME kf2_crash_recorder_test COMMAND kf2_crash_recorder_test)

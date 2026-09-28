@@ -11,6 +11,23 @@
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
 
+namespace {
+
+int fallback_calls = 0;
+bool fallback_received_pointers = false;
+DWORD fallback_exception_code = 0;
+
+LONG WINAPI fallback_filter(EXCEPTION_POINTERS* pointers) noexcept {
+    ++fallback_calls;
+    fallback_received_pointers = pointers != nullptr &&
+        pointers->ExceptionRecord != nullptr;
+    fallback_exception_code = fallback_received_pointers
+        ? pointers->ExceptionRecord->ExceptionCode : 0;
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+}  // namespace
+
 int main() {
     namespace fs = std::filesystem;
     const fs::path root{KF2_TEST_ROOT};
@@ -38,6 +55,38 @@ int main() {
         CHECK(kf2::diagnostics::retained_crash_record_count(root) == 1);
     }
     CHECK(fs::exists(record_path));
+
+    const auto original_filter = SetUnhandledExceptionFilter(fallback_filter);
+    fs::path failed_record_path;
+    {
+        auto armed = kf2::diagnostics::CrashRecorder::arm(
+            root, "0.0.2-alpha+test (debug)");
+        CHECK(armed.has_value());
+        failed_record_path = armed.value().pending_path();
+        kf2::diagnostics::invalidate_crash_file_for_testing();
+        CHECK(kf2::diagnostics::invoke_crash_filter_for_testing(
+                  0xC0000005U, 0x5678U) == EXCEPTION_CONTINUE_SEARCH);
+        CHECK(fallback_calls == 1);
+        CHECK(fallback_received_pointers);
+        CHECK(fallback_exception_code == 0xC0000005U);
+        CHECK(!armed.value().write_for_testing(
+                   0xC0000005U, 0x5678U).has_value());
+    }
+    CHECK(!fs::exists(failed_record_path));
+    CHECK(SetUnhandledExceptionFilter(original_filter) == fallback_filter);
+
+    const auto system_filter = SetUnhandledExceptionFilter(nullptr);
+    {
+        auto armed = kf2::diagnostics::CrashRecorder::arm(
+            root, "0.0.2-alpha+test (debug)");
+        CHECK(armed.has_value());
+        kf2::diagnostics::invalidate_crash_file_for_testing();
+        CHECK(kf2::diagnostics::invoke_crash_filter_for_testing(
+                  0xC0000005U, 0x9ABCU) == EXCEPTION_CONTINUE_SEARCH);
+        CHECK(fallback_calls == 1);
+    }
+    CHECK(SetUnhandledExceptionFilter(system_filter) == nullptr);
+
     fs::remove_all(root);
     return EXIT_SUCCESS;
 }
