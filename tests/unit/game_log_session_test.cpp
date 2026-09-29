@@ -399,6 +399,26 @@ int main() {
     CHECK(current_generation_gameplay.has_value());
     CHECK(game_log_is_active_gameplay(*current_generation_gameplay));
 
+    // A same-map World recreation can reuse the same numeric UDP port. The
+    // endpoint still belongs to the old provider generation until the fresh
+    // bridge announces it again.
+    const auto generation_bridge = online_ui_stream.feed(
+        "[0080.03] ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready "
+        "port=64298\n");
+    CHECK(generation_bridge.has_value());
+    CHECK(generation_bridge->telemetry_control_port == 64298);
+    const auto next_same_map_generation = online_ui_stream.feed(
+        "[0090.00] ScriptLog: KF2OPT_SESSION_CONTEXT schema=2 "
+        "state=online_client_read_only net_mode=NM_Client "
+        "map=KF-BioticsLab generation=9\n");
+    CHECK(next_same_map_generation.has_value());
+    CHECK(!next_same_map_generation->telemetry_control_port.has_value());
+    const auto reused_generation_bridge = online_ui_stream.feed(
+        "[0090.01] ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready "
+        "port=64298\n");
+    CHECK(reused_generation_bridge.has_value());
+    CHECK(reused_generation_bridge->telemetry_control_port == 64298);
+
     GameLogSessionParser listen_ui_stream;
     CHECK(listen_ui_stream.feed(
         "[0039.13] Log: LoadMap: KF-Outpost\n").has_value());

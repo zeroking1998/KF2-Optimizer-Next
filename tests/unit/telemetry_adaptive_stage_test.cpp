@@ -229,6 +229,14 @@ int main() {
     CHECK(should_log_adaptive_readback(false, true));
     CHECK(!should_log_adaptive_readback(true, false));
     CHECK(should_log_adaptive_readback(true, true));
+    const AdaptiveRuntimeProviderIdentity provider_generation_7{
+        9001, std::uint64_t{7}, std::uint16_t{64298}};
+    const AdaptiveRuntimeProviderIdentity provider_generation_8{
+        9001, std::uint64_t{8}, std::uint16_t{64298}};
+    CHECK(adaptive_runtime_provider_changed(
+        provider_generation_7, provider_generation_8));
+    CHECK(!adaptive_runtime_provider_changed(
+        provider_generation_8, provider_generation_8));
     CHECK(should_log_adaptive_decision(
         true, false, 1'000'000'000ULL, 900'000'000ULL));
     CHECK(should_log_adaptive_decision(
