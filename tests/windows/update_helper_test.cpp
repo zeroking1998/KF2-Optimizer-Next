@@ -98,6 +98,55 @@ int wmain(int argc, wchar_t** argv) {
         return 0;
     }
     namespace fs = std::filesystem;
+
+    wchar_t executable[MAX_PATH + 1]{};
+    CHECK(GetModuleFileNameW(nullptr, executable, MAX_PATH) > 0);
+    const auto start_child = [&]() {
+        std::wstring command = L"\"" + std::wstring{executable} +
+            L"\" --child";
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION child{};
+        if (!CreateProcessW(executable, command.data(), nullptr, nullptr,
+                            FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+                            &startup, &child)) {
+            std::abort();
+        }
+        CloseHandle(child.hThread);
+        return child.hProcess;
+    };
+
+    HANDLE live_child = start_child();
+    kf2::update::set_update_helper_stop_fault_for_testing(
+        kf2::update::UpdateHelperStopFault::termination_failure);
+    CHECK(!kf2::update::stop_update_child_for_testing(live_child));
+    CHECK(WaitForSingleObject(live_child, 0) == WAIT_TIMEOUT);
+    CHECK(TerminateProcess(live_child, 99));
+    CHECK(WaitForSingleObject(live_child, 2'000) == WAIT_OBJECT_0);
+    CloseHandle(live_child);
+
+    for (const auto fault : {
+             kf2::update::UpdateHelperStopFault::wait_failure,
+             kf2::update::UpdateHelperStopFault::wait_timeout}) {
+        live_child = start_child();
+        kf2::update::set_update_helper_stop_fault_for_testing(fault);
+        CHECK(!kf2::update::stop_update_child_for_testing(live_child));
+        CHECK(WaitForSingleObject(live_child, 2'000) == WAIT_OBJECT_0);
+        CloseHandle(live_child);
+    }
+
+    live_child = start_child();
+    kf2::update::set_update_helper_stop_fault_for_testing(
+        kf2::update::UpdateHelperStopFault::none);
+    CHECK(kf2::update::stop_update_child_for_testing(live_child));
+    CHECK(WaitForSingleObject(live_child, 0) == WAIT_OBJECT_0);
+    CloseHandle(live_child);
+
+    HANDLE stopped_child = start_child();
+    CHECK(WaitForSingleObject(stopped_child, 2'000) == WAIT_OBJECT_0);
+    CHECK(kf2::update::stop_update_child_for_testing(stopped_child));
+    CloseHandle(stopped_child);
+
     const fs::path root{KF2_TEST_ROOT};
     std::error_code error;
     fs::remove_all(root, error);
@@ -124,8 +173,6 @@ int wmain(int argc, wchar_t** argv) {
         .expected_new_version = "0.0.5",
     }).has_value());
 
-    wchar_t executable[MAX_PATH + 1]{};
-    CHECK(GetModuleFileNameW(nullptr, executable, MAX_PATH) > 0);
     std::wstring command = L"\"" + std::wstring{executable} +
         L"\" --child";
     STARTUPINFOW startup{};

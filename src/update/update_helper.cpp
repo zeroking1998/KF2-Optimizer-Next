@@ -22,6 +22,8 @@
 namespace kf2::update {
 namespace {
 
+constexpr int kUpdateRecoveryRequiredExitCode = 26;
+
 struct HelperRequest {
     std::uint32_t parent_process_id{};
     std::filesystem::path target_root;
@@ -39,6 +41,10 @@ struct DirectoryIdentity {
 
     bool operator==(const DirectoryIdentity&) const = default;
 };
+
+#if defined(KF2_UPDATE_HELPER_TESTING)
+UpdateHelperStopFault g_stop_fault{UpdateHelperStopFault::none};
+#endif
 
 UpdateTransactionRequest transaction_request(
     const HelperRequest& request) {
@@ -375,6 +381,38 @@ bool wait_for_parent(std::uint32_t process_id) {
     return GetLastError() == ERROR_INVALID_PARAMETER;
 }
 
+DWORD wait_for_stopped_update_child(HANDLE process) noexcept {
+#if defined(KF2_UPDATE_HELPER_TESTING)
+    if (g_stop_fault == UpdateHelperStopFault::wait_failure) {
+        return WAIT_FAILED;
+    }
+    if (g_stop_fault == UpdateHelperStopFault::wait_timeout) {
+        return WAIT_TIMEOUT;
+    }
+#endif
+    return WaitForSingleObject(process, 5'000);
+}
+
+bool stop_update_child(HANDLE process) noexcept {
+    if (!process) return false;
+    const DWORD current = WaitForSingleObject(process, 0);
+    if (current == WAIT_OBJECT_0) return true;
+    if (current != WAIT_TIMEOUT) return false;
+#if defined(KF2_UPDATE_HELPER_TESTING)
+    if (g_stop_fault == UpdateHelperStopFault::termination_failure) {
+        return false;
+    }
+#endif
+    if (!TerminateProcess(process, 30)) return false;
+    return wait_for_stopped_update_child(process) == WAIT_OBJECT_0;
+}
+
+void close_process_handles(PROCESS_INFORMATION& process) noexcept {
+    if (process.hThread) CloseHandle(process.hThread);
+    if (process.hProcess) CloseHandle(process.hProcess);
+    process = {};
+}
+
 bool receipt_ready(const std::filesystem::path& receipt,
                    std::string_view token) {
     const auto bytes = read_small_file(receipt);
@@ -403,6 +441,17 @@ Result<bool> launch_cleanup_instance(const HelperRequest& request) {
 }
 
 }  // namespace
+
+#if defined(KF2_UPDATE_HELPER_TESTING)
+void set_update_helper_stop_fault_for_testing(
+    UpdateHelperStopFault fault) noexcept {
+    g_stop_fault = fault;
+}
+
+bool stop_update_child_for_testing(void* process_handle) noexcept {
+    return stop_update_child(static_cast<HANDLE>(process_handle));
+}
+#endif
 
 Result<bool> launch_update_helper(
     const PreparedUpdatePackage& package,
@@ -457,6 +506,7 @@ Result<bool> launch_update_helper(
 
 int run_update_helper(const std::filesystem::path& request_path) noexcept {
     std::optional<HelperRequest> request;
+    std::optional<PROCESS_INFORMATION> restarted_process;
     try {
         auto parsed = parse_request(request_path);
         if (!parsed.has_value()) return 20;
@@ -488,6 +538,7 @@ int run_update_helper(const std::filesystem::path& request_path) noexcept {
                                    request->token.end()}));
         bool ready = false;
         if (process.has_value()) {
+            restarted_process = process.value();
             const auto deadline = std::chrono::steady_clock::now() +
                 std::chrono::seconds{20};
             while (std::chrono::steady_clock::now() < deadline) {
@@ -496,21 +547,27 @@ int run_update_helper(const std::filesystem::path& request_path) noexcept {
                     ready = true;
                     break;
                 }
-                if (WaitForSingleObject(process.value().hProcess, 0) ==
-                    WAIT_OBJECT_0) break;
+                const DWORD state = WaitForSingleObject(
+                    restarted_process->hProcess, 0);
+                if (state == WAIT_OBJECT_0 || state == WAIT_FAILED) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds{100});
+            }
+            if (!ready) {
+                ready = receipt_ready(request->receipt_path,
+                                      request->token);
             }
         }
         if (ready) {
-            CloseHandle(process.value().hThread);
-            CloseHandle(process.value().hProcess);
+            close_process_handles(*restarted_process);
+            restarted_process.reset();
             return 0;
         }
-        if (process.has_value()) {
-            TerminateProcess(process.value().hProcess, 30);
-            WaitForSingleObject(process.value().hProcess, 5'000);
-            CloseHandle(process.value().hThread);
-            CloseHandle(process.value().hProcess);
+        if (restarted_process.has_value()) {
+            const bool stopped = stop_update_child(
+                restarted_process->hProcess);
+            close_process_handles(*restarted_process);
+            restarted_process.reset();
+            if (!stopped) return kUpdateRecoveryRequiredExitCode;
         }
         const auto rolled_back = rollback_update_transaction(
             request->target_root, request->backup_root);
@@ -518,6 +575,13 @@ int run_update_helper(const std::filesystem::path& request_path) noexcept {
         static_cast<void>(launch_cleanup_instance(*request));
         return 23;
     } catch (...) {
+        if (restarted_process.has_value()) {
+            const bool stopped = stop_update_child(
+                restarted_process->hProcess);
+            close_process_handles(*restarted_process);
+            restarted_process.reset();
+            if (!stopped) return kUpdateRecoveryRequiredExitCode;
+        }
         if (request) {
             const auto recovered = recover_update_transaction(
                 transaction_request(*request));

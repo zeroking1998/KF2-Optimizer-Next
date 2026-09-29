@@ -16,6 +16,21 @@ struct UpdateReadyArguments {
     std::string token;
 };
 
+#if defined(KF2_UPDATE_HELPER_TESTING)
+enum class UpdateHelperStopFault {
+    none,
+    termination_failure,
+    wait_failure,
+    wait_timeout,
+};
+
+void set_update_helper_stop_fault_for_testing(
+    UpdateHelperStopFault fault) noexcept;
+
+[[nodiscard]] bool stop_update_child_for_testing(
+    void* process_handle) noexcept;
+#endif
+
 [[nodiscard]] Result<bool> launch_update_helper(
     const PreparedUpdatePackage& package,
     const std::filesystem::path& target_root,
