@@ -228,10 +228,17 @@ Result<GameInstallation> validate_game_candidate(
         return Result<GameInstallation>::failure(
             {ErrorCode::not_found, L"KF2 installation root was not found", 0});
     }
-    const auto executable = std::filesystem::weakly_canonical(
-        canonical_install / L"Binaries/Win64/KFGame.exe", error);
+    const auto binaries = canonical_install / L"Binaries";
+    const auto win64 = binaries / L"Win64";
+    const auto executable_candidate = win64 / L"KFGame.exe";
+    const auto executable =
+        std::filesystem::weakly_canonical(executable_candidate, error);
     if (error || !std::filesystem::is_regular_file(executable) ||
-        has_reparse_attribute(canonical_install) || has_reparse_attribute(executable) ||
+        !is_within(executable, canonical_install) ||
+        has_reparse_attribute(canonical_install) ||
+        has_reparse_attribute(binaries) || has_reparse_attribute(win64) ||
+        has_reparse_attribute(executable_candidate) ||
+        has_reparse_attribute(executable) ||
         !is_x64_pe(executable)) {
         return Result<GameInstallation>::failure(
             {ErrorCode::invalid_argument,

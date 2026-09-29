@@ -122,6 +122,19 @@ int main() {
     CHECK(found.value().duplicate_candidates_ignored == 1);
     CHECK(found.value().executable_identity.file_index != 0);
 
+    const auto outside_binaries = fixture / L"outside-binaries";
+    const auto outside_executable =
+        outside_binaries / L"Win64/KFGame.exe";
+    fs::remove_all(install / L"Binaries");
+    write_test_pe(outside_executable, IMAGE_FILE_MACHINE_AMD64);
+    std::error_code symlink_error;
+    fs::create_directory_symlink(
+        outside_binaries, install / L"Binaries", symlink_error);
+    CHECK(!symlink_error);
+    CHECK(!kf2::game::discover_game_installation(input).has_value());
+    fs::remove(install / L"Binaries");
+    write_test_pe(executable, IMAGE_FILE_MACHINE_AMD64);
+
     auto missing = input;
     missing.manual_candidates = {fixture / L"missing"};
     CHECK(!kf2::game::discover_game_installation(missing).has_value());
