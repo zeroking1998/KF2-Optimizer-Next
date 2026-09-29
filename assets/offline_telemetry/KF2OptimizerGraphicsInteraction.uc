@@ -9,6 +9,10 @@ const RuntimeGuardMaximumSeconds=0.25;
 var float NextReadRealTime;
 var float LastObservedRealTime;
 var string LastReadback;
+var KF2OptimizerAdaptiveGraphicsState PreviousMenuGraphicsState;
+var KF2OptimizerAdaptiveGraphicsState CurrentMenuGraphicsState;
+var bool bMenuGraphicsStateInitialized;
+var bool bGraphicsMenuWasOpen;
 var string LastSelectedMap;
 var string LastVotedMap;
 var string LastRuntimeGuardMapName;
@@ -238,6 +242,100 @@ function GuardRuntimeActors(WorldInfo CurrentWorld)
     }
 }
 
+function bool IsGraphicsMenuOpen(KFPlayerController KFPC)
+{
+    return KFPC != None && KFPC.MyGFxManager != None &&
+        KFPC.MyGFxManager.bMenusOpen &&
+        KFPC.MyGFxManager.OptionsGraphicsMenu != None &&
+        KFPC.MyGFxManager.CurrentMenu ==
+            KFPC.MyGFxManager.OptionsGraphicsMenu;
+}
+
+function ResetMenuGraphicsObservation()
+{
+    bMenuGraphicsStateInitialized = false;
+    bGraphicsMenuWasOpen = false;
+}
+
+function string ObserveMenuGraphicsAndRebase()
+{
+    local Engine CurrentEngine;
+    local GameViewportClient CurrentViewport;
+    local KF2OptimizerTelemetryInteraction TelemetryInteraction;
+    local KF2OptimizerOnlineContextInteraction OnlineInteraction;
+    local KF2OptimizerAdaptiveGraphicsState SwapState;
+    local string InteractionPath;
+    local string Readback;
+    local bool bOfflineRebased;
+    local bool bOnlineRebased;
+
+    if (PreviousMenuGraphicsState == None)
+    {
+        PreviousMenuGraphicsState = new(self)
+            class'KF2OptimizerAdaptiveGraphicsState';
+    }
+    if (CurrentMenuGraphicsState == None)
+    {
+        CurrentMenuGraphicsState = new(self)
+            class'KF2OptimizerAdaptiveGraphicsState';
+    }
+    if (PreviousMenuGraphicsState == None ||
+        CurrentMenuGraphicsState == None)
+    {
+        return "";
+    }
+
+    Readback = class'KF2OptimizerAdaptiveGraphics'.static.
+        MenuReadback(CurrentMenuGraphicsState);
+    if (bMenuGraphicsStateInitialized &&
+        class'KF2OptimizerAdaptiveGraphics'.static.OwnedSettingsDiffer(
+            PreviousMenuGraphicsState, CurrentMenuGraphicsState))
+    {
+        CurrentEngine = class'Engine'.static.GetEngine();
+        if (CurrentEngine != None && CurrentEngine.GameViewport != None)
+        {
+            CurrentViewport = CurrentEngine.GameViewport;
+            InteractionPath = PathName(CurrentViewport)$
+                ".KF2OptimizerTelemetryInteraction";
+            TelemetryInteraction = KF2OptimizerTelemetryInteraction(
+                FindObject(InteractionPath,
+                    class'KF2OptimizerTelemetryInteraction'));
+            InteractionPath = PathName(CurrentViewport)$
+                ".KF2OptimizerOnlineContextInteraction";
+            OnlineInteraction = KF2OptimizerOnlineContextInteraction(
+                FindObject(InteractionPath,
+                    class'KF2OptimizerOnlineContextInteraction'));
+        }
+        if (TelemetryInteraction != None)
+        {
+            bOfflineRebased = class'KF2OptimizerAdaptiveGraphics'.static.
+                RebaseOriginalFromMenuChange(
+                    TelemetryInteraction.
+                        PeekProcessAdaptiveGraphicsState(),
+                    PreviousMenuGraphicsState, CurrentMenuGraphicsState);
+        }
+        if (OnlineInteraction != None)
+        {
+            bOnlineRebased = class'KF2OptimizerAdaptiveGraphics'.static.
+                RebaseOriginalFromMenuChange(
+                    OnlineInteraction.PeekOnlineGraphicsState(),
+                    PreviousMenuGraphicsState, CurrentMenuGraphicsState);
+        }
+        if (bOfflineRebased || bOnlineRebased)
+        {
+            `log("KF2OPT_ADAPTIVE_BASELINE state=rebased"$
+                 " source=graphics_menu offline="$int(bOfflineRebased)$
+                 " online="$int(bOnlineRebased)$
+                 " composition=preserved");
+        }
+    }
+    SwapState = PreviousMenuGraphicsState;
+    PreviousMenuGraphicsState = CurrentMenuGraphicsState;
+    CurrentMenuGraphicsState = SwapState;
+    bMenuGraphicsStateInitialized = true;
+    return Readback;
+}
+
 event Tick(float DeltaTime)
 {
     local LocalPlayer PrimaryPlayer;
@@ -247,6 +345,7 @@ event Tick(float DeltaTime)
     local string Readback;
     local string SelectedMap;
     local string CurrentMapName;
+    local bool bGraphicsMenuOpen;
 
     if (GamePlayers.Length == 0)
     {
@@ -278,14 +377,25 @@ event Tick(float DeltaTime)
         NextReadRealTime = 0.0;
         LastVotedMap = "";
         ResetRuntimeGuardCadence();
+        ResetMenuGraphicsObservation();
         bFireAfflictionGuardReported = false;
         bWeaponClassFallbackGuardReported = false;
     }
     LastObservedRealTime = CurrentWorld.RealTimeSeconds;
     LastRuntimeGuardMapName = CurrentMapName;
     GuardRuntimeActors(CurrentWorld);
-    if (CurrentWorld.NetMode != NM_Standalone)
+    KFPC = KFPlayerController(PrimaryController);
+    bGraphicsMenuOpen = IsGraphicsMenuOpen(KFPC);
+    if (bGraphicsMenuOpen != bGraphicsMenuWasOpen)
     {
+        // Capture the exact state at both menu boundaries before the normal
+        // half-second reporting cadence can miss a quick Apply/Close action.
+        NextReadRealTime = 0.0;
+    }
+    if (CurrentWorld.NetMode != NM_Standalone &&
+        !bGraphicsMenuOpen && !bGraphicsMenuWasOpen)
+    {
+        ResetMenuGraphicsObservation();
         return;
     }
     if (CurrentWorld.RealTimeSeconds < NextReadRealTime)
@@ -293,7 +403,21 @@ event Tick(float DeltaTime)
         return;
     }
     NextReadRealTime = CurrentWorld.RealTimeSeconds + 0.5;
-    KFPC = KFPlayerController(PrimaryController);
+
+    if ((CurrentMapName ~= "KFMainMenu") ||
+        bGraphicsMenuOpen || bGraphicsMenuWasOpen)
+    {
+        Readback = ObserveMenuGraphicsAndRebase();
+    }
+    else
+    {
+        ResetMenuGraphicsObservation();
+    }
+    bGraphicsMenuWasOpen = bGraphicsMenuOpen;
+    if (CurrentWorld.NetMode != NM_Standalone)
+    {
+        return;
+    }
 
     if (CurrentMapName ~= "KFMainMenu")
     {
@@ -309,7 +433,6 @@ event Tick(float DeltaTime)
                 `log("KF2OPT_MAP_SELECTION schema=1 state=menu map="$SelectedMap);
             }
         }
-        Readback = class'KF2OptimizerAdaptiveGraphics'.static.MenuReadback();
         if (Readback != "" && Readback != LastReadback)
         {
             LastReadback = Readback;

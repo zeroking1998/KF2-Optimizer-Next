@@ -478,9 +478,10 @@ static function ApplyRam(out GFXSettings Requested, int Quality)
     }
 }
 
-static function CaptureOriginal(
+static function CopyOwnedSettings(
     KF2OptimizerAdaptiveGraphicsState Snapshot, GFXSettings Current)
 {
+    if (Snapshot == None) return;
     Snapshot.OriginalMaxWholeSceneShadowResolution =
         Current.Shadows.MaxWholeSceneDominantShadowResolution;
     Snapshot.OriginalMaxShadowResolution = Current.Shadows.MaxShadowResolution;
@@ -566,6 +567,332 @@ static function CaptureOriginal(
         Current.FX.MaxPersistentSplatsPerFrame;
     Snapshot.OriginalMaxBodyWoundDecals =
         Current.CharacterDetail.MaxBodyWoundDecals;
+}
+
+static function CaptureCurrentOwnedSettings(
+    KF2OptimizerAdaptiveGraphicsState Snapshot)
+{
+    local GFXSettings Current;
+
+    if (Snapshot == None) return;
+    GetCurrentGFXSettings(Current);
+    CopyOwnedSettings(Snapshot, Current);
+}
+
+static function bool OwnedSettingsDiffer(
+    KF2OptimizerAdaptiveGraphicsState Previous,
+    KF2OptimizerAdaptiveGraphicsState Current)
+{
+    if (Previous == None || Current == None) return false;
+    return Previous.OriginalMaxWholeSceneShadowResolution !=
+               Current.OriginalMaxWholeSceneShadowResolution ||
+           Previous.OriginalMaxShadowResolution !=
+               Current.OriginalMaxShadowResolution ||
+           Previous.OriginalShadowFadeResolution !=
+               Current.OriginalShadowFadeResolution ||
+           Previous.OriginalMinShadowResolution !=
+               Current.OriginalMinShadowResolution ||
+           Previous.OriginalShadowTexelsPerPixel !=
+               Current.OriginalShadowTexelsPerPixel ||
+           Previous.OriginalGlobalShadowDistanceScale !=
+               Current.OriginalGlobalShadowDistanceScale ||
+           Previous.bOriginalWholeSceneDominantShadows !=
+               Current.bOriginalWholeSceneDominantShadows ||
+           Previous.bOriginalDynamicShadows !=
+               Current.bOriginalDynamicShadows ||
+           Previous.bOriginalPerObjectShadows !=
+               Current.bOriginalPerObjectShadows ||
+           Previous.bOriginalForegroundPreshadows !=
+               Current.bOriginalForegroundPreshadows ||
+           Previous.OriginalBloomQuality != Current.OriginalBloomQuality ||
+           Previous.OriginalMotionBlurQuality !=
+               Current.OriginalMotionBlurQuality ||
+           Previous.OriginalDepthOfFieldQuality !=
+               Current.OriginalDepthOfFieldQuality ||
+           Previous.OriginalDistanceFogQuality !=
+               Current.OriginalDistanceFogQuality ||
+           Previous.bOriginalScreenSpaceReflections !=
+               Current.bOriginalScreenSpaceReflections ||
+           Previous.bOriginalHBAO != Current.bOriginalHBAO ||
+           Previous.bOriginalDepthOfField !=
+               Current.bOriginalDepthOfField ||
+           Previous.bOriginalLightShafts != Current.bOriginalLightShafts ||
+           Previous.bOriginalLightCones != Current.bOriginalLightCones ||
+           Previous.bOriginalLensFlares != Current.bOriginalLensFlares ||
+           Previous.bOriginalAmbientOcclusion !=
+               Current.bOriginalAmbientOcclusion ||
+           Previous.bOriginalBloom != Current.bOriginalBloom ||
+           Previous.bOriginalDistortion != Current.bOriginalDistortion ||
+           Previous.bOriginalFilteredDistortion !=
+               Current.bOriginalFilteredDistortion ||
+           Previous.bOriginalDropParticleDistortion !=
+               Current.bOriginalDropParticleDistortion ||
+           Previous.bOriginalSecondaryBloodEffects !=
+               Current.bOriginalSecondaryBloodEffects ||
+           Previous.bOriginalExplosionLights !=
+               Current.bOriginalExplosionLights ||
+           Previous.bOriginalSprayActorLights !=
+               Current.bOriginalSprayActorLights ||
+           Previous.bOriginalPilotLights != Current.bOriginalPilotLights ||
+           Previous.bOriginalBloodSplatterDecals !=
+               Current.bOriginalBloodSplatterDecals ||
+           Previous.bOriginalSubsurfaceScattering !=
+               Current.bOriginalSubsurfaceScattering ||
+           Previous.bOriginalCorpseCollideWithDead !=
+               Current.bOriginalCorpseCollideWithDead ||
+           Previous.bOriginalCorpseCollideWithLiving !=
+               Current.bOriginalCorpseCollideWithLiving ||
+           Previous.bOriginalCorpseCollideWithDeadAfterSleep !=
+               Current.bOriginalCorpseCollideWithDeadAfterSleep ||
+           Previous.bOriginalLightFunctions !=
+               Current.bOriginalLightFunctions ||
+           Previous.OriginalDetailMode != Current.OriginalDetailMode ||
+           Previous.OriginalDestructionLifetimeScale !=
+               Current.OriginalDestructionLifetimeScale ||
+           Previous.OriginalSkeletalMeshLODBias !=
+               Current.OriginalSkeletalMeshLODBias ||
+           Previous.OriginalKinematicUpdateScale !=
+               Current.OriginalKinematicUpdateScale ||
+           Previous.OriginalParticleLODBias !=
+               Current.OriginalParticleLODBias ||
+           Previous.OriginalCharacterTextureBias !=
+               Current.OriginalCharacterTextureBias ||
+           Previous.OriginalWeapon1stTextureBias !=
+               Current.OriginalWeapon1stTextureBias ||
+           Previous.OriginalWeapon3rdTextureBias !=
+               Current.OriginalWeapon3rdTextureBias ||
+           Previous.OriginalEnvironmentTextureBias !=
+               Current.OriginalEnvironmentTextureBias ||
+           Previous.OriginalFXTextureBias != Current.OriginalFXTextureBias ||
+           Previous.OriginalShadowmapTextureBias !=
+               Current.OriginalShadowmapTextureBias ||
+           Previous.OriginalMaxAnisotropy != Current.OriginalMaxAnisotropy ||
+           Previous.OriginalEmitterPoolScale !=
+               Current.OriginalEmitterPoolScale ||
+           Previous.OriginalShellEjectLifetime !=
+               Current.OriginalShellEjectLifetime ||
+           Previous.OriginalGoreLifetimeMultiplier !=
+               Current.OriginalGoreLifetimeMultiplier ||
+           Previous.OriginalMaxImpactEffectDecals !=
+               Current.OriginalMaxImpactEffectDecals ||
+           Previous.OriginalMaxExplosionDecals !=
+               Current.OriginalMaxExplosionDecals ||
+           Previous.OriginalMaxBloodEffects !=
+               Current.OriginalMaxBloodEffects ||
+           Previous.OriginalMaxGoreEffects !=
+               Current.OriginalMaxGoreEffects ||
+           Previous.OriginalMaxPersistentSplatsPerFrame !=
+               Current.OriginalMaxPersistentSplatsPerFrame ||
+           Previous.OriginalMaxBodyWoundDecals !=
+               Current.OriginalMaxBodyWoundDecals;
+}
+
+// Rebase only values that changed while KF2's graphics menu was active. This
+// preserves untouched Adaptive reductions as temporary composition state.
+static function bool RebaseOriginalFromMenuChange(
+    KF2OptimizerAdaptiveGraphicsState Snapshot,
+    KF2OptimizerAdaptiveGraphicsState Previous,
+    KF2OptimizerAdaptiveGraphicsState Current)
+{
+    if (Snapshot == None || !Snapshot.bOriginalCaptured ||
+        Previous == None || Current == None ||
+        !OwnedSettingsDiffer(Previous, Current))
+    {
+        return false;
+    }
+    if (Previous.OriginalMaxWholeSceneShadowResolution !=
+        Current.OriginalMaxWholeSceneShadowResolution)
+        Snapshot.OriginalMaxWholeSceneShadowResolution =
+            Current.OriginalMaxWholeSceneShadowResolution;
+    if (Previous.OriginalMaxShadowResolution !=
+        Current.OriginalMaxShadowResolution)
+        Snapshot.OriginalMaxShadowResolution =
+            Current.OriginalMaxShadowResolution;
+    if (Previous.OriginalShadowFadeResolution !=
+        Current.OriginalShadowFadeResolution)
+        Snapshot.OriginalShadowFadeResolution =
+            Current.OriginalShadowFadeResolution;
+    if (Previous.OriginalMinShadowResolution !=
+        Current.OriginalMinShadowResolution)
+        Snapshot.OriginalMinShadowResolution =
+            Current.OriginalMinShadowResolution;
+    if (Previous.OriginalShadowTexelsPerPixel !=
+        Current.OriginalShadowTexelsPerPixel)
+        Snapshot.OriginalShadowTexelsPerPixel =
+            Current.OriginalShadowTexelsPerPixel;
+    if (Previous.OriginalGlobalShadowDistanceScale !=
+        Current.OriginalGlobalShadowDistanceScale)
+        Snapshot.OriginalGlobalShadowDistanceScale =
+            Current.OriginalGlobalShadowDistanceScale;
+    if (Previous.bOriginalWholeSceneDominantShadows !=
+        Current.bOriginalWholeSceneDominantShadows)
+        Snapshot.bOriginalWholeSceneDominantShadows =
+            Current.bOriginalWholeSceneDominantShadows;
+    if (Previous.bOriginalDynamicShadows != Current.bOriginalDynamicShadows)
+        Snapshot.bOriginalDynamicShadows = Current.bOriginalDynamicShadows;
+    if (Previous.bOriginalPerObjectShadows !=
+        Current.bOriginalPerObjectShadows)
+        Snapshot.bOriginalPerObjectShadows =
+            Current.bOriginalPerObjectShadows;
+    if (Previous.bOriginalForegroundPreshadows !=
+        Current.bOriginalForegroundPreshadows)
+        Snapshot.bOriginalForegroundPreshadows =
+            Current.bOriginalForegroundPreshadows;
+    if (Previous.OriginalBloomQuality != Current.OriginalBloomQuality)
+        Snapshot.OriginalBloomQuality = Current.OriginalBloomQuality;
+    if (Previous.OriginalMotionBlurQuality !=
+        Current.OriginalMotionBlurQuality)
+        Snapshot.OriginalMotionBlurQuality =
+            Current.OriginalMotionBlurQuality;
+    if (Previous.OriginalDepthOfFieldQuality !=
+        Current.OriginalDepthOfFieldQuality)
+        Snapshot.OriginalDepthOfFieldQuality =
+            Current.OriginalDepthOfFieldQuality;
+    if (Previous.OriginalDistanceFogQuality !=
+        Current.OriginalDistanceFogQuality)
+        Snapshot.OriginalDistanceFogQuality =
+            Current.OriginalDistanceFogQuality;
+    if (Previous.bOriginalScreenSpaceReflections !=
+        Current.bOriginalScreenSpaceReflections)
+        Snapshot.bOriginalScreenSpaceReflections =
+            Current.bOriginalScreenSpaceReflections;
+    if (Previous.bOriginalHBAO != Current.bOriginalHBAO)
+        Snapshot.bOriginalHBAO = Current.bOriginalHBAO;
+    if (Previous.bOriginalDepthOfField != Current.bOriginalDepthOfField)
+        Snapshot.bOriginalDepthOfField = Current.bOriginalDepthOfField;
+    if (Previous.bOriginalLightShafts != Current.bOriginalLightShafts)
+        Snapshot.bOriginalLightShafts = Current.bOriginalLightShafts;
+    if (Previous.bOriginalLightCones != Current.bOriginalLightCones)
+        Snapshot.bOriginalLightCones = Current.bOriginalLightCones;
+    if (Previous.bOriginalLensFlares != Current.bOriginalLensFlares)
+        Snapshot.bOriginalLensFlares = Current.bOriginalLensFlares;
+    if (Previous.bOriginalAmbientOcclusion !=
+        Current.bOriginalAmbientOcclusion)
+        Snapshot.bOriginalAmbientOcclusion =
+            Current.bOriginalAmbientOcclusion;
+    if (Previous.bOriginalBloom != Current.bOriginalBloom)
+        Snapshot.bOriginalBloom = Current.bOriginalBloom;
+    if (Previous.bOriginalDistortion != Current.bOriginalDistortion)
+        Snapshot.bOriginalDistortion = Current.bOriginalDistortion;
+    if (Previous.bOriginalFilteredDistortion !=
+        Current.bOriginalFilteredDistortion)
+        Snapshot.bOriginalFilteredDistortion =
+            Current.bOriginalFilteredDistortion;
+    if (Previous.bOriginalDropParticleDistortion !=
+        Current.bOriginalDropParticleDistortion)
+        Snapshot.bOriginalDropParticleDistortion =
+            Current.bOriginalDropParticleDistortion;
+    if (Previous.bOriginalSecondaryBloodEffects !=
+        Current.bOriginalSecondaryBloodEffects)
+        Snapshot.bOriginalSecondaryBloodEffects =
+            Current.bOriginalSecondaryBloodEffects;
+    if (Previous.bOriginalExplosionLights != Current.bOriginalExplosionLights)
+        Snapshot.bOriginalExplosionLights = Current.bOriginalExplosionLights;
+    if (Previous.bOriginalSprayActorLights !=
+        Current.bOriginalSprayActorLights)
+        Snapshot.bOriginalSprayActorLights =
+            Current.bOriginalSprayActorLights;
+    if (Previous.bOriginalPilotLights != Current.bOriginalPilotLights)
+        Snapshot.bOriginalPilotLights = Current.bOriginalPilotLights;
+    if (Previous.bOriginalBloodSplatterDecals !=
+        Current.bOriginalBloodSplatterDecals)
+        Snapshot.bOriginalBloodSplatterDecals =
+            Current.bOriginalBloodSplatterDecals;
+    if (Previous.bOriginalSubsurfaceScattering !=
+        Current.bOriginalSubsurfaceScattering)
+        Snapshot.bOriginalSubsurfaceScattering =
+            Current.bOriginalSubsurfaceScattering;
+    if (Previous.bOriginalCorpseCollideWithDead !=
+        Current.bOriginalCorpseCollideWithDead)
+        Snapshot.bOriginalCorpseCollideWithDead =
+            Current.bOriginalCorpseCollideWithDead;
+    if (Previous.bOriginalCorpseCollideWithLiving !=
+        Current.bOriginalCorpseCollideWithLiving)
+        Snapshot.bOriginalCorpseCollideWithLiving =
+            Current.bOriginalCorpseCollideWithLiving;
+    if (Previous.bOriginalCorpseCollideWithDeadAfterSleep !=
+        Current.bOriginalCorpseCollideWithDeadAfterSleep)
+        Snapshot.bOriginalCorpseCollideWithDeadAfterSleep =
+            Current.bOriginalCorpseCollideWithDeadAfterSleep;
+    if (Previous.bOriginalLightFunctions != Current.bOriginalLightFunctions)
+        Snapshot.bOriginalLightFunctions = Current.bOriginalLightFunctions;
+    if (Previous.OriginalDetailMode != Current.OriginalDetailMode)
+        Snapshot.OriginalDetailMode = Current.OriginalDetailMode;
+    if (Previous.OriginalDestructionLifetimeScale !=
+        Current.OriginalDestructionLifetimeScale)
+        Snapshot.OriginalDestructionLifetimeScale =
+            Current.OriginalDestructionLifetimeScale;
+    if (Previous.OriginalSkeletalMeshLODBias !=
+        Current.OriginalSkeletalMeshLODBias)
+        Snapshot.OriginalSkeletalMeshLODBias =
+            Current.OriginalSkeletalMeshLODBias;
+    if (Previous.OriginalKinematicUpdateScale !=
+        Current.OriginalKinematicUpdateScale)
+        Snapshot.OriginalKinematicUpdateScale =
+            Current.OriginalKinematicUpdateScale;
+    if (Previous.OriginalParticleLODBias != Current.OriginalParticleLODBias)
+        Snapshot.OriginalParticleLODBias = Current.OriginalParticleLODBias;
+    if (Previous.OriginalCharacterTextureBias !=
+        Current.OriginalCharacterTextureBias)
+        Snapshot.OriginalCharacterTextureBias =
+            Current.OriginalCharacterTextureBias;
+    if (Previous.OriginalWeapon1stTextureBias !=
+        Current.OriginalWeapon1stTextureBias)
+        Snapshot.OriginalWeapon1stTextureBias =
+            Current.OriginalWeapon1stTextureBias;
+    if (Previous.OriginalWeapon3rdTextureBias !=
+        Current.OriginalWeapon3rdTextureBias)
+        Snapshot.OriginalWeapon3rdTextureBias =
+            Current.OriginalWeapon3rdTextureBias;
+    if (Previous.OriginalEnvironmentTextureBias !=
+        Current.OriginalEnvironmentTextureBias)
+        Snapshot.OriginalEnvironmentTextureBias =
+            Current.OriginalEnvironmentTextureBias;
+    if (Previous.OriginalFXTextureBias != Current.OriginalFXTextureBias)
+        Snapshot.OriginalFXTextureBias = Current.OriginalFXTextureBias;
+    if (Previous.OriginalShadowmapTextureBias !=
+        Current.OriginalShadowmapTextureBias)
+        Snapshot.OriginalShadowmapTextureBias =
+            Current.OriginalShadowmapTextureBias;
+    if (Previous.OriginalMaxAnisotropy != Current.OriginalMaxAnisotropy)
+        Snapshot.OriginalMaxAnisotropy = Current.OriginalMaxAnisotropy;
+    if (Previous.OriginalEmitterPoolScale != Current.OriginalEmitterPoolScale)
+        Snapshot.OriginalEmitterPoolScale = Current.OriginalEmitterPoolScale;
+    if (Previous.OriginalShellEjectLifetime !=
+        Current.OriginalShellEjectLifetime)
+        Snapshot.OriginalShellEjectLifetime =
+            Current.OriginalShellEjectLifetime;
+    if (Previous.OriginalGoreLifetimeMultiplier !=
+        Current.OriginalGoreLifetimeMultiplier)
+        Snapshot.OriginalGoreLifetimeMultiplier =
+            Current.OriginalGoreLifetimeMultiplier;
+    if (Previous.OriginalMaxImpactEffectDecals !=
+        Current.OriginalMaxImpactEffectDecals)
+        Snapshot.OriginalMaxImpactEffectDecals =
+            Current.OriginalMaxImpactEffectDecals;
+    if (Previous.OriginalMaxExplosionDecals !=
+        Current.OriginalMaxExplosionDecals)
+        Snapshot.OriginalMaxExplosionDecals =
+            Current.OriginalMaxExplosionDecals;
+    if (Previous.OriginalMaxBloodEffects != Current.OriginalMaxBloodEffects)
+        Snapshot.OriginalMaxBloodEffects = Current.OriginalMaxBloodEffects;
+    if (Previous.OriginalMaxGoreEffects != Current.OriginalMaxGoreEffects)
+        Snapshot.OriginalMaxGoreEffects = Current.OriginalMaxGoreEffects;
+    if (Previous.OriginalMaxPersistentSplatsPerFrame !=
+        Current.OriginalMaxPersistentSplatsPerFrame)
+        Snapshot.OriginalMaxPersistentSplatsPerFrame =
+            Current.OriginalMaxPersistentSplatsPerFrame;
+    if (Previous.OriginalMaxBodyWoundDecals !=
+        Current.OriginalMaxBodyWoundDecals)
+        Snapshot.OriginalMaxBodyWoundDecals =
+            Current.OriginalMaxBodyWoundDecals;
+    return true;
+}
+
+static function CaptureOriginal(
+    KF2OptimizerAdaptiveGraphicsState Snapshot, GFXSettings Current)
+{
+    CopyOwnedSettings(Snapshot, Current);
     Snapshot.GpuQuality = 100;
     Snapshot.CpuQuality = 100;
     Snapshot.VramQuality = 100;
@@ -1004,13 +1331,18 @@ static function bool RestoreOriginal(KF2OptimizerAdaptiveGraphicsState Snapshot)
 
 // Uses the same composite preset comparison as KF2's own options menu.
 // INDEX_NONE (-1) is a real INI-override state, not a guessed quality tier.
-static function string MenuReadback()
+static function string MenuReadback(
+    optional KF2OptimizerAdaptiveGraphicsState ObservedState)
 {
     local GFXSettings Current;
     local float FilmGrainRange;
     local int FilmGrainPercent;
 
     GetCurrentGFXSettings(Current);
+    if (ObservedState != None)
+    {
+        CopyOwnedSettings(ObservedState, Current);
+    }
     FilmGrainRange = default.FilmGrainMinMaxPreset[1].FilmGrainScale -
         default.FilmGrainMinMaxPreset[0].FilmGrainScale;
     if (FilmGrainRange <= 0.0)
