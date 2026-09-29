@@ -6,6 +6,7 @@
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -32,6 +33,12 @@ constexpr std::array<std::string_view, 13> kPayloadPaths{
     "Data/Documentation/THIRD_PARTY_NOTICES.md",
     "Data/Documentation/issue72-feature-inventory.json",
 };
+
+#if defined(KF2_PACKAGE_INTEGRITY_TESTING)
+PackageRepairFaultInjection g_repair_fault{
+    PackageRepairFaultInjection::none};
+std::size_t g_repair_fault_after_replacements{};
+#endif
 
 bool safe_identity(std::string_view value) noexcept {
     return !value.empty() && value.size() <= 128 &&
@@ -294,12 +301,117 @@ Result<bool> ensure_repair_parent(const std::filesystem::path& path) {
     return Result<bool>::success(true);
 }
 
+struct RepairChange {
+    std::filesystem::path target;
+    std::string replacement;
+    std::optional<std::string> original;
+};
+
+Result<std::optional<std::string>> read_optional_repair_file(
+    const std::filesystem::path& path) {
+    const DWORD attributes = GetFileAttributesW(
+        platform::windows::extended_length_path(path).c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        const DWORD native_error = GetLastError();
+        if (native_error == ERROR_FILE_NOT_FOUND ||
+            native_error == ERROR_PATH_NOT_FOUND) {
+            return Result<std::optional<std::string>>::success(std::nullopt);
+        }
+        return Result<std::optional<std::string>>::failure(
+            {ErrorCode::io_failure,
+             L"An installed package file cannot be inspected", native_error});
+    }
+    auto bytes = read_repair_source(path);
+    if (!bytes.has_value()) {
+        return Result<std::optional<std::string>>::failure(bytes.error());
+    }
+    return Result<std::optional<std::string>>::success(
+        std::move(bytes.value()));
+}
+
+bool same_repair_file(
+    const std::optional<std::string>& left,
+    const std::optional<std::string>& right) noexcept {
+    return left.has_value() == right.has_value() &&
+        (!left.has_value() || left.value() == right.value());
+}
+
+struct RepairRollbackResult {
+    bool verified{true};
+    std::wstring detail;
+};
+
+RepairRollbackResult rollback_repair_changes(
+    std::span<const RepairChange> changes,
+    std::size_t committed_changes) {
+    RepairRollbackResult rollback;
+    auto failed = [&rollback](std::wstring detail) {
+        rollback.verified = false;
+        if (rollback.detail.empty()) rollback.detail = std::move(detail);
+    };
+
+#if defined(KF2_PACKAGE_INTEGRITY_TESTING)
+    bool injected_failure = false;
+#endif
+    for (std::size_t remaining = committed_changes; remaining > 0;
+         --remaining) {
+        const auto& change = changes[remaining - 1];
+#if defined(KF2_PACKAGE_INTEGRITY_TESTING)
+        if (!injected_failure &&
+            g_repair_fault ==
+                PackageRepairFaultInjection::rollback_failure) {
+            injected_failure = true;
+            failed(L"Injected package repair rollback failure");
+            continue;
+        }
+#endif
+        const auto current = read_optional_repair_file(change.target);
+        if (!current.has_value() || !current.value().has_value() ||
+            current.value().value() != change.replacement) {
+            failed(L"A repaired file changed before it could be restored");
+            continue;
+        }
+        if (change.original.has_value()) {
+            const auto restored = platform::windows::atomic_replace_utf8(
+                change.target, change.original.value());
+            if (!restored.has_value()) failed(restored.error().message);
+            continue;
+        }
+        if (!DeleteFileW(platform::windows::extended_length_path(
+                             change.target).c_str())) {
+            const DWORD native_error = GetLastError();
+            if (native_error != ERROR_FILE_NOT_FOUND &&
+                native_error != ERROR_PATH_NOT_FOUND) {
+                failed(L"A newly repaired file could not be removed");
+            }
+        }
+    }
+
+    for (std::size_t index = 0; index < committed_changes; ++index) {
+        const auto current = read_optional_repair_file(changes[index].target);
+        if (!current.has_value() ||
+            !same_repair_file(current.value(), changes[index].original)) {
+            failed(L"The original package state could not be verified");
+        }
+    }
+    return rollback;
+}
+
 PackageIntegrityAudit invalid(std::wstring message) {
     return {.managed_package = true, .verified = false,
             .message = std::move(message)};
 }
 
 }  // namespace
+
+#if defined(KF2_PACKAGE_INTEGRITY_TESTING)
+void set_package_repair_fault_for_testing(
+    PackageRepairFaultInjection fault,
+    std::size_t after_replacements) noexcept {
+    g_repair_fault = fault;
+    g_repair_fault_after_replacements = after_replacements;
+}
+#endif
 
 std::span<const std::string_view> managed_package_payload_paths() noexcept {
     return kPayloadPaths;
@@ -465,13 +577,22 @@ Result<PackageRepairResult> repair_package_from_directory(
         source_files[index] = source_bytes.value();
     }
 
+    std::vector<RepairChange> changes;
+    changes.reserve(kPayloadPaths.size() + 1);
     for (std::size_t index = 0; index < kPayloadPaths.size(); ++index) {
         const auto relative = kPayloadPaths[index];
         const auto relative_path = std::filesystem::path{std::u8string{
             reinterpret_cast<const char8_t*>(relative.data()),
             relative.size()}};
         const auto target = executable_directory / relative_path;
-        const auto current_hash = sha256_file_hex(target);
+        auto current = read_optional_repair_file(target);
+        if (!current.has_value()) {
+            return Result<PackageRepairResult>::failure(current.error());
+        }
+        const auto current_hash = current.value().has_value()
+            ? sha256_hex(current.value().value())
+            : Result<std::string>::failure(
+                  {ErrorCode::not_found, L"Package file is missing", 0});
         if (current_hash.has_value() && equal_ascii_case_insensitive(
                 current_hash.value(), source.value().hashes[index])) {
             ++result.already_valid_files;
@@ -484,40 +605,86 @@ Result<PackageRepairResult> repair_package_from_directory(
                  L"Extract the complete package into a new folder instead.",
                  0});
         }
-        const auto parent = ensure_repair_parent(target.parent_path());
-        if (!parent.has_value()) {
-            return Result<PackageRepairResult>::failure(parent.error());
-        }
-        const auto written = platform::windows::atomic_replace_utf8(
-            target, source_files[index]);
-        if (!written.has_value()) {
-            return Result<PackageRepairResult>::failure(written.error());
-        }
-        ++result.repaired_files;
+        changes.push_back({target, source_files[index],
+                           std::move(current.value())});
     }
 
     const auto target_manifest = executable_directory / L"Data" /
         L"package-integrity.ini";
-    const auto current_manifest = read_manifest(target_manifest);
-    if (!current_manifest.has_value() ||
-        current_manifest.value() != source.value().document) {
-        const auto parent = ensure_repair_parent(target_manifest.parent_path());
+    auto current_manifest = read_optional_repair_file(target_manifest);
+    if (!current_manifest.has_value()) {
+        return Result<PackageRepairResult>::failure(current_manifest.error());
+    }
+    if (!current_manifest.value().has_value() ||
+        current_manifest.value().value() != source.value().document) {
+        changes.push_back({target_manifest, source.value().document,
+                           std::move(current_manifest.value())});
+    }
+
+    for (const auto& change : changes) {
+        const auto parent = ensure_repair_parent(change.target.parent_path());
         if (!parent.has_value()) {
             return Result<PackageRepairResult>::failure(parent.error());
         }
-        const auto written = platform::windows::atomic_replace_utf8(
-            target_manifest, source.value().document);
-        if (!written.has_value()) {
-            return Result<PackageRepairResult>::failure(written.error());
-        }
-        ++result.repaired_files;
     }
 
+    std::size_t committed_changes = 0;
+    auto fail_after_mutation = [&](Error error) {
+        const auto rollback = rollback_repair_changes(
+            changes, committed_changes);
+        if (!rollback.verified) {
+            return Result<PackageRepairResult>::failure(
+                {ErrorCode::recovery_required,
+                 L"Package repair is incomplete because rollback could not "
+                 L"be verified. Restart the app and run Repair again. " +
+                     rollback.detail,
+                 0});
+        }
+        return Result<PackageRepairResult>::failure(std::move(error));
+    };
+
+    for (const auto& change : changes) {
+        const auto current = read_optional_repair_file(change.target);
+        if (!current.has_value() ||
+            !same_repair_file(current.value(), change.original)) {
+            return fail_after_mutation(
+                {ErrorCode::stale_data,
+                 L"An installed package file changed during repair", 0});
+        }
+        const auto written = platform::windows::atomic_replace_utf8(
+            change.target, change.replacement);
+        if (!written.has_value()) {
+            return fail_after_mutation(written.error());
+        }
+        ++committed_changes;
+        ++result.repaired_files;
+#if defined(KF2_PACKAGE_INTEGRITY_TESTING)
+        if ((g_repair_fault ==
+                 PackageRepairFaultInjection::after_replacement ||
+             g_repair_fault ==
+                 PackageRepairFaultInjection::rollback_failure) &&
+            result.repaired_files ==
+                g_repair_fault_after_replacements) {
+            return fail_after_mutation(
+                {ErrorCode::io_failure,
+                 L"Injected package repair interruption", 0});
+        }
+#endif
+    }
+
+#if defined(KF2_PACKAGE_INTEGRITY_TESTING)
+    if (g_repair_fault ==
+        PackageRepairFaultInjection::final_verification) {
+        return fail_after_mutation(
+            {ErrorCode::io_failure,
+             L"Injected final package verification failure", 0});
+    }
+#endif
     const auto verified = audit_package_integrity(
         executable_directory, expected_source_identity);
     if (!verified.has_value() || !verified.value().managed_package ||
         !verified.value().verified) {
-        return Result<PackageRepairResult>::failure(
+        return fail_after_mutation(
             {ErrorCode::io_failure,
              L"The repaired package did not pass final integrity verification",
              0});

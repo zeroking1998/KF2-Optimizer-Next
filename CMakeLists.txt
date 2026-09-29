@@ -354,6 +354,7 @@ if(BUILD_TESTING)
         "${PROJECT_SOURCE_DIR}/include"
     )
     target_compile_definitions(KF2TestUpdateCore PRIVATE
+        KF2_PACKAGE_INTEGRITY_TESTING
         KF2_UPDATE_TRANSACTION_TESTING)
 
     add_library(KF2TestOptimizerCore STATIC
