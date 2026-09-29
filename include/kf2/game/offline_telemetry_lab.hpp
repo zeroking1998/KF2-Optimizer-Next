@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 
 #include "kf2/core/result.hpp"
@@ -29,6 +30,19 @@ struct OfflineTelemetryRecovery {
 using OfflineTelemetryCleanupTestHook = void (*)();
 void set_offline_telemetry_cleanup_test_hook(
     OfflineTelemetryCleanupTestHook hook) noexcept;
+
+#if defined(KF2_OFFLINE_TELEMETRY_LAB_TESTING)
+enum class OfflineTelemetryRemovalTestStage {
+    before_delete,
+    retryable_failure,
+};
+using OfflineTelemetryRemovalTestHook = void (*)(
+    OfflineTelemetryRemovalTestStage,
+    const std::filesystem::path&,
+    std::uint32_t);
+void set_offline_telemetry_removal_test_hook(
+    OfflineTelemetryRemovalTestHook hook) noexcept;
+#endif
 
 // Installs the pinned UnrealScript package into KF2's normal per-user
 // Published/BrewedPC directory for one protected session, regardless of

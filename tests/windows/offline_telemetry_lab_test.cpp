@@ -60,6 +60,26 @@ void throw_cleanup_allocation_failure() {
     throw std::bad_alloc{};
 }
 
+std::filesystem::path removal_replacement;
+HANDLE removal_blocker{INVALID_HANDLE_VALUE};
+bool removal_mutated{false};
+kf2::game::OfflineTelemetryRemovalTestStage removal_mutation_stage{
+    kf2::game::OfflineTelemetryRemovalTestStage::before_delete};
+
+void replace_module_during_removal(
+    kf2::game::OfflineTelemetryRemovalTestStage stage,
+    const std::filesystem::path& path,
+    std::uint32_t) {
+    if (stage != removal_mutation_stage || removal_mutated) return;
+    if (removal_blocker != INVALID_HANDLE_VALUE) {
+        CloseHandle(removal_blocker);
+        removal_blocker = INVALID_HANDLE_VALUE;
+    }
+    removal_mutated = ReplaceFileW(
+        path.c_str(), removal_replacement.c_str(), nullptr,
+        REPLACEFILE_WRITE_THROUGH, nullptr, nullptr) != FALSE;
+}
+
 }  // namespace
 
 int main() {
@@ -115,6 +135,56 @@ int main() {
     CHECK(restored.value());
     CHECK(!fs::exists(target));
     CHECK(!fs::exists(state / L"offline-telemetry-lab" / L"module.marker"));
+
+    // A replacement after authentication must survive cleanup and force a
+    // recovery-required result instead of being deleted by its reused path.
+    CHECK(install_offline_telemetry_lab(options).has_value());
+    removal_replacement = root / L"replacement-before-delete.u";
+    write_bytes(removal_replacement, "foreign replacement before delete");
+    removal_mutation_stage =
+        OfflineTelemetryRemovalTestStage::before_delete;
+    removal_mutated = false;
+    set_offline_telemetry_removal_test_hook(&replace_module_during_removal);
+    const auto replacement_before_delete =
+        restore_offline_telemetry_lab(config, state, false);
+    set_offline_telemetry_removal_test_hook(nullptr);
+    CHECK(removal_mutated);
+    CHECK(!replacement_before_delete.has_value());
+    CHECK(replacement_before_delete.error().code ==
+          kf2::ErrorCode::stale_data);
+    CHECK(read_bytes(target) == "foreign replacement before delete");
+    CHECK(fs::exists(state / L"offline-telemetry-lab" / L"module.marker"));
+    write_bytes(target, asset_bytes);
+    CHECK(restore_offline_telemetry_lab(config, state, false).has_value());
+
+    // A transient sharing failure must not let the next retry delete a new
+    // occupant without authenticating it again.
+    CHECK(install_offline_telemetry_lab(options).has_value());
+    removal_blocker = CreateFileW(
+        target.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(removal_blocker != INVALID_HANDLE_VALUE);
+    removal_replacement = root / L"replacement-between-retries.u";
+    write_bytes(removal_replacement, "foreign replacement between retries");
+    removal_mutation_stage =
+        OfflineTelemetryRemovalTestStage::retryable_failure;
+    removal_mutated = false;
+    set_offline_telemetry_removal_test_hook(&replace_module_during_removal);
+    const auto replacement_between_retries =
+        restore_offline_telemetry_lab(config, state, false);
+    set_offline_telemetry_removal_test_hook(nullptr);
+    if (removal_blocker != INVALID_HANDLE_VALUE) {
+        CloseHandle(removal_blocker);
+        removal_blocker = INVALID_HANDLE_VALUE;
+    }
+    CHECK(removal_mutated);
+    CHECK(!replacement_between_retries.has_value());
+    CHECK(replacement_between_retries.error().code ==
+          kf2::ErrorCode::stale_data);
+    CHECK(read_bytes(target) == "foreign replacement between retries");
+    CHECK(fs::exists(state / L"offline-telemetry-lab" / L"module.marker"));
+    write_bytes(target, asset_bytes);
+    CHECK(restore_offline_telemetry_lab(config, state, false).has_value());
 
     CHECK(install_offline_telemetry_lab(options).has_value());
     HANDLE busy_target = CreateFileW(

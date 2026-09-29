@@ -351,6 +351,7 @@ add_executable(kf2_offline_telemetry_lab_test
 target_include_directories(kf2_offline_telemetry_lab_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_offline_telemetry_lab_test PRIVATE
+    KF2_OFFLINE_TELEMETRY_LAB_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/offline-telemetry-lab"
     KF2_TELEMETRY_ASSET=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetry.u")
 target_link_libraries(kf2_offline_telemetry_lab_test PRIVATE bcrypt)
