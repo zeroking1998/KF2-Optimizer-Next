@@ -39,6 +39,31 @@ constexpr std::pair<const wchar_t*, const char*> kFiles[]{
     {L"Data/Documentation/issue72-feature-inventory.json", "inventory"},
 };
 
+enum class ControlFileMutation { none, replace, grow };
+ControlFileMutation control_file_mutation{ControlFileMutation::none};
+std::filesystem::path control_file_replacement;
+bool control_file_mutated{false};
+
+void mutate_control_file(const std::filesystem::path& path) {
+    if (control_file_mutation == ControlFileMutation::replace) {
+        control_file_mutated = ReplaceFileW(
+            path.c_str(), control_file_replacement.c_str(), nullptr,
+            REPLACEFILE_WRITE_THROUGH, nullptr, nullptr) != FALSE;
+    } else if (control_file_mutation == ControlFileMutation::grow) {
+        HANDLE file = CreateFileW(
+            path.c_str(), FILE_APPEND_DATA,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return;
+        const std::string growth(64U * 1024U, 'x');
+        DWORD written = 0;
+        control_file_mutated = WriteFile(
+            file, growth.data(), static_cast<DWORD>(growth.size()),
+            &written, nullptr) != FALSE && written == growth.size();
+        CloseHandle(file);
+    }
+}
+
 void write_file(const std::filesystem::path& path, std::string_view bytes) {
     std::filesystem::create_directories(path.parent_path());
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
@@ -151,6 +176,31 @@ int wmain(int argc, wchar_t** argv) {
     std::error_code error;
     fs::remove_all(root, error);
     fs::create_directories(root);
+
+    const auto control_root = root / L"control-files";
+    fs::create_directories(control_root);
+    for (const auto* filename : {
+             L"update-request.ini", L"update.marker", L"ready.receipt"}) {
+        const auto control = control_root / filename;
+        for (const auto mutation : {
+                 ControlFileMutation::replace, ControlFileMutation::grow}) {
+            write_file(control, "trusted");
+            control_file_replacement =
+                control_root / (std::wstring{filename} + L".replacement");
+            write_file(control_file_replacement, "foreign");
+            control_file_mutation = mutation;
+            control_file_mutated = false;
+            kf2::platform::windows::set_bounded_read_hook_for_testing(
+                &mutate_control_file);
+            const auto read =
+                kf2::update::read_update_control_file_for_testing(control);
+            kf2::platform::windows::set_bounded_read_hook_for_testing(nullptr);
+            control_file_mutation = ControlFileMutation::none;
+            CHECK(control_file_mutated);
+            CHECK(!read.has_value());
+            CHECK(read.error().code == kf2::ErrorCode::stale_data);
+        }
+    }
     const auto temporary = kf2::platform::windows::temporary_directory();
     CHECK(temporary.has_value());
     const auto update_root =

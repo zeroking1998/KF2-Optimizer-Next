@@ -29,6 +29,9 @@ void set_update_helper_stop_fault_for_testing(
 
 [[nodiscard]] bool stop_update_child_for_testing(
     void* process_handle) noexcept;
+
+[[nodiscard]] Result<std::string> read_update_control_file_for_testing(
+    const std::filesystem::path& path);
 #endif
 
 [[nodiscard]] Result<bool> launch_update_helper(

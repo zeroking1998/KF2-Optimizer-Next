@@ -98,6 +98,7 @@ target_compile_definitions(kf2_update_helper_test PRIVATE
     _UNICODE
     NOMINMAX
     WIN32_LEAN_AND_MEAN
+    KF2_ATOMIC_FILE_TESTING
     KF2_UPDATE_HELPER_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/update-helper"
 )
