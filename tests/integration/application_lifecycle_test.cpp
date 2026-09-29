@@ -1915,6 +1915,9 @@ int main(int argc, char** argv) {
             515151, 7001, runtime.installation->executable};
         runtime.refresh_game_configuration_for_process_start(false);
         CHECK(runtime.adaptive_variable_frame_rate_enabled == false);
+        CHECK(runtime.adaptive_frame_rate_config_write_time.has_value());
+        const auto initial_rate_config_write_time =
+            *runtime.adaptive_frame_rate_config_write_time;
 
         runtime.optimizer_settings.target_fps = 144;
         runtime.adaptive_frame_not_before_ns = 1;
@@ -1934,25 +1937,40 @@ int main(int argc, char** argv) {
         game_config.replace(capped, std::strlen("bSmoothFrameRate=True"),
                             "bSmoothFrameRate=False");
         write_bytes(config_root / L"KFGame.ini", game_config);
-        runtime.adaptive_frame_rate_config_write_time.reset();
+        fs::last_write_time(config_root / L"KFGame.ini",
+            initial_rate_config_write_time + std::chrono::seconds{2});
         CHECK(runtime.reset_adaptive_frame_window_for_rate_mode_change(
             30'000'000'000ULL, true));
+        CHECK(runtime.adaptive_frame_rate_config_metadata_checks_for_testing ==
+              1);
         CHECK(runtime.adaptive_variable_frame_rate_enabled == true);
         CHECK(runtime.adaptive_frame_not_before_ns == 30'000'000'000ULL);
         CHECK(!runtime.last_frame_metrics.fps);
         CHECK(runtime.quality_response.end_ns() == 0);
         CHECK(runtime.optimizer_settings.target_fps == 144);
-        CHECK(!runtime.reset_adaptive_frame_window_for_rate_mode_change(
-            30'250'000'000ULL, true));
+        for (std::uint64_t tick = 1; tick <= 7; ++tick) {
+            CHECK(!runtime.reset_adaptive_frame_window_for_rate_mode_change(
+                30'000'000'000ULL + tick * 120'000'000ULL, true));
+        }
+        CHECK(runtime.adaptive_frame_rate_config_metadata_checks_for_testing ==
+              1);
 
         game_config.replace(
             game_config.find("bSmoothFrameRate=False"),
             std::strlen("bSmoothFrameRate=False"),
             "bSmoothFrameRate=True");
         write_bytes(config_root / L"KFGame.ini", game_config);
-        runtime.adaptive_frame_rate_config_write_time.reset();
+        fs::last_write_time(config_root / L"KFGame.ini",
+            initial_rate_config_write_time + std::chrono::seconds{4});
+        CHECK(!runtime.reset_adaptive_frame_window_for_rate_mode_change(
+            30'960'000'000ULL, true));
+        CHECK(runtime.adaptive_variable_frame_rate_enabled == true);
+        CHECK(runtime.adaptive_frame_rate_config_metadata_checks_for_testing ==
+              1);
         CHECK(runtime.reset_adaptive_frame_window_for_rate_mode_change(
-            30'500'000'000ULL, true));
+            31'000'000'000ULL, true));
+        CHECK(runtime.adaptive_frame_rate_config_metadata_checks_for_testing ==
+              2);
         CHECK(runtime.adaptive_variable_frame_rate_enabled == false);
 
         game_config.replace(
@@ -1960,9 +1978,12 @@ int main(int argc, char** argv) {
             std::strlen("bSmoothFrameRate=True"),
             "bSmoothFrameRate=False");
         write_bytes(config_root / L"KFGame.ini", game_config);
-        runtime.adaptive_frame_rate_config_write_time.reset();
+        fs::last_write_time(config_root / L"KFGame.ini",
+            initial_rate_config_write_time + std::chrono::seconds{6});
         CHECK(!runtime.reset_adaptive_frame_window_for_rate_mode_change(
-            30'750'000'000ULL, false));
+            32'000'000'000ULL, false));
+        CHECK(runtime.adaptive_frame_rate_config_metadata_checks_for_testing ==
+              3);
         CHECK(runtime.adaptive_variable_frame_rate_enabled == true);
         const auto rate_events = rate_mode_events.snapshot();
         CHECK(std::count_if(rate_events.begin(), rate_events.end(),

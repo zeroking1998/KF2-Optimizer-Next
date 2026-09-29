@@ -8,6 +8,9 @@ namespace {
 using VideoConfigWriteTimes =
     std::array<std::optional<std::filesystem::file_time_type>, 3>;
 
+constexpr std::uint64_t kAdaptiveFrameRateConfigPollIntervalNs =
+    1'000'000'000ULL;
+
 std::optional<VideoConfigWriteTimes> read_video_config_write_times(
     const std::filesystem::path& config_root) {
     static constexpr std::array<std::wstring_view, 3> files{
@@ -216,8 +219,19 @@ bool UiRuntime::reset_adaptive_frame_window_for_rate_mode_change(
     std::uint64_t now_ns, bool active_gameplay) {
     if (!installation || !game_process || now_ns == 0) return false;
 
+    if (adaptive_frame_rate_config_last_poll_ns != 0 &&
+        now_ns >= adaptive_frame_rate_config_last_poll_ns &&
+        now_ns - adaptive_frame_rate_config_last_poll_ns <
+            kAdaptiveFrameRateConfigPollIntervalNs) {
+        return false;
+    }
+    adaptive_frame_rate_config_last_poll_ns = now_ns;
+
     const auto game_config = installation->config_root / L"KFGame.ini";
     std::error_code write_time_error;
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+    ++adaptive_frame_rate_config_metadata_checks_for_testing;
+#endif
     const auto write_time = std::filesystem::last_write_time(
         game_config, write_time_error);
     if (write_time_error ||
