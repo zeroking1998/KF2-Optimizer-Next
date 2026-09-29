@@ -50,6 +50,62 @@ int main() {
     CHECK(*isolated_stream.fps > 62.0 && *isolated_stream.fps < 63.0);
     CHECK(isolated_stream.quality == SampleQuality::good);
 
+    // A retired high-rate swapchain must not hide a slower stream that is
+    // still presenting. Candidate freshness is relative to the requested
+    // observation time, not to each stream's own newest sample.
+    PresentSource retired_fast_stream{game, 256};
+    CHECK(retired_fast_stream.start().has_value());
+    constexpr std::uint64_t retired_start_ns = 10'000'000'000ULL;
+    for (std::uint64_t index = 0; index <= 120; ++index) {
+        CHECK(retired_fast_stream.ingest(
+            {game, retired_start_ns + index * 8'333'333ULL,
+             1, true, 0, 301}));
+    }
+    constexpr std::uint64_t current_start_ns = 12'000'000'000ULL;
+    for (std::uint64_t index = 0; index <= 30; ++index) {
+        CHECK(retired_fast_stream.ingest(
+            {game, current_start_ns + index * 33'333'333ULL,
+             1, true, 0, 302}));
+    }
+    constexpr std::uint64_t current_now_ns =
+        current_start_ns + 30 * 33'333'333ULL;
+    const auto current_slow_stream = retired_fast_stream.drain(
+        current_now_ns, 500'000'000ULL);
+    CHECK(current_slow_stream.fps.has_value());
+    CHECK(*current_slow_stream.fps > 29.0 &&
+          *current_slow_stream.fps < 31.0);
+
+    PresentSource stale_stream_only{game, 256};
+    CHECK(stale_stream_only.start().has_value());
+    for (std::uint64_t index = 0; index <= 120; ++index) {
+        CHECK(stale_stream_only.ingest(
+            {game, retired_start_ns + index * 8'333'333ULL,
+             1, true, 0, 301}));
+    }
+    const auto stale_only = stale_stream_only.drain(
+        current_now_ns, 500'000'000ULL);
+    CHECK(!stale_only.fps.has_value());
+    CHECK(stale_only.reason == UnavailableReason::stale);
+
+    // Equal fresh candidates use the same stable stream-ID tie break as the
+    // diagnostic window path, independent of unordered-map iteration order.
+    PresentSource deterministic_fresh_streams{game, 64};
+    CHECK(deterministic_fresh_streams.start().has_value());
+    constexpr std::uint64_t deterministic_end_ns = 15'000'000'000ULL;
+    for (std::uint64_t index = 0; index <= 30; ++index) {
+        CHECK(deterministic_fresh_streams.ingest(
+            {game, deterministic_end_ns - (30 - index) * 16'000'000ULL,
+             1, true, 0, 401}));
+        CHECK(deterministic_fresh_streams.ingest(
+            {game, deterministic_end_ns - (30 - index) * 33'000'000ULL,
+             1, true, 0, 402}));
+    }
+    const auto deterministic_fresh = deterministic_fresh_streams.drain(
+        deterministic_end_ns, 500'000'000ULL);
+    CHECK(deterministic_fresh.fps.has_value());
+    CHECK(*deterministic_fresh.fps > 62.0 &&
+          *deterministic_fresh.fps < 63.0);
+
     // Retention is based on inactivity, not sample count. In particular, the
     // active stream must survive admission of a replacement even when every
     // older stream owns more samples.

@@ -130,13 +130,16 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
         identity = identity_;
         reported_loss = reported_loss_;
         const std::deque<PresentTimestamp>* selected = nullptr;
+        bool selected_fresh = false;
         std::size_t selected_fast_count = 0;
         std::uint64_t selected_newest = 0;
+        std::uint64_t selected_stream_id = 0;
         for (const auto& [stream_id, presents] : streams_) {
-            static_cast<void>(stream_id);
             if (presents.empty()) continue;
             const auto newest = presents.back().monotonic_ns;
             if (newest < not_before_ns) continue;
+            const bool fresh = now_ns >= newest &&
+                now_ns - newest <= stale_after_ns;
             const auto cutoff = std::max(not_before_ns,
                 newest > kLiveWindowNs ? newest - kLiveWindowNs : 0);
             const auto first = std::lower_bound(
@@ -147,12 +150,18 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
                 });
             const auto fast_count = static_cast<std::size_t>(
                 std::distance(first, presents.end()));
-            if (!selected || fast_count > selected_fast_count ||
-                (fast_count == selected_fast_count &&
-                 newest > selected_newest)) {
+            if (!selected || (fresh && !selected_fresh) ||
+                (fresh == selected_fresh &&
+                 (fast_count > selected_fast_count ||
+                  (fast_count == selected_fast_count &&
+                   (newest > selected_newest ||
+                    (newest == selected_newest &&
+                     stream_id < selected_stream_id)))))) {
                 selected = &presents;
+                selected_fresh = fresh;
                 selected_fast_count = fast_count;
                 selected_newest = newest;
+                selected_stream_id = stream_id;
             }
         }
         if (selected) {
