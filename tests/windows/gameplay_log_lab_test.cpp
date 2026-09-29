@@ -2259,6 +2259,41 @@ int main() {
         "                if (Corpse.bHasBrokenConstraints)") !=
           std::string::npos);
     CHECK(telemetry_source.find(
+        "if (bDetailedRuntimeDiagnostics)\n    {\n"
+        "        if (CollisionProbeCorpse != None &&\n"
+        "            CollisionProbeCorpse.ShouldCorpseCollideWithDead())") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "if (bDetailedRuntimeDiagnostics)\n        {\n"
+        "            ++AdaptiveBaselinePhysicsSleeps;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "if (bDetailedRuntimeDiagnostics)\n    {\n"
+        "        ++AdaptiveDistancePhysicsSleeps;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "if (!bDetailedRuntimeDiagnostics || Candidate == None") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "if (bDetailedRuntimeDiagnostics)\n    {\n"
+        "        ++FixedMinimumLivingOffscreenAnimRestores;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "if (bDetailedRuntimeDiagnostics)\n                {\n"
+        "                    ++FixedMinimumLivingOffscreenAnimReductions;") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "function bool DetailedRuntimeDiagnosticsEnabled()") !=
+          std::string::npos);
+    CHECK(online_context_source.find(
+        "if (DetailedRuntimeDiagnosticsEnabled())\n        {\n"
+        "            `log(\"KF2OPT_ONLINE_CORPSE_ACTION state=sleep "
+        "corpse_id=\"") != std::string::npos);
+    CHECK(online_context_source.find(
+        "`log(\"KF2OPT_ONLINE_CORPSE_ACTION state=sleep\"$\n"
+        "                 \" awake=false local_only=true "
+        "readback=verified\");") != std::string::npos);
+    CHECK(telemetry_source.find(
         "function RegisterAdaptiveCorpseDebugMarker(") != std::string::npos);
     CHECK(telemetry_source.find(
         "function DrawAdaptiveCorpseDebugMarkers(Canvas MarkerCanvas)") !=

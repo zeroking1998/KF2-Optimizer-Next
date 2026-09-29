@@ -1736,12 +1736,15 @@ function bool RestoreLivingOffscreenAnimation(int Index, string Reason)
         return false;
     }
     FixedMinimumLivingOffscreenAnimReduced[Index] = false;
-    ++FixedMinimumLivingOffscreenAnimRestores;
-    `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=restored reason="$Reason$
-         " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
-         " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-             GetAdaptiveCorpseDistanceUnits(Candidate), false)$
-         " readback=verified");
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ++FixedMinimumLivingOffscreenAnimRestores;
+        `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=restored reason="$Reason$
+             " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
+             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             " readback=verified");
+    }
     return true;
 }
 
@@ -1948,13 +1951,17 @@ function bool ApplyLivingEnemyMinimumVisuals()
                 !Candidate.Mesh.bUpdateSkelWhenNotRendered)
             {
                 FixedMinimumLivingOffscreenAnimReduced[EntryIndex] = true;
-                ++FixedMinimumLivingOffscreenAnimReductions;
                 bOffscreenChanged = true;
-                `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=reduced distance_units="$
-                     GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
-                     FormatAdaptiveCorpseDistanceMeters(
-                         GetAdaptiveCorpseDistanceUnits(Candidate), false)$
-                     " readback=verified");
+                if (bDetailedRuntimeDiagnostics)
+                {
+                    ++FixedMinimumLivingOffscreenAnimReductions;
+                    `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=reduced"$
+                         " distance_units="$
+                         GetAdaptiveCorpseDistanceUnits(Candidate)$
+                         " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                             GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                         " readback=verified");
+                }
             }
         }
         if (!bVisualChanged && !bOffscreenChanged)
@@ -2097,7 +2104,8 @@ function LogBaselineCorpseDeferred(
     KFPawn Candidate, string Reason, float LinearSpeed,
     float AngularSpeed, float PositionChange, float StableMilliseconds)
 {
-    if (Candidate == None || WorldInfo == None ||
+    if (!bDetailedRuntimeDiagnostics || Candidate == None ||
+        WorldInfo == None ||
         WorldInfo.RealTimeSeconds - AdaptiveLastBaselineDeferredRealTime < 1.0)
     {
         return;
@@ -2115,7 +2123,8 @@ function LogAdaptiveCorpsePathDeferred(
     KFPawn Candidate, string Stage, string Reason, float LinearSpeed,
     float AngularSpeed, float PositionChange, float StableMilliseconds)
 {
-    if (Candidate == None || WorldInfo == None)
+    if (!bDetailedRuntimeDiagnostics || Candidate == None ||
+        WorldInfo == None)
     {
         return;
     }
@@ -2369,21 +2378,27 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
             return SleepsThisPass;
         }
         ++SleepsThisPass;
-        ++AdaptiveBaselinePhysicsSleeps;
-        ++AdaptiveCorpsesSlept;
+        if (bDetailedRuntimeDiagnostics)
+        {
+            ++AdaptiveBaselinePhysicsSleeps;
+            ++AdaptiveCorpsesSlept;
+        }
         RegisterAdaptiveCorpseDebugMarker(Candidate, "BASE_SLEEP");
-        `log("KF2OPT_CORPSE_BASELINE state=sleep slept="$
-             AdaptiveBaselinePhysicsSleeps$" batch="$SleepsThisPass$
-             " age_ms="$int(CorpseAge * 1000.0)$
-             " stable_ms="$int(StableMilliseconds)$
-             " linear_speed_units="$int(LinearSpeed)$
-             " angular_speed_units="$int(AngularSpeed)$
-             " position_change_units="$int(PositionChange)$" corpse_id="$
-             GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-             GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
-             FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
-             " effective_awake=0");
+        if (bDetailedRuntimeDiagnostics)
+        {
+            `log("KF2OPT_CORPSE_BASELINE state=sleep slept="$
+                 AdaptiveBaselinePhysicsSleeps$" batch="$SleepsThisPass$
+                 " age_ms="$int(CorpseAge * 1000.0)$
+                 " stable_ms="$int(StableMilliseconds)$
+                 " linear_speed_units="$int(LinearSpeed)$
+                 " angular_speed_units="$int(AngularSpeed)$
+                 " position_change_units="$int(PositionChange)$
+                 " corpse_id="$GetAdaptiveCorpseActionId(Candidate)$
+                 " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
+                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                 " effective_awake=0");
+        }
         // Keep physics mutations bounded to one actor per scheduler callback.
         AdaptiveBaselineScanCursor = (Index + 1) % PoolLength;
         return SleepsThisPass;
@@ -3374,14 +3389,17 @@ function bool RestoreAdaptiveCorpseFreezeState(
             return false;
         }
     }
-    DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
-    `log("KF2OPT_CORPSE_DISTANCE state=unfrozen reason="$Reason$
-         " corpse_id="$CorpseId$
-         " distance_units="$DistanceUnits$
-         " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-             DistanceUnits, false)$
-         " physics=rigid_body readback=verified"$
-         " collision=restored tick=restored");
+    if (bDetailedRuntimeDiagnostics)
+    {
+        DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
+        `log("KF2OPT_CORPSE_DISTANCE state=unfrozen reason="$Reason$
+             " corpse_id="$CorpseId$
+             " distance_units="$DistanceUnits$
+             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                 DistanceUnits, false)$
+             " physics=rigid_body readback=verified"$
+             " collision=restored tick=restored");
+    }
     return true;
 }
 
@@ -3628,10 +3646,13 @@ function int WakeOneRetiredAdaptiveDistanceSleptCorpse()
                 if (Candidate.Mesh.RigidBodyIsAwake())
                 {
                     Candidate.Mesh.bNoSkeletonUpdate = false;
-                    ++AdaptiveDistancePhysicsWakes;
-                    `log("KF2OPT_CORPSE_DISTANCE state=wake"$
-                         " reason=manager_replaced corpse_id="$CurrentId$
-                         " readback=verified");
+                    if (bDetailedRuntimeDiagnostics)
+                    {
+                        ++AdaptiveDistancePhysicsWakes;
+                        `log("KF2OPT_CORPSE_DISTANCE state=wake"$
+                             " reason=manager_replaced corpse_id="$CurrentId$
+                             " readback=verified");
+                    }
                     AdaptiveRetiredDistanceSleptCorpses.Remove(Index, 1);
                     AdaptiveRetiredDistanceWakeCursor =
                         AdaptiveRetiredDistanceSleptCorpses.Length > 0 ?
@@ -3843,14 +3864,17 @@ function bool FreezeOnePressureEligibleCorpse(
         RemoveAdaptiveDistanceSleptCorpseEntry(TrackedSleepIndex, "frozen");
     }
     RegisterAdaptiveCorpseDebugMarker(Candidate, "PRESSURE_FREEZE");
-    `log("KF2OPT_CORPSE_DISTANCE state=frozen reason=pressure_eligible"$
-         " pressure_level="$PhysicsPressureLevel$
-         " minimum_age_s="$MinimumAgeSeconds$
-         " minimum_distance_units="$MinimumDistanceUnits$
-         " corpse_id="$CorpseId$" distance_units="$DistanceUnits$
-        " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-            DistanceUnits, false)$" physics=none readback=verified"$
-        " collision=disabled tick=disabled");
+    if (bDetailedRuntimeDiagnostics)
+    {
+        `log("KF2OPT_CORPSE_DISTANCE state=frozen reason=pressure_eligible"$
+             " pressure_level="$PhysicsPressureLevel$
+             " minimum_age_s="$MinimumAgeSeconds$
+             " minimum_distance_units="$MinimumDistanceUnits$
+             " corpse_id="$CorpseId$" distance_units="$DistanceUnits$
+             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                 DistanceUnits, false)$" physics=none readback=verified"$
+             " collision=disabled tick=disabled");
+    }
     return true;
 }
 
@@ -3868,11 +3892,17 @@ function RemoveAdaptiveDistanceSleptCorpseEntry(
     {
         Candidate = AdaptiveDistanceSleptCorpses[Index].Corpse;
         CorpseId = AdaptiveDistanceSleptCorpses[Index].CorpseId;
+        // The transition ledger uses distance for native-wake backoff even
+        // when diagnostics are disabled; only the readback formatting below
+        // is optional.
         DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
-        EffectiveAwake = GetAdaptiveCorpseEffectiveAwake(Candidate);
+        if (bDetailedRuntimeDiagnostics)
+        {
+            EffectiveAwake = GetAdaptiveCorpseEffectiveAwake(Candidate);
+        }
         RememberAdaptiveDistanceSleepTransition(
             CorpseId, RemovalReason, DistanceUnits);
-        if (RemovalReason == "native_wake")
+        if (bDetailedRuntimeDiagnostics && RemovalReason == "native_wake")
         {
             TransitionIndex = FindAdaptiveDistanceSleepTransition(CorpseId);
             if (TransitionIndex >= 0)
@@ -3886,12 +3916,15 @@ function RemoveAdaptiveDistanceSleptCorpseEntry(
             }
         }
         AdaptiveDistanceSleptCorpses.Remove(Index, 1);
-        `log("KF2OPT_CORPSE_DISTANCE state=removed previous_state=sleep"$
-             " removal_reason="$RemovalReason$" corpse_id="$CorpseId$
-             " distance_units="$DistanceUnits$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 DistanceUnits, false)$
-             " effective_awake="$EffectiveAwake$BackoffFields);
+        if (bDetailedRuntimeDiagnostics)
+        {
+            `log("KF2OPT_CORPSE_DISTANCE state=removed previous_state=sleep"$
+                 " removal_reason="$RemovalReason$" corpse_id="$CorpseId$
+                 " distance_units="$DistanceUnits$
+                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                     DistanceUnits, false)$
+                 " effective_awake="$EffectiveAwake$BackoffFields);
+        }
     }
 }
 
@@ -4029,21 +4062,27 @@ function int WakeNearAdaptiveDistanceSleptCorpses()
                 return 0;
             }
             Candidate.Mesh.bNoSkeletonUpdate = false;
-            ++AdaptiveDistancePhysicsWakes;
+            if (bDetailedRuntimeDiagnostics)
+            {
+                ++AdaptiveDistancePhysicsWakes;
+            }
             ++WakeCount;
             RegisterAdaptiveCorpseDebugMarker(Candidate, "WAKE");
         }
         RemoveAdaptiveDistanceSleptCorpseEntry(Index, "optimizer_wake");
         if (bWasSleeping)
         {
-            `log("KF2OPT_CORPSE_DISTANCE state=wake woken="$
-                 AdaptiveDistancePhysicsWakes$" tracked="$
-                 AdaptiveDistanceSleptCorpses.Length$" corpse_id="$
-                 GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-                 GetAdaptiveCorpseDistanceUnits(Candidate)$
-                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
-                 " effective_awake=1");
+            if (bDetailedRuntimeDiagnostics)
+            {
+                `log("KF2OPT_CORPSE_DISTANCE state=wake woken="$
+                     AdaptiveDistancePhysicsWakes$" tracked="$
+                     AdaptiveDistanceSleptCorpses.Length$" corpse_id="$
+                     GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
+                     GetAdaptiveCorpseDistanceUnits(Candidate)$
+                     " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                         GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                     " effective_awake=1");
+            }
             // A nearby body has priority, but never wake a second rigid body
             // in the same game-thread callback.
             return WakeCount;
@@ -4087,7 +4126,10 @@ function int WakeAdaptiveDistanceSleptCorpseBatch()
             if (Candidate.Mesh.RigidBodyIsAwake())
             {
                 Candidate.Mesh.bNoSkeletonUpdate = false;
-                ++AdaptiveDistancePhysicsWakes;
+                if (bDetailedRuntimeDiagnostics)
+                {
+                    ++AdaptiveDistancePhysicsWakes;
+                }
                 ++WakeCount;
             }
             RemoveAdaptiveDistanceSleptCorpseEntry(
@@ -4102,7 +4144,11 @@ function int WakeAdaptiveDistanceSleptCorpseBatch()
     if (AdaptiveDistanceSleptCorpses.Length == 0)
     {
         ClearTimer(nameof(WakeAdaptiveDistanceSleptCorpseBatch), self);
-        `log("KF2OPT_CORPSE_DISTANCE state=release_complete reason=adaptive_disabled");
+        if (bDetailedRuntimeDiagnostics)
+        {
+            `log("KF2OPT_CORPSE_DISTANCE state=release_complete"$
+                 " reason=adaptive_disabled");
+        }
     }
     return WakeCount;
 }
@@ -4291,13 +4337,17 @@ function bool SleepOneDistantMonsterCorpse(
         PreviousReason = "tracking_lost";
         AdaptiveDistanceSleepTransitions[TransitionIndex].RemovalReason =
             PreviousReason;
-        `log("KF2OPT_CORPSE_DISTANCE state=removed previous_state=sleep"$
-             " removal_reason=tracking_lost corpse_id="$CorpseId$
-             " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
-             " effective_awake="$
-             GetAdaptiveCorpseEffectiveAwake(Candidate));
+        if (bDetailedRuntimeDiagnostics)
+        {
+            `log("KF2OPT_CORPSE_DISTANCE state=removed"$
+                 " previous_state=sleep removal_reason=tracking_lost"$
+                 " corpse_id="$CorpseId$" distance_units="$
+                 GetAdaptiveCorpseDistanceUnits(Candidate)$
+                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                 " effective_awake="$
+                 GetAdaptiveCorpseEffectiveAwake(Candidate));
+        }
     }
     Candidate.Mesh.PutRigidBodyToSleep();
     if (Candidate.Mesh.RigidBodyIsAwake())
@@ -4317,10 +4367,13 @@ function bool SleepOneDistantMonsterCorpse(
         "tracked";
     AdaptiveDistanceSleepTransitions[TransitionIndex].ExpiresRealTime =
         WorldInfo.RealTimeSeconds + 60.0;
-    ++AdaptiveDistancePhysicsSleeps;
-    ++AdaptiveCorpsesSlept;
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ++AdaptiveDistancePhysicsSleeps;
+        ++AdaptiveCorpsesSlept;
+    }
     RegisterAdaptiveCorpseDebugMarker(Candidate, "DIST_SLEEP");
-    if (PreviousReason != "")
+    if (bDetailedRuntimeDiagnostics && PreviousReason != "")
     {
         `log("KF2OPT_CORPSE_DISTANCE state=resleep previous_reason="$
              PreviousReason$" physics_level="$PhysicsPressureLevel$
@@ -4336,7 +4389,7 @@ function bool SleepOneDistantMonsterCorpse(
                  GetAdaptiveCorpseDistanceUnits(Candidate), false)$
              " effective_awake=0");
     }
-    else
+    else if (bDetailedRuntimeDiagnostics)
     {
         `log("KF2OPT_CORPSE_DISTANCE state=sleep physics_level="$
              PhysicsPressureLevel$" frame_level="$AdaptiveCorpsePressureLevel$
@@ -4640,7 +4693,8 @@ function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(
         // freeze a visible corpse inside the 800-unit interaction radius.
         if (DistanceSquared < 640000.0)
         {
-            if (WorldInfo.RealTimeSeconds -
+            if (bDetailedRuntimeDiagnostics &&
+                WorldInfo.RealTimeSeconds -
                     AdaptiveLastNearRagdollRejectRealTime >= 2.0)
             {
                 AdaptiveLastNearRagdollRejectRealTime =
@@ -4714,26 +4768,33 @@ function bool SleepOneVisibleMonsterCorpse(
         `log("KF2OPT_CORPSE_RAGDOLL state=tracking_full capacity=8192");
         return false;
     }
-    ++AdaptiveCorpsesSlept;
-    ++AdaptiveVisibleRagdollSleeps;
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ++AdaptiveCorpsesSlept;
+        ++AdaptiveVisibleRagdollSleeps;
+    }
     RegisterAdaptiveCorpseDebugMarker(Candidate, "RAGDOLL_SLEEP");
-    `log("KF2OPT_CORPSE_RAGDOLL state=sleep level="$
-         AdaptiveCorpsePressureLevel$" quality_steps="$
-         GetAdaptiveCorpseAttackScale()$" slept="$
-         AdaptiveVisibleRagdollSleeps$" visible_awake_before="$
-         VisibleAwakeBefore$" distance_tracked="$
-         AdaptiveDistanceSleptCorpses.Length$" ownership_tracked="$
-         AdaptiveCorpsePhysicsActionIdCount$" corpse_id="$
-         GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-         GetAdaptiveCorpseDistanceUnits(Candidate)$
-         " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-             GetAdaptiveCorpseDistanceUnits(Candidate), false)$
-         " minimum_distance_units=800 minimum_distance_m=8.0"$
-         " scene_level="$ScenePressureLevel$
-         " enemy_level="$EnemyPressureLevel$" frame_level="$FramePressureLevel$
-         " visible=1 age_ms="$
-         int((WorldInfo.TimeSeconds - Candidate.TimeOfDeath) * 1000.0)$
-         " zed_time=0 eligible=1 effective_awake=0");
+    if (bDetailedRuntimeDiagnostics)
+    {
+        `log("KF2OPT_CORPSE_RAGDOLL state=sleep level="$
+             AdaptiveCorpsePressureLevel$" quality_steps="$
+             GetAdaptiveCorpseAttackScale()$" slept="$
+             AdaptiveVisibleRagdollSleeps$" visible_awake_before="$
+             VisibleAwakeBefore$" distance_tracked="$
+             AdaptiveDistanceSleptCorpses.Length$" ownership_tracked="$
+             AdaptiveCorpsePhysicsActionIdCount$" corpse_id="$
+             GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
+             GetAdaptiveCorpseDistanceUnits(Candidate)$
+             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
+                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             " minimum_distance_units=800 minimum_distance_m=8.0"$
+             " scene_level="$ScenePressureLevel$
+             " enemy_level="$EnemyPressureLevel$
+             " frame_level="$FramePressureLevel$
+             " visible=1 age_ms="$
+             int((WorldInfo.TimeSeconds - Candidate.TimeOfDeath) * 1000.0)$
+             " zed_time=0 eligible=1 effective_awake=0");
+    }
     return true;
 }
 
@@ -4827,11 +4888,15 @@ function bool RunAdaptiveCorpseLoadControl()
         EnemyPressureScale);
     if (ScenePressureLevel != AdaptiveCorpseScenePressureLevel)
     {
-        `log("KF2OPT_CORPSE_SCENE state=changed level="$
-             ScenePressureLevel$" previous="$AdaptiveCorpseScenePressureLevel$
-             " visible_living="$VisibleLivingZeds$" visible_corpses="$
-             VisibleCorpses$" visible_awake="$VisibleAwake$" awake_total="$
-             AwakeTotal);
+        if (bDetailedRuntimeDiagnostics)
+        {
+            `log("KF2OPT_CORPSE_SCENE state=changed level="$
+                 ScenePressureLevel$" previous="$
+                 AdaptiveCorpseScenePressureLevel$
+                 " visible_living="$VisibleLivingZeds$" visible_corpses="$
+                 VisibleCorpses$" visible_awake="$VisibleAwake$
+                 " awake_total="$AwakeTotal);
+        }
         AdaptiveCorpseScenePressureLevel = ScenePressureLevel;
     }
     CurrentPressureLevel = GetAdaptiveCorpseFramePressureLevel(
@@ -4847,9 +4912,12 @@ function bool RunAdaptiveCorpseLoadControl()
         if (AdaptiveCorpsePressureLevel > 0 &&
             AdaptiveCorpseRecoverySamples >= 8)
         {
-            `log("KF2OPT_CORPSE_LOAD state=recovered slept="$
-                 AdaptiveCorpsesSlept$" frame_ms="$
-                 int(AdaptiveFrameTimeEmaMs));
+            if (bDetailedRuntimeDiagnostics)
+            {
+                `log("KF2OPT_CORPSE_LOAD state=recovered slept="$
+                     AdaptiveCorpsesSlept$" frame_ms="$
+                     int(AdaptiveFrameTimeEmaMs));
+            }
             AdaptiveCorpsePressureLevel = 0;
             AdaptiveCorpsePressureSamples = 0;
         }
@@ -4872,14 +4940,17 @@ function bool RunAdaptiveCorpseLoadControl()
         if (DesiredPressureLevel > AdaptiveCorpsePressureLevel)
         {
             AdaptiveCorpsePressureLevel = DesiredPressureLevel;
-            `log("KF2OPT_CORPSE_LOAD state=pressure level="$
-                 AdaptiveCorpsePressureLevel$" visible_awake="$VisibleAwake$
-                 " awake_total="$AwakeTotal$" threshold="$AwakeThreshold$
-                 " frame_ms="$
-                 int(AdaptiveFrameTimeEmaMs)$" baseline_ms="$
-                 int(AdaptiveFrameBaselineMs)$" resource="$
-                 AdaptiveGraphicsResource$" quality="$
-                 AdaptiveGraphicsQuality);
+            if (bDetailedRuntimeDiagnostics)
+            {
+                `log("KF2OPT_CORPSE_LOAD state=pressure level="$
+                     AdaptiveCorpsePressureLevel$" visible_awake="$
+                     VisibleAwake$" awake_total="$AwakeTotal$
+                     " threshold="$AwakeThreshold$" frame_ms="$
+                     int(AdaptiveFrameTimeEmaMs)$" baseline_ms="$
+                     int(AdaptiveFrameBaselineMs)$" resource="$
+                     AdaptiveGraphicsResource$" quality="$
+                     AdaptiveGraphicsQuality);
+            }
         }
         if (AdaptiveCorpsePressureLevel > 0)
         {
@@ -6486,7 +6557,10 @@ function SampleTelemetry()
                 continue;
             }
             ++CorpseTotal;
-            CollisionProbeCorpse = Corpse;
+            if (bDetailedRuntimeDiagnostics)
+            {
+                CollisionProbeCorpse = Corpse;
+            }
             if (Corpse.Mesh != None)
             {
                 if (bDetailedRuntimeDiagnostics)
@@ -6682,28 +6756,34 @@ function SampleTelemetry()
     // These native queries require a live KFPawn instance. Calling them via
     // the class default object crashes KF2's Win64 client before the first
     // telemetry sample, while the game itself calls them from pawn instances.
-    if (CollisionProbeCorpse != None &&
-        CollisionProbeCorpse.ShouldCorpseCollideWithDead())
+    if (bDetailedRuntimeDiagnostics)
     {
-        RuntimeCorpseCollideDead = 1;
-    }
-    if (CollisionProbeCorpse != None &&
-        CollisionProbeCorpse.ShouldCorpseCollideWithLiving())
-    {
-        RuntimeCorpseCollideLiving = 1;
-    }
-    if (CollisionProbeCorpse != None &&
-        CollisionProbeCorpse.ShouldCorpseCollideWithDeadAfterSleep())
-    {
-        RuntimeCorpseCollideDeadAfterSleep = 1;
-    }
-    if (CollisionProbeCorpse != None &&
-        CollisionProbeCorpse.ShouldCorpseCollideWithLivingAfterSleep())
-    {
-        RuntimeCorpseCollideLivingAfterSleep = 1;
+        if (CollisionProbeCorpse != None &&
+            CollisionProbeCorpse.ShouldCorpseCollideWithDead())
+        {
+            RuntimeCorpseCollideDead = 1;
+        }
+        if (CollisionProbeCorpse != None &&
+            CollisionProbeCorpse.ShouldCorpseCollideWithLiving())
+        {
+            RuntimeCorpseCollideLiving = 1;
+        }
+        if (CollisionProbeCorpse != None &&
+            CollisionProbeCorpse.ShouldCorpseCollideWithDeadAfterSleep())
+        {
+            RuntimeCorpseCollideDeadAfterSleep = 1;
+        }
+        if (CollisionProbeCorpse != None &&
+            CollisionProbeCorpse.ShouldCorpseCollideWithLivingAfterSleep())
+        {
+            RuntimeCorpseCollideLivingAfterSleep = 1;
+        }
     }
 
-    if (SampleSequence == 0) `log("KF2OPT_TRACE stage=collision_done");
+    if (bDetailedRuntimeDiagnostics && SampleSequence == 0)
+    {
+        `log("KF2OPT_TRACE stage=collision_done");
+    }
 
     if (bSubmitNativeProfileNodes)
     {
@@ -7220,13 +7300,14 @@ function QuiesceForWorldTeardown()
         `log("KF2OPT_CORPSE_STAGGER state=stopped removed="$
              AdaptiveCorpsesRemoved);
     }
-    if (AdaptiveCorpsesSlept > 0 || FixedMinimumSkeletonReductions > 0)
+    if (bDetailedRuntimeDiagnostics &&
+        (AdaptiveCorpsesSlept > 0 || FixedMinimumSkeletonReductions > 0))
     {
         `log("KF2OPT_CORPSE_LOAD state=stopped slept="$
              AdaptiveCorpsesSlept$" skeleton_reductions="$
              FixedMinimumSkeletonReductions);
     }
-    if (AdaptiveBaselinePhysicsSleeps > 0)
+    if (bDetailedRuntimeDiagnostics && AdaptiveBaselinePhysicsSleeps > 0)
     {
         `log("KF2OPT_CORPSE_BASELINE state=stopped slept="$
              AdaptiveBaselinePhysicsSleeps);
@@ -7236,14 +7317,15 @@ function QuiesceForWorldTeardown()
         `log("KF2OPT_CORPSE_LOD state=stopped reduced="$
              FixedMinimumCorpseLodReductions);
     }
-    if (AdaptiveDistancePhysicsSleeps > 0 ||
-        AdaptiveDistancePhysicsWakes > 0)
+    if (bDetailedRuntimeDiagnostics &&
+        (AdaptiveDistancePhysicsSleeps > 0 ||
+         AdaptiveDistancePhysicsWakes > 0))
     {
         `log("KF2OPT_CORPSE_DISTANCE state=stopped slept="$
              AdaptiveDistancePhysicsSleeps$" woken="$
              AdaptiveDistancePhysicsWakes);
     }
-    if (AdaptiveVisibleRagdollSleeps > 0)
+    if (bDetailedRuntimeDiagnostics && AdaptiveVisibleRagdollSleeps > 0)
     {
         `log("KF2OPT_CORPSE_RAGDOLL state=stopped slept="$
              AdaptiveVisibleRagdollSleeps);
@@ -7253,8 +7335,9 @@ function QuiesceForWorldTeardown()
         `log("KF2OPT_LIVING_VISUAL state=stopped reduced="$
              FixedMinimumLivingVisualReductions);
     }
-    if (FixedMinimumLivingOffscreenAnimReductions > 0 ||
-        FixedMinimumLivingOffscreenAnimRestores > 0)
+    if (bDetailedRuntimeDiagnostics &&
+        (FixedMinimumLivingOffscreenAnimReductions > 0 ||
+         FixedMinimumLivingOffscreenAnimRestores > 0))
     {
         `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=stopped reduced="$
              FixedMinimumLivingOffscreenAnimReductions$" restored="$

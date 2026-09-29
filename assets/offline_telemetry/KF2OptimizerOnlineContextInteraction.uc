@@ -50,6 +50,12 @@ function bool ValidOnlineGraphicsToken(string Candidate)
                class'KF2OptimizerTelemetryProbe'.default.AdaptiveControlToken;
 }
 
+function bool DetailedRuntimeDiagnosticsEnabled()
+{
+    return class'KF2OptimizerTelemetryProbe'.default.
+        bDetailedRuntimeDiagnostics;
+}
+
 function bool GetOnlineWorld(out WorldInfo CurrentWorld)
 {
     local LocalPlayer PrimaryPlayer;
@@ -449,9 +455,20 @@ function bool TrySleepOneOnlineCorpse(WorldInfo CurrentWorld)
         }
         bOnlineCorpseSleepApplied = true;
         bOnlineCorpseSleepArmed = false;
-        `log("KF2OPT_ONLINE_CORPSE_ACTION state=sleep corpse_id="$
-             string(Candidate.Name)$" pool="$GoreManager.CorpsePool.Length$
-             " awake=false local_only=true readback=verified");
+        if (DetailedRuntimeDiagnosticsEnabled())
+        {
+            `log("KF2OPT_ONLINE_CORPSE_ACTION state=sleep corpse_id="$
+                 string(Candidate.Name)$" pool="$
+                 GoreManager.CorpsePool.Length$
+                 " awake=false local_only=true readback=verified");
+        }
+        else
+        {
+            // Keep the single authenticated capability receipt without
+            // formatting Actor or pool details in normal sessions.
+            `log("KF2OPT_ONLINE_CORPSE_ACTION state=sleep"$
+                 " awake=false local_only=true readback=verified");
+        }
         return true;
     }
     return false;
