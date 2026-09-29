@@ -76,6 +76,18 @@ int run_application(int show_command) {
             *end != L'\0') return std::nullopt;
         return static_cast<std::uint32_t>(parsed);
     };
+    const auto parse_process_start_id = [](std::wstring_view value)
+        -> std::optional<std::uint64_t> {
+        if (value.empty()) return std::nullopt;
+        const std::wstring owned{value};
+        wchar_t* end = nullptr;
+        errno = 0;
+        const auto parsed = std::wcstoull(owned.c_str(), &end, 10);
+        if (errno != 0 || parsed == 0 || end == nullptr || *end != L'\0') {
+            return std::nullopt;
+        }
+        return static_cast<std::uint64_t>(parsed);
+    };
     const auto narrow_token = [](std::wstring_view value)
         -> std::optional<std::string> {
         std::string result;
@@ -86,25 +98,40 @@ int run_application(int show_command) {
         return result;
     };
     std::optional<kf2::update::UpdateReadyArguments> update_ready;
-    std::optional<std::tuple<std::uint32_t, std::filesystem::path,
-                             std::string>> update_cleanup;
+    std::optional<std::tuple<std::uint32_t, std::uint64_t,
+                             std::filesystem::path, std::string>>
+        update_cleanup;
     if (!arguments.empty() && arguments[0] == L"--portable-update-ready") {
-        if (arguments.size() != 5) return 18;
+        if (arguments.size() != 5 && arguments.size() != 6) return 18;
         const auto process_id = parse_process_id(arguments[2]);
-        const auto token = narrow_token(arguments[4]);
-        if (!process_id || !token) return 18;
+        const bool identity_bound = arguments.size() == 6;
+        const auto process_start = identity_bound
+            ? parse_process_start_id(arguments[3])
+            : std::optional<std::uint64_t>{0};
+        const auto token = narrow_token(arguments[identity_bound ? 5 : 4]);
+        if (!process_id || !token || (identity_bound && !process_start)) {
+            return 18;
+        }
         update_ready = kf2::update::UpdateReadyArguments{
             .receipt_path = arguments[1],
             .helper_process_id = *process_id,
-            .work_root = arguments[3],
+            .helper_process_start_id = process_start.value_or(0),
+            .work_root = arguments[identity_bound ? 4 : 3],
             .token = *token};
     } else if (!arguments.empty() &&
                arguments[0] == L"--portable-update-cleanup") {
-        if (arguments.size() != 4) return 19;
+        if (arguments.size() != 4 && arguments.size() != 5) return 19;
         const auto process_id = parse_process_id(arguments[1]);
-        const auto token = narrow_token(arguments[3]);
-        if (!process_id || !token) return 19;
-        update_cleanup.emplace(*process_id, arguments[2], *token);
+        const bool identity_bound = arguments.size() == 5;
+        const auto process_start = identity_bound
+            ? parse_process_start_id(arguments[2])
+            : std::optional<std::uint64_t>{0};
+        const auto token = narrow_token(arguments[identity_bound ? 4 : 3]);
+        if (!process_id || !token || (identity_bound && !process_start)) {
+            return 19;
+        }
+        update_cleanup.emplace(*process_id, process_start.value_or(0),
+                               arguments[identity_bound ? 3 : 2], *token);
     }
 
     const auto executable_directory = windows::executable_directory();
@@ -240,7 +267,7 @@ int run_application(int show_command) {
     } else if (update_cleanup) {
         static_cast<void>(kf2::update::schedule_update_cleanup(
             std::get<0>(*update_cleanup), std::get<1>(*update_cleanup),
-            std::get<2>(*update_cleanup)));
+            std::get<2>(*update_cleanup), std::get<3>(*update_cleanup)));
     }
 
     const auto run_result = application.value().run(show_command);

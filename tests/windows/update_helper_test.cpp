@@ -70,6 +70,13 @@ void write_file(const std::filesystem::path& path, std::string_view bytes) {
     output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 }
 
+std::uint64_t process_start_id(HANDLE process) {
+    FILETIME creation{}, exit{}, kernel{}, user{};
+    if (!GetProcessTimes(process, &creation, &exit, &kernel, &user)) return 0;
+    return (static_cast<std::uint64_t>(creation.dwHighDateTime) << 32U) |
+        creation.dwLowDateTime;
+}
+
 void write_package(const std::filesystem::path& root,
                    std::string_view identity,
                    std::string_view version,
@@ -104,8 +111,10 @@ bool write_request(const std::filesystem::path& work,
     fs::create_directories(work / L"staged", error);
     if (error) return false;
     const std::string bytes =
-        "schema_version=1\nparent_process_id=" +
+        "schema_version=2\nparent_process_id=" +
         std::to_string(GetCurrentProcessId()) +
+        "\nparent_process_start_id=" +
+        std::to_string(process_start_id(GetCurrentProcess())) +
         "\ntarget_root=" + target.string() +
         "\nstaged_root=" + (work / L"staged").string() +
         "\nbackup_root=" + (work / L"backup").string() +
@@ -142,6 +151,19 @@ int wmain(int argc, wchar_t** argv) {
     };
 
     HANDLE live_child = start_child();
+    const auto live_child_id = GetProcessId(live_child);
+    const auto live_child_start = process_start_id(live_child);
+    CHECK(live_child_id != 0);
+    CHECK(live_child_start != 0);
+    CHECK(kf2::update::wait_for_update_process_for_testing(
+              live_child_id, live_child_start, 0) ==
+          kf2::update::UpdateProcessWaitResult::timed_out);
+    CHECK(kf2::update::wait_for_update_process_for_testing(
+              live_child_id, live_child_start + 1, 30'000) ==
+          kf2::update::UpdateProcessWaitResult::exited_or_missing);
+    CHECK(kf2::update::wait_for_update_process_for_testing(
+              live_child_id, 0, 0) ==
+          kf2::update::UpdateProcessWaitResult::failed);
     kf2::update::set_update_helper_stop_fault_for_testing(
         kf2::update::UpdateHelperStopFault::termination_failure);
     CHECK(!kf2::update::stop_update_child_for_testing(live_child));
@@ -168,7 +190,12 @@ int wmain(int argc, wchar_t** argv) {
     CloseHandle(live_child);
 
     HANDLE stopped_child = start_child();
+    const auto stopped_child_id = GetProcessId(stopped_child);
+    const auto stopped_child_start = process_start_id(stopped_child);
     CHECK(WaitForSingleObject(stopped_child, 2'000) == WAIT_OBJECT_0);
+    CHECK(kf2::update::wait_for_update_process_for_testing(
+              stopped_child_id, stopped_child_start, 30'000) ==
+          kf2::update::UpdateProcessWaitResult::exited_or_missing);
     CHECK(kf2::update::stop_update_child_for_testing(stopped_child));
     CloseHandle(stopped_child);
 
@@ -216,12 +243,19 @@ int wmain(int argc, wchar_t** argv) {
     write_package(target, "old-build", "0.0.4", "old");
     write_package(staged, "new-build", "0.0.5", "new");
     CHECK(write_request(work, target, token));
-    CHECK(kf2::update::apply_update_transaction({
+    const kf2::update::UpdateTransactionRequest transaction{
         .target_root = target,
         .staged_root = staged,
         .backup_root = backup,
         .expected_new_version = "0.0.5",
-    }).has_value());
+    };
+    CHECK(kf2::update::apply_update_transaction(transaction).has_value());
+    const auto transaction_owner =
+        kf2::update::update_transaction_owner_identity(transaction);
+    CHECK(transaction_owner.has_value());
+    CHECK(transaction_owner.value().process_id == GetCurrentProcessId());
+    CHECK(transaction_owner.value().process_start_id ==
+          process_start_id(GetCurrentProcess()));
 
     std::wstring command = L"\"" + std::wstring{executable} +
         L"\" --child";
@@ -237,6 +271,7 @@ int wmain(int argc, wchar_t** argv) {
         kf2::update::signal_update_ready_and_schedule_cleanup({
             .receipt_path = receipt,
             .helper_process_id = child.dwProcessId,
+            .helper_process_start_id = process_start_id(child.hProcess),
             .work_root = work,
             .token = token});
     CHECK(signaled.has_value());
@@ -255,7 +290,7 @@ int wmain(int argc, wchar_t** argv) {
     CHECK(kf2::platform::windows::atomic_replace_utf8(
               marker_only / L"update.marker", token).has_value());
     CHECK(!kf2::update::schedule_update_cleanup(
-               1, marker_only, token).has_value());
+               1, 1, marker_only, token).has_value());
     CHECK(fs::exists(marker_only));
 
     // A complete-looking transaction outside the canonical update root is
@@ -264,7 +299,7 @@ int wmain(int argc, wchar_t** argv) {
         (std::to_wstring(GetCurrentProcessId()) + L"-1");
     CHECK(write_request(unrelated, root / L"target", token));
     CHECK(!kf2::update::schedule_update_cleanup(
-               1, unrelated, token).has_value());
+               1, 1, unrelated, token).has_value());
     CHECK(fs::exists(unrelated));
 
     // Only direct children are valid; nested workspaces and lexical aliases
@@ -273,12 +308,12 @@ int wmain(int argc, wchar_t** argv) {
         (std::to_wstring(GetCurrentProcessId()) + L"-2");
     CHECK(write_request(nested, root / L"target", token));
     CHECK(!kf2::update::schedule_update_cleanup(
-               1, nested, token).has_value());
+               1, 1, nested, token).has_value());
     const auto alias_component = update_root / L"alias-component";
     fs::create_directories(alias_component);
     const auto aliased = alias_component / L".." / marker_only.filename();
     CHECK(!kf2::update::schedule_update_cleanup(
-               1, aliased, token).has_value());
+               1, 1, aliased, token).has_value());
 
     // Reparse-point substitution is rejected when the platform permits the
     // unprivileged test to create a directory symlink.
@@ -290,12 +325,12 @@ int wmain(int argc, wchar_t** argv) {
     fs::create_directory_symlink(reparse_target, reparse_work, error);
     if (!error) {
         CHECK(!kf2::update::schedule_update_cleanup(
-                   1, reparse_work, token).has_value());
+                   1, 1, reparse_work, token).has_value());
         fs::remove(reparse_work, error);
     }
 
     CHECK(!kf2::update::schedule_update_cleanup(
-               1, marker_only, "not-a-valid-token").has_value());
+               1, 1, marker_only, "not-a-valid-token").has_value());
     fs::remove_all(marker_only, error);
     fs::remove(alias_component, error);
     fs::remove_all(root, error);

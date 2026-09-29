@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
@@ -44,6 +45,11 @@ struct UpdateRecoveryResult {
     std::size_t replaced_files{};
 };
 
+struct UpdateOwnerIdentity {
+    std::uint32_t process_id{};
+    std::uint64_t process_start_id{};
+};
+
 #if defined(KF2_UPDATE_TRANSACTION_TESTING)
 using ManagedReadHook = void (*)(const std::filesystem::path& path);
 void set_managed_read_hook_for_testing(ManagedReadHook hook) noexcept;
@@ -66,6 +72,9 @@ void set_managed_read_hook_for_testing(ManagedReadHook hook) noexcept;
     const UpdateTransactionRequest& request);
 
 [[nodiscard]] Result<bool> update_transaction_allows_cleanup(
+    const UpdateTransactionRequest& request);
+
+[[nodiscard]] Result<UpdateOwnerIdentity> update_transaction_owner_identity(
     const UpdateTransactionRequest& request);
 
 }  // namespace kf2::update

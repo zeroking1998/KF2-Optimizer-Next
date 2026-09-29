@@ -12,8 +12,15 @@ namespace kf2::update {
 struct UpdateReadyArguments {
     std::filesystem::path receipt_path;
     std::uint32_t helper_process_id{};
+    std::uint64_t helper_process_start_id{};
     std::filesystem::path work_root;
     std::string token;
+};
+
+enum class UpdateProcessWaitResult {
+    exited_or_missing,
+    timed_out,
+    failed,
 };
 
 #if defined(KF2_UPDATE_HELPER_TESTING)
@@ -32,6 +39,11 @@ void set_update_helper_stop_fault_for_testing(
 
 [[nodiscard]] Result<std::string> read_update_control_file_for_testing(
     const std::filesystem::path& path);
+
+[[nodiscard]] UpdateProcessWaitResult wait_for_update_process_for_testing(
+    std::uint32_t process_id,
+    std::uint64_t process_start_id,
+    std::uint32_t timeout_ms) noexcept;
 #endif
 
 [[nodiscard]] Result<bool> launch_update_helper(
@@ -53,6 +65,7 @@ void set_update_helper_stop_fault_for_testing(
 
 [[nodiscard]] Result<bool> schedule_update_cleanup(
     std::uint32_t helper_process_id,
+    std::uint64_t helper_process_start_id,
     const std::filesystem::path& work_root,
     std::string_view token);
 
