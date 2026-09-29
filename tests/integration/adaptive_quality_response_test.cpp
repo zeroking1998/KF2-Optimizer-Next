@@ -9,6 +9,21 @@
     std::cerr << __LINE__ << ": " #condition << '\n'; return EXIT_FAILURE; \
 } } while (false)
 
+namespace {
+
+template <typename Configure>
+void replace_gameplay(
+    kf2::telemetry_pipeline::TelemetryFrame& frame,
+    Configure&& configure) {
+    auto session = frame.gameplay
+        ? *frame.gameplay : kf2::game::GameLogSession{};
+    configure(session);
+    frame.gameplay = kf2::game::make_game_log_session_snapshot(
+        std::move(session));
+}
+
+}  // namespace
+
 int main() {
     using namespace kf2;
     using namespace kf2::telemetry_pipeline;
@@ -27,8 +42,9 @@ int main() {
         frame.adapter_luid = 77;
         frame.active_gameplay = true;
         frame.offline_gameplay = false;
-        frame.gameplay.emplace();
-        frame.gameplay->map = "KF-CastleVolter";
+        replace_gameplay(frame, [](auto& gameplay) {
+            gameplay.map = "KF-CastleVolter";
+        });
         AdaptiveSampleContext context;
         context.current_map = "KF-BioticsLab";
         context.last_telemetry_sample = 500;
@@ -41,9 +57,11 @@ int main() {
             frame.frames = source.drain(now, 2'000'000'000ULL);
             if (now >= ready_ns) {
                 frame.offline_gameplay = true;
-                frame.gameplay->net_mode = "NM_Standalone";
-                frame.gameplay->telemetry_sample = 1;
-                frame.gameplay->telemetry_observed_ns = now;
+                replace_gameplay(frame, [&](auto& gameplay) {
+                    gameplay.net_mode = "NM_Standalone";
+                    gameplay.telemetry_sample = 1;
+                    gameplay.telemetry_observed_ns = now;
+                });
             }
             context.decision_frames = source.drain(now, 2'000'000'000ULL, boundary);
             const auto built = build_adaptive_sample(frame, context);
@@ -78,10 +96,11 @@ int main() {
             frame.offline_gameplay = true;
             frame.evidence.cpu_percent = 35.0;
             frame.evidence.gpu_percent = 80.0;
-            frame.gameplay.emplace();
-            frame.gameplay->map = "KF-Outpost";
-            frame.gameplay->net_mode = "NM_Standalone";
-            frame.gameplay->phase = game::GameLogPhase::map_loaded;
+            replace_gameplay(frame, [](auto& gameplay) {
+                gameplay.map = "KF-Outpost";
+                gameplay.net_mode = "NM_Standalone";
+                gameplay.phase = game::GameLogPhase::map_loaded;
+            });
             AdaptiveSampleContext context;
             context.current_quality = 80;
             context.current_map = "KF-Outpost";
@@ -94,8 +113,10 @@ int main() {
                 CHECK(source.ingest({identity, at, 1, true, 0}));
                 frame.observed_at_ns = at;
                 frame.frames = source.drain(at, 2'000'000'000ULL);
-                frame.gameplay->telemetry_observed_ns = frame.observed_at_ns;
-                frame.gameplay->telemetry_sample = 1;
+                replace_gameplay(frame, [&](auto& gameplay) {
+                    gameplay.telemetry_observed_ns = frame.observed_at_ns;
+                    gameplay.telemetry_sample = 1;
+                });
                 const auto built = build_adaptive_sample(frame, context);
                 before = governor.evaluate(policy, built.sample, at);
             }
@@ -115,7 +136,9 @@ int main() {
                 CHECK(source.ingest({identity, now, 1, true, 0}));
                 frame.observed_at_ns = now;
                 frame.frames = source.drain(now, 2'000'000'000ULL);
-                frame.gameplay->telemetry_observed_ns = now;
+                replace_gameplay(frame, [&](auto& gameplay) {
+                    gameplay.telemetry_observed_ns = now;
+                });
                 context.decision_frames = source.drain(
                     now, 2'000'000'000ULL, receipt_ns);
                 const auto built = build_adaptive_sample(frame, context);
@@ -184,12 +207,13 @@ int main() {
         frame.active_gameplay = true;
         frame.offline_gameplay = true;
         frame.frames = overlay_frames;
-        frame.gameplay.emplace();
-        frame.gameplay->map = "KF-Outpost";
-        frame.gameplay->net_mode = "NM_Standalone";
-        frame.gameplay->phase = game::GameLogPhase::map_loaded;
-        frame.gameplay->telemetry_sample = 10;
-        frame.gameplay->telemetry_observed_ns = now;
+        replace_gameplay(frame, [&](auto& gameplay) {
+            gameplay.map = "KF-Outpost";
+            gameplay.net_mode = "NM_Standalone";
+            gameplay.phase = game::GameLogPhase::map_loaded;
+            gameplay.telemetry_sample = 10;
+            gameplay.telemetry_observed_ns = now;
+        });
         AdaptiveSampleContext context;
         context.current_map = "KF-Outpost";
         context.map_generation = 1;
@@ -205,7 +229,9 @@ int main() {
             CHECK(source.ingest({identity, at, 1, true, 0}));
             frame.observed_at_ns = at;
             frame.frames = source.drain(at, 2'000'000'000ULL);
-            frame.gameplay->telemetry_observed_ns = at;
+            replace_gameplay(frame, [&](auto& gameplay) {
+                gameplay.telemetry_observed_ns = at;
+            });
             context.decision_frames = source.drain(
                 at, 2'000'000'000ULL, gameplay_return_ns);
             const auto stalled = build_adaptive_sample(frame, context);
@@ -238,10 +264,11 @@ int main() {
             frame.evidence.cpu_percent = 2.02;
             frame.evidence.gpu_percent = 66.63;
             frame.evidence.process_gpu_percent = 66.63;
-            frame.gameplay.emplace();
-            frame.gameplay->map = "KF-Outpost";
-            frame.gameplay->net_mode = "NM_Standalone";
-            frame.gameplay->phase = game::GameLogPhase::map_loaded;
+            replace_gameplay(frame, [](auto& gameplay) {
+                gameplay.map = "KF-Outpost";
+                gameplay.net_mode = "NM_Standalone";
+                gameplay.phase = game::GameLogPhase::map_loaded;
+            });
             frame.frames.quality = telemetry::SampleQuality::good;
             frame.frames.fps = target * (50.01 / 50.0);
             frame.frames.average_fps = frame.frames.fps;
@@ -269,13 +296,17 @@ int main() {
             context.current_map = "KF-Outpost";
             context.map_generation = 1;
             context.last_telemetry_sample = 1;
-            frame.gameplay->telemetry_sample = 1;
+            replace_gameplay(frame, [](auto& gameplay) {
+                gameplay.telemetry_sample = 1;
+            });
             bool requested = false;
             for (std::uint64_t elapsed = 200'000'000ULL;
                  elapsed <= 8'000'000'000ULL; elapsed += 200'000'000ULL) {
                 const auto now = receipt_ns + elapsed;
                 frame.observed_at_ns = now;
-                frame.gameplay->telemetry_observed_ns = now;
+                replace_gameplay(frame, [&](auto& gameplay) {
+                    gameplay.telemetry_observed_ns = now;
+                });
                 const auto built = build_adaptive_sample(frame, context);
                 const auto decision = governor.evaluate(policy, built.sample, now);
                 CHECK(decision.data.quality == optimizer::AdaptiveDataQuality::valid);

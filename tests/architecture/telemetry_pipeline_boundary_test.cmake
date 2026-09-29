@@ -241,6 +241,24 @@ if(worker_log_parse EQUAL -1 OR worker_log_expiration EQUAL -1 OR
     message(FATAL_ERROR
         "Desktop telemetry worker must own session, boundary and expiration parsing")
 endif()
+
+# Gameplay publications cross every telemetry stage by immutable shared
+# identity. Reintroducing an owning optional here silently restores several
+# deep string/catalog copies on every 120-ms frame.
+foreach(snapshot_owner
+        "${stage_root}/telemetry_frame.hpp"
+        "${PROJECT_SOURCE_DIR}/src/app/application_runtime.hpp"
+        "${PROJECT_SOURCE_DIR}/include/kf2/telemetry/resource_telemetry_worker.hpp")
+    file(READ "${snapshot_owner}" snapshot_owner_text)
+    string(FIND "${snapshot_owner_text}"
+        "GameLogSessionSnapshot" immutable_snapshot)
+    string(FIND "${snapshot_owner_text}"
+        "optional<game::GameLogSession>" mutable_snapshot_copy)
+    if(immutable_snapshot EQUAL -1 OR NOT mutable_snapshot_copy EQUAL -1)
+        message(FATAL_ERROR
+            "Telemetry gameplay owners must share immutable snapshots: ${snapshot_owner}")
+    endif()
+endforeach()
 string(FIND "${session_stage_text}"
     "game_window = found_window.value()" visible_window_bound)
 string(FIND "${session_stage_text}"

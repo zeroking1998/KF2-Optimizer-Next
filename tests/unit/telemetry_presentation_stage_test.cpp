@@ -52,7 +52,8 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     game::GameLogSession gameplay;
     gameplay.telemetry_corpse_awake = 9;
     gameplay.telemetry_corpse_sleeping = 14;
-    frame.gameplay = gameplay;
+    frame.gameplay = game::make_game_log_session_snapshot(
+        std::move(gameplay));
 
     flex::ObservationSnapshot flex;
     flex.last_substeps = 4;

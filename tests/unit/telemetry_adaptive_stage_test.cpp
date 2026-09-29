@@ -20,6 +20,17 @@ bool approximately_equal(double left, double right) {
     return std::abs(left - right) < 0.0001;
 }
 
+template <typename Configure>
+void replace_gameplay(
+    kf2::telemetry_pipeline::TelemetryFrame& frame,
+    Configure&& configure) {
+    auto session = frame.gameplay
+        ? *frame.gameplay : kf2::game::GameLogSession{};
+    configure(session);
+    frame.gameplay = kf2::game::make_game_log_session_snapshot(
+        std::move(session));
+}
+
 kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     using namespace kf2;
     telemetry_pipeline::TelemetryFrame frame;
@@ -93,7 +104,8 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     session.telemetry_explosion_decal_limit = 20;
     session.telemetry_living_visible = 7;
     session.telemetry_living_offscreen = 4;
-    frame.gameplay = session;
+    frame.gameplay = game::make_game_log_session_snapshot(
+        std::move(session));
 
     flex::ObservationSnapshot flex;
     flex.fresh = true;
@@ -115,23 +127,29 @@ int main() {
         auto ready = complete_frame();
         ready.active_gameplay = true;
         ready.offline_gameplay = true;
-        ready.gameplay->net_mode = "NM_Standalone";
-        ready.gameplay->telemetry_sample = 5;
-        ready.gameplay->telemetry_corpse_limit = 2000;
-        ready.gameplay->telemetry_corpse_total = 20;
-        ready.gameplay->telemetry_observed_ns = ready.observed_at_ns;
+        replace_gameplay(ready, [&](auto& gameplay) {
+            gameplay.net_mode = "NM_Standalone";
+            gameplay.telemetry_sample = 5;
+            gameplay.telemetry_corpse_limit = 2000;
+            gameplay.telemetry_corpse_total = 20;
+            gameplay.telemetry_observed_ns = ready.observed_at_ns;
+        });
         CorpseTelemetryTracker tracker;
         CHECK(tracker.observe(ready).state == CorpseTelemetryState::available);
         CHECK(!tracker.observe(ready).event);
         auto gap = ready;
-        gap.gameplay->telemetry_corpse_limit.reset();
+        replace_gameplay(gap, [](auto& gameplay) {
+            gameplay.telemetry_corpse_limit.reset();
+        });
         gap.observed_at_ns += second;
         auto result = tracker.observe(gap);
         CHECK(result.state == CorpseTelemetryState::stale);
         CHECK(result.runtime_limit == 2000);
         CHECK(std::string_view{result.event} == "CORPSE_TELEMETRY_STALE");
         const auto gap_start = gap.observed_at_ns;
-        gap.gameplay->map = "KF-NextMap";
+        replace_gameplay(gap, [](auto& gameplay) {
+            gameplay.map = "KF-NextMap";
+        });
         gap.observed_at_ns += 9 * second;
         result = tracker.observe(gap);
         CHECK(result.state == CorpseTelemetryState::stale);
@@ -151,8 +169,10 @@ int main() {
         CHECK(tracker.observe(gap).state == CorpseTelemetryState::stale);
         auto recovered = ready;
         recovered.observed_at_ns += 2 * second;
-        recovered.gameplay->telemetry_observed_ns = recovered.observed_at_ns;
-        recovered.gameplay->telemetry_corpse_limit = 1500;
+        replace_gameplay(recovered, [&](auto& gameplay) {
+            gameplay.telemetry_observed_ns = recovered.observed_at_ns;
+            gameplay.telemetry_corpse_limit = 1500;
+        });
         result = tracker.observe(recovered);
         CHECK(result.state == CorpseTelemetryState::available);
         CHECK(result.runtime_limit == 1500);
@@ -168,23 +188,34 @@ int main() {
         for (int boundary = 0; boundary < 6; ++boundary) {
             tracker.reset();
             auto initial = ready;
-            initial.gameplay->telemetry_control_port = std::uint16_t{1234};
+            replace_gameplay(initial, [](auto& gameplay) {
+                gameplay.telemetry_control_port = std::uint16_t{1234};
+            });
             CHECK(tracker.observe(initial).state == CorpseTelemetryState::available);
             auto changed = initial;
             changed.observed_at_ns += second;
-            changed.gameplay->telemetry_corpse_limit.reset();
+            replace_gameplay(changed, [&](auto& gameplay) {
+                gameplay.telemetry_corpse_limit.reset();
+                if (boundary == 1) gameplay.net_mode = "NM_Client";
+                if (boundary == 2) {
+                    gameplay.telemetry_control_port = std::uint16_t{2345};
+                }
+                if (boundary == 3) gameplay.telemetry_sample = 1;
+                if (boundary == 5) {
+                    gameplay.telemetry_observed_ns =
+                        changed.observed_at_ns + second;
+                }
+            });
             if (boundary == 0) ++changed.identity.process_start_id;
-            if (boundary == 1) changed.gameplay->net_mode = "NM_Client";
-            if (boundary == 2) changed.gameplay->telemetry_control_port = std::uint16_t{2345};
-            if (boundary == 3) changed.gameplay->telemetry_sample = 1;
-            if (boundary == 5) changed.gameplay->telemetry_observed_ns = changed.observed_at_ns + second;
             result = tracker.observe(changed, boundary != 4);
             CHECK(result.state == CorpseTelemetryState::unavailable);
             CHECK(!result.runtime_limit);
         }
         tracker.reset();
         gap = ready;
-        gap.gameplay->telemetry_corpse_limit.reset();
+        replace_gameplay(gap, [](auto& gameplay) {
+            gameplay.telemetry_corpse_limit.reset();
+        });
         CHECK(tracker.observe(gap).state == CorpseTelemetryState::unavailable);
         CHECK(!tracker.observe(gap).runtime_limit);
 
@@ -193,20 +224,24 @@ int main() {
         tracker.reset();
         auto online = ready;
         online.offline_gameplay = false;
-        online.gameplay->net_mode = "NM_Client";
-        online.gameplay->optimizer_online_read_only = true;
-        online.gameplay->telemetry_corpse_limit.reset();
-        online.gameplay->telemetry_corpse_total.reset();
-        online.gameplay->telemetry_observed_ns = 0;
-        online.gameplay->online_corpse_pool = 2;
-        online.gameplay->online_corpse_maximum = 20;
-        online.gameplay->online_corpse_capability_observed_ns =
-            online.observed_at_ns;
+        replace_gameplay(online, [&](auto& gameplay) {
+            gameplay.net_mode = "NM_Client";
+            gameplay.optimizer_online_read_only = true;
+            gameplay.telemetry_corpse_limit.reset();
+            gameplay.telemetry_corpse_total.reset();
+            gameplay.telemetry_observed_ns = 0;
+            gameplay.online_corpse_pool = 2;
+            gameplay.online_corpse_maximum = 20;
+            gameplay.online_corpse_capability_observed_ns =
+                online.observed_at_ns;
+        });
         CHECK(tracker.observe(online).state ==
               CorpseTelemetryState::unavailable);
-        online.gameplay->online_corpse_sleep_verified = true;
-        online.gameplay->online_corpse_action_observed_ns =
-            online.observed_at_ns;
+        replace_gameplay(online, [&](auto& gameplay) {
+            gameplay.online_corpse_sleep_verified = true;
+            gameplay.online_corpse_action_observed_ns =
+                online.observed_at_ns;
+        });
         result = tracker.observe(online);
         CHECK(result.state == CorpseTelemetryState::available);
         CHECK(result.runtime_limit == 20);
@@ -214,7 +249,9 @@ int main() {
               "CORPSE_TELEMETRY_AVAILABLE");
 
         auto unverified_online = online;
-        unverified_online.gameplay->optimizer_online_read_only = false;
+        replace_gameplay(unverified_online, [](auto& gameplay) {
+            gameplay.optimizer_online_read_only = false;
+        });
         tracker.reset();
         CHECK(tracker.observe(unverified_online).state ==
               CorpseTelemetryState::unavailable);
@@ -293,42 +330,58 @@ int main() {
         AdaptiveSampleContext boundary;
         boundary.current_map = loading.gameplay->map;
         boundary.last_telemetry_sample = 44;
-        loading.gameplay->telemetry_sample.reset();
-        loading.gameplay->telemetry_observed_ns = 0;
+        replace_gameplay(loading, [](auto& gameplay) {
+            gameplay.telemetry_sample.reset();
+            gameplay.telemetry_observed_ns = 0;
+        });
         const auto waiting = build_adaptive_sample(loading, boundary);
         CHECK(requires_fresh_frame_window(waiting));
         CHECK(waiting.telemetry_sample == 0);
         boundary.last_telemetry_sample = waiting.telemetry_sample;
-        loading.gameplay->telemetry_sample = 1;
-        loading.gameplay->telemetry_observed_ns = loading.observed_at_ns;
+        replace_gameplay(loading, [&](auto& gameplay) {
+            gameplay.telemetry_sample = 1;
+            gameplay.telemetry_observed_ns = loading.observed_at_ns;
+        });
         const auto ready = build_adaptive_sample(loading, boundary);
         CHECK(requires_fresh_frame_window(ready));
         boundary.last_telemetry_sample = ready.telemetry_sample;
         CHECK(!requires_fresh_frame_window(build_adaptive_sample(loading, boundary)));
         // LoadMap clears net mode before the later offline/online receipt.
         // Unknown is not online, even if an old provider sample is present.
-        loading.gameplay->net_mode.reset();
+        replace_gameplay(loading, [](auto& gameplay) {
+            gameplay.net_mode.reset();
+        });
         CHECK(requires_fresh_frame_window(build_adaptive_sample(loading, boundary)));
-        loading.gameplay->telemetry_sample = 7;
-        loading.gameplay->telemetry_observed_ns = loading.observed_at_ns;
+        replace_gameplay(loading, [&](auto& gameplay) {
+            gameplay.telemetry_sample = 7;
+            gameplay.telemetry_observed_ns = loading.observed_at_ns;
+        });
         CHECK(requires_fresh_frame_window(build_adaptive_sample(loading, boundary)));
-        loading.gameplay->net_mode = "";
+        replace_gameplay(loading, [](auto& gameplay) {
+            gameplay.net_mode = "";
+        });
         CHECK(requires_fresh_frame_window(build_adaptive_sample(loading, boundary)));
-        loading.gameplay->net_mode = "NM_Standalone";
-        loading.gameplay->telemetry_sample = 1;
-        loading.gameplay->telemetry_observed_ns = 1;
+        replace_gameplay(loading, [](auto& gameplay) {
+            gameplay.net_mode = "NM_Standalone";
+            gameplay.telemetry_sample = 1;
+            gameplay.telemetry_observed_ns = 1;
+        });
         const auto expired = build_adaptive_sample(loading, boundary);
         CHECK(requires_fresh_frame_window(expired));
         CHECK(expired.telemetry_sample == 0);
         boundary.last_telemetry_sample = expired.telemetry_sample;
         CHECK(build_adaptive_sample(loading, boundary).map_generation ==
               boundary.map_generation);
-        loading.gameplay->telemetry_observed_ns = loading.observed_at_ns;
+        replace_gameplay(loading, [&](auto& gameplay) {
+            gameplay.telemetry_observed_ns = loading.observed_at_ns;
+        });
         CHECK(requires_fresh_frame_window(build_adaptive_sample(loading, boundary)));
         loading.offline_gameplay = false;
-        loading.gameplay->net_mode = "NM_Client";
-        loading.gameplay->telemetry_sample.reset();
-        loading.gameplay->telemetry_observed_ns = 0;
+        replace_gameplay(loading, [](auto& gameplay) {
+            gameplay.net_mode = "NM_Client";
+            gameplay.telemetry_sample.reset();
+            gameplay.telemetry_observed_ns = 0;
+        });
         CHECK(!requires_fresh_frame_window(build_adaptive_sample(loading, boundary)));
     }
     AdaptiveSampleContext context;
@@ -466,7 +519,9 @@ int main() {
     CHECK(!estimate_overdraw_pressure(invalid_overdraw).has_value());
 
     auto same_map_restart = frame;
-    same_map_restart.gameplay->telemetry_sample = 1;
+    replace_gameplay(same_map_restart, [](auto& gameplay) {
+        gameplay.telemetry_sample = 1;
+    });
     auto same_map_context = context;
     same_map_context.current_map = "KF-Outpost";
     same_map_context.map_generation = 9;
@@ -484,24 +539,27 @@ int main() {
 
     auto online = frame;
     online.offline_gameplay = false;
-    online.gameplay->net_mode = "NM_Client";
+    replace_gameplay(online, [](auto& gameplay) {
+        gameplay.net_mode = "NM_Client";
+    });
     const auto unverified_online_sample =
         build_adaptive_sample(online, context).sample;
     CHECK(unverified_online_sample.session_class ==
           optimizer::AdaptiveSessionClass::unknown);
-    online.gameplay->optimizer_online_read_only = true;
-    online.gameplay->optimizer_session_context_observed_ns =
-        online.observed_at_ns;
-    online.gameplay->telemetry_corpse_limit.reset();
-    online.gameplay->telemetry_corpse_total.reset();
-    online.gameplay->telemetry_observed_ns = 0;
-    online.gameplay->online_corpse_pool = 2;
-    online.gameplay->online_corpse_maximum = 20;
-    online.gameplay->online_corpse_capability_observed_ns =
-        online.observed_at_ns;
-    online.gameplay->online_corpse_sleep_verified = true;
-    online.gameplay->online_corpse_action_observed_ns =
-        online.observed_at_ns;
+    replace_gameplay(online, [&](auto& gameplay) {
+        gameplay.optimizer_online_read_only = true;
+        gameplay.optimizer_session_context_observed_ns =
+            online.observed_at_ns;
+        gameplay.telemetry_corpse_limit.reset();
+        gameplay.telemetry_corpse_total.reset();
+        gameplay.telemetry_observed_ns = 0;
+        gameplay.online_corpse_pool = 2;
+        gameplay.online_corpse_maximum = 20;
+        gameplay.online_corpse_capability_observed_ns =
+            online.observed_at_ns;
+        gameplay.online_corpse_sleep_verified = true;
+        gameplay.online_corpse_action_observed_ns = online.observed_at_ns;
+    });
     const auto online_sample = build_adaptive_sample(online, context).sample;
     CHECK(online_sample.session_class ==
           optimizer::AdaptiveSessionClass::verified_online);
@@ -516,8 +574,10 @@ int main() {
           optimizer::AdaptiveCapabilityState::unavailable);
     CHECK(online_sample.capabilities.skeleton_update_control ==
           optimizer::AdaptiveCapabilityState::unavailable);
-    online.gameplay->online_corpse_lod_verified = true;
-    online.gameplay->online_corpse_skeleton_verified = true;
+    replace_gameplay(online, [](auto& gameplay) {
+        gameplay.online_corpse_lod_verified = true;
+        gameplay.online_corpse_skeleton_verified = true;
+    });
     const auto online_visual_sample =
         build_adaptive_sample(online, context).sample;
     CHECK(online_visual_sample.capabilities.corpse_lod_control ==
@@ -530,12 +590,16 @@ int main() {
           optimizer::AdaptiveCapabilityState::unavailable);
     CHECK(online_sample.capabilities.particle_control ==
           optimizer::AdaptiveCapabilityState::unavailable);
-    online.gameplay->net_mode = "NM_ListenServer";
+    replace_gameplay(online, [](auto& gameplay) {
+        gameplay.net_mode = "NM_ListenServer";
+    });
     CHECK(build_adaptive_sample(online, context).sample.session_class ==
           optimizer::AdaptiveSessionClass::host_or_listen_server);
 
     auto stale = frame;
-    stale.gameplay->telemetry_observed_ns = 1;
+    replace_gameplay(stale, [](auto& gameplay) {
+        gameplay.telemetry_observed_ns = 1;
+    });
     const auto stale_sample = build_adaptive_sample(stale, context).sample;
     CHECK(!stale_sample.gameplay_context_fresh);
     CHECK(!stale_sample.visibility_context_fresh);

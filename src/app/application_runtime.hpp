@@ -228,7 +228,7 @@ struct UiRuntime {
     bool game_log_startup_exited{false};
     bool game_log_startup_exit_announced{false};
     bool game_log_new_settings_restart_requested{false};
-    std::optional<game::GameLogSession> game_log_session;
+    game::GameLogSessionSnapshot game_log_session;
     game::GameLogParserStats game_log_parser_stats;
     bool overlay_scene_ready{false};
     HWND game_window{};
@@ -308,7 +308,7 @@ struct UiRuntime {
     bool adaptive_gameplay_active{false};
     bool adaptive_provider_confirmed{false};
     telemetry::FrameMetrics last_frame_metrics;
-    std::optional<game::GameLogSession> last_report_gameplay_session;
+    game::GameLogSessionSnapshot last_report_gameplay_session;
     std::optional<std::uint64_t> adapter_vram_budget;
     std::wstring telemetry_failure;
     std::uint64_t last_flex_observation_calls{0};
