@@ -780,6 +780,93 @@ int test_gpu_profile_persistence_rollback() {
     return EXIT_SUCCESS;
 }
 
+int test_restore_cap_sync_failure() {
+#if !defined(KF2_APPLICATION_RESTORE_TESTING)
+    return EXIT_FAILURE;
+#else
+    namespace fs = std::filesystem;
+    const fs::path root = fs::path{KF2_TEST_ROOT} /
+        L"restore-cap-sync-failure";
+    fs::remove_all(root);
+    const auto config_root = root / L"Config";
+    const auto target = config_root / L"KFGame.ini";
+    const std::string original =
+        "[KFGame.KFGameEngine]\r\n"
+        "bSmoothFrameRate=True\r\n"
+        "MinSmoothedFrameRate=22.000000\r\n"
+        "MaxSmoothedFrameRate=60.000000\r\n";
+    const std::string changed =
+        "[KFGame.KFGameEngine]\r\n"
+        "bSmoothFrameRate=True\r\n"
+        "MinSmoothedFrameRate=22.000000\r\n"
+        "MaxSmoothedFrameRate=90.000000\r\n";
+    write_bytes(target, original);
+
+    kf2::diagnostics::EventLog events{32};
+    kf2::config::Settings settings;
+    settings.target_fps = 60;
+    {
+        kf2::app::UiRuntime runtime{
+            root / L"Data", false, settings, events, std::nullopt,
+            kf2::app::StartMode::normal, root / L"portable"};
+        runtime.installation = kf2::game::GameInstallation{
+            .install_root = root / L"Game",
+            .config_root = config_root};
+
+        kf2::config::ConfigPreview preview;
+        preview.config_root = config_root;
+        preview.files.push_back({L"KFGame.ini", original, changed});
+        const auto applied = kf2::config::apply_preview(
+            preview, runtime.backups, {.game_running = false});
+        CHECK(applied.has_value());
+        CHECK(read_bytes(target) == changed);
+
+        int synchronization_attempts = 0;
+        runtime.frame_rate_cap_sync_for_testing = [&] {
+            ++synchronization_attempts;
+            return kf2::Result<kf2::game::FrameRateCapResult>::failure({
+                kf2::ErrorCode::io_failure,
+                L"Injected native frame-cap synchronization failure", 1234});
+        };
+        const auto restored = runtime.restore(
+            applied.value().backup.id, {.game_running = false});
+        CHECK(synchronization_attempts == 1);
+        CHECK(!restored.has_value());
+        CHECK(restored.error().code ==
+              kf2::ErrorCode::recovery_required);
+        CHECK(restored.error().native_code == 1234);
+        CHECK(restored.error().message.find(L"Restored 1") !=
+              std::wstring::npos);
+        CHECK(restored.error().message.find(L"pre-restore backup") !=
+              std::wstring::npos);
+        CHECK(restored.error().message.find(
+                  L"Injected native frame-cap synchronization failure") !=
+              std::wstring::npos);
+        CHECK(read_bytes(target) == original);
+
+        const auto backups = runtime.backups.list_backups();
+        CHECK(backups.has_value());
+        CHECK(backups.value().size() >= 2);
+    }
+
+    const auto log = events.snapshot();
+    const auto failure = std::find_if(log.begin(), log.end(),
+        [](const auto& event) {
+            return event.code == "TARGET_FPS_PERSIST_FAILED";
+        });
+    CHECK(failure != log.end());
+    CHECK(failure->severity == kf2::diagnostics::Severity::error);
+    CHECK(failure->message.find(L"Restored 1") != std::wstring::npos);
+    CHECK(failure->message.find(L"pre-restore backup") !=
+          std::wstring::npos);
+    CHECK(std::none_of(log.begin(), log.end(), [](const auto& event) {
+        return event.code == "CONFIG_RESTORED";
+    }));
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+#endif
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 &&
         std::string_view{argv[1]} == "--package-repair-start-failure") {
@@ -808,6 +895,11 @@ int main(int argc, char** argv) {
         std::string_view{argv[1]} ==
             "--runtime-shutdown-exceptions") {
         return test_runtime_shutdown_exception_boundaries();
+    }
+    if (argc == 2 &&
+        std::string_view{argv[1]} ==
+            "--restore-cap-sync-failure") {
+        return test_restore_cap_sync_failure();
     }
     try {
         const auto inaccessible = kf2::app::load_or_create_settings(

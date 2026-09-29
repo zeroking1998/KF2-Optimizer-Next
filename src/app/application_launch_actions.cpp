@@ -273,6 +273,11 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile(
 }
 
 Result<game::FrameRateCapResult> UiRuntime::synchronize_frame_rate_cap() {
+#if defined(KF2_APPLICATION_RESTORE_TESTING)
+    if (frame_rate_cap_sync_for_testing) {
+        return frame_rate_cap_sync_for_testing();
+    }
+#endif
     if (!installation) {
         return Result<game::FrameRateCapResult>::failure(
             {ErrorCode::not_found, L"Game not detected", 0});

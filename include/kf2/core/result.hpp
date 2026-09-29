@@ -18,6 +18,7 @@ enum class ErrorCode {
     stale_data,
     already_running,
     internal_failure,
+    recovery_required,
 };
 
 struct Error {

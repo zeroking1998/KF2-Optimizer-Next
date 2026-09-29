@@ -450,6 +450,7 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_TELEMETRY_ASSET=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetry.u"
     KF2_APPLICATION_VIDEO_TESTING
     KF2_APPLICATION_SHUTDOWN_TESTING
+    KF2_APPLICATION_RESTORE_TESTING
     KF2_STARTUP_PREWARMER_TESTING
 )
 target_link_libraries(kf2_application_lifecycle_test PRIVATE
@@ -472,6 +473,9 @@ add_test(NAME kf2_map_prewarm_start_visibility_test
 add_test(NAME kf2_runtime_shutdown_exception_test
     COMMAND kf2_application_lifecycle_test
         --runtime-shutdown-exceptions)
+add_test(NAME kf2_restore_cap_sync_failure_test
+    COMMAND kf2_application_lifecycle_test
+        --restore-cap-sync-failure)
 
 add_executable(kf2_state_environment_test
     windows/state_environment_test.cpp
