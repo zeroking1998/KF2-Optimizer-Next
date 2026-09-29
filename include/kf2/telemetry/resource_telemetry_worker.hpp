@@ -11,11 +11,21 @@
 #include <vector>
 
 #include "kf2/game/game_log_session.hpp"
+#include "kf2/game/video_settings.hpp"
 #include "kf2/telemetry/gpu_metrics.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
 #include "kf2/telemetry/telemetry_snapshot.hpp"
 
 namespace kf2::telemetry {
+
+struct GameLogBoundaryEvents final {
+    std::optional<game::GameMenuGraphicsReadback> graphics_readback;
+    std::optional<std::wstring> map_prewarm_selection;
+    bool load_map_started{false};
+    bool new_settings_restart_requested{false};
+    bool startup_ready{false};
+    bool verified_engine_exit{false};
+};
 
 enum class ResourceSampleGroup {
     process_and_memory,
@@ -36,6 +46,7 @@ struct GameLogChunk final {
     bool observations_expired{false};
     std::uint64_t creation_filetime{0};
     std::string bytes;
+    GameLogBoundaryEvents boundaries;
     std::optional<game::GameLogSession> parsed_session;
     game::GameLogParserStats parser_stats;
 };

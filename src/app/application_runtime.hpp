@@ -228,8 +228,6 @@ struct UiRuntime {
     bool game_log_startup_exited{false};
     bool game_log_startup_exit_announced{false};
     bool game_log_new_settings_restart_requested{false};
-    std::string game_log_marker_tail;
-    std::string game_graphics_marker_tail;
     std::optional<game::GameLogSession> game_log_session;
     game::GameLogParserStats game_log_parser_stats;
     bool overlay_scene_ready{false};

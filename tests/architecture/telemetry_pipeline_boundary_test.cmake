@@ -207,12 +207,17 @@ foreach(forbidden_sync_log_call
         "CreateFileW"
         "std::ifstream"
         "game_log_session_parser.feed"
-        "expire_observations")
+        "expire_observations"
+        "chunk.bytes"
+        "parse_game_menu_graphics_readback"
+        "map_prewarm_request_from_log_line"
+        "game_log_reports_engine_exit"
+        "game_log_requests_settings_restart")
     string(FIND "${session_stage_text}"
         "${forbidden_sync_log_call}" forbidden_sync_log_offset)
     if(NOT forbidden_sync_log_offset EQUAL -1)
         message(FATAL_ERROR
-            "Session stage performs synchronous log I/O on the UI thread: ${forbidden_sync_log_call}")
+            "Session stage performs raw or structured log work on the UI thread: ${forbidden_sync_log_call}")
     endif()
 endforeach()
 string(FIND "${session_stage_text}"
@@ -229,9 +234,12 @@ string(FIND "${resource_worker_text}"
     "log_parser.feed" worker_log_parse)
 string(FIND "${resource_worker_text}"
     "log_parser.expire_observations" worker_log_expiration)
-if(worker_log_parse EQUAL -1 OR worker_log_expiration EQUAL -1)
+string(FIND "${resource_worker_text}"
+    "log_boundaries.feed" worker_boundary_parse)
+if(worker_log_parse EQUAL -1 OR worker_log_expiration EQUAL -1 OR
+   worker_boundary_parse EQUAL -1)
     message(FATAL_ERROR
-        "Desktop telemetry worker must own structured game-log parsing and expiration")
+        "Desktop telemetry worker must own session, boundary and expiration parsing")
 endif()
 string(FIND "${session_stage_text}"
     "game_window = found_window.value()" visible_window_bound)
