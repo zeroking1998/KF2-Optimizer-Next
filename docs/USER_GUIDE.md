@@ -202,6 +202,12 @@ normal progress display in every mode, while storage kind, planned/attempted
 file counts, cache-fill totals, open/read failures and detailed completion or
 cancellation events are recorded only for preparation jobs begun with runtime
 diagnostics enabled. File paths are never included in this summary.
+The same switch enables detailed corpse-physics tick and collision readbacks,
+sleep/wake statistics and successful per-action decision logs. Normal play
+still performs every required sleep, wake, freeze, restore and collision/tick
+safety check. It also retains the awake/sleep counts needed by Adaptive and the
+dashboard, all failures, rollback evidence and the single minimal online
+capability receipt; only diagnostic collection and formatting are omitted.
 The Debug page also links to the portable data folder and current session log.
 
 ## 11. Recovery

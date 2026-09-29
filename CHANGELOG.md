@@ -71,6 +71,10 @@ are visible immediately.
   operation. Storage kind, planned/attempted files, cache-fill totals and
   open/read failures are collected and shown only for Debug diagnostic jobs;
   detailed success/cancellation events are likewise opt-in.
+- Detailed corpse-physics tick, collision, sleep and wake statistics plus
+  successful action/decision logs now use the runtime diagnostics switch.
+  Adaptive control counts, mutation limits, rollback checks, failures and the
+  minimal online capability receipt remain active in normal sessions.
 - Added reproducible release optimization through interprocedural optimization
   and an optional two-phase MSVC profile-guided optimization workflow.
 - Simplified contributor setup, Windows builds, GitHub issue reporting, and
