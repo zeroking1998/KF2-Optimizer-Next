@@ -171,6 +171,10 @@ struct UiRuntime {
     backup::BackupStore backups;
     std::optional<game::GameDiscoveryInput> discovery_input;
     std::optional<game::GameInstallation> installation;
+#if defined(KF2_APPLICATION_RESTORE_TESTING)
+    std::function<Result<game::FrameRateCapResult>()>
+        frame_rate_cap_sync_for_testing;
+#endif
     PendingPolicyRestageOperation pending_policy_restage_operation{
         game::enable_offline_gameplay_logging};
     std::optional<config::ConfigPreview> preview;

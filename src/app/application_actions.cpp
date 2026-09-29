@@ -383,9 +383,23 @@ Result<backup::RestoreResult> UiRuntime::restore(
     if (restored.has_value()) {
         const auto capped = synchronize_frame_rate_cap();
         if (!capped.has_value()) {
+            const std::wstring incomplete_message =
+                L"Restored " +
+                std::to_wstring(restored.value().files_restored) +
+                L" configuration files from the verified backup and created "
+                L"pre-restore backup " +
+                std::wstring{
+                    restored.value().pre_restore_backup.id.begin(),
+                    restored.value().pre_restore_backup.id.end()} +
+                L", but native frame-cap synchronization failed: " +
+                capped.error().message;
             events->append({0, diagnostics::Severity::error,
-                "TARGET_FPS_PERSIST_FAILED", capped.error().message,
+                "TARGET_FPS_PERSIST_FAILED", incomplete_message,
                 L"config"});
+            invalidate();
+            return Result<backup::RestoreResult>::failure(
+                {ErrorCode::recovery_required, incomplete_message,
+                 capped.error().native_code});
         }
         events->append({0, diagnostics::Severity::info, "CONFIG_RESTORED",
                         L"Restored " +
