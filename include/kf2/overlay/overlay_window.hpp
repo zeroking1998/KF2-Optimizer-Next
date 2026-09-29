@@ -7,6 +7,10 @@
 #include "kf2/overlay/overlay_policy.hpp"
 
 namespace kf2::overlay {
+#if defined(KF2_OVERLAY_WINDOW_TESTING)
+struct OverlayWindowTestAccess;
+#endif
+
 struct OverlayDiagnostics final {
     bool enabled{false};
     std::uint64_t update_calls{0};
@@ -32,6 +36,9 @@ public:
     [[nodiscard]] std::size_t graph_geometry_build_count() const noexcept;
     [[nodiscard]] std::size_t static_layer_build_count() const noexcept;
 private:
+#if defined(KF2_OVERLAY_WINDOW_TESTING)
+    friend struct OverlayWindowTestAccess;
+#endif
     explicit OverlayWindow(std::unique_ptr<struct OverlayWindowState> state);
     std::unique_ptr<struct OverlayWindowState> state_;
 };

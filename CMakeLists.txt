@@ -391,6 +391,8 @@ if(BUILD_TESTING)
     target_include_directories(KF2TestOverlayCore PUBLIC
         "${PROJECT_SOURCE_DIR}/include"
     )
+    target_compile_definitions(KF2TestOverlayCore PUBLIC
+        KF2_OVERLAY_WINDOW_TESTING)
 
     add_library(KF2TestWindowCore STATIC
         src/platform/windows/window.cpp

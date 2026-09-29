@@ -37,6 +37,121 @@ DWORD bind_overlay_target_window(HWND overlay, HWND target) {
     if (previous == 0 && error != ERROR_SUCCESS) return error;
     return ERROR_SUCCESS;
 }
+
+void discard_overlay_device_resources(OverlayWindowState& state) noexcept {
+    state.static_layer_bitmap.Reset();
+    state.background.Reset();
+    state.foreground.Reset();
+    state.border.Reset();
+    state.accent.Reset();
+    state.muted.Reset();
+    state.metric_panel.Reset();
+    state.graph_line.Reset();
+    state.mascot_fill.Reset();
+    state.mascot_ink.Reset();
+    state.mascot_highlight.Reset();
+    state.mascot_bitmap.Reset();
+    state.low_mascot_bitmap.Reset();
+    state.render_target.Reset();
+    state.frame_time_graph_geometry.Reset();
+    state.mascot_bitmap_size = {};
+    state.low_mascot_bitmap_size = {};
+    state.static_layer_size = {};
+    state.static_layer_show_fps = false;
+    state.static_layer_show_frame_time = false;
+    state.static_layer_show_cpu = false;
+    state.static_layer_show_gpu = false;
+    state.static_layer_show_memory = false;
+    state.frame_time_graph_source_sample_ms = 0;
+    state.frame_time_graph_uses_memory_layout = true;
+    state.last_rendered_ms = 0;
+}
+
+HRESULT create_overlay_device_resources(OverlayWindowState& state) {
+    discard_overlay_device_resources(state);
+    const auto properties = D2D1::RenderTargetProperties(
+        D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                          D2D1_ALPHA_MODE_PREMULTIPLIED));
+    HRESULT result = state.d2d_factory->CreateDCRenderTarget(
+        &properties, &state.render_target);
+    if (SUCCEEDED(result)) result = state.render_target->CreateSolidColorBrush(
+        D2D1::ColorF(0.018F, 0.025F, 0.045F, 0.82F), &state.background);
+    if (SUCCEEDED(result)) result = state.render_target->CreateSolidColorBrush(
+        D2D1::ColorF(0.96F, 0.98F, 1.0F, 1.0F), &state.foreground);
+    if (SUCCEEDED(result)) result = state.render_target->CreateSolidColorBrush(
+        D2D1::ColorF(0.82F, 0.88F, 1.0F, 0.34F), &state.border);
+    if (SUCCEEDED(result)) result = state.render_target->CreateSolidColorBrush(
+        D2D1::ColorF(0.92F, 0.12F, 0.08F, 0.95F), &state.accent);
+    if (SUCCEEDED(result)) result = state.render_target->CreateSolidColorBrush(
+        D2D1::ColorF(0.78F, 0.84F, 0.93F, 0.98F), &state.muted);
+    if (SUCCEEDED(result)) result = state.render_target->CreateSolidColorBrush(
+        D2D1::ColorF(0.09F, 0.12F, 0.19F, 0.76F), &state.metric_panel);
+    if (SUCCEEDED(result)) result = state.render_target->CreateSolidColorBrush(
+        D2D1::ColorF(0.28F, 0.78F, 1.0F, 0.95F), &state.graph_line);
+    if (SUCCEEDED(result)) result = state.render_target->CreateSolidColorBrush(
+        D2D1::ColorF(0.30F, 0.58F, 0.42F, 1.0F), &state.mascot_fill);
+    if (SUCCEEDED(result)) result = state.render_target->CreateSolidColorBrush(
+        D2D1::ColorF(0.025F, 0.055F, 0.10F, 1.0F), &state.mascot_ink);
+    if (SUCCEEDED(result)) result = state.render_target->CreateSolidColorBrush(
+        D2D1::ColorF(0.78F, 0.94F, 0.70F, 0.82F), &state.mascot_highlight);
+
+    if (SUCCEEDED(result) && !state.wic_factory) {
+        static_cast<void>(CoCreateInstance(
+            CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&state.wic_factory)));
+    }
+    if (SUCCEEDED(result) && state.wic_factory) {
+        const HMODULE module = GetModuleHandleW(nullptr);
+        const auto load_embedded_bitmap = [&](int resource_id,
+                                               ID2D1Bitmap** output) {
+            const HRSRC png_resource = FindResourceW(
+                module, MAKEINTRESOURCEW(resource_id), RT_RCDATA);
+            if (!png_resource) return;
+            const HGLOBAL loaded = LoadResource(module, png_resource);
+            const auto* png_bytes = static_cast<const BYTE*>(
+                LockResource(loaded));
+            const DWORD png_size = SizeofResource(module, png_resource);
+            Microsoft::WRL::ComPtr<IWICStream> stream;
+            Microsoft::WRL::ComPtr<IWICBitmapDecoder> decoder;
+            Microsoft::WRL::ComPtr<IWICBitmapFrameDecode> frame;
+            Microsoft::WRL::ComPtr<IWICFormatConverter> converter;
+            HRESULT image_result = state.wic_factory->CreateStream(&stream);
+            if (SUCCEEDED(image_result)) image_result =
+                stream->InitializeFromMemory(
+                    const_cast<BYTE*>(png_bytes), png_size);
+            if (SUCCEEDED(image_result)) image_result =
+                state.wic_factory->CreateDecoderFromStream(
+                    stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad,
+                    &decoder);
+            if (SUCCEEDED(image_result)) image_result = decoder->GetFrame(
+                0, &frame);
+            if (SUCCEEDED(image_result)) image_result =
+                state.wic_factory->CreateFormatConverter(&converter);
+            if (SUCCEEDED(image_result)) image_result = converter->Initialize(
+                frame.Get(), GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapDitherTypeNone, nullptr, 0.0,
+                WICBitmapPaletteTypeCustom);
+            if (SUCCEEDED(image_result)) {
+                static_cast<void>(state.render_target->CreateBitmapFromWicBitmap(
+                    converter.Get(), nullptr, output));
+            }
+        };
+        load_embedded_bitmap(kPremiumMutantRigPngResource,
+                             &state.mascot_bitmap);
+        load_embedded_bitmap(kPremiumMutantLowIdlePngResource,
+                             &state.low_mascot_bitmap);
+        if (state.mascot_bitmap) {
+            state.mascot_bitmap_size = state.mascot_bitmap->GetSize();
+        }
+        if (state.low_mascot_bitmap) {
+            state.low_mascot_bitmap_size =
+                state.low_mascot_bitmap->GetSize();
+        }
+    }
+    if (FAILED(result)) discard_overlay_device_resources(state);
+    return result;
+}
 }  // namespace detail
 
 OverlayWindowState::~OverlayWindowState() {
@@ -86,78 +201,7 @@ Result<OverlayWindow> OverlayWindow::create() {
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_CONDENSED, 11.8F,
         L"de-DE", &state->system_value_format);
     if (SUCCEEDED(result)) {
-        const auto properties = D2D1::RenderTargetProperties(
-            D2D1_RENDER_TARGET_TYPE_DEFAULT,
-            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
-                              D2D1_ALPHA_MODE_PREMULTIPLIED));
-        result = state->d2d_factory->CreateDCRenderTarget(
-            &properties, &state->render_target);
-    }
-    if (SUCCEEDED(result)) result = state->render_target->CreateSolidColorBrush(
-        D2D1::ColorF(0.018F, 0.025F, 0.045F, 0.82F), &state->background);
-    if (SUCCEEDED(result)) result = state->render_target->CreateSolidColorBrush(
-        D2D1::ColorF(0.96F, 0.98F, 1.0F, 1.0F), &state->foreground);
-    if (SUCCEEDED(result)) result = state->render_target->CreateSolidColorBrush(
-        D2D1::ColorF(0.82F, 0.88F, 1.0F, 0.34F), &state->border);
-    if (SUCCEEDED(result)) result = state->render_target->CreateSolidColorBrush(
-        D2D1::ColorF(0.92F, 0.12F, 0.08F, 0.95F), &state->accent);
-    if (SUCCEEDED(result)) result = state->render_target->CreateSolidColorBrush(
-        D2D1::ColorF(0.78F, 0.84F, 0.93F, 0.98F), &state->muted);
-    if (SUCCEEDED(result)) result = state->render_target->CreateSolidColorBrush(
-        D2D1::ColorF(0.09F, 0.12F, 0.19F, 0.76F), &state->metric_panel);
-    if (SUCCEEDED(result)) result = state->render_target->CreateSolidColorBrush(
-        D2D1::ColorF(0.28F, 0.78F, 1.0F, 0.95F), &state->graph_line);
-    if (SUCCEEDED(result)) result = state->render_target->CreateSolidColorBrush(
-        D2D1::ColorF(0.30F, 0.58F, 0.42F, 1.0F), &state->mascot_fill);
-    if (SUCCEEDED(result)) result = state->render_target->CreateSolidColorBrush(
-        D2D1::ColorF(0.025F, 0.055F, 0.10F, 1.0F), &state->mascot_ink);
-    if (SUCCEEDED(result)) result = state->render_target->CreateSolidColorBrush(
-        D2D1::ColorF(0.78F, 0.94F, 0.70F, 0.82F), &state->mascot_highlight);
-    if (SUCCEEDED(result) && SUCCEEDED(CoCreateInstance(
-            CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-            IID_PPV_ARGS(&state->wic_factory)))) {
-        const HMODULE module = GetModuleHandleW(nullptr);
-        const auto load_embedded_bitmap = [&](int resource_id,
-                                               ID2D1Bitmap** output) {
-            const HRSRC png_resource = FindResourceW(
-                module, MAKEINTRESOURCEW(resource_id), RT_RCDATA);
-            if (!png_resource) return;
-            const HGLOBAL loaded = LoadResource(module, png_resource);
-            const auto* png_bytes = static_cast<const BYTE*>(LockResource(loaded));
-            const DWORD png_size = SizeofResource(module, png_resource);
-            Microsoft::WRL::ComPtr<IWICStream> stream;
-            Microsoft::WRL::ComPtr<IWICBitmapDecoder> decoder;
-            Microsoft::WRL::ComPtr<IWICBitmapFrameDecode> frame;
-            Microsoft::WRL::ComPtr<IWICFormatConverter> converter;
-            HRESULT image_result = state->wic_factory->CreateStream(&stream);
-            if (SUCCEEDED(image_result)) image_result = stream->InitializeFromMemory(
-                const_cast<BYTE*>(png_bytes), png_size);
-            if (SUCCEEDED(image_result)) image_result =
-                state->wic_factory->CreateDecoderFromStream(
-                    stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad, &decoder);
-            if (SUCCEEDED(image_result)) image_result = decoder->GetFrame(0, &frame);
-            if (SUCCEEDED(image_result)) image_result =
-                state->wic_factory->CreateFormatConverter(&converter);
-            if (SUCCEEDED(image_result)) image_result = converter->Initialize(
-                frame.Get(), GUID_WICPixelFormat32bppPBGRA,
-                WICBitmapDitherTypeNone, nullptr, 0.0,
-                WICBitmapPaletteTypeCustom);
-            if (SUCCEEDED(image_result)) {
-                state->render_target->CreateBitmapFromWicBitmap(
-                    converter.Get(), nullptr, output);
-            }
-        };
-        load_embedded_bitmap(detail::kPremiumMutantRigPngResource,
-                             &state->mascot_bitmap);
-        load_embedded_bitmap(detail::kPremiumMutantLowIdlePngResource,
-                             &state->low_mascot_bitmap);
-        if (state->mascot_bitmap) {
-            state->mascot_bitmap_size = state->mascot_bitmap->GetSize();
-        }
-        if (state->low_mascot_bitmap) {
-            state->low_mascot_bitmap_size =
-                state->low_mascot_bitmap->GetSize();
-        }
+        result = detail::create_overlay_device_resources(*state);
     }
     if (FAILED(result)) return Result<OverlayWindow>::failure(
         {ErrorCode::platform_failure, L"Overlay renderer cannot initialize",

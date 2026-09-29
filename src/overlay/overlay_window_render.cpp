@@ -11,6 +11,17 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         {ErrorCode::internal_failure, L"Overlay state is unavailable", 0});
     const bool collect_diagnostics = state_->diagnostics_enabled;
     if (collect_diagnostics) ++state_->diagnostic_update_calls;
+    if (!state_->render_target) {
+        const HRESULT recovery_result =
+            detail::create_overlay_device_resources(*state_);
+        if (FAILED(recovery_result)) {
+            return Result<bool>::failure(
+                {ErrorCode::platform_failure,
+                 L"Overlay device resources cannot be recovered",
+                 static_cast<std::uint32_t>(recovery_result)});
+        }
+        state_->redraw_required = true;
+    }
     const ULONGLONG frame_now_ms = GetTickCount64();
     bool window_recreated = false;
     if (!IsWindow(state_->window)) {
@@ -92,7 +103,8 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     const bool metric_reaction_animating =
         detail::advance_metric_reaction_animation(
             *state_, presentation.animations_enabled, update_now_ms);
-    const bool presentation_changed = window_recreated || owner_changed ||
+    const bool presentation_changed = state_->redraw_required ||
+        window_recreated || owner_changed ||
         geometry_changed || content_changed ||
         metric_update.any_metric_changed || metric_update.graph_sampled;
     const bool active_animation = state_->animating || number_bounce_animating ||
@@ -212,6 +224,24 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         detail::draw_overlay_metrics(
             *state_, width, height, frame_now_ms, linear);
         result = state_->render_target->EndDraw();
+#if defined(KF2_OVERLAY_WINDOW_TESTING)
+        if (state_->test_end_draw_result != S_OK) {
+            result = state_->test_end_draw_result;
+            state_->test_end_draw_result = S_OK;
+        }
+#endif
+    }
+    if (result == D2DERR_RECREATE_TARGET) {
+        const HRESULT recovery_result =
+            detail::create_overlay_device_resources(*state_);
+        state_->redraw_required = true;
+        if (FAILED(recovery_result)) {
+            return Result<bool>::failure(
+                {ErrorCode::platform_failure,
+                 L"Overlay device resources cannot be recovered",
+                 static_cast<std::uint32_t>(recovery_result)});
+        }
+        return Result<bool>::success(false);
     }
     if (FAILED(result)) return Result<bool>::failure(
         {ErrorCode::platform_failure, L"Overlay rendering failed",
@@ -250,6 +280,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
              GetLastError()});
     }
     state_->last_rendered_ms = update_now_ms;
+    state_->redraw_required = false;
     if (collect_diagnostics) {
         ++state_->diagnostic_redraws;
         if (time_render) {

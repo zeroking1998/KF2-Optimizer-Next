@@ -928,6 +928,8 @@ add_executable(kf2_overlay_window_test
     windows/overlay_window_test.cpp
 )
 target_include_directories(kf2_overlay_window_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
+target_include_directories(kf2_overlay_window_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/src/overlay")
 target_link_libraries(kf2_overlay_window_test PRIVATE user32 gdi32 d2d1 dwrite)
 add_test(NAME kf2_overlay_window_test COMMAND kf2_overlay_window_test)
 
