@@ -11,8 +11,8 @@
 namespace {
 
 std::string telemetry_line(int sample, int corpse_awake = 2) {
-    return "ScriptLog: KF2OPT_TELEMETRY schema=6 sample=" +
-        std::to_string(sample) +
+    return "ScriptLog: KF2OPT_TELEMETRY schema=7 sample=" +
+        std::to_string(sample) + " scan_diagnostics=1" +
         " living=23 living_classes=7 living_bosses=1 living_visible=18"
         " living_offscreen=5 living_lod_total=31"
         " living_anim_rate_total=1380 living_injured_zones=9"
@@ -74,7 +74,7 @@ std::string telemetry_line(int sample, int corpse_awake = 2) {
 
 std::string empty_telemetry_line() {
     return
-        "ScriptLog: KF2OPT_TELEMETRY schema=6 sample=1"
+        "ScriptLog: KF2OPT_TELEMETRY schema=7 sample=1 scan_diagnostics=1"
         " living=1 living_classes=1 living_bosses=0 living_visible=1"
         " living_offscreen=0 living_lod_total=0 living_anim_rate_total=60"
         " living_injured_zones=0"
@@ -775,10 +775,31 @@ int main() {
     CHECK(describe_game_log_session(*probe).find(
               L"probe: 23 living, 8 corpses (2 active/5 sleeping), 7 detached limbs, 2 ragdoll warnings, 11 gibs, 35 decals, particles 345 gore/987 world (4 ground-fire/5 impact components), effects 6 spray/5 explosion actors, Zed Time active") !=
           std::wstring::npos);
+    GameLogSessionParser diagnostics_off_stream;
+    CHECK(diagnostics_off_stream.feed(
+        "[1] Log: LoadMap: KF-BioticsLab\n").has_value());
+    CHECK(diagnostics_off_stream.feed(
+        "[2] ScriptLog: WI.NetMode:  NM_Standalone\n").has_value());
+    CHECK(diagnostics_off_stream.feed(telemetry_line(1)).has_value());
+    const auto diagnostics_off = diagnostics_off_stream.feed(
+        replace_once(telemetry_line(2), " scan_diagnostics=1",
+                     " scan_diagnostics=0"));
+    CHECK(diagnostics_off.has_value());
+    CHECK(diagnostics_off->telemetry_living_zeds == 23);
+    CHECK(diagnostics_off->telemetry_living_visible == 18);
+    CHECK(diagnostics_off->telemetry_corpse_total == 8);
+    CHECK(diagnostics_off->telemetry_corpse_awake == 2);
+    CHECK(!diagnostics_off->telemetry_living_classes.has_value());
+    CHECK(!diagnostics_off->telemetry_living_required_bones.has_value());
+    CHECK(!diagnostics_off->telemetry_living_special_moves.has_value());
+    CHECK(!diagnostics_off->telemetry_corpse_final_pose.has_value());
+    CHECK(!diagnostics_off->telemetry_corpse_lod_total.has_value());
+    CHECK(!diagnostics_off->telemetry_dismembered_corpses.has_value());
+    CHECK(diagnostics_off->telemetry_corpse_collide_dead == true);
     CHECK(!stream.feed(telemetry_line(8, 4),
                        4'600'000'000ULL).has_value());
     // Previous telemetry schemas remain unsupported rather than being parsed
-    // as the exact positional schema 6 contract.
+    // as the exact positional schema 7 contract.
     CHECK(!stream.feed(
         "ScriptLog: KF2OPT_TELEMETRY schema=1 sample=9 living=23\n",
         4'700'000'000ULL).has_value());

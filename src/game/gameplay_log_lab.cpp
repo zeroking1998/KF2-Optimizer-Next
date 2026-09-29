@@ -73,6 +73,8 @@ constexpr std::wstring_view kAdaptiveCorpseDebugMarkersKey =
     L"bAdaptiveCorpseDebugMarkers";
 constexpr std::wstring_view kAdaptiveZedDebugMarkersKey =
     L"bAdaptiveZedDebugMarkers";
+constexpr std::wstring_view kDetailedRuntimeDiagnosticsKey =
+    L"bDetailedRuntimeDiagnostics";
 constexpr std::wstring_view kAdaptiveCorpseMaximumKey =
     L"AdaptiveCorpseMaximum";
 constexpr std::wstring_view kAdaptiveTargetFpsKey = L"AdaptiveTargetFPS";
@@ -364,7 +366,8 @@ Result<bool> enable_offline_gameplay_logging(
     int adaptive_quality_change_budget,
     std::string_view adaptive_control_token,
     bool adaptive_zed_debug_markers,
-    bool adaptive_runtime_enabled) {
+    bool adaptive_runtime_enabled,
+    bool detailed_runtime_diagnostics) {
     if (config_root.empty() || !config_root.is_absolute()) {
         return Result<bool>::failure(
             {ErrorCode::invalid_argument,
@@ -372,7 +375,8 @@ Result<bool> enable_offline_gameplay_logging(
     }
     const bool configured_session = adaptive_corpse_maximum != 0 ||
         adaptive_target_fps != 0 || adaptive_corpse_debug_markers ||
-        adaptive_zed_debug_markers || !adaptive_control_token.empty();
+        adaptive_zed_debug_markers || detailed_runtime_diagnostics ||
+        !adaptive_control_token.empty();
     if ((configured_session &&
          (adaptive_corpse_maximum < 4 || adaptive_corpse_maximum > 2000 ||
           !optimizer::valid_target_fps(adaptive_target_fps) ||
@@ -600,6 +604,26 @@ Result<bool> enable_offline_gameplay_logging(
             {ErrorCode::invalid_argument,
              L"Adaptive Zed debug-marker setting is ambiguous", 0});
     }
+    if (const auto current_diagnostics = engine.value().find(
+            kTelemetrySection, kDetailedRuntimeDiagnosticsKey);
+        current_diagnostics) {
+        const auto diagnostics_boolean = normalized_boolean(
+            *current_diagnostics);
+        if (diagnostics_boolean != L"true" &&
+            diagnostics_boolean != L"false") {
+            return Result<bool>::failure(
+                {ErrorCode::invalid_argument,
+                 L"Detailed runtime-diagnostics setting is malformed", 0});
+        }
+    }
+    const auto diagnostics_replaced = engine.value().upsert(
+        kTelemetrySection, kDetailedRuntimeDiagnosticsKey,
+        detailed_runtime_diagnostics ? L"True" : L"False");
+    if (diagnostics_replaced.shadowed_occurrences != 0) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"Detailed runtime-diagnostics setting is ambiguous", 0});
+    }
     const auto target_replaced = engine.value().upsert(
         kTelemetrySection, kAdaptiveTargetFpsKey,
         std::to_wstring(adaptive_target_fps));
@@ -629,7 +653,8 @@ Result<bool> enable_offline_gameplay_logging(
         local_options_replaced.changed || runtime_path_appended.changed ||
         startup_package_removed.changed || stagger_replaced.changed ||
         runtime_enabled_replaced.changed || markers_replaced.changed ||
-        zed_markers_replaced.changed || maximum_replaced.changed ||
+        zed_markers_replaced.changed || diagnostics_replaced.changed ||
+        maximum_replaced.changed ||
         target_replaced.changed || quality_budget_replaced.changed ||
         control_token_replaced.changed || logging_baseline_changed;
     if (!logging_changed && !engine_changed) {
@@ -716,6 +741,10 @@ Result<bool> enable_offline_gameplay_logging(
         ? verified_engine.value().find(
               kTelemetrySection, kAdaptiveZedDebugMarkersKey)
         : std::optional<std::wstring>{};
+    const auto verified_diagnostics = verified_engine.has_value()
+        ? verified_engine.value().find(
+              kTelemetrySection, kDetailedRuntimeDiagnosticsKey)
+        : std::optional<std::wstring>{};
     const auto verified_target = verified_engine.has_value()
         ? verified_engine.value().find(kTelemetrySection, kAdaptiveTargetFpsKey)
         : std::optional<std::wstring>{};
@@ -753,6 +782,9 @@ Result<bool> enable_offline_gameplay_logging(
         !verified_zed_markers ||
         normalized_boolean(*verified_zed_markers) !=
             (adaptive_zed_debug_markers ? L"true" : L"false") ||
+        !verified_diagnostics ||
+        normalized_boolean(*verified_diagnostics) !=
+            (detailed_runtime_diagnostics ? L"true" : L"false") ||
         !verified_maximum ||
         *verified_maximum != std::to_wstring(adaptive_corpse_maximum) ||
         !verified_target ||

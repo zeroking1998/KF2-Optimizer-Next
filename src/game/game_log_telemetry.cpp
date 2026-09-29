@@ -7,6 +7,7 @@ namespace {
 
 struct OfflineTelemetrySnapshot {
     int sample{0};
+    bool scan_diagnostics{false};
     int living{0};
     int living_classes{0};
     int living_bosses{0};
@@ -123,11 +124,11 @@ struct OfflineTelemetrySnapshot {
 
 std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
     std::string_view line) {
-    // Schema 6 is an exact positional contract. Older schemas remain ignored;
+    // Schema 7 is an exact positional contract. Older schemas remain ignored;
     // adding or reordering a required field needs a new schema or synchronized
     // producer, parser and contract-test updates.
     constexpr std::string_view marker =
-        "KF2OPT_TELEMETRY schema=6 sample=";
+        "KF2OPT_TELEMETRY schema=7 sample=";
     const auto marker_position = line.find(marker);
     if (marker_position == std::string_view::npos) return std::nullopt;
     auto payload = line.substr(marker_position + marker.size());
@@ -156,7 +157,9 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
     constexpr int entity_max = 100'000;
     constexpr int aggregate_max = 100'000'000;
     constexpr int runtime_max = 1'000'000'000;
-    const auto sample = take(" living=", std::numeric_limits<int>::max());
+    const auto sample = take(
+        " scan_diagnostics=", std::numeric_limits<int>::max());
+    const auto scan_diagnostics = take(" living=", 1);
     const auto living = take(" living_classes=", entity_max);
     const auto living_classes = take(" living_bosses=", entity_max);
     const auto living_bosses = take(" living_visible=", entity_max);
@@ -293,7 +296,8 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
     const auto flex_particles = take(" flex_surrogate_visible=", aggregate_max);
     const auto flex_visible = take(" flex_surrogate_lod=", 1);
     const auto flex_lod = take({}, entity_max);
-    if (!sample || *sample <= 0 || !living || !total || !awake || !sleeping ||
+    if (!sample || *sample <= 0 || !scan_diagnostics || !living || !total ||
+        !awake || !sleeping ||
         !living_classes || !living_bosses || !living_visible ||
         !living_offscreen || !living_lod_total || !living_anim_rate_total ||
         !living_injured_zones || !living_required_bones ||
@@ -392,6 +396,7 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
         return std::nullopt;
     }
     result.sample = *sample;
+    result.scan_diagnostics = *scan_diagnostics != 0;
     result.living = *living;
     result.living_classes = *living_classes;
     result.living_bosses = *living_bosses;
@@ -522,51 +527,20 @@ bool apply_offline_telemetry_snapshot(
         if (!target || *target != value) changed = true;
         target = value;
     };
+    const auto reset = [&changed](auto& target) noexcept {
+        if (target) changed = true;
+        target.reset();
+    };
     update(session.telemetry_sample, telemetry.sample);
     update(session.telemetry_living_zeds, telemetry.living);
-    update(session.telemetry_living_classes, telemetry.living_classes);
-    update(session.telemetry_living_bosses, telemetry.living_bosses);
     update(session.telemetry_living_visible, telemetry.living_visible);
     update(session.telemetry_living_offscreen, telemetry.living_offscreen);
-    update(session.telemetry_living_lod_total, telemetry.living_lod_total);
-    update(session.telemetry_living_anim_rate_total, telemetry.living_anim_rate_total);
-    update(session.telemetry_living_injured_zones, telemetry.living_injured_zones);
-    update(session.telemetry_living_required_bones, telemetry.living_required_bones);
-    update(session.telemetry_living_material_slots, telemetry.living_material_slots);
-    update(session.telemetry_living_attachments, telemetry.living_attachments);
-    update(session.telemetry_living_anim_skipped, telemetry.living_anim_skipped);
-    update(
-        session.telemetry_living_bone_atoms_skipped,
-        telemetry.living_bone_atoms_skipped);
-    update(
-        session.telemetry_living_bone_interpolation,
-        telemetry.living_bone_interpolation);
-    update(
-        session.telemetry_living_kinematic_distance_skipped,
-        telemetry.living_kinematic_distance_skipped);
-    update(session.telemetry_living_ticks_offscreen, telemetry.living_ticks_offscreen);
-    update(
-        session.telemetry_living_updates_skeleton_offscreen,
-        telemetry.living_updates_skeleton_offscreen);
-    update(session.telemetry_living_special_moves, telemetry.living_special_moves);
-    update(session.telemetry_living_attack_moves, telemetry.living_attack_moves);
-    update(session.telemetry_living_grapple_moves, telemetry.living_grapple_moves);
-    update(session.telemetry_living_stumbles, telemetry.living_stumbles);
-    update(session.telemetry_living_knockdowns, telemetry.living_knockdowns);
-    update(session.telemetry_living_hit_reactions, telemetry.living_hit_reactions);
-    update(
-        session.telemetry_living_other_special_moves,
-        telemetry.living_other_special_moves);
     update(session.telemetry_corpse_total, telemetry.corpse_total);
     update(session.telemetry_corpse_awake, telemetry.corpse_awake);
     update(session.telemetry_corpse_sleeping, telemetry.corpse_sleeping);
     update(session.telemetry_corpse_other, telemetry.corpse_other);
-    update(session.telemetry_corpse_final_pose, telemetry.corpse_final);
     update(session.telemetry_corpse_visible, telemetry.corpse_visible);
     update(session.telemetry_corpse_offscreen, telemetry.corpse_offscreen);
-    update(session.telemetry_corpse_lod_total, telemetry.corpse_lod_total);
-    update(session.telemetry_corpse_injured_zones, telemetry.corpse_injured_zones);
-    update(session.telemetry_corpse_max_age_ms, telemetry.corpse_max_age_ms);
     update(session.telemetry_corpse_limit, telemetry.corpse_limit);
     update(
         session.telemetry_corpse_offscreen_time_ms,
@@ -574,10 +548,89 @@ bool apply_offline_telemetry_snapshot(
     update(
         session.telemetry_corpse_offscreen_distance,
         telemetry.corpse_offscreen_distance);
-    update(session.telemetry_dismembered_corpses, telemetry.dismembered);
-    update(session.telemetry_dismembered_limbs, telemetry.dismembered_limbs);
-    update(session.telemetry_ragdoll_warned_corpses, telemetry.ragdoll_warned);
-    update(session.telemetry_ragdoll_warning_max, telemetry.ragdoll_warning_max);
+    if (telemetry.scan_diagnostics) {
+        update(session.telemetry_living_classes, telemetry.living_classes);
+        update(session.telemetry_living_bosses, telemetry.living_bosses);
+        update(session.telemetry_living_lod_total, telemetry.living_lod_total);
+        update(session.telemetry_living_anim_rate_total,
+               telemetry.living_anim_rate_total);
+        update(session.telemetry_living_injured_zones,
+               telemetry.living_injured_zones);
+        update(session.telemetry_living_required_bones,
+               telemetry.living_required_bones);
+        update(session.telemetry_living_material_slots,
+               telemetry.living_material_slots);
+        update(session.telemetry_living_attachments,
+               telemetry.living_attachments);
+        update(session.telemetry_living_anim_skipped,
+               telemetry.living_anim_skipped);
+        update(session.telemetry_living_bone_atoms_skipped,
+               telemetry.living_bone_atoms_skipped);
+        update(session.telemetry_living_bone_interpolation,
+               telemetry.living_bone_interpolation);
+        update(session.telemetry_living_kinematic_distance_skipped,
+               telemetry.living_kinematic_distance_skipped);
+        update(session.telemetry_living_ticks_offscreen,
+               telemetry.living_ticks_offscreen);
+        update(session.telemetry_living_updates_skeleton_offscreen,
+               telemetry.living_updates_skeleton_offscreen);
+        update(session.telemetry_living_special_moves,
+               telemetry.living_special_moves);
+        update(session.telemetry_living_attack_moves,
+               telemetry.living_attack_moves);
+        update(session.telemetry_living_grapple_moves,
+               telemetry.living_grapple_moves);
+        update(session.telemetry_living_stumbles, telemetry.living_stumbles);
+        update(session.telemetry_living_knockdowns,
+               telemetry.living_knockdowns);
+        update(session.telemetry_living_hit_reactions,
+               telemetry.living_hit_reactions);
+        update(session.telemetry_living_other_special_moves,
+               telemetry.living_other_special_moves);
+        update(session.telemetry_corpse_final_pose, telemetry.corpse_final);
+        update(session.telemetry_corpse_lod_total, telemetry.corpse_lod_total);
+        update(session.telemetry_corpse_injured_zones,
+               telemetry.corpse_injured_zones);
+        update(session.telemetry_corpse_max_age_ms,
+               telemetry.corpse_max_age_ms);
+        update(session.telemetry_dismembered_corpses, telemetry.dismembered);
+        update(session.telemetry_dismembered_limbs,
+               telemetry.dismembered_limbs);
+        update(session.telemetry_ragdoll_warned_corpses,
+               telemetry.ragdoll_warned);
+        update(session.telemetry_ragdoll_warning_max,
+               telemetry.ragdoll_warning_max);
+    } else {
+        reset(session.telemetry_living_classes);
+        reset(session.telemetry_living_bosses);
+        reset(session.telemetry_living_lod_total);
+        reset(session.telemetry_living_anim_rate_total);
+        reset(session.telemetry_living_injured_zones);
+        reset(session.telemetry_living_required_bones);
+        reset(session.telemetry_living_material_slots);
+        reset(session.telemetry_living_attachments);
+        reset(session.telemetry_living_anim_skipped);
+        reset(session.telemetry_living_bone_atoms_skipped);
+        reset(session.telemetry_living_bone_interpolation);
+        reset(session.telemetry_living_kinematic_distance_skipped);
+        reset(session.telemetry_living_ticks_offscreen);
+        reset(session.telemetry_living_updates_skeleton_offscreen);
+        reset(session.telemetry_living_special_moves);
+        reset(session.telemetry_living_attack_moves);
+        reset(session.telemetry_living_grapple_moves);
+        reset(session.telemetry_living_stumbles);
+        reset(session.telemetry_living_knockdowns);
+        reset(session.telemetry_living_hit_reactions);
+        reset(session.telemetry_living_other_special_moves);
+        reset(session.telemetry_corpse_final_pose);
+        reset(session.telemetry_corpse_lod_total);
+        reset(session.telemetry_corpse_injured_zones);
+        reset(session.telemetry_corpse_max_age_ms);
+        reset(session.telemetry_dismembered_corpses);
+        reset(session.telemetry_dismembered_limbs);
+        reset(session.telemetry_ragdoll_warned_corpses);
+        reset(session.telemetry_ragdoll_warning_max);
+    }
     update(session.telemetry_corpse_collide_dead, telemetry.corpse_collide_dead);
     update(session.telemetry_corpse_collide_living, telemetry.corpse_collide_living);
     update(

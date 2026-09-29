@@ -232,6 +232,7 @@ var globalconfig bool bAdaptiveCorpseStagger;
 var globalconfig bool bAdaptiveRuntimeEnabled;
 var globalconfig bool bAdaptiveCorpseDebugMarkers;
 var globalconfig bool bAdaptiveZedDebugMarkers;
+var globalconfig bool bDetailedRuntimeDiagnostics;
 var globalconfig int AdaptiveCorpseMaximum;
 var globalconfig int AdaptiveTargetFPS;
 var globalconfig int AdaptiveQualityChangeBudget;
@@ -5614,12 +5615,12 @@ event PreBeginPlay()
 
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
     {
-        `log("KF2OPT_TELEMETRY schema=6 state=blocked reason=not_standalone");
+        `log("KF2OPT_TELEMETRY schema=7 state=blocked reason=not_standalone");
         Destroy();
         return;
     }
 
-    `log("KF2OPT_TELEMETRY schema=6 state=started net=standalone");
+    `log("KF2OPT_TELEMETRY schema=7 state=started net=standalone");
     SetTimer(1.0, true, nameof(SampleTelemetry), self);
     if (bAdaptiveCorpseStagger)
     {
@@ -6296,7 +6297,7 @@ function SampleTelemetry()
 
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
     {
-        `log("KF2OPT_TELEMETRY schema=6 state=stopped reason=netmode_changed");
+        `log("KF2OPT_TELEMETRY schema=7 state=stopped reason=netmode_changed");
         Destroy();
         return;
     }
@@ -6304,89 +6305,103 @@ function SampleTelemetry()
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=sample_begin");
 
-    bSubmitNativeProfileNodes = ((SampleSequence + 1) % 10 == 0);
-    ProfileTotalStartMilliseconds = GetProfileSystemMilliseconds();
+    bSubmitNativeProfileNodes = bDetailedRuntimeDiagnostics &&
+        ((SampleSequence + 1) % 10 == 0);
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileTotalStartMilliseconds = GetProfileSystemMilliseconds();
+        ProfileSectionStartMilliseconds = ProfileTotalStartMilliseconds;
+    }
     if (bSubmitNativeProfileNodes)
     {
         ProfileTotalNode = ProfNodeStart("KF2OPT_Telemetry_Total");
         ProfileSectionNode = ProfNodeStart("KF2OPT_Telemetry_Living");
     }
-    ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
     AdaptiveLocalPC = GetALocalPlayerController();
     foreach WorldInfo.AllPawns(class'KFPawn_Monster', Zed)
     {
         if (Zed != None && Zed.IsAliveAndWell())
         {
             ++LivingZeds;
-            if (LivingClasses.Find(Zed.Class) == INDEX_None)
+            if (bDetailedRuntimeDiagnostics)
             {
-                LivingClasses.AddItem(Zed.Class);
-            }
-            if (Zed.IsABoss()) ++LivingBosses;
-            if (Zed.SpecialMove != SM_None)
-            {
-                ++LivingSpecialMoves;
-                switch (Zed.SpecialMove)
+                if (LivingClasses.Find(Zed.Class) == INDEX_None)
                 {
-                    case SM_MeleeAttack:
-                    case SM_MeleeAttackDoor:
-                    case SM_SonicAttack:
-                    case SM_StandAndShootAttack:
-                    case SM_HoseWeaponAttack:
-                    case SM_Suicide:
-                    case SM_PlayerZedMove_LMB:
-                    case SM_PlayerZedMove_RMB:
-                    case SM_PlayerZedMove_V:
-                    case SM_PlayerZedMove_MMB:
-                    case SM_PlayerZedMove_Q:
-                    case SM_PlayerZedMove_G:
-                    case SM_Hans_ThrowGrenade:
-                    case SM_Hans_GrenadeHalfBarrage:
-                    case SM_Hans_GrenadeBarrage:
-                        ++LivingAttackMoves;
-                        break;
-                    case SM_GrappleAttack:
-                        ++LivingGrappleMoves;
-                        break;
-                    case SM_Stumble:
-                        ++LivingStumbles;
-                        break;
-                    case SM_Knockdown:
-                        ++LivingKnockdowns;
-                        break;
-                    case SM_RecoverFromRagdoll:
-                    case SM_DeathAnim:
-                    case SM_Stunned:
-                    case SM_Frozen:
-                    case SM_GorgeZedVictim:
-                        ++LivingHitReactions;
-                        break;
-                    default:
-                        ++LivingOtherSpecialMoves;
-                        break;
+                    LivingClasses.AddItem(Zed.Class);
+                }
+                if (Zed.IsABoss()) ++LivingBosses;
+                if (Zed.SpecialMove != SM_None)
+                {
+                    ++LivingSpecialMoves;
+                    switch (Zed.SpecialMove)
+                    {
+                        case SM_MeleeAttack:
+                        case SM_MeleeAttackDoor:
+                        case SM_SonicAttack:
+                        case SM_StandAndShootAttack:
+                        case SM_HoseWeaponAttack:
+                        case SM_Suicide:
+                        case SM_PlayerZedMove_LMB:
+                        case SM_PlayerZedMove_RMB:
+                        case SM_PlayerZedMove_V:
+                        case SM_PlayerZedMove_MMB:
+                        case SM_PlayerZedMove_Q:
+                        case SM_PlayerZedMove_G:
+                        case SM_Hans_ThrowGrenade:
+                        case SM_Hans_GrenadeHalfBarrage:
+                        case SM_Hans_GrenadeBarrage:
+                            ++LivingAttackMoves;
+                            break;
+                        case SM_GrappleAttack:
+                            ++LivingGrappleMoves;
+                            break;
+                        case SM_Stumble:
+                            ++LivingStumbles;
+                            break;
+                        case SM_Knockdown:
+                            ++LivingKnockdowns;
+                            break;
+                        case SM_RecoverFromRagdoll:
+                        case SM_DeathAnim:
+                        case SM_Stunned:
+                        case SM_Frozen:
+                        case SM_GorgeZedVictim:
+                            ++LivingHitReactions;
+                            break;
+                        default:
+                            ++LivingOtherSpecialMoves;
+                            break;
+                    }
                 }
             }
             if (Zed.Mesh != None)
             {
-                LivingLodTotal += Zed.Mesh.PredictedLODLevel;
-                LivingAnimationLodTotal += Zed.Mesh.AnimationLODFrameRate;
-                LivingRequiredBones += Zed.Mesh.RequiredBones.Length;
-                LivingMaterialSlots += Zed.Mesh.Materials.Length;
-                LivingAttachments += Zed.Mesh.Attachments.Length;
-                if (Zed.Mesh.bSkipTickAnimNodes) ++LivingAnimSkipped;
-                if (Zed.Mesh.bSkipGetBoneAtoms) ++LivingBoneAtomsSkipped;
-                if (Zed.Mesh.bInterpolateBoneAtoms) ++LivingBoneInterpolation;
-                if (Zed.Mesh.bNotUpdatingKinematicDueToDistance)
+                if (bDetailedRuntimeDiagnostics)
                 {
-                    ++LivingKinematicDistanceSkipped;
-                }
-                if (Zed.Mesh.bTickAnimNodesWhenNotRendered)
-                {
-                    ++LivingTicksOffscreen;
-                }
-                if (Zed.Mesh.bUpdateSkelWhenNotRendered)
-                {
-                    ++LivingUpdatesSkeletonOffscreen;
+                    LivingLodTotal += Zed.Mesh.PredictedLODLevel;
+                    LivingAnimationLodTotal +=
+                        Zed.Mesh.AnimationLODFrameRate;
+                    LivingRequiredBones += Zed.Mesh.RequiredBones.Length;
+                    LivingMaterialSlots += Zed.Mesh.Materials.Length;
+                    LivingAttachments += Zed.Mesh.Attachments.Length;
+                    if (Zed.Mesh.bSkipTickAnimNodes) ++LivingAnimSkipped;
+                    if (Zed.Mesh.bSkipGetBoneAtoms) ++LivingBoneAtomsSkipped;
+                    if (Zed.Mesh.bInterpolateBoneAtoms)
+                    {
+                        ++LivingBoneInterpolation;
+                    }
+                    if (Zed.Mesh.bNotUpdatingKinematicDueToDistance)
+                    {
+                        ++LivingKinematicDistanceSkipped;
+                    }
+                    if (Zed.Mesh.bTickAnimNodesWhenNotRendered)
+                    {
+                        ++LivingTicksOffscreen;
+                    }
+                    if (Zed.Mesh.bUpdateSkelWhenNotRendered)
+                    {
+                        ++LivingUpdatesSkeletonOffscreen;
+                    }
                 }
                 if (Zed.Mesh.LastRenderTime > WorldInfo.TimeSeconds - 0.3)
                 {
@@ -6413,14 +6428,20 @@ function SampleTelemetry()
                     ++LivingOffscreen;
                 }
             }
-            LivingInjuredZones += CountBits(Zed.InjuredHitZones);
+            if (bDetailedRuntimeDiagnostics)
+            {
+                LivingInjuredZones += CountBits(Zed.InjuredHitZones);
+            }
         }
     }
-    ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
-        ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
-    ProfileLivingMilliseconds += ProfileElapsedMilliseconds;
-    ProfileMaxLivingMilliseconds = Max(
-        ProfileMaxLivingMilliseconds, ProfileElapsedMilliseconds);
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
+            ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
+        ProfileLivingMilliseconds += ProfileElapsedMilliseconds;
+        ProfileMaxLivingMilliseconds = Max(
+            ProfileMaxLivingMilliseconds, ProfileElapsedMilliseconds);
+    }
     if (bSubmitNativeProfileNodes)
     {
         ProfNodeStop(ProfileSectionNode);
@@ -6448,7 +6469,10 @@ function SampleTelemetry()
     {
         ProfileSectionNode = ProfNodeStart("KF2OPT_Telemetry_CorpseGore");
     }
-    ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
+    }
     AdaptiveCachedVisibleCorpses = 0;
     AdaptiveCachedVisibleAwakeCorpses = 0;
     AdaptiveCachedAwakeCorpses = 0;
@@ -6463,17 +6487,16 @@ function SampleTelemetry()
             }
             ++CorpseTotal;
             CollisionProbeCorpse = Corpse;
-            if (Corpse.bHasBrokenConstraints)
-            {
-                ++DismemberedCorpses;
-            }
-            if (Corpse.Mesh != None && Corpse.Mesh.bNoSkeletonUpdate)
-            {
-                ++CorpseFinalPose;
-            }
             if (Corpse.Mesh != None)
             {
-                CorpseLodTotal += Corpse.Mesh.PredictedLODLevel;
+                if (bDetailedRuntimeDiagnostics)
+                {
+                    CorpseLodTotal += Corpse.Mesh.PredictedLODLevel;
+                    if (Corpse.Mesh.bNoSkeletonUpdate)
+                    {
+                        ++CorpseFinalPose;
+                    }
+                }
                 if (Corpse.Mesh.LastRenderTime > WorldInfo.TimeSeconds - 0.3)
                 {
                     ++CorpseRecentlyRendered;
@@ -6509,27 +6532,35 @@ function SampleTelemetry()
                     ++AdaptiveCachedAwakeCorpses;
                 }
             }
-            CorpseInjuredZones += CountBits(Corpse.InjuredHitZones);
-            for (HitZoneIndex = 0;
-                 HitZoneIndex < Corpse.HitZones.Length;
-                 ++HitZoneIndex)
+            if (bDetailedRuntimeDiagnostics)
             {
-                if (Corpse.HitZones[HitZoneIndex].bPlayedInjury)
+                if (Corpse.bHasBrokenConstraints)
                 {
-                    ++DismemberedLimbs;
+                    ++DismemberedCorpses;
                 }
-            }
-            if (Corpse.RagdollWarningLevel > 0)
-            {
-                ++RagdollWarnedCorpses;
-                MaximumRagdollWarningLevel = Max(
-                    MaximumRagdollWarningLevel,
-                    Corpse.RagdollWarningLevel);
-            }
-            if (Corpse.TimeOfDeath > 0.0)
-            {
-                MaxCorpseAgeMs = Max(MaxCorpseAgeMs,
-                    int((WorldInfo.TimeSeconds - Corpse.TimeOfDeath) * 1000.0));
+                CorpseInjuredZones += CountBits(Corpse.InjuredHitZones);
+                for (HitZoneIndex = 0;
+                     HitZoneIndex < Corpse.HitZones.Length;
+                     ++HitZoneIndex)
+                {
+                    if (Corpse.HitZones[HitZoneIndex].bPlayedInjury)
+                    {
+                        ++DismemberedLimbs;
+                    }
+                }
+                if (Corpse.RagdollWarningLevel > 0)
+                {
+                    ++RagdollWarnedCorpses;
+                    MaximumRagdollWarningLevel = Max(
+                        MaximumRagdollWarningLevel,
+                        Corpse.RagdollWarningLevel);
+                }
+                if (Corpse.TimeOfDeath > 0.0)
+                {
+                    MaxCorpseAgeMs = Max(MaxCorpseAgeMs,
+                        int((WorldInfo.TimeSeconds - Corpse.TimeOfDeath) *
+                            1000.0));
+                }
             }
             if (Corpse.Physics != PHYS_RigidBody || Corpse.Mesh == None)
             {
@@ -6633,11 +6664,14 @@ function SampleTelemetry()
                           ParticleBurstEntries,
                            ParticlePeakCapacity);
     }
-    ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
-        ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
-    ProfileCorpseGoreMilliseconds += ProfileElapsedMilliseconds;
-    ProfileMaxCorpseGoreMilliseconds = Max(
-        ProfileMaxCorpseGoreMilliseconds, ProfileElapsedMilliseconds);
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
+            ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
+        ProfileCorpseGoreMilliseconds += ProfileElapsedMilliseconds;
+        ProfileMaxCorpseGoreMilliseconds = Max(
+            ProfileMaxCorpseGoreMilliseconds, ProfileElapsedMilliseconds);
+    }
     if (bSubmitNativeProfileNodes)
     {
         ProfNodeStop(ProfileSectionNode);
@@ -6675,7 +6709,10 @@ function SampleTelemetry()
     {
         ProfileSectionNode = ProfNodeStart("KF2OPT_Telemetry_ParticlePools");
     }
-    ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
+    }
     if (WorldInfo.MyEmitterPool != None)
     {
         WorldParticlePoolCapacity = Max(
@@ -6749,11 +6786,14 @@ function SampleTelemetry()
     WorldParticleVisibleComponents += ImpactParticleVisibleComponents;
     WorldParticleLodTotal += ImpactParticleLodTotal;
     WorldParticleBoundedComponents += ImpactParticleBoundedComponents;
-    ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
-        ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
-    ProfileParticlePoolMilliseconds += ProfileElapsedMilliseconds;
-    ProfileMaxParticlePoolMilliseconds = Max(
-        ProfileMaxParticlePoolMilliseconds, ProfileElapsedMilliseconds);
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
+            ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
+        ProfileParticlePoolMilliseconds += ProfileElapsedMilliseconds;
+        ProfileMaxParticlePoolMilliseconds = Max(
+            ProfileMaxParticlePoolMilliseconds, ProfileElapsedMilliseconds);
+    }
     if (bSubmitNativeProfileNodes)
     {
         ProfNodeStop(ProfileSectionNode);
@@ -6765,7 +6805,10 @@ function SampleTelemetry()
     {
         ProfileSectionNode = ProfNodeStart("KF2OPT_Telemetry_EffectActors");
     }
-    ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
+    }
     ImpactEffectManager = KFImpactEffectManager(WorldInfo.MyImpactEffectManager);
     if (ImpactEffectManager != None &&
         ImpactEffectManager.ImpactEffectDecalManager != None)
@@ -6833,11 +6876,14 @@ function SampleTelemetry()
         }
     }
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=surrogate_done");
-    ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
-        ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
-    ProfileEffectActorMilliseconds += ProfileElapsedMilliseconds;
-    ProfileMaxEffectActorMilliseconds = Max(
-        ProfileMaxEffectActorMilliseconds, ProfileElapsedMilliseconds);
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
+            ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
+        ProfileEffectActorMilliseconds += ProfileElapsedMilliseconds;
+        ProfileMaxEffectActorMilliseconds = Max(
+            ProfileMaxEffectActorMilliseconds, ProfileElapsedMilliseconds);
+    }
     if (bSubmitNativeProfileNodes)
     {
         ProfNodeStop(ProfileSectionNode);
@@ -6847,7 +6893,10 @@ function SampleTelemetry()
     {
         ProfileSectionNode = ProfNodeStart("KF2OPT_Telemetry_WorldEmitters");
     }
-    ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
+    }
     bCollectWorldParticleGroups = SampleSequence == 0 ||
         SampleSequence % WorldParticleGroupScanInterval == 5;
     if (bCollectWorldParticleGroups)
@@ -6894,11 +6943,14 @@ function SampleTelemetry()
     ParticleBurstEntries += CachedWorldEmitters.BurstEntries;
     ParticlePeakCapacity = Max(
         ParticlePeakCapacity, CachedWorldEmitters.PeakCapacity);
-    ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
-        ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
-    ProfileWorldEmitterMilliseconds += ProfileElapsedMilliseconds;
-    ProfileMaxWorldEmitterMilliseconds = Max(
-        ProfileMaxWorldEmitterMilliseconds, ProfileElapsedMilliseconds);
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
+            ProfileSectionStartMilliseconds, GetProfileSystemMilliseconds());
+        ProfileWorldEmitterMilliseconds += ProfileElapsedMilliseconds;
+        ProfileMaxWorldEmitterMilliseconds = Max(
+            ProfileMaxWorldEmitterMilliseconds, ProfileElapsedMilliseconds);
+    }
     if (bSubmitNativeProfileNodes)
     {
         ProfNodeStop(ProfileSectionNode);
@@ -6918,19 +6970,22 @@ function SampleTelemetry()
     {
         ProfNodeStop(ProfileTotalNode);
     }
-    ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
-        ProfileTotalStartMilliseconds, GetProfileSystemMilliseconds());
-    ProfileTotalMilliseconds += ProfileElapsedMilliseconds;
-    ProfileMaxTotalMilliseconds = Max(
-        ProfileMaxTotalMilliseconds, ProfileElapsedMilliseconds);
-    ++ProfileWindowSamples;
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
+            ProfileTotalStartMilliseconds, GetProfileSystemMilliseconds());
+        ProfileTotalMilliseconds += ProfileElapsedMilliseconds;
+        ProfileMaxTotalMilliseconds = Max(
+            ProfileMaxTotalMilliseconds, ProfileElapsedMilliseconds);
+        ++ProfileWindowSamples;
+    }
     ++SampleSequence;
     // KF2's shipping client exposes Clock/UnClock but returned zero for every
     // section during the real 2026-09-01 gameplay run. Report an honest,
     // accumulated one-millisecond wall-clock window instead of manufacturing
     // microsecond precision. Native profiler nodes are also submitted on the
     // receipt sample for a future engine-profiler capture.
-    if (SampleSequence % 10 == 0)
+    if (bDetailedRuntimeDiagnostics && SampleSequence % 10 == 0)
     {
         ProfileUnclassifiedMilliseconds = Max(0,
             ProfileTotalMilliseconds - ProfileLivingMilliseconds -
@@ -7005,7 +7060,8 @@ function SampleTelemetry()
         ProfileMaxZedDebugMilliseconds = 0;
         ProfileClockAnomalies = 0;
     }
-    `log("KF2OPT_TELEMETRY schema=6 sample="$SampleSequence$
+    `log("KF2OPT_TELEMETRY schema=7 sample="$SampleSequence$
+         " scan_diagnostics="$(bDetailedRuntimeDiagnostics ? 1 : 0)$
          " living="$LivingZeds$
          " living_classes="$LivingClasses.Length$
          " living_bosses="$LivingBosses$
@@ -7253,7 +7309,7 @@ function QuiesceForWorldTeardown()
     bAdaptiveDebugMarkerRenderConfirmed = false;
     AdaptiveCorpsePhysicsActionIds.Length = 0;
     AdaptiveCorpsePhysicsActionIdCount = 0;
-    `log("KF2OPT_TELEMETRY schema=6 state=stopped reason=world_teardown");
+    `log("KF2OPT_TELEMETRY schema=7 state=stopped reason=world_teardown");
 }
 
 event Destroyed()
@@ -7269,6 +7325,7 @@ defaultproperties
     RemoteRole=ROLE_None
     bAdaptiveCorpseDebugMarkers=false
     bAdaptiveZedDebugMarkers=false
+    bDetailedRuntimeDiagnostics=false
     AdaptiveLivingEnemyPendingPressureLevel=-1
     AdaptiveLastPhysicsMutationWorldTime=-1.0
     bAdaptiveRuntimeEnabled=true

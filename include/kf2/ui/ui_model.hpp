@@ -67,6 +67,7 @@ struct UiStatus {
     bool debug_corpse_markers{false};
     bool debug_zed_markers{false};
     bool debug_flex_diagnostics{false};
+    bool debug_runtime_diagnostics{false};
     bool debug_corpse_physics_control{false};
     std::wstring overlay_position{L"top right"};
     int overlay_scale_percent{100};

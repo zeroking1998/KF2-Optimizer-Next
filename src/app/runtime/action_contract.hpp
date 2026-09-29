@@ -80,6 +80,7 @@ enum class ActionId : std::uint16_t {
     settings_adaptive_toggle = 130,
     debug_corpse_physics_control = 131,
     debug_flex_diagnostics = 132,
+    debug_runtime_diagnostics = 133,
 };
 
 enum class ControlId : std::uint8_t {

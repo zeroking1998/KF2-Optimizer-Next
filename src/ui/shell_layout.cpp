@@ -731,6 +731,11 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                        ? L"FLEX RUNTIME DIAGNOSTICS: ON"
                        : L"FLEX RUNTIME DIAGNOSTICS: OFF",
                    true, status.debug_flex_diagnostics);
+        add_action("debug-runtime-diagnostics",
+                   status.debug_runtime_diagnostics
+                       ? L"RUNTIME SCAN DIAGNOSTICS: ON"
+                       : L"RUNTIME SCAN DIAGNOSTICS: OFF",
+                   true, status.debug_runtime_diagnostics);
         cursor = grid_base +
             static_cast<float>((action_index + action_columns - 1) /
                                action_columns) * kActionStride + 8.0F;

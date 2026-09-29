@@ -102,7 +102,7 @@ transition and unavailable external hardware variants.
 Issue 72 also asks for writable per-enemy animation, arbitrary per-corpse
 physics/collision mutation, exact decal events, FleX gameplay classification and
 internal solver features not exposed by the pinned KF2 ABI. The official
-read-only offline telemetry schema 6 now covers aggregate living/corpse/gib/Zed-Time,
+read-only offline telemetry schema 7 now covers aggregate living/corpse/gib/Zed-Time,
 exact detached-limb state, ragdoll warning state, all four official runtime
 corpse-collision decisions, skeletal LOD/animation, visibility, runtime budget
 and exact living-Zed special-move buckets. It also distinguishes smoke,

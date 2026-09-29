@@ -171,6 +171,13 @@ Result<Settings> parse_settings(std::string_view text) {
                         L"debug_flex_diagnostics is invalid");
                 }
                 settings.debug_flex_diagnostics = parsed.value();
+            } else if (key == "debug_runtime_diagnostics") {
+                const auto parsed = parse_boolean(value);
+                if (!parsed.has_value()) {
+                    return invalid_settings(
+                        L"debug_runtime_diagnostics is invalid");
+                }
+                settings.debug_runtime_diagnostics = parsed.value();
             } else if (key == "debug_corpse_physics_control") {
                 const auto parsed = parse_boolean(value);
                 if (!parsed.has_value()) {
@@ -418,6 +425,8 @@ std::string serialize_settings(const Settings& settings) {
            << (settings.debug_zed_markers ? "true" : "false") << '\n'
            << "debug_flex_diagnostics="
            << (settings.debug_flex_diagnostics ? "true" : "false") << '\n'
+           << "debug_runtime_diagnostics="
+           << (settings.debug_runtime_diagnostics ? "true" : "false") << '\n'
            << "debug_corpse_physics_control="
            << (settings.debug_corpse_physics_control ? "true" : "false")
            << '\n'

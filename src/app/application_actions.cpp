@@ -182,7 +182,8 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
             optimizer_settings.debug_corpse_markers,
             optimizer_settings.adaptive_quality_change_budget,
             adaptive_control_token, optimizer_settings.debug_zed_markers,
-            optimizer_settings.adaptive_optimization_enabled);
+            optimizer_settings.adaptive_optimization_enabled,
+            optimizer_settings.debug_runtime_diagnostics);
         const auto staged_policy = restaged.has_value()
             ? game::read_offline_adaptive_session_policy(
                   installation->config_root)

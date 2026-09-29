@@ -87,7 +87,7 @@ void set_ui_runtime_shutdown_probe_for_testing(
 
 using PendingPolicyRestageOperation = std::function<Result<bool>(
     const std::filesystem::path&, bool, int, int, bool, int,
-    std::string_view, bool, bool)>;
+    std::string_view, bool, bool, bool)>;
 
 using GpuProfileSettingsWriteOperation = Result<bool> (*)(
     const std::filesystem::path&, std::string_view);

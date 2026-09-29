@@ -28,8 +28,10 @@ app::runtime::DispatchResult toggle_corpse_physics_control(
     app::UiRuntime&, const app::runtime::NoPayload&);
 app::runtime::DispatchResult toggle_flex_diagnostics(
     app::UiRuntime&, const app::runtime::NoPayload&);
+app::runtime::DispatchResult toggle_runtime_diagnostics(
+    app::UiRuntime&, const app::runtime::NoPayload&);
 
-inline constexpr std::array<app::runtime::ActionImplementation, 11> kActions{{
+inline constexpr std::array<app::runtime::ActionImplementation, 12> kActions{{
     {app::runtime::ActionId::diagnostics_export_support,
      &app::runtime::bind_no_payload<&export_support>},
     {app::runtime::ActionId::diagnostics_flex_restore,
@@ -52,6 +54,8 @@ inline constexpr std::array<app::runtime::ActionImplementation, 11> kActions{{
      &app::runtime::bind_no_payload<&toggle_corpse_physics_control>},
     {app::runtime::ActionId::debug_flex_diagnostics,
      &app::runtime::bind_no_payload<&toggle_flex_diagnostics>},
+    {app::runtime::ActionId::debug_runtime_diagnostics,
+     &app::runtime::bind_no_payload<&toggle_runtime_diagnostics>},
 }};
 
 inline constexpr app::runtime::FeatureDefinition kFeature{
