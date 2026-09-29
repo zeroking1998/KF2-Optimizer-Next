@@ -24,6 +24,16 @@ inline constexpr std::uint64_t kAdaptiveBottleneckLogIntervalNs =
 inline constexpr std::uint64_t kPerformanceSampleLogIntervalNs =
     5'000'000'000ULL;
 
+[[nodiscard]] inline constexpr bool detailed_adaptive_diagnostics_enabled(
+    bool adaptive_logging, bool runtime_diagnostics) noexcept {
+    return adaptive_logging && runtime_diagnostics;
+}
+
+[[nodiscard]] inline constexpr bool should_log_adaptive_readback(
+    bool succeeded, bool detailed_diagnostics) noexcept {
+    return !succeeded || detailed_diagnostics;
+}
+
 [[nodiscard]] inline bool has_complete_performance_metrics(
     const ::kf2::telemetry::FrameMetrics& frames) noexcept {
     return frames.quality == ::kf2::telemetry::SampleQuality::good &&

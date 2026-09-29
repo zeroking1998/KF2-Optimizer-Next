@@ -448,7 +448,9 @@ void UiRuntime::update_adaptive_controller(
                 // Record the exact dispatch evidence separately from the
                 // throttled decision log. This is a request, not an APPLIED
                 // receipt; never include the authenticated bridge token.
-                if (optimizer_settings.adaptive_logging) {
+                if (telemetry_pipeline::detailed_adaptive_diagnostics_enabled(
+                        optimizer_settings.adaptive_logging,
+                        optimizer_settings.debug_runtime_diagnostics)) {
                     const auto resource_name = game::adaptive_resource_control_name(
                         runtime_selection->resource);
                     std::wostringstream request_log;
@@ -641,7 +643,11 @@ void UiRuntime::update_adaptive_controller(
     const bool log_decision = telemetry_pipeline::should_log_adaptive_decision(
         controller_changed, bottleneck_changed, now_ns,
         last_adaptive_decision_log_ns);
-    if (log_decision && optimizer_settings.adaptive_logging) {
+    const bool detailed_adaptive_diagnostics =
+        telemetry_pipeline::detailed_adaptive_diagnostics_enabled(
+            optimizer_settings.adaptive_logging,
+            optimizer_settings.debug_runtime_diagnostics);
+    if (log_decision && detailed_adaptive_diagnostics) {
         std::wostringstream decision_log;
         decision_log << L"State=" << status.adaptive_state
                      << L"; target=" << effective_target_fps()
@@ -837,7 +843,7 @@ void UiRuntime::update_adaptive_controller(
         last_adaptive_disposition = adaptive_decision.disposition;
         last_adaptive_bottleneck = adaptive_decision.bottleneck.type;
         last_adaptive_decision_log_ns = now_ns;
-    } else if (!optimizer_settings.adaptive_logging) {
+    } else if (!detailed_adaptive_diagnostics) {
         last_adaptive_state = adaptive_decision.state;
         last_adaptive_disposition = adaptive_decision.disposition;
         last_adaptive_bottleneck = adaptive_decision.bottleneck.type;

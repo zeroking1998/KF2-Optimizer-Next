@@ -59,6 +59,10 @@ are visible immediately.
   keeps only the corpse/Zed counts and visibility data required by Adaptive;
   Actor, LOD, bone, injury, freeze-detail and scan-timing evidence is collected
   only for an explicitly requested diagnostic run.
+- Detailed Adaptive performance samples, decision history, pressure evidence,
+  quality requests and response windows now use the same Debug switch. Normal
+  play retains the identical controller and exact safety readbacks without
+  formatting or retaining those diagnostic-only event payloads.
 - Added reproducible release optimization through interprocedural optimization
   and an optional two-phase MSVC profile-guided optimization workflow.
 - Simplified contributor setup, Windows builds, GitHub issue reporting, and
