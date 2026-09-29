@@ -221,6 +221,14 @@ int main() {
     }
     using namespace kf2;
     using namespace kf2::telemetry_pipeline;
+    CHECK(!detailed_adaptive_diagnostics_enabled(false, false));
+    CHECK(!detailed_adaptive_diagnostics_enabled(true, false));
+    CHECK(!detailed_adaptive_diagnostics_enabled(false, true));
+    CHECK(detailed_adaptive_diagnostics_enabled(true, true));
+    CHECK(should_log_adaptive_readback(false, false));
+    CHECK(should_log_adaptive_readback(false, true));
+    CHECK(!should_log_adaptive_readback(true, false));
+    CHECK(should_log_adaptive_readback(true, true));
     CHECK(should_log_adaptive_decision(
         true, false, 1'000'000'000ULL, 900'000'000ULL));
     CHECK(should_log_adaptive_decision(

@@ -25,18 +25,25 @@ void UiRuntime::poll_adaptive_runtime_mode() {
             mode_outcome->value().status ==
                 game::AdaptiveControlReceiptStatus::applied &&
             mode_outcome->value().resource == expected_resource;
-        events->append({
-            0,
-            adaptive_runtime_mode_confirmed
-                ? diagnostics::Severity::info
-                : diagnostics::Severity::warning,
-            adaptive_runtime_mode_confirmed
-                ? "ADAPTIVE_RUNTIME_MODE_RECONCILED"
-                : "ADAPTIVE_RUNTIME_MODE_RECONCILE_FAILED",
-            adaptive_runtime_mode_confirmed
-                ? L"The current KF2 provider confirmed the saved Adaptive mode with an authenticated APPLIED readback"
-                : L"The current KF2 provider did not confirm the saved Adaptive mode; automatic actions remain blocked",
-            L"optimizer"});
+        const bool detailed_diagnostics =
+            telemetry_pipeline::detailed_adaptive_diagnostics_enabled(
+                optimizer_settings.adaptive_logging,
+                optimizer_settings.debug_runtime_diagnostics);
+        if (telemetry_pipeline::should_log_adaptive_readback(
+                adaptive_runtime_mode_confirmed, detailed_diagnostics)) {
+            events->append({
+                0,
+                adaptive_runtime_mode_confirmed
+                    ? diagnostics::Severity::info
+                    : diagnostics::Severity::warning,
+                adaptive_runtime_mode_confirmed
+                    ? "ADAPTIVE_RUNTIME_MODE_RECONCILED"
+                    : "ADAPTIVE_RUNTIME_MODE_RECONCILE_FAILED",
+                adaptive_runtime_mode_confirmed
+                    ? L"The current KF2 provider confirmed the saved Adaptive mode with an authenticated APPLIED readback"
+                    : L"The current KF2 provider did not confirm the saved Adaptive mode; automatic actions remain blocked",
+                L"optimizer"});
+        }
         adaptive_runtime_mode_pending.reset();
     }
 }
@@ -97,6 +104,11 @@ void UiRuntime::reconcile_adaptive_runtime_mode(
 
 void UiRuntime::log_adaptive_performance_sample(
     const telemetry_pipeline::TelemetryFrame& frame) {
+    if (!telemetry_pipeline::detailed_adaptive_diagnostics_enabled(
+            optimizer_settings.adaptive_logging,
+            optimizer_settings.debug_runtime_diagnostics)) {
+        return;
+    }
     const auto now_ns = frame.observed_at_ns;
     const bool active_gameplay = frame.active_gameplay;
     const bool adaptive_mode =
@@ -104,8 +116,7 @@ void UiRuntime::log_adaptive_performance_sample(
     const bool performance_mode_changed =
         !last_performance_sample_adaptive_mode.has_value() ||
         *last_performance_sample_adaptive_mode != adaptive_mode;
-    if (optimizer_settings.adaptive_logging &&
-        telemetry_pipeline::should_log_performance_sample(
+    if (telemetry_pipeline::should_log_performance_sample(
             active_gameplay, adaptive_runtime_mode_confirmed,
             performance_mode_changed, frame.frames, now_ns,
             last_performance_sample_log_ns)) {
@@ -188,7 +199,12 @@ bool UiRuntime::present_pending_adaptive_runtime_mode(
 
 void UiRuntime::log_adaptive_quality_response(
     const std::optional<optimizer::QualityResponse::Report>& report) {
-    if (!report || !optimizer_settings.adaptive_logging) return;
+    if (!report ||
+        !telemetry_pipeline::detailed_adaptive_diagnostics_enabled(
+            optimizer_settings.adaptive_logging,
+            optimizer_settings.debug_runtime_diagnostics)) {
+        return;
+    }
 
     std::wostringstream message;
     message << L"seq=" << report->sequence << L"; resource="
@@ -313,11 +329,15 @@ void UiRuntime::poll_adaptive_quality_dispatcher() {
                 adaptive_governor.notify_quality_applied(completed_ns);
                 log_adaptive_quality_response(
                     quality_response.cancel("pre_command_composition_restored"));
-                events->append({
-                    0, diagnostics::Severity::info,
-                    "ADAPTIVE_RUNTIME_QUALITY_RESTORED",
-                    L"KF2 verified the exact pre-command quality composition; the rejected follow-up request was not applied",
-                    L"optimizer"});
+                if (telemetry_pipeline::detailed_adaptive_diagnostics_enabled(
+                        optimizer_settings.adaptive_logging,
+                        optimizer_settings.debug_runtime_diagnostics)) {
+                    events->append({
+                        0, diagnostics::Severity::info,
+                        "ADAPTIVE_RUNTIME_QUALITY_RESTORED",
+                        L"KF2 verified the exact pre-command quality composition; the rejected follow-up request was not applied",
+                        L"optimizer"});
+                }
             } else if (outcome->has_value() &&
                 outcome->value().status ==
                     game::AdaptiveControlReceiptStatus::state_unknown) {
@@ -391,34 +411,39 @@ void UiRuntime::poll_adaptive_quality_dispatcher() {
                     adaptive_quality_last_applied_ns = completed_ns;
                     adaptive_frame_not_before_ns = completed_ns;
                     adaptive_governor.notify_quality_applied(completed_ns);
-                    const int effective_quality =
-                        adaptive_resource_quality.effective_quality();
-                    const auto resource_name =
-                        game::adaptive_resource_control_name(
-                            outcome->value().resource);
-                    events->append({
-                        0, diagnostics::Severity::info,
-                        "ADAPTIVE_RUNTIME_QUALITY_APPLIED",
-                        L"Live KF2 " + std::wstring{
-                            resource_name.begin(), resource_name.end()} +
-                            L" quality changed to " +
-                            std::to_wstring(outcome->value().quality) +
-                            L"% (effective " +
-                            std::to_wstring(effective_quality) +
-                            L"%; CPU " +
-                            std::to_wstring(adaptive_resource_quality.cpu) +
-                            L"%, GPU " +
-                            std::to_wstring(adaptive_resource_quality.gpu) +
-                            L"%, VRAM " +
-                            std::to_wstring(adaptive_resource_quality.vram) +
-                            L"%, RAM " +
-                            std::to_wstring(adaptive_resource_quality.ram) +
-                            L"%, overdraw " +
-                            std::to_wstring(adaptive_resource_quality.overdraw) +
-                            L"%, effects " +
-                            std::to_wstring(adaptive_resource_quality.effects) +
-                            L"%) after an exact authenticated APPLIED readback; fresh post-action frame window started",
-                        L"optimizer"});
+                    if (telemetry_pipeline::
+                            detailed_adaptive_diagnostics_enabled(
+                                optimizer_settings.adaptive_logging,
+                                optimizer_settings.debug_runtime_diagnostics)) {
+                        const int effective_quality =
+                            adaptive_resource_quality.effective_quality();
+                        const auto resource_name =
+                            game::adaptive_resource_control_name(
+                                outcome->value().resource);
+                        events->append({
+                            0, diagnostics::Severity::info,
+                            "ADAPTIVE_RUNTIME_QUALITY_APPLIED",
+                            L"Live KF2 " + std::wstring{
+                                resource_name.begin(), resource_name.end()} +
+                                L" quality changed to " +
+                                std::to_wstring(outcome->value().quality) +
+                                L"% (effective " +
+                                std::to_wstring(effective_quality) +
+                                L"%; CPU " +
+                                std::to_wstring(adaptive_resource_quality.cpu) +
+                                L"%, GPU " +
+                                std::to_wstring(adaptive_resource_quality.gpu) +
+                                L"%, VRAM " +
+                                std::to_wstring(adaptive_resource_quality.vram) +
+                                L"%, RAM " +
+                                std::to_wstring(adaptive_resource_quality.ram) +
+                                L"%, overdraw " +
+                                std::to_wstring(adaptive_resource_quality.overdraw) +
+                                L"%, effects " +
+                                std::to_wstring(adaptive_resource_quality.effects) +
+                                L"%) after an exact authenticated APPLIED readback; fresh post-action frame window started",
+                            L"optimizer"});
+                    }
                 } else {
                     events->append({0, diagnostics::Severity::warning,
                         "ADAPTIVE_RUNTIME_QUALITY_RECEIPT_REJECTED",
