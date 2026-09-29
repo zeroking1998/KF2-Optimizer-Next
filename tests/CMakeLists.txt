@@ -750,6 +750,8 @@ add_test(NAME kf2_telemetry_collection_stage_test
 
 add_executable(kf2_resource_telemetry_worker_test
     unit/resource_telemetry_worker_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/game/startup_prewarmer.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/video_settings.cpp"
     "${PROJECT_SOURCE_DIR}/src/telemetry/resource_telemetry_worker.cpp"
 )
 target_include_directories(kf2_resource_telemetry_worker_test PRIVATE
@@ -758,7 +760,7 @@ target_compile_definitions(kf2_resource_telemetry_worker_test PRIVATE
     KF2_RESOURCE_TELEMETRY_WORKER_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/resource-telemetry-worker")
 target_link_libraries(kf2_resource_telemetry_worker_test PRIVATE
-    psapi dwmapi pdh dxgi gdi32 advapi32)
+    KF2TestFoundation psapi dwmapi pdh dxgi gdi32 advapi32)
 add_test(NAME kf2_resource_telemetry_worker_test
     COMMAND kf2_resource_telemetry_worker_test)
 

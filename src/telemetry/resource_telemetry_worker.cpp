@@ -13,6 +13,7 @@
 
 #include "kf2/game/game_log_locator.hpp"
 #include "kf2/game/game_log_session.hpp"
+#include "kf2/game/startup_prewarmer.hpp"
 
 namespace kf2::telemetry {
 namespace {
@@ -37,6 +38,78 @@ bool same_session(const ResourceTelemetryBinding& left,
         left.identity.process_start_id == right.identity.process_start_id &&
         left.game_log_directory == right.game_log_directory;
 }
+
+class GameLogBoundaryExtractor final {
+public:
+    GameLogBoundaryEvents feed(std::string_view bytes,
+                               bool verified_log_identity) {
+        GameLogBoundaryEvents events;
+        std::size_t offset = 0;
+        while (offset < bytes.size()) {
+            const auto newline = bytes.find('\n', offset);
+            const auto end = newline == std::string_view::npos
+                ? bytes.size() : newline;
+            const auto segment = bytes.substr(offset, end - offset);
+            if (dropping_oversized_line_) {
+                if (newline == std::string_view::npos) break;
+                dropping_oversized_line_ = false;
+                offset = newline + 1;
+                continue;
+            }
+            if (segment.size() > kMaximumBoundaryLineBytes - pending_.size()) {
+                pending_.clear();
+                if (newline == std::string_view::npos) {
+                    dropping_oversized_line_ = true;
+                    break;
+                }
+            } else {
+                pending_.append(segment);
+                if (newline == std::string_view::npos) break;
+                if (!pending_.empty() && pending_.back() == '\r') {
+                    pending_.pop_back();
+                }
+                consume_line(pending_, verified_log_identity, events);
+                pending_.clear();
+            }
+            offset = newline + 1;
+        }
+        return events;
+    }
+
+    void reset() noexcept {
+        pending_.clear();
+        dropping_oversized_line_ = false;
+    }
+
+private:
+    static constexpr std::size_t kMaximumBoundaryLineBytes = 4096;
+
+    static void consume_line(std::string_view line,
+                             bool verified_log_identity,
+                             GameLogBoundaryEvents& events) {
+        if (const auto readback =
+                game::parse_game_menu_graphics_readback(line)) {
+            events.graphics_readback = *readback;
+        }
+        if (const auto selected_map =
+                game::map_prewarm_request_from_log_line(line)) {
+            events.map_prewarm_selection = *selected_map;
+        }
+        events.load_map_started = events.load_map_started ||
+            line.find("Log: LoadMap: ") != std::string_view::npos;
+        events.new_settings_restart_requested =
+            events.new_settings_restart_requested ||
+            game::game_log_requests_settings_restart(line);
+        events.startup_ready = events.startup_ready ||
+            line.find("WidgetInitialized - WidgetName:  StartMenu") !=
+                std::string_view::npos;
+        events.verified_engine_exit = events.verified_engine_exit ||
+            (verified_log_identity && game::game_log_reports_engine_exit(line));
+    }
+
+    std::string pending_;
+    bool dropping_oversized_line_{false};
+};
 
 class NativeGameLogSampler final {
 public:
@@ -355,6 +428,7 @@ private:
         std::optional<ResourceTelemetryBinding> log_binding;
         std::unique_ptr<NativeGameLogSampler> log_sampler;
         game::GameLogSessionParser log_parser;
+        GameLogBoundaryExtractor log_boundaries;
         while (!stop.stop_requested()) {
             ResourceSampleRequest request;
             std::uint64_t request_generation = 0;
@@ -391,6 +465,7 @@ private:
                         log_sampler = std::make_unique<NativeGameLogSampler>(
                             request.binding);
                         log_parser.reset();
+                        log_boundaries.reset();
                     }
                     bool log_queue_has_room = false;
                     {
@@ -400,8 +475,17 @@ private:
                     if (log_queue_has_room) {
                         log_chunk = log_sampler->sample();
                         if (log_chunk) {
-                            if (log_chunk->reset_parser) log_parser.reset();
+                            if (log_chunk->reset_parser) {
+                                log_parser.reset();
+                                log_boundaries.reset();
+                            }
                             if (!log_chunk->bytes.empty()) {
+                                const bool verified_log_identity =
+                                    game::game_log_belongs_to_process(
+                                        log_chunk->creation_filetime,
+                                        request.binding.identity.process_start_id);
+                                log_chunk->boundaries = log_boundaries.feed(
+                                    log_chunk->bytes, verified_log_identity);
                                 log_chunk->parsed_session = log_parser.feed(
                                     log_chunk->bytes, request.sampled_at_ns);
                                 // Online corpse capability/action receipts are
@@ -418,6 +502,10 @@ private:
                                     log_chunk->parsed_session =
                                         *log_parser.current();
                                 }
+                                // Raw Launch.log bytes are worker-private. The
+                                // UI consumes only bounded boundary events and
+                                // immutable structured session snapshots.
+                                std::string{}.swap(log_chunk->bytes);
                             }
                             log_chunk->parser_stats = log_parser.stats();
                         } else if (const auto expired =

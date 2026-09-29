@@ -389,8 +389,6 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     game_log_startup_exited = false;
     game_log_startup_exit_announced = false;
     game_log_new_settings_restart_requested = false;
-    game_log_marker_tail.clear();
-    game_graphics_marker_tail.clear();
     game_menu_graphics_readback.reset();
     game_log_session.reset();
     game_log_parser_stats = {};
@@ -610,8 +608,6 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
         game_log_parser_stats = chunk.parser_stats;
         if (chunk.reset_parser) {
             corpse_telemetry_tracker.reset();
-            game_log_marker_tail.clear();
-            game_graphics_marker_tail.clear();
             game_menu_graphics_readback.reset();
             overlay_scene_ready = false;
             game_log_startup_exited = false;
@@ -619,86 +615,48 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
             game_log_new_settings_restart_requested = false;
             game_log_session.reset();
         }
-        if (!chunk.bytes.empty()) {
-            // Consume only complete lines from this verified process-bound
-            // Launch log. A partial or malformed menu receipt is never used
-            // as a personal graphics value.
-            std::string graphics_lines =
-                game_graphics_marker_tail + chunk.bytes;
-            std::size_t line_start = 0;
-            for (;;) {
-                const auto line_end = graphics_lines.find('\n', line_start);
-                if (line_end == std::string::npos) break;
-                if (line_end - line_start <= 4096) {
-                    const auto line = std::string_view{graphics_lines}.substr(
-                        line_start, line_end - line_start);
-                    if (const auto readback =
-                            game::parse_game_menu_graphics_readback(line);
-                        readback &&
-                        (!game_menu_graphics_readback ||
-                         *game_menu_graphics_readback != *readback)) {
-                        game_menu_graphics_readback = *readback;
-                        refresh_video_presentation();
-                        events->append({0, diagnostics::Severity::info,
-                            "KF2_APPLIED_GRAPHICS_MENU_READBACK",
-                            L"KF2 confirmed its applied graphics menu state; Custom entries are retained rather than guessed from INIs",
-                            L"graphics"});
-                        invalidate();
-                    }
-                    if (const auto selected_map =
-                            game::map_prewarm_request_from_log_line(line)) {
-                        observe_map_prewarm_selection(*selected_map);
-                    }
-                }
-                line_start = line_end + 1;
+        const auto& boundaries = chunk.boundaries;
+        if (boundaries.graphics_readback &&
+            (!game_menu_graphics_readback ||
+             *game_menu_graphics_readback != *boundaries.graphics_readback)) {
+            game_menu_graphics_readback = *boundaries.graphics_readback;
+            refresh_video_presentation();
+            events->append({0, diagnostics::Severity::info,
+                "KF2_APPLIED_GRAPHICS_MENU_READBACK",
+                L"KF2 confirmed its applied graphics menu state; Custom entries are retained rather than guessed from INIs",
+                L"graphics"});
+            invalidate();
+        }
+        if (boundaries.map_prewarm_selection) {
+            observe_map_prewarm_selection(
+                *boundaries.map_prewarm_selection);
+        }
+        if (boundaries.load_map_started) {
+            stop_map_prewarm_for_load();
+        }
+        if (!game_log_new_settings_restart_requested &&
+            boundaries.new_settings_restart_requested) {
+            game_log_new_settings_restart_requested = true;
+            events->append({0, diagnostics::Severity::info,
+                "KF2_NEW_SETTINGS_RESTART_REQUESTED",
+                L"KF2's native log confirmed that the game requested a settings restart",
+                L"game"});
+        }
+        if (boundaries.startup_ready) {
+            overlay_scene_ready = true;
+            game_log_startup_exited = false;
+        } else if (!overlay_scene_ready &&
+                   boundaries.verified_engine_exit) {
+            game_log_startup_exited = true;
+            if (!game_log_startup_exit_announced) {
+                game_log_startup_exit_announced = true;
+                events->append({0, diagnostics::Severity::warning,
+                    "KF2_STARTUP_EXITED_BEFORE_MENU",
+                    L"KF2's engine exited before reaching the main menu; "
+                    L"waiting for the remaining process to close",
+                    L"telemetry"});
+                invalidate();
             }
-            game_graphics_marker_tail = graphics_lines.substr(line_start);
-            if (game_graphics_marker_tail.size() > 4096) {
-                game_graphics_marker_tail.clear();
-            }
-            // This is a one-shot startup gate. Once KF2 reaches its main menu
-            // the overlay remains eligible during later map loads and Steam
-            // overlays. The worker retains raw bytes only for these cheap
-            // boundary markers; structured parsing happens off the UI thread.
-            const std::string marker_input =
-                game_log_marker_tail + chunk.bytes;
-            if (marker_input.find("Log: LoadMap: ") != std::string::npos) {
-                stop_map_prewarm_for_load();
-            }
-            if (!game_log_new_settings_restart_requested &&
-                game::game_log_requests_settings_restart(marker_input)) {
-                game_log_new_settings_restart_requested = true;
-                events->append({0, diagnostics::Severity::info,
-                    "KF2_NEW_SETTINGS_RESTART_REQUESTED",
-                    L"KF2's native log confirmed that the game requested a settings restart",
-                    L"game"});
-            }
-            const bool menu_ready = marker_input.find(
-                "WidgetInitialized - WidgetName:  StartMenu") !=
-                std::string::npos;
-            if (menu_ready) {
-                overlay_scene_ready = true;
-                game_log_startup_exited = false;
-            } else if (!overlay_scene_ready &&
-                       game::game_log_belongs_to_process(
-                           chunk.creation_filetime,
-                           game_process->process_start_id) &&
-                       game::game_log_reports_engine_exit(marker_input)) {
-                game_log_startup_exited = true;
-                if (!game_log_startup_exit_announced) {
-                    game_log_startup_exit_announced = true;
-                    events->append({0, diagnostics::Severity::warning,
-                        "KF2_STARTUP_EXITED_BEFORE_MENU",
-                        L"KF2's engine exited before reaching the main menu; "
-                        L"waiting for the remaining process to close",
-                        L"telemetry"});
-                    invalidate();
-                }
-            }
-            constexpr std::size_t kMarkerTailBytes = 96;
-            game_log_marker_tail = marker_input.substr(
-                marker_input.size() > kMarkerTailBytes
-                    ? marker_input.size() - kMarkerTailBytes : 0);
         }
         const auto previous_session = game_log_session;
         if (chunk.parsed_session) {

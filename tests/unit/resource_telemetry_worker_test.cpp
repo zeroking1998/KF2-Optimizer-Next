@@ -109,6 +109,16 @@ std::string offline_telemetry_line() {
         " flex_surrogate_lod=0\n";
 }
 
+std::string graphics_readback_line() {
+    return
+        "[12.3] ScriptLog: KF2OPT_GFX_MENU schema=2 state=applied "
+        "resx=2560 resy=1440 display_full=0 display_borderless=1 "
+        "vsync=0 variable_fps=0 film_grain=25 environment=-1 character=-1 "
+        "fx=1 texture_resolution=1 texture_filtering=-1 shadows=1 "
+        "reflections=0 aa=1 bloom=1 motion_blur=0 ao=0 dof=0 volumetric=0 "
+        "lens_flares=0 light_shafts=0 flex=0\n";
+}
+
 }  // namespace
 
 int main() {
@@ -434,9 +444,8 @@ int main() {
             auto chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
             CHECK(chunks.front().reset_parser);
-            CHECK(chunks.front().bytes ==
-                "[0053.20] Log: LoadMap: KF-BioticsLab?"
-                "Game=KFGameContent.KFGameInfo_Survival\n");
+            CHECK(chunks.front().boundaries.load_map_started);
+            CHECK(chunks.front().bytes.empty());
             CHECK(chunks.front().parsed_session.has_value());
             CHECK(chunks.front().parsed_session->map == "KF-BioticsLab");
             CHECK(chunks.front().parser_stats.lines_processed == 1);
@@ -452,13 +461,68 @@ int main() {
             chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
             CHECK(!chunks.front().reset_parser);
-            CHECK(chunks.front().bytes ==
-                "[0048.42] ScriptLog: WI.NetMode:  NM_Standalone\n"
-                "[0060.11] ScriptLog: @@@@ ZED COUNT DEBUG: "
-                "AIAliveCount = 24\n");
+            CHECK(chunks.front().bytes.empty());
             CHECK(chunks.front().parsed_session.has_value());
             CHECK(chunks.front().parsed_session->zeds_alive == 24);
             CHECK(chunks.front().parser_stats.lines_processed == 3);
+
+            // Structured boundary lines may be split across worker samples.
+            // No partial line is exposed to the UI boundary.
+            {
+                std::ofstream output(log, std::ios::binary | std::ios::app);
+                output << "ScriptLog: KF2OPT_MAP_SELECTION schema=1 "
+                          "state=menu map=KF-Burn";
+            }
+            worker.request(2'025'000'000ULL);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(chunks.front().bytes.empty());
+            CHECK(!chunks.front().boundaries.map_prewarm_selection);
+
+            // Multiple boundary families in one chunk are reduced to a small,
+            // immutable handoff. Startup-ready retains precedence over an exit
+            // marker in the same chunk, matching the UI's existing behavior.
+            {
+                std::ofstream output(log, std::ios::binary | std::ios::app);
+                output << "ingParis\n"
+                       << graphics_readback_line()
+                       << "Log: Restarting by request\n"
+                          "Log: WidgetInitialized - WidgetName:  StartMenu\n"
+                          "] Exit: Exiting.\n";
+            }
+            worker.request(2'050'000'000ULL);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(chunks.front().bytes.empty());
+            const auto& boundaries = chunks.front().boundaries;
+            CHECK(boundaries.graphics_readback.has_value());
+            CHECK(boundaries.graphics_readback->resolution.width == 2560);
+            CHECK(boundaries.graphics_readback->film_grain_percent == 25);
+            CHECK(boundaries.map_prewarm_selection ==
+                  std::optional<std::wstring>{L"KF-BurningParis"});
+            CHECK(boundaries.new_settings_restart_requested);
+            CHECK(boundaries.startup_ready);
+            CHECK(boundaries.verified_engine_exit);
+
+            // Invalid structured lines and an oversized record cannot create
+            // a boundary event or leak an unbounded tail into the next chunk.
+            {
+                std::ofstream output(log, std::ios::binary | std::ios::app);
+                output << "ScriptLog: KF2OPT_GFX_MENU schema=1 state=applied\n"
+                          "ScriptLog: KF2OPT_MAP_SELECTION schema=1 "
+                          "state=menu map=../unsafe\n"
+                       << std::string(4097, 'x')
+                       << "WidgetInitialized - WidgetName:  StartMenu\n";
+            }
+            worker.request(2'075'000'000ULL);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(!chunks.front().boundaries.graphics_readback);
+            CHECK(!chunks.front().boundaries.map_prewarm_selection);
+            CHECK(!chunks.front().boundaries.startup_ready);
 
             {
                 std::ofstream output(log, std::ios::binary | std::ios::app);
@@ -555,6 +619,17 @@ int main() {
             CHECK(chunks.front().parsed_session->online_corpse_maximum == 20);
 
             {
+                std::ofstream output(log, std::ios::binary | std::ios::app);
+                output << "ScriptLog: KF2OPT_MAP_SELECTION schema=1 "
+                          "state=menu map=KF-Partial";
+            }
+            worker.request(32'400'000'000ULL);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(!chunks.front().boundaries.map_prewarm_selection);
+
+            {
                 std::ofstream output(log, std::ios::binary | std::ios::trunc);
                 output << "new\n";
             }
@@ -563,7 +638,8 @@ int main() {
             chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
             CHECK(chunks.front().reset_parser);
-            CHECK(chunks.front().bytes == "new\n");
+            CHECK(chunks.front().bytes.empty());
+            CHECK(!chunks.front().boundaries.map_prewarm_selection);
             CHECK(!chunks.front().parsed_session.has_value());
             CHECK(chunks.front().parser_stats.lines_processed == 1);
         }
