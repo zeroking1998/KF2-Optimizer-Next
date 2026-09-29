@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Optional crash-recorder setup no longer terminates startup on allocation or
+  filesystem exceptions; failed setup leaves no partial reservation and preserves
+  the existing exception filter.
 - Overlay fullscreen compatibility now stages only the display-mode delta and
   rejects invalid graphics choices before any preset lookup.
 - Malformed KF2 texture-group tuples now fail closed instead of reporting
