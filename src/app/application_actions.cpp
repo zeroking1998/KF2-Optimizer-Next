@@ -167,6 +167,54 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
         optimizer_settings.target_fps != previous.target_fps &&
         policy_bound_to_running_process;
 
+    // The saved target and native startup cap commit together. Do not publish
+    // the new status, rebase Adaptive, or restage a pending launch until the
+    // cap readback succeeds. Failed rollback is explicit, never reported saved.
+    if (optimizer_settings.target_fps != previous.target_fps &&
+        installation && !game_running) {
+        const auto synchronized = synchronize_frame_rate_cap();
+        if (!synchronized.has_value()) {
+            events->append({0, diagnostics::Severity::error,
+                "TARGET_FPS_PERSIST_FAILED",
+                synchronized.error().message, L"config"});
+            optimizer_settings = previous;
+            const auto settings_rollback = platform::windows::atomic_replace_utf8(
+                settings_path, config::serialize_settings(optimizer_settings));
+            // The native writer may have changed one file before failing.
+            // Reapply and verify the previous cap rather than trusting rollback.
+            const auto cap_rollback = synchronize_frame_rate_cap();
+            if (!settings_rollback.has_value() || !cap_rollback.has_value()) {
+                std::wstring recovery_message =
+                    L"Target FPS could not be committed: " + synchronized.error().message;
+                if (!settings_rollback.has_value()) {
+                    const auto detail = L"Portable settings rollback failed: " +
+                        settings_rollback.error().message;
+                    recovery_message += L"; " + detail;
+                    events->append({0, diagnostics::Severity::error,
+                        "TARGET_FPS_ROLLBACK_FAILED", detail, L"config"});
+                }
+                if (!cap_rollback.has_value()) {
+                    const auto detail = L"Native FPS cap rollback failed: " +
+                        cap_rollback.error().message;
+                    recovery_message += L"; " + detail;
+                    events->append({0, diagnostics::Severity::error,
+                        "TARGET_FPS_ROLLBACK_FAILED", detail, L"config"});
+                }
+                model.set_recovery_required(true);
+                model.set_notice({ui::NoticeSeverity::error,
+                    L"TARGET_FPS_RECOVERY_REQUIRED", std::move(recovery_message),
+                    L"The previous target remains displayed. Use Repair before starting KF2."});
+                invalidate();
+            } else {
+                show_notice(ui::NoticeSeverity::error, L"TARGET_FPS_PERSIST_FAILED",
+                    L"Target FPS could not be committed. The previous setting and native cap were restored: " +
+                        synchronized.error().message);
+            }
+            return;
+        }
+        message += L"; KF2's native startup cap is ready";
+    }
+
     // Steam can briefly create and end a KF2 bootstrap process before the
     // real process appears. While no verified process is running, update the
     // protected provider policy so a direct slider click still applies to the
@@ -283,25 +331,11 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     update_adaptive_policy_status(status);
     model.set_status(std::move(status));
 
-    if (optimizer_settings.target_fps != previous.target_fps && installation) {
-        if (game_running) {
-            message += target_staged_for_restart
-                ? L"; saved for the next KF2 start; this session keeps its active native FPS target"
-                : L"; the native cap will use it after KF2 restarts";
-        } else {
-            const auto synchronized = synchronize_frame_rate_cap();
-            if (!synchronized.has_value()) {
-                events->append({0, diagnostics::Severity::error,
-                    "TARGET_FPS_PERSIST_FAILED",
-                    synchronized.error().message, L"config"});
-                show_notice(ui::NoticeSeverity::error,
-                            L"TARGET_FPS_PERSIST_FAILED",
-                            L"Target FPS was saved, but KF2's native cap could not be updated: " +
-                                synchronized.error().message);
-                return;
-            }
-            message += L"; KF2's native startup cap is ready";
-        }
+    if (optimizer_settings.target_fps != previous.target_fps &&
+        installation && game_running) {
+        message += target_staged_for_restart
+            ? L"; saved for the next KF2 start; this session keeps its active native FPS target"
+            : L"; the native cap will use it after KF2 restarts";
     }
 
     if (overlay_changed) telemetry_tick();

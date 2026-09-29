@@ -73,6 +73,10 @@ for KF2 launched from the optimizer, Steam, or a desktop shortcut, and its
 published offline provider reapplies and verifies the value during a running
 offline session.
 
+While KF2 is stopped, a target change is confirmed only after its native startup
+cap passes readback. If saving fails, the previous target and cap are restored.
+An incomplete rollback shows a repair notice and blocks launch from the optimizer.
+
 ## 4. Adaptive control
 
 Target FPS and Maximum corpses are the only performance goals you set.
