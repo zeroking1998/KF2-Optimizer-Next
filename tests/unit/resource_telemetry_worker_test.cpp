@@ -54,6 +54,61 @@ ResourceTelemetryBinding binding(std::uint32_t pid,
     return result;
 }
 
+std::string offline_telemetry_line() {
+    return
+        "ScriptLog: KF2OPT_TELEMETRY schema=7 sample=1 scan_diagnostics=1"
+        " living=1 living_classes=1 living_bosses=0 living_visible=1"
+        " living_offscreen=0 living_lod_total=0 living_anim_rate_total=60"
+        " living_injured_zones=0 living_required_bones=80"
+        " living_material_slots=4 living_attachments=1 living_anim_skipped=0"
+        " living_bone_atoms_skipped=0 living_bone_interpolation=0"
+        " living_kinematic_distance_skipped=0 living_ticks_offscreen=1"
+        " living_updates_skeleton_offscreen=1 living_special_moves=0"
+        " living_attack_moves=0 living_grapple_moves=0 living_stumbles=0"
+        " living_knockdowns=0 living_hit_reactions=0"
+        " living_other_special_moves=0 corpse_total=0 corpse_awake=0"
+        " corpse_sleeping=0 corpse_other=0 corpse_final=0 corpse_visible=0"
+        " corpse_offscreen=0 corpse_lod_total=0 corpse_injured_zones=0"
+        " corpse_max_age_ms=0 corpse_limit=12 corpse_offscreen_time_ms=60000"
+        " corpse_offscreen_distance=5000 dismembered=0 dismembered_limbs=0"
+        " ragdoll_warned=0 ragdoll_warning_max=0 corpse_collide_dead=1"
+        " corpse_collide_living=1 corpse_collide_dead_after_sleep=0"
+        " corpse_collide_living_after_sleep=1 gibs=0 zed_time=0"
+        " spray_actors=0 fire_spray_actors=0 toxic_spray_actors=0"
+        " other_spray_actors=0 explosion_actors=0"
+        " damaging_explosion_actors=0 fire_explosion_actors=0"
+        " toxic_explosion_actors=0 other_damaging_explosion_actors=0"
+        " unclassified_explosion_actors=0 lingering_explosion_actors=0"
+        " smoke_explosion_actors=0 bloat_king_fart_explosion_actors=0"
+        " smoke_grenade_projectiles=0 puke_mine_projectiles=0"
+        " bloat_king_puke_mine_projectiles=0 wound_decals=0"
+        " splatter_decals=0 pool_decals=0 impact_decals=0 explosion_decals=0"
+        " wound_decal_limit=64 splatter_decal_limit=64 pool_decal_limit=20"
+        " impact_decal_limit=40 explosion_decal_limit=20"
+        " blood_effect_limit=25 gore_effect_limit=25"
+        " wound_lifetime_ms=10000 splatter_lifetime_ms=15000"
+        " pool_lifetime_ms=30000 gib_lifetime_ms=20000"
+        " gore_particle_components=0 gore_particles=0"
+        " gore_particle_visible_components=0 gore_particle_lod_total=0"
+        " gore_particle_bounded_components=0 world_particle_components=0"
+        " world_particles=0 world_particle_visible_components=0"
+        " world_particle_lod_total=0 world_particle_bounded_components=0"
+        " ground_fire_particle_components=0 ground_fire_particles=0"
+        " impact_particle_components=0 impact_particles=0"
+        " gore_particle_pool_capacity=30 world_particle_pool_capacity=200"
+        " ground_fire_particle_pool_capacity=100"
+        " impact_particle_pool_capacity=60 particle_constant_spawn_emitters=0"
+        " particle_dynamic_spawn_emitters=0"
+        " particle_constant_spawn_rate_milli=0 particle_burst_entries=0"
+        " particle_peak_capacity=0 particle_flex_components=0"
+        " particle_flex_fluid_components=0"
+        " particle_flex_nonfluid_components=0"
+        " particle_flex_mixed_components=0 particle_nonflex_components=0"
+        " particle_unclassified_components=0 flex_surrogate_active=0"
+        " flex_surrogate_particles=0 flex_surrogate_visible=0"
+        " flex_surrogate_lod=0\n";
+}
+
 }  // namespace
 
 int main() {
@@ -405,7 +460,56 @@ int main() {
             CHECK(chunks.front().parsed_session->zeds_alive == 24);
             CHECK(chunks.front().parser_stats.lines_processed == 3);
 
-            worker.request(17'000'000'001ULL);
+            {
+                std::ofstream output(log, std::ios::binary | std::ios::app);
+                output << "[0060.12] ScriptLog: "
+                          "KFAISpawnManager.SetupNextWave() NextWave: 0 "
+                          "WaveTotalAI: 93\n"
+                       << offline_telemetry_line();
+            }
+            worker.request(2'100'000'000ULL);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(chunks.front().parsed_session.has_value());
+            CHECK(chunks.front().parsed_session->wave_number == 1);
+            CHECK(chunks.front().parsed_session->wave_total_ai == 93);
+            CHECK(chunks.front().parsed_session->telemetry_sample == 1);
+
+            // Repeating the same valid values after the old publication would
+            // have crossed its freshness window must publish the refreshed
+            // observation times to the application boundary.
+            constexpr std::uint64_t repeated_at_ns = 17'100'000'001ULL;
+            {
+                std::ofstream output(log, std::ios::binary | std::ios::app);
+                output << "[0075.11] ScriptLog: @@@@ ZED COUNT DEBUG: "
+                          "AIAliveCount = 24\n"
+                          "[0075.12] ScriptLog: "
+                          "KFAISpawnManager.SetupNextWave() NextWave: 0 "
+                          "WaveTotalAI: 93\n"
+                       << offline_telemetry_line();
+            }
+            worker.request(repeated_at_ns);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(chunks.front().parsed_session.has_value());
+            const auto& refreshed = *chunks.front().parsed_session;
+            CHECK(refreshed.zeds_alive == 24);
+            CHECK(refreshed.zeds_alive_observed_ns == repeated_at_ns);
+            CHECK(refreshed.wave_number == 1);
+            CHECK(refreshed.wave_total_ai == 93);
+            CHECK(refreshed.wave_observed_ns == repeated_at_ns);
+            CHECK(refreshed.telemetry_sample == 1);
+            CHECK(refreshed.telemetry_observed_ns == repeated_at_ns);
+            CHECK(kf2::game::game_log_observation_is_fresh(
+                refreshed.zeds_alive, refreshed.zeds_alive_observed_ns,
+                repeated_at_ns + 1));
+            CHECK(kf2::game::game_log_observation_is_fresh(
+                refreshed.wave_number, refreshed.wave_observed_ns,
+                repeated_at_ns + 1));
+
+            worker.request(32'100'000'002ULL);
             CHECK(worker.wait_until_idle(2s));
             chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
@@ -413,6 +517,8 @@ int main() {
             CHECK(chunks.front().bytes.empty());
             CHECK(chunks.front().parsed_session.has_value());
             CHECK(!chunks.front().parsed_session->zeds_alive.has_value());
+            CHECK(!chunks.front().parsed_session->wave_number.has_value());
+            CHECK(!chunks.front().parsed_session->telemetry_sample.has_value());
 
             {
                 std::ofstream output(log, std::ios::binary | std::ios::app);
@@ -423,7 +529,7 @@ int main() {
                           "state=available pool=0 maximum=20 local_only=true "
                           "readback=verified\n";
             }
-            worker.request(17'100'000'000ULL);
+            worker.request(32'200'000'000ULL);
             CHECK(worker.wait_until_idle(2s));
             chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
@@ -440,7 +546,7 @@ int main() {
                           "state=available pool=0 maximum=20 local_only=true "
                           "readback=verified\n";
             }
-            worker.request(17'200'000'000ULL);
+            worker.request(32'300'000'000ULL);
             CHECK(worker.wait_until_idle(2s));
             chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
@@ -452,7 +558,7 @@ int main() {
                 std::ofstream output(log, std::ios::binary | std::ios::trunc);
                 output << "new\n";
             }
-            worker.request(18'000'000'000ULL);
+            worker.request(33'000'000'000ULL);
             CHECK(worker.wait_until_idle(2s));
             chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);

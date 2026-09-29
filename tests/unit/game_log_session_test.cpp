@@ -163,10 +163,12 @@ int main() {
     CHECK(batch->telemetry_sample == 3);
     CHECK(batch_stream.stats().lines_processed == 5);
     CHECK(batch_stream.stats().session_snapshot_copies == 1);
-    CHECK(!batch_stream.feed(telemetry_line(3), 2'000'000'000ULL)
-               .has_value());
-    CHECK(batch_stream.current()->telemetry_observed_ns == 2'000'000'000ULL);
-    CHECK(batch_stream.stats().session_snapshot_copies == 1);
+    const auto repeated_batch_telemetry =
+        batch_stream.feed(telemetry_line(3), 2'000'000'000ULL);
+    CHECK(repeated_batch_telemetry.has_value());
+    CHECK(repeated_batch_telemetry->telemetry_observed_ns ==
+          2'000'000'000ULL);
+    CHECK(batch_stream.stats().session_snapshot_copies == 2);
 
     const auto parsed = parse_load_map_line(
         "[0053.20] Log: LoadMap: KF-BioticsLab?Name=Player?Team=255?"
@@ -645,11 +647,19 @@ int main() {
         wave->wave_number, wave->wave_observed_ns, 3'000'000'000ULL));
     CHECK(!game_log_observation_is_fresh(
         wave->wave_number, wave->wave_observed_ns, 18'000'000'001ULL));
-    CHECK(!stream.feed(
+    const auto repeated_alive = stream.feed(
         "[0060.13] ScriptLog: @@@@ ZED COUNT DEBUG: AIAliveCount = 24\n",
-        4'000'000'000ULL)
-               .has_value());
-    CHECK(stream.current()->zeds_alive_observed_ns == 4'000'000'000ULL);
+        4'000'000'000ULL);
+    CHECK(repeated_alive.has_value());
+    CHECK(repeated_alive->zeds_alive == 24);
+    CHECK(repeated_alive->zeds_alive_observed_ns == 4'000'000'000ULL);
+    const auto repeated_wave = stream.feed(
+        "[0060.135] ScriptLog: KFAISpawnManager.SetupNextWave() "
+        "NextWave: 0 WaveTotalAI: 93\n", 4'100'000'000ULL);
+    CHECK(repeated_wave.has_value());
+    CHECK(repeated_wave->wave_number == 1);
+    CHECK(repeated_wave->wave_total_ai == 93);
+    CHECK(repeated_wave->wave_observed_ns == 4'100'000'000ULL);
     CHECK(!stream.feed(
         "[0060.14] ScriptLog: @@@@ ZED COUNT DEBUG: AIAliveCount = -1\n")
                .has_value());

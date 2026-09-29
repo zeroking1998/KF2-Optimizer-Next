@@ -782,8 +782,10 @@ std::optional<bool> apply_offline_telemetry_line(
     if (!telemetry) return std::nullopt;
     const bool value_changed =
         apply_offline_telemetry_snapshot(session, *telemetry);
+    const bool observation_refreshed = observed_at_ns != 0 &&
+        session.telemetry_observed_ns != observed_at_ns;
     if (observed_at_ns != 0) session.telemetry_observed_ns = observed_at_ns;
-    return value_changed;
+    return value_changed || observation_refreshed;
 }
 
 void clear_offline_telemetry_snapshot(GameLogSession& session) noexcept {
