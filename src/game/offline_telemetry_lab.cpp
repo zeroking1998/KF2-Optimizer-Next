@@ -37,6 +37,31 @@ struct DirectoryIdentity {
     std::uint64_t file{0};
 };
 
+class UniqueHandle final {
+public:
+    explicit UniqueHandle(HANDLE handle = INVALID_HANDLE_VALUE) noexcept
+        : handle_{handle} {}
+    ~UniqueHandle() { reset(); }
+
+    UniqueHandle(const UniqueHandle&) = delete;
+    UniqueHandle& operator=(const UniqueHandle&) = delete;
+
+    [[nodiscard]] HANDLE get() const noexcept { return handle_; }
+    void reset() noexcept {
+        if (handle_ != INVALID_HANDLE_VALUE) CloseHandle(handle_);
+        handle_ = INVALID_HANDLE_VALUE;
+    }
+
+private:
+    HANDLE handle_{INVALID_HANDLE_VALUE};
+};
+
+enum class ModuleRemovalPolicy {
+    pinned_or_legacy,
+    exact_hash,
+    exact_hash_and_signature,
+};
+
 struct Marker {
     std::string state;
     std::string sha256;
@@ -45,19 +70,202 @@ struct Marker {
 };
 
 OfflineTelemetryCleanupTestHook cleanup_test_hook{};
+#if defined(KF2_OFFLINE_TELEMETRY_LAB_TESTING)
+OfflineTelemetryRemovalTestHook removal_test_hook{};
+#endif
 
-Result<bool> delete_file_after_transient_release(
-    const std::filesystem::path& path, std::wstring_view failure_message) {
+bool transient_delete_error(DWORD error) noexcept {
+    return error == ERROR_SHARING_VIOLATION ||
+        error == ERROR_LOCK_VIOLATION ||
+        error == ERROR_USER_MAPPED_FILE;
+}
+
+bool same_file_state(const BY_HANDLE_FILE_INFORMATION& left,
+                     const LARGE_INTEGER& left_size,
+                     const BY_HANDLE_FILE_INFORMATION& right,
+                     const LARGE_INTEGER& right_size) noexcept {
+    return left.dwVolumeSerialNumber == right.dwVolumeSerialNumber &&
+        left.nFileIndexHigh == right.nFileIndexHigh &&
+        left.nFileIndexLow == right.nFileIndexLow &&
+        left_size.QuadPart == right_size.QuadPart &&
+        CompareFileTime(&left.ftLastWriteTime, &right.ftLastWriteTime) == 0;
+}
+
+bool optimizer_module_signature(std::string_view bytes);
+
+Result<bool> remove_authenticated_module(
+    const std::filesystem::path& path,
+    std::string_view expected_hash,
+    ModuleRemovalPolicy policy,
+    bool foreign_is_error,
+    std::wstring_view failure_message) {
     DWORD native = ERROR_SUCCESS;
     for (DWORD attempt = 0; attempt < kDeleteRetryCount; ++attempt) {
-        if (DeleteFileW(path.c_str())) return Result<bool>::success(true);
-        native = GetLastError();
-        if (native != ERROR_SHARING_VIOLATION &&
-            native != ERROR_LOCK_VIOLATION &&
-            native != ERROR_USER_MAPPED_FILE) {
+        UniqueHandle file{CreateFileW(
+            path.c_str(), GENERIC_READ | DELETE,
+            FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
+            nullptr)};
+        if (file.get() == INVALID_HANDLE_VALUE) {
+            native = GetLastError();
+            if (native == ERROR_FILE_NOT_FOUND ||
+                native == ERROR_PATH_NOT_FOUND) {
+                return Result<bool>::success(false);
+            }
+            if (!transient_delete_error(native)) {
+                return Result<bool>::failure(
+                    {ErrorCode::io_failure, std::wstring{failure_message},
+                     native});
+            }
+#if defined(KF2_OFFLINE_TELEMETRY_LAB_TESTING)
+            if (removal_test_hook != nullptr) {
+                removal_test_hook(
+                    OfflineTelemetryRemovalTestStage::retryable_failure,
+                    path, attempt);
+            }
+#endif
+            if (attempt + 1 < kDeleteRetryCount) {
+                Sleep(kDeleteRetryDelayMs);
+                continue;
+            }
             break;
         }
-        if (attempt + 1 < kDeleteRetryCount) Sleep(kDeleteRetryDelayMs);
+
+        BY_HANDLE_FILE_INFORMATION before{};
+        LARGE_INTEGER before_size{};
+        if (!GetFileInformationByHandle(file.get(), &before) ||
+            !GetFileSizeEx(file.get(), &before_size)) {
+            return Result<bool>::failure(
+                {ErrorCode::io_failure, std::wstring{failure_message},
+                 GetLastError()});
+        }
+        if (before_size.QuadPart < 0 ||
+            static_cast<std::uintmax_t>(before_size.QuadPart) >
+                kMaximumModuleBytes ||
+            (before.dwFileAttributes &
+             (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+            before.nNumberOfLinks != 1) {
+            if (!foreign_is_error) return Result<bool>::success(false);
+            return Result<bool>::failure(
+                {ErrorCode::stale_data,
+                 L"Offline telemetry target changed; the foreign file was preserved",
+                 0});
+        }
+        std::string bytes(static_cast<std::size_t>(before_size.QuadPart), '\0');
+        std::size_t offset = 0;
+        while (offset < bytes.size()) {
+            const DWORD requested = static_cast<DWORD>(
+                std::min<std::size_t>(bytes.size() - offset,
+                                      std::numeric_limits<DWORD>::max()));
+            DWORD read = 0;
+            if (!ReadFile(file.get(), bytes.data() + offset, requested,
+                          &read, nullptr)) {
+                return Result<bool>::failure(
+                    {ErrorCode::io_failure, std::wstring{failure_message},
+                     GetLastError()});
+            }
+            if (read == 0) {
+                return Result<bool>::failure(
+                    {ErrorCode::stale_data,
+                     L"Offline telemetry target changed; the foreign file was preserved",
+                     ERROR_HANDLE_EOF});
+            }
+            offset += read;
+        }
+        BY_HANDLE_FILE_INFORMATION after{};
+        LARGE_INTEGER after_size{};
+        if (!GetFileInformationByHandle(file.get(), &after) ||
+            !GetFileSizeEx(file.get(), &after_size) ||
+            !same_file_state(before, before_size, after, after_size)) {
+            return Result<bool>::failure(
+                {ErrorCode::stale_data,
+                 L"Offline telemetry target changed; the foreign file was preserved",
+                 0});
+        }
+        const auto hash = security::sha256_hex(bytes);
+        if (!hash.has_value()) return Result<bool>::failure(hash.error());
+        const bool exact_hash = hash.value() == expected_hash;
+        const bool signature = optimizer_module_signature(bytes);
+        const bool owned = policy == ModuleRemovalPolicy::pinned_or_legacy
+            ? exact_hash || signature
+            : policy == ModuleRemovalPolicy::exact_hash
+                ? exact_hash
+                : exact_hash && signature;
+        if (!owned) {
+            if (!foreign_is_error) return Result<bool>::success(false);
+            return Result<bool>::failure(
+                {ErrorCode::stale_data,
+                 L"Offline telemetry target changed; the foreign file was preserved",
+                 0});
+        }
+
+#if defined(KF2_OFFLINE_TELEMETRY_LAB_TESTING)
+        if (removal_test_hook != nullptr) {
+            removal_test_hook(
+                OfflineTelemetryRemovalTestStage::before_delete,
+                path, attempt);
+        }
+#endif
+
+        UniqueHandle current{CreateFileW(
+            path.c_str(), FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+            OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr)};
+        BY_HANDLE_FILE_INFORMATION current_information{};
+        LARGE_INTEGER current_size{};
+        if (current.get() == INVALID_HANDLE_VALUE ||
+            !GetFileInformationByHandle(current.get(), &current_information) ||
+            !GetFileSizeEx(current.get(), &current_size) ||
+            !same_file_state(before, before_size, current_information,
+                             current_size)) {
+            return Result<bool>::failure(
+                {ErrorCode::stale_data,
+                 L"Offline telemetry target changed; the foreign file was preserved",
+                 current.get() == INVALID_HANDLE_VALUE ? GetLastError() : 0});
+        }
+
+        FILE_DISPOSITION_INFO disposition{TRUE};
+        if (!SetFileInformationByHandle(
+                file.get(), FileDispositionInfo, &disposition,
+                sizeof(disposition))) {
+            native = GetLastError();
+            if (!transient_delete_error(native)) {
+                return Result<bool>::failure(
+                    {ErrorCode::io_failure, std::wstring{failure_message},
+                     native});
+            }
+            current.reset();
+            file.reset();
+#if defined(KF2_OFFLINE_TELEMETRY_LAB_TESTING)
+            if (removal_test_hook != nullptr) {
+                removal_test_hook(
+                    OfflineTelemetryRemovalTestStage::retryable_failure,
+                    path, attempt);
+            }
+#endif
+            if (attempt + 1 < kDeleteRetryCount) {
+                Sleep(kDeleteRetryDelayMs);
+                continue;
+            }
+            break;
+        }
+        current.reset();
+        file.reset();
+        const DWORD attributes = GetFileAttributesW(path.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES) {
+            native = GetLastError();
+            if (native == ERROR_FILE_NOT_FOUND ||
+                native == ERROR_PATH_NOT_FOUND) {
+                return Result<bool>::success(true);
+            }
+            return Result<bool>::failure(
+                {ErrorCode::io_failure, std::wstring{failure_message},
+                 native});
+        }
+        return Result<bool>::failure(
+            {ErrorCode::stale_data,
+             L"Offline telemetry target changed; the foreign file was preserved",
+             0});
     }
     return Result<bool>::failure(
         {ErrorCode::io_failure, std::wstring{failure_message}, native});
@@ -270,37 +478,10 @@ bool optimizer_module_signature(std::string_view bytes) {
 Result<bool> remove_orphaned_optimizer_module(
     const std::filesystem::path& config_root) {
     const auto target = target_module(config_root);
-    const DWORD attributes = GetFileAttributesW(target.c_str());
-    if (attributes == INVALID_FILE_ATTRIBUTES) {
-        const DWORD native = GetLastError();
-        if (native == ERROR_FILE_NOT_FOUND || native == ERROR_PATH_NOT_FOUND) {
-            return Result<bool>::success(false);
-        }
-        return Result<bool>::failure(
-            {ErrorCode::io_failure,
-             L"Offline telemetry target cannot be inspected", native});
-    }
-    auto bytes = read_regular_file(target, kMaximumModuleBytes);
-    if (!bytes.has_value()) {
-        // An unrecognized or unsafe occupant is user-owned and must remain.
-        return Result<bool>::success(false);
-    }
-    auto captured_hash = security::sha256_hex(bytes.value());
-    if (!captured_hash.has_value()) {
-        return Result<bool>::failure(captured_hash.error());
-    }
-    if (captured_hash.value() != kOfflineTelemetryModuleSha256 &&
-        !optimizer_module_signature(bytes.value())) {
-        return Result<bool>::success(false);
-    }
-    auto live_hash = security::sha256_file_hex(target, kMaximumModuleBytes);
-    if (!live_hash.has_value() || live_hash.value() != captured_hash.value()) {
-        return Result<bool>::failure(
-            {ErrorCode::stale_data,
-             L"Offline telemetry target changed during orphan cleanup", 0});
-    }
-    return delete_file_after_transient_release(
-        target, L"Orphaned optimizer telemetry package could not be removed");
+    return remove_authenticated_module(
+        target, kOfflineTelemetryModuleSha256,
+        ModuleRemovalPolicy::pinned_or_legacy, false,
+        L"Orphaned optimizer telemetry package could not be removed");
 }
 
 std::string marker_bytes(std::string_view state,
@@ -449,6 +630,13 @@ void set_offline_telemetry_cleanup_test_hook(
     cleanup_test_hook = hook;
 }
 
+#if defined(KF2_OFFLINE_TELEMETRY_LAB_TESTING)
+void set_offline_telemetry_removal_test_hook(
+    OfflineTelemetryRemovalTestHook hook) noexcept {
+    removal_test_hook = hook;
+}
+#endif
+
 Result<bool> install_offline_telemetry_lab(
     const OfflineTelemetryLabOptions& options) {
     if (options.game_running) {
@@ -524,7 +712,13 @@ Result<bool> install_offline_telemetry_lab(
     auto target_hash = security::sha256_file_hex(target, kMaximumModuleBytes);
     if (!target_hash.has_value() ||
         target_hash.value() != kOfflineTelemetryModuleSha256) {
-        static_cast<void>(DeleteFileW(target.c_str()));
+        auto removed = remove_authenticated_module(
+            target, kOfflineTelemetryModuleSha256,
+            ModuleRemovalPolicy::exact_hash, true,
+            L"Unverified offline telemetry installation could not be removed");
+        if (!removed.has_value()) {
+            return Result<bool>::failure(std::move(removed.error()));
+        }
         static_cast<void>(DeleteFileW(marker.c_str()));
         static_cast<void>(remove_created_empty_directories(
             options.config_root, directories.value()));
@@ -536,7 +730,13 @@ Result<bool> install_offline_telemetry_lab(
         marker, marker_bytes("installed", root_identity.value(),
                              directories.value()));
     if (!committed.has_value()) {
-        static_cast<void>(DeleteFileW(target.c_str()));
+        auto removed = remove_authenticated_module(
+            target, kOfflineTelemetryModuleSha256,
+            ModuleRemovalPolicy::exact_hash, true,
+            L"Offline telemetry installation rollback could not remove the package");
+        if (!removed.has_value()) {
+            return Result<bool>::failure(std::move(removed.error()));
+        }
         static_cast<void>(DeleteFileW(marker.c_str()));
         static_cast<void>(remove_created_empty_directories(
             options.config_root, directories.value()));
@@ -575,31 +775,11 @@ Result<bool> restore_offline_telemetry_lab(
         ErrorCode::io_failure,
         L"Offline telemetry directory cleanup is incomplete", 0};
     const auto target = target_module(config_root);
-    const DWORD target_attributes = GetFileAttributesW(target.c_str());
-    if (target_attributes != INVALID_FILE_ATTRIBUTES) {
-        auto bytes = read_regular_file(target, kMaximumModuleBytes);
-        if (!bytes.has_value()) {
-            return Result<bool>::failure(bytes.error());
-        }
-        auto hash = security::sha256_hex(bytes.value());
-        if (!hash.has_value() || hash.value() != marker.value().sha256 ||
-            !optimizer_module_signature(bytes.value())) {
-            return Result<bool>::failure(
-                {ErrorCode::stale_data,
-                 L"Offline telemetry target changed; the foreign file was preserved",
-                 0});
-        }
-        auto removed = delete_file_after_transient_release(
-            target, L"Offline telemetry package could not be removed");
-        if (!removed.has_value()) return removed;
-    } else {
-        const DWORD native = GetLastError();
-        if (native != ERROR_FILE_NOT_FOUND && native != ERROR_PATH_NOT_FOUND) {
-            return Result<bool>::failure(
-                {ErrorCode::io_failure,
-                 L"Offline telemetry target cannot be inspected", native});
-        }
-    }
+    auto removed = remove_authenticated_module(
+        target, marker.value().sha256,
+        ModuleRemovalPolicy::exact_hash_and_signature, true,
+        L"Offline telemetry package could not be removed");
+    if (!removed.has_value()) return removed;
     if (!remove_created_empty_directories(config_root,
                                           marker.value().created)) {
         return Result<bool>::failure(std::move(cleanup_error));
