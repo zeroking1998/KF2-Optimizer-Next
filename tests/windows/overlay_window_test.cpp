@@ -1,6 +1,10 @@
 #include <Windows.h>
+#include <cmath>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <iterator>
+#include <string>
 #include "kf2/overlay/overlay_window.hpp"
 #include "overlay_window_internal.hpp"
 
@@ -29,6 +33,10 @@ HWND create_target_window(const wchar_t* title = L"KF2 target fixture") {
         type.hInstance, nullptr);
 }
 
+bool nearly_equal(float left, float right) {
+    return std::fabs(left - right) < 0.0001F;
+}
+
 }  // namespace
 
 namespace kf2::overlay {
@@ -42,6 +50,85 @@ struct OverlayWindowTestAccess {
 }  // namespace kf2::overlay
 
 int main() {
+    const kf2::overlay::MascotAnimationAsset defaults;
+    bool malformed_valid = true;
+    const auto malformed =
+        kf2::overlay::detail::parse_mascot_animation_asset(
+            "sample_rate_fps=inf\n"
+            "idle_period_ms=0\n"
+            "idle_body_amplitude=-1\n"
+            "idle_hand_amplitude=0.75\n"
+            "dock_transition_ms=-4\n"
+            "dock_reach=1e999\n"
+            "dock_impact_reach=2junk\n"
+            "grip_micro_amplitude=nan\n"
+            "leg_step_amplitude=-0.1\n"
+            "variant_count=7.5\n"
+            "blend_in_fast=1.5\n"
+            "blend_out_soft=-0.1\n",
+            &malformed_valid);
+    CHECK(!malformed_valid);
+    CHECK(nearly_equal(malformed.sample_rate_fps,
+                       defaults.sample_rate_fps));
+    CHECK(nearly_equal(malformed.idle_period_ms, defaults.idle_period_ms));
+    CHECK(nearly_equal(malformed.idle_body_amplitude,
+                       defaults.idle_body_amplitude));
+    CHECK(nearly_equal(malformed.idle_hand_amplitude, 0.75F));
+    CHECK(nearly_equal(malformed.dock_transition_ms,
+                       defaults.dock_transition_ms));
+    CHECK(nearly_equal(malformed.dock_reach, defaults.dock_reach));
+    CHECK(nearly_equal(malformed.dock_impact_reach,
+                       defaults.dock_impact_reach));
+    CHECK(nearly_equal(malformed.grip_micro_amplitude,
+                       defaults.grip_micro_amplitude));
+    CHECK(nearly_equal(malformed.leg_step_amplitude,
+                       defaults.leg_step_amplitude));
+    CHECK(malformed.variant_count == defaults.variant_count);
+    CHECK(nearly_equal(malformed.blend_in_fast, defaults.blend_in_fast));
+    CHECK(nearly_equal(malformed.blend_out_soft, defaults.blend_out_soft));
+
+    bool unbounded_valid = true;
+    const auto unbounded =
+        kf2::overlay::detail::parse_mascot_animation_asset(
+            "sample_rate_fps=1000000\n"
+            "idle_period_ms=1000000000\n"
+            "idle_body_amplitude=1000000\n"
+            "dock_reach=1000000\n"
+            "variant_count=1000000\n",
+            &unbounded_valid);
+    CHECK(!unbounded_valid);
+    CHECK(nearly_equal(unbounded.sample_rate_fps,
+                       defaults.sample_rate_fps));
+    CHECK(nearly_equal(unbounded.idle_period_ms, defaults.idle_period_ms));
+    CHECK(nearly_equal(unbounded.idle_body_amplitude,
+                       defaults.idle_body_amplitude));
+    CHECK(nearly_equal(unbounded.dock_reach, defaults.dock_reach));
+    CHECK(unbounded.variant_count == defaults.variant_count);
+
+    std::ifstream asset_file(KF2_MASCOT_ANIMATION_ASSET_PATH,
+                             std::ios::binary);
+    CHECK(asset_file.good());
+    const std::string asset_text{
+        std::istreambuf_iterator<char>(asset_file),
+        std::istreambuf_iterator<char>()};
+    bool checked_in_valid = false;
+    const auto checked_in =
+        kf2::overlay::detail::parse_mascot_animation_asset(
+            asset_text, &checked_in_valid);
+    CHECK(checked_in_valid);
+    CHECK(nearly_equal(checked_in.sample_rate_fps, 120.0F));
+    CHECK(nearly_equal(checked_in.idle_period_ms, 5000.0F));
+    CHECK(nearly_equal(checked_in.idle_body_amplitude, 0.32F));
+    CHECK(nearly_equal(checked_in.idle_hand_amplitude, 0.65F));
+    CHECK(nearly_equal(checked_in.dock_transition_ms, 900.0F));
+    CHECK(nearly_equal(checked_in.dock_reach, 8.0F));
+    CHECK(nearly_equal(checked_in.dock_impact_reach, 2.0F));
+    CHECK(nearly_equal(checked_in.grip_micro_amplitude, 0.55F));
+    CHECK(nearly_equal(checked_in.leg_step_amplitude, 0.45F));
+    CHECK(checked_in.variant_count == 6);
+    CHECK(nearly_equal(checked_in.blend_in_fast, 0.24F));
+    CHECK(nearly_equal(checked_in.blend_out_soft, 0.075F));
+
     HWND target_window = create_target_window();
     CHECK(target_window != nullptr);
     ShowWindow(target_window, SW_SHOWNA);

@@ -1,50 +1,144 @@
 #include "overlay_window_internal.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
-#include <string>
 #include <string_view>
 
 namespace kf2::overlay::detail {
 
-MascotAnimationAsset load_mascot_animation_asset() {
+namespace {
+
+constexpr float kMinimumSampleRateFps = 1.0F;
+constexpr float kMaximumSampleRateFps = 1000.0F;
+constexpr float kMinimumIdlePeriodMs = 100.0F;
+constexpr float kMaximumIdlePeriodMs = 600000.0F;
+constexpr float kMinimumDockTransitionMs = 1.0F;
+constexpr float kMaximumDockTransitionMs = 60000.0F;
+constexpr float kMaximumAmplitude = 8.0F;
+constexpr float kMaximumReach = 64.0F;
+constexpr int kMaximumVariantCount = 64;
+
+bool find_property(
+    std::string_view text, std::string_view key,
+    std::string_view& value) noexcept {
+    std::size_t line_start = 0;
+    while (line_start <= text.size()) {
+        const std::size_t line_end = text.find_first_of("\r\n", line_start);
+        const std::string_view line = text.substr(
+            line_start, line_end == std::string_view::npos
+                            ? std::string_view::npos
+                            : line_end - line_start);
+        if (line.size() > key.size() &&
+            line.substr(0, key.size()) == key &&
+            line[key.size()] == '=') {
+            value = line.substr(key.size() + 1);
+            return true;
+        }
+        if (line_end == std::string_view::npos) break;
+        line_start = line_end + 1;
+    }
+    return false;
+}
+
+float checked_float(
+    std::string_view text, std::string_view key, float fallback,
+    float minimum, float maximum, bool& asset_valid) noexcept {
+    std::string_view value;
+    if (!find_property(text, key, value) || value.empty()) {
+        asset_valid = false;
+        return fallback;
+    }
+
+    float parsed = 0.0F;
+    const char* const begin = value.data();
+    const char* const end = begin + value.size();
+    const auto result = std::from_chars(
+        begin, end, parsed, std::chars_format::general);
+    if (result.ec != std::errc{} || result.ptr != end ||
+        !std::isfinite(parsed) || parsed < minimum || parsed > maximum) {
+        asset_valid = false;
+        return fallback;
+    }
+    return parsed;
+}
+
+int checked_variant_count(
+    std::string_view text, int fallback, bool& asset_valid) noexcept {
+    std::string_view value;
+    if (!find_property(text, "variant_count", value) || value.empty()) {
+        asset_valid = false;
+        return fallback;
+    }
+
+    int parsed = 0;
+    const char* const begin = value.data();
+    const char* const end = begin + value.size();
+    const auto result = std::from_chars(begin, end, parsed);
+    if (result.ec != std::errc{} || result.ptr != end || parsed < 1 ||
+        parsed > kMaximumVariantCount) {
+        asset_valid = false;
+        return fallback;
+    }
+    return parsed;
+}
+
+}  // namespace
+
+MascotAnimationAsset parse_mascot_animation_asset(
+    std::string_view text, bool* valid) {
     MascotAnimationAsset asset;
+    bool asset_valid = true;
+    asset.sample_rate_fps = checked_float(
+        text, "sample_rate_fps", asset.sample_rate_fps,
+        kMinimumSampleRateFps, kMaximumSampleRateFps, asset_valid);
+    asset.idle_period_ms = checked_float(
+        text, "idle_period_ms", asset.idle_period_ms,
+        kMinimumIdlePeriodMs, kMaximumIdlePeriodMs, asset_valid);
+    asset.idle_body_amplitude = checked_float(
+        text, "idle_body_amplitude", asset.idle_body_amplitude,
+        0.0F, kMaximumAmplitude, asset_valid);
+    asset.idle_hand_amplitude = checked_float(
+        text, "idle_hand_amplitude", asset.idle_hand_amplitude,
+        0.0F, kMaximumAmplitude, asset_valid);
+    asset.dock_transition_ms = checked_float(
+        text, "dock_transition_ms", asset.dock_transition_ms,
+        kMinimumDockTransitionMs, kMaximumDockTransitionMs, asset_valid);
+    asset.dock_reach = checked_float(
+        text, "dock_reach", asset.dock_reach,
+        0.0F, kMaximumReach, asset_valid);
+    asset.dock_impact_reach = checked_float(
+        text, "dock_impact_reach", asset.dock_impact_reach,
+        0.0F, kMaximumReach, asset_valid);
+    asset.grip_micro_amplitude = checked_float(
+        text, "grip_micro_amplitude", asset.grip_micro_amplitude,
+        0.0F, kMaximumAmplitude, asset_valid);
+    asset.leg_step_amplitude = checked_float(
+        text, "leg_step_amplitude", asset.leg_step_amplitude,
+        0.0F, kMaximumAmplitude, asset_valid);
+    asset.variant_count = checked_variant_count(
+        text, asset.variant_count, asset_valid);
+    asset.blend_in_fast = checked_float(
+        text, "blend_in_fast", asset.blend_in_fast,
+        0.0F, 1.0F, asset_valid);
+    asset.blend_out_soft = checked_float(
+        text, "blend_out_soft", asset.blend_out_soft,
+        0.0F, 1.0F, asset_valid);
+    if (valid) *valid = asset_valid;
+    return asset;
+}
+
+MascotAnimationAsset load_mascot_animation_asset() {
     const HMODULE module = GetModuleHandleW(nullptr);
     const HRSRC resource = FindResourceW(
         module, MAKEINTRESOURCEW(kPremiumMascotAnimationResource), RT_RCDATA);
-    if (!resource) return asset;
+    if (!resource) return {};
     const HGLOBAL loaded = LoadResource(module, resource);
+    if (!loaded) return {};
     const auto* bytes = static_cast<const char*>(LockResource(loaded));
     const DWORD size = SizeofResource(module, resource);
-    if (!loaded || !bytes || size == 0) return asset;
-    const std::string_view text(bytes, size);
-    const auto number = [&](std::string_view key, float fallback) {
-        const std::string token = std::string(key) + "=";
-        const std::size_t start = text.find(token);
-        if (start == std::string_view::npos) return fallback;
-        const std::size_t value_start = start + token.size();
-        const std::size_t end = text.find_first_of("\r\n", value_start);
-        try {
-            return std::stof(std::string(
-                text.substr(value_start, end - value_start)));
-        } catch (...) {
-            return fallback;
-        }
-    };
-    asset.sample_rate_fps = number("sample_rate_fps", asset.sample_rate_fps);
-    asset.idle_period_ms = number("idle_period_ms", asset.idle_period_ms);
-    asset.idle_body_amplitude = number("idle_body_amplitude", asset.idle_body_amplitude);
-    asset.idle_hand_amplitude = number("idle_hand_amplitude", asset.idle_hand_amplitude);
-    asset.dock_transition_ms = number("dock_transition_ms", asset.dock_transition_ms);
-    asset.dock_reach = number("dock_reach", asset.dock_reach);
-    asset.dock_impact_reach = number("dock_impact_reach", asset.dock_impact_reach);
-    asset.grip_micro_amplitude = number("grip_micro_amplitude", asset.grip_micro_amplitude);
-    asset.leg_step_amplitude = number("leg_step_amplitude", asset.leg_step_amplitude);
-    asset.variant_count = std::max(1, static_cast<int>(number(
-        "variant_count", static_cast<float>(asset.variant_count))));
-    asset.blend_in_fast = number("blend_in_fast", asset.blend_in_fast);
-    asset.blend_out_soft = number("blend_out_soft", asset.blend_out_soft);
-    return asset;
+    if (!bytes || size == 0) return {};
+    return parse_mascot_animation_asset(std::string_view(bytes, size));
 }
 
 void draw_mood_character(
