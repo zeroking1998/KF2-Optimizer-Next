@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <charconv>
 #include <fstream>
 #include <iterator>
 #include <optional>
@@ -108,6 +109,21 @@ std::vector<std::string> split(std::string_view text, char delimiter) {
 bool valid_hash(std::string_view hash) {
     return hash.size() == 64 &&
            hash.find_first_not_of("0123456789abcdef") == std::string_view::npos;
+}
+
+std::optional<std::uintmax_t> parse_canonical_size(
+    std::string_view text) noexcept {
+    if (text.empty() || (text.size() > 1U && text.front() == '0')) {
+        return std::nullopt;
+    }
+    std::uintmax_t value{};
+    const auto parsed = std::from_chars(
+        text.data(), text.data() + text.size(), value, 10);
+    if (parsed.ec != std::errc{} ||
+        parsed.ptr != text.data() + text.size()) {
+        return std::nullopt;
+    }
+    return value;
 }
 
 bool allowed_relative_path(const std::filesystem::path& path) {
@@ -378,13 +394,14 @@ Result<BackupSet> BackupStore::load_backup(std::string_view id) const {
                     {ErrorCode::access_denied,
                      L"Backup file path is outside the strict allowlist", 0});
             }
-            try {
-                snapshot.size = std::stoull(fields[1]);
-                snapshot.desired_size = std::stoull(fields[3]);
-            } catch (...) {
+            const auto size = parse_canonical_size(fields[1]);
+            const auto desired_size = parse_canonical_size(fields[3]);
+            if (!size.has_value() || !desired_size.has_value()) {
                 return Result<BackupSet>::failure(
                     {ErrorCode::io_failure, L"Backup size record is corrupt", 0});
             }
+            snapshot.size = size.value();
+            snapshot.desired_size = desired_size.value();
             snapshot.sha256 = fields[2];
             snapshot.desired_sha256 = fields[4];
             if (snapshot.size > max_object_bytes ||
