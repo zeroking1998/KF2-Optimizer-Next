@@ -25,6 +25,7 @@ int main() {
         "overlay_show_cpu=false\noverlay_show_gpu=true\noverlay_show_memory=true\n"
         "debug_corpse_markers=true\ndebug_zed_markers=true\n"
         "debug_flex_diagnostics=true\n"
+        "debug_runtime_diagnostics=true\n"
         "debug_corpse_physics_control=true\n"
         "overlay_position=bottom_left\n"
         "offline_gameplay_telemetry=true\n"
@@ -47,6 +48,7 @@ int main() {
     CHECK(parsed.value().debug_corpse_markers);
     CHECK(parsed.value().debug_zed_markers);
     CHECK(parsed.value().debug_flex_diagnostics);
+    CHECK(parsed.value().debug_runtime_diagnostics);
     CHECK(parsed.value().debug_corpse_physics_control);
     CHECK(parsed.value().overlay_position == "bottom_left");
     CHECK(parsed.value().overlay_scale_percent == 175);
@@ -194,6 +196,8 @@ int main() {
     CHECK(!parse_settings(
         "schema_version=1\ndebug_flex_diagnostics=maybe\n").has_value());
     CHECK(!parse_settings(
+        "schema_version=1\ndebug_runtime_diagnostics=maybe\n").has_value());
+    CHECK(!parse_settings(
         "schema_version=1\ndebug_corpse_physics_control=maybe\n").has_value());
     CHECK(!parse_settings(
         "schema_version=1\noffline_gameplay_telemetry=maybe\n").has_value());
@@ -254,6 +258,7 @@ int main() {
           "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=true\n"
           "debug_corpse_markers=false\ndebug_zed_markers=false\n"
           "debug_flex_diagnostics=false\n"
+          "debug_runtime_diagnostics=false\n"
           "debug_corpse_physics_control=false\n"
           "restore_config_after_game=true\n"
           "adaptive_aggressiveness=balanced\n"

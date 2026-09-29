@@ -21,6 +21,7 @@ struct Settings {
     bool debug_corpse_markers{false};
     bool debug_zed_markers{false};
     bool debug_flex_diagnostics{false};
+    bool debug_runtime_diagnostics{false};
     // Diagnostics-only A/B control. When true, the protected provider remains
     // active but all optimizer-owned corpse reductions are disabled.
     bool debug_corpse_physics_control{false};

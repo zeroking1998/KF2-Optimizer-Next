@@ -54,7 +54,8 @@ app::runtime::DispatchResult toggle_debug_marker(
             runtime.optimizer_settings.adaptive_quality_change_budget,
             runtime.adaptive_control_token,
             runtime.optimizer_settings.debug_zed_markers,
-            runtime.optimizer_settings.adaptive_optimization_enabled);
+            runtime.optimizer_settings.adaptive_optimization_enabled,
+            runtime.optimizer_settings.debug_runtime_diagnostics);
         if (!staged.has_value()) {
             show_notice(
                 runtime, ui::NoticeSeverity::error,
@@ -321,7 +322,8 @@ app::runtime::DispatchResult toggle_corpse_physics_control(
             runtime.optimizer_settings.adaptive_quality_change_budget,
             runtime.adaptive_control_token,
             runtime.optimizer_settings.debug_zed_markers,
-            runtime.optimizer_settings.adaptive_optimization_enabled);
+            runtime.optimizer_settings.adaptive_optimization_enabled,
+            runtime.optimizer_settings.debug_runtime_diagnostics);
         if (!staged.has_value()) {
             show_notice(
                 runtime, ui::NoticeSeverity::error,
@@ -399,6 +401,78 @@ app::runtime::DispatchResult toggle_flex_diagnostics(
             (enabled ? L"on." : L"off.") +
             (applied_live ? L" The running session was updated."
                           : L" The setting applies when FleX telemetry becomes available."));
+    return app::runtime::DispatchResult::handled;
+}
+
+app::runtime::DispatchResult toggle_runtime_diagnostics(
+    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
+    const bool previous =
+        runtime.optimizer_settings.debug_runtime_diagnostics;
+    runtime.optimizer_settings.debug_runtime_diagnostics = !previous;
+    const auto saved = platform::windows::atomic_replace_utf8(
+        runtime.settings_path,
+        config::serialize_settings(runtime.optimizer_settings));
+    if (!saved.has_value()) {
+        runtime.optimizer_settings.debug_runtime_diagnostics = previous;
+        show_notice(runtime, ui::NoticeSeverity::error,
+                    L"SETTINGS_SAVE_FAILED", saved.error().message);
+        return app::runtime::DispatchResult::handled;
+    }
+
+    const bool enabled =
+        runtime.optimizer_settings.debug_runtime_diagnostics;
+    auto status = runtime.model.status();
+    status.debug_runtime_diagnostics = enabled;
+    runtime.model.set_status(std::move(status));
+
+    bool staged_now = false;
+    bool verified_stopped = false;
+    if (runtime.installation) {
+        const auto process = game::find_running_game_process(
+            runtime.installation->executable);
+        verified_stopped = !process.has_value() &&
+            process.error().code == ErrorCode::not_found;
+    }
+    if (runtime.installation && !runtime.adaptive_control_token.empty() &&
+        verified_stopped) {
+        const auto staged = game::enable_offline_gameplay_logging(
+            runtime.installation->config_root,
+            !runtime.optimizer_settings.debug_corpse_physics_control,
+            runtime.optimizer_settings.corpse_limit,
+            runtime.optimizer_settings.target_fps,
+            runtime.optimizer_settings.debug_corpse_markers,
+            runtime.optimizer_settings.adaptive_quality_change_budget,
+            runtime.adaptive_control_token,
+            runtime.optimizer_settings.debug_zed_markers,
+            runtime.optimizer_settings.adaptive_optimization_enabled,
+            enabled);
+        if (!staged.has_value()) {
+            show_notice(
+                runtime, ui::NoticeSeverity::error,
+                L"RUNTIME_DIAGNOSTICS_STAGE_FAILED",
+                L"The preference was saved, but the prepared KF2 start could not be updated: " +
+                    staged.error().message +
+                    L" Restart KF2 Optimizer before the next test.");
+            return app::runtime::DispatchResult::handled;
+        }
+        staged_now = true;
+    }
+
+    runtime.events->append({
+        0, ::kf2::diagnostics::Severity::info,
+        "RUNTIME_DIAGNOSTICS_CHANGED",
+        std::wstring{L"Detailed runtime scan diagnostics "} +
+            (enabled ? L"enabled" : L"disabled") +
+            (staged_now ? L" for the prepared KF2 start"
+                        : L" for the next protected KF2 start"),
+        L"debug"});
+    show_notice(
+        runtime, ui::NoticeSeverity::info,
+        L"RUNTIME_DIAGNOSTICS_CHANGED",
+        std::wstring{L"Detailed corpse and Zed scan diagnostics are "} +
+            (enabled ? L"on." : L"off.") +
+            (staged_now ? L" The prepared KF2 start was updated."
+                        : L" The setting applies on the next protected KF2 start."));
     return app::runtime::DispatchResult::handled;
 }
 

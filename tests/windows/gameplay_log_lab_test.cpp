@@ -151,9 +151,9 @@ int main() {
     const auto telemetry_session_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_SESSION_SOURCE));
     const auto producer_schema_fields = telemetry_schema_fields(
-        telemetry_source, "KF2OPT_TELEMETRY schema=6 sample=", ");\n}");
+        telemetry_source, "KF2OPT_TELEMETRY schema=7 sample=", ");\n}");
     const auto parser_schema_fields = telemetry_schema_fields(
-        telemetry_parser_source, "KF2OPT_TELEMETRY schema=6 sample=",
+        telemetry_parser_source, "KF2OPT_TELEMETRY schema=7 sample=",
         "if (!sample");
     CHECK(!producer_schema_fields.empty());
     CHECK(producer_schema_fields == parser_schema_fields);
@@ -2245,6 +2245,20 @@ int main() {
         "var globalconfig bool bAdaptiveZedDebugMarkers") !=
           std::string::npos);
     CHECK(telemetry_source.find(
+        "var globalconfig bool bDetailedRuntimeDiagnostics") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "bSubmitNativeProfileNodes = bDetailedRuntimeDiagnostics &&") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "if (bDetailedRuntimeDiagnostics)\n            {\n"
+        "                if (LivingClasses.Find(Zed.Class)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "if (bDetailedRuntimeDiagnostics)\n            {\n"
+        "                if (Corpse.bHasBrokenConstraints)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
         "function RegisterAdaptiveCorpseDebugMarker(") != std::string::npos);
     CHECK(telemetry_source.find(
         "function DrawAdaptiveCorpseDebugMarkers(Canvas MarkerCanvas)") !=
@@ -2632,9 +2646,9 @@ int main() {
     CHECK(telemetry_source.find(
         "world_emitter_template_position_hits=") != std::string::npos);
     const auto profile_window_start = telemetry_source.find(
-        "if (SampleSequence % 10 == 0)");
+        "if (bDetailedRuntimeDiagnostics && SampleSequence % 10 == 0)");
     const auto profile_window_end = telemetry_source.find(
-        "`log(\"KF2OPT_TELEMETRY schema=6 sample=", profile_window_start);
+        "`log(\"KF2OPT_TELEMETRY schema=7 sample=", profile_window_start);
     CHECK(profile_window_start != std::string::npos);
     CHECK(profile_window_end != std::string::npos);
     const auto profile_window = telemetry_source.substr(
@@ -3771,6 +3785,8 @@ int main() {
           std::string::npos);
     CHECK(changed_engine.find("bAdaptiveZedDebugMarkers=False\r\n") !=
           std::string::npos);
+    CHECK(changed_engine.find("bDetailedRuntimeDiagnostics=False\r\n") !=
+          std::string::npos);
     CHECK(changed_engine.find("AdaptiveCorpseMaximum=0\r\n") !=
           std::string::npos);
     CHECK(changed_engine.find("AdaptiveTargetFPS=0\r\n") !=
@@ -3806,7 +3822,7 @@ int main() {
 
     const auto adaptive_enabled =
         kf2::game::enable_offline_gameplay_logging(
-            root, true, 350, 137, true, 2, control_token, true);
+            root, true, 350, 137, true, 2, control_token, true, true, true);
     CHECK(adaptive_enabled.has_value());
     CHECK(adaptive_enabled.value());
     const auto adaptive_engine = read_bytes(engine_ini);
@@ -3817,6 +3833,8 @@ int main() {
     CHECK(adaptive_engine.find("bAdaptiveCorpseDebugMarkers=True\r\n") !=
           std::string::npos);
     CHECK(adaptive_engine.find("bAdaptiveZedDebugMarkers=True\r\n") !=
+          std::string::npos);
+    CHECK(adaptive_engine.find("bDetailedRuntimeDiagnostics=True\r\n") !=
           std::string::npos);
     CHECK(adaptive_engine.find("AdaptiveCorpseMaximum=350\r\n") !=
           std::string::npos);
@@ -3837,12 +3855,12 @@ int main() {
     CHECK(observed_policy.value()->runtime_enabled);
     const auto adaptive_unchanged =
         kf2::game::enable_offline_gameplay_logging(
-            root, true, 350, 137, true, 2, control_token, true);
+            root, true, 350, 137, true, 2, control_token, true, true, true);
     CHECK(adaptive_unchanged.has_value());
     CHECK(!adaptive_unchanged.value());
     const auto physics_control =
         kf2::game::enable_offline_gameplay_logging(
-            root, false, 350, 137, true, 2, control_token, true);
+            root, false, 350, 137, true, 2, control_token, true, true, true);
     CHECK(physics_control.has_value());
     CHECK(physics_control.value());
     const auto physics_control_engine = read_bytes(engine_ini);
@@ -4004,6 +4022,12 @@ int main() {
         "bAdaptiveZedDebugMarkers=Maybe\n");
     CHECK(!kf2::game::enable_offline_gameplay_logging(
         root, true, 350, 137, false, 1, control_token, true).has_value());
+    write_bytes(engine_ini,
+        "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\n"
+        "bDetailedRuntimeDiagnostics=Maybe\n");
+    CHECK(!kf2::game::enable_offline_gameplay_logging(
+        root, true, 350, 137, false, 1, control_token, false, true, true)
+               .has_value());
     write_bytes(engine_ini, adaptive_engine);
 
     write_bytes(engine_ini,

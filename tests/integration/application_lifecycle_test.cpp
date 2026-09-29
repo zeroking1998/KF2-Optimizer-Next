@@ -682,7 +682,7 @@ int test_pending_policy_restage_failure_rollback() {
     int restage_attempts = 0;
     runtime.pending_policy_restage_operation =
         [&](const fs::path&, bool, int, int, bool, int,
-            std::string_view, bool, bool) {
+            std::string_view, bool, bool, bool) {
             ++restage_attempts;
             return kf2::Result<bool>::failure({
                 kf2::ErrorCode::io_failure,
@@ -1184,6 +1184,7 @@ int main(int argc, char** argv) {
         "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=true\n"
         "debug_corpse_markers=false\ndebug_zed_markers=false\n"
         "debug_flex_diagnostics=false\n"
+        "debug_runtime_diagnostics=false\n"
         "debug_corpse_physics_control=false\n"
         "restore_config_after_game=true\n"
         "adaptive_aggressiveness=balanced\n"
@@ -1454,6 +1455,12 @@ int main(int argc, char** argv) {
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(flex_diagnostics->x, flex_diagnostics->y));
     CHECK(graphical.value().ui_model().status().debug_flex_diagnostics);
+    const auto runtime_diagnostics = node_center(
+        hwnd, graphical.value().ui_model(), "debug-runtime-diagnostics");
+    CHECK(runtime_diagnostics.has_value());
+    SendMessageW(hwnd, WM_LBUTTONUP, 0,
+                 MAKELPARAM(runtime_diagnostics->x, runtime_diagnostics->y));
+    CHECK(graphical.value().ui_model().status().debug_runtime_diagnostics);
     const auto debug_settings_bytes =
         read_bytes(options.state_root / L"settings.ini");
     CHECK(debug_settings_bytes.find("debug_corpse_markers=true\n") !=
@@ -1464,10 +1471,14 @@ int main(int argc, char** argv) {
               "debug_corpse_physics_control=true\n") != std::string::npos);
     CHECK(debug_settings_bytes.find(
               "debug_flex_diagnostics=true\n") != std::string::npos);
+    CHECK(debug_settings_bytes.find(
+              "debug_runtime_diagnostics=true\n") != std::string::npos);
     CHECK(read_bytes(config_root / L"KFEngine.ini").find(
               "bAdaptiveCorpseDebugMarkers=True") != std::string::npos);
     CHECK(read_bytes(config_root / L"KFEngine.ini").find(
               "bAdaptiveZedDebugMarkers=True") != std::string::npos);
+    CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+              "bDetailedRuntimeDiagnostics=True") != std::string::npos);
     CHECK(read_bytes(config_root / L"KFEngine.ini").find(
               "bAdaptiveCorpseStagger=False") != std::string::npos);
     const auto diagnostics_navigation =

@@ -374,7 +374,8 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities(
         optimizer_settings.debug_corpse_markers,
         optimizer_settings.adaptive_quality_change_budget,
         adaptive_control_token, optimizer_settings.debug_zed_markers,
-        optimizer_settings.adaptive_optimization_enabled);
+        optimizer_settings.adaptive_optimization_enabled,
+        optimizer_settings.debug_runtime_diagnostics);
     if (!enabled.has_value()) {
         adaptive_control_token.clear();
         return Result<bool>::failure(enabled.error());

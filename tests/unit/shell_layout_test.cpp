@@ -283,6 +283,7 @@ int main() {
     debug_status.debug_corpse_markers = false;
     debug_status.debug_zed_markers = true;
     debug_status.debug_flex_diagnostics = true;
+    debug_status.debug_runtime_diagnostics = true;
     debug_status.debug_corpse_physics_control = true;
     debug_status.flex_telemetry = L"FleX solvers: 1 | particles: 10/90/100";
     debug_status.flex_substep_diagnostics =
@@ -309,6 +310,10 @@ int main() {
     CHECK(action(debug, "debug-flex-diagnostics")->selected);
     CHECK(action(debug, "debug-flex-diagnostics")->text ==
           L"FLEX RUNTIME DIAGNOSTICS: ON");
+    CHECK(action(debug, "debug-runtime-diagnostics") != nullptr);
+    CHECK(action(debug, "debug-runtime-diagnostics")->selected);
+    CHECK(action(debug, "debug-runtime-diagnostics")->text ==
+          L"RUNTIME SCAN DIAGNOSTICS: ON");
     CHECK(node(debug, "debug-flex-solver-text") != nullptr);
     CHECK(node(debug, "debug-flex-solver-text")->text.find(L"particles") !=
           std::wstring::npos);
@@ -324,6 +329,7 @@ int main() {
     CHECK(action_help_text("debug-zed-markers").has_value());
     CHECK(action_help_text("debug-corpse-physics-control").has_value());
     CHECK(action_help_text("debug-flex-diagnostics").has_value());
+    CHECK(action_help_text("debug-runtime-diagnostics").has_value());
 
     static_cast<void>(model.focus_destination(Destination::diagnostics));
     static_cast<void>(model.activate_focused());

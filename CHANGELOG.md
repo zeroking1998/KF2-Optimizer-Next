@@ -55,6 +55,10 @@ are visible immediately.
 - Added optional FleX runtime diagnostics to Debug with live min/max substeps,
   solver and particle statistics, shared-memory readback health, and bounded
   reports. Normal play keeps those detailed counters and logs disabled.
+- Added a separate, persistent runtime-scan diagnostics switch. Normal play
+  keeps only the corpse/Zed counts and visibility data required by Adaptive;
+  Actor, LOD, bone, injury, freeze-detail and scan-timing evidence is collected
+  only for an explicitly requested diagnostic run.
 - Added reproducible release optimization through interprocedural optimization
   and an optional two-phase MSVC profile-guided optimization workflow.
 - Simplified contributor setup, Windows builds, GitHub issue reporting, and
@@ -80,7 +84,7 @@ are visible immediately.
 - Frozen-corpse ownership is now released only after verified restoration,
   confirmed actor reuse, or world destruction. Pool removal and reused actors
   can no longer leave a live corpse non-physical, non-colliding, or unticked.
-- Kept schema 6 living-Zed telemetry in sync between the UnrealScript producer
+- Kept schema 7 living-Zed telemetry in sync between the UnrealScript producer
   and native parser, preventing complete snapshots from being discarded when
   offscreen skeleton-update counts are present.
 - Target FPS now uses KF2's native, vendor-independent startup cap for launches
