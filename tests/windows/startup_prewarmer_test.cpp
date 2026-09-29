@@ -286,6 +286,70 @@ int main(int argc, char** argv) {
         fair_root, StorageKind::solid_state, 8 * gib,
         L"KF-BioticsLab").size() == fair_plan.size());
 
+    const auto cancellation_root = std::filesystem::temp_directory_path() /
+        (L"kf2-map-prewarm-cancellation-test-" + process_suffix);
+    std::filesystem::remove_all(cancellation_root, cleanup_error);
+    write_file(cancellation_root /
+        L"KFGame/BrewedPC/Maps/Cancel/KF-Cancel.kfm", 4096);
+    detail::set_startup_prewarm_discovery_delay_for_testing(
+        std::chrono::milliseconds{750});
+    StartupPrewarmer discovery_cancelled;
+    discovery_cancelled.start(cancellation_root, {
+        .idle_delay = std::chrono::milliseconds{0},
+        .storage_override = StorageKind::solid_state,
+        .available_memory_override = 4 * gib,
+        .map_name = L"KF-Cancel",
+        .include_common_startup_files = false,
+    });
+    for (int attempt = 0; attempt < 200 &&
+         detail::startup_prewarm_discovery_steps_for_testing() == 0;
+         ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    CHECK(detail::startup_prewarm_discovery_steps_for_testing() > 0);
+    const auto cancel_started = std::chrono::steady_clock::now();
+    discovery_cancelled.request_stop();
+    discovery_cancelled.stop_and_wait();
+    const auto cancel_elapsed = std::chrono::duration_cast<
+        std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - cancel_started);
+    detail::set_startup_prewarm_discovery_delay_for_testing(
+        std::chrono::milliseconds{0});
+    CHECK(cancel_elapsed < std::chrono::milliseconds{250});
+    CHECK(discovery_cancelled.snapshot().state ==
+          StartupPrewarmState::cancelled);
+
+    detail::set_startup_prewarm_discovery_delay_for_testing(
+        std::chrono::milliseconds{750});
+    StartupPrewarmer replaced_discovery;
+    replaced_discovery.start(cancellation_root, {
+        .idle_delay = std::chrono::milliseconds{0},
+        .storage_override = StorageKind::solid_state,
+        .available_memory_override = 4 * gib,
+        .map_name = L"KF-Cancel",
+        .include_common_startup_files = false,
+    });
+    for (int attempt = 0; attempt < 200 &&
+         detail::startup_prewarm_discovery_steps_for_testing() == 0;
+         ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    CHECK(detail::startup_prewarm_discovery_steps_for_testing() > 0);
+    const auto replacement_started = std::chrono::steady_clock::now();
+    replaced_discovery.start(root, {
+        .idle_delay = std::chrono::milliseconds{0},
+        .storage_override = StorageKind::unknown,
+        .available_memory_override = 4 * gib,
+    });
+    const auto replacement_elapsed = std::chrono::duration_cast<
+        std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - replacement_started);
+    detail::set_startup_prewarm_discovery_delay_for_testing(
+        std::chrono::milliseconds{0});
+    CHECK(replacement_elapsed < std::chrono::milliseconds{250});
+    CHECK(wait_for_terminal(replaced_discovery).state ==
+          StartupPrewarmState::skipped_unknown_storage);
+
     const auto before = std::filesystem::last_write_time(plan[0].path);
     StartupPrewarmer prewarmer;
     prewarmer.start(root, {
@@ -426,5 +490,6 @@ int main(int argc, char** argv) {
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::remove_all(fair_root, cleanup_error);
     std::filesystem::remove_all(retry_root, cleanup_error);
+    std::filesystem::remove_all(cancellation_root, cleanup_error);
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

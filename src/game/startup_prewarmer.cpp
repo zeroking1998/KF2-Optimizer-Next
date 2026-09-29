@@ -24,6 +24,8 @@ namespace {
 #ifdef KF2_STARTUP_PREWARMER_TESTING
 std::atomic_bool fail_next_prewarm_plan{false};
 std::atomic<std::int64_t> next_prewarm_worker_entry_delay_ms{0};
+std::atomic<std::int64_t> prewarm_discovery_delay_ms{0};
+std::atomic<std::uint64_t> prewarm_discovery_steps{0};
 #endif
 
 constexpr std::size_t kVolumeExtentHeaderBytes =
@@ -53,6 +55,18 @@ void detail::delay_next_startup_prewarm_worker_entry(
     next_prewarm_worker_entry_delay_ms.store(
         std::max<std::int64_t>(0, delay.count()),
         std::memory_order_release);
+}
+
+void detail::set_startup_prewarm_discovery_delay_for_testing(
+    std::chrono::milliseconds delay) noexcept {
+    prewarm_discovery_steps.store(0, std::memory_order_release);
+    prewarm_discovery_delay_ms.store(
+        std::max<std::int64_t>(0, delay.count()),
+        std::memory_order_release);
+}
+
+std::uint64_t detail::startup_prewarm_discovery_steps_for_testing() noexcept {
+    return prewarm_discovery_steps.load(std::memory_order_acquire);
 }
 #endif
 
@@ -234,9 +248,21 @@ bool safe_map_name(std::wstring_view map_name) noexcept {
     });
 }
 
+bool continue_map_discovery(std::stop_token stop) noexcept {
+    if (stop.stop_requested()) return false;
+#ifdef KF2_STARTUP_PREWARMER_TESTING
+    prewarm_discovery_steps.fetch_add(1, std::memory_order_relaxed);
+    const auto delay = std::chrono::milliseconds{
+        prewarm_discovery_delay_ms.load(std::memory_order_acquire)};
+    if (delay.count() > 0 && !wait_interruptibly(stop, delay)) return false;
+#endif
+    return !stop.stop_requested();
+}
+
 std::vector<std::filesystem::path> map_packages(
     const std::filesystem::path& install_root,
-    std::wstring_view requested_map) {
+    std::wstring_view requested_map,
+    std::stop_token stop) {
     std::wstring map_name{requested_map};
     if (map_name.size() > 4 &&
         ascii_iequals(std::wstring_view{map_name}.substr(map_name.size() - 4),
@@ -253,6 +279,7 @@ std::vector<std::filesystem::path> map_packages(
         error};
     const std::filesystem::recursive_directory_iterator end;
     while (!error && iterator != end) {
+        if (!continue_map_discovery(stop)) return {};
         const auto entry = *iterator;
         iterator.increment(error);
         if (!entry.is_regular_file(error) || error) {
@@ -265,14 +292,16 @@ std::vector<std::filesystem::path> map_packages(
             matches.push_back(path);
         }
     }
-    if (matches.size() != 1) return {};
+    if (stop.stop_requested() || matches.size() != 1) return {};
 
     std::vector<std::filesystem::path> result;
+    if (stop.stop_requested()) return result;
     std::filesystem::directory_iterator sibling{
         matches.front().parent_path(),
         std::filesystem::directory_options::skip_permission_denied, error};
     const std::filesystem::directory_iterator sibling_end;
     while (!error && sibling != sibling_end) {
+        if (!continue_map_discovery(stop)) return {};
         const auto entry = *sibling;
         sibling.increment(error);
         if (!entry.is_regular_file(error) || error) {
@@ -329,8 +358,9 @@ std::uint64_t startup_prewarm_file_budget(
 std::vector<StartupPrewarmFile> build_startup_prewarm_plan(
     const std::filesystem::path& install_root, StorageKind storage,
     std::uint64_t available_memory_bytes, std::wstring_view map_name,
-    bool include_common_startup_files) {
+    bool include_common_startup_files, std::stop_token stop) {
     std::vector<StartupPrewarmFile> result;
+    if (stop.stop_requested()) return result;
     std::uint64_t remaining = startup_prewarm_budget(
         storage, available_memory_bytes);
     if (remaining == 0) return result;
@@ -360,12 +390,15 @@ std::vector<StartupPrewarmFile> build_startup_prewarm_plan(
     };
     if (include_common_startup_files) {
         for (const auto relative : kStartupFiles) {
+            if (stop.stop_requested()) return {};
             append_candidate(install_root / relative, false);
         }
     }
-    for (const auto& path : map_packages(install_root, map_name)) {
+    for (const auto& path : map_packages(install_root, map_name, stop)) {
+        if (stop.stop_requested()) return {};
         append_candidate(path, true);
     }
+    if (stop.stop_requested()) return {};
     std::stable_sort(candidates.begin(), candidates.end(),
                      [](const Candidate& left, const Candidate& right) {
                          if (left.large != right.large) return !left.large;
@@ -375,6 +408,7 @@ std::vector<StartupPrewarmFile> build_startup_prewarm_plan(
                          return false;
                      });
     for (const auto& candidate : candidates) {
+        if (stop.stop_requested()) return {};
         const auto file_limit = startup_prewarm_file_budget(candidate.bytes);
         const auto selected = std::min(
             {candidate.bytes, file_limit, remaining});
@@ -465,7 +499,11 @@ struct StartupPrewarmer::Impl final {
 #endif
         const auto plan = build_startup_prewarm_plan(
             install_root, storage, memory, options.map_name,
-            options.include_common_startup_files);
+            options.include_common_startup_files, stop);
+        if (stop.stop_requested()) {
+            state = StartupPrewarmState::cancelled;
+            return;
+        }
         if (plan.empty()) {
             state = StartupPrewarmState::skipped_no_files;
             return;
