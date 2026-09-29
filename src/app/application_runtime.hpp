@@ -280,6 +280,10 @@ struct UiRuntime {
     std::optional<bool> adaptive_variable_frame_rate_enabled;
     std::optional<std::filesystem::file_time_type>
         adaptive_frame_rate_config_write_time;
+    std::uint64_t adaptive_frame_rate_config_last_poll_ns{0};
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+    std::uint64_t adaptive_frame_rate_config_metadata_checks_for_testing{0};
+#endif
     bool adaptive_frame_rate_mode_read_failed{false};
     optimizer::QualityResponse quality_response;
     telemetry_pipeline::CorpseTelemetryTracker corpse_telemetry_tracker;
