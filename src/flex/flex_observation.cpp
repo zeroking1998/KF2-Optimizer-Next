@@ -132,6 +132,7 @@ std::optional<ObservationSnapshot> read_observation(
         result.last_download_memory = shared->last_download_memory;
         result.solver_tracking_quarantined =
             shared->solver_tracking_quarantined != 0;
+        result.diagnostics_enabled = shared->diagnostics_enabled != 0;
         const LONG bits = shared->last_delta_time_bits;
         std::memcpy(&result.last_delta_time, &bits, sizeof(bits));
         const auto now = GetTickCount64();
@@ -145,9 +146,10 @@ std::optional<ObservationSnapshot> read_observation(
         result.pass_through_healthy =
             (counters_match || one_update_is_in_flight) &&
             result.missing_original_calls == 0 &&
-            result.tracking_drop_calls == 0 &&
             result.invalid_argument_calls == 0 &&
-            !result.solver_tracking_quarantined;
+            (!result.diagnostics_enabled ||
+             (result.tracking_drop_calls == 0 &&
+              !result.solver_tracking_quarantined));
         result.control_fresh = result.control_heartbeat_tick != 0 &&
             now >= result.control_heartbeat_tick &&
             now - result.control_heartbeat_tick <= 1500;
@@ -185,8 +187,10 @@ std::optional<ObservationSnapshot> read_observation(
              (result.particle_capacity_available &&
               result.aggregate_active_particles + result.free_particles !=
                   result.particle_capacity) ||
-             !std::isfinite(result.last_delta_time) ||
-             result.last_delta_time <= 0.0F || result.last_delta_time > 1.0F)) {
+             (result.diagnostics_enabled &&
+              (!std::isfinite(result.last_delta_time) ||
+               result.last_delta_time <= 0.0F ||
+               result.last_delta_time > 1.0F)))) {
             UnmapViewOfFile(shared);
             CloseHandle(mapping);
             return std::nullopt;
@@ -198,10 +202,9 @@ std::optional<ObservationSnapshot> read_observation(
     return result;
 }
 
-bool write_adaptive_control(const game::GameProcessIdentity& process,
-                            int maximum_substeps) noexcept {
-    if (process.pid == 0 || process.process_start_id == 0 ||
-        maximum_substeps < 0 || maximum_substeps > 5) return false;
+bool write_fixed_control(const game::GameProcessIdentity& process,
+                         bool diagnostics_enabled) noexcept {
+    if (process.pid == 0 || process.process_start_id == 0) return false;
     std::array<wchar_t, observation_mapping_name_capacity> name{};
     if (!make_observation_mapping_name(process.pid, name)) return false;
     HANDLE mapping = OpenFileMappingW(
@@ -217,7 +220,9 @@ bool write_adaptive_control(const game::GameProcessIdentity& process,
         shared->version == observation_version && shared->size == sizeof(*shared) &&
         shared->pid == process.pid && start == process.process_start_id;
     if (valid) {
-        InterlockedExchange(&shared->desired_substeps, maximum_substeps);
+        InterlockedExchange(&shared->desired_substeps, 1);
+        InterlockedExchange(&shared->diagnostics_enabled,
+                            diagnostics_enabled ? 1 : 0);
         InterlockedExchange64(&shared->control_heartbeat_tick,
                               static_cast<LONGLONG>(GetTickCount64()));
     }

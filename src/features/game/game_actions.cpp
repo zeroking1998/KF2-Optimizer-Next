@@ -185,7 +185,8 @@ app::runtime::DispatchResult launch(
         app::should_prepare_fixed_flex_runtime(
             runtime.start_mode, *configured_physx_level);
     if (!automatic_external_profile_ready) {
-        const auto automatic = runtime.apply_adaptive_launch_profile();
+        const auto automatic =
+            runtime.apply_adaptive_launch_profile(fixed_flex_launch);
         if (!automatic.has_value()) {
             const auto detail = automatic.error().message;
             if (runtime.restore_protected_session_config(
@@ -204,7 +205,8 @@ app::runtime::DispatchResult launch(
     }
     if (!automatic_external_profile_ready) {
         const auto capabilities =
-            runtime.prepare_automatic_protected_launch_capabilities();
+            runtime.prepare_automatic_protected_launch_capabilities(
+                fixed_flex_launch);
         if (!capabilities.has_value()) {
             const auto detail = capabilities.error().message;
             if (runtime.restore_protected_session_config(

@@ -282,7 +282,13 @@ int main() {
     auto debug_status = model.status();
     debug_status.debug_corpse_markers = false;
     debug_status.debug_zed_markers = true;
+    debug_status.debug_flex_diagnostics = true;
     debug_status.debug_corpse_physics_control = true;
+    debug_status.flex_telemetry = L"FleX solvers: 1 | particles: 10/90/100";
+    debug_status.flex_substep_diagnostics =
+        L"input min/max 1/3 | forwarded min/max 1/1";
+    debug_status.flex_readback_diagnostics =
+        L"shared memory healthy | reports and extra logs on";
     model.set_status(debug_status);
     const auto debug = layout_shell(model, 1440, 900);
     CHECK(node(debug, "debug-markers-section") != nullptr);
@@ -299,11 +305,25 @@ int main() {
     CHECK(action(debug, "debug-corpse-physics-control")->selected);
     CHECK(action(debug, "debug-corpse-physics-control")->text ==
           L"PHYSICS A/B: CONTROL");
+    CHECK(action(debug, "debug-flex-diagnostics") != nullptr);
+    CHECK(action(debug, "debug-flex-diagnostics")->selected);
+    CHECK(action(debug, "debug-flex-diagnostics")->text ==
+          L"FLEX RUNTIME DIAGNOSTICS: ON");
+    CHECK(node(debug, "debug-flex-solver-text") != nullptr);
+    CHECK(node(debug, "debug-flex-solver-text")->text.find(L"particles") !=
+          std::wstring::npos);
+    CHECK(node(debug, "debug-flex-substeps-text") != nullptr);
+    CHECK(node(debug, "debug-flex-substeps-text")->text.find(L"min/max") !=
+          std::wstring::npos);
+    CHECK(node(debug, "debug-flex-readback-text") != nullptr);
+    CHECK(node(debug, "debug-flex-readback-text")->text.find(L"reports") !=
+          std::wstring::npos);
     CHECK(action(debug, "diagnostics-open-data") != nullptr);
     CHECK(action(debug, "diagnostics-open-log") != nullptr);
     CHECK(action_help_text("debug-corpse-markers").has_value());
     CHECK(action_help_text("debug-zed-markers").has_value());
     CHECK(action_help_text("debug-corpse-physics-control").has_value());
+    CHECK(action_help_text("debug-flex-diagnostics").has_value());
 
     static_cast<void>(model.focus_destination(Destination::diagnostics));
     static_cast<void>(model.activate_focused());

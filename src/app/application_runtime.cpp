@@ -479,6 +479,13 @@ ui::UiStatus UiRuntime::make_initial_status(
     status.overlay_show_memory = settings.overlay_show_memory;
     status.debug_corpse_markers = settings.debug_corpse_markers;
     status.debug_zed_markers = settings.debug_zed_markers;
+    status.debug_flex_diagnostics = settings.debug_flex_diagnostics;
+    if (settings.debug_flex_diagnostics) {
+        status.flex_substep_diagnostics =
+            L"Waiting for FleX min/max substep telemetry";
+        status.flex_readback_diagnostics =
+            L"Waiting for shared-memory readback; reports and extra logs are on";
+    }
     status.debug_corpse_physics_control =
         settings.debug_corpse_physics_control;
     status.overlay_scale_percent = settings.overlay_scale_percent;

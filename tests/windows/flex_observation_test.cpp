@@ -92,12 +92,13 @@ int wmain() {
     shared->last_download_memory = 2;
     shared->bounds_calls = 9;
     shared->params_calls = 10;
+    shared->diagnostics_enabled = 1;
     const float dt = 1.0F / 60.0F;
     std::memcpy(const_cast<LONG*>(&shared->last_delta_time_bits), &dt, sizeof(dt));
     shared->last_update_tick = GetTickCount64();
     kf2::game::GameProcessIdentity identity{pid, start, {}};
     static_assert(noexcept(kf2::flex::read_observation(identity)));
-    static_assert(noexcept(kf2::flex::write_adaptive_control(identity, 1)));
+    static_assert(noexcept(kf2::flex::write_fixed_control(identity, false)));
     const auto result = kf2::flex::read_observation(identity);
     if (!result || !result->fresh || !result->pass_through_healthy ||
         result->last_substeps != 3 || result->min_substeps != 2 ||
@@ -120,7 +121,20 @@ int wmain() {
         result->bounds_calls != 9 || result->params_calls != 10 ||
         result->missing_original_calls != 0 || result->tracking_drop_calls != 0 ||
         result->invalid_argument_calls != 0 || result->solver_tracking_quarantined ||
+        !result->diagnostics_enabled ||
         std::abs(result->solver_updates_per_second - 60.0) > 0.01) return 4;
+
+    // Detailed solver tracking is optional. A diagnostics-only tracking failure
+    // must not make the fixed one-substep relay unavailable while diagnostics
+    // are off, but it remains visible as unhealthy while diagnostics are on.
+    shared->tracking_drop_calls = 1;
+    shared->diagnostics_enabled = 0;
+    const auto diagnostics_off = kf2::flex::read_observation(identity);
+    if (!diagnostics_off || !diagnostics_off->pass_through_healthy) return 14;
+    shared->diagnostics_enabled = 1;
+    const auto diagnostics_on = kf2::flex::read_observation(identity);
+    if (!diagnostics_on || diagnostics_on->pass_through_healthy) return 15;
+    shared->tracking_drop_calls = 0;
 
     // A sampler can run after the forwarder records a started update but before
     // the original FleX call returns. That single fresh in-flight call is healthy,
@@ -146,17 +160,17 @@ int wmain() {
     fail_allocations = true;
     const auto allocation_free_read = kf2::flex::read_observation(identity);
     const bool allocation_free_write =
-        kf2::flex::write_adaptive_control(identity, 2);
+        kf2::flex::write_fixed_control(identity, false);
     fail_allocations = false;
     if (!allocation_free_read || !allocation_free_write ||
-        shared->desired_substeps != 2) return 13;
-    if (!kf2::flex::write_adaptive_control(identity, 1) ||
-        shared->desired_substeps != 1 || shared->control_heartbeat_tick == 0) return 6;
-    if (!kf2::flex::write_adaptive_control(identity, 5) || shared->desired_substeps != 5) return 7;
-    if (kf2::flex::write_adaptive_control(identity, 6)) return 9;
+        shared->desired_substeps != 1 || shared->diagnostics_enabled != 0)
+        return 13;
+    if (!kf2::flex::write_fixed_control(identity, true) ||
+        shared->desired_substeps != 1 || shared->diagnostics_enabled != 1 ||
+        shared->control_heartbeat_tick == 0) return 6;
     identity.process_start_id++;
     if (kf2::flex::read_observation(identity)) return 5;
-    if (kf2::flex::write_adaptive_control(identity, 1)) return 8;
+    if (kf2::flex::write_fixed_control(identity, true)) return 8;
     UnmapViewOfFile(shared);
     CloseHandle(mapping);
     return 0;

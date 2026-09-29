@@ -46,6 +46,9 @@ struct UiStatus {
     std::wstring recommendation_reason{L"Fresh stable telemetry is required"};
     std::wstring hardware_summary{L"Hardware not refreshed"};
     std::wstring flex_telemetry{L"FleX telemetry not observed"};
+    std::wstring flex_substep_diagnostics{L"Detailed substep counters are off"};
+    std::wstring flex_readback_diagnostics{
+        L"Minimal safety readback active; reports and extra logs are off"};
     bool game_detected{false};
     std::optional<double> live_fps;
     std::optional<double> live_frame_time_ms;
@@ -63,6 +66,7 @@ struct UiStatus {
     bool overlay_show_memory{true};
     bool debug_corpse_markers{false};
     bool debug_zed_markers{false};
+    bool debug_flex_diagnostics{false};
     bool debug_corpse_physics_control{false};
     std::wstring overlay_position{L"top right"};
     int overlay_scale_percent{100};

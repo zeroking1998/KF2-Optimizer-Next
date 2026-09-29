@@ -63,12 +63,14 @@ struct ObservationSnapshot {
     bool particle_capacity_available{false};
     bool aggregate_particles_fresh{false};
     bool solver_tracking_quarantined{false};
+    bool diagnostics_enabled{false};
     double solver_updates_per_second{0.0};
 };
 
 [[nodiscard]] std::optional<ObservationSnapshot> read_observation(
     const game::GameProcessIdentity& process) noexcept;
-[[nodiscard]] bool write_adaptive_control(
-    const game::GameProcessIdentity& process, int maximum_substeps) noexcept;
+[[nodiscard]] bool write_fixed_control(
+    const game::GameProcessIdentity& process,
+    bool diagnostics_enabled) noexcept;
 
 }  // namespace kf2::flex

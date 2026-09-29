@@ -33,6 +33,12 @@ struct SolverSlot {
 SRWLOCK solver_lock = SRWLOCK_INIT;
 SolverSlot solver_slots[64]{};
 volatile LONG solver_quarantine{};
+PVOID volatile flex_update_solver_target{};
+
+bool detailed_diagnostics(ObservationShared* shared) noexcept {
+    return shared &&
+        InterlockedCompareExchange(&shared->diagnostics_enabled, 0, 0) != 0;
+}
 
 void saturated_increment(volatile LONGLONG* value) noexcept;
 
@@ -154,44 +160,6 @@ bool register_solver(void* solver, int capacity, ULONGLONG tick,
     return destination != nullptr;
 }
 
-unsigned track_solver(void* solver, ULONGLONG tick, bool& tracked,
-                      ObservationShared* shared) noexcept {
-    tracked = false;
-    if (!solver || InterlockedCompareExchange(&solver_quarantine, 0, 0) != 0 ||
-        !TryAcquireSRWLockExclusive(&solver_lock)) {
-        if (shared) saturated_increment(&shared->tracking_drop_calls);
-        return 0;
-    }
-    SolverSlot* free_slot = nullptr;
-    for (auto& slot : solver_slots) {
-        if (slot.solver == solver) {
-            if (slot.last_tick && tick >= slot.last_tick && tick - slot.last_tick >= 5000)
-                slot.calls = 1;
-            else if (slot.calls != UINT_MAX)
-                ++slot.calls;
-            slot.last_tick = tick;
-            const auto calls = slot.calls;
-            tracked = true;
-            ReleaseSRWLockExclusive(&solver_lock);
-            return calls;
-        }
-        if (!free_slot && !slot.solver) free_slot = &slot;
-    }
-    if (free_slot) {
-        free_slot->solver = solver;
-        free_slot->calls = 1;
-        free_slot->last_tick = tick;
-        tracked = true;
-        publish_solver_snapshot(shared);
-    }
-    if (!tracked) {
-        publish_quarantine(shared);
-        if (shared) saturated_increment(&shared->tracking_drop_calls);
-    }
-    ReleaseSRWLockExclusive(&solver_lock);
-    return tracked ? 1 : 0;
-}
-
 void retire_solver(void* solver, ObservationShared* shared) noexcept {
     if (!solver) return;
     if (!TryAcquireSRWLockExclusive(&solver_lock)) {
@@ -286,6 +254,19 @@ HMODULE original_module() noexcept {
     // the game call path.
     return GetModuleHandleW(L"flexRelease_original.dll");
 }
+
+PVOID update_solver_target() noexcept {
+    auto* cached = InterlockedCompareExchangePointer(
+        &flex_update_solver_target, nullptr, nullptr);
+    if (cached) return cached;
+    const auto module = original_module();
+    auto* resolved = module ? reinterpret_cast<PVOID>(
+        GetProcAddress(module, "flexUpdateSolver")) : nullptr;
+    if (!resolved) return nullptr;
+    auto* previous = InterlockedCompareExchangePointer(
+        &flex_update_solver_target, resolved, nullptr);
+    return previous ? previous : resolved;
+}
 }  // namespace
 
 extern "C" void flexDestroySolver(void* solver) noexcept {
@@ -346,7 +327,7 @@ extern "C" int flexGetActiveCount(void* solver) noexcept {
     if (shared && !solver) saturated_increment(&shared->invalid_argument_calls);
     const int count = function ? function(solver) : 0;
     if (function && count >= 0) {
-        if (shared) {
+        if (detailed_diagnostics(shared)) {
             InterlockedExchange(&shared->last_active_particles, count);
             LONG minimum = InterlockedCompareExchange(
                 &shared->min_active_particles, 0, 0);
@@ -385,7 +366,8 @@ extern "C" void flexGetBounds(void* solver, void* lower, void* upper) noexcept {
     if (shared && (!solver || !lower || !upper))
         saturated_increment(&shared->invalid_argument_calls);
     if (function) function(solver, lower, upper);
-    if (function && shared) saturated_increment(&shared->bounds_calls);
+    if (function && detailed_diagnostics(shared))
+        saturated_increment(&shared->bounds_calls);
 }
 
 extern "C" void flexSetParams(void* solver, const void* params) noexcept {
@@ -398,7 +380,8 @@ extern "C" void flexSetParams(void* solver, const void* params) noexcept {
     if (shared && (!solver || !params))
         saturated_increment(&shared->invalid_argument_calls);
     if (function) function(solver, params);
-    if (function && shared) saturated_increment(&shared->params_calls);
+    if (function && detailed_diagnostics(shared))
+        saturated_increment(&shared->params_calls);
 }
 
 template <bool Upload>
@@ -414,7 +397,7 @@ void relay_buffer_transfer(const char* export_name, void* solver,
     if (shared && (!solver || (!buffer && elements > 0) || elements < 0))
         saturated_increment(&shared->invalid_argument_calls);
     if (function) function(solver, buffer, elements, memory);
-    if (function && shared)
+    if (function && detailed_diagnostics(shared))
         record_transfer(shared, Upload, &(shared->*counter), elements, memory);
 }
 
@@ -466,7 +449,7 @@ extern "C" void flexSetFence() noexcept {
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (!function) return;
     function();
-    if (shared) {
+    if (detailed_diagnostics(shared)) {
         saturated_increment(&shared->fence_set_calls);
         InterlockedExchange64(&shared->last_fence_set_tick,
                               static_cast<LONGLONG>(GetTickCount64()));
@@ -483,7 +466,7 @@ extern "C" void flexWaitFence() noexcept {
     if (!function) return;
     // This relay never adds a wait. It observes only the exact wait KF2 requested.
     function();
-    if (shared) {
+    if (detailed_diagnostics(shared)) {
         saturated_increment(&shared->fence_wait_calls);
         InterlockedExchange64(&shared->last_fence_wait_tick,
                               static_cast<LONGLONG>(GetTickCount64()));
@@ -493,58 +476,56 @@ extern "C" void flexWaitFence() noexcept {
 extern "C" void flexUpdateSolver(void* solver, float delta_time,
                                   int substeps, void* timers) noexcept {
     using Function = void (*)(void*, float, int, void*);
-    const auto module = original_module();
-    const auto function = module ? reinterpret_cast<Function>(
-        GetProcAddress(module, "flexUpdateSolver")) : nullptr;
+    const auto function = reinterpret_cast<Function>(update_solver_target());
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && (!solver || substeps < 0 || substeps > 64))
         saturated_increment(&shared->invalid_argument_calls);
-    int forwarded_substeps = substeps;
-    bool solver_tracked = false;
-    const auto tick = GetTickCount64();
-    const auto solver_calls = track_solver(solver, tick, solver_tracked, shared);
+    const int forwarded_substeps =
+        kf2::flex::fixed_minimum_substeps(substeps);
+    const bool diagnostics = detailed_diagnostics(shared);
     if (shared) {
-        const auto heartbeat = static_cast<ULONGLONG>(InterlockedCompareExchange64(
-            &shared->control_heartbeat_tick, 0, 0));
-        const LONG cap = InterlockedCompareExchange(&shared->desired_substeps, 0, 0);
-        const bool fresh = heartbeat != 0 && tick >= heartbeat && tick - heartbeat <= 1500 &&
-            kf2::flex::adaptive_warmup_complete(solver_calls, solver_tracked,
-                InterlockedCompareExchange(&solver_quarantine, 0, 0) != 0);
-        forwarded_substeps = kf2::flex::adaptive_substeps(substeps, cap, fresh);
         if (forwarded_substeps != substeps) {
             saturated_increment(&shared->constrained_updates);
         }
         InterlockedExchange(&shared->last_forwarded_substeps, forwarded_substeps);
-        LONG forwarded_minimum = InterlockedCompareExchange(
-            &shared->min_forwarded_substeps, 0, 0);
-        while (forwarded_substeps < forwarded_minimum &&
-               InterlockedCompareExchange(&shared->min_forwarded_substeps,
-                   forwarded_substeps, forwarded_minimum) != forwarded_minimum)
-            forwarded_minimum = InterlockedCompareExchange(
+        if (diagnostics) {
+            LONG forwarded_minimum = InterlockedCompareExchange(
                 &shared->min_forwarded_substeps, 0, 0);
-        LONG forwarded_maximum = InterlockedCompareExchange(
-            &shared->max_forwarded_substeps, 0, 0);
-        while (forwarded_substeps > forwarded_maximum &&
-               InterlockedCompareExchange(&shared->max_forwarded_substeps,
-                   forwarded_substeps, forwarded_maximum) != forwarded_maximum)
-            forwarded_maximum = InterlockedCompareExchange(
+            while (forwarded_substeps < forwarded_minimum &&
+                   InterlockedCompareExchange(&shared->min_forwarded_substeps,
+                       forwarded_substeps, forwarded_minimum) != forwarded_minimum)
+                forwarded_minimum = InterlockedCompareExchange(
+                    &shared->min_forwarded_substeps, 0, 0);
+            LONG forwarded_maximum = InterlockedCompareExchange(
                 &shared->max_forwarded_substeps, 0, 0);
-    }
-    if (shared) {
+            while (forwarded_substeps > forwarded_maximum &&
+                   InterlockedCompareExchange(&shared->max_forwarded_substeps,
+                       forwarded_substeps, forwarded_maximum) != forwarded_maximum)
+                forwarded_maximum = InterlockedCompareExchange(
+                    &shared->max_forwarded_substeps, 0, 0);
+        }
         saturated_increment(&shared->update_calls);
         InterlockedExchange(&shared->last_substeps, substeps);
-        LONG bits{}; static_assert(sizeof(bits) == sizeof(delta_time));
-        CopyMemory(&bits, &delta_time, sizeof(bits));
-        InterlockedExchange(&shared->last_delta_time_bits, bits);
-        LONG minimum = InterlockedCompareExchange(&shared->min_substeps, 0, 0);
-        while (substeps < minimum &&
-               InterlockedCompareExchange(&shared->min_substeps, substeps, minimum) != minimum)
-            minimum = InterlockedCompareExchange(&shared->min_substeps, 0, 0);
-        LONG maximum = InterlockedCompareExchange(&shared->max_substeps, 0, 0);
-        while (substeps > maximum &&
-               InterlockedCompareExchange(&shared->max_substeps, substeps, maximum) != maximum)
-            maximum = InterlockedCompareExchange(&shared->max_substeps, 0, 0);
+        if (diagnostics) {
+            LONG bits{}; static_assert(sizeof(bits) == sizeof(delta_time));
+            CopyMemory(&bits, &delta_time, sizeof(bits));
+            InterlockedExchange(&shared->last_delta_time_bits, bits);
+            LONG minimum = InterlockedCompareExchange(
+                &shared->min_substeps, 0, 0);
+            while (substeps < minimum &&
+                   InterlockedCompareExchange(&shared->min_substeps,
+                       substeps, minimum) != minimum)
+                minimum = InterlockedCompareExchange(
+                    &shared->min_substeps, 0, 0);
+            LONG maximum = InterlockedCompareExchange(
+                &shared->max_substeps, 0, 0);
+            while (substeps > maximum &&
+                   InterlockedCompareExchange(&shared->max_substeps,
+                       substeps, maximum) != maximum)
+                maximum = InterlockedCompareExchange(
+                    &shared->max_substeps, 0, 0);
+        }
         InterlockedExchange64(&shared->last_update_tick,
                               static_cast<LONGLONG>(GetTickCount64()));
     }

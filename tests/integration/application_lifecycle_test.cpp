@@ -860,21 +860,35 @@ int main(int argc, char** argv) {
     CHECK(flex_preservation_changes.size() == 4);
     CHECK(std::get<bool>(flex_preservation_changes[2].value));
     CHECK(std::get<bool>(flex_preservation_changes[3].value));
-    kf2::app::enforce_one_frame_thread_lag(flex_preservation_changes);
+    kf2::app::enforce_fixed_flex_substeps(
+        flex_preservation_changes, false);
+    CHECK(flex_preservation_changes.size() == 4);
+    kf2::app::enforce_fixed_flex_substeps(
+        flex_preservation_changes, true);
     CHECK(flex_preservation_changes.size() == 5);
     CHECK(flex_preservation_changes[4].id ==
+          kf2::config::SettingId::max_physics_substeps);
+    CHECK(std::get<int>(flex_preservation_changes[4].value) == 1);
+    flex_preservation_changes[4].value = 5;
+    kf2::app::enforce_fixed_flex_substeps(
+        flex_preservation_changes, true);
+    CHECK(flex_preservation_changes.size() == 5);
+    CHECK(std::get<int>(flex_preservation_changes[4].value) == 1);
+    kf2::app::enforce_one_frame_thread_lag(flex_preservation_changes);
+    CHECK(flex_preservation_changes.size() == 6);
+    CHECK(flex_preservation_changes[5].id ==
           kf2::config::SettingId::one_frame_thread_lag);
-    CHECK(std::get<bool>(flex_preservation_changes[4].value));
+    CHECK(std::get<bool>(flex_preservation_changes[5].value));
     const kf2::optimizer::StartupMemoryProfile startup_memory{
         .texture_pool_size_mb = 6000,
         .memory_margin_mb = 128,
         .streaming_hysteresis_limit = 40};
     kf2::app::enforce_startup_memory_profile(
         flex_preservation_changes, startup_memory);
-    CHECK(flex_preservation_changes.size() == 8);
-    CHECK(std::get<int>(flex_preservation_changes[5].value) == 6000);
-    CHECK(std::get<int>(flex_preservation_changes[6].value) == 128);
-    CHECK(std::get<int>(flex_preservation_changes[7].value) == 40);
+    CHECK(flex_preservation_changes.size() == 9);
+    CHECK(std::get<int>(flex_preservation_changes[6].value) == 6000);
+    CHECK(std::get<int>(flex_preservation_changes[7].value) == 128);
+    CHECK(std::get<int>(flex_preservation_changes[8].value) == 40);
     namespace fs = std::filesystem;
     CHECK(kf2::app::runtime::feature_definitions().size() == 7);
     CHECK(kf2::app::runtime::find_feature(
@@ -1169,6 +1183,7 @@ int main(int argc, char** argv) {
         "overlay_enabled=true\noverlay_show_fps=true\noverlay_show_frame_time=true\n"
         "overlay_show_cpu=true\noverlay_show_gpu=true\noverlay_show_memory=true\n"
         "debug_corpse_markers=false\ndebug_zed_markers=false\n"
+        "debug_flex_diagnostics=false\n"
         "debug_corpse_physics_control=false\n"
         "restore_config_after_game=true\n"
         "adaptive_aggressiveness=balanced\n"
@@ -1433,6 +1448,12 @@ int main(int argc, char** argv) {
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(physics_control->x, physics_control->y));
     CHECK(graphical.value().ui_model().status().debug_corpse_physics_control);
+    const auto flex_diagnostics = node_center(
+        hwnd, graphical.value().ui_model(), "debug-flex-diagnostics");
+    CHECK(flex_diagnostics.has_value());
+    SendMessageW(hwnd, WM_LBUTTONUP, 0,
+                 MAKELPARAM(flex_diagnostics->x, flex_diagnostics->y));
+    CHECK(graphical.value().ui_model().status().debug_flex_diagnostics);
     const auto debug_settings_bytes =
         read_bytes(options.state_root / L"settings.ini");
     CHECK(debug_settings_bytes.find("debug_corpse_markers=true\n") !=
@@ -1441,6 +1462,8 @@ int main(int argc, char** argv) {
           std::string::npos);
     CHECK(debug_settings_bytes.find(
               "debug_corpse_physics_control=true\n") != std::string::npos);
+    CHECK(debug_settings_bytes.find(
+              "debug_flex_diagnostics=true\n") != std::string::npos);
     CHECK(read_bytes(config_root / L"KFEngine.ini").find(
               "bAdaptiveCorpseDebugMarkers=True") != std::string::npos);
     CHECK(read_bytes(config_root / L"KFEngine.ini").find(

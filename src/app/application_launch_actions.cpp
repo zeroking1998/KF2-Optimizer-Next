@@ -78,6 +78,15 @@ void enforce_async_physics_enabled(
         L"Enable asynchronous scene processing at KF2 startup");
 }
 
+void enforce_fixed_flex_substeps(
+    std::vector<config::RequestedChange>& changes,
+    bool fixed_flex_launch) noexcept {
+    if (!fixed_flex_launch) return;
+    upsert_startup_change(
+        changes, config::SettingId::max_physics_substeps, 1,
+        L"Use KF2's native one-substep physics ceiling for user-enabled FleX");
+}
+
 void enforce_one_frame_thread_lag(
     std::vector<config::RequestedChange>& changes) noexcept {
     upsert_startup_change(
@@ -102,7 +111,8 @@ void enforce_startup_memory_profile(
         L"Use bounded native texture-streaming hysteresis");
 }
 
-Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
+Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile(
+    bool fixed_flex_launch) {
     const auto apply_launch_preview = [this]() -> Result<config::ApplyResult> {
         if (!preview) {
             return Result<config::ApplyResult>::failure(
@@ -123,11 +133,13 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
         return applied;
     };
     if (!optimizer_settings.adaptive_optimization_enabled) {
-        auto prepared = prepare({{
+        std::vector<config::RequestedChange> changes{{
             config::SettingId::corpse_limit,
             optimizer_settings.corpse_limit,
             config::ChangeSource::explicit_user,
-            L"Keep the user-selected maximum corpse count while Adaptive optimization is off"}},
+            L"Keep the user-selected maximum corpse count while Adaptive optimization is off"}};
+        enforce_fixed_flex_substeps(changes, fixed_flex_launch);
+        auto prepared = prepare(changes,
             L"Fixed user goals with Adaptive optimization off");
         if (!prepared.has_value()) {
             return Result<config::ApplyResult>::failure(prepared.error());
@@ -137,7 +149,9 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
             last_backup_id = applied.value().backup.id;
             events->append({0, diagnostics::Severity::info,
                 "ADAPTIVE_LAUNCH_SKIPPED",
-                L"Adaptive launch changes were skipped; only the selected maximum corpse count and independent native FPS cap remain active",
+                fixed_flex_launch
+                    ? L"Adaptive launch changes were skipped; the selected maximum corpse count, independent native FPS cap and native one-substep FleX ceiling remain active"
+                    : L"Adaptive launch changes were skipped; only the selected maximum corpse count and independent native FPS cap remain active",
                 L"optimizer"});
         }
         return applied;
@@ -160,6 +174,7 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile() {
         L"provider only reduces it during confirmed pressure"}};
     enforce_temporal_aa_disabled(changes);
     enforce_async_physics_enabled(changes);
+    enforce_fixed_flex_substeps(changes, fixed_flex_launch);
     enforce_one_frame_thread_lag(changes);
     std::optional<optimizer::StartupMemoryProfile> startup_memory_profile;
     std::wstring startup_memory_adapter_name;
@@ -302,7 +317,8 @@ Result<bool> UiRuntime::apply_overlay_compatible_display_mode() {
     return Result<bool>::success(true);
 }
 
-Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
+Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities(
+    bool fixed_flex_launch) {
     if (!installation || !session_config_snapshot) {
         return Result<bool>::failure({
             ErrorCode::invalid_argument,
@@ -310,25 +326,7 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities() {
             0});
     }
 
-    const auto captured_values = config::read_catalog_values(
-        session_config_snapshot->snapshot_root / L"files");
-    if (!captured_values.has_value()) {
-        return Result<bool>::failure(captured_values.error());
-    }
-    const auto physx = captured_values.value().find(
-        config::SettingId::physx_level);
-    const auto* configured_physx_level =
-        physx == captured_values.value().end()
-            ? nullptr : std::get_if<int>(&physx->second);
-    if (!configured_physx_level) {
-        return Result<bool>::failure({
-            ErrorCode::stale_data,
-            L"The user's captured KF2 FleX setting could not be verified",
-            0});
-    }
-
-    if (should_prepare_fixed_flex_runtime(
-            start_mode, *configured_physx_level)) {
+    if (fixed_flex_launch) {
         const auto prepared = ensure_fixed_flex_runtime();
         if (!prepared.has_value()) {
             return Result<bool>::failure(prepared.error());
@@ -423,7 +421,31 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
         L"The exact pre-game KF2 INI state was captured before automatic external-launch preparation",
         L"config"});
 
-    const auto applied = apply_adaptive_launch_profile();
+    const auto captured_values = config::read_catalog_values(
+        session_config_snapshot->snapshot_root / L"files");
+    if (!captured_values.has_value()) {
+        const auto error = captured_values.error();
+        static_cast<void>(restore_protected_session_config(
+            L"The captured FleX setting could not be verified"));
+        return Result<bool>::failure(error);
+    }
+    const auto physx = captured_values.value().find(
+        config::SettingId::physx_level);
+    const auto* configured_physx_level =
+        physx == captured_values.value().end()
+            ? nullptr : std::get_if<int>(&physx->second);
+    if (!configured_physx_level) {
+        static_cast<void>(restore_protected_session_config(
+            L"The captured FleX setting was unavailable"));
+        return Result<bool>::failure({
+            ErrorCode::stale_data,
+            L"The user's captured KF2 FleX setting could not be verified",
+            0});
+    }
+    const bool fixed_flex_launch = should_prepare_fixed_flex_runtime(
+        start_mode, *configured_physx_level);
+
+    const auto applied = apply_adaptive_launch_profile(fixed_flex_launch);
     if (!applied.has_value()) {
         const auto error = applied.error();
         static_cast<void>(restore_protected_session_config(
@@ -438,7 +460,7 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
         return Result<bool>::failure(error);
     }
     const auto capabilities =
-        prepare_automatic_protected_launch_capabilities();
+        prepare_automatic_protected_launch_capabilities(fixed_flex_launch);
     if (!capabilities.has_value()) {
         const auto error = capabilities.error();
         static_cast<void>(restore_protected_session_config(
