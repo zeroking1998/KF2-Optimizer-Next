@@ -145,11 +145,19 @@ std::wstring seconds_text(double value) {
 }  // namespace
 
 bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
-    if (!installation ||
-        !game::valid_adaptive_control_token(adaptive_control_token) ||
-        !game::find_running_game_process(
-             installation->executable).has_value()) {
+    auto process = game_process ? game_process : adaptive_restore_debt;
+    if (!process && installation) {
+        const auto found = game::find_running_game_process(
+            installation->executable);
+        if (found.has_value()) process = found.value();
+    }
+    if (!process || !game::is_game_process_current(*process)) {
+        adaptive_restore_debt.reset();
         return true;
+    }
+    adaptive_restore_debt = *process;
+    if (!game::valid_adaptive_control_token(adaptive_control_token)) {
+        return false;
     }
     std::optional<std::uint16_t> port;
     if (last_report_gameplay_session &&
@@ -184,7 +192,9 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
         .quality = 100,
         .timeout_ms = 500});
     adaptive_control_sequence = *next_sequence;
-    if (!restored.has_value()) {
+    if (!restored.has_value() ||
+        restored.value().status != game::AdaptiveControlReceiptStatus::applied ||
+        restored.value().resource != game::AdaptiveResourceControl::disable) {
         events->append({0, diagnostics::Severity::error,
             "ADAPTIVE_RUNTIME_RESTORE_FAILED",
             std::wstring{reason} +
@@ -194,6 +204,8 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
     }
     adaptive_control_pending.reset();
     adaptive_resource_quality.reset(100);
+    adaptive_quality_state_known = true;
+    adaptive_restore_debt.reset();
     events->append({0, diagnostics::Severity::info,
         "ADAPTIVE_RUNTIME_RESTORED",
         std::wstring{reason} +
@@ -207,10 +219,11 @@ void UiRuntime::reset_local_adaptive_controller_for_mode(bool enabled) {
     adaptive_governor.reset();
     adaptive_decision = {};
     adaptive_gameplay_active = false;
-    if (!enabled) {
+    if (!enabled && !adaptive_restore_debt) {
         adaptive_actuation.disable(monotonic_ns());
         adaptive_actuation.rebase({}, monotonic_ns());
         adaptive_resource_quality.reset(100);
+        adaptive_quality_state_known = true;
     }
 }
 
@@ -253,7 +266,8 @@ bool UiRuntime::set_live_adaptive_enabled(
         .quality = enabled ? effective_corpse_limit() : 100,
         .timeout_ms = game::kAdaptiveControlReadbackTimeoutMs});
     adaptive_control_sequence = *next_sequence;
-    if (!changed.has_value()) {
+    if (!changed.has_value() ||
+        changed.value().status != game::AdaptiveControlReceiptStatus::applied) {
         events->append({0, diagnostics::Severity::error,
             enabled ? "ADAPTIVE_RUNTIME_ENABLE_FAILED"
                     : "ADAPTIVE_RUNTIME_DISABLE_FAILED",
@@ -270,6 +284,7 @@ bool UiRuntime::set_live_adaptive_enabled(
     adaptive_runtime_mode_last_attempt_ns = monotonic_ns();
     adaptive_runtime_mode_confirmed = true;
     adaptive_runtime_mode_pending.reset();
+    if (!enabled) adaptive_restore_debt.reset();
     reset_local_adaptive_controller_for_mode(enabled);
     events->append({0, diagnostics::Severity::info,
         enabled ? "ADAPTIVE_RUNTIME_ENABLED"
@@ -284,9 +299,13 @@ bool UiRuntime::set_live_adaptive_enabled(
 
 void UiRuntime::detach_telemetry(bool restore_live_quality) {
     stop_map_prewarm_for_load();
-    if (restore_live_quality) {
+    if (restore_live_quality && !adaptive_restore_debt) {
         static_cast<void>(restore_live_adaptive_quality(
             L"Adaptive telemetry detached"));
+    }
+    if (adaptive_restore_debt &&
+        !game::is_game_process_current(*adaptive_restore_debt)) {
+        adaptive_restore_debt.reset();
     }
     if (last_flex_observation && last_flex_observation->update_calls > 0 &&
         last_flex_observation->diagnostics_enabled) {
@@ -342,26 +361,33 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     // The token and its anti-replay sequence belong to the protected KF2
     // session, not to one DXGI/PDH binding. Recoverable detach/rebind paths
     // must keep both values monotonically aligned with the live receiver.
-    adaptive_runtime_mode_process_start_id = 0;
-    adaptive_runtime_mode_provider_generation.reset();
-    adaptive_runtime_mode_port.reset();
-    adaptive_runtime_mode_last_attempt_ns = 0;
+    if (!adaptive_restore_debt) {
+        adaptive_runtime_mode_process_start_id = 0;
+        adaptive_runtime_mode_provider_generation.reset();
+        adaptive_runtime_mode_port.reset();
+        adaptive_runtime_mode_last_attempt_ns = 0;
+    }
     adaptive_runtime_mode_confirmed = false;
     adaptive_runtime_mode_pending.reset();
     adaptive_quality_last_dispatch_ns = 0;
     adaptive_quality_last_applied_ns = 0;
     adaptive_quality_reduction_floor.reset(
         optimizer_settings.adaptive_minimum_quality);
-    adaptive_quality_rollback_target.reset();
-    adaptive_quality_rollback_resource.reset();
+    if (!adaptive_restore_debt) {
+        adaptive_quality_rollback_target.reset();
+        adaptive_quality_rollback_resource.reset();
+    }
     adaptive_frame_not_before_ns = 0;
     adaptive_map_ready_ns = 0;
     adaptive_variable_frame_rate_enabled.reset();
     adaptive_frame_rate_config_write_time.reset();
     adaptive_frame_rate_config_last_poll_ns = 0;
     adaptive_frame_rate_mode_read_failed = false;
-    adaptive_resource_quality.reset(
-        optimizer_settings.adaptive_maximum_quality);
+    if (!adaptive_restore_debt) {
+        adaptive_resource_quality.reset(
+            optimizer_settings.adaptive_maximum_quality);
+        adaptive_quality_state_known = true;
+    }
     adaptive_session_policy.reset();
     adaptive_gameplay_active = false;
     adaptive_provider_confirmed = false;
@@ -841,6 +867,16 @@ void UiRuntime::try_attach_telemetry() {
         game_process->pid != process.value().pid ||
         game_process->process_start_id != process.value().process_start_id;
     if (new_process) {
+        if (adaptive_restore_debt &&
+            (adaptive_restore_debt->pid != process->pid ||
+             adaptive_restore_debt->process_start_id != process->process_start_id)) {
+            adaptive_restore_debt.reset();
+            adaptive_resource_quality.reset(
+                optimizer_settings.adaptive_maximum_quality);
+            adaptive_quality_state_known = true;
+            adaptive_quality_rollback_target.reset();
+            adaptive_quality_rollback_resource.reset();
+        }
         refresh_game_configuration_for_process_start(
             confirmed_settings_restart_replacement);
         game::OfflineAdaptiveSessionPolicy active_policy{

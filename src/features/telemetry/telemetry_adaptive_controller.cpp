@@ -10,6 +10,21 @@ void UiRuntime::update_adaptive_controller(
     auto status = model.status();
     poll_adaptive_runtime_mode();
     reconcile_adaptive_runtime_mode(frame);
+    if (adaptive_restore_debt) {
+        // Do not rebase on gameplay/menu entry or issue reductions while the
+        // previous live composition has not been restored by KF2.
+        status.adaptive_optimization_enabled =
+            optimizer_settings.adaptive_optimization_enabled;
+        status.adaptive_state = L"recovering";
+        status.adaptive_action = L"verify queued restore";
+        status.adaptive_reason =
+            L"Waiting for KF2 to confirm restoration after telemetry detached";
+        status.adaptive_quality_score =
+            adaptive_resource_quality.effective_quality();
+        status.adaptive_data_quality = L"DEGRADED";
+        model.set_status(std::move(status));
+        return;
+    }
     log_adaptive_performance_sample(frame);
     const auto corpse_state = update_adaptive_corpse_status(frame, status);
     using telemetry_pipeline::CorpseTelemetryState;

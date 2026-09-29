@@ -14,9 +14,10 @@ void run_adaptive_stage(app::UiRuntime& runtime,
 namespace kf2::app {
 void UiRuntime::poll_adaptive_runtime_mode() {
     if (auto mode_outcome = adaptive_mode_dispatcher.poll()) {
+        // Detach invalidates the request, not the live restore obligation.
+        if (!adaptive_runtime_mode_pending) return;
         const bool expected_enabled =
-            adaptive_runtime_mode_pending.value_or(
-                optimizer_settings.adaptive_optimization_enabled);
+            *adaptive_runtime_mode_pending;
         const auto expected_resource = expected_enabled
             ? game::AdaptiveResourceControl::enable
             : game::AdaptiveResourceControl::disable;
@@ -25,22 +26,40 @@ void UiRuntime::poll_adaptive_runtime_mode() {
             mode_outcome->value().status ==
                 game::AdaptiveControlReceiptStatus::applied &&
             mode_outcome->value().resource == expected_resource;
+        const bool readback_confirmed = adaptive_runtime_mode_confirmed;
+        const bool debt_restored = adaptive_restore_debt &&
+            !expected_enabled && readback_confirmed;
+        if (debt_restored) {
+            adaptive_resource_quality.reset(100);
+            adaptive_quality_state_known = true;
+            adaptive_quality_rollback_target.reset();
+            adaptive_quality_rollback_resource.reset();
+            adaptive_restore_debt.reset();
+            // Restore first, then reconcile the user's saved mode separately.
+            if (optimizer_settings.adaptive_optimization_enabled) {
+                adaptive_runtime_mode_confirmed = false;
+                adaptive_runtime_mode_last_attempt_ns = 0;
+            }
+        }
         const bool detailed_diagnostics =
             telemetry_pipeline::detailed_adaptive_diagnostics_enabled(
                 optimizer_settings.adaptive_logging,
                 optimizer_settings.debug_runtime_diagnostics);
         if (telemetry_pipeline::should_log_adaptive_readback(
-                adaptive_runtime_mode_confirmed, detailed_diagnostics)) {
+                readback_confirmed, detailed_diagnostics) || debt_restored) {
             events->append({
                 0,
-                adaptive_runtime_mode_confirmed
+                readback_confirmed
                     ? diagnostics::Severity::info
                     : diagnostics::Severity::warning,
-                adaptive_runtime_mode_confirmed
-                    ? "ADAPTIVE_RUNTIME_MODE_RECONCILED"
+                readback_confirmed
+                    ? (debt_restored ? "ADAPTIVE_RUNTIME_RESTORED"
+                                     : "ADAPTIVE_RUNTIME_MODE_RECONCILED")
                     : "ADAPTIVE_RUNTIME_MODE_RECONCILE_FAILED",
-                adaptive_runtime_mode_confirmed
-                    ? L"The current KF2 provider confirmed the saved Adaptive mode with an authenticated APPLIED readback"
+                readback_confirmed
+                    ? (debt_restored
+                        ? L"KF2 confirmed the detached session's original graphics with an exact APPLIED readback; the saved Adaptive mode will now be reconciled"
+                        : L"The current KF2 provider confirmed the saved Adaptive mode with an authenticated APPLIED readback")
                     : L"The current KF2 provider did not confirm the saved Adaptive mode; automatic actions remain blocked",
                 L"optimizer"});
         }
@@ -77,7 +96,8 @@ void UiRuntime::reconcile_adaptive_runtime_mode(
         (adaptive_runtime_mode_last_attempt_ns == 0 ||
          now_ns >= adaptive_runtime_mode_last_attempt_ns +
                        5'000'000'000ULL);
-    if ((!new_provider && !retry_due) || adaptive_mode_dispatcher.busy()) {
+    if ((!new_provider && !retry_due) || adaptive_mode_dispatcher.busy() ||
+        (adaptive_restore_debt && adaptive_control_dispatcher.busy())) {
         return;
     }
     adaptive_runtime_mode_process_start_id = game_process->process_start_id;
@@ -87,6 +107,7 @@ void UiRuntime::reconcile_adaptive_runtime_mode(
     adaptive_runtime_mode_last_attempt_ns = now_ns;
     adaptive_runtime_mode_confirmed = false;
     const bool desired_enabled =
+        !adaptive_restore_debt &&
         optimizer_settings.adaptive_optimization_enabled;
     const auto next_sequence = game::next_adaptive_control_sequence(
         adaptive_control_sequence);
