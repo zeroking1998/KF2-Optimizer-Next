@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace kf2::game {
 
@@ -176,6 +178,13 @@ struct GameLogSession {
 
     bool operator==(const GameLogSession&) const = default;
 };
+
+using GameLogSessionSnapshot = std::shared_ptr<const GameLogSession>;
+
+[[nodiscard]] inline GameLogSessionSnapshot make_game_log_session_snapshot(
+    GameLogSession session) {
+    return std::make_shared<const GameLogSession>(std::move(session));
+}
 
 struct GameLogParserStats {
     std::uint64_t bytes_received{0};

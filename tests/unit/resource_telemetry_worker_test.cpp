@@ -446,9 +446,10 @@ int main() {
             CHECK(chunks.front().reset_parser);
             CHECK(chunks.front().boundaries.load_map_started);
             CHECK(chunks.front().bytes.empty());
-            CHECK(chunks.front().parsed_session.has_value());
+            CHECK(chunks.front().parsed_session);
             CHECK(chunks.front().parsed_session->map == "KF-BioticsLab");
             CHECK(chunks.front().parser_stats.lines_processed == 1);
+            const auto initial_snapshot = chunks.front().parsed_session;
 
             {
                 std::ofstream output(log, std::ios::binary | std::ios::app);
@@ -462,7 +463,11 @@ int main() {
             CHECK(chunks.size() == 1);
             CHECK(!chunks.front().reset_parser);
             CHECK(chunks.front().bytes.empty());
-            CHECK(chunks.front().parsed_session.has_value());
+            CHECK(chunks.front().parsed_session);
+            CHECK(chunks.front().parsed_session.get() !=
+                  initial_snapshot.get());
+            CHECK(initial_snapshot->map == "KF-BioticsLab");
+            CHECK(!initial_snapshot->zeds_alive);
             CHECK(chunks.front().parsed_session->zeds_alive == 24);
             CHECK(chunks.front().parser_stats.lines_processed == 3);
 
@@ -535,7 +540,7 @@ int main() {
             CHECK(worker.wait_until_idle(2s));
             chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
-            CHECK(chunks.front().parsed_session.has_value());
+            CHECK(chunks.front().parsed_session);
             CHECK(chunks.front().parsed_session->wave_number == 1);
             CHECK(chunks.front().parsed_session->wave_total_ai == 93);
             CHECK(chunks.front().parsed_session->telemetry_sample == 1);
@@ -557,7 +562,7 @@ int main() {
             CHECK(worker.wait_until_idle(2s));
             chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
-            CHECK(chunks.front().parsed_session.has_value());
+            CHECK(chunks.front().parsed_session);
             const auto& refreshed = *chunks.front().parsed_session;
             CHECK(refreshed.zeds_alive == 24);
             CHECK(refreshed.zeds_alive_observed_ns == repeated_at_ns);
@@ -579,7 +584,7 @@ int main() {
             CHECK(chunks.size() == 1);
             CHECK(chunks.front().observations_expired);
             CHECK(chunks.front().bytes.empty());
-            CHECK(chunks.front().parsed_session.has_value());
+            CHECK(chunks.front().parsed_session);
             CHECK(!chunks.front().parsed_session->zeds_alive.has_value());
             CHECK(!chunks.front().parsed_session->wave_number.has_value());
             CHECK(!chunks.front().parsed_session->telemetry_sample.has_value());
@@ -597,7 +602,7 @@ int main() {
             CHECK(worker.wait_until_idle(2s));
             chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
-            CHECK(chunks.front().parsed_session.has_value());
+            CHECK(chunks.front().parsed_session);
             CHECK(chunks.front().parsed_session->online_corpse_pool == 0);
             CHECK(chunks.front().parsed_session->online_corpse_maximum == 20);
 
@@ -614,7 +619,7 @@ int main() {
             CHECK(worker.wait_until_idle(2s));
             chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
-            CHECK(chunks.front().parsed_session.has_value());
+            CHECK(chunks.front().parsed_session);
             CHECK(chunks.front().parsed_session->online_corpse_pool == 0);
             CHECK(chunks.front().parsed_session->online_corpse_maximum == 20);
 
@@ -640,7 +645,7 @@ int main() {
             CHECK(chunks.front().reset_parser);
             CHECK(chunks.front().bytes.empty());
             CHECK(!chunks.front().boundaries.map_prewarm_selection);
-            CHECK(!chunks.front().parsed_session.has_value());
+            CHECK(!chunks.front().parsed_session);
             CHECK(chunks.front().parser_stats.lines_processed == 1);
         }
         fs::remove_all(root);

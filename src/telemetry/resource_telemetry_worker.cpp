@@ -486,8 +486,13 @@ private:
                                         request.binding.identity.process_start_id);
                                 log_chunk->boundaries = log_boundaries.feed(
                                     log_chunk->bytes, verified_log_identity);
-                                log_chunk->parsed_session = log_parser.feed(
-                                    log_chunk->bytes, request.sampled_at_ns);
+                                if (auto parsed = log_parser.feed(
+                                        log_chunk->bytes,
+                                        request.sampled_at_ns)) {
+                                    log_chunk->parsed_session =
+                                        game::make_game_log_session_snapshot(
+                                            std::move(*parsed));
+                                }
                                 // Online corpse capability/action receipts are
                                 // intentionally emitted only once per World.
                                 // Always hand the parser's current snapshot to
@@ -498,9 +503,11 @@ private:
                                 if (log_chunk->bytes.find(
                                         "KF2OPT_ONLINE_CORPSE") !=
                                         std::string::npos &&
-                                    log_parser.current()) {
+                                    log_parser.current() &&
+                                    !log_chunk->parsed_session) {
                                     log_chunk->parsed_session =
-                                        *log_parser.current();
+                                        game::make_game_log_session_snapshot(
+                                            *log_parser.current());
                                 }
                                 // Raw Launch.log bytes are worker-private. The
                                 // UI consumes only bounded boundary events and
@@ -514,7 +521,9 @@ private:
                             GameLogChunk expiration;
                             expiration.identity = request.binding.identity;
                             expiration.observations_expired = true;
-                            expiration.parsed_session = std::move(expired);
+                            expiration.parsed_session =
+                                game::make_game_log_session_snapshot(
+                                    std::move(*expired));
                             expiration.parser_stats = log_parser.stats();
                             log_chunk = std::move(expiration);
                         }

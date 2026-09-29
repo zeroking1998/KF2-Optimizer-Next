@@ -47,7 +47,7 @@ struct GameLogChunk final {
     std::uint64_t creation_filetime{0};
     std::string bytes;
     GameLogBoundaryEvents boundaries;
-    std::optional<game::GameLogSession> parsed_session;
+    game::GameLogSessionSnapshot parsed_session;
     game::GameLogParserStats parser_stats;
 };
 

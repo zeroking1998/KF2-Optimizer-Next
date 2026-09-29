@@ -19,6 +19,17 @@ bool approximately_equal(double left, double right) {
     return std::abs(left - right) < 0.0001;
 }
 
+template <typename Configure>
+void replace_gameplay(
+    kf2::telemetry_pipeline::TelemetryFrameInput& input,
+    Configure&& configure) {
+    auto session = input.gameplay
+        ? *input.gameplay : kf2::game::GameLogSession{};
+    configure(session);
+    input.gameplay = kf2::game::make_game_log_session_snapshot(
+        std::move(session));
+}
+
 kf2::telemetry_pipeline::TelemetryFrameInput complete_input() {
     using namespace kf2;
     telemetry_pipeline::TelemetryFrameInput input;
@@ -81,7 +92,8 @@ kf2::telemetry_pipeline::TelemetryFrameInput complete_input() {
     session.telemetry_corpse_awake = 9;
     session.telemetry_corpse_sleeping = 14;
     session.telemetry_observed_ns = 7'900'000'000ULL;
-    input.gameplay = session;
+    input.gameplay = game::make_game_log_session_snapshot(
+        std::move(session));
 
     flex::ObservationSnapshot flex;
     flex.fresh = true;
@@ -118,7 +130,8 @@ int main() {
     CHECK(frame.adapter_gpu.has_value());
     CHECK(frame.gpu_utilization.has_value());
     CHECK(frame.system_memory.has_value());
-    CHECK(frame.gameplay.has_value());
+    CHECK(frame.gameplay);
+    CHECK(frame.gameplay.get() == input.gameplay.get());
     CHECK(frame.flex.has_value());
     CHECK(frame.active_gameplay);
     CHECK(frame.offline_gameplay);
@@ -168,8 +181,23 @@ int main() {
     CHECK(input.gameplay->map == "KF-BioticsLab");
     CHECK(input.flex->aggregate_active_particles == 120);
 
+    // Frame construction shares one immutable gameplay publication instead
+    // of deep-copying its strings and optional telemetry catalog. A retained
+    // frame snapshot remains alive when the producer releases its reference.
+    const auto retained_gameplay = frame.gameplay;
+    for (int unchanged_tick = 0; unchanged_tick < 256; ++unchanged_tick) {
+        const auto unchanged_frame = build_telemetry_frame(input);
+        CHECK(unchanged_frame.has_value());
+        CHECK(unchanged_frame.value().gameplay.get() == retained_gameplay.get());
+    }
+    input.gameplay.reset();
+    CHECK(retained_gameplay);
+    CHECK(retained_gameplay->map == "KF-BioticsLab");
+
     auto missing_context_input = complete_input();
-    missing_context_input.gameplay->gameplay_ui_context.reset();
+    replace_gameplay(missing_context_input, [](auto& gameplay) {
+        gameplay.gameplay_ui_context.reset();
+    });
     const auto missing_context_frame = build_telemetry_frame(
         missing_context_input);
     CHECK(missing_context_frame.has_value());
@@ -178,7 +206,9 @@ int main() {
     CHECK(!missing_context_frame.value().evidence.fresh);
 
     auto menu_input = complete_input();
-    menu_input.gameplay->gameplay_ui_context = game::GameplayUiContext::menu;
+    replace_gameplay(menu_input, [](auto& gameplay) {
+        gameplay.gameplay_ui_context = game::GameplayUiContext::menu;
+    });
     const auto menu_context_frame = build_telemetry_frame(menu_input);
     CHECK(menu_context_frame.has_value());
     CHECK(!menu_context_frame.value().active_gameplay);
@@ -186,41 +216,46 @@ int main() {
     CHECK(!menu_context_frame.value().evidence.fresh);
 
     auto trader_input = complete_input();
-    trader_input.gameplay->gameplay_ui_context =
-        game::GameplayUiContext::trader;
+    replace_gameplay(trader_input, [](auto& gameplay) {
+        gameplay.gameplay_ui_context = game::GameplayUiContext::trader;
+    });
     const auto trader_frame = build_telemetry_frame(trader_input);
     CHECK(trader_frame.has_value());
     CHECK(!trader_frame.value().active_gameplay);
 
     auto gameplay_input = complete_input();
-    gameplay_input.gameplay->gameplay_ui_context =
-        game::GameplayUiContext::gameplay;
+    replace_gameplay(gameplay_input, [](auto& gameplay) {
+        gameplay.gameplay_ui_context = game::GameplayUiContext::gameplay;
+    });
     const auto gameplay_frame = build_telemetry_frame(gameplay_input);
     CHECK(gameplay_frame.has_value());
     CHECK(gameplay_frame.value().active_gameplay);
     CHECK(gameplay_frame.value().offline_gameplay);
 
     auto online_gameplay_input = complete_input();
-    online_gameplay_input.gameplay->net_mode = "NM_Client";
-    online_gameplay_input.gameplay->optimizer_online_read_only = true;
-    online_gameplay_input.gameplay->optimizer_session_generation = 4;
-    online_gameplay_input.gameplay->gameplay_ui_context_map =
-        "KF-BioticsLab";
-    online_gameplay_input.gameplay->gameplay_ui_context_generation = 4;
+    replace_gameplay(online_gameplay_input, [](auto& gameplay) {
+        gameplay.net_mode = "NM_Client";
+        gameplay.optimizer_online_read_only = true;
+        gameplay.optimizer_session_generation = 4;
+        gameplay.gameplay_ui_context_map = "KF-BioticsLab";
+        gameplay.gameplay_ui_context_generation = 4;
+    });
     const auto online_gameplay_frame = build_telemetry_frame(
         online_gameplay_input);
     CHECK(online_gameplay_frame.has_value());
     CHECK(online_gameplay_frame.value().active_gameplay);
     CHECK(!online_gameplay_frame.value().offline_gameplay);
-    online_gameplay_input.gameplay->gameplay_ui_context =
-        game::GameplayUiContext::menu;
+    replace_gameplay(online_gameplay_input, [](auto& gameplay) {
+        gameplay.gameplay_ui_context = game::GameplayUiContext::menu;
+    });
     const auto online_menu_frame = build_telemetry_frame(
         online_gameplay_input);
     CHECK(online_menu_frame.has_value());
     CHECK(!online_menu_frame.value().active_gameplay);
-    online_gameplay_input.gameplay->gameplay_ui_context =
-        game::GameplayUiContext::gameplay;
-    online_gameplay_input.gameplay->gameplay_ui_context_generation = 3;
+    replace_gameplay(online_gameplay_input, [](auto& gameplay) {
+        gameplay.gameplay_ui_context = game::GameplayUiContext::gameplay;
+        gameplay.gameplay_ui_context_generation = 3;
+    });
     const auto stale_online_frame = build_telemetry_frame(
         online_gameplay_input);
     CHECK(stale_online_frame.has_value());
@@ -293,15 +328,19 @@ int main() {
     CHECK(unavailable_frame.value().evidence.fps.has_value());
 
     auto online = complete_input();
-    online.gameplay->net_mode = "NM_Client";
+    replace_gameplay(online, [](auto& gameplay) {
+        gameplay.net_mode = "NM_Client";
+    });
     const auto online_frame = build_telemetry_frame(online);
     CHECK(online_frame.has_value());
     CHECK(online_frame.value().active_gameplay);
     CHECK(!online_frame.value().offline_gameplay);
 
     auto menu = complete_input();
-    menu.gameplay->main_menu = true;
-    menu.gameplay->phase = game::GameLogPhase::main_menu;
+    replace_gameplay(menu, [](auto& gameplay) {
+        gameplay.main_menu = true;
+        gameplay.phase = game::GameLogPhase::main_menu;
+    });
     const auto menu_frame = build_telemetry_frame(menu);
     CHECK(menu_frame.has_value());
     CHECK(!menu_frame.value().active_gameplay);

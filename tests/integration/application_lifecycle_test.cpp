@@ -40,6 +40,27 @@
         }                                                                       \
     } while (false)
 
+template <typename Configure>
+void replace_runtime_gameplay(
+    kf2::app::UiRuntime& runtime, Configure&& configure) {
+    auto session = runtime.game_log_session
+        ? *runtime.game_log_session : kf2::game::GameLogSession{};
+    configure(session);
+    runtime.game_log_session = kf2::game::make_game_log_session_snapshot(
+        std::move(session));
+}
+
+template <typename Configure>
+void replace_frame_gameplay(
+    kf2::telemetry_pipeline::TelemetryFrame& frame,
+    Configure&& configure) {
+    auto session = frame.gameplay
+        ? *frame.gameplay : kf2::game::GameLogSession{};
+    configure(session);
+    frame.gameplay = kf2::game::make_game_log_session_snapshot(
+        std::move(session));
+}
+
 void throw_update_controller_allocation_failure() {
     kf2::update::detail::set_update_controller_allocation_hook_for_testing(
         nullptr);
@@ -509,8 +530,9 @@ int test_map_prewarm_retry_scheduler() {
     runtime.installation = kf2::game::GameInstallation{
         .install_root = test_root};
     runtime.game_process = kf2::game::GameProcessIdentity{.pid = 1};
-    runtime.game_log_session = kf2::game::GameLogSession{};
-    runtime.game_log_session->main_menu = true;
+    replace_runtime_gameplay(runtime, [](auto& gameplay) {
+        gameplay.main_menu = true;
+    });
 
     const auto wait_for_state = [&](StartupPrewarmState expected) {
         for (int attempt = 0; attempt < 200; ++attempt) {
@@ -592,7 +614,9 @@ int test_map_prewarm_retry_scheduler() {
     }, StartupPrewarmState::skipped_no_files));
     runtime.poll_map_prewarm();
     CHECK(runtime.map_prewarm_retry_not_before_ns != 0);
-    runtime.game_log_session->main_menu = false;
+    replace_runtime_gameplay(runtime, [](auto& gameplay) {
+        gameplay.main_menu = false;
+    });
     runtime.poll_map_prewarm();
     CHECK(runtime.map_prewarm_observed.empty());
     CHECK(runtime.map_prewarm_last_attempted.empty());
@@ -617,8 +641,9 @@ int test_map_prewarm_start_is_visible_before_worker_entry() {
     runtime.installation = kf2::game::GameInstallation{
         .install_root = test_root};
     runtime.game_process = kf2::game::GameProcessIdentity{.pid = 1};
-    runtime.game_log_session = kf2::game::GameLogSession{};
-    runtime.game_log_session->main_menu = true;
+    replace_runtime_gameplay(runtime, [](auto& gameplay) {
+        gameplay.main_menu = true;
+    });
 
     kf2::game::detail::delay_next_startup_prewarm_worker_entry(
         std::chrono::seconds{30});
@@ -633,7 +658,9 @@ int test_map_prewarm_start_is_visible_before_worker_entry() {
     CHECK(runtime.model.status().prewarm_active);
     CHECK(runtime.model.status().prewarm_map == L"KF-DelayedWorker");
 
-    runtime.game_log_session->main_menu = false;
+    replace_runtime_gameplay(runtime, [](auto& gameplay) {
+        gameplay.main_menu = false;
+    });
     runtime.poll_map_prewarm();
     CHECK(runtime.map_prewarm_active.empty());
     CHECK(runtime.map_prewarm_pending.empty());
@@ -867,6 +894,45 @@ int test_restore_cap_sync_failure() {
 #endif
 }
 
+int test_gameplay_snapshot_lifetime() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::path{KF2_TEST_ROOT} /
+        L"gameplay-snapshot-lifetime";
+    fs::remove_all(root);
+    fs::create_directories(root);
+    kf2::diagnostics::EventLog events{32};
+    kf2::app::UiRuntime runtime{root / L"Data", false,
+        kf2::config::Settings{}, events, std::nullopt,
+        kf2::app::StartMode::read_only, root / L"portable"};
+
+    kf2::game::GameLogSession first;
+    first.map = "KF-First";
+    const auto retained = kf2::game::make_game_log_session_snapshot(
+        std::move(first));
+    runtime.game_log_session = retained;
+    runtime.last_report_gameplay_session = runtime.game_log_session;
+    CHECK(runtime.game_log_session.get() ==
+          runtime.last_report_gameplay_session.get());
+
+    kf2::game::GameLogSession travelled;
+    travelled.map = "KF-Second";
+    runtime.game_log_session = kf2::game::make_game_log_session_snapshot(
+        std::move(travelled));
+    runtime.last_report_gameplay_session = runtime.game_log_session;
+    CHECK(runtime.game_log_session.get() ==
+          runtime.last_report_gameplay_session.get());
+    CHECK(runtime.game_log_session.get() != retained.get());
+    CHECK(retained->map == "KF-First");
+    CHECK(runtime.game_log_session->map == "KF-Second");
+
+    runtime.detach_telemetry(false);
+    CHECK(!runtime.game_log_session);
+    CHECK(!runtime.last_report_gameplay_session);
+    CHECK(retained->map == "KF-First");
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 &&
         std::string_view{argv[1]} == "--package-repair-start-failure") {
@@ -910,6 +976,7 @@ int main(int argc, char** argv) {
     }
     CHECK(test_pending_policy_restage_failure_rollback() == EXIT_SUCCESS);
     CHECK(test_map_prewarm_retry_scheduler() == EXIT_SUCCESS);
+    CHECK(test_gameplay_snapshot_lifetime() == EXIT_SUCCESS);
     CHECK(kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::normal));
     CHECK(!kf2::app::should_prepare_protected_gameplay_provider(
@@ -1736,30 +1803,37 @@ int main(int argc, char** argv) {
         frame.identity = {424242, 9001};
         frame.active_gameplay = true;
         frame.offline_gameplay = true;
-        frame.gameplay.emplace();
-        frame.gameplay->map = "KF-Test";
-        frame.gameplay->net_mode = "NM_Standalone";
-        frame.gameplay->telemetry_sample = 1;
-        frame.gameplay->telemetry_corpse_limit = 2000;
-        frame.gameplay->telemetry_corpse_total = 20;
         frame.observed_at_ns = 20'000'000'000ULL;
-        frame.gameplay->telemetry_observed_ns = frame.observed_at_ns;
+        replace_frame_gameplay(frame, [&](auto& gameplay) {
+            gameplay.map = "KF-Test";
+            gameplay.net_mode = "NM_Standalone";
+            gameplay.telemetry_sample = 1;
+            gameplay.telemetry_corpse_limit = 2000;
+            gameplay.telemetry_corpse_total = 20;
+            gameplay.telemetry_observed_ns = frame.observed_at_ns;
+        });
         runtime.update_adaptive_controller(frame);
         frame.observed_at_ns += 250'000'000ULL;
         runtime.update_adaptive_controller(frame);
         CHECK(runtime.model.status().adaptive_runtime_corpse_limit == 2000);
-        frame.gameplay->telemetry_corpse_limit = 1950;
         frame.observed_at_ns += 250'000'000ULL;
-        frame.gameplay->telemetry_observed_ns = frame.observed_at_ns;
+        replace_frame_gameplay(frame, [&](auto& gameplay) {
+            gameplay.telemetry_corpse_limit = 1950;
+            gameplay.telemetry_observed_ns = frame.observed_at_ns;
+        });
         runtime.update_adaptive_controller(frame);
-        frame.gameplay->telemetry_corpse_limit = 2000;
         frame.observed_at_ns += 250'000'000ULL;
-        frame.gameplay->telemetry_observed_ns = frame.observed_at_ns;
+        replace_frame_gameplay(frame, [&](auto& gameplay) {
+            gameplay.telemetry_corpse_limit = 2000;
+            gameplay.telemetry_observed_ns = frame.observed_at_ns;
+        });
         runtime.update_adaptive_controller(frame);
         CHECK(runtime.model.status().adaptive_corpse_action_status == L"APPLIED");
         // A partial readback used to pass the general gameplay gate and enter
         // fallback selection. Other telemetry is still fresh during this gap.
-        frame.gameplay->telemetry_corpse_limit.reset();
+        replace_frame_gameplay(frame, [](auto& gameplay) {
+            gameplay.telemetry_corpse_limit.reset();
+        });
         frame.observed_at_ns += 250'000'000ULL;
         runtime.update_adaptive_controller(frame);
         CHECK(runtime.model.status().adaptive_corpse_capability == L"STALE");
@@ -1781,11 +1855,13 @@ int main(int argc, char** argv) {
         CHECK(runtime.model.status().adaptive_corpse_capability == L"UNAVAILABLE");
         CHECK(!runtime.model.status().adaptive_runtime_corpse_limit);
         CHECK(runtime.model.status().adaptive_corpse_action_status == L"NONE");
-        frame.gameplay->telemetry_sample = 2;
-        frame.gameplay->telemetry_corpse_limit = 1500;
-        frame.gameplay->telemetry_corpse_total = 10;
         frame.observed_at_ns += 250'000'000ULL;
-        frame.gameplay->telemetry_observed_ns = frame.observed_at_ns;
+        replace_frame_gameplay(frame, [&](auto& gameplay) {
+            gameplay.telemetry_sample = 2;
+            gameplay.telemetry_corpse_limit = 1500;
+            gameplay.telemetry_corpse_total = 10;
+            gameplay.telemetry_observed_ns = frame.observed_at_ns;
+        });
         runtime.update_adaptive_controller(frame);
         CHECK(runtime.model.status().adaptive_corpse_capability == L"AVAILABLE");
         CHECK(runtime.model.status().adaptive_runtime_corpse_limit == 1500);
@@ -1812,11 +1888,12 @@ int main(int argc, char** argv) {
         frame.identity = {424243, 9002};
         frame.observed_at_ns = 30'000'000'000ULL;
         frame.active_gameplay = true;
-        frame.gameplay.emplace();
-        frame.gameplay->map = "KF-Test";
-        frame.gameplay->net_mode = "NM_Client";
-        frame.gameplay->optimizer_online_read_only = true;
-        frame.gameplay->optimizer_session_generation = 8;
+        replace_frame_gameplay(frame, [](auto& gameplay) {
+            gameplay.map = "KF-Test";
+            gameplay.net_mode = "NM_Client";
+            gameplay.optimizer_online_read_only = true;
+            gameplay.optimizer_session_generation = 8;
+        });
         // The fresh bridge has not announced its endpoint yet.
         runtime.update_adaptive_controller(frame);
         CHECK(!runtime.adaptive_runtime_mode_confirmed);
