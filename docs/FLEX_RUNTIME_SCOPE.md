@@ -18,6 +18,12 @@ for user-enabled FleX and is restored after the protected session. Particle
 counts and capacity remain telemetry only; they do not imply a writable
 particle-budget, spawn, lifetime or fluid/non-fluid actuator.
 
+Solver creation, destruction and diagnostics-only active-count observations
+are rare and serialize in fixed storage so transient lock contention cannot
+drop an exact solver identity. Unknown identities or exhausted fixed storage
+remain permanently quarantined for the session. None of this adds locking to
+the update path.
+
 Detailed FleX diagnostics are off by default and can be enabled from the Debug
 tab. Only that mode records min/max substeps, per-call solver/particle transfer
 statistics, detailed shared-memory readback, the session report and additional
@@ -35,8 +41,11 @@ therefore does not guess addresses or assign different values to those groups.
 Corpse lifetime/count settings remain separate and reversible; living-enemy
 gameplay physics is protected.
 
-The release test `kf2_flex_forwarder_fixed_minimum_test` loads the actual built
-forwarder against an isolated original-DLL test double. It verifies immediate
-one-substep clamping, independence from legacy heartbeat/control values and
-exact preservation of values at or below one. Exact shared-memory readback is
+The release test `kf2_flex_forwarder_fixed_minimum_test` loads the same
+forwarder source with test-only lock-control exports against an isolated
+original-DLL test double. It verifies that updates remain lock-free while rare
+lifecycle and diagnostics observations wait and recover exactly. It also
+verifies immediate one-substep clamping, independence from legacy heartbeat
+and control values, and exact preservation of values at or below one. Exact
+shared-memory readback is
 required before the app reports `FLEX_MINIMUM_APPLIED`.
