@@ -31,7 +31,8 @@ add_test(NAME kf2_github_release_client_test
 
 add_executable(kf2_update_state_test
     windows/update_state_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/update/update_state.cpp")
+    "${PROJECT_SOURCE_DIR}/src/update/update_state.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/semantic_version.cpp")
 target_include_directories(kf2_update_state_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_update_state_test PRIVATE

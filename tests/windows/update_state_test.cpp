@@ -1,6 +1,8 @@
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <string_view>
 
 #include "kf2/update/update_state.hpp"
 
@@ -21,14 +23,15 @@ int main() {
     CHECK(kf2::update::save_update_state(
         path, {1'765'000'000,
                kf2::update::PersistedCheckResult::available,
-               "0.0.4-alpha", "0.0.3-alpha"}).has_value());
+               "0.0.4-alpha.1+build.7",
+               "0.0.3-alpha+ignored.1"}).has_value());
     const auto loaded = kf2::update::load_update_state(path);
     CHECK(loaded.has_value());
     CHECK(loaded.value().last_check_unix_seconds == 1'765'000'000);
     CHECK(loaded.value().last_result ==
           kf2::update::PersistedCheckResult::available);
-    CHECK(loaded.value().available_version == "0.0.4-alpha");
-    CHECK(loaded.value().ignored_version == "0.0.3-alpha");
+    CHECK(loaded.value().available_version == "0.0.4-alpha.1+build.7");
+    CHECK(loaded.value().ignored_version == "0.0.3-alpha+ignored.1");
     CHECK(loaded.value().last_attempt_unix_seconds == 0);
     CHECK(loaded.value().automatic_failure_count == 0);
     CHECK(kf2::update::save_update_state(
@@ -60,6 +63,48 @@ int main() {
     CHECK(legacy.value().last_check_unix_seconds == 0);
     CHECK(legacy.value().last_result ==
           kf2::update::PersistedCheckResult::unknown);
+
+    constexpr std::array<std::string_view, 9> malformed_versions{
+        "1..2",
+        "---",
+        "1.2.3-",
+        "1.2.3+",
+        "1.2.3-alpha..1",
+        "1.2.3+build..1",
+        "1.2.3-01",
+        "4294967296.0.0",
+        "v1.2.3",
+    };
+    for (const std::string_view malformed_version : malformed_versions) {
+        std::ofstream(path, std::ios::binary | std::ios::trunc)
+            << "schema_version=3\n"
+               "last_check_unix_seconds=1765000000\n"
+               "last_attempt_unix_seconds=1765000000\n"
+               "automatic_failure_count=0\n"
+               "last_result=available\n"
+               "available_version="
+            << malformed_version <<
+               "\nignored_version=\n";
+        CHECK(!kf2::update::load_update_state(path).has_value());
+        std::ofstream(path, std::ios::binary | std::ios::trunc)
+            << "schema_version=3\n"
+               "last_check_unix_seconds=1765000000\n"
+               "last_attempt_unix_seconds=1765000000\n"
+               "automatic_failure_count=0\n"
+               "last_result=current\n"
+               "available_version=\n"
+               "ignored_version="
+            << malformed_version << '\n';
+        CHECK(!kf2::update::load_update_state(path).has_value());
+        CHECK(!kf2::update::save_update_state(
+            path, {1'765'000'000,
+                   kf2::update::PersistedCheckResult::available,
+                   std::string{malformed_version}, {}}).has_value());
+        CHECK(!kf2::update::save_update_state(
+            path, {1'765'000'000,
+                   kf2::update::PersistedCheckResult::current,
+                   {}, std::string{malformed_version}}).has_value());
+    }
     std::ofstream(path, std::ios::binary | std::ios::trunc) << "damaged";
     CHECK(!kf2::update::load_update_state(path).has_value());
     std::ofstream(path, std::ios::binary | std::ios::trunc)

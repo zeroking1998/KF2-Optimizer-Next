@@ -1,22 +1,19 @@
 #include "kf2/update/update_state.hpp"
 
-#include <algorithm>
 #include <charconv>
-#include <cctype>
 #include <sstream>
 #include <string>
 
 #include "kf2/platform/windows/atomic_file.hpp"
+#include "kf2/update/semantic_version.hpp"
 
 namespace kf2::update {
 namespace {
 
 bool valid_cached_version(std::string_view value) {
-    return !value.empty() && value.size() <= 64 &&
-        std::all_of(value.begin(), value.end(), [](unsigned char character) {
-            return std::isalnum(character) || character == '.' ||
-                   character == '+' || character == '-';
-        });
+    if (value.empty() || value.size() > 64) return false;
+    const auto parsed = parse_semantic_version(value);
+    return parsed.has_value() && parsed.value().canonical == value;
 }
 
 Result<std::int64_t> parse_timestamp(std::string_view value) {
