@@ -40,11 +40,20 @@ struct StartupPrewarmFile {
     std::uint64_t bytes{0};
 };
 
+struct StartupPrewarmDiagnostics final {
+    StorageKind storage{StorageKind::unknown};
+    std::uint32_t files_planned{0};
+    std::uint32_t files_attempted{0};
+    std::uint32_t file_open_failures{0};
+    std::uint32_t file_read_failures{0};
+};
+
 struct StartupPrewarmSnapshot {
     StartupPrewarmState state{StartupPrewarmState::idle};
     std::uint64_t bytes_planned{0};
     std::uint64_t bytes_read{0};
     std::uint32_t files_read{0};
+    std::optional<StartupPrewarmDiagnostics> diagnostics;
 };
 
 struct StartupPrewarmOptions {
@@ -53,6 +62,7 @@ struct StartupPrewarmOptions {
     std::optional<std::uint64_t> available_memory_override;
     std::wstring map_name;
     bool include_common_startup_files{true};
+    bool collect_diagnostics{false};
 };
 
 [[nodiscard]] std::uint64_t startup_prewarm_budget(

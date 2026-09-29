@@ -197,7 +197,11 @@ pressure/decision history and quality-response evidence. Exact controller
 readbacks and failures remain active and visible while it is off. Overlay
 render duration, redraw/skip counts, placement-cache hits and real window
 coverage checks also appear on Debug only while this switch is on; their text
-is refreshed at most once per second.
+is refreshed at most once per second. Startup and map preparation keep their
+normal progress display in every mode, while storage kind, planned/attempted
+file counts, cache-fill totals, open/read failures and detailed completion or
+cancellation events are recorded only for preparation jobs begun with runtime
+diagnostics enabled. File paths are never included in this summary.
 The Debug page also links to the portable data folder and current session log.
 
 ## 11. Recovery

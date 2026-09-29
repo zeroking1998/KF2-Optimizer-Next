@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cwctype>
 #include <cstring>
+#include <limits>
 #include <stop_token>
 #include <string>
 #include <system_error>
@@ -410,6 +411,12 @@ struct StartupPrewarmer::Impl final {
     std::atomic<std::uint64_t> bytes_planned{0};
     std::atomic<std::uint64_t> bytes_read{0};
     std::atomic<std::uint32_t> files_read{0};
+    std::atomic_bool diagnostics_enabled{false};
+    std::atomic<StorageKind> diagnostic_storage{StorageKind::unknown};
+    std::atomic<std::uint32_t> diagnostic_files_planned{0};
+    std::atomic<std::uint32_t> diagnostic_files_attempted{0};
+    std::atomic<std::uint32_t> diagnostic_file_open_failures{0};
+    std::atomic<std::uint32_t> diagnostic_file_read_failures{0};
 
     void run(std::stop_token stop, const std::filesystem::path& install_root,
              const StartupPrewarmOptions& options) noexcept {
@@ -439,6 +446,7 @@ struct StartupPrewarmer::Impl final {
         }
         const auto storage = options.storage_override.value_or(
             storage_kind_for_path(install_root));
+        if (options.collect_diagnostics) diagnostic_storage = storage;
         if (storage == StorageKind::unknown) {
             state = StartupPrewarmState::skipped_unknown_storage;
             return;
@@ -462,6 +470,11 @@ struct StartupPrewarmer::Impl final {
             state = StartupPrewarmState::skipped_no_files;
             return;
         }
+        if (options.collect_diagnostics) {
+            diagnostic_files_planned = static_cast<std::uint32_t>(
+                std::min<std::size_t>(
+                    plan.size(), std::numeric_limits<std::uint32_t>::max()));
+        }
         std::uint64_t planned = 0;
         for (const auto& file : plan) planned += file.bytes;
         bytes_planned = planned;
@@ -473,11 +486,21 @@ struct StartupPrewarmer::Impl final {
         std::array<std::byte, kReadBufferBytes> buffer{};
         for (const auto& file : plan) {
             if (stop.stop_requested()) break;
+            if (options.collect_diagnostics) {
+                diagnostic_files_attempted.fetch_add(
+                    1, std::memory_order_relaxed);
+            }
             HANDLE input = CreateFileW(
                 file.path.c_str(), GENERIC_READ,
                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                 nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-            if (input == INVALID_HANDLE_VALUE) continue;
+            if (input == INVALID_HANDLE_VALUE) {
+                if (options.collect_diagnostics) {
+                    diagnostic_file_open_failures.fetch_add(
+                        1, std::memory_order_relaxed);
+                }
+                continue;
+            }
             std::uint64_t remaining = file.bytes;
             bool read_any = false;
             while (remaining > 0 && !stop.stop_requested()) {
@@ -485,7 +508,13 @@ struct StartupPrewarmer::Impl final {
                     std::min<std::uint64_t>(buffer.size(), remaining));
                 DWORD actual = 0;
                 if (!ReadFile(input, buffer.data(), requested, &actual,
-                              nullptr) || actual == 0) break;
+                              nullptr) || actual == 0) {
+                    if (options.collect_diagnostics) {
+                        diagnostic_file_read_failures.fetch_add(
+                            1, std::memory_order_relaxed);
+                    }
+                    break;
+                }
                 read_any = true;
                 bytes_read.fetch_add(actual, std::memory_order_relaxed);
                 remaining -= actual;
@@ -522,6 +551,12 @@ void StartupPrewarmer::start(std::filesystem::path install_root,
     implementation_->bytes_planned = 0;
     implementation_->bytes_read = 0;
     implementation_->files_read = 0;
+    implementation_->diagnostics_enabled = options.collect_diagnostics;
+    implementation_->diagnostic_storage = StorageKind::unknown;
+    implementation_->diagnostic_files_planned = 0;
+    implementation_->diagnostic_files_attempted = 0;
+    implementation_->diagnostic_file_open_failures = 0;
+    implementation_->diagnostic_file_read_failures = 0;
     implementation_->state = StartupPrewarmState::waiting;
     try {
         implementation_->worker = std::jthread{
@@ -549,12 +584,27 @@ void StartupPrewarmer::stop_and_wait() {
 
 StartupPrewarmSnapshot StartupPrewarmer::snapshot() const noexcept {
     if (!implementation_) return {};
-    return {
+    StartupPrewarmSnapshot result{
         implementation_->state.load(std::memory_order_acquire),
         implementation_->bytes_planned.load(std::memory_order_relaxed),
         implementation_->bytes_read.load(std::memory_order_relaxed),
         implementation_->files_read.load(std::memory_order_relaxed),
     };
+    if (implementation_->diagnostics_enabled.load(
+            std::memory_order_acquire)) {
+        result.diagnostics = StartupPrewarmDiagnostics{
+            implementation_->diagnostic_storage.load(
+                std::memory_order_relaxed),
+            implementation_->diagnostic_files_planned.load(
+                std::memory_order_relaxed),
+            implementation_->diagnostic_files_attempted.load(
+                std::memory_order_relaxed),
+            implementation_->diagnostic_file_open_failures.load(
+                std::memory_order_relaxed),
+            implementation_->diagnostic_file_read_failures.load(
+                std::memory_order_relaxed)};
+    }
+    return result;
 }
 
 }  // namespace kf2::game

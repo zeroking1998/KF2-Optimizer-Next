@@ -292,6 +292,7 @@ int main(int argc, char** argv) {
         .idle_delay = std::chrono::milliseconds{0},
         .storage_override = StorageKind::rotational,
         .available_memory_override = 4 * gib,
+        .collect_diagnostics = true,
     });
     for (int attempt = 0; attempt < 200; ++attempt) {
         if (prewarmer.snapshot().state == StartupPrewarmState::complete) break;
@@ -302,6 +303,14 @@ int main(int argc, char** argv) {
     CHECK(complete.bytes_planned == 3072);
     CHECK(complete.bytes_read == 3072);
     CHECK(complete.files_read == 2);
+    CHECK(complete.diagnostics.has_value());
+    if (complete.diagnostics) {
+        CHECK(complete.diagnostics->storage == StorageKind::rotational);
+        CHECK(complete.diagnostics->files_planned == 2);
+        CHECK(complete.diagnostics->files_attempted == 2);
+        CHECK(complete.diagnostics->file_open_failures == 0);
+        CHECK(complete.diagnostics->file_read_failures == 0);
+    }
     CHECK(std::filesystem::last_write_time(plan[0].path) == before);
 
     StartupPrewarmer solid_state;
@@ -317,6 +326,7 @@ int main(int argc, char** argv) {
     }
     CHECK(solid_state.snapshot().state == StartupPrewarmState::complete);
     CHECK(solid_state.snapshot().bytes_read == 3072);
+    CHECK(!solid_state.snapshot().diagnostics.has_value());
 
     StartupPrewarmer failed_then_recovered;
     detail::fail_next_startup_prewarm_plan();

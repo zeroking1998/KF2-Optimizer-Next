@@ -426,6 +426,7 @@ app::runtime::DispatchResult toggle_runtime_diagnostics(
     runtime.overlay_diagnostic_placement_cache_hits = 0;
     runtime.overlay_diagnostic_coverage_checks = 0;
     runtime.overlay_diagnostics_last_published_ns = 0;
+    runtime.prewarm_diagnostics_last_published_ns = 0;
     if (runtime.overlay_window) {
         runtime.overlay_window->set_diagnostics_enabled(enabled);
     }
@@ -434,6 +435,9 @@ app::runtime::DispatchResult toggle_runtime_diagnostics(
     status.overlay_diagnostics = enabled
         ? L"Waiting for overlay diagnostics"
         : L"Detailed overlay diagnostics are off";
+    status.prewarm_diagnostics = enabled
+        ? L"Waiting for prewarm diagnostics"
+        : L"Detailed prewarm diagnostics are off";
     runtime.model.set_status(std::move(status));
 
     bool staged_now = false;
