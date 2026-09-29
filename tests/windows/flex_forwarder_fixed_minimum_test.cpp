@@ -141,6 +141,14 @@ int wmain(int argc, wchar_t** argv) {
         shared->version != kf2::flex::observation_version) {
         return fail(9, "observation mapping invalid");
     }
+    if (shared->diagnostics_enabled != 0 ||
+        shared->min_substeps != LONG_MAX ||
+        shared->min_forwarded_substeps != LONG_MAX)
+        return fail(23, "detailed diagnostics were not disabled by default");
+    set_fence();
+    if (fence_set_calls() != 1 || shared->fence_set_calls != 0)
+        return fail(24, "disabled diagnostics recorded a detailed fence sample");
+    InterlockedExchange(&shared->diagnostics_enabled, 1);
 
     if (shared->create_calls != 2 || shared->live_solvers != 2 ||
         shared->max_live_solvers != 2 || shared->aggregate_particle_capacity != 1280 ||
@@ -163,7 +171,7 @@ int wmain(int argc, wchar_t** argv) {
 
     set_fence();
     wait_fence();
-    if (fence_set_calls() != 1 || fence_wait_calls() != 1 ||
+    if (fence_set_calls() != 2 || fence_wait_calls() != 1 ||
         shared->fence_set_calls != 1 || shared->fence_wait_calls != 1 ||
         shared->last_fence_set_tick == 0 || shared->last_fence_wait_tick == 0)
         return fail(19, "fence synchronization was not relayed exactly");
@@ -207,34 +215,33 @@ int wmain(int argc, wchar_t** argv) {
         upper[0] != 1.0F || upper[2] != 3.0F)
         return fail(22, "bounds or parameter calls were not relayed exactly");
 
+    if (calls() != 1 || last() != 1 || shared->last_substeps != 2 ||
+        shared->last_forwarded_substeps != 1 || shared->constrained_updates != 1)
+        return fail(10, "the fixed minimum was not applied immediately");
+
     InterlockedExchange(&shared->desired_substeps, 5);
     InterlockedExchange64(&shared->control_heartbeat_tick,
         static_cast<LONGLONG>(GetTickCount64()));
-    for (int index = 1; index < 180; ++index) {
-        update(solver, 1.0F / 60.0F, 2, nullptr);
-    }
-    if (calls() != 180 || last() != 2 || shared->constrained_updates != 0)
-        return fail(10, "warmup changed original substeps");
-
-    update(solver, 1.0F / 60.0F, 2, nullptr);
-    if (calls() != 181 || last() != 5 || shared->last_substeps != 2 ||
-        shared->last_forwarded_substeps != 5 || shared->constrained_updates != 1)
-        return fail(11, "fresh control did not change forwarded substeps");
+    update(solver, 1.0F / 60.0F, 4, nullptr);
+    if (calls() != 2 || last() != 1 || shared->last_substeps != 4 ||
+        shared->last_forwarded_substeps != 1 || shared->constrained_updates != 2)
+        return fail(11, "legacy adaptive control overrode the fixed minimum");
 
     InterlockedExchange64(&shared->control_heartbeat_tick,
         static_cast<LONGLONG>(GetTickCount64() - 1600));
     update(solver, 1.0F / 60.0F, 2, nullptr);
-    if (calls() != 182 || last() != 2 || shared->last_forwarded_substeps != 2 ||
-        shared->constrained_updates != 1)
-        return fail(12, "stale control did not restore original substeps");
+    if (calls() != 3 || last() != 1 || shared->last_forwarded_substeps != 1 ||
+        shared->constrained_updates != 3)
+        return fail(12, "stale control released the fixed minimum");
 
     InterlockedExchange(&shared->desired_substeps, 0);
-    InterlockedExchange64(&shared->control_heartbeat_tick,
-        static_cast<LONGLONG>(GetTickCount64()));
     update(solver, 1.0F / 60.0F, 3, nullptr);
-    if (calls() != 183 || last() != 3 || shared->last_forwarded_substeps != 3 ||
+    update(solver, 1.0F / 60.0F, 1, nullptr);
+    update(solver, 1.0F / 60.0F, 0, nullptr);
+    if (calls() != 6 || last() != 0 || shared->last_forwarded_substeps != 0 ||
+        shared->constrained_updates != 4 ||
         shared->successful_updates != shared->update_calls)
-        return fail(13, "Off mode did not preserve original substeps");
+        return fail(13, "the fixed minimum did not preserve values at or below one");
 
     destroy(second_solver);
     if (destroy_calls() != 1 || shared->destroy_calls != 1 ||

@@ -1,22 +1,28 @@
-# Fixed minimum offline FleX scope
+# Native one-substep FleX scope
 
 KF2's FleX choice remains owned by the user:
 
 - **Off:** no runtime hook is installed and FleX stays disabled.
-- **Gibs / Gibs and fluids:** the verified runtime hook requests one solver
-  substep after its observation warmup.
+- **Gibs / Gibs and fluids:** the protected launch sets KF2's native
+  `MaxPhysicsSubsteps=1` ceiling. The verified runtime hook clamps only a rare
+  solver request above one that bypasses the native setting.
 
 The fixed request is independent of Adaptive mode, target FPS, frame pressure,
 resource pressure and visible-enemy pressure. Adaptive never enables FleX and
 never raises or lowers its solver level.
 
-Every solver is observed unchanged for 180 update calls first. Control is bound
-to the exact KF2 PID and process start time and must be refreshed within 1.5
-seconds. Missing or stale control, an unknown solver, tracker saturation, lock
-contention, invalid values or an app crash immediately preserve the game's
-original argument. Particle counts and capacity remain telemetry only; they do
-not imply a writable particle-budget, spawn, lifetime or fluid/non-fluid
-actuator.
+The hot update path has no warmup, heartbeat, solver-lock lookup or adaptive
+decision. It preserves values at or below one and converts only values above
+one to one before calling the original FleX runtime. The hook is installed only
+for user-enabled FleX and is restored after the protected session. Particle
+counts and capacity remain telemetry only; they do not imply a writable
+particle-budget, spawn, lifetime or fluid/non-fluid actuator.
+
+Detailed FleX diagnostics are off by default and can be enabled from the Debug
+tab. Only that mode records min/max substeps, per-call solver/particle transfer
+statistics, detailed shared-memory readback, the session report and additional
+summary logging. The fixed clamp and minimal failure/readback counters remain
+active independently of diagnostics.
 
 KF2's shipped FleX solver is CUDA/GPU based; the optimizer does not claim or
 provide a CPU solver. CPU-side submission, transfer and synchronization can
@@ -30,8 +36,7 @@ Corpse lifetime/count settings remain separate and reversible; living-enemy
 gameplay physics is protected.
 
 The release test `kf2_flex_forwarder_fixed_minimum_test` loads the actual built
-forwarder against an isolated original-DLL test double. It verifies that the
-first 180 calls remain unchanged, call 181 accepts fresh valid control, an
-expired heartbeat immediately restores the original argument, and Off remains
-pass-through. Exact shared-memory readback is required before the app reports
-`FLEX_MINIMUM_APPLIED`.
+forwarder against an isolated original-DLL test double. It verifies immediate
+one-substep clamping, independence from legacy heartbeat/control values and
+exact preservation of values at or below one. Exact shared-memory readback is
+required before the app reports `FLEX_MINIMUM_APPLIED`.

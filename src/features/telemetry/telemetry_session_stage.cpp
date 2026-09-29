@@ -285,7 +285,8 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
         static_cast<void>(restore_live_adaptive_quality(
             L"Adaptive telemetry detached"));
     }
-    if (last_flex_observation && last_flex_observation->update_calls > 0) {
+    if (last_flex_observation && last_flex_observation->update_calls > 0 &&
+        last_flex_observation->diagnostics_enabled) {
         const auto& observed = *last_flex_observation;
         const bool saved = save_flex_report(observed, true);
         events->append({0,
@@ -392,6 +393,12 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     auto status = model.status();
     status.game_session.clear();
     status.flex_telemetry = L"FleX telemetry not observed";
+    status.flex_substep_diagnostics = status.debug_flex_diagnostics
+        ? L"Waiting for FleX min/max substep telemetry"
+        : L"Detailed substep counters are off";
+    status.flex_readback_diagnostics = status.debug_flex_diagnostics
+        ? L"Waiting for shared-memory readback; reports and extra logs are on"
+        : L"Minimal safety readback active; reports and extra logs are off";
     status.live_fps.reset();
     status.live_frame_time_ms.reset();
     status.live_cpu_percent.reset();

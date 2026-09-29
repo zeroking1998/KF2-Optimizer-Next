@@ -352,6 +352,56 @@ app::runtime::DispatchResult toggle_corpse_physics_control(
     return app::runtime::DispatchResult::handled;
 }
 
+app::runtime::DispatchResult toggle_flex_diagnostics(
+    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
+    const bool previous = runtime.optimizer_settings.debug_flex_diagnostics;
+    runtime.optimizer_settings.debug_flex_diagnostics = !previous;
+    const auto saved = platform::windows::atomic_replace_utf8(
+        runtime.settings_path,
+        config::serialize_settings(runtime.optimizer_settings));
+    if (!saved.has_value()) {
+        runtime.optimizer_settings.debug_flex_diagnostics = previous;
+        show_notice(runtime, ui::NoticeSeverity::error,
+                    L"SETTINGS_SAVE_FAILED", saved.error().message);
+        return app::runtime::DispatchResult::handled;
+    }
+
+    const bool enabled = runtime.optimizer_settings.debug_flex_diagnostics;
+    auto status = runtime.model.status();
+    status.debug_flex_diagnostics =
+        runtime.optimizer_settings.debug_flex_diagnostics;
+    status.flex_substep_diagnostics = enabled
+        ? L"Waiting for FleX min/max substep telemetry"
+        : L"Detailed substep counters are off";
+    status.flex_readback_diagnostics = enabled
+        ? L"Waiting for shared-memory readback; reports and extra logs are on"
+        : L"Minimal safety readback active; reports and extra logs are off";
+    runtime.model.set_status(std::move(status));
+
+    bool applied_live = false;
+    if (runtime.game_process) {
+        applied_live = flex::write_fixed_control(
+            *runtime.game_process,
+            runtime.optimizer_settings.debug_flex_diagnostics);
+    }
+    runtime.events->append({
+        0, ::kf2::diagnostics::Severity::info,
+        "FLEX_DIAGNOSTICS_CHANGED",
+        std::wstring{L"Detailed FleX diagnostics "} +
+            (enabled ? L"enabled" : L"disabled") +
+            (applied_live ? L" for the running KF2 session"
+                          : L" for the next available protected session"),
+        L"debug"});
+    show_notice(
+        runtime, ui::NoticeSeverity::info,
+        L"FLEX_DIAGNOSTICS_CHANGED",
+        std::wstring{L"Detailed FleX diagnostics are "} +
+            (enabled ? L"on." : L"off.") +
+            (applied_live ? L" The running session was updated."
+                          : L" The setting applies when FleX telemetry becomes available."));
+    return app::runtime::DispatchResult::handled;
+}
+
 app::runtime::DispatchResult flex_restore(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
     if (!runtime.installation) {

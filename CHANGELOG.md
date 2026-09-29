@@ -52,6 +52,9 @@ are visible immediately.
   frames to reduce periodic CPU spikes.
 - Added a controlled corpse-physics A/B mode for repeatable performance tests
   without changing normal user behavior.
+- Added optional FleX runtime diagnostics to Debug with live min/max substeps,
+  solver and particle statistics, shared-memory readback health, and bounded
+  reports. Normal play keeps those detailed counters and logs disabled.
 - Added reproducible release optimization through interprocedural optimization
   and an optional two-phase MSVC profile-guided optimization workflow.
 - Simplified contributor setup, Windows builds, GitHub issue reporting, and
@@ -171,6 +174,9 @@ are visible immediately.
 - Fixed FleX detection after graphics changes and settings restarts. User-
   enabled FleX runs at the verified minimum solver level; user-disabled FleX
   remains off and is never enabled by Adaptive.
+- Reduced the fixed FleX minimum hot path to an immediate one-substep safety
+  clamp with cached export resolution. It no longer performs solver scans,
+  locking, warm-up, heartbeat evaluation, or Adaptive decisions per update.
 - Bound FleX laboratory backups, transaction markers, and installed forwarders
   to the exact bytes that were verified, rejecting source-file replacement
   races without replacing the active runtime or losing recovery evidence.

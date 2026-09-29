@@ -28,8 +28,16 @@ void apply_flex_control_effect(app::UiRuntime& runtime,
          action->status != optimizer::AdaptiveActionStatus::applied)) {
         return;
     }
-    const bool write_succeeded = flex::write_adaptive_control(
-        *runtime.game_process, effect.requested_substeps);
+    const bool diagnostics_match = runtime.last_flex_observation &&
+        runtime.last_flex_observation->diagnostics_enabled ==
+            runtime.optimizer_settings.debug_flex_diagnostics;
+    if (action->status == optimizer::AdaptiveActionStatus::applied &&
+        diagnostics_match) {
+        return;
+    }
+    const bool write_succeeded = flex::write_fixed_control(
+        *runtime.game_process,
+        runtime.optimizer_settings.debug_flex_diagnostics);
     if (!write_succeeded &&
         action->status == optimizer::AdaptiveActionStatus::pending) {
         static_cast<void>(runtime.adaptive_actuation.receive({

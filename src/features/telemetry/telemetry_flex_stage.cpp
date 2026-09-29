@@ -15,7 +15,8 @@ void run_flex_control_stage(app::UiRuntime& runtime,
                             const TelemetryFrame& frame) {
     const auto capability = frame.offline_gameplay && frame.flex &&
             frame.flex->fresh && frame.flex->pass_through_healthy &&
-            !frame.flex->solver_tracking_quarantined
+            (!frame.flex->diagnostics_enabled ||
+             !frame.flex->solver_tracking_quarantined)
         ? optimizer::AdaptiveCapabilityState::available
         : optimizer::AdaptiveCapabilityState::unavailable;
     const optimizer::AdaptiveGeneration generation{
@@ -65,10 +66,12 @@ namespace kf2::app {
 
 bool UiRuntime::save_flex_report(const flex::ObservationSnapshot& observed,
                                  bool wait_for_disk) {
-    if (observed.update_calls == 0) return false;
+    if (observed.update_calls == 0 || !observed.diagnostics_enabled)
+        return false;
     std::ostringstream report;
-    report << "{\"version\":7,\"configured_mode\":\"fixed_minimum\""
+    report << "{\"version\":8,\"configured_mode\":\"fixed_minimum\""
                << ",\"fixed_substeps\":1"
+               << ",\"diagnostics_enabled\":true"
                << ",\"update_calls\":" << observed.update_calls
                << ",\"successful_updates\":" << observed.successful_updates
                << ",\"destroy_calls\":" << observed.destroy_calls
@@ -197,7 +200,9 @@ void UiRuntime::observe_flex_process() {
                   L" (read-only runtime source; aggregate unavailable)"
         : flex_state->active_count_calls > 0
             ? L"FleX active-particle value is stale"
-            : L"FleX solver active; particle count not yet observed";
+            : flex_state->diagnostics_enabled
+                ? L"FleX diagnostics are active; particle count not yet observed"
+                : L"FleX fixed one-substep relay active; detailed diagnostics off";
     const auto* action = adaptive_actuation.current(
         optimizer::AdaptiveControlId::flex_solver_substeps);
     const auto effective = adaptive_actuation.effective_value(
@@ -212,20 +217,43 @@ void UiRuntime::observe_flex_process() {
         : std::string_view{"NONE"};
     const std::wstring action_status{
         action_status_view.begin(), action_status_view.end()};
+    const std::wstring substep_status = flex_state->diagnostics_enabled
+        ? L"input min/max " + std::to_wstring(flex_state->min_substeps) +
+              L"/" + std::to_wstring(flex_state->max_substeps) +
+              L"  •  forwarded min/max " +
+              std::to_wstring(flex_state->min_forwarded_substeps) + L"/" +
+              std::to_wstring(flex_state->max_forwarded_substeps) +
+              L"  •  latest " + std::to_wstring(flex_state->last_substeps) +
+              L" → " + std::to_wstring(flex_state->last_forwarded_substeps)
+        : L"Detailed substep counters are off; fixed one-substep limit is active";
+    const std::wstring readback_status = flex_state->diagnostics_enabled
+        ? std::wstring{L"shared memory "} +
+              (flex_state->pass_through_healthy ? L"healthy" : L"unhealthy") +
+              L"  •  updates " + std::to_wstring(flex_state->successful_updates) +
+              L"/" + std::to_wstring(flex_state->update_calls) +
+              L"  •  constrained " +
+              std::to_wstring(flex_state->constrained_updates) +
+              L"  •  reports and extra logs on"
+        : L"Minimal safety readback active; reports and extra logs are off";
     if (status.flex_telemetry != flex_status ||
         status.flex_requested_substeps != requested ||
         status.flex_effective_substeps != applied ||
-        status.flex_action_status != action_status) {
+        status.flex_action_status != action_status ||
+        status.flex_substep_diagnostics != substep_status ||
+        status.flex_readback_diagnostics != readback_status) {
         status.flex_telemetry = flex_status;
         status.flex_requested_substeps = requested;
         status.flex_effective_substeps = applied;
         status.flex_action_status = action_status;
+        status.flex_substep_diagnostics = substep_status;
+        status.flex_readback_diagnostics = readback_status;
         model.set_status(std::move(status));
         invalidate();
     }
     const auto report_tick = GetTickCount64();
-    if (last_flex_report_tick == 0 || report_tick < last_flex_report_tick ||
-        report_tick - last_flex_report_tick >= 2000) {
+    if (flex_state->diagnostics_enabled &&
+        (last_flex_report_tick == 0 || report_tick < last_flex_report_tick ||
+         report_tick - last_flex_report_tick >= 2000)) {
         if (save_flex_report(*flex_state)) last_flex_report_tick = report_tick;
     }
     if (!flex_observation_announced) {

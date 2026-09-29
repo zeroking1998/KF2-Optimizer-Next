@@ -725,7 +725,12 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                    status.debug_corpse_physics_control
                        ? L"PHYSICS A/B: CONTROL"
                        : L"PHYSICS A/B: CANDIDATE",
-                   true, status.debug_corpse_physics_control);
+                    true, status.debug_corpse_physics_control);
+        add_action("debug-flex-diagnostics",
+                   status.debug_flex_diagnostics
+                       ? L"FLEX RUNTIME DIAGNOSTICS: ON"
+                       : L"FLEX RUNTIME DIAGNOSTICS: OFF",
+                   true, status.debug_flex_diagnostics);
         cursor = grid_base +
             static_cast<float>((action_index + action_columns - 1) /
                                action_columns) * kActionStride + 8.0F;
@@ -735,6 +740,19 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                     L"Telemetry: " + status.telemetry +
                         L"  •  Corpse actions: " +
                         status.adaptive_corpse_action_status,
+                    cursor, 40.0F);
+        cursor += 48.0F;
+        add_section("debug-flex-solver-text",
+                    L"Solver / particles: " + status.flex_telemetry,
+                    cursor, 40.0F);
+        cursor += 48.0F;
+        add_section("debug-flex-substeps-text",
+                    L"Substeps: " + status.flex_substep_diagnostics,
+                    cursor, 40.0F);
+        cursor += 48.0F;
+        add_section("debug-flex-readback-text",
+                    L"Readback / reports: " +
+                        status.flex_readback_diagnostics,
                     cursor, 40.0F);
         cursor += 48.0F;
         add_section("debug-tools-section", L"LOCAL DEBUG FILES", cursor);

@@ -175,13 +175,18 @@ The overlay is a separate, game-bound Windows surface. It displays verified
 telemetry without injecting a renderer into KF2. Use F10 to toggle it. Scale,
 position, and metric visibility are stored in the portable `Data` directory.
 
-## 10. Debug markers
+## 10. Debug
 
 Open **Debug** to enable temporary in-game evidence markers for corpse actions
 or living-Zed distances. Both options are off by default and affect only the
 next protected KF2 start; they never change a game that is already running.
 Living-Zed markers show distance in metres and a session Actor ID. Their
 snapshot is limited to 64 visible Zeds and refreshes at most every 100 ms.
+**FleX runtime diagnostics** is also off by default. When enabled, the Debug
+page shows incoming and forwarded min/max substeps, solver and particle
+statistics, shared-memory readback health, and report/log state. It can be
+changed during a protected session. Leave it off for the cheapest normal path;
+the fixed one-substep safety limit remains active for user-enabled FleX.
 The Debug page also links to the portable data folder and current session log.
 
 ## 11. Recovery

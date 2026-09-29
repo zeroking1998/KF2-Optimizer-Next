@@ -199,7 +199,7 @@ std::wstring UiModel::page_body() const {
             : L"Select a valid Killing Floor 2 installation to edit advanced INI settings.";
     }
     if (selected_ == Destination::debug) {
-        return L"Debug changes apply on the next protected KF2 start. Physics A/B defaults to Candidate.";
+        return L"Markers and Physics A/B apply on the next protected KF2 start. FleX diagnostics can also be changed for a running protected session.";
     }
     if (selected_ == Destination::diagnostics) {
         return L"";
