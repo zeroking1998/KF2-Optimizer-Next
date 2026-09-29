@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <string_view>
 
 #include "kf2/overlay/overlay_window.hpp"
 
@@ -178,6 +179,8 @@ inline constexpr int kPremiumMutantRigPngResource = 202;
 inline constexpr int kPremiumMutantLowIdlePngResource = 203;
 
 [[nodiscard]] MascotAnimationAsset load_mascot_animation_asset();
+[[nodiscard]] MascotAnimationAsset parse_mascot_animation_asset(
+    std::string_view text, bool* valid = nullptr);
 [[nodiscard]] HWND create_overlay_native_window(HINSTANCE instance);
 [[nodiscard]] DWORD bind_overlay_target_window(HWND overlay, HWND target);
 void discard_overlay_device_resources(OverlayWindowState& state) noexcept;
