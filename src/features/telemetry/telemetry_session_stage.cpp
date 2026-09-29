@@ -224,14 +224,15 @@ bool UiRuntime::set_live_adaptive_enabled(
     if (!game::valid_adaptive_control_token(adaptive_control_token)) {
         return false;
     }
-    std::optional<std::uint16_t> port;
+    const game::GameLogSession* provider_session = nullptr;
     if (last_report_gameplay_session &&
         last_report_gameplay_session->telemetry_control_port) {
-        port = last_report_gameplay_session->telemetry_control_port;
+        provider_session = &*last_report_gameplay_session;
     } else if (game_log_session && game_log_session->telemetry_control_port) {
-        port = game_log_session->telemetry_control_port;
+        provider_session = &*game_log_session;
     }
-    if (!port || adaptive_mode_dispatcher.busy()) return false;
+    if (!provider_session || adaptive_mode_dispatcher.busy()) return false;
+    const auto port = *provider_session->telemetry_control_port;
 
     const auto next_sequence = game::next_adaptive_control_sequence(
         adaptive_control_sequence);
@@ -244,7 +245,7 @@ bool UiRuntime::set_live_adaptive_enabled(
         return false;
     }
     const auto changed = game::send_adaptive_control({
-        .port = *port,
+        .port = port,
         .token = adaptive_control_token,
         .sequence = *next_sequence,
         .resource = enabled ? game::AdaptiveResourceControl::enable
@@ -263,7 +264,9 @@ bool UiRuntime::set_live_adaptive_enabled(
     }
     adaptive_runtime_mode_process_start_id = game_process
         ? game_process->process_start_id : 0;
-    adaptive_runtime_mode_port = *port;
+    adaptive_runtime_mode_provider_generation =
+        provider_session->optimizer_session_generation;
+    adaptive_runtime_mode_port = port;
     adaptive_runtime_mode_last_attempt_ns = monotonic_ns();
     adaptive_runtime_mode_confirmed = true;
     adaptive_runtime_mode_pending.reset();
@@ -340,6 +343,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     // session, not to one DXGI/PDH binding. Recoverable detach/rebind paths
     // must keep both values monotonically aligned with the live receiver.
     adaptive_runtime_mode_process_start_id = 0;
+    adaptive_runtime_mode_provider_generation.reset();
     adaptive_runtime_mode_port.reset();
     adaptive_runtime_mode_last_attempt_ns = 0;
     adaptive_runtime_mode_confirmed = false;

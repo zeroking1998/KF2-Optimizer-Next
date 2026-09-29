@@ -1792,6 +1792,40 @@ int main(int argc, char** argv) {
         runtime.game_process.reset();
     }
 
+    // Direct online travel can recreate the provider while the process and
+    // numeric UDP port stay unchanged. The old APPLIED receipt must cease to
+    // authorize actions as soon as the new World generation is observed.
+    {
+        kf2::diagnostics::EventLog generation_events{32};
+        kf2::app::UiRuntime runtime{root / L"Data-provider-generation", false,
+            kf2::config::Settings{}, generation_events,
+            options.game_discovery, kf2::app::StartMode::read_only,
+            root / L"portable"};
+        runtime.game_process = kf2::game::GameProcessIdentity{424243, 9002, {}};
+        runtime.optimizer_settings.adaptive_optimization_enabled = true;
+        runtime.adaptive_runtime_mode_process_start_id = 9002;
+        runtime.adaptive_runtime_mode_provider_generation = 7;
+        runtime.adaptive_runtime_mode_port = std::uint16_t{64298};
+        runtime.adaptive_runtime_mode_confirmed = true;
+
+        kf2::telemetry_pipeline::TelemetryFrame frame;
+        frame.identity = {424243, 9002};
+        frame.observed_at_ns = 30'000'000'000ULL;
+        frame.active_gameplay = true;
+        frame.gameplay.emplace();
+        frame.gameplay->map = "KF-Test";
+        frame.gameplay->net_mode = "NM_Client";
+        frame.gameplay->optimizer_online_read_only = true;
+        frame.gameplay->optimizer_session_generation = 8;
+        // The fresh bridge has not announced its endpoint yet.
+        runtime.update_adaptive_controller(frame);
+        CHECK(!runtime.adaptive_runtime_mode_confirmed);
+        CHECK(runtime.model.status().adaptive_action == L"blocked");
+        CHECK(runtime.model.status().adaptive_evidence ==
+              L"MODE_READBACK_PENDING");
+        runtime.game_process.reset();
+    }
+
     // A live Variable frame rate change invalidates every Adaptive frame
     // statistic exactly once. Unchanged settings and loading-time changes do
     // not repeatedly reset the controller boundary.

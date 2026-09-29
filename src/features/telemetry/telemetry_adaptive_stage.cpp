@@ -51,54 +51,68 @@ void UiRuntime::poll_adaptive_runtime_mode() {
 void UiRuntime::reconcile_adaptive_runtime_mode(
     const telemetry_pipeline::TelemetryFrame& frame) {
     const auto now_ns = frame.observed_at_ns;
-    if (frame.gameplay && frame.gameplay->telemetry_control_port &&
-        game_process &&
-        game::valid_adaptive_control_token(adaptive_control_token)) {
-        const auto port = *frame.gameplay->telemetry_control_port;
-        const bool new_provider =
-            adaptive_runtime_mode_process_start_id !=
-                game_process->process_start_id ||
-            adaptive_runtime_mode_port != port;
-        const bool retry_due = !adaptive_runtime_mode_confirmed &&
-            (adaptive_runtime_mode_last_attempt_ns == 0 ||
-             now_ns >= adaptive_runtime_mode_last_attempt_ns +
-                           5'000'000'000ULL);
-        if ((new_provider || retry_due) &&
-            !adaptive_mode_dispatcher.busy()) {
-            adaptive_runtime_mode_process_start_id =
-                game_process->process_start_id;
-            adaptive_runtime_mode_port = port;
-            adaptive_runtime_mode_last_attempt_ns = now_ns;
-            adaptive_runtime_mode_confirmed = false;
-            const bool desired_enabled =
-                optimizer_settings.adaptive_optimization_enabled;
-            const auto next_sequence = game::next_adaptive_control_sequence(
-                adaptive_control_sequence);
-            if (!next_sequence) {
-                events->append({0, diagnostics::Severity::error,
-                    "ADAPTIVE_CONTROL_SEQUENCE_EXHAUSTED",
-                    L"The authenticated command sequence is exhausted; automatic actions remain blocked until a new protected KF2 session starts",
-                    L"optimizer"});
-                return;
-            }
-            const auto started = adaptive_mode_dispatcher.start({
-                .port = port,
-                .token = adaptive_control_token,
-                .sequence = *next_sequence,
-                .resource = desired_enabled
-                    ? game::AdaptiveResourceControl::enable
-                    : game::AdaptiveResourceControl::disable,
-                .quality = desired_enabled ? effective_corpse_limit() : 100});
-            if (started.has_value() && started.value()) {
-                adaptive_control_sequence = *next_sequence;
-                adaptive_runtime_mode_pending = desired_enabled;
-            } else {
-                events->append({0, diagnostics::Severity::warning,
-                    "ADAPTIVE_RUNTIME_MODE_RECONCILE_FAILED",
-                    L"The background worker could not start; automatic actions remain blocked",
-                    L"optimizer"});
-            }
-        }
+    if (!frame.gameplay || !game_process) return;
+
+    const telemetry_pipeline::AdaptiveRuntimeProviderIdentity previous{
+        adaptive_runtime_mode_process_start_id,
+        adaptive_runtime_mode_provider_generation,
+        adaptive_runtime_mode_port};
+    const telemetry_pipeline::AdaptiveRuntimeProviderIdentity current{
+        game_process->process_start_id,
+        frame.gameplay->optimizer_session_generation,
+        frame.gameplay->telemetry_control_port};
+    const bool new_provider =
+        telemetry_pipeline::adaptive_runtime_provider_changed(
+            previous, current);
+    // Fail closed at the World boundary, before a fresh listener has a port
+    // or the previous asynchronous request has finished.
+    if (new_provider) adaptive_runtime_mode_confirmed = false;
+    if (!frame.gameplay->telemetry_control_port ||
+        !game::valid_adaptive_control_token(adaptive_control_token)) {
+        return;
+    }
+
+    const auto port = *frame.gameplay->telemetry_control_port;
+    const bool retry_due = !adaptive_runtime_mode_confirmed &&
+        (adaptive_runtime_mode_last_attempt_ns == 0 ||
+         now_ns >= adaptive_runtime_mode_last_attempt_ns +
+                       5'000'000'000ULL);
+    if ((!new_provider && !retry_due) || adaptive_mode_dispatcher.busy()) {
+        return;
+    }
+    adaptive_runtime_mode_process_start_id = game_process->process_start_id;
+    adaptive_runtime_mode_provider_generation =
+        frame.gameplay->optimizer_session_generation;
+    adaptive_runtime_mode_port = port;
+    adaptive_runtime_mode_last_attempt_ns = now_ns;
+    adaptive_runtime_mode_confirmed = false;
+    const bool desired_enabled =
+        optimizer_settings.adaptive_optimization_enabled;
+    const auto next_sequence = game::next_adaptive_control_sequence(
+        adaptive_control_sequence);
+    if (!next_sequence) {
+        events->append({0, diagnostics::Severity::error,
+            "ADAPTIVE_CONTROL_SEQUENCE_EXHAUSTED",
+            L"The authenticated command sequence is exhausted; automatic actions remain blocked until a new protected KF2 session starts",
+            L"optimizer"});
+        return;
+    }
+    const auto started = adaptive_mode_dispatcher.start({
+        .port = port,
+        .token = adaptive_control_token,
+        .sequence = *next_sequence,
+        .resource = desired_enabled
+            ? game::AdaptiveResourceControl::enable
+            : game::AdaptiveResourceControl::disable,
+        .quality = desired_enabled ? effective_corpse_limit() : 100});
+    if (started.has_value() && started.value()) {
+        adaptive_control_sequence = *next_sequence;
+        adaptive_runtime_mode_pending = desired_enabled;
+    } else {
+        events->append({0, diagnostics::Severity::warning,
+            "ADAPTIVE_RUNTIME_MODE_RECONCILE_FAILED",
+            L"The background worker could not start; automatic actions remain blocked",
+            L"optimizer"});
     }
 }
 

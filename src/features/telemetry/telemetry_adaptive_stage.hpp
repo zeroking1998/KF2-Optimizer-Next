@@ -24,6 +24,20 @@ inline constexpr std::uint64_t kAdaptiveBottleneckLogIntervalNs =
 inline constexpr std::uint64_t kPerformanceSampleLogIntervalNs =
     5'000'000'000ULL;
 
+struct AdaptiveRuntimeProviderIdentity final {
+    std::uint64_t process_start_id{0};
+    std::optional<std::uint64_t> session_generation;
+    std::optional<std::uint16_t> port;
+};
+
+[[nodiscard]] inline constexpr bool adaptive_runtime_provider_changed(
+    const AdaptiveRuntimeProviderIdentity& previous,
+    const AdaptiveRuntimeProviderIdentity& current) noexcept {
+    return previous.process_start_id != current.process_start_id ||
+           previous.session_generation != current.session_generation ||
+           previous.port != current.port;
+}
+
 [[nodiscard]] inline constexpr bool detailed_adaptive_diagnostics_enabled(
     bool adaptive_logging, bool runtime_diagnostics) noexcept {
     return adaptive_logging && runtime_diagnostics;
