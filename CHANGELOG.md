@@ -84,6 +84,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Protected launch preparation reports allocation failures instead of terminating
+  the Optimizer, discards failed previews, and keeps the existing rollback path.
 - Optional crash-recorder setup no longer terminates startup on allocation or
   filesystem exceptions; failed setup leaves no partial reservation and preserves
   the existing exception filter.
