@@ -2,7 +2,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "kf2/security/package_integrity.hpp"
 #include "kf2/security/sha256.hpp"
@@ -59,6 +61,46 @@ void write_package(const std::filesystem::path& root,
         manifest += "file=" + narrow + "|" + hash.value() + "\r\n";
     }
     write_file(root / L"Data/package-integrity.ini", manifest);
+}
+
+using PackageSnapshot = std::vector<
+    std::pair<std::filesystem::path, std::optional<std::string>>>;
+
+PackageSnapshot capture_package(const std::filesystem::path& root) {
+    PackageSnapshot snapshot;
+    for (const auto& [relative, content] : kFiles) {
+        (void)content;
+        const auto path = root / relative;
+        snapshot.emplace_back(
+            path, std::filesystem::exists(path)
+                      ? std::optional<std::string>{read_file(path)}
+                      : std::nullopt);
+    }
+    const auto manifest = root / L"Data/package-integrity.ini";
+    snapshot.emplace_back(
+        manifest, std::filesystem::exists(manifest)
+                      ? std::optional<std::string>{read_file(manifest)}
+                      : std::nullopt);
+    return snapshot;
+}
+
+bool matches_snapshot(const PackageSnapshot& snapshot) {
+    for (const auto& [path, original] : snapshot) {
+        if (std::filesystem::exists(path) != original.has_value()) return false;
+        if (original.has_value() && read_file(path) != original.value()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void damage_repair_target(const std::filesystem::path& root) {
+    std::error_code error;
+    std::filesystem::remove(
+        root / L"Data/Lab/KF2OptimizerTelemetry.u", error);
+    write_file(root / L"Data/Documentation/SAFETY.md", "damaged safety");
+    write_file(root / L"Data/Documentation/SUPPORT.md", "damaged support");
+    std::filesystem::remove(root / L"Data/package-integrity.ini", error);
 }
 
 }  // namespace
@@ -135,6 +177,52 @@ int main() {
     CHECK(unchanged.value().repaired_files == 0);
     CHECK(unchanged.value().already_valid_files == 13);
     CHECK(!unchanged.value().restart_required);
+
+    for (const std::size_t interruption : {1U, 2U, 4U}) {
+        write_package(repair_target, "test-build");
+        damage_repair_target(repair_target);
+        const auto before = capture_package(repair_target);
+        kf2::security::set_package_repair_fault_for_testing(
+            kf2::security::PackageRepairFaultInjection::after_replacement,
+            interruption);
+        const auto interrupted =
+            kf2::security::repair_package_from_directory(
+                repair_target, repair_source, "test-build");
+        kf2::security::set_package_repair_fault_for_testing(
+            kf2::security::PackageRepairFaultInjection::none);
+        CHECK(!interrupted.has_value());
+        CHECK(matches_snapshot(before));
+    }
+
+    write_package(repair_target, "test-build");
+    damage_repair_target(repair_target);
+    const auto before_final_verification = capture_package(repair_target);
+    kf2::security::set_package_repair_fault_for_testing(
+        kf2::security::PackageRepairFaultInjection::final_verification);
+    const auto final_verification_failure =
+        kf2::security::repair_package_from_directory(
+            repair_target, repair_source, "test-build");
+    kf2::security::set_package_repair_fault_for_testing(
+        kf2::security::PackageRepairFaultInjection::none);
+    CHECK(!final_verification_failure.has_value());
+    CHECK(matches_snapshot(before_final_verification));
+
+    write_package(repair_target, "test-build");
+    damage_repair_target(repair_target);
+    const auto before_failed_rollback = capture_package(repair_target);
+    kf2::security::set_package_repair_fault_for_testing(
+        kf2::security::PackageRepairFaultInjection::rollback_failure, 2U);
+    const auto failed_rollback =
+        kf2::security::repair_package_from_directory(
+            repair_target, repair_source, "test-build");
+    kf2::security::set_package_repair_fault_for_testing(
+        kf2::security::PackageRepairFaultInjection::none);
+    CHECK(!failed_rollback.has_value());
+    CHECK(failed_rollback.error().code == kf2::ErrorCode::recovery_required);
+    CHECK(failed_rollback.error().message.find(L"Restart") !=
+          std::wstring::npos);
+    CHECK(!matches_snapshot(before_failed_rollback));
+    write_package(repair_target, "test-build");
 
     write_file(repair_target / L"Data/Documentation/SAFETY.md",
                "target must remain unchanged");

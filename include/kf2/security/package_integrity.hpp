@@ -36,6 +36,19 @@ struct PackageIntegrityManifest {
     std::vector<PackageIntegrityFile> files;
 };
 
+#if defined(KF2_PACKAGE_INTEGRITY_TESTING)
+enum class PackageRepairFaultInjection {
+    none,
+    after_replacement,
+    final_verification,
+    rollback_failure,
+};
+
+void set_package_repair_fault_for_testing(
+    PackageRepairFaultInjection fault,
+    std::size_t after_replacements = 0) noexcept;
+#endif
+
 [[nodiscard]] std::span<const std::string_view>
 managed_package_payload_paths() noexcept;
 
