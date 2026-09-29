@@ -205,9 +205,13 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                             ? current_->zeds_remaining_observed_ns
                             : current_->zeds_alive_observed_ns;
                         const bool value_changed = target != count->second;
+                        const bool observation_refreshed =
+                            observed_at_ns != 0 && observed != observed_at_ns;
                         target = count->second;
                         if (observed_at_ns != 0) observed = observed_at_ns;
-                        if (value_changed) changed = true;
+                        if (value_changed || observation_refreshed) {
+                            changed = true;
+                        }
                     } else if (const auto wave =
                                    detail::parse_wave_snapshot_line(line);
                                wave && current_->game_class &&
@@ -218,12 +222,17 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                         const bool value_changed =
                             current_->wave_number != wave_number ||
                             current_->wave_total_ai != wave->second;
+                        const bool observation_refreshed =
+                            observed_at_ns != 0 &&
+                            current_->wave_observed_ns != observed_at_ns;
                         current_->wave_number = wave_number;
                         current_->wave_total_ai = wave->second;
                         if (observed_at_ns != 0) {
                             current_->wave_observed_ns = observed_at_ns;
                         }
-                        if (value_changed) changed = true;
+                        if (value_changed || observation_refreshed) {
+                            changed = true;
+                        }
                     } else if (const auto telemetry_changed =
                                    detail::apply_offline_telemetry_line(
                                        *current_, line, observed_at_ns);
