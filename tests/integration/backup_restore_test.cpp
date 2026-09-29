@@ -1,5 +1,6 @@
 #include <Windows.h>
 
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -68,6 +69,25 @@ bool has_quarantined_copy(const std::filesystem::path& source,
         }
     }
     return false;
+}
+
+std::string replace_manifest_file_field(std::string manifest,
+                                        std::size_t field_index,
+                                        std::string_view replacement) {
+    std::size_t begin = manifest.find("file=");
+    if (begin == std::string::npos) return {};
+    begin += 5;
+    for (std::size_t index = 0; index < field_index; ++index) {
+        begin = manifest.find('|', begin);
+        if (begin == std::string::npos) return {};
+        ++begin;
+    }
+    const auto delimiter = manifest.find('|', begin);
+    const auto newline = manifest.find('\n', begin);
+    const auto end = std::min(delimiter, newline);
+    if (end == std::string::npos) return {};
+    manifest.replace(begin, end - begin, replacement);
+    return manifest;
 }
 
 }  // namespace
@@ -297,6 +317,47 @@ int main() {
     write_bytes(applied.value().backup.manifest_path,
                 original_manifest + "root=00\n");
     CHECK(!store.load_backup(applied.value().backup.id).has_value());
+    write_bytes(applied.value().backup.manifest_path, original_manifest);
+    CHECK(store.load_backup(applied.value().backup.id).has_value());
+
+    auto boundary_manifest = replace_manifest_file_field(
+        original_manifest, 1, "0");
+    boundary_manifest = replace_manifest_file_field(
+        std::move(boundary_manifest), 3, "16777216");
+    CHECK(!boundary_manifest.empty());
+    write_bytes(applied.value().backup.manifest_path, boundary_manifest);
+    const auto lower_upper_boundaries =
+        store.load_backup(applied.value().backup.id);
+    CHECK(lower_upper_boundaries.has_value());
+    CHECK(lower_upper_boundaries.value().snapshots[0].size == 0);
+    CHECK(lower_upper_boundaries.value().snapshots[0].desired_size ==
+          16U * 1024U * 1024U);
+
+    boundary_manifest = replace_manifest_file_field(
+        original_manifest, 1, "16777216");
+    boundary_manifest = replace_manifest_file_field(
+        std::move(boundary_manifest), 3, "0");
+    CHECK(!boundary_manifest.empty());
+    write_bytes(applied.value().backup.manifest_path, boundary_manifest);
+    const auto upper_lower_boundaries =
+        store.load_backup(applied.value().backup.id);
+    CHECK(upper_lower_boundaries.has_value());
+    CHECK(upper_lower_boundaries.value().snapshots[0].size ==
+          16U * 1024U * 1024U);
+    CHECK(upper_lower_boundaries.value().snapshots[0].desired_size == 0);
+
+    constexpr std::array<std::string_view, 11> invalid_sizes{
+        "", "18446744073709551616", "123junk", "123.5", "+123",
+        "-1", " 123", "123 ", "1e2", "00", "0123"};
+    for (const std::size_t field_index : {1U, 3U}) {
+        for (const auto value : invalid_sizes) {
+            const auto malformed = replace_manifest_file_field(
+                original_manifest, field_index, value);
+            CHECK(!malformed.empty());
+            write_bytes(applied.value().backup.manifest_path, malformed);
+            CHECK(!store.load_backup(applied.value().backup.id).has_value());
+        }
+    }
     write_bytes(applied.value().backup.manifest_path, original_manifest);
     CHECK(store.load_backup(applied.value().backup.id).has_value());
 
