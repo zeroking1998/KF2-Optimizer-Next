@@ -751,6 +751,10 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                     L"Overlay: " + status.overlay_diagnostics,
                     cursor, 40.0F);
         cursor += 48.0F;
+        add_section("debug-prewarm-text",
+                    L"Prewarm / cache: " + status.prewarm_diagnostics,
+                    cursor, 40.0F);
+        cursor += 48.0F;
         add_section("debug-flex-solver-text",
                     L"Solver / particles: " + status.flex_telemetry,
                     cursor, 40.0F);

@@ -483,6 +483,7 @@ ui::UiStatus UiRuntime::make_initial_status(
     status.debug_runtime_diagnostics = settings.debug_runtime_diagnostics;
     if (settings.debug_runtime_diagnostics) {
         status.overlay_diagnostics = L"Waiting for overlay diagnostics";
+        status.prewarm_diagnostics = L"Waiting for prewarm diagnostics";
     }
     if (settings.debug_flex_diagnostics) {
         status.flex_substep_diagnostics =

@@ -67,6 +67,10 @@ are visible immediately.
   real game-window coverage checks are now collected only with runtime
   diagnostics enabled and published to Debug at a bounded one-second cadence.
   Normal play performs no high-resolution overlay timing or diagnostic count.
+- Startup and map prewarm now retain only the byte progress required for normal
+  operation. Storage kind, planned/attempted files, cache-fill totals and
+  open/read failures are collected and shown only for Debug diagnostic jobs;
+  detailed success/cancellation events are likewise opt-in.
 - Added reproducible release optimization through interprocedural optimization
   and an optional two-phase MSVC profile-guided optimization workflow.
 - Simplified contributor setup, Windows builds, GitHub issue reporting, and

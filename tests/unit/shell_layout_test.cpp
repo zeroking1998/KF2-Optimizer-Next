@@ -292,6 +292,8 @@ int main() {
         L"shared memory healthy | reports and extra logs on";
     debug_status.overlay_diagnostics =
         L"updates 20, redraws 4, skipped 16, render 120 us";
+    debug_status.prewarm_diagnostics =
+        L"Map KF-Test: running, SSD, cache 64/128 MiB";
     model.set_status(debug_status);
     const auto debug = layout_shell(model, 1440, 900);
     CHECK(node(debug, "debug-markers-section") != nullptr);
@@ -318,6 +320,9 @@ int main() {
           L"RUNTIME DIAGNOSTICS: ON");
     CHECK(node(debug, "debug-overlay-text") != nullptr);
     CHECK(node(debug, "debug-overlay-text")->text.find(L"redraws 4") !=
+          std::wstring::npos);
+    CHECK(node(debug, "debug-prewarm-text") != nullptr);
+    CHECK(node(debug, "debug-prewarm-text")->text.find(L"cache 64/128") !=
           std::wstring::npos);
     CHECK(node(debug, "debug-flex-solver-text") != nullptr);
     CHECK(node(debug, "debug-flex-solver-text")->text.find(L"particles") !=

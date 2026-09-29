@@ -10,6 +10,36 @@ namespace kf2::app {
 namespace {
 
 constexpr std::uint64_t kMapPrewarmRetryDelayNs = 15'000'000'000ULL;
+constexpr std::uint64_t kPrewarmDiagnosticsPublishIntervalNs =
+    1'000'000'000ULL;
+
+std::wstring_view prewarm_state_text(
+    game::StartupPrewarmState state) noexcept {
+    switch (state) {
+        case game::StartupPrewarmState::idle: return L"idle";
+        case game::StartupPrewarmState::waiting: return L"waiting";
+        case game::StartupPrewarmState::running: return L"running";
+        case game::StartupPrewarmState::complete: return L"complete";
+        case game::StartupPrewarmState::cancelled: return L"cancelled";
+        case game::StartupPrewarmState::skipped_unknown_storage:
+            return L"unknown storage";
+        case game::StartupPrewarmState::skipped_low_memory:
+            return L"low memory";
+        case game::StartupPrewarmState::skipped_no_files:
+            return L"no files";
+        case game::StartupPrewarmState::failed: return L"failed";
+    }
+    return L"unknown";
+}
+
+std::wstring_view storage_kind_text(game::StorageKind storage) noexcept {
+    switch (storage) {
+        case game::StorageKind::solid_state: return L"SSD";
+        case game::StorageKind::rotational: return L"HDD";
+        case game::StorageKind::unknown: return L"unknown storage";
+    }
+    return L"unknown storage";
+}
 
 class RuntimeTelemetryPipeline final {
 public:
@@ -165,8 +195,54 @@ void UiRuntime::start_startup_prewarm() {
         return;
     }
     startup_prewarm_announced = false;
+    prewarm_diagnostics_last_published_ns = 0;
     game::StartupPrewarmOptions options;
+    options.collect_diagnostics =
+        optimizer_settings.debug_runtime_diagnostics;
     startup_prewarmer.start(installation->install_root, std::move(options));
+}
+
+void UiRuntime::publish_prewarm_diagnostics(
+    const game::StartupPrewarmSnapshot& snapshot,
+    std::wstring_view context, bool force) {
+    if (!optimizer_settings.debug_runtime_diagnostics) return;
+    const auto now_ns = monotonic_ns();
+    if (!force && prewarm_diagnostics_last_published_ns != 0 &&
+        now_ns >= prewarm_diagnostics_last_published_ns &&
+        now_ns - prewarm_diagnostics_last_published_ns <
+            kPrewarmDiagnosticsPublishIntervalNs) {
+        return;
+    }
+    prewarm_diagnostics_last_published_ns = now_ns;
+    std::wstring summary{context};
+    summary += L": ";
+    summary += prewarm_state_text(snapshot.state);
+    if (snapshot.diagnostics) {
+        summary += L", ";
+        summary += storage_kind_text(snapshot.diagnostics->storage);
+        summary += L", cache " +
+            std::to_wstring(snapshot.bytes_read / (1024ULL * 1024ULL)) +
+            L"/" +
+            std::to_wstring(snapshot.bytes_planned / (1024ULL * 1024ULL)) +
+            L" MiB, files " + std::to_wstring(snapshot.files_read) +
+            L"/" +
+            std::to_wstring(snapshot.diagnostics->files_planned) +
+            L" read, " +
+            std::to_wstring(snapshot.diagnostics->files_attempted) +
+            L" attempted, open/read failures " +
+            std::to_wstring(snapshot.diagnostics->file_open_failures) +
+            L"/" +
+            std::to_wstring(snapshot.diagnostics->file_read_failures);
+    } else {
+        summary +=
+            L", detailed file/cache counters were not enabled when this job "
+            L"started";
+    }
+    if (model.status().prewarm_diagnostics == summary) return;
+    auto status = model.status();
+    status.prewarm_diagnostics = std::move(summary);
+    model.set_status(std::move(status));
+    invalidate();
 }
 
 void UiRuntime::poll_startup_prewarm() {
@@ -183,11 +259,13 @@ void UiRuntime::poll_startup_prewarm() {
             model.set_status(std::move(status));
             invalidate();
         }
+        publish_prewarm_diagnostics(current, L"Startup");
     }
     if (startup_prewarm_announced) return;
     switch (current.state) {
         case game::StartupPrewarmState::complete:
             startup_prewarm_announced = true;
+            publish_prewarm_diagnostics(current, L"Startup", true);
             {
                 auto status = model.status();
                 status.prewarm_active = false;
@@ -195,23 +273,29 @@ void UiRuntime::poll_startup_prewarm() {
                 status.prewarm_map.clear();
                 model.set_status(std::move(status));
             }
-            events->append({0, diagnostics::Severity::info,
-                "STARTUP_PREWARM_COMPLETED",
-                L"Prepared " + std::to_wstring(current.files_read) +
-                    L" known KF2 startup files (" +
-                    std::to_wstring(current.bytes_read / (1024ULL * 1024ULL)) +
-                    L" MiB) in the Windows file cache",
-                L"performance"});
+            if (optimizer_settings.debug_runtime_diagnostics &&
+                current.diagnostics) {
+                events->append({0, diagnostics::Severity::info,
+                    "STARTUP_PREWARM_COMPLETED",
+                    L"Prepared " + std::to_wstring(current.files_read) +
+                        L" known KF2 startup files (" +
+                        std::to_wstring(
+                            current.bytes_read / (1024ULL * 1024ULL)) +
+                        L" MiB) in the Windows file cache",
+                    L"performance"});
+            }
             break;
         case game::StartupPrewarmState::cancelled:
             startup_prewarm_announced = true;
+            publish_prewarm_diagnostics(current, L"Startup", true);
             {
                 auto status = model.status();
                 status.prewarm_active = false;
                 status.prewarm_map.clear();
                 model.set_status(std::move(status));
             }
-            if (current.bytes_read != 0) {
+            if (optimizer_settings.debug_runtime_diagnostics &&
+                current.diagnostics && current.bytes_read != 0) {
                 events->append({0, diagnostics::Severity::info,
                     "STARTUP_PREWARM_CANCELLED",
                     L"Stopped startup preparation before KF2 launch after " +
@@ -225,9 +309,11 @@ void UiRuntime::poll_startup_prewarm() {
         case game::StartupPrewarmState::skipped_low_memory:
         case game::StartupPrewarmState::skipped_no_files:
             startup_prewarm_announced = true;
+            publish_prewarm_diagnostics(current, L"Startup", true);
             break;
         case game::StartupPrewarmState::failed:
             startup_prewarm_announced = true;
+            publish_prewarm_diagnostics(current, L"Startup", true);
             {
                 auto status = model.status();
                 status.prewarm_active = false;
@@ -283,6 +369,8 @@ void UiRuntime::poll_map_prewarm() {
         game::startup_prewarm_retryable(current.state);
     if (!map_prewarm_active.empty() && terminal) {
         const auto completed_map = std::exchange(map_prewarm_active, {});
+        publish_prewarm_diagnostics(
+            current, L"Map " + completed_map, true);
         auto status = model.status();
         status.prewarm_active = false;
         status.prewarm_map.clear();
@@ -291,12 +379,16 @@ void UiRuntime::poll_map_prewarm() {
         model.set_status(std::move(status));
         if (current.state == game::StartupPrewarmState::complete) {
             map_prewarm_retry_not_before_ns = 0;
-            events->append({0, diagnostics::Severity::info,
-                "MAP_PREWARM_COMPLETED",
-                L"Prepared " + completed_map + L" (" +
-                    std::to_wstring(current.bytes_read / (1024ULL * 1024ULL)) +
-                    L" MiB) in the Windows file cache before map loading",
-                L"performance"});
+            if (optimizer_settings.debug_runtime_diagnostics &&
+                current.diagnostics) {
+                events->append({0, diagnostics::Severity::info,
+                    "MAP_PREWARM_COMPLETED",
+                    L"Prepared " + completed_map + L" (" +
+                        std::to_wstring(
+                            current.bytes_read / (1024ULL * 1024ULL)) +
+                        L" MiB) in the Windows file cache before map loading",
+                    L"performance"});
+            }
         } else if (game::startup_prewarm_retryable(current.state) &&
                    completed_map == map_prewarm_observed) {
             map_prewarm_retry_not_before_ns =
@@ -304,6 +396,8 @@ void UiRuntime::poll_map_prewarm() {
         }
         invalidate();
     } else if (!map_prewarm_active.empty()) {
+        publish_prewarm_diagnostics(
+            current, L"Map " + map_prewarm_active);
         auto status = model.status();
         const int percent = prewarm_percent(current);
         if (!status.prewarm_active || status.prewarm_percent != percent ||
@@ -333,6 +427,9 @@ void UiRuntime::poll_map_prewarm() {
         options.idle_delay = std::chrono::milliseconds{0};
         options.map_name = map_prewarm_active;
         options.include_common_startup_files = false;
+        options.collect_diagnostics =
+            optimizer_settings.debug_runtime_diagnostics;
+        prewarm_diagnostics_last_published_ns = 0;
         map_prewarmer.start(installation->install_root, std::move(options));
         auto status = model.status();
         status.prewarm_active = true;
