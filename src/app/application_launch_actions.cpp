@@ -4,13 +4,21 @@
 #include "kf2/optimizer/startup_gpu_profile.hpp"
 
 #include <algorithm>
+#include <new>
 
 namespace kf2::app {
 namespace {
 
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+void (*launch_change_probe)(config::SettingId, std::size_t){};
+#endif
+
 void upsert_startup_change(
     std::vector<config::RequestedChange>& changes, config::SettingId id,
     config::SettingValue value, std::wstring_view reason) {
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+    if (launch_change_probe) launch_change_probe(id, changes.size());
+#endif
     const auto existing = std::find_if(
         changes.begin(), changes.end(), [id](const auto& change) {
             return change.id == id;
@@ -44,6 +52,13 @@ std::optional<std::wstring_view> persisted_physical_gpu_key(
 
 }  // namespace
 
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+void set_launch_change_probe_for_testing(
+    void (*probe)(config::SettingId, std::size_t)) noexcept {
+    launch_change_probe = probe;
+}
+#endif
+
 void preserve_user_flex_activation(
     std::vector<config::RequestedChange>& changes) noexcept {
     std::erase_if(changes, [](const config::RequestedChange& change) {
@@ -52,7 +67,12 @@ void preserve_user_flex_activation(
 }
 
 void enforce_temporal_aa_disabled(
-    std::vector<config::RequestedChange>& changes) noexcept {
+    std::vector<config::RequestedChange>& changes) {
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+    if (launch_change_probe) {
+        launch_change_probe(config::SettingId::temporal_aa, changes.size());
+    }
+#endif
     const auto existing = std::find_if(
         changes.begin(), changes.end(), [](const config::RequestedChange& change) {
             return change.id == config::SettingId::temporal_aa;
@@ -69,7 +89,7 @@ void enforce_temporal_aa_disabled(
 }
 
 void enforce_async_physics_enabled(
-    std::vector<config::RequestedChange>& changes) noexcept {
+    std::vector<config::RequestedChange>& changes) {
     upsert_startup_change(
         changes, config::SettingId::physics_async_scene, true,
         L"Enable the standard asynchronous physics scene at KF2 startup");
@@ -80,7 +100,7 @@ void enforce_async_physics_enabled(
 
 void enforce_fixed_flex_substeps(
     std::vector<config::RequestedChange>& changes,
-    bool fixed_flex_launch) noexcept {
+    bool fixed_flex_launch) {
     if (!fixed_flex_launch) return;
     upsert_startup_change(
         changes, config::SettingId::max_physics_substeps, 1,
@@ -88,7 +108,7 @@ void enforce_fixed_flex_substeps(
 }
 
 void enforce_one_frame_thread_lag(
-    std::vector<config::RequestedChange>& changes) noexcept {
+    std::vector<config::RequestedChange>& changes) {
     upsert_startup_change(
         changes, config::SettingId::one_frame_thread_lag, true,
         L"Enable KF2's native one-frame render-thread pipeline at startup");
@@ -96,7 +116,7 @@ void enforce_one_frame_thread_lag(
 
 void enforce_startup_memory_profile(
     std::vector<config::RequestedChange>& changes,
-    const optimizer::StartupMemoryProfile& profile) noexcept {
+    const optimizer::StartupMemoryProfile& profile) {
     upsert_startup_change(
         changes, config::SettingId::texture_pool_size,
         profile.texture_pool_size_mb,
@@ -112,7 +132,7 @@ void enforce_startup_memory_profile(
 }
 
 Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile(
-    bool fixed_flex_launch) {
+    bool fixed_flex_launch) try {
     const auto apply_launch_preview = [this]() -> Result<config::ApplyResult> {
         if (!preview) {
             return Result<config::ApplyResult>::failure(
@@ -270,6 +290,17 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile(
             L"optimizer"});
     }
     return applied;
+} catch (const std::bad_alloc&) {
+    // Fail through the existing launch rollback path. Never leave a stale or
+    // partially constructed preview available for a later apply action.
+    preview.reset();
+    Error error{ErrorCode::internal_failure, {}, ERROR_NOT_ENOUGH_MEMORY};
+    try {
+        error.message = L"Not enough memory to prepare the protected KF2 launch";
+    } catch (const std::bad_alloc&) {
+        // Returning the error must remain possible under continued exhaustion.
+    }
+    return Result<config::ApplyResult>::failure(std::move(error));
 }
 
 Result<game::FrameRateCapResult> UiRuntime::synchronize_frame_rate_cap() {

@@ -933,7 +933,118 @@ int test_gameplay_snapshot_lifetime() {
     return EXIT_SUCCESS;
 }
 
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+kf2::config::SettingId launch_failure_setting{};
+std::size_t changes_before_launch_failure{};
+void throw_launch_change_allocation(
+    kf2::config::SettingId id, std::size_t prepared_count) {
+    if (id == launch_failure_setting) {
+        changes_before_launch_failure = prepared_count;
+        throw std::bad_alloc{};
+    }
+}
+#endif
+
+int test_launch_profile_allocation_failures() {
+    namespace fs = std::filesystem;
+    using kf2::config::RequestedChange;
+    using kf2::config::SettingId;
+    using kf2::app::set_launch_change_probe_for_testing;
+    std::vector<RequestedChange> changes;
+    const kf2::optimizer::StartupMemoryProfile memory_profile{
+        .texture_pool_size_mb = 6000,
+        .memory_margin_mb = 128,
+        .streaming_hysteresis_limit = 40};
+    CHECK(!noexcept(kf2::app::enforce_temporal_aa_disabled(changes)));
+    CHECK(!noexcept(kf2::app::enforce_async_physics_enabled(changes)));
+    CHECK(!noexcept(kf2::app::enforce_fixed_flex_substeps(changes, true)));
+    CHECK(!noexcept(kf2::app::enforce_one_frame_thread_lag(changes)));
+    CHECK(!noexcept(kf2::app::enforce_startup_memory_profile(changes, memory_profile)));
+
+    // Every allocating helper must propagate failure, including a partially
+    // assembled multi-setting helper. Existing success tests cover its values.
+    for (const auto id : {SettingId::temporal_aa, SettingId::enable_async_scene,
+                         SettingId::max_physics_substeps,
+                         SettingId::one_frame_thread_lag,
+                         SettingId::texture_streaming_memory_margin}) {
+        changes.clear();
+        launch_failure_setting = id;
+        set_launch_change_probe_for_testing(throw_launch_change_allocation);
+        bool propagated = false;
+        try {
+            switch (id) {
+            case SettingId::temporal_aa:
+                kf2::app::enforce_temporal_aa_disabled(changes); break;
+            case SettingId::enable_async_scene:
+                kf2::app::enforce_async_physics_enabled(changes); break;
+            case SettingId::max_physics_substeps:
+                kf2::app::enforce_fixed_flex_substeps(changes, true); break;
+            case SettingId::one_frame_thread_lag:
+                kf2::app::enforce_one_frame_thread_lag(changes); break;
+            default:
+                kf2::app::enforce_startup_memory_profile(changes, memory_profile); break;
+            }
+        } catch (const std::bad_alloc&) {
+            propagated = true;
+        }
+        set_launch_change_probe_for_testing(nullptr);
+        CHECK(propagated);
+        CHECK(changes.size() == ((id == SettingId::enable_async_scene ||
+            id == SettingId::texture_streaming_memory_margin) ? 1U : 0U));
+    }
+
+    const fs::path root = fs::path{KF2_TEST_ROOT} / L"launch-allocation";
+    fs::remove_all(root);
+    const auto config_root = root / L"Config";
+    CHECK(write_complete_config_catalog(config_root));
+    std::map<fs::path, std::string> original;
+    for (const auto& file : fs::directory_iterator{config_root}) {
+        original.emplace(file.path(), read_bytes(file.path()));
+    }
+    kf2::diagnostics::EventLog events{64};
+    kf2::app::UiRuntime runtime{root / L"Data", false,
+        kf2::config::Settings{}, events, std::nullopt,
+        kf2::app::StartMode::normal, root / L"portable"};
+    runtime.installation = kf2::game::GameInstallation{.config_root = config_root};
+    runtime.adaptive_locks_valid = true;
+    for (const bool adaptive : {true, false}) {
+        runtime.optimizer_settings.adaptive_optimization_enabled = adaptive;
+        for (const auto id : {SettingId::temporal_aa, SettingId::enable_async_scene,
+                             SettingId::max_physics_substeps,
+                             SettingId::one_frame_thread_lag}) {
+            if (!adaptive && id != SettingId::max_physics_substeps) continue;
+            // A stale preview must never become a fallback for a failed build.
+            runtime.preview = kf2::config::ConfigPreview{};
+            launch_failure_setting = id;
+            changes_before_launch_failure = 0;
+            set_launch_change_probe_for_testing(throw_launch_change_allocation);
+            const auto failed = runtime.apply_adaptive_launch_profile(true);
+            set_launch_change_probe_for_testing(nullptr);
+            CHECK(!failed.has_value());
+            CHECK(failed.error().code == kf2::ErrorCode::internal_failure);
+            CHECK(failed.error().native_code == ERROR_NOT_ENOUGH_MEMORY);
+            CHECK(changes_before_launch_failure >= 1);
+            CHECK(!runtime.preview.has_value());
+            CHECK(runtime.last_backup_id.empty());
+            const auto backups = runtime.backups.list_backups();
+            CHECK(backups.has_value());
+            CHECK(backups.value().empty());
+            for (const auto& [path, bytes] : original) {
+                CHECK(read_bytes(path) == bytes);
+            }
+        }
+    }
+    const auto log = events.snapshot();
+    CHECK(std::none_of(log.begin(), log.end(), [](const auto& event) {
+        return event.code == "CONFIG_APPLIED" || event.code == "CONFIG_PREVIEW_READY";
+    }));
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--launch-profile-allocation") {
+        return test_launch_profile_allocation_failures();
+    }
     if (argc == 2 &&
         std::string_view{argv[1]} == "--package-repair-start-failure") {
         return test_package_repair_worker_start_failure();
