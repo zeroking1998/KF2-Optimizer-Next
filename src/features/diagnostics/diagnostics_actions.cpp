@@ -421,8 +421,19 @@ app::runtime::DispatchResult toggle_runtime_diagnostics(
 
     const bool enabled =
         runtime.optimizer_settings.debug_runtime_diagnostics;
+    runtime.overlay_diagnostics_collecting = enabled;
+    runtime.overlay_diagnostic_placement_queries = 0;
+    runtime.overlay_diagnostic_placement_cache_hits = 0;
+    runtime.overlay_diagnostic_coverage_checks = 0;
+    runtime.overlay_diagnostics_last_published_ns = 0;
+    if (runtime.overlay_window) {
+        runtime.overlay_window->set_diagnostics_enabled(enabled);
+    }
     auto status = runtime.model.status();
     status.debug_runtime_diagnostics = enabled;
+    status.overlay_diagnostics = enabled
+        ? L"Waiting for overlay diagnostics"
+        : L"Detailed overlay diagnostics are off";
     runtime.model.set_status(std::move(status));
 
     bool staged_now = false;
@@ -461,18 +472,20 @@ app::runtime::DispatchResult toggle_runtime_diagnostics(
     runtime.events->append({
         0, ::kf2::diagnostics::Severity::info,
         "RUNTIME_DIAGNOSTICS_CHANGED",
-        std::wstring{L"Detailed runtime scan diagnostics "} +
+        std::wstring{L"Detailed runtime diagnostics "} +
             (enabled ? L"enabled" : L"disabled") +
-            (staged_now ? L" for the prepared KF2 start"
-                        : L" for the next protected KF2 start"),
+            L" for native telemetry" +
+            (staged_now ? L" and the prepared KF2 start"
+                        : L"; provider scan details change on the next protected KF2 start"),
         L"debug"});
     show_notice(
         runtime, ui::NoticeSeverity::info,
         L"RUNTIME_DIAGNOSTICS_CHANGED",
-        std::wstring{L"Detailed corpse and Zed scan diagnostics are "} +
+        std::wstring{L"Detailed runtime diagnostics are "} +
             (enabled ? L"on." : L"off.") +
+            L" Native diagnostics changed immediately." +
             (staged_now ? L" The prepared KF2 start was updated."
-                        : L" The setting applies on the next protected KF2 start."));
+                        : L" Provider scan details change on the next protected KF2 start."));
     return app::runtime::DispatchResult::handled;
 }
 

@@ -31,6 +31,18 @@ TelemetryPresentation derive_telemetry_presentation(
         adaptive_status.recommendation_reason);
 
     if (!runtime.overlay_window) return result;
+    const bool collect_overlay_diagnostics =
+        runtime.optimizer_settings.debug_runtime_diagnostics;
+    if (runtime.overlay_diagnostics_collecting !=
+        collect_overlay_diagnostics) {
+        runtime.overlay_diagnostics_collecting = collect_overlay_diagnostics;
+        runtime.overlay_diagnostic_placement_queries = 0;
+        runtime.overlay_diagnostic_placement_cache_hits = 0;
+        runtime.overlay_diagnostic_coverage_checks = 0;
+        runtime.overlay_diagnostics_last_published_ns = 0;
+    }
+    runtime.overlay_window->set_diagnostics_enabled(
+        collect_overlay_diagnostics);
     const auto process_ram_bytes = frame.process
         ? std::optional<std::uint64_t>{frame.process->working_set_bytes}
         : std::nullopt;
@@ -57,6 +69,9 @@ TelemetryPresentation derive_telemetry_presentation(
         result.overlay = std::move(overlay_presentation);
         return result;
     }
+    if (collect_overlay_diagnostics) {
+        ++runtime.overlay_diagnostic_placement_queries;
+    }
 
     const bool context_matches =
         runtime.overlay_placement_cache_valid &&
@@ -73,6 +88,9 @@ TelemetryPresentation derive_telemetry_presentation(
         runtime.overlay_placement_checked_ns, frame.observed_at_ns,
         context_matches);
     if (use_cached_placement) {
+        if (collect_overlay_diagnostics) {
+            ++runtime.overlay_diagnostic_placement_cache_hits;
+        }
         if (runtime.overlay_placement_resolved_corner) {
             if (*runtime.overlay_placement_resolved_corner !=
                 runtime.overlay_corner) {
@@ -85,9 +103,14 @@ TelemetryPresentation derive_telemetry_presentation(
                 overlay::OverlayHideReason::not_foreground;
         }
     } else {
+        const auto game_area_is_covered = [&](const RECT& bounds) {
+            if (collect_overlay_diagnostics) {
+                ++runtime.overlay_diagnostic_coverage_checks;
+            }
+            return game::is_game_area_covered(frame.window, bounds);
+        };
         std::optional<overlay::OverlayCorner> resolved_corner;
-        if (!game::is_game_area_covered(frame.window,
-                                        overlay_presentation.bounds)) {
+        if (!game_area_is_covered(overlay_presentation.bounds)) {
             resolved_corner = runtime.overlay_corner;
         }
         const std::array corners{
@@ -99,9 +122,8 @@ TelemetryPresentation derive_telemetry_presentation(
             for (const auto corner : corners) {
                 if (corner == runtime.overlay_corner) continue;
                 auto candidate = evaluate_at(corner);
-                if (candidate.visible && !game::is_game_area_covered(
-                                             frame.window,
-                                             candidate.bounds)) {
+                if (candidate.visible &&
+                    !game_area_is_covered(candidate.bounds)) {
                     overlay_presentation = std::move(candidate);
                     resolved_corner = corner;
                     break;
@@ -168,6 +190,37 @@ void publish_telemetry_presentation(
         runtime.events->append(
             {0, diagnostics::Severity::warning, "OVERLAY_UPDATE_FAILED",
              std::move(message), L"overlay"});
+    }
+    if (!runtime.optimizer_settings.debug_runtime_diagnostics) return;
+    const auto now_ns = runtime.monotonic_ns();
+    if (!overlay_diagnostics_publish_is_due(
+            runtime.overlay_diagnostics_last_published_ns, now_ns)) {
+        return;
+    }
+    runtime.overlay_diagnostics_last_published_ns = now_ns;
+    const auto diagnostics = runtime.overlay_window->diagnostics();
+    const auto placement_misses =
+        runtime.overlay_diagnostic_placement_queries >=
+                runtime.overlay_diagnostic_placement_cache_hits
+            ? runtime.overlay_diagnostic_placement_queries -
+                  runtime.overlay_diagnostic_placement_cache_hits
+            : 0;
+    std::wstring summary =
+        L"updates " + std::to_wstring(diagnostics.update_calls) +
+        L", redraws " + std::to_wstring(diagnostics.redraws) +
+        L", skipped " + std::to_wstring(diagnostics.skipped_redraws) +
+        L", render " + std::to_wstring(diagnostics.last_render_us) +
+        L" us (max " + std::to_wstring(diagnostics.maximum_render_us) +
+        L"), placement cache " +
+        std::to_wstring(runtime.overlay_diagnostic_placement_cache_hits) +
+        L" hit / " + std::to_wstring(placement_misses) +
+        L" miss, window checks " +
+        std::to_wstring(runtime.overlay_diagnostic_coverage_checks);
+    if (runtime.model.status().overlay_diagnostics != summary) {
+        auto status = runtime.model.status();
+        status.overlay_diagnostics = std::move(summary);
+        runtime.model.set_status(std::move(status));
+        runtime.invalidate();
     }
 }
 }  // namespace kf2::telemetry_pipeline

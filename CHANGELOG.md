@@ -63,6 +63,10 @@ are visible immediately.
   quality requests and response windows now use the same Debug switch. Normal
   play retains the identical controller and exact safety readbacks without
   formatting or retaining those diagnostic-only event payloads.
+- Overlay render duration, update/redraw/skip counts, placement-cache hits and
+  real game-window coverage checks are now collected only with runtime
+  diagnostics enabled and published to Debug at a bounded one-second cadence.
+  Normal play performs no high-resolution overlay timing or diagnostic count.
 - Added reproducible release optimization through interprocedural optimization
   and an optional two-phase MSVC profile-guided optimization workflow.
 - Simplified contributor setup, Windows builds, GitHub issue reporting, and

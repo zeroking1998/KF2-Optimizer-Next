@@ -151,7 +151,13 @@ struct OverlayWindowState {
     bool frame_time_graph_uses_memory_layout{true};
     std::size_t graph_geometry_builds{0};
     ULONGLONG last_rendered_ms{0};
-    std::size_t renders{0};
+    bool diagnostics_enabled{false};
+    std::uint64_t diagnostic_update_calls{0};
+    std::uint64_t diagnostic_redraws{0};
+    std::uint64_t diagnostic_skipped_redraws{0};
+    std::uint64_t diagnostic_last_render_us{0};
+    std::uint64_t diagnostic_maximum_render_us{0};
+    std::uint64_t diagnostic_counter_frequency{0};
     ~OverlayWindowState();
 };
 

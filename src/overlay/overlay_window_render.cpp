@@ -9,6 +9,8 @@ namespace kf2::overlay {
 Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     if (!state_) return Result<bool>::failure(
         {ErrorCode::internal_failure, L"Overlay state is unavailable", 0});
+    const bool collect_diagnostics = state_->diagnostics_enabled;
+    if (collect_diagnostics) ++state_->diagnostic_update_calls;
     const ULONGLONG frame_now_ms = GetTickCount64();
     bool window_recreated = false;
     if (!IsWindow(state_->window)) {
@@ -63,6 +65,9 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     if (!state_->has_visual) {
         ShowWindow(state_->window, SW_HIDE);
         state_->animating = false;
+        if (collect_diagnostics && !geometry_changed) {
+            ++state_->diagnostic_skipped_redraws;
+        }
         return Result<bool>::success(geometry_changed);
     }
     const ULONGLONG update_now_ms = frame_now_ms;
@@ -93,6 +98,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     const bool active_animation = state_->animating || number_bounce_animating ||
         metric_reaction_animating;
     if (!presentation_changed && !active_animation && !mascot_idle_animating) {
+        if (collect_diagnostics) ++state_->diagnostic_skipped_redraws;
         return Result<bool>::success(false);
     }
     // New information is always presented immediately. Between data updates,
@@ -103,11 +109,15 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         update_now_ms >= state_->last_rendered_ms) {
         const ULONGLONG minimum_interval_ms = active_animation ? 15 : 50;
         if (update_now_ms - state_->last_rendered_ms < minimum_interval_ms) {
+            if (collect_diagnostics) ++state_->diagnostic_skipped_redraws;
             return Result<bool>::success(false);
         }
     }
 
-
+    LARGE_INTEGER render_started{};
+    const bool time_render = collect_diagnostics &&
+        state_->diagnostic_counter_frequency != 0 &&
+        QueryPerformanceCounter(&render_started);
     const RECT animated_bounds = detail::advance_visibility_animation(
         *state_, presentation, frame_now_ms);
     const float linear = state_->animating
@@ -240,7 +250,24 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
              GetLastError()});
     }
     state_->last_rendered_ms = update_now_ms;
-    ++state_->renders;
+    if (collect_diagnostics) {
+        ++state_->diagnostic_redraws;
+        if (time_render) {
+            LARGE_INTEGER render_finished{};
+            if (QueryPerformanceCounter(&render_finished) &&
+                render_finished.QuadPart >= render_started.QuadPart) {
+                const long double elapsed_ticks = static_cast<long double>(
+                    render_finished.QuadPart - render_started.QuadPart);
+                const auto elapsed_us = static_cast<std::uint64_t>(
+                    elapsed_ticks * 1'000'000.0L /
+                    static_cast<long double>(
+                        state_->diagnostic_counter_frequency));
+                state_->diagnostic_last_render_us = elapsed_us;
+                state_->diagnostic_maximum_render_us = std::max(
+                    state_->diagnostic_maximum_render_us, elapsed_us);
+            }
+        }
+    }
     return Result<bool>::success(true);
 }
 

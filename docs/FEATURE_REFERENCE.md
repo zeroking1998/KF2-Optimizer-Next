@@ -19,7 +19,7 @@
 | Fixed FleX minimum | Keeps user-enabled FleX at one protected solver substep without Adaptive decisions | `FLEX_MINIMUM_APPLIED` readback |
 | Debug markers | Correlates corpse actions and visible living-Zed distances with metre values and Actor IDs | Optional next-session in-game markers plus session log |
 | FleX runtime diagnostics | Opt-in min/max substeps, solver/particle statistics, shared-memory health, reports, and extra logs without burdening the normal hot path | Debug-page live readback plus `flex-session-last.json` |
-| Runtime scan diagnostics | Opt-in corpse/Zed Actor, LOD, bone, injury, freeze-detail and scan-timing evidence plus detailed Adaptive performance/pressure/decision history; normal play keeps only control and safety inputs | Debug-page state plus schema-7 `scan_diagnostics=1` samples and diagnostic Adaptive events |
+| Runtime diagnostics | Opt-in corpse/Zed scan evidence, Adaptive performance/pressure/decision history and bounded overlay timing/redraw/window-check counters; normal play keeps only control and safety inputs | Debug-page state plus schema-7 `scan_diagnostics=1` samples, diagnostic Adaptive events and one-second overlay summaries |
 | Diagnostics | Explains provider, identity, restore, and evidence status | Explicit checks and exported reports |
 
 ## Important distinctions
