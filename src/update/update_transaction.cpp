@@ -1077,4 +1077,15 @@ Result<bool> update_transaction_allows_cleanup(
     return Result<bool>::success(true);
 }
 
+Result<UpdateOwnerIdentity> update_transaction_owner_identity(
+    const UpdateTransactionRequest& request) {
+    const auto journal = read_bound_journal(request);
+    if (!journal.has_value()) {
+        return Result<UpdateOwnerIdentity>::failure(journal.error());
+    }
+    return Result<UpdateOwnerIdentity>::success({
+        journal.value().owner_process_id,
+        journal.value().owner_process_start_id});
+}
+
 }  // namespace kf2::update

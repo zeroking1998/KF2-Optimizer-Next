@@ -25,6 +25,7 @@ constexpr int kUpdateRecoveryRequiredExitCode = 26;
 
 struct HelperRequest {
     std::uint32_t parent_process_id{};
+    std::uint64_t parent_process_start_id{};
     std::filesystem::path target_root;
     std::filesystem::path staged_root;
     std::filesystem::path backup_root;
@@ -44,6 +45,45 @@ struct DirectoryIdentity {
 #if defined(KF2_UPDATE_HELPER_TESTING)
 UpdateHelperStopFault g_stop_fault{UpdateHelperStopFault::none};
 #endif
+
+std::uint64_t process_start_id(HANDLE process) noexcept {
+    FILETIME creation{}, exit{}, kernel{}, user{};
+    if (!GetProcessTimes(process, &creation, &exit, &kernel, &user)) return 0;
+    return (static_cast<std::uint64_t>(creation.dwHighDateTime) << 32U) |
+        creation.dwLowDateTime;
+}
+
+UpdateProcessWaitResult wait_for_process_instance(
+    std::uint32_t process_id,
+    std::uint64_t expected_start_id,
+    DWORD timeout_ms) noexcept {
+    if (process_id == 0 || expected_start_id == 0) {
+        return UpdateProcessWaitResult::failed;
+    }
+    HANDLE process = OpenProcess(
+        SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_id);
+    if (!process) {
+        return GetLastError() == ERROR_INVALID_PARAMETER
+            ? UpdateProcessWaitResult::exited_or_missing
+            : UpdateProcessWaitResult::failed;
+    }
+    const auto actual_start_id = process_start_id(process);
+    if (actual_start_id == 0) {
+        CloseHandle(process);
+        return UpdateProcessWaitResult::failed;
+    }
+    if (actual_start_id != expected_start_id) {
+        CloseHandle(process);
+        return UpdateProcessWaitResult::exited_or_missing;
+    }
+    const DWORD waited = WaitForSingleObject(process, timeout_ms);
+    CloseHandle(process);
+    if (waited == WAIT_OBJECT_0) {
+        return UpdateProcessWaitResult::exited_or_missing;
+    }
+    return waited == WAIT_TIMEOUT ? UpdateProcessWaitResult::timed_out
+                                  : UpdateProcessWaitResult::failed;
+}
 
 UpdateTransactionRequest transaction_request(
     const HelperRequest& request) {
@@ -269,14 +309,28 @@ Result<HelperRequest> parse_request(const std::filesystem::path& path) {
                 {ErrorCode::invalid_argument, L"Update helper request is invalid", 0});
         }
     }
-    constexpr std::array<std::string_view, 8> keys{
+    constexpr std::array<std::string_view, 8> legacy_keys{
         "schema_version", "parent_process_id", "target_root", "staged_root",
         "backup_root", "receipt_path", "expected_version", "token"};
-    if (values.size() != keys.size() || values["schema_version"] != "1") {
+    constexpr std::array<std::string_view, 9> current_keys{
+        "schema_version", "parent_process_id", "parent_process_start_id",
+        "target_root", "staged_root", "backup_root", "receipt_path",
+        "expected_version", "token"};
+    const bool legacy_schema = values.size() == legacy_keys.size() &&
+        values["schema_version"] == "1";
+    const bool current_schema = values.size() == current_keys.size() &&
+        values["schema_version"] == "2";
+    if (!legacy_schema && !current_schema) {
         return Result<HelperRequest>::failure(
             {ErrorCode::invalid_argument, L"Update helper request schema is invalid", 0});
     }
-    for (const auto key : keys) if (!values.contains(std::string{key})) {
+    const auto has_all_keys = [&](const auto& keys) {
+        return std::ranges::all_of(keys, [&](std::string_view key) {
+            return values.contains(std::string{key});
+        });
+    };
+    if (!(legacy_schema ? has_all_keys(legacy_keys)
+                        : has_all_keys(current_keys))) {
         return Result<HelperRequest>::failure(
             {ErrorCode::invalid_argument, L"Update helper request is incomplete", 0});
     }
@@ -284,6 +338,20 @@ Result<HelperRequest> parse_request(const std::filesystem::path& path) {
     const auto* begin = values["parent_process_id"].data();
     const auto* end = begin + values["parent_process_id"].size();
     const auto parsed = std::from_chars(begin, end, parent);
+    std::uint64_t parent_start = 0;
+    std::from_chars_result parsed_start{};
+    if (current_schema) {
+        const auto* start_begin = values["parent_process_start_id"].data();
+        const auto* start_end = start_begin +
+            values["parent_process_start_id"].size();
+        parsed_start = std::from_chars(start_begin, start_end, parent_start);
+        if (parsed_start.ec != std::errc{} ||
+            parsed_start.ptr != start_end || parent_start == 0) {
+            return Result<HelperRequest>::failure(
+                {ErrorCode::invalid_argument,
+                 L"Update helper request values are invalid", 0});
+        }
+    }
     const auto target = wide_from_utf8(values["target_root"]);
     const auto staged = wide_from_utf8(values["staged_root"]);
     const auto backup = wide_from_utf8(values["backup_root"]);
@@ -297,6 +365,7 @@ Result<HelperRequest> parse_request(const std::filesystem::path& path) {
     }
     HelperRequest request{
         .parent_process_id = static_cast<std::uint32_t>(parent),
+        .parent_process_start_id = parent_start,
         .target_root = *target,
         .staged_root = *staged,
         .backup_root = *backup,
@@ -350,22 +419,22 @@ Result<bool> write_request(const std::filesystem::path& path,
             {ErrorCode::invalid_argument, L"Update helper paths are invalid", 0});
     }
     const std::string bytes =
-        "schema_version=1\nparent_process_id=" +
-        std::to_string(request.parent_process_id) + "\ntarget_root=" + *target +
+        "schema_version=2\nparent_process_id=" +
+        std::to_string(request.parent_process_id) +
+        "\nparent_process_start_id=" +
+        std::to_string(request.parent_process_start_id) +
+        "\ntarget_root=" + *target +
         "\nstaged_root=" + *staged + "\nbackup_root=" + *backup +
         "\nreceipt_path=" + *receipt + "\nexpected_version=" +
         request.expected_version + "\ntoken=" + request.token + "\n";
     return platform::windows::atomic_replace_utf8(path, bytes);
 }
 
-bool wait_for_parent(std::uint32_t process_id) {
-    HANDLE parent = OpenProcess(SYNCHRONIZE, FALSE, process_id);
-    if (parent) {
-        const DWORD waited = WaitForSingleObject(parent, 30'000);
-        CloseHandle(parent);
-        return waited == WAIT_OBJECT_0;
-    }
-    return GetLastError() == ERROR_INVALID_PARAMETER;
+bool wait_for_parent(std::uint32_t process_id,
+                     std::uint64_t process_start_identity) {
+    return wait_for_process_instance(process_id, process_start_identity,
+                                     30'000) ==
+        UpdateProcessWaitResult::exited_or_missing;
 }
 
 DWORD wait_for_stopped_update_child(HANDLE process) noexcept {
@@ -414,9 +483,16 @@ bool marker_matches(const std::filesystem::path& work,
 
 Result<bool> launch_cleanup_instance(const HelperRequest& request) {
     const auto executable = request.target_root / L"KF2Optimizer.exe";
+    const auto helper_start_id = process_start_id(GetCurrentProcess());
+    if (helper_start_id == 0) {
+        return Result<bool>::failure(
+            {ErrorCode::platform_failure,
+             L"Update cleanup process identity is unavailable", GetLastError()});
+    }
     auto process = start_process(
         executable, L"--portable-update-cleanup " +
             std::to_wstring(GetCurrentProcessId()) + L" " +
+            std::to_wstring(helper_start_id) + L" " +
             quote(request.backup_root.parent_path().wstring()) + L" " +
             quote(std::wstring{request.token.begin(), request.token.end()}));
     if (process.has_value()) {
@@ -442,6 +518,14 @@ bool stop_update_child_for_testing(void* process_handle) noexcept {
 Result<std::string> read_update_control_file_for_testing(
     const std::filesystem::path& path) {
     return read_small_file(path);
+}
+
+UpdateProcessWaitResult wait_for_update_process_for_testing(
+    std::uint32_t process_id,
+    std::uint64_t process_start_identity,
+    std::uint32_t timeout_ms) noexcept {
+    return wait_for_process_instance(process_id, process_start_identity,
+                                     timeout_ms);
 }
 #endif
 
@@ -477,8 +561,23 @@ Result<bool> launch_update_helper(
     const auto marker = platform::windows::atomic_replace_utf8(
         package.work_root / L"update.marker", token);
     if (!marker.has_value()) return marker;
+    HANDLE parent = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                parent_process_id);
+    if (!parent) {
+        return Result<bool>::failure(
+            {ErrorCode::platform_failure,
+             L"Update parent process identity is unavailable", GetLastError()});
+    }
+    const auto parent_start_id = process_start_id(parent);
+    CloseHandle(parent);
+    if (parent_start_id == 0) {
+        return Result<bool>::failure(
+            {ErrorCode::platform_failure,
+             L"Update parent process identity is unavailable", GetLastError()});
+    }
     HelperRequest request{
         .parent_process_id = parent_process_id,
+        .parent_process_start_id = parent_start_id,
         .target_root = native_target_root,
         .staged_root = package.staged_root,
         .backup_root = package.work_root / L"backup",
@@ -503,7 +602,8 @@ int run_update_helper(const std::filesystem::path& request_path) noexcept {
         auto parsed = parse_request(request_path);
         if (!parsed.has_value()) return 20;
         request = std::move(parsed.value());
-        if (!wait_for_parent(request->parent_process_id)) return 25;
+        if (!wait_for_parent(request->parent_process_id,
+                             request->parent_process_start_id)) return 25;
         const auto applied = apply_update_transaction(
             transaction_request(*request));
         if (!applied.has_value()) {
@@ -521,10 +621,13 @@ int run_update_helper(const std::filesystem::path& request_path) noexcept {
         }
         const auto executable = request->target_root /
             L"KF2Optimizer.exe";
+        const auto helper_start_id = process_start_id(GetCurrentProcess());
+        if (helper_start_id == 0) return 25;
         auto process = start_process(
             executable, L"--portable-update-ready " +
                 quote(request->receipt_path.wstring()) + L" " +
                 std::to_wstring(GetCurrentProcessId()) + L" " +
+                std::to_wstring(helper_start_id) + L" " +
                 quote(request->backup_root.parent_path().wstring()) + L" " +
                 quote(std::wstring{request->token.begin(),
                                    request->token.end()}));
@@ -657,10 +760,18 @@ Result<bool> recover_interrupted_updates_on_startup(
         }
         const auto executable = request.value().target_root /
             L"KF2Optimizer.exe";
+        const auto recovery_start_id = process_start_id(GetCurrentProcess());
+        if (recovery_start_id == 0) {
+            return Result<bool>::failure(
+                {ErrorCode::platform_failure,
+                 L"Update recovery process identity is unavailable",
+                 GetLastError()});
+        }
         auto process = start_process(
             executable, L"--portable-update-ready " +
                 quote(request.value().receipt_path.wstring()) + L" " +
                 std::to_wstring(GetCurrentProcessId()) + L" " +
+                std::to_wstring(recovery_start_id) + L" " +
                 quote(work.wstring()) + L" " +
                 quote(std::wstring{request.value().token.begin(),
                                    request.value().token.end()}));
@@ -701,13 +812,32 @@ Result<bool> signal_update_ready_and_schedule_cleanup(
         transaction_request(request.value()));
     if (!handed_off.has_value()) return handed_off;
     return schedule_update_cleanup(arguments.helper_process_id,
+                                   arguments.helper_process_start_id,
                                    arguments.work_root, arguments.token);
 }
 
 Result<bool> schedule_update_cleanup(
-    std::uint32_t helper_process_id, const std::filesystem::path& work_root,
+    std::uint32_t helper_process_id,
+    std::uint64_t helper_process_start_id,
+    const std::filesystem::path& work_root,
     std::string_view token) {
-    const auto identity = safe_token(token) && helper_process_id != 0
+    if (helper_process_start_id == 0 && safe_token(token) &&
+        helper_process_id != 0) {
+        const auto request = parse_request(work_root / L"update-request.ini");
+        const auto legacy_owner = request.has_value()
+            ? update_transaction_owner_identity(
+                  transaction_request(request.value()))
+            : Result<UpdateOwnerIdentity>::failure(
+                  {ErrorCode::access_denied,
+                   L"Update cleanup handshake is invalid", 0});
+        if (legacy_owner.has_value() &&
+            legacy_owner.value().process_id == helper_process_id) {
+            helper_process_start_id =
+                legacy_owner.value().process_start_id;
+        }
+    }
+    const auto identity = safe_token(token) && helper_process_id != 0 &&
+            helper_process_start_id != 0
         ? validated_cleanup_identity(work_root, token)
         : std::nullopt;
     if (!identity) {
@@ -716,13 +846,12 @@ Result<bool> schedule_update_cleanup(
     }
     const auto work = normalized(work_root);
     const auto helper_id = helper_process_id;
+    const auto helper_start_id = helper_process_start_id;
     const std::string owned_token{token};
-    std::thread([work, helper_id, owned_token, identity = *identity] {
-        HANDLE helper = OpenProcess(SYNCHRONIZE, FALSE, helper_id);
-        if (helper) {
-            WaitForSingleObject(helper, 30'000);
-            CloseHandle(helper);
-        }
+    std::thread([work, helper_id, helper_start_id, owned_token,
+                 identity = *identity] {
+        if (wait_for_process_instance(helper_id, helper_start_id, 30'000) !=
+            UpdateProcessWaitResult::exited_or_missing) return;
         const auto current_identity = validated_cleanup_identity(
             work, owned_token);
         if (!current_identity || *current_identity != identity) return;
