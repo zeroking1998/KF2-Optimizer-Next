@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -73,7 +74,8 @@ struct StartupPrewarmOptions {
     const std::filesystem::path& install_root, StorageKind storage,
     std::uint64_t available_memory_bytes,
     std::wstring_view map_name = {},
-    bool include_common_startup_files = true);
+    bool include_common_startup_files = true,
+    std::stop_token stop = {});
 [[nodiscard]] StorageKind storage_kind_for_path(
     const std::filesystem::path& path) noexcept;
 [[nodiscard]] bool startup_prewarm_retryable(
@@ -104,6 +106,10 @@ namespace detail {
 void fail_next_startup_prewarm_plan() noexcept;
 void delay_next_startup_prewarm_worker_entry(
     std::chrono::milliseconds delay) noexcept;
+void set_startup_prewarm_discovery_delay_for_testing(
+    std::chrono::milliseconds delay) noexcept;
+[[nodiscard]] std::uint64_t
+startup_prewarm_discovery_steps_for_testing() noexcept;
 }
 #endif
 
