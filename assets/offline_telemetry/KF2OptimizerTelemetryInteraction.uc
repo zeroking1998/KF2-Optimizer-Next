@@ -275,6 +275,11 @@ function KF2OptimizerAdaptiveGraphicsState GetProcessAdaptiveGraphicsState()
     return ProcessAdaptiveGraphicsState;
 }
 
+function KF2OptimizerAdaptiveGraphicsState PeekProcessAdaptiveGraphicsState()
+{
+    return ProcessAdaptiveGraphicsState;
+}
+
 function ClearAchievementPrewarmDelegate()
 {
     local OnlineSubsystem OnlineSub;

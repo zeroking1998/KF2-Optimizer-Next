@@ -83,6 +83,11 @@ function KF2OptimizerAdaptiveGraphicsState GetOnlineGraphicsState()
     return OnlineGraphicsState;
 }
 
+function KF2OptimizerAdaptiveGraphicsState PeekOnlineGraphicsState()
+{
+    return OnlineGraphicsState;
+}
+
 function bool IsOnlineAdaptiveEnabled()
 {
     return bOnlineGraphicsEnabled;

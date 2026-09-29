@@ -1804,6 +1804,77 @@ int main() {
     CHECK(graphics_source.find(
         "static function bool ApplyQualityComposition(") !=
           std::string::npos);
+    // A confirmed KF2 graphics-menu change must replace only the changed
+    // user-owned baseline groups.  The next Adaptive composition and final
+    // recovery then derive from that rebased baseline instead of the stale
+    // first-action snapshot.
+    CHECK(graphics_source.find(
+        "static function CaptureCurrentOwnedSettings(") !=
+          std::string::npos);
+    CHECK(graphics_source.find(
+        "static function bool OwnedSettingsDiffer(") !=
+          std::string::npos);
+    const auto menu_rebase_start = graphics_source.find(
+        "static function bool RebaseOriginalFromMenuChange(");
+    const auto menu_rebase_end = graphics_source.find(
+        "static function CaptureOriginal(", menu_rebase_start);
+    CHECK(menu_rebase_start != std::string::npos);
+    CHECK(menu_rebase_end != std::string::npos);
+    const auto menu_rebase_body = graphics_source.substr(
+        menu_rebase_start, menu_rebase_end - menu_rebase_start);
+    CHECK(menu_rebase_body.find("!Snapshot.bOriginalCaptured") !=
+          std::string::npos);
+    CHECK(menu_rebase_body.find("Snapshot.OriginalMaxShadowResolution") !=
+          std::string::npos);
+    CHECK(menu_rebase_body.find("Snapshot.OriginalParticleLODBias") !=
+          std::string::npos);
+    CHECK(menu_rebase_body.find("Snapshot.GpuQuality =") ==
+          std::string::npos);
+    CHECK(menu_rebase_body.find("Snapshot.bQualityRestorePending =") ==
+          std::string::npos);
+    const auto owned_copy_start = graphics_source.find(
+        "static function CopyOwnedSettings(");
+    const auto owned_copy_end = graphics_source.find(
+        "static function CaptureCurrentOwnedSettings(", owned_copy_start);
+    CHECK(owned_copy_start != std::string::npos);
+    CHECK(owned_copy_end != std::string::npos);
+    const auto owned_copy_body = graphics_source.substr(
+        owned_copy_start, owned_copy_end - owned_copy_start);
+    std::set<std::string> owned_fields;
+    for (auto cursor = owned_copy_body.find("Snapshot.");
+         cursor != std::string::npos;
+         cursor = owned_copy_body.find("Snapshot.", cursor + 9)) {
+        const auto name_start = cursor + 9;
+        const auto name_end = owned_copy_body.find_first_of(
+            " \t\r\n=", name_start);
+        if (name_end == std::string::npos) break;
+        const auto equals = owned_copy_body.find_first_not_of(
+            " \t\r\n", name_end);
+        if (equals != std::string::npos && owned_copy_body[equals] == '=') {
+            owned_fields.emplace(owned_copy_body.substr(
+                name_start, name_end - name_start));
+        }
+    }
+    CHECK(owned_fields.size() == 56);
+    for (const auto& field : owned_fields) {
+        CHECK(menu_rebase_body.find("Snapshot." + field) !=
+              std::string::npos);
+    }
+    CHECK(graphics_interaction_source.find(
+        "MenuReadback(CurrentMenuGraphicsState)") != std::string::npos);
+    CHECK(graphics_interaction_source.find("OwnedSettingsDiffer(") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "PreviousMenuGraphicsState, CurrentMenuGraphicsState") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "RebaseOriginalFromMenuChange(") != std::string::npos);
+    CHECK(interaction_source.find(
+        "function KF2OptimizerAdaptiveGraphicsState "
+        "PeekProcessAdaptiveGraphicsState()") != std::string::npos);
+    CHECK(online_context_source.find(
+        "function KF2OptimizerAdaptiveGraphicsState "
+        "PeekOnlineGraphicsState()") != std::string::npos);
     CHECK(graphics_source.find(
         "static function bool ApplyQualityRestoreDebt(") !=
           std::string::npos);
