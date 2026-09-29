@@ -33,6 +33,30 @@ int main() {
     const fs::path root{KF2_TEST_ROOT};
     fs::remove_all(root);
     fs::create_directories(root);
+    const auto setup_root = root / L"setup-failure";
+    fs::create_directories(setup_root);
+    const auto setup_filter = SetUnhandledExceptionFilter(fallback_filter);
+    for (const auto failure : {
+             kf2::diagnostics::CrashSetupFailure::allocation,
+             kf2::diagnostics::CrashSetupFailure::filesystem}) {
+        kf2::diagnostics::fail_crash_setup_for_testing(failure);
+        const auto failed = kf2::diagnostics::CrashRecorder::arm(setup_root, "test");
+        kf2::diagnostics::fail_crash_setup_for_testing(
+            kf2::diagnostics::CrashSetupFailure::none);
+        CHECK(!failed.has_value());
+        CHECK(failed.error().code == kf2::ErrorCode::internal_failure);
+        CHECK(SetUnhandledExceptionFilter(fallback_filter) == fallback_filter);
+        CHECK(fs::is_empty(setup_root));
+        // A failed setup must neither leak its handle nor mark the recorder armed.
+        {
+            auto retry = kf2::diagnostics::CrashRecorder::arm(setup_root, "retry");
+            CHECK(retry.has_value());
+            CHECK(retry.value().write_for_testing(0xC0000005U, 0x1234U).has_value());
+        }
+        fs::remove_all(setup_root);
+        fs::create_directories(setup_root);
+    }
+    CHECK(SetUnhandledExceptionFilter(setup_filter) == fallback_filter);
     fs::path record_path;
     {
         auto armed = kf2::diagnostics::CrashRecorder::arm(

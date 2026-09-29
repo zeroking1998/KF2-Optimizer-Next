@@ -35,6 +35,8 @@ private:
     const std::filesystem::path& directory) noexcept;
 
 #if defined(KF2_CRASH_RECORDER_TESTING)
+enum class CrashSetupFailure { none, allocation, filesystem };
+void fail_crash_setup_for_testing(CrashSetupFailure failure) noexcept;
 void invalidate_crash_file_for_testing() noexcept;
 [[nodiscard]] long invoke_crash_filter_for_testing(
     std::uint32_t exception_code, std::uintptr_t address) noexcept;

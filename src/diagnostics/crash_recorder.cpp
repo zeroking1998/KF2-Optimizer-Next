@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <new>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -18,6 +19,9 @@ volatile PVOID crash_file{};
 volatile LONG record_written{};
 LPTOP_LEVEL_EXCEPTION_FILTER previous_filter{};
 std::array<char, 128> build_text{};
+#if defined(KF2_CRASH_RECORDER_TESTING)
+CrashSetupFailure setup_failure{};
+#endif
 
 HANDLE current_file() noexcept {
     return static_cast<HANDLE>(InterlockedCompareExchangePointer(
@@ -140,7 +144,10 @@ LONG WINAPI unhandled_exception_filter(EXCEPTION_POINTERS* pointers) noexcept {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-Result<bool> verify_directory(const std::filesystem::path& directory) noexcept {
+Result<bool> verify_directory(const std::filesystem::path& directory) {
+#if defined(KF2_CRASH_RECORDER_TESTING)
+    if (setup_failure == CrashSetupFailure::allocation) throw std::bad_alloc{};
+#endif
     if (!directory.is_absolute()) {
         return Result<bool>::failure(
             {ErrorCode::invalid_argument,
@@ -179,7 +186,7 @@ Result<bool> verify_directory(const std::filesystem::path& directory) noexcept {
 }  // namespace
 
 CrashRecorder::CrashRecorder(std::filesystem::path pending_path) noexcept
-    : pending_path_{std::move(pending_path)}, active_{true} {}
+    : pending_path_{std::move(pending_path)} {}
 
 CrashRecorder::CrashRecorder(CrashRecorder&& other) noexcept
     : pending_path_{std::move(other.pending_path_)},
@@ -199,53 +206,72 @@ CrashRecorder::~CrashRecorder() { disarm(); }
 Result<CrashRecorder> CrashRecorder::arm(
     const std::filesystem::path& directory,
     std::string_view build_identity) noexcept {
-    if (current_file()) {
+    try {
+        if (current_file()) {
+            return Result<CrashRecorder>::failure(
+                {ErrorCode::already_running, L"Crash recorder is already armed", 0});
+        }
+        const auto verified = verify_directory(directory);
+        if (!verified.has_value()) {
+            return Result<CrashRecorder>::failure(verified.error());
+        }
+        prune_records(directory);
+        std::array<unsigned char, 16> random{};
+        if (BCryptGenRandom(nullptr, random.data(),
+                            static_cast<ULONG>(random.size()),
+                            BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
+            return Result<CrashRecorder>::failure(
+                {ErrorCode::platform_failure,
+                 L"A unique crash record identity could not be created", 0});
+        }
+        constexpr wchar_t digits[] = L"0123456789abcdef";
+        std::wstring name = L"crash-";
+        name.reserve(43);
+        for (const auto value : random) {
+            name.push_back(digits[value >> 4U]);
+            name.push_back(digits[value & 0x0FU]);
+        }
+        name += L".json";
+        auto path = directory / name;
+        // Finish all allocating setup before reserving a handle or replacing
+        // the filter. The staged recorder remains inactive until publication.
+        auto result = Result<CrashRecorder>::success(CrashRecorder{std::move(path)});
+        auto& recorder = result.value();
+#if defined(KF2_CRASH_RECORDER_TESTING)
+        if (setup_failure == CrashSetupFailure::filesystem) {
+            throw std::filesystem::filesystem_error{
+                "injected crash setup failure", std::make_error_code(std::errc::io_error)};
+        }
+#endif
+        HANDLE file = CreateFileW(recorder.pending_path_.c_str(),
+            GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            return Result<CrashRecorder>::failure(
+                {ErrorCode::io_failure, L"Crash record file cannot be reserved",
+                 GetLastError()});
+        }
+        // Everything after successful reservation is allocation-free.
+        build_text.fill('\0');
+        const auto count = std::min(build_identity.size(), build_text.size() - 1);
+        for (std::size_t index = 0; index < count; ++index) {
+            const unsigned char character =
+                static_cast<unsigned char>(build_identity[index]);
+            build_text[index] = character >= 0x20 && character < 0x7f &&
+                                character != '"' && character != '\\'
+                ? static_cast<char>(character) : '_';
+        }
+        InterlockedExchange(&record_written, 0);
+        InterlockedExchangePointer(&crash_file, file);
+        previous_filter = SetUnhandledExceptionFilter(unhandled_exception_filter);
+        recorder.active_ = true;
+        return result;
+    } catch (...) {
+        // Best-effort startup must also survive exhausted memory: an empty
+        // message and moved Result require no fallback allocation.
         return Result<CrashRecorder>::failure(
-            {ErrorCode::already_running, L"Crash recorder is already armed", 0});
+            {ErrorCode::internal_failure, {}, 0});
     }
-    const auto verified = verify_directory(directory);
-    if (!verified.has_value()) {
-        return Result<CrashRecorder>::failure(verified.error());
-    }
-    prune_records(directory);
-    std::array<unsigned char, 16> random{};
-    if (BCryptGenRandom(nullptr, random.data(),
-                        static_cast<ULONG>(random.size()),
-                        BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
-        return Result<CrashRecorder>::failure(
-            {ErrorCode::platform_failure,
-             L"A unique crash record identity could not be created", 0});
-    }
-    constexpr wchar_t digits[] = L"0123456789abcdef";
-    std::wstring name = L"crash-";
-    name.reserve(43);
-    for (const auto value : random) {
-        name.push_back(digits[value >> 4U]);
-        name.push_back(digits[value & 0x0FU]);
-    }
-    name += L".json";
-    const auto path = directory / name;
-    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
-        FILE_SHARE_READ, nullptr, CREATE_NEW,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return Result<CrashRecorder>::failure(
-            {ErrorCode::io_failure, L"Crash record file cannot be reserved",
-             GetLastError()});
-    }
-    build_text.fill('\0');
-    const auto count = std::min(build_identity.size(), build_text.size() - 1);
-    for (std::size_t index = 0; index < count; ++index) {
-        const unsigned char character =
-            static_cast<unsigned char>(build_identity[index]);
-        build_text[index] = character >= 0x20 && character < 0x7f &&
-                            character != '"' && character != '\\'
-            ? static_cast<char>(character) : '_';
-    }
-    InterlockedExchange(&record_written, 0);
-    InterlockedExchangePointer(&crash_file, file);
-    previous_filter = SetUnhandledExceptionFilter(unhandled_exception_filter);
-    return Result<CrashRecorder>::success(CrashRecorder{path});
 }
 
 Result<bool> CrashRecorder::write_for_testing(
@@ -258,6 +284,10 @@ Result<bool> CrashRecorder::write_for_testing(
 }
 
 #if defined(KF2_CRASH_RECORDER_TESTING)
+void fail_crash_setup_for_testing(CrashSetupFailure failure) noexcept {
+    setup_failure = failure;
+}
+
 void invalidate_crash_file_for_testing() noexcept {
     HANDLE file = static_cast<HANDLE>(
         InterlockedExchangePointer(&crash_file, INVALID_HANDLE_VALUE));
