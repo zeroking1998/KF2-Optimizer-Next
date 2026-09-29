@@ -34,6 +34,8 @@ struct TelemetryPresentation final {
 
 inline constexpr std::uint64_t kOverlayPlacementCacheIntervalNs =
     500'000'000ULL;
+inline constexpr std::uint64_t kOverlayDiagnosticsPublishIntervalNs =
+    1'000'000'000ULL;
 
 [[nodiscard]] constexpr bool overlay_placement_cache_is_fresh(
     std::uint64_t checked_at_ns, std::uint64_t now_ns,
@@ -41,6 +43,12 @@ inline constexpr std::uint64_t kOverlayPlacementCacheIntervalNs =
     return context_matches && checked_at_ns != 0 &&
         now_ns >= checked_at_ns &&
         now_ns - checked_at_ns < kOverlayPlacementCacheIntervalNs;
+}
+
+[[nodiscard]] constexpr bool overlay_diagnostics_publish_is_due(
+    std::uint64_t last_published_ns, std::uint64_t now_ns) noexcept {
+    return last_published_ns == 0 || now_ns < last_published_ns ||
+        now_ns - last_published_ns >= kOverlayDiagnosticsPublishIntervalNs;
 }
 
 [[nodiscard]] inline std::wstring format_gib(std::uint64_t bytes) {

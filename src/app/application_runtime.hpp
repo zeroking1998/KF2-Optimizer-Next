@@ -195,6 +195,11 @@ struct UiRuntime {
     float overlay_placement_scale{1.0F};
     std::optional<overlay::OverlayCorner>
         overlay_placement_resolved_corner;
+    bool overlay_diagnostics_collecting{false};
+    std::uint64_t overlay_diagnostic_placement_queries{0};
+    std::uint64_t overlay_diagnostic_placement_cache_hits{0};
+    std::uint64_t overlay_diagnostic_coverage_checks{0};
+    std::uint64_t overlay_diagnostics_last_published_ns{0};
     std::uint64_t last_telemetry_tick_ns{0};
     unsigned int current_ui_timer_interval_ms{0};
     bool animation_timer_active{false};

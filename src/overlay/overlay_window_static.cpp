@@ -114,7 +114,7 @@ HRESULT rebuild_static_layer(OverlayWindowState& state, LONG width,
     state.static_layer_show_cpu = state.target.show_cpu;
     state.static_layer_show_gpu = state.target.show_gpu;
     state.static_layer_show_memory = state.target.show_memory;
-    ++state.static_layer_builds;
+    if (state.diagnostics_enabled) ++state.static_layer_builds;
     return S_OK;
 }
 

@@ -69,6 +69,7 @@ bool contains(const std::wstring& text, std::wstring_view needle) {
 
 int main() {
     using namespace kf2;
+    using telemetry_pipeline::kOverlayDiagnosticsPublishIntervalNs;
     using telemetry_pipeline::kOverlayPlacementCacheIntervalNs;
     CHECK(!telemetry_pipeline::overlay_placement_cache_is_fresh(
         0, 1, true));
@@ -80,6 +81,13 @@ int main() {
         2'000, 1'000, true));
     CHECK(!telemetry_pipeline::overlay_placement_cache_is_fresh(
         1'000, 1'001, false));
+    CHECK(telemetry_pipeline::overlay_diagnostics_publish_is_due(0, 1));
+    CHECK(!telemetry_pipeline::overlay_diagnostics_publish_is_due(
+        1'000, 1'000 + kOverlayDiagnosticsPublishIntervalNs - 1));
+    CHECK(telemetry_pipeline::overlay_diagnostics_publish_is_due(
+        1'000, 1'000 + kOverlayDiagnosticsPublishIntervalNs));
+    CHECK(telemetry_pipeline::overlay_diagnostics_publish_is_due(
+        2'000, 1'000));
 
     const auto frame = complete_frame();
     const auto projection = telemetry_pipeline::build_status_projection(

@@ -290,6 +290,8 @@ int main() {
         L"input min/max 1/3 | forwarded min/max 1/1";
     debug_status.flex_readback_diagnostics =
         L"shared memory healthy | reports and extra logs on";
+    debug_status.overlay_diagnostics =
+        L"updates 20, redraws 4, skipped 16, render 120 us";
     model.set_status(debug_status);
     const auto debug = layout_shell(model, 1440, 900);
     CHECK(node(debug, "debug-markers-section") != nullptr);
@@ -313,7 +315,10 @@ int main() {
     CHECK(action(debug, "debug-runtime-diagnostics") != nullptr);
     CHECK(action(debug, "debug-runtime-diagnostics")->selected);
     CHECK(action(debug, "debug-runtime-diagnostics")->text ==
-          L"RUNTIME SCAN DIAGNOSTICS: ON");
+          L"RUNTIME DIAGNOSTICS: ON");
+    CHECK(node(debug, "debug-overlay-text") != nullptr);
+    CHECK(node(debug, "debug-overlay-text")->text.find(L"redraws 4") !=
+          std::wstring::npos);
     CHECK(node(debug, "debug-flex-solver-text") != nullptr);
     CHECK(node(debug, "debug-flex-solver-text")->text.find(L"particles") !=
           std::wstring::npos);

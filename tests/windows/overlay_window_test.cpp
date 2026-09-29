@@ -38,6 +38,17 @@ int main() {
     auto created = kf2::overlay::OverlayWindow::create();
     CHECK(created.has_value());
     auto overlay = std::move(created.value());
+    const auto disabled_diagnostics = overlay.diagnostics();
+    CHECK(!disabled_diagnostics.enabled);
+    CHECK(disabled_diagnostics.update_calls == 0);
+    kf2::overlay::OverlayPresentation disabled_probe;
+    disabled_probe.target_window = target_window;
+    CHECK(overlay.update(disabled_probe).has_value());
+    CHECK(overlay.diagnostics().update_calls == 0);
+    CHECK(overlay.render_count() == 0);
+    CHECK(overlay.graph_geometry_build_count() == 0);
+    CHECK(overlay.static_layer_build_count() == 0);
+    overlay.set_diagnostics_enabled(true);
     HWND window = overlay.native_handle();
     CHECK(window != nullptr);
     const LONG_PTR style = GetWindowLongPtrW(window, GWL_EXSTYLE);
@@ -52,6 +63,12 @@ int main() {
     shown.target_window = target_window;
     shown.bounds = {100, 120, 340, 210};
     CHECK(overlay.update(shown).has_value());
+    const auto initial_diagnostics = overlay.diagnostics();
+    CHECK(initial_diagnostics.enabled);
+    CHECK(initial_diagnostics.update_calls == 1);
+    CHECK(initial_diagnostics.redraws == 1);
+    CHECK(initial_diagnostics.maximum_render_us >=
+          initial_diagnostics.last_render_us);
     CHECK(IsWindowVisible(window));
     CHECK(overlay.static_layer_build_count() == 1);
     CHECK(GetWindow(window, GW_OWNER) == target_window);
@@ -66,6 +83,7 @@ int main() {
     const auto settled_render_count = overlay.render_count();
     CHECK(overlay.update(shown).has_value());
     CHECK(overlay.render_count() == settled_render_count);
+    CHECK(overlay.diagnostics().skipped_redraws > 0);
     // Debug rendering can itself cross one cadence boundary. Allow enough
     // wall time for the next idle frame without depending on scheduler jitter.
     Sleep(100);
@@ -211,6 +229,11 @@ int main() {
         CHECK(overlay.update(shown).has_value());
     }
     CHECK(!IsWindowVisible(window));
+    overlay.set_diagnostics_enabled(false);
+    const auto cleared_diagnostics = overlay.diagnostics();
+    CHECK(!cleared_diagnostics.enabled);
+    CHECK(cleared_diagnostics.update_calls == 0);
+    CHECK(cleared_diagnostics.redraws == 0);
     DestroyWindow(replacement_window);
     return EXIT_SUCCESS;
 }

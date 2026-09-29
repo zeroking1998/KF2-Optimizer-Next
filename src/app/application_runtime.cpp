@@ -481,6 +481,9 @@ ui::UiStatus UiRuntime::make_initial_status(
     status.debug_zed_markers = settings.debug_zed_markers;
     status.debug_flex_diagnostics = settings.debug_flex_diagnostics;
     status.debug_runtime_diagnostics = settings.debug_runtime_diagnostics;
+    if (settings.debug_runtime_diagnostics) {
+        status.overlay_diagnostics = L"Waiting for overlay diagnostics";
+    }
     if (settings.debug_flex_diagnostics) {
         status.flex_substep_diagnostics =
             L"Waiting for FleX min/max substep telemetry";

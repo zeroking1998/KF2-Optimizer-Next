@@ -187,14 +187,17 @@ page shows incoming and forwarded min/max substeps, solver and particle
 statistics, shared-memory readback health, and report/log state. It can be
 changed during a protected session. Leave it off for the cheapest normal path;
 the fixed one-substep safety limit remains active for user-enabled FleX.
-**Runtime scan diagnostics** is a separate, persistent option and is also off
+**Runtime diagnostics** is a separate, persistent option and is also off
 by default. Enable it before a protected KF2 start only when you need detailed
 corpse/Zed Actor, LOD, bone, injury, freeze and scan-timing evidence. Adaptive
 still receives its required counts, visibility and awake/sleep state while the
 option is off; unavailable diagnostic-only fields are shown as not measured,
 not as zero. The same switch enables detailed Adaptive performance samples,
 pressure/decision history and quality-response evidence. Exact controller
-readbacks and failures remain active and visible while it is off.
+readbacks and failures remain active and visible while it is off. Overlay
+render duration, redraw/skip counts, placement-cache hits and real window
+coverage checks also appear on Debug only while this switch is on; their text
+is refreshed at most once per second.
 The Debug page also links to the portable data folder and current session log.
 
 ## 11. Recovery

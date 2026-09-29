@@ -55,7 +55,7 @@ HRESULT rebuild_frame_time_graph(
     state.frame_time_graph_source_sample_ms =
         state.frame_time_history_sample_ms;
     state.frame_time_graph_uses_memory_layout = state.target.show_memory;
-    ++state.graph_geometry_builds;
+    if (state.diagnostics_enabled) ++state.graph_geometry_builds;
     return S_OK;
 }
 

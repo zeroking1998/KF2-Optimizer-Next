@@ -733,8 +733,8 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                    true, status.debug_flex_diagnostics);
         add_action("debug-runtime-diagnostics",
                    status.debug_runtime_diagnostics
-                       ? L"RUNTIME SCAN DIAGNOSTICS: ON"
-                       : L"RUNTIME SCAN DIAGNOSTICS: OFF",
+                       ? L"RUNTIME DIAGNOSTICS: ON"
+                       : L"RUNTIME DIAGNOSTICS: OFF",
                    true, status.debug_runtime_diagnostics);
         cursor = grid_base +
             static_cast<float>((action_index + action_columns - 1) /
@@ -745,6 +745,10 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                     L"Telemetry: " + status.telemetry +
                         L"  •  Corpse actions: " +
                         status.adaptive_corpse_action_status,
+                    cursor, 40.0F);
+        cursor += 48.0F;
+        add_section("debug-overlay-text",
+                    L"Overlay: " + status.overlay_diagnostics,
                     cursor, 40.0F);
         cursor += 48.0F;
         add_section("debug-flex-solver-text",
