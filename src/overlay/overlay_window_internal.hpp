@@ -151,6 +151,7 @@ struct OverlayWindowState {
     bool frame_time_graph_uses_memory_layout{true};
     std::size_t graph_geometry_builds{0};
     ULONGLONG last_rendered_ms{0};
+    bool redraw_required{false};
     bool diagnostics_enabled{false};
     std::uint64_t diagnostic_update_calls{0};
     std::uint64_t diagnostic_redraws{0};
@@ -158,6 +159,9 @@ struct OverlayWindowState {
     std::uint64_t diagnostic_last_render_us{0};
     std::uint64_t diagnostic_maximum_render_us{0};
     std::uint64_t diagnostic_counter_frequency{0};
+#if defined(KF2_OVERLAY_WINDOW_TESTING)
+    HRESULT test_end_draw_result{S_OK};
+#endif
     ~OverlayWindowState();
 };
 
@@ -176,6 +180,9 @@ inline constexpr int kPremiumMutantLowIdlePngResource = 203;
 [[nodiscard]] MascotAnimationAsset load_mascot_animation_asset();
 [[nodiscard]] HWND create_overlay_native_window(HINSTANCE instance);
 [[nodiscard]] DWORD bind_overlay_target_window(HWND overlay, HWND target);
+void discard_overlay_device_resources(OverlayWindowState& state) noexcept;
+[[nodiscard]] HRESULT create_overlay_device_resources(
+    OverlayWindowState& state);
 [[nodiscard]] bool same_rect(const RECT& left, const RECT& right);
 [[nodiscard]] RECT visibility_pose(
     const RECT& bounds, float scale, LONG outward);

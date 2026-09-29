@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <iostream>
 #include "kf2/overlay/overlay_window.hpp"
+#include "overlay_window_internal.hpp"
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
@@ -29,6 +30,16 @@ HWND create_target_window(const wchar_t* title = L"KF2 target fixture") {
 }
 
 }  // namespace
+
+namespace kf2::overlay {
+
+struct OverlayWindowTestAccess {
+    static void fail_next_draw_with_device_loss(OverlayWindow& overlay) {
+        overlay.state_->test_end_draw_result = D2DERR_RECREATE_TARGET;
+    }
+};
+
+}  // namespace kf2::overlay
 
 int main() {
     HWND target_window = create_target_window();
@@ -180,6 +191,20 @@ int main() {
                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE |
                            SWP_SHOWWINDOW));
     CHECK(overlay.update(shown).has_value());
+    CHECK(IsWindowVisible(window));
+
+    // A Direct2D device-loss result must rebuild the device-dependent resource
+    // graph and allow the next bounded update to render successfully.
+    shown.fps += 1.0;
+    kf2::overlay::OverlayWindowTestAccess::fail_next_draw_with_device_loss(
+        overlay);
+    const auto device_loss = overlay.update(shown);
+    CHECK(device_loss.has_value());
+    const auto recovered_render_count = overlay.render_count();
+    const auto recovered = overlay.update(shown);
+    CHECK(recovered.has_value());
+    CHECK(recovered.value());
+    CHECK(overlay.render_count() == recovered_render_count + 1);
     CHECK(IsWindowVisible(window));
 
     // Exercise the exact resize/relocate path used by scaling and automatic
