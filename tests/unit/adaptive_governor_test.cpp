@@ -950,6 +950,83 @@ int main() {
     CHECK(rebased.target_frame_time_ms ==
           adaptive_stability_bands(137).target_frame_time_ms);
 
+    // A target change is one transaction with its frame-history boundary.
+    // Unavailable telemetry must not consume the new target before that
+    // boundary can be applied to the first usable sample.
+    auto missing_target_sample = sample(
+        start + 200'000'000ULL, 60.0, 1000.0 / 60.0,
+        17.0, 30.0, 50.0);
+    missing_target_sample.fps.reset();
+    auto stale_target_sample = sample(
+        start, 60.0, 1000.0 / 60.0, 17.0, 30.0, 50.0);
+    auto invalid_target_sample = sample(
+        start + 200'000'000ULL, 60.0, 1000.0 / 60.0,
+        17.0, 30.0, 50.0);
+    invalid_target_sample.system_cpu_percent = 101.0;
+    auto future_target_sample = sample(
+        start + 400'000'000ULL, 60.0, 1000.0 / 60.0,
+        17.0, 30.0, 50.0);
+    struct UnavailableTargetCase {
+        AdaptiveSample unavailable;
+        std::uint64_t now_ns;
+        const char* reason;
+    };
+    const UnavailableTargetCase unavailable_target_cases[] = {
+        {missing_target_sample, start + 200'000'000ULL,
+         "invalid_or_missing_primary_telemetry"},
+        {stale_target_sample,
+         start + adaptive.freshness_limit_ns + 1,
+         "stale_telemetry"},
+        {invalid_target_sample, start + 200'000'000ULL,
+         "invalid_or_missing_primary_telemetry"},
+        {future_target_sample, start + 200'000'000ULL,
+         "invalid_source_identity_or_time"},
+    };
+    AdaptivePolicy pending_target = adaptive;
+    pending_target.target_fps = 120;
+    for (const auto& target_case : unavailable_target_cases) {
+        AdaptiveGovernor governor;
+        const auto initial = governor.evaluate(
+            adaptive,
+            sample(start, 60.0, 1000.0 / 60.0,
+                   17.0, 30.0, 50.0),
+            start);
+        CHECK(initial.settings_generation == 1);
+        const auto initial_restore_generation =
+            initial.restore_generation;
+
+        const auto unavailable = governor.evaluate(
+            pending_target, target_case.unavailable, target_case.now_ns);
+        CHECK(unavailable.data.quality ==
+              AdaptiveDataQuality::not_available);
+        CHECK(unavailable.reason == target_case.reason);
+        CHECK(unavailable.settings_generation == 1);
+        CHECK(unavailable.restore_generation ==
+              initial_restore_generation);
+
+        auto fresh_target_sample = sample(
+            target_case.now_ns + 200'000'000ULL,
+            120.0, 1000.0 / 120.0, 1000.0 / 118.0,
+            30.0, 50.0);
+        const auto committed = governor.evaluate(
+            pending_target, fresh_target_sample,
+            fresh_target_sample.timestamp_ns);
+        CHECK(committed.reason == "target_changed_stabilization_hold");
+        CHECK(committed.settings_generation == 2);
+        CHECK(committed.restore_generation ==
+              initial_restore_generation + 1);
+
+        fresh_target_sample.timestamp_ns += 200'000'000ULL;
+        const auto after_boundary = governor.evaluate(
+            pending_target, fresh_target_sample,
+            fresh_target_sample.timestamp_ns);
+        CHECK(after_boundary.settings_generation == 2);
+        CHECK(after_boundary.restore_generation ==
+              initial_restore_generation + 1);
+        CHECK(after_boundary.reason != "target_changed_stabilization_hold");
+        CHECK(after_boundary.state == AdaptiveControllerState::observing);
+    }
+
     AdaptiveGovernor unbound_governor;
     auto unbound = sample(start, 30.0, 33.33, 42.0, 35.0, 98.0);
     unbound.adapter_luid.reset();

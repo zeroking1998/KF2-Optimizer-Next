@@ -819,17 +819,6 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
         stability_bands.corrective_frame_time_ms;
     decision.critical_frame_time_ms = stability_bands.critical_frame_time_ms;
 
-    bool target_changed = false;
-    if (valid_target_fps(policy.target_fps)) {
-        if (target_fps_ == 0) {
-            target_fps_ = policy.target_fps;
-            settings_generation_ = 1;
-        } else if (target_fps_ != policy.target_fps) {
-            target_fps_ = policy.target_fps;
-            ++settings_generation_;
-            target_changed = true;
-        }
-    }
     decision.settings_generation = settings_generation_;
 
     if (frozen_ || (last_evaluation_ns_ != 0 && now_ns < last_evaluation_ns_)) {
@@ -857,6 +846,19 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
         decision.reason = decision.data.reason;
         return decision;
     }
+
+    bool target_changed = false;
+    if (valid_target_fps(policy.target_fps)) {
+        if (target_fps_ == 0) {
+            target_fps_ = policy.target_fps;
+            settings_generation_ = 1;
+        } else if (target_fps_ != policy.target_fps) {
+            target_fps_ = policy.target_fps;
+            ++settings_generation_;
+            target_changed = true;
+        }
+    }
+    decision.settings_generation = settings_generation_;
 
     const bool boundary = target_changed || sample.discontinuity ||
         sample.session_changed ||
