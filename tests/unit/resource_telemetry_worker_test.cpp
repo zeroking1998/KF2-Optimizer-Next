@@ -32,6 +32,21 @@ using kf2::telemetry::ResourceSampleRequest;
 using kf2::telemetry::ResourceTelemetryBinding;
 using kf2::telemetry::ResourceTelemetryWorker;
 
+std::filesystem::path replacement_game_log;
+std::atomic_bool game_log_replaced{false};
+
+void replace_game_log_during_read(const std::filesystem::path& path) {
+    game_log_replaced.store(
+        ReplaceFileW(path.c_str(), replacement_game_log.c_str(), nullptr,
+                     REPLACEFILE_WRITE_THROUGH, nullptr, nullptr) != FALSE,
+        std::memory_order_release);
+}
+
+void write_file(const std::filesystem::path& path, std::string_view bytes) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+
 std::shared_ptr<const kf2::telemetry::ResourceTelemetrySnapshot>
 wait_for_generation(ResourceTelemetryWorker& worker, std::uint64_t generation) {
     const auto deadline = std::chrono::steady_clock::now() + 2s;
@@ -411,6 +426,62 @@ int main() {
             CHECK(started.wait_for(lock, 2s, [&] { return callback_started; }));
         }
         CHECK(std::chrono::steady_clock::now() - before < 2s);
+    }
+
+    // A path replacement after identity validation cannot inject bytes from a
+    // different Launch.log into the authenticated parser session.
+    {
+        namespace fs = std::filesystem;
+        const fs::path root = fs::path{KF2_TEST_ROOT} / L"log-replacement";
+        fs::remove_all(root);
+        fs::create_directories(root);
+        const auto log = root / L"Launch.log";
+        const std::string initial =
+            "[0053.20] Log: LoadMap: KF-BioticsLab?"
+            "Game=KFGameContent.KFGameInfo_Survival\n"
+            "[0053.21] ScriptLog: WI.NetMode:  NM_Standalone\n";
+        write_file(log, initial);
+        wchar_t module[MAX_PATH + 1]{};
+        const DWORD length = GetModuleFileNameW(nullptr, module, MAX_PATH);
+        CHECK(length > 0 && length < MAX_PATH);
+        const auto identity = kf2::game::bind_game_process(
+            GetCurrentProcessId(), fs::path{module});
+        CHECK(identity.has_value());
+        ResourceTelemetryBinding log_binding;
+        log_binding.identity = {
+            identity.value().pid, identity.value().process_start_id};
+        log_binding.game_log_directory = root;
+        ResourceTelemetryWorker worker;
+        static_cast<void>(worker.bind(log_binding));
+        worker.request(900'000'000ULL);
+        CHECK(worker.wait_until_idle(2s));
+        auto chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        const std::string trusted =
+            "[0060.11] ScriptLog: @@@@ ZED COUNT DEBUG: "
+            "AIAliveCount = 24\n";
+        const std::string foreign =
+            "[0060.11] ScriptLog: @@@@ ZED COUNT DEBUG: "
+            "AIAliveCount = 99\n";
+        {
+            std::ofstream output(log, std::ios::binary | std::ios::app);
+            output << trusted;
+        }
+        replacement_game_log = root / L"Launch.replacement.log";
+        write_file(replacement_game_log, initial + foreign);
+        game_log_replaced.store(false, std::memory_order_release);
+        kf2::telemetry::detail::set_game_log_read_hook_for_testing(
+            &replace_game_log_during_read);
+        worker.request(950'000'000ULL);
+        CHECK(worker.wait_until_idle(2s));
+        kf2::telemetry::detail::set_game_log_read_hook_for_testing(nullptr);
+        CHECK(game_log_replaced.load(std::memory_order_acquire));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        CHECK(chunks.front().parsed_session);
+        CHECK(chunks.front().parsed_session->zeds_alive == 24);
+        worker.stop();
+        fs::remove_all(root);
     }
 
     // The production worker performs incremental Launch.log I/O away from the

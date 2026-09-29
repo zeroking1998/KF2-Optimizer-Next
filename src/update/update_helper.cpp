@@ -8,7 +8,6 @@
 #include <chrono>
 #include <charconv>
 #include <cctype>
-#include <fstream>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -248,19 +247,7 @@ Result<PROCESS_INFORMATION> start_process(
 }
 
 Result<std::string> read_small_file(const std::filesystem::path& path) {
-    if (!normal_file(path)) return Result<std::string>::failure(
-        {ErrorCode::not_found, L"Update helper request is unavailable", 0});
-    std::error_code error;
-    if (std::filesystem::file_size(path, error) > 64U * 1024U || error) {
-        return Result<std::string>::failure(
-            {ErrorCode::access_denied, L"Update helper request is too large", 0});
-    }
-    std::ifstream input(path, std::ios::binary);
-    if (!input) return Result<std::string>::failure(
-        {ErrorCode::io_failure, L"Update helper request cannot be read", 0});
-    return Result<std::string>::success(
-        {std::istreambuf_iterator<char>{input},
-         std::istreambuf_iterator<char>{}});
+    return platform::windows::read_bounded_verified_file(path, 64U * 1024U);
 }
 
 Result<HelperRequest> parse_request(const std::filesystem::path& path) {
@@ -450,6 +437,11 @@ void set_update_helper_stop_fault_for_testing(
 
 bool stop_update_child_for_testing(void* process_handle) noexcept {
     return stop_update_child(static_cast<HANDLE>(process_handle));
+}
+
+Result<std::string> read_update_control_file_for_testing(
+    const std::filesystem::path& path) {
+    return read_small_file(path);
 }
 #endif
 

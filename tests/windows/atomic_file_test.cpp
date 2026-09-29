@@ -99,6 +99,32 @@ void replace_during_read(const std::filesystem::path& path) {
         REPLACEFILE_WRITE_THROUGH, nullptr, nullptr) != FALSE;
 }
 
+void rewrite_same_size_during_read(const std::filesystem::path& path) {
+    HANDLE file = CreateFileW(
+        path.c_str(), GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    BY_HANDLE_FILE_INFORMATION information{};
+    constexpr char replacement[] = "changed!";
+    DWORD written = 0;
+    FILETIME changed{};
+    const bool inspected =
+        GetFileInformationByHandle(file, &information) != FALSE;
+    ULARGE_INTEGER timestamp{};
+    timestamp.LowPart = information.ftLastWriteTime.dwLowDateTime;
+    timestamp.HighPart = information.ftLastWriteTime.dwHighDateTime;
+    timestamp.QuadPart += 10'000'000ULL;
+    changed.dwLowDateTime = timestamp.LowPart;
+    changed.dwHighDateTime = timestamp.HighPart;
+    mutation_succeeded = inspected && WriteFile(
+        file, replacement, static_cast<DWORD>(sizeof(replacement) - 1),
+        &written, nullptr) != FALSE && written == sizeof(replacement) - 1 &&
+        FlushFileBuffers(file) != FALSE &&
+        SetFileTime(file, nullptr, nullptr, &changed) != FALSE;
+    CloseHandle(file);
+}
+
 int main() {
     namespace fs = std::filesystem;
 
@@ -208,6 +234,21 @@ int main() {
     CHECK(mutation_succeeded);
     CHECK(!changed_identity.has_value());
     CHECK(changed_identity.error().code == kf2::ErrorCode::stale_data);
+
+    const auto rewritten = root / L"same-size-rewrite.ini";
+    {
+        std::ofstream output(rewritten, std::ios::binary);
+        output << "original";
+    }
+    mutation_succeeded = false;
+    kf2::platform::windows::set_bounded_read_hook_for_testing(
+        &rewrite_same_size_during_read);
+    const auto same_size_rewrite =
+        kf2::platform::windows::read_bounded_verified_file(rewritten, 64);
+    kf2::platform::windows::set_bounded_read_hook_for_testing(nullptr);
+    CHECK(mutation_succeeded);
+    CHECK(!same_size_rewrite.has_value());
+    CHECK(same_size_rewrite.error().code == kf2::ErrorCode::stale_data);
 
     const auto replaced =
         kf2::platform::windows::atomic_replace_utf8(target, "new settings\n");

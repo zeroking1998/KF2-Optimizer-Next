@@ -117,6 +117,8 @@ private:
 
 #ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
 namespace detail {
+using GameLogReadHook = void (*)(const std::filesystem::path&);
+void set_game_log_read_hook_for_testing(GameLogReadHook hook) noexcept;
 void fail_next_resource_telemetry_publication() noexcept;
 }
 #endif

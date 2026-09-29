@@ -6,7 +6,7 @@
 #include <condition_variable>
 #include <deque>
 #include <exception>
-#include <fstream>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -20,6 +20,7 @@ namespace {
 
 #ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
 std::atomic_bool fail_next_telemetry_publication{false};
+kf2::telemetry::detail::GameLogReadHook game_log_read_hook{nullptr};
 #endif
 
 bool same_binding(const ResourceTelemetryBinding& left,
@@ -38,6 +39,22 @@ bool same_session(const ResourceTelemetryBinding& left,
         left.identity.process_start_id == right.identity.process_start_id &&
         left.game_log_directory == right.game_log_directory;
 }
+
+class UniqueHandle final {
+public:
+    explicit UniqueHandle(HANDLE handle) noexcept : handle_{handle} {}
+    ~UniqueHandle() {
+        if (handle_ != INVALID_HANDLE_VALUE) CloseHandle(handle_);
+    }
+
+    UniqueHandle(const UniqueHandle&) = delete;
+    UniqueHandle& operator=(const UniqueHandle&) = delete;
+
+    [[nodiscard]] HANDLE get() const noexcept { return handle_; }
+
+private:
+    HANDLE handle_{INVALID_HANDLE_VALUE};
+};
 
 class GameLogBoundaryExtractor final {
 public:
@@ -127,20 +144,21 @@ public:
             path_ = selected.value()->path;
         }
 
-        HANDLE file = CreateFileW(path_.c_str(),
+        UniqueHandle file{CreateFileW(path_.c_str(),
             FILE_READ_ATTRIBUTES | GENERIC_READ,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             nullptr, OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-        if (file == INVALID_HANDLE_VALUE) {
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr)};
+        if (file.get() == INVALID_HANDLE_VALUE) {
             reset_binding();
             return std::nullopt;
         }
         BY_HANDLE_FILE_INFORMATION information{};
-        const bool inspected = GetFileInformationByHandle(file, &information) &&
+        const bool inspected =
+            GetFileInformationByHandle(file.get(), &information) &&
             (information.dwFileAttributes &
-                (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0;
-        CloseHandle(file);
+                (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0 &&
+            information.nNumberOfLinks == 1;
         if (!inspected) {
             reset_binding();
             return std::nullopt;
@@ -189,15 +207,28 @@ public:
             return reset_parser ? std::optional{std::move(chunk)}
                                 : std::nullopt;
         }
-        std::ifstream input(path_, std::ios::binary);
-        if (!input) return std::nullopt;
-        input.seekg(static_cast<std::streamoff>(offset_));
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+        if (game_log_read_hook != nullptr) game_log_read_hook(path_);
+#endif
+        if (offset_ > static_cast<std::uintmax_t>(
+                          (std::numeric_limits<LONGLONG>::max)())) {
+            reset_binding();
+            return std::nullopt;
+        }
+        LARGE_INTEGER position{};
+        position.QuadPart = static_cast<LONGLONG>(offset_);
+        if (!SetFilePointerEx(file.get(), position, nullptr, FILE_BEGIN)) {
+            return std::nullopt;
+        }
         constexpr std::uintmax_t kMaximumLogChunkBytes = 32 * 1024;
         const auto requested = static_cast<std::size_t>(
             (std::min)(size - offset_, kMaximumLogChunkBytes));
         chunk.bytes.assign(requested, '\0');
-        input.read(chunk.bytes.data(), static_cast<std::streamsize>(requested));
-        const auto received = static_cast<std::size_t>(input.gcount());
+        DWORD received = 0;
+        if (!ReadFile(file.get(), chunk.bytes.data(),
+                      static_cast<DWORD>(requested), &received, nullptr)) {
+            return std::nullopt;
+        }
         if (received == 0) return reset_parser
             ? std::optional{std::move(chunk)} : std::nullopt;
         chunk.bytes.resize(received);
@@ -298,6 +329,11 @@ private:
 }  // namespace
 
 #ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+void detail::set_game_log_read_hook_for_testing(
+    GameLogReadHook hook) noexcept {
+    game_log_read_hook = hook;
+}
+
 void detail::fail_next_resource_telemetry_publication() noexcept {
     fail_next_telemetry_publication.store(true, std::memory_order_release);
 }
