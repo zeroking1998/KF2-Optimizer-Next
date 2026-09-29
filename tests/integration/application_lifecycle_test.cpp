@@ -1,3 +1,4 @@
+#include <WinSock2.h>
 #include <Windows.h>
 #include <ole2.h>
 #include <UIAutomationCore.h>
@@ -15,6 +16,7 @@
 #include <iterator>
 #include <map>
 #include <new>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -1092,6 +1094,256 @@ int test_restore_cap_sync_failure() {
 #endif
 }
 
+// A real loopback receiver: exercise the production client/worker and its
+// exact receipt validation without requiring KF2 or desktop interaction.
+class AdaptiveTestReceiver final {
+public:
+    explicit AdaptiveTestReceiver(std::string receipt_status)
+        : listener_{socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)} {
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (listener_ == INVALID_SOCKET ||
+            bind(listener_, reinterpret_cast<sockaddr*>(&address),
+                 sizeof(address)) != 0 || listen(listener_, 1) != 0) return;
+        int length = sizeof(address);
+        if (getsockname(listener_, reinterpret_cast<sockaddr*>(&address),
+                        &length) != 0) return;
+        port = ntohs(address.sin_port);
+        worker_ = std::jthread{[this, status = std::move(receipt_status)] {
+            fd_set ready;
+            FD_ZERO(&ready);
+            FD_SET(listener_, &ready);
+            timeval timeout{3, 0};
+            if (select(0, &ready, nullptr, nullptr, &timeout) <= 0) return;
+            const SOCKET connection = accept(listener_, nullptr, nullptr);
+            if (connection == INVALID_SOCKET) return;
+            const DWORD receive_timeout = 2000;
+            setsockopt(connection, SOL_SOCKET, SO_RCVTIMEO,
+                reinterpret_cast<const char*>(&receive_timeout),
+                sizeof(receive_timeout));
+            char buffer[256]{};
+            std::string request;
+            while (request.find('\n') == std::string::npos) {
+                const int size = recv(connection, buffer, sizeof(buffer), 0);
+                if (size <= 0) break;
+                request.append(buffer, static_cast<std::size_t>(size));
+            }
+            std::istringstream parsed{request};
+            std::string prefix, token, sequence, resource, quality;
+            parsed >> prefix >> token >> sequence >> resource >> quality;
+            command = request;
+            if (status == "timeout") {
+                Sleep(650);
+            } else {
+                const auto reply = "KF2OPT_ACK " + sequence + " " + status +
+                    " " + resource + " " + quality + "\r\n";
+                send(connection, reply.data(), static_cast<int>(reply.size()), 0);
+            }
+            closesocket(connection);
+        }};
+    }
+    ~AdaptiveTestReceiver() {
+        finish();
+        if (listener_ != INVALID_SOCKET) closesocket(listener_);
+    }
+    void finish() { if (worker_.joinable()) worker_.join(); }
+    std::uint16_t port{};
+    std::string command;
+private:
+    SOCKET listener_{INVALID_SOCKET};
+    std::jthread worker_;
+};
+
+int test_adaptive_restore_debt() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::path{KF2_TEST_ROOT} / L"adaptive-restore-debt";
+    fs::remove_all(root);
+    fs::create_directories(root);
+    kf2::diagnostics::EventLog events{32};
+    kf2::app::UiRuntime runtime{root / L"Data", false,
+        kf2::config::Settings{}, events, std::nullopt,
+        kf2::app::StartMode::read_only, root / L"portable"};
+    wchar_t executable[32768]{};
+    CHECK(GetModuleFileNameW(nullptr, executable, 32768) != 0);
+    runtime.installation = kf2::game::GameInstallation{
+        .install_root = root, .executable = executable,
+        .config_root = root / L"Config"};
+    const auto bound = kf2::game::bind_game_process(
+        GetCurrentProcessId(), executable);
+    CHECK(bound.has_value());
+    runtime.game_process = bound.value();
+    runtime.adaptive_control_token = "0123456789abcdef0123456789abcdef";
+    runtime.adaptive_resource_quality.gpu = 70;
+    runtime.adaptive_resource_quality.effects = 80;
+    runtime.adaptive_quality_state_known = false;
+    // A rejected frame takes this same path. The endpoint is unavailable,
+    // but the verified game process is still alive.
+    runtime.detach_telemetry();
+    CHECK(runtime.adaptive_resource_quality.gpu == 70);
+    CHECK(runtime.adaptive_resource_quality.effects == 80);
+    CHECK(!runtime.adaptive_quality_state_known);
+    CHECK(runtime.adaptive_restore_debt.has_value());
+    CHECK(runtime.adaptive_restore_debt->process_start_id ==
+          bound.value().process_start_id);
+    runtime.reset_local_adaptive_controller_for_mode(false);
+    CHECK(runtime.adaptive_restore_debt.has_value());
+    CHECK(runtime.adaptive_resource_quality.gpu == 70);
+    CHECK(!runtime.adaptive_quality_state_known);
+    runtime.adaptive_control_token.clear();
+    CHECK(!runtime.restore_live_adaptive_quality(L"test missing credential"));
+    CHECK(runtime.adaptive_restore_debt.has_value());
+    runtime.adaptive_control_token = "0123456789abcdef0123456789abcdef";
+    runtime.game_process = bound.value();
+    kf2::telemetry_pipeline::TelemetryFrame frame;
+    frame.identity = {bound.value().pid, bound.value().process_start_id};
+    frame.observed_at_ns = runtime.monotonic_ns();
+    frame.active_gameplay = true;
+    replace_frame_gameplay(frame, [](auto& session) {
+        session.optimizer_session_generation = 42;
+    });
+    for (const bool gameplay : {false, true, false, true}) {
+        frame.active_gameplay = gameplay;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.adaptive_resource_quality.gpu == 70);
+        CHECK(runtime.adaptive_resource_quality.effects == 80);
+        CHECK(!runtime.adaptive_quality_state_known);
+        CHECK(runtime.model.status().adaptive_quality_score == 70);
+        CHECK(!runtime.adaptive_runtime_mode_confirmed);
+    }
+    WSADATA winsock{};
+    CHECK(WSAStartup(MAKEWORD(2, 2), &winsock) == 0);
+    // A timeout and a syntactically valid non-APPLIED receipt both retain debt.
+    for (const auto status : {"timeout", "unknown", "restored", "unsupported"}) {
+        AdaptiveTestReceiver receiver{status};
+        CHECK(receiver.port != 0);
+        replace_runtime_gameplay(runtime, [&](auto& session) {
+            session.telemetry_control_port = receiver.port;
+        });
+        CHECK(!runtime.restore_live_adaptive_quality(L"test rejected restore"));
+        receiver.finish();
+        CHECK(runtime.adaptive_restore_debt.has_value());
+        CHECK(runtime.adaptive_resource_quality.gpu == 70);
+    }
+    auto poll_worker = [&] {
+        const auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::seconds{3};
+        while (runtime.adaptive_mode_dispatcher.busy() &&
+               std::chrono::steady_clock::now() < deadline) Sleep(2);
+        runtime.poll_adaptive_runtime_mode();
+    };
+    // Reattach retries in the existing background worker, with its 5s backoff.
+    {
+        AdaptiveTestReceiver receiver{"unknown"};
+        CHECK(receiver.port != 0);
+        replace_frame_gameplay(frame, [&](auto& session) {
+            session.telemetry_control_port = receiver.port;
+        });
+        runtime.reconcile_adaptive_runtime_mode(frame);
+        const auto sequence = runtime.adaptive_control_sequence;
+        poll_worker();
+        receiver.finish();
+        CHECK(receiver.command.find(" disable 100\n") != std::string::npos);
+        CHECK(runtime.adaptive_restore_debt.has_value());
+        frame.observed_at_ns += 4'999'999'999ULL;
+        runtime.reconcile_adaptive_runtime_mode(frame);
+        CHECK(runtime.adaptive_control_sequence == sequence);
+        runtime.detach_telemetry();
+        CHECK(runtime.adaptive_control_sequence == sequence);
+        runtime.game_process = bound.value();
+        runtime.reconcile_adaptive_runtime_mode(frame);
+        CHECK(runtime.adaptive_control_sequence == sequence);
+    }
+    {
+        AdaptiveTestReceiver receiver{"applied"};
+        CHECK(receiver.port != 0);
+        replace_frame_gameplay(frame, [&](auto& session) {
+            session.telemetry_control_port = receiver.port;
+        });
+        ++frame.observed_at_ns;
+        runtime.reconcile_adaptive_runtime_mode(frame);
+        poll_worker();
+        receiver.finish();
+        CHECK(receiver.command.find(" disable 100\n") != std::string::npos);
+        CHECK(!runtime.adaptive_restore_debt);
+        CHECK(runtime.adaptive_resource_quality.effective_quality() == 100);
+        CHECK(runtime.adaptive_quality_state_known);
+        CHECK(!runtime.adaptive_runtime_mode_confirmed);
+    }
+    // Restoring must not silently leave the user's saved Adaptive-on mode off.
+    {
+        AdaptiveTestReceiver receiver{"applied"};
+        CHECK(receiver.port != 0);
+        replace_frame_gameplay(frame, [&](auto& session) {
+            session.telemetry_control_port = receiver.port;
+        });
+        runtime.reconcile_adaptive_runtime_mode(frame);
+        poll_worker();
+        receiver.finish();
+        CHECK(receiver.command.find(" enable ") != std::string::npos);
+        CHECK(runtime.adaptive_runtime_mode_confirmed);
+    }
+    // An acknowledgement invalidated by detach cannot clear the obligation.
+    runtime.adaptive_restore_debt = bound.value();
+    runtime.adaptive_resource_quality.gpu = 65;
+    runtime.adaptive_quality_state_known = false;
+    {
+        AdaptiveTestReceiver receiver{"applied"};
+        CHECK(receiver.port != 0);
+        replace_frame_gameplay(frame, [&](auto& session) {
+            session.telemetry_control_port = receiver.port;
+        });
+        runtime.reconcile_adaptive_runtime_mode(frame);
+        runtime.detach_telemetry();
+        poll_worker();
+        receiver.finish();
+        CHECK(runtime.adaptive_restore_debt.has_value());
+        CHECK(runtime.adaptive_resource_quality.gpu == 65);
+        CHECK(!runtime.adaptive_runtime_mode_confirmed);
+    }
+    runtime.game_process = bound.value();
+    runtime.optimizer_settings.adaptive_optimization_enabled = false;
+    {
+        AdaptiveTestReceiver receiver{"applied"};
+        CHECK(receiver.port != 0);
+        replace_frame_gameplay(frame, [&](auto& session) {
+            session.telemetry_control_port = receiver.port;
+        });
+        runtime.reconcile_adaptive_runtime_mode(frame);
+        poll_worker();
+        receiver.finish();
+        CHECK(!runtime.adaptive_restore_debt);
+        CHECK(runtime.adaptive_runtime_mode_confirmed);
+        CHECK(runtime.adaptive_resource_quality.effective_quality() == 100);
+        const auto sequence = runtime.adaptive_control_sequence;
+        runtime.reconcile_adaptive_runtime_mode(frame);
+        CHECK(runtime.adaptive_control_sequence == sequence);
+        runtime.update_adaptive_controller(frame);
+        CHECK(!runtime.model.status().adaptive_optimization_enabled);
+    }
+    // A verified ended process must not carry debt into another process.
+    runtime.adaptive_restore_debt = bound.value();
+    ++runtime.adaptive_restore_debt->process_start_id;
+    runtime.game_process.reset();
+    runtime.detach_telemetry(false);
+    CHECK(!runtime.adaptive_restore_debt);
+    CHECK(runtime.adaptive_resource_quality.effective_quality() == 100);
+    // Rebinding the same PID with a different creation identity is replacement,
+    // not permission to restore the old process' graphics on the new receiver.
+    runtime.adaptive_restore_debt = bound.value();
+    ++runtime.adaptive_restore_debt->process_start_id;
+    runtime.adaptive_resource_quality.gpu = 60;
+    runtime.adaptive_quality_state_known = false;
+    runtime.try_attach_telemetry();
+    CHECK(!runtime.adaptive_restore_debt);
+    CHECK(runtime.adaptive_resource_quality.effective_quality() == 100);
+    CHECK(runtime.adaptive_quality_state_known);
+    runtime.detach_telemetry(false);
+    WSACleanup();
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
 int test_gameplay_snapshot_lifetime() {
     namespace fs = std::filesystem;
     const fs::path root = fs::path{KF2_TEST_ROOT} /
@@ -1240,6 +1492,9 @@ int test_launch_profile_allocation_failures() {
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--adaptive-restore-debt") {
+        return test_adaptive_restore_debt();
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--stopped-target-fps-transaction") {
         return test_stopped_target_fps_transaction();
     }

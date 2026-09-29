@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Failed live graphics restoration now remains pending across telemetry
+  reconnects. Adaptive preserves the last confirmed quality and retries in the
+  background before resuming control instead of assuming an unconfirmed 100%.
 - Target FPS changes while KF2 is stopped now confirm its native startup cap
   before publishing success. Failed writes restore the previous target and cap;
   incomplete rollback is reported as requiring repair.
