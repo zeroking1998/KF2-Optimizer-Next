@@ -698,6 +698,9 @@ int test_pending_policy_restage_failure_rollback() {
         .executable = executable,
         .config_root = config_root};
 
+    write_bytes(install_root / L"Engine/Config/ConsoleVariables.ini",
+        "[Startup]\r\nt.MaxFPS=90\r\n");
+    CHECK(kf2::game::persist_frame_rate_cap(*runtime.installation, 90).has_value());
     auto captured = kf2::config::capture_session_config(
         config_root, state_root);
     CHECK(captured.has_value());
@@ -735,6 +738,201 @@ int test_pending_policy_restage_failure_rollback() {
             return event.code ==
                    "ADAPTIVE_PENDING_POLICY_UPDATE_FAILED";
         }));
+    return EXIT_SUCCESS;
+}
+
+int test_stopped_target_fps_transaction() {
+    namespace fs = std::filesystem;
+    using kf2::platform::windows::PointerKind;
+    const fs::path root = fs::path{KF2_TEST_ROOT} / L"target-fps-transaction";
+    fs::remove_all(root);
+
+    // Both pointer paths use the real settings writer and native INI writer.
+    // Only the cap result is injected, after the proposed setting is durable.
+    for (const bool drag : {false, true}) {
+        for (int failure = 0; failure != 5; ++failure) {
+            const auto scenario = root / (drag ? L"drag" : L"click") /
+                std::to_wstring(failure);
+            const auto install_root = scenario / L"KillingFloor2";
+            const auto config_root = scenario / L"Config";
+            const auto executable = install_root / L"Binaries/Win64/KFGame.exe";
+            write_test_pe(executable);
+            CHECK(write_complete_config_catalog(config_root));
+            const auto console_path = install_root / L"Engine/Config/ConsoleVariables.ini";
+            write_bytes(console_path, "[Startup]\r\nt.MaxFPS=90\r\n");
+            kf2::diagnostics::EventLog events{128};
+            kf2::config::Settings initial;
+            initial.target_fps = 90;
+            initial.corpse_limit = 40;
+            initial.extras["unrelated"] = "preserved";
+            kf2::app::UiRuntime runtime{
+                scenario / L"Data", false, initial, events, std::nullopt,
+                kf2::app::StartMode::normal, scenario / L"portable"};
+            runtime.installation = kf2::game::GameInstallation{
+                .install_root = install_root, .executable = executable,
+                .config_root = config_root};
+            CHECK(kf2::game::persist_frame_rate_cap(*runtime.installation, 90)
+                      .has_value());
+            const auto original_console = read_bytes(console_path);
+            const auto original_game = read_bytes(config_root / L"KFGame.ini");
+            fs::create_directories(runtime.settings_path.parent_path());
+            CHECK(kf2::platform::windows::atomic_replace_utf8(
+                runtime.settings_path, kf2::config::serialize_settings(initial))
+                      .has_value());
+            const auto original_settings = read_bytes(runtime.settings_path);
+            const auto generation = runtime.adaptive_settings_generation;
+            int restage_attempts = 0;
+            if (failure == 1) {
+                auto captured = kf2::config::capture_session_config(
+                    config_root, runtime.settings_path.parent_path());
+                CHECK(captured.has_value());
+                runtime.session_config_snapshot = std::move(captured.value());
+                const auto token = kf2::game::generate_adaptive_control_token();
+                CHECK(token.has_value());
+                runtime.adaptive_control_token = token.value();
+                runtime.adaptive_session_policy =
+                    kf2::game::OfflineAdaptiveSessionPolicy{40, 90, 2};
+                runtime.pending_policy_restage_operation =
+                    [&](const fs::path&, bool, int, int, bool, int,
+                        std::string_view, bool, bool, bool) {
+                        ++restage_attempts;
+                        return kf2::Result<bool>::failure({
+                            kf2::ErrorCode::internal_failure,
+                            L"A failed cap must not restage the launch", 0});
+                    };
+            }
+            const bool settings_rollback_fails = failure == 2 || failure == 4;
+            const bool native_rollback_fails = failure == 3 || failure == 4;
+            HANDLE settings_lock = INVALID_HANDLE_VALUE;
+            int sync_attempts = 0;
+            bool staged_before_sync = false;
+            bool status_unpublished = true;
+            bool partial_native_write_succeeded = false;
+            runtime.frame_rate_cap_sync_for_testing = [&] {
+                ++sync_attempts;
+                status_unpublished = status_unpublished &&
+                    runtime.model.status().target_fps == 90 &&
+                    runtime.adaptive_settings_generation == generation;
+                if (sync_attempts == 1) {
+                    const auto staged = kf2::config::parse_settings(
+                        read_bytes(runtime.settings_path));
+                    staged_before_sync = staged.has_value() &&
+                        staged.value().target_fps == 144;
+                    if (failure != 0) {
+                        // Simulate failure after the native writer touched files.
+                        partial_native_write_succeeded =
+                            kf2::game::persist_frame_rate_cap(
+                                *runtime.installation, 144).has_value();
+                        if (settings_rollback_fails) {
+                            settings_lock = CreateFileW(
+                                runtime.settings_path.c_str(), GENERIC_READ,
+                                FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                FILE_ATTRIBUTE_NORMAL, nullptr);
+                        }
+                        return kf2::Result<kf2::game::FrameRateCapResult>::failure({
+                            kf2::ErrorCode::io_failure, L"Injected native cap failure", 1234});
+                    }
+                } else if (native_rollback_fails) {
+                    return kf2::Result<kf2::game::FrameRateCapResult>::failure({
+                        kf2::ErrorCode::access_denied,
+                        L"Injected native cap rollback failure", 5678});
+                }
+                return kf2::game::persist_frame_rate_cap(
+                    *runtime.installation, runtime.optimizer_settings.target_fps);
+            };
+
+            runtime.controller.synchronize_model();
+            const auto& nodes = runtime.controller.layout().nodes;
+            const auto target = std::find_if(nodes.begin(), nodes.end(),
+                [](const auto& node) { return node.id == "settings-target-slider"; });
+            CHECK(target != nodes.end());
+            CHECK(target->enabled && target->slider.has_value());
+            const auto bounds = target->bounds;
+            const float x = bounds.x + 28.0F +
+                (bounds.width - 56.0F) * (144.0F - 30.0F) / (240.0F - 30.0F);
+            const float y = bounds.y + bounds.height / 2.0F;
+            if (drag) {
+                runtime.controller.on_pointer({PointerKind::press, {bounds.x + 28.0F, y}});
+                runtime.controller.on_pointer({PointerKind::move, {x, y}});
+            }
+            runtime.controller.on_pointer({PointerKind::release, {x, y}});
+            const bool lock_acquired = settings_lock != INVALID_HANDLE_VALUE;
+            if (lock_acquired) CloseHandle(settings_lock);
+            runtime.frame_rate_cap_sync_for_testing = {};
+
+            CHECK(staged_before_sync);
+            CHECK(status_unpublished);
+            CHECK(lock_acquired == settings_rollback_fails);
+            CHECK(runtime.model.notice().has_value());
+            const auto stored = kf2::config::parse_settings(read_bytes(runtime.settings_path));
+            CHECK(stored.has_value());
+            CHECK(stored.value().corpse_limit == 40);
+            CHECK(stored.value().extras.at("unrelated") == "preserved");
+            if (failure == 0) {
+                CHECK(sync_attempts == 1);
+                CHECK(stored.value().target_fps == 144);
+                CHECK(runtime.optimizer_settings.target_fps == 144);
+                CHECK(runtime.model.status().target_fps == 144);
+                CHECK(runtime.model.presented_target_fps() == 144);
+                CHECK(runtime.adaptive_settings_generation == generation + 1);
+                CHECK(runtime.model.notice()->code == L"TARGET_FPS_CHANGED");
+                const auto verified = kf2::game::persist_frame_rate_cap(
+                    *runtime.installation, 144);
+                CHECK(verified.has_value());
+                CHECK(!verified.value().changed);
+                bool synchronized_again = false;
+                runtime.frame_rate_cap_sync_for_testing = [&] {
+                    synchronized_again = true;
+                    return kf2::Result<kf2::game::FrameRateCapResult>::success({144, false});
+                };
+                runtime.set_slider_value("settings-target-slider", 144);
+                runtime.frame_rate_cap_sync_for_testing = {};
+                CHECK(!synchronized_again);
+            } else {
+                CHECK(partial_native_write_succeeded);
+                CHECK(sync_attempts == 2);
+                CHECK(runtime.optimizer_settings.target_fps == 90);
+                CHECK(runtime.model.status().target_fps == 90);
+                CHECK(runtime.model.presented_target_fps() == 90);
+                CHECK(runtime.adaptive_settings_generation == generation);
+                if (failure == 1) {
+                    CHECK(restage_attempts == 0);
+                    CHECK(runtime.session_config_snapshot.has_value());
+                    CHECK(runtime.adaptive_session_policy->target_fps == 90);
+                }
+                CHECK(stored.value().target_fps == (settings_rollback_fails ? 144 : 90));
+                if (!settings_rollback_fails) {
+                    CHECK(read_bytes(runtime.settings_path) == original_settings);
+                }
+                if (!native_rollback_fails) {
+                    CHECK(read_bytes(console_path) == original_console);
+                    CHECK(read_bytes(config_root / L"KFGame.ini") == original_game);
+                }
+                const bool recovery = settings_rollback_fails || native_rollback_fails;
+                CHECK(runtime.model.recovery_required() == recovery);
+                CHECK(runtime.model.notice()->code == (recovery
+                    ? L"TARGET_FPS_RECOVERY_REQUIRED" : L"TARGET_FPS_PERSIST_FAILED"));
+                CHECK(runtime.model.notice()->message.find(L"Injected native cap failure")
+                          != std::wstring::npos);
+                if (settings_rollback_fails) {
+                    CHECK(runtime.model.notice()->message.find(L"Portable settings rollback")
+                              != std::wstring::npos);
+                }
+                if (native_rollback_fails) {
+                    CHECK(runtime.model.notice()->message.find(L"Injected native cap rollback failure")
+                              != std::wstring::npos);
+                }
+                const auto log = events.snapshot();
+                CHECK(std::count_if(log.begin(), log.end(), [](const auto& event) {
+                    return event.code == "TARGET_FPS_PERSIST_FAILED";
+                }) == 1);
+                CHECK(std::count_if(log.begin(), log.end(), [](const auto& event) {
+                    return event.code == "TARGET_FPS_ROLLBACK_FAILED";
+                }) == static_cast<int>(settings_rollback_fails) +
+                     static_cast<int>(native_rollback_fails));
+            }
+        }
+    }
     return EXIT_SUCCESS;
 }
 
@@ -1042,6 +1240,9 @@ int test_launch_profile_allocation_failures() {
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--stopped-target-fps-transaction") {
+        return test_stopped_target_fps_transaction();
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--launch-profile-allocation") {
         return test_launch_profile_allocation_failures();
     }

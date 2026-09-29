@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Target FPS changes while KF2 is stopped now confirm its native startup cap
+  before publishing success. Failed writes restore the previous target and cap;
+  incomplete rollback is reported as requiring repair.
 - Protected launch preparation reports allocation failures instead of terminating
   the Optimizer, discards failed previews, and keeps the existing rollback path.
 - Optional crash-recorder setup no longer terminates startup on allocation or
