@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Graphics INI reads now reject incomplete, non-finite, overflowing, and
+  out-of-range numbers before converting them to resolution or quality values.
+  Invalid texture-tuple integers remain Custom without silent normalization.
 - FleX recovery now uses the remaining transaction-hash-verified original when
   the other recovery copy is missing, damaged, or unreadable. Diagnostics
   identify the selected source without weakening marker-free legacy recovery.
