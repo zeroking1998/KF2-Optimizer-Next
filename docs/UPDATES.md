@@ -48,7 +48,12 @@ atomically, verifies the installed package and starts the new executable.
 The new app must complete startup and return a token-bound readiness receipt.
 If download, verification, replacement or restart fails, the helper restores
 the verified backup and starts the previous version. Temporary update files
-are removed after the helper exits.
+are removed only after the identity-bound helper wait confirms exit (including
+an absent or reused PID) and the transaction is verified for cleanup. An
+unknown process-query/wait result or timeout retains the receipt, journal,
+staged package and backup for next-start recovery. A small
+`cleanup-deferred.ini` in the temporary update folder records the reason when
+writable; it is diagnostic only, not an update failure or a cleanup permit.
 
 ## Files that remain unchanged
 
