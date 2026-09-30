@@ -4,7 +4,6 @@
 class KF2OptimizerTelemetryInteraction extends Interaction
     within GameViewportClient;
 
-const AchievementPrewarmRequestTimeoutSeconds=10.0;
 const TelemetryMaintenanceInitialSeconds=0.05;
 const TelemetryMaintenanceMaximumSeconds=1.0;
 
@@ -16,13 +15,6 @@ var bool bGameSessionEnding;
 var KF2OptimizerAdaptiveGraphicsState ProcessAdaptiveGraphicsState;
 var bool bProcessAdaptiveRuntimeStateInitialized;
 var bool bProcessAdaptiveRuntimeEnabled;
-var bool bAchievementPrewarmRequested;
-var bool bAchievementPrewarmComplete;
-var bool bAchievementPrewarmDelegateRegistered;
-var byte AchievementPrewarmPlayerControllerId;
-var int AchievementPrewarmAttempts;
-var float AchievementPrewarmNextAttemptRealTime;
-var float AchievementPrewarmRequestStartedRealTime;
 var int FixedEffectsBaselineAttempts;
 var float FixedEffectsBaselineNextAttemptRealTime;
 var float FixedEffectsBaselineRetryDelay;
@@ -280,125 +272,12 @@ function KF2OptimizerAdaptiveGraphicsState PeekProcessAdaptiveGraphicsState()
     return ProcessAdaptiveGraphicsState;
 }
 
-function ClearAchievementPrewarmDelegate()
-{
-    local OnlineSubsystem OnlineSub;
-
-    if (!bAchievementPrewarmDelegateRegistered)
-    {
-        return;
-    }
-    OnlineSub = class'GameEngine'.static.GetOnlineSubsystem();
-    if (OnlineSub != None && OnlineSub.PlayerInterface != None)
-    {
-        OnlineSub.PlayerInterface.ClearReadAchievementsCompleteDelegate(
-            AchievementPrewarmPlayerControllerId,
-            OnAchievementPrewarmComplete);
-    }
-    bAchievementPrewarmDelegateRegistered = false;
-}
-
-function OnAchievementPrewarmComplete(int TitleId)
-{
-    bAchievementPrewarmRequested = false;
-    bAchievementPrewarmComplete = true;
-    AchievementPrewarmRequestStartedRealTime = 0.0;
-    ClearAchievementPrewarmDelegate();
-    `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=complete title="$
-         TitleId$" attempts="$AchievementPrewarmAttempts);
-}
-
-function TryPrewarmAchievements(PlayerController PrimaryController)
-{
-    local LocalPlayer PrimaryPlayer;
-    local OnlineSubsystem OnlineSub;
-    local byte PlayerControllerId;
-    local int NextRetryMs;
-
-    if (bAchievementPrewarmRequested)
-    {
-        if (PrimaryController != None && PrimaryController.WorldInfo != None &&
-            (PrimaryController.WorldInfo.RealTimeSeconds <
-                 AchievementPrewarmRequestStartedRealTime ||
-             PrimaryController.WorldInfo.RealTimeSeconds -
-                 AchievementPrewarmRequestStartedRealTime >=
-                 AchievementPrewarmRequestTimeoutSeconds))
-        {
-            ClearAchievementPrewarmDelegate();
-            bAchievementPrewarmRequested = false;
-            AchievementPrewarmRequestStartedRealTime = 0.0;
-            if (AchievementPrewarmAttempts < 3)
-            {
-                AchievementPrewarmNextAttemptRealTime =
-                    PrimaryController.WorldInfo.RealTimeSeconds + 1.0;
-                NextRetryMs = 1000;
-            }
-            `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=timeout attempt="$
-                 AchievementPrewarmAttempts$" next_retry_ms="$NextRetryMs);
-        }
-        return;
-    }
-    if (bAchievementPrewarmComplete ||
-        AchievementPrewarmAttempts >= 3 || PrimaryController == None ||
-        PrimaryController.WorldInfo == None || GamePlayers.Length == 0 ||
-        PrimaryController.WorldInfo.RealTimeSeconds <
-            AchievementPrewarmNextAttemptRealTime)
-    {
-        return;
-    }
-    PrimaryPlayer = GamePlayers[0];
-    if (PrimaryPlayer == None)
-    {
-        return;
-    }
-    PlayerControllerId = byte(PrimaryPlayer.ControllerId);
-    OnlineSub = class'GameEngine'.static.GetOnlineSubsystem();
-    if (OnlineSub == None || OnlineSub.PlayerInterface == None ||
-        OnlineSub.PlayerInterface.GetLoginStatus(PlayerControllerId) <=
-            LS_NotLoggedIn ||
-        OnlineSub.PlayerInterface.IsGuestLogin(PlayerControllerId))
-    {
-        AchievementPrewarmNextAttemptRealTime =
-            PrimaryController.WorldInfo.RealTimeSeconds + 1.0;
-        return;
-    }
-
-    AchievementPrewarmPlayerControllerId = PlayerControllerId;
-    OnlineSub.PlayerInterface.AddReadAchievementsCompleteDelegate(
-        PlayerControllerId, OnAchievementPrewarmComplete);
-    bAchievementPrewarmDelegateRegistered = true;
-    bAchievementPrewarmRequested = true;
-    AchievementPrewarmRequestStartedRealTime =
-        PrimaryController.WorldInfo.RealTimeSeconds;
-    ++AchievementPrewarmAttempts;
-    `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=requested"$
-         " text=true images=true attempt="$AchievementPrewarmAttempts);
-    if (!OnlineSub.PlayerInterface.ReadAchievements(
-            PlayerControllerId, 0, true, true))
-    {
-        bAchievementPrewarmRequested = false;
-        AchievementPrewarmRequestStartedRealTime = 0.0;
-        ClearAchievementPrewarmDelegate();
-        AchievementPrewarmNextAttemptRealTime =
-            PrimaryController.WorldInfo.RealTimeSeconds + 1.0;
-        `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=deferred attempt="$
-             AchievementPrewarmAttempts);
-        return;
-    }
-}
-
 function PrepareForGameplayWorld()
 {
     // The viewport interaction outlives gameplay worlds. A newly initialized
     // standalone gameplay mutator is the authoritative rearm boundary; local
     // players may also be added while KF2 is only returning to the main menu.
-    ClearAchievementPrewarmDelegate();
     bGameSessionEnding = false;
-    bAchievementPrewarmRequested = false;
-    bAchievementPrewarmComplete = false;
-    AchievementPrewarmAttempts = 0;
-    AchievementPrewarmNextAttemptRealTime = 0.0;
-    AchievementPrewarmRequestStartedRealTime = 0.0;
     ResetFixedEffectsBaselineRetry();
     if (bProcessGraphicsRestorePending)
     {
@@ -504,7 +383,6 @@ event Tick(float DeltaTime)
         ScheduleTelemetryMaintenance(false);
         return;
     }
-    TryPrewarmAchievements(PrimaryController);
     UpdateGameplayUiState(PrimaryController);
 
     foreach CurrentWorld.DynamicActors(
@@ -597,9 +475,6 @@ function NotifyGameSessionEnded()
     // Stop Tick access immediately so the persistent interaction cannot
     // touch a controller, world or render object while UE3 tears them down.
     bGameSessionEnding = true;
-    ClearAchievementPrewarmDelegate();
-    bAchievementPrewarmRequested = false;
-    AchievementPrewarmRequestStartedRealTime = 0.0;
     bProcessGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.
         RestoreOriginal(
         ProcessAdaptiveGraphicsState);
