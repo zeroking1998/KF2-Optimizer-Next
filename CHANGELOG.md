@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Adaptive applies temporary script-side graphics budgets without using the
+  menu's config-saving setters. Already-matching native graphics no longer
+  trigger another renderer update; apply, rollback and restore still require
+  fresh readback. Actual native quality changes can still incur engine work.
 - Failed live graphics restoration now remains pending across telemetry
   reconnects. Adaptive preserves the last confirmed quality and retries in the
   background before resuming control instead of assuming an unconfirmed 100%.
