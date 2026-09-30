@@ -105,13 +105,37 @@ HRESULT create_overlay_device_resources(OverlayWindowState& state) {
         const HMODULE module = GetModuleHandleW(nullptr);
         const auto load_embedded_bitmap = [&](int resource_id,
                                                ID2D1Bitmap** output) {
+#if defined(KF2_OVERLAY_WINDOW_TESTING)
+            if (state.test_bitmap_resource_failure ==
+                BitmapResourceFailure::missing)
+                resource_id = 0;
+#endif
             const HRSRC png_resource = FindResourceW(
                 module, MAKEINTRESOURCEW(resource_id), RT_RCDATA);
             if (!png_resource) return;
-            const HGLOBAL loaded = LoadResource(module, png_resource);
+            HGLOBAL loaded = LoadResource(module, png_resource);
+#if defined(KF2_OVERLAY_WINDOW_TESTING)
+            const bool primary = resource_id == kPremiumMutantRigPngResource;
+            if (primary && state.test_bitmap_resource_failure ==
+                BitmapResourceFailure::load)
+                loaded = nullptr;
+#endif
+            if (!loaded) return;
             const auto* png_bytes = static_cast<const BYTE*>(
                 LockResource(loaded));
-            const DWORD png_size = SizeofResource(module, png_resource);
+            DWORD png_size = SizeofResource(module, png_resource);
+#if defined(KF2_OVERLAY_WINDOW_TESTING)
+            if (primary && state.test_bitmap_resource_failure ==
+                BitmapResourceFailure::lock)
+                png_bytes = nullptr;
+            if (primary && state.test_bitmap_resource_failure ==
+                BitmapResourceFailure::empty)
+                png_size = 0;
+#endif
+            if (!png_bytes || png_size == 0) return;
+#if defined(KF2_OVERLAY_WINDOW_TESTING)
+            ++state.test_bitmap_decode_attempts;
+#endif
             Microsoft::WRL::ComPtr<IWICStream> stream;
             Microsoft::WRL::ComPtr<IWICBitmapDecoder> decoder;
             Microsoft::WRL::ComPtr<IWICBitmapFrameDecode> frame;
