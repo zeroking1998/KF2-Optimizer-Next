@@ -21,6 +21,7 @@ public:
 
 #ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
     [[nodiscard]] static bool test_event_callback_exception_boundary() noexcept;
+    static void test_fail_worker_creation(unsigned int ordinal) noexcept;
 #endif
 
 private:

@@ -12,8 +12,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -32,6 +34,15 @@ constexpr std::uint32_t kPresentTest = 0x1;
 constexpr wchar_t kSessionPrefix[] = L"KF2OptimizerNext-DXGI-";
 #ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
 std::atomic_bool fail_next_event_callback{false};
+std::atomic_uint failed_worker_ordinal{0};
+
+void test_worker_creation(unsigned int ordinal) {
+    unsigned int expected = ordinal;
+    if (failed_worker_ordinal.compare_exchange_strong(expected, 0)) {
+        throw std::system_error{
+            ERROR_NOT_ENOUGH_MEMORY, std::system_category()};
+    }
+}
 #endif
 
 struct PresentStartPayload {
@@ -117,6 +128,16 @@ struct DxgiFrameTimingSession::Impl {
     std::uint64_t reported_events_lost{};
     std::uint64_t qpc_frequency{};
     std::unordered_map<ULONG, PendingPresent> pending_by_thread;
+
+    ~Impl() { shutdown(); }
+
+    void shutdown() noexcept {
+        running.store(false, std::memory_order_release);
+        stop_session();
+        if (flush_worker.joinable()) flush_worker.join();
+        if (trace_worker.joinable()) trace_worker.join();
+        close_trace();
+    }
 
     EVENT_TRACE_PROPERTIES* properties() {
         return reinterpret_cast<EVENT_TRACE_PROPERTIES*>(
@@ -279,6 +300,11 @@ struct DxgiFrameTimingSession::Impl {
 };
 
 #ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+void DxgiFrameTimingSession::test_fail_worker_creation(
+    unsigned int ordinal) noexcept {
+    failed_worker_ordinal.store(ordinal, std::memory_order_release);
+}
+
 bool DxgiFrameTimingSession::test_event_callback_exception_boundary() noexcept {
     Impl implementation;
     EVENT_RECORD event{};
@@ -317,33 +343,40 @@ DxgiFrameTimingSession::start(telemetry::SampleIdentity identity,
     impl->qpc_frequency = static_cast<std::uint64_t>(frequency.QuadPart);
     const ULONG status = impl->open();
     if (status != ERROR_SUCCESS) {
-        impl->stop_session();
-        impl->close_trace();
         return Result<std::unique_ptr<DxgiFrameTimingSession>>::failure(
             {ErrorCode::platform_failure,
              L"Native DXGI frame timing session cannot start", status});
     }
     impl->running.store(true, std::memory_order_release);
-    impl->trace_worker = std::thread{
-        [pointer = impl.get()] { pointer->process_trace(); }};
-    impl->flush_worker = std::thread{
-        [pointer = impl.get()] { pointer->flush_trace(); }};
-    return Result<std::unique_ptr<DxgiFrameTimingSession>>::success(
-        std::unique_ptr<DxgiFrameTimingSession>{
-            new DxgiFrameTimingSession{std::move(impl)}});
+    try {
+#ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+        test_worker_creation(1);
+#endif
+        impl->trace_worker = std::thread{
+            [pointer = impl.get()] { pointer->process_trace(); }};
+#ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+        test_worker_creation(2);
+#endif
+        impl->flush_worker = std::thread{
+            [pointer = impl.get()] { pointer->flush_trace(); }};
+        return Result<std::unique_ptr<DxgiFrameTimingSession>>::success(
+            std::unique_ptr<DxgiFrameTimingSession>{
+                new DxgiFrameTimingSession{std::move(impl)}});
+    } catch (const std::system_error& error) {
+        return Result<std::unique_ptr<DxgiFrameTimingSession>>::failure(
+            {ErrorCode::platform_failure,
+             L"Native DXGI frame timing workers cannot start",
+             static_cast<std::uint32_t>(error.code().value())});
+    } catch (const std::bad_alloc&) {
+        return Result<std::unique_ptr<DxgiFrameTimingSession>>::failure(
+            {ErrorCode::platform_failure,
+             L"Native DXGI frame timing workers cannot start",
+             ERROR_NOT_ENOUGH_MEMORY});
+    }
 }
 
 Result<bool> DxgiFrameTimingSession::stop() {
-    if (!implementation_ ||
-        !implementation_->running.exchange(false, std::memory_order_acq_rel)) {
-        return Result<bool>::success(true);
-    }
-    implementation_->stop_session();
-    if (implementation_->flush_worker.joinable())
-        implementation_->flush_worker.join();
-    if (implementation_->trace_worker.joinable())
-        implementation_->trace_worker.join();
-    implementation_->close_trace();
+    if (implementation_) implementation_->shutdown();
     return Result<bool>::success(true);
 }
 
