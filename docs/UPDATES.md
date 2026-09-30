@@ -13,6 +13,8 @@ receives a visible highlight, and starts the consent-based installation flow.
 last check and current status. The automatic-check toggle is in the upper-right
 corner. Automatic checks are enabled by default and run at startup no more than
 once in 24 hours. Turning them off does not disable the manual Updates button.
+If the system clock moves backward, future saved check or retry timestamps
+do not extend the cooldown; a new check can establish a current timestamp.
 The last completed result is kept locally, so reopening the app within that
 24-hour interval still shows **No newer version available** or the exact newer
 version without another network request.

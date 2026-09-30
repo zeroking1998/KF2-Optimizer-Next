@@ -1,4 +1,6 @@
 #include <cstdlib>
+#include <iostream>
+#include <limits>
 #include <new>
 #include <utility>
 
@@ -132,6 +134,62 @@ int main() {
     CHECK(!cached_current.snapshot().cached_available_version);
     CHECK(cached_current.snapshot().status.find(L"No newer version") !=
           std::wstring::npos);
+
+    // Future persisted wall-clock times are not elapsed-time cooldowns.
+    for (const auto future : {
+             now + 3600, std::numeric_limits<std::int64_t>::max()}) {
+        UpdateController backward_clock{"0.0.2-alpha"};
+        backward_clock.restore_preferences(
+            true, future, true, "0.0.3-alpha", "0.0.3-alpha");
+        CHECK(backward_clock.snapshot().dismissed);
+        CHECK(backward_clock.snapshot().status.find(L"new version") !=
+              std::wstring::npos);
+        const auto started = backward_clock.begin_check(
+            CheckTrigger::automatic, now);
+        if (started != CheckStart::started) {
+            std::cerr << "Future last-check timestamp " << future
+                      << " blocked automatic checking at " << now << '\n';
+        }
+        CHECK(started == CheckStart::started);
+        CHECK(backward_clock.snapshot().last_attempt_unix_seconds == now);
+        CHECK(backward_clock.snapshot().cached_check_completed);
+        CHECK(backward_clock.snapshot().cached_available_version ==
+              std::optional<std::string>{"0.0.3-alpha"});
+        CHECK(backward_clock.snapshot().ignored_version == "0.0.3-alpha");
+        CHECK(backward_clock.snapshot().dismissed);
+        backward_clock.complete_check(
+            kf2::Result<std::optional<ReleaseInfo>>::success(std::nullopt));
+        CHECK(backward_clock.snapshot().last_check_unix_seconds == now);
+        CHECK(backward_clock.begin_check(CheckTrigger::automatic,
+              now + kAutomaticCheckIntervalSeconds - 1) ==
+              CheckStart::throttled);
+        CHECK(backward_clock.begin_check(CheckTrigger::automatic,
+              now + kAutomaticCheckIntervalSeconds) == CheckStart::started);
+
+        UpdateController future_attempt{"0.0.2-alpha"};
+        future_attempt.restore_preferences(
+            true, 0, false, {}, {}, future, 1);
+        CHECK(future_attempt.begin_check(CheckTrigger::automatic, now) ==
+              CheckStart::started);
+        CHECK(future_attempt.snapshot().last_attempt_unix_seconds == now);
+        CHECK(future_attempt.snapshot().automatic_failure_count == 2);
+        future_attempt.complete_check(
+            kf2::Result<std::optional<ReleaseInfo>>::failure(
+                {kf2::ErrorCode::io_failure, L"Temporary failure", 0}));
+        CHECK(future_attempt.begin_check(CheckTrigger::automatic,
+              now + 2 * kAutomaticFailureRetryInitialSeconds - 1) ==
+              CheckStart::throttled);
+        CHECK(future_attempt.begin_check(CheckTrigger::automatic,
+              now + 2 * kAutomaticFailureRetryInitialSeconds) ==
+              CheckStart::started);
+
+        UpdateController future_disabled{"0.0.2-alpha"};
+        future_disabled.restore_preferences(false, future);
+        CHECK(future_disabled.begin_check(CheckTrigger::automatic, now) ==
+              CheckStart::automatic_disabled);
+        CHECK(future_disabled.begin_check(CheckTrigger::manual, now) ==
+              CheckStart::started);
+    }
 
     UpdateController dismissed{"0.0.2-alpha"};
     CHECK(dismissed.begin_check(CheckTrigger::manual, now) ==

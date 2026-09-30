@@ -93,6 +93,9 @@ are visible immediately.
 - Accessibility slider requests are bounded before numeric conversion, so
   extreme values reach the correct endpoint. Invalid slider metadata and
   non-finite requests are rejected without calling the setting callback.
+- Automatic update checks no longer inherit an extended cooldown from future
+  saved timestamps after a backward clock jump. Normal daily throttling and
+  failed-check retry delays remain unchanged.
 - FleX recovery now uses the remaining transaction-hash-verified original when
   the other recovery copy is missing, damaged, or unreadable. Diagnostics
   identify the selected source without weakening marker-free legacy recovery.
