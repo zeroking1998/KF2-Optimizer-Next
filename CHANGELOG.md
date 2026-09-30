@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Failed protected launch preparation now distinguishes verified rollback
+  from recovery-required state. Startup no longer claims safe restoration
+  when rollback failed; the authoritative recovery snapshot is retained.
 - Deferred update cleanup now records why helper exit could not be confirmed.
   Recovery receipts, journals and verified rollback files remain unchanged;
   a diagnostic-write failure cannot authorize deletion or fail a ready update.

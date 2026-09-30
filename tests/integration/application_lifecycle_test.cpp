@@ -1654,7 +1654,147 @@ int test_executable_identity_boundaries() {
     return EXIT_SUCCESS;
 }
 
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+std::optional<kf2::app::ProtectedLaunchPreparationStage> protected_failure_stage;
+HANDLE protected_file_lock{INVALID_HANDLE_VALUE};
+std::filesystem::path protected_snapshot_root;
+
+void lock_protected_launch_file(kf2::app::UiRuntime& runtime,
+    kf2::app::ProtectedLaunchPreparationStage stage) {
+    if (stage != protected_failure_stage) return;
+    protected_snapshot_root = runtime.session_config_snapshot->snapshot_root;
+    const bool captured = stage ==
+        kf2::app::ProtectedLaunchPreparationStage::captured_settings;
+    const auto file = (captured
+        ? protected_snapshot_root / L"files"
+        : runtime.installation->config_root) / L"KFSystemSettings.ini";
+    protected_file_lock = CreateFileW(file.c_str(), GENERIC_READ,
+        captured ? 0 : FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+}
+
+int test_protected_launch_rollback() {
+    namespace fs = std::filesystem;
+    using Stage = kf2::app::ProtectedLaunchPreparationStage;
+    // Keep hashed backup paths below Windows' legacy test-EXE path limit.
+    const auto root = fs::path{KF2_TEST_ROOT} / L"plr" /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" +
+         std::to_wstring(GetTickCount64()));
+    const auto install = root / L"game";
+    const auto executable = install / L"Binaries/Win64/KFGame.exe";
+    const auto config = root / L"Documents/Config";
+    const auto portable = root / L"portable";
+    CHECK(write_complete_config_catalog(config));
+    auto system = kf2::config::IniDocument::parse(
+        read_bytes(config / L"KFSystemSettings.ini"));
+    CHECK(system.has_value());
+    CHECK(system.value().upsert(L"SystemSettings", L"bAllowTemporalAA",
+                               L"False").shadowed_occurrences == 0);
+    CHECK(system.value().upsert(L"SystemSettings", L"OneFrameThreadLag",
+                               L"False").shadowed_occurrences == 0);
+    CHECK(system.value().upsert(L"SystemSettings", L"Fullscreen",
+                               L"True").shadowed_occurrences == 0);
+    CHECK(system.value().upsert(L"SystemSettings", L"Borderless",
+                               L"False").shadowed_occurrences == 0);
+    write_bytes(config / L"KFSystemSettings.ini", system.value().serialize());
+    write_bytes(config / L"KFEngine.ini", read_bytes(config / L"KFEngine.ini") +
+        "[URL]\r\nLocalOptions=\r\n[Engine.Engine]\r\n"
+        "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n");
+    write_bytes(install / L"Engine/Config/ConsoleVariables.ini", "[Startup]\r\n");
+    fs::create_directories(portable); // Missing provider is a real preparation failure.
+    fs::create_directories(executable.parent_path());
+    write_test_pe(executable);
+    const kf2::game::GameDiscoveryInput discovery{
+        .manual_candidates = {install}, .config_root = config,
+        .allowed_config_parent = root / L"Documents"};
+    kf2::config::Settings settings{};
+    settings.target_fps = 62;
+    struct ProbeGuard {
+        ~ProbeGuard() {
+            kf2::app::set_protected_launch_probe_for_testing(nullptr);
+            if (protected_file_lock != INVALID_HANDLE_VALUE)
+                CloseHandle(protected_file_lock);
+            protected_file_lock = INVALID_HANDLE_VALUE;
+        }
+    } guard;
+    std::size_t index = 0;
+    for (const auto stage : {Stage::captured_settings, Stage::launch_profile,
+                            Stage::overlay_display, Stage::capabilities}) {
+        kf2::diagnostics::EventLog events{128};
+        kf2::app::UiRuntime runtime{root / std::to_wstring(index++), false,
+            settings, events, discovery, kf2::app::StartMode::normal, portable};
+        CHECK(runtime.installation.has_value());
+        CHECK(runtime.synchronize_frame_rate_cap().has_value());
+        std::map<fs::path, std::string> originals;
+        for (const auto& entry : fs::directory_iterator(config))
+            if (entry.is_regular_file()) originals.emplace(
+                entry.path(), read_bytes(entry.path()));
+        protected_failure_stage = stage;
+        kf2::app::set_protected_launch_probe_for_testing(lock_protected_launch_file);
+        const auto prepared = runtime.prepare_automatic_external_launch_profile();
+        kf2::app::set_protected_launch_probe_for_testing(nullptr);
+        CHECK(protected_file_lock != INVALID_HANDLE_VALUE);
+        CloseHandle(protected_file_lock);
+        protected_file_lock = INVALID_HANDLE_VALUE;
+        CHECK(!prepared.has_value());
+        CHECK(runtime.model.recovery_required());
+        CHECK(runtime.session_config_snapshot.has_value());
+        CHECK(prepared.error().code == kf2::ErrorCode::recovery_required);
+        CHECK(prepared.error().message.find(L"could not be confirmed") !=
+              std::wstring::npos);
+        CHECK(fs::is_regular_file(protected_snapshot_root / L"manifest.txt"));
+        for (const auto& [file, bytes] : originals) CHECK(read_bytes(
+            protected_snapshot_root / L"files" / file.filename()) == bytes);
+        CHECK(runtime.restore_protected_session_config(L"Test lock released"));
+        CHECK(!runtime.session_config_snapshot.has_value());
+        CHECK(!fs::exists(protected_snapshot_root));
+        for (const auto& [file, bytes] : originals) CHECK(read_bytes(file) == bytes);
+    }
+    // Verify the actual startup message, not just the lower-level result.
+    for (const bool blocked : {true, false}) {
+        const auto state = root / (blocked ? L"startup-blocked" : L"startup-restored");
+        write_bytes(state / L"settings.ini", kf2::config::serialize_settings(settings));
+        protected_failure_stage = blocked ? std::optional{Stage::capabilities}
+                                          : std::nullopt;
+        kf2::app::set_protected_launch_probe_for_testing(lock_protected_launch_file);
+        auto app = kf2::app::Application::start({
+            .state_root = state, .executable_root = portable,
+            .instance_name = L"Local\\KF2-ProtectedRollback-" +
+                std::to_wstring(GetCurrentProcessId()) + std::to_wstring(blocked),
+            .identity = {GetCurrentProcessId(), 343}, .create_window = false,
+            .game_discovery = discovery});
+        kf2::app::set_protected_launch_probe_for_testing(nullptr);
+        CHECK(app.has_value());
+        CHECK(app.value().ui_model().notice().has_value());
+        const auto& notice = *app.value().ui_model().notice();
+        CHECK(app.value().ui_model().recovery_required() == blocked);
+        CHECK((notice.recovery_action.find(L"No game files") !=
+               std::wstring::npos) == !blocked);
+        if (blocked) {
+            CHECK(protected_file_lock != INVALID_HANDLE_VALUE);
+            CHECK(notice.recovery_action.find(L"Do not start KF2") !=
+                  std::wstring::npos);
+            CHECK(fs::exists(protected_snapshot_root));
+            CloseHandle(protected_file_lock);
+            protected_file_lock = INVALID_HANDLE_VALUE;
+        }
+        CHECK(app.value().shutdown_cleanly().has_value());
+        CHECK(!fs::exists(state / L"session-config/active"));
+    }
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+#endif
+
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--protected-launch-rollback") {
+        try {
+            return test_protected_launch_rollback();
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << '\n';
+            return EXIT_FAILURE;
+        }
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--executable-identity-child") {
         Sleep(60'000);
         return EXIT_SUCCESS;

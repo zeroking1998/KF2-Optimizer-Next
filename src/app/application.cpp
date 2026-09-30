@@ -216,7 +216,10 @@ Result<Application> Application::start(const StartOptions& options) {
                 L"ADAPTIVE_EXTERNAL_LAUNCH_PREPARE_FAILED",
                 L"Adaptive launch capabilities could not be prepared safely: " +
                     prepared.error().message,
-                L"No game files were left partially changed."});
+                runtime->model.recovery_required() ||
+                        prepared.error().code == ErrorCode::recovery_required
+                    ? L"Do not start KF2 until Repair confirms that all protected files were restored."
+                    : L"No game files were left partially changed."});
         }
     }
     if (!options.startup_warning.empty()) {

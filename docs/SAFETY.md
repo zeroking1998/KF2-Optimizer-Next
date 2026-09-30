@@ -50,5 +50,9 @@ Normal shutdown and recovery restore protected INIs, telemetry modules and
 sources, optional FleX runtime state, the native viewport client, and temporary
 session files. The pre-session snapshot is authoritative.
 
+Failed pre-launch preparation checks restoration before reporting safe rollback.
+Unconfirmed restoration preserves the snapshot, marks recovery required and
+instructs the user not to start KF2 until Repair verifies protected state.
+
 Security issues that could cross these boundaries should follow
 [SECURITY.md](../SECURITY.md).

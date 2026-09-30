@@ -73,6 +73,18 @@ struct PackageRepairAsyncState;
 struct UpdateCheckAsyncState;
 struct UpdateInstallAsyncState;
 
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+enum class ProtectedLaunchPreparationStage {
+    captured_settings,
+    launch_profile,
+    overlay_display,
+    capabilities,
+};
+struct UiRuntime;
+void set_protected_launch_probe_for_testing(
+    void (*probe)(UiRuntime&, ProtectedLaunchPreparationStage)) noexcept;
+#endif
+
 #if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
 enum class UiRuntimeShutdownPhase {
     live_adaptive_restore,
