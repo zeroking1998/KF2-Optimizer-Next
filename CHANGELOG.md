@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Deferred update cleanup now records why helper exit could not be confirmed.
+  Recovery receipts, journals and verified rollback files remain unchanged;
+  a diagnostic-write failure cannot authorize deletion or fail a ready update.
 - Exited KF2 processes no longer remain bound while telemetry retains a
   process handle. Nonblocking liveness checks preserve PID-reuse protection
   and let normal restart handoff bind the replacement process.
