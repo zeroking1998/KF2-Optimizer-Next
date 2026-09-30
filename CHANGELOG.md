@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- FleX recovery now uses the remaining transaction-hash-verified original when
+  the other recovery copy is missing, damaged, or unreadable. Diagnostics
+  identify the selected source without weakening marker-free legacy recovery.
 - Failed live graphics restoration now remains pending across telemetry
   reconnects. Adaptive preserves the last confirmed quality and retries in the
   background before resuming control instead of assuming an unconfirmed 100%.

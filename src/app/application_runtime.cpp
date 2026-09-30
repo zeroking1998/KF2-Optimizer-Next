@@ -659,6 +659,7 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
                     flex_status_error);
             const bool flex_transaction_exists =
                 flex_marker_exists || flex_original_exists;
+            std::wstring flex_recovery_details;
             const auto recovered = flex_status_error
                 ? Result<bool>::failure(
                       {ErrorCode::io_failure,
@@ -666,9 +667,11 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
                        static_cast<std::uint32_t>(flex_status_error.value())})
                 : (!game_running && flex_transaction_exists
                        ? flex::restore_offline_lab(
-                             flex_directory, flex_state, false)
+                             flex_directory, flex_state, false,
+                             &flex_recovery_details)
                        : flex::recover_offline_lab(
-                             flex_directory, flex_state, game_running));
+                             flex_directory, flex_state, game_running,
+                             &flex_recovery_details));
             if (!recovered.has_value()) {
                 event_log.append({0, diagnostics::Severity::error,
                                   "FLEX_LAB_RECOVERY_BLOCKED",
@@ -677,7 +680,8 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
             } else if (recovered.value()) {
                 event_log.append({0, diagnostics::Severity::warning,
                                   "FLEX_LAB_RECOVERED",
-                                  L"Interrupted offline FleX laboratory state was restored and verified",
+                                  L"Interrupted offline FleX laboratory state was restored and verified. " +
+                                      flex_recovery_details,
                                   L"flex"});
             }
             if (game_running) {

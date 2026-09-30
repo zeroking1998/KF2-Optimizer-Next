@@ -122,10 +122,15 @@ Result<bool> UiRuntime::ensure_fixed_flex_runtime() {
     }
     if (transaction.value().marker_exists ||
         transaction.value().original_exists) {
+        std::wstring recovery_details;
         const auto recovered = flex::recover_offline_lab(
-            game_directory, state_directory, false);
+            game_directory, state_directory, false, &recovery_details);
         if (!recovered.has_value()) {
             return Result<bool>::failure(recovered.error());
+        }
+        if (recovered.value()) {
+            events->append({0, diagnostics::Severity::info,
+                "FLEX_LAB_RECOVERED", recovery_details, L"flex"});
         }
         const auto retained = inspect_flex_transaction_state(
             game_directory, state_directory);
@@ -201,8 +206,9 @@ bool UiRuntime::restore_fixed_flex_runtime(std::wstring_view reason) {
     }
     const bool running = game::find_running_game_process(
         installation->executable).has_value();
+    std::wstring recovery_details;
     const auto restored = flex::restore_offline_lab(
-        game_directory, state_directory, running);
+        game_directory, state_directory, running, &recovery_details);
     if (!restored.has_value()) {
         events->append({0, diagnostics::Severity::error,
             "FLEX_FIXED_RESTORE_FAILED", restored.error().message,
@@ -217,7 +223,8 @@ bool UiRuntime::restore_fixed_flex_runtime(std::wstring_view reason) {
     events->append({0, diagnostics::Severity::info,
         "FLEX_FIXED_RESTORED",
         std::wstring{reason} +
-            L"; the original FleX runtime was restored and verified",
+            L"; the original FleX runtime was restored and verified. " +
+            recovery_details,
         L"flex"});
     return true;
 }

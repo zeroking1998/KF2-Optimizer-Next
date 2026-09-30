@@ -278,7 +278,9 @@ Result<LabTransactionResult> install_offline_lab(const LabTransactionOptions& o)
 }
 
 Result<bool> restore_offline_lab(const std::filesystem::path& game,
-                                 const std::filesystem::path& state, bool running) {
+                                 const std::filesystem::path& state, bool running,
+                                 std::wstring* recovery_details) {
+    if (recovery_details != nullptr) recovery_details->clear();
     const auto checked = preflight(game, state, running);
     if (!checked.has_value()) return checked;
     const auto active = game / active_name;
@@ -289,25 +291,48 @@ Result<bool> restore_offline_lab(const std::filesystem::path& game,
     const auto original_exists = inspected_exists(original);
     const auto backup_exists = inspected_exists(backup);
     if (!marker_exists.has_value()) return marker_exists;
-    if (!original_exists.has_value()) return original_exists;
-    if (!backup_exists.has_value()) return backup_exists;
-    if (!marker_exists.value() && !original_exists.value())
-        return Result<bool>::failure(
+    if (!marker_exists.value()) {
+        if (!original_exists.has_value()) return original_exists;
+        if (!original_exists.value()) return Result<bool>::failure(
             {ErrorCode::not_found, L"No active FleX laboratory transaction exists", 0});
-    const auto source = backup_exists.value() ? backup : original;
-    if (!backup_exists.value() && !original_exists.value()) return Result<bool>::failure(
-        {ErrorCode::not_found, L"Verified FleX laboratory backup is missing", 0});
+    }
     std::optional<std::string> expected_hash;
     if (marker_exists.value()) {
         const auto parsed = parse_marker(marker);
         if (!parsed.has_value()) return Result<bool>::failure(parsed.error());
         expected_hash = parsed.value().original_hash;
     }
-    const auto source_before = hash_file(source);
-    if (!source_before.has_value()) return Result<bool>::failure(source_before.error());
-    if (expected_hash && source_before.value() != *expected_hash)
-        return Result<bool>::failure(
-            {ErrorCode::stale_data, L"FleX backup does not match the transaction marker", 0});
+    const auto verify_source = [&](const std::filesystem::path& path,
+                                   const Result<bool>& exists) {
+        if (!exists.has_value())
+            return Result<std::string>::failure(exists.error());
+        if (!exists.value()) return Result<std::string>::failure(
+            {ErrorCode::not_found, L"Recovery copy is missing", 0});
+        auto hash = hash_file(path);
+        if (hash.has_value() && expected_hash && hash.value() != *expected_hash)
+            return Result<std::string>::failure(
+                {ErrorCode::stale_data,
+                 L"Recovery copy does not match the transaction marker", 0});
+        return hash;
+    };
+    const auto backup_hash = verify_source(backup, backup_exists);
+    // Only the transaction hash authorizes fallback after a source read failure.
+    if (!expected_hash && (!backup_exists.has_value() ||
+        (backup_exists.value() && !backup_hash.has_value()))) {
+        return Result<bool>::failure(backup_hash.error());
+    }
+    const auto original_hash = verify_source(original, original_exists);
+    if (!backup_hash.has_value() && !original_hash.has_value()) {
+        auto error = backup_hash.error().code == ErrorCode::not_found
+            ? original_hash.error() : backup_hash.error();
+        error.message = L"No verified FleX recovery copy is available. State backup: " +
+            backup_hash.error().message + L"; in-game original: " +
+            original_hash.error().message;
+        return Result<bool>::failure(std::move(error));
+    }
+    const bool use_backup = backup_hash.has_value();
+    const auto& source = use_backup ? backup : original;
+    const auto& source_before = use_backup ? backup_hash : original_hash;
     auto copied = replace_verified(source, active, source_before.value());
     if (!copied.has_value()) return copied;
     const auto source_hash = hash_file(source); const auto active_hash = hash_file(active);
@@ -320,18 +345,30 @@ Result<bool> restore_offline_lab(const std::filesystem::path& game,
     std::filesystem::remove(marker, ec);
     if (ec) return Result<bool>::failure({ErrorCode::io_failure,
         L"FleX transaction marker removal failed", static_cast<std::uint32_t>(ec.value())});
+    if (recovery_details != nullptr) {
+        *recovery_details = use_backup ? L"Recovery source: verified state backup."
+                                      : L"Recovery source: verified in-game original.";
+        const auto& other = use_backup ? original_hash : backup_hash;
+        if (!other.has_value()) {
+            *recovery_details += use_backup ? L" In-game original rejected: "
+                                            : L" State backup rejected: ";
+            *recovery_details += other.error().message;
+        }
+    }
     return Result<bool>::success(true);
 }
 
 Result<bool> recover_offline_lab(const std::filesystem::path& game,
-                                 const std::filesystem::path& state, bool running) {
+                                 const std::filesystem::path& state, bool running,
+                                 std::wstring* recovery_details) {
+    if (recovery_details != nullptr) recovery_details->clear();
     const auto marker = state / marker_name;
     const auto marker_exists = inspected_exists(marker);
     const auto original_exists = inspected_exists(game / original_name);
     if (!marker_exists.has_value()) return marker_exists;
-    if (!original_exists.has_value()) return original_exists;
-    if (!marker_exists.value() && !original_exists.value()) {
-        return Result<bool>::success(false);
+    if (!marker_exists.value()) {
+        if (!original_exists.has_value()) return original_exists;
+        if (!original_exists.value()) return Result<bool>::success(false);
     }
     if (marker_exists.value()) {
         const auto parsed = parse_marker(marker);
@@ -350,7 +387,8 @@ Result<bool> recover_offline_lab(const std::filesystem::path& game,
         // Schema 1 could remain after an older build had already restored the
         // active DLL but failed to remove its marker. Remove only this harmless
         // residue after both active runtime and backup match its pinned hash.
-        if (!parsed.has_value() && !original_exists.value()) {
+        if (!parsed.has_value() && original_exists.has_value() &&
+            !original_exists.value()) {
             const auto legacy = parse_legacy_original_hash(marker);
             const auto active_hash = hash_file(game / active_name);
             const auto backup_hash = hash_file(state / backup_name);
@@ -368,7 +406,7 @@ Result<bool> recover_offline_lab(const std::filesystem::path& game,
             }
         }
     }
-    return restore_offline_lab(game, state, running);
+    return restore_offline_lab(game, state, running, recovery_details);
 }
 
 }  // namespace kf2::flex
