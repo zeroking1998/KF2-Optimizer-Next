@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Living Zeds retain their original offscreen animation flags when restoration
+  fails. Bounded scans retry without blocking other Zeds or recording reduced
+  flags as originals, including after a corpse-manager replacement.
 - Failed live graphics restoration now remains pending across telemetry
   reconnects. Adaptive preserves the last confirmed quality and retries in the
   background before resuming control instead of assuming an unconfirmed 100%.
