@@ -96,6 +96,9 @@ are visible immediately.
 - Automatic update checks no longer inherit an extended cooldown from future
   saved timestamps after a backward clock jump. Normal daily throttling and
   failed-check retry delays remain unchanged.
+- Embedded overlay PNGs now require a loaded handle, readable bytes and a
+  non-empty buffer before decoding. Failed resources keep the procedural
+  overlay fallback without breaking otherwise valid images.
 - FleX recovery now uses the remaining transaction-hash-verified original when
   the other recovery copy is missing, damaged, or unreadable. Diagnostics
   identify the selected source without weakening marker-free legacy recovery.
