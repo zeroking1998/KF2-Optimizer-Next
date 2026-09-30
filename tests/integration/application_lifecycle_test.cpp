@@ -1544,9 +1544,9 @@ int test_executable_identity_boundaries() {
     // same pathname as the file replaced after discovery.
     struct Child {
         PROCESS_INFORMATION process{};
-        bool stop() {
+        bool stop(DWORD exit_code = 0) {
             if (!process.hProcess) return true;
-            const bool stopped = TerminateProcess(process.hProcess, 0) &&
+            const bool stopped = TerminateProcess(process.hProcess, exit_code) &&
                 WaitForSingleObject(process.hProcess, 5000) == WAIT_OBJECT_0;
             CloseHandle(process.hThread);
             CloseHandle(process.hProcess);
@@ -1573,21 +1573,54 @@ int test_executable_identity_boundaries() {
     CHECK(runtime.game_process.has_value());
     CHECK(runtime.game_process->pid == child.process.dwProcessId);
     const auto first_process = *runtime.game_process;
-    CHECK(child.stop());
-    // Start a fresh session here. Detecting exit while a sampler still owns
-    // the old process handle is a separate process-liveness contract.
-    runtime.resource_telemetry_worker.stop();
-    runtime.game_process.reset();
-    runtime.last_game_process_scan_ns = 0;
+    CHECK(kf2::game::is_game_process_current(first_process));
+    auto wrong_start = first_process;
+    ++wrong_start.process_start_id;
+    CHECK(!kf2::game::is_game_process_current(wrong_start));
+    struct RetainedProcess {
+        HANDLE handle{};
+        ~RetainedProcess() { if (handle) CloseHandle(handle); }
+    } first_retained{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+        FALSE, first_process.pid)};
+    CHECK(first_retained.handle != nullptr);
+    // Retain the kernel object like a sampler does. Exit code 259 must not
+    // be mistaken for a live process merely because it equals STILL_ACTIVE.
+    CHECK(child.stop(STILL_ACTIVE));
+    CHECK(WaitForSingleObject(first_retained.handle, 0) == WAIT_OBJECT_0);
+    DWORD exit_code = 0;
+    CHECK(GetExitCodeProcess(first_retained.handle, &exit_code));
+    CHECK(exit_code == STILL_ACTIVE);
+    CHECK(!kf2::game::is_game_process_current(first_process));
+    const auto exited_binding = kf2::game::bind_game_process(
+        first_process.pid, executable);
+    CHECK(!exited_binding.has_value());
+    CHECK(exited_binding.error().code == kf2::ErrorCode::stale_data);
+    CHECK(!kf2::game::find_running_game_process(executable).has_value());
     CHECK(start_child());
+    // No manual runtime reset: attachment must detect exit and perform the
+    // normal restart handoff even while the old handle is still retained.
     runtime.try_attach_telemetry();
     CHECK(runtime.game_process.has_value());
     CHECK(runtime.game_process->pid == child.process.dwProcessId);
     CHECK(runtime.game_process->process_start_id != first_process.process_start_id);
     CHECK(runtime.installation->executable_identity.file_index ==
         replaced.value().executable_identity.file_index);
+    const auto second_process = *runtime.game_process;
+    RetainedProcess second_retained{OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE,
+        second_process.pid)};
+    CHECK(second_retained.handle != nullptr);
     CHECK(child.stop());
-    runtime.game_process.reset();
+    CHECK(WaitForSingleObject(second_retained.handle, 0) == WAIT_OBJECT_0);
+    runtime.present_source = std::make_unique<kf2::telemetry::PresentSource>(
+        kf2::telemetry::SampleIdentity{second_process.pid,
+            second_process.process_start_id}, 8);
+    // A missing window must not reaccept an exited process as window recovery.
+    static_cast<void>(kf2::telemetry_pipeline::inspect_bound_session(runtime));
+    CHECK(!runtime.game_process.has_value());
+    CHECK(!runtime.present_source);
+    CHECK(runtime.game_restart_handoff_previous_process.has_value());
+    CHECK(runtime.game_restart_handoff_previous_process->pid == second_process.pid);
 
     runtime.resource_telemetry_worker.stop();
     auto captured = kf2::config::capture_session_config(config, root / L"Data");

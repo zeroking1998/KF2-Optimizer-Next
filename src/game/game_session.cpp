@@ -40,13 +40,14 @@ bool is_overlay_window(HWND window) {
 }
 
 bool process_start_matches(const GameProcessIdentity& identity) {
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
                                  FALSE, identity.pid);
     if (!process) return false;
     FILETIME creation{}, exit{}, kernel{}, user{};
     const bool matches =
         GetProcessTimes(process, &creation, &exit, &kernel, &user) != FALSE &&
-        file_time_value(creation) == identity.process_start_id;
+        file_time_value(creation) == identity.process_start_id &&
+        WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
     CloseHandle(process);
     return matches;
 }
@@ -63,6 +64,15 @@ Result<GameProcessIdentity> bind_game_process(
                                  FALSE, pid);
     if (!process) return Result<GameProcessIdentity>::failure(
         {ErrorCode::access_denied, L"Game process cannot be inspected", GetLastError()});
+    const DWORD wait = WaitForSingleObject(process, 0);
+    if (wait != WAIT_TIMEOUT) {
+        const DWORD error = wait == WAIT_FAILED ? GetLastError() : 0;
+        CloseHandle(process);
+        return Result<GameProcessIdentity>::failure(
+            {wait == WAIT_OBJECT_0 ? ErrorCode::stale_data
+                                  : ErrorCode::platform_failure,
+             L"Game process is not running", error});
+    }
     FILETIME creation{}, exit{}, kernel{}, user{};
     DWORD length = 32768;
     std::vector<wchar_t> path(length);
@@ -92,9 +102,9 @@ Result<GameWindowState> inspect_game_window(
     if (!IsWindow(window)) return Result<GameWindowState>::failure(
         {ErrorCode::not_found, L"Game window no longer exists", 0});
     // The executable path was verified when the session was bound. During the
-    // 120 ms hot path, the immutable process creation time is sufficient to
-    // reject exits and PID reuse without querying and canonicalizing the EXE
-    // path again on every frame sample.
+    // 120 ms hot path, a nonblocking liveness check and immutable creation
+    // time reject exits and PID reuse without querying and canonicalizing
+    // the EXE path again on every frame sample.
     if (!is_game_process_current(process)) {
         return Result<GameWindowState>::failure(
             {ErrorCode::stale_data, L"Game process was restarted", 0});
