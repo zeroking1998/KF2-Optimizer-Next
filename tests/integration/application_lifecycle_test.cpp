@@ -1169,6 +1169,18 @@ int test_adaptive_restore_debt() {
     runtime.installation = kf2::game::GameInstallation{
         .install_root = root, .executable = executable,
         .config_root = root / L"Config"};
+    // This test uses its own process instead of installation discovery. Supply
+    // the real file identity required at a fresh session-integration boundary.
+    const HANDLE image = CreateFileW(executable, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(image != INVALID_HANDLE_VALUE);
+    BY_HANDLE_FILE_INFORMATION file{};
+    const bool identity_read = GetFileInformationByHandle(image, &file) != FALSE;
+    CloseHandle(image);
+    CHECK(identity_read);
+    runtime.installation->executable_identity = {file.dwVolumeSerialNumber,
+        (static_cast<std::uint64_t>(file.nFileIndexHigh) << 32U) | file.nFileIndexLow};
     const auto bound = kf2::game::bind_game_process(
         GetCurrentProcessId(), executable);
     CHECK(bound.has_value());
@@ -1491,7 +1503,132 @@ int test_launch_profile_allocation_failures() {
     return EXIT_SUCCESS;
 }
 
+int test_executable_identity_boundaries() {
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"executable-identity";
+    fs::remove_all(root);
+    const auto install = root / L"game";
+    const auto executable = install / L"Binaries/Win64/KFGame.exe";
+    const auto config = root / L"Documents/Config";
+    const auto portable = root / L"portable";
+    CHECK(write_complete_config_catalog(config));
+    write_bytes(config / L"KFEngine.ini", read_bytes(config / L"KFEngine.ini") +
+        "[URL]\r\nLocalOptions=\r\n[Engine.Engine]\r\n"
+        "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n");
+    write_bytes(install / L"Engine/Config/ConsoleVariables.ini",
+        "[Startup]\r\n");
+    fs::create_directories(portable);
+    fs::create_directories(executable.parent_path());
+    wchar_t self[32768]{};
+    CHECK(GetModuleFileNameW(nullptr, self, 32768) != 0);
+    CHECK(CopyFileW(self, executable.c_str(), FALSE));
+    const kf2::game::GameDiscoveryInput input{
+        .manual_candidates = {install}, .config_root = config,
+        .allowed_config_parent = root / L"Documents"};
+    kf2::diagnostics::EventLog events{64};
+    kf2::app::UiRuntime runtime{root / L"Data", false,
+        kf2::config::Settings{}, events, input,
+        kf2::app::StartMode::normal, portable};
+    CHECK(runtime.installation.has_value());
+    const auto original_identity = runtime.installation->executable_identity;
+    const auto replacement = executable.parent_path() / L"replacement.exe";
+    CHECK(CopyFileW(self, replacement.c_str(), FALSE));
+    CHECK(ReplaceFileW(executable.c_str(), replacement.c_str(), nullptr,
+        REPLACEFILE_WRITE_THROUGH, nullptr, nullptr));
+    const auto replaced = kf2::game::discover_game_installation(input);
+    CHECK(replaced.has_value());
+    CHECK(replaced.value().executable_identity.file_index !=
+        original_identity.file_index);
+
+    // The child is this test binary, not KF2. Its real process image is at the
+    // same pathname as the file replaced after discovery.
+    struct Child {
+        PROCESS_INFORMATION process{};
+        bool stop() {
+            if (!process.hProcess) return true;
+            const bool stopped = TerminateProcess(process.hProcess, 0) &&
+                WaitForSingleObject(process.hProcess, 5000) == WAIT_OBJECT_0;
+            CloseHandle(process.hThread);
+            CloseHandle(process.hProcess);
+            process = {};
+            return stopped;
+        }
+        ~Child() { static_cast<void>(stop()); }
+    } child;
+    const auto start_child = [&] {
+        std::wstring command = L"\"" + executable.wstring() +
+            L"\" --executable-identity-child";
+        STARTUPINFOW startup{sizeof(startup)};
+        return CreateProcessW(executable.c_str(), command.data(), nullptr,
+            nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup,
+            &child.process) != FALSE;
+    };
+    CHECK(start_child());
+    runtime.try_attach_telemetry();
+    CHECK(!runtime.game_process.has_value());
+    CHECK(runtime.installation->executable_identity.file_index ==
+        replaced.value().executable_identity.file_index);
+    runtime.last_game_process_scan_ns = 0;
+    runtime.try_attach_telemetry();
+    CHECK(runtime.game_process.has_value());
+    CHECK(runtime.game_process->pid == child.process.dwProcessId);
+    const auto first_process = *runtime.game_process;
+    CHECK(child.stop());
+    // Start a fresh session here. Detecting exit while a sampler still owns
+    // the old process handle is a separate process-liveness contract.
+    runtime.resource_telemetry_worker.stop();
+    runtime.game_process.reset();
+    runtime.last_game_process_scan_ns = 0;
+    CHECK(start_child());
+    runtime.try_attach_telemetry();
+    CHECK(runtime.game_process.has_value());
+    CHECK(runtime.game_process->pid == child.process.dwProcessId);
+    CHECK(runtime.game_process->process_start_id != first_process.process_start_id);
+    CHECK(runtime.installation->executable_identity.file_index ==
+        replaced.value().executable_identity.file_index);
+    CHECK(child.stop());
+    runtime.game_process.reset();
+
+    runtime.resource_telemetry_worker.stop();
+    auto captured = kf2::config::capture_session_config(config, root / L"Data");
+    CHECK(captured.has_value());
+    runtime.session_config_snapshot = std::move(captured.value());
+    runtime.session_config_waiting_for_launch = true;
+    runtime.session_config_launch_deadline_ns = 0;
+    const auto prepared = runtime.prepare_automatic_external_launch_profile();
+    CHECK(prepared.has_value() && prepared.value());
+    CHECK(runtime.session_config_snapshot.has_value());
+    const auto snapshot_root = runtime.session_config_snapshot->snapshot_root;
+    const auto staged_engine = read_bytes(config / L"KFEngine.ini");
+    write_bytes(replacement, "not an executable");
+    CHECK(ReplaceFileW(executable.c_str(), replacement.c_str(), nullptr,
+        REPLACEFILE_WRITE_THROUGH, nullptr, nullptr));
+    const auto stale_preparation = runtime.prepare_automatic_external_launch_profile();
+    CHECK(!stale_preparation.has_value());
+    CHECK(runtime.session_config_snapshot->snapshot_root == snapshot_root);
+    CHECK(read_bytes(config / L"KFEngine.ini") == staged_engine);
+    runtime.execute_action("dashboard-launch");
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"GAME_EXECUTABLE_REVALIDATION_FAILED");
+    CHECK(runtime.session_config_snapshot->snapshot_root == snapshot_root);
+    CHECK(runtime.restore_protected_session_config(L"Identity test finished"));
+    CHECK(!runtime.session_config_snapshot.has_value());
+    const auto original_engine = read_bytes(config / L"KFEngine.ini");
+    const auto stale_unprepared = runtime.prepare_automatic_external_launch_profile();
+    CHECK(!stale_unprepared.has_value());
+    CHECK(!runtime.session_config_snapshot.has_value());
+    CHECK(read_bytes(config / L"KFEngine.ini") == original_engine);
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--executable-identity-child") {
+        Sleep(60'000);
+        return EXIT_SUCCESS;
+    }
+    if (argc == 2 && std::string_view{argv[1]} == "--executable-identity") {
+        return test_executable_identity_boundaries();
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--adaptive-restore-debt") {
         return test_adaptive_restore_debt();
     }

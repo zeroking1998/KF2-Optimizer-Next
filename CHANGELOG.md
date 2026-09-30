@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- KF2 launch preparation and new telemetry bindings now recheck the discovered
+  executable's volume/file identity. Replaced files require full installation
+  validation; invalid replacements cannot reuse a prepared start or discard
+  its recovery snapshot. Normal sampling adds no executable file queries.
 - Graphics INI reads now reject incomplete, non-finite, overflowing, and
   out-of-range numbers before converting them to resolution or quality values.
   Invalid texture-tuple integers remain Custom without silent normalization.

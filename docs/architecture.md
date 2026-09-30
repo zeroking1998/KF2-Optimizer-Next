@@ -11,6 +11,15 @@ allowed Documents tree. The `config` module parses verified UTF-8 INI files
 losslessly, applies only catalogued typed keys, and produces an immutable
 before/after preview. Manual requests and persisted locks override Adaptive.
 
+Before protected launch preparation or reuse, the discovered executable's
+volume/file identity is checked again. A newly found telemetry process receives
+the same check before session integration. A mismatch reruns validation of the
+selected installation, and telemetry retries against the refreshed identity
+instead of binding its stale candidate. Invalid replacements block integration
+without losing the paths or snapshots needed for restoration. Already bound
+processes retain their creation-time fast path; executable files are not polled
+on the 120-ms sample path or while no matching process is found.
+
 The `backup` module performs compare-and-swap guarded changes. Before any
 replacement it writes and verifies content-addressed SHA-256 objects, a manifest,
 and an explicit transaction journal. Replacements are atomic, re-read after the

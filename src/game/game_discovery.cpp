@@ -265,6 +265,24 @@ Result<GameInstallation> validate_game_candidate(
         {canonical_install, executable, canonical_config, source, identity.value(), 0});
 }
 
+Result<bool> verify_game_executable_identity(
+    const GameInstallation& installation) {
+    if (installation.executable.empty() ||
+        installation.executable_identity.file_index == 0) {
+        return Result<bool>::failure({ErrorCode::invalid_argument,
+            L"The discovered KF2 executable identity is unavailable", 0});
+    }
+    const auto current = read_identity(installation.executable);
+    if (!current.has_value()) return Result<bool>::failure(current.error());
+    if (current.value().volume_serial !=
+            installation.executable_identity.volume_serial ||
+        current.value().file_index != installation.executable_identity.file_index) {
+        return Result<bool>::failure({ErrorCode::stale_data,
+            L"KFGame.exe changed after discovery; the installation must be revalidated", 0});
+    }
+    return Result<bool>::success(true);
+}
+
 Result<GameInstallation> discover_game_installation(const GameDiscoveryInput& input) {
     struct CandidateList {
         const std::vector<std::filesystem::path>* paths;

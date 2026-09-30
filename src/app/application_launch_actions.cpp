@@ -429,10 +429,38 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities(
     return Result<bool>::success(true);
 }
 
+Result<bool> UiRuntime::revalidate_game_installation() {
+    if (!installation) {
+        return Result<bool>::failure({ErrorCode::not_found,
+            L"A verified KF2 installation is unavailable", 0});
+    }
+    const auto current = game::verify_game_executable_identity(*installation);
+    if (current.has_value()) return current;
+    if (!discovery_input) return Result<bool>::failure(current.error());
+
+    // Revalidate the selected installation, not another Steam library. Keep
+    // the previous paths and protected snapshot available for restoration if
+    // an update is incomplete or its replacement executable is invalid.
+    auto refreshed = game::validate_game_candidate(
+        installation->install_root, installation->config_root,
+        discovery_input->allowed_config_parent, installation->source);
+    if (!refreshed.has_value()) return Result<bool>::failure(refreshed.error());
+    refreshed.value().duplicate_candidates_ignored =
+        installation->duplicate_candidates_ignored;
+    installation = std::move(refreshed.value());
+    events->append({0, diagnostics::Severity::info,
+        "GAME_EXECUTABLE_REVALIDATED",
+        L"The changed KF2 executable passed installation validation before protected integration resumed",
+        L"discovery"});
+    return Result<bool>::success(true);
+}
+
 Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
     if (start_mode != StartMode::normal || !installation) {
         return Result<bool>::success(false);
     }
+    const auto verified = revalidate_game_installation();
+    if (!verified.has_value()) return verified;
     if (session_config_snapshot) {
         return Result<bool>::success(
             session_config_waiting_for_launch &&

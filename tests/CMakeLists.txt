@@ -485,6 +485,8 @@ add_test(NAME kf2_restore_cap_sync_failure_test
 add_test(NAME kf2_launch_profile_allocation_test
     COMMAND kf2_application_lifecycle_test
         --launch-profile-allocation)
+add_test(NAME kf2_executable_identity_boundary_test
+    COMMAND kf2_application_lifecycle_test --executable-identity)
 add_test(NAME kf2_stopped_target_fps_transaction_test
     COMMAND kf2_application_lifecycle_test
         --stopped-target-fps-transaction)
