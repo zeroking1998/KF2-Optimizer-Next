@@ -51,6 +51,114 @@ static void replace_source_at_checkpoint(
     }
 }
 
+static int check_redundant_recovery(const std::filesystem::path& root) {
+    struct Case {
+        const char* name;
+        const char* backup;
+        const char* original;
+        bool recover;
+        bool succeeds;
+        bool lock_backup{false};
+        bool deny_backup_status{false};
+        bool lock_active{false};
+        bool remove_marker{false};
+    };
+    const Case cases[] = {
+        {"valid-copies", "original-runtime", "original-runtime", false, true},
+        {"missing-backup", nullptr, "original-runtime", false, true},
+        {"corrupt-backup", "corrupt", "original-runtime", false, true},
+        {"corrupt-original", "original-runtime", "corrupt", false, true},
+        {"missing-original", "original-runtime", nullptr, false, true},
+        {"both-invalid", "corrupt-backup", "corrupt-original", false, false},
+        {"missing-both", nullptr, nullptr, false, false},
+        {"missing-backup-corrupt-original", nullptr, "corrupt", false, false},
+        {"startup-recovery", "corrupt", "original-runtime", true, true},
+        {"startup-both-invalid", "corrupt", "corrupt", true, false},
+        {"locked-backup", "original-runtime", "original-runtime", false, true,
+         true},
+        {"unknown-backup-status", "original-runtime", "original-runtime",
+         false, true, false, true},
+        {"blocked-replacement", "corrupt", "original-runtime", false, false,
+         false, false, true},
+        {"markerless-valid", "original-runtime", "original-runtime", false,
+         true, false, false, false, true},
+        {"markerless-locked-backup", "original-runtime", "original-runtime",
+         false, false, true, false, false, true},
+    };
+    for (const auto& scenario : cases) {
+        const auto directory = root / scenario.name;
+        const auto game = directory / "game";
+        const auto state = directory / "state";
+        const auto forwarder = directory / "flexRelease_x64.forwarder-lab.dll";
+        const auto backup = state / "flexRelease_x64.pre-lab.dll";
+        const auto original = game / "flexRelease_original.dll";
+        const auto marker = state / "flex-lab-transaction.marker";
+        std::filesystem::create_directories(game);
+        write(game / "flexRelease_x64.dll", "original-runtime");
+        write(forwarder, "forwarder");
+        CHECK(kf2::flex::install_offline_lab(
+            {game, state, forwarder, false, true, true, false}).has_value());
+        if (scenario.backup != nullptr) write(backup, scenario.backup);
+        else CHECK(std::filesystem::remove(backup));
+        if (scenario.original != nullptr) write(original, scenario.original);
+        else CHECK(std::filesystem::remove(original));
+        if (scenario.remove_marker) CHECK(std::filesystem::remove(marker));
+        const auto marker_before = read(marker);
+        HANDLE locked = INVALID_HANDLE_VALUE;
+        if (scenario.lock_backup) {
+            locked = CreateFileW(backup.c_str(), GENERIC_READ, 0, nullptr,
+                                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            CHECK(locked != INVALID_HANDLE_VALUE);
+        }
+        if (scenario.lock_active) {
+            locked = CreateFileW((game / "flexRelease_x64.dll").c_str(),
+                GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL, nullptr);
+            CHECK(locked != INVALID_HANDLE_VALUE);
+        }
+        if (scenario.deny_backup_status) {
+            denied_status_path = backup;
+            kf2::flex::set_lab_status_hook_for_testing(&fail_selected_status);
+        }
+        std::wstring details = L"Previous recovery details";
+        const auto result = scenario.recover
+            ? kf2::flex::recover_offline_lab(game, state, false, &details)
+            : kf2::flex::restore_offline_lab(game, state, false, &details);
+        kf2::flex::set_lab_status_hook_for_testing(nullptr);
+        denied_status_path.clear();
+        if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
+        CHECK(result.has_value() == scenario.succeeds);
+        if (scenario.succeeds) {
+            CHECK(result.value());
+            CHECK(read(game / "flexRelease_x64.dll") == "original-runtime");
+            CHECK(!std::filesystem::exists(marker));
+            CHECK(!std::filesystem::exists(original));
+            const bool backup_used = scenario.backup != nullptr &&
+                std::string{scenario.backup} == "original-runtime" &&
+                !scenario.lock_backup && !scenario.deny_backup_status;
+            CHECK(details.find(backup_used ? L"verified state backup"
+                                          : L"verified in-game original") !=
+                  std::wstring::npos);
+            if (!backup_used) CHECK(details.find(L"State backup rejected:") !=
+                                    std::wstring::npos);
+            if (scenario.original == nullptr ||
+                std::string{scenario.original} != "original-runtime") {
+                CHECK(details.find(L"In-game original rejected:") !=
+                      std::wstring::npos);
+            }
+        } else {
+            CHECK(details.empty());
+            CHECK(read(game / "flexRelease_x64.dll") == "forwarder");
+            CHECK(read(marker) == marker_before);
+            CHECK(read(original) == (scenario.original != nullptr
+                ? scenario.original : ""));
+        }
+        CHECK(read(backup) == (scenario.backup != nullptr
+            ? scenario.backup : ""));
+    }
+    return 0;
+}
+
 int main() {
     const auto root = std::filesystem::path{KF2_TEST_ROOT};
     std::error_code ec; std::filesystem::remove_all(root, ec);
@@ -81,6 +189,11 @@ int main() {
     auto retained = kf2::flex::recover_offline_lab(game, state, false);
     CHECK(retained.has_value() && !retained.value());
     CHECK(read(game / "flexRelease_x64.dll") == "forwarder");
+    std::wstring blocked_details = L"Previous recovery details";
+    CHECK(!kf2::flex::restore_offline_lab(
+        game, state, true, &blocked_details).has_value());
+    CHECK(blocked_details.empty());
+    CHECK(read(state / "flex-lab-transaction.marker") == installed_marker);
     CHECK(kf2::flex::restore_offline_lab(game, state, false).has_value());
     write(state / "flex-lab-transaction.marker",
           "schema=1\noriginal_sha256="
@@ -101,8 +214,9 @@ int main() {
     o.offline_confirmed = true;
     CHECK(kf2::flex::install_offline_lab(o).has_value());
     write(state / "flexRelease_x64.pre-lab.dll", "tampered");
-    CHECK(!kf2::flex::restore_offline_lab(game, state, false).has_value());
-    write(state / "flexRelease_x64.pre-lab.dll", "original-runtime");
+    CHECK(kf2::flex::restore_offline_lab(game, state, false).has_value());
+    CHECK(read(game / "flexRelease_x64.dll") == "original-runtime");
+    CHECK(kf2::flex::install_offline_lab(o).has_value());
     auto still_installed = kf2::flex::recover_offline_lab(game, state, false);
     CHECK(still_installed.has_value() && !still_installed.value());
     CHECK(read(game / "flexRelease_x64.dll") == "forwarder");
@@ -264,5 +378,6 @@ int main() {
     CHECK(!replaced_marker.has_value());
     CHECK(replaced_marker.error().code == kf2::ErrorCode::stale_data);
     CHECK(read(marker_race_game / "flexRelease_x64.dll") == "forwarder");
+    CHECK(check_redundant_recovery(root / "redundant-recovery") == 0);
     return 0;
 }

@@ -503,16 +503,19 @@ app::runtime::DispatchResult flex_restore(
     }
     const bool running = game::find_running_game_process(
         runtime.installation->executable).has_value();
+    std::wstring recovery_details;
     const auto restored = flex::restore_offline_lab(
         runtime.installation->install_root / L"Binaries" / L"Win64",
-        runtime.settings_path.parent_path() / L"flex-lab", running);
+        runtime.settings_path.parent_path() / L"flex-lab", running,
+        &recovery_details);
     show_notice(runtime,
                 restored.has_value() ? ui::NoticeSeverity::info
                                      : ui::NoticeSeverity::error,
                 restored.has_value() ? L"FLEX_ORIGINAL_RESTORED"
                                      : L"FLEX_RESTORE_BLOCKED",
                 restored.has_value()
-                    ? L"Original FleX runtime restored and hash-verified."
+                    ? L"Original FleX runtime restored and hash-verified. " +
+                          recovery_details
                     : restored.error().message);
     return app::runtime::DispatchResult::handled;
 }
