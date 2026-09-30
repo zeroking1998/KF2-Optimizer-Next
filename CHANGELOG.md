@@ -84,6 +84,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Steam achievement warming now runs in the main menu before offline or online
+  play, verifies loaded images, and does not repeat after successful map travel.
 - Failed live graphics restoration now remains pending across telemetry
   reconnects. Adaptive preserves the last confirmed quality and retries in the
   background before resuming control instead of assuming an unconfirmed 100%.
