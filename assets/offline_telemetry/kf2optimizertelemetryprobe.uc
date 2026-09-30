@@ -1317,9 +1317,9 @@ function RetireAdaptiveCorpseManagerOwnership(KFGoreManager NewManager)
         ++RetiredSleptCount;
     }
 
-    // Everything below belongs to the old manager generation. Keep only the
-    // two state-bearing physics ledgers above; their actors are released by a
-    // separate fair cursor after the new manager has initialized.
+    // Retire manager-owned caches, but keep living-Zed animation originals:
+    // those pawns can survive a GoreManager replacement in the same World.
+    // The two physics ledgers above use a separate fair release cursor.
     AdaptiveCorpseManager = None;
     bAdaptiveCorpseStaggerInitialized = false;
     AdaptiveFrozenCorpses.Length = 0;
@@ -1327,13 +1327,6 @@ function RetireAdaptiveCorpseManagerOwnership(KFGoreManager NewManager)
     AdaptiveBaselineSettleEntries.Length = 0;
     FixedMinimumCorpseLodCorpses.Length = 0;
     FixedMinimumCorpseLodAppliedMinModels.Length = 0;
-    FixedMinimumLivingVisualZeds.Length = 0;
-    FixedMinimumLivingAppliedMinLods.Length = 0;
-    FixedMinimumLivingAppliedAnimDistances.Length = 0;
-    FixedMinimumLivingAppliedAnimRates.Length = 0;
-    FixedMinimumLivingOriginalTickAnimOffscreen.Length = 0;
-    FixedMinimumLivingOriginalUpdateSkelOffscreen.Length = 0;
-    FixedMinimumLivingOffscreenAnimReduced.Length = 0;
     AdaptiveDistanceSleepTransitions.Length = 0;
     AdaptiveDistanceSleepTransitionCount = 0;
     AdaptiveDistanceSleepTransitionPruneCursor = 0;
@@ -1686,8 +1679,10 @@ function int FindFixedMinimumLivingVisualEntry(KFPawn_Monster Candidate)
     return -1;
 }
 
-function RemoveFixedMinimumLivingVisualEntry(int Index)
+function bool RemoveFixedMinimumLivingVisualEntry(int Index, string Reason)
 {
+    local KFPawn_Monster Candidate;
+
     if (Index < 0 || Index >= FixedMinimumLivingVisualZeds.Length ||
         Index >= FixedMinimumLivingAppliedMinLods.Length ||
         Index >= FixedMinimumLivingAppliedAnimDistances.Length ||
@@ -1696,7 +1691,16 @@ function RemoveFixedMinimumLivingVisualEntry(int Index)
         Index >= FixedMinimumLivingOriginalUpdateSkelOffscreen.Length ||
         Index >= FixedMinimumLivingOffscreenAnimReduced.Length)
     {
-        return;
+        return false;
+    }
+    Candidate = FixedMinimumLivingVisualZeds[Index];
+    // Missing mesh is not proof that the pawn is gone. Keep ownership until
+    // both flags read back correctly, or the actor is definitively deleted.
+    if (Candidate != None && !Candidate.bDeleteMe &&
+        FixedMinimumLivingOffscreenAnimReduced[Index] &&
+        !RestoreLivingOffscreenAnimation(Index, Reason))
+    {
+        return false;
     }
     FixedMinimumLivingVisualZeds.Remove(Index, 1);
     FixedMinimumLivingAppliedMinLods.Remove(Index, 1);
@@ -1705,6 +1709,7 @@ function RemoveFixedMinimumLivingVisualEntry(int Index)
     FixedMinimumLivingOriginalTickAnimOffscreen.Remove(Index, 1);
     FixedMinimumLivingOriginalUpdateSkelOffscreen.Remove(Index, 1);
     FixedMinimumLivingOffscreenAnimReduced.Remove(Index, 1);
+    return true;
 }
 
 function bool RestoreLivingOffscreenAnimation(int Index, string Reason)
@@ -1750,7 +1755,9 @@ function bool RestoreLivingOffscreenAnimation(int Index, string Reason)
 
 function PruneFixedMinimumLivingVisualEntries()
 {
+    local bool bRemoved;
     local int Index;
+    local int ScanBudget;
     local int Scanned;
     local KFPawn_Monster Candidate;
 
@@ -1762,22 +1769,18 @@ function PruneFixedMinimumLivingVisualEntries()
     FixedMinimumLivingPruneCursor = Clamp(
         FixedMinimumLivingPruneCursor, 0,
         FixedMinimumLivingVisualZeds.Length - 1);
+    // One bounded pass: do not retry a failed restore repeatedly in this tick.
+    ScanBudget = Min(AdaptiveCorpseScanBudget, FixedMinimumLivingVisualZeds.Length);
     while (FixedMinimumLivingVisualZeds.Length > 0 &&
-           Scanned < AdaptiveCorpseScanBudget)
+           Scanned < ScanBudget)
     {
-        Index = Clamp(
-            FixedMinimumLivingPruneCursor, 0,
-            FixedMinimumLivingVisualZeds.Length - 1);
+        Index = FixedMinimumLivingPruneCursor % FixedMinimumLivingVisualZeds.Length;
         Candidate = FixedMinimumLivingVisualZeds[Index];
+        bRemoved = false;
         if (Candidate == None || Candidate.bDeleteMe ||
             !Candidate.IsAliveAndWell() || Candidate.Mesh == None)
         {
-            if (Candidate != None && !Candidate.bDeleteMe &&
-                Candidate.Mesh != None)
-            {
-                RestoreLivingOffscreenAnimation(Index, "not_alive");
-            }
-            RemoveFixedMinimumLivingVisualEntry(Index);
+            bRemoved = RemoveFixedMinimumLivingVisualEntry(Index, "not_alive");
         }
         else if (Candidate.Mesh.MinLodModel !=
                      FixedMinimumLivingAppliedMinLods[Index] ||
@@ -1786,12 +1789,11 @@ function PruneFixedMinimumLivingVisualEntries()
                  Candidate.Mesh.AnimationLODFrameRate !=
                       FixedMinimumLivingAppliedAnimRates[Index])
         {
-            // Another KF2 system changed the mesh. Drop the stale readback;
-            // the fixed controller will verify and reapply it on a later scan.
-            RestoreLivingOffscreenAnimation(Index, "native_visual_state");
-            RemoveFixedMinimumLivingVisualEntry(Index);
+            // Discard stale visual readbacks only after animation ownership
+            // has been released. Failed restores must retain the originals.
+            bRemoved = RemoveFixedMinimumLivingVisualEntry(Index, "native_visual_state");
         }
-        else
+        if (!bRemoved)
         {
             FixedMinimumLivingPruneCursor =
                 (Index + 1) % FixedMinimumLivingVisualZeds.Length;
@@ -1892,6 +1894,8 @@ function bool ApplyLivingEnemyMinimumVisuals()
             {
                 return true;
             }
+            ScanPawn = FixedMinimumLivingScanPawn;
+            continue;
         }
         if (FixedMinimumLivingOffscreenAnimReduced[EntryIndex] &&
             (Candidate.Mesh.bTickAnimNodesWhenNotRendered ||
@@ -1903,6 +1907,8 @@ function bool ApplyLivingEnemyMinimumVisuals()
             {
                 return true;
             }
+            ScanPawn = FixedMinimumLivingScanPawn;
+            continue;
         }
         bVisualChanged =
             Candidate.Mesh.MinLodModel != TargetMinLod ||
@@ -1918,8 +1924,7 @@ function bool ApplyLivingEnemyMinimumVisuals()
                     TargetAnimDistance ||
                 Candidate.Mesh.AnimationLODFrameRate != TargetAnimRate)
             {
-                RestoreLivingOffscreenAnimation(EntryIndex, "visual_readback");
-                RemoveFixedMinimumLivingVisualEntry(EntryIndex);
+                RemoveFixedMinimumLivingVisualEntry(EntryIndex, "visual_readback");
                 ScanPawn = FixedMinimumLivingScanPawn;
                 continue;
             }
