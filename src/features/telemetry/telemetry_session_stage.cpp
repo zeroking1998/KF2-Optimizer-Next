@@ -771,7 +771,19 @@ void UiRuntime::try_attach_telemetry() {
         last_game_process_scan_ns = now;
         const auto discovered =
             game::find_running_game_process(installation->executable);
-        if (discovered.has_value()) process = discovered.value();
+        if (discovered.has_value()) {
+            const auto current = game::verify_game_executable_identity(*installation);
+            if (!current.has_value()) {
+                const auto refreshed = revalidate_game_installation();
+                telemetry_failure = refreshed.has_value()
+                    ? L"KF2 executable changed; installation revalidated before retrying telemetry"
+                    : refreshed.error().message;
+                // Do not bind the stale candidate or mistake rejection for a
+                // closed game and restore its protected INIs while it runs.
+                return;
+            }
+            process = discovered.value();
+        }
     }
     if (game_restart_handoff_previous_process) {
         const auto& previous = *game_restart_handoff_previous_process;

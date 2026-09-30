@@ -120,6 +120,13 @@ app::runtime::DispatchResult launch(
                     L"A verified KF2 installation was not found.");
         return app::runtime::DispatchResult::handled;
     }
+    const auto verified = runtime.revalidate_game_installation();
+    if (!verified.has_value()) {
+        show_notice(runtime, ui::NoticeSeverity::error,
+                    L"GAME_EXECUTABLE_REVALIDATION_FAILED",
+                    verified.error().message);
+        return app::runtime::DispatchResult::handled;
+    }
     if (product_game::find_running_game_process(
             runtime.installation->executable).has_value()) {
         show_notice(runtime, ui::NoticeSeverity::info,

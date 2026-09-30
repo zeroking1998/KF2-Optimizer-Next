@@ -525,6 +525,7 @@ struct UiRuntime {
     Result<bool> prepare_automatic_protected_launch_capabilities(
         bool fixed_flex_launch);
 
+    Result<bool> revalidate_game_installation();
     Result<bool> prepare_automatic_external_launch_profile();
 
     Result<bool> rearm_automatic_external_launch_profile();
