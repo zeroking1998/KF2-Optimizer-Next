@@ -11,6 +11,7 @@ namespace {
 
 #if defined(KF2_APPLICATION_LAUNCH_TESTING)
 void (*launch_change_probe)(config::SettingId, std::size_t){};
+void (*protected_launch_probe)(UiRuntime&, ProtectedLaunchPreparationStage){};
 #endif
 
 void upsert_startup_change(
@@ -56,6 +57,11 @@ std::optional<std::wstring_view> persisted_physical_gpu_key(
 void set_launch_change_probe_for_testing(
     void (*probe)(config::SettingId, std::size_t)) noexcept {
     launch_change_probe = probe;
+}
+
+void set_protected_launch_probe_for_testing(
+    void (*probe)(UiRuntime&, ProtectedLaunchPreparationStage)) noexcept {
+    protected_launch_probe = probe;
 }
 #endif
 
@@ -486,13 +492,26 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
         L"The exact pre-game KF2 INI state was captured before automatic external-launch preparation",
         L"config"});
 
+    const auto fail_preparation = [this](const Error& error,
+                                        std::wstring_view reason) {
+        if (restore_protected_session_config(reason)) {
+            return Result<bool>::failure(error);
+        }
+        model.set_recovery_required(true);
+        return Result<bool>::failure({ErrorCode::recovery_required,
+            error.message + L"; protected launch rollback could not be confirmed",
+            error.native_code});
+    };
+
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+    if (protected_launch_probe) protected_launch_probe(
+        *this, ProtectedLaunchPreparationStage::captured_settings);
+#endif
     const auto captured_values = config::read_catalog_values(
         session_config_snapshot->snapshot_root / L"files");
     if (!captured_values.has_value()) {
-        const auto error = captured_values.error();
-        static_cast<void>(restore_protected_session_config(
-            L"The captured FleX setting could not be verified"));
-        return Result<bool>::failure(error);
+        return fail_preparation(captured_values.error(),
+            L"The captured FleX setting could not be verified");
     }
     const auto physx = captured_values.value().find(
         config::SettingId::physx_level);
@@ -500,37 +519,41 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
         physx == captured_values.value().end()
             ? nullptr : std::get_if<int>(&physx->second);
     if (!configured_physx_level) {
-        static_cast<void>(restore_protected_session_config(
-            L"The captured FleX setting was unavailable"));
-        return Result<bool>::failure({
+        return fail_preparation({
             ErrorCode::stale_data,
             L"The user's captured KF2 FleX setting could not be verified",
-            0});
+            0}, L"The captured FleX setting was unavailable");
     }
     const bool fixed_flex_launch = should_prepare_fixed_flex_runtime(
         start_mode, *configured_physx_level);
 
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+    if (protected_launch_probe) protected_launch_probe(
+        *this, ProtectedLaunchPreparationStage::launch_profile);
+#endif
     const auto applied = apply_adaptive_launch_profile(fixed_flex_launch);
     if (!applied.has_value()) {
-        const auto error = applied.error();
-        static_cast<void>(restore_protected_session_config(
-            L"Automatic external-launch preparation failed"));
-        return Result<bool>::failure(error);
+        return fail_preparation(applied.error(),
+            L"Automatic external-launch preparation failed");
     }
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+    if (protected_launch_probe) protected_launch_probe(
+        *this, ProtectedLaunchPreparationStage::overlay_display);
+#endif
     const auto overlay_display = apply_overlay_compatible_display_mode();
     if (!overlay_display.has_value()) {
-        const auto error = overlay_display.error();
-        static_cast<void>(restore_protected_session_config(
-            L"Overlay-compatible fullscreen preparation failed"));
-        return Result<bool>::failure(error);
+        return fail_preparation(overlay_display.error(),
+            L"Overlay-compatible fullscreen preparation failed");
     }
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+    if (protected_launch_probe) protected_launch_probe(
+        *this, ProtectedLaunchPreparationStage::capabilities);
+#endif
     const auto capabilities =
         prepare_automatic_protected_launch_capabilities(fixed_flex_launch);
     if (!capabilities.has_value()) {
-        const auto error = capabilities.error();
-        static_cast<void>(restore_protected_session_config(
-            L"Automatic external-launch capability preparation failed"));
-        return Result<bool>::failure(error);
+        return fail_preparation(capabilities.error(),
+            L"Automatic external-launch capability preparation failed");
     }
 
     // A zero deadline deliberately means that the verified runtime
