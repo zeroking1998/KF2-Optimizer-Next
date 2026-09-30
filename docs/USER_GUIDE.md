@@ -109,6 +109,11 @@ While KF2 is running in its main menu, the page shows values confirmed by
 KF2's own applied Graphics-menu getter, including **INI override** where a
 saved value does not match a built-in preset. Values selected in KF2's menu
 before pressing **Apply** are not yet treated as applied settings.
+Present numeric INI values must be complete, finite, and within the supported
+ranges. An invalid scalar value makes the graphics snapshot unavailable and
+identifies the setting without rewriting it. Missing optional keys retain their
+existing display defaults. Malformed or non-preset texture-tuple integers remain
+**Custom** and are preserved unless you explicitly change that texture option.
 The app does not expose VSync or Variable frame rate controls. When KF2 is
 closed and the app opens, an enabled VSync value or disabled frame-rate
 smoothing is corrected through the same verified backup transaction. An

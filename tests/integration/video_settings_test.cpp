@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 
 #include "kf2/config/ini_document.hpp"
 #include "kf2/game/video_settings.hpp"
@@ -100,6 +101,178 @@ bool rejects_or_blocks_mutation(MutationPlan& plan,
                                            : !loaded.has_value());
 }
 
+int check_numeric_video_values(const std::filesystem::path& root,
+                               const std::string& system,
+                               const std::string& game,
+                               const std::string& engine) {
+    std::filesystem::create_directories(root);
+    struct InvalidValue {
+        const wchar_t* key;
+        const wchar_t* value;
+        bool script{false};
+    };
+    const InvalidValue invalid_values[] = {
+        {L"ResX", L"1920junk"},
+        {L"ResY", L"1080.5"},
+        {L"ResX", L"2147483648"},
+        {L"ResY", L"-2147483649"},
+        {L"ResX", L"639"},
+        {L"ResY", L"479"},
+        {L"ResX", L"16385"},
+        {L"ResY", L"0"},
+        {L"ResX", L"+"},
+        {L"ResX", L""},
+        {L"ImageGrainScaler", L"NaN"},
+        {L"ImageGrainScaler", L"inf"},
+        {L"ImageGrainScaler", L"-inf"},
+        {L"ImageGrainScaler", L"1e309"},
+        {L"ImageGrainScaler", L"1e-999"},
+        {L"ImageGrainScaler", L"1e100"},
+        {L"ImageGrainScaler", L"0.49"},
+        {L"ImageGrainScaler", L"37.51"},
+        {L"ImageGrainScaler", L"0.5junk"},
+        {L"ImageGrainScaler", L"0.5e"},
+        {L"ImageGrainScaler", L""},
+        {L"DetailMode", L"3"},
+        {L"DetailMode", L"-1"},
+        {L"SkeletalMeshLODBias", L"2"},
+        {L"DistanceFogQuality", L"3"},
+        {L"MaxAnisotropy", L"0"},
+        {L"MaxAnisotropy", L"17"},
+        {L"MaxShadowResolution", L"255"},
+        {L"MaxShadowResolution", L"4097"},
+        {L"BloomQuality", L"3"},
+        {L"ShadowTexelsPerPixel", L"NaN"},
+        {L"ShadowTexelsPerPixel", L"4.01"},
+        {L"DestructionLifetimeScale", L"1.2partial"},
+        {L"DestructionLifetimeScale", L"2.01"},
+        {L"EmitterPoolScale", L"0.24"},
+        {L"EmitterPoolScale", L"4.01"},
+        {L"DestructionLifetimeScale", L"NaN", true},
+        {L"DestructionLifetimeScale", L"1.2partial", true},
+        {L"DestructionLifetimeScale", L"2.01", true},
+        {L"EmitterPoolScale", L"inf", true},
+        {L"EmitterPoolScale", L"1e-999", true},
+        {L"EmitterPoolScale", L"4.01", true},
+    };
+    for (const auto& invalid : invalid_values) {
+        auto changed = kf2::config::IniDocument::parse(
+            invalid.script ? game : system);
+        CHECK(changed.has_value());
+        CHECK(changed.value().upsert(invalid.script ? L"Engine.WorldInfo"
+                                                   : L"SystemSettings",
+                                     invalid.key, invalid.value).changed);
+        const auto system_bytes = invalid.script ? system
+            : changed.value().serialize();
+        const auto game_bytes = invalid.script ? changed.value().serialize()
+                                               : game;
+        write_file(root / L"KFSystemSettings.ini", system_bytes);
+        write_file(root / L"KFGame.ini", game_bytes);
+        write_file(root / L"KFEngine.ini", engine);
+        const auto loaded = kf2::game::read_video_settings(root);
+        if (loaded.has_value()) {
+            std::wcerr << L"Accepted invalid numeric setting: " << invalid.key
+                       << L'=' << invalid.value << L'\n';
+        }
+        CHECK(!loaded.has_value());
+        CHECK(loaded.error().code == kf2::ErrorCode::stale_data);
+        CHECK(loaded.error().message.find(invalid.key) != std::wstring::npos);
+        for (const auto& expected : {
+                 std::pair{L"KFSystemSettings.ini", system_bytes},
+                 std::pair{L"KFGame.ini", game_bytes},
+                 std::pair{L"KFEngine.ini", engine}}) {
+            std::ifstream input(root / expected.first, std::ios::binary);
+            CHECK(std::string(std::istreambuf_iterator<char>{input}, {}) ==
+                  expected.second);
+        }
+    }
+
+    // Bounds come from the existing configuration catalog and menu readback.
+    // Numeric syntax may include surrounding whitespace and a leading sign.
+    auto valid = kf2::config::IniDocument::parse(system);
+    CHECK(valid.has_value());
+    CHECK(valid.value().upsert(L"SystemSettings", L"ResX", L"\t+640\t").changed);
+    CHECK(valid.value().upsert(L"SystemSettings", L"ResY", L" +480 ").changed);
+    CHECK(valid.value().upsert(L"SystemSettings", L"ImageGrainScaler", L" +3.75e1 ").changed);
+    CHECK(valid.value().upsert(L"SystemSettings", L"DistanceFogQuality", L"2").changed);
+    CHECK(valid.value().upsert(L"SystemSettings", L"MaxAnisotropy", L"8").changed);
+    write_file(root / L"KFSystemSettings.ini", valid.value().serialize());
+    write_file(root / L"KFGame.ini", game);
+    write_file(root / L"KFEngine.ini", engine);
+    auto loaded = kf2::game::read_video_settings(root);
+    CHECK(loaded.has_value());
+    CHECK(loaded.value().film_grain_percent == 100);
+    CHECK(kf2::game::video_choice_label(
+        kf2::game::VideoOption::resolution, loaded.value()) == L"640 × 480");
+    CHECK(valid.value().upsert(L"SystemSettings", L"ResX", L"16384").changed);
+    CHECK(valid.value().upsert(L"SystemSettings", L"ResY", L"16384").changed);
+    write_file(root / L"KFSystemSettings.ini", valid.value().serialize());
+    CHECK(kf2::game::read_video_settings(root).has_value());
+
+    struct Bounds {
+        const wchar_t* key;
+        const wchar_t* minimum;
+        const wchar_t* maximum;
+        bool script{false};
+    };
+    const Bounds bounds[] = {
+        {L"ResX", L"640", L"16384"},
+        {L"ResY", L"480", L"16384"},
+        {L"ImageGrainScaler", L"0.5", L"37.5"},
+        {L"DetailMode", L"0", L"2"},
+        {L"SkeletalMeshLODBias", L"0", L"1"},
+        {L"DistanceFogQuality", L"0", L"2"},
+        {L"MaxAnisotropy", L"1", L"16"},
+        {L"MaxShadowResolution", L"256", L"4096"},
+        {L"BloomQuality", L"0", L"2"},
+        {L"ShadowTexelsPerPixel", L"0.1", L"4.0"},
+        {L"DestructionLifetimeScale", L"0.1", L"2.0"},
+        {L"EmitterPoolScale", L"0.25", L"4.0"},
+        {L"DestructionLifetimeScale", L"0.1", L"2.0", true},
+        {L"EmitterPoolScale", L"0.25", L"4.0", true},
+    };
+    for (const bool maximum : {false, true}) {
+        valid = kf2::config::IniDocument::parse(system);
+        auto script = kf2::config::IniDocument::parse(game);
+        CHECK(valid.has_value() && script.has_value());
+        for (const auto& bound : bounds) {
+            auto& target = bound.script ? script.value() : valid.value();
+            const auto change = target.upsert(
+                bound.script ? L"Engine.WorldInfo" : L"SystemSettings",
+                bound.key, maximum ? bound.maximum : bound.minimum);
+            CHECK(change.shadowed_occurrences == 0);
+        }
+        write_file(root / L"KFSystemSettings.ini", valid.value().serialize());
+        write_file(root / L"KFGame.ini", script.value().serialize());
+        loaded = kf2::game::read_video_settings(root);
+        CHECK(loaded.has_value());
+        CHECK(loaded.value().film_grain_percent == (maximum ? 100 : 0));
+    }
+    write_file(root / L"KFGame.ini", game);
+
+    // Invalid tuple integers are safely presented as Custom, never as a
+    // matching vanilla preset. Existing custom bias values remain supported.
+    const auto texture_index = static_cast<std::size_t>(
+        kf2::game::VideoOption::texture_resolution);
+    for (const auto* bias : {L"0junk", L"2147483648", L"-2147483649", L"9"}) {
+        valid = kf2::config::IniDocument::parse(system);
+        CHECK(valid.has_value());
+        CHECK(valid.value().upsert(L"SystemSettings", L"TEXTUREGROUP_World",
+            std::wstring{L"(LODBias="} + bias +
+                L",MinMagFilter=Aniso,MipFilter=Linear)").changed);
+        write_file(root / L"KFSystemSettings.ini", valid.value().serialize());
+        loaded = kf2::game::read_video_settings(root);
+        CHECK(loaded.has_value());
+        CHECK(loaded.value().choices[texture_index] == -1);
+        const auto preview = kf2::game::build_video_preview(
+            root, loaded.value(), &loaded.value());
+        CHECK(preview.has_value());
+        CHECK(preview.value().files[0].proposed_bytes ==
+              valid.value().serialize());
+    }
+    return EXIT_SUCCESS;
+}
+
 }  // namespace
 
 int main() {
@@ -131,6 +304,8 @@ int main() {
 
     auto loaded = kf2::game::read_video_settings(root);
     CHECK(loaded.has_value());
+    CHECK(check_numeric_video_values(root / L"numeric-values", system, game,
+                                    engine) == EXIT_SUCCESS);
 
     // A graphics snapshot holds all three INIs against writes and replacement
     // until every exact, bounded read and metadata check has completed.
