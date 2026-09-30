@@ -87,6 +87,9 @@ are visible immediately.
 - Graphics INI reads now reject incomplete, non-finite, overflowing, and
   out-of-range numbers before converting them to resolution or quality values.
   Invalid texture-tuple integers remain Custom without silent normalization.
+- DXGI timing startup now stops its ETW session and joins any created worker
+  if another worker cannot start, returning unavailable telemetry instead of
+  terminating the application. A later attempt can start normally.
 - FleX recovery now uses the remaining transaction-hash-verified original when
   the other recovery copy is missing, damaged, or unreadable. Diagnostics
   identify the selected source without weakening marker-free legacy recovery.
