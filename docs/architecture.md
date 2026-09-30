@@ -17,8 +17,11 @@ the same check before session integration. A mismatch reruns validation of the
 selected installation, and telemetry retries against the refreshed identity
 instead of binding its stale candidate. Invalid replacements block integration
 without losing the paths or snapshots needed for restoration. Already bound
-processes retain their creation-time fast path; executable files are not polled
-on the 120-ms sample path or while no matching process is found.
+processes use a zero-timeout process-handle wait and creation-time comparison:
+an exited process is rejected even when a sampler retains its handle, while
+PID reuse remains rejected. Initial binding and window recovery also require
+a live process. Executable files are not polled on the 120-ms sample path or
+while no matching process is found.
 
 The `backup` module performs compare-and-swap guarded changes. Before any
 replacement it writes and verifies content-addressed SHA-256 objects, a manifest,

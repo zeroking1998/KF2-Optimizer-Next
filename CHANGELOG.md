@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Exited KF2 processes no longer remain bound while telemetry retains a
+  process handle. Nonblocking liveness checks preserve PID-reuse protection
+  and let normal restart handoff bind the replacement process.
 - KF2 launch preparation and new telemetry bindings now recheck the discovered
   executable's volume/file identity. Replaced files require full installation
   validation; invalid replacements cannot reuse a prepared start or discard
