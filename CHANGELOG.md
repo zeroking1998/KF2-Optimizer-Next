@@ -90,6 +90,9 @@ are visible immediately.
 - DXGI timing startup now stops its ETW session and joins any created worker
   if another worker cannot start, returning unavailable telemetry instead of
   terminating the application. A later attempt can start normally.
+- Accessibility slider requests are bounded before numeric conversion, so
+  extreme values reach the correct endpoint. Invalid slider metadata and
+  non-finite requests are rejected without calling the setting callback.
 - FleX recovery now uses the remaining transaction-hash-verified original when
   the other recovery copy is missing, damaged, or unreadable. Diagnostics
   identify the selected source without weakening marker-free legacy recovery.

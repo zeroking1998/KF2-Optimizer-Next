@@ -555,12 +555,19 @@ HRESULT NodeProvider::SetValue(double requested) {
         if (!std::isfinite(requested) || !context_->set_slider_value) {
             return UIA_E_NOTSUPPORTED;
         }
-        const int step = std::max(1, current.slider->small_step);
-        int value = current.slider->minimum + static_cast<int>(std::lround(
-            (requested - static_cast<double>(current.slider->minimum)) /
-            static_cast<double>(step))) * step;
-        value = std::clamp(value, current.slider->minimum,
-                           current.slider->maximum);
+        const auto& slider = *current.slider;
+        if (slider.minimum > slider.maximum || slider.small_step <= 0) {
+            return UIA_E_NOTSUPPORTED;
+        }
+        const double minimum = slider.minimum;
+        const double maximum = slider.maximum;
+        // Bound the double before rounding. Even the full int range fits
+        // exactly here; no intermediate integer offset or product can overflow.
+        const double bounded = std::clamp(requested, minimum, maximum);
+        const double rounded = minimum + std::round(
+            (bounded - minimum) / slider.small_step) * slider.small_step;
+        const int value = bounded == maximum ? slider.maximum
+            : static_cast<int>(std::clamp(rounded, minimum, maximum));
         (void)context_->model->focus_action(*current.action_id);
         context_->set_slider_value(*current.action_id, value);
         if (context_->invalidate) context_->invalidate();
