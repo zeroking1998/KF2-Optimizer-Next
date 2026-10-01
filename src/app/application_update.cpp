@@ -8,6 +8,7 @@
 #include <exception>
 #include <mutex>
 #include <optional>
+#include <type_traits>
 
 #include "kf2/platform/windows/atomic_file.hpp"
 #include "kf2/platform/windows/state_environment.hpp"
@@ -70,6 +71,30 @@ update::PersistedUpdateState persisted_state(
         state.last_result = update::PersistedCheckResult::current;
     }
     return state;
+}
+
+[[nodiscard]] bool persist_update_snapshot(
+    UiRuntime& runtime, const update::UpdateSnapshot& snapshot) {
+    try {
+        const auto saved = update::save_update_state(
+            runtime.updates.state_path, persisted_state(snapshot));
+        if (saved.has_value()) {
+            if (runtime.model.notice() &&
+                runtime.model.notice()->code == L"UPDATE_STATE_SAVE_FAILED") {
+                runtime.model.clear_notice();
+            }
+            return true;
+        }
+    } catch (...) {
+        // Cache preparation/persistence must not discard a network result or
+        // prevent an already accepted check from starting its worker.
+    }
+    runtime.model.set_notice({
+        ui::NoticeSeverity::error,
+        L"UPDATE_STATE_SAVE_FAILED",
+        L"Update state could not be saved. Unsaved check information is kept only for this session.",
+        L"Check free space and write access, then retry. An ignore preference is not applied until saving succeeds."});
+    return false;
 }
 
 }  // namespace
@@ -142,8 +167,7 @@ void UiRuntime::start_update_check(update::CheckTrigger trigger) {
         refresh_update_presentation();
         return;
     }
-    static_cast<void>(update::save_update_state(
-        updates.state_path, persisted_state(updates.controller.snapshot())));
+    static_cast<void>(persist_update_snapshot(*this, updates.controller.snapshot()));
     try {
         const auto state = std::make_shared<UpdateCheckAsyncState>();
         const std::string installed =
@@ -176,9 +200,8 @@ void UiRuntime::start_update_check(update::CheckTrigger trigger) {
             Result<std::optional<update::ReleaseInfo>>::failure(
                 {ErrorCode::internal_failure,
                  L"Update check could not start its background worker", 0}));
-        static_cast<void>(update::save_update_state(
-            updates.state_path,
-            persisted_state(updates.controller.snapshot())));
+        // Failure changes only volatile status; attempt/backoff metadata was
+        // already attempted above. Do not write the identical state again.
     }
     refresh_update_presentation();
 }
@@ -192,9 +215,11 @@ void UiRuntime::poll_update_check() {
         outcome.emplace(std::move(*updates.check->outcome));
     }
     updates.check.reset();
+    const bool succeeded = outcome->has_value();
     updates.controller.complete_check(std::move(*outcome));
-    static_cast<void>(update::save_update_state(
-        updates.state_path, persisted_state(updates.controller.snapshot())));
+    if (succeeded) {
+        static_cast<void>(persist_update_snapshot(*this, updates.controller.snapshot()));
+    }
     refresh_update_presentation();
 }
 
@@ -337,19 +362,24 @@ void UiRuntime::dismiss_update() {
 }
 
 void UiRuntime::ignore_update() {
+    if (!updates.controller.snapshot().cached_available_version) {
+        refresh_update_presentation();
+        return;
+    }
     try {
-        updates.controller.ignore_available_version();
+        auto proposed = updates.controller;
+        proposed.ignore_available_version();
+        if (persist_update_snapshot(*this, proposed.snapshot())) {
+            static_assert(std::is_nothrow_move_assignable_v<update::UpdateController>);
+            updates.controller = std::move(proposed);
+        }
     } catch (...) {
         model.set_notice({
             ui::NoticeSeverity::error,
             L"UPDATE_IGNORE_FAILED",
             L"The available version could not be ignored. The previous update state was kept.",
             L"Close memory-intensive applications, then retry."});
-        refresh_update_presentation();
-        return;
     }
-    static_cast<void>(update::save_update_state(
-        updates.state_path, persisted_state(updates.controller.snapshot())));
     refresh_update_presentation();
 }
 
