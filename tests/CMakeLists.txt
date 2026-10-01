@@ -816,6 +816,8 @@ target_include_directories(kf2_adaptive_quality_response_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/src")
 add_test(NAME kf2_adaptive_quality_response_test
     COMMAND kf2_adaptive_quality_response_test)
+add_test(NAME kf2_present_loss_recovery_test
+    COMMAND kf2_adaptive_quality_response_test --present-loss-recovery)
 
 add_executable(kf2_telemetry_presentation_stage_test
     unit/telemetry_presentation_stage_test.cpp

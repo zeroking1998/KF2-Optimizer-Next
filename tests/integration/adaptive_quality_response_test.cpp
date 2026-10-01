@@ -1,5 +1,7 @@
 #include <cstdlib>
 #include <iostream>
+#include <limits>
+#include <string_view>
 
 #include "features/telemetry/telemetry_adaptive_stage.hpp"
 #include "kf2/telemetry/present_source.hpp"
@@ -24,7 +26,152 @@ void replace_gameplay(
 
 }  // namespace
 
-int main() {
+int test_present_loss_recovery() {
+    using namespace kf2;
+    using namespace kf2::telemetry_pipeline;
+    constexpr std::uint64_t second = 1'000'000'000ULL;
+    constexpr std::uint64_t step = 25'000'000ULL;
+    const telemetry::SampleIdentity identity{42, 9001};
+    for (const bool completed_loss : {true, false}) {
+        telemetry::PresentSource source{identity, 4096};
+        CHECK(source.start().has_value());
+        const auto append = [&](std::uint64_t begin, std::uint64_t end) {
+            for (auto at = begin; at <= end; at += step)
+                if (!source.ingest({identity, at, 1, true, 0, 7})) return false;
+            return true;
+        };
+        CHECK(append(10 * second, 12 * second));
+        const auto before = source.measure_window(10 * second, 12 * second);
+        CHECK(before.complete);
+        constexpr auto loss_ns = 12 * second + step;
+        source.request_drain(12 * second, second / 2);
+        CHECK(source.wait_for_drain(std::chrono::seconds{2}));
+        CHECK(source.latest_drain()->quality == telemetry::SampleQuality::good);
+        CHECK(source.ingest({identity, loss_ns, 1, completed_loss, 4, 7}) ==
+            completed_loss);
+        const auto lossy = source.drain(loss_ns, second / 2);
+        CHECK(lossy.quality == telemetry::SampleQuality::degraded);
+        CHECK(lossy.loss_count >= 4);
+        CHECK(!source.measure_window(10 * second, loss_ns).complete);
+
+        TelemetryFrame frame;
+        frame.identity = identity;
+        frame.adapter_luid = 77;
+        frame.active_gameplay = true;
+        frame.offline_gameplay = true;
+        AdaptiveSampleContext context;
+        context.current_map = "KF-Test";
+        context.last_telemetry_sample = 1;
+        const auto sample = [&](const telemetry::FrameMetrics& metrics,
+                                std::uint64_t now) {
+            frame.observed_at_ns = now;
+            frame.frames = metrics;
+            replace_gameplay(frame, [&](auto& gameplay) {
+                gameplay.map = "KF-Test";
+                gameplay.net_mode = "NM_Standalone";
+                gameplay.telemetry_sample = 1;
+                gameplay.telemetry_observed_ns = now;
+            });
+            return build_adaptive_sample(frame, context).sample;
+        };
+        optimizer::AdaptivePolicy policy;
+        const auto loss_sample = sample(lossy, loss_ns);
+        CHECK(loss_sample.sample_loss);
+        CHECK(optimizer::validate_adaptive_sample(policy, loss_sample, loss_ns).
+            quality == optimizer::AdaptiveDataQuality::degraded);
+        optimizer::AdaptiveGovernor governor;
+        const auto loss_decision = governor.evaluate(policy, loss_sample, loss_ns);
+        CHECK(loss_decision.data.quality == optimizer::AdaptiveDataQuality::degraded);
+        CHECK(!loss_decision.proposed_value);
+
+        constexpr auto fresh_begin = loss_ns + step;
+        constexpr auto fresh_end = fresh_begin + second;
+        CHECK(append(fresh_begin, fresh_end));
+        CHECK(source.drain(fresh_end, second / 2).loss_count >= 4);
+        CHECK(source.drain(fresh_end, second / 2, loss_ns).loss_count >= 4);
+        const auto fresh = source.drain(fresh_end, second / 2, fresh_begin);
+        CHECK(fresh.quality == telemetry::SampleQuality::good);
+        CHECK(fresh.loss_count == 0);
+        // Loss revokes old cached publications and fixed-window comparisons.
+        CHECK(source.wait_for_drain(std::chrono::seconds{2}));
+        CHECK(!source.latest_drain());
+        const auto fresh_window = source.measure_window(fresh_begin, fresh_end);
+        CHECK(fresh_window.complete);
+        CHECK(fresh_window.generation != before.generation);
+        CHECK(!source.measure_window(loss_ns, fresh_end).complete);
+        const auto fresh_sample = sample(fresh, fresh_end);
+        CHECK(!fresh_sample.sample_loss);
+        CHECK(optimizer::validate_adaptive_sample(policy, fresh_sample, fresh_end).
+            quality == optimizer::AdaptiveDataQuality::valid);
+        CHECK(governor.evaluate(policy, fresh_sample, fresh_end).data.quality ==
+            optimizer::AdaptiveDataQuality::valid);
+        source.request_drain(fresh_end, second / 2, fresh_begin);
+        CHECK(source.wait_for_drain(std::chrono::seconds{2}));
+        CHECK(source.latest_drain(fresh_begin)->loss_count == 0);
+
+        // No reset: the longest UI window recovers once it is wholly fresh.
+        constexpr auto recovered_end = loss_ns +
+            telemetry::PresentSource::longest_window_ns + 2 * step;
+        CHECK(append(fresh_end + step, recovered_end));
+        const auto recovered = source.drain(recovered_end, second / 2);
+        CHECK(recovered.quality == telemetry::SampleQuality::good);
+        CHECK(recovered.loss_count == 0);
+        CHECK(recovered.one_percent_low_fps == fresh.one_percent_low_fps);
+        CHECK(source.drain(recovered_end + second, second / 2).reason ==
+            telemetry::UnavailableReason::stale);
+        const auto generation = source.measure_window(
+            recovered_end - second, recovered_end).generation;
+        CHECK(!source.ingest({{99, 88}, recovered_end + step, 1, true, 5, 7}));
+        CHECK(source.measure_window(recovered_end - second, recovered_end).
+            generation == generation);
+        CHECK(source.drain(recovered_end, second / 2).loss_count == 0);
+
+        // Duplicate timestamps cannot hide loss; counters must not wrap to
+        // zero and certify affected data when the reported count saturates.
+        constexpr auto maximum_loss = std::numeric_limits<std::uint64_t>::max();
+        CHECK(!source.ingest({identity, recovered_end, 1, true, maximum_loss, 7}));
+        CHECK(!source.ingest({identity, recovered_end, 1, true, 1, 7}));
+        CHECK(source.drain(recovered_end, second / 2).loss_count == maximum_loss);
+
+        // Late/missing timestamps cannot move the loss fence behind already
+        // admitted samples or let another retained swapchain bypass it.
+        CHECK(source.ingest({identity, recovered_end + step, 1, true, 0, 8}));
+        for (const auto late_ns : {loss_ns, std::uint64_t{0}}) {
+            CHECK(!source.ingest({identity, late_ns, 1, false, 0, 7}));
+            CHECK(source.drain(recovered_end, second / 2).quality ==
+                telemetry::SampleQuality::degraded);
+            CHECK(!source.measure_window(recovered_end - second,
+                recovered_end).complete);
+        }
+        CHECK(append(recovered_end + step, recovered_end + second));
+        CHECK(source.drain(recovered_end + second, second / 2,
+            recovered_end).loss_count > 0);
+        CHECK(source.drain(recovered_end + second, second / 2,
+            recovered_end + step).loss_count > 0);
+        CHECK(source.drain(recovered_end + second, second / 2,
+            recovered_end + 2 * step).loss_count == 0);
+
+        // Existing reset/bind/start boundaries clear both count and fence.
+        source.reset_statistics();
+        CHECK(append(10 * second, 11 * second));
+        CHECK(source.drain(11 * second, second / 2).quality ==
+            telemetry::SampleQuality::good);
+        CHECK(source.ingest({identity, 11 * second + step, 1, true, 1, 7}));
+        source.bind(identity);
+        CHECK(append(10 * second, 11 * second));
+        CHECK(source.measure_window(10 * second, 11 * second).complete);
+        CHECK(source.ingest({identity, 11 * second + step, 1, true, 1, 7}));
+        CHECK(source.stop().has_value());
+        CHECK(source.start().has_value());
+        CHECK(append(10 * second, 11 * second));
+        CHECK(source.drain(11 * second, second / 2).loss_count == 0);
+    }
+    return EXIT_SUCCESS;
+}
+
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--present-loss-recovery")
+        return test_present_loss_recovery();
     using namespace kf2;
     using namespace kf2::telemetry_pipeline;
     constexpr std::uint64_t receipt_ns = 20'000'000'000ULL;
