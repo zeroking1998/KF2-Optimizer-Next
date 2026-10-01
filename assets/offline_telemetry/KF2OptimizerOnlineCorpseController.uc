@@ -19,7 +19,9 @@ struct OnlineFrozenCorpseState
 var array<OnlineFrozenCorpseState> FrozenCorpses;
 var int FreezeScanCursor;
 var int ReleaseScanCursor;
-var int VisualScanCursor;
+// Alternating categories must not consume each other's scan progress.
+var int FixedMinimumCorpseLodScanCursor;
+var int SleepingCorpseSkeletonScanCursor;
 var int VisualControlPhase;
 var float LastPhysicsMutationRealTime;
 var float LastVisualMutationRealTime;
@@ -429,14 +431,15 @@ function bool ApplyOneFixedMinimumCorpseLod()
     PoolLength = GoreManager.CorpsePool.Length;
     if (PoolLength <= 0)
     {
-        VisualScanCursor = 0;
+        FixedMinimumCorpseLodScanCursor = 0;
         return false;
     }
-    VisualScanCursor = Clamp(VisualScanCursor, 0, PoolLength - 1);
+    FixedMinimumCorpseLodScanCursor = Clamp(
+        FixedMinimumCorpseLodScanCursor, 0, PoolLength - 1);
     ScanCount = Min(8, PoolLength);
     for (Offset = 0; Offset < ScanCount; ++Offset)
     {
-        Index = (VisualScanCursor + Offset) % PoolLength;
+        Index = (FixedMinimumCorpseLodScanCursor + Offset) % PoolLength;
         Candidate = GoreManager.CorpsePool[Index];
         if (Candidate == None || Candidate.bDeleteMe ||
             KFPawn_Monster(Candidate) == None || Candidate.Mesh == None ||
@@ -460,7 +463,7 @@ function bool ApplyOneFixedMinimumCorpseLod()
             return false;
         }
         LastVisualMutationRealTime = WorldInfo.RealTimeSeconds;
-        VisualScanCursor = (Index + 1) % PoolLength;
+        FixedMinimumCorpseLodScanCursor = (Index + 1) % PoolLength;
         if (!bLodReceiptReported)
         {
             bLodReceiptReported = true;
@@ -470,7 +473,8 @@ function bool ApplyOneFixedMinimumCorpseLod()
         }
         return true;
     }
-    VisualScanCursor = (VisualScanCursor + ScanCount) % PoolLength;
+    FixedMinimumCorpseLodScanCursor =
+        (FixedMinimumCorpseLodScanCursor + ScanCount) % PoolLength;
     return false;
 }
 
@@ -491,14 +495,15 @@ function bool ApplyOneSleepingCorpseSkeletonMinimum()
     PoolLength = GoreManager.CorpsePool.Length;
     if (PoolLength <= 0)
     {
-        VisualScanCursor = 0;
+        SleepingCorpseSkeletonScanCursor = 0;
         return false;
     }
-    VisualScanCursor = Clamp(VisualScanCursor, 0, PoolLength - 1);
+    SleepingCorpseSkeletonScanCursor = Clamp(
+        SleepingCorpseSkeletonScanCursor, 0, PoolLength - 1);
     ScanCount = Min(8, PoolLength);
     for (Offset = 0; Offset < ScanCount; ++Offset)
     {
-        Index = (VisualScanCursor + Offset) % PoolLength;
+        Index = (SleepingCorpseSkeletonScanCursor + Offset) % PoolLength;
         Candidate = GoreManager.CorpsePool[Index];
         if (Candidate == None || Candidate.bDeleteMe ||
             KFPawn_Monster(Candidate) == None || Candidate.Mesh == None ||
@@ -521,7 +526,7 @@ function bool ApplyOneSleepingCorpseSkeletonMinimum()
             return false;
         }
         LastVisualMutationRealTime = WorldInfo.RealTimeSeconds;
-        VisualScanCursor = (Index + 1) % PoolLength;
+        SleepingCorpseSkeletonScanCursor = (Index + 1) % PoolLength;
         if (!bSkeletonReceiptReported)
         {
             bSkeletonReceiptReported = true;
@@ -532,7 +537,8 @@ function bool ApplyOneSleepingCorpseSkeletonMinimum()
         }
         return true;
     }
-    VisualScanCursor = (VisualScanCursor + ScanCount) % PoolLength;
+    SleepingCorpseSkeletonScanCursor =
+        (SleepingCorpseSkeletonScanCursor + ScanCount) % PoolLength;
     return false;
 }
 

@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Online corpse LOD and sleeping-skeleton scans now keep independent progress,
+  so alternating checks no longer permanently skip parts of the corpse pool.
+  Existing scan budgets and action cadence remain unchanged.
 - Retired hidden Adaptive aggressiveness profiles. Legacy values migrate away,
   so identical user settings now use the same fixed controller policy instead
   of different behavior inherited from old portable settings.
