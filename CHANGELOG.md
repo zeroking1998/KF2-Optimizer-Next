@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Adaptive toggles now save the preference before changing live or deferred
+  control. Failed writes leave the previous mode intact and cannot apply an
+  unsaved change when gameplay confirmation returns later.
 - Fixed a shutdown race that could leave the native frame-statistics worker
   asleep forever when stopping capture or changing sessions.
 - Native FPS capture now bounds orphaned Present starts and invalidates pending
