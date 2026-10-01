@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Failed application initialization no longer creates a false interrupted-session
+  marker. Genuine prior interruption evidence remains unchanged until startup
+  reaches the operational boundary.
 - Adaptive quality recovery now requires a complete valid memory measurement
   or explicit valid paging signal. Partial, invalid or zero-budget memory
   values no longer masquerade as confirmed free capacity.
