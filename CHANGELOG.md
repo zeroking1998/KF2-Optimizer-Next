@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Removed the inert saved quality-policy preference and its misleading status
+  and diagnostic labels. Valid legacy values migrate away once while user
+  graphics, goals and Adaptive control remain unchanged.
 - Online corpse LOD and sleeping-skeleton scans now keep independent progress,
   so alternating checks no longer permanently skip parts of the corpse pool.
   Existing scan budgets and action cadence remain unchanged.

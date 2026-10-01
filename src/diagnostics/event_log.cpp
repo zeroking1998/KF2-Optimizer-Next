@@ -561,8 +561,7 @@ std::string serialize_product_report_json(const ProductReport& report) {
     }
     output << '}';
     output << "},\"optimizer\":{\"profile\":\""
-           << text(report.optimizer_profile) << "\",\"quality_policy\":\""
-           << text(report.quality_policy) << "\",\"target_fps\":"
+           << text(report.optimizer_profile) << "\",\"target_fps\":"
            << report.target_fps << ",\"restore_config_after_game\":"
            << (report.restore_config_after_game ? "true" : "false")
            << "},\"overlay\":{\"enabled\":"

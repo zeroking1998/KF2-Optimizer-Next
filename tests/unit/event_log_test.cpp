@@ -252,8 +252,7 @@ int main() {
         .performance_analysis = L"p95 16.2 ms | p99 17.1 ms | stutters 0",
         .hardware = L"CPU 16 | GPU Test",
         .flex = L"FleX healthy",
-        .optimizer_profile = L"balanced",
-        .quality_policy = L"exact",
+        .optimizer_profile = L"user settings",
         .overlay_position = L"top right",
         .target_fps = 62,
         .overlay_scale_percent = 100,
@@ -482,6 +481,9 @@ int main() {
                        "\"zed_time_active\":true,\"snapshot_fresh\":true,"
                        "\"oldest_snapshot_age_ms\":250}") !=
           std::string::npos);
+    CHECK(product.find("\"quality_policy\"") == std::string::npos);
+    CHECK(product.find("\"optimizer\":{\"profile\":\"user settings\","
+                       "\"target_fps\":62") != std::string::npos);
     CHECK(product.find("\"performance_analysis\":\"p95 16.2 ms") !=
           std::string::npos);
     CHECK(product.find("\"events\":[") != std::string::npos);

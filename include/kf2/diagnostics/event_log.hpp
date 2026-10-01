@@ -114,7 +114,6 @@ struct ProductReport {
     std::wstring hardware;
     std::wstring flex;
     std::wstring optimizer_profile;
-    std::wstring quality_policy;
     std::wstring overlay_position;
     int target_fps{0};
     int overlay_scale_percent{100};
