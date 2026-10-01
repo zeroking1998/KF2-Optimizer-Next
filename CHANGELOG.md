@@ -84,6 +84,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep unsuccessful corpse wake attempts tracked for fair, bounded retries,
+  and restore skeleton updates when wake is confirmed, including late wakes.
 - Offline corpse restoration now yields after a failed attempt and fairly
   shares release turns with active/retired wake queues. Failed collision/tick
   readbacks no longer consume the physics slot; original retry state is kept.
