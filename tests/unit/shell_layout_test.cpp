@@ -479,6 +479,28 @@ int main() {
     CHECK(action(available_updates, "settings-updates-later") != nullptr);
     CHECK(action(available_updates, "settings-updates-ignore") != nullptr);
 
+    // Busy state must disable every mutation entry, even if the presentation
+    // still carries a previously installable release during a transition.
+    for (int mode = 0; mode < 3; ++mode) {
+        auto busy_status = available_status;
+        busy_status.update_checking = mode == 0;
+        busy_status.update_installing = mode == 1;
+        busy_status.package_actions_busy = mode == 2;
+        model.set_status(busy_status);
+        static_cast<void>(model.focus_destination(Destination::dashboard));
+        static_cast<void>(model.activate_focused());
+        const auto busy_home = layout_shell(model, 1440, 900);
+        CHECK(!action(busy_home, "header-update-install")->enabled);
+        CHECK(!action(busy_home, "settings-updates-install")->enabled);
+        CHECK(!action(busy_home, "header-repair")->enabled);
+        static_cast<void>(model.focus_destination(Destination::diagnostics));
+        static_cast<void>(model.activate_focused());
+        const auto busy_repair = layout_shell(model, 1440, 900);
+        CHECK(!action(busy_repair, "diagnostics-repair-package")->enabled);
+    }
+    static_cast<void>(model.focus_destination(Destination::dashboard));
+    static_cast<void>(model.activate_focused());
+
     auto cached_available_status = home_status;
     cached_available_status.update_newer_version_known = true;
     cached_available_status.update_prompt_visible = true;

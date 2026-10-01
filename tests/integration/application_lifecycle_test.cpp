@@ -39,6 +39,7 @@
 #include "kf2/update/update_state.hpp"
 #include "app/application_runtime.hpp"
 #include "app/runtime/feature_composition.hpp"
+#include "features/diagnostics/diagnostics_actions.hpp"
 #include "features/telemetry/telemetry_adaptive_stage.hpp"
 #include "features/telemetry/telemetry_collection_stage.hpp"
 #include "features/telemetry/telemetry_session_stage.hpp"
@@ -368,7 +369,132 @@ bool create_owned_repair_package(const std::filesystem::path& root) {
     return true;
 }
 
+int test_package_operation_exclusion() {
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"package-operation-exclusion";
+    fs::remove_all(root);
+    RepairScenario scenario{root / L"source", root / L"portable"};
+    CHECK(create_owned_repair_package(scenario.source));
+    CHECK(create_owned_repair_package(scenario.target));
+    const auto first = scenario.target / L"Data/Lab/KF2OptimizerTelemetry.u";
+    const auto second = scenario.target / L"Data/Documentation/SAFETY.md";
+    write_bytes(first, "damaged first");
+    write_bytes(second, "damaged second");
+    RepairTestHooks hooks{scenario};
+    kf2::diagnostics::EventLog events{128};
+    kf2::app::UiRuntime runtime{root / L"state", false,
+        kf2::config::Settings{}, events, std::nullopt,
+        kf2::app::StartMode::read_only, scenario.target};
+    fs::create_directories(runtime.updates.state_path.parent_path());
+    auto release_pause = std::unique_ptr<RepairPause, void (*)(RepairPause*)>{
+        &scenario.pause, [](RepairPause* pause) { pause->release(); }};
+    int repair_launches = 0;
+    runtime.package_repair_worker_launcher = [&](std::function<void()> worker) {
+        ++repair_launches;
+        return std::jthread{[worker = std::move(worker)] { worker(); }};
+    };
+    runtime.updates.worker_launcher = [](std::function<void()> worker) { worker(); };
+    int install_calls = 0;
+    runtime.updates.install_operation = [&](const kf2::update::ReleaseInfo&,
+                                            const fs::path&) {
+        ++install_calls;
+        return kf2::Result<kf2::update::PreparedUpdatePackage>::failure({
+            kf2::ErrorCode::io_failure, L"Fixture download unavailable", 0});
+    };
+    const auto enabled = [](const kf2::ui::UiModel& model, std::string_view id) {
+        const auto layout = kf2::ui::layout_shell(model, 1440, 900);
+        const auto found = std::find_if(layout.nodes.begin(), layout.nodes.end(),
+            [&](const auto& item) { return item.action_id == id; });
+        return found != layout.nodes.end() && found->enabled;
+    };
+
+    CHECK(runtime.updates.controller.begin_check(
+        kf2::update::CheckTrigger::manual, 1) == kf2::update::CheckStart::started);
+    runtime.refresh_update_presentation();
+    runtime.start_auto_package_repair();
+    CHECK(repair_launches == 0);
+    CHECK(!runtime.package_repair_state);
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"PACKAGE_ACTIONS_BUSY");
+    CHECK(runtime.model.status().package_actions_busy);
+    CHECK(!enabled(runtime.model, "header-repair"));
+    runtime.updates.controller.complete_check(
+        kf2::Result<std::optional<kf2::update::ReleaseInfo>>::success(
+            kf2::update::ReleaseInfo{
+                .repository = "zeroking1998/KF2-Optimizer-Next",
+                .tag = "v0.0.6-alpha", .version = "0.0.6-alpha",
+                .asset = kf2::update::ReleaseAsset{
+                    .file_name = "KF2OptimizerNext.zip",
+                    .download_url = "https://example.invalid/update.zip",
+                    .size_bytes = 1, .sha256 = std::string(64, 'a')}}));
+    runtime.refresh_update_presentation();
+    CHECK(runtime.model.status().update_installable);
+    runtime.start_update_install();
+    CHECK(install_calls == 1);
+    CHECK(runtime.updates.install);
+    runtime.start_auto_package_repair();
+    CHECK(repair_launches == 0);
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"PACKAGE_ACTIONS_BUSY");
+    CHECK(!enabled(runtime.model, "header-repair"));
+    runtime.poll_update_install();
+    CHECK(!runtime.updates.install);
+    CHECK(enabled(runtime.model, "header-repair"));
+
+    // Native repair is paused after one real atomic replacement. Update and
+    // manual-import dispatch must refuse work before any worker/picker starts.
+    runtime.start_auto_package_repair();
+    CHECK(scenario.pause.wait());
+    CHECK(repair_launches == 1);
+    CHECK(runtime.model.status().package_actions_busy);
+    CHECK(!runtime.model.status().update_installable);
+    CHECK(!enabled(runtime.model, "header-update-install"));
+    CHECK(!enabled(runtime.model, "settings-updates-install"));
+    runtime.start_update_install();
+    CHECK(install_calls == 1);
+    CHECK(!runtime.updates.install);
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"PACKAGE_ACTIONS_BUSY");
+    CHECK(kf2::features::diagnostics::repair_package(runtime, {}) ==
+          kf2::app::runtime::DispatchResult::handled);
+    CHECK(runtime.model.notice()->code == L"PACKAGE_ACTIONS_BUSY");
+    CHECK(read_bytes(first) == read_bytes(scenario.source / L"Data/Lab/KF2OptimizerTelemetry.u"));
+    CHECK(read_bytes(second) == "damaged second");
+    // Read-only checking remains usable, but completing that check must not
+    // unlock installation while native Repair still owns the package.
+    const auto available_release = *runtime.updates.controller.snapshot().available_release;
+    int check_calls = 0;
+    runtime.updates.check_operation = [&](std::string_view) {
+        ++check_calls;
+        return kf2::Result<std::optional<kf2::update::ReleaseInfo>>::success(available_release);
+    };
+    runtime.start_update_check(kf2::update::CheckTrigger::manual);
+    CHECK(check_calls == 1);
+    CHECK(runtime.updates.check);
+    runtime.poll_update_check();
+    CHECK(!runtime.updates.check);
+    CHECK(runtime.updates.controller.snapshot().phase == kf2::update::UpdatePhase::available);
+    CHECK(runtime.model.status().package_actions_busy);
+    CHECK(!runtime.model.status().update_installable);
+    scenario.pause.release();
+    runtime.package_repair_worker.join();
+    runtime.poll_auto_package_repair();
+    CHECK(!runtime.package_repair_state);
+    CHECK(!runtime.model.status().package_actions_busy);
+    CHECK(runtime.model.status().update_installable);
+    CHECK(enabled(runtime.model, "header-update-install"));
+    CHECK(enabled(runtime.model, "settings-updates-install"));
+    const auto audit = kf2::security::audit_package_integrity(scenario.target, "unknown");
+    CHECK(audit.has_value() && audit.value().verified);
+    runtime.start_update_install();
+    CHECK(install_calls == 2);
+    runtime.poll_update_install();
+    CHECK(!runtime.updates.install);
+    return EXIT_SUCCESS;
+}
+
 int test_package_repair_shutdown() {
+    CHECK(test_package_operation_exclusion() == EXIT_SUCCESS);
     namespace fs = std::filesystem;
     const auto root = fs::path{KF2_TEST_ROOT} / L"repair-shutdown";
     fs::remove_all(root);

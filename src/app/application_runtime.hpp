@@ -396,6 +396,11 @@ struct UiRuntime {
         const config::Settings& settings, StartMode mode) const;
     void enforce_saved_frame_control_compatibility();
     void initialize_update_state(const config::Settings& settings);
+    [[nodiscard]] bool package_actions_busy() const noexcept {
+        const auto phase = updates.controller.snapshot().phase;
+        return package_repair_state || phase == update::UpdatePhase::checking ||
+            phase == update::UpdatePhase::installing;
+    }
 
     UiRuntime(const std::filesystem::path& state_root, bool recovery_required,
               const config::Settings& settings, diagnostics::EventLog& event_log,

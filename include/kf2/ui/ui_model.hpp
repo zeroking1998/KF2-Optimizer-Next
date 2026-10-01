@@ -131,6 +131,7 @@ struct UiStatus {
     bool update_check_completed{false};
     bool update_installable{false};
     bool update_installing{false};
+    bool package_actions_busy{false};
     bool graphics_available{false};
     bool graphics_game_running{false};
     bool graphics_game_menu_readback{false};

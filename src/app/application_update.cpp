@@ -123,6 +123,7 @@ void UiRuntime::refresh_update_presentation() {
     status.automatic_update_checks = snapshot.automatic_checks_enabled;
     status.update_checking = snapshot.phase == update::UpdatePhase::checking;
     status.update_installing = snapshot.phase == update::UpdatePhase::installing;
+    status.package_actions_busy = package_actions_busy();
     status.update_available = snapshot.available_release.has_value();
     status.update_newer_version_known =
         snapshot.available_release.has_value() ||
@@ -130,7 +131,7 @@ void UiRuntime::refresh_update_presentation() {
     status.update_prompt_visible = status.update_newer_version_known &&
         !snapshot.dismissed;
     status.update_check_completed = snapshot.cached_check_completed;
-    status.update_installable = status.update_available &&
+    status.update_installable = status.update_available && !status.package_actions_busy &&
         snapshot.available_release->asset.has_value() &&
         snapshot.available_release->install_block_reason.empty();
     if (snapshot.available_release) {
@@ -384,6 +385,12 @@ void UiRuntime::ignore_update() {
 }
 
 void UiRuntime::start_update_install() {
+    if (package_actions_busy()) {
+        model.set_notice({ui::NoticeSeverity::info, L"PACKAGE_ACTIONS_BUSY",
+            L"Wait for the current update check, update installation or repair to finish.", L""});
+        refresh_update_presentation();
+        return;
+    }
     bool install_started{false};
     try {
         install_started =

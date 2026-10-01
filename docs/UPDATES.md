@@ -40,6 +40,15 @@ cache data at completion; a blocked initial save remains explicitly session-only
 
 ## Verification and installation
 
+Update installation, Auto Repair and manual package import use one busy gate.
+Repair/import cannot start during an update check or installation, and Install
+update cannot start while Auto Repair owns the package. Disabled buttons and
+direct action dispatch enforce the same rule. Manual import rechecks after its
+folder picker, before changing files. Update checks themselves are read-only
+and may run during Repair, but cannot promote to installation until it finishes.
+The existing owned repair worker is still joined before shutdown; closing its
+window waits for final verification or rollback instead of abandoning a write.
+
 The updater accepts only the exact Windows-x64 ZIP named for the selected
 version in the configured official repository. Before installation it checks:
 
