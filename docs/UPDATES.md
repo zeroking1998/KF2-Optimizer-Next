@@ -30,6 +30,14 @@ highlighted Update button.
 Internet and GitHub errors do not stop the optimizer. They remain quiet in the
 Updates status and can be retried manually.
 
+If local update state cannot be saved, a visible warning explains that unsaved
+check information is session-only. A completed check remains available in the
+current app run. **Don't show again** changes neither the ignored version nor
+the dialog state until its atomic save succeeds. A successful retry clears only
+that persistence warning, not unrelated warnings. Failed checks keep their
+attempt/backoff metadata from the initial save without rewriting identical
+cache data at completion; a blocked initial save remains explicitly session-only.
+
 ## Verification and installation
 
 The updater accepts only the exact Windows-x64 ZIP named for the selected

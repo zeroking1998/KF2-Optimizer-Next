@@ -226,6 +226,10 @@ are visible immediately.
 - Automatic update checks no longer inherit an extended cooldown from future
   saved timestamps after a backward clock jump. Normal daily throttling and
   failed-check retry delays remain unchanged.
+- Update-state write failures are now visible without discarding a completed
+  check. Don't show again changes only after its preference is saved; retrying
+  a successful save clears the matching warning. Failed checks no longer
+  write unchanged cache data twice.
 - Embedded overlay PNGs now require a loaded handle, readable bytes and a
   non-empty buffer before decoding. Failed resources keep the procedural
   overlay fallback without breaking otherwise valid images.

@@ -36,6 +36,7 @@
 #include "kf2/optimizer/startup_gpu_profile.hpp"
 #include "kf2/security/sha256.hpp"
 #include "kf2/ui/shell_layout.hpp"
+#include "kf2/update/update_state.hpp"
 #include "app/application_runtime.hpp"
 #include "app/runtime/feature_composition.hpp"
 #include "features/telemetry/telemetry_adaptive_stage.hpp"
@@ -626,7 +627,173 @@ int test_runtime_shutdown_exception_boundaries() {
 #endif
 }
 
+int test_update_state_persistence_boundaries() {
+    namespace fs = std::filesystem;
+    const auto test_root = fs::path{KF2_TEST_ROOT} / L"update-state-persistence";
+    fs::remove_all(test_root);
+    kf2::diagnostics::EventLog events{128};
+    kf2::app::UiRuntime runtime{test_root / L"Data", false,
+        kf2::config::Settings{}, events, std::nullopt,
+        kf2::app::StartMode::read_only, test_root / L"portable"};
+    fs::create_directories(runtime.updates.state_path.parent_path());
+    CHECK(kf2::update::save_update_state(runtime.updates.state_path, {
+        .last_check_unix_seconds = 1,
+        .last_result = kf2::update::PersistedCheckResult::current,
+        .ignored_version = "0.0.3-alpha",
+        .last_attempt_unix_seconds = 1}).has_value());
+    runtime.updates.controller.restore_preferences(
+        true, 1, true, {}, "0.0.3-alpha", 1);
+    runtime.model.clear_notice();
+    runtime.updates.worker_launcher = [](std::function<void()> worker) {
+        worker();
+    };
+    int network_calls = 0;
+    runtime.updates.check_operation = [&](std::string_view) {
+        ++network_calls;
+        return kf2::Result<std::optional<kf2::update::ReleaseInfo>>::success(
+            kf2::update::ReleaseInfo{
+                .repository = "zeroking1998/KF2-Optimizer-Next",
+                .tag = "v0.0.6-alpha",
+                .version = "0.0.6-alpha"});
+    };
+    const auto lock_state = [&](DWORD sharing = FILE_SHARE_READ) {
+        return std::unique_ptr<void, decltype(&CloseHandle)>{
+            CreateFileW(runtime.updates.state_path.c_str(), GENERIC_READ,
+                sharing, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr),
+            &CloseHandle};
+    };
+
+    // A real deny-delete handle blocks the production atomic writer. Failed
+    // attempt persistence must warn without blocking the background check.
+    const auto original = read_bytes(runtime.updates.state_path);
+    auto lease = lock_state();
+    CHECK(lease.get() != INVALID_HANDLE_VALUE);
+    runtime.start_update_check(kf2::update::CheckTrigger::manual);
+    CHECK(network_calls == 1);
+    CHECK(runtime.updates.check);
+    CHECK(runtime.updates.controller.snapshot().phase ==
+          kf2::update::UpdatePhase::checking);
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"UPDATE_STATE_SAVE_FAILED");
+    CHECK(runtime.model.notice()->severity == kf2::ui::NoticeSeverity::error);
+    CHECK(runtime.model.notice()->message.find(L"only for this session") !=
+          std::wstring::npos);
+    CHECK(read_bytes(runtime.updates.state_path) == original);
+    lease.reset();
+    runtime.poll_update_check();
+    CHECK(!runtime.updates.check);
+    CHECK(!runtime.model.notice().has_value());
+    CHECK(runtime.updates.controller.snapshot().phase ==
+          kf2::update::UpdatePhase::available);
+    auto saved = kf2::update::load_update_state(runtime.updates.state_path);
+    CHECK(saved.has_value());
+    CHECK(saved.value().available_version == "0.0.6-alpha");
+    CHECK(saved.value().ignored_version == "0.0.3-alpha");
+
+    // A failed cache commit does not discard a successful network result.
+    runtime.model.clear_notice();
+    runtime.start_update_check(kf2::update::CheckTrigger::manual);
+    CHECK(!runtime.model.notice().has_value());
+    const auto before_completion = read_bytes(runtime.updates.state_path);
+    lease = lock_state();
+    CHECK(lease.get() != INVALID_HANDLE_VALUE);
+    runtime.poll_update_check();
+    CHECK(network_calls == 2);
+    CHECK(runtime.updates.controller.snapshot().available_release.has_value());
+    CHECK(runtime.model.status().update_available_version == L"0.0.6-alpha");
+    CHECK(runtime.model.status().update_prompt_visible);
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"UPDATE_STATE_SAVE_FAILED");
+    CHECK(read_bytes(runtime.updates.state_path) == before_completion);
+    runtime.model.clear_notice();
+    runtime.poll_update_check();
+    CHECK(!runtime.model.notice().has_value());
+
+    // Ignore is committed before its UI/controller state is promoted.
+    runtime.ignore_update();
+    CHECK(runtime.updates.controller.snapshot().ignored_version == "0.0.3-alpha");
+    CHECK(!runtime.updates.controller.snapshot().dismissed);
+    CHECK(runtime.model.status().update_prompt_visible);
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"UPDATE_STATE_SAVE_FAILED");
+    CHECK(read_bytes(runtime.updates.state_path) == before_completion);
+    lease.reset();
+    runtime.ignore_update();
+    CHECK(!runtime.model.notice().has_value());
+    CHECK(runtime.updates.controller.snapshot().ignored_version == "0.0.6-alpha");
+    CHECK(!runtime.model.status().update_prompt_visible);
+    saved = kf2::update::load_update_state(runtime.updates.state_path);
+    CHECK(saved.has_value());
+    CHECK(saved.value().ignored_version == "0.0.6-alpha");
+    {
+        kf2::app::UiRuntime reopened{test_root / L"Data", false,
+            kf2::config::Settings{}, events, std::nullopt,
+            kf2::app::StartMode::read_only, test_root / L"portable"};
+        CHECK(reopened.updates.controller.snapshot().ignored_version ==
+              "0.0.6-alpha");
+        CHECK(!reopened.model.status().update_prompt_visible);
+    }
+
+    // Failure completion changes only volatile status. Hold the original
+    // share-delete handle to prove there is no second identical file replace.
+    runtime.updates.check_operation = [](std::string_view) {
+        return kf2::Result<std::optional<kf2::update::ReleaseInfo>>::failure({
+            kf2::ErrorCode::io_failure, L"Fixture network unavailable", 0});
+    };
+    runtime.model.set_notice({kf2::ui::NoticeSeverity::error,
+        L"UNRELATED_FIXTURE_NOTICE", L"Other state remains unavailable", L""});
+    runtime.start_update_check(kf2::update::CheckTrigger::automatic);
+    // A recent success is throttled; an expired cooldown permits an automatic
+    // retry whose failure/backoff metadata is already committed at start.
+    CHECK(!runtime.updates.check);
+    runtime.updates.controller.restore_preferences(
+        true, 1, true, "0.0.6-alpha", "0.0.6-alpha", 1);
+    runtime.start_update_check(kf2::update::CheckTrigger::automatic);
+    CHECK(runtime.updates.check);
+    lease = lock_state(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+    CHECK(lease.get() != INVALID_HANDLE_VALUE);
+    BY_HANDLE_FILE_INFORMATION before{};
+    CHECK(GetFileInformationByHandle(lease.get(), &before));
+    runtime.poll_update_check();
+    CHECK(runtime.updates.controller.snapshot().phase ==
+          kf2::update::UpdatePhase::error);
+    CHECK(runtime.updates.controller.snapshot().status == L"Fixture network unavailable");
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"UNRELATED_FIXTURE_NOTICE");
+    auto after_lease = lock_state(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+    CHECK(after_lease.get() != INVALID_HANDLE_VALUE);
+    BY_HANDLE_FILE_INFORMATION after{};
+    CHECK(GetFileInformationByHandle(after_lease.get(), &after));
+    CHECK(before.dwVolumeSerialNumber == after.dwVolumeSerialNumber);
+    CHECK(before.nFileIndexHigh == after.nFileIndexHigh);
+    CHECK(before.nFileIndexLow == after.nFileIndexLow);
+    lease.reset();
+    after_lease.reset();
+    saved = kf2::update::load_update_state(runtime.updates.state_path);
+    CHECK(saved.has_value());
+    CHECK(saved.value().last_check_unix_seconds == 1);
+    CHECK(saved.value().last_attempt_unix_seconds > 1);
+    CHECK(saved.value().automatic_failure_count == 1);
+
+    // There is nothing to persist when no version can be ignored. A locked
+    // file and unrelated warning are left alone rather than generating work.
+    runtime.updates.controller = kf2::update::UpdateController{"0.0.5-alpha"};
+    const auto before_noop = read_bytes(runtime.updates.state_path);
+    lease = lock_state();
+    CHECK(lease.get() != INVALID_HANDLE_VALUE);
+    runtime.ignore_update();
+    CHECK(runtime.updates.controller.snapshot().ignored_version.empty());
+    CHECK(runtime.model.notice().has_value());
+    CHECK(runtime.model.notice()->code == L"UNRELATED_FIXTURE_NOTICE");
+    CHECK(read_bytes(runtime.updates.state_path) == before_noop);
+    lease.reset();
+
+    fs::remove_all(test_root);
+    return EXIT_SUCCESS;
+}
+
 int test_update_worker_exception_boundaries() {
+    CHECK(test_update_state_persistence_boundaries() == EXIT_SUCCESS);
     namespace fs = std::filesystem;
     const fs::path root{KF2_TEST_ROOT};
     const auto test_root = root / L"update-worker-exceptions";
