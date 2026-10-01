@@ -108,6 +108,9 @@ struct Context {
     std::atomic_bool connected{true};
 #if defined(KF2_AUTOMATION_PROVIDER_TESTING)
     bool fail_next_child_allocation{false};
+    LONG failed_runtime_id_position{-1};
+    HRESULT runtime_id_write_failure{E_FAIL};
+    HRESULT runtime_id_cleanup_result{S_FALSE};
 #endif
 };
 
@@ -504,9 +507,21 @@ HRESULT NodeProvider::GetRuntimeId(SAFEARRAY** runtime_id) {
     *runtime_id = SafeArrayCreateVector(VT_I4, 0, 2);
     if (!*runtime_id) return E_OUTOFMEMORY;
     for (LONG position = 0; position < 2; ++position) {
+#if defined(KF2_AUTOMATION_PROVIDER_TESTING)
+        const bool inject_failure =
+            context_->failed_runtime_id_position == position;
+        const auto written = inject_failure
+            ? context_->runtime_id_write_failure
+            : SafeArrayPutElement(*runtime_id, &position, &values[position]);
+        if (inject_failure) context_->failed_runtime_id_position = -1;
+#else
         const auto written = SafeArrayPutElement(
             *runtime_id, &position, &values[position]);
+#endif
         if (FAILED(written)) {
+#if defined(KF2_AUTOMATION_PROVIDER_TESTING)
+            context_->runtime_id_cleanup_result =
+#endif
             SafeArrayDestroy(*runtime_id);
             *runtime_id = nullptr;
             return written;
@@ -773,6 +788,17 @@ bool AutomationProvider::update_layout(ShellLayoutResult layout) noexcept {
 #if defined(KF2_AUTOMATION_PROVIDER_TESTING)
 void AutomationProvider::fail_next_child_allocation_for_testing() noexcept {
     implementation_->context->fail_next_child_allocation = true;
+}
+
+void AutomationProvider::fail_runtime_id_write_for_testing(
+    LONG position, HRESULT failure) noexcept {
+    implementation_->context->failed_runtime_id_position = position;
+    implementation_->context->runtime_id_write_failure = failure;
+    implementation_->context->runtime_id_cleanup_result = S_FALSE;
+}
+
+HRESULT AutomationProvider::runtime_id_cleanup_result_for_testing() const noexcept {
+    return implementation_->context->runtime_id_cleanup_result;
 }
 
 IUnknown* AutomationProvider::retain_child_for_testing(

@@ -46,6 +46,31 @@ int runtime_suffix(IUIAutomationElement* element) {
     return value;
 }
 
+bool direct_runtime_id(IRawElementProviderFragment* fragment, int& suffix) {
+    SAFEARRAY* runtime_id = nullptr;
+    const auto result = fragment->GetRuntimeId(&runtime_id);
+    if (FAILED(result) || !runtime_id) {
+        if (runtime_id) SafeArrayDestroy(runtime_id);
+        return false;
+    }
+    LONG lower = -1;
+    LONG upper = -1;
+    VARTYPE type = VT_EMPTY;
+    LONG position = 0;
+    int prefix = 0;
+    bool valid = SafeArrayGetDim(runtime_id) == 1 &&
+        SUCCEEDED(SafeArrayGetVartype(runtime_id, &type)) && type == VT_I4 &&
+        SUCCEEDED(SafeArrayGetLBound(runtime_id, 1, &lower)) && lower == 0 &&
+        SUCCEEDED(SafeArrayGetUBound(runtime_id, 1, &upper)) && upper == 1 &&
+        SUCCEEDED(SafeArrayGetElement(runtime_id, &position, &prefix)) &&
+        prefix == UiaAppendRuntimeId;
+    position = 1;
+    valid = valid &&
+        SUCCEEDED(SafeArrayGetElement(runtime_id, &position, &suffix)) &&
+        suffix > 0;
+    return SUCCEEDED(SafeArrayDestroy(runtime_id)) && valid;
+}
+
 class AutomationSink final : public kf2::platform::windows::WindowEventSink {
 public:
     void on_paint() override {}
@@ -453,7 +478,26 @@ int main() {
     CHECK(retained_child != nullptr);
     ComPtr<IRawElementProviderFragment> retained_fragment;
     CHECK(SUCCEEDED(retained_child.As(&retained_fragment)));
+    CHECK(retained_fragment->GetRuntimeId(nullptr) == E_POINTER);
+    int original_id = 0;
+    CHECK(direct_runtime_id(retained_fragment.Get(), original_id));
+    for (LONG position = 0; position < 2; ++position) {
+        const HRESULT failure = position == 0 ? E_ACCESSDENIED : E_UNEXPECTED;
+        provider.value().fail_runtime_id_write_for_testing(position, failure);
+        // The provider must clear even a pre-populated caller output pointer.
+        SAFEARRAY* failed_id = reinterpret_cast<SAFEARRAY*>(1);
+        CHECK(retained_fragment->GetRuntimeId(&failed_id) == failure);
+        CHECK(failed_id == nullptr);
+        CHECK(provider.value().runtime_id_cleanup_result_for_testing() == S_OK);
+        int retried_id = 0;
+        CHECK(direct_runtime_id(retained_fragment.Get(), retried_id));
+        CHECK(retried_id == original_id);
+    }
     provider.value().disconnect_for_testing();
+    SAFEARRAY* disconnected_id = reinterpret_cast<SAFEARRAY*>(1);
+    CHECK(retained_fragment->GetRuntimeId(&disconnected_id) ==
+          UIA_E_ELEMENTNOTAVAILABLE);
+    CHECK(disconnected_id == nullptr);
     for (const auto direction : {NavigateDirection_NextSibling,
                                  NavigateDirection_PreviousSibling}) {
         IRawElementProviderFragment* sibling = retained_fragment.Get();
