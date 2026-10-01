@@ -150,8 +150,16 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
         const auto found = game::find_running_game_process(
             installation->executable);
         if (found.has_value()) process = found.value();
+        else if (found.error().code != ErrorCode::not_found) return false;
     }
     if (!process || !game::is_game_process_current(*process)) {
+        if (process) {
+            const auto found = game::find_running_game_process(process->executable);
+            if (!found.has_value() && found.error().code != ErrorCode::not_found) {
+                adaptive_restore_debt = *process;
+                return false;
+            }
+        }
         adaptive_restore_debt.reset();
         return true;
     }
@@ -229,11 +237,9 @@ void UiRuntime::reset_local_adaptive_controller_for_mode(bool enabled) {
 
 bool UiRuntime::set_live_adaptive_enabled(
     bool enabled, std::wstring_view reason) {
-    if (!installation ||
-        !game::find_running_game_process(
-             installation->executable).has_value()) {
-        return true;
-    }
+    if (!installation) return true;
+    const auto running = game::find_running_game_process(installation->executable);
+    if (!running.has_value()) return running.error().code == ErrorCode::not_found;
     if (!game::valid_adaptive_control_token(adaptive_control_token)) {
         return false;
     }
@@ -790,6 +796,9 @@ void UiRuntime::try_attach_telemetry() {
                 return;
             }
             process = discovered.value();
+        } else if (discovered.error().code != ErrorCode::not_found) {
+            telemetry_failure = discovered.error().message;
+            return;
         }
     }
     if (game_restart_handoff_previous_process) {

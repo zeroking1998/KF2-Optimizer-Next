@@ -167,8 +167,8 @@ Result<Application> Application::start(const StartOptions& options) {
     if (!runtime->model.recovery_required() &&
         options.mode == StartMode::normal) {
         const bool game_running = runtime->installation &&
-            game::find_running_game_process(
-                runtime->installation->executable).has_value();
+            game::game_process_may_be_running(
+                runtime->installation->executable);
         if (runtime->installation && !game_running) {
             const auto capped = runtime->synchronize_frame_rate_cap();
             if (!capped.has_value()) {

@@ -72,8 +72,8 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     if (control->id == runtime::ControlId::film_grain) {
         if (!video_pending) reload_video_settings();
         if (!video_pending) return;
-        if (installation && game::find_running_game_process(
-                installation->executable).has_value()) {
+        if (installation && game::game_process_may_be_running(
+                installation->executable)) {
             show_notice(ui::NoticeSeverity::warning, L"GRAPHICS_GAME_RUNNING",
                         L"Close KF2 before changing its video settings.");
             return;
@@ -151,8 +151,8 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     }
 
     const bool game_running = installation &&
-        game::find_running_game_process(
-            installation->executable).has_value();
+        game::game_process_may_be_running(
+            installation->executable);
     const bool policy_bound_to_running_process =
         adaptive_session_policy.has_value() && game_running;
     if (adaptive_policy_changed) {

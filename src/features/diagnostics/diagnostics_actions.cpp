@@ -500,8 +500,8 @@ app::runtime::DispatchResult flex_restore(
                     L"Detect a valid KF2 installation first.");
         return app::runtime::DispatchResult::handled;
     }
-    const bool running = game::find_running_game_process(
-        runtime.installation->executable).has_value();
+    const bool running = game::game_process_may_be_running(
+        runtime.installation->executable);
     std::wstring recovery_details;
     const auto restored = flex::restore_offline_lab(
         runtime.installation->install_root / L"Binaries" / L"Win64",

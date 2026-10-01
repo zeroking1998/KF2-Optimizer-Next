@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Process inspection failures no longer mean KF2 is closed. Configuration,
+  package recovery, launch preparation and other stopped-game writes wait
+  until the process state can be verified safely.
 - Keep unsuccessful corpse wake attempts tracked for fair, bounded retries,
   and restore skeleton updates when wake is confirmed, including late wakes.
 - Offline corpse restoration now yields after a failed attempt and fairly

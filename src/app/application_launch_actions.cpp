@@ -472,8 +472,8 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
             session_config_waiting_for_launch &&
             session_config_launch_deadline_ns == 0);
     }
-    if (game::find_running_game_process(
-            installation->executable).has_value()) {
+    if (game::game_process_may_be_running(
+            installation->executable)) {
         events->append({0, diagnostics::Severity::warning,
             "ADAPTIVE_EXTERNAL_LAUNCH_TOO_LATE",
             L"KF2 was already running before the protected Adaptive runtime capabilities could be prepared; the native FPS cap remains independent and uses the saved value after restart",

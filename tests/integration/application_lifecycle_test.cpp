@@ -34,6 +34,7 @@
 #include "app/runtime/feature_composition.hpp"
 #include "features/telemetry/telemetry_session_stage.hpp"
 #include "features/telemetry/telemetry_frame.hpp"
+#include "../support/process_inspection_denial.hpp"
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -2176,7 +2177,8 @@ int test_graphics_restaging_failures() {
 }
 #endif
 
-int test_protected_shutdown_running_game(bool with_module = false) {
+int test_protected_shutdown_running_game(bool with_module = false,
+                                        bool deny_inspection = false) {
     namespace fs = std::filesystem;
     if (with_module && !fs::exists(KF2_TELEMETRY_ASSET)) {
         std::cout << "SDK package unavailable; module-specific lifecycle case skipped\n";
@@ -2263,6 +2265,59 @@ int test_protected_shutdown_running_game(bool with_module = false) {
             FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child.process));
         const auto running = kf2::game::find_running_game_process(executable);
         CHECK(running.has_value() && running.value().pid == child.process.dwProcessId);
+        kf2::test::ProcessInspectionDenial denied;
+        if (deny_inspection) {
+            CHECK(denied.deny(child.process.hProcess));
+            const auto ambiguous = kf2::game::find_running_game_process(executable);
+            CHECK(!ambiguous.has_value());
+            CHECK(ambiguous.error().code == kf2::ErrorCode::access_denied);
+            kf2::diagnostics::EventLog events{64};
+            kf2::app::UiRuntime runtime{state, false, settings, events,
+                discovery, kf2::app::StartMode::normal, portable};
+            CHECK(runtime.video_pending.has_value());
+            CHECK(runtime.advanced_settings.pending.has_value());
+            CHECK(runtime.model.status().graphics_game_running);
+            CHECK(runtime.model.status().advanced_game_running);
+            const auto video = *runtime.video_pending;
+            runtime.cycle_video_option(kf2::game::VideoOption::motion_blur);
+            CHECK(runtime.video_pending->choices == video.choices);
+            runtime.video_pending->film_grain_percent =
+                (video.film_grain_percent + 1) % 101;
+            const auto video_apply = runtime.apply_video_settings();
+            CHECK(!video_apply.has_value());
+            CHECK(video_apply.error().code == kf2::ErrorCode::access_denied);
+            const auto advanced = *runtime.advanced_settings.pending;
+            runtime.stage_advanced_slider(
+                kf2::game::AdvancedOption::screen_percentage, 50);
+            CHECK(*runtime.advanced_settings.pending == advanced);
+            const auto current = kf2::game::advanced_slider_value(
+                kf2::game::AdvancedOption::screen_percentage, advanced);
+            CHECK(kf2::game::set_advanced_slider_value(
+                *runtime.advanced_settings.pending,
+                kf2::game::AdvancedOption::screen_percentage,
+                current == 50 ? 60 : 50));
+            const auto advanced_apply = runtime.apply_advanced_settings();
+            CHECK(!advanced_apply.has_value());
+            CHECK(advanced_apply.error().code == kf2::ErrorCode::access_denied);
+            CHECK(!runtime.set_live_adaptive_enabled(false, L"unverified test"));
+            CHECK(!runtime.restore_live_adaptive_quality(L"unverified test"));
+            runtime.game_process = running.value();
+            CHECK(!runtime.restore_live_adaptive_quality(L"cached unverified test"));
+            CHECK(runtime.adaptive_restore_debt.has_value());
+            runtime.game_process.reset();
+            runtime.session_config_snapshot = capture.value();
+            runtime.game_restart_handoff_previous_process = running.value();
+            runtime.game_restart_handoff_deadline_ns = 0;
+            runtime.last_game_process_scan_ns = 0;
+            runtime.try_attach_telemetry();
+            CHECK(runtime.session_config_snapshot.has_value());
+            CHECK(runtime.game_restart_handoff_previous_process.has_value());
+            runtime.start_startup_prewarm();
+            CHECK(runtime.startup_prewarmer.snapshot().state ==
+                  kf2::game::StartupPrewarmState::idle);
+            for (const auto& [file, bytes] : protected_files)
+                CHECK(read_bytes(file) == bytes);
+        }
         kf2::app::StartOptions options{
             .state_root = state, .executable_root = portable,
             .instance_name = L"Local\\KF2OptimizerNext-ProtectedShutdown-" +
@@ -2288,6 +2343,7 @@ int test_protected_shutdown_running_game(bool with_module = false) {
         CHECK(read_bytes(manifest) == retained_manifest);
         for (const auto& [file, bytes] : protected_files)
             CHECK(read_bytes(file) == bytes);
+        CHECK(denied.restore());
         CHECK(child.stop());
         CHECK(!kf2::game::is_game_process_current(running.value()));
         ++options.identity.process_start_id;
@@ -2624,6 +2680,10 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string_view{argv[1]} == "--executable-identity-child") {
         Sleep(60'000);
         return EXIT_SUCCESS;
+    }
+    if (argc == 2 &&
+        std::string_view{argv[1]} == "--protected-shutdown-uninspectable-game") {
+        return test_protected_shutdown_running_game(false, true);
     }
     if (argc == 2 && std::string_view{argv[1]} == "--executable-identity") {
         return test_executable_identity_boundaries();

@@ -261,8 +261,8 @@ void UiRuntime::toggle_adaptive_optimization() {
             L"optimizer"});
     }
     const bool game_running = installation &&
-        game::find_running_game_process(
-            installation->executable).has_value();
+        game::game_process_may_be_running(
+            installation->executable);
     if (!game_running && session_config_snapshot) {
         const bool restored = restore_protected_session_config(
             L"Adaptive mode changed before KF2 start");

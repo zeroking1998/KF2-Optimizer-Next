@@ -204,8 +204,8 @@ bool UiRuntime::restore_fixed_flex_runtime(std::wstring_view reason) {
         !transaction.value().original_exists) {
         return true;
     }
-    const bool running = game::find_running_game_process(
-        installation->executable).has_value();
+    const bool running = game::game_process_may_be_running(
+        installation->executable);
     std::wstring recovery_details;
     const auto restored = flex::restore_offline_lab(
         game_directory, state_directory, running, &recovery_details);

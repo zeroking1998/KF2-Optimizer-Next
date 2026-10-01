@@ -36,7 +36,7 @@ void UiRuntime::refresh_video_presentation() {
     auto status = model.status();
     status.graphics_available = video_pending.has_value();
     status.graphics_game_running = installation &&
-        game::find_running_game_process(installation->executable).has_value();
+        game::game_process_may_be_running(installation->executable);
     status.graphics_game_menu_readback = status.graphics_game_running &&
         game_menu_graphics_readback.has_value();
     if (video_pending) {
@@ -288,7 +288,7 @@ void UiRuntime::cycle_video_option(game::VideoOption option) {
         reload_video_settings();
         if (!video_pending) return;
     }
-    if (game::find_running_game_process(installation->executable).has_value()) {
+    if (game::game_process_may_be_running(installation->executable)) {
         model.set_notice({ui::NoticeSeverity::warning, L"GRAPHICS_GAME_RUNNING",
                           L"Close KF2 before changing its video settings.", L""});
         invalidate();
@@ -342,8 +342,8 @@ void UiRuntime::reset_video_settings() {
     if (start_mode != StartMode::normal) return;
     if (!video_pending) reload_video_settings();
     if (!video_pending) return;
-    if (installation && game::find_running_game_process(
-            installation->executable).has_value()) {
+    if (installation && game::game_process_may_be_running(
+            installation->executable)) {
         model.set_notice({ui::NoticeSeverity::warning, L"GRAPHICS_GAME_RUNNING",
                           L"Close KF2 before changing its video settings.", L""});
         invalidate();
@@ -379,8 +379,8 @@ Result<config::ApplyResult> UiRuntime::apply_video_settings() {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::invalid_argument, L"No video changes are staged", 0});
     }
-    const bool running = game::find_running_game_process(
-        installation->executable).has_value();
+    const bool running = game::game_process_may_be_running(
+        installation->executable);
     if (running) {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::access_denied, L"Close KF2 before applying video settings", 0});

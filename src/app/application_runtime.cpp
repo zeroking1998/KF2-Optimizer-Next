@@ -505,7 +505,7 @@ void UiRuntime::enforce_saved_frame_control_compatibility() {
     // Prevent VSync and disabled frame-rate smoothing from competing with
     // Target FPS. Do not describe an already-running game as changed live.
     if (start_mode != StartMode::normal || !installation || !video_pending ||
-        game::find_running_game_process(installation->executable).has_value()) {
+        game::game_process_may_be_running(installation->executable)) {
         return;
     }
     const auto vsync = static_cast<std::size_t>(game::VideoOption::vsync);
@@ -615,7 +615,7 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
             status.game = L"Game detected: " + installation->install_root.wstring();
             status.game_detected = true;
             const auto game_running =
-                game::find_running_game_process(installation->executable).has_value();
+                game::game_process_may_be_running(installation->executable);
             const auto telemetry_recovered =
                 game::recover_offline_telemetry_lab(
                     installation->config_root,
