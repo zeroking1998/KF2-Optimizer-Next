@@ -222,6 +222,21 @@ void UiRuntime::toggle_adaptive_optimization() {
     if (start_mode != StartMode::normal) return;
     const bool previous = optimizer_settings.adaptive_optimization_enabled;
     const bool requested = !previous;
+    // Persist the user's intent before changing live or deferred control.
+    // A failed write must create no unsaved mode that later reconciliation
+    // could apply, and must not disturb an already confirmed/in-flight mode.
+    auto proposed_settings = optimizer_settings;
+    proposed_settings.adaptive_optimization_enabled = requested;
+    const auto saved = platform::windows::atomic_replace_utf8(
+        settings_path, config::serialize_settings(proposed_settings));
+    if (!saved.has_value()) {
+        model.set_notice({ui::NoticeSeverity::error,
+                          L"ADAPTIVE_SETTING_SAVE_FAILED",
+                          saved.error().message, L""});
+        invalidate();
+        return;
+    }
+    optimizer_settings.adaptive_optimization_enabled = requested;
     const bool live_confirmed = set_live_adaptive_enabled(
         requested, requested ? L"Adaptive enabled by the user"
                              : L"Adaptive disabled by the user");
@@ -244,37 +259,6 @@ void UiRuntime::toggle_adaptive_optimization() {
                 ? L"Adaptive was requested; automatic actions remain blocked until protected gameplay telemetry confirms the enabled mode"
                 : L"Adaptive was disabled locally; exact KF2 runtime restoration will be confirmed when protected gameplay telemetry is available",
             L"optimizer"});
-    }
-    optimizer_settings.adaptive_optimization_enabled = requested;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        settings_path, config::serialize_settings(optimizer_settings));
-    if (!saved.has_value()) {
-        const bool runtime_rolled_back = set_live_adaptive_enabled(
-            previous, L"Adaptive setting save rollback");
-        optimizer_settings.adaptive_optimization_enabled =
-            runtime_rolled_back ? previous : requested;
-        auto status = model.status();
-        status.adaptive_optimization_enabled =
-            optimizer_settings.adaptive_optimization_enabled;
-        status.adaptive_state =
-            optimizer_settings.adaptive_optimization_enabled
-                ? L"observing" : L"off";
-        model.set_status(std::move(status));
-        if (!runtime_rolled_back) {
-            model.set_recovery_required(true);
-            model.set_notice({
-                ui::NoticeSeverity::error,
-                L"ADAPTIVE_SETTING_ROLLBACK_UNCONFIRMED",
-                L"KF2 confirmed the requested Adaptive mode, but the preference could not be saved and the live rollback was not confirmed: " +
-                    saved.error().message,
-                L"Close KF2, then run Repair before the next launch."});
-        } else {
-            model.set_notice({ui::NoticeSeverity::error,
-                              L"ADAPTIVE_SETTING_SAVE_FAILED",
-                              saved.error().message, L""});
-        }
-        invalidate();
-        return;
     }
     const bool game_running = installation &&
         game::find_running_game_process(

@@ -1157,6 +1157,147 @@ private:
     std::jthread worker_;
 };
 
+int test_adaptive_toggle_save_failure() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::path{KF2_TEST_ROOT} / L"adaptive-toggle-saving";
+    fs::remove_all(root);
+    fs::create_directories(root);
+    WSADATA winsock{};
+    CHECK(WSAStartup(MAKEWORD(2, 2), &winsock) == 0);
+    wchar_t executable[32768]{};
+    CHECK(GetModuleFileNameW(nullptr, executable, 32768) != 0);
+    const auto bound = kf2::game::bind_game_process(GetCurrentProcessId(), executable);
+    CHECK(bound.has_value());
+    const auto finish_mode = [](kf2::app::UiRuntime& runtime) {
+        const auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::seconds{3};
+        do {
+            runtime.poll_adaptive_runtime_mode();
+            if (!runtime.adaptive_mode_dispatcher.busy()) return true;
+            Sleep(1);
+        } while (std::chrono::steady_clock::now() < deadline);
+        return false;
+    };
+
+    for (const bool previous : {false, true}) {
+        for (const int provider : {0, 1, 2}) {
+            const auto state = root / (std::to_wstring(previous) + L"-" +
+                std::to_wstring(provider));
+            fs::create_directories(state);
+            kf2::config::Settings settings;
+            settings.adaptive_optimization_enabled = previous;
+            settings.automatic_update_checks = false;
+            const auto original = kf2::config::serialize_settings(settings);
+            write_bytes(state / L"settings.ini", original);
+            kf2::diagnostics::EventLog events{64};
+            kf2::app::UiRuntime runtime{state, false, settings, events, std::nullopt,
+                kf2::app::StartMode::normal, root / L"portable"};
+            runtime.installation = kf2::game::GameInstallation{
+                .install_root = root, .executable = executable,
+                .config_root = root / L"Config"};
+            runtime.game_process = bound.value();
+            runtime.adaptive_control_token = "0123456789abcdef0123456789abcdef";
+            runtime.adaptive_runtime_mode_pending = previous;
+            runtime.adaptive_runtime_mode_last_attempt_ns = 123;
+            std::unique_ptr<AdaptiveTestReceiver> receiver;
+            if (provider != 0) {
+                receiver = std::make_unique<AdaptiveTestReceiver>(
+                    provider == 1 ? "timeout" : "applied");
+                CHECK(receiver->port != 0);
+                replace_runtime_gameplay(runtime, [&](auto& session) {
+                    session.telemetry_control_port = receiver->port;
+                    session.optimizer_session_generation = 42;
+                });
+                if (provider == 1) {
+                    const auto started = runtime.adaptive_mode_dispatcher.start({
+                        .port = receiver->port,
+                        .token = runtime.adaptive_control_token,
+                        .sequence = 1,
+                        .resource = previous ? kf2::game::AdaptiveResourceControl::enable
+                                             : kf2::game::AdaptiveResourceControl::disable,
+                        .quality = previous ? runtime.effective_corpse_limit() : 100});
+                    CHECK(started.has_value() && started.value());
+                    runtime.adaptive_control_sequence = 1;
+                    CHECK(runtime.adaptive_mode_dispatcher.busy());
+                } else {
+                    CHECK(runtime.set_live_adaptive_enabled(previous, L"test setup"));
+                    receiver->finish();
+                }
+            }
+            runtime.adaptive_resource_quality.gpu = 73;
+            runtime.adaptive_quality_state_known = true;
+            const auto sequence = runtime.adaptive_control_sequence;
+            const auto pending = runtime.adaptive_runtime_mode_pending;
+            const bool confirmed = runtime.adaptive_runtime_mode_confirmed;
+            const auto last_attempt = runtime.adaptive_runtime_mode_last_attempt_ns;
+            auto lease = std::unique_ptr<void, decltype(&CloseHandle)>{
+                CreateFileW(runtime.settings_path.c_str(), GENERIC_READ,
+                    FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr),
+                &CloseHandle};
+            CHECK(lease.get() != INVALID_HANDLE_VALUE);
+            runtime.toggle_adaptive_optimization();
+            lease.reset();
+            CHECK(read_bytes(runtime.settings_path) == original);
+            CHECK(runtime.optimizer_settings.adaptive_optimization_enabled == previous);
+            CHECK(runtime.model.status().adaptive_optimization_enabled == previous);
+            CHECK(runtime.adaptive_runtime_mode_pending == pending);
+            CHECK(runtime.adaptive_runtime_mode_confirmed == confirmed);
+            CHECK(runtime.adaptive_runtime_mode_last_attempt_ns == last_attempt);
+            CHECK(runtime.adaptive_control_sequence == sequence);
+            CHECK(runtime.adaptive_resource_quality.gpu == 73);
+            CHECK(runtime.adaptive_quality_state_known);
+            CHECK(!runtime.model.recovery_required());
+            CHECK(runtime.model.notice() &&
+                runtime.model.notice()->code == L"ADAPTIVE_SETTING_SAVE_FAILED");
+            if (receiver) receiver->finish();
+            CHECK(finish_mode(runtime));
+
+            // A fresh provider must reconcile to disk, never to the failed toggle.
+            AdaptiveTestReceiver fresh{"applied"};
+            CHECK(fresh.port != 0);
+            kf2::telemetry_pipeline::TelemetryFrame frame;
+            frame.observed_at_ns = runtime.monotonic_ns();
+            replace_frame_gameplay(frame, [&](auto& session) {
+                session.optimizer_session_generation = 43;
+                session.telemetry_control_port = fresh.port;
+            });
+            runtime.reconcile_adaptive_runtime_mode(frame);
+            fresh.finish();
+            CHECK(finish_mode(runtime));
+            CHECK(runtime.adaptive_runtime_mode_confirmed);
+            CHECK(fresh.command.find(previous ? " enable " : " disable ") != std::string::npos);
+            CHECK(read_bytes(runtime.settings_path) == original);
+
+            // Successful deferred saves retain the existing immediate preference
+            // behavior and authenticate that new mode on the next provider.
+            runtime.game_log_session.reset();
+            runtime.last_report_gameplay_session.reset();
+            runtime.toggle_adaptive_optimization();
+            CHECK(runtime.optimizer_settings.adaptive_optimization_enabled == !previous);
+            CHECK(runtime.adaptive_runtime_mode_pending == std::optional<bool>{!previous});
+            const auto persisted = kf2::config::parse_settings(read_bytes(runtime.settings_path));
+            CHECK(persisted.has_value());
+            CHECK(persisted.value().adaptive_optimization_enabled == !previous);
+            AdaptiveTestReceiver saved_mode{"applied"};
+            CHECK(saved_mode.port != 0);
+            ++frame.observed_at_ns;
+            replace_frame_gameplay(frame, [&](auto& session) {
+                session.optimizer_session_generation = 44;
+                session.telemetry_control_port = saved_mode.port;
+            });
+            runtime.reconcile_adaptive_runtime_mode(frame);
+            saved_mode.finish();
+            CHECK(finish_mode(runtime));
+            CHECK(runtime.adaptive_runtime_mode_confirmed);
+            CHECK(saved_mode.command.find(previous ? " disable " : " enable ") !=
+                std::string::npos);
+        }
+    }
+    WSACleanup();
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
 int test_adaptive_restore_debt() {
     namespace fs = std::filesystem;
     const fs::path root = fs::path{KF2_TEST_ROOT} / L"adaptive-restore-debt";
@@ -2090,6 +2231,9 @@ int test_legacy_adaptive_profile(
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--adaptive-toggle-save-failure") {
+        return test_adaptive_toggle_save_failure();
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--legacy-quality-policy") {
         try {
             return test_legacy_adaptive_profile(

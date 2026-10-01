@@ -502,6 +502,9 @@ add_test(NAME kf2_stopped_target_fps_transaction_test
         --stopped-target-fps-transaction)
 add_test(NAME kf2_adaptive_restore_debt_test
     COMMAND kf2_application_lifecycle_test --adaptive-restore-debt)
+add_test(NAME kf2_adaptive_toggle_save_failure_test
+    COMMAND kf2_application_lifecycle_test --adaptive-toggle-save-failure)
+set_tests_properties(kf2_adaptive_toggle_save_failure_test PROPERTIES TIMEOUT 15)
 
 add_executable(kf2_state_environment_test
     windows/state_environment_test.cpp
