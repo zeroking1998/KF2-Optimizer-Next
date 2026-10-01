@@ -4,6 +4,7 @@
 #include <evntrace.h>
 #include <evntcons.h>
 
+#include <algorithm>
 #include <atomic>
 #include <array>
 #include <chrono>
@@ -31,6 +32,8 @@ constexpr USHORT kPresentStopEvent = 179;
 // Microsoft-Windows-DXGI manifest task IDXGISwapChain_Present. These logging
 // events bracket the application call and expose its swap-chain and HRESULT.
 constexpr std::uint32_t kPresentTest = 0x1;
+constexpr std::size_t kMaximumPendingPresents = 256;
+constexpr std::uint64_t kPendingLifetimeSeconds = 30;
 constexpr wchar_t kSessionPrefix[] = L"KF2OptimizerNext-DXGI-";
 #ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
 std::atomic_bool fail_next_event_callback{false};
@@ -126,6 +129,9 @@ struct DxgiFrameTimingSession::Impl {
     std::atomic<bool> running{false};
     std::atomic<std::uint64_t> observed_events_lost{0};
     std::uint64_t reported_events_lost{};
+    std::uint64_t invalidated_events_lost{};
+    std::uint64_t unreported_pending_loss{};
+    std::uint64_t last_pending_cleanup_qpc{};
     std::uint64_t qpc_frequency{};
     std::unordered_map<ULONG, PendingPresent> pending_by_thread;
 
@@ -175,15 +181,62 @@ struct DxgiFrameTimingSession::Impl {
             !IsEqualGUID(header.ProviderId, kDxgiProvider)) {
             return;
         }
+        if ((header.EventDescriptor.Id != kPresentStartEvent &&
+             header.EventDescriptor.Id != kPresentStopEvent) ||
+            !record.UserData || header.TimeStamp.QuadPart <= 0 ||
+            qpc_frequency == 0) {
+            return;
+        }
+        const auto now_qpc = static_cast<std::uint64_t>(header.TimeStamp.QuadPart);
+        const auto total_loss = observed_events_lost.load(
+            std::memory_order_acquire);
+        if (total_loss != invalidated_events_lost) {
+            // A lost Stop must never match a reused thread's later Stop.
+            pending_by_thread.clear();
+            invalidated_events_lost = total_loss;
+        }
+        const auto expired = [&](const PendingPresent& present) {
+            return now_qpc >= present.timestamp_qpc &&
+                (now_qpc - present.timestamp_qpc) / qpc_frequency >=
+                    kPendingLifetimeSeconds;
+        };
+        // Event-driven maintenance: at most one bounded pass per QPC second,
+        // with no timer, additional worker or thread-liveness queries.
+        if (now_qpc >= last_pending_cleanup_qpc &&
+            now_qpc - last_pending_cleanup_qpc >= qpc_frequency) {
+            last_pending_cleanup_qpc = now_qpc;
+            for (auto pending = pending_by_thread.begin();
+                 pending != pending_by_thread.end();) {
+                if (expired(pending->second)) {
+                    pending = pending_by_thread.erase(pending);
+                    ++unreported_pending_loss;
+                } else {
+                    ++pending;
+                }
+            }
+        }
         if (header.EventDescriptor.Id == kPresentStartEvent) {
             if (record.UserDataLength < sizeof(PresentStartPayload)) return;
             PresentStartPayload payload{};
             std::memcpy(&payload, record.UserData, sizeof(payload));
             if ((payload.flags & kPresentTest) != 0 || payload.swap_chain == 0)
                 return;
-            pending_by_thread[header.ThreadId] = {
-                static_cast<std::uint64_t>(header.TimeStamp.QuadPart),
-                payload.swap_chain};
+            const auto existing = pending_by_thread.find(header.ThreadId);
+            if (existing != pending_by_thread.end()) {
+                existing->second = {now_qpc, payload.swap_chain};
+                return;
+            }
+            if (pending_by_thread.size() >= kMaximumPendingPresents) {
+                const auto oldest = std::min_element(
+                    pending_by_thread.begin(), pending_by_thread.end(),
+                    [](const auto& left, const auto& right) {
+                        return left.second.timestamp_qpc < right.second.timestamp_qpc;
+                    });
+                pending_by_thread.erase(oldest);
+                ++unreported_pending_loss;
+            }
+            pending_by_thread.emplace(header.ThreadId,
+                PendingPresent{now_qpc, payload.swap_chain});
             return;
         }
         if (header.EventDescriptor.Id != kPresentStopEvent ||
@@ -194,19 +247,22 @@ struct DxgiFrameTimingSession::Impl {
         if (pending == pending_by_thread.end()) return;
         const PendingPresent present = pending->second;
         pending_by_thread.erase(pending);
+        if (now_qpc < present.timestamp_qpc || expired(present)) {
+            ++unreported_pending_loss;
+            return;
+        }
         std::int32_t result{};
         std::memcpy(&result, record.UserData, sizeof(result));
         if (FAILED(static_cast<HRESULT>(result)) || present.timestamp_qpc == 0)
             return;
 
-        const auto total_loss = observed_events_lost.load(
-            std::memory_order_acquire);
         const auto new_loss = total_loss >= reported_events_lost
             ? total_loss - reported_events_lost : total_loss;
         reported_events_lost = total_loss;
         static_cast<void>(sink->ingest(
             {identity, qpc_to_ns(present.timestamp_qpc, qpc_frequency),
-             1, true, new_loss, present.swap_chain}));
+             1, true, new_loss + unreported_pending_loss, present.swap_chain}));
+        unreported_pending_loss = 0;
     }
 
     void process_trace() {
@@ -307,6 +363,7 @@ void DxgiFrameTimingSession::test_fail_worker_creation(
 
 bool DxgiFrameTimingSession::test_event_callback_exception_boundary() noexcept {
     Impl implementation;
+    implementation.pending_by_thread.emplace(1, Impl::PendingPresent{1, 1});
     EVENT_RECORD event{};
     event.UserContext = &implementation;
     fail_next_event_callback.store(true, std::memory_order_release);
@@ -314,6 +371,47 @@ bool DxgiFrameTimingSession::test_event_callback_exception_boundary() noexcept {
     return implementation.observed_events_lost.load(
                std::memory_order_acquire) == 1 &&
            implementation.pending_by_thread.empty();
+}
+
+std::unique_ptr<DxgiFrameTimingSession> DxgiFrameTimingSession::test_parser(
+    telemetry::SampleIdentity identity, telemetry::PresentSource& sink,
+    std::uint64_t qpc_frequency) {
+    auto impl = std::make_unique<Impl>();
+    impl->identity = identity;
+    impl->sink = &sink;
+    impl->qpc_frequency = qpc_frequency;
+    return std::unique_ptr<DxgiFrameTimingSession>{
+        new DxgiFrameTimingSession{std::move(impl)}};
+}
+
+void DxgiFrameTimingSession::test_present_event(
+    bool start, std::uint32_t thread, std::uint64_t timestamp_qpc,
+    std::uint64_t swap_chain, std::uint32_t flags, std::int32_t result) {
+    PresentStartPayload payload{swap_chain, 0, flags};
+    EVENT_RECORD event{};
+    event.UserContext = implementation_.get();
+    event.EventHeader.ProviderId = kDxgiProvider;
+    event.EventHeader.ProcessId = implementation_->identity.pid;
+    event.EventHeader.ThreadId = thread;
+    event.EventHeader.TimeStamp.QuadPart = static_cast<LONGLONG>(timestamp_qpc);
+    event.EventHeader.EventDescriptor.Id = start
+        ? kPresentStartEvent : kPresentStopEvent;
+    event.UserData = start ? static_cast<void*>(&payload)
+                          : static_cast<void*>(&result);
+    event.UserDataLength = static_cast<USHORT>(start
+        ? sizeof(payload) : sizeof(result));
+    Impl::event_callback(&event);
+}
+
+void DxgiFrameTimingSession::test_events_lost(std::uint32_t count) noexcept {
+    EVENT_TRACE_LOGFILEW log{};
+    log.Context = implementation_.get();
+    log.EventsLost = count;
+    static_cast<void>(Impl::buffer_callback(&log));
+}
+
+std::size_t DxgiFrameTimingSession::test_pending_count() const noexcept {
+    return implementation_->pending_by_thread.size();
 }
 #endif
 
