@@ -66,7 +66,6 @@ struct AdaptivePolicy {
     bool quality_recovery_enabled{true};
     bool manual_locks_enabled{true};
     bool shadow_mode{true};
-    bool calibration_enabled{true};
     bool adaptive_logging{true};
     std::uint64_t freshness_limit_ns{2'000'000'000ULL};
     std::uint64_t controller_iteration_budget_ns{2'000'000ULL};

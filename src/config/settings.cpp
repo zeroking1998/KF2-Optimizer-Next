@@ -284,7 +284,8 @@ Result<Settings> parse_settings(std::string_view text) {
                     return invalid_settings(
                         L"adaptive_calibration_enabled is invalid");
                 }
-                settings.adaptive_calibration_enabled = parsed.value();
+                // Retired no-op option. Validate legacy input for migration,
+                // but do not persist or forward a nonexistent behavior gate.
             } else if (key == "adaptive_logging") {
                 const auto parsed = parse_boolean(value);
                 if (!parsed.has_value()) {
@@ -449,8 +450,6 @@ std::string serialize_settings(const Settings& settings) {
            << (settings.adaptive_quality_recovery_enabled ? "true" : "false") << '\n'
            << "adaptive_manual_locks_enabled="
            << (settings.adaptive_manual_locks_enabled ? "true" : "false") << '\n'
-           << "adaptive_calibration_enabled="
-           << (settings.adaptive_calibration_enabled ? "true" : "false") << '\n'
            << "adaptive_logging="
            << (settings.adaptive_logging ? "true" : "false") << '\n'
            << "overlay_position=" << settings.overlay_position << '\n'

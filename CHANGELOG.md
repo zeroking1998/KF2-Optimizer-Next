@@ -84,6 +84,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Removed the inert Adaptive calibration preference. Older settings migrate
+  safely without changing the user's active preferences or controller behavior.
 - The full self-check uses the authoritative catalog size and reports its
   actual setting count instead of falsely rejecting the valid catalog because
   of an obsolete independent total.
