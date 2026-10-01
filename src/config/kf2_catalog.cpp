@@ -30,7 +30,7 @@ constexpr std::array<int, 2> kMotionBlurSkinningLevels{0, 1};
 constexpr std::array<int, 5> kPhysicsSubstepLevels{1, 2, 3, 4, 5};
 constexpr std::array<int, 3> kGoreLevels{0, 1, 2};
 
-const std::array<SettingDefinition, 217> kSettings{{
+const std::array<SettingDefinition, kVerifiedSettingCount> kSettings{{
     {SettingId::target_fps, L"KFGame.ini", L"KFGame.KFGameEngine",
      L"MaxSmoothedFrameRate", SettingType::integer,
      optimizer::kTargetFpsMinimum, optimizer::kTargetFpsMaximum, true, {}, 1},

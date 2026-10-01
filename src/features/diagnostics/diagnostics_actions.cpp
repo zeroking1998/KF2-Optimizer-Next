@@ -564,9 +564,11 @@ app::runtime::DispatchResult full_check(
            settings_roundtrip.has_value()
                ? L"Settings serialize/parse contract passed"
                : L"Settings serialize/parse contract failed");
-    record(config::all_settings().size() == 213,
+    const auto catalog = config::all_settings();
+    record(catalog.size() == config::kVerifiedSettingCount,
            "SELF_CHECK_CATALOG",
-           L"Strict typed KF2 catalog contains exactly 213 settings");
+           L"Strict typed KF2 catalog contains " +
+               std::to_wstring(catalog.size()) + L" settings");
     const auto hardware = telemetry::query_hardware_inventory();
     record(hardware.has_value() &&
                hardware.value().logical_processors > 0 &&

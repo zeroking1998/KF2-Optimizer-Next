@@ -3890,6 +3890,15 @@ int main(int argc, char** argv) {
     SendMessageW(hwnd, WM_LBUTTONUP, 0,
                  MAKELPARAM(full_check->x, full_check->y));
     CHECK(fs::exists(options.state_root / L"full-self-check.json"));
+    const auto self_check_report =
+        read_bytes(options.state_root / L"full-self-check.json");
+    CHECK(self_check_report.find(
+              "\"severity\":\"info\",\"code\":\"SELF_CHECK_CATALOG\"") !=
+          std::string::npos);
+    const auto catalog_message =
+        "\"message\":\"Strict typed KF2 catalog contains " +
+        std::to_string(kf2::config::all_settings().size()) + " settings\"";
+    CHECK(self_check_report.find(catalog_message) != std::string::npos);
     CHECK(graphical.value().ui_model().notice().has_value());
     CHECK(graphical.value().ui_model().notice()->code == L"FULL_CHECK_FAILED" ||
           graphical.value().ui_model().notice()->code == L"FULL_CHECK_PASSED");
