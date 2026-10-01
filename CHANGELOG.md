@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Enabling Adaptive no longer treats the selected corpse maximum as a
+  confirmed graphics-quality reduction. Genuine graphics evidence is preserved.
+
 - Adaptive now counts each Present observation once. Delayed or repeated
   asynchronous FPS windows cannot manufacture pressure or recovery evidence.
 
