@@ -366,6 +366,9 @@ function bool FreezeOneOnlineCorpse()
         Original.bRestorePending = false;
         LedgerIndex = FrozenCorpses.Length;
         FrozenCorpses.AddItem(Original);
+        // Attempt progress/cadence also applies when readback needs rollback.
+        FreezeScanCursor = (Index + 1) % PoolLength;
+        LastPhysicsMutationRealTime = WorldInfo.RealTimeSeconds;
         Candidate.SetCollision(false, false, Candidate.bIgnoreEncroachers);
         if (Candidate.CollisionComponent != None)
         {
@@ -396,7 +399,6 @@ function bool FreezeOneOnlineCorpse()
             }
             return false;
         }
-        LastPhysicsMutationRealTime = WorldInfo.RealTimeSeconds;
         if (!bFreezeReceiptReported)
         {
             bFreezeReceiptReported = true;
@@ -406,7 +408,6 @@ function bool FreezeOneOnlineCorpse()
                  " rigid_body_block=false tick_disabled=true"$
                  " local_only=true readback=verified");
         }
-        FreezeScanCursor = (Index + 1) % PoolLength;
         return true;
     }
     FreezeScanCursor = (FreezeScanCursor + ScanCount) % PoolLength;
@@ -457,13 +458,13 @@ function bool ApplyOneFixedMinimumCorpseLod()
         {
             continue;
         }
+        FixedMinimumCorpseLodScanCursor = (Index + 1) % PoolLength;
+        LastVisualMutationRealTime = WorldInfo.RealTimeSeconds;
         Candidate.Mesh.MinLodModel = TargetMinLod;
         if (Candidate.Mesh.MinLodModel != TargetMinLod)
         {
             return false;
         }
-        LastVisualMutationRealTime = WorldInfo.RealTimeSeconds;
-        FixedMinimumCorpseLodScanCursor = (Index + 1) % PoolLength;
         if (!bLodReceiptReported)
         {
             bLodReceiptReported = true;
@@ -518,6 +519,8 @@ function bool ApplyOneSleepingCorpseSkeletonMinimum()
         {
             continue;
         }
+        SleepingCorpseSkeletonScanCursor = (Index + 1) % PoolLength;
+        LastVisualMutationRealTime = WorldInfo.RealTimeSeconds;
         Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
         Candidate.Mesh.bNoSkeletonUpdate = true;
         if (!Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep ||
@@ -525,8 +528,6 @@ function bool ApplyOneSleepingCorpseSkeletonMinimum()
         {
             return false;
         }
-        LastVisualMutationRealTime = WorldInfo.RealTimeSeconds;
-        SleepingCorpseSkeletonScanCursor = (Index + 1) % PoolLength;
         if (!bSkeletonReceiptReported)
         {
             bSkeletonReceiptReported = true;

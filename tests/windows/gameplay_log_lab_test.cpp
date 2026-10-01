@@ -71,7 +71,8 @@ struct OnlineVisualScanModel {
 
 bool covers_online_visual_pool(OnlineVisualScanModel& model,
                               const std::vector<int>& pool,
-                              bool intermittent_actions) {
+                              bool intermittent_actions,
+                              bool failed_readbacks = false) {
     const auto length = static_cast<int>(pool.size());
     std::array<std::vector<bool>, 2> seen{
         std::vector<bool>(pool.size()), std::vector<bool>(pool.size())};
@@ -94,7 +95,11 @@ bool covers_online_visual_pool(OnlineVisualScanModel& model,
                 seen[phase][index] = true;
                 if (intermittent_actions && pool[index] % 3 == phase &&
                     !done[phase][index]) {
-                    done[phase][index] = true;
+                    // The first eligible entry of either category may fail
+                    // permanently; later eligible entries can still succeed.
+                    if (!failed_readbacks || pool[index] > 1) {
+                        done[phase][index] = true;
+                    }
                     ++actions;
                     cursor = (index + 1) % length;
                     break;
@@ -110,6 +115,44 @@ bool covers_online_visual_pool(OnlineVisualScanModel& model,
                        [](bool value) { return value; }) &&
            std::all_of(seen[1].begin(), seen[1].end(),
                        [](bool value) { return value; });
+}
+
+bool advances_online_attempt(std::string_view body, std::string_view cursor,
+                             std::string_view first_write,
+                             std::string_view attempt_clock) {
+    const auto write = body.find(first_write);
+    const auto advance = body.find(std::string{cursor} +
+        " = (Index + 1) % PoolLength;");
+    const auto stamp = body.find(std::string{attempt_clock} +
+        " = WorldInfo.RealTimeSeconds;");
+    if (write == std::string_view::npos || advance >= write || stamp >= write) {
+        std::cerr << cursor << ": mismatch can bypass cursor/cooldown progress\n";
+        return false;
+    }
+    return true;
+}
+
+bool online_freeze_progress_after_rollback(int length) {
+    std::vector<bool> completed(static_cast<std::size_t>(length));
+    int cursor = 0;
+    for (int visit = 0; visit < 2 * length; ++visit) {
+        const auto scan_count = std::min(8, length);
+        bool attempted = false;
+        for (int offset = 0; offset < scan_count; ++offset) {
+            const auto index = (cursor + offset) % length;
+            if (completed[index]) continue;
+            cursor = (index + 1) % length;
+            attempted = true;
+            // Entry zero always fails readback, but immediate rollback
+            // succeeds, removing its ledger entry and leaving it eligible.
+            if (index != 0) completed[index] = true;
+            break;
+        }
+        if (!attempted) cursor = (cursor + scan_count) % length;
+    }
+    return !completed[0] &&
+        std::all_of(completed.begin() + 1, completed.end(),
+                    [](bool value) { return value; });
 }
 
 std::size_t settled_after_bounded_scans(
@@ -1171,6 +1214,32 @@ int main() {
               ";") != std::string::npos);
     }
     CHECK(lod_cursor != skeleton_cursor);
+    bool mismatch_progress = advances_online_attempt(
+        online_freeze_body, "FreezeScanCursor", "Candidate.SetCollision(",
+        "LastPhysicsMutationRealTime");
+    mismatch_progress = advances_online_attempt(
+        online_lod_body, lod_cursor,
+        "Candidate.Mesh.MinLodModel = TargetMinLod;",
+        "LastVisualMutationRealTime") && mismatch_progress;
+    mismatch_progress = advances_online_attempt(
+        online_skeleton_body, skeleton_cursor,
+        "Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;",
+        "LastVisualMutationRealTime") && mismatch_progress;
+    CHECK(mismatch_progress);
+    CHECK(online_freeze_body.find(
+        "WorldInfo.RealTimeSeconds - LastPhysicsMutationRealTime < 0.45") !=
+          std::string::npos);
+    CHECK(count_occurrences(online_freeze_body,
+        "FreezeScanCursor = (Index + 1) % PoolLength;") == 1);
+    CHECK(count_occurrences(online_freeze_body,
+        "LastPhysicsMutationRealTime = WorldInfo.RealTimeSeconds;") == 1);
+    for (const auto length : {1, 2, 8, 9, 16, 17, 2000}) {
+        std::vector<int> pool;
+        for (int id = 0; id < length; ++id) pool.push_back(id);
+        OnlineVisualScanModel model;
+        CHECK(covers_online_visual_pool(model, pool, true, true));
+        CHECK(online_freeze_progress_after_rollback(length));
+    }
     const auto online_visual_body = online_corpse_controller_source.substr(
         online_visual_start, online_tick_start - online_visual_start);
     CHECK(online_visual_body.find(
