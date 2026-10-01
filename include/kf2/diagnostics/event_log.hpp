@@ -82,6 +82,7 @@ public:
     [[nodiscard]] EventLogStats stats() const noexcept;
 
 private:
+    static constexpr std::chrono::milliseconds kInitialPersistenceRetryDelay{250};
     const std::size_t capacity_;
     mutable std::mutex mutex_;
     std::deque<Event> events_;
@@ -93,6 +94,8 @@ private:
     bool persistence_active_{false};
     std::uint64_t persistence_revision_{0};
     std::uint64_t persisted_revision_{0};
+    std::chrono::milliseconds persistence_retry_delay_{kInitialPersistenceRetryDelay};
+    std::chrono::steady_clock::time_point persistence_retry_at_{};
     std::condition_variable persistence_changed_;
     std::jthread persistence_worker_;
     EventLogStats stats_{};

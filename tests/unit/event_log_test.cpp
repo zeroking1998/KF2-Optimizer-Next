@@ -23,6 +23,29 @@
         }                                                                       \
     } while (false)
 
+namespace {
+
+struct OwnedHandle {
+    HANDLE value{INVALID_HANDLE_VALUE};
+    ~OwnedHandle() { close(); }
+    void close() {
+        if (value != INVALID_HANDLE_VALUE) CloseHandle(value);
+        value = INVALID_HANDLE_VALUE;
+    }
+};
+
+template <typename Predicate>
+bool await(Predicate predicate) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while (!predicate()) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    return true;
+}
+
+}  // namespace
+
 int main() {
     using kf2::diagnostics::Event;
     using kf2::diagnostics::EventLog;
@@ -158,6 +181,119 @@ int main() {
         CHECK(persisted_json.find("\"message\":\"second\"") !=
               std::string::npos);
     }
+    // Real Windows sharing failures must not permanently disable persistence.
+    const auto retry_path = persistent_root / L"retry.json";
+    {
+        std::ofstream output(retry_path);
+        output << "original evidence";
+    }
+    {
+        OwnedHandle blocked{CreateFileW(retry_path.c_str(), GENERIC_READ, 0,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
+        CHECK(blocked.value != INVALID_HANDLE_VALUE);
+        EventLog retry{4, retry_path};
+        CHECK(!retry.persistence_ready());
+        CHECK(retry.stats().persistence_failures >= 1);
+        retry.append(Event{0, Severity::info, "LATEST", L"startup retry", L"test"});
+        blocked.close();
+        CHECK(retry.flush(std::chrono::seconds{2}));
+        CHECK(retry.persistence_ready());
+        std::ifstream input(retry_path);
+        const std::string saved{std::istreambuf_iterator<char>{input}, {}};
+        CHECK(saved.find("startup retry") != std::string::npos);
+    }
+    {
+        EventLog retry{4, retry_path};
+        OwnedHandle blocked{CreateFileW(retry_path.c_str(), GENERIC_READ, 0,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
+        CHECK(blocked.value != INVALID_HANDLE_VALUE);
+        retry.append(Event{0, Severity::info, "LATEST", L"locked", L"test"});
+        CHECK(await([&] { return !retry.persistence_ready(); }));
+        for (int index = 0; index < 2000; ++index) {
+            retry.append(Event{0, Severity::info, "LATEST",
+                std::to_wstring(index), L"test"});
+        }
+        CHECK(retry.snapshot().size() == 4);
+        blocked.close();
+        CHECK(retry.flush(std::chrono::seconds{2}));
+        CHECK(retry.persistence_ready());
+        std::ifstream input(retry_path);
+        const std::string saved{std::istreambuf_iterator<char>{input}, {}};
+        CHECK(saved.find("1999") != std::string::npos);
+        CHECK(saved.find("\"events\":[]") == std::string::npos);
+    }
+    // The existing writer seam exercises false results, errors and exceptions.
+    // Recovery must not require another append, nor persist the failed copy.
+    for (const int failure : {0, 1, 2}) {
+        std::atomic<bool> fail{true};
+        std::string saved;
+        EventLog retry{4, retry_path,
+            [&](const std::filesystem::path&, std::string_view bytes) {
+                if (fail.load()) {
+                    if (failure == 0) return kf2::Result<bool>::success(false);
+                    if (failure == 1) return kf2::Result<bool>::failure(
+                        {kf2::ErrorCode::io_failure, L"test write failure", 0});
+                    throw std::runtime_error{"test write failure"};
+                }
+                saved = std::string{bytes};
+                return kf2::Result<bool>::success(true);
+            }};
+        CHECK(!retry.persistence_ready());
+        retry.append(Event{0, Severity::info, "LATEST", L"newest", L"test"});
+        fail.store(false);
+        CHECK(retry.flush(std::chrono::seconds{2}));
+        CHECK(retry.persistence_ready());
+        CHECK(saved.find("newest") != std::string::npos);
+        fail.store(true);
+        retry.clear();
+        CHECK(await([&] { return !retry.persistence_ready(); }));
+        fail.store(false);
+        CHECK(retry.flush(std::chrono::seconds{2}));
+        CHECK(saved == "{\"version\":1,\"events\":[]}");
+    }
+    std::atomic<int> failed_writes{0};
+    auto stop_started = std::chrono::steady_clock::now();
+    {
+        EventLog unavailable{4, retry_path,
+            [&](const std::filesystem::path&, std::string_view) {
+                ++failed_writes;
+                return kf2::Result<bool>::success(false);
+            }};
+        for (int index = 0; index < 2000; ++index) {
+            unavailable.append(Event{0, Severity::info, "LATEST",
+                std::to_wstring(index), L"test"});
+        }
+        const auto flush_started = std::chrono::steady_clock::now();
+        CHECK(!unavailable.flush(std::chrono::milliseconds{550}));
+        CHECK(std::chrono::steady_clock::now() - flush_started < std::chrono::seconds{2});
+        CHECK(failed_writes >= 2 && failed_writes <= 4);
+        CHECK(!unavailable.persistence_ready());
+        CHECK(unavailable.snapshot().size() == 4);
+        stop_started = std::chrono::steady_clock::now();
+    }
+    CHECK(std::chrono::steady_clock::now() - stop_started < std::chrono::seconds{2});
+    {
+        EventLog final_drain{4, retry_path};
+        for (int index = 0; index < 100; ++index) {
+            final_drain.append(Event{0, Severity::info, "FINAL",
+                L"last " + std::to_wstring(index), L"test"});
+        }
+        // Healthy destruction retains the existing final-drain behavior.
+    }
+    {
+        std::ifstream input(retry_path);
+        const std::string saved{std::istreambuf_iterator<char>{input}, {}};
+        CHECK(saved.find("last 99") != std::string::npos);
+    }
+    int unsafe_writes = 0;
+    EventLog unsafe{4, L"relative.json",
+        [&](const std::filesystem::path&, std::string_view) {
+            ++unsafe_writes;
+            return kf2::Result<bool>::success(true);
+        }};
+    unsafe.append(Event{0, Severity::info, "LATEST", L"unsafe", L"test"});
+    CHECK(!unsafe.flush(std::chrono::milliseconds{10}));
+    CHECK(unsafe_writes == 0 && !unsafe.persistence_ready());
     std::filesystem::remove_all(persistent_root);
 
     const auto rotation_root = std::filesystem::temp_directory_path() /

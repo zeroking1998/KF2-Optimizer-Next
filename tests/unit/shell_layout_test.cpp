@@ -353,6 +353,21 @@ int main() {
     CHECK(node(diagnostics, "diagnostics-check-section") != nullptr);
     CHECK(node(diagnostics, "diagnostics-recovery-section") != nullptr);
     CHECK(node(diagnostics, "diagnostics-reports-section") != nullptr);
+    CHECK(node(diagnostics, "diagnostics-event-storage") != nullptr);
+    CHECK(node(diagnostics, "diagnostics-event-storage")->text ==
+          L"Event log storage: not checked");
+    auto persistence_status = model.status();
+    for (const bool available : {false, true}) {
+        persistence_status.event_persistence_available = available;
+        model.set_status(persistence_status);
+        const auto observed = layout_shell(model, 1440, 900);
+        const auto* storage = node(observed, "diagnostics-event-storage");
+        CHECK(storage != nullptr);
+        CHECK(storage->text == (available ? L"Event log storage: available" :
+            L"Event log storage: unavailable — check Data/Logs access"));
+        CHECK(storage->bounds.y + storage->bounds.height <=
+              node(observed, "diagnostics-check-section")->bounds.y);
+    }
 
     static_cast<void>(model.focus_destination(Destination::dashboard));
     static_cast<void>(model.activate_focused());

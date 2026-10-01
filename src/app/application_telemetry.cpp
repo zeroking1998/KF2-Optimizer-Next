@@ -482,6 +482,17 @@ void UiRuntime::system_resume() {
 
 
 void UiRuntime::telemetry_tick() {
+    // Observe health only on the relevant page and redraw only on transition.
+    // Never append an event about the event writer's own failure/recovery.
+    if (model.selected() == ui::Destination::diagnostics) {
+        const bool available = events->persistence_ready();
+        if (model.status().event_persistence_available != available) {
+            auto status = model.status();
+            status.event_persistence_available = available;
+            model.set_status(std::move(status));
+            invalidate();
+        }
+    }
     RuntimeTelemetryPipeline pipeline{*this};
     static_cast<void>(
         telemetry_pipeline::run_ordered_telemetry_pipeline(pipeline));

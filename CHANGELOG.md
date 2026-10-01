@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Temporary event-log write failures now retry in the background with bounded
+  backoff, preserving the latest events. Help & Repair shows storage availability
+  without generating more log events about the writer itself.
 - Online corpse sleep and capacity checks now use bounded, rotating scans,
   including retry pauses after misses. The local controller reuses its
   viewport-owned monitor, and missing corpse support no longer logs every frame.
