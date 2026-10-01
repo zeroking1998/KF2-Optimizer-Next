@@ -167,6 +167,38 @@ bool online_restore_advances_after_failure(std::string_view body) {
             std::string_view::npos;
 }
 
+constexpr std::string_view online_restore_readback_fields[] = {
+    "Candidate.Physics != PHYS_RigidBody ||",
+    "Candidate.bCollideActors != Original.bOriginalCollideActors ||",
+    "Candidate.bBlockActors != Original.bOriginalBlockActors ||",
+    "Candidate.bIgnoreEncroachers != Original.bOriginalIgnoreEncroachers ||",
+    "Candidate.bTickIsDisabled != Original.bOriginalTickDisabled ||",
+    "(Candidate.CollisionComponent != None) !=\n"
+    "            Original.bHadCollisionComponent ||",
+    "(Original.bHadCollisionComponent &&\n"
+    "         Candidate.CollisionComponent.BlockRigidBody !=\n"
+    "             Original.bOriginalBlockRigidBody)",
+};
+
+bool online_restore_has_complete_readback(std::string_view body) {
+    const auto begin = body.find("if (Candidate.Physics != PHYS_RigidBody ||");
+    const auto end = body.find("LastPhysicsMutationRealTime =", begin);
+    if (begin == std::string_view::npos || end == std::string_view::npos) {
+        return false;
+    }
+    const auto guard = body.substr(begin, end - begin);
+    return std::all_of(std::begin(online_restore_readback_fields),
+                       std::end(online_restore_readback_fields),
+                       [guard](std::string_view field) {
+                           return guard.find(field) != std::string_view::npos;
+                       }) &&
+        guard.find("\"restore_readback_mismatch\");\n        return false;") !=
+            std::string_view::npos &&
+        body.find("\"collision_component_missing\");\n            return false;") !=
+            std::string_view::npos &&
+        body.find("FrozenCorpses.Remove(") == std::string_view::npos;
+}
+
 // Models the source-bound restore-all loop, not UnrealScript/PhysX execution.
 // A failed ledger record keeps its original collision/tick state for retry.
 bool online_restore_progress(int length, int failed_id,
@@ -1378,6 +1410,27 @@ int main() {
     CHECK(online_restore_start != std::string::npos);
     const auto online_restore_body = online_corpse_controller_source.substr(
         online_restore_start, online_release_start - online_restore_start);
+    CHECK(online_restore_has_complete_readback(online_restore_body));
+    // Removing any single readback rejects the restore contract, including
+    // ignore-encroachers and missing/unexpected collision-component cases.
+    for (const auto field : online_restore_readback_fields) {
+        auto incomplete_readback = online_restore_body;
+        const auto position = incomplete_readback.find(field);
+        CHECK(position != std::string::npos);
+        incomplete_readback.erase(position, field.size());
+        CHECK(!online_restore_has_complete_readback(incomplete_readback));
+    }
+    auto discarded_original = online_restore_body;
+    discarded_original.insert(0, "FrozenCorpses.Remove(Index, 1);\n");
+    CHECK(!online_restore_has_complete_readback(discarded_original));
+    auto missing_component_accepted = online_restore_body;
+    const auto missing_component_return = missing_component_accepted.find(
+        "return false;", missing_component_accepted.find(
+            "\"collision_component_missing\""));
+    CHECK(missing_component_return != std::string::npos);
+    missing_component_accepted.erase(missing_component_return,
+                                    std::string_view{"return false;"}.size());
+    CHECK(!online_restore_has_complete_readback(missing_component_accepted));
     CHECK(online_restore_body.find("Original = FrozenCorpses[Index];") !=
           std::string::npos);
     CHECK(online_restore_body.find("FrozenCorpses.Remove(") ==
