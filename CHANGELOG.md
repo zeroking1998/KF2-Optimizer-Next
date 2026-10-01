@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Offline corpse restoration now yields after a failed attempt and fairly
+  shares release turns with active/retired wake queues. Failed collision/tick
+  readbacks no longer consume the physics slot; original retry state is kept.
 - Temporary gameplay-telemetry expiry no longer discards the Adaptive listener
   port. Fresh measurements can resume control without another readiness line;
   map/provider changes and explicit listener failures still invalidate the port.
