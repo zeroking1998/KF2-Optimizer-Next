@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Closing the optimizer while KF2 is running now retains protected INIs, runtime
+  packages and their durable recovery snapshots. Cleanup is retried after KF2
+  ends instead of rewriting live state or marking incomplete recovery clean.
 - FPS telemetry now recovers after a transient capture loss once the measurement
   window is wholly fresh. Affected windows and stale cached results stay blocked;
   Adaptive and quality-response diagnostics no longer require a session restart.

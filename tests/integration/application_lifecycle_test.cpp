@@ -2062,6 +2062,133 @@ int test_graphics_restaging_failures() {
 }
 #endif
 
+int test_protected_shutdown_running_game() {
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"psg" /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" +
+         std::to_wstring(GetTickCount64()));
+    wchar_t self[32768]{};
+    CHECK(GetModuleFileNameW(nullptr, self, 32768) != 0);
+    for (const bool with_module : {false, true}) {
+        const auto case_root = root / std::to_wstring(with_module);
+        const auto install = case_root / L"game";
+        const auto executable = install / L"Binaries/Win64/KFGame.exe";
+        const auto config = case_root / L"Documents/Config";
+        const auto state = case_root / L"Data";
+        const auto portable = case_root / L"portable";
+        fs::create_directories(executable.parent_path());
+        fs::create_directories(portable);
+        fs::create_directories(state);
+        CHECK(CopyFileW(self, executable.c_str(), TRUE));
+        CHECK(write_complete_config_catalog(config));
+        write_bytes(install / L"Engine/Config/ConsoleVariables.ini", "[Startup]\r\n");
+        write_bytes(config / L"KFEngine.ini", read_bytes(config / L"KFEngine.ini") +
+            "[URL]\r\nLocalOptions=\r\n[Engine.Engine]\r\n"
+            "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n");
+        auto system = kf2::config::IniDocument::parse(
+            read_bytes(config / L"KFSystemSettings.ini"));
+        CHECK(system.has_value());
+        CHECK(system.value().upsert(L"SystemSettings", L"bAllowTemporalAA",
+            L"False").shadowed_occurrences == 0);
+        write_bytes(config / L"KFSystemSettings.ini", system.value().serialize());
+        const kf2::game::GameDiscoveryInput discovery{
+            .manual_candidates = {install}, .config_root = config,
+            .allowed_config_parent = case_root / L"Documents"};
+        const auto found = kf2::game::discover_game_installation(discovery);
+        CHECK(found.has_value());
+        // Normalize the separately managed FPS cap before recording originals.
+        CHECK(kf2::game::persist_frame_rate_cap(found.value(), 62).has_value());
+        kf2::config::Settings settings;
+        settings.target_fps = 62;
+        settings.automatic_update_checks = false;
+        write_bytes(state / L"settings.ini", kf2::config::serialize_settings(settings));
+        const auto capture = kf2::config::capture_session_config(config, state);
+        CHECK(capture.has_value());
+        std::map<fs::path, std::string> originals;
+        for (const auto& entry : fs::directory_iterator(config))
+            if (entry.is_regular_file()) originals[entry.path()] = read_bytes(entry.path());
+        write_bytes(config / L"KFSystemSettings.ini",
+            originals[config / L"KFSystemSettings.ini"] + "\r\n; protected session\r\n");
+        if (with_module) {
+            const auto installed = kf2::game::install_offline_telemetry_lab({
+                config, state, KF2_TELEMETRY_ASSET, false});
+            if (!installed.has_value()) std::wcerr << installed.error().message << L'\n';
+            CHECK(installed.has_value());
+        }
+        std::map<fs::path, std::string> protected_files;
+        for (const auto& entry : fs::recursive_directory_iterator(config.parent_path()))
+            if (entry.is_regular_file())
+                protected_files[entry.path()] = read_bytes(entry.path());
+        const auto manifest = capture.value().snapshot_root / L"manifest.txt";
+        const auto retained_manifest = read_bytes(manifest);
+        CHECK(!retained_manifest.empty());
+
+        // Reuse the existing inert child mode. This is our copied test image,
+        // never a real KF2 process; the RAII guard terminates only this child.
+        struct Child {
+            PROCESS_INFORMATION process{};
+            bool stop() {
+                if (!process.hProcess) return true;
+                const bool stopped = TerminateProcess(process.hProcess, 0) &&
+                    WaitForSingleObject(process.hProcess, 5000) == WAIT_OBJECT_0;
+                CloseHandle(process.hThread);
+                CloseHandle(process.hProcess);
+                process = {};
+                return stopped;
+            }
+            ~Child() { static_cast<void>(stop()); }
+        } child;
+        std::wstring command = L"\"" + executable.wstring() +
+            L"\" --executable-identity-child";
+        STARTUPINFOW startup{sizeof(startup)};
+        CHECK(CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr,
+            FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child.process));
+        const auto running = kf2::game::find_running_game_process(executable);
+        CHECK(running.has_value() && running.value().pid == child.process.dwProcessId);
+        kf2::app::StartOptions options{
+            .state_root = state, .executable_root = portable,
+            .instance_name = L"Local\\KF2OptimizerNext-ProtectedShutdown-" +
+                std::to_wstring(GetCurrentProcessId()) + L"-" +
+                std::to_wstring(with_module),
+            .identity = {GetCurrentProcessId(), 2630ULL + with_module},
+            .create_window = false, .game_discovery = discovery,
+            .mode = kf2::app::StartMode::read_only};
+        {
+            auto application = kf2::app::Application::start(options);
+            CHECK(application.has_value());
+            for (const auto& [file, bytes] : protected_files)
+                CHECK(read_bytes(file) == bytes);
+            const auto stopped = application.value().shutdown_cleanly();
+            CHECK(!stopped.has_value());
+            CHECK(read_bytes(manifest) == retained_manifest);
+            for (const auto& [file, bytes] : protected_files)
+                CHECK(read_bytes(file) == bytes);
+            CHECK(application.value().ui_model().recovery_required());
+            CHECK(read_bytes(state / L"session.marker").ends_with("clean_shutdown=false\n"));
+        }
+        // The noexcept destructor's fallback must also leave live state alone.
+        CHECK(read_bytes(manifest) == retained_manifest);
+        for (const auto& [file, bytes] : protected_files)
+            CHECK(read_bytes(file) == bytes);
+        CHECK(child.stop());
+        CHECK(!kf2::game::is_game_process_current(running.value()));
+        ++options.identity.process_start_id;
+        {
+            auto recovered = kf2::app::Application::start(options);
+            CHECK(recovered.has_value());
+            CHECK(!fs::exists(capture.value().snapshot_root));
+            for (const auto& [file, bytes] : originals)
+                CHECK(read_bytes(file) == bytes);
+            CHECK(recovered.value().shutdown_cleanly().has_value());
+        }
+        CHECK(read_bytes(state / L"session.marker").ends_with("clean_shutdown=true\n"));
+        const auto module = config.parent_path() / L"Unpublished/BrewedPC/Script/KF2OptimizerTelemetry.u";
+        CHECK(!fs::exists(module));
+    }
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
 int test_graphics_protected_rebuild_failure() {
 #if !defined(KF2_APPLICATION_VIDEO_TESTING)
     return EXIT_FAILURE;
@@ -2320,6 +2447,9 @@ int test_legacy_adaptive_profile(
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--protected-shutdown-running-game") {
+        return test_protected_shutdown_running_game();
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--graphics-protected-rebuild-failure") {
         return test_graphics_protected_rebuild_failure();
     }

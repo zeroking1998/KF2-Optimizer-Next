@@ -230,13 +230,30 @@ bool UiRuntime::restore_fixed_flex_runtime(std::wstring_view reason) {
 }
 
 bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
-    game_restart_handoff_previous_process.reset();
-    game_restart_handoff_deadline_ns = 0;
-    game_restart_handoff_new_settings = false;
     if (final_graphics_capture_pending) {
         model.set_recovery_required(true);
         return false;
     }
+    if (installation) {
+        const auto running = game::find_running_game_process(installation->executable);
+        if (running.has_value() || running.error().code != ErrorCode::not_found) {
+            const auto message = running.has_value()
+                ? L"KF2 is still running. Protected INIs and runtime packages were retained."
+                : L"KF2 process enumeration could not confirm that the game has ended. Protected state was retained.";
+            model.set_recovery_required(true);
+            events->append({0, diagnostics::Severity::warning,
+                "PROTECTED_SESSION_RESTORE_DEFERRED",
+                std::wstring{reason} + L"; " + message, L"config"});
+            model.set_notice({ui::NoticeSeverity::warning,
+                L"PROTECTED_SESSION_RESTORE_DEFERRED", message,
+                L"Close KF2, then restart KF2 Optimizer to complete protected recovery."});
+            invalidate();
+            return false;
+        }
+    }
+    game_restart_handoff_previous_process.reset();
+    game_restart_handoff_deadline_ns = 0;
+    game_restart_handoff_new_settings = false;
     bool complete = true;
     // Restore the native viewport/INI state even if Windows still has a
     // runtime file open. Each recovery surface is independent, so one busy
