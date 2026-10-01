@@ -115,7 +115,6 @@ struct UiStatus {
     bool adaptive_emergency_enabled{true};
     bool adaptive_quality_recovery_enabled{true};
     bool adaptive_manual_locks_enabled{true};
-    bool adaptive_calibration_enabled{true};
     bool adaptive_logging{true};
     std::wstring update_installed_version{L"unknown"};
     std::wstring update_available_version{L"None"};

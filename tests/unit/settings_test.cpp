@@ -135,6 +135,35 @@ int main() {
     CHECK(!parse_settings(
         "schema_version=1\nadaptive_aggressiveness=balanced\n"
         "adaptive_aggressiveness=aggressive\n").has_value());
+    const std::string current_preferences =
+        "schema_version=1\ntarget_fps=119\ncorpse_limit=1272\n"
+        "adaptive_optimization_enabled=false\nadaptive_logging=false\n"
+        "custom_key=kept\n";
+    const auto current = parse_settings(current_preferences);
+    CHECK(current.has_value());
+    const auto expected_preferences = serialize_settings(current.value());
+    for (const auto legacy : {"true", "false"}) {
+        const auto migrated_calibration = parse_settings(
+            current_preferences + "adaptive_calibration_enabled=" +
+            legacy + "\n");
+        CHECK(migrated_calibration.has_value());
+        CHECK(!migrated_calibration.value().extras.contains(
+            "adaptive_calibration_enabled"));
+        const auto canonical = serialize_settings(migrated_calibration.value());
+        CHECK(canonical.find("adaptive_calibration_enabled=") ==
+              std::string::npos);
+        CHECK(canonical == expected_preferences);
+        const auto reloaded = parse_settings(canonical);
+        CHECK(reloaded.has_value());
+        CHECK(serialize_settings(reloaded.value()) == canonical);
+    }
+    CHECK(!parse_settings(
+        "schema_version=1\nadaptive_calibration_enabled=maybe\n").has_value());
+    CHECK(!parse_settings(
+        "schema_version=1\nadaptive_calibration_enabled=\n").has_value());
+    CHECK(!parse_settings(
+        "schema_version=1\nadaptive_calibration_enabled=true\n"
+        "adaptive_calibration_enabled=false\n").has_value());
     for (const auto legacy : {"exact", "invisible", "performance"}) {
         const auto migrated_quality = parse_settings(
             std::string{"schema_version=1\nquality_policy="} + legacy +
@@ -307,7 +336,7 @@ int main() {
           "adaptive_emergency_enabled=true\n"
           "adaptive_quality_recovery_enabled=true\n"
           "adaptive_manual_locks_enabled=true\n"
-          "adaptive_calibration_enabled=true\nadaptive_logging=true\n"
+          "adaptive_logging=true\n"
           "overlay_position=top_right\n"
           "overlay_scale_percent=100\n"
           "target_fps=60\ncorpse_limit=20\n");

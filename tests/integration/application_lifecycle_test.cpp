@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <initializer_list>
 #include <iostream>
 #include <iterator>
 #include <map>
@@ -2871,7 +2872,7 @@ int test_startup_session_marker() {
 
 int test_legacy_adaptive_profile(
     std::string_view legacy_key = "adaptive_aggressiveness",
-    std::array<const char*, 3> legacy_values = {
+    std::initializer_list<const char*> legacy_values = {
         "conservative", "balanced", "aggressive"}) {
     namespace fs = std::filesystem;
     const auto root = fs::path{KF2_TEST_ROOT} / L"lap" /
@@ -2884,7 +2885,7 @@ int test_legacy_adaptive_profile(
         "adaptive_emergency_enabled=false\n"
         "adaptive_quality_recovery_enabled=false\n"
         "adaptive_manual_locks_enabled=false\n"
-        "adaptive_calibration_enabled=false\nadaptive_logging=false\n"
+        "adaptive_logging=false\n"
         "custom_key=kept\ncustom_quality_policy=kept\n";
     const auto reference = kf2::config::parse_settings(visible);
     CHECK(reference.has_value());
@@ -2894,7 +2895,7 @@ int test_legacy_adaptive_profile(
             policy.maximum_quality, policy.quality_change_budget,
             policy.performance_headroom, policy.emergency_enabled,
             policy.quality_recovery_enabled, policy.manual_locks_enabled,
-            policy.shadow_mode, policy.calibration_enabled, policy.adaptive_logging,
+            policy.shadow_mode, policy.adaptive_logging,
             policy.freshness_limit_ns, policy.controller_iteration_budget_ns,
         };
     };
@@ -2986,7 +2987,9 @@ int main(int argc, char** argv) {
     }
     if (argc == 2 && std::string_view{argv[1]} == "--legacy-adaptive-profile") {
         try {
-            return test_legacy_adaptive_profile();
+            CHECK(test_legacy_adaptive_profile() == EXIT_SUCCESS);
+            return test_legacy_adaptive_profile(
+                "adaptive_calibration_enabled", {"true", "false"});
         } catch (const std::exception& error) {
             std::cerr << error.what() << '\n';
             return EXIT_FAILURE;
@@ -3460,7 +3463,7 @@ int main(int argc, char** argv) {
         "adaptive_emergency_enabled=true\n"
         "adaptive_quality_recovery_enabled=true\n"
         "adaptive_manual_locks_enabled=true\n"
-        "adaptive_calibration_enabled=true\nadaptive_logging=true\n"
+        "adaptive_logging=true\n"
         "overlay_position=top_right\n"
         "overlay_scale_percent=100\n"
         "target_fps=60\ncorpse_limit=20\n");

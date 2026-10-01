@@ -32,7 +32,6 @@ optimizer::AdaptivePolicy adaptive_policy_from(
             settings.adaptive_quality_recovery_enabled,
         .manual_locks_enabled = settings.adaptive_manual_locks_enabled,
         .shadow_mode = settings.adaptive_shadow_mode,
-        .calibration_enabled = settings.adaptive_calibration_enabled,
         .adaptive_logging = settings.adaptive_logging,
     };
 }
@@ -81,6 +80,8 @@ Result<config::Settings> load_or_create_settings(
                 bytes.find("adaptive_online_allowed=") != std::string::npos ||
                 bytes.find("adaptive_aggressiveness=") != std::string::npos ||
                 bytes.find("adaptive_shadow_mode=") != std::string::npos ||
+                bytes.find("adaptive_calibration_enabled=") !=
+                    std::string::npos ||
                 parsed.value().target_fps_migrated ||
                 parsed.value().legacy_quality_policy_migrated ||
                 parsed.value().adaptive_quality_range_migrated;
@@ -432,8 +433,6 @@ void UiRuntime::update_adaptive_policy_status(ui::UiStatus& status) const {
         optimizer_settings.adaptive_quality_recovery_enabled;
     status.adaptive_manual_locks_enabled =
         optimizer_settings.adaptive_manual_locks_enabled;
-    status.adaptive_calibration_enabled =
-        optimizer_settings.adaptive_calibration_enabled;
     status.adaptive_logging = optimizer_settings.adaptive_logging;
 }
 

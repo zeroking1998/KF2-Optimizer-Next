@@ -34,7 +34,6 @@ struct Settings {
     bool adaptive_quality_recovery_enabled{true};
     bool adaptive_manual_locks_enabled{true};
     bool adaptive_shadow_mode{false};
-    bool adaptive_calibration_enabled{true};
     bool adaptive_logging{true};
     std::string overlay_position{"top_right"};
     int overlay_scale_percent{100};
