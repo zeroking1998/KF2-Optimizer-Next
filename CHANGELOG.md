@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- The full self-check uses the authoritative catalog size and reports its
+  actual setting count instead of falsely rejecting the valid catalog because
+  of an obsolete independent total.
 - Ordinary diagnostic events now share a fixed 250 ms persistence batch,
   avoiding repeated full-history copies and atomic file replacements during
   bursts. Explicit flush and healthy shutdown bypass the batch delay; bounded

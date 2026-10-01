@@ -12,6 +12,7 @@ int main() {
     using namespace kf2::config;
     const auto settings = all_settings();
     CHECK(!settings.empty());
+    CHECK(settings.size() == kVerifiedSettingCount);
     std::set<SettingId> ids;
     std::set<std::pair<std::wstring, std::wstring>> targets;
     for (const auto& setting : settings) {
