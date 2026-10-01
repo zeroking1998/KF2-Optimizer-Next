@@ -2062,6 +2062,95 @@ int test_graphics_restaging_failures() {
 }
 #endif
 
+int test_graphics_protected_rebuild_failure() {
+#if !defined(KF2_APPLICATION_VIDEO_TESTING)
+    return EXIT_FAILURE;
+#else
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"grb" /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" +
+         std::to_wstring(GetTickCount64()));
+    const auto install = root / L"game";
+    const auto config = root / L"Documents/Config";
+    const auto portable = root / L"portable";
+    write_test_pe(install / L"Binaries/Win64/KFGame.exe");
+    write_bytes(install / L"Engine/Config/ConsoleVariables.ini", "[Startup]\r\n");
+    fs::create_directories(portable); // The provider required for rebuilding is absent.
+    const kf2::game::GameDiscoveryInput discovery{
+        .manual_candidates = {install}, .config_root = config,
+        .allowed_config_parent = root / L"Documents"};
+    const auto blur = static_cast<std::size_t>(kf2::game::VideoOption::motion_blur);
+    for (const bool ui_save : {false, true}) {
+        for (const bool unavailable : {false, true}) {
+            CHECK(write_complete_config_catalog(config));
+            auto system = kf2::config::IniDocument::parse(
+                read_bytes(config / L"KFSystemSettings.ini"));
+            CHECK(system.has_value());
+            CHECK(system.value().upsert(L"SystemSettings", L"bAllowTemporalAA",
+                L"False").shadowed_occurrences == 0);
+            write_bytes(config / L"KFSystemSettings.ini", system.value().serialize());
+            kf2::diagnostics::EventLog events{128};
+            kf2::config::Settings settings;
+            settings.automatic_update_checks = false;
+            kf2::app::UiRuntime runtime{root / (std::to_wstring(ui_save) +
+                std::to_wstring(unavailable)), false, settings, events, discovery,
+                kf2::app::StartMode::normal, portable};
+            CHECK(runtime.installation.has_value());
+            CHECK(runtime.synchronize_frame_rate_cap().has_value());
+            runtime.reload_video_settings();
+            CHECK(runtime.video_saved.has_value());
+            auto captured = kf2::config::capture_session_config(
+                config, runtime.settings_path.parent_path());
+            CHECK(captured.has_value());
+            runtime.session_config_snapshot = std::move(captured.value());
+            const int desired = runtime.video_saved->choices[blur] == 0 ? 1 : 0;
+            runtime.video_pending->choices[blur] = desired;
+            bool wrote_graphics = false;
+            runtime.video_before_protected_rebuild_for_testing = [&] {
+                const auto actual = kf2::game::read_video_settings(config);
+                wrote_graphics = actual.has_value() && actual.value().choices[blur] == desired;
+                if (unavailable) runtime.start_mode = kf2::app::StartMode::read_only;
+            };
+            if (ui_save) {
+                runtime.save_video_selection();
+            } else {
+                const auto result = runtime.apply_video_settings();
+                CHECK(wrote_graphics);
+                CHECK(!result.has_value());
+                CHECK(result.error().code == kf2::ErrorCode::recovery_required);
+                CHECK(result.error().message.find(L"saved") != std::wstring::npos);
+            }
+            CHECK(wrote_graphics);
+            CHECK(runtime.model.recovery_required());
+            CHECK(runtime.model.notice().has_value());
+            const auto& notice = *runtime.model.notice();
+            CHECK(notice.code != L"GRAPHICS_SAVED");
+            CHECK(notice.severity == kf2::ui::NoticeSeverity::warning);
+            CHECK(notice.message.find(L"saved") != std::wstring::npos);
+            CHECK(notice.message.find(L"Graphics were not changed") == std::wstring::npos);
+            CHECK(notice.recovery_action.find(L"Repair") != std::wstring::npos);
+            const auto actual = kf2::game::read_video_settings(config);
+            CHECK(actual.has_value() && actual.value().choices[blur] == desired);
+            CHECK(runtime.video_saved && runtime.video_saved->choices[blur] == desired);
+            CHECK(runtime.video_pending && runtime.video_pending->choices[blur] == desired);
+            CHECK(!runtime.last_backup_id.empty());
+            const auto log = events.snapshot();
+            CHECK(std::any_of(log.begin(), log.end(), [](const auto& event) {
+                return event.code == "GRAPHICS_PROTECTED_LAUNCH_REBUILD_FAILED";
+            }));
+            CHECK(std::none_of(log.begin(), log.end(), [](const auto& event) {
+                return event.code == "GRAPHICS_PROTECTED_LAUNCH_REBUILT";
+            }));
+            runtime.video_before_protected_rebuild_for_testing = {};
+            runtime.start_mode = kf2::app::StartMode::normal;
+            CHECK(runtime.restore_protected_session_config(L"Test complete"));
+        }
+    }
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+#endif
+}
+
 int test_startup_session_marker() {
     namespace fs = std::filesystem;
     const auto root = fs::path{KF2_TEST_ROOT} / L"ssm" /
@@ -2231,6 +2320,9 @@ int test_legacy_adaptive_profile(
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--graphics-protected-rebuild-failure") {
+        return test_graphics_protected_rebuild_failure();
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--adaptive-toggle-save-failure") {
         return test_adaptive_toggle_save_failure();
     }
