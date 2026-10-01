@@ -39,6 +39,7 @@
 #include "app/application_runtime.hpp"
 #include "app/runtime/feature_composition.hpp"
 #include "features/telemetry/telemetry_adaptive_stage.hpp"
+#include "features/telemetry/telemetry_collection_stage.hpp"
 #include "features/telemetry/telemetry_session_stage.hpp"
 #include "features/telemetry/telemetry_frame.hpp"
 #include "../support/process_inspection_denial.hpp"
@@ -3104,6 +3105,158 @@ int test_graphics_protected_rebuild_failure() {
 #endif
 }
 
+struct DxgiStartProbe {
+    unsigned int calls{};
+    unsigned int failures{};
+    kf2::telemetry::SampleIdentity expected;
+    bool identity_matches{true};
+} dxgi_start_probe;
+
+kf2::Result<std::unique_ptr<kf2::platform::windows::DxgiFrameTimingSession>>
+controlled_dxgi_start(kf2::telemetry::SampleIdentity identity,
+                      kf2::telemetry::PresentSource& sink) {
+    using Session = kf2::platform::windows::DxgiFrameTimingSession;
+    ++dxgi_start_probe.calls;
+    dxgi_start_probe.identity_matches &= identity == dxgi_start_probe.expected;
+    if (dxgi_start_probe.calls <= dxgi_start_probe.failures) {
+        return kf2::Result<std::unique_ptr<Session>>::failure({
+            kf2::ErrorCode::platform_failure, L"Controlled DXGI startup failure",
+            ERROR_NOT_ENOUGH_MEMORY});
+    }
+    return kf2::Result<std::unique_ptr<Session>>::success(
+        Session::test_parser(identity, sink, 1'000'000'000ULL));
+}
+
+int test_initial_dxgi_retry() {
+    using namespace kf2;
+    using namespace kf2::telemetry_pipeline;
+    using Session = platform::windows::DxgiFrameTimingSession;
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"initial-dxgi-retry";
+    fs::remove_all(root);
+    wchar_t self[32768]{};
+    CHECK(GetModuleFileNameW(nullptr, self, 32768) != 0);
+    const auto process = game::bind_game_process(GetCurrentProcessId(), self);
+    CHECK(process.has_value());
+    // A test-owned, non-activating window exercises real process/window binding
+    // without opening KF2 or requiring a graphics driver/ETW privilege.
+    struct TestBoundary {
+        HWND window{CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+            L"STATIC", L"DXGI retry fixture", WS_POPUP | WS_VISIBLE,
+            -32000, -32000, 320, 240, nullptr, nullptr,
+            GetModuleHandleW(nullptr), nullptr)};
+        ~TestBoundary() {
+            Session::test_set_start_operation(nullptr);
+            if (window) DestroyWindow(window);
+        }
+    } boundary;
+    CHECK(boundary.window);
+    Session::test_set_start_operation(controlled_dxgi_start);
+    for (const unsigned int failures : {0U, 1U, 2U, 3U}) {
+        dxgi_start_probe = {0, failures,
+            {process.value().pid, process.value().process_start_id}};
+        diagnostics::EventLog events{32};
+        app::UiRuntime runtime{root / std::to_wstring(failures), false,
+            config::Settings{}, events, std::nullopt, app::StartMode::read_only,
+            root / L"portable"};
+        runtime.installation = game::GameInstallation{
+            .executable = self, .config_root = root / L"Config"};
+        runtime.game_process = process.value();
+        CHECK(!runtime.present_source);
+        CHECK(!runtime.present_session);
+        CHECK(runtime.present_session_started_ns == 0);
+        runtime.try_attach_telemetry();
+        CHECK(dxgi_start_probe.calls == 0); // Existing main-menu gate.
+        runtime.overlay_scene_ready = true;
+        runtime.try_attach_telemetry();
+        CHECK(dxgi_start_probe.calls == 1);
+        CHECK(runtime.present_source);
+        CHECK(static_cast<bool>(runtime.present_session) == (failures == 0));
+        CHECK(runtime.present_session_started_ns != 0);
+        auto* const source = runtime.present_source.get();
+        bool drains_completed = true;
+        const auto drain = [&](std::uint64_t now) {
+            source->request_drain(now, 2'000'000'000ULL);
+            drains_completed &= source->wait_for_drain(std::chrono::seconds{2});
+            return drain_present_stage(runtime, now);
+        };
+        for (unsigned int retry = 1; retry <= kMaximumPresentRestarts; ++retry) {
+            if (failures != 0 && runtime.present_session) break;
+            const auto due = runtime.present_session_started_ns +
+                kSilentPresentRestartNs;
+            runtime.try_attach_telemetry();
+            CHECK(dxgi_start_probe.calls == retry);
+            CHECK(drain(due - 1).disposition() ==
+                  PresentDrainDisposition::frames_ready);
+            CHECK(dxgi_start_probe.calls == retry);
+            runtime.overlay_scene_ready = false;
+            CHECK(drain(due).disposition() ==
+                  PresentDrainDisposition::frames_ready);
+            CHECK(dxgi_start_probe.calls == retry);
+            runtime.overlay_scene_ready = true;
+            CHECK(drain(due).disposition() ==
+                  PresentDrainDisposition::reconnecting);
+            CHECK(runtime.present_source.get() == source);
+            CHECK(dxgi_start_probe.calls == retry + 1);
+            CHECK(runtime.present_session_restart_count == retry);
+            CHECK(runtime.present_session_started_ns == due);
+        }
+        const auto attempts = dxgi_start_probe.calls;
+        if (runtime.present_session) {
+            const auto first = runtime.present_session_started_ns;
+            for (unsigned int frame = 0; frame < 66; ++frame) {
+                const auto at = first + frame * 10'000'000ULL;
+                runtime.present_session->test_present_event(true, 17, at);
+                runtime.present_session->test_present_event(false, 17,
+                    at + 500'000ULL);
+            }
+            const auto metrics = drain(first + 650'500'000ULL);
+            CHECK(metrics.frames());
+            CHECK(metrics.frames()->fps);
+            CHECK(std::abs(*metrics.frames()->fps - 100.0) < 0.01);
+            CHECK(metrics.frames()->frame_time_ms == 10.0);
+            CHECK(metrics.frames()->reason == telemetry::UnavailableReason::none);
+            CHECK(metrics.frames()->quality == telemetry::SampleQuality::good);
+            CHECK(dxgi_start_probe.calls == attempts);
+            // A formerly healthy but now stale stream is not restarted.
+            CHECK(drain(first + 4'000'000'000ULL).disposition() ==
+                  PresentDrainDisposition::frames_ready);
+            CHECK(dxgi_start_probe.calls == attempts);
+        } else {
+            CHECK(failures == 3);
+            for (unsigned int tick = 1; tick <= 20; ++tick) {
+                const auto metrics = drain(runtime.present_session_started_ns +
+                    tick * kSilentPresentRestartNs);
+                CHECK(metrics.frames() && !metrics.frames()->fps);
+            }
+            CHECK(dxgi_start_probe.calls == 3);
+        }
+        CHECK(dxgi_start_probe.identity_matches);
+        CHECK(drains_completed);
+        const auto log = events.snapshot();
+        const auto count_events = [&](std::string_view code) {
+            unsigned int count = 0;
+            for (const auto& event : log) {
+                if (event.code == code) count += event.repeat_count;
+            }
+            return count;
+        };
+        CHECK(count_events("DXGI_FRAME_TIMING_UNAVAILABLE") ==
+              (failures == 0 ? 0U : 1U));
+        CHECK(count_events("DXGI_FRAME_TIMING_RECONNECT_FAILED") ==
+              (failures == 3 ? 2U : failures == 2 ? 1U : 0U));
+        CHECK(count_events("DXGI_FRAME_TIMING_RECONNECTED") ==
+              (failures == 0 ? 2U : failures == 3 ? 0U : 1U));
+        runtime.detach_telemetry();
+        CHECK(!runtime.present_source && !runtime.present_session);
+        CHECK(runtime.present_session_started_ns == 0);
+        CHECK(runtime.present_session_restart_count == 0);
+        CHECK(!fs::exists(root / L"Config"));
+    }
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
 int test_startup_session_marker() {
     namespace fs = std::filesystem;
     const auto root = fs::path{KF2_TEST_ROOT} / L"ssm" /
@@ -3273,6 +3426,9 @@ int test_legacy_adaptive_profile(
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--initial-dxgi-retry") {
+        return test_initial_dxgi_retry();
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--frame-rate-cap-recovery-startup") {
         return test_frame_rate_cap_recovery_startup();
     }

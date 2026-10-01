@@ -24,6 +24,14 @@
 
 ## Important distinctions
 
+### Native frame timing recovery
+
+An initial DXGI start failure and a completely silent startup session share
+the same three-second retry interval and limit of two retries. Recovery waits
+for the existing process-bound main-menu gate and keeps the same measurement
+source. Healthy or merely stale streams are not restarted. Exhausted retries
+remain explicitly unavailable; a successful start alone is not a fresh FPS sample.
+
 ### Optional file prewarming
 
 Startup and selected-map warming report completion only when all planned bytes

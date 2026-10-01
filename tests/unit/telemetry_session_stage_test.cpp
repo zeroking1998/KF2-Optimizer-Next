@@ -69,12 +69,18 @@ int main() {
 
     SilentPresentInput silent;
     silent.scene_ready = true;
-    silent.session_bound = true;
     silent.session_started_ns = 10;
     silent.now_ns = 10 + kSilentPresentRestartNs - 1;
     CHECK(!should_reconnect_silent_present(silent));
     silent.now_ns++;
     CHECK(should_reconnect_silent_present(silent));
+    silent.now_ns = 9;
+    CHECK(!should_reconnect_silent_present(silent));
+    silent.session_started_ns = 0;
+    silent.now_ns = kSilentPresentRestartNs;
+    CHECK(!should_reconnect_silent_present(silent));
+    silent.session_started_ns = 10;
+    silent.now_ns = 10 + kSilentPresentRestartNs;
     silent.restart_count = kMaximumPresentRestarts;
     CHECK(!should_reconnect_silent_present(silent));
     silent.restart_count = 0;

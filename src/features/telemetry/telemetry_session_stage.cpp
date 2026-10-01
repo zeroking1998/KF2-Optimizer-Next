@@ -987,12 +987,13 @@ void UiRuntime::try_attach_telemetry() {
         game_process->pid, game_process->process_start_id};
     present_source = std::make_unique<telemetry::PresentSource>(identity, 2400);
     static_cast<void>(present_source->start());
+    // Failed starts share the existing bounded silent-session retry clock.
+    present_session_started_ns = monotonic_ns();
+    present_session_restart_count = 0;
     auto frame_timing = platform::windows::DxgiFrameTimingSession::start(
         identity, *present_source);
     if (frame_timing.has_value()) {
         present_session = std::move(frame_timing.value());
-        present_session_started_ns = monotonic_ns();
-        present_session_restart_count = 0;
         telemetry_failure.clear();
     } else {
         telemetry_failure = L"DXGI frame timing unavailable: " +
