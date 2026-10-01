@@ -155,6 +155,64 @@ bool online_freeze_progress_after_rollback(int length) {
                     [](bool value) { return value; });
 }
 
+bool online_restore_advances_after_failure(std::string_view body) {
+    const auto attempt = body.find("TryRestoreOnlineCorpse(Index, bRestoreAll ?");
+    const auto advance = body.find(
+        "        ReleaseScanCursor = FrozenCorpses.Length > 0 ?\n"
+        "            (bRemoved ? Index % FrozenCorpses.Length :\n"
+        "             (Index + 1) % FrozenCorpses.Length) : 0;");
+    return attempt != std::string_view::npos &&
+        advance != std::string_view::npos && attempt < advance &&
+        body.substr(attempt, advance - attempt).find("return false;") ==
+            std::string_view::npos;
+}
+
+// Models the source-bound restore-all loop, not UnrealScript/PhysX execution.
+// A failed ledger record keeps its original collision/tick state for retry.
+bool online_restore_progress(int length, int failed_id,
+                             bool legacy_reverse_scan = false) {
+    struct OriginalState {
+        int id;
+        std::array<bool, 6> collision_and_tick;
+        bool operator==(const OriginalState&) const = default;
+    };
+    const auto fails = [failed_id](int id) {
+        return failed_id == -2 || id == failed_id;
+    };
+    std::vector<OriginalState> ledger;
+    std::vector<OriginalState> expected_remaining;
+    for (int id = 0; id < length; ++id) {
+        OriginalState original{id, {}};
+        for (std::size_t bit = 0; bit < original.collision_and_tick.size(); ++bit) {
+            original.collision_and_tick[bit] = (id & (1 << bit)) != 0;
+        }
+        ledger.push_back(original);
+        if (fails(id)) expected_remaining.push_back(original);
+    }
+    std::size_t cursor = 0;
+    for (int visit = 0; visit < 2 * length + 1 && !ledger.empty(); ++visit) {
+        int inspected = 0;
+        int successful_mutations = 0;
+        while (!ledger.empty() && inspected < 8) {
+            const auto index = legacy_reverse_scan ? ledger.size() - 1
+                : std::min(cursor, ledger.size() - 1);
+            ++inspected;
+            if (fails(ledger[index].id)) {
+                if (legacy_reverse_scan) break;
+                cursor = (index + 1) % ledger.size();
+            } else {
+                ledger.erase(ledger.begin() + index);
+                cursor = ledger.empty() ? 0 : index % ledger.size();
+                ++successful_mutations;
+                break;
+            }
+        }
+        if (inspected > 8 || successful_mutations > 1 ||
+            (!ledger.empty() && cursor >= ledger.size())) return false;
+    }
+    return ledger == expected_remaining;
+}
+
 std::size_t settled_after_bounded_scans(
     std::size_t pool_size, std::size_t scan_budget,
     double category_visit_interval, double tracking_timeout) {
@@ -1038,6 +1096,23 @@ int main() {
           std::string::npos);
     CHECK(online_release_body.find(
         "(Index + 1) % FrozenCorpses.Length") != std::string::npos);
+    CHECK(online_restore_advances_after_failure(online_release_body));
+    auto blocked_release = online_release_body;
+    const auto attempt = blocked_release.find(
+        "TryRestoreOnlineCorpse(Index, bRestoreAll ?");
+    const auto failure_exit = blocked_release.find(
+        "        ReleaseScanCursor = FrozenCorpses.Length", attempt);
+    CHECK(failure_exit != std::string::npos);
+    blocked_release.insert(failure_exit, "        return false;\n");
+    CHECK(!online_restore_advances_after_failure(blocked_release));
+    CHECK(!online_restore_progress(9, 8, true));
+    for (const auto length : {0, 1, 2, 8, 9, 16, 17, 2000}) {
+        CHECK(online_restore_progress(length, -1));
+        CHECK(online_restore_progress(length, -2));
+        CHECK(online_restore_progress(length, 0));
+        CHECK(online_restore_progress(length, length / 2));
+        CHECK(online_restore_progress(length, length - 1));
+    }
     CHECK(online_corpse_controller_source.find(
         "state=release_failed corpse_id=") != std::string::npos);
     CHECK(online_corpse_controller_source.find(
@@ -1117,6 +1192,13 @@ int main() {
     CHECK(online_restore_start != std::string::npos);
     const auto online_restore_body = online_corpse_controller_source.substr(
         online_restore_start, online_release_start - online_restore_start);
+    CHECK(online_restore_body.find("Original = FrozenCorpses[Index];") !=
+          std::string::npos);
+    CHECK(online_restore_body.find("FrozenCorpses.Remove(") ==
+          std::string::npos);
+    CHECK(online_restore_body.find(
+        "\"restore_readback_mismatch\");\n        return false;") !=
+          std::string::npos);
     CHECK(online_restore_body.find(
         "if (Candidate.Physics != PHYS_RigidBody)") != std::string::npos);
     CHECK(online_restore_body.find(
