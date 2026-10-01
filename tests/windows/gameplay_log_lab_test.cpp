@@ -63,6 +63,25 @@ bool adaptive_mode_preserves_graphics_receipt(std::string_view body) {
         body.find(reset) < body.find("AdaptiveLastControlSequence = Sequence;");
 }
 
+bool online_enable_is_transactional(std::string_view body) {
+    const auto prerequisite = body.find("!EnsureOnlineFixedEffectsBaseline(CurrentWorld)");
+    const auto reject = body.find("return false;", prerequisite);
+    const auto pending_check = body.find("if (!RestoreOnlineEnableMaximum(GoreManager))");
+    const auto previous = body.find(
+        "OnlineCorpseEnablePreviousMaximum = GoreManager.MaxDeadBodies;");
+    const auto write = body.find("GoreManager.MaxDeadBodies = Quality;");
+    const auto mismatch = body.find("if (GoreManager.MaxDeadBodies != Quality)");
+    const auto debt = body.find("bOnlineCorpseEnableRestorePending = true;", mismatch);
+    const auto rollback = body.find("RestoreOnlineEnableMaximum(GoreManager);", debt);
+    const auto failure = body.find("return false;", rollback);
+    const auto commit = body.find("bOnlineGraphicsEnabled = true;");
+    return prerequisite != std::string_view::npos && reject < write &&
+        pending_check < prerequisite && previous < write && write < mismatch &&
+        mismatch < debt && debt < rollback && rollback < failure && failure < commit &&
+        count_occurrences(body, "GoreManager.MaxDeadBodies = Quality;") == 1 &&
+        body.find("RestoreOnlineCorpseMaximum") == std::string_view::npos;
+}
+
 std::string online_visual_cursor(std::string_view body) {
     constexpr std::string_view prefix = "Index = (";
     const auto start = body.find(prefix);
@@ -1207,12 +1226,139 @@ int main() {
     CHECK(corpse_capture_call != std::string::npos);
     CHECK(corpse_limit_write != std::string::npos);
     CHECK(corpse_capture_call < corpse_limit_write);
+    const auto online_enable_start = online_apply_body.find("if (Resource ~= \"enable\")");
+    const auto online_enable_end = online_apply_body.find("if (Quality < 10 || Quality > 100)");
+    CHECK(online_enable_start != std::string::npos &&
+          online_enable_end != std::string::npos);
+    const auto online_enable_body = online_apply_body.substr(
+        online_enable_start, online_enable_end - online_enable_start);
+    CHECK(online_enable_is_transactional(online_enable_body));
     const auto enable_failure_restore = online_apply_body.find(
-        "RestoreOnlineCorpseMaximum(CurrentWorld, \"enable_failure\")",
+        "RestoreOnlineEnableMaximum(GoreManager);",
         corpse_limit_write);
     CHECK(enable_failure_restore != std::string::npos);
     CHECK(enable_failure_restore < online_apply_body.find(
         "bOnlineGraphicsEnabled = true"));
+    auto premature_enable = online_enable_body;
+    const auto previous_capture = premature_enable.find(
+        "OnlineCorpseEnablePreviousMaximum = GoreManager.MaxDeadBodies;");
+    CHECK(previous_capture != std::string::npos);
+    premature_enable.replace(previous_capture,
+        std::string_view{"OnlineCorpseEnablePreviousMaximum = GoreManager.MaxDeadBodies;"}.size(),
+        "OnlineCorpseEnablePreviousMaximum = OnlineCorpseOriginalMaximum;");
+    CHECK(!online_enable_is_transactional(premature_enable));
+    CHECK(!online_enable_is_transactional(
+        online_enable_body + "GoreManager.MaxDeadBodies = Quality;"));
+    const auto enable_restore_start = online_context_source.find(
+        "function bool RestoreOnlineEnableMaximum(");
+    CHECK(enable_restore_start != std::string::npos);
+    const auto enable_restore_body = online_context_source.substr(
+        enable_restore_start, online_apply_function - enable_restore_start);
+    const auto enable_restore_write = enable_restore_body.find(
+        "GoreManager.MaxDeadBodies = OnlineCorpseEnablePreviousMaximum;");
+    const auto enable_restore_mismatch = enable_restore_body.find(
+        "GoreManager.MaxDeadBodies != OnlineCorpseEnablePreviousMaximum");
+    const auto enable_restore_reject = enable_restore_body.find(
+        "return false;", enable_restore_mismatch);
+    const auto enable_debt_clear = enable_restore_body.find(
+        "bOnlineCorpseEnableRestorePending = false;");
+    CHECK(enable_restore_write != std::string::npos &&
+          enable_restore_mismatch != std::string::npos &&
+          enable_restore_reject != std::string::npos &&
+          enable_debt_clear != std::string::npos);
+    CHECK(enable_restore_write < enable_restore_mismatch &&
+          enable_restore_mismatch < enable_restore_reject &&
+          enable_restore_reject < enable_debt_clear);
+    CHECK(enable_restore_body.find("ownership=retained") != std::string::npos);
+    CHECK(enable_restore_body.find("ClearOnlineCorpseMaximumSnapshot") ==
+          std::string::npos);
+    const auto capacity_start = online_context_source.find(
+        "function bool TryEnforceOnlineCorpseCapacity(");
+    const auto capacity_end = online_context_source.find(
+        "function ResetOnlineGraphicsListenerHealth(", capacity_start);
+    CHECK(capacity_start != std::string::npos && capacity_end != std::string::npos);
+    const auto capacity_body = online_context_source.substr(
+        capacity_start, capacity_end - capacity_start);
+    const auto pending_capacity_hold = capacity_body.find(
+        "if (!bOnlineGraphicsEnabled || bOnlineCorpseEnableRestorePending ||");
+    CHECK(pending_capacity_hold != std::string::npos);
+    CHECK(capacity_body.find("return false;", pending_capacity_hold) <
+          capacity_body.find("GoreManager ="));
+    const auto maximum_clear_start = online_context_source.find(
+        "function ClearOnlineCorpseMaximumSnapshot()");
+    const auto maximum_clear_end = online_context_source.find(
+        "function DiscardOnlineCorpseMaximumSnapshot(");
+    CHECK(maximum_clear_start != std::string::npos &&
+          maximum_clear_end != std::string::npos);
+    CHECK(online_context_source.substr(maximum_clear_start,
+        maximum_clear_end - maximum_clear_start).find(
+            "bOnlineCorpseEnableRestorePending = false;") != std::string::npos);
+    // Source-bound failure model, not live UnrealScript/engine injection.
+    struct EnableState {
+        int limit{20}, original{}, previous{}, sequence{};
+        bool captured{}, pending{}, enabled{};
+        bool apply(int requested, int prerequisite_failure,
+                   bool write_mismatch, bool rollback_mismatch) {
+            if (!captured) { original = limit; captured = true; }
+            if (pending) {
+                if (rollback_mismatch) return false;
+                limit = previous;
+                pending = false;
+            }
+            if (prerequisite_failure != 0) return false;
+            previous = limit;
+            if (write_mismatch) {
+                limit = requested + 1;
+                pending = true;
+                if (!rollback_mismatch) { limit = previous; pending = false; }
+                return false;
+            }
+            limit = requested;
+            enabled = true;
+            ++sequence;
+            return true;
+        }
+        bool restore(bool mismatch) {
+            if (mismatch) return false;
+            limit = original;
+            captured = pending = enabled = false;
+            return true;
+        }
+    };
+    for (const int maximum : {4, 20, 99, 100, 2000}) {
+        for (const int prerequisite : {1, 2, 3}) {
+            EnableState state;
+            CHECK(!state.apply(maximum, prerequisite, false, false));
+            CHECK(state.limit == 20 && state.sequence == 0 && !state.enabled);
+            CHECK(!state.apply(maximum, 0, true, false));
+            CHECK(state.limit == 20 && !state.pending && state.sequence == 0);
+            CHECK(!state.apply(maximum, 0, true, true));
+            CHECK(state.pending && state.previous == 20 && !state.enabled);
+            CHECK(!state.apply(maximum, prerequisite, false, false));
+            CHECK(state.limit == 20 && !state.pending && state.sequence == 0);
+            CHECK(state.apply(maximum, 0, false, false));
+            const int next = maximum == 4 ? 2000 : 4;
+            CHECK(!state.apply(next, prerequisite, false, false));
+            CHECK(state.limit == maximum && state.sequence == 1 && state.enabled);
+            CHECK(!state.apply(next, 0, true, false));
+            CHECK(state.limit == maximum && !state.pending && state.sequence == 1);
+            CHECK(!state.apply(next, 0, true, true));
+            CHECK(state.pending && state.previous == maximum && state.original == 20);
+            const auto partial = state.limit;
+            CHECK(!state.apply(next, 0, false, true));
+            CHECK(state.limit == partial && state.previous == maximum && state.sequence == 1);
+            CHECK(!state.apply(next, prerequisite, false, false));
+            CHECK(state.limit == maximum && !state.pending && state.sequence == 1);
+            CHECK(state.apply(next, 0, false, false));
+            CHECK(state.limit == next && state.sequence == 2 && state.original == 20);
+            CHECK(!state.apply(maximum, 0, true, true));
+            CHECK(!state.restore(true) && state.pending && state.captured);
+            CHECK(state.restore(false) && state.limit == 20 && !state.pending);
+            state.limit = 60; // New World: no previous-world restore ownership.
+            CHECK(!state.apply(maximum, prerequisite, false, false));
+            CHECK(state.original == 60 && state.limit == 60 && state.sequence == 2);
+        }
+    }
     CHECK(online_apply_body.find(
         "RestoreOnlineCorpseMaximum(CurrentWorld, \"disable\")") !=
           std::string::npos);

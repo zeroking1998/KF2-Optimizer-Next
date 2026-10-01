@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Online Adaptive enable verifies its prerequisites before changing the corpse
+  maximum. Rejected re-enables restore the previous limit and retain rollback
+  ownership until verified, without losing the session-original value.
+
 - DXGI frame telemetry identifies its ETW owner by PID and process start time,
   so a crashed session cannot block a new optimizer instance after PID reuse.
 
