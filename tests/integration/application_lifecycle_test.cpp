@@ -2062,14 +2062,18 @@ int test_graphics_restaging_failures() {
 }
 #endif
 
-int test_protected_shutdown_running_game() {
+int test_protected_shutdown_running_game(bool with_module = false) {
     namespace fs = std::filesystem;
+    if (with_module && !fs::exists(KF2_TELEMETRY_ASSET)) {
+        std::cout << "SDK package unavailable; module-specific lifecycle case skipped\n";
+        return 77;
+    }
     const auto root = fs::path{KF2_TEST_ROOT} / L"psg" /
         (std::to_wstring(GetCurrentProcessId()) + L"-" +
          std::to_wstring(GetTickCount64()));
     wchar_t self[32768]{};
     CHECK(GetModuleFileNameW(nullptr, self, 32768) != 0);
-    for (const bool with_module : {false, true}) {
+    {
         const auto case_root = root / std::to_wstring(with_module);
         const auto install = case_root / L"game";
         const auto executable = install / L"Binaries/Win64/KFGame.exe";
@@ -2447,6 +2451,9 @@ int test_legacy_adaptive_profile(
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--protected-shutdown-running-game-module") {
+        return test_protected_shutdown_running_game(true);
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--protected-shutdown-running-game") {
         return test_protected_shutdown_running_game();
     }
