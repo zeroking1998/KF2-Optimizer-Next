@@ -103,7 +103,6 @@ product_diagnostics::ProductReport make_product_report(
         .hardware = status.hardware_summary,
         .flex = status.flex_telemetry,
         .optimizer_profile = status.profile,
-        .quality_policy = status.quality,
         .overlay_position = status.overlay_position,
         .target_fps = status.target_fps,
         .overlay_scale_percent = status.overlay_scale_percent,
@@ -664,7 +663,6 @@ app::runtime::DispatchResult full_check(
         .hardware = runtime.model.status().hardware_summary,
         .flex = runtime.model.status().flex_telemetry,
         .optimizer_profile = runtime.model.status().profile,
-        .quality_policy = runtime.model.status().quality,
         .overlay_position = runtime.model.status().overlay_position,
         .target_fps = runtime.model.status().target_fps,
         .overlay_scale_percent =

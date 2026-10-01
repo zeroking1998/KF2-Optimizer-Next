@@ -6,6 +6,7 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -2001,7 +2002,10 @@ int test_startup_session_marker() {
     return EXIT_SUCCESS;
 }
 
-int test_legacy_adaptive_profile() {
+int test_legacy_adaptive_profile(
+    std::string_view legacy_key = "adaptive_aggressiveness",
+    std::array<const char*, 3> legacy_values = {
+        "conservative", "balanced", "aggressive"}) {
     namespace fs = std::filesystem;
     const auto root = fs::path{KF2_TEST_ROOT} / L"lap" /
         (std::to_wstring(GetCurrentProcessId()) + L"-" +
@@ -2014,7 +2018,7 @@ int test_legacy_adaptive_profile() {
         "adaptive_quality_recovery_enabled=false\n"
         "adaptive_manual_locks_enabled=false\n"
         "adaptive_calibration_enabled=false\nadaptive_logging=false\n"
-        "custom_key=kept\n";
+        "custom_key=kept\ncustom_quality_policy=kept\n";
     const auto reference = kf2::config::parse_settings(visible);
     CHECK(reference.has_value());
     const auto policy_signature = [](const kf2::optimizer::AdaptivePolicy& policy) {
@@ -2034,8 +2038,9 @@ int test_legacy_adaptive_profile() {
     CHECK(expected.quality_change_budget == 4);
     CHECK(expected.performance_headroom == 0.12);
     CHECK(!expected.quality_recovery_enabled);
-    for (const auto legacy : {"conservative", "balanced", "aggressive"}) {
-        const auto document = visible + "adaptive_aggressiveness=" + legacy + "\n";
+    for (const auto legacy : legacy_values) {
+        const auto document = visible + std::string{legacy_key} + "=" +
+                              legacy + "\n";
         const auto parsed = kf2::config::parse_settings(document);
         CHECK(parsed.has_value());
         CHECK(policy_signature(kf2::app::adaptive_policy_from(parsed.value())) ==
@@ -2064,9 +2069,11 @@ int test_legacy_adaptive_profile() {
               policy_signature(expected));
         CHECK(migrated.value().corpse_limit == 1272);
         CHECK(migrated.value().extras.at("custom_key") == "kept");
+        CHECK(migrated.value().extras.at("custom_quality_policy") == "kept");
         const auto canonical = read_bytes(path);
         CHECK(canonical == kf2::config::serialize_settings(reference.value()));
-        CHECK(canonical.find("adaptive_aggressiveness=") == std::string::npos);
+        CHECK(canonical.find("\n" + std::string{legacy_key} + "=") ==
+              std::string::npos);
         // Already migrated settings remain readable even when replacement is
         // blocked, proving that normal reload does not rewrite the file.
         locked.handle = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
@@ -2083,6 +2090,15 @@ int test_legacy_adaptive_profile() {
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--legacy-quality-policy") {
+        try {
+            return test_legacy_adaptive_profile(
+                "quality_policy", {"exact", "invisible", "performance"});
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << '\n';
+            return EXIT_FAILURE;
+        }
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--legacy-adaptive-profile") {
         try {
             return test_legacy_adaptive_profile();
@@ -2551,8 +2567,7 @@ int main(int argc, char** argv) {
         "adaptive_calibration_enabled=true\nadaptive_logging=true\n"
         "overlay_position=top_right\n"
         "overlay_scale_percent=100\n"
-        "target_fps=60\ncorpse_limit=20\n"
-        "quality_policy=exact\n");
+        "target_fps=60\ncorpse_limit=20\n");
         CHECK(recovered.value().shutdown_cleanly().has_value());
     }
     {

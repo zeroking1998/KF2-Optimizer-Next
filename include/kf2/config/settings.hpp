@@ -42,8 +42,8 @@ struct Settings {
     // Transient load evidence. It is intentionally not serialized.
     bool target_fps_migrated{false};
     bool adaptive_quality_range_migrated{false};
+    bool legacy_quality_policy_migrated{false};
     int corpse_limit{20};
-    std::string quality_policy{"exact"};
     std::string manual_game_path;
     std::map<std::string, std::string> extras;
 };

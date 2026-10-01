@@ -82,6 +82,7 @@ Result<config::Settings> load_or_create_settings(
                 bytes.find("adaptive_aggressiveness=") != std::string::npos ||
                 bytes.find("adaptive_shadow_mode=") != std::string::npos ||
                 parsed.value().target_fps_migrated ||
+                parsed.value().legacy_quality_policy_migrated ||
                 parsed.value().adaptive_quality_range_migrated;
             if (canonicalization_needed) {
                 const auto migrated =
@@ -494,8 +495,6 @@ ui::UiStatus UiRuntime::make_initial_status(
                 : L"top right";
     status.hardware_summary = query_hardware_summary();
     status.profile = L"user settings";
-    status.quality = std::wstring{
-        settings.quality_policy.begin(), settings.quality_policy.end()};
     status.recommended_profile = L"user settings";
     status.recommendation_reason =
         L"KF2 starts from the user's saved graphics; Adaptive reacts only to validated gameplay telemetry";

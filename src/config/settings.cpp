@@ -359,7 +359,9 @@ Result<Settings> parse_settings(std::string_view text) {
                     value != "performance") {
                     return invalid_settings(L"quality_policy is invalid");
                 }
-                settings.quality_policy = value;
+                // Retired inert preference: validate legacy input, then
+                // remove it from canonical settings without selecting policy.
+                settings.legacy_quality_policy_migrated = true;
             } else if (key == "optimizer_profile") {
                 // Legacy portable builds persisted a named startup profile.
                 // User-owned graphics now come directly from KF2, so accept
@@ -454,8 +456,7 @@ std::string serialize_settings(const Settings& settings) {
            << "overlay_position=" << settings.overlay_position << '\n'
            << "overlay_scale_percent=" << settings.overlay_scale_percent << '\n'
            << "target_fps=" << settings.target_fps << '\n'
-           << "corpse_limit=" << settings.corpse_limit << '\n'
-           << "quality_policy=" << settings.quality_policy << '\n';
+           << "corpse_limit=" << settings.corpse_limit << '\n';
     if (!settings.manual_game_path.empty()) {
         output << "manual_game_path=" << settings.manual_game_path << '\n';
     }

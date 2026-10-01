@@ -52,7 +52,7 @@ int main() {
     CHECK(parsed.value().debug_corpse_physics_control);
     CHECK(parsed.value().overlay_position == "bottom_left");
     CHECK(parsed.value().overlay_scale_percent == 175);
-    CHECK(parsed.value().quality_policy == "invisible");
+    CHECK(parsed.value().legacy_quality_policy_migrated);
     CHECK(parsed.value().manual_game_path == "D:\\Steam\\KillingFloor2");
     CHECK(parsed.value().extras.at("custom_key") == "preserved");
     const auto migrated_serialized = serialize_settings(parsed.value());
@@ -135,6 +135,27 @@ int main() {
     CHECK(!parse_settings(
         "schema_version=1\nadaptive_aggressiveness=balanced\n"
         "adaptive_aggressiveness=aggressive\n").has_value());
+    for (const auto legacy : {"exact", "invisible", "performance"}) {
+        const auto migrated_quality = parse_settings(
+            std::string{"schema_version=1\nquality_policy="} + legacy +
+            "\ntarget_fps=119\ncorpse_limit=1272\ncustom_key=kept\n");
+        CHECK(migrated_quality.has_value());
+        CHECK(migrated_quality.value().legacy_quality_policy_migrated);
+        CHECK(migrated_quality.value().target_fps == 119);
+        CHECK(migrated_quality.value().corpse_limit == 1272);
+        CHECK(migrated_quality.value().extras.at("custom_key") == "kept");
+        CHECK(!migrated_quality.value().extras.contains("quality_policy"));
+        const auto canonical = serialize_settings(migrated_quality.value());
+        CHECK(canonical.find("quality_policy=") == std::string::npos);
+        const auto reloaded = parse_settings(canonical);
+        CHECK(reloaded.has_value());
+        CHECK(!reloaded.value().legacy_quality_policy_migrated);
+        CHECK(serialize_settings(reloaded.value()) == canonical);
+    }
+    CHECK(!parse_settings(
+        "schema_version=1\nquality_policy=exact\nquality_policy=invisible\n")
+        .has_value());
+    CHECK(!parse_settings("schema_version=1\nquality_policy=\n").has_value());
     const auto adaptive_off = parse_settings(
         "schema_version=1\nadaptive_optimization_enabled=false\n");
     CHECK(adaptive_off.has_value());
@@ -289,8 +310,7 @@ int main() {
           "adaptive_calibration_enabled=true\nadaptive_logging=true\n"
           "overlay_position=top_right\n"
           "overlay_scale_percent=100\n"
-          "target_fps=60\ncorpse_limit=20\n"
-          "quality_policy=exact\n");
+          "target_fps=60\ncorpse_limit=20\n");
 
     Settings with_extras;
     CHECK(serialize_settings(with_extras).find(

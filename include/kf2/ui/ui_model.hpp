@@ -145,7 +145,6 @@ struct UiStatus {
     int advanced_particle_percentage{100};
     int advanced_decal_lifetime{30};
     std::wstring profile{L"user settings"};
-    std::wstring quality{L"exact"};
 };
 
 struct UiAction {
