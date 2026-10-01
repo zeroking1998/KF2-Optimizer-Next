@@ -16,6 +16,7 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <new>
 #include <sstream>
 #include <stdexcept>
@@ -3411,6 +3412,37 @@ int main(int argc, char** argv) {
                             diagnostics_navigation->y));
     CHECK(graphical.value().ui_model().selected() ==
           kf2::ui::Destination::diagnostics);
+    // Observe a real asynchronous writer failure/recovery through Help & Repair.
+    // This locks only the test application's own event file, never user data.
+    {
+        graphical.value().telemetry_tick_for_testing();
+        CHECK(graphical.value().ui_model().status().event_persistence_available == true);
+        std::unique_ptr<void, decltype(&CloseHandle)> blocked{
+            CreateFileW((options.state_root / L"logs/session-events.json").c_str(),
+                GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr),
+            &CloseHandle};
+        CHECK(blocked.get() != INVALID_HANDLE_VALUE);
+        const auto backup = node_center(
+            hwnd, graphical.value().ui_model(), "diagnostics-backup");
+        CHECK(backup.has_value());
+        SendMessageW(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(backup->x, backup->y));
+        CHECK(graphical.value().ui_model().notice().has_value());
+        CHECK(graphical.value().ui_model().notice()->code == L"BACKUP_CREATED");
+        const auto await_storage = [&](bool available) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{4};
+            do {
+                graphical.value().telemetry_tick_for_testing();
+                if (graphical.value().ui_model().status().event_persistence_available ==
+                    available) return true;
+                std::this_thread::sleep_for(std::chrono::milliseconds{10});
+            } while (std::chrono::steady_clock::now() < deadline);
+            return false;
+        };
+        CHECK(await_storage(false));
+        blocked.reset();
+        CHECK(await_storage(true));
+        CHECK(graphical.value().ui_model().notice()->code == L"BACKUP_CREATED");
+    }
     const auto overlay_navigation =
         node_center(hwnd, graphical.value().ui_model(), "nav-2");
     CHECK(overlay_navigation.has_value());

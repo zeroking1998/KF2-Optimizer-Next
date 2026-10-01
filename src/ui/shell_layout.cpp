@@ -776,6 +776,13 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         add_action("diagnostics-open-log", L"OPEN SESSION LOG");
     } else if (model.selected() == Destination::diagnostics) {
         float cursor = grid_base;
+        const auto available = model.status().event_persistence_available;
+        add_section("diagnostics-event-storage",
+            !available.has_value() ? L"Event log storage: not checked" :
+            *available ? L"Event log storage: available" :
+                L"Event log storage: unavailable — check Data/Logs access",
+            cursor, 48.0F);
+        cursor += 56.0F;
         add_section("diagnostics-check-section", L"FIX A PROBLEM", cursor);
         cursor += 34.0F;
         grid_base = cursor;

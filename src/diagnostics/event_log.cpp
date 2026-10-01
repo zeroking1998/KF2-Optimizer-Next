@@ -18,6 +18,7 @@ namespace {
 constexpr std::uintmax_t kMaximumPreviousEventLogBytes =
     2U * 1024U * 1024U;
 constexpr std::size_t kMaximumRetainedEventLogs = 2;
+constexpr std::chrono::milliseconds kMaximumPersistenceRetryDelay{5000};
 
 bool is_retained_audit_event(const Event& event) noexcept {
     if (event.severity != Severity::info) return true;
@@ -177,10 +178,10 @@ EventLog::EventLog(std::size_t capacity,
             }
             if (!initialized) {
                 record_persistence_failure_locked();
-            } else {
-                persistence_worker_ = std::jthread(
-                    [this](std::stop_token stop) { persist_worker(stop); });
             }
+            // A validated path may be temporarily locked even at startup.
+            persistence_worker_ = std::jthread(
+                [this](std::stop_token stop) { persist_worker(stop); });
         }
     }
 }
@@ -249,13 +250,12 @@ void EventLog::clear() {
 bool EventLog::flush(std::chrono::milliseconds timeout) {
     std::unique_lock lock{mutex_};
     if (persistence_path_.empty()) return true;
-    if (!persistence_ready_) return false;
+    if (!persistence_worker_.joinable()) return false;
     const auto target_revision = persistence_revision_;
     persistence_changed_.notify_one();
     const auto completed = persistence_changed_.wait_for(
         lock, timeout, [&] {
-            return persisted_revision_ >= target_revision ||
-                   !persistence_ready_;
+            return persistence_ready_ && persisted_revision_ >= target_revision;
         });
     return completed && persistence_ready_ &&
            persisted_revision_ >= target_revision;
@@ -284,10 +284,11 @@ EventLogStats EventLog::stats() const noexcept {
 }
 
 void EventLog::schedule_persist_locked() noexcept {
-    if (!persistence_ready_ || persistence_path_.empty()) return;
+    if (!persistence_worker_.joinable() || persistence_path_.empty()) return;
     if (persistence_revision_ != UINT64_MAX) ++persistence_revision_;
+    const bool was_pending = persistence_pending_;
     persistence_pending_ = true;
-    persistence_changed_.notify_one();
+    if (!was_pending) persistence_changed_.notify_one();
 }
 
 void EventLog::persist_worker(std::stop_token stop) noexcept {
@@ -299,16 +300,25 @@ void EventLog::persist_worker(std::stop_token stop) noexcept {
             persistence_changed_.wait(lock, [&] {
                 return persistence_pending_ || stop.stop_requested();
             });
+            // Preserve the healthy final drain, but never wait/retry a known
+            // failed writer during destruction. Shutdown has its own flush.
+            if (stop.stop_requested() &&
+                (!persistence_pending_ || !persistence_ready_)) return;
             if (!persistence_pending_) {
-                if (stop.stop_requested()) return;
                 continue;
+            }
+            if (!persistence_ready_) {
+                persistence_changed_.wait_until(lock, persistence_retry_at_, [&] {
+                    return stop.stop_requested();
+                });
+                if (stop.stop_requested()) return;
             }
             try {
                 copy.assign(events_.begin(), events_.end());
             } catch (...) {
                 record_persistence_failure_locked();
                 persistence_changed_.notify_all();
-                return;
+                continue;
             }
             revision = persistence_revision_;
             persistence_pending_ = false;
@@ -331,6 +341,9 @@ void EventLog::persist_worker(std::stop_token stop) noexcept {
                 record_persistence_failure_locked();
             } else {
                 persisted_revision_ = std::max(persisted_revision_, revision);
+                persistence_ready_ = true;
+                persistence_retry_delay_ = kInitialPersistenceRetryDelay;
+                persistence_retry_at_ = {};
             }
         }
         persistence_changed_.notify_all();
@@ -339,7 +352,11 @@ void EventLog::persist_worker(std::stop_token stop) noexcept {
 
 void EventLog::record_persistence_failure_locked() noexcept {
     persistence_ready_ = false;
-    persistence_pending_ = false;
+    // Retry a fresh bounded snapshot, including appends/clear during failure.
+    persistence_pending_ = true;
+    persistence_retry_at_ = std::chrono::steady_clock::now() + persistence_retry_delay_;
+    persistence_retry_delay_ = std::min(persistence_retry_delay_ * 2,
+                                       kMaximumPersistenceRetryDelay);
     if (stats_.persistence_failures != UINT64_MAX) {
         ++stats_.persistence_failures;
     }

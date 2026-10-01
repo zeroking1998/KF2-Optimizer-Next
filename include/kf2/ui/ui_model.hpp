@@ -73,6 +73,7 @@ struct UiStatus {
         L"Detailed overlay diagnostics are off"};
     std::wstring prewarm_diagnostics{
         L"Detailed prewarm diagnostics are off"};
+    std::optional<bool> event_persistence_available;
     std::wstring overlay_position{L"top right"};
     int overlay_scale_percent{100};
     int target_fps{60};
