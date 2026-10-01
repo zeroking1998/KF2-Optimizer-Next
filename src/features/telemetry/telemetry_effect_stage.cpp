@@ -383,9 +383,16 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
     if (installation) {
         const auto capped = synchronize_frame_rate_cap();
         if (!capped.has_value()) {
+            complete = false;
+            model.set_recovery_required(true);
             events->append({0, diagnostics::Severity::error,
                 "TARGET_FPS_PERSIST_FAILED", capped.error().message,
                 L"config"});
+            model.set_notice({ui::NoticeSeverity::error,
+                L"TARGET_FPS_PERSIST_FAILED",
+                L"Required native FPS-cap synchronization failed: " +
+                    capped.error().message,
+                L"Keep KF2 closed until the native cap can be written and verified."});
         } else if (capped.value().changed) {
             events->append({0, diagnostics::Severity::info,
                 "TARGET_FPS_PERSISTED",

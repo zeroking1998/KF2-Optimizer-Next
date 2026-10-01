@@ -586,9 +586,16 @@ void UiRuntime::finalize_ended_game_session() {
     } else if (installation) {
         const auto capped = synchronize_frame_rate_cap();
         if (!capped.has_value()) {
+            session_restored = false;
+            model.set_recovery_required(true);
             events->append({0, diagnostics::Severity::error,
                 "TARGET_FPS_PERSIST_FAILED", capped.error().message,
                 L"config"});
+            model.set_notice({ui::NoticeSeverity::error,
+                L"TARGET_FPS_PERSIST_FAILED",
+                L"Required native FPS-cap synchronization failed: " +
+                    capped.error().message,
+                L"Keep KF2 closed until the native cap can be written and verified."});
         } else if (capped.value().changed) {
             events->append({0, diagnostics::Severity::info,
                 "TARGET_FPS_PERSISTED",
@@ -610,7 +617,7 @@ void UiRuntime::finalize_ended_game_session() {
                          : "KF2_SESSION_RECOVERY_PENDING",
         session_restored
             ? L"No verified replacement process appeared; session telemetry was finalized"
-            : L"No verified replacement process appeared; protected INI finalization is waiting for a stable graphics readback",
+            : L"No verified replacement process appeared; required session finalization remains incomplete",
         L"game"});
     if (session_restored) {
         static_cast<void>(rearm_automatic_external_launch_profile());
