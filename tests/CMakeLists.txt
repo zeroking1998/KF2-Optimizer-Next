@@ -912,6 +912,9 @@ target_include_directories(kf2_present_source_test PRIVATE "${PROJECT_SOURCE_DIR
 target_compile_definitions(kf2_present_source_test PRIVATE
     KF2_PRESENT_SOURCE_TESTING)
 add_test(NAME kf2_present_source_test COMMAND kf2_present_source_test)
+add_test(NAME kf2_present_source_shutdown_test
+    COMMAND kf2_present_source_test --shutdown-before-wait)
+set_tests_properties(kf2_present_source_shutdown_test PROPERTIES TIMEOUT 5)
 
 add_executable(kf2_dxgi_frame_timing_session_test
     windows/dxgi_frame_timing_session_test.cpp

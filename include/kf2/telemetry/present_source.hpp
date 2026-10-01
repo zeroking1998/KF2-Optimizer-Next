@@ -88,6 +88,8 @@ private:
 #ifdef KF2_PRESENT_SOURCE_TESTING
 namespace detail {
 void fail_next_present_drain_publication() noexcept;
+using PresentDrainWaitHook = void (*)(std::stop_token) noexcept;
+void set_present_drain_wait_hook(PresentDrainWaitHook hook) noexcept;
 }
 #endif
 }  // namespace kf2::telemetry
