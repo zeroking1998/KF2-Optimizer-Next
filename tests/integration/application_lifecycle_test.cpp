@@ -2578,6 +2578,15 @@ int test_executable_identity_boundaries() {
     CHECK(runtime.game_restart_handoff_previous_process.has_value());
     CHECK(runtime.game_restart_handoff_previous_process->pid == second_process.pid);
 
+    // Pending recovery is not an indefinitely fast polling window after its
+    // deadline. Expiration still requires a real process query before cleanup.
+    runtime.game_restart_handoff_deadline_ns = 1;
+    runtime.last_game_process_scan_ns = 1;
+    runtime.game_process_discovery_interval_ns = 1'000'000'000ULL;
+    runtime.try_attach_telemetry();
+    CHECK(runtime.game_process_discovery_interval_ns == 2'000'000'000ULL);
+    CHECK(!runtime.game_restart_handoff_previous_process.has_value());
+
     runtime.resource_telemetry_worker.stop();
     auto captured = kf2::config::capture_session_config(config, root / L"Data");
     CHECK(captured.has_value());

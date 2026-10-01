@@ -783,7 +783,9 @@ void UiRuntime::try_attach_telemetry() {
         // A permanently staged external-launch profile is not an active
         // launch. Keep the fast cadence only inside a bounded startup/handoff.
         const bool bounded_launch =
-            game_restart_handoff_previous_process.has_value() ||
+            (game_restart_handoff_previous_process.has_value() &&
+             game_restart_handoff_deadline_ns != 0 &&
+             now < game_restart_handoff_deadline_ns) ||
             (session_config_waiting_for_launch &&
              session_config_launch_deadline_ns != 0 &&
              now < session_config_launch_deadline_ns);
