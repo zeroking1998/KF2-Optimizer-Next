@@ -1,5 +1,4 @@
 #include <Windows.h>
-#include <atomic>
 #include <bit>
 #include <cstdlib>
 #include <iostream>
@@ -118,6 +117,25 @@ int main() {
     CHECK(calculate_thread_cpu_percent(100, 50'100, 100).value() == 5.0);
     CHECK(calculate_thread_cpu_percent(100, 2'000'100, 100).value() == 100.0);
 
+    // Numeric thread IDs are not instance identities. Never subtract CPU
+    // counters from different creation times, even when the new counter grew.
+    using detail::ThreadCpuTimes;
+    const ThreadCpuTimes old_thread{1'000, 100};
+    for (const auto reused_ticks : {50ULL, 100ULL, 50'100ULL}) {
+        CHECK(!detail::calculate_thread_cpu_percent(
+            old_thread, ThreadCpuTimes{2'000, reused_ticks}, 100));
+    }
+    CHECK(!detail::calculate_thread_cpu_percent(
+        ThreadCpuTimes{}, ThreadCpuTimes{0, 50'000}, 100));
+    CHECK(!detail::calculate_thread_cpu_percent(
+        old_thread, ThreadCpuTimes{1'000, 50'100}, 0));
+    CHECK(!detail::calculate_thread_cpu_percent(
+        old_thread, ThreadCpuTimes{1'000, 50}, 100));
+    CHECK(detail::calculate_thread_cpu_percent(
+        old_thread, ThreadCpuTimes{1'000, 50'100}, 100).value() == 5.0);
+    CHECK(detail::calculate_thread_cpu_percent(
+        old_thread, old_thread, 100).value() == 0.0);
+
     const detail::ThreadPressureMetrics pressure{
         98.0, 1.25, 78.4, 3};
     detail::ThreadPressureCache terminated_threads;
@@ -189,15 +207,15 @@ int main() {
     auto stale = identity.value(); ++stale.process_start_id;
     CHECK(!ProcessMetricSampler{stale}.sample().has_value());
 
-    std::atomic_bool keep_workers{true};
-    std::vector<std::thread> workers;
+    std::vector<std::jthread> workers;
     for (int index = 0; index < 8; ++index) {
-        workers.emplace_back([&] {
-            while (keep_workers.load(std::memory_order_relaxed)) Sleep(5);
+        workers.emplace_back([](std::stop_token stop) {
+            while (!stop.stop_requested()) Sleep(5);
         });
     }
     DWORD handles_before = 0;
     CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_before));
+    constexpr DWORD kAmbientHandleAllowance = 2;
     {
         ProcessMetricSampler tracked{identity.value()};
         CHECK(tracked.sample().has_value());
@@ -206,15 +224,26 @@ int main() {
                                     &handles_while_tracked));
         CHECK(handles_while_tracked >=
               handles_before + static_cast<DWORD>(workers.size()));
+
+        for (auto& worker : workers) worker.request_stop();
+        for (auto& worker : workers) worker.join();
+        DWORD handles_after_exit = 0;
+        CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after_exit));
+        // Exercise the real five-second membership refresh: exited workers'
+        // cached handles must be released while the sampler remains alive.
+        Sleep(5'050);
+        CHECK(tracked.sample().has_value());
+        DWORD handles_after_refresh = 0;
+        CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after_refresh));
+        CHECK(handles_after_refresh + static_cast<DWORD>(workers.size()) <=
+              handles_after_exit + kAmbientHandleAllowance);
     }
     DWORD handles_after = 0;
     CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after));
     // The process-wide count can move by a handle or two when Windows or the
-    // test runtime performs unrelated asynchronous work. The eight persistent
-    // worker threads make a tracker leak much larger than that ambient noise.
-    constexpr DWORD kAmbientHandleAllowance = 2;
-    CHECK(handles_after <= handles_before + kAmbientHandleAllowance);
-    keep_workers.store(false, std::memory_order_relaxed);
-    for (auto& worker : workers) worker.join();
+    // test runtime performs unrelated asynchronous work. Joined workers no
+    // longer own the eight native handles counted before sampling started.
+    CHECK(handles_after + static_cast<DWORD>(workers.size()) <=
+          handles_before + kAmbientHandleAllowance);
     return EXIT_SUCCESS;
 }
