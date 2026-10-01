@@ -479,6 +479,12 @@ add_test(NAME kf2_map_prewarm_start_visibility_test
 add_test(NAME kf2_runtime_shutdown_exception_test
     COMMAND kf2_application_lifecycle_test
         --runtime-shutdown-exceptions)
+add_test(NAME kf2_protected_shutdown_running_game_test
+    COMMAND kf2_application_lifecycle_test --protected-shutdown-running-game)
+add_test(NAME kf2_protected_shutdown_running_game_module_test
+    COMMAND kf2_application_lifecycle_test --protected-shutdown-running-game-module)
+set_tests_properties(kf2_protected_shutdown_running_game_module_test PROPERTIES
+    SKIP_RETURN_CODE 77)
 add_test(NAME kf2_restore_cap_sync_failure_test
     COMMAND kf2_application_lifecycle_test
         --restore-cap-sync-failure)
