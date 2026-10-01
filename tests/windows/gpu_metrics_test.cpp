@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include "kf2/telemetry/gpu_metrics.hpp"
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
@@ -138,6 +140,65 @@ int wmain(int argc, wchar_t** argv) {
     }, 4242, 1);
     CHECK(higher_memory_renderer.has_value());
     CHECK(*higher_memory_renderer == 2);
+    constexpr std::uint64_t gib = 1ULL << 30U;
+    constexpr auto maximum_memory =
+        (std::numeric_limits<std::uint64_t>::max)();
+    std::vector<GpuCounterValue> split_memory{
+        {{4242, 1, L"3D", 0, 0}, 30.0, 0, 0},
+        {{4242, 2, L"3D", 0, 0}, 30.0, 0, 0},
+        {{4242, 1, L"memory"}, 0.0, 2 * gib, 0},
+        {{4242, 1, L"memory"}, 0.0, 0, 2 * gib},
+        {{4242, 2, L"memory"}, 0.0, 3 * gib, 0},
+        {{7777, 2, L"memory"}, 0.0, maximum_memory, 0},
+        {{4242, 0, L"memory"}, 0.0, maximum_memory, 0},
+        {{4242, 3, L"memory"}, 0.0, maximum_memory, 0},
+    };
+    // PDH supplies the two memory categories separately. Four GiB must beat
+    // three GiB, including when the smaller allocation was bound previously.
+    CHECK(active_process_gpu_adapter_luid(split_memory, 4242) == 1);
+    CHECK(active_process_gpu_adapter_luid(split_memory, 4242, 1) == 1);
+    CHECK(active_process_gpu_adapter_luid(split_memory, 4242, 2) == 1);
+    std::reverse(split_memory.begin(), split_memory.end());
+    CHECK(active_process_gpu_adapter_luid(split_memory, 4242, 2) == 1);
+    // Duplicate/lower category records must not inflate or reduce the total.
+    split_memory.push_back({{4242, 2, L"memory"}, 0.0, 3 * gib, 0});
+    split_memory.push_back({{4242, 1, L"memory"}, 0.0, gib, gib});
+    CHECK(active_process_gpu_adapter_luid(split_memory, 4242, 2) == 1);
+    CHECK(active_process_gpu_adapter_luid({
+        {{4242, 1, L"3D", 0, 0}, 30.0, 2 * gib, 2 * gib},
+        {{4242, 2, L"3D", 0, 0}, 30.0, 3 * gib, 0},
+    }, 4242, 2) == 1);
+    // If memory counters are absent/zero, utilization spikes alone must not
+    // displace the already bound 3D renderer.
+    for (const auto other_load : {0.0, 99.0}) {
+        CHECK(active_process_gpu_adapter_luid({
+            {{4242, 1, L"3D", 0, 0}, 30.0, 0, 0},
+            {{4242, 2, L"3D", 0, 0}, other_load, 0, 0},
+        }, 4242, 1) == 1);
+        CHECK(active_process_gpu_adapter_luid({
+            {{4242, 1, L"3D", 0, 0}, 30.0, 0, 0},
+            {{4242, 2, L"3D", 0, 0}, other_load, 0, 0},
+            {{4242, 1, L"memory"}, 0.0, 0, 0},
+            {{4242, 2, L"memory"}, 0.0, 0, 0},
+        }, 4242, 1) == 1);
+    }
+
+    std::vector<GpuCounterValue> overflowing_memory{
+        {{4242, 1, L"3D", 0, 0}, 30.0, 0, 0},
+        {{4242, 2, L"3D", 0, 0}, 30.0, 0, 0},
+        {{4242, 1, L"memory"}, 0.0, maximum_memory - 2, 8},
+        {{4242, 2, L"memory"}, 0.0, maximum_memory - 1, 0},
+    };
+    CHECK(active_process_gpu_adapter_luid(overflowing_memory, 4242, 2) == 1);
+    overflowing_memory.push_back({{4242, 2, L"memory"}, 0.0, 0, 2});
+    CHECK(active_process_gpu_adapter_luid(overflowing_memory, 4242, 2) == 2);
+    CHECK(!active_process_gpu_adapter_luid(overflowing_memory, 4242));
+    // A later strictly better candidate clears an earlier ambiguous tie.
+    CHECK(active_process_gpu_adapter_luid({
+        {{4242, 1, L"3D", 0, 0}, 30.0, 2 * gib, 0},
+        {{4242, 2, L"3D", 0, 0}, 30.0, 2 * gib, 0},
+        {{4242, 3, L"3D", 0, 0}, 30.0, 3 * gib, 0},
+    }, 4242) == 3);
     CHECK(!adapter_luid_for_window(nullptr).has_value());
     CHECK(!query_gpu_memory_budget(0).has_value());
     const auto parsed = parse_gpu_instance(

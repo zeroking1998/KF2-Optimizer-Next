@@ -84,6 +84,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Hybrid-GPU attribution ranks the combined dedicated and shared process
+  allocation correctly, while preserving renderer preference and tie handling.
 - Removed the inert Adaptive calibration preference. Older settings migrate
   safely without changing the user's active preferences or controller behavior.
 - The full self-check uses the authoritative catalog size and reports its
