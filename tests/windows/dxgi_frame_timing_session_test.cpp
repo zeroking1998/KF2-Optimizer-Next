@@ -9,9 +9,11 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "kf2/platform/windows/dxgi_frame_timing_session.hpp"
+#include "../support/process_inspection_denial.hpp"
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
@@ -28,8 +30,22 @@ ULONG cleanup_control_status{ERROR_SUCCESS};
 int cleanup_malformed{};
 bool cleanup_arguments_valid{};
 std::vector<std::wstring> cleanup_stops;
+std::vector<std::wstring> cleanup_names;
 constexpr wchar_t kDeadSession[] = L"KF2OptimizerNext-DXGI-4294967295";
 constexpr wchar_t kLastSession[] = L"KF2OptimizerNext-DXGI-4294967291";
+
+std::uint64_t current_creation_time() {
+    FILETIME creation{}, exit{}, kernel{}, user{};
+    if (!GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user))
+        return 0;
+    return (static_cast<std::uint64_t>(creation.dwHighDateTime) << 32) |
+        creation.dwLowDateTime;
+}
+
+std::wstring current_session_name(std::uint64_t creation) {
+    return L"KF2OptimizerNext-DXGI-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(creation);
+}
 
 ULONG WINAPI query_cleanup_sessions(
     PEVENT_TRACE_PROPERTIES* sessions, ULONG capacity, PULONG count) {
@@ -37,7 +53,8 @@ ULONG WINAPI query_cleanup_sessions(
     if (!cleanup_arguments_valid) return ERROR_INVALID_PARAMETER;
     for (ULONG index = 0; index < capacity; ++index) {
         auto* properties = sessions[index];
-        const auto name = index == 0 ? std::wstring{kDeadSession}
+        const auto name = index < cleanup_names.size() ? cleanup_names[index]
+            : index == 0 ? std::wstring{kDeadSession}
             : index == capacity - 1 ? std::wstring{kLastSession}
             : index == 1 ? L"KF2OptimizerNext-DXGI-" + std::to_wstring(GetCurrentProcessId())
                          : std::wstring{L"Unrelated-ETW-session"};
@@ -118,6 +135,118 @@ int test_stale_cleanup_overflow() {
     DxgiFrameTimingSession::test_cleanup_stale_sessions(
         query_cleanup_sessions, control_cleanup_session);
     CHECK(cleanup_arguments_valid && cleanup_stops.size() == 2);
+    return EXIT_SUCCESS;
+}
+
+int test_stale_cleanup_pid_reuse() {
+    const auto creation = current_creation_time();
+    CHECK(creation > 1);
+    const auto legacy = L"KF2OptimizerNext-DXGI-" +
+        std::to_wstring(GetCurrentProcessId());
+    const auto live = current_session_name(creation);
+    const auto orphan = current_session_name(creation - 1);
+    cleanup_names = {orphan, live, legacy,
+        std::wstring{kDeadSession} + L"-123",
+        std::wstring{kLastSession} + L"-123",
+        legacy + L"-", legacy + L"-0", legacy + L"--1",
+        legacy + L"-123x", legacy + L"-18446744073709551616",
+        live + L"-1", L"KF2OptimizerNext-DXGI-0-123",
+        L"Other-owner-123"};
+    cleanup_query_status = ERROR_SUCCESS;
+    cleanup_reported_count = static_cast<ULONG>(cleanup_names.size());
+    cleanup_control_status = ERROR_SUCCESS;
+    cleanup_malformed = 0;
+    cleanup_stops.clear();
+    DxgiFrameTimingSession::test_cleanup_stale_sessions(
+        query_cleanup_sessions, control_cleanup_session);
+    CHECK(cleanup_arguments_valid);
+    CHECK(cleanup_stops == (std::vector<std::wstring>{orphan,
+        std::wstring{kDeadSession} + L"-123",
+        std::wstring{kLastSession} + L"-123"}));
+    {
+        kf2::test::ProcessInspectionDenial denied;
+        CHECK(denied.deny(GetCurrentProcess()));
+        const auto process = OpenProcess(
+            SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+            FALSE, GetCurrentProcessId());
+        const auto error = GetLastError();
+        if (process) CloseHandle(process);
+        CHECK(!process && error == ERROR_ACCESS_DENIED);
+        cleanup_stops.clear();
+        DxgiFrameTimingSession::test_cleanup_stale_sessions(
+            query_cleanup_sessions, control_cleanup_session);
+        // Without verified ownership, preserve even a same-PID candidate.
+        CHECK(cleanup_stops == (std::vector<std::wstring>{
+            std::wstring{kDeadSession} + L"-123",
+            std::wstring{kLastSession} + L"-123"}));
+        CHECK(denied.restore());
+    }
+    cleanup_names.clear();
+    return EXIT_SUCCESS;
+}
+
+struct OwnedTrace {
+    std::wstring name;
+    TRACEHANDLE handle{};
+    struct Properties {
+        EVENT_TRACE_PROPERTIES header{};
+        wchar_t name[128]{};
+    } properties;
+
+    explicit OwnedTrace(std::wstring session_name) : name{std::move(session_name)} {
+        properties.header.Wnode.BufferSize = sizeof(properties);
+        properties.header.Wnode.ClientContext = 1;
+        properties.header.Wnode.Flags = WNODE_FLAG_TRACED_GUID;
+        properties.header.LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
+        properties.header.LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
+    }
+    OwnedTrace(const OwnedTrace&) = delete;
+    OwnedTrace& operator=(const OwnedTrace&) = delete;
+    ULONG start() {
+        TRACEHANDLE owned{};
+        const auto status = StartTraceW(&owned, name.c_str(), &properties.header);
+        if (status == ERROR_SUCCESS) handle = owned;
+        return status;
+    }
+    ULONG query() {
+        return ControlTraceW(0, name.c_str(), &properties.header,
+                             EVENT_TRACE_CONTROL_QUERY);
+    }
+    ~OwnedTrace() {
+        if (handle != 0) {
+            // Stop only the handle this fixture successfully created.
+            static_cast<void>(ControlTraceW(handle, nullptr, &properties.header,
+                EVENT_TRACE_CONTROL_STOP));
+        }
+    }
+};
+
+int test_real_orphan_startup() {
+    const auto creation = current_creation_time();
+    CHECK(creation > 1);
+    OwnedTrace orphan{current_session_name(creation - 1)};
+    OwnedTrace legacy{L"KF2OptimizerNext-DXGI-" +
+        std::to_wstring(GetCurrentProcessId())};
+    CHECK(orphan.start() == ERROR_SUCCESS);
+    CHECK(legacy.start() == ERROR_SUCCESS);
+    const SampleIdentity identity{GetCurrentProcessId(), 1};
+    PresentSource source{identity, 120};
+    CHECK(source.start().has_value());
+    auto session = DxgiFrameTimingSession::start(identity, source);
+    CHECK(session.has_value());
+    CHECK(orphan.query() == ERROR_WMI_INSTANCE_NOT_FOUND);
+    CHECK(legacy.query() == ERROR_SUCCESS);
+    const auto duplicate = DxgiFrameTimingSession::start(identity, source);
+    CHECK(!duplicate.has_value());
+    CHECK(duplicate.error().native_code == ERROR_ALREADY_EXISTS);
+    OwnedTrace live{current_session_name(creation)};
+    CHECK(live.query() == ERROR_SUCCESS);
+    CHECK(session.value()->stop().has_value());
+    CHECK(live.query() == ERROR_WMI_INSTANCE_NOT_FOUND);
+    auto retry = DxgiFrameTimingSession::start(identity, source);
+    CHECK(retry.has_value());
+    CHECK(retry.value()->stop().has_value());
+    CHECK(legacy.query() == ERROR_SUCCESS);
     return EXIT_SUCCESS;
 }
 
@@ -259,12 +388,16 @@ int main(int argc, char** argv) {
     if (argc == 2) {
         const std::string_view scenario{argv[1]};
         if (scenario == "--stale-session-overflow") return test_stale_cleanup_overflow();
+        if (scenario == "--pid-reuse") return test_stale_cleanup_pid_reuse();
+        if (scenario == "--orphan-startup") return test_real_orphan_startup();
         if (scenario == "--pending-capacity") return test_capacity();
         if (scenario == "--pending-expiry") return test_expiry();
         if (scenario == "--pending-loss") return test_event_loss();
         return EXIT_FAILURE;
     }
     CHECK(test_stale_cleanup_overflow() == EXIT_SUCCESS);
+    CHECK(test_stale_cleanup_pid_reuse() == EXIT_SUCCESS);
+    CHECK(test_real_orphan_startup() == EXIT_SUCCESS);
     CHECK(test_capacity() == EXIT_SUCCESS);
     CHECK(test_expiry() == EXIT_SUCCESS);
     CHECK(test_event_loss() == EXIT_SUCCESS);
@@ -277,8 +410,7 @@ int main(int argc, char** argv) {
     PresentSource source{identity, 120};
     CHECK(source.start().has_value());
 
-    const auto session_name = std::wstring{L"KF2OptimizerNext-DXGI-"} +
-                              std::to_wstring(GetCurrentProcessId());
+    const auto session_name = current_session_name(current_creation_time());
     for (const unsigned int worker : {1U, 2U}) {
         DxgiFrameTimingSession::test_fail_worker_creation(worker);
         bool threw = false;

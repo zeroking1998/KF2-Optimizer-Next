@@ -61,11 +61,24 @@ std::uint64_t qpc_to_ns(std::uint64_t ticks, std::uint64_t frequency) {
         1'000'000'000.0L / static_cast<long double>(frequency));
 }
 
-bool process_is_alive(DWORD pid) {
-    if (pid == 0 || pid == GetCurrentProcessId()) return true;
-    const HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
-    if (!process) return GetLastError() == ERROR_ACCESS_DENIED;
-    const bool alive = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+bool process_is_alive(DWORD pid, std::uint64_t creation_time = 0) {
+    if (pid == 0 || (creation_time == 0 && pid == GetCurrentProcessId())) return true;
+    const auto access = SYNCHRONIZE |
+        (creation_time != 0 ? PROCESS_QUERY_LIMITED_INFORMATION : 0);
+    const HANDLE process = OpenProcess(access, FALSE, pid);
+    // Unknown ownership is not proof that another instance's session is stale.
+    if (!process) return GetLastError() != ERROR_INVALID_PARAMETER;
+    const auto waited = WaitForSingleObject(process, 0);
+    bool alive = waited != WAIT_OBJECT_0;
+    if (waited == WAIT_TIMEOUT && creation_time != 0) {
+        FILETIME creation{}, exit{}, kernel{}, user{};
+        if (GetProcessTimes(process, &creation, &exit, &kernel, &user)) {
+            const auto actual_creation =
+                (static_cast<std::uint64_t>(creation.dwHighDateTime) << 32) |
+                creation.dwLowDateTime;
+            alive = actual_creation == creation_time;
+        }
+    }
     CloseHandle(process);
     return alive;
 }
@@ -118,13 +131,25 @@ void stop_stale_sessions(
         if (end == name + characters) continue;
         const std::wstring_view session_name{name, static_cast<std::size_t>(end - name)};
         if (!session_name.starts_with(prefix)) continue;
-        const auto pid_text = session_name.substr(prefix.size());
+        const auto owner_text = session_name.substr(prefix.size());
+        const auto separator = owner_text.find(L'-');
+        const auto pid_text = owner_text.substr(0, separator);
         if (pid_text.empty() || !std::all_of(pid_text.begin(), pid_text.end(),
             [](wchar_t digit) { return digit >= L'0' && digit <= L'9'; })) continue;
         errno = 0;
         const unsigned long pid = std::wcstoul(std::wstring{pid_text}.c_str(),
                                                nullptr, 10);
-        if (errno == ERANGE || pid == 0 || process_is_alive(static_cast<DWORD>(pid))) continue;
+        if (errno == ERANGE || pid == 0) continue;
+        std::uint64_t creation_time{};
+        if (separator != std::wstring_view::npos) {
+            const auto time_text = owner_text.substr(separator + 1);
+            if (time_text.empty() || !std::all_of(time_text.begin(), time_text.end(),
+                [](wchar_t digit) { return digit >= L'0' && digit <= L'9'; })) continue;
+            errno = 0;
+            creation_time = std::wcstoull(std::wstring{time_text}.c_str(), nullptr, 10);
+            if (errno == ERANGE || creation_time == 0) continue;
+        }
+        if (process_is_alive(static_cast<DWORD>(pid), creation_time)) continue;
         EVENT_TRACE_PROPERTIES stop_properties{};
         stop_properties.Wnode.BufferSize = sizeof(stop_properties);
         static_cast<void>(control_trace(
@@ -320,9 +345,11 @@ struct DxgiFrameTimingSession::Impl {
         session_properties->MaximumBuffers = 16;
         session_properties->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
 
-        ULONG status = StartTraceW(&session_handle, name.c_str(),
+        TRACEHANDLE started_session{};
+        ULONG status = StartTraceW(&started_session, name.c_str(),
                                    session_properties);
         if (status != ERROR_SUCCESS) return status;
+        session_handle = started_session;
 
         alignas(EVENT_FILTER_EVENT_ID) std::array<
             std::byte, offsetof(EVENT_FILTER_EVENT_ID, Events) +
@@ -457,6 +484,15 @@ Result<std::unique_ptr<DxgiFrameTimingSession>>
 DxgiFrameTimingSession::start(telemetry::SampleIdentity identity,
                               telemetry::PresentSource& sink) {
     stop_stale_sessions();
+    FILETIME creation{}, exit{}, kernel{}, user{};
+    if (!GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user)) {
+        return Result<std::unique_ptr<DxgiFrameTimingSession>>::failure(
+            {ErrorCode::platform_failure, L"DXGI trace owner identity is unavailable",
+             GetLastError()});
+    }
+    const auto creation_time =
+        (static_cast<std::uint64_t>(creation.dwHighDateTime) << 32) |
+        creation.dwLowDateTime;
     LARGE_INTEGER frequency{};
     if (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0) {
         return Result<std::unique_ptr<DxgiFrameTimingSession>>::failure(
@@ -467,7 +503,8 @@ DxgiFrameTimingSession::start(telemetry::SampleIdentity identity,
     impl->identity = identity;
     impl->sink = &sink;
     impl->name = std::wstring{kSessionPrefix} +
-                 std::to_wstring(GetCurrentProcessId());
+                 std::to_wstring(GetCurrentProcessId()) + L"-" +
+                 std::to_wstring(creation_time);
     impl->qpc_frequency = static_cast<std::uint64_t>(frequency.QuadPart);
     const ULONG status = impl->open();
     if (status != ERROR_SUCCESS) {
