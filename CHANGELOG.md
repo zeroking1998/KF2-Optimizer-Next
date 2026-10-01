@@ -84,6 +84,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Fixed a shutdown race that could leave the native frame-statistics worker
+  asleep forever when stopping capture or changing sessions.
 - Failed online corpse readbacks no longer stall Freeze, LOD or skeleton scans.
   Failed attempts also respect the existing cooldowns, while freeze rollback
   retains original state until restoration is verified.

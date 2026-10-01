@@ -14,12 +14,16 @@ constexpr std::uint64_t kSustainedWindowNs = 3'000'000'000ULL;
 constexpr std::uint64_t kTailWindowNs = 5'000'000'000ULL;
 #ifdef KF2_PRESENT_SOURCE_TESTING
 std::atomic_bool fail_next_drain_publication{false};
+std::atomic<detail::PresentDrainWaitHook> drain_wait_hook{nullptr};
 #endif
 }
 
 #ifdef KF2_PRESENT_SOURCE_TESTING
 void detail::fail_next_present_drain_publication() noexcept {
     fail_next_drain_publication.store(true, std::memory_order_release);
+}
+void detail::set_present_drain_wait_hook(PresentDrainWaitHook hook) noexcept {
+    drain_wait_hook.store(hook, std::memory_order_release);
 }
 #endif
 
@@ -29,7 +33,12 @@ PresentSource::PresentSource(SampleIdentity identity, std::size_t capacity)
       drain_worker_{[this](std::stop_token stop) { drain_worker(stop); }} {}
 
 PresentSource::~PresentSource() {
-    drain_worker_.request_stop();
+    {
+        // Publish stop under the wait mutex, so its notification cannot fall
+        // between the worker's false predicate and the atomic wait/unlock.
+        std::scoped_lock lock{mutex_};
+        drain_worker_.request_stop();
+    }
     drain_changed_.notify_all();
     if (drain_worker_.joinable()) drain_worker_.join();
 }
@@ -279,9 +288,16 @@ void PresentSource::drain_worker(std::stop_token stop) noexcept {
             {
                 std::unique_lock lock{mutex_};
                 drain_changed_.wait(lock, [&] {
-                    return pending_default_drain_.has_value() ||
+                    const bool ready = pending_default_drain_.has_value() ||
                            pending_bounded_drain_.has_value() ||
                            stop.stop_requested();
+#ifdef KF2_PRESENT_SOURCE_TESTING
+                    if (!ready) {
+                        if (auto hook = drain_wait_hook.load(std::memory_order_acquire))
+                            hook(stop);
+                    }
+#endif
+                    return ready;
                 });
                 if (pending_bounded_drain_) {
                     request = *pending_bounded_drain_;

@@ -2,13 +2,45 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
+#include <string_view>
 #include <thread>
 #include "kf2/telemetry/present_source.hpp"
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
 
-int main() {
+namespace {
+std::atomic_bool waiting_to_sleep{false};
+
+void pause_before_wait(std::stop_token stop) noexcept {
+    waiting_to_sleep.store(true, std::memory_order_release);
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds{200};
+    // Force destruction after the false predicate but before wait unlocks.
+    // With the fixed protocol, destruction waits for this mutex to release.
+    while (!stop.stop_requested() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+}
+
+int test_shutdown_before_wait() {
+    kf2::telemetry::detail::set_present_drain_wait_hook(&pause_before_wait);
+    auto source = std::make_unique<kf2::telemetry::PresentSource>(
+        kf2::telemetry::SampleIdentity{42, 123}, 120);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while (!waiting_to_sleep.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    CHECK(waiting_to_sleep.load(std::memory_order_acquire));
+    source.reset();
+    kf2::telemetry::detail::set_present_drain_wait_hook(nullptr);
+    return EXIT_SUCCESS;
+}
+}  // namespace
+
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--shutdown-before-wait")
+        return test_shutdown_before_wait();
     using namespace kf2::telemetry;
     const SampleIdentity game{1234, 5678};
     PresentSource source{game, 256};
