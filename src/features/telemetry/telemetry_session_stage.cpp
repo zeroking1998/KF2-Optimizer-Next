@@ -419,6 +419,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     last_flex_report_tick = 0;
     flex_minimum_limited = false;
     game_process.reset();
+    reset_game_process_discovery();
     game_log_startup_exited = false;
     game_log_startup_exit_announced = false;
     game_log_new_settings_restart_requested = false;
@@ -778,13 +779,30 @@ void UiRuntime::try_attach_telemetry() {
             begin_game_restart_handoff(previous_process);
         }
     }
-    if (!process && telemetry_pipeline::should_scan_for_game_process(
-            now, last_game_process_scan_ns,
-            game_restart_handoff_previous_process.has_value())) {
+    if (!process) {
+        // A permanently staged external-launch profile is not an active
+        // launch. Keep the fast cadence only inside a bounded startup/handoff.
+        const bool bounded_launch =
+            game_restart_handoff_previous_process.has_value() ||
+            (session_config_waiting_for_launch &&
+             session_config_launch_deadline_ns != 0 &&
+             now < session_config_launch_deadline_ns);
+        if (!telemetry_pipeline::should_scan_for_game_process(
+                now, last_game_process_scan_ns, bounded_launch,
+                game_process_discovery_interval_ns)) {
+            // Skipping a query is not fresh evidence that KF2 has closed.
+            return;
+        }
+        const bool clock_rolled_back = now < last_game_process_scan_ns;
+        if (bounded_launch || clock_rolled_back)
+            game_process_discovery_interval_ns =
+                telemetry_pipeline::kIdleProcessDiscoveryIntervalNs;
         last_game_process_scan_ns = now;
         const auto discovered =
             game::find_running_game_process(installation->executable);
         if (discovered.has_value()) {
+            game_process_discovery_interval_ns =
+                telemetry_pipeline::kIdleProcessDiscoveryIntervalNs;
             const auto current = game::verify_game_executable_identity(*installation);
             if (!current.has_value()) {
                 const auto refreshed = revalidate_game_installation();
@@ -796,9 +814,15 @@ void UiRuntime::try_attach_telemetry() {
                 return;
             }
             process = discovered.value();
-        } else if (discovered.error().code != ErrorCode::not_found) {
-            telemetry_failure = discovered.error().message;
-            return;
+        } else {
+            if (!bounded_launch && !clock_rolled_back)
+                game_process_discovery_interval_ns =
+                    telemetry_pipeline::next_idle_process_discovery_interval_ns(
+                        game_process_discovery_interval_ns);
+            if (discovered.error().code != ErrorCode::not_found) {
+                telemetry_failure = discovered.error().message;
+                return;
+            }
         }
     }
     if (game_restart_handoff_previous_process) {

@@ -25,6 +25,7 @@
 #include "kf2/app/build_identity.hpp"
 #include "kf2/optimizer/quality_response.hpp"
 #include "features/telemetry/corpse_telemetry_state.hpp"
+#include "features/telemetry/telemetry_session_stage.hpp"
 #include "kf2/backup/restore_transaction.hpp"
 #include "kf2/config/ini_document.hpp"
 #include "kf2/config/adaptive_locks.hpp"
@@ -238,6 +239,8 @@ struct UiRuntime {
     std::uint64_t map_prewarm_retry_not_before_ns{0};
     std::uint64_t prewarm_diagnostics_last_published_ns{0};
     std::uint64_t last_game_process_scan_ns{0};
+    std::uint64_t game_process_discovery_interval_ns{
+        telemetry_pipeline::kIdleProcessDiscoveryIntervalNs};
     std::optional<game::GameProcessIdentity>
         game_restart_handoff_previous_process;
     std::uint64_t game_restart_handoff_deadline_ns{0};
@@ -401,6 +404,11 @@ struct UiRuntime {
               std::filesystem::path executable_directory);
 
     std::uint64_t monotonic_ns() const;
+    void reset_game_process_discovery() noexcept {
+        last_game_process_scan_ns = 0;
+        game_process_discovery_interval_ns =
+            telemetry_pipeline::kIdleProcessDiscoveryIntervalNs;
+    }
 
     [[nodiscard]] int effective_target_fps() const noexcept {
         return optimizer::effective_adaptive_target_fps(

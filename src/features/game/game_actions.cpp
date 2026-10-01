@@ -248,6 +248,7 @@ app::runtime::DispatchResult launch(
                 ? std::numeric_limits<std::uint64_t>::max()
                 : now + kLaunchSafetyTimeoutNs;
     }
+    runtime.reset_game_process_discovery();
     runtime.startup_prewarmer.request_stop();
     if (!ShellExecuteExW(&launch_request)) {
         const DWORD launch_error = GetLastError();

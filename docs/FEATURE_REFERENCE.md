@@ -24,6 +24,22 @@
 
 ## Important distinctions
 
+### Idle process discovery
+
+When no verified KF2 process is present, discovery starts immediately and backs
+off after misses to one, two, four and at most five seconds between queries.
+External Steam/shortcut launches are detected by the next scheduled query,
+subject to the existing UI callback cadence. The app's Launch action and a
+restart handoff reset the schedule immediately and use the short 500 ms cadence
+only inside their bounded launch/replacement window. A permanently staged
+external-launch profile does not keep fast polling active. Discovery errors
+also back off without being treated as proof that KF2 is closed.
+
+Skipped queries never trigger protected-session restoration. A found process,
+telemetry detach or backward clock resets the backoff; existing executable and
+immutable process-identity verification remain unchanged. No new timer, worker
+or normal-play diagnostic counter is required.
+
 ### Native frame timing recovery
 
 Concurrent DXGI streams retain separate diagnostic lifetimes, so interleaved
