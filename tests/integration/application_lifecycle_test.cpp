@@ -9,14 +9,17 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <iterator>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <sstream>
 #include <stdexcept>
@@ -30,6 +33,7 @@
 #include "kf2/app/application.hpp"
 #include "kf2/config/setting_catalog.hpp"
 #include "kf2/optimizer/startup_gpu_profile.hpp"
+#include "kf2/security/sha256.hpp"
 #include "kf2/ui/shell_layout.hpp"
 #include "app/application_runtime.hpp"
 #include "app/runtime/feature_composition.hpp"
@@ -256,7 +260,7 @@ int test_package_repair_worker_start_failure() {
         kf2::app::StartMode::read_only, test_root / L"portable"};
     int launch_attempts = 0;
     runtime.package_repair_worker_launcher =
-        [&](std::function<void()>) {
+        [&](std::function<void()>) -> std::jthread {
             ++launch_attempts;
             throw std::system_error{
                 std::make_error_code(std::errc::resource_unavailable_try_again)};
@@ -275,6 +279,237 @@ int test_package_repair_worker_start_failure() {
     runtime.start_auto_package_repair();
     CHECK(launch_attempts == 2);
     CHECK(!runtime.package_repair_state);
+    return EXIT_SUCCESS;
+}
+
+struct RepairPause {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool reached{false};
+    bool released{false};
+    void pause() {
+        std::unique_lock lock{mutex};
+        reached = true;
+        changed.notify_all();
+        changed.wait(lock, [&] { return released; });
+    }
+    bool wait() {
+        std::unique_lock lock{mutex};
+        return changed.wait_for(lock, std::chrono::seconds{4},
+                                [&] { return reached; });
+    }
+    void release() {
+        std::scoped_lock lock{mutex};
+        released = true;
+        changed.notify_all();
+    }
+};
+
+struct RepairScenario {
+    std::filesystem::path source;
+    std::filesystem::path target;
+    RepairPause pause;
+    bool download_failure{false};
+    bool unexpected_error{false};
+};
+RepairScenario* repair_scenario{};
+
+void pause_package_replacement(std::size_t replacements) {
+    if (replacements == 1) repair_scenario->pause.pause();
+}
+kf2::Result<kf2::security::PackageRepairResult> repair_owned_package() {
+    if (repair_scenario->download_failure || repair_scenario->unexpected_error) {
+        repair_scenario->pause.pause();
+        if (repair_scenario->unexpected_error) {
+            throw std::runtime_error{"Injected unexpected repair error"};
+        }
+        return kf2::Result<kf2::security::PackageRepairResult>::failure({
+            kf2::ErrorCode::io_failure, L"Injected download failure", 0});
+    }
+    return kf2::security::repair_package_from_directory(
+        repair_scenario->target, repair_scenario->source, "unknown");
+}
+
+struct RepairTestHooks {
+    explicit RepairTestHooks(RepairScenario& scenario) {
+        repair_scenario = &scenario;
+        kf2::app::set_auto_package_repair_operation_for_testing(
+            repair_owned_package);
+        kf2::security::set_package_repair_progress_for_testing(
+            pause_package_replacement);
+    }
+    ~RepairTestHooks() {
+        kf2::app::set_auto_package_repair_operation_for_testing(nullptr);
+        kf2::security::set_package_repair_progress_for_testing(nullptr);
+        kf2::security::set_package_repair_fault_for_testing(
+            kf2::security::PackageRepairFaultInjection::none);
+        repair_scenario = nullptr;
+    }
+};
+
+bool create_owned_repair_package(const std::filesystem::path& root) {
+    const auto paths = kf2::security::managed_package_payload_paths();
+    std::string manifest =
+        "schema_version=1\r\nproduct=KF2OptimizerNext\r\n"
+        "source_identity=unknown\r\nfile_count=" +
+        std::to_string(paths.size()) + "\r\n";
+    for (const auto path : paths) {
+        const auto file = root / std::filesystem::path{path};
+        write_bytes(file, "Owned test payload: " + std::string{path});
+        const auto hash = kf2::security::sha256_file_hex(file);
+        if (!hash.has_value()) return false;
+        manifest += "file=" + std::string{path} + "|" + hash.value() + "\r\n";
+    }
+    write_bytes(root / L"Data/package-integrity.ini", manifest);
+    return true;
+}
+
+int test_package_repair_shutdown() {
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"repair-shutdown";
+    fs::remove_all(root);
+    // Real WM_CLOSE while paused in download or between two atomic writes.
+    for (int mode = 0; mode < 4; ++mode) {
+        const auto scenario_root = root / std::to_wstring(mode);
+        RepairScenario scenario{scenario_root / L"source",
+                                scenario_root / L"portable"};
+        scenario.download_failure = mode == 0;
+        scenario.unexpected_error = mode == 3;
+        CHECK(create_owned_repair_package(scenario.source));
+        CHECK(create_owned_repair_package(scenario.target));
+        const auto first = scenario.target / L"Data/Lab/KF2OptimizerTelemetry.u";
+        const auto second = scenario.target / L"Data/Documentation/SAFETY.md";
+        write_bytes(first, "damaged first");
+        write_bytes(second, "damaged second");
+        RepairTestHooks hooks{scenario};
+        if (mode == 2) {
+            kf2::security::set_package_repair_fault_for_testing(
+                kf2::security::PackageRepairFaultInjection::rollback_failure, 2);
+        }
+        const auto state = scenario_root / L"state";
+        auto application = kf2::app::Application::start({
+            .state_root = state,
+            .executable_root = scenario.target,
+            .instance_name = L"Local\\KF2OptimizerNext-RepairShutdown-" +
+                std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(mode),
+            .identity = {GetCurrentProcessId(), 8000ULL + mode},
+            .create_window = true,
+            .mode = kf2::app::StartMode::read_only,
+        });
+        CHECK(application.has_value());
+        auto release = std::unique_ptr<RepairPause, void (*)(RepairPause*)>{
+            &scenario.pause, [](RepairPause* pause) { pause->release(); }};
+        const auto hwnd = application.value().native_window_handle();
+        // Hidden CI windows need no mouse capture to activate the real action.
+        for (int step = 0; step < 64 &&
+             application.value().ui_model().focused_action() !=
+                 std::optional<std::string>{"header-repair"}; ++step) {
+            SendMessageW(hwnd, WM_KEYDOWN, VK_TAB, 0);
+        }
+        CHECK(application.value().ui_model().focused_action() ==
+              std::optional<std::string>{"header-repair"});
+        SendMessageW(hwnd, WM_KEYDOWN, VK_RETURN, 0);
+        CHECK(application.value().ui_model().notice().has_value());
+        CHECK(application.value().ui_model().notice()->code ==
+              L"PACKAGE_AUTO_REPAIR_STARTED");
+        CHECK(scenario.pause.wait());
+        SendMessageW(hwnd, WM_CLOSE, 0, 0);
+        for (int frame = 0; frame < 60; ++frame) {
+            SendMessageW(hwnd, WM_TIMER, kf2::ui::kAnimationTimerId, 0);
+        }
+        CHECK(IsWindow(hwnd));
+        CHECK(application.value().ui_model().notice()->code ==
+              L"PACKAGE_AUTO_REPAIR_CLOSE_WAIT");
+        CHECK(read_bytes(state / L"session.marker").ends_with(
+            "clean_shutdown=false\n"));
+        CHECK(read_bytes(second) == "damaged second");
+        if (mode == 1 || mode == 2) {
+            CHECK(read_bytes(first) == read_bytes(
+                scenario.source / L"Data/Lab/KF2OptimizerTelemetry.u"));
+        }
+        const auto partial = kf2::security::audit_package_integrity(
+            scenario.target, "unknown");
+        CHECK(partial.has_value() && !partial.value().verified);
+        scenario.pause.release();
+        const auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::seconds{4};
+        do {
+            SendMessageW(hwnd, WM_TIMER, kf2::ui::kRuntimeTimerId, 0);
+            if (application.value().ui_model().notice()->code !=
+                L"PACKAGE_AUTO_REPAIR_CLOSE_WAIT") break;
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        } while (std::chrono::steady_clock::now() < deadline);
+        CHECK(application.value().ui_model().notice()->code ==
+              (mode == 1 ? L"PACKAGE_AUTO_REPAIR_APPLIED" :
+                           L"PACKAGE_AUTO_REPAIR_FAILED"));
+        MSG message{};
+        CHECK(PeekMessageW(&message, hwnd, WM_CLOSE, WM_CLOSE, PM_REMOVE));
+        DispatchMessageW(&message);
+        for (int frame = 0; frame < 60 && IsWindow(hwnd); ++frame) {
+            SendMessageW(hwnd, WM_TIMER, kf2::ui::kAnimationTimerId, 0);
+        }
+        while (PeekMessageW(&message, hwnd, WM_CLOSE, WM_CLOSE, PM_REMOVE)) {
+            DispatchMessageW(&message);
+        }
+        CHECK(!IsWindow(hwnd));
+        while (PeekMessageW(&message, nullptr, WM_QUIT, WM_QUIT, PM_REMOVE)) {}
+        const auto stopped = application.value().shutdown_cleanly();
+        CHECK(stopped.has_value() == (mode < 2));
+        CHECK(read_bytes(state / L"session.marker").ends_with(
+            mode >= 2 ? "clean_shutdown=false\n" : "clean_shutdown=true\n"));
+        const auto audit = kf2::security::audit_package_integrity(
+            scenario.target, "unknown");
+        CHECK(audit.has_value() && audit.value().verified == (mode == 1));
+        if (mode == 2) {
+            kf2::security::set_package_repair_fault_for_testing(
+                kf2::security::PackageRepairFaultInjection::none);
+            const auto recovered = kf2::security::repair_package_from_directory(
+                scenario.target, scenario.source, "unknown");
+            CHECK(recovered.has_value());
+            const auto recovered_audit = kf2::security::audit_package_integrity(
+                scenario.target, "unknown");
+            CHECK(recovered_audit.has_value() && recovered_audit.value().verified);
+        }
+    }
+    // Programmatic shutdown and destruction must also join the owned worker.
+    for (bool destroy : {false, true}) {
+        const auto owned = root / (destroy ? L"destroy" : L"shutdown");
+        RepairScenario scenario{owned / L"source", owned / L"portable"};
+        CHECK(create_owned_repair_package(scenario.source));
+        CHECK(create_owned_repair_package(scenario.target));
+        write_bytes(scenario.target / L"Data/Lab/KF2OptimizerTelemetry.u", "first");
+        write_bytes(scenario.target / L"Data/Documentation/SAFETY.md", "second");
+        RepairTestHooks hooks{scenario};
+        kf2::diagnostics::EventLog events{128};
+        auto runtime = std::make_unique<kf2::app::UiRuntime>(
+            owned / L"state", false, kf2::config::Settings{}, events,
+            std::nullopt, kf2::app::StartMode::read_only, scenario.target);
+        runtime->start_auto_package_repair();
+        auto release = std::unique_ptr<RepairPause, void (*)(RepairPause*)>{
+            &scenario.pause, [](RepairPause* pause) { pause->release(); }};
+        CHECK(scenario.pause.wait());
+        std::promise<bool> done;
+        auto completion = done.get_future();
+        std::jthread shutdown{[&](std::stop_token stop) {
+            std::stop_callback unblock{stop, [&] { scenario.pause.release(); }};
+            if (destroy) {
+                runtime.reset();
+                done.set_value(true);
+            } else {
+                done.set_value(runtime->shutdown().has_value());
+            }
+        }};
+        CHECK(completion.wait_for(std::chrono::milliseconds{30}) ==
+              std::future_status::timeout);
+        scenario.pause.release();
+        CHECK(completion.wait_for(std::chrono::seconds{4}) ==
+              std::future_status::ready);
+        CHECK(completion.get());
+        shutdown.join();
+        const auto audit = kf2::security::audit_package_integrity(
+            scenario.target, "unknown");
+        CHECK(audit.has_value() && audit.value().verified);
+    }
     return EXIT_SUCCESS;
 }
 
@@ -2701,6 +2936,10 @@ int main(int argc, char** argv) {
     if (argc == 2 &&
         std::string_view{argv[1]} == "--package-repair-start-failure") {
         return test_package_repair_worker_start_failure();
+    }
+    if (argc == 2 &&
+        std::string_view{argv[1]} == "--package-repair-shutdown") {
+        return test_package_repair_shutdown();
     }
     if (argc == 2 &&
         std::string_view{argv[1]} == "--update-worker-exceptions") {

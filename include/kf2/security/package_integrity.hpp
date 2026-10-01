@@ -47,6 +47,8 @@ enum class PackageRepairFaultInjection {
 void set_package_repair_fault_for_testing(
     PackageRepairFaultInjection fault,
     std::size_t after_replacements = 0) noexcept;
+void set_package_repair_progress_for_testing(
+    void (*probe)(std::size_t)) noexcept;
 #endif
 
 [[nodiscard]] std::span<const std::string_view>

@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Auto Repair now finishes its background work before the app closes, with a
+  visible waiting message. Unverified repair rollback or unexpected repair
+  errors preserve the interrupted-session marker instead of marking shutdown clean.
 - Temporary event-log write failures now retry in the background with bounded
   backoff, preserving the latest events. Help & Repair shows storage availability
   without generating more log events about the writer itself.

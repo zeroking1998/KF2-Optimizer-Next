@@ -231,6 +231,13 @@ std::wstring query_hardware_summary() {
 
 bool UiRuntime::stop_shutdown_workers() noexcept {
     bool complete = true;
+    try {
+        if (package_repair_worker.joinable()) package_repair_worker.join();
+        poll_auto_package_repair();
+        if (package_repair_recovery_required) complete = false;
+    } catch (...) {
+        complete = false;
+    }
     const auto stop_prewarmer = [&](game::StartupPrewarmer& prewarmer) noexcept {
         try {
             prewarmer.stop_and_wait();
@@ -579,6 +586,9 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
                        const auto handle = static_cast<HWND>(
                            window->native_handle_for_testing());
                        if (handle) PostMessageW(handle, WM_CLOSE, 0, 0);
+                   },
+                   .can_close = [this] {
+                       return can_close_after_package_repair();
                    },
                    .theme_changed = [this] {
                        update_animation_cadence();

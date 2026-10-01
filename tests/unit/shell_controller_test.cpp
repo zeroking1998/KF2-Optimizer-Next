@@ -551,6 +551,30 @@ int main() {
     CHECK(close_requests == 1);
     CHECK(closing_controller.on_close());
 
+    UiModel guarded_model;
+    bool allow_close = false;
+    int guarded_close_requests = 0;
+    ShellController guarded_controller{
+        guarded_model,
+        {.request_close = [&] { ++guarded_close_requests; },
+         .can_close = [&] { return allow_close; }}};
+    CHECK(!guarded_controller.on_close());
+    for (int frame = 0; frame < 60; ++frame) guarded_controller.on_timer();
+    CHECK(guarded_controller.layout().exit_progress == 0.0F);
+    CHECK(guarded_close_requests == 0);
+    guarded_controller.on_theme_changed({true, true});
+    CHECK(!guarded_controller.on_close());
+    allow_close = true;
+    CHECK(guarded_controller.on_close());
+    guarded_controller.on_theme_changed({false, false});
+    CHECK(!guarded_controller.on_close());
+    for (int frame = 0; frame < 60; ++frame) guarded_controller.on_timer();
+    CHECK(guarded_close_requests == 1);
+    // A new operation during the exit animation must re-arm the guard.
+    allow_close = false;
+    CHECK(!guarded_controller.on_close());
+    CHECK(guarded_controller.layout().exit_progress == 0.0F);
+
     // A rejected persistence request must not leave a preview looking saved.
     UiModel rejected_model;
     int rejected_requests = 0;

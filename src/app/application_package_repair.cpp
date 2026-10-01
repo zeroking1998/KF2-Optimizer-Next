@@ -10,6 +10,17 @@
 
 namespace kf2::app {
 
+#if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
+namespace {
+AutoPackageRepairOperation repair_operation_for_testing{};
+}
+
+void set_auto_package_repair_operation_for_testing(
+    AutoPackageRepairOperation operation) noexcept {
+    repair_operation_for_testing = operation;
+}
+#endif
+
 struct PackageRepairAsyncState {
     std::mutex mutex;
     std::optional<Result<security::PackageRepairResult>> outcome;
@@ -17,8 +28,9 @@ struct PackageRepairAsyncState {
 
 void UiRuntime::start_auto_package_repair() {
     if (package_repair_state) {
-        std::scoped_lock lock{package_repair_state->mutex};
-        if (!package_repair_state->outcome.has_value()) {
+        poll_auto_package_repair();
+        if (package_repair_state) {
+            if (package_repair_close_requested) return;
             model.set_notice({ui::NoticeSeverity::info,
                               L"PACKAGE_AUTO_REPAIR_RUNNING",
                               L"Auto Repair is already downloading and checking the exact installed release.",
@@ -40,30 +52,44 @@ void UiRuntime::start_auto_package_repair() {
     auto state = std::make_shared<PackageRepairAsyncState>();
     const auto root = executable_root;
     const auto working = settings_path.parent_path() / L"package-repair";
+#if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
+    const auto repair_for_testing = repair_operation_for_testing;
+#endif
     std::function<void()> worker =
         [state, root, working, version = identity.version,
-         source_identity = identity.commit]() {
+         source_identity = identity.commit
+#if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
+         , repair_for_testing
+#endif
+        ]() {
             Result<security::PackageRepairResult> result =
                 Result<security::PackageRepairResult>::failure(
                     {ErrorCode::internal_failure,
                      L"Auto Repair ended unexpectedly", 0});
             try {
-                result = security::download_and_repair_release_package(
-                    root, working, version, source_identity);
+#if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
+                if (repair_for_testing) {
+                    result = repair_for_testing();
+                } else
+#endif
+                {
+                    result = security::download_and_repair_release_package(
+                        root, working, version, source_identity);
+                }
             } catch (const std::exception&) {
                 result = Result<security::PackageRepairResult>::failure(
-                    {ErrorCode::internal_failure,
+                    {ErrorCode::recovery_required,
                      L"Auto Repair encountered an unexpected local error", 0});
             } catch (...) {
                 result = Result<security::PackageRepairResult>::failure(
-                    {ErrorCode::internal_failure,
+                    {ErrorCode::recovery_required,
                      L"Auto Repair encountered an unknown local error", 0});
             }
             std::scoped_lock lock{state->mutex};
             state->outcome.emplace(std::move(result));
         };
     try {
-        package_repair_worker_launcher(std::move(worker));
+        package_repair_worker = package_repair_worker_launcher(std::move(worker));
     } catch (...) {
         events->append(
             {0, diagnostics::Severity::error, "PACKAGE_AUTO_REPAIR_FAILED",
@@ -97,8 +123,15 @@ void UiRuntime::poll_auto_package_repair() {
         if (!package_repair_state->outcome.has_value()) return;
         outcome.emplace(std::move(*package_repair_state->outcome));
     }
+    if (package_repair_worker.joinable()) package_repair_worker.join();
     package_repair_state.reset();
+    if (std::exchange(package_repair_close_requested, false) && window) {
+        PostMessageW(static_cast<HWND>(window->native_handle_for_testing()),
+                     WM_CLOSE, 0, 0);
+    }
     if (!outcome->has_value()) {
+        package_repair_recovery_required = package_repair_recovery_required ||
+            outcome->error().code == ErrorCode::recovery_required;
         events->append(
             {0, diagnostics::Severity::error, "PACKAGE_AUTO_REPAIR_FAILED",
              outcome->error().message, L"package"});
@@ -109,6 +142,7 @@ void UiRuntime::poll_auto_package_repair() {
         invalidate();
         return;
     }
+    package_repair_recovery_required = false;
     const auto& repaired = outcome->value();
     if (repaired.repaired_files == 0) {
         events->append(
@@ -134,6 +168,19 @@ void UiRuntime::poll_auto_package_repair() {
             L"Restart KF2 Optimizer to load the repaired components."});
     }
     invalidate();
+}
+
+bool UiRuntime::can_close_after_package_repair() {
+    if (!package_repair_state) return true;
+    if (!std::exchange(package_repair_close_requested, true)) {
+        model.set_notice({
+            ui::NoticeSeverity::info, L"PACKAGE_AUTO_REPAIR_CLOSE_WAIT",
+            L"Waiting for Auto Repair before closing.",
+            L"The app will close after repair and verification finish. "
+            L"Do not force it to stop."});
+        invalidate();
+    }
+    return false;
 }
 
 }  // namespace kf2::app
