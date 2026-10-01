@@ -915,6 +915,100 @@ int test_map_prewarm_start_is_visible_before_worker_entry() {
     return EXIT_SUCCESS;
 }
 
+std::filesystem::path cap_failed_console;
+std::filesystem::path cap_failed_game;
+HANDLE cap_console_lease = INVALID_HANDLE_VALUE;
+HANDLE cap_game_lease = INVALID_HANDLE_VALUE;
+void block_cap_rollback(kf2::platform::windows::AtomicFileMutationStage stage,
+                        const std::filesystem::path& target) {
+    if (stage != kf2::platform::windows::AtomicFileMutationStage::conditional_after_validation ||
+        target != cap_failed_game) return;
+    cap_console_lease = CreateFileW(cap_failed_console.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+    cap_game_lease = CreateFileW(cap_failed_game.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+}
+
+int test_frame_rate_cap_recovery_startup() {
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"cap-recovery-startup";
+    fs::remove_all(root);
+    const auto install = root / L"game";
+    const auto config = root / L"Documents/Config";
+    const auto state = root / L"Data";
+    write_test_pe(install / L"Binaries/Win64/KFGame.exe");
+    fs::create_directories(install / L"KFGame");
+    CHECK(write_complete_config_catalog(config));
+    auto system = kf2::config::IniDocument::parse(read_bytes(config / L"KFSystemSettings.ini"));
+    CHECK(system.has_value());
+    CHECK(system.value().upsert(L"SystemSettings", L"bAllowTemporalAA", L"False").shadowed_occurrences == 0);
+    write_bytes(config / L"KFSystemSettings.ini", system.value().serialize());
+    const kf2::game::GameDiscoveryInput discovery{
+        .manual_candidates = {install}, .config_root = config,
+        .allowed_config_parent = root / L"Documents"};
+    const auto found = kf2::game::discover_game_installation(discovery);
+    CHECK(found.has_value());
+    cap_failed_console = install / L"Engine/Config/ConsoleVariables.ini";
+    cap_failed_game = config / L"KFGame.ini";
+    write_bytes(cap_failed_console, "[Startup]\r\nt.MaxFPS=90\r\n");
+    fs::create_directories(state);
+    CHECK(kf2::game::persist_frame_rate_cap(found.value(), 90, state).has_value());
+    kf2::config::Settings settings;
+    settings.target_fps = 90;
+    settings.automatic_update_checks = false;
+    write_bytes(state / L"settings.ini", kf2::config::serialize_settings(settings));
+    const auto original_game = read_bytes(cap_failed_game);
+    const auto original_console = read_bytes(cap_failed_console);
+    const auto protected_snapshot = kf2::config::capture_session_config(config, state);
+    CHECK(protected_snapshot.has_value());
+    const auto temporary_game = original_game + "\r\n; owned protected session\r\n";
+    write_bytes(cap_failed_game, temporary_game);
+    kf2::platform::windows::set_atomic_file_mutation_hook_for_testing(block_cap_rollback);
+    const auto failed = kf2::game::persist_frame_rate_cap(found.value(), 120, state);
+    kf2::platform::windows::set_atomic_file_mutation_hook_for_testing(nullptr);
+    struct Release {
+        ~Release() {
+            if (cap_console_lease != INVALID_HANDLE_VALUE) CloseHandle(cap_console_lease);
+            if (cap_game_lease != INVALID_HANDLE_VALUE) CloseHandle(cap_game_lease);
+            cap_console_lease = cap_game_lease = INVALID_HANDLE_VALUE;
+        }
+    } release;
+    CHECK(cap_console_lease != INVALID_HANDLE_VALUE && cap_game_lease != INVALID_HANDLE_VALUE);
+    CHECK(!failed.has_value() && failed.error().code == kf2::ErrorCode::recovery_required);
+    const auto debt = read_bytes(state / L"frame-rate-cap.recovery");
+    CHECK(!debt.empty());
+    const kf2::app::StartOptions options{
+        .state_root = state, .executable_root = root / L"portable",
+        .instance_name = L"Local\\KF2OptimizerNext-CapRecovery-" + std::to_wstring(GetCurrentProcessId()),
+        .identity = {GetCurrentProcessId(), 9701}, .create_window = true,
+        .game_discovery = discovery, .mode = kf2::app::StartMode::read_only};
+    {
+        auto application = kf2::app::Application::start(options);
+        CHECK(application.has_value());
+        CHECK(application.value().ui_model().recovery_required());
+        CHECK(read_bytes(cap_failed_game) == temporary_game);
+        CHECK(read_bytes(state / L"frame-rate-cap.recovery") == debt);
+        CHECK(fs::exists(protected_snapshot.value().snapshot_root));
+        CHECK(!application.value().shutdown_cleanly().has_value());
+        CHECK(read_bytes(cap_failed_game) == temporary_game);
+        CHECK(fs::exists(protected_snapshot.value().snapshot_root));
+    }
+    CHECK(CloseHandle(cap_console_lease));
+    CHECK(CloseHandle(cap_game_lease));
+    cap_console_lease = cap_game_lease = INVALID_HANDLE_VALUE;
+    {
+        auto restarted = kf2::app::Application::start(options);
+        CHECK(restarted.has_value());
+        CHECK(!restarted.value().ui_model().recovery_required());
+        CHECK(read_bytes(state / L"frame-rate-cap.recovery").empty());
+        CHECK(read_bytes(cap_failed_console) == original_console);
+        CHECK(read_bytes(cap_failed_game) == original_game);
+        CHECK(!fs::exists(protected_snapshot.value().snapshot_root));
+        CHECK(restarted.value().shutdown_cleanly().has_value());
+    }
+    return EXIT_SUCCESS;
+}
+
 int test_pending_policy_restage_failure_rollback() {
     namespace fs = std::filesystem;
     const fs::path root = fs::path{KF2_TEST_ROOT} /
@@ -1301,6 +1395,7 @@ int test_restore_cap_sync_failure() {
         CHECK(restored.error().code ==
               kf2::ErrorCode::recovery_required);
         CHECK(restored.error().native_code == 1234);
+        CHECK(runtime.model.recovery_required());
         CHECK(restored.error().message.find(L"Restored 1") !=
               std::wstring::npos);
         CHECK(restored.error().message.find(L"pre-restore backup") !=
@@ -2857,6 +2952,9 @@ int test_legacy_adaptive_profile(
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--frame-rate-cap-recovery-startup") {
+        return test_frame_rate_cap_recovery_startup();
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--session-cap-finalization-failure") {
         return test_session_cap_finalization_failure();
     }

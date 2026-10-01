@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <optional>
 #include <vector>
 
 #include "kf2/platform/windows/atomic_file.hpp"
@@ -72,20 +73,39 @@ Result<std::filesystem::path> existing_space_probe_path(
 Result<bool> rollback_written_files(
     const ConfigPreview& preview,
     const std::vector<const PreviewFile*>& written_files) {
+    std::optional<Error> failure;
     for (auto entry = written_files.rbegin();
          entry != written_files.rend(); ++entry) {
         const auto* file = *entry;
+        const auto target = preview.config_root / file->relative_path;
+        const auto before = read_bytes(target);
+        if (before.has_value() && before.value() == file->original_bytes) continue;
         auto restored = platform::windows::atomic_replace_utf8_if_unchanged(
-            preview.config_root / file->relative_path,
+            target,
             file->proposed_bytes, file->original_bytes);
-        // A stale target now belongs to another writer; preserving it is the
-        // safe rollback result for this file.
-        if (!restored.has_value() &&
-            restored.error().code != ErrorCode::stale_data) {
-            return restored;
+        const auto readback = read_bytes(target);
+        if (readback.has_value() && readback.value() == file->original_bytes) continue;
+        // Keep other writers' bytes, but do not discard the recovery debt.
+        // A failed rollback must not prevent attempts on earlier files.
+        if (!failure) {
+            failure = !restored.has_value() ? restored.error() :
+                !readback.has_value() ? readback.error() :
+                Error{ErrorCode::stale_data,
+                      L"Configuration rollback did not pass exact readback", 0};
         }
     }
+    if (failure) {
+        failure->code = ErrorCode::recovery_required;
+        failure->message = L"Configuration rollback is incomplete; recovery remains pending: " + failure->message;
+        return Result<bool>::failure(std::move(*failure));
+    }
     return Result<bool>::success(true);
+}
+
+Error pending_recovery(Error error) {
+    error.code = ErrorCode::recovery_required;
+    error.message = L"Configuration recovery journal remains pending: " + error.message;
+    return error;
 }
 
 }  // namespace
@@ -171,7 +191,7 @@ Result<ApplyResult> apply_preview(const ConfigPreview& preview,
             }
             auto completed = write_journal(backup.value(), "complete");
             if (!completed.has_value()) {
-                return Result<ApplyResult>::failure(completed.error());
+                return Result<ApplyResult>::failure(pending_recovery(completed.error()));
             }
             return Result<ApplyResult>::failure(written.error());
         }
@@ -187,7 +207,7 @@ Result<ApplyResult> apply_preview(const ConfigPreview& preview,
             }
             auto completed = write_journal(backup.value(), "complete");
             if (!completed.has_value()) {
-                return Result<ApplyResult>::failure(completed.error());
+                return Result<ApplyResult>::failure(pending_recovery(completed.error()));
             }
             if (!applied.has_value()) {
                 return Result<ApplyResult>::failure(applied.error());
@@ -197,9 +217,9 @@ Result<ApplyResult> apply_preview(const ConfigPreview& preview,
         }
     }
     journal = write_journal(backup.value(), "verification_complete");
-    if (!journal.has_value()) return Result<ApplyResult>::failure(journal.error());
+    if (!journal.has_value()) return Result<ApplyResult>::failure(pending_recovery(journal.error()));
     journal = write_journal(backup.value(), "complete");
-    if (!journal.has_value()) return Result<ApplyResult>::failure(journal.error());
+    if (!journal.has_value()) return Result<ApplyResult>::failure(pending_recovery(journal.error()));
     return Result<ApplyResult>::success(
         {std::move(backup.value()), written_files.size()});
 }

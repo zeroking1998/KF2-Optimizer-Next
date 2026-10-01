@@ -320,7 +320,7 @@ Result<game::FrameRateCapResult> UiRuntime::synchronize_frame_rate_cap() {
             {ErrorCode::not_found, L"Game not detected", 0});
     }
     return game::persist_frame_rate_cap(
-        *installation, optimizer_settings.target_fps);
+        *installation, optimizer_settings.target_fps, settings_path.parent_path());
 }
 
 Result<bool> UiRuntime::apply_overlay_compatible_display_mode() {

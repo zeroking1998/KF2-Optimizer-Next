@@ -237,6 +237,7 @@ add_executable(kf2_frame_rate_cap_test
 target_include_directories(kf2_frame_rate_cap_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_frame_rate_cap_test PRIVATE
+    KF2_ATOMIC_FILE_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/frame-rate-cap")
 add_test(NAME kf2_frame_rate_cap_test COMMAND kf2_frame_rate_cap_test)
 
@@ -455,6 +456,7 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_TELEMETRY_ASSET=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetry.u"
     KF2_APPLICATION_VIDEO_TESTING
     KF2_APPLICATION_SHUTDOWN_TESTING
+    KF2_ATOMIC_FILE_TESTING
     KF2_PACKAGE_INTEGRITY_TESTING
     KF2_APPLICATION_RESTORE_TESTING
     KF2_APPLICATION_LAUNCH_TESTING
@@ -471,6 +473,8 @@ add_test(NAME kf2_package_repair_worker_start_test
     COMMAND kf2_application_lifecycle_test --package-repair-start-failure)
 add_test(NAME kf2_package_repair_shutdown_test
     COMMAND kf2_application_lifecycle_test --package-repair-shutdown)
+add_test(NAME kf2_frame_rate_cap_recovery_startup_test
+    COMMAND kf2_application_lifecycle_test --frame-rate-cap-recovery-startup)
 add_test(NAME kf2_update_worker_exception_test
     COMMAND kf2_application_lifecycle_test --update-worker-exceptions)
 add_test(NAME kf2_gpu_profile_persistence_rollback_test
@@ -729,6 +733,7 @@ add_executable(kf2_config_apply_test
 target_include_directories(kf2_config_apply_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_config_apply_test PRIVATE
     KF2_CONFIG_APPLY_TESTING
+    KF2_ATOMIC_FILE_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/config-apply"
 )
 target_link_libraries(kf2_config_apply_test PRIVATE bcrypt)
