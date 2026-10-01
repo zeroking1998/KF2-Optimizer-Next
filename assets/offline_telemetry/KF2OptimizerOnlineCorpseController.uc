@@ -35,20 +35,16 @@ var bool bWorldTeardownAuthorized;
 function KF2OptimizerOnlineContextInteraction GetOnlineInteraction()
 {
     local Engine CurrentEngine;
-    local GameViewportClient CurrentViewport;
-    local string InteractionPath;
+    local KF2OptimizerGraphicsViewport CurrentViewport;
 
     CurrentEngine = class'Engine'.static.GetEngine();
-    if (CurrentEngine == None || CurrentEngine.GameViewport == None)
+    if (CurrentEngine == None)
     {
         return None;
     }
-    CurrentViewport = CurrentEngine.GameViewport;
-    InteractionPath = PathName(CurrentViewport)$
-        ".KF2OptimizerOnlineContextInteraction";
-    return KF2OptimizerOnlineContextInteraction(
-        FindObject(InteractionPath,
-            class'KF2OptimizerOnlineContextInteraction'));
+    CurrentViewport = KF2OptimizerGraphicsViewport(CurrentEngine.GameViewport);
+    if (CurrentViewport == None) return None;
+    return CurrentViewport.GetOnlineMonitor();
 }
 
 function int FindFrozenCorpse(KFPawn Candidate)

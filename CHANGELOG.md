@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Online corpse sleep and capacity checks now use bounded, rotating scans,
+  including retry pauses after misses. The local controller reuses its
+  viewport-owned monitor, and missing corpse support no longer logs every frame.
 - Online Adaptive enable verifies its prerequisites before changing the corpse
   maximum. Rejected re-enables restore the previous limit and retain rollback
   ownership until verified, without losing the session-original value.
