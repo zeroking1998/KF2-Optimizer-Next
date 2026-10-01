@@ -19,16 +19,9 @@ void set_ui_runtime_shutdown_probe_for_testing(
 
 optimizer::AdaptivePolicy adaptive_policy_from(
     const config::Settings& settings) noexcept {
-    optimizer::AdaptiveAggressiveness aggressiveness =
-        optimizer::AdaptiveAggressiveness::balanced;
-    if (settings.adaptive_aggressiveness == "conservative") {
-        aggressiveness = optimizer::AdaptiveAggressiveness::conservative;
-    } else if (settings.adaptive_aggressiveness == "aggressive") {
-        aggressiveness = optimizer::AdaptiveAggressiveness::aggressive;
-    }
+    // Controller timing uses one fixed default, never a persisted profile.
     return {
         .target_fps = settings.target_fps,
-        .aggressiveness = aggressiveness,
         .minimum_quality = settings.adaptive_minimum_quality,
         .maximum_quality = settings.adaptive_maximum_quality,
         .quality_change_budget = settings.adaptive_quality_change_budget,
@@ -86,6 +79,7 @@ Result<config::Settings> load_or_create_settings(
                 bytes.find("manual_gore_effect_limit=") != std::string::npos ||
                 bytes.find("adaptive_enabled=") != std::string::npos ||
                 bytes.find("adaptive_online_allowed=") != std::string::npos ||
+                bytes.find("adaptive_aggressiveness=") != std::string::npos ||
                 bytes.find("adaptive_shadow_mode=") != std::string::npos ||
                 parsed.value().target_fps_migrated ||
                 parsed.value().adaptive_quality_range_migrated;
@@ -416,9 +410,6 @@ Result<bool> UiRuntime::save_adaptive_locks() {
 void UiRuntime::update_adaptive_policy_status(ui::UiStatus& status) const {
     status.adaptive_shadow_mode =
         optimizer_settings.adaptive_shadow_mode;
-    status.adaptive_aggressiveness = std::wstring{
-        optimizer_settings.adaptive_aggressiveness.begin(),
-        optimizer_settings.adaptive_aggressiveness.end()};
     status.adaptive_minimum_quality =
         optimizer_settings.adaptive_minimum_quality;
     status.adaptive_maximum_quality =

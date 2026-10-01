@@ -26,7 +26,6 @@ struct Settings {
     // active but all optimizer-owned corpse reductions are disabled.
     bool debug_corpse_physics_control{false};
     bool restore_config_after_game{true};
-    std::string adaptive_aggressiveness{"balanced"};
     int adaptive_minimum_quality{10};
     int adaptive_maximum_quality{100};
     int adaptive_quality_change_budget{2};

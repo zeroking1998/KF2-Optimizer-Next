@@ -27,6 +27,10 @@ VRAM needs finite nonnegative usage and a finite positive budget. RAM needs a
 valid RAM or commit pair, or an explicit finite paging signal in [0, 1]. Partial
 tuples and process-private bytes alone never establish available memory headroom.
 
+Adaptive uses one fixed controller timing policy plus user-owned settings.
+Retired named aggressiveness values are migration input only: they are removed
+from portable settings and cannot silently alter runtime behavior.
+
 ## Capability before control
 
 Every runtime control requires a known provider, verified identity, narrow
