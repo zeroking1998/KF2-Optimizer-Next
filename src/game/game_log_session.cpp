@@ -39,16 +39,11 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
     }
     pending_.append(bytes);
     bool changed = false;
+    std::size_t consumed = 0;
     for (;;) {
-        const auto newline = pending_.find('\n');
-        if (newline == std::string::npos) {
-            if (pending_.size() > detail::kMaximumLineBytes) {
-                pending_.clear();
-                add_saturated(stats_.oversized_line_drops);
-            }
-            break;
-        }
-        auto line = std::string_view{pending_}.substr(0, newline);
+        const auto newline = pending_.find('\n', consumed);
+        if (newline == std::string::npos) break;
+        auto line = std::string_view{pending_}.substr(consumed, newline - consumed);
         if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
         add_saturated(stats_.lines_processed);
         if (line.size() <= detail::kMaximumLineBytes) {
@@ -260,7 +255,15 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
         } else {
             add_saturated(stats_.oversized_line_drops);
         }
-        pending_.erase(0, newline + 1);
+        consumed = newline + 1;
+    }
+    // Keep views valid throughout the batch and move the incomplete suffix
+    // only once, rather than shifting every remaining line after each record.
+    if (pending_.size() - consumed > detail::kMaximumLineBytes) {
+        pending_.clear();
+        add_saturated(stats_.oversized_line_drops);
+    } else if (consumed != 0) {
+        pending_.erase(0, consumed);
     }
     if (!changed || !current_) return std::nullopt;
     auto snapshot = std::optional<GameLogSession>{*current_};

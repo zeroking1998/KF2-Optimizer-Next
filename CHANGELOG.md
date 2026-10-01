@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Noisy game-log batches now compact their incomplete tail only once instead
+  of moving the remaining buffer after every line. Session markers, receipts,
+  partial lines and existing size limits are unchanged.
 - Thread CPU telemetry now keeps its measurement baseline with the verified
   thread handle, resets it for a changed thread instance, and releases exited
   threads during membership refresh without rebuilding a sample hash table.
