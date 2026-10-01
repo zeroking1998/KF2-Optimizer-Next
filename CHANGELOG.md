@@ -84,6 +84,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Initial DXGI frame-timing failures now share the existing bounded startup
+  retry, so a transient failure can recover FPS telemetry without restarting KF2.
 - Verified online Adaptive graphics changes now use the same session checks
   for selection and response evaluation, avoiding false restoration after a
   measured improvement. Unknown sessions and incomplete comparisons still fail closed.

@@ -25,6 +25,9 @@ public:
     [[nodiscard]] Result<bool> stop();
 
 #ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+    using TestStartOperation = Result<std::unique_ptr<DxgiFrameTimingSession>> (*)(
+        telemetry::SampleIdentity, telemetry::PresentSource&);
+    static void test_set_start_operation(TestStartOperation operation) noexcept;
     static void test_cleanup_stale_sessions(
         decltype(&QueryAllTracesW) query_traces,
         decltype(&ControlTraceW) control_trace);

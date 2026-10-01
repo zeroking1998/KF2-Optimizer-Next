@@ -461,6 +461,7 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_APPLICATION_RESTORE_TESTING
     KF2_APPLICATION_LAUNCH_TESTING
     KF2_STARTUP_PREWARMER_TESTING
+    KF2_DXGI_FRAME_TIMING_SESSION_TESTING
 )
 target_link_libraries(kf2_application_lifecycle_test PRIVATE
     user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs uiautomationcore bcrypt
@@ -515,6 +516,8 @@ add_test(NAME kf2_graphics_protected_rebuild_failure_test
     COMMAND kf2_application_lifecycle_test --graphics-protected-rebuild-failure)
 add_test(NAME kf2_startup_session_marker_test
     COMMAND kf2_application_lifecycle_test --startup-session-marker)
+add_test(NAME kf2_initial_dxgi_retry_test
+    COMMAND kf2_application_lifecycle_test --initial-dxgi-retry)
 add_test(NAME kf2_legacy_adaptive_profile_test
     COMMAND kf2_application_lifecycle_test --legacy-adaptive-profile)
 add_test(NAME kf2_legacy_quality_policy_test

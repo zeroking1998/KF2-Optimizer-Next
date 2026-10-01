@@ -39,6 +39,7 @@ constexpr wchar_t kSessionPrefix[] = L"KF2OptimizerNext-DXGI-";
 #ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
 std::atomic_bool fail_next_event_callback{false};
 std::atomic_uint failed_worker_ordinal{0};
+std::atomic<DxgiFrameTimingSession::TestStartOperation> test_start_operation{};
 
 void test_worker_creation(unsigned int ordinal) {
     unsigned int expected = ordinal;
@@ -407,6 +408,11 @@ struct DxgiFrameTimingSession::Impl {
 };
 
 #ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+void DxgiFrameTimingSession::test_set_start_operation(
+    TestStartOperation operation) noexcept {
+    test_start_operation.store(operation, std::memory_order_release);
+}
+
 void DxgiFrameTimingSession::test_cleanup_stale_sessions(
     decltype(&QueryAllTracesW) query_traces,
     decltype(&ControlTraceW) control_trace) {
@@ -483,6 +489,12 @@ DxgiFrameTimingSession::~DxgiFrameTimingSession() {
 Result<std::unique_ptr<DxgiFrameTimingSession>>
 DxgiFrameTimingSession::start(telemetry::SampleIdentity identity,
                               telemetry::PresentSource& sink) {
+#ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+    if (const auto operation = test_start_operation.load(
+            std::memory_order_acquire)) {
+        return operation(identity, sink);
+    }
+#endif
     stop_stale_sessions();
     FILETIME creation{}, exit{}, kernel{}, user{};
     if (!GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user)) {
