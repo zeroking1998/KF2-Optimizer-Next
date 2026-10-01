@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Adaptive quality recovery now requires a complete valid memory measurement
+  or explicit valid paging signal. Partial, invalid or zero-budget memory
+  values no longer masquerade as confirmed free capacity.
 - Failed graphics preparation now reports both the graphics error and loss
   of protected launch preparation, with a recovery-required Repair instruction
   instead of an incomplete “graphics unchanged” notice.

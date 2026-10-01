@@ -1,6 +1,8 @@
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 
 #include "kf2/optimizer/resource_pressure.hpp"
 
@@ -170,6 +172,122 @@ int main() {
     insufficient.process_private_bytes.reset();
     insufficient.paging_pressure.reset();
     CHECK(!insufficient_estimator.evaluate(insufficient).recovery_safe);
+
+    const auto complete_memory = healthy(start);
+    constexpr std::array partial_memory_fields{
+        &ResourcePressureInput::vram_used_bytes,
+        &ResourcePressureInput::vram_budget_bytes,
+        &ResourcePressureInput::ram_used_bytes,
+        &ResourcePressureInput::ram_budget_bytes,
+        &ResourcePressureInput::commit_used_bytes,
+        &ResourcePressureInput::commit_budget_bytes,
+        &ResourcePressureInput::process_private_bytes,
+    };
+    for (const auto field : partial_memory_fields) {
+        ResourcePressureEstimator partial_estimator;
+        auto partial = insufficient;
+        partial.*field = complete_memory.*field;
+        const auto partial_result = partial_estimator.evaluate(partial);
+        CHECK(!partial_result.recovery_safe);
+        CHECK(partial_result.vram.confidence < 0.55);
+        CHECK(partial_result.ram.confidence < 0.55);
+    }
+    auto mixed_partial = insufficient;
+    mixed_partial.vram_used_bytes = complete_memory.vram_used_bytes;
+    mixed_partial.ram_used_bytes = complete_memory.ram_used_bytes;
+    mixed_partial.commit_budget_bytes = complete_memory.commit_budget_bytes;
+    mixed_partial.process_private_bytes = complete_memory.process_private_bytes;
+    ResourcePressureEstimator mixed_partial_estimator;
+    CHECK(!mixed_partial_estimator.evaluate(mixed_partial).recovery_safe);
+
+    constexpr std::array used_fields{
+        &ResourcePressureInput::vram_used_bytes,
+        &ResourcePressureInput::ram_used_bytes,
+        &ResourcePressureInput::commit_used_bytes,
+    };
+    constexpr std::array budget_fields{
+        &ResourcePressureInput::vram_budget_bytes,
+        &ResourcePressureInput::ram_budget_bytes,
+        &ResourcePressureInput::commit_budget_bytes,
+    };
+    constexpr std::array invalid_memory_values{
+        -1.0, std::numeric_limits<double>::infinity(),
+        std::numeric_limits<double>::quiet_NaN(),
+    };
+    for (std::size_t index = 0; index < used_fields.size(); ++index) {
+        auto pair = insufficient;
+        pair.*used_fields[index] = complete_memory.*used_fields[index];
+        pair.*budget_fields[index] = complete_memory.*budget_fields[index];
+        ResourcePressureEstimator pair_estimator;
+        const auto pair_result = pair_estimator.evaluate(pair);
+        CHECK(pair_result.recovery_safe);
+        CHECK((index == 0 ? pair_result.vram : pair_result.ram)
+                  .confidence >= 0.75);
+
+        auto over_capacity = pair;
+        over_capacity.*used_fields[index] =
+            *(pair.*budget_fields[index]) * 1.1;
+        ResourcePressureEstimator over_capacity_estimator;
+        const auto pressure = over_capacity_estimator.evaluate(over_capacity);
+        CHECK((index == 0 ? pressure.vram : pressure.ram).raw == 1.0);
+        CHECK(!pressure.recovery_safe);
+
+        for (const auto field : {used_fields[index], budget_fields[index]}) {
+            for (const double invalid : invalid_memory_values) {
+                ResourcePressureEstimator invalid_estimator;
+                auto invalid_pair = pair;
+                invalid_pair.*field = invalid;
+                const auto invalid_result =
+                    invalid_estimator.evaluate(invalid_pair);
+                CHECK(!invalid_result.recovery_safe);
+                CHECK(!invalid_result.vram.reserve_bytes);
+                CHECK(!invalid_result.ram.reserve_bytes);
+                CHECK(std::isfinite(invalid_result.total));
+            }
+        }
+
+        auto zero_used = pair;
+        zero_used.*used_fields[index] = 0.0;
+        ResourcePressureEstimator zero_used_estimator;
+        CHECK(zero_used_estimator.evaluate(zero_used).recovery_safe);
+        zero_used.*budget_fields[index] = 0.0;
+        ResourcePressureEstimator zero_budget_estimator;
+        const auto zero_budget = zero_budget_estimator.evaluate(zero_used);
+        CHECK(!zero_budget.recovery_safe);
+        CHECK(!zero_budget.vram.reserve_bytes);
+        CHECK(!zero_budget.ram.reserve_bytes);
+        CHECK(zero_budget.total == 0.0);
+    }
+
+    for (const double invalid_paging :
+         {-1.0, 1.01, std::numeric_limits<double>::infinity(),
+          std::numeric_limits<double>::quiet_NaN()}) {
+        ResourcePressureEstimator paging_estimator;
+        auto invalid = insufficient;
+        invalid.paging_pressure = invalid_paging;
+        CHECK(!paging_estimator.evaluate(invalid).recovery_safe);
+    }
+    ResourcePressureEstimator paging_estimator;
+    auto paging_only = insufficient;
+    paging_only.paging_pressure = 0.0;
+    CHECK(paging_estimator.evaluate(paging_only).recovery_safe);
+    paging_only.paging_pressure = 0.80;
+    ResourcePressureEstimator paging_pressure_estimator;
+    const auto paging_pressure = paging_pressure_estimator.evaluate(paging_only);
+    CHECK(paging_pressure.ram.raw == 0.80);
+    CHECK(paging_pressure.ram.confidence >= 0.55);
+    CHECK(!paging_pressure.recovery_safe);
+
+    // Losing a previously complete tuple cannot turn cached headroom into
+    // permission to recover, even after smoothing settles.
+    ResourcePressureEstimator dropout_estimator;
+    CHECK(dropout_estimator.evaluate(complete_memory).recovery_safe);
+    auto dropout = insufficient;
+    dropout.vram_used_bytes = complete_memory.vram_used_bytes;
+    for (int tick = 1; tick <= 32; ++tick) {
+        dropout.timestamp_ns = start + tick * 200'000'000ULL;
+        CHECK(!dropout_estimator.evaluate(dropout).recovery_safe);
+    }
 
     CHECK(std::string_view{resource_kind_name(ResourceKind::vram)} == "vram");
     CHECK(std::string_view{pressure_trend_name(PressureTrend::rising)} ==

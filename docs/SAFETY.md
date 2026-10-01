@@ -18,6 +18,11 @@ The UI and logs distinguish four states:
 
 Timeouts and missing acknowledgements never become success.
 
+Adaptive quality recovery requires a usable compute signal and memory evidence.
+VRAM needs finite nonnegative usage and a finite positive budget. RAM needs a
+valid RAM or commit pair, or an explicit finite paging signal in [0, 1]. Partial
+tuples and process-private bytes alone never establish available memory headroom.
+
 ## Capability before control
 
 Every runtime control requires a known provider, verified identity, narrow

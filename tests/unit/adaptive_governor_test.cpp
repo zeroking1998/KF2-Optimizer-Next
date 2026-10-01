@@ -1,3 +1,4 @@
+#include <array>
 #include <cstdlib>
 #include <chrono>
 #include <iostream>
@@ -486,6 +487,52 @@ int main() {
         adaptive, recovery_sample, recovery_sample.timestamp_ns);
     CHECK(recovery_after_reset.state == AdaptiveControllerState::observing);
     CHECK(!recovery_after_reset.quality_recovery_eligible);
+
+    auto unknown_memory = recovery_sample;
+    unknown_memory.process_gpu_percent.reset();
+    unknown_memory.gpu_percent.reset();
+    unknown_memory.vram_used_bytes.reset();
+    unknown_memory.vram_budget_bytes.reset();
+    unknown_memory.ram_used_bytes.reset();
+    unknown_memory.ram_budget_bytes.reset();
+    constexpr std::array partial_memory_fields{
+        &AdaptiveSample::vram_used_bytes, &AdaptiveSample::vram_budget_bytes,
+        &AdaptiveSample::ram_used_bytes, &AdaptiveSample::ram_budget_bytes,
+        &AdaptiveSample::commit_used_bytes, &AdaptiveSample::commit_budget_bytes,
+        &AdaptiveSample::process_private_bytes,
+    };
+    for (const auto field : partial_memory_fields) {
+        AdaptiveGovernor partial_memory_governor;
+        auto partial = unknown_memory;
+        partial.*field = 2.0 * 1024.0 * 1024.0 * 1024.0;
+        const auto blocked = drive(
+            partial_memory_governor, adaptive, partial,
+            start, 6'200'000'000ULL);
+        CHECK(blocked.state == AdaptiveControllerState::stable);
+        CHECK(!blocked.resources.recovery_safe);
+        CHECK(!blocked.quality_recovery_eligible);
+        CHECK(blocked.stability_state != AdaptiveStabilityState::recovering);
+
+        // A complete healthy tuple restores eligibility without needing a
+        // Governor reset or GPU-specific counters.
+        partial.vram_used_bytes = recovery_sample.vram_used_bytes;
+        partial.vram_budget_bytes = recovery_sample.vram_budget_bytes;
+        const auto confirmed = drive(
+            partial_memory_governor, adaptive, partial,
+            start + 6'400'000'000ULL, 6'200'000'000ULL);
+        CHECK(confirmed.resources.recovery_safe);
+        CHECK(confirmed.quality_recovery_eligible);
+    }
+    AdaptiveGovernor invalid_budget_governor;
+    auto invalid_budget = unknown_memory;
+    invalid_budget.vram_used_bytes = 0.0;
+    invalid_budget.vram_budget_bytes =
+        std::numeric_limits<double>::quiet_NaN();
+    const auto invalid_memory = drive(
+        invalid_budget_governor, adaptive, invalid_budget,
+        start, 6'200'000'000ULL);
+    CHECK(!invalid_memory.resources.recovery_safe);
+    CHECK(!invalid_memory.quality_recovery_eligible);
 
     AdaptiveGovernor gpu_governor;
     const auto gpu = drive(
