@@ -86,6 +86,8 @@ are visible immediately.
 
 - Fixed a shutdown race that could leave the native frame-statistics worker
   asleep forever when stopping capture or changing sessions.
+- Native FPS capture now bounds orphaned Present starts and invalidates pending
+  pairs after ETW loss, avoiding session-long thread-state accumulation.
 - Failed online corpse readbacks no longer stall Freeze, LOD or skeleton scans.
   Failed attempts also respect the existing cooldowns, while freeze rollback
   retains original state until restoration is verified.
