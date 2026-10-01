@@ -24,6 +24,16 @@
 
 ## Important distinctions
 
+### Optional file prewarming
+
+Startup and selected-map warming report completion only when all planned bytes
+have been read. Missing files, read errors and premature end-of-file retain
+actual progress and produce one incomplete warning, including with diagnostics
+disabled. KF2 launch and map loading remain available. Incomplete jobs do not
+automatically reread the same plan; a later launch or changed map selection can
+start new preparation. Transient storage, memory and discovery skips retain
+their existing bounded retry policy.
+
 ### Adaptive frame pressure
 
 Offline quality decisions wait for a fresh gameplay-provider sample after
