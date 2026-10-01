@@ -107,6 +107,14 @@ readback. A test that only proves a command was sent is incomplete.
 
 ## Compatibility and safety
 
+### Diagnostic persistence
+
+Ordinary event-log changes share a fixed 250 ms batch in the existing worker.
+Later events do not extend the first pending deadline. Explicit `flush()` and
+healthy destruction bypass that delay; a failed writer keeps its bounded retry
+backoff. The accepted in-memory snapshot stays immediately available to
+diagnostic/support reports. JSON retention and atomic replacement are unchanged.
+
 ### Adaptive Present observations
 
 Frame metrics carry the actual newest Present timestamp, selected swapchain

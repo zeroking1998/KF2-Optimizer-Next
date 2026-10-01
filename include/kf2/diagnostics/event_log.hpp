@@ -91,9 +91,9 @@ private:
     PersistFunction persist_;
     bool persistence_ready_{false};
     bool persistence_pending_{false};
-    bool persistence_active_{false};
     std::uint64_t persistence_revision_{0};
     std::uint64_t persisted_revision_{0};
+    std::chrono::steady_clock::time_point persistence_batch_due_{};
     std::chrono::milliseconds persistence_retry_delay_{kInitialPersistenceRetryDelay};
     std::chrono::steady_clock::time_point persistence_retry_at_{};
     std::condition_variable persistence_changed_;

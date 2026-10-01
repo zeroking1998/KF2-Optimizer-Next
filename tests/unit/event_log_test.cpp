@@ -1,4 +1,5 @@
 #include <atomic>
+#include <barrier>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -136,6 +137,99 @@ int main() {
     persistent.clear();
     CHECK(persistent.flush(std::chrono::seconds{2}));
     CHECK(std::filesystem::file_size(persistent_path) > 0);
+
+    // Ordinary appends share one bounded batch, not one full file rewrite each.
+    const auto batch_path = persistent_root / L"batch.json";
+    std::atomic<int> batch_writes{0};
+    std::mutex batch_mutex;
+    std::condition_variable batch_changed;
+    const auto batch_writer = [&](const std::filesystem::path& path,
+                                  std::string_view bytes) {
+        auto result = kf2::platform::windows::atomic_replace_utf8(path, bytes);
+        {
+            std::scoped_lock lock{batch_mutex};
+            ++batch_writes;
+        }
+        batch_changed.notify_all();
+        return result;
+    };
+    {
+        EventLog batched{128, batch_path, batch_writer};
+        CHECK(batch_writes == 1);  // Initial empty atomic document.
+        for (int index = 0; index < 100; ++index) {
+            batched.append(Event{0, Severity::info, "BATCH",
+                std::to_wstring(index), L"test"});
+        }
+        {
+            std::unique_lock lock{batch_mutex};
+            CHECK(!batch_changed.wait_for(lock, std::chrono::milliseconds{100},
+                                          [&] { return batch_writes > 1; }));
+        }
+        CHECK(batched.flush(std::chrono::seconds{2}));
+        CHECK(batch_writes == 2);
+        std::ifstream input(batch_path, std::ios::binary);
+        const std::string saved{std::istreambuf_iterator<char>{input}, {}};
+        CHECK(saved == kf2::diagnostics::serialize_events_json(batched.snapshot()));
+        input.close();
+
+        // An explicit flush bypasses the fresh batch deadline, including clear.
+        batched.clear();
+        std::barrier start_flush{3};
+        bool first_flushed = false;
+        bool second_flushed = false;
+        std::jthread first_flush{[&] {
+            start_flush.arrive_and_wait();
+            first_flushed = batched.flush(std::chrono::milliseconds{100});
+        }};
+        std::jthread second_flush{[&] {
+            start_flush.arrive_and_wait();
+            second_flushed = batched.flush(std::chrono::milliseconds{100});
+        }};
+        start_flush.arrive_and_wait();
+        first_flush.join();
+        second_flush.join();
+        CHECK(first_flushed && second_flushed);
+        CHECK(batch_writes == 3);
+        CHECK(std::filesystem::file_size(batch_path) ==
+              std::string_view{"{\"version\":1,\"events\":[]}"}.size());
+        batched.append(Event{0, Severity::info, "DUP", L"same", L"test"});
+        batched.append(Event{0, Severity::info, "DUP", L"same", L"test"});
+        CHECK(batched.flush(std::chrono::milliseconds{100}));
+        CHECK(batch_writes == 4);
+        CHECK(batched.snapshot().front().repeat_count == 2);
+    }
+    batch_writes = 0;
+    {
+        EventLog scheduled{4, batch_path, batch_writer};
+        scheduled.append(Event{0, Severity::info, "DEADLINE", L"latest", L"test"});
+        CHECK(await([&] { return batch_writes == 2; }));
+        CHECK(scheduled.flush(std::chrono::seconds{2}));
+        {
+            std::unique_lock lock{batch_mutex};
+            CHECK(!batch_changed.wait_for(lock, std::chrono::milliseconds{350},
+                                          [&] { return batch_writes > 2; }));
+        }
+        CHECK(batch_writes == 2);  // Idle time must not generate more writes.
+    }
+    batch_writes = 0;
+    {
+        EventLog continuous{4, batch_path, batch_writer};
+        std::jthread producer{[&](std::stop_token stop) {
+            while (!stop.stop_requested()) {
+                continuous.append(Event{0, Severity::info, "CONTINUOUS",
+                    L"same", L"test"});
+                std::this_thread::sleep_for(std::chrono::milliseconds{5});
+            }
+        }};
+        // Later appends cannot keep postponing the first pending deadline.
+        CHECK(await([&] { return batch_writes >= 2; }));
+        producer.request_stop();
+        producer.join();
+        CHECK(continuous.flush(std::chrono::seconds{2}));
+        std::ifstream input(batch_path, std::ios::binary);
+        const std::string saved{std::istreambuf_iterator<char>{input}, {}};
+        CHECK(saved == kf2::diagnostics::serialize_events_json(continuous.snapshot()));
+    }
 
     const auto asynchronous_path = persistent_root / L"asynchronous.json";
     std::mutex writer_mutex;
