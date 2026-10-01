@@ -97,6 +97,11 @@ settings selected by the user, user-selected FleX minimum and fixed-minimum
 Zed/corpse visual controls remain available while Adaptive is off. The saved
 state is also reapplied after a map change.
 
+The saved `adaptive_quality_recovery_enabled` preference controls automatic
+quality increases under stable headroom. When disabled, Adaptive can still
+reduce quality under confirmed pressure. This preference does not block rollback
+of an ineffective change or restoration when Adaptive is disabled or KF2 closes.
+
 The optimizer never enables FleX. If FleX is off in KF2, it remains off and no
 FleX runtime hook is installed. If the user enabled FleX in KF2, the protected
 session requests the fixed minimum solver work independently of Adaptive mode.

@@ -240,6 +240,85 @@ int main(int argc, char** argv) {
     using namespace kf2::telemetry_pipeline;
     constexpr std::uint64_t receipt_ns = 20'000'000'000ULL;
     const telemetry::SampleIdentity identity{42, 9001};
+    // The decision forwarded to the real selector, not just its reason text,
+    // must honor the recovery preference for every target and supported mode.
+    for (int target = 30; target <= 240; ++target) {
+        for (const auto mode : {"NM_Standalone", "NM_Client", "NM_ListenServer"}) {
+            const bool offline = std::string_view{mode} == "NM_Standalone";
+            for (const bool recovery_enabled : {false, true}) {
+                optimizer::AdaptiveGovernor governor;
+                optimizer::AdaptivePolicy policy;
+                policy.target_fps = target;
+                policy.quality_recovery_enabled = recovery_enabled;
+                TelemetryFrame frame;
+                frame.identity = identity;
+                frame.adapter_luid = 77;
+                frame.active_gameplay = true;
+                frame.offline_gameplay = offline;
+                frame.evidence.cpu_percent = 30.0;
+                frame.evidence.process_gpu_percent = 45.0;
+                frame.evidence.gpu_percent = 45.0;
+                frame.evidence.adapter_vram_used_bytes = 2ULL << 30;
+                frame.evidence.adapter_vram_budget_bytes = 8ULL << 30;
+                frame.evidence.system_ram_used_bytes = 8ULL << 30;
+                frame.evidence.system_ram_budget_bytes = 32ULL << 30;
+                frame.frames.quality = telemetry::SampleQuality::good;
+                frame.frames.fps = target;
+                frame.frames.average_fps = target;
+                frame.frames.frame_time_ms = 1000.0 / target;
+                frame.frames.p95_ms = 1000.0 / target;
+                frame.frames.p99_ms = 1000.0 / target;
+                frame.frames.one_percent_low_fps = target;
+                frame.frames.sustained_one_percent_low_fps = target;
+                replace_gameplay(frame, [&](auto& gameplay) {
+                    gameplay.map = "KF-Outpost";
+                    gameplay.net_mode = mode;
+                    gameplay.optimizer_online_read_only = !offline;
+                    gameplay.telemetry_sample = 1;
+                });
+                AdaptiveSampleContext context;
+                context.current_quality = 80;
+                context.current_map = "KF-Outpost";
+                context.map_generation = 1;
+                context.last_telemetry_sample = 1;
+                std::optional<AdaptiveRuntimeControlSelection> selected;
+                for (std::uint64_t elapsed = 0; elapsed <= 6'200'000'000ULL;
+                     elapsed += 200'000'000ULL) {
+                    const auto now = receipt_ns + elapsed;
+                    frame.observed_at_ns = now;
+                    frame.frames.newest_present_ns = now;
+                    replace_gameplay(frame, [&](auto& gameplay) {
+                        gameplay.telemetry_observed_ns = now;
+                    });
+                    const auto built = build_adaptive_sample(frame, context);
+                    const auto decision = governor.evaluate(policy, built.sample, now);
+                    CHECK(decision.data.quality == optimizer::AdaptiveDataQuality::valid);
+                    AdaptiveRuntimeControlInput input;
+                    input.state = decision.state;
+                    input.data_quality = decision.data.quality;
+                    input.current_quality = context.current_quality;
+                    input.recovery_eligible = decision.quality_recovery_eligible;
+                    input.active_gameplay = true;
+                    input.verified_offline = offline;
+                    input.verified_online_graphics = !offline;
+                    input.local_graphics_only = !offline;
+                    input.bridge_available = true;
+                    input.now_ns = now;
+                    input.sample_timestamp_ns = built.sample.timestamp_ns;
+                    selected = select_adaptive_runtime_control(input);
+                    if (!recovery_enabled) {
+                        CHECK(!selected);
+                        CHECK(!decision.quality_recovery_eligible);
+                    }
+                }
+                CHECK(selected.has_value() == recovery_enabled);
+                if (selected) {
+                    CHECK(selected->resource == game::AdaptiveResourceControl::recover);
+                    CHECK(selected->quality == 85);
+                }
+            }
+        }
+    }
     // A LoadMap interval can contain very slow presents for any duration.
     // Rebase at the first provider tick before admitting quality decisions.
     for (const bool recovered : {true, false}) {

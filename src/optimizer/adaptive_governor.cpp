@@ -1121,6 +1121,7 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
         static_cast<double>(policy.minimum_quality),
         static_cast<double>(policy.maximum_quality));
     decision.quality_recovery_eligible =
+        policy.quality_recovery_enabled &&
         active_pressure_ == AdaptivePressure::healthy &&
         desired_level == FrameSignalLevel::healthy &&
         !long_low_unhealthy &&
@@ -1142,8 +1143,7 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     }
     if (active_pressure_ == AdaptivePressure::healthy) {
         decision.disposition = AdaptiveDisposition::hold;
-        decision.reason = policy.quality_recovery_enabled &&
-                                  decision.quality_recovery_eligible
+        decision.reason = decision.quality_recovery_eligible
             ? "stable_headroom_slow_quality_recovery_eligible"
             : "stable_or_reserve_insufficient_hold";
         return decision;
