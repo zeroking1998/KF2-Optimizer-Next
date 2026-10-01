@@ -69,6 +69,7 @@ private:
     bool running_{false};
     bool schema_failure_{false};
     std::uint64_t reported_loss_{0};
+    std::uint64_t loss_boundary_ns_{0};
     std::uint64_t diagnostic_generation_{0}, diagnostic_boundary_ns_{0};
     std::optional<std::uint64_t> last_stream_;
     std::unordered_map<std::uint64_t, std::deque<PresentTimestamp>> streams_;

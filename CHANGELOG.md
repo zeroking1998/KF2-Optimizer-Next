@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- FPS telemetry now recovers after a transient capture loss once the measurement
+  window is wholly fresh. Affected windows and stale cached results stay blocked;
+  Adaptive and quality-response diagnostics no longer require a session restart.
 - Graphics saves now retain a Repair warning if rebuilding the protected KF2
   launch fails or is unavailable. Successfully saved values remain intact
   instead of hiding the partial failure behind a generic success notice.

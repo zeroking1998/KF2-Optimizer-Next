@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <iterator>
+#include <limits>
 
 namespace kf2::telemetry {
 namespace {
@@ -45,7 +46,8 @@ PresentSource::~PresentSource() {
 
 Result<bool> PresentSource::start() {
     std::scoped_lock lock{mutex_};
-    streams_.clear(); reported_loss_ = 0; schema_failure_ = false;
+    streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
+    schema_failure_ = false;
     ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
     invalidate_drain_locked();
     running_ = true;
@@ -53,14 +55,14 @@ Result<bool> PresentSource::start() {
 }
 Result<bool> PresentSource::stop() {
     std::scoped_lock lock{mutex_};
-    running_ = false; streams_.clear(); reported_loss_ = 0;
+    running_ = false; streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
     ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
     invalidate_drain_locked();
     return Result<bool>::success(true);
 }
 void PresentSource::bind(SampleIdentity identity) {
     std::scoped_lock lock{mutex_};
-    identity_ = identity; streams_.clear(); reported_loss_ = 0;
+    identity_ = identity; streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
     ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
     schema_failure_ = false;
     invalidate_drain_locked();
@@ -69,6 +71,7 @@ void PresentSource::reset_statistics() {
     std::scoped_lock lock{mutex_};
     streams_.clear();
     reported_loss_ = 0;
+    loss_boundary_ns_ = 0;
     ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
     invalidate_drain_locked();
 }
@@ -81,8 +84,21 @@ bool PresentSource::ingest(const PresentEvent& event) {
         invalidate_drain_locked();
         return false;
     }
-    if (!event.completed) { ++reported_loss_; return false; }
-    reported_loss_ += event.events_lost;
+    if (!event.completed || event.events_lost != 0) {
+        constexpr auto maximum_loss = std::numeric_limits<std::uint64_t>::max();
+        reported_loss_ += std::min(event.events_lost, maximum_loss - reported_loss_);
+        if (!event.completed && reported_loss_ < maximum_loss) ++reported_loss_;
+        loss_boundary_ns_ = std::max(loss_boundary_ns_, event.monotonic_ns);
+        // A late or untimed loss must not certify already admitted data.
+        // This bounded stream walk runs only on loss, never on clean presents.
+        for (const auto& [stream_id, presents] : streams_) {
+            if (!presents.empty()) loss_boundary_ns_ = std::max(
+                loss_boundary_ns_, presents.back().monotonic_ns);
+        }
+        ++diagnostic_generation_;
+        invalidate_drain_locked();
+        if (!event.completed) return false;
+    }
     constexpr std::size_t kMaximumStreams = 16;
     auto stream = streams_.find(event.stream_id);
     if (stream == streams_.end()) {
@@ -178,6 +194,9 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
             const auto cutoff = std::max(not_before_ns,
                 newest > PresentSource::longest_window_ns
                     ? newest - PresentSource::longest_window_ns : 0);
+            // The shared quality covers every returned statistic, including
+            // the longest tail. A fully post-loss window needs no reset.
+            if (cutoff > loss_boundary_ns_) reported_loss = 0;
             const auto first = std::lower_bound(
                 selected->begin(), selected->end(), cutoff,
                 [](const PresentTimestamp& present,
@@ -378,7 +397,8 @@ PresentSource::Window PresentSource::measure_window(
     std::scoped_lock lock{mutex_};
     Window result;
     result.generation = diagnostic_generation_;
-    if (!running_ || schema_failure_ || reported_loss_ || end_ns <= begin_ns ||
+    if (!running_ || schema_failure_ || end_ns <= begin_ns ||
+        (reported_loss_ != 0 && begin_ns <= loss_boundary_ns_) ||
         (diagnostic_boundary_ns_ >= begin_ns && diagnostic_boundary_ns_ <= end_ns))
         return result;
     std::vector<PresentTimestamp> selected;
