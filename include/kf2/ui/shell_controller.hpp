@@ -24,6 +24,7 @@ struct ShellControllerCallbacks {
     std::function<void(std::string_view)> activate_action;
     std::function<void(std::string_view, int)> set_slider_value;
     std::function<void()> request_close;
+    std::function<bool()> can_close;
     std::function<void()> theme_changed;
 };
 

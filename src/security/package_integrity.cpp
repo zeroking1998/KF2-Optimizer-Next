@@ -38,6 +38,7 @@ constexpr std::array<std::string_view, 13> kPayloadPaths{
 PackageRepairFaultInjection g_repair_fault{
     PackageRepairFaultInjection::none};
 std::size_t g_repair_fault_after_replacements{};
+void (*g_repair_progress_probe)(std::size_t){};
 #endif
 
 bool safe_identity(std::string_view value) noexcept {
@@ -411,6 +412,10 @@ void set_package_repair_fault_for_testing(
     g_repair_fault = fault;
     g_repair_fault_after_replacements = after_replacements;
 }
+void set_package_repair_progress_for_testing(
+    void (*probe)(std::size_t)) noexcept {
+    g_repair_progress_probe = probe;
+}
 #endif
 
 std::span<const std::string_view> managed_package_payload_paths() noexcept {
@@ -659,6 +664,9 @@ Result<PackageRepairResult> repair_package_from_directory(
         ++committed_changes;
         ++result.repaired_files;
 #if defined(KF2_PACKAGE_INTEGRITY_TESTING)
+        if (g_repair_progress_probe) {
+            g_repair_progress_probe(result.repaired_files);
+        }
         if ((g_repair_fault ==
                  PackageRepairFaultInjection::after_replacement ||
              g_repair_fault ==

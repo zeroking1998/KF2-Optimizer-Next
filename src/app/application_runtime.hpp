@@ -62,6 +62,7 @@
 #include "kf2/telemetry/gpu_metrics.hpp"
 #include "kf2/telemetry/resource_telemetry_worker.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
+#include "kf2/security/package_integrity.hpp"
 
 namespace kf2::telemetry_pipeline {
 struct TelemetryFrame;
@@ -95,6 +96,9 @@ enum class UiRuntimeShutdownPhase {
 using UiRuntimeShutdownProbe = void (*)(UiRuntimeShutdownPhase);
 void set_ui_runtime_shutdown_probe_for_testing(
     UiRuntimeShutdownProbe probe) noexcept;
+using AutoPackageRepairOperation = Result<security::PackageRepairResult> (*)();
+void set_auto_package_repair_operation_for_testing(
+    AutoPackageRepairOperation operation) noexcept;
 #endif
 
 using PendingPolicyRestageOperation = std::function<Result<bool>(
@@ -342,10 +346,13 @@ struct UiRuntime {
     bool flex_minimum_limited{false};
     StartMode start_mode{StartMode::normal};
     std::shared_ptr<PackageRepairAsyncState> package_repair_state;
-    std::function<void(std::function<void()>)> package_repair_worker_launcher{
+    std::jthread package_repair_worker;
+    std::function<std::jthread(std::function<void()>)> package_repair_worker_launcher{
         [](std::function<void()> worker) {
-            std::thread{std::move(worker)}.detach();
+            return std::jthread{std::move(worker)};
         }};
+    bool package_repair_close_requested{false};
+    bool package_repair_recovery_required{false};
     UpdateRuntimeState updates;
     std::optional<game::VideoSettings> video_saved;
     std::optional<game::VideoSettings> video_pending;
@@ -455,6 +462,7 @@ struct UiRuntime {
     void start_auto_package_repair();
 
     void poll_auto_package_repair();
+    [[nodiscard]] bool can_close_after_package_repair();
 
     void start_update_check(update::CheckTrigger trigger);
     void poll_update_check();

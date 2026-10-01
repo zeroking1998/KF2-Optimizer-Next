@@ -316,6 +316,14 @@ void ShellController::on_theme_changed(platform::windows::ThemeChangedEvent even
 }
 
 bool ShellController::on_close() {
+    if (callbacks_.can_close && !callbacks_.can_close()) {
+        closing_ = false;
+        close_ready_ = false;
+        exit_progress_ = 0.0F;
+        layout_.exit_progress = 0.0F;
+        if (callbacks_.invalidate) callbacks_.invalidate();
+        return false;
+    }
     if (close_ready_ || !theme_.animations_enabled ||
         !callbacks_.request_close) {
         return true;

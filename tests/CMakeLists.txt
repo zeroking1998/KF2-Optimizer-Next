@@ -455,6 +455,7 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_TELEMETRY_ASSET=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetry.u"
     KF2_APPLICATION_VIDEO_TESTING
     KF2_APPLICATION_SHUTDOWN_TESTING
+    KF2_PACKAGE_INTEGRITY_TESTING
     KF2_APPLICATION_RESTORE_TESTING
     KF2_APPLICATION_LAUNCH_TESTING
     KF2_STARTUP_PREWARMER_TESTING
@@ -468,6 +469,8 @@ set_tests_properties(kf2_application_lifecycle_test PROPERTIES
     LABELS "requires-desktop")
 add_test(NAME kf2_package_repair_worker_start_test
     COMMAND kf2_application_lifecycle_test --package-repair-start-failure)
+add_test(NAME kf2_package_repair_shutdown_test
+    COMMAND kf2_application_lifecycle_test --package-repair-shutdown)
 add_test(NAME kf2_update_worker_exception_test
     COMMAND kf2_application_lifecycle_test --update-worker-exceptions)
 add_test(NAME kf2_gpu_profile_persistence_rollback_test
