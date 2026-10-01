@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Configuration rollback now verifies every restored file and retains recovery
+  state when a write, readback or journal completion fails. Native FPS-cap
+  changes retain both original files until confirmed, so the next stopped-game
+  startup can recover an interrupted change before restoring protected INIs.
 - Auto Repair now finishes its background work before the app closes, with a
   visible waiting message. Unverified repair rollback or unexpected repair
   errors preserve the interrupted-session marker instead of marking shutdown clean.

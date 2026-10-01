@@ -392,6 +392,9 @@ Result<config::ApplyResult> UiRuntime::apply(
                             L" files; verified restore backup created",
                         L"config"});
     } else {
+        if (applied.error().code == ErrorCode::recovery_required) {
+            model.set_recovery_required(true);
+        }
         events->append({0, diagnostics::Severity::warning,
                         "CONFIG_APPLY_BLOCKED", applied.error().message,
                         L"config"});
@@ -417,6 +420,7 @@ Result<backup::RestoreResult> UiRuntime::restore(
     if (restored.has_value()) {
         const auto capped = synchronize_frame_rate_cap();
         if (!capped.has_value()) {
+            model.set_recovery_required(true);
             const std::wstring incomplete_message =
                 L"Restored " +
                 std::to_wstring(restored.value().files_restored) +
@@ -442,6 +446,9 @@ Result<backup::RestoreResult> UiRuntime::restore(
                             L"a pre-restore backup was created",
                         L"config"});
     } else {
+        if (restored.error().code == ErrorCode::recovery_required) {
+            model.set_recovery_required(true);
+        }
         events->append({0, diagnostics::Severity::warning,
                         "RESTORE_BLOCKED", restored.error().message,
                         L"config"});

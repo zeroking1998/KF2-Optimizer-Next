@@ -251,6 +251,20 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
             return false;
         }
     }
+    if (installation) {
+        const auto cap_recovered = game::recover_frame_rate_cap(
+            *installation, settings_path.parent_path());
+        if (!cap_recovered.has_value()) {
+            model.set_recovery_required(true);
+            events->append({0, diagnostics::Severity::error,
+                "TARGET_FPS_RECOVERY_BLOCKED", cap_recovered.error().message,
+                L"config"});
+            model.set_notice({ui::NoticeSeverity::error,
+                L"TARGET_FPS_RECOVERY_BLOCKED", cap_recovered.error().message,
+                L"Protected INIs and their snapshot were retained. Close KF2 and restart the optimizer after the file lock is released."});
+            return false;
+        }
+    }
     game_restart_handoff_previous_process.reset();
     game_restart_handoff_deadline_ns = 0;
     game_restart_handoff_new_settings = false;

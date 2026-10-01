@@ -575,6 +575,19 @@ Result<RecoveryResult> recover_transactions(
                     if (!restored.has_value()) {
                         return Result<RecoveryResult>::failure(restored.error());
                     }
+                    const auto readback = read_bytes(target);
+                    if (!readback.has_value()) {
+                        auto recovery_error = readback.error();
+                        recovery_error.code = ErrorCode::recovery_required;
+                        recovery_error.message =
+                            L"Configuration recovery readback failed: " + recovery_error.message;
+                        return Result<RecoveryResult>::failure(std::move(recovery_error));
+                    }
+                    if (readback.value() != original.value()) {
+                        return Result<RecoveryResult>::failure({
+                            ErrorCode::recovery_required,
+                            L"Configuration recovery did not pass exact readback", 0});
+                    }
                 }
             }
         }

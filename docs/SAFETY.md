@@ -63,6 +63,14 @@ Normal shutdown and recovery restore protected INIs, telemetry modules and
 sources, optional FleX runtime state, the native viewport client, and temporary
 session files. The pre-session snapshot is authoritative.
 
+Multi-file configuration rollback attempts every written target and verifies
+the exact original bytes. An incomplete rollback or journal completion reports
+recovery required and retains its durable recovery state. Native FPS-cap
+changes record both originals before mutation, bind recovery to the verified
+installation, and address only their two fixed files. Recovery preserves
+conflicting edits and runs only with KF2 stopped, before protected session
+restoration. Blocked cap recovery also retains the protected session snapshot.
+
 Failed pre-launch preparation checks restoration before reporting safe rollback.
 Unconfirmed restoration preserves the snapshot, marks recovery required and
 instructs the user not to start KF2 until Repair verifies protected state.

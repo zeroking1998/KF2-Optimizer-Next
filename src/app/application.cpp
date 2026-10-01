@@ -172,6 +172,9 @@ Result<Application> Application::start(const StartOptions& options) {
         if (runtime->installation && !game_running) {
             const auto capped = runtime->synchronize_frame_rate_cap();
             if (!capped.has_value()) {
+                const bool cap_recovery_required =
+                    capped.error().code == ErrorCode::recovery_required;
+                if (cap_recovery_required) runtime->model.set_recovery_required(true);
                 events->append({0, diagnostics::Severity::error,
                     "TARGET_FPS_PERSIST_FAILED", capped.error().message,
                     L"config"});
@@ -180,7 +183,9 @@ Result<Application> Application::start(const StartOptions& options) {
                     L"TARGET_FPS_PERSIST_FAILED",
                     L"KF2's native FPS cap could not be prepared: " +
                         capped.error().message,
-                    L"The app remains available; KF2 settings were not partially changed."});
+                    cap_recovery_required
+                        ? L"Close KF2, then restart KF2 Optimizer to recover the saved transaction."
+                        : L"The app remains available; the native cap change was not committed."});
             } else if (capped.value().changed) {
                 events->append({0, diagnostics::Severity::info,
                     "TARGET_FPS_PERSISTED",

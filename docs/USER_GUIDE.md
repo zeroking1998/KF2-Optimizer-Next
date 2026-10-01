@@ -230,6 +230,12 @@ recovery status on **Help & Repair**. Recovery restores protected INIs,
 runtime modules, and temporary session state from the recorded pre-session
 snapshot. Do not delete the `Data` directory before recovery is complete.
 
+If a configuration or native FPS-cap change reports pending recovery, close
+KF2 and restart the optimizer. It verifies the original bytes before clearing
+the recovery state. Locked files, conflicting edits or a damaged recovery
+record remain blocked and visible; recovery does not overwrite unknown edits.
+Resolve the reported conflict before launching from the optimizer again.
+
 See [Support](../SUPPORT.md) before sharing logs publicly.
 
 ## 12. License
