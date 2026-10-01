@@ -94,6 +94,8 @@ struct AdaptiveSample {
     std::uint64_t timestamp_ns{0};
     std::uint64_t session_generation{0};
     std::uint64_t map_generation{0};
+    std::uint64_t frame_generation{0};
+    std::uint64_t frame_stream_id{0};
     std::optional<std::uint64_t> adapter_luid;
     AdaptiveSessionClass session_class{AdaptiveSessionClass::unknown};
     AdaptiveCapabilities capabilities;
@@ -284,9 +286,13 @@ private:
     std::uint64_t low_percentile_pressure_since_ns_{0};
     std::uint64_t last_direction_change_ns_{0};
     std::uint64_t last_evaluation_ns_{0};
+    std::uint64_t last_frame_timestamp_ns_{0};
+    std::uint32_t identity_pid_{0};
     std::uint64_t identity_start_id_{0};
     std::uint64_t session_generation_{0};
     std::uint64_t map_generation_{0};
+    std::uint64_t frame_generation_{0};
+    std::uint64_t frame_stream_id_{0};
     std::uint64_t restore_generation_{0};
     std::uint64_t settings_generation_{0};
     std::uint64_t stabilization_until_ns_{0};

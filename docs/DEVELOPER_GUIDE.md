@@ -107,6 +107,21 @@ readback. A test that only proves a command was sent is incomplete.
 
 ## Compatibility and safety
 
+### Adaptive Present observations
+
+Frame metrics carry the actual newest Present timestamp, selected swapchain
+and source generation. An asynchronous UI read must not derive a new Present
+time from its own clock and a cached age. Adaptive accepts each increasing
+timestamp once within the same process/session/map/source/swapchain epoch.
+Repeated or older publications hold before history, smoothing and pressure
+confirmation; UI work, receipts and timeouts still advance independently.
+
+A no-Present stall holds and becomes unavailable after the policy's freshness
+limit (two seconds by default); it does not imply a quality reduction. A fresh
+Present resumes evaluation. Process/session/map/discontinuity resets and
+confirmed quality actions clear duplicate ownership; pre-action frames remain
+excluded by the applied-receipt timestamp.
+
 Preserve the permanent boundary in [Safety](SAFETY.md), the target-FPS range of
 30 through 240 in one-FPS steps, the corpse ceiling of 4 through 2000, bounded
 work, protected restoration, and explicit Unavailable states.

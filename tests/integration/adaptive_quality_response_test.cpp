@@ -169,9 +169,73 @@ int test_present_loss_recovery() {
     return EXIT_SUCCESS;
 }
 
+int test_duplicate_present_observations() {
+    using namespace kf2;
+    using namespace kf2::telemetry_pipeline;
+    constexpr std::uint64_t second = 1'000'000'000ULL;
+    const telemetry::SampleIdentity identity{42, 9001};
+    telemetry::PresentSource source{identity, 128};
+    CHECK(source.start().has_value());
+    for (auto at = 10 * second; at <= 11 * second; at += 20'000'000ULL)
+        CHECK(source.ingest({identity, at, 1, true, 0, 7}));
+    source.request_drain(11 * second, 2 * second);
+    CHECK(source.wait_for_drain(std::chrono::seconds{2}));
+    TelemetryFrame frame;
+    frame.identity = identity;
+    frame.adapter_luid = 77;
+    frame.active_gameplay = true;
+    frame.offline_gameplay = true;
+    frame.observed_at_ns = 11 * second;
+    auto published = source.latest_drain();
+    CHECK(published.has_value());
+    frame.frames = *published;
+    AdaptiveSampleContext context;
+    optimizer::AdaptivePolicy policy;
+    optimizer::AdaptiveGovernor governor;
+    auto built = build_adaptive_sample(frame, context);
+    static_cast<void>(governor.evaluate(policy, built.sample, frame.observed_at_ns));
+    // Cached drain age remains zero. Reading it later must not invent a new
+    // Present timestamp, and an unchanging frame cannot trigger a reduction.
+    frame.observed_at_ns += second / 2;
+    frame.evidence.cpu_percent = 99.0;
+    built = build_adaptive_sample(frame, context);
+    CHECK(built.sample.timestamp_ns == 11 * second);
+    const auto repeated = governor.evaluate(policy, built.sample, frame.observed_at_ns);
+    CHECK(repeated.reason == "duplicate_frame_observation_hold");
+    CHECK(repeated.disposition == optimizer::AdaptiveDisposition::hold);
+    frame.observed_at_ns = 11 * second + policy.freshness_limit_ns + 1;
+    built = build_adaptive_sample(frame, context);
+    CHECK(governor.evaluate(policy, built.sample, frame.observed_at_ns).
+          reason == "stale_telemetry");
+    // A newly published drain with no new Present has the same identity too.
+    source.request_drain(11 * second + second / 2, 2 * second);
+    CHECK(source.wait_for_drain(std::chrono::seconds{2}));
+    published = source.latest_drain();
+    CHECK(published.has_value());
+    frame.frames = *published;
+    frame.observed_at_ns += 1;
+    CHECK(build_adaptive_sample(frame, context).sample.timestamp_ns == 11 * second);
+    const auto resumed_ns = frame.observed_at_ns;
+    for (int index = 0; index <= 50; ++index)
+        CHECK(source.ingest({identity,
+            resumed_ns + index * 20'000'000ULL, 1, true, 0, 7}));
+    frame.observed_at_ns = resumed_ns + second;
+    source.request_drain(frame.observed_at_ns, 2 * second);
+    CHECK(source.wait_for_drain(std::chrono::seconds{2}));
+    published = source.latest_drain();
+    CHECK(published.has_value());
+    frame.frames = *published;
+    built = build_adaptive_sample(frame, context);
+    CHECK(built.sample.timestamp_ns == frame.observed_at_ns);
+    CHECK(governor.evaluate(policy, built.sample, frame.observed_at_ns).
+          reason != "duplicate_frame_observation_hold");
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view{argv[1]} == "--present-loss-recovery")
         return test_present_loss_recovery();
+    CHECK(test_duplicate_present_observations() == EXIT_SUCCESS);
     using namespace kf2;
     using namespace kf2::telemetry_pipeline;
     constexpr std::uint64_t receipt_ns = 20'000'000'000ULL;
@@ -451,6 +515,7 @@ int main(int argc, char** argv) {
                  elapsed <= 8'000'000'000ULL; elapsed += 200'000'000ULL) {
                 const auto now = receipt_ns + elapsed;
                 frame.observed_at_ns = now;
+                frame.frames.newest_present_ns = now;
                 replace_gameplay(frame, [&](auto& gameplay) {
                     gameplay.telemetry_observed_ns = now;
                 });

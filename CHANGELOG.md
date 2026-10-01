@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Adaptive now counts each Present observation once. Delayed or repeated
+  asynchronous FPS windows cannot manufacture pressure or recovery evidence.
+
 - Process inspection failures no longer mean KF2 is closed. Configuration,
   package recovery, launch preparation and other stopped-game writes wait
   until the process state can be verified safely.

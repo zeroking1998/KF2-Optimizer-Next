@@ -642,6 +642,7 @@ AdaptiveDataQualityReport validate_adaptive_sample(
 
 void AdaptiveGovernor::reset_for_boundary(
     std::uint64_t now_ns, bool telemetry_transition) noexcept {
+    last_frame_timestamp_ns_ = 0;
     history_size_ = 0;
     history_next_ = 0;
     smoothed_frame_time_ms_.reset();
@@ -860,21 +861,29 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     }
     decision.settings_generation = settings_generation_;
 
-    const bool boundary = target_changed || sample.discontinuity ||
+    const bool frame_transition = identity_pid_ != 0 &&
+        (sample.frame_generation != frame_generation_ ||
+         sample.frame_stream_id != frame_stream_id_);
+    const bool boundary = target_changed || frame_transition ||
+        sample.discontinuity ||
         sample.session_changed ||
         sample.map_changed ||
+        sample.pid != identity_pid_ ||
         sample.process_start_id != identity_start_id_ ||
         (session_generation_ != 0 &&
          sample.session_generation != session_generation_) ||
         (map_generation_ != 0 && sample.map_generation != map_generation_);
-    const bool telemetry_transition = sample.discontinuity ||
+    const bool telemetry_transition = frame_transition || sample.discontinuity ||
         sample.session_changed || sample.map_changed;
     if (boundary) {
         reset_for_boundary(now_ns, telemetry_transition);
     }
+    identity_pid_ = sample.pid;
     identity_start_id_ = sample.process_start_id;
     session_generation_ = sample.session_generation;
     map_generation_ = sample.map_generation;
+    frame_generation_ = sample.frame_generation;
+    frame_stream_id_ = sample.frame_stream_id;
     decision.restore_generation = restore_generation_;
     decision.settings_generation = settings_generation_;
 
@@ -901,6 +910,22 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
         decision.reason = "boundary_stabilization_hold";
         return decision;
     }
+
+    // UI/control time still advances above, but a cached or delayed window
+    // cannot reweight history, resources or pressure/recovery confirmation.
+    // A no-Present stall becomes stale through the existing freshness limit;
+    // no quality action is inferred from repeatedly reading the last frame.
+    if (sample.duplicate_sample ||
+        sample.timestamp_ns <= last_frame_timestamp_ns_) {
+        decision.data.quality = AdaptiveDataQuality::degraded;
+        decision.data.confidence_factor = 0.0;
+        decision.data.reason = "duplicate_frame_observation";
+        decision.state = AdaptiveControllerState::observing;
+        decision.disposition = AdaptiveDisposition::hold;
+        decision.reason = "duplicate_frame_observation_hold";
+        return decision;
+    }
+    last_frame_timestamp_ns_ = sample.timestamp_ns;
 
     const double target_frame_time = stability_bands.target_frame_time_ms;
     const auto frame_analysis = update_frame_analysis(
@@ -1268,6 +1293,7 @@ void AdaptiveGovernor::notify_quality_applied(
     // performance-evidence epoch. Keep resource smoothing and ownership state:
     // memory or compute pressure may remain dangerous after a graphics step.
     quality_applied_not_before_ns_ = applied_ns;
+    last_frame_timestamp_ns_ = 0;
     history_ = {};
     history_size_ = 0;
     history_next_ = 0;
@@ -1294,9 +1320,13 @@ void AdaptiveGovernor::reset() noexcept {
     low_percentile_pressure_since_ns_ = 0;
     last_direction_change_ns_ = 0;
     last_evaluation_ns_ = 0;
+    last_frame_timestamp_ns_ = 0;
+    identity_pid_ = 0;
     identity_start_id_ = 0;
     session_generation_ = 0;
     map_generation_ = 0;
+    frame_generation_ = 0;
+    frame_stream_id_ = 0;
     restore_generation_ = 0;
     settings_generation_ = 0;
     stabilization_until_ns_ = 0;

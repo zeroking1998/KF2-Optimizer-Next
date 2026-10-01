@@ -145,6 +145,8 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
     std::vector<PresentTimestamp> long_term;
     SampleIdentity identity;
     std::uint64_t reported_loss = 0;
+    std::uint64_t source_generation = 0;
+    std::uint64_t selected_stream_id = 0;
     {
         std::scoped_lock lock{mutex_};
         if (!running_ || schema_failure_) {
@@ -154,11 +156,11 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
         }
         identity = identity_;
         reported_loss = reported_loss_;
+        source_generation = drain_generation_;
         const std::deque<PresentTimestamp>* selected = nullptr;
         bool selected_fresh = false;
         std::size_t selected_fast_count = 0;
         std::uint64_t selected_newest = 0;
-        std::uint64_t selected_stream_id = 0;
         for (const auto& [stream_id, presents] : streams_) {
             if (presents.empty()) continue;
             const auto newest = presents.back().monotonic_ns;
@@ -242,6 +244,8 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
         result.one_percent_low_fps = long_metrics.one_percent_low_fps;
     }
     result.loss_count += reported_loss;
+    result.source_generation = source_generation;
+    result.stream_id = selected_stream_id;
     if (result.fps && result.loss_count > 0) result.quality = SampleQuality::degraded;
     return result;
 }
