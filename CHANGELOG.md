@@ -230,6 +230,10 @@ are visible immediately.
   check. Don't show again changes only after its preference is saved; retrying
   a successful save clears the matching warning. Failed checks no longer
   write unchanged cache data twice.
+- Update installation, Auto Repair and manual package import now share a busy
+  gate. Repair cannot start during an update check or installation; updates
+  cannot install during Repair. Buttons match the gate, and safe close-waiting
+  and verified repair rollback remain unchanged.
 - Embedded overlay PNGs now require a loaded handle, readable bytes and a
   non-empty buffer before decoding. Failed resources keep the procedural
   overlay fallback without breaking otherwise valid images.

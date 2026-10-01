@@ -154,6 +154,8 @@ bool intersects(const DipRect& left, const DipRect& right) noexcept {
 
 ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                                float height_dip) {
+    const bool package_actions_busy = model.status().package_actions_busy ||
+        model.status().update_checking || model.status().update_installing;
     const float width = std::max(0.0F, width_dip);
     const float height = std::max(0.0F, height_dip);
     const float footer_y = std::max(0.0F, height - kFooterHeight);
@@ -224,7 +226,7 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                                                 : L"UPDATES";
         const bool update_enabled = !status.update_checking &&
             !status.update_installing &&
-            (!install_action || status.update_installable);
+            (!install_action || (status.update_installable && !package_actions_busy));
         float x = header_actions_left;
         result.nodes.push_back({
             "header-update", SemanticRole::action,
@@ -248,7 +250,7 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
             {x, 17.0F, header_action_widths[2], 44.0F}, L"REPAIR",
             std::nullopt, false,
             model.focused_action() == "header-repair",
-            !status.update_installing, "header-repair"});
+            !package_actions_busy, "header-repair"});
     }
 
     constexpr float status_left_padding = 32.0F;
@@ -414,7 +416,7 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
             action_index = 0;
             if (status.update_available) {
                 add_action("settings-updates-install", L"INSTALL UPDATE",
-                           status.update_installable, true);
+                           status.update_installable && !package_actions_busy, true);
             } else {
                 add_action("settings-updates-check",
                            L"LOAD UPDATE DETAILS", true, true);
@@ -788,7 +790,8 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         grid_base = cursor;
         action_index = 0;
         add_action("diagnostics-full-check", L"CHECK EVERYTHING");
-        add_action("diagnostics-repair-package", L"IMPORT REPAIR PACKAGE");
+        add_action("diagnostics-repair-package", L"IMPORT REPAIR PACKAGE",
+                   !package_actions_busy);
         cursor = grid_base + kActionStride + 8.0F;
         add_section("diagnostics-recovery-section",
                     L"BACKUP & RESTORE", cursor);

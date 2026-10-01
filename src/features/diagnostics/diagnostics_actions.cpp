@@ -202,6 +202,11 @@ app::runtime::DispatchResult open_data(
 
 app::runtime::DispatchResult repair_package(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
+    if (runtime.package_actions_busy()) {
+        show_notice(runtime, ui::NoticeSeverity::info, L"PACKAGE_ACTIONS_BUSY",
+                    L"Wait for the current update check, update installation or repair to finish.");
+        return app::runtime::DispatchResult::handled;
+    }
     const auto selected = app::choose_directory(
         runtime.window
             ? static_cast<HWND>(runtime.window->native_handle_for_testing())
@@ -214,6 +219,12 @@ app::runtime::DispatchResult repair_package(
         return app::runtime::DispatchResult::handled;
     }
 
+    // The native picker pumps messages; recheck before any package mutation.
+    if (runtime.package_actions_busy()) {
+        show_notice(runtime, ui::NoticeSeverity::info, L"PACKAGE_ACTIONS_BUSY",
+                    L"Wait for the current update check, update installation or repair to finish.");
+        return app::runtime::DispatchResult::handled;
+    }
     std::filesystem::path source = *selected;
     std::error_code error;
     if (!std::filesystem::is_regular_file(

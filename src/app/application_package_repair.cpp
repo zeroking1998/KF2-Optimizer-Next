@@ -39,6 +39,12 @@ void UiRuntime::start_auto_package_repair() {
             return;
         }
     }
+    if (package_actions_busy()) {
+        model.set_notice({ui::NoticeSeverity::info, L"PACKAGE_ACTIONS_BUSY",
+            L"Wait for the current update check, update installation or repair to finish.", L""});
+        refresh_update_presentation();
+        return;
+    }
     const auto identity = current_build_identity();
     const auto plan = security::exact_release_repair_plan(identity.version);
     if (!plan.has_value()) {
@@ -103,6 +109,7 @@ void UiRuntime::start_auto_package_repair() {
     }
 
     package_repair_state = std::move(state);
+    refresh_update_presentation();
     events->append(
         {0, diagnostics::Severity::info, "PACKAGE_AUTO_REPAIR_STARTED",
          L"Downloading only the exact installed release " + plan.value().tag +
@@ -132,6 +139,7 @@ void UiRuntime::poll_auto_package_repair() {
     if (!outcome->has_value()) {
         package_repair_recovery_required = package_repair_recovery_required ||
             outcome->error().code == ErrorCode::recovery_required;
+        refresh_update_presentation();
         events->append(
             {0, diagnostics::Severity::error, "PACKAGE_AUTO_REPAIR_FAILED",
              outcome->error().message, L"package"});
@@ -143,6 +151,7 @@ void UiRuntime::poll_auto_package_repair() {
         return;
     }
     package_repair_recovery_required = false;
+    refresh_update_presentation();
     const auto& repaired = outcome->value();
     if (repaired.repaired_files == 0) {
         events->append(
