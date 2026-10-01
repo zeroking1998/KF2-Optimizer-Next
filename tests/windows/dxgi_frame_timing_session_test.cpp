@@ -2,10 +2,14 @@
 #include <evntrace.h>
 
 #include <cstdlib>
+#include <algorithm>
+#include <cstring>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 #include "kf2/platform/windows/dxgi_frame_timing_session.hpp"
 
@@ -17,6 +21,105 @@ using kf2::platform::windows::DxgiFrameTimingSession;
 using namespace kf2::telemetry;
 constexpr SampleIdentity kIdentity{123, 1};
 constexpr std::uint64_t kFrequency = 1'000;
+
+ULONG cleanup_query_status{ERROR_SUCCESS};
+ULONG cleanup_reported_count{64};
+ULONG cleanup_control_status{ERROR_SUCCESS};
+int cleanup_malformed{};
+bool cleanup_arguments_valid{};
+std::vector<std::wstring> cleanup_stops;
+constexpr wchar_t kDeadSession[] = L"KF2OptimizerNext-DXGI-4294967295";
+constexpr wchar_t kLastSession[] = L"KF2OptimizerNext-DXGI-4294967291";
+
+ULONG WINAPI query_cleanup_sessions(
+    PEVENT_TRACE_PROPERTIES* sessions, ULONG capacity, PULONG count) {
+    cleanup_arguments_valid = sessions && count && capacity == 64;
+    if (!cleanup_arguments_valid) return ERROR_INVALID_PARAMETER;
+    for (ULONG index = 0; index < capacity; ++index) {
+        auto* properties = sessions[index];
+        const auto name = index == 0 ? std::wstring{kDeadSession}
+            : index == capacity - 1 ? std::wstring{kLastSession}
+            : index == 1 ? L"KF2OptimizerNext-DXGI-" + std::to_wstring(GetCurrentProcessId())
+                         : std::wstring{L"Unrelated-ETW-session"};
+        auto* destination = reinterpret_cast<wchar_t*>(
+            reinterpret_cast<std::byte*>(properties) + properties->LoggerNameOffset);
+        std::copy(name.begin(), name.end(), destination);
+        destination[name.size()] = L'\0';
+        if (index != 0) continue;
+        switch (cleanup_malformed) {
+        case 1: properties->LoggerNameOffset = 0; break;
+        case 2: properties->LoggerNameOffset = properties->Wnode.BufferSize; break;
+        case 3: ++properties->LoggerNameOffset; break;
+        case 4: {
+            const auto characters = (properties->Wnode.BufferSize -
+                properties->LoggerNameOffset) / sizeof(wchar_t);
+            std::fill(destination + name.size(), destination + characters, L'X');
+            break;
+        }
+        case 5: destination[name.size()] = L'x'; destination[name.size() + 1] = L'\0'; break;
+        case 6: destination[22] = L'-'; break;
+        case 7: properties->Wnode.BufferSize = 0; break;
+        case 8: std::fill(destination + 22, destination + 43, L'9'); destination[43] = L'\0'; break;
+        }
+    }
+    *count = cleanup_reported_count;
+    return cleanup_query_status;
+}
+
+ULONG WINAPI control_cleanup_session(
+    TRACEHANDLE session, LPCWSTR name, PEVENT_TRACE_PROPERTIES properties,
+    ULONG operation) {
+    cleanup_arguments_valid = cleanup_arguments_valid && session == 0 && name &&
+        properties && properties->Wnode.BufferSize == sizeof(EVENT_TRACE_PROPERTIES) &&
+        operation == EVENT_TRACE_CONTROL_STOP;
+    if (name) cleanup_stops.emplace_back(name);
+    return cleanup_control_status;
+}
+
+int test_stale_cleanup_overflow() {
+    // No real QueryAllTraces/ControlTrace calls: even stale/foreign session
+    // fixtures cannot stop another application's actual tracing session.
+    for (const auto status : {ERROR_MORE_DATA, ERROR_SUCCESS,
+                             ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER}) {
+        for (const ULONG count : {0UL, 1UL, 64UL, 96UL, std::numeric_limits<ULONG>::max()}) {
+            cleanup_query_status = status;
+            cleanup_reported_count = count;
+            cleanup_control_status = ERROR_SUCCESS;
+            cleanup_malformed = 0;
+            cleanup_stops.clear();
+            DxgiFrameTimingSession::test_cleanup_stale_sessions(
+                query_cleanup_sessions, control_cleanup_session);
+            CHECK(cleanup_arguments_valid);
+            const bool usable = status == ERROR_SUCCESS || status == ERROR_MORE_DATA;
+            const std::size_t expected = !usable || count == 0 ? 0 : count < 64 ? 1 : 2;
+            CHECK(cleanup_stops.size() == expected);
+            if (expected != 0) CHECK(cleanup_stops.front() == kDeadSession);
+            if (expected == 2) CHECK(cleanup_stops.back() == kLastSession);
+        }
+    }
+    for (int malformed = 1; malformed <= 8; ++malformed) {
+        for (const ULONG count : {1UL, 64UL}) {
+            cleanup_query_status = ERROR_SUCCESS;
+            cleanup_reported_count = count;
+            cleanup_malformed = malformed;
+            cleanup_stops.clear();
+            DxgiFrameTimingSession::test_cleanup_stale_sessions(
+                query_cleanup_sessions, control_cleanup_session);
+            CHECK(cleanup_arguments_valid);
+            CHECK(cleanup_stops.size() == (count == 1 ? 0U : 1U));
+            if (!cleanup_stops.empty()) CHECK(cleanup_stops.front() == kLastSession);
+        }
+    }
+    cleanup_query_status = ERROR_MORE_DATA;
+    cleanup_reported_count = 96;
+    cleanup_malformed = 0;
+    cleanup_control_status = ERROR_ACCESS_DENIED;
+    cleanup_stops.clear();
+    DxgiFrameTimingSession::test_cleanup_stale_sessions(
+        query_cleanup_sessions, control_cleanup_session);
+    CHECK(cleanup_arguments_valid && cleanup_stops.size() == 2);
+    return EXIT_SUCCESS;
+}
 
 int test_capacity() {
     PresentSource source{kIdentity, 120};
@@ -155,11 +258,13 @@ int test_active_pairing() {
 int main(int argc, char** argv) {
     if (argc == 2) {
         const std::string_view scenario{argv[1]};
+        if (scenario == "--stale-session-overflow") return test_stale_cleanup_overflow();
         if (scenario == "--pending-capacity") return test_capacity();
         if (scenario == "--pending-expiry") return test_expiry();
         if (scenario == "--pending-loss") return test_event_loss();
         return EXIT_FAILURE;
     }
+    CHECK(test_stale_cleanup_overflow() == EXIT_SUCCESS);
     CHECK(test_capacity() == EXIT_SUCCESS);
     CHECK(test_expiry() == EXIT_SUCCESS);
     CHECK(test_event_loss() == EXIT_SUCCESS);

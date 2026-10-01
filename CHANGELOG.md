@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- DXGI stale-session cleanup now processes safely returned ETW entries when more
+  sessions exist than its fixed buffer can hold. Array bounds and malformed
+  session names are checked without adding retries or a larger startup scan.
 - Failed native FPS-cap synchronization now keeps session finalization incomplete,
   preserves an actionable error and blocks automatic launch rearming instead of
   reporting that all required state was restored.

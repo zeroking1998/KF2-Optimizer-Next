@@ -8,6 +8,7 @@
 #include <atomic>
 #include <array>
 #include <chrono>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -69,7 +70,16 @@ bool process_is_alive(DWORD pid) {
     return alive;
 }
 
-void stop_stale_sessions() {
+void stop_stale_sessions(
+#ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+    decltype(&QueryAllTracesW) query_traces = &QueryAllTracesW,
+    decltype(&ControlTraceW) control_trace = &ControlTraceW
+#endif
+) {
+#ifndef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+    constexpr auto query_traces = &QueryAllTracesW;
+    constexpr auto control_trace = &ControlTraceW;
+#endif
     constexpr ULONG kMaximumSessions = 64;
     std::vector<std::vector<std::byte>> storage(
         kMaximumSessions,
@@ -86,24 +96,38 @@ void stop_stale_sessions() {
         sessions.push_back(properties);
     }
     ULONG count = kMaximumSessions;
-    if (QueryAllTracesW(sessions.data(), kMaximumSessions, &count) != ERROR_SUCCESS)
+    const auto status = query_traces(sessions.data(), kMaximumSessions, &count);
+    // ERROR_MORE_DATA still fills the supplied entries. Keep the existing
+    // startup-only budget, but never use the total session count as its bound.
+    if (status != ERROR_SUCCESS && status != ERROR_MORE_DATA)
         return;
+    count = std::min(count, kMaximumSessions);
     const std::wstring_view prefix{kSessionPrefix};
     for (ULONG index = 0; index < count; ++index) {
         auto* properties = sessions[index];
+        const auto bytes = std::min(static_cast<std::size_t>(properties->Wnode.BufferSize),
+                                    storage[index].size());
+        const auto offset = properties->LoggerNameOffset;
+        if (offset < sizeof(EVENT_TRACE_PROPERTIES) || offset >= bytes ||
+            offset % alignof(wchar_t) != 0) continue;
         const auto* name = reinterpret_cast<const wchar_t*>(
             reinterpret_cast<const std::byte*>(properties) +
-            properties->LoggerNameOffset);
-        const std::wstring_view session_name{name};
+            offset);
+        const auto characters = (bytes - offset) / sizeof(wchar_t);
+        const auto* end = std::find(name, name + characters, L'\0');
+        if (end == name + characters) continue;
+        const std::wstring_view session_name{name, static_cast<std::size_t>(end - name)};
         if (!session_name.starts_with(prefix)) continue;
         const auto pid_text = session_name.substr(prefix.size());
-        wchar_t* end = nullptr;
+        if (pid_text.empty() || !std::all_of(pid_text.begin(), pid_text.end(),
+            [](wchar_t digit) { return digit >= L'0' && digit <= L'9'; })) continue;
+        errno = 0;
         const unsigned long pid = std::wcstoul(std::wstring{pid_text}.c_str(),
-                                               &end, 10);
-        if (pid == 0 || process_is_alive(static_cast<DWORD>(pid))) continue;
+                                               nullptr, 10);
+        if (errno == ERANGE || pid == 0 || process_is_alive(static_cast<DWORD>(pid))) continue;
         EVENT_TRACE_PROPERTIES stop_properties{};
         stop_properties.Wnode.BufferSize = sizeof(stop_properties);
-        static_cast<void>(ControlTraceW(
+        static_cast<void>(control_trace(
             0, std::wstring{session_name}.c_str(), &stop_properties,
             EVENT_TRACE_CONTROL_STOP));
     }
@@ -356,6 +380,12 @@ struct DxgiFrameTimingSession::Impl {
 };
 
 #ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+void DxgiFrameTimingSession::test_cleanup_stale_sessions(
+    decltype(&QueryAllTracesW) query_traces,
+    decltype(&ControlTraceW) control_trace) {
+    stop_stale_sessions(query_traces, control_trace);
+}
+
 void DxgiFrameTimingSession::test_fail_worker_creation(
     unsigned int ordinal) noexcept {
     failed_worker_ordinal.store(ordinal, std::memory_order_release);

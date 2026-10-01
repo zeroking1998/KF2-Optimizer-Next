@@ -2,6 +2,11 @@
 
 #include <memory>
 
+#ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+#include <Windows.h>
+#include <evntrace.h>
+#endif
+
 #include "kf2/core/result.hpp"
 #include "kf2/telemetry/present_source.hpp"
 
@@ -20,6 +25,9 @@ public:
     [[nodiscard]] Result<bool> stop();
 
 #ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+    static void test_cleanup_stale_sessions(
+        decltype(&QueryAllTracesW) query_traces,
+        decltype(&ControlTraceW) control_trace);
     [[nodiscard]] static bool test_event_callback_exception_boundary() noexcept;
     static void test_fail_worker_creation(unsigned int ordinal) noexcept;
     [[nodiscard]] static std::unique_ptr<DxgiFrameTimingSession> test_parser(
