@@ -3095,6 +3095,9 @@ int main(int argc, char** argv) {
         CHECK(read_bytes(options.state_root /
                          L"logs/previous-session-events.json")
                   .find("APP_START") != std::string::npos);
+        // Startup appends asynchronously. The existing shutdown boundary
+        // verifies persistence before inspecting the current log on disk.
+        CHECK(recovered.value().shutdown_cleanly().has_value());
         CHECK(read_bytes(options.state_root / L"logs/session-events.json")
                   .find("PREVIOUS_EVENT_LOG_ARCHIVED") != std::string::npos);
         CHECK(fs::exists(options.state_root / L"settings.ini.corrupt"));
@@ -3118,7 +3121,6 @@ int main(int argc, char** argv) {
         "overlay_position=top_right\n"
         "overlay_scale_percent=100\n"
         "target_fps=60\ncorpse_limit=20\n");
-        CHECK(recovered.value().shutdown_cleanly().has_value());
     }
     {
         std::ofstream corrupt(options.state_root / L"settings.ini",
