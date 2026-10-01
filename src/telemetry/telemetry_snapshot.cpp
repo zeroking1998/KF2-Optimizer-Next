@@ -36,7 +36,9 @@ FrameMetrics aggregate_presents(
     const auto newest = presents.back().monotonic_ns;
     const auto age = now_ns >= newest ? now_ns - newest : 0;
     if (now_ns < newest || age > stale_after_ns) {
-        return unavailable(UnavailableReason::stale, age);
+        auto result = unavailable(UnavailableReason::stale, age);
+        result.newest_present_ns = newest;
+        return result;
     }
 
     std::vector<double> intervals;
@@ -80,6 +82,7 @@ FrameMetrics aggregate_presents(
         intervals.begin(), intervals.end(),
         [stutter_limit](double interval) { return interval > stutter_limit; }));
     result.age_ns = age;
+    result.newest_present_ns = newest;
     result.loss_count = loss;
     result.quality = loss == 0 ? SampleQuality::good : SampleQuality::degraded;
     result.reason = UnavailableReason::none;

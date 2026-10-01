@@ -37,6 +37,9 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     frame.identity = {42, 9001};
     frame.observed_at_ns = 20'000'000'000ULL;
     frame.frames.age_ns = 1'000'000'000ULL;
+    frame.frames.newest_present_ns = 19'000'000'000ULL;
+    frame.frames.source_generation = 7;
+    frame.frames.stream_id = 31;
     frame.frames.fps = 58.0;
     frame.frames.average_fps = 54.0;
     frame.frames.frame_time_ms = 17.2;
@@ -320,7 +323,7 @@ int main() {
     CHECK(adaptive_frame_boundary_requires_drain(
         unavailable_frames, 1));
     auto invalid_age = frame;
-    invalid_age.frames.age_ns = invalid_age.observed_at_ns + 1;
+    invalid_age.frames.newest_present_ns = invalid_age.observed_at_ns + 1;
     CHECK(adaptive_frame_boundary_requires_drain(invalid_age, 1));
 
     // LoadMap is announced before the protected provider starts ticking.
@@ -398,6 +401,19 @@ int main() {
     CHECK(sample.pid == 42);
     CHECK(sample.process_start_id == 9001);
     CHECK(sample.timestamp_ns == 19'000'000'000ULL);
+    CHECK(sample.frame_generation == 7);
+    CHECK(sample.frame_stream_id == 31);
+    auto delayed_readback = frame;
+    delayed_readback.observed_at_ns += 200'000'000ULL;
+    const auto delayed_sample = build_adaptive_sample(delayed_readback, context).sample;
+    CHECK(delayed_sample.timestamp_ns == sample.timestamp_ns);
+    CHECK(delayed_sample.frame_generation == sample.frame_generation);
+    CHECK(delayed_sample.frame_stream_id == sample.frame_stream_id);
+    CHECK(adaptive_frame_boundary_requires_drain(
+        delayed_readback, 9'000'000'001ULL));
+    auto missing_present_time = frame;
+    missing_present_time.frames.newest_present_ns = 0;
+    CHECK(build_adaptive_sample(missing_present_time, context).sample.timestamp_ns == 0);
     CHECK(sample.session_generation == 9001);
     CHECK(sample.adapter_luid == 77);
     CHECK(sample.fps == frame.frames.fps);
@@ -771,6 +787,7 @@ int main() {
         .frame_time_ms = 1000.0 / 60.0,
         .p95_ms = 1000.0 / 60.0, .p99_ms = 1000.0 / 60.0,
         .one_percent_low_fps = 60.0,
+        .newest_present_ns = frame.observed_at_ns,
         .quality = telemetry::SampleQuality::good,
         .reason = telemetry::UnavailableReason::none};
     const auto fresh_sample = build_adaptive_sample(frame, fresh_context).sample;

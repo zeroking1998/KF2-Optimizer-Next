@@ -54,6 +54,9 @@ int main(int argc, char** argv) {
     CHECK(fresh.fps.has_value());
     CHECK(*fresh.fps > 62.0 && *fresh.fps < 63.0);
     CHECK(fresh.quality == SampleQuality::good);
+    CHECK(fresh.newest_present_ns == 2'920'000'000ULL);
+    CHECK(fresh.source_generation != 0);
+    CHECK(fresh.stream_id == 0);
 
     PresentSource reordered{game, 16};
     CHECK(reordered.start().has_value());
@@ -221,6 +224,7 @@ int main(int argc, char** argv) {
     CHECK(lossy.fps.has_value());
     CHECK(lossy.quality == SampleQuality::degraded);
     CHECK(lossy.loss_count >= 4);
+    CHECK(lossy.source_generation != fresh.source_generation);
 
     CHECK(!source.ingest({game, 2'952'000'000ULL, 99, true, 0}));
     auto schema = source.drain(2'952'000'000ULL, 500'000'000ULL);
@@ -339,6 +343,7 @@ int main(int argc, char** argv) {
     CHECK(*reset_metrics.average_fps > 119.0);
     CHECK(*reset_metrics.sustained_one_percent_low_fps > 119.0);
     CHECK(*reset_metrics.one_percent_low_fps > 119.0);
+    CHECK(reset_metrics.source_generation != responsive_metrics.source_generation);
 
     PresentSource asynchronous{game, 256};
     CHECK(asynchronous.start().has_value());
@@ -354,6 +359,18 @@ int main(int argc, char** argv) {
     CHECK(asynchronous_metrics->fps.has_value());
     CHECK(*asynchronous_metrics->fps > 62.0 &&
           *asynchronous_metrics->fps < 63.0);
+    CHECK(asynchronous_metrics->newest_present_ns == 9'920'000'000ULL);
+    const auto cached = asynchronous.latest_drain();
+    CHECK(cached->newest_present_ns == asynchronous_metrics->newest_present_ns);
+    CHECK(cached->source_generation == asynchronous_metrics->source_generation);
+    asynchronous.request_drain(10'041'000'000ULL, 500'000'000ULL);
+    CHECK(asynchronous.wait_for_drain(std::chrono::seconds{2}));
+    const auto repeated = asynchronous.latest_drain();
+    CHECK(repeated->age_ns == 121'000'000ULL);
+    CHECK(repeated->newest_present_ns == asynchronous_metrics->newest_present_ns);
+    CHECK(repeated->source_generation == asynchronous_metrics->source_generation);
+    CHECK(repeated->stream_id == asynchronous_metrics->stream_id);
+    CHECK(repeated->fps == asynchronous_metrics->fps);
 
     detail::fail_next_present_drain_publication();
     asynchronous.request_drain(9'921'000'000ULL, 500'000'000ULL);
@@ -373,6 +390,10 @@ int main(int argc, char** argv) {
         asynchronous.latest_drain(asynchronous_boundary_ns);
     CHECK(asynchronous_bounded.has_value());
     CHECK(asynchronous_bounded->fps.has_value());
+    CHECK(asynchronous_bounded->newest_present_ns ==
+          asynchronous_metrics->newest_present_ns);
+    CHECK(asynchronous_bounded->source_generation ==
+          asynchronous_metrics->source_generation);
 
     // Live collection can continuously replace its coalesced request while a
     // drain is running. A queued Adaptive boundary must still be selected on
