@@ -213,6 +213,89 @@ bool online_restore_progress(int length, int failed_id,
     return ledger == expected_remaining;
 }
 
+struct OfflineReleasePolicy {
+    bool late_reservation;
+    bool yield_after_attempt;
+    bool fair_lanes;
+};
+
+bool offline_restore_yields_after_attempt(std::string_view body,
+                                         std::string_view restore_call) {
+    const auto flag = body.find("bRestoreAttempted = true;");
+    const auto attempt = body.find(restore_call);
+    const auto advance = body.find("(Index + 1) %", attempt);
+    const auto yield = body.find("if (bRestoreAttempted)", advance);
+    return flag != std::string_view::npos &&
+        attempt != std::string_view::npos && flag < attempt &&
+        advance != std::string_view::npos && yield != std::string_view::npos;
+}
+
+// Source-bound model of the shared one-physics-attempt-per-frame budget and
+// active/retired freeze/wake queues. It does not execute UnrealScript/PhysX.
+bool offline_release_progress(int length, int failed_id, bool physics_failure,
+                              OfflineReleasePolicy policy) {
+    std::array<std::vector<int>, 4> queues;
+    std::array<std::vector<int>, 4> expected;
+    for (int id = 0; id < length; ++id) {
+        for (int lane = 0; lane < 2; ++lane) {
+            queues[lane].push_back(id);
+            if (id == failed_id) expected[lane].push_back(id);
+        }
+    }
+    queues[2] = queues[3] = {0, 1};
+    std::array<std::size_t, 2> cursors{};
+    int phase = 0;
+    for (int callback = 0; callback < 8 * length + 32; ++callback) {
+        int lane = -1;
+        for (int slot = 0; slot < 4; ++slot) {
+            const int candidate = policy.fair_lanes ? phase : slot;
+            if (policy.fair_lanes) phase = (phase + 1) % 4;
+            if (!queues[candidate].empty()) {
+                lane = candidate;
+                break;
+            }
+        }
+        if (lane < 0) break;
+        auto& queue = queues[lane];
+        bool reserved = false;
+        int reservations = 0;
+        int physics_attempts = 0;
+        int inspected = 0;
+        if (lane >= 2) {
+            queue.erase(queue.begin());
+            ++physics_attempts;
+        } else {
+            auto& cursor = cursors[lane];
+            while (!queue.empty() && inspected < 64) {
+                const auto index = std::min(cursor, queue.size() - 1);
+                ++inspected;
+                const bool failed = queue[index] == failed_id;
+                bool restored = false;
+                if (!reserved) {
+                    if (!policy.late_reservation || !failed || physics_failure) {
+                        reserved = true;
+                        ++reservations;
+                    }
+                    if (!failed || physics_failure) ++physics_attempts;
+                    restored = !failed;
+                }
+                if (restored) {
+                    queue.erase(queue.begin() + index);
+                    cursor = queue.empty() ? 0 : index % queue.size();
+                    break;
+                }
+                cursor = (index + 1) % queue.size();
+                if (policy.yield_after_attempt) break;
+            }
+        }
+        if (inspected > 64 || reservations > 1 || physics_attempts > 1 ||
+            (lane < 2 && !queue.empty() && cursors[lane] >= queue.size())) {
+            return false;
+        }
+    }
+    return queues == expected;
+}
+
 std::size_t settled_after_bounded_scans(
     std::size_t pool_size, std::size_t scan_budget,
     double category_visit_interval, double tracking_timeout) {
@@ -3629,6 +3712,69 @@ int main() {
     CHECK(freeze_release_body.find(
         "(Index + 1) % AdaptiveFrozenCorpses.Length") !=
           std::string::npos);
+    const auto restore_state_start = telemetry_source.find(
+        "function bool RestoreAdaptiveCorpseFreezeState(");
+    const auto restore_state_end = telemetry_source.find(
+        "function bool TryRestoreAdaptiveCorpseFreeze(", restore_state_start);
+    CHECK(restore_state_start != std::string::npos);
+    CHECK(restore_state_end != std::string::npos);
+    const auto restore_state_body = telemetry_source.substr(
+        restore_state_start, restore_state_end - restore_state_start);
+    const auto reservation = restore_state_body.find(
+        "!ReserveAdaptivePhysicsMutationForCurrentFrame()");
+    const auto readback = restore_state_body.find(
+        "if (Candidate.bCollideActors != bOriginalCollideActors ||");
+    const auto physics_write = restore_state_body.find(
+        "Candidate.SetPhysics(PHYS_RigidBody);");
+    const auto release_callback_start = telemetry_source.find(
+        "function AdaptiveCorpsePhysicsRelease()");
+    const auto release_callback_end = telemetry_source.find(
+        "function BeginAdaptiveCorpsePhysicsRelease()", release_callback_start);
+    CHECK(release_callback_start != std::string::npos);
+    CHECK(release_callback_end != std::string::npos);
+    const auto release_callback = telemetry_source.substr(
+        release_callback_start, release_callback_end - release_callback_start);
+    const OfflineReleasePolicy release_policy{
+        .late_reservation = readback != std::string::npos &&
+            reservation != std::string::npos && readback < reservation &&
+            reservation < physics_write,
+        .yield_after_attempt = offline_restore_yields_after_attempt(
+            freeze_release_body, "TryRestoreAdaptiveCorpseFreeze(") &&
+            offline_restore_yields_after_attempt(retired_freeze_release_body,
+                "RestoreAdaptiveCorpseFreezeState("),
+        .fair_lanes = release_callback.find(
+            "for (Attempt = 0; Attempt < 4; ++Attempt)") != std::string::npos &&
+            release_callback.find(
+                "AdaptiveCorpsePhysicsReleasePhase = (Phase + 1) % 4;") !=
+                std::string::npos &&
+            count_occurrences(release_callback, "bHandled = true;") == 4 &&
+            release_callback.find(
+                "if (bHandled)\n        {\n            break;") !=
+                std::string::npos};
+    CHECK(restore_state_body.find("AdaptiveFrozenCorpses") ==
+          std::string::npos);
+    CHECK(telemetry_source.find("const AdaptiveCorpseScanBudget=64;") !=
+          std::string::npos);
+    for (const auto* queue : {"AdaptiveFrozenCorpses",
+        "AdaptiveRetiredFrozenCorpses", "AdaptiveDistanceSleptCorpses",
+        "AdaptiveRetiredDistanceSleptCorpses"}) {
+        CHECK(release_callback.find(std::string{queue} + ".Length > 0)") !=
+              std::string::npos);
+    }
+    // Existing main's early reservation + 64-slot wrap can revisit the same
+    // failed actor forever; a single physics-failing actor also blocks wakes.
+    CHECK(!offline_release_progress(64, 0, false, {false, false, false}));
+    CHECK(!offline_release_progress(1, 0, true, {true, true, false}));
+    CHECK(!offline_release_progress(64, 0, true, {true, false, true}));
+    CHECK(offline_release_progress(64, 0, false, release_policy));
+    for (const auto length : {0, 1, 2, 8, 9, 64, 65, 128, 129, 2000}) {
+        for (const bool physics_failure : {false, true}) {
+            for (const int failed_id : {-1, 0, length / 2, length - 1}) {
+                CHECK(offline_release_progress(
+                    length, failed_id, physics_failure, release_policy));
+            }
+        }
+    }
     CHECK(telemetry_source.find(
         "function PruneAdaptiveCorpseFreezes()\n"
         "{\n    ReleaseOneAdaptiveCorpseFreeze(false);") !=
