@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Failed online corpse readbacks no longer stall Freeze, LOD or skeleton scans.
+  Failed attempts also respect the existing cooldowns, while freeze rollback
+  retains original state until restoration is verified.
 - Removed the inert saved quality-policy preference and its misleading status
   and diagnostic labels. Valid legacy values migrate away once while user
   graphics, goals and Adaptive control remain unchanged.
