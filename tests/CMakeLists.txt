@@ -491,6 +491,8 @@ add_test(NAME kf2_protected_launch_rollback_test
     COMMAND kf2_application_lifecycle_test --protected-launch-rollback)
 add_test(NAME kf2_graphics_restaging_failure_test
     COMMAND kf2_application_lifecycle_test --graphics-restaging-failure)
+add_test(NAME kf2_startup_session_marker_test
+    COMMAND kf2_application_lifecycle_test --startup-session-marker)
 add_test(NAME kf2_stopped_target_fps_transaction_test
     COMMAND kf2_application_lifecycle_test
         --stopped-target-fps-transaction)

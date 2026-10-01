@@ -1919,7 +1919,96 @@ int test_graphics_restaging_failures() {
 }
 #endif
 
+int test_startup_session_marker() {
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"ssm" /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" +
+         std::to_wstring(GetTickCount64()));
+    fs::create_directories(root / L"portable");
+    const std::array previous_markers{
+        std::string{},
+        std::string{"version=1\npid=7\nprocess_start_id=8\nclean_shutdown=true\n"},
+        std::string{"version=1\npid=7\nprocess_start_id=8\nclean_shutdown=false\n"},
+        std::string{"retained malformed marker"},
+    };
+    for (std::size_t index = 0; index < previous_markers.size(); ++index) {
+        const auto state = root / std::to_wstring(index);
+        const auto marker = state / L"session.marker";
+        const auto& previous = previous_markers[index];
+        if (!previous.empty()) write_bytes(marker, previous);
+        kf2::app::StartOptions options{
+            .state_root = state,
+            .executable_root = root / L"portable",
+            .instance_name = L"Local\\KF2OptimizerNext-StartupMarker-" +
+                std::to_wstring(GetCurrentProcessId()) + L"-" +
+                std::to_wstring(index),
+            .identity = {GetCurrentProcessId(), 3481},
+            .create_window = true,
+            .window_title = L"",
+            .mode = kf2::app::StartMode::read_only,
+        };
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            const auto failed = kf2::app::Application::start(options);
+            CHECK(!failed.has_value());
+            CHECK(failed.error().code == kf2::ErrorCode::invalid_argument);
+            CHECK(failed.error().message == L"Invalid window options");
+            CHECK(fs::exists(marker) == !previous.empty());
+            if (!previous.empty()) CHECK(read_bytes(marker) == previous);
+            CHECK(!fs::exists(fs::path{marker.wstring() + L".corrupt"}));
+        }
+        options.create_window = false;
+        options.identity.process_start_id = 3482;
+        {
+            auto ready = kf2::app::Application::start(options);
+            CHECK(ready.has_value());
+            CHECK(read_bytes(marker).find("process_start_id=3482\n") !=
+                  std::string::npos);
+            CHECK(read_bytes(marker).ends_with("clean_shutdown=false\n"));
+            CHECK(ready.value().shutdown_cleanly().has_value());
+        }
+        CHECK(read_bytes(marker).ends_with("clean_shutdown=true\n"));
+        const auto events = read_bytes(state / L"logs/session-events.json");
+        CHECK(!events.empty());
+        CHECK((events.find("PREVIOUS_APP_INTERRUPTED") != std::string::npos) ==
+              (index >= 2));
+        if (index == 3) {
+            CHECK(read_bytes(fs::path{marker.wstring() + L".corrupt"}) ==
+                  previous);
+        }
+        options.identity.process_start_id = 3483;
+        {
+            auto restart = kf2::app::Application::start(options);
+            CHECK(restart.has_value());
+            CHECK(restart.value().shutdown_cleanly().has_value());
+        }
+        CHECK(read_bytes(state / L"logs/session-events.json").find(
+                  "PREVIOUS_APP_INTERRUPTED") == std::string::npos);
+    }
+    kf2::app::StartOptions invalid_identity{
+        .state_root = root / L"invalid",
+        .executable_root = root / L"portable",
+        .instance_name = L"Local\\KF2OptimizerNext-InvalidSessionIdentity",
+        .identity = {GetCurrentProcessId(), 0},
+        .create_window = false,
+        .mode = kf2::app::StartMode::read_only,
+    };
+    const auto rejected = kf2::app::Application::start(invalid_identity);
+    CHECK(!rejected.has_value());
+    CHECK(rejected.error().code == kf2::ErrorCode::invalid_argument);
+    CHECK(!fs::exists(invalid_identity.state_root));
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--startup-session-marker") {
+        try {
+            return test_startup_session_marker();
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << '\n';
+            return EXIT_FAILURE;
+        }
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--graphics-restaging-failure") {
         try {
             return test_graphics_restaging_failures();

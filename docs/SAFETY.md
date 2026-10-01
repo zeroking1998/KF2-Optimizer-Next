@@ -18,6 +18,10 @@ The UI and logs distinguish four states:
 
 Timeouts and missing acknowledgements never become success.
 
+The application commits its unclean-session marker only after runtime and window
+initialization succeed. Failed runtime/window initialization preserves prior bytes or
+absence; genuine prior interruption evidence is still reported on the next start.
+
 Adaptive quality recovery requires a usable compute signal and memory evidence.
 VRAM needs finite nonnegative usage and a finite positive budget. RAM needs a
 valid RAM or commit pair, or an explicit finite paging signal in [0, 1]. Partial
