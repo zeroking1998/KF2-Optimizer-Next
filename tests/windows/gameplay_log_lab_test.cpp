@@ -82,6 +82,23 @@ bool online_enable_is_transactional(std::string_view body) {
         body.find("RestoreOnlineCorpseMaximum") == std::string_view::npos;
 }
 
+bool online_pool_scan_is_bounded(std::string_view body, std::string_view cursor,
+                                 std::string_view timestamp) {
+    const auto attempt = body.find(std::string{timestamp} +
+                                  " = CurrentWorld.RealTimeSeconds;");
+    const auto manager = body.find("GoreManager =");
+    const auto empty = body.find("if (PoolLength == 0) return false;");
+    const auto budget = body.find("ScanCount = Min(OnlineCorpseScanBudget, PoolLength);");
+    const auto loop = body.find("for (Scanned = 0; Scanned < ScanCount; ++Scanned)");
+    const auto advance = body.find(std::string{cursor} + " = (Index + 1) % PoolLength;");
+    const auto candidate = body.find("Candidate = GoreManager.CorpsePool[Index];");
+    return attempt != std::string_view::npos && attempt < manager &&
+        empty != std::string_view::npos && empty < budget && budget < loop &&
+        loop < advance && advance < candidate &&
+        body.find("Index = " + std::string{cursor} + ";", loop) < advance &&
+        count_occurrences(body, std::string{timestamp} + " =") == 1;
+}
+
 std::string online_visual_cursor(std::string_view body) {
     constexpr std::string_view prefix = "Index = (";
     const auto start = body.find(prefix);
@@ -1284,6 +1301,124 @@ int main() {
     CHECK(pending_capacity_hold != std::string::npos);
     CHECK(capacity_body.find("return false;", pending_capacity_hold) <
           capacity_body.find("GoreManager ="));
+    const auto sleep_body = online_context_source.substr(
+        online_sleep_function, capacity_start - online_sleep_function);
+    CHECK(online_context_source.find("const OnlineCorpseScanBudget=64;") !=
+          std::string::npos);
+    CHECK(online_pool_scan_is_bounded(sleep_body,
+        "OnlineCorpseSleepScanCursor", "OnlineCorpseLastSleepRealTime"));
+    CHECK(online_pool_scan_is_bounded(capacity_body,
+        "OnlineCorpseCapacityScanCursor", "OnlineCorpseLastCapacityRealTime"));
+    CHECK(sleep_body.find(
+        "CurrentWorld.RealTimeSeconds - OnlineCorpseLastSleepRealTime < 0.15") !=
+          std::string::npos);
+    CHECK(capacity_body.find(
+        "CurrentWorld.RealTimeSeconds - OnlineCorpseLastCapacityRealTime < 0.45") !=
+          std::string::npos);
+    CHECK(count_occurrences(sleep_body, "PutRigidBodyToSleep();") == 1);
+    CHECK(count_occurrences(capacity_body, "RemoveAndDeleteCorpse(Index)") == 1);
+    CHECK(count_occurrences(online_context_source,
+        "OnlineCorpseSleepScanCursor = 0;") == 2);
+    CHECK(count_occurrences(online_context_source,
+        "OnlineCorpseCapacityScanCursor = 0;") == 2);
+    CHECK(count_occurrences(online_context_source,
+        "OnlineCorpseLastSleepRealTime = 0.0;") == 2);
+    CHECK(count_occurrences(online_context_source,
+        "OnlineCorpseLastCapacityRealTime = 0.0;") == 2);
+    auto unbounded_scan = sleep_body;
+    const std::string budget_rule = "ScanCount = Min(OnlineCorpseScanBudget, PoolLength);";
+    unbounded_scan.replace(unbounded_scan.find(budget_rule), budget_rule.size(),
+                           "ScanCount = PoolLength;");
+    CHECK(!online_pool_scan_is_bounded(unbounded_scan,
+        "OnlineCorpseSleepScanCursor", "OnlineCorpseLastSleepRealTime"));
+    auto stuck_scan = capacity_body;
+    const std::string advance_rule = "OnlineCorpseCapacityScanCursor = (Index + 1) % PoolLength;";
+    stuck_scan.erase(stuck_scan.find(advance_rule), advance_rule.size());
+    CHECK(!online_pool_scan_is_bounded(stuck_scan,
+        "OnlineCorpseCapacityScanCursor", "OnlineCorpseLastCapacityRealTime"));
+    // Source-bound scheduling model, not execution of UnrealScript/physics.
+    for (const int length : {0, 1, 63, 64, 65, 2000}) {
+        for (const bool failed_readback : {false, true}) {
+            std::vector<bool> seen(static_cast<std::size_t>(length));
+            int cursor = 0;
+            for (int visit = 0; visit <= length; ++visit) {
+                int inspected = 0;
+                int actions = 0;
+                for (; inspected < std::min(64, length);) {
+                    const auto index = cursor;
+                    cursor = (index + 1) % length;
+                    seen[index] = true;
+                    ++inspected;
+                    // Permanent readback failure at every slot must still
+                    // progress; misses process only the admitted budget.
+                    if (failed_readback) { ++actions; break; }
+                }
+                CHECK(inspected <= 64 && actions <= 1);
+                CHECK(length == 0 || (cursor >= 0 && cursor < length));
+            }
+            CHECK(std::all_of(seen.begin(), seen.end(), [](bool v) { return v; }));
+            // Shrunken/repopulated pools never use an old out-of-range index.
+            for (const int changed_length : {0, 1, 7, 2000}) {
+                if (changed_length == 0) continue;
+                cursor = std::clamp(cursor, 0, changed_length - 1);
+                CHECK(cursor >= 0 && cursor < changed_length);
+            }
+        }
+    }
+    for (const double interval : {0.15, 0.45}) {
+        for (const int fps : {30, 60, 120, 240}) {
+            double last_attempt = 0.0;
+            int attempts = 0;
+            for (int frame = 1; frame <= fps * 10; ++frame) {
+                const auto now = static_cast<double>(frame) / fps;
+                if (now - last_attempt < interval) continue;
+                last_attempt = now; // Includes missing manager, miss and failure.
+                ++attempts;
+            }
+            CHECK(attempts > 0 && attempts <= static_cast<int>(10.0 / interval));
+            last_attempt = 0.0; // Existing world/session resets clear cadence.
+            CHECK(1.0 - last_attempt >= interval);
+        }
+    }
+    const auto capability_start = online_context_source.find(
+        "function ReportOnlineCorpseCapability(");
+    const auto capability_end = online_context_source.find(
+        "function bool RestoreOnlineSessionState(", capability_start);
+    CHECK(capability_start != std::string::npos && capability_end != std::string::npos);
+    const auto capability_body = online_context_source.substr(
+        capability_start, capability_end - capability_start);
+    const auto unavailable_guard = capability_body.find("if (!bOnlineCorpseUnavailableReported)");
+    const auto unavailable_log = capability_body.find("state=unavailable reason=no_gore_manager");
+    CHECK(unavailable_guard != std::string::npos && unavailable_guard < unavailable_log);
+    CHECK(capability_body.find("bOnlineCorpseUnavailableReported = true;",
+        unavailable_guard) < unavailable_log);
+    const auto recovered = capability_body.find("if (bOnlineCorpseUnavailableReported)");
+    CHECK(recovered > unavailable_log && recovered < capability_body.find("state=available"));
+    CHECK(capability_body.find("bOnlineCorpseCapabilityReported = false;", recovered) <
+          capability_body.find("state=available"));
+    CHECK(capability_body.find("bOnlineCorpseUnavailableReported = false;", recovered) <
+          capability_body.find("state=available"));
+    CHECK(count_occurrences(online_context_source,
+        "bOnlineCorpseUnavailableReported = false;") == 3);
+    const auto bridge_start = online_corpse_controller_source.find(
+        "function KF2OptimizerOnlineContextInteraction GetOnlineInteraction()");
+    const auto bridge_end = online_corpse_controller_source.find(
+        "function int FindFrozenCorpse(", bridge_start);
+    CHECK(bridge_start != std::string::npos && bridge_end != std::string::npos);
+    const auto bridge_body = online_corpse_controller_source.substr(
+        bridge_start, bridge_end - bridge_start);
+    CHECK(bridge_body.find("KF2OptimizerGraphicsViewport(CurrentEngine.GameViewport)") !=
+          std::string::npos);
+    CHECK(bridge_body.find("return CurrentViewport.GetOnlineMonitor();") != std::string::npos);
+    CHECK(bridge_body.find("FindObject") == std::string::npos);
+    CHECK(bridge_body.find("PathName") == std::string::npos);
+    CHECK(graphics_viewport_source.find(
+        "var private KF2OptimizerOnlineContextInteraction OnlineMonitor;") != std::string::npos);
+    CHECK(graphics_viewport_source.find(
+        "OnlineMonitor == None || GlobalInteractions.Find(OnlineMonitor) == -1") !=
+          std::string::npos);
+    CHECK(graphics_viewport_source.find("var WorldInfo") == std::string::npos);
+    CHECK(graphics_viewport_source.find("var Actor") == std::string::npos);
     const auto maximum_clear_start = online_context_source.find(
         "function ClearOnlineCorpseMaximumSnapshot()");
     const auto maximum_clear_end = online_context_source.find(
