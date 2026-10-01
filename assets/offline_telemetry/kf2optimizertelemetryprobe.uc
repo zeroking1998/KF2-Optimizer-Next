@@ -641,8 +641,13 @@ function bool ApplyAdaptiveResourceControl(
         {
             return false;
         }
-        AdaptiveGraphicsQuality = Resource ~= "disable" ? 100 : Quality;
-        AdaptiveGraphicsResource = Resource;
+        // Enable carries a corpse ceiling, not a graphics-pressure receipt.
+        // Preserve genuine resource evidence until disable or a quality action.
+        if (Resource ~= "disable")
+        {
+            AdaptiveGraphicsQuality = 100;
+            AdaptiveGraphicsResource = Resource;
+        }
         AdaptiveLastControlSequence = Sequence;
         return true;
     }

@@ -51,6 +51,18 @@ std::size_t count_occurrences(std::string_view text, std::string_view needle) {
     return count;
 }
 
+bool adaptive_mode_preserves_graphics_receipt(std::string_view body) {
+    constexpr std::string_view reset =
+        "if (Resource ~= \"disable\")\n        {\n"
+        "            AdaptiveGraphicsQuality = 100;\n"
+        "            AdaptiveGraphicsResource = Resource;\n        }";
+    return body.find(reset) != std::string_view::npos &&
+        count_occurrences(body, "AdaptiveGraphicsQuality =") == 1 &&
+        count_occurrences(body, "AdaptiveGraphicsResource =") == 1 &&
+        body.find("SetAdaptiveRuntimeEnabled") < body.find(reset) &&
+        body.find(reset) < body.find("AdaptiveLastControlSequence = Sequence;");
+}
+
 std::string online_visual_cursor(std::string_view body) {
     constexpr std::string_view prefix = "Index = (";
     const auto start = body.find(prefix);
@@ -613,6 +625,70 @@ int main() {
     const auto adaptive_control_body = telemetry_source.substr(
         adaptive_control_function,
         adaptive_control_end - adaptive_control_function);
+    const auto mode_start = adaptive_control_body.find(
+        "if ((Resource ~= \"enable\") || (Resource ~= \"disable\"))");
+    const auto mode_end = adaptive_control_body.find(
+        "if (!bAdaptiveRuntimeEnabled)", mode_start);
+    CHECK(mode_start != std::string::npos && mode_end != std::string::npos);
+    const auto mode_body = adaptive_control_body.substr(mode_start, mode_end - mode_start);
+    const bool preserves_graphics_receipt =
+        adaptive_mode_preserves_graphics_receipt(mode_body);
+    CHECK(preserves_graphics_receipt);
+    auto polluted_mode = mode_body;
+    polluted_mode += "AdaptiveGraphicsQuality = Quality;";
+    CHECK(!adaptive_mode_preserves_graphics_receipt(polluted_mode));
+    auto wrong_mode_guard = mode_body;
+    const auto disable_guard = wrong_mode_guard.find("if (Resource ~= \"disable\")");
+    CHECK(disable_guard != std::string::npos);
+    wrong_mode_guard.replace(disable_guard,
+        std::string_view{"if (Resource ~= \"disable\")"}.size(),
+        "if (Resource ~= \"enable\")");
+    CHECK(!adaptive_mode_preserves_graphics_receipt(wrong_mode_guard));
+    // Source-bound transition model; it does not execute UnrealScript. The
+    // unchanged pressure predicate below is checked against the source too.
+    for (const int corpse_limit : {4, 20, 99, 100, 2000}) {
+        int confirmed_quality = 100;
+        std::string confirmed_resource = "recover";
+        int sequence = 0;
+        const auto pressure = [&] {
+            return sequence > 0 && confirmed_quality >= 10 &&
+                confirmed_quality < 100 && confirmed_resource != "recover";
+        };
+        const auto mode = [&](bool enabled, bool applied) {
+            if (!applied) return false;
+            if (!enabled) {
+                confirmed_quality = 100;
+                confirmed_resource = "disable";
+            } else if (!preserves_graphics_receipt) {
+                confirmed_quality = corpse_limit;
+                confirmed_resource = "enable";
+            }
+            ++sequence;
+            return true;
+        };
+        CHECK(corpse_limit >= 4 && corpse_limit <= 2000);
+        CHECK(!mode(true, false));
+        CHECK(sequence == 0 && confirmed_quality == 100 && !pressure());
+        CHECK(mode(true, true));
+        CHECK(confirmed_quality == 100 && confirmed_resource == "recover");
+        CHECK(!pressure());
+        for (const auto resource : {"cpu", "gpu"}) {
+            confirmed_quality = 75;
+            confirmed_resource = resource;
+            ++sequence;
+            CHECK(pressure());
+            const auto receipt_sequence = sequence;
+            CHECK(!mode(true, false));
+            CHECK(sequence == receipt_sequence);
+            CHECK(mode(true, true));
+            CHECK(confirmed_quality == 75 && confirmed_resource == resource);
+            CHECK(pressure());
+        }
+        CHECK(mode(false, true));
+        CHECK(confirmed_quality == 100 && !pressure());
+        CHECK(mode(true, true));
+        CHECK(!pressure());
+    }
     CHECK(adaptive_control_body.find("IsAdaptiveControlResource(Resource)") !=
           std::string::npos);
     CHECK(adaptive_control_body.find("IsAdaptiveQualityResource(Resource)") !=
@@ -2449,6 +2525,10 @@ int main() {
     CHECK(telemetry_source.find(
         "function bool HasConfirmedAdaptivePerformancePressure()") !=
           std::string::npos);
+    CHECK(telemetry_source.find(
+        "return AdaptiveLastControlSequence > 0 &&\n"
+        "        AdaptiveGraphicsQuality >= 10 && AdaptiveGraphicsQuality < 100 &&\n"
+        "        !(AdaptiveGraphicsResource ~= \"recover\")") != std::string::npos);
     CHECK(telemetry_source.find(
         "if (!HasConfirmedAdaptivePerformancePressure())") !=
           std::string::npos);
