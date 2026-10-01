@@ -38,6 +38,7 @@
 #include "kf2/ui/shell_layout.hpp"
 #include "app/application_runtime.hpp"
 #include "app/runtime/feature_composition.hpp"
+#include "features/telemetry/telemetry_adaptive_stage.hpp"
 #include "features/telemetry/telemetry_session_stage.hpp"
 #include "features/telemetry/telemetry_frame.hpp"
 #include "../support/process_inspection_denial.hpp"
@@ -1695,6 +1696,229 @@ private:
     std::jthread worker_;
 };
 
+int test_online_quality_response_case(
+    std::string_view mode, std::uint64_t post_step_ns,
+    std::string_view expected_result, bool diagnostics,
+    std::string receipt_status = "applied") {
+    using namespace kf2;
+    namespace fs = std::filesystem;
+    constexpr std::uint64_t second = 1'000'000'000ULL;
+    constexpr std::uint64_t before_step = 20'000'000ULL;
+    const auto test_root = fs::path{KF2_TEST_ROOT} / L"online-quality-response";
+    fs::remove_all(test_root);
+    diagnostics::EventLog events{128};
+    config::Settings settings;
+    settings.debug_runtime_diagnostics = diagnostics;
+    app::UiRuntime runtime{test_root / L"Data", false, settings, events,
+        std::nullopt, app::StartMode::read_only, test_root / L"portable"};
+    const telemetry::SampleIdentity identity{4242, 9001};
+    runtime.present_source = std::make_unique<telemetry::PresentSource>(
+        identity, 2048);
+    CHECK(runtime.present_source->start().has_value());
+    const auto requested = runtime.monotonic_ns();
+    CHECK(requested > 6 * second);
+    for (auto at = requested - 6 * second; at <= requested; at += before_step) {
+        CHECK(runtime.present_source->ingest({identity, at, 1, true, 0, 7}));
+    }
+    telemetry_pipeline::TelemetryFrame frame;
+    frame.identity = identity;
+    frame.adapter_luid = 77;
+    frame.active_gameplay = true;
+    frame.frames.quality = telemetry::SampleQuality::good;
+    const auto observe = [&](std::uint64_t at) {
+        frame.observed_at_ns = at;
+        replace_frame_gameplay(frame, [&](auto& gameplay) {
+            gameplay.map = "KF-Test";
+            gameplay.net_mode = std::string{mode};
+            gameplay.optimizer_online_read_only = true;
+            gameplay.optimizer_session_generation = 1;
+            gameplay.telemetry_observed_ns = at;
+            gameplay.telemetry_sample = 1;
+            gameplay.telemetry_living_visible = 20;
+            gameplay.telemetry_corpse_total = 40;
+            gameplay.telemetry_zed_time_active = false;
+        });
+        return runtime.observe_adaptive_quality_response(frame);
+    };
+    for (auto at = requested - 6 * second; at < requested;
+         at += 100'000'000ULL) {
+        static_cast<void>(observe(at));
+    }
+    const auto context = observe(requested);
+    CHECK(context.ready);
+    const auto sample = telemetry_pipeline::build_adaptive_sample(frame, {}).sample;
+    CHECK(sample.session_class == (mode == "NM_ListenServer"
+        ? optimizer::AdaptiveSessionClass::host_or_listen_server
+        : optimizer::AdaptiveSessionClass::verified_online));
+    const auto selected = telemetry_pipeline::select_adaptive_runtime_control({
+        .state = optimizer::AdaptiveControllerState::intervention,
+        .data_quality = optimizer::AdaptiveDataQuality::valid,
+        .primary_resource = optimizer::ResourceKind::gpu,
+        .primary_confidence = 1.0,
+        .current_frame_pressure = true,
+        .active_gameplay = frame.active_gameplay,
+        .verified_online_graphics = sample.session_class ==
+            optimizer::AdaptiveSessionClass::verified_online ||
+            sample.session_class == optimizer::AdaptiveSessionClass::host_or_listen_server,
+        .local_graphics_only = true,
+        .bridge_available = true,
+        .now_ns = requested,
+        .sample_timestamp_ns = requested,
+    });
+    CHECK(selected && selected->resource == game::AdaptiveResourceControl::gpu);
+    CHECK(selected->quality == 90);
+    const auto baseline = runtime.present_source->measure_window(
+        requested - optimizer::QualityResponse::window_ns, requested);
+    CHECK(baseline.complete);
+    constexpr std::uint64_t sequence = 7;
+    constexpr auto control = optimizer::AdaptiveControlId::runtime_quality;
+    const auto proposed = runtime.adaptive_actuation.propose(
+        control, selected->quality, 100,
+        optimizer::AdaptiveCapabilityState::available, requested,
+        "kf2_loopback_readback");
+    CHECK(runtime.adaptive_actuation.dispatch(control, requested));
+    runtime.quality_response.begin(sequence, "gpu", 100, selected->quality,
+        requested, context, baseline);
+    runtime.adaptive_control_pending = app::AdaptiveRuntimePendingRequest{
+        sequence, proposed.action_id, proposed.generation, 100,
+        selected->quality, selected->resource};
+    AdaptiveTestReceiver receiver{std::move(receipt_status)};
+    CHECK(receiver.port != 0);
+    const auto started = runtime.adaptive_control_dispatcher.start({
+        receiver.port, "0123456789abcdef0123456789abcdef", sequence,
+        selected->resource, selected->quality});
+    CHECK(started.has_value() && started.value());
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{3};
+    while (runtime.adaptive_control_pending &&
+           std::chrono::steady_clock::now() < deadline) {
+        runtime.poll_adaptive_quality_dispatcher();
+        Sleep(1);
+    }
+    receiver.finish();
+    CHECK(!runtime.adaptive_control_pending);
+    CHECK(receiver.command ==
+        "KF2OPT 0123456789abcdef0123456789abcdef 7 gpu 90\n");
+    if (expected_result == "unconfirmed" || expected_result == "state_unknown") {
+        CHECK(runtime.adaptive_resource_quality.gpu == 100);
+        CHECK(runtime.quality_response.end_ns() == 0);
+        CHECK(!runtime.quality_response.cancel("test_unconfirmed"));
+        CHECK(runtime.adaptive_quality_rollback_target ==
+            (expected_result == "state_unknown" ? std::optional<int>{100} : std::nullopt));
+    } else {
+        CHECK(runtime.adaptive_resource_quality.gpu == 90);
+        CHECK(runtime.adaptive_actuation.current(control)->status ==
+            optimizer::AdaptiveActionStatus::applied);
+        const auto end = runtime.quality_response.end_ns();
+        CHECK(end == runtime.adaptive_quality_last_applied_ns +
+            optimizer::QualityResponse::settle_ns + optimizer::QualityResponse::window_ns);
+        const auto begin = end - optimizer::QualityResponse::window_ns;
+        for (auto at = requested + before_step; at < begin; at += before_step) {
+            CHECK(runtime.present_source->ingest({identity, at, 1, true, 0, 7}));
+        }
+        for (auto at = begin; at <= end; at += post_step_ns) {
+            CHECK(runtime.present_source->ingest({identity, at, 1, true, 0, 7}));
+        }
+        for (auto at = requested + 100'000'000ULL; at < end;
+             at += 100'000'000ULL) {
+            CHECK(observe(at).ready);
+        }
+        CHECK(observe(end).ready);
+        CHECK(runtime.quality_response.end_ns() == 0);
+        const bool rollback = expected_result != "improved";
+        CHECK(runtime.adaptive_quality_rollback_target ==
+            (rollback ? std::optional<int>{100} : std::nullopt));
+        CHECK(runtime.adaptive_quality_rollback_resource ==
+            (rollback ? std::optional{game::AdaptiveResourceControl::gpu} : std::nullopt));
+        const auto reported = events.snapshot();
+        CHECK(std::count_if(reported.begin(), reported.end(), [&](const auto& event) {
+            return event.code == "ADAPTIVE_QUALITY_RESPONSE" &&
+                event.message.find(L"result=" +
+                    std::wstring{expected_result.begin(), expected_result.end()}) !=
+                    std::wstring::npos;
+        }) == static_cast<int>(diagnostics));
+    }
+    runtime.present_source.reset();
+    fs::remove_all(test_root);
+    return EXIT_SUCCESS;
+}
+
+int test_verified_online_quality_response() {
+    WSADATA winsock{};
+    CHECK(WSAStartup(MAKEWORD(2, 2), &winsock) == 0);
+    for (const auto mode : {"NM_Client", "NM_ListenServer", "NM_DedicatedServer"}) {
+        CHECK(test_online_quality_response_case(mode, 10'000'000ULL,
+            "improved", false) == EXIT_SUCCESS);
+    }
+    CHECK(test_online_quality_response_case("NM_Client", 10'000'000ULL,
+        "improved", true) == EXIT_SUCCESS);
+    CHECK(test_online_quality_response_case("NM_Client", 40'000'000ULL,
+        "worsened", false) == EXIT_SUCCESS);
+    CHECK(test_online_quality_response_case("NM_Client", 20'000'000ULL,
+        "no_clear_change", false) == EXIT_SUCCESS);
+    CHECK(test_online_quality_response_case("NM_Client", 10'000'000ULL,
+        "state_unknown", true, "unknown") == EXIT_SUCCESS);
+    CHECK(test_online_quality_response_case("NM_Client", 10'000'000ULL,
+        "unconfirmed", true, "invalid") == EXIT_SUCCESS);
+    WSACleanup();
+
+    using namespace kf2;
+    const auto test_root = std::filesystem::path{KF2_TEST_ROOT} / L"quality-response-gates";
+    diagnostics::EventLog events{32};
+    app::UiRuntime runtime{test_root / L"Data", false, config::Settings{},
+        events, std::nullopt, app::StartMode::read_only, test_root / L"portable"};
+    telemetry_pipeline::TelemetryFrame valid;
+    valid.identity = {42, 9001};
+    valid.observed_at_ns = 30'000'000'000ULL;
+    valid.adapter_luid = 77;
+    valid.active_gameplay = true;
+    valid.frames.quality = telemetry::SampleQuality::good;
+    replace_frame_gameplay(valid, [&](auto& gameplay) {
+        gameplay.map = "KF-Test";
+        gameplay.net_mode = "NM_Client";
+        gameplay.optimizer_online_read_only = true;
+        gameplay.telemetry_sample = 1;
+        gameplay.telemetry_observed_ns = valid.observed_at_ns;
+        gameplay.telemetry_zed_time_active = false;
+    });
+    CHECK(runtime.observe_adaptive_quality_response(valid).ready);
+    for (const auto mode : {"NM_Standalone", "NM_FakeListen", "NM_Unknown", ""}) {
+        auto unknown = valid;
+        replace_frame_gameplay(unknown, [&](auto& gameplay) {
+            gameplay.net_mode = mode;
+        });
+        CHECK(!runtime.observe_adaptive_quality_response(unknown).ready);
+        CHECK(telemetry_pipeline::build_adaptive_sample(unknown, {}).sample.session_class ==
+            optimizer::AdaptiveSessionClass::unknown);
+    }
+    for (int rejection = 0; rejection < 9; ++rejection) {
+        auto rejected = valid;
+        replace_frame_gameplay(rejected, [&](auto& gameplay) {
+            if (rejection == 0) gameplay.optimizer_online_read_only = false;
+            if (rejection == 1) gameplay.net_mode.reset();
+            if (rejection == 2) gameplay.telemetry_observed_ns = 0;
+            if (rejection == 3) gameplay.telemetry_observed_ns =
+                valid.observed_at_ns - game::kGameLogObservationFreshnessNs - 1;
+            if (rejection == 4) gameplay.telemetry_observed_ns = valid.observed_at_ns + 1;
+            if (rejection == 5) gameplay.telemetry_zed_time_active = true;
+            if (rejection == 6) gameplay.telemetry_sample = 0;
+        });
+        if (rejection == 7) rejected.frames.quality = telemetry::SampleQuality::degraded;
+        if (rejection == 8) rejected.active_gameplay = false;
+        CHECK(!runtime.observe_adaptive_quality_response(rejected).ready);
+    }
+    auto offline = valid;
+    offline.offline_gameplay = true;
+    replace_frame_gameplay(offline, [](auto& gameplay) {
+        gameplay.net_mode = "NM_Standalone";
+        gameplay.optimizer_online_read_only = false;
+    });
+    CHECK(runtime.observe_adaptive_quality_response(offline).ready);
+    CHECK(telemetry_pipeline::build_adaptive_sample(offline, {}).sample.session_class ==
+        optimizer::AdaptiveSessionClass::verified_offline);
+    std::filesystem::remove_all(test_root);
+    return EXIT_SUCCESS;
+}
+
 int test_adaptive_toggle_save_failure() {
     namespace fs = std::filesystem;
     const fs::path root = fs::path{KF2_TEST_ROOT} / L"adaptive-toggle-saving";
@@ -3162,6 +3386,10 @@ int main(int argc, char** argv) {
             }
         }
         return test_map_prewarm_start_is_visible_before_worker_entry();
+    }
+    if (argc == 2 &&
+        std::string_view{argv[1]} == "--verified-online-quality-response") {
+        return test_verified_online_quality_response();
     }
     if (argc == 2 &&
         std::string_view{argv[1]} ==

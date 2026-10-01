@@ -277,7 +277,9 @@ UiRuntime::observe_adaptive_quality_response(
         frame.gameplay ? frame.gameplay->telemetry_living_visible : std::nullopt,
         frame.gameplay ? frame.gameplay->telemetry_corpse_total : std::nullopt,
         frame.active_gameplay &&
-        frame.offline_gameplay && frame.gameplay && frame.adapter_luid &&
+        telemetry_pipeline::adaptive_session_class(frame) !=
+            optimizer::AdaptiveSessionClass::unknown &&
+        frame.gameplay && frame.adapter_luid &&
         frame.gameplay->telemetry_sample.value_or(0) > 0 &&
         frame.gameplay->telemetry_observed_ns != 0 &&
         now_ns >= frame.gameplay->telemetry_observed_ns &&

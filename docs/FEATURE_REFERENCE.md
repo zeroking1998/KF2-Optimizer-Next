@@ -77,6 +77,13 @@ actors that may already be leaving the world.
 
 ### Quality-response diagnostics
 
+Dispatch and response evaluation share the same verified offline/online session
+classification. Online client, listen-server and dedicated-server session modes
+still require the protected session receipt and fresh provider telemetry.
+Unknown or unverified modes are not comparable. Authenticated APPLIED readback,
+scene stability and complete local frame windows remain required; online mode
+alone is not evidence that a quality reduction helped.
+
 `ADAPTIVE_QUALITY_RESPONSE` compares a five-second pre-request window with a
 five-second window starting one second after an authenticated APPLIED receipt.
 Late telemetry batches get up to one second to fill each fixed event-time

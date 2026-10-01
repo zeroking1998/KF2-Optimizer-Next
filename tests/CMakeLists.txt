@@ -483,6 +483,9 @@ add_test(NAME kf2_gpu_profile_persistence_rollback_test
 add_test(NAME kf2_map_prewarm_start_visibility_test
     COMMAND kf2_application_lifecycle_test
         --map-prewarm-start-visibility)
+add_test(NAME kf2_verified_online_quality_response_test
+    COMMAND kf2_application_lifecycle_test
+        --verified-online-quality-response)
 add_test(NAME kf2_runtime_shutdown_exception_test
     COMMAND kf2_application_lifecycle_test
         --runtime-shutdown-exceptions)

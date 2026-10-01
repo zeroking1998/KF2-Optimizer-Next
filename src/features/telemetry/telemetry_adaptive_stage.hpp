@@ -97,6 +97,25 @@ struct AdaptiveSampleBuildResult final {
     bool waiting_for_gameplay_telemetry{false};
 };
 
+[[nodiscard]] inline optimizer::AdaptiveSessionClass adaptive_session_class(
+    const TelemetryFrame& frame) noexcept {
+    if (!frame.gameplay) return optimizer::AdaptiveSessionClass::unknown;
+    if (frame.offline_gameplay) {
+        return optimizer::AdaptiveSessionClass::verified_offline;
+    }
+    if (!frame.gameplay->optimizer_online_read_only) {
+        return optimizer::AdaptiveSessionClass::unknown;
+    }
+    const auto& mode = frame.gameplay->net_mode;
+    if (mode == "NM_ListenServer") {
+        return optimizer::AdaptiveSessionClass::host_or_listen_server;
+    }
+    if (mode == "NM_Client" || mode == "NM_DedicatedServer") {
+        return optimizer::AdaptiveSessionClass::verified_online;
+    }
+    return optimizer::AdaptiveSessionClass::unknown;
+}
+
 [[nodiscard]] inline bool requires_fresh_frame_window(
     const AdaptiveSampleBuildResult& result) noexcept {
     return result.sample.map_changed || result.waiting_for_gameplay_telemetry;
@@ -568,16 +587,7 @@ select_adaptive_runtime_control(
                 (context.last_telemetry_sample == 0 ||
                  result.telemetry_sample < context.last_telemetry_sample);
         }
-        if (frame.offline_gameplay) {
-            sample.session_class =
-                optimizer::AdaptiveSessionClass::verified_offline;
-        } else if (frame.gameplay->net_mode &&
-                   frame.gameplay->optimizer_online_read_only) {
-            sample.session_class =
-                frame.gameplay->net_mode->find("Listen") != std::string::npos
-                    ? optimizer::AdaptiveSessionClass::host_or_listen_server
-                    : optimizer::AdaptiveSessionClass::verified_online;
-        }
+        sample.session_class = adaptive_session_class(frame);
         if ((!frame.gameplay->map.empty() &&
              frame.gameplay->map != result.map) || telemetry_restarted) {
             result.map = frame.gameplay->map;

@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Verified online Adaptive graphics changes now use the same session checks
+  for selection and response evaluation, avoiding false restoration after a
+  measured improvement. Unknown sessions and incomplete comparisons still fail closed.
 - Missing or shortened prewarm files now retain their actual byte progress
   instead of being reported as 100% complete. Incomplete map preparation does
   not repeatedly reread files or block KF2 loading.
