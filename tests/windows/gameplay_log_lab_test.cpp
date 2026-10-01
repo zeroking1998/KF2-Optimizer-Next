@@ -1,6 +1,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -48,6 +49,67 @@ std::size_t count_occurrences(std::string_view text, std::string_view needle) {
         ++count;
     }
     return count;
+}
+
+std::string online_visual_cursor(std::string_view body) {
+    constexpr std::string_view prefix = "Index = (";
+    const auto start = body.find(prefix);
+    if (start == std::string_view::npos) return {};
+    const auto end = body.find(" + Offset) % PoolLength;", start);
+    if (end == std::string_view::npos) return {};
+    return std::string{body.substr(start + prefix.size(),
+                                  end - start - prefix.size())};
+}
+
+// Source contracts below bind this deterministic model to the UC cursor,
+// budget and advance rules. This does not execute UnrealScript or physics.
+struct OnlineVisualScanModel {
+    bool shared_cursor{};
+    std::array<int, 2> cursors{};
+    int phase{};
+};
+
+bool covers_online_visual_pool(OnlineVisualScanModel& model,
+                              const std::vector<int>& pool,
+                              bool intermittent_actions) {
+    const auto length = static_cast<int>(pool.size());
+    std::array<std::vector<bool>, 2> seen{
+        std::vector<bool>(pool.size()), std::vector<bool>(pool.size())};
+    auto done = seen;
+    // Each successful action advances at least one slot; a no-action visit
+    // advances up to eight. Two full per-category cycles are ample for both.
+    for (int visit = 0; visit < 4 * length + 2; ++visit) {
+        const auto phase = model.phase;
+        auto& cursor = model.cursors[model.shared_cursor ? 0 : phase];
+        if (length == 0) {
+            cursor = 0;
+        } else {
+            cursor = std::clamp(cursor, 0, length - 1);
+            const auto scan_count = std::min(8, length);
+            int inspected = 0;
+            int actions = 0;
+            for (int offset = 0; offset < scan_count; ++offset) {
+                const auto index = (cursor + offset) % length;
+                ++inspected;
+                seen[phase][index] = true;
+                if (intermittent_actions && pool[index] % 3 == phase &&
+                    !done[phase][index]) {
+                    done[phase][index] = true;
+                    ++actions;
+                    cursor = (index + 1) % length;
+                    break;
+                }
+            }
+            if (actions == 0) cursor = (cursor + scan_count) % length;
+            if (inspected > 8 || actions > 1 || cursor < 0 ||
+                cursor >= length) return false;
+        }
+        model.phase = (phase + 1) % 2;
+    }
+    return std::all_of(seen[0].begin(), seen[0].end(),
+                       [](bool value) { return value; }) &&
+           std::all_of(seen[1].begin(), seen[1].end(),
+                       [](bool value) { return value; });
 }
 
 std::size_t settled_after_bounded_scans(
@@ -1048,6 +1110,81 @@ int main() {
           std::string::npos);
     CHECK(online_corpse_controller_source.find("RemoteRole=ROLE_None") !=
           std::string::npos);
+    const auto online_lod_start = online_corpse_controller_source.find(
+        "function bool ApplyOneFixedMinimumCorpseLod()");
+    const auto online_skeleton_start = online_corpse_controller_source.find(
+        "function bool ApplyOneSleepingCorpseSkeletonMinimum()");
+    const auto online_visual_start = online_corpse_controller_source.find(
+        "function bool RunOneFixedMinimumVisualAction()");
+    CHECK(online_lod_start < online_skeleton_start);
+    CHECK(online_skeleton_start < online_visual_start);
+    CHECK(online_visual_start < online_tick_start);
+    const auto online_lod_body = online_corpse_controller_source.substr(
+        online_lod_start, online_skeleton_start - online_lod_start);
+    const auto online_skeleton_body = online_corpse_controller_source.substr(
+        online_skeleton_start, online_visual_start - online_skeleton_start);
+    const auto lod_cursor = online_visual_cursor(online_lod_body);
+    const auto skeleton_cursor = online_visual_cursor(online_skeleton_body);
+    CHECK(!lod_cursor.empty());
+    CHECK(!skeleton_cursor.empty());
+    std::vector<int> sixteen_corpses;
+    for (int id = 0; id < 16; ++id) sixteen_corpses.push_back(id);
+    OnlineVisualScanModel no_action_model{lod_cursor == skeleton_cursor};
+    CHECK(covers_online_visual_pool(no_action_model, sixteen_corpses, false));
+    for (const auto length : {8, 9, 16, 17, 2000}) {
+        std::vector<int> pool;
+        for (int id = 0; id < length; ++id) pool.push_back(id);
+        for (const auto actions : {false, true}) {
+            OnlineVisualScanModel model{lod_cursor == skeleton_cursor};
+            CHECK(covers_online_visual_pool(model, pool, actions));
+            // Preserve progress through growth, shrink and middle removal.
+            for (int id = length; id < length + 9; ++id) pool.push_back(id);
+            CHECK(covers_online_visual_pool(model, pool, actions));
+            pool.resize(9);
+            model.cursors = {-5, 2001}; // The same clamp as the UC functions.
+            CHECK(covers_online_visual_pool(model, pool, actions));
+            pool.erase(pool.begin() + 3);
+            CHECK(covers_online_visual_pool(model, pool, actions));
+            CHECK(covers_online_visual_pool(model, {}, actions));
+            CHECK(model.cursors[0] == 0 && model.cursors[1] == 0);
+            CHECK(covers_online_visual_pool(model, pool, actions));
+            // A new world-owned controller starts with fresh zero cursors.
+            model = OnlineVisualScanModel{lod_cursor == skeleton_cursor};
+            CHECK(covers_online_visual_pool(model, pool, actions));
+            pool.clear();
+            for (int id = 0; id < length; ++id) pool.push_back(id);
+        }
+    }
+    for (const auto* body : {&online_lod_body, &online_skeleton_body}) {
+        const auto cursor = online_visual_cursor(*body);
+        CHECK(body->find("ScanCount = Min(8, PoolLength);") !=
+              std::string::npos);
+        CHECK(body->find(cursor + " = 0;") != std::string::npos);
+        CHECK(body->find(cursor + " = Clamp(\n        " + cursor +
+              ", 0, PoolLength - 1);") != std::string::npos);
+        CHECK(body->find(cursor + " = (Index + 1) % PoolLength;") !=
+              std::string::npos);
+        CHECK(body->find(cursor + " =\n        (" + cursor +
+              " + ScanCount) % PoolLength;") != std::string::npos);
+        CHECK(count_occurrences(*body, cursor) == 7);
+        CHECK(online_corpse_controller_source.find("var int " + cursor +
+              ";") != std::string::npos);
+    }
+    CHECK(lod_cursor != skeleton_cursor);
+    const auto online_visual_body = online_corpse_controller_source.substr(
+        online_visual_start, online_tick_start - online_visual_start);
+    CHECK(online_visual_body.find(
+        "WorldInfo.RealTimeSeconds - LastVisualMutationRealTime < 0.20") !=
+          std::string::npos);
+    CHECK(online_visual_body.find(
+        "VisualControlPhase = (VisualControlPhase + 1) % 2;") !=
+          std::string::npos);
+    CHECK(count_occurrences(online_visual_body,
+        "bActionTaken = ApplyOneFixedMinimumCorpseLod();") == 1);
+    CHECK(count_occurrences(online_visual_body,
+        "bActionTaken = ApplyOneSleepingCorpseSkeletonMinimum();") == 1);
+    CHECK(online_visual_body.find("else\n    {\n        bActionTaken = "
+        "ApplyOneSleepingCorpseSkeletonMinimum();") != std::string::npos);
     CHECK(listener_source.find(
         "class'KF2OptimizerOnlineCorpseController'") != std::string::npos);
     CHECK(online_graphics_connection_source.find(
