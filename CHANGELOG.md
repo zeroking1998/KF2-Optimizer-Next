@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Missing or shortened prewarm files now retain their actual byte progress
+  instead of being reported as 100% complete. Incomplete map preparation does
+  not repeatedly reread files or block KF2 loading.
 - Hybrid-GPU attribution ranks the combined dedicated and shared process
   allocation correctly, while preserving renderer preference and tie handling.
 - Removed the inert Adaptive calibration preference. Older settings migrate

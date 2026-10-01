@@ -868,6 +868,97 @@ int test_map_prewarm_retry_scheduler() {
     return EXIT_SUCCESS;
 }
 
+int test_prewarm_incomplete_publication(bool map_job, bool diagnostics) {
+    namespace fs = std::filesystem;
+    using kf2::game::StartupPrewarmState;
+    const auto test_root = fs::path{KF2_TEST_ROOT} /
+        (map_job ? L"map-prewarm-incomplete" : L"startup-prewarm-incomplete");
+    fs::remove_all(test_root);
+    const auto file = test_root / (map_job
+        ? L"KFGame/BrewedPC/Maps/Incomplete/KF-Incomplete.kfm"
+        : L"KFGame/BrewedPC/Engine.u");
+    write_bytes(file, std::string(4096, 'x'));
+    kf2::diagnostics::EventLog events{128};
+    kf2::config::Settings settings;
+    settings.debug_runtime_diagnostics = diagnostics;
+    kf2::app::UiRuntime runtime{test_root / L"Data", false,
+        settings, events, std::nullopt, kf2::app::StartMode::read_only,
+        test_root / L"portable"};
+    runtime.installation = kf2::game::GameInstallation{
+        .install_root = test_root};
+    if (map_job) {
+        runtime.game_process = kf2::game::GameProcessIdentity{.pid = 1};
+        replace_runtime_gameplay(runtime, [](auto& gameplay) {
+            gameplay.main_menu = true;
+        });
+        runtime.map_prewarm_observed = L"KF-Incomplete";
+        runtime.map_prewarm_active = L"KF-Incomplete";
+        runtime.map_prewarm_last_attempted = L"KF-Incomplete";
+    }
+    auto& worker = map_job ? runtime.map_prewarmer : runtime.startup_prewarmer;
+    kf2::game::detail::set_startup_prewarm_plan_hook_for_testing([](auto files) {
+        fs::resize_file(files.front().path, 2048);
+    });
+    worker.start(test_root, {
+        .idle_delay = std::chrono::milliseconds{0},
+        .storage_override = kf2::game::StorageKind::solid_state,
+        .available_memory_override = 4ULL * 1024 * 1024 * 1024,
+        .map_name = map_job ? L"KF-Incomplete" : L"",
+        .include_common_startup_files = !map_job,
+        .collect_diagnostics = diagnostics,
+    });
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        const auto state = worker.snapshot().state;
+        if (state != StartupPrewarmState::idle &&
+            state != StartupPrewarmState::waiting &&
+            state != StartupPrewarmState::running) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    const auto snapshot = worker.snapshot();
+    CHECK(snapshot.state == StartupPrewarmState::incomplete);
+    CHECK(snapshot.bytes_planned == 4096);
+    CHECK(snapshot.bytes_read == 2048);
+    CHECK(snapshot.diagnostics.has_value() == diagnostics);
+    const auto poll = [&] {
+        if (map_job) runtime.poll_map_prewarm();
+        else runtime.poll_startup_prewarm();
+    };
+    poll();
+    CHECK(!runtime.model.status().prewarm_active);
+    CHECK(runtime.model.status().prewarm_percent == 50);
+    CHECK(runtime.model.status().prewarm_map.empty());
+    CHECK(runtime.map_prewarm_active.empty());
+    CHECK(runtime.map_prewarm_pending.empty());
+    CHECK(runtime.map_prewarm_retry_not_before_ns == 0);
+    if (diagnostics) {
+        CHECK(runtime.model.status().prewarm_diagnostics.find(
+            L"incomplete") != std::wstring::npos);
+    }
+    const auto reported = events.snapshot();
+    const auto incomplete_code = map_job
+        ? "MAP_PREWARM_INCOMPLETE" : "STARTUP_PREWARM_INCOMPLETE";
+    const auto completed_code = map_job
+        ? "MAP_PREWARM_COMPLETED" : "STARTUP_PREWARM_COMPLETED";
+    CHECK(std::count_if(reported.begin(), reported.end(), [&](const auto& event) {
+        return event.code == incomplete_code && event.repeat_count == 1 &&
+            event.severity == kf2::diagnostics::Severity::warning &&
+            event.message.find(L"2048/4096 bytes") != std::wstring::npos;
+    }) == 1);
+    CHECK(std::none_of(reported.begin(), reported.end(), [&](const auto& event) {
+        return event.code == completed_code;
+    }));
+    const auto appended = events.stats().appended;
+    poll();
+    CHECK(events.stats().appended == appended);
+    CHECK(runtime.map_prewarm_active.empty());
+    CHECK(runtime.map_prewarm_pending.empty());
+    CHECK(runtime.map_prewarm_retry_not_before_ns == 0);
+    CHECK(worker.snapshot().bytes_read == 2048);
+    worker.stop_and_wait();
+    fs::remove_all(test_root);
+    return EXIT_SUCCESS;
+}
+
 int test_map_prewarm_start_is_visible_before_worker_entry() {
     namespace fs = std::filesystem;
     using kf2::game::StartupPrewarmState;
@@ -3064,6 +3155,12 @@ int main(int argc, char** argv) {
     if (argc == 2 &&
         std::string_view{argv[1]} ==
             "--map-prewarm-start-visibility") {
+        for (const bool map_job : {false, true}) {
+            for (const bool diagnostics : {false, true}) {
+                CHECK(test_prewarm_incomplete_publication(
+                    map_job, diagnostics) == EXIT_SUCCESS);
+            }
+        }
         return test_map_prewarm_start_is_visible_before_worker_entry();
     }
     if (argc == 2 &&
