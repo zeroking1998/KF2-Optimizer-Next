@@ -18,13 +18,50 @@ int main() {
     CHECK(should_rediscover_game_log(true, true, 10, 10));
     CHECK(should_rediscover_game_log(true, false, 10, 11));
     CHECK(!should_rediscover_game_log(true, false, 10, 10));
-    CHECK(should_scan_for_game_process(100, 0, false));
+    CHECK(should_scan_for_game_process(100, 0, false,
+        kIdleProcessDiscoveryIntervalNs));
     CHECK(!should_scan_for_game_process(
-        kIdleProcessDiscoveryIntervalNs - 1, 1, false));
+        kIdleProcessDiscoveryIntervalNs - 1, 1, false,
+        kIdleProcessDiscoveryIntervalNs));
     CHECK(should_scan_for_game_process(
-        kIdleProcessDiscoveryIntervalNs + 1, 1, false));
-    CHECK(should_scan_for_game_process(10, 20, false));
-    CHECK(should_scan_for_game_process(100, 99, true));
+        kIdleProcessDiscoveryIntervalNs + 1, 1, false,
+        kIdleProcessDiscoveryIntervalNs));
+    CHECK(should_scan_for_game_process(10, 20, false,
+        kMaximumIdleProcessDiscoveryIntervalNs));
+    CHECK(!should_scan_for_game_process(100, 99, true,
+        kMaximumIdleProcessDiscoveryIntervalNs));
+    CHECK(should_scan_for_game_process(100, 0, true,
+        kMaximumIdleProcessDiscoveryIntervalNs));
+    CHECK(should_scan_for_game_process(kIdleProcessDiscoveryIntervalNs + 99,
+        99, true, kMaximumIdleProcessDiscoveryIntervalNs));
+    CHECK(!should_scan_for_game_process(kIdleProcessDiscoveryIntervalNs + 98,
+        99, true, kMaximumIdleProcessDiscoveryIntervalNs));
+    CHECK(!should_scan_for_game_process(kIdleProcessDiscoveryIntervalNs + 99,
+        99, false, kMaximumIdleProcessDiscoveryIntervalNs));
+    CHECK(should_scan_for_game_process(kMaximumIdleProcessDiscoveryIntervalNs + 99,
+        99, false, kMaximumIdleProcessDiscoveryIntervalNs));
+    CHECK(next_idle_process_discovery_interval_ns(500'000'000ULL) == 1'000'000'000ULL);
+    CHECK(next_idle_process_discovery_interval_ns(1'000'000'000ULL) == 2'000'000'000ULL);
+    CHECK(next_idle_process_discovery_interval_ns(2'000'000'000ULL) == 4'000'000'000ULL);
+    CHECK(next_idle_process_discovery_interval_ns(4'000'000'000ULL) == 5'000'000'000ULL);
+    CHECK(next_idle_process_discovery_interval_ns(5'000'000'000ULL) == 5'000'000'000ULL);
+    CHECK(next_idle_process_discovery_interval_ns(UINT64_MAX) == 5'000'000'000ULL);
+    // Count the policy-authorized process snapshots for a whole idle hour,
+    // without waiting an hour or enumerating the test machine's processes.
+    std::uint64_t idle_last_scan = 0;
+    std::uint64_t idle_interval = kIdleProcessDiscoveryIntervalNs;
+    unsigned int idle_scans = 0;
+    for (std::uint64_t tick = 1; tick <= 7200; ++tick) {
+        const auto now = tick * 500'000'000ULL;
+        if (should_scan_for_game_process(now, idle_last_scan, false, idle_interval)) {
+            idle_last_scan = now;
+            idle_interval = next_idle_process_discovery_interval_ns(idle_interval);
+            ++idle_scans;
+        }
+    }
+    std::cout << "Idle hour: " << idle_scans << " scheduled process scans\n";
+    CHECK(idle_scans <= 730);
+    CHECK(idle_scans == 722);
     CHECK(game_restart_handoff_timeout_ns(false) == 10'000'000'000ULL);
     CHECK(game_restart_handoff_timeout_ns(true) == 300'000'000'000ULL);
     SessionGateInput input;

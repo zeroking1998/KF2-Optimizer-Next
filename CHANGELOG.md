@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Idle KF2 process discovery now backs off instead of repeatedly scanning the
+  Windows process list. App launches and restart handoffs wake discovery;
+  skipped queries no longer imply that KF2 has closed.
 - Concurrent DXGI streams no longer falsely interrupt Adaptive quality-response
   windows. Only the selected stream's lifetime and real source loss invalidate
   the comparison; unrelated streams no longer allocate copied windows.

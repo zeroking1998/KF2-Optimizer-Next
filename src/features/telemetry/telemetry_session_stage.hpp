@@ -60,13 +60,25 @@ struct SessionStageResult final {
 
 inline constexpr std::uint64_t kIdleProcessDiscoveryIntervalNs =
     500'000'000ULL;
+inline constexpr std::uint64_t kMaximumIdleProcessDiscoveryIntervalNs =
+    5'000'000'000ULL;
+
+[[nodiscard]] constexpr std::uint64_t next_idle_process_discovery_interval_ns(
+    std::uint64_t current_ns) noexcept {
+    if (current_ns >= kMaximumIdleProcessDiscoveryIntervalNs / 2)
+        return kMaximumIdleProcessDiscoveryIntervalNs;
+    return current_ns < kIdleProcessDiscoveryIntervalNs
+        ? kIdleProcessDiscoveryIntervalNs : current_ns * 2;
+}
 
 [[nodiscard]] constexpr bool should_scan_for_game_process(
     std::uint64_t now_ns, std::uint64_t last_scan_ns,
-    bool restart_handoff_pending) noexcept {
-    return restart_handoff_pending || last_scan_ns == 0 ||
+    bool bounded_launch_pending, std::uint64_t idle_interval_ns) noexcept {
+    const auto interval_ns = bounded_launch_pending
+        ? kIdleProcessDiscoveryIntervalNs : idle_interval_ns;
+    return last_scan_ns == 0 ||
            now_ns < last_scan_ns ||
-           now_ns - last_scan_ns >= kIdleProcessDiscoveryIntervalNs;
+           now_ns - last_scan_ns >= interval_ns;
 }
 
 inline constexpr std::uint64_t kSilentPresentRestartNs = 3'000'000'000ULL;

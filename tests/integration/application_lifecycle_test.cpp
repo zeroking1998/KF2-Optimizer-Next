@@ -2442,6 +2442,50 @@ int test_executable_identity_boundaries() {
         kf2::app::StartMode::normal, portable};
     CHECK(runtime.installation.has_value());
     const auto original_identity = runtime.installation->executable_identity;
+    // Exercise the native query path before the test child exists. Repeated
+    // idle calls reuse the schedule; a skipped query must not restore INIs.
+    runtime.reset_game_process_discovery();
+    runtime.try_attach_telemetry();
+    CHECK(!runtime.game_process.has_value());
+    CHECK(runtime.game_process_discovery_interval_ns == 1'000'000'000ULL);
+    if (!runtime.session_config_snapshot) {
+        const auto captured = kf2::config::capture_session_config(
+            config, root / L"Data");
+        CHECK(captured.has_value());
+        runtime.session_config_snapshot = captured.value();
+    }
+    const auto protected_root = runtime.session_config_snapshot->snapshot_root;
+    const auto previous_launch_wait = runtime.session_config_waiting_for_launch;
+    const auto previous_launch_deadline = runtime.session_config_launch_deadline_ns;
+    runtime.session_config_waiting_for_launch = true;
+    runtime.session_config_launch_deadline_ns = 0;
+    runtime.last_game_process_scan_ns = 1;
+    runtime.try_attach_telemetry();
+    CHECK(runtime.game_process_discovery_interval_ns == 2'000'000'000ULL);
+    CHECK(runtime.session_config_snapshot.has_value());
+    runtime.session_config_launch_deadline_ns = UINT64_MAX;
+    runtime.last_game_process_scan_ns = 1;
+    runtime.try_attach_telemetry();
+    CHECK(runtime.game_process_discovery_interval_ns == 500'000'000ULL);
+    CHECK(runtime.session_config_snapshot.has_value());
+    runtime.session_config_launch_deadline_ns = previous_launch_deadline;
+    runtime.session_config_waiting_for_launch = false;
+    runtime.last_game_process_scan_ns = runtime.monotonic_ns();
+    runtime.game_process_discovery_interval_ns = 5'000'000'000ULL;
+    const auto deferred_scan = runtime.last_game_process_scan_ns;
+    runtime.try_attach_telemetry();
+    CHECK(runtime.last_game_process_scan_ns == deferred_scan);
+    CHECK(runtime.session_config_snapshot.has_value());
+    CHECK(runtime.session_config_snapshot->snapshot_root == protected_root);
+    runtime.session_config_waiting_for_launch = previous_launch_wait;
+    // A backward clock starts over immediately at the short cadence.
+    runtime.last_game_process_scan_ns = UINT64_MAX;
+    runtime.try_attach_telemetry();
+    CHECK(runtime.last_game_process_scan_ns != UINT64_MAX);
+    CHECK(runtime.game_process_discovery_interval_ns == 500'000'000ULL);
+    runtime.reset_game_process_discovery();
+    CHECK(runtime.last_game_process_scan_ns == 0);
+    CHECK(runtime.game_process_discovery_interval_ns == 500'000'000ULL);
     const auto replacement = executable.parent_path() / L"replacement.exe";
     CHECK(CopyFileW(self, replacement.c_str(), FALSE));
     CHECK(ReplaceFileW(executable.c_str(), replacement.c_str(), nullptr,
@@ -2479,7 +2523,8 @@ int test_executable_identity_boundaries() {
     CHECK(!runtime.game_process.has_value());
     CHECK(runtime.installation->executable_identity.file_index ==
         replaced.value().executable_identity.file_index);
-    runtime.last_game_process_scan_ns = 0;
+    CHECK(runtime.game_process_discovery_interval_ns == 500'000'000ULL);
+    runtime.reset_game_process_discovery();
     runtime.try_attach_telemetry();
     CHECK(runtime.game_process.has_value());
     CHECK(runtime.game_process->pid == child.process.dwProcessId);
@@ -2532,6 +2577,15 @@ int test_executable_identity_boundaries() {
     CHECK(!runtime.present_source);
     CHECK(runtime.game_restart_handoff_previous_process.has_value());
     CHECK(runtime.game_restart_handoff_previous_process->pid == second_process.pid);
+
+    // Pending recovery is not an indefinitely fast polling window after its
+    // deadline. Expiration still requires a real process query before cleanup.
+    runtime.game_restart_handoff_deadline_ns = 1;
+    runtime.last_game_process_scan_ns = 1;
+    runtime.game_process_discovery_interval_ns = 1'000'000'000ULL;
+    runtime.try_attach_telemetry();
+    CHECK(runtime.game_process_discovery_interval_ns == 2'000'000'000ULL);
+    CHECK(!runtime.game_restart_handoff_previous_process.has_value());
 
     runtime.resource_telemetry_worker.stop();
     auto captured = kf2::config::capture_session_config(config, root / L"Data");
