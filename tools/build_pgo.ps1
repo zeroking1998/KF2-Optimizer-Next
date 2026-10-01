@@ -61,13 +61,6 @@ $commit = (& git -C $projectRoot rev-parse --short=12 HEAD 2>$null)
 if ([string]::IsNullOrWhiteSpace($commit)) { $commit = 'local' }
 $dirty = (& git -C $projectRoot status --porcelain --untracked-files=normal 2>$null)
 if ($dirty) { $commit = "$commit.dirty" }
-$telemetryModule = Join-Path $projectRoot `
-    'assets\offline_telemetry\KF2OptimizerTelemetry.u'
-$telemetryHash = if (Test-Path -LiteralPath $telemetryModule -PathType Leaf) {
-    (Get-FileHash -LiteralPath $telemetryModule -Algorithm SHA256).Hash.ToLowerInvariant()
-} else {
-    '589aa708392e2c26abc753ce272c6e146f274623181015e8f6bdc201ccb8e2f0'
-}
 $mode = if ($Phase -eq 'Instrument') { 'INSTRUMENT' } else { 'OPTIMIZE' }
 
 Push-Location -LiteralPath $projectRoot
@@ -75,7 +68,7 @@ try {
     & cmake -S . -B $buildRoot -G 'Visual Studio 17 2022' -A x64 `
         '-DBUILD_TESTING=OFF' '-DKF2_VERSION=0.0.4-alpha' `
         "-DKF2_BUILD_COMMIT=$commit" '-DKF2_BUILD_CHANNEL=release' `
-        "-DKF2_OFFLINE_TELEMETRY_SHA256=$telemetryHash" `
+        '-DKF2_OFFLINE_TELEMETRY_SHA256=AUTO' `
         "-DKF2_PGO_MODE=$mode" "-DKF2_PGO_PGD=$pgdPath"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

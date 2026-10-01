@@ -869,6 +869,11 @@ set_tests_properties(kf2_telemetry_pipeline_boundary_test PROPERTIES
 add_test(NAME kf2_telemetry_build_binding_test
     COMMAND "${CMAKE_COMMAND}"
         "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+        "-DTEST_BINARY_ROOT=${CMAKE_CURRENT_BINARY_DIR}"
+        "-DTEST_ROOT=${KF2_TEST_SANDBOX_ROOT}/telemetry-build-binding"
+        "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+        "-DTEST_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+        "-DTEST_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/architecture/telemetry_build_binding_test.cmake")
 set_tests_properties(kf2_telemetry_build_binding_test PROPERTIES
     LABELS "architecture;telemetry")
