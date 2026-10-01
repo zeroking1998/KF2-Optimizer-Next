@@ -148,10 +148,72 @@ bool rejects_offline_telemetry(std::string line) {
            !parser.current()->telemetry_sample.has_value();
 }
 
+int test_bridge_capability_lifetime() {
+    using namespace kf2::game;
+    const std::string initial =
+        "Log: LoadMap: KF-BioticsLab?Game=KFGameContent.KFGameInfo_Survival\n"
+        "ScriptLog: WI.NetMode:  NM_Standalone\n"
+        "ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready port=49152\n" +
+        telemetry_line(1);
+    GameLogSessionParser parser;
+    CHECK(parser.feed(initial, 1'000'000'000ULL));
+    CHECK(parser.current()->telemetry_control_port == 49152);
+    CHECK(parser.current()->telemetry_living_zeds == 23);
+    const auto expired = parser.expire_observations(16'000'000'001ULL);
+    CHECK(expired);
+    CHECK(expired->telemetry_control_port == 49152);
+    CHECK(!expired->telemetry_sample && !expired->telemetry_living_zeds &&
+        !expired->telemetry_corpse_total && !expired->telemetry_world_particles);
+    CHECK(expired->telemetry_observed_ns == 0);
+    CHECK(!parser.expire_observations(16'000'000'002ULL));
+    const auto resumed = parser.feed(telemetry_line(2), 17'000'000'000ULL);
+    CHECK(resumed && resumed->telemetry_control_port == 49152);
+    CHECK(resumed->telemetry_sample == 2 && resumed->telemetry_living_zeds == 23);
+    CHECK(resumed->telemetry_observed_ns == 17'000'000'000ULL);
+    // No second ready line is needed. Malformed/unknown states cannot remove
+    // the valid capability; explicit listener failures can.
+    for (const auto* line : {
+        "KF2OPT_ADAPTIVE_BRIDGE state=ready port=0\n",
+        "KF2OPT_ADAPTIVE_BRIDGE state=ready port=65536\n",
+        "KF2OPT_ADAPTIVE_BRIDGE state=unavailable_extra reason=x\n",
+        "KF2OPT_ADAPTIVE_BRIDGE state=blocked_extra reason=x\n"}) {
+        CHECK(!parser.feed(line, 18'000'000'000ULL));
+        CHECK(parser.current()->telemetry_control_port == 49152);
+    }
+    for (const auto* state : {"blocked", "unavailable"}) {
+        CHECK(parser.feed("ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=" +
+            std::string{state} + " reason=listener_failed\n", 18'000'000'000ULL));
+        CHECK(!parser.current()->telemetry_control_port);
+        CHECK(parser.current()->telemetry_sample == 2);
+        (void)parser.feed(telemetry_line(2), 18'000'000'000ULL);
+        CHECK(!parser.current()->telemetry_control_port);
+        CHECK(parser.feed("KF2OPT_ADAPTIVE_BRIDGE state=ready port=49152\n"));
+    }
+    for (const auto* boundary : {
+        "Log: LoadMap: KF-Outpost\n",
+        "Log: LoadMap: KFMainMenu\n",
+        "ScriptLog: WI.NetMode:  NM_Client\n",
+        "ScriptLog: KFGameInfo_Survival_0 - MatchEnded.BeginState\n",
+        "ScriptLog: KF2OPT_SESSION_CONTEXT schema=2 state=online_client_read_only "
+            "net_mode=NM_Client map=KF-BioticsLab generation=8\n"}) {
+        GameLogSessionParser boundary_parser;
+        CHECK(boundary_parser.feed(initial, 1'000'000'000ULL));
+        CHECK(boundary_parser.expire_observations(16'000'000'001ULL));
+        CHECK(boundary_parser.feed(boundary, 17'000'000'000ULL));
+        CHECK(!boundary_parser.current()->telemetry_control_port);
+    }
+    parser.reset();
+    CHECK(!parser.current());
+    CHECK(parser.feed("Log: LoadMap: KF-BioticsLab\n"));
+    CHECK(!parser.current()->telemetry_control_port);
+    return EXIT_SUCCESS;
+}
+
 }  // namespace
 
 int main() {
     using namespace kf2::game;
+    CHECK(test_bridge_capability_lifetime() == EXIT_SUCCESS);
 
     GameLogSessionParser batch_stream;
     const auto batch = batch_stream.feed(

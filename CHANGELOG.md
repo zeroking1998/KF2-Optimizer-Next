@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Temporary gameplay-telemetry expiry no longer discards the Adaptive listener
+  port. Fresh measurements can resume control without another readiness line;
+  map/provider changes and explicit listener failures still invalidate the port.
 - DXGI stale-session cleanup now processes safely returned ETW entries when more
   sessions exist than its fixed buffer can hold. Array bounds and malformed
   session names are checked without adding retries or a larger startup scan.
