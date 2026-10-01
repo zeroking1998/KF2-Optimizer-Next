@@ -488,6 +488,8 @@ set_tests_properties(kf2_protected_shutdown_running_game_module_test PROPERTIES
 add_test(NAME kf2_restore_cap_sync_failure_test
     COMMAND kf2_application_lifecycle_test
         --restore-cap-sync-failure)
+add_test(NAME kf2_session_cap_finalization_failure_test
+    COMMAND kf2_application_lifecycle_test --session-cap-finalization-failure)
 add_test(NAME kf2_launch_profile_allocation_test
     COMMAND kf2_application_lifecycle_test
         --launch-profile-allocation)

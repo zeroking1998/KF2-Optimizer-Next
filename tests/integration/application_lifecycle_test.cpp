@@ -1096,6 +1096,120 @@ int test_restore_cap_sync_failure() {
 #endif
 }
 
+int test_session_cap_finalization_failure() {
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"scf" /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" +
+         std::to_wstring(GetTickCount64()));
+    for (const bool protected_session : {false, true}) {
+        for (const bool blocked : {true, false}) {
+            for (int entry = 0; entry < 3; ++entry) {
+                const auto fixture = root / (std::to_wstring(protected_session) +
+                    std::to_wstring(blocked) + std::to_wstring(entry));
+                const auto install = fixture / L"game";
+                const auto config = fixture / L"Documents/Config";
+                const auto state = fixture / L"Data";
+                write_test_pe(install / L"Binaries/Win64/KFGame.exe");
+                fs::create_directories(install / L"KFGame");
+                CHECK(write_complete_config_catalog(config));
+                auto system = kf2::config::IniDocument::parse(
+                    read_bytes(config / L"KFSystemSettings.ini"));
+                CHECK(system.has_value());
+                CHECK(system.value().upsert(L"SystemSettings", L"bAllowTemporalAA",
+                    L"False").shadowed_occurrences == 0);
+                write_bytes(config / L"KFSystemSettings.ini", system.value().serialize());
+                const auto console = install / L"Engine/Config/ConsoleVariables.ini";
+                write_bytes(console, "[Startup]\r\n; unrelated variable\r\n");
+                const kf2::game::GameDiscoveryInput discovery{
+                    .manual_candidates = {install}, .config_root = config,
+                    .allowed_config_parent = fixture / L"Documents"};
+                const auto found = kf2::game::discover_game_installation(discovery);
+                CHECK(found.has_value());
+                CHECK(kf2::game::persist_frame_rate_cap(found.value(), 60).has_value());
+                kf2::config::Settings settings;
+                settings.target_fps = 119;
+                settings.automatic_update_checks = false;
+                kf2::diagnostics::EventLog events{64};
+                {
+                    kf2::app::UiRuntime runtime{state, false, settings, events,
+                        discovery, kf2::app::StartMode::read_only, fixture / L"portable"};
+                    CHECK(runtime.installation);
+                    CHECK(runtime.video_saved);
+                    const auto original_system = read_bytes(config / L"KFSystemSettings.ini");
+                    if (protected_session) {
+                        const auto captured = kf2::config::capture_session_config(config, state);
+                        CHECK(captured.has_value());
+                        runtime.session_config_snapshot = captured.value();
+                        runtime.session_video_runtime = *runtime.video_saved;
+                        write_bytes(config / L"KFSystemSettings.ini",
+                            original_system + "\r\n; temporary session\r\n");
+                    }
+                    struct Lease {
+                        HANDLE handle{INVALID_HANDLE_VALUE};
+                        void release() {
+                            if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+                            handle = INVALID_HANDLE_VALUE;
+                        }
+                        ~Lease() { release(); }
+                    } lease;
+                    if (blocked) {
+                        // Reading remains possible; Windows rejects the actual
+                        // atomic cap replacement. No production test hook.
+                        lease.handle = CreateFileW(console.c_str(), GENERIC_READ,
+                            FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                            FILE_ATTRIBUTE_NORMAL, nullptr);
+                        CHECK(lease.handle != INVALID_HANDLE_VALUE);
+                    }
+                    if (entry == 0) {
+                        CHECK(runtime.restore_protected_session_config(L"Test finalization") == !blocked);
+                    } else if (entry == 1) {
+                        CHECK(runtime.shutdown().has_value() == !blocked);
+                    } else {
+                        // In failure cases, exercise the real automatic rearm
+                        // gate rather than relying on read-only mode to block it.
+                        if (blocked) runtime.start_mode = kf2::app::StartMode::normal;
+                        runtime.finalize_ended_game_session();
+                    }
+                    CHECK(!runtime.session_config_snapshot);
+                    CHECK(read_bytes(config / L"KFSystemSettings.ini") == original_system);
+                    const auto native = kf2::config::IniDocument::parse(read_bytes(console));
+                    CHECK(native.has_value());
+                    CHECK(native.value().find(L"Startup", L"t.MaxFPS") ==
+                        std::optional<std::wstring>{blocked ? L"60" : L"119"});
+                    CHECK(read_bytes(console).find("unrelated variable") != std::string::npos);
+                    CHECK(runtime.model.recovery_required() == blocked);
+                    const auto log = events.snapshot();
+                    CHECK(std::any_of(log.begin(), log.end(), [](const auto& event) {
+                        return event.code == "TARGET_FPS_PERSIST_FAILED";
+                    }) == blocked);
+                    if (blocked) {
+                        CHECK(runtime.model.notice());
+                        CHECK(runtime.model.notice()->code == L"TARGET_FPS_PERSIST_FAILED");
+                        CHECK(runtime.model.notice()->severity == kf2::ui::NoticeSeverity::error);
+                        CHECK(std::none_of(log.begin(), log.end(), [](const auto& event) {
+                            return event.code == "KF2_SESSION_ENDED" ||
+                                event.code == "ADAPTIVE_EXTERNAL_LAUNCH_REARMED" ||
+                                event.code == "ADAPTIVE_EXTERNAL_LAUNCH_REARM_FAILED";
+                        }));
+                        if (entry == 2) CHECK(std::any_of(log.begin(), log.end(), [](const auto& event) {
+                            return event.code == "KF2_SESSION_RECOVERY_PENDING";
+                        }));
+                    } else {
+                        const auto verified = kf2::game::persist_frame_rate_cap(*runtime.installation, 119);
+                        CHECK(verified.has_value() && !verified.value().changed);
+                        if (entry == 2) CHECK(runtime.model.notice()->code == L"KF2_SESSION_ENDED");
+                    }
+                    lease.release();
+                    // Retry is successful once the actual filesystem lease ends.
+                    CHECK(runtime.shutdown().has_value());
+                }
+            }
+        }
+    }
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
 // A real loopback receiver: exercise the production client/worker and its
 // exact receipt validation without requiring KF2 or desktop interaction.
 class AdaptiveTestReceiver final {
@@ -2451,6 +2565,9 @@ int test_legacy_adaptive_profile(
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--session-cap-finalization-failure") {
+        return test_session_cap_finalization_failure();
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--protected-shutdown-running-game-module") {
         return test_protected_shutdown_running_game(true);
     }

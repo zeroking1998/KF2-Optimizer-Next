@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Failed native FPS-cap synchronization now keeps session finalization incomplete,
+  preserves an actionable error and blocks automatic launch rearming instead of
+  reporting that all required state was restored.
 - Closing the optimizer while KF2 is running now retains protected INIs, runtime
   packages and their durable recovery snapshots. Cleanup is retried after KF2
   ends instead of rewriting live state or marking incomplete recovery clean.
