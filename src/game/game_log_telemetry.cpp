@@ -789,7 +789,6 @@ std::optional<bool> apply_offline_telemetry_line(
 }
 
 void clear_offline_telemetry_snapshot(GameLogSession& session) noexcept {
-    session.telemetry_control_port.reset();
     session.telemetry_sample.reset();
     session.telemetry_living_zeds.reset();
     session.telemetry_living_classes.reset();
@@ -907,6 +906,8 @@ void clear_offline_telemetry_snapshot(GameLogSession& session) noexcept {
 }
 
 void clear_gameplay_snapshot(GameLogSession& session) noexcept {
+    // The listener belongs to this World/provider, not to a periodic sample.
+    session.telemetry_control_port.reset();
     session.zeds_remaining.reset();
     session.zeds_alive.reset();
     session.wave_number.reset();

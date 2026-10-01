@@ -113,12 +113,12 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                         receipt->generation;
                     changed = true;
                 }
-            } else if (const auto port =
+            } else if (const auto bridge =
                            detail::parse_adaptive_bridge_line(line);
                        current_ && !current_->main_menu &&
-                       current_->phase != GameLogPhase::match_ended && port) {
-                if (current_->telemetry_control_port != port) {
-                    current_->telemetry_control_port = port;
+                       current_->phase != GameLogPhase::match_ended && bridge) {
+                if (current_->telemetry_control_port != bridge->port) {
+                    current_->telemetry_control_port = bridge->port;
                     changed = true;
                 }
             } else if (const auto online_corpse_changed =
