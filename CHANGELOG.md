@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- DXGI frame telemetry identifies its ETW owner by PID and process start time,
+  so a crashed session cannot block a new optimizer instance after PID reuse.
+
 - Enabling Adaptive no longer treats the selected corpse maximum as a
   confirmed graphics-quality reduction. Genuine graphics evidence is preserved.
 
