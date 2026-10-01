@@ -39,6 +39,8 @@ var float OnlineCorpseLastCapacityRealTime;
 var int OnlineCorpseOriginalMaximum;
 var bool bOnlineCorpseOriginalMaximumCaptured;
 var string OnlineCorpseOriginalMapName;
+var int OnlineCorpseEnablePreviousMaximum;
+var bool bOnlineCorpseEnableRestorePending;
 var bool bOnlineSessionEnding;
 var string OnlineSessionEndingMapName;
 
@@ -198,6 +200,8 @@ function ClearOnlineCorpseMaximumSnapshot()
     OnlineCorpseOriginalMaximum = 0;
     OnlineCorpseOriginalMapName = "";
     bOnlineCorpseOriginalMaximumCaptured = false;
+    OnlineCorpseEnablePreviousMaximum = 0;
+    bOnlineCorpseEnableRestorePending = false;
 }
 
 function DiscardOnlineCorpseMaximumSnapshot(string Boundary)
@@ -285,6 +289,33 @@ function bool RestoreOnlineCorpseMaximum(
     return true;
 }
 
+function bool RestoreOnlineEnableMaximum(KFGoreManager GoreManager)
+{
+    if (!bOnlineCorpseEnableRestorePending)
+    {
+        return true;
+    }
+    if (GoreManager == None)
+    {
+        return false;
+    }
+    GoreManager.MaxDeadBodies = OnlineCorpseEnablePreviousMaximum;
+    if (GoreManager.MaxDeadBodies != OnlineCorpseEnablePreviousMaximum)
+    {
+        `log("KF2OPT_ONLINE_CORPSE_MAXIMUM state=restore_failed"$
+             " boundary=enable_failure reason=readback_mismatch expected="$
+             OnlineCorpseEnablePreviousMaximum$
+             " actual="$GoreManager.MaxDeadBodies$" ownership=retained");
+        return false;
+    }
+    bOnlineCorpseEnableRestorePending = false;
+    // Keep the session-original snapshot for eventual disable/cleanup.
+    `log("KF2OPT_ONLINE_CORPSE_MAXIMUM state=restored"$
+         " boundary=enable_failure maximum="$OnlineCorpseEnablePreviousMaximum$
+         " local_only=true readback=verified snapshot=retained");
+    return true;
+}
+
 function bool ApplyOnlineGraphicsControl(
     string Token, int Sequence, string Resource, int Quality)
 {
@@ -327,17 +358,24 @@ function bool ApplyOnlineGraphicsControl(
         {
             return false;
         }
-        GoreManager.MaxDeadBodies = Quality;
-        if (GoreManager.MaxDeadBodies != Quality)
+        if (!RestoreOnlineEnableMaximum(GoreManager))
         {
-            RestoreOnlineCorpseMaximum(CurrentWorld, "enable_failure");
             return false;
         }
         CurrentState = GetOnlineGraphicsState();
         if (CurrentState == None ||
             !EnsureOnlineFixedEffectsBaseline(CurrentWorld))
         {
-            RestoreOnlineCorpseMaximum(CurrentWorld, "enable_failure");
+            return false;
+        }
+        // All prerequisites are ready. A rejected re-enable must restore the
+        // previous live limit, not undo an earlier accepted enable.
+        OnlineCorpseEnablePreviousMaximum = GoreManager.MaxDeadBodies;
+        GoreManager.MaxDeadBodies = Quality;
+        if (GoreManager.MaxDeadBodies != Quality)
+        {
+            bOnlineCorpseEnableRestorePending = true;
+            RestoreOnlineEnableMaximum(GoreManager);
             return false;
         }
         bOnlineGraphicsEnabled = true;
@@ -487,7 +525,9 @@ function bool TryEnforceOnlineCorpseCapacity(WorldInfo CurrentWorld)
     local KFPawn Candidate;
     local string CandidateName;
 
-    if (!bOnlineGraphicsEnabled || CurrentWorld == None ||
+    // Do not delete corpses using an unconfirmed, partially written ceiling.
+    if (!bOnlineGraphicsEnabled || bOnlineCorpseEnableRestorePending ||
+        CurrentWorld == None ||
         CurrentWorld.RealTimeSeconds - OnlineCorpseLastCapacityRealTime < 0.45)
     {
         return false;
