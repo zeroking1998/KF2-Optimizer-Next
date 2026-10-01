@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- DXGI live statistics now share one interval sort for their overlapping
+  windows instead of rebuilding four independent arrays. FPS, 1% lows,
+  percentiles, freshness and diagnostic comparisons are unchanged.
 - Idle KF2 process discovery now backs off instead of repeatedly scanning the
   Windows process list. App launches and restart handoffs wake discovery;
   skipped queries no longer imply that KF2 has closed.
