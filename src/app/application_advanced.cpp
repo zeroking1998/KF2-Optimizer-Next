@@ -6,7 +6,7 @@ void UiRuntime::refresh_advanced_presentation() {
     auto status = model.status();
     status.advanced_available = advanced_settings.pending.has_value();
     status.advanced_game_running = installation &&
-        game::find_running_game_process(installation->executable).has_value();
+        game::game_process_may_be_running(installation->executable);
     status.advanced_dirty = advanced_settings.saved &&
         advanced_settings.pending &&
         *advanced_settings.saved != *advanced_settings.pending;
@@ -60,7 +60,7 @@ void UiRuntime::cycle_advanced_option(game::AdvancedOption option) {
         reload_advanced_settings();
         if (!advanced_settings.pending) return;
     }
-    if (game::find_running_game_process(installation->executable).has_value()) {
+    if (game::game_process_may_be_running(installation->executable)) {
         model.set_notice({
             ui::NoticeSeverity::warning, L"ADVANCED_GAME_RUNNING",
             L"Close KF2 before changing advanced game settings.", L""});
@@ -78,7 +78,7 @@ void UiRuntime::stage_advanced_slider(
         reload_advanced_settings();
         if (!advanced_settings.pending) return;
     }
-    if (game::find_running_game_process(installation->executable).has_value()) {
+    if (game::game_process_may_be_running(installation->executable)) {
         model.set_notice({
             ui::NoticeSeverity::warning, L"ADVANCED_GAME_RUNNING",
             L"Close KF2 before changing advanced game settings.", L""});
@@ -126,7 +126,7 @@ void UiRuntime::reset_advanced_settings() {
         reload_advanced_settings();
         if (!advanced_settings.pending) return;
     }
-    if (game::find_running_game_process(installation->executable).has_value()) {
+    if (game::game_process_may_be_running(installation->executable)) {
         model.set_notice({
             ui::NoticeSeverity::warning, L"ADVANCED_GAME_RUNNING",
             L"Close KF2 before changing advanced game settings.", L""});
@@ -151,7 +151,7 @@ Result<config::ApplyResult> UiRuntime::apply_advanced_settings() {
             {ErrorCode::invalid_argument,
              L"The selected advanced settings are already saved", 0});
     }
-    if (game::find_running_game_process(installation->executable).has_value()) {
+    if (game::game_process_may_be_running(installation->executable)) {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::access_denied,
              L"Close KF2 before applying advanced game settings", 0});

@@ -190,8 +190,8 @@ void UiRuntime::runtime_tick() {
 }
 
 void UiRuntime::start_startup_prewarm() {
-    if (!installation || game::find_running_game_process(
-            installation->executable).has_value()) {
+    if (!installation || game::game_process_may_be_running(
+            installation->executable)) {
         return;
     }
     startup_prewarm_announced = false;

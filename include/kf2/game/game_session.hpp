@@ -41,6 +41,9 @@ struct GameWindowState {
                                         const RECT& area);
 [[nodiscard]] Result<GameProcessIdentity> find_running_game_process(
     const std::filesystem::path& expected_executable);
+// A write guard: true includes inspection failures, not only verified games.
+[[nodiscard]] bool game_process_may_be_running(
+    const std::filesystem::path& expected_executable);
 [[nodiscard]] Result<HWND> find_game_window(const GameProcessIdentity& process);
 
 }  // namespace kf2::game

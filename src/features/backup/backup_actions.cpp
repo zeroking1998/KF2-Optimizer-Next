@@ -24,8 +24,8 @@ app::runtime::DispatchResult create(
                     L"A verified KF2 installation was not found.");
         return app::runtime::DispatchResult::handled;
     }
-    if (game::find_running_game_process(
-            runtime.installation->executable).has_value()) {
+    if (game::game_process_may_be_running(
+            runtime.installation->executable)) {
         show_notice(runtime, ui::NoticeSeverity::warning,
                     L"BACKUP_GAME_RUNNING",
                     L"Close KF2 before creating a consistent INI backup.");

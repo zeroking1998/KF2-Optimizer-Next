@@ -481,6 +481,8 @@ add_test(NAME kf2_runtime_shutdown_exception_test
         --runtime-shutdown-exceptions)
 add_test(NAME kf2_protected_shutdown_running_game_test
     COMMAND kf2_application_lifecycle_test --protected-shutdown-running-game)
+add_test(NAME kf2_protected_shutdown_uninspectable_game_test
+    COMMAND kf2_application_lifecycle_test --protected-shutdown-uninspectable-game)
 add_test(NAME kf2_protected_shutdown_running_game_module_test
     COMMAND kf2_application_lifecycle_test --protected-shutdown-running-game-module)
 set_tests_properties(kf2_protected_shutdown_running_game_module_test PROPERTIES
@@ -881,7 +883,7 @@ add_executable(kf2_game_session_test
     windows/game_session_test.cpp
 )
 target_include_directories(kf2_game_session_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
-target_link_libraries(kf2_game_session_test PRIVATE user32 dwmapi)
+target_link_libraries(kf2_game_session_test PRIVATE user32 dwmapi advapi32)
 add_test(NAME kf2_game_session_test COMMAND kf2_game_session_test)
 
 add_executable(kf2_startup_prewarmer_test

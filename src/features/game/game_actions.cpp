@@ -127,8 +127,8 @@ app::runtime::DispatchResult launch(
                     verified.error().message);
         return app::runtime::DispatchResult::handled;
     }
-    if (product_game::find_running_game_process(
-            runtime.installation->executable).has_value()) {
+    if (product_game::game_process_may_be_running(
+            runtime.installation->executable)) {
         show_notice(runtime, ui::NoticeSeverity::info,
                     L"GAME_ALREADY_RUNNING",
                     L"Killing Floor 2 is already running.");
