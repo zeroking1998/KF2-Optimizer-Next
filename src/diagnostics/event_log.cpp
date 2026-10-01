@@ -18,6 +18,7 @@ namespace {
 constexpr std::uintmax_t kMaximumPreviousEventLogBytes =
     2U * 1024U * 1024U;
 constexpr std::size_t kMaximumRetainedEventLogs = 2;
+constexpr std::chrono::milliseconds kPersistenceBatchDelay{250};
 constexpr std::chrono::milliseconds kMaximumPersistenceRetryDelay{5000};
 
 bool is_retained_audit_event(const Event& event) noexcept {
@@ -252,7 +253,8 @@ bool EventLog::flush(std::chrono::milliseconds timeout) {
     if (persistence_path_.empty()) return true;
     if (!persistence_worker_.joinable()) return false;
     const auto target_revision = persistence_revision_;
-    persistence_changed_.notify_one();
+    if (persistence_pending_) persistence_batch_due_ = {};
+    persistence_changed_.notify_all();
     const auto completed = persistence_changed_.wait_for(
         lock, timeout, [&] {
             return persistence_ready_ && persisted_revision_ >= target_revision;
@@ -288,7 +290,13 @@ void EventLog::schedule_persist_locked() noexcept {
     if (persistence_revision_ != UINT64_MAX) ++persistence_revision_;
     const bool was_pending = persistence_pending_;
     persistence_pending_ = true;
-    if (!was_pending) persistence_changed_.notify_one();
+    if (!was_pending) {
+        // A fixed first-event deadline batches bursts without starving writes
+        // during continuous logging. Explicit flush/shutdown bypasses it.
+        persistence_batch_due_ =
+            std::chrono::steady_clock::now() + kPersistenceBatchDelay;
+        persistence_changed_.notify_one();
+    }
 }
 
 void EventLog::persist_worker(std::stop_token stop) noexcept {
@@ -312,6 +320,11 @@ void EventLog::persist_worker(std::stop_token stop) noexcept {
                     return stop.stop_requested();
                 });
                 if (stop.stop_requested()) return;
+            } else if (!stop.stop_requested()) {
+                persistence_changed_.wait_until(lock, persistence_batch_due_, [&] {
+                    return stop.stop_requested() ||
+                        persistence_batch_due_ <= std::chrono::steady_clock::now();
+                });
             }
             try {
                 copy.assign(events_.begin(), events_.end());
@@ -322,7 +335,6 @@ void EventLog::persist_worker(std::stop_token stop) noexcept {
             }
             revision = persistence_revision_;
             persistence_pending_ = false;
-            persistence_active_ = true;
         }
 
         bool succeeded = false;
@@ -336,7 +348,6 @@ void EventLog::persist_worker(std::stop_token stop) noexcept {
 
         {
             std::scoped_lock lock{mutex_};
-            persistence_active_ = false;
             if (!succeeded) {
                 record_persistence_failure_locked();
             } else {
