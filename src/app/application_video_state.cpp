@@ -452,19 +452,31 @@ Result<config::ApplyResult> UiRuntime::apply_video_settings() {
                         L"graphics"});
         reload_video_settings();
         if (rebuild_protected_launch) {
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+            if (video_before_protected_rebuild_for_testing)
+                video_before_protected_rebuild_for_testing();
+#endif
             const auto rebuilt = prepare_automatic_external_launch_profile();
-            if (!rebuilt.has_value()) {
+            if (!rebuilt.has_value() || !rebuilt.value()) {
+                const auto cause = rebuilt.has_value()
+                    ? Error{ErrorCode::recovery_required,
+                        L"Protected launch capabilities are unavailable"}
+                    : rebuilt.error();
+                const auto message =
+                    L"The graphics settings were saved, but the next protected KF2 launch could not be prepared: " +
+                    cause.message;
+                model.set_recovery_required(true);
                 events->append({0, diagnostics::Severity::error,
                     "GRAPHICS_PROTECTED_LAUNCH_REBUILD_FAILED",
-                    L"The graphics settings were saved, but protected launch preparation failed: " +
-                        rebuilt.error().message,
+                    message,
                     L"graphics"});
                 model.set_notice({ui::NoticeSeverity::warning,
                     L"GRAPHICS_PROTECTED_LAUNCH_REBUILD_FAILED",
-                    L"The graphics settings were saved, but the next protected KF2 launch could not be prepared: " +
-                        rebuilt.error().message,
+                    message,
                     L"Run Repair before starting KF2."});
                 invalidate();
+                return Result<config::ApplyResult>::failure({
+                    ErrorCode::recovery_required, message, cause.native_code});
             } else {
                 events->append({0, diagnostics::Severity::info,
                     "GRAPHICS_PROTECTED_LAUNCH_REBUILT",

@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Graphics saves now retain a Repair warning if rebuilding the protected KF2
+  launch fails or is unavailable. Successfully saved values remain intact
+  instead of hiding the partial failure behind a generic success notice.
 - Adaptive toggles now save the preference before changing live or deferred
   control. Failed writes leave the previous mode intact and cannot apply an
   unsaved change when gameplay confirmation returns later.
