@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Adaptive now honors disabled automatic quality recovery. Confirmed pressure
+  can still reduce quality, and disabling Adaptive or rolling back an ineffective
+  change still restores protected settings.
 - Configuration rollback now verifies every restored file and retains recovery
   state when a write, readback or journal completion fails. Native FPS-cap
   changes retain both original files until confirmed, so the next stopped-game

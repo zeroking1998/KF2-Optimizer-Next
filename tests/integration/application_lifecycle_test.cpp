@@ -1632,6 +1632,7 @@ int test_adaptive_toggle_save_failure() {
             fs::create_directories(state);
             kf2::config::Settings settings;
             settings.adaptive_optimization_enabled = previous;
+            settings.adaptive_quality_recovery_enabled = false;
             settings.automatic_update_checks = false;
             const auto original = kf2::config::serialize_settings(settings);
             write_bytes(state / L"settings.ini", original);
@@ -1724,6 +1725,7 @@ int test_adaptive_toggle_save_failure() {
             const auto persisted = kf2::config::parse_settings(read_bytes(runtime.settings_path));
             CHECK(persisted.has_value());
             CHECK(persisted.value().adaptive_optimization_enabled == !previous);
+            CHECK(!persisted.value().adaptive_quality_recovery_enabled);
             AdaptiveTestReceiver saved_mode{"applied"};
             CHECK(saved_mode.port != 0);
             ++frame.observed_at_ns;
@@ -1737,6 +1739,9 @@ int test_adaptive_toggle_save_failure() {
             CHECK(runtime.adaptive_runtime_mode_confirmed);
             CHECK(saved_mode.command.find(previous ? " disable " : " enable ") !=
                 std::string::npos);
+            if (previous) {
+                CHECK(runtime.adaptive_resource_quality.effective_quality() == 100);
+            }
         }
     }
     WSACleanup();

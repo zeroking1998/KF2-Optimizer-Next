@@ -481,6 +481,44 @@ int main() {
     CHECK(recovery.quality_recovery_eligible);
     CHECK(recovery.reason ==
           "stable_headroom_slow_quality_recovery_eligible");
+
+    // Disabling automatic recovery holds quality even with confirmed reserve,
+    // including when the controller was already eligible before the change.
+    auto recovery_disabled = adaptive;
+    recovery_disabled.quality_recovery_enabled = false;
+    AdaptiveGovernor disabled_recovery_governor;
+    const auto disabled_recovery = drive(
+        disabled_recovery_governor, recovery_disabled, recovery_sample,
+        start, 6'200'000'000ULL);
+    CHECK(disabled_recovery.state == AdaptiveControllerState::stable);
+    CHECK(disabled_recovery.resources.recovery_safe);
+    CHECK(!disabled_recovery.quality_recovery_eligible);
+    CHECK(disabled_recovery.stability_state == AdaptiveStabilityState::stable);
+    CHECK(disabled_recovery.reason == "stable_or_reserve_insufficient_hold");
+    recovery_sample.timestamp_ns = start + 6'400'000'000ULL;
+    const auto switched_off = recovery_governor.evaluate(
+        recovery_disabled, recovery_sample, recovery_sample.timestamp_ns);
+    CHECK(!switched_off.quality_recovery_eligible);
+    CHECK(switched_off.stability_state == AdaptiveStabilityState::stable);
+    recovery_sample.timestamp_ns += 200'000'000ULL;
+    CHECK(recovery_governor.evaluate(
+        adaptive, recovery_sample, recovery_sample.timestamp_ns)
+        .quality_recovery_eligible);
+
+    // This preference must not suppress correction under actual pressure.
+    AdaptiveGovernor disabled_recovery_pressure_governor;
+    AdaptiveGovernor enabled_recovery_pressure_governor;
+    const auto pressured = sample(start, 30.0, 33.33, 42.0, 35.0, 98.0);
+    const auto disabled_pressure = drive(disabled_recovery_pressure_governor,
+        recovery_disabled, pressured, start, 1'000'000'000ULL);
+    const auto enabled_pressure = drive(enabled_recovery_pressure_governor,
+        adaptive, pressured, start, 1'000'000'000ULL);
+    CHECK(disabled_pressure.state == AdaptiveControllerState::emergency);
+    CHECK(disabled_pressure.state == enabled_pressure.state);
+    CHECK(disabled_pressure.disposition == enabled_pressure.disposition);
+    CHECK(disabled_pressure.selected_setting == enabled_pressure.selected_setting);
+    CHECK(disabled_pressure.proposed_value == enabled_pressure.proposed_value);
+
     recovery_governor.reset();
     recovery_sample.timestamp_ns = start + 7'000'000'000ULL;
     const auto recovery_after_reset = recovery_governor.evaluate(
