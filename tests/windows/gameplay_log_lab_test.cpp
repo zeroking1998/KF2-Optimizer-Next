@@ -296,6 +296,110 @@ bool offline_release_progress(int length, int failed_id, bool physics_failure,
     return queues == expected;
 }
 
+struct OfflineWakePolicy {
+    bool retain_failed;
+    bool advance_failed;
+    bool restore_already_awake;
+    bool validate_identity;
+};
+
+OfflineWakePolicy offline_wake_policy(std::string_view body) {
+    const auto call = body.find("Candidate.Mesh.WakeRigidBody();");
+    const auto readback = body.find(
+        "if (!Candidate.Mesh.RigidBodyIsAwake())", call);
+    const auto skeleton = body.find(
+        "Candidate.Mesh.bNoSkeletonUpdate = false;", call);
+    const auto failure = readback != std::string_view::npos &&
+        skeleton != std::string_view::npos && readback < skeleton
+        ? body.substr(readback, skeleton - readback) : std::string_view{};
+    return {
+        .retain_failed = !failure.empty() &&
+            failure.find("return 0;") != std::string_view::npos &&
+            failure.find("RemoveAdaptiveDistanceSleptCorpseEntry") ==
+                std::string_view::npos,
+        .advance_failed = failure.find("(Index + 1) %") !=
+            std::string_view::npos && failure.find(
+                "AdaptiveDistanceReleaseWakeCursor") != std::string_view::npos,
+        .restore_already_awake = body.find(
+            "\n        }\n        Candidate.Mesh.bNoSkeletonUpdate = false;") !=
+                std::string_view::npos,
+        .validate_identity = body.find(
+            "GetAdaptiveCorpseActionId(Candidate) !=") < call,
+    };
+}
+
+// Source-bound release model, not a PhysX simulation. Each invocation may
+// inspect 64 entries, but only one wake attempt may consume the frame slot.
+bool offline_wake_progress(int length, int failed_id, bool late_wake,
+                           bool invalid_entries, OfflineWakePolicy policy) {
+    struct Entry {
+        int id;
+        int invalid_kind;
+        bool awake;
+        bool skeleton_disabled;
+    };
+    std::vector<Entry> ledger;
+    std::vector<int> expected;
+    for (int id = 0; id < length; ++id) {
+        const int invalid_kind = invalid_entries ? id % 5 : 0;
+        ledger.push_back({id, invalid_kind, id % 3 == 1, true});
+        if (!late_wake && invalid_kind == 0 &&
+            (failed_id == -2 || id == failed_id)) {
+            ledger.back().awake = false;
+            expected.push_back(id);
+        }
+        if (id == failed_id) ledger.back().awake = false;
+    }
+    std::size_t cursor = 0;
+    for (int callback = 0; callback < 4 * length + 16 && !ledger.empty();
+         ++callback) {
+        if (late_wake && callback >= length + 2) {
+            for (auto& entry : ledger) {
+                if (entry.id == failed_id) entry.awake = true;
+            }
+        }
+        int inspected = 0;
+        int attempts = 0;
+        while (!ledger.empty() && inspected < 64) {
+            const auto index = policy.advance_failed
+                ? std::min(cursor, ledger.size() - 1) : ledger.size() - 1;
+            auto& entry = ledger[index];
+            ++inspected;
+            // Kinds 1/2/3/4: deleted, reused, missing mesh, non-rigid.
+            const bool invalid = entry.invalid_kind != 0 &&
+                (entry.invalid_kind != 2 || policy.validate_identity);
+            if (!invalid && entry.invalid_kind != 0) return false;
+            if (!invalid && !entry.awake) {
+                // Another physics action can already own this frame.
+                if (callback % 5 == 0) break;
+                ++attempts;
+                entry.awake = !(failed_id == -2 || entry.id == failed_id);
+                if (!entry.awake && policy.retain_failed) {
+                    cursor = (index + 1) % ledger.size();
+                    break;
+                }
+                if (entry.awake) entry.skeleton_disabled = false;
+            } else if (!invalid && policy.restore_already_awake) {
+                entry.skeleton_disabled = false;
+            }
+            if (!invalid && (!entry.awake || entry.skeleton_disabled)) {
+                return false;
+            }
+            ledger.erase(ledger.begin() + index);
+            cursor = ledger.empty() ? 0 : index % ledger.size();
+            if (attempts > 0) break;
+        }
+        if (attempts > 1 || inspected > 64 ||
+            (!ledger.empty() && cursor >= ledger.size())) return false;
+    }
+    std::vector<int> remaining;
+    for (const auto& entry : ledger) {
+        if (entry.awake || !entry.skeleton_disabled) return false;
+        remaining.push_back(entry.id);
+    }
+    return remaining == expected;
+}
+
 std::size_t settled_after_bounded_scans(
     std::size_t pool_size, std::size_t scan_budget,
     double category_visit_interval, double tracking_timeout) {
@@ -461,7 +565,6 @@ int main() {
     CHECK(telemetry_source.find(
         "if (!bAdaptiveRuntimeEnabled)\n    {\n        `log(\"KF2OPT_ADAPTIVE_QUALITY") !=
           std::string::npos);
-    CHECK(telemetry_source.find("WakeCount < 1") != std::string::npos);
     CHECK(telemetry_source.find(
         "KF2OPT_ADAPTIVE_MODE state=disabled fixed_effect_quality=") !=
           std::string::npos);
@@ -3826,6 +3929,71 @@ int main() {
     CHECK(wake_call < wake_readback);
     CHECK(wake_readback < wake_tracking_release);
     CHECK(wake_tracking_release < wake_receipt);
+    const auto release_wake_start = telemetry_source.find(
+        "function int WakeAdaptiveDistanceSleptCorpseBatch()");
+    const auto release_wake_end = telemetry_source.find(
+        "\nfunction ", release_wake_start + 1);
+    CHECK(release_wake_start != std::string::npos);
+    CHECK(release_wake_end != std::string::npos);
+    const auto release_wake_body = telemetry_source.substr(
+        release_wake_start, release_wake_end - release_wake_start);
+    const auto release_wake_policy = offline_wake_policy(release_wake_body);
+    CHECK(release_wake_policy.retain_failed);
+    CHECK(release_wake_policy.advance_failed);
+    CHECK(release_wake_policy.restore_already_awake);
+    CHECK(release_wake_policy.validate_identity);
+    auto lost_retry_release = release_wake_body;
+    const auto release_wake_call = lost_retry_release.find(
+        "Candidate.Mesh.WakeRigidBody();");
+    const auto failed_wake_return = lost_retry_release.find(
+        "return 0;", release_wake_call);
+    CHECK(failed_wake_return != std::string::npos);
+    lost_retry_release.insert(failed_wake_return,
+        "RemoveAdaptiveDistanceSleptCorpseEntry(Index, \"adaptive_disabled\");\n");
+    CHECK(!offline_wake_policy(lost_retry_release).retain_failed);
+    auto stuck_cursor_release = release_wake_body;
+    const auto failed_cursor_advance = stuck_cursor_release.find(
+        "(Index + 1) %", release_wake_call);
+    CHECK(failed_cursor_advance != std::string::npos);
+    stuck_cursor_release.replace(failed_cursor_advance,
+        std::string_view{"(Index + 1) %"}.size(), "Index %");
+    CHECK(!offline_wake_policy(stuck_cursor_release).advance_failed);
+    CHECK(count_occurrences(release_wake_body,
+        "Candidate.Mesh.WakeRigidBody();") == 1);
+    CHECK(release_wake_body.find("Scanned < AdaptiveCorpseScanBudget") !=
+          std::string::npos);
+    CHECK(release_wake_body.find(
+        "if (WakeCount > 0)\n        {\n            return WakeCount;") !=
+          std::string::npos);
+    CHECK(release_wake_body.find("AdaptiveDistanceWakeScanCursor") ==
+          std::string::npos);
+    CHECK(retired_sleep_release_body.find(
+        "else if (Candidate.Mesh.RigidBodyIsAwake())\n"
+        "            {\n"
+        "                Candidate.Mesh.bNoSkeletonUpdate = false;\n"
+        "                AdaptiveRetiredDistanceSleptCorpses.Remove(Index, 1);") !=
+          std::string::npos);
+    const OfflineWakePolicy correct_wake_policy{true, true, true, true};
+    CHECK(!offline_wake_progress(1, 0, false, false,
+                                {false, false, false, false}));
+    CHECK(!offline_wake_progress(2, 1, false, false,
+                                {true, false, true, true}));
+    CHECK(!offline_wake_progress(2, -1, false, false,
+                                {true, true, false, true}));
+    CHECK(!offline_wake_progress(5, -1, false, true,
+                                {true, true, true, false}));
+    for (const int length : {0, 1, 2, 8, 9, 64, 65, 128, 129, 2000}) {
+        for (const int failed_id : {-2, -1, 0, length / 2, length - 1}) {
+            CHECK(offline_wake_progress(length, failed_id, false, false,
+                                       correct_wake_policy));
+            CHECK(offline_wake_progress(length, failed_id, false, false,
+                                       release_wake_policy));
+        }
+        CHECK(offline_wake_progress(length, 0, true, false,
+                                   release_wake_policy));
+        CHECK(offline_wake_progress(length, -1, false, true,
+                                   release_wake_policy));
+    }
     CHECK(telemetry_source.find(
         "function int WakeNearAdaptiveDistanceSleptCorpses()") !=
           std::string::npos);

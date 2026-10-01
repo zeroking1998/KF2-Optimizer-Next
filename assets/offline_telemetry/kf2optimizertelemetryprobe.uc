@@ -340,6 +340,7 @@ var int AdaptiveBaselinePruneCursor;
 var int AdaptiveFreezePruneCursor;
 var int AdaptiveDistancePruneCursor;
 var int AdaptiveDistanceWakeScanCursor;
+var int AdaptiveDistanceReleaseWakeCursor;
 var int FixedMinimumCorpseLodPruneCursor;
 // One same-world cursor bounds PawnList traversal without retaining a work
 // queue. It is cleared on disable, manager replacement and world teardown.
@@ -1325,6 +1326,7 @@ function RetireAdaptiveCorpseManagerOwnership(KFGoreManager NewManager)
     bAdaptiveCorpseStaggerInitialized = false;
     AdaptiveFrozenCorpses.Length = 0;
     AdaptiveDistanceSleptCorpses.Length = 0;
+    AdaptiveDistanceReleaseWakeCursor = 0;
     AdaptiveBaselineSettleEntries.Length = 0;
     FixedMinimumCorpseLodCorpses.Length = 0;
     FixedMinimumCorpseLodAppliedMinModels.Length = 0;
@@ -3653,9 +3655,14 @@ function int WakeOneRetiredAdaptiveDistanceSleptCorpse()
                 bRemoved = true;
             }
             else if (Candidate.Mesh == None ||
-                     Candidate.Physics != PHYS_RigidBody ||
-                     Candidate.Mesh.RigidBodyIsAwake())
+                     Candidate.Physics != PHYS_RigidBody)
             {
+                AdaptiveRetiredDistanceSleptCorpses.Remove(Index, 1);
+                bRemoved = true;
+            }
+            else if (Candidate.Mesh.RigidBodyIsAwake())
+            {
+                Candidate.Mesh.bNoSkeletonUpdate = false;
                 AdaptiveRetiredDistanceSleptCorpses.Remove(Index, 1);
                 bRemoved = true;
             }
@@ -4129,46 +4136,61 @@ function int WakeAdaptiveDistanceSleptCorpseBatch()
     local int WakeCount;
     local KFPawn Candidate;
 
-    for (Index = AdaptiveDistanceSleptCorpses.Length - 1;
-         Index >= 0 && WakeCount < 1 &&
-         Scanned < AdaptiveCorpseScanBudget; --Index)
+    while (AdaptiveDistanceSleptCorpses.Length > 0 &&
+           Scanned < AdaptiveCorpseScanBudget)
     {
+        Index = Clamp(AdaptiveDistanceReleaseWakeCursor, 0,
+            AdaptiveDistanceSleptCorpses.Length - 1);
         ++Scanned;
         Candidate = AdaptiveDistanceSleptCorpses[Index].Corpse;
         if (Candidate == None || Candidate.bDeleteMe ||
-            Candidate.Mesh == None || Candidate.Physics != PHYS_RigidBody)
+            Candidate.Mesh == None || Candidate.Physics != PHYS_RigidBody ||
+            GetAdaptiveCorpseActionId(Candidate) !=
+                AdaptiveDistanceSleptCorpses[Index].CorpseId)
         {
             RemoveAdaptiveDistanceSleptCorpseEntry(
                 Index, "adaptive_disabled");
+            AdaptiveDistanceReleaseWakeCursor =
+                AdaptiveDistanceSleptCorpses.Length > 0 ?
+                Index % AdaptiveDistanceSleptCorpses.Length : 0;
             continue;
         }
         if (!Candidate.Mesh.RigidBodyIsAwake())
         {
             if (!ReserveAdaptivePhysicsMutationForCurrentFrame())
             {
-                return WakeCount;
+                return 0;
             }
             Candidate.Mesh.WakeRigidBody();
-            if (Candidate.Mesh.RigidBodyIsAwake())
+            if (!Candidate.Mesh.RigidBodyIsAwake())
             {
-                Candidate.Mesh.bNoSkeletonUpdate = false;
-                if (bDetailedRuntimeDiagnostics)
-                {
-                    ++AdaptiveDistancePhysicsWakes;
-                }
-                ++WakeCount;
+                // Keep ownership until wake is verified, but let the next
+                // release turn reach another actor instead of retrying here.
+                AdaptiveDistanceReleaseWakeCursor =
+                    (Index + 1) % AdaptiveDistanceSleptCorpses.Length;
+                return 0;
             }
-            RemoveAdaptiveDistanceSleptCorpseEntry(
-                Index, "adaptive_disabled");
-            // Count attempts, not only successful readbacks, for the per-frame
-            // mutation bound. The repeating release timer handles the rest.
-            return WakeCount;
+            if (bDetailedRuntimeDiagnostics)
+            {
+                ++AdaptiveDistancePhysicsWakes;
+            }
+            ++WakeCount;
         }
+        Candidate.Mesh.bNoSkeletonUpdate = false;
         RemoveAdaptiveDistanceSleptCorpseEntry(
             Index, "adaptive_disabled");
+        AdaptiveDistanceReleaseWakeCursor =
+            AdaptiveDistanceSleptCorpses.Length > 0 ?
+            Index % AdaptiveDistanceSleptCorpses.Length : 0;
+        // Successful and failed attempts both yield within the frame budget.
+        if (WakeCount > 0)
+        {
+            return WakeCount;
+        }
     }
     if (AdaptiveDistanceSleptCorpses.Length == 0)
     {
+        AdaptiveDistanceReleaseWakeCursor = 0;
         ClearTimer(nameof(WakeAdaptiveDistanceSleptCorpseBatch), self);
         if (bDetailedRuntimeDiagnostics)
         {
