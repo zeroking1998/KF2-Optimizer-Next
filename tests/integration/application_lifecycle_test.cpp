@@ -400,12 +400,18 @@ int test_package_repair_shutdown() {
         auto release = std::unique_ptr<RepairPause, void (*)(RepairPause*)>{
             &scenario.pause, [](RepairPause* pause) { pause->release(); }};
         const auto hwnd = application.value().native_window_handle();
-        const auto button = node_center(hwnd, application.value().ui_model(),
-                                        "header-repair");
-        CHECK(button);
-        SendMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON,
-                     MAKELPARAM(button->x, button->y));
-        SendMessageW(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(button->x, button->y));
+        // Hidden CI windows need no mouse capture to activate the real action.
+        for (int step = 0; step < 64 &&
+             application.value().ui_model().focused_action() !=
+                 std::optional<std::string>{"header-repair"}; ++step) {
+            SendMessageW(hwnd, WM_KEYDOWN, VK_TAB, 0);
+        }
+        CHECK(application.value().ui_model().focused_action() ==
+              std::optional<std::string>{"header-repair"});
+        SendMessageW(hwnd, WM_KEYDOWN, VK_RETURN, 0);
+        CHECK(application.value().ui_model().notice().has_value());
+        CHECK(application.value().ui_model().notice()->code ==
+              L"PACKAGE_AUTO_REPAIR_STARTED");
         CHECK(scenario.pause.wait());
         SendMessageW(hwnd, WM_CLOSE, 0, 0);
         for (int frame = 0; frame < 60; ++frame) {
