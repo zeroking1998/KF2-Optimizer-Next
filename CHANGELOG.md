@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- All native build paths now share automatic binding to the exact local
+  telemetry module. Direct CMake and incremental builds no longer inherit
+  an outdated default hash; explicit mismatched pins fail during configuration.
 - Noisy game-log batches now compact their incomplete tail only once instead
   of moving the remaining buffer after every line. Session markers, receipts,
   partial lines and existing size limits are unchanged.

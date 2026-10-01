@@ -56,6 +56,15 @@ out/build/windows-x64-release/Release/KF2Optimizer.exe
 
 For a faster development build, replace `Release` with `Debug`.
 
+CMake derives the telemetry hash from the local compiled module for every
+build entry point, including direct CMake, Ninja, GUI checks and PGO. The
+default `KF2_OFFLINE_TELEMETRY_SHA256=AUTO` also follows module creation or
+replacement during incremental builds. An explicit hash remains supported,
+but configuration rejects it if it differs from the existing module. The
+normal scripts select `AUTO` to clear older cached pins. SDK-less developer
+builds remain supported; complete packaging still requires a source-verified
+SDK module.
+
 The one-click command accepts the same options. For example:
 
 ```powershell

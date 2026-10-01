@@ -15,7 +15,8 @@ if (-not $outputRoot.StartsWith($allowedRoot + [System.IO.Path]::DirectorySepara
     throw "Refusing to clean GUI output outside $allowedRoot"
 }
 
-cmake -S $projectRoot -B $buildRoot -A x64
+cmake -S $projectRoot -B $buildRoot -A x64 `
+    '-DKF2_OFFLINE_TELEMETRY_SHA256=AUTO'
 if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed' }
 cmake --build $buildRoot --config $Configuration --target kf2_direct2d_renderer_test
 if ($LASTEXITCODE -ne 0) { throw 'Renderer test build failed' }

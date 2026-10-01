@@ -37,16 +37,7 @@ if(NOT KF2_PGO_MODE STREQUAL "OFF")
     endif()
     cmake_path(NORMAL_PATH KF2_PGO_PGD)
 endif()
-set(KF2_OFFLINE_TELEMETRY_SHA256
-    "b4d826c1a64286b7f98634e13c5592486aed2e8c1fd162394a3be7e3b3f79300"
-    CACHE STRING "SHA-256 of the exact locally compiled offline telemetry module")
-string(LENGTH "${KF2_OFFLINE_TELEMETRY_SHA256}" KF2_TELEMETRY_HASH_LENGTH)
-if(NOT KF2_TELEMETRY_HASH_LENGTH EQUAL 64 OR
-   NOT KF2_OFFLINE_TELEMETRY_SHA256 MATCHES "^[0-9A-Fa-f]+$")
-    message(FATAL_ERROR "KF2_OFFLINE_TELEMETRY_SHA256 must be exactly 64 hexadecimal characters")
-endif()
-string(TOLOWER "${KF2_OFFLINE_TELEMETRY_SHA256}"
-    KF2_OFFLINE_TELEMETRY_SHA256)
+include("${PROJECT_SOURCE_DIR}/tools/telemetry_binding.cmake")
 set(KF2_RELEASE_REPOSITORY "" CACHE STRING "HTTPS GitHub repository used for exact-version release repair")
 if(KF2_RELEASE_REPOSITORY STREQUAL "")
     execute_process(
