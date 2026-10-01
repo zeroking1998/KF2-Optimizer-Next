@@ -48,7 +48,7 @@ Result<bool> PresentSource::start() {
     std::scoped_lock lock{mutex_};
     streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
     schema_failure_ = false;
-    ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
+    ++diagnostic_generation_; last_stream_.reset();
     invalidate_drain_locked();
     running_ = true;
     return Result<bool>::success(true);
@@ -56,14 +56,14 @@ Result<bool> PresentSource::start() {
 Result<bool> PresentSource::stop() {
     std::scoped_lock lock{mutex_};
     running_ = false; streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
-    ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
+    ++diagnostic_generation_; last_stream_.reset();
     invalidate_drain_locked();
     return Result<bool>::success(true);
 }
 void PresentSource::bind(SampleIdentity identity) {
     std::scoped_lock lock{mutex_};
     identity_ = identity; streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
-    ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
+    ++diagnostic_generation_; last_stream_.reset();
     schema_failure_ = false;
     invalidate_drain_locked();
 }
@@ -72,7 +72,7 @@ void PresentSource::reset_statistics() {
     streams_.clear();
     reported_loss_ = 0;
     loss_boundary_ns_ = 0;
-    ++diagnostic_generation_; last_stream_.reset(); diagnostic_boundary_ns_ = 0;
+    ++diagnostic_generation_; last_stream_.reset();
     invalidate_drain_locked();
 }
 bool PresentSource::ingest(const PresentEvent& event) {
@@ -91,11 +91,13 @@ bool PresentSource::ingest(const PresentEvent& event) {
         loss_boundary_ns_ = std::max(loss_boundary_ns_, event.monotonic_ns);
         // A late or untimed loss must not certify already admitted data.
         // This bounded stream walk runs only on loss, never on clean presents.
-        for (const auto& [stream_id, presents] : streams_) {
+        ++diagnostic_generation_;
+        for (auto& [stream_id, stream] : streams_) {
+            const auto& presents = stream.presents;
             if (!presents.empty()) loss_boundary_ns_ = std::max(
                 loss_boundary_ns_, presents.back().monotonic_ns);
+            stream.diagnostic_generation = diagnostic_generation_;
         }
-        ++diagnostic_generation_;
         invalidate_drain_locked();
         if (!event.completed) return false;
     }
@@ -108,10 +110,10 @@ bool PresentSource::ingest(const PresentEvent& event) {
                  candidate != streams_.end(); ++candidate) {
                 if (last_stream_ && candidate->first == *last_stream_) continue;
                 if (oldest_inactive == streams_.end() ||
-                    candidate->second.empty() ||
-                    (!oldest_inactive->second.empty() &&
-                     candidate->second.back().monotonic_ns <
-                         oldest_inactive->second.back().monotonic_ns)) {
+                    candidate->second.presents.empty() ||
+                    (!oldest_inactive->second.presents.empty() &&
+                     candidate->second.presents.back().monotonic_ns <
+                         oldest_inactive->second.presents.back().monotonic_ns)) {
                     oldest_inactive = candidate;
                 }
             }
@@ -119,13 +121,13 @@ bool PresentSource::ingest(const PresentEvent& event) {
             streams_.erase(oldest_inactive);
         }
         stream = streams_.try_emplace(event.stream_id).first;
-    }
-    if (last_stream_ && *last_stream_ != event.stream_id) {
-        ++diagnostic_generation_;
-        diagnostic_boundary_ns_ = std::max(diagnostic_boundary_ns_, event.monotonic_ns);
+        // A swapchain lifetime owns its diagnostic epoch. Interleaved events
+        // from another live chain do not interrupt this chain's windows.
+        stream->second.diagnostic_generation = ++diagnostic_generation_;
+        stream->second.boundary_ns = last_stream_ ? event.monotonic_ns : 0;
     }
     last_stream_ = event.stream_id;
-    auto& presents = stream->second;
+    auto& presents = stream->second.presents;
     const auto position = std::lower_bound(
         presents.begin(), presents.end(), event.monotonic_ns,
         [](const PresentTimestamp& present, std::uint64_t timestamp) {
@@ -161,7 +163,8 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
         bool selected_fresh = false;
         std::size_t selected_fast_count = 0;
         std::uint64_t selected_newest = 0;
-        for (const auto& [stream_id, presents] : streams_) {
+        for (const auto& [stream_id, stream] : streams_) {
+            const auto& presents = stream.presents;
             if (presents.empty()) continue;
             const auto newest = presents.back().monotonic_ns;
             if (newest < not_before_ns) continue;
@@ -402,24 +405,37 @@ PresentSource::Window PresentSource::measure_window(
     Window result;
     result.generation = diagnostic_generation_;
     if (!running_ || schema_failure_ || end_ns <= begin_ns ||
-        (reported_loss_ != 0 && begin_ns <= loss_boundary_ns_) ||
-        (diagnostic_boundary_ns_ >= begin_ns && diagnostic_boundary_ns_ <= end_ns))
+        (reported_loss_ != 0 && begin_ns <= loss_boundary_ns_))
         return result;
-    std::vector<PresentTimestamp> selected;
-    for (const auto& [stream_id, presents] : streams_) {
-        std::vector<PresentTimestamp> window;
-        std::copy_if(presents.begin(), presents.end(), std::back_inserter(window),
-            [=](const auto& p) {
-                return p.monotonic_ns >= begin_ns && p.monotonic_ns <= end_ns;
+    const Stream* selected_stream = nullptr;
+    std::deque<PresentTimestamp>::const_iterator selected_first, selected_end;
+    for (const auto& [stream_id, stream] : streams_) {
+        const auto& presents = stream.presents;
+        const auto first = std::lower_bound(presents.begin(), presents.end(),
+            begin_ns, [](const auto& present, std::uint64_t at) {
+                return present.monotonic_ns < at;
             });
-        if (window.size() > selected.size() ||
-            (window.size() == selected.size() && stream_id < result.stream_id)) {
-            selected = std::move(window);
+        const auto end = std::upper_bound(first, presents.end(), end_ns,
+            [](std::uint64_t at, const auto& present) {
+                return at < present.monotonic_ns;
+            });
+        const auto count = static_cast<std::size_t>(std::distance(first, end));
+        if (count > result.count ||
+            (count == result.count && stream_id < result.stream_id)) {
+            selected_stream = &stream;
+            selected_first = first;
+            selected_end = end;
+            result.count = count;
             result.stream_id = stream_id;
+            result.generation = stream.diagnostic_generation;
         }
     }
-    result.count = selected.size();
-    if (result.count < 2) return result;
+    if (!selected_stream || result.count < 2 ||
+        (selected_stream->boundary_ns >= begin_ns &&
+         selected_stream->boundary_ns <= end_ns)) return result;
+    // Copy only the selected interval, after binary-searching the existing
+    // sorted deques; unrelated chains no longer allocate/copy full windows.
+    const std::vector<PresentTimestamp> selected{selected_first, selected_end};
     result.span_ns = selected.back().monotonic_ns - selected.front().monotonic_ns;
     result.metrics = aggregate_presents(selected, identity_, end_ns, 100'000'000ULL);
     // Allow boundary quantization by one frame, but not a young or stale window.

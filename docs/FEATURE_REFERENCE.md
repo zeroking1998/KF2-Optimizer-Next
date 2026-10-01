@@ -26,6 +26,12 @@
 
 ### Native frame timing recovery
 
+Concurrent DXGI streams retain separate diagnostic lifetimes, so interleaved
+presents and unused secondary chains do not invalidate a selected stream's
+quality-response windows. Replaced or recreated selected streams, source
+resets, and real event loss remain inconclusive. Window selection uses the
+existing bounded stream cache and copies only the selected interval.
+
 An initial DXGI start failure and a completely silent startup session share
 the same three-second retry interval and limit of two retries. Recovery waits
 for the existing process-bound main-menu gate and keeps the same measurement

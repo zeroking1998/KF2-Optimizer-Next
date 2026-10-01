@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Concurrent DXGI streams no longer falsely interrupt Adaptive quality-response
+  windows. Only the selected stream's lifetime and real source loss invalidate
+  the comparison; unrelated streams no longer allocate copied windows.
 - Initial DXGI frame-timing failures now share the existing bounded startup
   retry, so a transient failure can recover FPS telemetry without restarting KF2.
 - Verified online Adaptive graphics changes now use the same session checks
