@@ -107,7 +107,6 @@ struct UiStatus {
     std::wstring adaptive_evidence{L"NOT_AVAILABLE"};
     std::uint64_t adaptive_restore_generation{0};
     bool adaptive_shadow_mode{false};
-    std::wstring adaptive_aggressiveness{L"balanced"};
     int adaptive_minimum_quality{10};
     int adaptive_maximum_quality{100};
     int adaptive_quality_change_budget{2};

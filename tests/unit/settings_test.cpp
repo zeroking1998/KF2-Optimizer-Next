@@ -111,10 +111,30 @@ int main() {
         "adaptive_quality_change_budget=3\nadaptive_headroom_percent=12\n"
         "adaptive_shadow_mode=true\n");
     CHECK(adaptive.has_value());
-    CHECK(adaptive.value().adaptive_aggressiveness == "aggressive");
+    CHECK(!adaptive.value().extras.contains("adaptive_aggressiveness"));
     CHECK(adaptive.value().adaptive_minimum_quality == 55);
     CHECK(adaptive.value().adaptive_maximum_quality == 95);
     CHECK(adaptive.value().adaptive_optimization_enabled);
+    for (const auto legacy : {"conservative", "balanced", "aggressive"}) {
+        const auto migrated_profile = parse_settings(
+            std::string{"schema_version=1\nadaptive_aggressiveness="} +
+            legacy + "\ntarget_fps=119\ncorpse_limit=1272\ncustom_key=kept\n");
+        CHECK(migrated_profile.has_value());
+        CHECK(migrated_profile.value().target_fps == 119);
+        CHECK(migrated_profile.value().corpse_limit == 1272);
+        CHECK(migrated_profile.value().extras.at("custom_key") == "kept");
+        CHECK(!migrated_profile.value().extras.contains("adaptive_aggressiveness"));
+        const auto canonical = serialize_settings(migrated_profile.value());
+        CHECK(canonical.find("adaptive_aggressiveness=") == std::string::npos);
+        const auto reloaded = parse_settings(canonical);
+        CHECK(reloaded.has_value());
+        CHECK(serialize_settings(reloaded.value()) == canonical);
+    }
+    CHECK(!parse_settings(
+        "schema_version=1\nadaptive_aggressiveness=unknown\n").has_value());
+    CHECK(!parse_settings(
+        "schema_version=1\nadaptive_aggressiveness=balanced\n"
+        "adaptive_aggressiveness=aggressive\n").has_value());
     const auto adaptive_off = parse_settings(
         "schema_version=1\nadaptive_optimization_enabled=false\n");
     CHECK(adaptive_off.has_value());
@@ -261,7 +281,6 @@ int main() {
           "debug_runtime_diagnostics=false\n"
           "debug_corpse_physics_control=false\n"
           "restore_config_after_game=true\n"
-          "adaptive_aggressiveness=balanced\n"
           "adaptive_minimum_quality=10\nadaptive_maximum_quality=100\n"
           "adaptive_quality_change_budget=2\nadaptive_headroom_percent=8\n"
           "adaptive_emergency_enabled=true\n"

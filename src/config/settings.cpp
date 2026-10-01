@@ -208,7 +208,8 @@ Result<Settings> parse_settings(std::string_view text) {
                     return invalid_settings(
                         L"adaptive_aggressiveness is invalid");
                 }
-                settings.adaptive_aggressiveness = value;
+                // Retired hidden profile. Validate legacy input, but do not
+                // retain it or let it change the fixed controller policy.
             } else if (key == "adaptive_minimum_quality") {
                 const auto parsed = parse_integer(value);
                 if (!parsed.has_value() || parsed.value() < 10 ||
@@ -432,8 +433,6 @@ std::string serialize_settings(const Settings& settings) {
            << '\n'
            << "restore_config_after_game="
            << (settings.restore_config_after_game ? "true" : "false") << '\n'
-           << "adaptive_aggressiveness="
-           << settings.adaptive_aggressiveness << '\n'
            << "adaptive_minimum_quality="
            << settings.adaptive_minimum_quality << '\n'
            << "adaptive_maximum_quality="

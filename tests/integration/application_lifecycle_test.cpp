@@ -21,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -2000,7 +2001,96 @@ int test_startup_session_marker() {
     return EXIT_SUCCESS;
 }
 
+int test_legacy_adaptive_profile() {
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"lap" /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" +
+         std::to_wstring(GetTickCount64()));
+    const std::string visible =
+        "schema_version=1\ntarget_fps=119\ncorpse_limit=1272\n"
+        "adaptive_minimum_quality=20\nadaptive_maximum_quality=90\n"
+        "adaptive_quality_change_budget=4\nadaptive_headroom_percent=12\n"
+        "adaptive_emergency_enabled=false\n"
+        "adaptive_quality_recovery_enabled=false\n"
+        "adaptive_manual_locks_enabled=false\n"
+        "adaptive_calibration_enabled=false\nadaptive_logging=false\n"
+        "custom_key=kept\n";
+    const auto reference = kf2::config::parse_settings(visible);
+    CHECK(reference.has_value());
+    const auto policy_signature = [](const kf2::optimizer::AdaptivePolicy& policy) {
+        return std::tuple{
+            policy.target_fps, policy.aggressiveness, policy.minimum_quality,
+            policy.maximum_quality, policy.quality_change_budget,
+            policy.performance_headroom, policy.emergency_enabled,
+            policy.quality_recovery_enabled, policy.manual_locks_enabled,
+            policy.shadow_mode, policy.calibration_enabled, policy.adaptive_logging,
+            policy.freshness_limit_ns, policy.controller_iteration_budget_ns,
+        };
+    };
+    const auto expected = kf2::app::adaptive_policy_from(reference.value());
+    CHECK(expected.target_fps == 119);
+    CHECK(expected.minimum_quality == 20);
+    CHECK(expected.maximum_quality == 90);
+    CHECK(expected.quality_change_budget == 4);
+    CHECK(expected.performance_headroom == 0.12);
+    CHECK(!expected.quality_recovery_enabled);
+    for (const auto legacy : {"conservative", "balanced", "aggressive"}) {
+        const auto document = visible + "adaptive_aggressiveness=" + legacy + "\n";
+        const auto parsed = kf2::config::parse_settings(document);
+        CHECK(parsed.has_value());
+        CHECK(policy_signature(kf2::app::adaptive_policy_from(parsed.value())) ==
+              policy_signature(expected));
+        const auto path = root / legacy / L"settings.ini";
+        write_bytes(path, document);
+        struct ReadLock {
+            HANDLE handle{INVALID_HANDLE_VALUE};
+            ~ReadLock() {
+                if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+            }
+            void release() {
+                CloseHandle(handle);
+                handle = INVALID_HANDLE_VALUE;
+            }
+        } locked{CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
+        CHECK(locked.handle != INVALID_HANDLE_VALUE);
+        const auto blocked = kf2::app::load_or_create_settings(path);
+        CHECK(!blocked.has_value());
+        CHECK(read_bytes(path) == document);
+        locked.release();
+        const auto migrated = kf2::app::load_or_create_settings(path);
+        CHECK(migrated.has_value());
+        CHECK(policy_signature(kf2::app::adaptive_policy_from(migrated.value())) ==
+              policy_signature(expected));
+        CHECK(migrated.value().corpse_limit == 1272);
+        CHECK(migrated.value().extras.at("custom_key") == "kept");
+        const auto canonical = read_bytes(path);
+        CHECK(canonical == kf2::config::serialize_settings(reference.value()));
+        CHECK(canonical.find("adaptive_aggressiveness=") == std::string::npos);
+        // Already migrated settings remain readable even when replacement is
+        // blocked, proving that normal reload does not rewrite the file.
+        locked.handle = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        CHECK(locked.handle != INVALID_HANDLE_VALUE);
+        const auto reloaded = kf2::app::load_or_create_settings(path);
+        CHECK(reloaded.has_value());
+        CHECK(policy_signature(kf2::app::adaptive_policy_from(reloaded.value())) ==
+              policy_signature(expected));
+        CHECK(read_bytes(path) == canonical);
+    }
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--legacy-adaptive-profile") {
+        try {
+            return test_legacy_adaptive_profile();
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << '\n';
+            return EXIT_FAILURE;
+        }
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--startup-session-marker") {
         try {
             return test_startup_session_marker();
@@ -2453,7 +2543,6 @@ int main(int argc, char** argv) {
         "debug_runtime_diagnostics=false\n"
         "debug_corpse_physics_control=false\n"
         "restore_config_after_game=true\n"
-        "adaptive_aggressiveness=balanced\n"
         "adaptive_minimum_quality=10\nadaptive_maximum_quality=100\n"
         "adaptive_quality_change_budget=2\nadaptive_headroom_percent=8\n"
         "adaptive_emergency_enabled=true\n"

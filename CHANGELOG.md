@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Retired hidden Adaptive aggressiveness profiles. Legacy values migrate away,
+  so identical user settings now use the same fixed controller policy instead
+  of different behavior inherited from old portable settings.
 - Failed application initialization no longer creates a false interrupted-session
   marker. Genuine prior interruption evidence remains unchanged until startup
   reaches the operational boundary.
