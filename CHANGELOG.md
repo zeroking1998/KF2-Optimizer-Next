@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Failed graphics preparation now reports both the graphics error and loss
+  of protected launch preparation, with a recovery-required Repair instruction
+  instead of an incomplete “graphics unchanged” notice.
 - Failed protected launch preparation now distinguishes verified rollback
   from recovery-required state. Startup no longer claims safe restoration
   when rollback failed; the authoritative recovery snapshot is retained.
