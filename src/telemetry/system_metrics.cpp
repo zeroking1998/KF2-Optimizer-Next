@@ -347,9 +347,9 @@ void detail::ThreadPressureCache::miss(std::uint64_t now_ms) noexcept {
 class ProcessMetricSampler::ThreadTracker final {
 public:
     ~ThreadTracker() {
-        for (const auto& [thread_id, handle] : handles_) {
+        for (const auto& [thread_id, thread] : handles_) {
             static_cast<void>(thread_id);
-            CloseHandle(handle);
+            CloseHandle(thread.handle);
         }
     }
 
@@ -368,38 +368,72 @@ public:
         CloseHandle(snapshot);
 
         for (auto iterator = handles_.begin(); iterator != handles_.end();) {
-            if (current.contains(iterator->first)) {
+            if (current.contains(iterator->first) &&
+                WaitForSingleObject(iterator->second.handle, 0) == WAIT_TIMEOUT) {
                 ++iterator;
             } else {
-                CloseHandle(iterator->second);
+                CloseHandle(iterator->second.handle);
                 iterator = handles_.erase(iterator);
             }
         }
         for (const auto thread_id : current) {
             if (handles_.contains(thread_id)) continue;
             const HANDLE thread = OpenThread(
-                THREAD_QUERY_LIMITED_INFORMATION, FALSE, thread_id);
-            if (thread) handles_.emplace(thread_id, thread);
+                THREAD_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, thread_id);
+            if (!thread) continue;
+            // The snapshot can outlive a thread. Check both lifetime and owner
+            // before accepting a handle opened by a potentially reused ID.
+            if (GetProcessIdOfThread(thread) != pid ||
+                WaitForSingleObject(thread, 0) != WAIT_TIMEOUT) {
+                CloseHandle(thread);
+                continue;
+            }
+            handles_.emplace(thread_id, Thread{thread, std::nullopt});
         }
         return true;
     }
 
-    std::unordered_map<std::uint32_t, std::uint64_t> sample() const {
-        std::unordered_map<std::uint32_t, std::uint64_t> ticks;
-        ticks.reserve(handles_.size());
-        for (const auto& [thread_id, thread] : handles_) {
+    std::optional<detail::ThreadPressureMetrics> sample(std::uint64_t elapsed_ms) {
+        std::optional<double> busiest;
+        double summed_thread_percent = 0.0;
+        std::uint32_t active_threads = 0;
+        for (auto& [thread_id, thread] : handles_) {
+            static_cast<void>(thread_id);
             FILETIME creation{}, exit{}, kernel{}, user{};
-            if (GetThreadTimes(thread, &creation, &exit, &kernel, &user)) {
-                ticks.emplace(thread_id, value(kernel) + value(user));
+            if (!GetThreadTimes(thread.handle, &creation, &exit, &kernel, &user)) {
+                thread.previous.reset();
+                continue;
+            }
+            const detail::ThreadCpuTimes current{
+                value(creation), value(kernel) + value(user)};
+            const auto percent = thread.previous
+                ? detail::calculate_thread_cpu_percent(
+                      *thread.previous, current, elapsed_ms)
+                : std::nullopt;
+            thread.previous = current;
+            if (percent) {
+                summed_thread_percent += *percent;
+                if (*percent >= 1.0) ++active_threads;
+                if (!busiest || *percent > *busiest) busiest = percent;
             }
         }
-        return ticks;
+        if (!busiest) return std::nullopt;
+        return detail::ThreadPressureMetrics{
+            *busiest, summed_thread_percent / 100.0,
+            summed_thread_percent > 0.0
+                ? std::clamp(*busiest * 100.0 / summed_thread_percent, 0.0, 100.0)
+                : 0.0,
+            active_threads};
     }
 
     [[nodiscard]] bool empty() const { return handles_.empty(); }
 
 private:
-    std::unordered_map<std::uint32_t, HANDLE> handles_;
+    struct Thread {
+        HANDLE handle;
+        std::optional<detail::ThreadCpuTimes> previous;
+    };
+    std::unordered_map<std::uint32_t, Thread> handles_;
 };
 
 Result<HardwareInventory> query_hardware_inventory() {
@@ -475,6 +509,14 @@ std::optional<double> calculate_thread_cpu_percent(
     const double thread_ticks = static_cast<double>(
         current_thread_ticks - previous_thread_ticks);
     return std::clamp(thread_ticks * 100.0 / elapsed_ticks, 0.0, 100.0);
+}
+
+std::optional<double> detail::calculate_thread_cpu_percent(
+    ThreadCpuTimes previous, ThreadCpuTimes current, std::uint64_t elapsed_ms) {
+    if (previous.creation_ticks == 0 ||
+        previous.creation_ticks != current.creation_ticks) return std::nullopt;
+    return telemetry::calculate_thread_cpu_percent(
+        previous.cpu_ticks, current.cpu_ticks, elapsed_ms);
 }
 
 ProcessMetricSampler::ProcessMetricSampler(game::GameProcessIdentity identity)
@@ -556,42 +598,13 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
         // from the previous refresh. Continue sampling them and retry the
         // membership refresh on the next telemetry tick.
         if (!thread_tracker_->empty()) {
-            auto current_thread_ticks = thread_tracker_->sample();
-            if (previous_thread_sample_ms_ &&
-                thread_now_ms > *previous_thread_sample_ms_) {
-                std::optional<double> busiest;
-                double summed_thread_percent = 0.0;
-                std::uint32_t active_threads = 0;
-                const auto elapsed_ms =
-                    thread_now_ms - *previous_thread_sample_ms_;
-                for (const auto& [thread_id, current_ticks] :
-                     current_thread_ticks) {
-                    const auto previous = previous_thread_ticks_.find(thread_id);
-                    if (previous == previous_thread_ticks_.end()) continue;
-                    const auto percent = calculate_thread_cpu_percent(
-                        previous->second, current_ticks, elapsed_ms);
-                    if (percent) {
-                        summed_thread_percent += *percent;
-                        if (*percent >= 1.0) ++active_threads;
-                        if (!busiest || *percent > *busiest) {
-                            busiest = percent;
-                        }
-                    }
-                }
-                if (busiest) {
-                    thread_pressure_cache_.observe({
-                        *busiest,
-                        summed_thread_percent / 100.0,
-                        summed_thread_percent > 0.0
-                            ? std::clamp(*busiest * 100.0 /
-                                             summed_thread_percent,
-                                         0.0, 100.0)
-                            : 0.0,
-                        active_threads}, thread_now_ms);
-                    thread_pressure_observed = true;
-                }
+            const auto elapsed_ms = previous_thread_sample_ms_ &&
+                thread_now_ms > *previous_thread_sample_ms_
+                ? thread_now_ms - *previous_thread_sample_ms_ : 0;
+            if (const auto pressure = thread_tracker_->sample(elapsed_ms)) {
+                thread_pressure_cache_.observe(*pressure, thread_now_ms);
+                thread_pressure_observed = true;
             }
-            previous_thread_ticks_ = std::move(current_thread_ticks);
         }
         previous_thread_sample_ms_ = thread_now_ms;
         if (!thread_pressure_observed) {

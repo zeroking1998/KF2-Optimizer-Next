@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Thread CPU telemetry now keeps its measurement baseline with the verified
+  thread handle, resets it for a changed thread instance, and releases exited
+  threads during membership refresh without rebuilding a sample hash table.
 - Adaptive now honors disabled automatic quality recovery. Confirmed pressure
   can still reduce quality, and disabling Adaptive or rolling back an ineffective
   change still restores protected settings.

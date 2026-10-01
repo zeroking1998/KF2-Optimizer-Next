@@ -2,7 +2,6 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <unordered_map>
 #include <vector>
 #include "kf2/core/result.hpp"
 #include "kf2/game/game_session.hpp"
@@ -64,6 +63,13 @@ struct SystemMemoryMetrics {
     std::uint64_t current_thread_ticks,
     std::uint64_t elapsed_ms);
 namespace detail {
+struct ThreadCpuTimes {
+    std::uint64_t creation_ticks{0};
+    std::uint64_t cpu_ticks{0};
+};
+[[nodiscard]] std::optional<double> calculate_thread_cpu_percent(
+    ThreadCpuTimes previous, ThreadCpuTimes current, std::uint64_t elapsed_ms);
+
 struct ProcessorGroupMask {
     std::uint16_t group{0};
     std::uintptr_t mask{0};
@@ -117,7 +123,6 @@ private:
     std::optional<CpuTimes> previous_;
     std::optional<std::uint64_t> previous_thread_sample_ms_;
     std::optional<std::uint64_t> previous_thread_refresh_ms_;
-    std::unordered_map<std::uint32_t, std::uint64_t> previous_thread_ticks_;
     std::unique_ptr<ThreadTracker> thread_tracker_;
     detail::ThreadPressureCache thread_pressure_cache_;
     bool cpu_capacity_sampled_{false};
