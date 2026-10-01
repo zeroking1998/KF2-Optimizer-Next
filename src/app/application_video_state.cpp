@@ -321,14 +321,20 @@ void UiRuntime::save_video_selection() {
             reload_video_settings();
         }
     }
+    const bool recovery_required = !result.has_value() &&
+        (result.error().code == ErrorCode::recovery_required ||
+         model.recovery_required());
     model.set_notice({
         result.has_value() ? ui::NoticeSeverity::info
                            : ui::NoticeSeverity::warning,
-        result.has_value() ? L"GRAPHICS_SAVED" : L"GRAPHICS_SAVE_FAILED",
+        result.has_value() ? L"GRAPHICS_SAVED"
+            : recovery_required ? L"GRAPHICS_PROTECTED_LAUNCH_RESTORE_FAILED"
+                                : L"GRAPHICS_SAVE_FAILED",
         result.has_value()
             ? L"KF2 graphics saved and verified. A restore backup is available."
-            : L"Graphics were not changed: " + result.error().message,
-        L""});
+            : recovery_required ? result.error().message
+                : L"Graphics were not changed: " + result.error().message,
+        recovery_required ? L"Run Repair before starting KF2." : L""});
     invalidate();
 }
 
@@ -381,38 +387,59 @@ Result<config::ApplyResult> UiRuntime::apply_video_settings() {
     }
 
     const bool rebuild_protected_launch = session_config_snapshot.has_value();
+    const auto fail_before_apply = [this, rebuild_protected_launch](
+                                      const Error& error) {
+        if (rebuild_protected_launch) {
+            const auto restored = prepare_automatic_external_launch_profile();
+            if (!restored.has_value() || !restored.value()) {
+                model.set_recovery_required(true);
+                return Result<config::ApplyResult>::failure({
+                    ErrorCode::recovery_required,
+                    L"Graphics preparation failed: " + error.message +
+                        L"; the next protected launch could not be prepared: " +
+                        (restored.has_value()
+                            ? L"Protected launch capabilities are unavailable"
+                            : restored.error().message),
+                    error.native_code});
+            }
+        }
+        return Result<config::ApplyResult>::failure(error);
+    };
     const auto desired = *video_pending;
     const auto staged_base = *video_saved;
     if (rebuild_protected_launch) {
         if (!restore_protected_session_config(
                 L"Explicit graphics settings changed before KF2 start")) {
             return Result<config::ApplyResult>::failure({
-                ErrorCode::io_failure,
+                ErrorCode::recovery_required,
                 L"The prepared KF2 session could not be restored before applying graphics settings",
                 0});
         }
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+        if (video_preapply_probe_for_testing) video_preapply_probe_for_testing(
+            VideoPreapplyStage::restored_read);
+#endif
         const auto original = game::read_video_settings(
             installation->config_root);
         if (!original.has_value()) {
-            static_cast<void>(prepare_automatic_external_launch_profile());
-            return Result<config::ApplyResult>::failure(original.error());
+            return fail_before_apply(original.error());
         }
         const auto rebased = game::rebase_video_changes(
             original.value(), staged_base, desired);
         if (!rebased.has_value()) {
-            static_cast<void>(prepare_automatic_external_launch_profile());
-            return Result<config::ApplyResult>::failure(rebased.error());
+            return fail_before_apply(rebased.error());
         }
         video_saved = original.value();
         video_pending = rebased.value();
     }
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+    if (video_preapply_probe_for_testing) video_preapply_probe_for_testing(
+        VideoPreapplyStage::preview_build);
+#endif
     auto prepared = game::build_video_preview(
         installation->config_root, *video_pending, &*video_saved);
     if (!prepared.has_value()) {
-        if (rebuild_protected_launch) {
-            static_cast<void>(prepare_automatic_external_launch_profile());
-        }
-        return Result<config::ApplyResult>::failure(prepared.error());
+        return fail_before_apply(prepared.error());
     }
     preview = std::move(prepared.value());
     preview_context = L"Explicit KF2 video settings";

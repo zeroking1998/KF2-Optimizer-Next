@@ -53,6 +53,8 @@ session files. The pre-session snapshot is authoritative.
 Failed pre-launch preparation checks restoration before reporting safe rollback.
 Unconfirmed restoration preserves the snapshot, marks recovery required and
 instructs the user not to start KF2 until Repair verifies protected state.
+Graphics changes that temporarily dismantle a prepared launch also check its
+re-preparation; a second failure is reported separately and requires Repair.
 
 Security issues that could cross these boundaries should follow
 [SECURITY.md](../SECURITY.md).

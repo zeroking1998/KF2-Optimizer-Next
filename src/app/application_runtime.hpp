@@ -111,6 +111,10 @@ enum class VideoSyncDisposition {
     hard_failure,
 };
 
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+enum class VideoPreapplyStage { restored_read, preview_build };
+#endif
+
 struct AdaptiveRuntimePendingRequest final {
     std::uint64_t sequence{0};
     std::uint64_t action_id{0};
@@ -347,6 +351,7 @@ struct UiRuntime {
     std::optional<game::VideoSettings> video_pending;
 #if defined(KF2_APPLICATION_VIDEO_TESTING)
     std::function<void()> video_sync_before_verification_for_testing;
+    std::function<void(VideoPreapplyStage)> video_preapply_probe_for_testing;
 #endif
     std::optional<game::GameMenuGraphicsReadback> game_menu_graphics_readback;
     // Keep the temporary live profile separate from the user's saved graphics.
