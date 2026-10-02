@@ -83,6 +83,61 @@ function KF2OptimizerOnlineContextInteraction GetOnlineMonitor()
     return OnlineMonitor;
 }
 
+function bool RestoreAdaptiveAtMainMenu(
+    string Token, int Sequence, WorldInfo CurrentWorld)
+{
+    local Engine CurrentEngine;
+    local KF2OptimizerTelemetryInteraction OfflineInteraction;
+    local KF2OptimizerOnlineContextInteraction OnlineInteraction;
+    local bool bOfflineRestored;
+
+    if (Len(class'KF2OptimizerTelemetryProbe'.default.AdaptiveControlToken) != 32 ||
+        Token != class'KF2OptimizerTelemetryProbe'.default.AdaptiveControlToken ||
+        Sequence <= 0 || CurrentWorld == None ||
+        CurrentWorld.NetMode != NM_Standalone ||
+        !(Left(CurrentWorld.GetMapName(true), 10) ~= "KFMainMenu"))
+    {
+        return false;
+    }
+    CurrentEngine = class'Engine'.static.GetEngine();
+    if (CurrentEngine == None || CurrentEngine.GameViewport != self)
+    {
+        return false;
+    }
+    OnlineInteraction = GetOnlineMonitor();
+    if (OnlineInteraction == None)
+    {
+        return false;
+    }
+    // A first menu has neither an offline interaction nor a gameplay probe.
+    // If a previous map created one, restore its retained process ownership.
+    OfflineInteraction = KF2OptimizerTelemetryInteraction(FindObject(
+        PathName(self)$".KF2OptimizerTelemetryInteraction",
+        class'KF2OptimizerTelemetryInteraction'));
+    bOfflineRestored = true;
+    if (OfflineInteraction != None)
+    {
+        bOfflineRestored = class'KF2OptimizerAdaptiveGraphics'.static.
+            RestoreOriginal(OfflineInteraction.ProcessAdaptiveGraphicsState);
+        OfflineInteraction.bProcessGraphicsRestorePending = !bOfflineRestored;
+        OfflineInteraction.ResetProcessGraphicsRestoreRetry();
+    }
+    if (!bOfflineRestored ||
+        !OnlineInteraction.RestoreOnlineSessionState(CurrentWorld, "main_menu"))
+    {
+        return false;
+    }
+    if (OfflineInteraction != None)
+    {
+        OfflineInteraction.SetProcessAdaptiveRuntimeEnabled(false);
+    }
+    // Idempotent restoration needs no shared counter after an app restart and
+    // never changes the FPS limit or its process-owned readback sequence.
+    `log("KF2OPT_ADAPTIVE_BRIDGE state=restored boundary=main_menu"$
+         " sequence="$Sequence$" readback=verified ownership=released");
+    return true;
+}
+
 event bool Init(out string OutError)
 {
     local KF2OptimizerGraphicsInteraction Monitor;

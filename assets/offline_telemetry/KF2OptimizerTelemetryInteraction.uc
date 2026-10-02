@@ -81,51 +81,6 @@ function SetProcessAdaptiveRuntimeEnabled(bool bEnabled)
     bProcessAdaptiveRuntimeEnabled = bEnabled;
 }
 
-function bool RestoreAdaptiveAtMainMenu(
-    string Token, int Sequence, WorldInfo CurrentWorld)
-{
-    local Engine CurrentEngine;
-    local KF2OptimizerGraphicsViewport CurrentViewport;
-    local KF2OptimizerOnlineContextInteraction OnlineInteraction;
-
-    if (Len(class'KF2OptimizerTelemetryProbe'.default.AdaptiveControlToken) != 32 ||
-        Token != class'KF2OptimizerTelemetryProbe'.default.AdaptiveControlToken ||
-        Sequence <= 0 ||
-        CurrentWorld == None || CurrentWorld.NetMode != NM_Standalone ||
-        !(Left(CurrentWorld.GetMapName(true), 10) ~= "KFMainMenu"))
-    {
-        return false;
-    }
-    CurrentEngine = class'Engine'.static.GetEngine();
-    CurrentViewport = KF2OptimizerGraphicsViewport(Outer);
-    if (CurrentEngine == None || CurrentEngine.GameViewport != Outer ||
-        CurrentViewport == None || GlobalInteractions.Find(self) == -1)
-    {
-        return false;
-    }
-    OnlineInteraction = CurrentViewport.GetOnlineMonitor();
-    if (OnlineInteraction == None)
-    {
-        return false;
-    }
-    // The menu has no gameplay probe. Restore the existing process snapshots,
-    // including ownership retained after a failed world-teardown readback.
-    // This restore is idempotent; a restarted app need not share a counter.
-    // It never changes the FPS limit or its readback sequence.
-    bProcessGraphicsRestorePending = !class'KF2OptimizerAdaptiveGraphics'.static.
-        RestoreOriginal(ProcessAdaptiveGraphicsState);
-    ResetProcessGraphicsRestoreRetry();
-    if (bProcessGraphicsRestorePending ||
-        !OnlineInteraction.RestoreOnlineSessionState(CurrentWorld, "main_menu"))
-    {
-        return false;
-    }
-    SetProcessAdaptiveRuntimeEnabled(false);
-    `log("KF2OPT_ADAPTIVE_BRIDGE state=restored boundary=main_menu"$
-         " sequence="$Sequence$" readback=verified ownership=released");
-    return true;
-}
-
 function ReportOptimizerContextState(string State)
 {
     if (OptimizerContextState ~= State)
