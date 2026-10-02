@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- GPU counter sampling now reuses its buffers and remembers parsed counter
+  identities instead of repeatedly allocating and parsing unchanged names.
+  Measurements, GPU attribution and sampling cadence remain unchanged.
 - DXGI live statistics now share one interval sort for their overlapping
   windows instead of rebuilding four independent arrays. FPS, 1% lows,
   percentiles, freshness and diagnostic comparisons are unchanged.

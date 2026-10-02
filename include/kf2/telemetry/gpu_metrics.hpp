@@ -12,6 +12,21 @@
 #include "kf2/telemetry/telemetry_snapshot.hpp"
 
 namespace kf2::telemetry {
+#ifdef KF2_PDH_GPU_TESTING
+namespace detail {
+// Native boundary replacement for deterministic tests only. The application
+// calls PDH directly and contains neither this table nor parser counters.
+struct PdhGpuApi final {
+    decltype(&PdhOpenQueryW) open{PdhOpenQueryW};
+    decltype(&PdhAddEnglishCounterW) add{PdhAddEnglishCounterW};
+    decltype(&PdhCollectQueryData) collect{PdhCollectQueryData};
+    decltype(&PdhGetFormattedCounterArrayW) array{PdhGetFormattedCounterArrayW};
+    decltype(&PdhCloseQuery) close{PdhCloseQuery};
+    void (*before_parse)(std::wstring_view){nullptr};
+};
+void set_pdh_gpu_api_for_testing(const PdhGpuApi& api) noexcept;
+}  // namespace detail
+#endif
 struct GpuInstanceIdentity {
     std::uint32_t pid{0};
     std::uint64_t adapter_luid{0};
@@ -174,8 +189,13 @@ public:
     [[nodiscard]] static Result<PdhGpuSampler> create(std::uint32_t pid,
                                                        std::uint64_t adapter_luid);
     [[nodiscard]] Result<GpuMetrics> sample();
+#ifdef KF2_PDH_GPU_TESTING
+    [[nodiscard]] std::size_t cached_instance_count_for_testing() const noexcept;
+#endif
 private:
-    PdhGpuSampler() = default;
+    struct Storage;
+    PdhGpuSampler();
+    std::unique_ptr<Storage> storage_;
     PDH_HQUERY query_{};
     PDH_HCOUNTER utilization_{};
     PDH_HCOUNTER dedicated_{};
