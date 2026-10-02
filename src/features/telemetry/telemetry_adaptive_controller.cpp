@@ -54,6 +54,13 @@ void UiRuntime::update_adaptive_controller(
         return;
     }
     status.adaptive_optimization_enabled = true;
+    if (live_frame_rate_unsettled()) {
+        status.adaptive_state = L"observing";
+        status.adaptive_action = L"hold";
+        status.adaptive_reason = L"Waiting for a confirmed native FPS limit";
+        model.set_status(std::move(status));
+        return;
+    }
     if (reset_adaptive_frame_window_for_rate_mode_change(
             now_ns, active_gameplay)) {
         status.adaptive_state = L"observing";

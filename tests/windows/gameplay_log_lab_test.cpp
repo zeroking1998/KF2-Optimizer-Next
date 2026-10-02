@@ -1000,7 +1000,7 @@ int main() {
         "LastObservedRealTime = CurrentWorld.RealTimeSeconds;",
         graphics_world_reset) < graphics_timer_guard);
     CHECK(graphics_interaction_source.find(
-        "KF2OPT_GFX_MENU schema=2 state=applied") != std::string::npos);
+        "KF2OPT_GFX_MENU schema=3 state=applied") != std::string::npos);
     CHECK(graphics_interaction_source.find(
         "function bool EnsureTurretWeaponMaterial(KFWeapon Weapon)") !=
           std::string::npos);
@@ -1419,6 +1419,39 @@ int main() {
           std::string::npos);
     CHECK(graphics_viewport_source.find("var WorldInfo") == std::string::npos);
     CHECK(graphics_viewport_source.find("var Actor") == std::string::npos);
+    const auto frame_rate_start = graphics_viewport_source.find(
+        "function string ApplyRuntimeFrameRate(");
+    const auto frame_rate_end = graphics_viewport_source.find(
+        "function KF2OptimizerOnlineContextInteraction", frame_rate_start);
+    CHECK(frame_rate_start != std::string::npos &&
+          frame_rate_end != std::string::npos);
+    const auto frame_rate_body = graphics_viewport_source.substr(
+        frame_rate_start, frame_rate_end - frame_rate_start);
+    CHECK(frame_rate_body.find("Sequence <= FrameRateLastSequence") != std::string::npos);
+    CHECK(frame_rate_body.find("TargetFPS < 30 || TargetFPS > 240") != std::string::npos);
+    CHECK(frame_rate_body.find("CurrentEngine.GameViewport != self") != std::string::npos);
+    CHECK(frame_rate_body.find("CurrentEngine.MaxSmoothedFrameRate = float(TargetFPS)") !=
+          std::string::npos);
+    CHECK(frame_rate_body.find("CurrentEngine.MinSmoothedFrameRate = 22.0") !=
+          std::string::npos);
+    CHECK(frame_rate_body.find("CurrentEngine.bSmoothFrameRate = true") != std::string::npos);
+    CHECK(frame_rate_body.find("default.AdaptiveTargetFPS = TargetFPS") != std::string::npos);
+    CHECK(frame_rate_body.find("SaveConfig(") == std::string::npos);
+    CHECK(frame_rate_body.find("SetPhysics(") == std::string::npos);
+    CHECK(frame_rate_body.find("ConsoleCommand(") == std::string::npos);
+    CHECK(frame_rate_body.find("return \"restored\"") != std::string::npos);
+    CHECK(frame_rate_body.find("return \"unknown\"") != std::string::npos);
+    for (const auto& fps_connection : {connection_source,
+                                      online_graphics_connection_source}) {
+        CHECK(fps_connection.find("Resource == \"frame_rate\"") != std::string::npos);
+        CHECK(fps_connection.find("SequenceText == string(Sequence)") != std::string::npos);
+        CHECK(fps_connection.find("QualityText == string(Quality)") != std::string::npos);
+        CHECK(fps_connection.find("ApplyRuntimeFrameRate(Token, Sequence, Quality)") !=
+              std::string::npos);
+    }
+    CHECK(telemetry_source.find(
+        "float(class'KF2OptimizerTelemetryProbe'.default.AdaptiveTargetFPS)") !=
+          std::string::npos);
     const auto maximum_clear_start = online_context_source.find(
         "function ClearOnlineCorpseMaximumSnapshot()");
     const auto maximum_clear_end = online_context_source.find(

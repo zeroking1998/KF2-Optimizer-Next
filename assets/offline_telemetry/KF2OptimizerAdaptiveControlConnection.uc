@@ -87,6 +87,8 @@ event ReceivedLine(string Line)
     local GameViewportClient CurrentViewport;
     local KF2OptimizerTelemetryInteraction CurrentInteraction;
     local string InteractionPath;
+    local KF2OptimizerGraphicsViewport FrameRateViewport;
+    local string FrameRateStatus;
 
     if (bCleanupStarted)
     {
@@ -110,6 +112,24 @@ event ReceivedLine(string Line)
     if (Prefix != "KF2OPT" || Len(Line) != 0)
     {
         SendText("KF2OPT_ACK "$SequenceText$" failed malformed");
+        RequestClose();
+        return;
+    }
+
+    if (Resource == "frame_rate")
+    {
+        FrameRateStatus = "unsupported";
+        CurrentEngine = class'Engine'.static.GetEngine();
+        if (CurrentEngine != None && SequenceText == string(Sequence) &&
+            QualityText == string(Quality))
+        {
+            FrameRateViewport = KF2OptimizerGraphicsViewport(CurrentEngine.GameViewport);
+            if (FrameRateViewport != None)
+            {
+                FrameRateStatus = FrameRateViewport.ApplyRuntimeFrameRate(Token, Sequence, Quality);
+            }
+        }
+        SendText("KF2OPT_ACK "$SequenceText$" "$FrameRateStatus$" frame_rate "$QualityText);
         RequestClose();
         return;
     }

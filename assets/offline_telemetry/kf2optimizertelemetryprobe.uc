@@ -4683,9 +4683,11 @@ function int GetAdaptiveCorpseFramePressureLevel(
     {
         return 0;
     }
-    if (AdaptiveTargetFPS >= 30 && AdaptiveTargetFPS <= 240)
+    if (class'KF2OptimizerTelemetryProbe'.default.AdaptiveTargetFPS >= 30 &&
+        class'KF2OptimizerTelemetryProbe'.default.AdaptiveTargetFPS <= 240)
     {
-        TargetFrameMs = 1000.0 / float(AdaptiveTargetFPS);
+        TargetFrameMs = 1000.0 /
+            float(class'KF2OptimizerTelemetryProbe'.default.AdaptiveTargetFPS);
         WarningThresholdMs = TargetFrameMs * 60.0 / 59.0;
         CorrectiveThresholdMs = TargetFrameMs * 60.0 / 58.0;
         CriticalThresholdMs = TargetFrameMs * 60.0 / 57.0;

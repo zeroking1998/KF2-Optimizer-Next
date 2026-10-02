@@ -661,19 +661,25 @@ std::optional<GameMenuGraphicsReadback>
 parse_game_menu_graphics_readback(std::string_view line) {
     constexpr std::string_view marker =
         "KF2OPT_GFX_MENU schema=2 state=applied ";
-    const auto start = line.find(marker);
+    constexpr std::string_view current_marker =
+        "KF2OPT_GFX_MENU schema=3 state=applied ";
+    const auto current_start = line.find(current_marker);
+    const bool current_schema = current_start != std::string_view::npos;
+    const auto start = current_schema ? current_start : line.find(marker);
     if (start == std::string_view::npos || line.size() > 4096) {
         return std::nullopt;
     }
     std::string_view payload = line.substr(start + marker.size());
-    constexpr std::array<std::string_view, 23> names{{
+    constexpr std::array<std::string_view, 25> names{{
         "resx", "resy", "display_full", "display_borderless", "vsync",
         "variable_fps", "film_grain", "environment", "character", "fx",
         "texture_resolution", "texture_filtering", "shadows", "reflections",
         "aa", "bloom", "motion_blur", "ao", "dof", "volumetric",
-        "lens_flares", "light_shafts", "flex"}};
+        "lens_flares", "light_shafts", "flex", "frame_rate_sequence",
+        "frame_rate_limit"}};
     std::array<int, names.size()> values{};
-    for (std::size_t field = 0; field < names.size(); ++field) {
+    const auto field_count = current_schema ? names.size() : names.size() - 2;
+    for (std::size_t field = 0; field < field_count; ++field) {
         const auto first = payload.find_first_not_of(" \t");
         if (first == std::string_view::npos) return std::nullopt;
         payload.remove_prefix(first);
@@ -712,6 +718,12 @@ parse_game_menu_graphics_readback(std::string_view line) {
         }
     }
     GameMenuGraphicsReadback result;
+    if (current_schema) {
+        if (values[23] < 0 || (values[24] != 0 &&
+            (values[24] < 30 || values[24] > 240))) return std::nullopt;
+        result.frame_rate_sequence = values[23];
+        result.frame_rate_limit = values[24];
+    }
     result.choices.fill(-1);
     result.resolution = {values[0], values[1]};
     result.choices[index(VideoOption::display)] = values[2] ? 2 : values[3] ? 1 : 0;

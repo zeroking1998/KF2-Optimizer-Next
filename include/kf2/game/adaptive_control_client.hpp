@@ -23,6 +23,7 @@ enum class AdaptiveResourceControl : std::uint8_t {
     recover,
     enable,
     disable,
+    frame_rate,
 };
 
 struct AdaptiveControlRequest final {
@@ -30,6 +31,7 @@ struct AdaptiveControlRequest final {
     std::string token;
     std::uint64_t sequence{0};
     AdaptiveResourceControl resource{AdaptiveResourceControl::mixed};
+    // Legacy integer transport: quality, enable corpse ceiling, or frame_rate FPS.
     int quality{100};
     std::uint32_t timeout_ms{kAdaptiveControlReadbackTimeoutMs};
 };
@@ -44,6 +46,7 @@ enum class AdaptiveControlReceiptStatus : std::uint8_t {
 struct AdaptiveControlReceipt final {
     std::uint64_t sequence{0};
     AdaptiveResourceControl resource{AdaptiveResourceControl::mixed};
+    // Legacy integer transport: quality, enable corpse ceiling, or frame_rate FPS.
     int quality{100};
     AdaptiveControlReceiptStatus status{AdaptiveControlReceiptStatus::applied};
 };

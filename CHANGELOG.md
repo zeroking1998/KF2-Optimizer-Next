@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Target FPS can now change live in protected KF2 sessions, online or offline
+  and with Adaptive off. The UI and Adaptive goal update only after KF2 confirms
+  the current Engine limit; lost replies pause Adaptive without guessing the cap.
 - Reworked Adaptive into one protected, user-controlled runtime with separate
   CPU, GPU, VRAM, RAM, overdraw, effects, physics, LOD, and corpse-pressure
   paths. Confirmed pressure changes only its matching group, and stable

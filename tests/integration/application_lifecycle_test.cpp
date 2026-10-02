@@ -29,6 +29,7 @@
 #include <thread>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "kf2/app/application.hpp"
@@ -1933,7 +1934,8 @@ int test_session_cap_finalization_failure() {
 // exact receipt validation without requiring KF2 or desktop interaction.
 class AdaptiveTestReceiver final {
 public:
-    explicit AdaptiveTestReceiver(std::string receipt_status)
+    explicit AdaptiveTestReceiver(std::string receipt_status,
+                                  RepairPause* receipt_pause = nullptr)
         : listener_{socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)} {
         sockaddr_in address{};
         address.sin_family = AF_INET;
@@ -1945,7 +1947,8 @@ public:
         if (getsockname(listener_, reinterpret_cast<sockaddr*>(&address),
                         &length) != 0) return;
         port = ntohs(address.sin_port);
-        worker_ = std::jthread{[this, status = std::move(receipt_status)] {
+        worker_ = std::jthread{[this, status = std::move(receipt_status),
+                              receipt_pause] {
             fd_set ready;
             FD_ZERO(&ready);
             FD_SET(listener_, &ready);
@@ -1968,8 +1971,9 @@ public:
             std::string prefix, token, sequence, resource, quality;
             parsed >> prefix >> token >> sequence >> resource >> quality;
             command = request;
+            if (receipt_pause) receipt_pause->pause();
             if (status == "timeout") {
-                Sleep(650);
+                if (!receipt_pause) Sleep(650);
             } else {
                 const auto reply = "KF2OPT_ACK " + sequence + " " + status +
                     " " + resource + " " + quality + "\r\n";
@@ -1989,6 +1993,478 @@ private:
     SOCKET listener_{INVALID_SOCKET};
     std::jthread worker_;
 };
+
+kf2::config::Settings live_frame_rate_test_settings(bool adaptive) {
+    kf2::config::Settings settings;
+    settings.target_fps = 90;
+    settings.adaptive_optimization_enabled = adaptive;
+    settings.automatic_update_checks = false;
+    settings.restore_config_after_game = false;
+    return settings;
+}
+
+struct LiveFrameRateTestRuntime final {
+    kf2::diagnostics::EventLog events{64};
+    kf2::app::UiRuntime runtime;
+    LiveFrameRateTestRuntime(const std::filesystem::path& root,
+                            const kf2::game::GameProcessIdentity& process,
+                            kf2::game::FileIdentity image, bool adaptive = true)
+        : runtime{root / L"Data", false, live_frame_rate_test_settings(adaptive),
+                  events, std::nullopt, kf2::app::StartMode::normal,
+                  root / L"portable"} {
+        runtime.installation = kf2::game::GameInstallation{
+            .install_root = root, .executable = process.executable,
+            .config_root = root / L"Config", .executable_identity = image};
+        runtime.game_process = process;
+        runtime.adaptive_control_token = "0123456789abcdef0123456789abcdef";
+        runtime.adaptive_session_policy =
+            kf2::game::OfflineAdaptiveSessionPolicy{20, 60, 2, adaptive};
+        runtime.adaptive_runtime_mode_process_start_id = process.process_start_id;
+        runtime.adaptive_runtime_mode_confirmed = true;
+        auto status = runtime.model.status();
+        status.active_target_fps = 60;
+        runtime.model.set_status(std::move(status));
+        write_bytes(runtime.settings_path,
+                    kf2::config::serialize_settings(runtime.optimizer_settings));
+        write_bytes(runtime.installation->config_root / L"KFEngine.ini",
+            "[KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe]\r\n"
+            "AdaptiveCorpseMaximum=20\r\nAdaptiveTargetFPS=60\r\n"
+            "AdaptiveQualityChangeBudget=2\r\nbAdaptiveRuntimeEnabled=True\r\n");
+    }
+    ~LiveFrameRateTestRuntime() {
+        // The receiver owns transport only. Shutdown must not request actor
+        // restoration or rediscover this test process as a running KF2.
+        runtime.game_process.reset();
+        runtime.installation.reset();
+        runtime.adaptive_restore_debt.reset();
+        runtime.game_log_session.reset();
+    }
+};
+
+int test_live_target_fps_control() {
+    using namespace kf2;
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"live-target-fps-control";
+    fs::remove_all(root);
+    wchar_t executable[32768]{};
+    CHECK(GetModuleFileNameW(nullptr, executable, 32768) != 0);
+    const auto bound = game::bind_game_process(GetCurrentProcessId(), executable);
+    CHECK(bound.has_value());
+    CHECK(game::is_game_process_current(bound.value()));
+    const HANDLE image_handle = CreateFileW(executable, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(image_handle != INVALID_HANDLE_VALUE);
+    BY_HANDLE_FILE_INFORMATION image_info{};
+    const bool image_read =
+        GetFileInformationByHandle(image_handle, &image_info) != FALSE;
+    CloseHandle(image_handle);
+    CHECK(image_read);
+    const game::FileIdentity image{image_info.dwVolumeSerialNumber,
+        (static_cast<std::uint64_t>(image_info.nFileIndexHigh) << 32U) |
+            image_info.nFileIndexLow};
+    struct WinsockLease {
+        ~WinsockLease() { WSACleanup(); }
+    };
+    WSADATA winsock{};
+    CHECK(WSAStartup(MAKEWORD(2, 2), &winsock) == 0);
+    WinsockLease winsock_lease;
+    const auto poll_until = [](app::UiRuntime& runtime, const auto& ready) {
+        const auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::seconds{3};
+        do {
+            runtime.poll_live_frame_rate();
+            if (ready()) return true;
+            Sleep(1);
+        } while (std::chrono::steady_clock::now() < deadline);
+        return false;
+    };
+    const auto finish = [&](app::UiRuntime& runtime) {
+        return poll_until(runtime, [&] {
+            return !runtime.frame_rate_pending &&
+                !runtime.frame_rate_dispatcher.busy();
+        });
+    };
+    const auto connect = [](app::UiRuntime& runtime,
+                            const AdaptiveTestReceiver& receiver) {
+        replace_runtime_gameplay(runtime, [&](auto& session) {
+            session.telemetry_control_port = receiver.port;
+        });
+    };
+
+    // Saved intent cannot change the active cap or rebase Adaptive before the
+    // authenticated receipt. The event dispatcher also works with Adaptive off.
+    for (const bool adaptive : {false, true}) {
+        LiveFrameRateTestRuntime fixture{root / std::to_wstring(adaptive),
+            bound.value(), image, adaptive};
+        auto& runtime = fixture.runtime;
+        runtime.adaptive_resource_quality.gpu = 73;
+        AdaptiveTestReceiver receiver{"applied"};
+        CHECK(receiver.port != 0);
+        connect(runtime, receiver);
+        const auto generation = runtime.adaptive_settings_generation;
+        runtime.set_slider_value("settings-target-slider", 119);
+        CHECK(runtime.optimizer_settings.target_fps == 119);
+        CHECK(runtime.model.status().target_fps == 119);
+        CHECK(runtime.model.status().active_target_fps == 60);
+        CHECK(runtime.model.status().target_fps_pending);
+        CHECK(runtime.effective_target_fps() == 60);
+        CHECK(runtime.adaptive_settings_generation == generation);
+        receiver.finish();
+        CHECK(finish(runtime));
+        CHECK(runtime.model.status().active_target_fps == 119);
+        CHECK(!runtime.model.status().target_fps_pending);
+        CHECK(!runtime.model.status().target_fps_unknown);
+        CHECK(!runtime.live_frame_rate_unsettled());
+        CHECK(runtime.effective_target_fps() == 119);
+        CHECK(runtime.adaptive_settings_generation == generation + 1);
+        CHECK(runtime.adaptive_frame_not_before_ns != 0);
+        CHECK(runtime.adaptive_resource_quality.gpu == 73);
+        CHECK(runtime.optimizer_settings.adaptive_optimization_enabled == adaptive);
+        CHECK(receiver.command.find(" frame_rate 119\n") != std::string::npos);
+        const auto saved = config::parse_settings(read_bytes(runtime.settings_path));
+        CHECK(saved.has_value() && saved.value().target_fps == 119);
+    }
+
+    for (const auto receipt : {"timeout", "unknown", "unsupported", "restored"}) {
+        LiveFrameRateTestRuntime fixture{root / receipt, bound.value(), image};
+        auto& runtime = fixture.runtime;
+        AdaptiveTestReceiver previous{"applied"};
+        CHECK(previous.port != 0);
+        connect(runtime, previous);
+        runtime.set_slider_value("settings-target-slider", 119);
+        previous.finish();
+        CHECK(finish(runtime));
+        CHECK(runtime.effective_target_fps() == 119);
+        RepairPause pause;
+        const bool timeout = std::string_view{receipt} == "timeout";
+        AdaptiveTestReceiver receiver{receipt, timeout ? &pause : nullptr};
+        auto release = std::unique_ptr<RepairPause, void (*)(RepairPause*)>{
+            &pause, [](RepairPause* value) { value->release(); }};
+        CHECK(receiver.port != 0);
+        connect(runtime, receiver);
+        const auto generation = runtime.adaptive_settings_generation;
+        runtime.set_slider_value("settings-target-slider", 144);
+        if (timeout) {
+            CHECK(pause.wait());
+            CHECK(finish(runtime)); // Let the real receive deadline expire.
+            pause.release();
+        }
+        receiver.finish();
+        CHECK(finish(runtime));
+        const bool unknown = std::string_view{receipt} == "timeout" ||
+            std::string_view{receipt} == "unknown";
+        CHECK(runtime.model.status().target_fps_unknown == unknown);
+        CHECK(!runtime.model.status().target_fps_pending);
+        CHECK(runtime.live_frame_rate_unsettled() == unknown);
+        CHECK(runtime.model.status().active_target_fps ==
+            (unknown ? std::optional<int>{} : std::optional<int>{119}));
+        CHECK(runtime.effective_target_fps() == 119);
+        CHECK(runtime.adaptive_settings_generation == generation);
+        CHECK(runtime.optimizer_settings.target_fps == 144);
+        if (unknown) {
+            telemetry_pipeline::TelemetryFrame frame;
+            frame.identity = {bound.value().pid, bound.value().process_start_id};
+            frame.observed_at_ns = runtime.monotonic_ns();
+            frame.active_gameplay = true;
+            runtime.update_adaptive_controller(frame);
+            CHECK(runtime.model.status().adaptive_state == L"observing");
+            CHECK(runtime.model.status().adaptive_action == L"hold");
+            CHECK(!runtime.adaptive_control_pending);
+            CHECK(!runtime.adaptive_control_dispatcher.busy());
+        }
+    }
+
+    // One request is in flight; slider events retain only the newest next value.
+    for (const auto first_status : {"applied", "unknown", "timeout"}) {
+        LiveFrameRateTestRuntime fixture{root /
+            ("coalesced-" + std::string{first_status}), bound.value(), image};
+        auto& runtime = fixture.runtime;
+        RepairPause first_pause;
+        AdaptiveTestReceiver first{first_status, &first_pause};
+        auto release_first = std::unique_ptr<RepairPause, void (*)(RepairPause*)>{
+            &first_pause, [](RepairPause* pause) { pause->release(); }};
+        CHECK(first.port != 0);
+        connect(runtime, first);
+        runtime.set_slider_value("settings-target-slider", 119);
+        CHECK(first_pause.wait());
+        runtime.set_slider_value("settings-target-slider", 120);
+        runtime.set_slider_value("settings-target-slider", 144);
+        CHECK(runtime.adaptive_control_sequence == 1);
+        CHECK(runtime.live_frame_rate && runtime.live_frame_rate->queued == 144);
+        CHECK(runtime.effective_target_fps() == 60);
+        RepairPause latest_pause;
+        AdaptiveTestReceiver latest{"applied", &latest_pause};
+        auto release_latest = std::unique_ptr<RepairPause, void (*)(RepairPause*)>{
+            &latest_pause, [](RepairPause* pause) { pause->release(); }};
+        CHECK(latest.port != 0);
+        connect(runtime, latest);
+        first_pause.release();
+        first.finish();
+        CHECK(poll_until(runtime, [&] {
+            return runtime.adaptive_control_sequence == 2;
+        }));
+        CHECK(latest_pause.wait());
+        const bool unknown = std::string_view{first_status} != "applied";
+        CHECK(runtime.effective_target_fps() == (unknown ? 60 : 119));
+        CHECK(runtime.model.status().target_fps_unknown == unknown);
+        CHECK(runtime.model.status().active_target_fps ==
+            (unknown ? std::optional<int>{} : std::optional<int>{119}));
+        CHECK(runtime.model.status().target_fps_pending);
+        CHECK(runtime.model.status().target_fps == 144);
+        CHECK(runtime.live_frame_rate_unsettled());
+        latest_pause.release();
+        latest.finish();
+        CHECK(finish(runtime));
+        CHECK(runtime.adaptive_control_sequence == 2);
+        CHECK(runtime.model.status().active_target_fps == 144);
+        CHECK(!runtime.model.status().target_fps_pending);
+        CHECK(!runtime.model.status().target_fps_unknown);
+        CHECK(runtime.effective_target_fps() == 144);
+        CHECK(!runtime.live_frame_rate_unsettled());
+        CHECK(first.command.find(" frame_rate 119\n") != std::string::npos);
+        CHECK(latest.command.find(" frame_rate 144\n") != std::string::npos);
+        const auto saved = config::parse_settings(read_bytes(runtime.settings_path));
+        CHECK(saved.has_value() && saved.value().target_fps == 144);
+    }
+
+    // Only a native readback from the confirmed FPS sequence may invalidate
+    // its cap. Historical/menu-only observations cannot override a live ACK.
+    {
+        LiveFrameRateTestRuntime fixture{root / L"native-readback", bound.value(), image};
+        auto& runtime = fixture.runtime;
+        AdaptiveTestReceiver previous{"applied"};
+        CHECK(previous.port != 0);
+        connect(runtime, previous);
+        runtime.set_slider_value("settings-target-slider", 119);
+        previous.finish();
+        CHECK(finish(runtime));
+        CHECK(runtime.live_frame_rate &&
+              runtime.live_frame_rate->confirmed_sequence == 1);
+        const auto saved = read_bytes(runtime.settings_path);
+        const auto generation = runtime.adaptive_settings_generation;
+        game::GameMenuGraphicsReadback readback;
+        readback.choices[static_cast<std::size_t>(
+            game::VideoOption::variable_frame_rate)] = 1;
+        const std::array<std::pair<std::optional<int>, std::optional<int>>, 6>
+            ignored{{{std::nullopt, std::nullopt}, {1, std::nullopt},
+                     {std::nullopt, 0}, {0, 0}, {2, 0}, {1, 119}}};
+        for (const auto& [sequence, limit] : ignored) {
+            readback.frame_rate_sequence = sequence;
+            readback.frame_rate_limit = limit;
+            readback.choices[static_cast<std::size_t>(
+                game::VideoOption::variable_frame_rate)] = limit == 119 ? 0 : 1;
+            runtime.observe_live_frame_rate(readback);
+            CHECK(runtime.model.status().active_target_fps == 119);
+            CHECK(!runtime.model.status().target_fps_unknown);
+            CHECK(!runtime.model.status().target_fps_pending);
+            CHECK(!runtime.live_frame_rate_unsettled());
+        }
+        readback.frame_rate_sequence = 1;
+        readback.frame_rate_limit = 0; // Native smoothing was disabled.
+        readback.choices[static_cast<std::size_t>(
+            game::VideoOption::variable_frame_rate)] = 1;
+        runtime.observe_live_frame_rate(readback);
+        CHECK(runtime.model.status().target_fps_unknown);
+        CHECK(!runtime.model.status().active_target_fps);
+        CHECK(!runtime.model.status().target_fps_pending);
+        CHECK(runtime.live_frame_rate_unsettled());
+        CHECK(runtime.effective_target_fps() == 119);
+        telemetry_pipeline::TelemetryFrame frame;
+        frame.identity = {bound.value().pid, bound.value().process_start_id};
+        frame.observed_at_ns = runtime.monotonic_ns();
+        frame.active_gameplay = true;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.model.status().adaptive_state == L"observing");
+        CHECK(runtime.model.status().adaptive_action == L"hold");
+        readback.frame_rate_limit = 119;
+        readback.choices[static_cast<std::size_t>(
+            game::VideoOption::variable_frame_rate)] = 0;
+        runtime.observe_live_frame_rate(readback);
+        CHECK(runtime.model.status().target_fps_unknown);
+        CHECK(!runtime.model.status().active_target_fps);
+        CHECK(runtime.live_frame_rate_unsettled());
+        CHECK(runtime.model.status().target_fps == 119);
+        CHECK(runtime.optimizer_settings.target_fps == 119);
+        CHECK(read_bytes(runtime.settings_path) == saved);
+        CHECK(runtime.adaptive_control_sequence == 1);
+        CHECK(!runtime.frame_rate_pending);
+        CHECK(!runtime.frame_rate_dispatcher.busy());
+        CHECK(!runtime.adaptive_control_pending);
+        CHECK(!runtime.adaptive_control_dispatcher.busy());
+        CHECK(runtime.adaptive_settings_generation == generation);
+
+        // Re-selecting the already saved target explicitly retries the live
+        // command; only its matching receipt can remove the unknown state.
+        AdaptiveTestReceiver retry{"applied"};
+        CHECK(retry.port != 0);
+        connect(runtime, retry);
+        runtime.set_slider_value("settings-target-slider", 119);
+        CHECK(runtime.model.status().target_fps_unknown);
+        CHECK(runtime.model.status().target_fps_pending);
+        CHECK(!runtime.model.status().active_target_fps);
+        retry.finish();
+        CHECK(finish(runtime));
+        CHECK(runtime.model.status().active_target_fps == 119);
+        CHECK(!runtime.model.status().target_fps_unknown);
+        CHECK(!runtime.model.status().target_fps_pending);
+        CHECK(!runtime.live_frame_rate_unsettled());
+        CHECK(runtime.effective_target_fps() == 119);
+        CHECK(runtime.live_frame_rate->confirmed_sequence == 2);
+        CHECK(runtime.adaptive_control_sequence == 2);
+        CHECK(runtime.adaptive_settings_generation == generation + 1);
+        CHECK(retry.command.find(" frame_rate 119\n") != std::string::npos);
+        CHECK(read_bytes(runtime.settings_path) == saved);
+
+        // A verified restore consumes its newer sequence while retaining the
+        // old cap; its next native menu observation must still be actionable.
+        AdaptiveTestReceiver restored{"restored"};
+        CHECK(restored.port != 0);
+        connect(runtime, restored);
+        runtime.set_slider_value("settings-target-slider", 144);
+        restored.finish();
+        CHECK(finish(runtime));
+        CHECK(runtime.live_frame_rate->confirmed_sequence == 3);
+        CHECK(runtime.model.status().active_target_fps == 119);
+        CHECK(!runtime.model.status().target_fps_unknown);
+        CHECK(!runtime.model.status().target_fps_pending);
+        CHECK(runtime.effective_target_fps() == 119);
+        CHECK(runtime.adaptive_settings_generation == generation + 1);
+        const auto restored_saved = read_bytes(runtime.settings_path);
+        const auto restored_settings = config::parse_settings(restored_saved);
+        CHECK(restored_settings.has_value() && restored_settings.value().target_fps == 144);
+        readback.frame_rate_limit = 0;
+        readback.choices[static_cast<std::size_t>(
+            game::VideoOption::variable_frame_rate)] = 1;
+        readback.frame_rate_sequence = 2;
+        runtime.observe_live_frame_rate(readback);
+        CHECK(runtime.model.status().active_target_fps == 119);
+        CHECK(!runtime.model.status().target_fps_unknown);
+        readback.frame_rate_sequence = 3;
+        runtime.observe_live_frame_rate(readback);
+        CHECK(runtime.model.status().target_fps_unknown);
+        CHECK(!runtime.model.status().active_target_fps);
+        CHECK(!runtime.model.status().target_fps_pending);
+        CHECK(runtime.live_frame_rate_unsettled());
+        CHECK(runtime.effective_target_fps() == 119);
+        CHECK(runtime.optimizer_settings.target_fps == 144);
+        CHECK(runtime.adaptive_control_sequence == 3);
+        CHECK(!runtime.frame_rate_pending);
+        CHECK(!runtime.frame_rate_dispatcher.busy());
+        CHECK(runtime.adaptive_settings_generation == generation + 1);
+        CHECK(read_bytes(runtime.settings_path) == restored_saved);
+    }
+
+    // A missing bridge expires through the existing event poll, without a
+    // dispatch, while its durable target remains available for the next launch.
+    {
+        LiveFrameRateTestRuntime fixture{root / L"no-bridge", bound.value(), image};
+        auto& runtime = fixture.runtime;
+        runtime.set_slider_value("settings-target-slider", 119);
+        CHECK(runtime.live_frame_rate && runtime.live_frame_rate->queued == 119);
+        CHECK(runtime.live_frame_rate->queue_deadline_ns > runtime.monotonic_ns());
+        CHECK(runtime.model.status().target_fps_pending);
+        runtime.live_frame_rate->queue_deadline_ns = 1;
+        runtime.poll_live_frame_rate();
+        CHECK(!runtime.model.status().target_fps_pending);
+        CHECK(!runtime.model.status().target_fps_unknown);
+        CHECK(runtime.model.status().active_target_fps == 60);
+        CHECK(runtime.effective_target_fps() == 60);
+        CHECK(!runtime.live_frame_rate_unsettled());
+        CHECK(runtime.adaptive_control_sequence == 0);
+        CHECK(!runtime.frame_rate_dispatcher.busy());
+        const auto saved = config::parse_settings(read_bytes(runtime.settings_path));
+        CHECK(saved.has_value() && saved.value().target_fps == 119);
+    }
+
+    // A real Windows lease rejects the settings replacement before live work.
+    {
+        LiveFrameRateTestRuntime fixture{root / L"save-failure", bound.value(), image};
+        auto& runtime = fixture.runtime;
+        const auto original = read_bytes(runtime.settings_path);
+        const auto generation = runtime.adaptive_settings_generation;
+        auto lease = std::unique_ptr<void, decltype(&CloseHandle)>{
+            CreateFileW(runtime.settings_path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr), &CloseHandle};
+        CHECK(lease.get() != INVALID_HANDLE_VALUE);
+        runtime.set_slider_value("settings-target-slider", 144);
+        lease.reset();
+        CHECK(read_bytes(runtime.settings_path) == original);
+        CHECK(runtime.optimizer_settings.target_fps == 90);
+        CHECK(runtime.model.status().target_fps == 90);
+        CHECK(runtime.model.status().active_target_fps == 60);
+        CHECK(runtime.effective_target_fps() == 60);
+        CHECK(!runtime.live_frame_rate);
+        CHECK(!runtime.frame_rate_pending);
+        CHECK(!runtime.frame_rate_dispatcher.busy());
+        CHECK(runtime.adaptive_control_sequence == 0);
+        CHECK(runtime.adaptive_settings_generation == generation);
+    }
+
+    // DXGI detach is not an Engine/process replacement: a reply received in
+    // the gap and an already confirmed cap both survive the same process bind.
+    for (const bool receipt_during_detach : {false, true}) {
+        LiveFrameRateTestRuntime fixture{root / (receipt_during_detach
+            ? L"detached-receipt" : L"confirmed-rebind"), bound.value(), image};
+        auto& runtime = fixture.runtime;
+        RepairPause pause;
+        AdaptiveTestReceiver receiver{"applied", &pause};
+        auto release = std::unique_ptr<RepairPause, void (*)(RepairPause*)>{
+            &pause, [](RepairPause* value) { value->release(); }};
+        CHECK(receiver.port != 0);
+        connect(runtime, receiver);
+        runtime.set_slider_value("settings-target-slider", 119);
+        CHECK(pause.wait());
+        if (receipt_during_detach) runtime.detach_telemetry(false);
+        pause.release();
+        receiver.finish();
+        CHECK(finish(runtime));
+        if (!receipt_during_detach) runtime.detach_telemetry(false);
+        runtime.poll_live_frame_rate();
+        CHECK(runtime.live_frame_rate && runtime.live_frame_rate->confirmed == 119);
+        runtime.try_attach_telemetry();
+        CHECK(runtime.game_process && runtime.game_process->pid == bound.value().pid);
+        CHECK(runtime.game_process->process_start_id ==
+              bound.value().process_start_id);
+        CHECK(runtime.adaptive_session_policy &&
+              runtime.adaptive_session_policy->target_fps == 60);
+        CHECK(runtime.model.status().active_target_fps == 119);
+        CHECK(runtime.effective_target_fps() == 119);
+        CHECK(!runtime.live_frame_rate_unsettled());
+    }
+
+    // PID reuse and a different PID cannot consume an old process' receipt.
+    for (const bool different_pid : {false, true}) {
+        LiveFrameRateTestRuntime fixture{root / (different_pid
+            ? L"replaced-pid" : L"replaced-start"), bound.value(), image};
+        auto& runtime = fixture.runtime;
+        RepairPause pause;
+        AdaptiveTestReceiver receiver{"applied", &pause};
+        auto release = std::unique_ptr<RepairPause, void (*)(RepairPause*)>{
+            &pause, [](RepairPause* value) { value->release(); }};
+        CHECK(receiver.port != 0);
+        connect(runtime, receiver);
+        const auto generation = runtime.adaptive_settings_generation;
+        runtime.set_slider_value("settings-target-slider", 119);
+        CHECK(pause.wait());
+        if (different_pid) ++runtime.game_process->pid;
+        else ++runtime.game_process->process_start_id;
+        pause.release();
+        receiver.finish();
+        CHECK(finish(runtime));
+        runtime.poll_live_frame_rate();
+        CHECK(!runtime.live_frame_rate);
+        CHECK(!runtime.frame_rate_pending);
+        CHECK(runtime.model.status().active_target_fps != 119);
+        CHECK(runtime.adaptive_settings_generation == generation);
+        const auto log = fixture.events.snapshot();
+        CHECK(std::none_of(log.begin(), log.end(), [](const auto& event) {
+            return event.code == "TARGET_FPS_APPLIED";
+        }));
+    }
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
 
 int test_online_quality_response_case(
     std::string_view mode, std::uint64_t post_step_ns,
@@ -3773,6 +4249,9 @@ int test_legacy_adaptive_profile(
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--live-target-fps-control") {
+        return test_live_target_fps_control();
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--initial-dxgi-retry") {
         return test_initial_dxgi_retry();
     }
@@ -3912,6 +4391,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     CHECK(test_pending_policy_restage_failure_rollback() == EXIT_SUCCESS);
+    CHECK(test_live_target_fps_control() == EXIT_SUCCESS);
     CHECK(test_map_prewarm_retry_scheduler() == EXIT_SUCCESS);
     CHECK(test_gameplay_snapshot_lifetime() == EXIT_SUCCESS);
     CHECK(kf2::app::should_prepare_protected_gameplay_provider(

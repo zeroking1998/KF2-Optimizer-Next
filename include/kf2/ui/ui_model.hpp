@@ -78,6 +78,8 @@ struct UiStatus {
     int overlay_scale_percent{100};
     int target_fps{60};
     std::optional<int> active_target_fps;
+    bool target_fps_pending{false};
+    bool target_fps_unknown{false};
     int corpse_limit{20};
     std::optional<int> active_corpse_limit;
     bool prewarm_active{false};
