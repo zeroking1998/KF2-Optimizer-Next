@@ -62,6 +62,30 @@ public:
     [[nodiscard]] bool inspect_window() {
         // Preserve the process revalidation point after FleX observation.
         telemetry_pipeline::revalidate_bound_process(runtime_);
+        if (runtime_.live_corpse_limit_change &&
+            (runtime_.live_corpse_limit_change->pending ||
+             !runtime_.live_corpse_limit_change->applied_limit)) {
+            // Finish/discard a count receipt even when a window or Present
+            // sample is unavailable. Do not dispatch from this read-only seam.
+            telemetry_pipeline::TelemetryFrame frame;
+            if (runtime_.game_process) frame.identity = {
+                runtime_.game_process->pid, runtime_.game_process->process_start_id};
+            frame.observed_at_ns = runtime_.monotonic_ns();
+            frame.gameplay = runtime_.game_log_session;
+            const auto& previous = runtime_.model.status();
+            auto status = previous;
+            const bool request_was_pending =
+                runtime_.live_corpse_limit_change->pending.has_value();
+            runtime_.update_live_corpse_limit(frame, status, false);
+            const bool changed =
+                status.active_corpse_limit != previous.active_corpse_limit ||
+                status.live_corpse_limit_pending != previous.live_corpse_limit_pending ||
+                status.live_corpse_limit_unknown != previous.live_corpse_limit_unknown ||
+                (request_was_pending && (!runtime_.live_corpse_limit_change ||
+                 !runtime_.live_corpse_limit_change->pending));
+            runtime_.model.set_status(std::move(status));
+            if (changed) runtime_.invalidate();
+        }
         session_ = telemetry_pipeline::inspect_bound_session(runtime_);
         return session_->disposition ==
             telemetry_pipeline::SessionDisposition::ready;

@@ -226,12 +226,30 @@ function bool CaptureOnlineCorpseMaximum(
     WorldInfo CurrentWorld, KFGoreManager GoreManager)
 {
     local string CurrentMapName;
+    local KF2OptimizerOnlineCorpseController Controller;
 
     if (CurrentWorld == None || GoreManager == None)
     {
         return false;
     }
     CurrentMapName = CurrentWorld.GetMapName(true);
+    foreach CurrentWorld.DynamicActors(
+        class'KF2OptimizerOnlineCorpseController', Controller)
+    {
+        if (Controller != None && !Controller.bDeleteMe) break;
+    }
+    if (Controller == None || Controller.bDeleteMe) return false;
+    if (bOnlineCorpseOriginalMaximumCaptured &&
+        Controller.CorpseMaximumOwner != GoreManager)
+    {
+        // A missing controller identity is not proof that the original
+        // manager died. Keep the original snapshot instead of recapturing
+        // an already modified maximum as the native value.
+        if (Controller.CorpseMaximumOwner == None ||
+            !Controller.CorpseMaximumOwner.bDeleteMe) return false;
+        DiscardOnlineCorpseMaximumSnapshot("manager_replaced");
+    }
+    Controller.CorpseMaximumOwner = GoreManager;
     if (bOnlineCorpseOriginalMaximumCaptured)
     {
         if (OnlineCorpseOriginalMapName == CurrentMapName)
@@ -254,6 +272,7 @@ function bool RestoreOnlineCorpseMaximum(
 {
     local KFGoreManager GoreManager;
     local string CurrentMapName;
+    local KF2OptimizerOnlineCorpseController Controller;
 
     if (!bOnlineCorpseOriginalMaximumCaptured)
     {
@@ -280,6 +299,14 @@ function bool RestoreOnlineCorpseMaximum(
              OnlineCorpseOriginalMaximum);
         return false;
     }
+    foreach CurrentWorld.DynamicActors(
+        class'KF2OptimizerOnlineCorpseController', Controller)
+    {
+        if (Controller != None && !Controller.bDeleteMe &&
+            Controller.CorpseMaximumOwner == GoreManager) break;
+    }
+    if (Controller == None || Controller.bDeleteMe ||
+        Controller.CorpseMaximumOwner != GoreManager) return false;
     GoreManager.MaxDeadBodies = OnlineCorpseOriginalMaximum;
     if (GoreManager.MaxDeadBodies != OnlineCorpseOriginalMaximum)
     {
@@ -393,6 +420,26 @@ function bool ApplyOnlineGraphicsControl(
              class'KF2OptimizerAdaptiveGraphics'.static.
                 GetFixedSessionEffectsQuality()$
              " local_only=true readback=verified");
+        return true;
+    }
+    if (Resource ~= "corpse_limit")
+    {
+        if (Quality < 4 || Quality > 2000) return false;
+        GoreManager = KFGoreManager(CurrentWorld.MyGoreEffectManager);
+        if (GoreManager == None || GoreManager.bDeleteMe ||
+            !CaptureOnlineCorpseMaximum(CurrentWorld, GoreManager) ||
+            !RestoreOnlineEnableMaximum(GoreManager)) return false;
+        OnlineCorpseEnablePreviousMaximum = GoreManager.MaxDeadBodies;
+        GoreManager.MaxDeadBodies = Quality;
+        if (GoreManager.MaxDeadBodies != Quality)
+        {
+            bOnlineCorpseEnableRestorePending = true;
+            RestoreOnlineEnableMaximum(GoreManager);
+            return false;
+        }
+        OnlineGraphicsLastSequence = Sequence;
+        `log("KF2OPT_ONLINE_CORPSE_MAXIMUM state=applied maximum="$Quality$
+             " local_only=true readback=verified mode_unchanged=true");
         return true;
     }
     if (Quality < 10 || Quality > 100)

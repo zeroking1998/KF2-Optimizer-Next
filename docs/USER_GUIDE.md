@@ -94,6 +94,14 @@ controls while the game is running. The protected offline session separately
 keeps eligible Zed/corpse LOD and safe animation work at their fixed minimum.
 Unsupported controls remain unchanged.
 
+Maximum corpses is saved immediately. During a supported protected offline or
+online session, the optimizer requests a live change without toggling Adaptive.
+Home shows the new ceiling as active only after an exact KF2 confirmation.
+Missing confirmation is shown explicitly; the saved goal remains available for
+the next start. Lowering the ceiling does not instantly remove existing corpses,
+and raising it cannot bring back corpses already removed. Adaptive may still use
+fewer corpses under verified pressure. Map changes require a fresh confirmation.
+
 Use **Adaptive optimization** on Home to enable or disable those automatic
 adjustments. The choice is saved. Turning Adaptive off during a supported
 offline session requires a confirmed runtime receipt before the app saves the

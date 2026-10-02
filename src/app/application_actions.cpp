@@ -155,6 +155,21 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
             installation->executable);
     const bool policy_bound_to_running_process =
         adaptive_session_policy.has_value() && game_running;
+    if (control->id == runtime::ControlId::corpse_limit &&
+        game_running && game_process && adaptive_session_policy) {
+        if (!live_corpse_limit_change ||
+            live_corpse_limit_change->identity.pid != game_process->pid ||
+            live_corpse_limit_change->identity.process_start_id !=
+                game_process->process_start_id) {
+            live_corpse_limit_change.emplace();
+            live_corpse_limit_change->identity =
+                {game_process->pid, game_process->process_start_id};
+        }
+        live_corpse_limit_change->attempts = 0;
+        live_corpse_limit_change->next_attempt_ns = 0;
+        message = L"Maximum corpses saved: " + std::to_wstring(value) +
+            L"; waiting for KF2 to confirm the live change";
+    }
     if (adaptive_policy_changed) {
         const bool session_value_staged_for_restart =
             policy_bound_to_running_process &&
@@ -323,8 +338,11 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     auto status = model.status();
     status.target_fps = optimizer_settings.target_fps;
     status.corpse_limit = optimizer_settings.corpse_limit;
+    status.live_corpse_limit_pending = game_running &&
+        live_corpse_limit_change.has_value();
     status.overlay_scale_percent = optimizer_settings.overlay_scale_percent;
     if (!game_running) {
+        status.live_corpse_limit_unknown = false;
         status.active_target_fps.reset();
         status.active_corpse_limit.reset();
     }

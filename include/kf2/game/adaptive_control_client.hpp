@@ -23,6 +23,7 @@ enum class AdaptiveResourceControl : std::uint8_t {
     recover,
     enable,
     disable,
+    corpse_limit,
 };
 
 struct AdaptiveControlRequest final {

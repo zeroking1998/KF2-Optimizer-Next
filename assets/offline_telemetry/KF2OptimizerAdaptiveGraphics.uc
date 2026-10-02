@@ -21,13 +21,15 @@ static function bool IsAdaptiveControlResource(string Resource)
         (Resource ~= "vram") || (Resource ~= "ram") ||
         (Resource ~= "overdraw") || (Resource ~= "effects") ||
         (Resource ~= "mixed") || (Resource ~= "recover") ||
-        (Resource ~= "enable") || (Resource ~= "disable");
+        (Resource ~= "enable") || (Resource ~= "disable") ||
+        (Resource ~= "corpse_limit");
 }
 
 static function bool IsAdaptiveQualityResource(string Resource)
 {
     return IsAdaptiveControlResource(Resource) &&
-        !(Resource ~= "enable") && !(Resource ~= "disable");
+        !(Resource ~= "enable") && !(Resource ~= "disable") &&
+        !(Resource ~= "corpse_limit");
 }
 
 // Joined servers expose only capabilities with independent client-local
