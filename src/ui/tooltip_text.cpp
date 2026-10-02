@@ -12,7 +12,7 @@ struct TooltipEntry {
 
 constexpr TooltipEntry kTooltips[]{
     {"dashboard-launch", L"Starts KF2 through the Optimizer and begins Adaptive monitoring for the selected FPS target. It never enables NVIDIA FleX."},
-    {"game-select-install", L"Selects the KF2 installation folder that the Optimizer will validate and use. No game file is changed by selecting it."},
+    {"game-select-install", L"Selects a verified KF2 installation while the game is closed. Any prepared protected state is restored in the original folder before the new path is saved. Unconfirmed recovery blocks the change."},
     {"game-open-config", L"Opens KF2's local configuration folder in File Explorer."},
 
     {"header-update-check", L"Checks the official GitHub Releases page now. It only reports a newer version and never downloads or installs automatically."},

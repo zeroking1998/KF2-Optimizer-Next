@@ -444,7 +444,9 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                    model.status().game_detected, true);
         add_action("game-select-install",
                    model.status().game_detected
-                       ? L"CHANGE GAME FOLDER" : L"SELECT GAME FOLDER");
+                       ? L"CHANGE GAME FOLDER" : L"SELECT GAME FOLDER",
+                   !status.game_folder_change_blocked &&
+                       !model.recovery_required());
         cursor = grid_base +
             static_cast<float>((action_index + action_columns - 1) /
                                action_columns) * kActionStride + 8.0F;

@@ -50,6 +50,7 @@ struct UiStatus {
     std::wstring flex_readback_diagnostics{
         L"Minimal safety readback active; reports and extra logs are off"};
     bool game_detected{false};
+    bool game_folder_change_blocked{false};
     std::optional<double> live_fps;
     std::optional<double> live_frame_time_ms;
     std::optional<double> live_cpu_percent;

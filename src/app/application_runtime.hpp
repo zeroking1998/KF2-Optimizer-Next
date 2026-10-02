@@ -207,6 +207,11 @@ struct UiRuntime {
     backup::BackupStore backups;
     std::optional<game::GameDiscoveryInput> discovery_input;
     std::optional<game::GameInstallation> installation;
+    bool game_folder_selection_active{false};
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+    std::function<std::optional<std::filesystem::path>()>
+        game_directory_chooser_for_testing;
+#endif
 #if defined(KF2_APPLICATION_RESTORE_TESTING)
     std::function<Result<game::FrameRateCapResult>()>
         frame_rate_cap_sync_for_testing;
@@ -419,6 +424,17 @@ struct UiRuntime {
         const auto phase = updates.controller.snapshot().phase;
         return package_repair_state || phase == update::UpdatePhase::checking ||
             phase == update::UpdatePhase::installing;
+    }
+    [[nodiscard]] bool game_folder_change_blocked() const noexcept {
+        return game_process || present_source || adaptive_restore_debt ||
+            game_restart_handoff_previous_process ||
+            game_restart_handoff_deadline_ns != 0 ||
+            game_log_new_settings_restart_requested ||
+            session_config_launch_deadline_ns != 0 ||
+            (session_config_snapshot && !session_config_waiting_for_launch) ||
+            final_graphics_capture_pending || adaptive_control_pending ||
+            adaptive_runtime_mode_pending || model.recovery_required() ||
+            package_repair_state || updates.check || updates.install;
     }
 
     UiRuntime(const std::filesystem::path& state_root, bool recovery_required,

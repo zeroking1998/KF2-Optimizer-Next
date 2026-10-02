@@ -41,6 +41,7 @@
 #include "app/application_runtime.hpp"
 #include "app/runtime/feature_composition.hpp"
 #include "features/diagnostics/diagnostics_actions.hpp"
+#include "features/game/game_actions.hpp"
 #include "features/telemetry/telemetry_adaptive_stage.hpp"
 #include "features/telemetry/telemetry_collection_stage.hpp"
 #include "features/telemetry/telemetry_session_stage.hpp"
@@ -3183,6 +3184,232 @@ int test_launch_profile_allocation_failures() {
     return EXIT_SUCCESS;
 }
 
+int test_game_folder_ownership() {
+    namespace fs = std::filesystem;
+    using namespace kf2;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"gfo" /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" +
+         std::to_wstring(GetTickCount64()));
+    const auto old_install = root / L"old";
+    const auto new_install = root / L"new";
+    const auto config = root / L"Documents/Config";
+    const auto portable = root / L"portable";
+    fs::create_directories(portable);
+    const auto write_catalog = [&] {
+        if (!write_complete_config_catalog(config)) return false;
+        auto system = config::IniDocument::parse(read_bytes(config / L"KFSystemSettings.ini"));
+        if (!system.has_value()) return false;
+        if (system.value().upsert(L"SystemSettings", L"bAllowTemporalAA",
+                                  L"False").shadowed_occurrences != 0) return false;
+        write_bytes(config / L"KFSystemSettings.ini", system.value().serialize());
+        return true;
+    };
+    for (const auto& install : {old_install, new_install}) {
+        fs::create_directories(install / L"Binaries/Win64");
+        write_test_pe(install / L"Binaries/Win64/KFGame.exe");
+        write_bytes(install / L"Engine/Config/ConsoleVariables.ini", "[Startup]\r\n");
+    }
+    const game::GameDiscoveryInput discovery{
+        .manual_candidates = {old_install}, .config_root = config,
+        .allowed_config_parent = root / L"Documents"};
+    wchar_t self[32768]{};
+    CHECK(GetModuleFileNameW(nullptr, self, 32768) != 0);
+    const auto identity = game::bind_game_process(GetCurrentProcessId(), self);
+    CHECK(identity.has_value());
+    // All writes are confined to this test's two fake installations and INIs.
+    constexpr std::array scenarios{
+        "cached process", "restore debt", "restart owner", "launch wait",
+        "final graphics pending", "recovery required", "native live process",
+        "unfinalized snapshot", "locked INI", "process during picker",
+        "nested selection and launch", "cancel", "same folder", "invalid folder",
+        "locked settings", "partial provider recovery", "snapshotless FleX",
+        "restart deadline", "pending adaptive mode", "process during recovery",
+        "unowned provider", "unowned FleX", "unowned snapshot", "unowned FPS journal",
+        "completed FPS journal", "ordinary stopped switch"};
+    for (std::size_t scenario = 0; scenario != scenarios.size(); ++scenario) {
+        std::cout << "Game-folder ownership: " << scenarios[scenario] << '\n';
+        CHECK(write_catalog());
+        const auto state = root / std::to_wstring(scenario);
+        config::Settings settings;
+        settings.target_fps = 62;
+        settings.automatic_update_checks = false;
+        settings.manual_game_path = *app::path_utf8(old_install);
+        write_bytes(state / L"settings.ini", config::serialize_settings(settings));
+        diagnostics::EventLog events{128};
+        {
+            app::UiRuntime runtime{state, false, settings, events, discovery,
+                                  app::StartMode::normal, portable};
+            CHECK(runtime.installation.has_value());
+            CHECK(!runtime.model.recovery_required());
+            const auto saved_before = read_bytes(runtime.settings_path);
+            int chooser_calls = 0;
+            runtime.game_directory_chooser_for_testing = [&]() -> std::optional<fs::path> {
+                ++chooser_calls;
+                if (scenario == 9) runtime.game_process = identity.value();
+                if (scenario == 10) {
+                    // IFileDialog::Show pumps messages: nested actions must not run.
+                    static_cast<void>(features::game::select_install(runtime, {}));
+                    static_cast<void>(features::game::launch(runtime, {}));
+                }
+                if (scenario == 11) return std::nullopt;
+                if (scenario == 12) return old_install;
+                if (scenario == 13) return root / L"invalid";
+                return new_install;
+            };
+            const bool prepared = scenario >= 7 && scenario <= 15;
+            std::string original;
+            fs::path snapshot_root;
+            if (prepared) {
+                const auto captured = config::capture_session_config(config, state);
+                CHECK(captured.has_value());
+                runtime.session_config_snapshot = captured.value();
+                runtime.session_config_waiting_for_launch = true;
+                snapshot_root = captured.value().snapshot_root;
+                original = read_bytes(config / L"KFSystemSettings.ini");
+                write_bytes(config / L"KFSystemSettings.ini", original + "\r\n; staged\r\n");
+            }
+            if (scenario == 0) runtime.game_process = identity.value();
+            if (scenario == 1) runtime.adaptive_restore_debt = identity.value();
+            if (scenario == 2) runtime.game_restart_handoff_previous_process = identity.value();
+            if (scenario == 3) runtime.session_config_launch_deadline_ns = UINT64_MAX;
+            if (scenario == 4) runtime.final_graphics_capture_pending = true;
+            if (scenario == 5) runtime.model.set_recovery_required(true);
+            if (scenario == 6) runtime.installation->executable = self; // Native live check, no cache.
+            if (scenario == 7) runtime.session_config_waiting_for_launch = false;
+            if (scenario == 17) runtime.game_restart_handoff_deadline_ns = UINT64_MAX;
+            if (scenario == 18) runtime.adaptive_runtime_mode_pending = false;
+            if (scenario == 19) {
+                runtime.frame_rate_cap_sync_for_testing = [&] {
+                    const auto result = game::persist_frame_rate_cap(
+                        *runtime.installation, settings.target_fps, state);
+                    runtime.game_process = identity.value();
+                    return result;
+                };
+            }
+            if (scenario >= 20 && scenario <= 24) {
+                runtime.installation.reset();
+                constexpr std::array<const wchar_t*, 5> evidence{
+                    L"offline-telemetry-lab/module.marker",
+                    L"flex-lab/flex-lab-transaction.marker",
+                    L"session-config/active/manifest.txt",
+                    L"frame-rate-cap.recovery", L"frame-rate-cap.recovery"};
+                write_bytes(state / evidence[scenario - 20],
+                            scenario == 24 ? "" : "retained ownership");
+            }
+            struct FileLock {
+                HANDLE handle{INVALID_HANDLE_VALUE};
+                ~FileLock() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
+            } lock;
+            if (scenario == 8 || scenario == 14) {
+                const auto file = scenario == 8 ? config / L"KFSystemSettings.ini"
+                                               : runtime.settings_path;
+                lock.handle = CreateFileW(file.c_str(), GENERIC_READ,
+                    FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+                CHECK(lock.handle != INVALID_HANDLE_VALUE);
+            }
+            if (scenario == 15) {
+                // Failed provider cleanup must block even after INI restoration succeeds.
+                write_bytes(state / L"offline-telemetry-lab/module.marker", "invalid marker");
+            }
+            if (scenario == 16) {
+                // The durable FleX transaction still owns A without an INI snapshot.
+                write_bytes(state / L"flex-lab/flex-lab-transaction.marker", "invalid marker");
+            }
+            const auto staged_bytes = read_bytes(config / L"KFSystemSettings.ini");
+            static_cast<void>(features::game::select_install(runtime, {}));
+            const bool switched = scenario == 10 || scenario >= 24;
+            if (scenario >= 20 && !switched) CHECK(!runtime.installation);
+            else CHECK(runtime.installation->install_root == (switched ? new_install : old_install));
+            CHECK(fs::path{runtime.optimizer_settings.manual_game_path} ==
+                  (switched ? new_install : old_install));
+            CHECK(chooser_calls == (scenario <= 7 || scenario == 17 || scenario == 18 ||
+                  (scenario >= 20 && scenario <= 23) ? 0 : 1));
+            CHECK(!runtime.game_folder_selection_active);
+            if (!switched) CHECK(read_bytes(runtime.settings_path) == saved_before);
+            if (scenario <= 9 || (scenario >= 11 && scenario <= 13)) {
+                CHECK(read_bytes(config / L"KFSystemSettings.ini") == staged_bytes);
+                if (prepared) CHECK(runtime.session_config_snapshot.has_value());
+            } else if (prepared) {
+                CHECK(read_bytes(config / L"KFSystemSettings.ini") == original);
+                CHECK(!fs::exists(snapshot_root));
+            }
+            if (scenario == 15 || scenario == 16) CHECK(runtime.model.recovery_required());
+            if (lock.handle != INVALID_HANDLE_VALUE) CloseHandle(lock.handle);
+            lock.handle = INVALID_HANDLE_VALUE;
+            fs::remove(state / L"offline-telemetry-lab/module.marker");
+            fs::remove(state / L"flex-lab/flex-lab-transaction.marker");
+            if (scenario >= 20) {
+                fs::remove(state / L"session-config/active/manifest.txt");
+                fs::remove(state / L"frame-rate-cap.recovery");
+            }
+            runtime.game_process.reset();
+            runtime.adaptive_restore_debt.reset();
+            runtime.game_restart_handoff_previous_process.reset();
+            runtime.game_restart_handoff_deadline_ns = 0;
+            runtime.adaptive_runtime_mode_pending.reset();
+            runtime.session_config_launch_deadline_ns = 0;
+            runtime.final_graphics_capture_pending = false;
+            runtime.frame_rate_cap_sync_for_testing = {};
+            if (runtime.installation) runtime.installation->executable =
+                old_install / L"Binaries/Win64/KFGame.exe";
+        }
+    }
+    CHECK(CopyFileW(self, (new_install / L"Binaries/Win64/KFGame.exe").c_str(), FALSE));
+    for (const bool deny_inspection : {false, true}) {
+        CHECK(write_catalog());
+        const auto state = root / (deny_inspection ? L"candidate-unknown" : L"candidate-live");
+        config::Settings settings;
+        settings.target_fps = 62;
+        settings.automatic_update_checks = false;
+        settings.manual_game_path = *app::path_utf8(old_install);
+        write_bytes(state / L"settings.ini", config::serialize_settings(settings));
+        diagnostics::EventLog events{64};
+        {
+            app::UiRuntime runtime{state, false, settings, events, discovery,
+                                  app::StartMode::normal, portable};
+            CHECK(runtime.installation.has_value());
+            const auto captured = config::capture_session_config(config, state);
+            CHECK(captured.has_value());
+            runtime.session_config_snapshot = captured.value();
+            runtime.session_config_waiting_for_launch = true;
+            const auto saved = read_bytes(runtime.settings_path);
+            const auto original = read_bytes(config / L"KFSystemSettings.ini");
+            write_bytes(config / L"KFSystemSettings.ini", original + "\r\n; protected\r\n");
+            const auto protected_bytes = read_bytes(config / L"KFSystemSettings.ini");
+            // This owned inert test child uses the actual native enumeration path.
+            // It is not KF2 and never starts a real game or modifies real settings.
+            struct Child {
+                PROCESS_INFORMATION process{};
+                ~Child() {
+                    if (process.hProcess) {
+                        TerminateProcess(process.hProcess, 0);
+                        WaitForSingleObject(process.hProcess, 5000);
+                        CloseHandle(process.hThread);
+                        CloseHandle(process.hProcess);
+                    }
+                }
+            } child;
+            const auto executable = new_install / L"Binaries/Win64/KFGame.exe";
+            auto command = L"\"" + executable.wstring() + L"\" --executable-identity-child";
+            STARTUPINFOW startup{};
+            startup.cb = sizeof(startup);
+            CHECK(CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr,
+                FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child.process));
+            kf2::test::ProcessInspectionDenial denied;
+            if (deny_inspection) CHECK(denied.deny(child.process.hProcess));
+            runtime.game_directory_chooser_for_testing = [&]() { return std::optional{new_install}; };
+            static_cast<void>(features::game::select_install(runtime, {}));
+            CHECK(runtime.installation->install_root == old_install);
+            CHECK(runtime.optimizer_settings.manual_game_path == *app::path_utf8(old_install));
+            CHECK(read_bytes(runtime.settings_path) == saved);
+            CHECK(read_bytes(config / L"KFSystemSettings.ini") == protected_bytes);
+            CHECK(runtime.session_config_snapshot.has_value());
+        }
+    }
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
 int test_executable_identity_boundaries() {
     namespace fs = std::filesystem;
     const auto root = fs::path{KF2_TEST_ROOT} / L"executable-identity";
@@ -4329,7 +4556,11 @@ int main(int argc, char** argv) {
         return test_protected_shutdown_running_game(false, true);
     }
     if (argc == 2 && std::string_view{argv[1]} == "--executable-identity") {
+        CHECK(test_game_folder_ownership() == EXIT_SUCCESS);
         return test_executable_identity_boundaries();
+    }
+    if (argc == 2 && std::string_view{argv[1]} == "--game-folder-ownership") {
+        return test_game_folder_ownership();
     }
     if (argc == 2 && std::string_view{argv[1]} == "--adaptive-restore-debt") {
         return test_adaptive_restore_debt();
