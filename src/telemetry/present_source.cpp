@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <iterator>
 #include <limits>
 
@@ -13,6 +14,105 @@ namespace {
 constexpr std::uint64_t kLiveWindowNs = 1'000'000'000ULL;
 constexpr std::uint64_t kSustainedWindowNs = 3'000'000'000ULL;
 constexpr std::uint64_t kTailWindowNs = 5'000'000'000ULL;
+
+FrameMetrics aggregate_windows(std::span<const PresentTimestamp> presents,
+                               std::uint64_t now_ns, std::uint64_t stale_after_ns,
+                               std::uint64_t not_before_ns) {
+    FrameMetrics result;
+    if (presents.size() < 2) return result;
+    const auto newest = presents.back().monotonic_ns;
+    const auto first_index = [&](std::uint64_t duration) {
+        const auto cutoff = std::max(not_before_ns,
+            newest > duration ? newest - duration : 0);
+        return static_cast<std::size_t>(std::lower_bound(
+            presents.begin(), presents.end(), cutoff,
+            [](const auto& present, auto at) { return present.monotonic_ns < at; }) - presents.begin());
+    };
+    const auto live_first = first_index(kLiveWindowNs);
+    const auto sustained_first = first_index(kSustainedWindowNs);
+    const auto tail_first = first_index(kTailWindowNs);
+    const auto interval_count = presents.size() - 1;
+    const auto live_count = interval_count - live_first;
+    const auto sustained_count = interval_count - sustained_first;
+    const auto tail_count = interval_count - tail_first;
+    const auto age = now_ns >= newest ? now_ns - newest : 0;
+    if (now_ns < newest || age > stale_after_ns) {
+        // A live window with only one sample stays no_samples, even when a
+        // longer window could have intervals. Preserve the generic contract.
+        if (live_count != 0) {
+            result.reason = UnavailableReason::stale;
+            result.age_ns = age;
+            result.newest_present_ns = newest;
+        }
+        return result;
+    }
+
+    // Ingest has already validated identity and deduplicated/sorted timestamps.
+    // Keep each interval's position so one sort serves all overlapping windows,
+    // excluding the pair that crosses each window's first retained timestamp.
+    struct Interval { double ms; std::size_t index; };
+    std::vector<Interval> sorted;
+    sorted.reserve(interval_count);
+    double live_total = 0.0;
+    double sustained_total = 0.0;
+    for (std::size_t index = 1; index < presents.size(); ++index) {
+        const auto ms = static_cast<double>(presents[index].monotonic_ns -
+            presents[index - 1].monotonic_ns) / 1'000'000.0;
+        sorted.push_back({ms, index});
+        if (index > live_first) live_total += ms;
+        if (index > sustained_first) sustained_total += ms;
+    }
+    std::sort(sorted.begin(), sorted.end(),
+        [](const auto& left, const auto& right) { return left.ms < right.ms; });
+    const auto rank = [](std::size_t count, double fraction) {
+        return static_cast<std::size_t>(std::ceil(static_cast<double>(count) * fraction));
+    };
+    const auto long_slow_count = rank(interval_count, 0.01);
+    const auto sustained_slow_count = rank(sustained_count, 0.01);
+    const auto median_rank = rank(tail_count, 0.5);
+    const auto p95_rank = rank(tail_count, 0.95);
+    const auto p99_rank = rank(tail_count, 0.99);
+    std::size_t long_rank = 0, sustained_rank = 0, tail_rank = 0;
+    double long_slow_total = 0.0, sustained_slow_total = 0.0, median = 0.0;
+    for (const auto& interval : sorted) {
+        // Sum slow tails in ascending order, just like aggregate_presents(),
+        // so FPS, nearest-rank percentiles and 1% lows remain bit-identical.
+        if (++long_rank > interval_count - long_slow_count)
+            long_slow_total += interval.ms;
+        if (interval.index > sustained_first &&
+            ++sustained_rank > sustained_count - sustained_slow_count)
+            sustained_slow_total += interval.ms;
+        if (interval.index > tail_first) {
+            ++tail_rank;
+            if (tail_rank == median_rank) median = interval.ms;
+            if (tail_rank == p95_rank) result.p95_ms = interval.ms;
+            if (tail_rank == p99_rank) result.p99_ms = interval.ms;
+        }
+    }
+    if (live_count != 0) {
+        result.frame_time_ms = live_total / static_cast<double>(live_count);
+        result.fps = 1000.0 / *result.frame_time_ms;
+        result.quality = SampleQuality::good;
+        result.reason = UnavailableReason::none;
+        result.age_ns = age;
+        result.newest_present_ns = newest;
+    }
+    if (sustained_count != 0) {
+        result.average_fps = 1000.0 / (sustained_total / static_cast<double>(sustained_count));
+        result.sustained_one_percent_low_fps =
+            1000.0 / (sustained_slow_total / static_cast<double>(sustained_slow_count));
+    }
+    result.one_percent_low_fps =
+        1000.0 / (long_slow_total / static_cast<double>(long_slow_count));
+    if (tail_count != 0) {
+        const auto stutter_limit = std::max(50.0, median * 2.0);
+        result.stutter_count = static_cast<std::size_t>(std::count_if(
+            sorted.begin(), sorted.end(), [&](const auto& interval) {
+                return interval.index > tail_first && interval.ms > stutter_limit;
+            }));
+    }
+    return result;
+}
 #ifdef KF2_PRESENT_SOURCE_TESTING
 std::atomic_bool fail_next_drain_publication{false};
 std::atomic<detail::PresentDrainWaitHook> drain_wait_hook{nullptr};
@@ -145,7 +245,6 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
                                   std::uint64_t stale_after_ns,
                                   std::uint64_t not_before_ns) const {
     std::vector<PresentTimestamp> long_term;
-    SampleIdentity identity;
     std::uint64_t reported_loss = 0;
     std::uint64_t source_generation = 0;
     std::uint64_t selected_stream_id = 0;
@@ -156,7 +255,6 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
             unavailable.reason = UnavailableReason::source_failure;
             return unavailable;
         }
-        identity = identity_;
         reported_loss = reported_loss_;
         source_generation = drain_generation_;
         const std::deque<PresentTimestamp>* selected = nullptr;
@@ -212,40 +310,7 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
         }
     }
 
-    const auto window = [&](std::uint64_t duration) {
-        const std::span<const PresentTimestamp> all{long_term};
-        if (all.empty()) return all;
-        const auto newest = all.back().monotonic_ns;
-        const auto cutoff = std::max(not_before_ns,
-            newest > duration ? newest - duration : 0);
-        const auto first = std::lower_bound(
-            all.begin(), all.end(), cutoff,
-            [](const PresentTimestamp& present, std::uint64_t timestamp) {
-                return present.monotonic_ns < timestamp;
-            });
-        return all.subspan(static_cast<std::size_t>(first - all.begin()));
-    };
-    auto result = aggregate_presents(
-        window(kLiveWindowNs), identity, now_ns, stale_after_ns);
-    const auto sustained_metrics = aggregate_presents(
-        window(kSustainedWindowNs), identity, now_ns, stale_after_ns);
-    const auto tail_metrics = aggregate_presents(
-        window(kTailWindowNs), identity, now_ns, stale_after_ns);
-    const auto long_metrics = aggregate_presents(
-        long_term, identity, now_ns, stale_after_ns);
-    if (sustained_metrics.fps) {
-        result.average_fps = sustained_metrics.fps;
-    }
-    if (sustained_metrics.one_percent_low_fps) {
-        result.sustained_one_percent_low_fps =
-            sustained_metrics.one_percent_low_fps;
-    }
-    if (tail_metrics.p95_ms) result.p95_ms = tail_metrics.p95_ms;
-    if (tail_metrics.p99_ms) result.p99_ms = tail_metrics.p99_ms;
-    if (tail_metrics.fps) result.stutter_count = tail_metrics.stutter_count;
-    if (long_metrics.one_percent_low_fps) {
-        result.one_percent_low_fps = long_metrics.one_percent_low_fps;
-    }
+    auto result = aggregate_windows(long_term, now_ns, stale_after_ns, not_before_ns);
     result.loss_count += reported_loss;
     result.source_generation = source_generation;
     result.stream_id = selected_stream_id;

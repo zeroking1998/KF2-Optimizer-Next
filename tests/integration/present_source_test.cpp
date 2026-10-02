@@ -1,17 +1,159 @@
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <new>
 #include <string_view>
 #include <thread>
 #include "kf2/telemetry/present_source.hpp"
+
+namespace {
+thread_local std::size_t* allocation_counter = nullptr;
+}
+
+void* operator new(std::size_t size) {
+    if (allocation_counter) ++*allocation_counter;
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
 
 namespace {
 std::atomic_bool waiting_to_sleep{false};
+
+using namespace kf2::telemetry;
+
+FrameMetrics reference_windows(std::span<const PresentTimestamp> presents,
+                               SampleIdentity identity, std::uint64_t now,
+                               std::uint64_t stale, std::uint64_t not_before) {
+    const auto window = [&](std::uint64_t duration) {
+        if (presents.empty()) return presents;
+        const auto newest = presents.back().monotonic_ns;
+        const auto cutoff = std::max(not_before,
+            newest > duration ? newest - duration : 0);
+        const auto first = std::lower_bound(presents.begin(), presents.end(),
+            cutoff, [](const auto& item, auto at) { return item.monotonic_ns < at; });
+        return presents.subspan(static_cast<std::size_t>(first - presents.begin()));
+    };
+    auto result = aggregate_presents(window(1'000'000'000ULL), identity, now, stale);
+    const auto sustained = aggregate_presents(window(3'000'000'000ULL), identity, now, stale);
+    const auto tail = aggregate_presents(window(5'000'000'000ULL), identity, now, stale);
+    const auto longest = aggregate_presents(window(10'000'000'000ULL), identity, now, stale);
+    if (sustained.fps) result.average_fps = sustained.fps;
+    if (sustained.one_percent_low_fps)
+        result.sustained_one_percent_low_fps = sustained.one_percent_low_fps;
+    if (tail.p95_ms) result.p95_ms = tail.p95_ms;
+    if (tail.p99_ms) result.p99_ms = tail.p99_ms;
+    if (tail.fps) result.stutter_count = tail.stutter_count;
+    if (longest.one_percent_low_fps) result.one_percent_low_fps = longest.one_percent_low_fps;
+    return result;
+}
+
+bool equal_metrics(const FrameMetrics& actual, const FrameMetrics& expected) {
+    return actual.fps == expected.fps && actual.average_fps == expected.average_fps &&
+        actual.frame_time_ms == expected.frame_time_ms &&
+        actual.sustained_one_percent_low_fps == expected.sustained_one_percent_low_fps &&
+        actual.one_percent_low_fps == expected.one_percent_low_fps &&
+        actual.p95_ms == expected.p95_ms && actual.p99_ms == expected.p99_ms &&
+        actual.stutter_count == expected.stutter_count && actual.age_ns == expected.age_ns &&
+        actual.newest_present_ns == expected.newest_present_ns &&
+        actual.loss_count == expected.loss_count && actual.quality == expected.quality &&
+        actual.reason == expected.reason;
+}
+
+int test_shared_window_statistics() {
+    const SampleIdentity identity{315, 1};
+    constexpr std::uint64_t stale = 500'000'000ULL;
+    for (const std::size_t capacity : {2U, 128U, 4096U}) {
+        for (const std::size_t count : {0U, 1U, 2U, 99U, 100U, 101U, 301U, 1201U, 2401U}) {
+            PresentSource source{identity, capacity};
+            CHECK(source.start().has_value());
+            std::vector<PresentTimestamp> presents;
+            std::uint64_t at = 0;
+            for (std::size_t index = 0; index < count; ++index) {
+                // Deterministic changing cadence and spikes, including ties in
+                // the sorted intervals and 1% nearest-rank boundaries.
+                at += index % 113 == 0 ? 150'000'000ULL :
+                    1'000'000ULL + (index * 7919 % 31'000'000ULL);
+                presents.push_back({identity, at});
+            }
+            // Late ETW events are admitted in timestamp order; duplicates do
+            // not add intervals. Retention must still match the reference.
+            for (auto iterator = presents.rbegin(); iterator != presents.rend(); ++iterator)
+                CHECK(source.ingest({identity, iterator->monotonic_ns, 1, true, 0, 41}));
+            if (!presents.empty())
+                CHECK(!source.ingest({identity, presents.back().monotonic_ns, 1, true, 0, 41}));
+            if (presents.size() > capacity)
+                presents.erase(presents.begin(), presents.end() - static_cast<std::ptrdiff_t>(capacity));
+            const auto generation = source.drain(at, stale).source_generation;
+            for (const std::uint64_t boundary : {0ULL, at / 2, at, at + 1}) {
+                for (const std::uint64_t now : {at, at + stale, at + stale + 1, at > 0 ? at - 1 : 0}) {
+                    const auto actual = source.drain(now, stale, boundary);
+                    CHECK(equal_metrics(actual, reference_windows(presents, identity, now, stale, boundary)));
+                    CHECK(actual.source_generation == generation);
+                    CHECK(actual.stream_id == (presents.empty() || boundary > at ? 0 : 41));
+                }
+            }
+        }
+    }
+
+    // Exact window edges, a one-sample live window with a usable longer tail,
+    // and a second slower swapchain. Source selection and loss recovery stay
+    // outside aggregation and must keep their existing semantics.
+    PresentSource source{identity, 4096};
+    CHECK(source.start().has_value());
+    std::vector<PresentTimestamp> presents;
+    for (std::uint64_t at : {0ULL, 5'000'000'000ULL, 7'000'000'000ULL,
+                             9'000'000'000ULL, 10'000'000'000ULL}) {
+        presents.push_back({identity, at});
+        CHECK(source.ingest({identity, at, 1, true, 0, 41}));
+    }
+    CHECK(equal_metrics(source.drain(10'000'000'000ULL, stale),
+        reference_windows(presents, identity, 10'000'000'000ULL, stale, 0)));
+    presents.push_back({identity, 11'500'000'000ULL});
+    CHECK(source.ingest({identity, presents.back().monotonic_ns, 1, true, 4, 41}));
+    auto expected = reference_windows(presents, identity, 11'500'000'000ULL, stale, 0);
+    expected.loss_count += 4;
+    CHECK(equal_metrics(source.drain(11'500'000'000ULL, stale), expected));
+    for (std::uint64_t index = 1; index <= 120; ++index) {
+        const auto at = 11'500'000'000ULL + index * 16'666'667ULL;
+        presents.push_back({identity, at});
+        CHECK(source.ingest({identity, at, 1, true, 0, 41}));
+        if (index % 4 == 0)
+            CHECK(source.ingest({identity, at + 1, 1, true, 0, 42}));
+    }
+    const auto now = presents.back().monotonic_ns + 1;
+    for (std::uint64_t boundary : {0ULL, 11'500'000'001ULL}) {
+        expected = reference_windows(presents, identity, now, stale, boundary);
+        if (boundary == 0) {
+            expected.loss_count += 4;
+            if (expected.fps) expected.quality = SampleQuality::degraded;
+        }
+        const auto actual = source.drain(now, stale, boundary);
+        CHECK(equal_metrics(actual, expected));
+        CHECK(actual.stream_id == 41);
+    }
+
+    // Count allocations on this drain's thread only, not on the independent
+    // worker. Reference buffers/ingestion are deliberately outside the budget.
+    std::size_t allocations = 0;
+    allocation_counter = &allocations;
+    const auto measured = source.drain(now, stale);
+    allocation_counter = nullptr;
+    CHECK(measured.fps.has_value());
+    // MSVC's Debug iterator tracking also allocates one proxy per vector.
+    constexpr std::size_t budget = _ITERATOR_DEBUG_LEVEL == 0 ? 2 : 4;
+    if (allocations > budget) std::cerr << "Drain allocations: " << allocations << '\n';
+    CHECK(allocations <= budget);
+    return EXIT_SUCCESS;
+}
 
 void pause_before_wait(std::stop_token stop) noexcept {
     waiting_to_sleep.store(true, std::memory_order_release);
@@ -41,6 +183,7 @@ int test_shutdown_before_wait() {
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view{argv[1]} == "--shutdown-before-wait")
         return test_shutdown_before_wait();
+    CHECK(test_shared_window_statistics() == EXIT_SUCCESS);
     using namespace kf2::telemetry;
     const SampleIdentity game{1234, 5678};
     PresentSource source{game, 256};

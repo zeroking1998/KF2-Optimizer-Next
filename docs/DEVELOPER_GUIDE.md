@@ -117,6 +117,13 @@ diagnostic/support reports. JSON retention and atomic replacement are unchanged.
 
 ### Adaptive Present observations
 
+The live worker computes its overlapping 1/3/5/10-second metrics from one
+interval array and one sort. Window membership excludes each boundary-crossing
+pair; chronological averages and ascending slow-tail sums preserve the generic
+aggregator's exact values. All metrics retain their existing cadence and
+freshness checks without an additional mutable cache. Fixed diagnostic windows
+still use the generic aggregator independently.
+
 Frame metrics carry the actual newest Present timestamp, selected swapchain
 and source generation. An asynchronous UI read must not derive a new Present
 time from its own clock and a cached age. Adaptive accepts each increasing
