@@ -4026,7 +4026,10 @@ int test_initial_dxgi_retry() {
         }
         const auto attempts = dxgi_start_probe.calls;
         if (runtime.present_session) {
-            const auto first = runtime.present_session_started_ns;
+            // A long-running Windows clock can lose individual nanoseconds
+            // during QPC conversion. Keep this boundary independent of uptime.
+            constexpr std::uint64_t first = 9'000'000'000'000'002ULL;
+            runtime.present_session_started_ns = first;
             for (unsigned int frame = 0; frame < 66; ++frame) {
                 const auto at = first + frame * 10'000'000ULL;
                 runtime.present_session->test_present_event(true, 17, at);
@@ -4037,7 +4040,8 @@ int test_initial_dxgi_retry() {
             CHECK(metrics.frames());
             CHECK(metrics.frames()->fps);
             CHECK(std::abs(*metrics.frames()->fps - 100.0) < 0.01);
-            CHECK(metrics.frames()->frame_time_ms == 10.0);
+            CHECK(metrics.frames()->frame_time_ms);
+            CHECK(std::abs(*metrics.frames()->frame_time_ms - 10.0) < 0.000001);
             CHECK(metrics.frames()->reason == telemetry::UnavailableReason::none);
             CHECK(metrics.frames()->quality == telemetry::SampleQuality::good);
             CHECK(dxgi_start_probe.calls == attempts);
