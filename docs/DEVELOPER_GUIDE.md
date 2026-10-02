@@ -115,6 +115,17 @@ healthy destruction bypass that delay; a failed writer keeps its bounded retry
 backoff. The accepted in-memory snapshot stays immediately available to
 diagnostic/support reports. JSON retention and atomic replacement are unchanged.
 
+### PDH GPU sampling
+
+PDH GPU sampling reuses one query-owned raw buffer and one merged value vector.
+Counter items are consumed before the next category overwrites the buffer;
+names and category amounts no longer pass through temporary pair vectors.
+The exact existing identity parser runs once per retained name, including
+invalid names. Up to 4096 names of at most 512 characters are cached per query;
+overflow/long names use uncached parsing without dropping or truncating data.
+Query recreation discards the cache, and moves transfer it with the handles.
+Amounts, validity checks, aggregation and sampling cadence remain uncached.
+
 ### Adaptive Present observations
 
 The live worker computes its overlapping 1/3/5/10-second metrics from one

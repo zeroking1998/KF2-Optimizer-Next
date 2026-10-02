@@ -321,6 +321,8 @@ if(BUILD_TESTING)
     )
     target_compile_definitions(KF2TestTelemetryCore PRIVATE
         KF2_PRESENT_SOURCE_TESTING)
+    target_compile_definitions(KF2TestTelemetryCore PUBLIC
+        KF2_PDH_GPU_TESTING)
 
     add_library(KF2TestUiCore STATIC
         src/ui/numeric_presentation.cpp

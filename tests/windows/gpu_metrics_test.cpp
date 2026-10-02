@@ -1,11 +1,289 @@
 #include <algorithm>
+#include <array>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <limits>
+#include <new>
 #include "kf2/telemetry/gpu_metrics.hpp"
+#include <pdhmsg.h>
+
+namespace {
+thread_local bool count_allocations = false;
+thread_local std::size_t allocations = 0;
+thread_local std::size_t raw_allocations = 0;
+thread_local std::array<std::size_t, 3> raw_sizes{};
+}
+
+void* operator new(std::size_t size) {
+    if (count_allocations) {
+        ++allocations;
+        if (std::find(raw_sizes.begin(), raw_sizes.end(), size) != raw_sizes.end())
+            ++raw_allocations;
+    }
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
+
+namespace {
+using namespace kf2::telemetry;
+struct CounterEntry {
+    std::wstring name;
+    double utilization{0};
+    LONGLONG memory{0};
+    DWORD status{PDH_CSTATUS_VALID_DATA};
+};
+std::array<std::vector<CounterEntry>, 3> counter_arrays;
+std::size_t parse_calls = 0;
+std::size_t closed_queries = 0;
+std::size_t next_counter = 0;
+int failed_array = -1;
+bool collection_failed = false;
+bool fail_data_read = false;
+
+PDH_STATUS WINAPI open_query(LPCWSTR, DWORD_PTR, PDH_HQUERY* query) {
+    *query = reinterpret_cast<PDH_HQUERY>(100);
+    next_counter = 0;
+    return ERROR_SUCCESS;
+}
+PDH_STATUS WINAPI add_counter(PDH_HQUERY, LPCWSTR, DWORD_PTR, PDH_HCOUNTER* counter) {
+    *counter = reinterpret_cast<PDH_HCOUNTER>(++next_counter);
+    return ERROR_SUCCESS;
+}
+PDH_STATUS WINAPI collect_query(PDH_HQUERY query) {
+    return !query || collection_failed ? PDH_INVALID_HANDLE : ERROR_SUCCESS;
+}
+PDH_STATUS WINAPI close_query(PDH_HQUERY) {
+    ++closed_queries;
+    return ERROR_SUCCESS;
+}
+PDH_STATUS WINAPI read_counter(PDH_HCOUNTER counter, DWORD format,
+    LPDWORD bytes, LPDWORD count, PPDH_FMT_COUNTERVALUE_ITEM_W items) {
+    const auto index = reinterpret_cast<std::uintptr_t>(counter) - 1;
+    if (index >= counter_arrays.size()) return PDH_INVALID_HANDLE;
+    if (failed_array == static_cast<int>(index)) return PDH_INVALID_HANDLE;
+    const auto& entries = counter_arrays[index];
+    if (entries.empty()) return PDH_NO_DATA;
+    std::size_t required = entries.size() * sizeof(*items);
+    for (const auto& entry : entries) required += (entry.name.size() + 1) * sizeof(wchar_t);
+    raw_sizes[index] = required;
+    *count = static_cast<DWORD>(entries.size());
+    if (!items || *bytes < required) {
+        *bytes = static_cast<DWORD>(required);
+        return PDH_MORE_DATA;
+    }
+    if (fail_data_read) return PDH_MORE_DATA;
+    auto* name = reinterpret_cast<wchar_t*>(items + entries.size());
+    for (std::size_t at = 0; at < entries.size(); ++at) {
+        const auto& entry = entries[at];
+        std::memcpy(name, entry.name.c_str(), (entry.name.size() + 1) * sizeof(wchar_t));
+        items[at].szName = name;
+        items[at].FmtValue.CStatus = entry.status;
+        if (format == PDH_FMT_DOUBLE) items[at].FmtValue.doubleValue = entry.utilization;
+        else items[at].FmtValue.largeValue = entry.memory;
+        name += entry.name.size() + 1;
+    }
+    *bytes = static_cast<DWORD>(required);
+    return ERROR_SUCCESS;
+}
+
+std::vector<GpuCounterValue> reference_counters() {
+    std::vector<GpuCounterValue> values;
+    for (std::size_t kind = 0; kind < counter_arrays.size(); ++kind) {
+        for (const auto& entry : counter_arrays[kind]) {
+            if (entry.status != PDH_CSTATUS_VALID_DATA && entry.status != PDH_CSTATUS_NEW_DATA)
+                continue;
+            const auto identity = parse_gpu_instance(entry.name);
+            if (!identity) continue;
+            const auto memory = static_cast<std::uint64_t>(std::max<LONGLONG>(0, entry.memory));
+            values.push_back({*identity, kind == 0 ? entry.utilization : 0,
+                kind == 1 ? memory : 0, kind == 2 ? memory : 0});
+        }
+    }
+    return values;
+}
+
+bool equivalent_metrics(const GpuMetrics& actual, std::uint32_t pid, std::uint64_t luid) {
+    const auto values = reference_counters();
+    const auto expected = aggregate_gpu_counters(values, pid, luid);
+    const auto adapter = aggregate_adapter_gpu_percent(values, luid);
+    const bool valid_adapter = adapter && expected.reason != UnavailableReason::source_failure;
+    return actual.gpu_percent == expected.gpu_percent && actual.dedicated_bytes == expected.dedicated_bytes &&
+        actual.shared_bytes == expected.shared_bytes && actual.adapter_gpu_percent == adapter &&
+        actual.process_adapter_luid == active_process_gpu_adapter_luid(values, pid, luid) &&
+        actual.quality == (valid_adapter ? SampleQuality::good : expected.quality) &&
+        actual.reason == (valid_adapter ? UnavailableReason::none : expected.reason);
+}
+
+int test_reused_pdh_samples() {
+    struct ResetApi {
+        ~ResetApi() { detail::set_pdh_gpu_api_for_testing({}); }
+    } reset;
+    detail::PdhGpuApi api;
+    api.open = open_query;
+    api.add = add_counter;
+    api.collect = collect_query;
+    api.array = read_counter;
+    api.close = close_query;
+    api.before_parse = [](std::wstring_view) { ++parse_calls; };
+    detail::set_pdh_gpu_api_for_testing(api);
+    constexpr std::uint64_t luid = 0xF0F0F0F000F1F1F1ULL;
+    constexpr auto memory_name = L"pid_4242_luid_0xf0f0f0f0_0x00f1f1f1";
+    counter_arrays = {};
+    counter_arrays[0] = {
+        {L"pid_4242_luid_0xf0f0f0f0_0x00f1f1f1_phys_0_eng_0_engtype_3D", 35},
+        {L"pid_7777_luid_0xf0f0f0f0_0x00f1f1f1_phys_0_eng_0_engtype_3D", 40},
+        {L"pid_4242_luid_0x2_0x3_phys_0_eng_0_engtype_3D", 99},
+        {L"pid_4242_luid_0xf0f0f0f0_0x00f1f1f1_phys_0_eng_1_engtype_Copy", 20},
+        {L"bad-name", 99},
+        {L"pid_4242_luid_0xf0f0f0f0_0x00f1f1f1_phys_1_eng_1_engtype_3D", 99, 0, PDH_CSTATUS_INVALID_DATA},
+    };
+    counter_arrays[1] = {{memory_name, 0, 3000}, {memory_name, 0, 2000}};
+    counter_arrays[2] = {{memory_name, 0, 500, PDH_CSTATUS_NEW_DATA},
+        {L"pid_4242_luid_0x2_0x3", 0, -10}};
+    auto sampler = PdhGpuSampler::create(4242, luid);
+    CHECK(sampler.has_value());
+    const auto warmup = sampler.value().sample();
+    CHECK(warmup.has_value());
+    CHECK(!warmup.value().gpu_percent);
+    const auto first = sampler.value().sample();
+    CHECK(first.has_value());
+    CHECK(equivalent_metrics(first.value(), 4242, luid));
+    CHECK(sampler.value().cached_instance_count_for_testing() == 7);
+    parse_calls = 0;
+    allocations = raw_allocations = 0;
+    count_allocations = true;
+    const auto second = sampler.value().sample();
+    count_allocations = false;
+    CHECK(second.has_value());
+    if (parse_calls != 0) std::cerr << "Repeated PDH parsing: " << parse_calls << '\n';
+    CHECK(parse_calls == 0);
+    if (raw_allocations != 0)
+        std::cerr << "Steady allocations: " << allocations << ", raw buffers: " << raw_allocations << '\n';
+    CHECK(raw_allocations == 0);
+    CHECK(equivalent_metrics(second.value(), 4242, luid));
+
+    // Cached identities must never cache amounts or suppress validation.
+    counter_arrays[0][0].utilization = 80;
+    counter_arrays[1][0].memory = 4500;
+    counter_arrays[2][0].memory = 700;
+    auto changed = sampler.value().sample();
+    CHECK(changed.has_value());
+    CHECK(equivalent_metrics(changed.value(), 4242, luid));
+    CHECK(changed.value().gpu_percent == 80);
+    CHECK(changed.value().dedicated_bytes == 4500);
+    CHECK(changed.value().shared_bytes == 700);
+    counter_arrays[0][0].utilization = 101;
+    changed = sampler.value().sample();
+    CHECK(changed.has_value());
+    CHECK(changed.value().reason == UnavailableReason::source_failure);
+    CHECK(equivalent_metrics(changed.value(), 4242, luid));
+    counter_arrays[0][0].utilization = 35;
+
+    for (const auto failed : {0, 1, 2}) {
+        failed_array = failed;
+        CHECK(!sampler.value().sample().has_value());
+    }
+    failed_array = -1;
+    fail_data_read = true;
+    CHECK(!sampler.value().sample().has_value());
+    fail_data_read = false;
+    collection_failed = true;
+    CHECK(!sampler.value().sample().has_value());
+    collection_failed = false;
+    changed = sampler.value().sample();
+    CHECK(changed.has_value());
+    CHECK(equivalent_metrics(changed.value(), 4242, luid));
+
+    auto moved = std::move(sampler.value());
+    CHECK(sampler.value().cached_instance_count_for_testing() == 0);
+    CHECK(!sampler.value().sample().has_value());
+    parse_calls = 0;
+    CHECK(moved.sample().has_value());
+    CHECK(parse_calls == 0);
+    auto other = PdhGpuSampler::create(7777, luid);
+    CHECK(other.has_value());
+    CHECK(other.value().sample().has_value());
+    parse_calls = 0;
+    const auto other_metrics = other.value().sample();
+    CHECK(other_metrics.has_value());
+    CHECK(parse_calls == 7); // New query owns a new cache, not the first query's.
+    CHECK(equivalent_metrics(other_metrics.value(), 7777, luid));
+    const auto closed_before_move = closed_queries;
+    other.value() = std::move(moved);
+    CHECK(closed_queries == closed_before_move + 1);
+    parse_calls = 0;
+    CHECK(other.value().sample().has_value());
+    CHECK(parse_calls == 0);
+
+    // Grow beyond the cache ceiling without dropping any valid counters. Old
+    // entries stay cached; overflow and overlong names retain uncached parsing.
+    const auto retained = other.value().cached_instance_count_for_testing();
+    counter_arrays = {};
+    for (std::size_t at = 0; at < 5000; ++at) {
+        counter_arrays[0].push_back({L"pid_" + std::to_wstring(100000 + at) +
+            L"_luid_0xf0f0f0f0_0x00f1f1f1_phys_0_eng_0_engtype_3D", 0.01});
+    }
+    changed = other.value().sample();
+    CHECK(changed.has_value());
+    CHECK(equivalent_metrics(changed.value(), 4242, luid));
+    CHECK(other.value().cached_instance_count_for_testing() == 4096);
+    parse_calls = 0;
+    changed = other.value().sample();
+    CHECK(changed.has_value());
+    CHECK(parse_calls == 5000 - (4096 - retained));
+    CHECK(other.value().cached_instance_count_for_testing() == 4096);
+    CHECK(equivalent_metrics(changed.value(), 4242, luid));
+    counter_arrays = {};
+    counter_arrays[0] = {{memory_name + std::wstring{L"_"} + std::wstring(513, L'x'), 0}};
+    parse_calls = 0;
+    changed = other.value().sample();
+    CHECK(changed.has_value());
+    CHECK(parse_calls == 1);
+    CHECK(equivalent_metrics(changed.value(), 4242, luid));
+    auto long_names = PdhGpuSampler::create(4242, luid);
+    CHECK(long_names.has_value());
+    CHECK(long_names.value().sample().has_value());
+    parse_calls = 0;
+    CHECK(long_names.value().sample().has_value());
+    CHECK(long_names.value().sample().has_value());
+    CHECK(parse_calls == 2);
+    CHECK(long_names.value().cached_instance_count_for_testing() == 0);
+    counter_arrays = {};
+    changed = other.value().sample();
+    CHECK(changed.has_value());
+    CHECK(equivalent_metrics(changed.value(), 4242, luid));
+    CHECK(!changed.value().gpu_percent && !changed.value().adapter_gpu_percent);
+    // Keep the unchanged parser's numeric limits, LUID truncation, suffixes and
+    // missing engine indices identical when records go through the cache.
+    counter_arrays[0] = {
+        {L"pid_00004242_luid_0x100000001_0x100000002_phys_0_eng_0_engtype_3D", 10},
+        {L"pid_4242_luid_0xFFFFFFFFFFFFFFFF_0xFFFFFFFFFFFFFFFF_phys_0_eng_1_engtype_Copy", 20},
+        {L"pid_4294967296_luid_0x1_0x2_phys_0_eng_2_engtype_3D", 99},
+        {L"pid_4242_luid_0x10000000000000000_0x2", 99},
+        {L"pid_4242_luid_0x1_0x2_engtype_3D", 5},
+        {L"pid_4242_luid_0x1_0x2_phys_4294967296_eng_0_engtype_3D", 99},
+        {L"PID_4242_luid_0x1_0x2_phys_0_eng_0_engtype_3D", 99},
+    };
+    auto limits = PdhGpuSampler::create(4242, 0);
+    CHECK(limits.has_value());
+    CHECK(limits.value().sample().has_value());
+    changed = limits.value().sample();
+    CHECK(changed.has_value());
+    CHECK(equivalent_metrics(changed.value(), 4242, 0));
+    parse_calls = 0;
+    changed = limits.value().sample();
+    CHECK(changed.has_value());
+    CHECK(parse_calls == 0);
+    CHECK(equivalent_metrics(changed.value(), 4242, 0));
+    return EXIT_SUCCESS;
+}
+}  // namespace
 
 int wmain(int argc, wchar_t** argv) {
     using namespace kf2::telemetry;
@@ -18,6 +296,7 @@ int wmain(int argc, wchar_t** argv) {
                   << '\n';
         return EXIT_SUCCESS;
     }
+    CHECK(test_reused_pdh_samples() == EXIT_SUCCESS);
     const auto adapters = enumerate_gpu_adapters();
     CHECK(adapters.has_value());
     CHECK(!adapters.value().empty());
