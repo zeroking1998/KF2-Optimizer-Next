@@ -44,6 +44,13 @@ Protected configuration uses explicit discovery, preview, backup, atomic write,
 readback, and exact restoration. Unknown or locked values are not silently
 overridden. Interrupted sessions are recoverable from portable state.
 
+Changing the game folder requires both installations to be confirmed stopped.
+The old installation and saved path remain authoritative until all protected
+INI, provider, FleX and FPS-cap recovery succeeds. An idle prepared external
+launch can be restored before switching; an active launch, restart, live
+restoration debt or unconfirmed cleanup blocks the change. Cancelling the
+picker or selecting the same folder preserves prepared state.
+
 ## Bounded runtime work
 
 Runtime queues, per-tick work, action sizes, retry counts, and history are

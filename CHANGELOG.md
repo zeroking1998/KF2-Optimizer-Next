@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Game-folder changes now preserve the original installation until protected
+  files are fully restored. Running games, pending launches/restarts and
+  unconfirmed recovery block switching; cancelling preserves prepared state.
+
 - GPU counter sampling now reuses its buffers and remembers parsed counter
   identities instead of repeatedly allocating and parsing unchanged names.
   Measurements, GPU attribution and sampling cadence remain unchanged.
