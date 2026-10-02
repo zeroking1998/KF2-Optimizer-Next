@@ -90,6 +90,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Closing the optimizer in KF2's main menu now restores owned process graphics
+  through the authenticated menu bridge, without requiring a gameplay probe.
+  Failed readbacks retain restore ownership; the selected FPS limit is unchanged.
 - Game-folder changes now preserve the original installation until protected
   files are fully restored. Running games, pending launches/restarts and
   unconfirmed recovery block switching; cancelling preserves prepared state.

@@ -152,6 +152,25 @@ event ReceivedLine(string Line)
             RequestClose();
             return;
         }
+        if ((Resource ~= "disable") && Quality == 100 && WorldInfo != None &&
+            WorldInfo.NetMode == NM_Standalone &&
+            (Left(WorldInfo.GetMapName(true), 10) ~= "KFMainMenu"))
+        {
+            Applied = SequenceText == string(Sequence) &&
+                QualityText == string(Quality) &&
+                CurrentInteraction.RestoreAdaptiveAtMainMenu(
+                    Token, Sequence, WorldInfo);
+            if (Applied)
+            {
+                SendText("KF2OPT_ACK "$Sequence$" applied disable 100");
+            }
+            else
+            {
+                SendText("KF2OPT_ACK "$Sequence$" failed rejected");
+            }
+            RequestClose();
+            return;
+        }
     }
 
     foreach WorldInfo.DynamicActors(class'KF2OptimizerTelemetryProbe', Probe)

@@ -1449,6 +1449,47 @@ int main() {
         CHECK(fps_connection.find("ApplyRuntimeFrameRate(Token, Sequence, Quality)") !=
               std::string::npos);
     }
+    // Menu shutdown must restore viewport-owned state without a gameplay probe.
+    const auto menu_restore_start = interaction_source.find(
+        "function bool RestoreAdaptiveAtMainMenu(");
+    CHECK(menu_restore_start != std::string::npos);
+    const auto menu_restore_end = interaction_source.find(
+        "function ReportOptimizerContextState(", menu_restore_start);
+    CHECK(menu_restore_end != std::string::npos);
+    const auto menu_restore_body = interaction_source.substr(
+        menu_restore_start, menu_restore_end - menu_restore_start);
+    const auto menu_auth = menu_restore_body.find(
+        "Token != class'KF2OptimizerTelemetryProbe'.default.AdaptiveControlToken");
+    const auto menu_offline_restore = menu_restore_body.find(
+        "RestoreOriginal(ProcessAdaptiveGraphicsState)");
+    const auto menu_online_restore = menu_restore_body.find(
+        "RestoreOnlineSessionState(CurrentWorld, \"main_menu\")");
+    const auto menu_disabled = menu_restore_body.find(
+        "SetProcessAdaptiveRuntimeEnabled(false);");
+    CHECK(menu_auth != std::string::npos && menu_auth < menu_offline_restore);
+    CHECK(menu_offline_restore < menu_disabled);
+    CHECK(menu_online_restore < menu_disabled);
+    CHECK(menu_restore_body.find("Sequence <= 0") != std::string::npos);
+    CHECK(menu_restore_body.find("MenuRestoreLastSequence") == std::string::npos);
+    CHECK(menu_restore_body.find("CurrentWorld.NetMode != NM_Standalone") != std::string::npos);
+    CHECK(menu_restore_body.find("Left(CurrentWorld.GetMapName(true), 10) ~= \"KFMainMenu\"") !=
+          std::string::npos);
+    CHECK(menu_restore_body.find("CurrentEngine.GameViewport != Outer") != std::string::npos);
+    CHECK(menu_restore_body.find("GlobalInteractions.Find(self) == -1") != std::string::npos);
+    CHECK(menu_restore_body.find("bProcessGraphicsRestorePending ||") != std::string::npos);
+    CHECK(menu_restore_body.find("FrameRateLastSequence") == std::string::npos);
+    CHECK(menu_restore_body.find("Spawn(") == std::string::npos);
+    CHECK(menu_restore_body.find("SaveConfig(") == std::string::npos);
+    const auto menu_restore_route = connection_source.find(
+        "CurrentInteraction.RestoreAdaptiveAtMainMenu(");
+    CHECK(menu_restore_route != std::string::npos &&
+          menu_restore_route < connection_source.find("foreach WorldInfo.DynamicActors"));
+    CHECK(connection_source.find("Resource ~= \"disable\") && Quality == 100") <
+          menu_restore_route);
+    CHECK(connection_source.find("SequenceText == string(Sequence)",
+        connection_source.find("if ((Resource ~= \"enable\")")) < menu_restore_route);
+    CHECK(connection_source.find("QualityText == string(Quality)",
+        connection_source.find("if ((Resource ~= \"enable\")")) < menu_restore_route);
     CHECK(telemetry_source.find(
         "float(class'KF2OptimizerTelemetryProbe'.default.AdaptiveTargetFPS)") !=
           std::string::npos);
