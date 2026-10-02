@@ -2103,6 +2103,21 @@ int test_live_target_fps_control() {
         AdaptiveTestReceiver receiver{"applied"};
         CHECK(receiver.port != 0);
         connect(runtime, receiver);
+        telemetry_pipeline::TelemetryFrame menu;
+        menu.observed_at_ns = runtime.monotonic_ns();
+        replace_frame_gameplay(menu, [&](auto& session) {
+            session.main_menu = true;
+            session.map = "KFMainMenu";
+            session.phase = game::GameLogPhase::main_menu;
+            session.telemetry_control_port = receiver.port;
+        });
+        runtime.adaptive_runtime_mode_confirmed = true;
+        runtime.reconcile_adaptive_runtime_mode(menu);
+        CHECK(!runtime.adaptive_mode_dispatcher.busy());
+        CHECK(!runtime.adaptive_runtime_mode_pending);
+        CHECK(!runtime.adaptive_runtime_mode_confirmed);
+        CHECK(runtime.adaptive_control_sequence == 0);
+        CHECK(runtime.adaptive_runtime_mode_last_attempt_ns == 0);
         const auto generation = runtime.adaptive_settings_generation;
         runtime.set_slider_value("settings-target-slider", 119);
         CHECK(runtime.optimizer_settings.target_fps == 119);
