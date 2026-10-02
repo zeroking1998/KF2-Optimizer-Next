@@ -71,6 +71,16 @@ int main() {
     CHECK(action(dashboard, "dashboard-diagnostics") == nullptr);
     CHECK(action(dashboard, "dashboard-refresh") == nullptr);
     CHECK(action(dashboard, "game-select-install") != nullptr);
+    CHECK(action(dashboard, "game-select-install")->enabled);
+    auto folder_status = model.status();
+    folder_status.game_folder_change_blocked = true;
+    model.set_status(folder_status);
+    CHECK(!action(layout_shell(model, 1440, 900), "game-select-install")->enabled);
+    folder_status.game_folder_change_blocked = false;
+    model.set_status(folder_status);
+    model.set_recovery_required(true);
+    CHECK(!action(layout_shell(model, 1440, 900), "game-select-install")->enabled);
+    model.set_recovery_required(false);
     CHECK(action(dashboard, "settings-animations") == nullptr);
     CHECK(action(dashboard, "settings-updates-automatic") != nullptr);
     CHECK(node(dashboard, "header-auto-updates") != nullptr);

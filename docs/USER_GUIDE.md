@@ -60,6 +60,11 @@ Start the optimizer and open **Home**. If KF2 was not detected, choose
 **Select game folder**. A missing or ambiguous path keeps dependent controls
 unavailable.
 
+Close KF2 before changing its folder. A pending launch, restart or unfinished
+protected recovery blocks the change. Prepared files are restored in the old
+installation before the new path is saved; cancelling the picker or selecting
+the current folder leaves the prepared state intact.
+
 ## 3. Choose the performance target
 
 On **Home**, choose any target between 30 and 240 FPS. The target
