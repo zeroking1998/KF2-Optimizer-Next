@@ -20,8 +20,136 @@
         }                                                                       \
     } while (false)
 
+int frame_rate_command_and_receipt_contract() {
+    using namespace kf2::game;
+    constexpr auto token = "0123456789abcdef0123456789abcdef";
+    for (const int fps : {30, 119, 240}) {
+        const auto command = build_adaptive_control_command({
+            .port = 17777, .token = token, .sequence = 81,
+            .resource = AdaptiveResourceControl::frame_rate, .quality = fps});
+        CHECK(command.has_value());
+        CHECK(command.value() ==
+              "KF2OPT 0123456789abcdef0123456789abcdef 81 frame_rate " +
+                  std::to_string(fps) + "\n");
+        const auto receipt = parse_adaptive_control_receipt(
+            "KF2OPT_ACK 81 applied frame_rate " + std::to_string(fps) +
+            "\r\n");
+        CHECK(receipt.has_value());
+        CHECK(receipt->sequence == 81);
+        CHECK(receipt->resource == AdaptiveResourceControl::frame_rate);
+        CHECK(receipt->quality == fps);
+        CHECK(receipt->status == AdaptiveControlReceiptStatus::applied);
+    }
+    for (const int fps : {29, 241}) {
+        CHECK(!build_adaptive_control_command({
+            .port = 17777, .token = token, .sequence = 81,
+            .resource = AdaptiveResourceControl::frame_rate,
+            .quality = fps}).has_value());
+        CHECK(!parse_adaptive_control_receipt(
+            "KF2OPT_ACK 81 applied frame_rate " + std::to_string(fps) +
+            "\r\n").has_value());
+    }
+    CHECK(!parse_adaptive_control_receipt(
+        "KF2OPT_ACK 81 applied frame_rate 119.5\r\n").has_value());
+    CHECK(!parse_adaptive_control_receipt(
+        "KF2OPT_ACK 81 applied frame_rate 119.0\r\n").has_value());
+    CHECK(!build_adaptive_control_command({
+        .port = 17777, .token = token, .sequence = 81,
+        .resource = static_cast<AdaptiveResourceControl>(255),
+        .quality = 50}).has_value());
+    CHECK(!build_adaptive_control_command({
+        .port = 17777, .token = token, .sequence = 81,
+        .resource = AdaptiveResourceControl::cpu,
+        .quality = 119}).has_value());
+    CHECK(!parse_adaptive_control_receipt(
+        "KF2OPT_ACK 81 applied cpu 119\r\n").has_value());
+    return EXIT_SUCCESS;
+}
+
+int frame_rate_receipts_preserve_quality_state() {
+    using namespace kf2::game;
+    AdaptiveResourceQualityState quality{80};
+    quality.apply({1, AdaptiveResourceControl::gpu, 60});
+    quality.apply({2, AdaptiveResourceControl::overdraw, 40});
+    quality.apply({3, AdaptiveResourceControl::effects, 70});
+    for (const int fps : {30, 119, 240}) {
+        for (const auto status : {AdaptiveControlReceiptStatus::applied,
+                 AdaptiveControlReceiptStatus::restored,
+                 AdaptiveControlReceiptStatus::state_unknown,
+                 AdaptiveControlReceiptStatus::unsupported}) {
+            quality.apply({4, AdaptiveResourceControl::frame_rate, fps, status});
+            CHECK(quality.cpu == 80 && quality.gpu == 60 &&
+                  quality.vram == 80 && quality.ram == 80 &&
+                  quality.overdraw == 40 && quality.effects == 70);
+            CHECK(quality.control_quality(AdaptiveResourceControl::frame_rate) ==
+                  40);
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
+int frame_rate_acknowledgements_match_request() {
+    using namespace kf2::game;
+    constexpr auto token = "0123456789abcdef0123456789abcdef";
+    struct ReceiptCase final {
+        std::string_view response;
+        bool matches;
+    };
+    constexpr std::array<ReceiptCase, 4> receipts{{
+        {"KF2OPT_ACK 81 applied frame_rate 119\r\n", true},
+        {"KF2OPT_ACK 82 applied frame_rate 119\r\n", false},
+        {"KF2OPT_ACK 81 applied enable 119\r\n", false},
+        {"KF2OPT_ACK 81 applied frame_rate 120\r\n", false},
+    }};
+    for (const auto& receipt : receipts) {
+        const SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        CHECK(listener != INVALID_SOCKET);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        CHECK(bind(listener, reinterpret_cast<const sockaddr*>(&address),
+                   sizeof(address)) == 0);
+        int address_size = sizeof(address);
+        CHECK(getsockname(listener, reinterpret_cast<sockaddr*>(&address),
+                          &address_size) == 0);
+        CHECK(listen(listener, 1) == 0);
+        std::string observed_command;
+        std::thread server{[&] {
+            const SOCKET connection = accept(listener, nullptr, nullptr);
+            if (connection == INVALID_SOCKET) return;
+            char buffer[128]{};
+            while (observed_command.find('\n') == std::string::npos) {
+                const int received = recv(connection, buffer, sizeof(buffer), 0);
+                if (received <= 0) break;
+                observed_command.append(
+                    buffer, static_cast<std::size_t>(received));
+            }
+            send(connection, receipt.response.data(),
+                 static_cast<int>(receipt.response.size()), 0);
+            closesocket(connection);
+        }};
+        const auto result = send_adaptive_control({
+            .port = ntohs(address.sin_port), .token = token, .sequence = 81,
+            .resource = AdaptiveResourceControl::frame_rate, .quality = 119,
+            .timeout_ms = 500});
+        server.join();
+        closesocket(listener);
+        CHECK(observed_command ==
+              "KF2OPT 0123456789abcdef0123456789abcdef 81 frame_rate 119\n");
+        CHECK(result.has_value() == receipt.matches);
+        if (receipt.matches) {
+            CHECK(result.value().sequence == 81);
+            CHECK(result.value().resource == AdaptiveResourceControl::frame_rate);
+            CHECK(result.value().quality == 119);
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
 int main() {
     using namespace kf2::game;
+    CHECK(frame_rate_command_and_receipt_contract() == EXIT_SUCCESS);
+    CHECK(frame_rate_receipts_preserve_quality_state() == EXIT_SUCCESS);
     constexpr auto token = "0123456789abcdef0123456789abcdef";
     CHECK(valid_adaptive_control_token(token));
     CHECK(!valid_adaptive_control_token("0123"));
@@ -40,7 +168,7 @@ int main() {
         AdaptiveResourceControl resource;
         std::string_view name;
     };
-    constexpr std::array<ResourceCase, 10> resources{{
+    constexpr std::array<ResourceCase, 11> resources{{
         {AdaptiveResourceControl::cpu, "cpu"},
         {AdaptiveResourceControl::gpu, "gpu"},
         {AdaptiveResourceControl::vram, "vram"},
@@ -51,6 +179,7 @@ int main() {
         {AdaptiveResourceControl::recover, "recover"},
         {AdaptiveResourceControl::enable, "enable"},
         {AdaptiveResourceControl::disable, "disable"},
+        {AdaptiveResourceControl::frame_rate, "frame_rate"},
     }};
     std::uint64_t resource_sequence = 100;
     for (const auto& resource : resources) {
@@ -319,6 +448,7 @@ int main() {
     CHECK(live_receipt.value().quality == 75);
     CHECK(observed_command ==
           "KF2OPT 0123456789abcdef0123456789abcdef 77 cpu 75\n");
+    CHECK(frame_rate_acknowledgements_match_request() == EXIT_SUCCESS);
 
     const SOCKET delayed_listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     CHECK(delayed_listener != INVALID_SOCKET);

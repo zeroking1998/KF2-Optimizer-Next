@@ -22,12 +22,25 @@ namespace {
 std::atomic_bool fail_next_dispatch_publication{false};
 #endif
 
-constexpr std::array<std::string_view, 10> kAdaptiveResourceNames{
+constexpr std::array<std::string_view, 11> kAdaptiveResourceNames{
     "cpu", "gpu", "vram", "ram", "overdraw", "effects", "mixed",
-    "recover", "enable", "disable"};
+    "recover", "enable", "disable", "frame_rate"};
 static_assert(
     kAdaptiveResourceNames.size() ==
-    static_cast<std::size_t>(AdaptiveResourceControl::disable) + 1);
+    static_cast<std::size_t>(AdaptiveResourceControl::frame_rate) + 1);
+
+bool valid_control_value(AdaptiveResourceControl resource, int value) noexcept {
+    if (static_cast<std::size_t>(resource) >= kAdaptiveResourceNames.size()) {
+        return false;
+    }
+    if (resource == AdaptiveResourceControl::enable) {
+        return value >= 4 && value <= 2000;
+    }
+    if (resource == AdaptiveResourceControl::frame_rate) {
+        return value >= 30 && value <= 240;
+    }
+    return value >= 10 && value <= 100;
+}
 
 class WinsockSession final {
 public:
@@ -169,7 +182,8 @@ int AdaptiveResourceQualityState::control_quality(
             return std::min({cpu, gpu, vram, ram});
         case AdaptiveResourceControl::recover:
         case AdaptiveResourceControl::enable:
-        case AdaptiveResourceControl::disable: return effective_quality();
+        case AdaptiveResourceControl::disable:
+        case AdaptiveResourceControl::frame_rate: return effective_quality();
     }
     return effective_quality();
 }
@@ -197,6 +211,7 @@ void AdaptiveResourceQualityState::apply(
             break;
         case AdaptiveResourceControl::enable:
         case AdaptiveResourceControl::disable:
+        case AdaptiveResourceControl::frame_rate:
             break;
     }
 }
@@ -247,13 +262,10 @@ Result<std::string> generate_adaptive_control_token() {
 
 Result<std::string> build_adaptive_control_command(
     const AdaptiveControlRequest& request) {
-    const bool mode_enable =
-        request.resource == AdaptiveResourceControl::enable;
-    const bool valid_value = mode_enable
-        ? request.quality >= 4 && request.quality <= 2000
-        : request.quality >= 10 && request.quality <= 100;
     if (request.port == 0 || !valid_adaptive_control_token(request.token) ||
-        request.sequence == 0 || !valid_value || request.timeout_ms < 25 ||
+        request.sequence == 0 ||
+        !valid_control_value(request.resource, request.quality) ||
+        request.timeout_ms < 25 ||
         request.timeout_ms > 2000) {
         return Result<std::string>::failure({
             ErrorCode::invalid_argument,
@@ -305,12 +317,9 @@ std::optional<AdaptiveControlReceipt> parse_adaptive_control_receipt(
     } else {
         receipt.status = AdaptiveControlReceiptStatus::state_unknown;
     }
-    const bool mode_enable =
-        receipt.resource == AdaptiveResourceControl::enable;
-    const bool valid_value = mode_enable
-        ? receipt.quality >= 4 && receipt.quality <= 2000
-        : receipt.quality >= 10 && receipt.quality <= 100;
-    if (!valid_value) return std::nullopt;
+    if (!valid_control_value(receipt.resource, receipt.quality)) {
+        return std::nullopt;
+    }
     return receipt;
 }
 

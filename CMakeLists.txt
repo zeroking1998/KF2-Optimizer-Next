@@ -84,6 +84,7 @@ set(KF2_FEATURE_ACTION_SOURCES
 set(KF2_APP_ACTION_SOURCES
     "${PROJECT_SOURCE_DIR}/src/app/application_advanced.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application_actions.cpp"
+    "${PROJECT_SOURCE_DIR}/src/app/application_frame_rate_actions.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application_launch_actions.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/application_video_state.cpp"
     "${PROJECT_SOURCE_DIR}/src/app/runtime/action_contract.cpp"

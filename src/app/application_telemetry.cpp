@@ -516,6 +516,9 @@ void UiRuntime::telemetry_tick() {
         }
     }
     RuntimeTelemetryPipeline pipeline{*this};
+    // Advance user FPS receipts even with Adaptive off or no DXGI samples.
+    // In the normal idle case this is only an empty optional check.
+    poll_live_frame_rate();
     static_cast<void>(
         telemetry_pipeline::run_ordered_telemetry_pipeline(pipeline));
 }

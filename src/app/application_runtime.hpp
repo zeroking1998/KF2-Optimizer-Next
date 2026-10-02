@@ -129,6 +129,21 @@ struct AdaptiveRuntimePendingRequest final {
     game::AdaptiveResourceControl resource{game::AdaptiveResourceControl::mixed};
 };
 
+struct LiveFrameRateState final {
+    telemetry::SampleIdentity identity;
+    std::optional<int> confirmed;
+    std::optional<int> queued;
+    std::uint64_t queue_deadline_ns{0};
+    bool uncertain{false};
+    std::uint64_t confirmed_sequence{0};
+};
+
+struct LiveFrameRatePending final {
+    telemetry::SampleIdentity identity;
+    std::uint64_t sequence{0};
+    int target_fps{0};
+};
+
 struct UpdateRuntimeState final {
     UpdateRuntimeState(std::string installed_version,
                        std::filesystem::path persisted_state_path)
@@ -286,6 +301,10 @@ struct UiRuntime {
     optimizer::AdaptiveActuationTracker adaptive_actuation;
     game::AdaptiveControlDispatcher adaptive_control_dispatcher;
     game::AdaptiveControlDispatcher adaptive_mode_dispatcher;
+    // User-triggered only; no FPS polling or automatic retry worker.
+    game::AdaptiveControlDispatcher frame_rate_dispatcher;
+    std::optional<LiveFrameRateState> live_frame_rate;
+    std::optional<LiveFrameRatePending> frame_rate_pending;
     std::optional<AdaptiveRuntimePendingRequest>
         adaptive_control_pending;
     std::string adaptive_control_token;
@@ -432,6 +451,11 @@ struct UiRuntime {
     }
 
     [[nodiscard]] int effective_target_fps() const noexcept {
+        if (live_frame_rate && game_process && live_frame_rate->confirmed &&
+            live_frame_rate->identity == telemetry::SampleIdentity{
+                game_process->pid, game_process->process_start_id}) {
+            return *live_frame_rate->confirmed;
+        }
         return optimizer::effective_adaptive_target_fps(
             optimizer_settings.target_fps,
             adaptive_session_policy
@@ -479,6 +503,11 @@ struct UiRuntime {
     void update_overlay_scene_gate(bool flush = false);
 
     void runtime_tick();
+    void queue_live_frame_rate(int target_fps);
+    void poll_live_frame_rate();
+    void present_live_frame_rate(ui::UiStatus& status) const;
+    void observe_live_frame_rate(const game::GameMenuGraphicsReadback& readback);
+    [[nodiscard]] bool live_frame_rate_unsettled() const noexcept;
     void start_startup_prewarm();
     void poll_startup_prewarm();
     void poll_map_prewarm();

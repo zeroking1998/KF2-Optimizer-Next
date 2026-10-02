@@ -72,6 +72,9 @@ event PreBeginPlay()
         return;
     }
     `log("KF2OPT_ADAPTIVE_BRIDGE state=ready port="$BoundPort);
+    // Publish the address once at bind. Menu logs can otherwise remain
+    // buffered indefinitely, leaving an available local control undiscoverable.
+    ConsoleCommand("flushlog", false);
     if (WorldInfo.NetMode == NM_Client ||
         WorldInfo.NetMode == NM_ListenServer)
     {

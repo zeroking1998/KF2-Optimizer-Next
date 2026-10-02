@@ -110,7 +110,9 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                 }
             } else if (const auto bridge =
                            detail::parse_adaptive_bridge_line(line);
-                       current_ && !current_->main_menu &&
+                       // Listener discovery also serves the process-owned FPS
+                       // limit in the menu; it is not gameplay authorization.
+                       current_ &&
                        current_->phase != GameLogPhase::match_ended && bridge) {
                 if (current_->telemetry_control_port != bridge->port) {
                     current_->telemetry_control_port = bridge->port;

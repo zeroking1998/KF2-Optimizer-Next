@@ -51,7 +51,14 @@ std::wstring status_text(const UiModel& model) {
         configured_target);
     std::wstring target = L"Target " + std::to_wstring(displayed_target) +
                           L" FPS";
-    if (status.active_target_fps &&
+    if (status.target_fps_unknown) {
+        target = L"Active FPS limit unconfirmed";
+    }
+    if (status.target_fps_pending) {
+        target += L"   •   " + std::to_wstring(configured_target) + L" pending";
+    } else if (status.target_fps_unknown) {
+        target += L"   •   " + std::to_wstring(configured_target) + L" next start";
+    } else if (status.active_target_fps &&
         *status.active_target_fps != configured_target) {
         target += L"   •   " + std::to_wstring(configured_target) +
                   L" next start";

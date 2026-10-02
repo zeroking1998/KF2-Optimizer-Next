@@ -406,6 +406,24 @@ int main() {
               L"Maximum corpses 2000") != std::wstring::npos);
     CHECK(node(staged_target_home, "status")->text.find(
               L"20 next start") != std::wstring::npos);
+    home_status.target_fps_pending = true;
+    model.set_status(home_status);
+    const auto pending_target_home = layout_shell(model, 1440, 900);
+    CHECK(node(pending_target_home, "status")->text.find(
+              L"Target 240 FPS") != std::wstring::npos);
+    CHECK(node(pending_target_home, "status")->text.find(
+              L"60 pending") != std::wstring::npos);
+    home_status.target_fps_pending = false;
+    home_status.target_fps_unknown = true;
+    model.set_status(home_status);
+    const auto unknown_target_home = layout_shell(model, 1440, 900);
+    CHECK(node(unknown_target_home, "status")->text.find(
+              L"Active FPS limit unconfirmed") != std::wstring::npos);
+    CHECK(node(unknown_target_home, "status")->text.find(
+              L"Target 240 FPS") == std::wstring::npos);
+    CHECK(node(unknown_target_home, "status")->text.find(
+              L"60 next start") != std::wstring::npos);
+    home_status.target_fps_unknown = false;
     home_status.prewarm_active = true;
     home_status.prewarm_percent = 47;
     home_status.prewarm_map = L"KF-BioticsLab";

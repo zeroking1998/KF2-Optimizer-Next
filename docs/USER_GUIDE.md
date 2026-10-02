@@ -78,9 +78,17 @@ other target.
 
 Target FPS uses KF2's own engine frame-pacing controls and does not depend on a
 specific GPU vendor or display driver. The optimizer prepares the same settings
-for KF2 launched from the optimizer, Steam, or a desktop shortcut, and its
-published offline provider reapplies and verifies the value during a running
-offline session.
+for KF2 launched from the optimizer, Steam, or a desktop shortcut. During a
+protected session, changes are sent to the current KF2 Engine in the menu,
+offline, or online, even with Adaptive off. The saved target is shown as pending
+until KF2 confirms the matching live limit. Adaptive switches to that target
+only after confirmation and ignores frame samples collected before the change.
+
+If the bridge is unavailable, the saved target remains for the next launch.
+If a reply is lost, the active limit is shown as unconfirmed and Adaptive pauses
+instead of assuming that the old cap survived. Confirmed limits survive a
+temporary telemetry reconnection to the same KF2 process. Target FPS is a limit,
+not a guarantee: scene load and external limits can keep actual FPS below it.
 
 While KF2 is stopped, a target change is confirmed only after its native startup
 cap passes readback. If saving fails, the previous target and cap are restored.
