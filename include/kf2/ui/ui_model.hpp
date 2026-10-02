@@ -81,6 +81,8 @@ struct UiStatus {
     std::optional<int> active_target_fps;
     int corpse_limit{20};
     std::optional<int> active_corpse_limit;
+    bool live_corpse_limit_pending{false};
+    bool live_corpse_limit_unknown{false};
     bool prewarm_active{false};
     int prewarm_percent{0};
     std::wstring prewarm_map;

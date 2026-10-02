@@ -31,6 +31,9 @@ var bool bLodReceiptReported;
 var bool bSkeletonReceiptReported;
 var float LastReleaseFailureRealTime;
 var bool bWorldTeardownAuthorized;
+// World-owned identity only; the persistent interaction keeps no manager
+// reference. A replacement must never receive another manager's original.
+var KFGoreManager CorpseMaximumOwner;
 
 function KF2OptimizerOnlineContextInteraction GetOnlineInteraction()
 {
@@ -71,6 +74,10 @@ function int AdoptRestoreOwnership(
     if (PreviousOwner == None || PreviousOwner == self)
     {
         return 0;
+    }
+    if (CorpseMaximumOwner == None)
+    {
+        CorpseMaximumOwner = PreviousOwner.CorpseMaximumOwner;
     }
     for (Index = 0; Index < PreviousOwner.FrozenCorpses.Length; ++Index)
     {
@@ -601,7 +608,8 @@ event Destroyed()
         bWorldTeardownAuthorized = true;
     }
     Outstanding = FrozenCorpses.Length;
-    if (!bWorldTeardownAuthorized && Outstanding > 0 && WorldInfo != None)
+    if (!bWorldTeardownAuthorized &&
+        (Outstanding > 0 || CorpseMaximumOwner != None) && WorldInfo != None)
     {
         Replacement = Spawn(class'KF2OptimizerOnlineCorpseController');
         if (Replacement != None && Replacement != self &&

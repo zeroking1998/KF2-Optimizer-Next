@@ -40,7 +40,7 @@ int main() {
         AdaptiveResourceControl resource;
         std::string_view name;
     };
-    constexpr std::array<ResourceCase, 10> resources{{
+    constexpr std::array<ResourceCase, 11> resources{{
         {AdaptiveResourceControl::cpu, "cpu"},
         {AdaptiveResourceControl::gpu, "gpu"},
         {AdaptiveResourceControl::vram, "vram"},
@@ -51,6 +51,7 @@ int main() {
         {AdaptiveResourceControl::recover, "recover"},
         {AdaptiveResourceControl::enable, "enable"},
         {AdaptiveResourceControl::disable, "disable"},
+        {AdaptiveResourceControl::corpse_limit, "corpse_limit"},
     }};
     std::uint64_t resource_sequence = 100;
     for (const auto& resource : resources) {
@@ -147,6 +148,23 @@ int main() {
         .quality = 2001}).has_value());
     CHECK(!parse_adaptive_control_receipt(
         "KF2OPT_ACK 47 applied enable 2001\r\n").has_value());
+    // A corpse ceiling is a count, independent of mode and graphics quality.
+    for (const int count : {4, 119, 1272, 2000}) {
+        const auto corpse_command = build_adaptive_control_command({
+            .port = 17777, .token = token, .sequence = 48,
+            .resource = AdaptiveResourceControl::corpse_limit,
+            .quality = count});
+        CHECK(corpse_command.has_value());
+        const auto parsed = parse_adaptive_control_receipt(
+            "KF2OPT_ACK 48 applied corpse_limit " + std::to_string(count) +
+            "\r\n");
+        CHECK(parsed.has_value());
+        CHECK(parsed->quality == count);
+    }
+    CHECK(!parse_adaptive_control_receipt(
+        "KF2OPT_ACK 48 applied corpse_limit 3\r\n"));
+    CHECK(!parse_adaptive_control_receipt(
+        "KF2OPT_ACK 48 applied corpse_limit 2001\r\n"));
     CHECK(!build_adaptive_control_command({
         .port = 0, .token = token, .sequence = 1}).has_value());
     CHECK(!build_adaptive_control_command({
@@ -269,6 +287,8 @@ int main() {
     quality.reset(90);
     CHECK(quality.effective_quality() == 90);
     quality.apply({5, AdaptiveResourceControl::disable, 100});
+    CHECK(quality.effective_quality() == 90);
+    quality.apply({6, AdaptiveResourceControl::corpse_limit, 4});
     CHECK(quality.effective_quality() == 90);
 
     WSADATA winsock{};
