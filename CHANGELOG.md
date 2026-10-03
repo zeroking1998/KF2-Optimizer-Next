@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Removed unused named-profile generation and persistence code. Adaptive still
+  starts from user graphics and retains resource-specific control and locks.
+
 - Advanced settings changed before a prepared protected launch now remain
   personal settings after cancellation, shutdown and restart. Failed saves
   roll back safely; blocked restoration retains verified recovery data.

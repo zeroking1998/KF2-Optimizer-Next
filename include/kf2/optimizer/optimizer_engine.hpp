@@ -3,13 +3,9 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <vector>
-
-#include "kf2/config/config_preview.hpp"
 
 namespace kf2::optimizer {
 
-enum class QualityPolicy { exact, invisible, performance };
 enum class Profile { balanced, stability, high_performance, custom };
 enum class Bottleneck {
     unavailable,
@@ -52,9 +48,6 @@ struct PerformanceEvidence {
 
 struct OptimizerInput {
     int target_fps{60};
-    QualityPolicy quality{QualityPolicy::exact};
-    Profile profile{Profile::balanced};
-    bool profile_preview_requested{false};
     PerformanceEvidence evidence;
 };
 
@@ -62,7 +55,6 @@ struct OptimizerDecision {
     Bottleneck bottleneck{Bottleneck::unavailable};
     Confidence confidence{Confidence::unavailable};
     std::wstring reason;
-    std::vector<config::RequestedChange> changes;
 };
 
 struct StartupMemoryProfile {

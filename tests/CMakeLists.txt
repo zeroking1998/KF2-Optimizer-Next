@@ -425,7 +425,6 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/game/startup_prewarmer.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/advanced_settings.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/video_settings.cpp"
-    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_profile.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_actuation.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/startup_gpu_profile.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/dxgi_frame_timing_session.cpp"
@@ -1024,15 +1023,6 @@ target_include_directories(kf2_startup_gpu_profile_test PRIVATE
 add_test(NAME kf2_startup_gpu_profile_test
     COMMAND kf2_startup_gpu_profile_test)
 
-add_executable(kf2_adaptive_profile_test
-    unit/adaptive_profile_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_profile.cpp"
-)
-target_include_directories(kf2_adaptive_profile_test PRIVATE
-    "${PROJECT_SOURCE_DIR}/include")
-target_link_libraries(kf2_adaptive_profile_test PRIVATE user32)
-add_test(NAME kf2_adaptive_profile_test COMMAND kf2_adaptive_profile_test)
-
 add_executable(kf2_adaptive_registry_test
     unit/adaptive_registry_test.cpp
 )
@@ -1099,7 +1089,6 @@ set(KF2_FOUNDATION_TEST_TARGETS
     kf2_adaptive_quality_response_test
     kf2_optimizer_engine_test
     kf2_startup_gpu_profile_test
-    kf2_adaptive_profile_test
     kf2_adaptive_registry_test
     kf2_adaptive_locks_test
     kf2_adaptive_governor_test
@@ -1110,7 +1099,6 @@ endforeach()
 
 set(KF2_CONFIG_CORE_TEST_TARGETS
     kf2_adaptive_locks_test
-    kf2_adaptive_profile_test
     kf2_application_lifecycle_test
     kf2_backup_restore_test
     kf2_config_apply_test

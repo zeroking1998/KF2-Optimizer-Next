@@ -49,7 +49,6 @@
 #include "kf2/optimizer/adaptive_governor.hpp"
 #include "kf2/optimizer/adaptive_session.hpp"
 #include "kf2/optimizer/adaptive_actuation.hpp"
-#include "kf2/optimizer/adaptive_profile.hpp"
 #include "kf2/optimizer/optimizer_engine.hpp"
 #include "kf2/platform/windows/dxgi_frame_timing_session.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
