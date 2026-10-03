@@ -133,6 +133,8 @@ private:
 
 #ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
 namespace detail {
+[[nodiscard]] std::uint64_t game_log_handle_opens_for_testing() noexcept;
+[[nodiscard]] std::uint64_t game_log_handle_closes_for_testing() noexcept;
 using GameLogReadHook = void (*)(const std::filesystem::path&);
 using ResourceRequestHook = void (*)(ResourceTelemetryWorker&);
 void set_resource_request_hook_for_testing(ResourceRequestHook hook) noexcept;

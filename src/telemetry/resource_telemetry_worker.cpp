@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <deque>
 #include <exception>
 #include <limits>
@@ -22,6 +23,8 @@ namespace {
 std::atomic_bool fail_next_telemetry_publication{false};
 kf2::telemetry::detail::GameLogReadHook game_log_read_hook{nullptr};
 std::atomic_uint64_t resource_requests{0};
+std::atomic_uint64_t game_log_handle_opens{0};
+std::atomic_uint64_t game_log_handle_closes{0};
 kf2::telemetry::detail::ResourceRequestHook resource_request_hook{nullptr};
 #endif
 
@@ -44,9 +47,20 @@ bool same_session(const ResourceTelemetryBinding& left,
 
 class UniqueHandle final {
 public:
-    explicit UniqueHandle(HANDLE handle) noexcept : handle_{handle} {}
-    ~UniqueHandle() {
-        if (handle_ != INVALID_HANDLE_VALUE) CloseHandle(handle_);
+    UniqueHandle() noexcept = default;
+    ~UniqueHandle() { reset(); }
+
+    void reset(HANDLE handle = INVALID_HANDLE_VALUE) noexcept {
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            CloseHandle(handle_);
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+            ++game_log_handle_closes;
+#endif
+        }
+        handle_ = handle;
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+        if (handle_ != INVALID_HANDLE_VALUE) ++game_log_handle_opens;
+#endif
     }
 
     UniqueHandle(const UniqueHandle&) = delete;
@@ -138,33 +152,51 @@ public:
     std::optional<GameLogChunk> sample(std::uint64_t now_ns) {
         if (binding_.game_log_directory.empty()) return std::nullopt;
         bool reset_parser = false;
-        if (!bound_ || path_.empty()) {
+        if (file_.get() == INVALID_HANDLE_VALUE) {
             const auto selected = game::find_active_game_log(
                 binding_.game_log_directory,
                 binding_.identity.process_start_id);
             if (!selected.has_value() || !selected.value()) return std::nullopt;
             path_ = selected.value()->path;
+            file_.reset(CreateFileW(path_.c_str(),
+                FILE_READ_ATTRIBUTES | GENERIC_READ,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                nullptr, OPEN_EXISTING,
+                FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
+                nullptr));
+            if (file_.get() == INVALID_HANDLE_VALUE) return reject_binding();
+            // Allocate once per binding, with room for the volume-relative
+            // name. Never allocate or reopen an unchanged file on idle polls.
+            name_buffer_.resize(sizeof(FILE_NAME_INFO) +
+                (path_.native().size() + MAX_PATH) * sizeof(wchar_t));
         }
 
-        UniqueHandle file{CreateFileW(path_.c_str(),
-            FILE_READ_ATTRIBUTES | GENERIC_READ,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            nullptr, OPEN_EXISTING,
-            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr)};
-        if (file.get() == INVALID_HANDLE_VALUE) {
-            reset_binding();
-            return std::nullopt;
-        }
         BY_HANDLE_FILE_INFORMATION information{};
+        FILE_STANDARD_INFO standard{};
         const bool inspected =
-            GetFileInformationByHandle(file.get(), &information) &&
+            GetFileInformationByHandle(file_.get(), &information) &&
             (information.dwFileAttributes &
                 (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0 &&
-            information.nNumberOfLinks == 1;
-        if (!inspected) {
-            reset_binding();
-            return std::nullopt;
+            information.nNumberOfLinks == 1 &&
+            GetFileInformationByHandleEx(file_.get(), FileStandardInfo,
+                &standard, sizeof(standard)) && !standard.DeletePending &&
+            !standard.Directory && standard.NumberOfLinks == 1 &&
+            GetFileInformationByHandleEx(file_.get(), FileNameInfo,
+                name_buffer_.data(), static_cast<DWORD>(name_buffer_.size()));
+        if (!inspected) return reject_binding();
+        const auto* name = reinterpret_cast<const FILE_NAME_INFO*>(
+            name_buffer_.data());
+        if (name->FileNameLength == 0 ||
+            name->FileNameLength % sizeof(wchar_t) != 0 ||
+            name->FileNameLength >
+                name_buffer_.size() - offsetof(FILE_NAME_INFO, FileName)) {
+            return reject_binding();
         }
+        const std::wstring_view current_name{
+            name->FileName, name->FileNameLength / sizeof(wchar_t)};
+        // File IDs are immutable on a retained handle. Detect rename/delete
+        // through that same handle rather than continuing to tail an old file.
+        if (bound_ && current_name != bound_name_) return reject_binding();
         const auto size =
             (static_cast<std::uintmax_t>(information.nFileSizeHigh) << 32U) |
             information.nFileSizeLow;
@@ -178,7 +210,7 @@ public:
             information.ftCreationTime.dwLowDateTime;
         if (!game::game_log_belongs_to_process(
                 last_write, binding_.identity.process_start_id)) {
-            return std::nullopt;
+            return reject_binding();
         }
         const auto file_index =
             (static_cast<std::uint64_t>(information.nFileIndexHigh) << 32U) |
@@ -186,10 +218,10 @@ public:
         if (bound_ &&
             (volume_serial_ != information.dwVolumeSerialNumber ||
              file_index_ != file_index)) {
-            reset_binding();
-            return std::nullopt;
+            return reject_binding();
         }
         if (!bound_) {
+            bound_name_ = current_name;
             bound_ = true;
             volume_serial_ = information.dwVolumeSerialNumber;
             file_index_ = file_index;
@@ -225,13 +257,12 @@ public:
 #endif
         if (offset_ > static_cast<std::uintmax_t>(
                           (std::numeric_limits<LONGLONG>::max)())) {
-            reset_binding();
-            return std::nullopt;
+            return reject_binding();
         }
         LARGE_INTEGER position{};
         position.QuadPart = static_cast<LONGLONG>(offset_);
-        if (!SetFilePointerEx(file.get(), position, nullptr, FILE_BEGIN)) {
-            return std::nullopt;
+        if (!SetFilePointerEx(file_.get(), position, nullptr, FILE_BEGIN)) {
+            return reject_binding();
         }
         const auto requested = static_cast<std::size_t>(
             (std::min)(size - offset_, chunk.historical ||
@@ -239,18 +270,17 @@ public:
                 ? kCatchUpLogChunkBytes : kNormalLogChunkBytes));
         chunk.bytes.assign(requested, '\0');
         DWORD received = 0;
-        if (!ReadFile(file.get(), chunk.bytes.data(),
+        if (!ReadFile(file_.get(), chunk.bytes.data(),
                       static_cast<DWORD>(requested), &received, nullptr)) {
-            return std::nullopt;
+            return reject_binding();
         }
-        if (received == 0) return reset_parser
-            ? std::optional{std::move(chunk)} : std::nullopt;
+        if (received == 0) return reject_binding();
         chunk.bytes.resize(received);
         offset_ += received;
         // Inspect the same verified handle again: writers may have appended
         // during this bounded read. Never mistake the earlier EOF for live.
         LARGE_INTEGER latest_size{};
-        if (!GetFileSizeEx(file.get(), &latest_size) ||
+        if (!GetFileSizeEx(file_.get(), &latest_size) ||
             latest_size.QuadPart < 0 ||
             static_cast<std::uintmax_t>(latest_size.QuadPart) < offset_) {
             reset_binding();
@@ -276,7 +306,20 @@ public:
     }
 
 private:
+    std::optional<GameLogChunk> reject_binding() {
+        const bool was_bound = bound_;
+        reset_binding();
+        if (!was_bound) return std::nullopt;
+        GameLogChunk reset;
+        reset.identity = binding_.identity;
+        reset.reset_parser = true;
+        reset.catching_up = true;
+        return reset;
+    }
+
     void reset_binding() {
+        file_.reset();
+        bound_name_.clear();
         path_.clear();
         offset_ = 0;
         volume_serial_ = 0;
@@ -288,6 +331,9 @@ private:
     }
 
     ResourceTelemetryBinding binding_;
+    UniqueHandle file_;
+    std::vector<std::byte> name_buffer_;
+    std::wstring bound_name_;
     std::filesystem::path path_;
     std::uintmax_t offset_{0};
     std::uint32_t volume_serial_{0};
@@ -423,6 +469,14 @@ private:
 }  // namespace
 
 #ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+std::uint64_t detail::game_log_handle_opens_for_testing() noexcept {
+    return game_log_handle_opens.load();
+}
+
+std::uint64_t detail::game_log_handle_closes_for_testing() noexcept {
+    return game_log_handle_closes.load();
+}
+
 void detail::set_resource_request_hook_for_testing(
     ResourceRequestHook hook) noexcept {
     resource_request_hook = hook;
@@ -459,7 +513,10 @@ public:
         pending_ = false;
         next_group_ = ResourceSampleGroup::process_and_memory;
         published_.reset();
-        if (!preserve_log) log_chunks_.clear();
+        if (!preserve_log) {
+            log_chunks_.clear();
+            reset_log_ = !stopped_ && !worker_failed_;
+        }
         condition_.notify_all();
         return generation_;
     }
@@ -483,6 +540,7 @@ public:
         next_group_ = ResourceSampleGroup::process_and_memory;
         published_.reset();
         log_chunks_.clear();
+        reset_log_ = !stopped_ && !worker_failed_;
         condition_.notify_all();
     }
 
@@ -516,7 +574,7 @@ public:
     bool wait_until_idle(std::chrono::milliseconds timeout) {
         std::unique_lock lock{mutex_};
         return condition_.wait_for(lock, timeout, [this] {
-            return !pending_ && !active_;
+            return !pending_ && !active_ && !reset_log_;
         });
     }
 
@@ -526,6 +584,7 @@ public:
             if (stopped_) return;
             stopped_ = true;
             pending_ = false;
+            reset_log_ = false;
             thread_.request_stop();
             condition_.notify_all();
         }
@@ -551,6 +610,7 @@ private:
                 std::scoped_lock lock{mutex_};
                 worker_failed_ = true;
                 pending_ = false;
+                reset_log_ = false;
                 active_ = false;
                 published_.reset();
             } catch (...) {
@@ -575,9 +635,25 @@ private:
             {
                 std::unique_lock lock{mutex_};
                 if (!condition_.wait(lock, stop, [this] {
-                        return pending_;
+                        return pending_ || reset_log_;
                     })) {
                     break;
+                }
+                if (reset_log_) {
+                    reset_log_ = false;
+                    active_ = true;
+                    lock.unlock();
+                    // Detach/rebind closes the retained file on its owning
+                    // worker even when no further sample is requested.
+                    log_sampler.reset();
+                    log_binding.reset();
+                    log_parser.reset();
+                    log_boundaries.reset();
+                    catch_up_boundaries = {};
+                    lock.lock();
+                    active_ = false;
+                    condition_.notify_all();
+                    continue;
                 }
                 if (!binding_) continue;
                 request.binding = *binding_;
@@ -742,7 +818,7 @@ private:
                 }
 #endif
                 std::scoped_lock lock{mutex_};
-                if (log_chunk && binding_ &&
+                if (log_chunk && binding_ && !reset_log_ &&
                     same_session(*binding_, request.binding)) {
                     log_chunks_.push_back(std::move(*log_chunk));
                 }
@@ -794,6 +870,7 @@ private:
     bool stopped_{false};
     bool worker_failed_{false};
     bool pending_{false};
+    bool reset_log_{false};
     bool active_{false};
     std::uint64_t pending_at_ns_{0};
     std::uint64_t generation_{0};

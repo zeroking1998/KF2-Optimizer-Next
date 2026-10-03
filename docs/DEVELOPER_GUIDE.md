@@ -126,6 +126,18 @@ overflow/long names use uncached parsing without dropping or truncating data.
 Query recreation discards the cache, and moves transfer it with the handles.
 Amounts, validity checks, aggregation and sampling cadence remain uncached.
 
+### Launch.log handle ownership
+
+The resource worker retains one shared read handle per verified Launch.log
+generation. Identity, attributes, process-start ownership, deletion state and
+the handle's current file name are checked before reading; no path reopen or
+per-poll name allocation is required. Rename, replacement, deletion, unsafe
+metadata and I/O failure close the handle and invalidate parser/UI context.
+Truncation resets the offset and parser. Process detach/rebind schedules cleanup
+on the same worker even without a new sample; adapter-only changes and map
+travel retain the handle. A raced read still uses its inspected file, and the
+next poll detects replacement. Existing catch-up/freshness limits remain intact.
+
 ### Adaptive Present observations
 
 The live worker computes its overlapping 1/3/5/10-second metrics from one

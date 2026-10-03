@@ -154,6 +154,9 @@ are visible immediately.
   old maps and measurements as live telemetry. Adaptive waits for the current
   tail, historical measurements are discarded, and diagnostics report unread
   bytes and catch-up duration without additional UI-thread file work.
+- Launch.log sampling now retains one verified read handle instead of reopening
+  the file every poll. Rotation, deletion, truncation and process changes reset
+  parser ownership safely; detach releases the handle without another sample.
 - Thread CPU telemetry now keeps its measurement baseline with the verified
   thread handle, resets it for a changed thread instance, and releases exited
   threads during membership refresh without rebuilding a sample hash table.
