@@ -334,6 +334,33 @@ int main() {
           2'000'000'000ULL);
     CHECK(batch_stream.stats().session_snapshot_copies == 2);
 
+    const auto historical = batch_stream.feed(
+        "ScriptLog: @@@@ ZED COUNT DEBUG: AIAliveCount = 24\n"
+        "ScriptLog: KFAISpawnManager.SetupNextWave() NextWave: 0 WaveTotalAI: 93\n" +
+        telemetry_line(4), 3'000'000'000ULL, false);
+    CHECK(historical.has_value());
+    CHECK(historical->map == "KF-BioticsLab");
+    CHECK(historical->net_mode == "NM_Standalone");
+    CHECK(!historical->zeds_alive);
+    CHECK(!historical->wave_number);
+    CHECK(!historical->telemetry_sample);
+    CHECK(historical->telemetry_observed_ns == 0);
+    CHECK(historical->load_map_observed_ns == 0);
+    const auto live_after_history = batch_stream.feed(
+        telemetry_line(5), 4'000'000'000ULL);
+    CHECK(live_after_history.has_value());
+    CHECK(live_after_history->telemetry_sample == 5);
+    CHECK(live_after_history->telemetry_observed_ns == 4'000'000'000ULL);
+    // Discarding previously current measurements is itself a model change,
+    // even when the next historical block contains only unrelated log noise.
+    const auto historical_noise = batch_stream.feed(
+        "Log: historical diagnostic record\n", 5'000'000'000ULL, false);
+    CHECK(historical_noise.has_value());
+    CHECK(!historical_noise->telemetry_sample);
+    CHECK(historical_noise->telemetry_observed_ns == 0);
+    CHECK(!batch_stream.feed(
+        "Log: more historical diagnostic records\n", 6'000'000'000ULL, false));
+
     const auto parsed = parse_load_map_line(
         "[0053.20] Log: LoadMap: KF-BioticsLab?Name=Player?Team=255?"
         "Game=KFGameContent.KFGameInfo_Survival?Difficulty=1.0000?"

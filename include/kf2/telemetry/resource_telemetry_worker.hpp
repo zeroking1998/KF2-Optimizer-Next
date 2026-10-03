@@ -45,6 +45,10 @@ struct GameLogChunk final {
     SampleIdentity identity;
     bool reset_parser{false};
     bool observations_expired{false};
+    bool catching_up{false};
+    // Worker-private input classification; historical measurements are never
+    // published as current, even in the final catch-up chunk.
+    bool historical{false};
     std::uint64_t creation_filetime{0};
     std::string bytes;
     GameLogBoundaryEvents boundaries;

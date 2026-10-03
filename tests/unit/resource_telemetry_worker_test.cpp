@@ -36,6 +36,12 @@ using kf2::telemetry::ResourceTelemetryWorker;
 
 std::filesystem::path replacement_game_log;
 std::atomic_bool game_log_replaced{false};
+std::string game_log_append_during_read;
+
+void append_game_log_during_read(const std::filesystem::path& path) {
+    std::ofstream output(path, std::ios::binary | std::ios::app);
+    output << game_log_append_during_read;
+}
 
 void replace_game_log_during_read(const std::filesystem::path& path) {
     game_log_replaced.store(
@@ -841,6 +847,11 @@ int main() {
             // have crossed its freshness window must publish the refreshed
             // observation times to the application boundary.
             constexpr std::uint64_t repeated_at_ns = 17'100'000'001ULL;
+            // Establish a current EOF before these newly written receipts.
+            // A first read after a long pause must not freshen old history.
+            worker.request(repeated_at_ns - 1);
+            CHECK(worker.wait_until_idle(2s));
+            static_cast<void>(worker.take_game_log_chunks(log_binding.identity));
             {
                 std::ofstream output(log, std::ios::binary | std::ios::app);
                 output << "[0075.11] ScriptLog: @@@@ ZED COUNT DEBUG: "
@@ -940,6 +951,221 @@ int main() {
             CHECK(!chunks.front().parsed_session);
             CHECK(chunks.front().parser_stats.lines_processed == 1);
         }
+        fs::remove_all(root);
+    }
+
+    // A large existing log must not expose its historical first map as live
+    // gameplay while the bounded reader is still catching up to the tail.
+    {
+        namespace fs = std::filesystem;
+        const auto root = fs::path{KF2_TEST_ROOT} / L"log-backlog";
+        fs::remove_all(root);
+        fs::create_directories(root);
+        const auto log = root / L"Launch.log";
+        const std::string old_map =
+            "Log: LoadMap: KF-BioticsLab?"
+            "Game=KFGameContent.KFGameInfo_Survival\n"
+            "ScriptLog: WI.NetMode:  NM_Standalone\n";
+        std::string history = old_map + offline_telemetry_line() +
+            "Log: WidgetInitialized - WidgetName:  StartMenu\n" +
+            "ScriptLog: KF2OPT_MAP_SELECTION schema=1 "
+            "state=menu map=KF-BioticsLab\n";
+        while (history.size() < 2 * 1024 * 1024) {
+            history += "Log: historical diagnostic record\n";
+        }
+        history += "Log: LoadMap: KF-BurningParis?"
+                   "Game=KFGameContent.KFGameInfo_Survival\n"
+                   "ScriptLog: WI.NetMode:  NM_Client\n"
+                   "ScriptLog: KF2OPT_SESSION_CONTEXT schema=1 "
+                   "state=online_client_read_only net_mode=NM_Client "
+                   "map=KF-BurningParis\n"
+                   "ScriptLog: KF2OPT_ONLINE_CORPSE state=available "
+                   "pool=0 maximum=20 local_only=true readback=verified\n" +
+                   graphics_readback_line();
+        write_file(log, history);
+        wchar_t module[MAX_PATH + 1]{};
+        const DWORD length = GetModuleFileNameW(nullptr, module, MAX_PATH);
+        CHECK(length > 0 && length < MAX_PATH);
+        const auto process = kf2::game::bind_game_process(
+            GetCurrentProcessId(), fs::path{module});
+        CHECK(process.has_value());
+        ResourceTelemetryBinding log_binding;
+        log_binding.identity = {
+            process.value().pid, process.value().process_start_id};
+        log_binding.game_log_directory = root;
+        ResourceTelemetryWorker worker;
+        static_cast<void>(worker.bind(log_binding));
+        auto now_ns = 50'000'000'000ULL;
+        worker.request(now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        auto chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        CHECK(!chunks.front().parsed_session);
+        CHECK(chunks.front().catching_up);
+        CHECK(chunks.front().bytes.empty());
+        CHECK(chunks.front().parser_stats.bytes_received == 512 * 1024);
+        CHECK(chunks.front().parser_stats.backlog_bytes ==
+              history.size() - 512 * 1024);
+        CHECK(chunks.front().parser_stats.catch_up_age_ns == 0);
+        CHECK(!chunks.front().boundaries.startup_ready);
+        unsigned int samples = 1;
+        while (chunks.front().catching_up && samples < 6) {
+            now_ns += 200'000'000ULL;
+            worker.request(now_ns);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(chunks.front().parser_stats.oversized_input_resets == 0);
+            if (chunks.front().catching_up) {
+                CHECK(!chunks.front().parsed_session);
+                CHECK(chunks.front().parser_stats.catch_up_age_ns ==
+                      now_ns - 50'000'000'000ULL);
+            }
+            ++samples;
+        }
+        CHECK(samples == 5);
+        CHECK(!chunks.front().catching_up);
+        CHECK(chunks.front().parser_stats.backlog_bytes == 0);
+        CHECK(chunks.front().parsed_session);
+        CHECK(chunks.front().parsed_session->map == "KF-BurningParis");
+        CHECK(chunks.front().parsed_session->net_mode == "NM_Client");
+        CHECK(!chunks.front().parsed_session->telemetry_sample);
+        CHECK(chunks.front().parsed_session->telemetry_observed_ns == 0);
+        CHECK(chunks.front().parsed_session->online_corpse_maximum == 20);
+        CHECK(chunks.front().parsed_session->online_corpse_capability_observed_ns != 0);
+        CHECK(chunks.front().boundaries.startup_ready);
+        CHECK(chunks.front().boundaries.graphics_readback);
+        CHECK(!chunks.front().boundaries.map_prewarm_selection);
+
+        const auto append = [&](std::string_view bytes) {
+            std::ofstream output(log, std::ios::binary | std::ios::app);
+            output << bytes;
+        };
+        append("ScriptLog: WI.NetMode:  NM_Standalone\n" +
+               offline_telemetry_line());
+        now_ns += 200'000'000ULL;
+        worker.request(now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        CHECK(chunks.front().parsed_session);
+        CHECK(chunks.front().parsed_session->telemetry_observed_ns == now_ns);
+        CHECK(chunks.front().parsed_session->telemetry_sample == 1);
+
+        // Sustained writes six times the old read budget still reach EOF in
+        // each bounded sample and retain newly produced, current measurements.
+        std::string burst;
+        while (burst.size() < 192 * 1024) burst += "Log: live diagnostic record\n";
+        for (int index = 0; index < 12; ++index) {
+            append(burst + offline_telemetry_line());
+            now_ns += 200'000'000ULL;
+            worker.request(now_ns);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(!chunks.front().catching_up);
+            CHECK(!chunks.front().historical);
+            CHECK(chunks.front().parser_stats.backlog_bytes == 0);
+            CHECK(chunks.front().parsed_session);
+            CHECK(chunks.front().parsed_session->telemetry_observed_ns == now_ns);
+        }
+
+        // Growth during ReadFile must use the new EOF, not the pre-read size.
+        append("Log: triggering concurrent append\n");
+        game_log_append_during_read = burst + burst + burst + offline_telemetry_line();
+        kf2::telemetry::detail::set_game_log_read_hook_for_testing(
+            &append_game_log_during_read);
+        now_ns += 200'000'000ULL;
+        worker.request(now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        kf2::telemetry::detail::set_game_log_read_hook_for_testing(nullptr);
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        CHECK(chunks.front().catching_up);
+        CHECK(!chunks.front().parsed_session);
+        CHECK(chunks.front().parser_stats.backlog_bytes ==
+              game_log_append_during_read.size());
+        for (int index = 0; index < 2; ++index) {
+            now_ns += 200'000'000ULL;
+            worker.request(now_ns);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+        }
+        CHECK(!chunks.front().catching_up);
+        CHECK(chunks.front().parsed_session);
+        CHECK(!chunks.front().parsed_session->telemetry_sample);
+
+        // Unread records accumulated during a long pause are history even if
+        // the entire tail fits in one sample; newly written data works again.
+        append(offline_telemetry_line());
+        now_ns += kf2::game::kGameLogObservationFreshnessNs + 1;
+        worker.request(now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        CHECK(chunks.front().historical);
+        CHECK(!chunks.front().catching_up);
+        CHECK(chunks.front().parsed_session);
+        CHECK(!chunks.front().parsed_session->telemetry_sample);
+        append(offline_telemetry_line());
+        worker.request(++now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        CHECK(chunks.front().parsed_session);
+        CHECK(chunks.front().parsed_session->telemetry_observed_ns == now_ns);
+        // An overloaded writer cannot force an unbounded read or make a
+        // behind-tail snapshot current. Stop writing and bounded catch-up
+        // must recover instead of starving permanently.
+        const auto overloaded_burst = burst + burst + burst + burst +
+            offline_telemetry_line();
+        auto previous_received = chunks.front().parser_stats.bytes_received;
+        for (int index = 0; index < 5; ++index) {
+            append(overloaded_burst);
+            now_ns += 200'000'000ULL;
+            worker.request(now_ns);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(chunks.front().catching_up);
+            CHECK(!chunks.front().parsed_session);
+            CHECK(chunks.front().parser_stats.bytes_received - previous_received ==
+                  512 * 1024);
+            previous_received = chunks.front().parser_stats.bytes_received;
+        }
+        for (int index = 0; index < 4 && chunks.front().catching_up; ++index) {
+            now_ns += 200'000'000ULL;
+            worker.request(now_ns);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+        }
+        CHECK(!chunks.front().catching_up);
+        CHECK(chunks.front().parsed_session);
+        CHECK(!chunks.front().parsed_session->telemetry_sample);
+        CHECK(chunks.front().parser_stats.oversized_input_resets == 0);
+
+        append(overloaded_burst);
+        worker.request(++now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1 && chunks.front().catching_up);
+        // Truncation during catch-up resets both context and deferred events.
+        write_file(log, old_map + offline_telemetry_line());
+        worker.request(++now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        CHECK(chunks.front().reset_parser);
+        CHECK(!chunks.front().catching_up);
+        CHECK(chunks.front().parser_stats.backlog_bytes == 0);
+        CHECK(chunks.front().parsed_session);
+        CHECK(chunks.front().parsed_session->map == "KF-BioticsLab");
+        CHECK(!chunks.front().parsed_session->online_corpse_maximum);
+        CHECK(!chunks.front().parsed_session->telemetry_sample);
+        CHECK(!chunks.front().boundaries.startup_ready);
+        worker.stop();
         fs::remove_all(root);
     }
 

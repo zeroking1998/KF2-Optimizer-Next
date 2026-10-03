@@ -135,7 +135,7 @@ public:
     explicit NativeGameLogSampler(ResourceTelemetryBinding binding)
         : binding_{std::move(binding)} {}
 
-    std::optional<GameLogChunk> sample() {
+    std::optional<GameLogChunk> sample(std::uint64_t now_ns) {
         if (binding_.game_log_directory.empty()) return std::nullopt;
         bool reset_parser = false;
         if (!bound_ || path_.empty()) {
@@ -200,12 +200,23 @@ public:
             offset_ = 0;
             reset_parser = true;
         }
+        if (reset_parser) {
+            catching_up_ = false;
+            catch_up_started_ns_ = 0;
+            caught_up_at_ns_ = 0;
+        }
 
         GameLogChunk chunk;
         chunk.identity = binding_.identity;
         chunk.reset_parser = reset_parser;
         chunk.creation_filetime = creation;
+        constexpr std::uintmax_t kNormalLogChunkBytes = 32 * 1024;
+        constexpr std::uintmax_t kCatchUpLogChunkBytes = 512 * 1024;
+        chunk.historical = reset_parser || catching_up_ ||
+            now_ns < caught_up_at_ns_ ||
+            now_ns - caught_up_at_ns_ > game::kGameLogObservationFreshnessNs;
         if (size == offset_) {
+            caught_up_at_ns_ = now_ns;
             return reset_parser ? std::optional{std::move(chunk)}
                                 : std::nullopt;
         }
@@ -222,9 +233,10 @@ public:
         if (!SetFilePointerEx(file.get(), position, nullptr, FILE_BEGIN)) {
             return std::nullopt;
         }
-        constexpr std::uintmax_t kMaximumLogChunkBytes = 32 * 1024;
         const auto requested = static_cast<std::size_t>(
-            (std::min)(size - offset_, kMaximumLogChunkBytes));
+            (std::min)(size - offset_, chunk.historical ||
+                size - offset_ > kNormalLogChunkBytes
+                ? kCatchUpLogChunkBytes : kNormalLogChunkBytes));
         chunk.bytes.assign(requested, '\0');
         DWORD received = 0;
         if (!ReadFile(file.get(), chunk.bytes.data(),
@@ -235,6 +247,31 @@ public:
             ? std::optional{std::move(chunk)} : std::nullopt;
         chunk.bytes.resize(received);
         offset_ += received;
+        // Inspect the same verified handle again: writers may have appended
+        // during this bounded read. Never mistake the earlier EOF for live.
+        LARGE_INTEGER latest_size{};
+        if (!GetFileSizeEx(file.get(), &latest_size) ||
+            latest_size.QuadPart < 0 ||
+            static_cast<std::uintmax_t>(latest_size.QuadPart) < offset_) {
+            reset_binding();
+            chunk.reset_parser = true;
+            chunk.catching_up = true;
+            chunk.historical = true;
+            chunk.bytes.clear();
+            return chunk;
+        }
+        chunk.parser_stats.backlog_bytes =
+            static_cast<std::uintmax_t>(latest_size.QuadPart) - offset_;
+        chunk.catching_up = chunk.parser_stats.backlog_bytes != 0;
+        chunk.historical = chunk.historical || chunk.catching_up;
+        if (chunk.catching_up) {
+            if (!catching_up_ || now_ns < catch_up_started_ns_) {
+                catch_up_started_ns_ = now_ns;
+            }
+            chunk.parser_stats.catch_up_age_ns = now_ns - catch_up_started_ns_;
+        }
+        catching_up_ = chunk.catching_up;
+        if (!catching_up_) caught_up_at_ns_ = now_ns;
         return chunk;
     }
 
@@ -245,6 +282,9 @@ private:
         volume_serial_ = 0;
         file_index_ = 0;
         bound_ = false;
+        catching_up_ = false;
+        catch_up_started_ns_ = 0;
+        caught_up_at_ns_ = 0;
     }
 
     ResourceTelemetryBinding binding_;
@@ -253,6 +293,9 @@ private:
     std::uint32_t volume_serial_{0};
     std::uint64_t file_index_{0};
     bool bound_{false};
+    bool catching_up_{false};
+    std::uint64_t catch_up_started_ns_{0};
+    std::uint64_t caught_up_at_ns_{0};
 };
 
 struct GpuProviderRetry final {
@@ -525,6 +568,7 @@ private:
         std::unique_ptr<NativeGameLogSampler> log_sampler;
         game::GameLogSessionParser log_parser;
         GameLogBoundaryExtractor log_boundaries;
+        GameLogBoundaryEvents catch_up_boundaries;
         while (!stop.stop_requested()) {
             ResourceSampleRequest request;
             std::uint64_t request_generation = 0;
@@ -562,6 +606,7 @@ private:
                             request.binding);
                         log_parser.reset();
                         log_boundaries.reset();
+                        catch_up_boundaries = {};
                     }
                     bool log_queue_has_room = false;
                     {
@@ -569,25 +614,66 @@ private:
                         log_queue_has_room = log_chunks_.size() < 8;
                     }
                     if (log_queue_has_room) {
-                        log_chunk = log_sampler->sample();
+                        log_chunk = log_sampler->sample(request.sampled_at_ns);
                         if (log_chunk) {
                             if (log_chunk->reset_parser) {
                                 log_parser.reset();
                                 log_boundaries.reset();
+                                catch_up_boundaries = {};
                             }
                             if (!log_chunk->bytes.empty()) {
                                 const bool verified_log_identity =
                                     game::game_log_belongs_to_process(
                                         log_chunk->creation_filetime,
                                         request.binding.identity.process_start_id);
-                                log_chunk->boundaries = log_boundaries.feed(
+                                auto boundaries = log_boundaries.feed(
                                     log_chunk->bytes, verified_log_identity);
-                                if (auto parsed = log_parser.feed(
-                                        log_chunk->bytes,
-                                        request.sampled_at_ns)) {
+                                if (log_chunk->historical) {
+                                    // Preserve bounded lifecycle/readback state,
+                                    // not historical speculative prewarm work.
+                                    if (boundaries.graphics_readback) {
+                                        catch_up_boundaries.graphics_readback =
+                                            std::move(boundaries.graphics_readback);
+                                    }
+                                    catch_up_boundaries.load_map_started |=
+                                        boundaries.load_map_started;
+                                    catch_up_boundaries.startup_ready |=
+                                        boundaries.startup_ready;
+                                    catch_up_boundaries.verified_engine_exit |=
+                                        boundaries.verified_engine_exit;
+                                    catch_up_boundaries.new_settings_restart_requested |=
+                                        boundaries.new_settings_restart_requested;
+                                } else {
+                                    log_chunk->boundaries = std::move(boundaries);
+                                }
+                                // Keep the parser's existing bounded input size.
+                                // Only the final current snapshot crosses to UI.
+                                std::optional<game::GameLogSession> parsed_session;
+                                constexpr std::size_t kParserChunkBytes = 32 * 1024;
+                                const std::string_view bytes{log_chunk->bytes};
+                                for (std::size_t offset = 0; offset < bytes.size();
+                                     offset += kParserChunkBytes) {
+                                    if (auto parsed = log_parser.feed(
+                                            bytes.substr(offset, kParserChunkBytes),
+                                            request.sampled_at_ns,
+                                            !log_chunk->historical)) {
+                                        parsed_session = std::move(parsed);
+                                    }
+                                }
+                                if (!log_chunk->catching_up &&
+                                    log_parser.current() &&
+                                    (parsed_session || log_chunk->historical)) {
                                     log_chunk->parsed_session =
                                         game::make_game_log_session_snapshot(
-                                            std::move(*parsed));
+                                            parsed_session
+                                                ? std::move(*parsed_session)
+                                                : *log_parser.current());
+                                }
+                                if (log_chunk->historical &&
+                                    !log_chunk->catching_up) {
+                                    log_chunk->boundaries =
+                                        std::move(catch_up_boundaries);
+                                    catch_up_boundaries = {};
                                 }
                                 // Online corpse capability/action receipts are
                                 // intentionally emitted only once per World.
@@ -600,6 +686,7 @@ private:
                                         "KF2OPT_ONLINE_CORPSE") !=
                                         std::string::npos &&
                                     log_parser.current() &&
+                                    !log_chunk->catching_up &&
                                     !log_chunk->parsed_session) {
                                     log_chunk->parsed_session =
                                         game::make_game_log_session_snapshot(
@@ -610,7 +697,10 @@ private:
                                 // immutable structured session snapshots.
                                 std::string{}.swap(log_chunk->bytes);
                             }
+                            const auto backlog = log_chunk->parser_stats;
                             log_chunk->parser_stats = log_parser.stats();
+                            log_chunk->parser_stats.backlog_bytes = backlog.backlog_bytes;
+                            log_chunk->parser_stats.catch_up_age_ns = backlog.catch_up_age_ns;
                         } else if (const auto expired =
                                        log_parser.expire_observations(
                                            request.sampled_at_ns)) {

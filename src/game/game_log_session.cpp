@@ -24,7 +24,8 @@ bool game_log_requests_settings_restart(std::string_view text) noexcept {
 }
 
 std::optional<GameLogSession> GameLogSessionParser::feed(
-    std::string_view bytes, std::uint64_t observed_at_ns) {
+    std::string_view bytes, std::uint64_t observed_at_ns,
+    bool measurements_current) {
     if (bytes.empty()) return std::nullopt;
     add_saturated(stats_.bytes_received, bytes.size());
     if (bytes.size() > detail::kMaximumLineBytes * 4) {
@@ -264,6 +265,26 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
         add_saturated(stats_.oversized_line_drops);
     } else if (consumed != 0) {
         pending_.erase(0, consumed);
+    }
+    if (current_ && !measurements_current) {
+        // Catch-up reconstructs the latest map and its one-shot capabilities,
+        // but reading historical measurements does not make them fresh.
+        changed = changed || current_->zeds_remaining || current_->zeds_alive ||
+            current_->wave_number || current_->wave_total_ai ||
+            current_->telemetry_sample || current_->load_map_observed_ns != 0 ||
+            current_->level_loaded_observed_ns != 0 ||
+            current_->loading_movie_finished_observed_ns != 0;
+        current_->zeds_remaining.reset();
+        current_->zeds_remaining_observed_ns = 0;
+        current_->zeds_alive.reset();
+        current_->zeds_alive_observed_ns = 0;
+        current_->wave_number.reset();
+        current_->wave_total_ai.reset();
+        current_->wave_observed_ns = 0;
+        current_->load_map_observed_ns = 0;
+        current_->level_loaded_observed_ns = 0;
+        current_->loading_movie_finished_observed_ns = 0;
+        detail::clear_offline_telemetry_snapshot(*current_);
     }
     if (!changed || !current_) return std::nullopt;
     auto snapshot = std::optional<GameLogSession>{*current_};
