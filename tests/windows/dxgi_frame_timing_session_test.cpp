@@ -24,6 +24,32 @@ using namespace kf2::telemetry;
 constexpr SampleIdentity kIdentity{123, 1};
 constexpr std::uint64_t kFrequency = 1'000;
 
+int test_exact_clock_conversion() {
+    struct Case { std::uint64_t frequency, ticks, expected_ns; };
+    for (const auto [frequency, ticks, expected_ns] : {
+            Case{1'000'000'000ULL, 12'345'678'901'245ULL, 12'345'678'901'245ULL},
+            Case{10'000'000ULL, 12'345'678'901'245ULL, 1'234'567'890'124'500ULL},
+            Case{3, 7, 2'333'333'333ULL},
+            Case{3, 30'000'000'001ULL, 10'000'000'000'333'333'333ULL},
+            Case{2'000'000'000ULL, 12'345'678'901'245ULL, 6'172'839'450'622ULL},
+            Case{10'000'000ULL, 184'467'440'737'095'516ULL,
+                 18'446'744'073'709'551'600ULL},
+            Case{1, 9'223'372'036'854'775'806ULL, 0},
+            Case{0, 1, 0}}) {
+        PresentSource source{kIdentity, 8};
+        CHECK(source.start().has_value());
+        auto parser = DxgiFrameTimingSession::test_parser(kIdentity, source, frequency);
+        parser->test_present_event(true, 1, ticks, 7);
+        parser->test_present_event(false, 1, ticks + 1);
+        if (expected_ns == 0) {
+            CHECK(source.measure_window(0, UINT64_MAX).count == 0);
+        } else {
+            CHECK(source.measure_window(expected_ns, expected_ns + 1).count == 1);
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
 ULONG cleanup_query_status{ERROR_SUCCESS};
 ULONG cleanup_reported_count{64};
 ULONG cleanup_control_status{ERROR_SUCCESS};
@@ -395,6 +421,7 @@ int main(int argc, char** argv) {
         if (scenario == "--pending-loss") return test_event_loss();
         return EXIT_FAILURE;
     }
+    CHECK(test_exact_clock_conversion() == EXIT_SUCCESS);
     CHECK(test_stale_cleanup_overflow() == EXIT_SUCCESS);
     CHECK(test_stale_cleanup_pid_reuse() == EXIT_SUCCESS);
     CHECK(test_real_orphan_startup() == EXIT_SUCCESS);
