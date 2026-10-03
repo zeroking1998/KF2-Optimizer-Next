@@ -3671,10 +3671,276 @@ int test_protected_shutdown_running_game(bool with_module = false,
     return EXIT_SUCCESS;
 }
 
-int test_graphics_protected_rebuild_failure() {
+kf2::app::UiRuntime* advanced_apply_probe_runtime{};
+HANDLE advanced_write_lock{INVALID_HANDLE_VALUE};
+
+void block_advanced_write(kf2::platform::windows::AtomicFileMutationStage stage,
+                          const std::filesystem::path& target) {
+    if (!advanced_apply_probe_runtime || advanced_write_lock != INVALID_HANDLE_VALUE ||
+        stage != kf2::platform::windows::AtomicFileMutationStage::conditional_after_validation ||
+        advanced_apply_probe_runtime->preview_context !=
+            L"Explicit user-selected advanced KF2 settings" ||
+        target.filename() != L"KFSystemSettings.ini") return;
+    advanced_write_lock = CreateFileW(target.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+}
+
+int test_staged_advanced_settings(bool use_provider) {
+    namespace fs = std::filesystem;
+    using Option = kf2::game::AdvancedOption;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"adv" /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" +
+         std::to_wstring(GetTickCount64()));
+    const auto install = root / L"game";
+    const auto config = root / L"Documents/Config";
+    const auto portable = root / L"portable";
+    const auto provider = portable / L"Data/Lab/KF2OptimizerTelemetry.u";
+    const bool provider_available = use_provider &&
+        fs::is_regular_file(fs::path{KF2_TELEMETRY_ASSET});
+    write_test_pe(install / L"Binaries/Win64/KFGame.exe");
+    write_bytes(install / L"Engine/Config/ConsoleVariables.ini", "[Startup]\r\n");
+    CHECK(write_complete_config_catalog(config));
+    auto system = kf2::config::IniDocument::parse(
+        read_bytes(config / L"KFSystemSettings.ini"));
+    CHECK(system.has_value());
+    CHECK(system.value().upsert(L"SystemSettings", L"bAllowTemporalAA",
+        L"False").shadowed_occurrences == 0);
+    CHECK(system.value().upsert(L"SystemSettings", L"OneFrameThreadLag",
+        L"False").shadowed_occurrences == 0);
+    write_bytes(config / L"KFSystemSettings.ini", system.value().serialize());
+    write_bytes(config / L"KFEngine.ini", read_bytes(config / L"KFEngine.ini") +
+        "[URL]\r\nLocalOptions=\r\n[Engine.Engine]\r\n"
+        "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n");
+    fs::create_directories(portable);
+    if (provider_available)
+        write_bytes(provider, read_bytes(fs::path{KF2_TELEMETRY_ASSET}));
+    const kf2::game::GameDiscoveryInput discovery{
+        .manual_candidates = {install}, .config_root = config,
+        .allowed_config_parent = root / L"Documents"};
+    kf2::diagnostics::EventLog events{128};
+    kf2::config::Settings settings{};
+    settings.automatic_update_checks = false;
+    settings.target_fps = 62;
+    kf2::game::AdvancedGameSettings expected;
+    {
+        kf2::app::UiRuntime runtime{root / L"state", false, settings, events,
+            discovery, kf2::app::StartMode::normal, portable};
+        CHECK(runtime.installation.has_value());
+        CHECK(runtime.synchronize_frame_rate_cap().has_value());
+        const auto personal = kf2::game::read_advanced_game_settings(config);
+        CHECK(personal.has_value());
+        if (provider_available) {
+            const auto prepared = runtime.prepare_automatic_external_launch_profile();
+            CHECK(prepared.has_value() && prepared.value());
+        } else {
+            // Public CI has no compiled KF2 SDK package. Still exercise the
+            // personal baseline and real failed-rebuild/backup-rollback path.
+            auto captured = kf2::config::capture_session_config(
+                config, runtime.settings_path.parent_path());
+            CHECK(captured.has_value());
+            runtime.session_config_snapshot = std::move(captured.value());
+            runtime.session_config_waiting_for_launch = true;
+        }
+        CHECK(runtime.session_config_waiting_for_launch);
+        CHECK(runtime.session_config_launch_deadline_ns == 0);
+        // A temporary value must never become the editor's personal baseline.
+        system = kf2::config::IniDocument::parse(
+            read_bytes(config / L"KFSystemSettings.ini"));
+        CHECK(system.has_value());
+        CHECK(system.value().upsert(L"SystemSettings", L"ScreenPercentage",
+            L"90.0").shadowed_occurrences == 0);
+        write_bytes(config / L"KFSystemSettings.ini", system.value().serialize());
+        runtime.reload_advanced_settings();
+        CHECK(runtime.advanced_settings.saved == personal.value());
+        expected = personal.value();
+        if (!provider_available) {
+            runtime.stage_advanced_slider(Option::screen_percentage, 137);
+            CHECK(runtime.model.notice()->code == L"ADVANCED_SAVE_FAILED");
+            CHECK(runtime.model.recovery_required());
+            CHECK(runtime.advanced_settings.saved == expected);
+            CHECK(runtime.advanced_settings.pending == expected);
+            const auto actual = kf2::game::read_advanced_game_settings(config);
+            CHECK(actual.has_value() && actual.value() == expected);
+            const auto backup = runtime.backups.load_backup(runtime.last_backup_id);
+            CHECK(backup.has_value() && runtime.backups.verify(backup.value()).has_value());
+            CHECK(runtime.shutdown().has_value());
+            fs::remove_all(root);
+            return EXIT_SUCCESS;
+        }
+        for (std::size_t index = 0; index < kf2::game::kAdvancedOptionCount; ++index) {
+            const auto option = static_cast<Option>(index);
+            if (kf2::game::advanced_option_is_slider(option)) {
+                const int value = option == Option::screen_percentage ? 137 :
+                    option == Option::particle_percentage ? 86 : 45;
+                CHECK(kf2::game::set_advanced_slider_value(expected, option, value));
+                runtime.stage_advanced_slider(option, value);
+            } else {
+                CHECK(kf2::game::cycle_advanced_option(expected, option));
+                runtime.cycle_advanced_option(option);
+            }
+            CHECK(runtime.model.notice() &&
+                runtime.model.notice()->code == L"ADVANCED_SAVED");
+            CHECK(runtime.advanced_settings.saved == expected);
+            CHECK(runtime.advanced_settings.pending == expected);
+            CHECK(runtime.session_config_snapshot.has_value());
+            const auto captured = kf2::game::read_advanced_game_settings(
+                runtime.session_config_snapshot->snapshot_root / L"files");
+            CHECK(captured.has_value() && captured.value() == expected);
+        }
+        // A submitted launch and unresolved recovery must not accept edits.
+        runtime.session_config_launch_deadline_ns = 1;
+        CHECK(kf2::game::set_advanced_slider_value(
+            *runtime.advanced_settings.pending, Option::screen_percentage, 138));
+        CHECK(!runtime.apply_advanced_settings().has_value());
+        runtime.session_config_launch_deadline_ns = 0;
+        runtime.reload_advanced_settings();
+        runtime.model.set_recovery_required(true);
+        runtime.stage_advanced_slider(Option::screen_percentage, 138);
+        CHECK(runtime.advanced_settings.saved == expected);
+        CHECK(runtime.advanced_settings.pending == expected);
+        CHECK(runtime.model.notice()->code == L"ADVANCED_SAVE_FAILED");
+        runtime.model.set_recovery_required(false);
+        CHECK(runtime.restore_protected_session_config(L"Cancelled launch"));
+        const auto cancelled = kf2::game::read_advanced_game_settings(config);
+        CHECK(cancelled.has_value() && cancelled.value() == expected);
+        const auto rearmed = runtime.prepare_automatic_external_launch_profile();
+        CHECK(rearmed.has_value() && rearmed.value());
+        runtime.reset_advanced_settings();
+        expected = kf2::game::recommended_advanced_defaults();
+        CHECK(runtime.advanced_settings.saved == expected);
+        CHECK(runtime.model.notice()->code == L"ADVANCED_SAVED");
+        CHECK(runtime.shutdown().has_value());
+    }
+    const auto closed = kf2::game::read_advanced_game_settings(config);
+    CHECK(closed.has_value() && closed.value() == expected);
+    {
+        kf2::app::UiRuntime runtime{root / L"state", false, settings, events,
+            discovery, kf2::app::StartMode::normal, portable};
+        runtime.reload_advanced_settings();
+        CHECK(runtime.advanced_settings.saved == expected);
+        const auto prepared = runtime.prepare_automatic_external_launch_profile();
+        CHECK(prepared.has_value() && prepared.value());
+        // Invalid proposals restore the old profile without persisting anything.
+        runtime.advanced_settings.pending->values[static_cast<std::size_t>(
+            Option::screen_percentage)] = 201.0;
+        runtime.save_advanced_selection(L"Invalid render scale");
+        CHECK(runtime.model.notice()->code == L"ADVANCED_SAVE_FAILED");
+        CHECK(!runtime.model.recovery_required());
+        CHECK(runtime.session_config_snapshot.has_value());
+        CHECK(runtime.advanced_settings.saved == expected);
+        CHECK(runtime.advanced_settings.pending == expected);
+
+        // Fail the last file of a real multi-file apply; earlier writes roll back.
+        struct WriteProbeGuard {
+            ~WriteProbeGuard() {
+                kf2::platform::windows::set_atomic_file_mutation_hook_for_testing(nullptr);
+                advanced_apply_probe_runtime = nullptr;
+                if (advanced_write_lock != INVALID_HANDLE_VALUE)
+                    CloseHandle(advanced_write_lock);
+                advanced_write_lock = INVALID_HANDLE_VALUE;
+            }
+        };
+        {
+            WriteProbeGuard guard;
+            advanced_apply_probe_runtime = &runtime;
+            for (const auto option : {Option::per_frame_sleep, Option::gore_level})
+                CHECK(kf2::game::cycle_advanced_option(
+                    *runtime.advanced_settings.pending, option));
+            CHECK(kf2::game::set_advanced_slider_value(
+                *runtime.advanced_settings.pending, Option::screen_percentage, 138));
+            kf2::platform::windows::set_atomic_file_mutation_hook_for_testing(
+                block_advanced_write);
+            runtime.save_advanced_selection(L"Multi-file Advanced edit");
+            CHECK(advanced_write_lock != INVALID_HANDLE_VALUE);
+            CHECK(runtime.model.notice()->code == L"ADVANCED_SAVE_FAILED");
+            CHECK(!runtime.model.recovery_required());
+            CHECK(runtime.session_config_snapshot.has_value());
+            CHECK(runtime.advanced_settings.saved == expected);
+            CHECK(runtime.advanced_settings.pending == expected);
+        }
+        CHECK(runtime.restore_protected_session_config(L"Released apply lock"));
+        runtime.model.set_recovery_required(false);
+        const auto recovered = kf2::game::read_advanced_game_settings(config);
+        CHECK(recovered.has_value() && recovered.value() == expected);
+        const auto ready = runtime.prepare_automatic_external_launch_profile();
+        CHECK(ready.has_value() && ready.value());
+        // A locked original retains the snapshot and rolls the UI back.
+        const auto file = config / L"KFSystemSettings.ini";
+        HANDLE locked = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        CHECK(locked != INVALID_HANDLE_VALUE);
+        runtime.stage_advanced_slider(Option::screen_percentage, 138);
+        CloseHandle(locked);
+        CHECK(runtime.model.notice()->code == L"ADVANCED_SAVE_FAILED");
+        CHECK(runtime.model.recovery_required());
+        CHECK(runtime.session_config_snapshot.has_value());
+        CHECK(runtime.advanced_settings.saved == expected);
+        CHECK(runtime.advanced_settings.pending == expected);
+        CHECK(runtime.restore_protected_session_config(L"Released test lock"));
+        runtime.model.set_recovery_required(false);
+        const auto rearmed = runtime.prepare_automatic_external_launch_profile();
+        CHECK(rearmed.has_value() && rearmed.value());
+        // Missing provider: the edit applies, but rebuilding must roll it back.
+        fs::remove(provider);
+        runtime.stage_advanced_slider(Option::screen_percentage, 139);
+        CHECK(runtime.model.notice()->code == L"ADVANCED_SAVE_FAILED");
+        CHECK(runtime.model.recovery_required());
+        CHECK(!runtime.last_backup_id.empty());
+        const auto backup = runtime.backups.load_backup(runtime.last_backup_id);
+        CHECK(backup.has_value() && runtime.backups.verify(backup.value()).has_value());
+        CHECK(runtime.advanced_settings.saved == expected);
+        CHECK(runtime.advanced_settings.pending == expected);
+        const auto rolled_back = kf2::game::read_advanced_game_settings(config);
+        CHECK(rolled_back.has_value() && rolled_back.value() == expected);
+
+        // If rebuild rollback is locked too, retain both durable recovery sources.
+        write_bytes(provider, read_bytes(fs::path{KF2_TELEMETRY_ASSET}));
+        runtime.model.set_recovery_required(false);
+        const auto staged = runtime.prepare_automatic_external_launch_profile();
+        CHECK(staged.has_value() && staged.value());
+        struct RebuildProbeGuard {
+            ~RebuildProbeGuard() {
+                kf2::app::set_protected_launch_probe_for_testing(nullptr);
+                protected_failure_stage.reset();
+                if (protected_file_lock != INVALID_HANDLE_VALUE)
+                    CloseHandle(protected_file_lock);
+                protected_file_lock = INVALID_HANDLE_VALUE;
+            }
+        };
+        {
+            RebuildProbeGuard guard;
+            protected_failure_stage = kf2::app::ProtectedLaunchPreparationStage::capabilities;
+            kf2::app::set_protected_launch_probe_for_testing(lock_protected_launch_file);
+            fs::remove(provider);
+            runtime.stage_advanced_slider(Option::screen_percentage, 140);
+            CHECK(protected_file_lock != INVALID_HANDLE_VALUE);
+            CHECK(runtime.model.notice()->code == L"ADVANCED_SAVE_FAILED");
+            CHECK(runtime.model.notice()->recovery_action.find(L"Keep KF2 closed") !=
+                std::wstring::npos);
+            CHECK(runtime.model.recovery_required());
+            CHECK(runtime.session_config_snapshot.has_value());
+            CHECK(fs::is_regular_file(protected_snapshot_root / L"manifest.txt"));
+            const auto retained = runtime.backups.load_backup(runtime.last_backup_id);
+            CHECK(retained.has_value() &&
+                runtime.backups.verify(retained.value()).has_value());
+        }
+        CHECK(runtime.restore_protected_session_config(L"Released rebuild lock"));
+        CHECK(kf2::backup::restore_backup(runtime.backups, runtime.last_backup_id,
+            config, {.game_running = false}).has_value());
+        runtime.reload_advanced_settings();
+        CHECK(runtime.advanced_settings.saved == expected);
+        CHECK(runtime.advanced_settings.pending == expected);
+        runtime.model.set_recovery_required(false);
+    }
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
+int test_graphics_protected_rebuild_failure(bool use_provider = true) {
 #if !defined(KF2_APPLICATION_VIDEO_TESTING)
     return EXIT_FAILURE;
 #else
+    CHECK(test_staged_advanced_settings(use_provider) == EXIT_SUCCESS);
     namespace fs = std::filesystem;
     const auto root = fs::path{KF2_TEST_ROOT} / L"grb" /
         (std::to_wstring(GetCurrentProcessId()) + L"-" +
@@ -4270,8 +4536,11 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string_view{argv[1]} == "--protected-shutdown-running-game") {
         return test_protected_shutdown_running_game();
     }
-    if (argc == 2 && std::string_view{argv[1]} == "--graphics-protected-rebuild-failure") {
-        return test_graphics_protected_rebuild_failure();
+    if (argc == 2 &&
+        (std::string_view{argv[1]} == "--graphics-protected-rebuild-failure" ||
+         std::string_view{argv[1]} == "--graphics-protected-rebuild-failure-no-provider")) {
+        return test_graphics_protected_rebuild_failure(
+            std::string_view{argv[1]} == "--graphics-protected-rebuild-failure");
     }
     if (argc == 2 && std::string_view{argv[1]} == "--adaptive-toggle-save-failure") {
         return test_adaptive_toggle_save_failure();
@@ -5003,8 +5272,15 @@ int main(int argc, char** argv) {
                  MAKELPARAM(thread_lag->x, thread_lag->y));
     CHECK(!graphical.value().ui_model().status().advanced_dirty);
     CHECK(graphical.value().ui_model().status().advanced_values[0] == L"Off");
+    const auto advanced_snapshot = kf2::config::resume_session_config(
+        config_root, options.state_root);
+    CHECK(advanced_snapshot.has_value() && advanced_snapshot.value().has_value());
+    CHECK(read_bytes(advanced_snapshot.value()->snapshot_root / L"files" /
+              L"KFSystemSettings.ini").find("OneFrameThreadLag=False") !=
+          std::string::npos);
+    // The personal selection is separate from the existing protected override.
     CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
-              "OneFrameThreadLag=False") != std::string::npos);
+              "OneFrameThreadLag=True") != std::string::npos);
     const auto debug_navigation =
         node_center(hwnd, graphical.value().ui_model(), "nav-4");
     CHECK(debug_navigation.has_value());
@@ -5252,6 +5528,8 @@ int main(int argc, char** argv) {
     SysFreeString(name);
     SendMessageW(hwnd, WM_CLOSE, 0, 0);
     CHECK(graphical.value().shutdown_cleanly().has_value());
+    CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
+              "OneFrameThreadLag=False") != std::string::npos);
     CHECK(read_bytes(options.state_root / L"session.marker").ends_with(
         "clean_shutdown=true\n"));
 

@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Advanced settings changed before a prepared protected launch now remain
+  personal settings after cancellation, shutdown and restart. Failed saves
+  roll back safely; blocked restoration retains verified recovery data.
+
 - GPU telemetry now retries missing Windows and NVIDIA providers independently
   after transient initialization failures, with backoff capped at 30 seconds.
   Working providers are retained and retry diagnostics cannot spam every tick.

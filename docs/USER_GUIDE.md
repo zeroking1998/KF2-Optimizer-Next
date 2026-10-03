@@ -159,8 +159,12 @@ settings and are independent of Adaptive.
 Click an On/Off or enumerated option, or use the sliders for render scale,
 particle amount, and decal lifetime. Each change is saved and verified
 immediately. KF2 must be closed, and the app creates a restore backup before
-writing. If writing or verification fails, the controls return to the values
-currently stored by KF2.
+writing. When a protected launch is prepared, this page reads personal values
+from its snapshot, saves only your change, then rebuilds the prepared launch.
+The saved settings survive launch cancellation, app shutdown and restart.
+If saving fails, the controls reload the saved personal values. If restoration
+cannot finish, keep KF2 closed and use the retained backup or repair the
+protected launch before retrying; the app does not report the edit as saved.
 
 Hover over any button or slider to see what it changes and its visual or
 performance trade-off. These descriptions also distinguish user-owned
