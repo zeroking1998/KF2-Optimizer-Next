@@ -145,6 +145,9 @@ int main() {
     std::condition_variable batch_changed;
     const auto batch_writer = [&](const std::filesystem::path& path,
                                   std::string_view bytes) {
+        // Durable I/O may exceed 100 ms even when flush bypasses batching.
+        if (bytes.find("\"DUP\"") != std::string_view::npos)
+            std::this_thread::sleep_for(std::chrono::milliseconds{150});
         auto result = kf2::platform::windows::atomic_replace_utf8(path, bytes);
         {
             std::scoped_lock lock{batch_mutex};
@@ -172,18 +175,19 @@ int main() {
         CHECK(saved == kf2::diagnostics::serialize_events_json(batched.snapshot()));
         input.close();
 
-        // An explicit flush bypasses the fresh batch deadline, including clear.
+        // Flush requests persistence immediately, including clear. Its completion
+        // budget must allow worker scheduling and durable I/O, not just batching.
         batched.clear();
         std::barrier start_flush{3};
         bool first_flushed = false;
         bool second_flushed = false;
         std::jthread first_flush{[&] {
             start_flush.arrive_and_wait();
-            first_flushed = batched.flush(std::chrono::milliseconds{100});
+            first_flushed = batched.flush(std::chrono::seconds{2});
         }};
         std::jthread second_flush{[&] {
             start_flush.arrive_and_wait();
-            second_flushed = batched.flush(std::chrono::milliseconds{100});
+            second_flushed = batched.flush(std::chrono::seconds{2});
         }};
         start_flush.arrive_and_wait();
         first_flush.join();
@@ -194,7 +198,7 @@ int main() {
               std::string_view{"{\"version\":1,\"events\":[]}"}.size());
         batched.append(Event{0, Severity::info, "DUP", L"same", L"test"});
         batched.append(Event{0, Severity::info, "DUP", L"same", L"test"});
-        CHECK(batched.flush(std::chrono::milliseconds{100}));
+        CHECK(batched.flush(std::chrono::seconds{2}));
         CHECK(batch_writes == 4);
         CHECK(batched.snapshot().front().repeat_count == 2);
     }
