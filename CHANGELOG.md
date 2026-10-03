@@ -86,6 +86,8 @@ are visible immediately.
 
 - Removed unused named-profile generation and persistence code. Adaptive still
   starts from user graphics and retains resource-specific control and locks.
+- Shared the backup and protected-session byte codec without changing saved
+  formats, path checks, or configuration restoration.
 
 - Advanced settings changed before a prepared protected launch now remain
   personal settings after cancellation, shutdown and restart. Failed saves
