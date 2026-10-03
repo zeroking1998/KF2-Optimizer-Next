@@ -169,7 +169,6 @@ add_executable(KF2Optimizer WIN32
     src/overlay/overlay_window_render.cpp
     src/overlay/overlay_window_static.cpp
     src/overlay/overlay_window.cpp
-    src/optimizer/adaptive_profile.cpp
     src/optimizer/adaptive_registry.cpp
     src/optimizer/adaptive_actuation.cpp
     src/optimizer/adaptive_governor.cpp

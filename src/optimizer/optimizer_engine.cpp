@@ -3,15 +3,9 @@
 
 #include <algorithm>
 #include <cmath>
-#include <utility>
 
 namespace kf2::optimizer {
 namespace {
-
-bool valid_value(config::SettingId id, const config::SettingValue& value) {
-    const auto* definition = config::find_setting(id);
-    return definition && config::serialize_setting_value(*definition, value).has_value();
-}
 
 Bottleneck classify(const OptimizerInput& input) {
     const auto& evidence = input.evidence;
@@ -81,187 +75,6 @@ std::wstring bottleneck_reason(Bottleneck bottleneck) {
     return L"Adaptive decision unavailable";
 }
 
-void put(std::map<config::SettingId, config::RequestedChange>& changes,
-         config::SettingId id, config::SettingValue value,
-         config::ChangeSource source, std::wstring reason) {
-    if (!valid_value(id, value)) return;
-    changes.insert_or_assign(
-        id, config::RequestedChange{id, std::move(value), source, std::move(reason)});
-}
-
-void apply_effect_profile(
-    std::map<config::SettingId, config::RequestedChange>& changes,
-    Profile profile) {
-    const bool high_performance = profile == Profile::high_performance;
-    const bool stability = profile == Profile::stability;
-    const auto select = [high_performance, stability](auto performance_value,
-                                                       auto balanced_value,
-                                                       auto stability_value) {
-        return high_performance ? performance_value
-                                : stability ? stability_value : balanced_value;
-    };
-    const auto source = config::ChangeSource::adaptive;
-    const std::wstring reason = high_performance
-        ? L"Use KF2's shipped performance effect bucket"
-        : stability
-            ? L"Use KF2's shipped high-quality effect bucket"
-            : L"Use KF2's shipped balanced effect bucket";
-
-    put(changes, config::SettingId::corpse_limit,
-        select(8, 12, 15), source, reason);
-    put(changes, config::SettingId::gore_effect_limit,
-        select(8, 10, 15), source, reason);
-    put(changes, config::SettingId::explosion_decal_limit,
-        select(12, 15, 20), source, reason);
-    put(changes, config::SettingId::impact_decal_limit,
-        select(15, 20, 40), source, reason);
-    put(changes, config::SettingId::wound_decal_limit,
-        5, source, reason);
-    put(changes, config::SettingId::blood_splatter_decal_limit,
-        20, source, reason);
-    put(changes, config::SettingId::blood_pool_decal_limit,
-        20, source, reason);
-    put(changes, config::SettingId::blood_effect_limit,
-        select(15, 25, 40), source, reason);
-    put(changes, config::SettingId::body_wound_decal_lifetime,
-        30, source, reason);
-    put(changes, config::SettingId::blood_splatter_lifetime,
-        10, source, reason);
-    put(changes, config::SettingId::blood_pool_lifetime,
-        20, source, reason);
-    put(changes, config::SettingId::giblet_lifetime,
-        10, source, reason);
-    put(changes, config::SettingId::gore_lifetime_multiplier,
-        select(0.75, 1.0, 1.2), source, reason);
-    put(changes, config::SettingId::persistent_splats_per_frame,
-        select(50, 75, 100), source, reason);
-    put(changes, config::SettingId::blood_splatter_decals,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::secondary_blood_effects,
-        !high_performance, source, reason);
-}
-
-void apply_render_profile(
-    std::map<config::SettingId, config::RequestedChange>& changes,
-    Profile profile) {
-    const bool high_performance = profile == Profile::high_performance;
-    const bool stability = profile == Profile::stability;
-    const auto select = [high_performance, stability](auto performance_value,
-                                                       auto balanced_value,
-                                                       auto stability_value) {
-        return high_performance ? performance_value
-                                : stability ? stability_value : balanced_value;
-    };
-    const auto source = config::ChangeSource::adaptive;
-    const std::wstring reason = high_performance
-        ? L"Use KF2's shipped performance rendering bucket"
-        : stability
-            ? L"Use KF2's shipped high-quality rendering bucket"
-            : L"Use KF2's shipped balanced rendering bucket";
-
-    put(changes, config::SettingId::static_decals, true, source, reason);
-    put(changes, config::SettingId::dynamic_decals,
-        true, source, reason);
-    put(changes, config::SettingId::decal_cull_distance_scale,
-        select(0.5, 0.6, 0.8), source, reason);
-    put(changes, config::SettingId::dynamic_shadows,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::light_environment_shadows,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::ambient_occlusion,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::bloom,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::distortion,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::drop_particle_distortion,
-        high_performance, source, reason);
-    put(changes, config::SettingId::high_quality_materials,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::detail_mode,
-        select(0, 1, 2), source, reason);
-    put(changes, config::SettingId::max_shadow_resolution,
-        select(512, 1024, 2048), source, reason);
-    put(changes, config::SettingId::max_whole_scene_shadow_resolution,
-        select(512, 1280, 2048), source, reason);
-    put(changes, config::SettingId::shadow_texels_per_pixel,
-        select(0.9, 1.3, 2.0), source, reason);
-    put(changes, config::SettingId::fracture_cull_distance_scale,
-        select(0.5, 1.0, 1.5), source, reason);
-
-    put(changes, config::SettingId::particle_lod_bias, 0, source, reason);
-    put(changes, config::SettingId::skeletal_mesh_lod_bias,
-        high_performance ? 1 : 0, source, reason);
-    put(changes, config::SettingId::global_shadow_distance_scale,
-        select(0.75, 1.0, 1.5), source, reason);
-    put(changes, config::SettingId::depth_of_field,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::light_shafts,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::lens_flares,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::radial_blur,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::fractured_damage,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::motion_blur,
-        stability, source, reason);
-    put(changes, config::SettingId::post_process_aa,
-        true, source, reason);
-    put(changes, config::SettingId::filtered_distortion,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::unbatched_decals,
-        true, source, reason);
-    put(changes, config::SettingId::whole_scene_dominant_shadows,
-        true, source, reason);
-    put(changes, config::SettingId::conservative_shadow_bounds,
-        high_performance, source, reason);
-    put(changes, config::SettingId::max_anisotropy,
-        select(1, 4, 16), source, reason);
-    put(changes, config::SettingId::post_process_mlaa,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::screen_space_reflections,
-        stability, source, reason);
-    put(changes, config::SettingId::subsurface_scattering,
-        stability, source, reason);
-    put(changes, config::SettingId::light_functions,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::light_cones,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::destruction_lifetime_scale,
-        select(0.5, 1.0, 1.2), source, reason);
-    put(changes, config::SettingId::explosion_lights,
-        true, source, reason);
-    put(changes, config::SettingId::depth_of_field_quality,
-        high_performance ? 0 : 1, source, reason);
-    put(changes, config::SettingId::bloom_quality,
-        high_performance ? 1 : 2, source, reason);
-    put(changes, config::SettingId::distance_fog_quality,
-        high_performance ? 0 : 1, source, reason);
-    put(changes, config::SettingId::motion_blur_quality,
-        stability ? 1 : 0, source, reason);
-    put(changes, config::SettingId::hbao,
-        stability, source, reason);
-    put(changes, config::SettingId::per_object_shadows,
-        true, source, reason);
-    put(changes, config::SettingId::min_shadow_resolution,
-        stability ? 32 : 64, source, reason);
-    put(changes, config::SettingId::shadow_fade_resolution,
-        stability ? 64 : 128, source, reason);
-    put(changes, config::SettingId::foreground_preshadows,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::emitter_pool_scale,
-        select(0.5, 1.0, 2.0), source, reason);
-    put(changes, config::SettingId::shell_eject_lifetime,
-        select(5.0, 10.0, 20.0), source, reason);
-    put(changes, config::SettingId::spray_actor_lights,
-        !high_performance, source, reason);
-    put(changes, config::SettingId::pilot_lights,
-        true, source, reason);
-    put(changes, config::SettingId::override_map_whole_scene_shadow,
-        stability, source, reason);
-}
-
 }  // namespace
 
 std::optional<StartupMemoryProfile> recommended_startup_memory_profile(
@@ -296,35 +109,6 @@ OptimizerDecision evaluate(const OptimizerInput& input) {
         case Bottleneck::unavailable: decision.confidence = Confidence::unavailable; break;
     }
 
-    std::map<config::SettingId, config::RequestedChange> changes;
-    const bool valid_target = valid_target_fps(input.target_fps);
-    const bool explicit_profile_preview =
-        input.profile_preview_requested && valid_target;
-    if (explicit_profile_preview) {
-        decision.reason = decision.bottleneck == Bottleneck::unavailable
-            ? L"Explicit selected-profile preview; adaptive classification remains unavailable"
-            : L"Explicit selected-profile preview; " + decision.reason;
-    }
-    if (valid_target &&
-        (decision.bottleneck != Bottleneck::unavailable ||
-         explicit_profile_preview)) {
-        if (input.quality == QualityPolicy::performance &&
-            (explicit_profile_preview ||
-             decision.bottleneck != Bottleneck::frame_cap)) {
-            if (input.profile != Profile::custom) {
-                // Every named profile owns the complete verified Adaptive set.
-                // This prevents values from a previously applied profile from
-                // leaking into the next one.
-                apply_effect_profile(changes, input.profile);
-                apply_render_profile(changes, input.profile);
-            }
-        }
-    }
-
-    for (auto& [id, change] : changes) {
-        static_cast<void>(id);
-        decision.changes.push_back(std::move(change));
-    }
     return decision;
 }
 

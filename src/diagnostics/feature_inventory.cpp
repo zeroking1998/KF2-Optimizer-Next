@@ -66,7 +66,7 @@ constexpr AreaContract area02{
     "Automatic launch application requires a verified session snapshot, backup, readback and safe restore.",
     "Native DXGI timing, system telemetry, settings and verified KF2 catalog.",
     "Adaptive migration, freshness, bounds, lock priority, cooldown, restart and fallback tests.",
-    "kf2_adaptive_profile_test; kf2_adaptive_governor_test; kf2_optimizer_engine_test; kf2_settings_test; lifecycle test"};
+    "kf2_adaptive_governor_test; kf2_optimizer_engine_test; kf2_settings_test; lifecycle test"};
 
 constexpr std::array area02_items{
     ItemSpec{FeatureStatus::present, "unambiguous Adaptive control", "Adaptive is the only visible and actionable optimizer mode."},
@@ -296,14 +296,14 @@ constexpr std::array area12_items{
 };
 
 constexpr AreaContract area13{
-    "Adaptive performance and profiles", "src/optimizer/adaptive_governor.cpp; src/optimizer/adaptive_profile.cpp; src/optimizer/optimizer_engine.cpp",
+    "Adaptive performance and quality control", "src/optimizer/adaptive_governor.cpp; src/optimizer/optimizer_engine.cpp",
     "Fresh frame, CPU, GPU, VRAM and RAM evidence", "B measured",
-    "Validated sampling, hysteresis, dwell, bounded profiles, recovery, resource attribution and explicit safety-lock priority are deterministic.",
-    "Stable automatic profile control without rapid quality oscillation.",
+    "Validated sampling, hysteresis, dwell, bounded quality, recovery, resource attribution and explicit safety-lock priority are deterministic.",
+    "Stable automatic quality control without rapid quality oscillation.",
     "Live changes require verified offline gameplay, an authenticated loopback command and exact engine readback; owned values restore to their captured originals.",
-    "Adaptive automatic profile with bounded safety locks.", "Automatic protected launch transaction, session token, exact runtime readback and backup/restore.",
-    "Telemetry and catalog profiles.", "Degrade, recover, neutral band, stale, safety-lock and quality-policy tests.",
-    "kf2_adaptive_profile_test; kf2_adaptive_governor_test; kf2_telemetry_adaptive_stage_test; kf2_adaptive_control_client_test"};
+    "Resource-specific Adaptive quality control with bounded safety locks.", "Automatic protected launch transaction, session token, exact runtime readback and backup/restore.",
+    "Telemetry and verified setting catalog.", "Degrade, recover, neutral band, stale, safety-lock and quality-policy tests.",
+    "kf2_adaptive_governor_test; kf2_telemetry_adaptive_stage_test; kf2_adaptive_control_client_test"};
 
 constexpr std::array area13_items{
     ItemSpec{FeatureStatus::present, "target FPS and frame-time budget", "Every integer target from 30 through 240 drives exact relative frame-time bands."},
