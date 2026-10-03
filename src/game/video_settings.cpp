@@ -262,6 +262,20 @@ std::size_t index(VideoOption option) noexcept {
     return static_cast<std::size_t>(option);
 }
 
+int recognize_overall_quality(const VideoSettings& settings, int custom) noexcept {
+    for (std::size_t preset = 0; preset < kOverallQualityPresets.size(); ++preset) {
+        bool match = true;
+        for (std::size_t component = 0;
+             component < kOverallQualityTargets.size(); ++component) {
+            match = match && settings.choices[index(
+                kOverallQualityTargets[component])] ==
+                kOverallQualityPresets[preset][component];
+        }
+        if (match) return static_cast<int>(preset);
+    }
+    return custom;
+}
+
 Result<std::string> read_file(const std::filesystem::path& path) {
     auto file = open_video_file(path);
     if (!file.has_value()) return Result<std::string>::failure(file.error());
@@ -753,20 +767,8 @@ VideoSettings present_game_menu_graphics_readback(
             result.choices[option] = readback.choices[option];
         }
     }
-    result.choices[index(VideoOption::overall_quality)] = -1;
-    for (int preset = 0; preset < 4; ++preset) {
-        bool match = true;
-        for (std::size_t component = 0;
-             component < kOverallQualityTargets.size(); ++component) {
-            match = match && result.choices[index(
-                kOverallQualityTargets[component])] ==
-                kOverallQualityPresets[preset][component];
-        }
-        if (match) {
-            result.choices[index(VideoOption::overall_quality)] = preset;
-            break;
-        }
-    }
+    result.choices[index(VideoOption::overall_quality)] =
+        recognize_overall_quality(result, -1);
     result.flex_level = std::max(0, result.choices[index(VideoOption::nvidia_flex)]);
     return result;
 }
@@ -1049,20 +1051,8 @@ Result<VideoSettings> read_video_settings(const std::filesystem::path& config_ro
     settings.choices[index(VideoOption::volumetric_lighting)] = bool_choice(document, L"LightCones");
     settings.choices[index(VideoOption::lens_flares)] = bool_choice(document, L"bAllowLensFlares");
     settings.choices[index(VideoOption::light_shafts)] = bool_choice(document, L"bAllowLightShafts");
-    settings.choices[index(VideoOption::overall_quality)] = 4;
-    for (int preset = 0; preset < 4; ++preset) {
-        bool match = true;
-        for (std::size_t component = 0;
-             component < kOverallQualityTargets.size(); ++component) {
-            match = match && settings.choices[index(
-                kOverallQualityTargets[component])] ==
-                kOverallQualityPresets[preset][component];
-        }
-        if (match) {
-            settings.choices[index(VideoOption::overall_quality)] = preset;
-            break;
-        }
-    }
+    settings.choices[index(VideoOption::overall_quality)] =
+        recognize_overall_quality(settings, 4);
 
     auto engine = config::IniDocument::parse(snapshot.value().engine);
     if (!engine.has_value()) {
