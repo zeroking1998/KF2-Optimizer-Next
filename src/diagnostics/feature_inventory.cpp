@@ -5,6 +5,8 @@
 #include <sstream>
 #include <vector>
 
+#include "kf2/core/json_escape.hpp"
+
 namespace kf2::diagnostics {
 namespace {
 
@@ -569,30 +571,6 @@ const std::vector<FeatureRecord>& inventory(
     return records;
 }
 
-std::string escape(std::string_view value) {
-    std::ostringstream output;
-    for (const unsigned char character : value) {
-        switch (character) {
-            case '"': output << "\\\""; break;
-            case '\\': output << "\\\\"; break;
-            case '\b': output << "\\b"; break;
-            case '\f': output << "\\f"; break;
-            case '\n': output << "\\n"; break;
-            case '\r': output << "\\r"; break;
-            case '\t': output << "\\t"; break;
-            default:
-                if (character < 0x20) {
-                    constexpr char digits[] = "0123456789abcdef";
-                    output << "\\u00" << digits[character >> 4]
-                           << digits[character & 0x0f];
-                } else {
-                    output << static_cast<char>(character);
-                }
-        }
-    }
-    return output.str();
-}
-
 }  // namespace
 
 std::span<const FeatureRecord> issue72_feature_inventory(
@@ -655,7 +633,7 @@ std::string serialize_feature_inventory_json(
     }
     std::ostringstream output;
     output << "{\"schema\":\"KF2_ISSUE72_INVENTORY_V3\",\"build_identity\":\""
-           << escape(build_identity) << "\",\"issue\":72,\"function_count\":"
+           << json_escape(build_identity) << "\",\"issue\":72,\"function_count\":"
            << records.size() << ",\"status_counts\":{\"present\":"
            << status_counts[static_cast<std::size_t>(FeatureStatus::present)]
            << ",\"partial\":"
@@ -685,27 +663,27 @@ std::string serialize_feature_inventory_json(
     for (const auto& record : records) {
         if (!first) output << ',';
         first = false;
-        output << "{\"id\":\"" << escape(record.id)
-               << "\",\"name\":\"" << escape(record.name)
+        output << "{\"id\":\"" << json_escape(record.id)
+               << "\",\"name\":\"" << json_escape(record.name)
                << "\",\"area\":" << record.area
                << ",\"item\":" << record.item
                << ",\"status\":\"" << status_name(record.status)
                << "\",\"remaining_scope\":\""
                << remaining_scope_name(record.remaining_scope)
-               << "\",\"user_requirement\":\"" << escape(record.user_requirement)
-               << "\",\"code_path\":\"" << escape(record.code_path)
-               << "\",\"data_source\":\"" << escape(record.data_source)
-               << "\",\"trust_class\":\"" << escape(record.trust_class)
-               << "\",\"technical_statement\":\"" << escape(record.technical_statement)
-               << "\",\"expected_benefit\":\"" << escape(record.expected_benefit)
-               << "\",\"risks\":\"" << escape(record.risks)
-               << "\",\"mode_support\":\"" << escape(record.mode_support)
-               << "\",\"reversible_path\":\"" << escape(record.reversible_path)
-               << "\",\"dependencies\":\"" << escape(record.dependencies)
-               << "\",\"required_tests\":\"" << escape(record.required_tests)
-               << "\",\"evidence\":\"" << escape(record.evidence)
-               << "\",\"decision\":\"" << escape(record.decision)
-               << "\",\"linkage\":\"" << escape(record.linkage) << "\"}";
+               << "\",\"user_requirement\":\"" << json_escape(record.user_requirement)
+               << "\",\"code_path\":\"" << json_escape(record.code_path)
+               << "\",\"data_source\":\"" << json_escape(record.data_source)
+               << "\",\"trust_class\":\"" << json_escape(record.trust_class)
+               << "\",\"technical_statement\":\"" << json_escape(record.technical_statement)
+               << "\",\"expected_benefit\":\"" << json_escape(record.expected_benefit)
+               << "\",\"risks\":\"" << json_escape(record.risks)
+               << "\",\"mode_support\":\"" << json_escape(record.mode_support)
+               << "\",\"reversible_path\":\"" << json_escape(record.reversible_path)
+               << "\",\"dependencies\":\"" << json_escape(record.dependencies)
+               << "\",\"required_tests\":\"" << json_escape(record.required_tests)
+               << "\",\"evidence\":\"" << json_escape(record.evidence)
+               << "\",\"decision\":\"" << json_escape(record.decision)
+               << "\",\"linkage\":\"" << json_escape(record.linkage) << "\"}";
     }
     output << "]}";
     return output.str();
