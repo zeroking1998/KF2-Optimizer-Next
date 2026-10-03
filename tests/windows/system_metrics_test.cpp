@@ -6,6 +6,7 @@
 #include <vector>
 #include "kf2/game/game_session.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
+#include "../support/process_inspection_denial.hpp"
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
@@ -167,6 +168,7 @@ int main() {
     const auto identity = kf2::game::bind_game_process(GetCurrentProcessId(), path);
     CHECK(identity.has_value());
     ProcessMetricSampler sampler{identity.value()};
+    const auto opens_before = detail::process_metric_opens_for_testing();
     const auto first = sampler.sample();
     CHECK(first.has_value());
     CHECK(first.value().working_set_bytes > 0);
@@ -179,6 +181,7 @@ int main() {
     Sleep(520);
     const auto third = sampler.sample();
     CHECK(third.has_value());
+    CHECK(detail::process_metric_opens_for_testing() == opens_before);
     CHECK(third.value().critical_core_percent.has_value());
     CHECK(*third.value().critical_core_percent >= 0.0);
     CHECK(*third.value().critical_core_percent <= 100.0);
@@ -206,6 +209,39 @@ int main() {
           third.value().system_logical_processors);
     auto stale = identity.value(); ++stale.process_start_id;
     CHECK(!ProcessMetricSampler{stale}.sample().has_value());
+    stale = identity.value(); ++stale.pid;
+    CHECK(!ProcessMetricSampler{stale}.sample().has_value());
+    {
+        auto detached = identity.value();
+        detached.native_process.reset();
+        const auto before = detail::process_metric_opens_for_testing();
+        ProcessMetricSampler standalone{detached};
+        CHECK(standalone.sample().has_value());
+        CHECK(standalone.sample().has_value());
+        auto moved = std::move(standalone);
+        CHECK(moved.sample().has_value());
+        CHECK(detail::process_metric_opens_for_testing() == before + 1);
+    }
+    {
+        // Denying VM_READ must not break read-only session observation.
+        std::unique_ptr<void, decltype(&CloseHandle)> owned{
+            OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId()), &CloseHandle};
+        CHECK(owned);
+        kf2::test::ProcessInspectionDenial denial;
+        CHECK(denial.deny(owned.get(), PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE));
+        const auto limited = kf2::game::bind_game_process(GetCurrentProcessId(), path);
+        CHECK(limited.has_value());
+        CHECK(limited.value().native_process);
+        CHECK(!limited.value().native_process->metrics_readable());
+        CHECK(kf2::game::is_game_process_current(limited.value()));
+        ProcessMetricSampler restricted{limited.value()};
+        CHECK(!restricted.sample().has_value());
+        CHECK(denial.restore());
+        const auto before = detail::process_metric_opens_for_testing();
+        CHECK(restricted.sample().has_value());
+        CHECK(restricted.sample().has_value());
+        CHECK(detail::process_metric_opens_for_testing() == before + 1);
+    }
 
     std::vector<std::jthread> workers;
     for (int index = 0; index < 8; ++index) {

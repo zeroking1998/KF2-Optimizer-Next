@@ -38,6 +38,7 @@ struct ResourceTelemetryBinding final {
     std::wstring adapter_name;
     std::uint32_t adapter_vendor_id{0};
     std::filesystem::path game_log_directory;
+    std::shared_ptr<const game::GameProcessHandle> native_process;
 };
 
 struct GameLogChunk final {
@@ -118,6 +119,9 @@ private:
 #ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
 namespace detail {
 using GameLogReadHook = void (*)(const std::filesystem::path&);
+using ResourceRequestHook = void (*)(ResourceTelemetryWorker&);
+void set_resource_request_hook_for_testing(ResourceRequestHook hook) noexcept;
+[[nodiscard]] std::uint64_t resource_requests_for_testing() noexcept;
 void set_game_log_read_hook_for_testing(GameLogReadHook hook) noexcept;
 void fail_next_resource_telemetry_publication() noexcept;
 }

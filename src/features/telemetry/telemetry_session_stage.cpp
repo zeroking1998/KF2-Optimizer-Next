@@ -13,24 +13,24 @@ void attach_session_sources(app::UiRuntime& runtime) {
     runtime.try_attach_telemetry();
 }
 
-void refresh_session_gate(app::UiRuntime& runtime) {
+std::shared_ptr<const telemetry::ResourceTelemetrySnapshot>
+refresh_session_gate(app::UiRuntime& runtime) {
     // Continue consuming KF2's own read-only session log after DXGI timing
     // attached; map transitions happen long after the startup gate.
-    if (runtime.game_process) runtime.update_overlay_scene_gate();
-}
-
-void revalidate_bound_process(app::UiRuntime& runtime) {
-    if (!runtime.game_process) return;
-    const auto previous_process = *runtime.game_process;
-    // The executable path was verified when this immutable process identity
-    // was bound. Repeating path lookup and canonicalization every 120 ms adds
-    // no security after the creation timestamp protects against PID reuse.
-    if (!game::is_game_process_current(previous_process)) {
-        runtime.begin_game_restart_handoff(previous_process);
+    if (runtime.game_process) {
+        runtime.resource_telemetry_worker.request(runtime.monotonic_ns());
+        runtime.update_overlay_scene_gate();
     }
+    return runtime.resource_telemetry_worker.latest();
 }
 
 SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
+    // Sessions without a Present source must still observe process exit.
+    if (runtime.game_process && !runtime.present_source &&
+        !game::is_game_process_current(*runtime.game_process)) {
+        const auto previous_process = *runtime.game_process;
+        runtime.begin_game_restart_handoff(previous_process);
+    }
     if (!runtime.game_process || !runtime.present_source) {
         runtime.corpse_telemetry_tracker.reset();
         const std::wstring detail = runtime.telemetry_failure.empty()
@@ -630,9 +630,9 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
     if (!installation || !game_process) return;
     const telemetry::SampleIdentity identity{
         game_process->pid, game_process->process_start_id};
-    const auto now = monotonic_ns();
-    resource_telemetry_worker.request(now);
     if (flush) {
+        // An explicit terminal flush is separate from the periodic cycle.
+        resource_telemetry_worker.request(monotonic_ns());
         static_cast<void>(resource_telemetry_worker.wait_until_idle(
             std::chrono::milliseconds{250}));
     }
@@ -1080,6 +1080,7 @@ void UiRuntime::bind_resource_telemetry(
     telemetry::ResourceTelemetryBinding binding;
     binding.identity = {
         game_process->pid, game_process->process_start_id};
+    binding.native_process = game_process->native_process;
     if (installation) {
         binding.game_log_directory =
             installation->config_root.parent_path() / L"Logs";

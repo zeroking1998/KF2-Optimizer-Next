@@ -84,6 +84,11 @@ are visible immediately.
 
 ### Bug fixes
 
+- Desktop telemetry now submits one resource-worker request per regular cycle
+  and shares verified process handles instead of reopening them for each
+  liveness or CPU/memory sample. Process exits, PID reuse and restricted access
+  still reject unsafe samples; final log flushing remains explicit.
+
 - DXGI frame timestamps now use exact integer clock conversion instead of
   floating-point scaling, preserving nanosecond intervals and rejecting
   values outside the supported timestamp range.

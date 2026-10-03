@@ -52,7 +52,7 @@ public:
     }
 
     void refresh_session_gate() {
-        telemetry_pipeline::refresh_session_gate(runtime_);
+        resources_ = telemetry_pipeline::refresh_session_gate(runtime_);
     }
 
     void observe_flex() {
@@ -60,8 +60,7 @@ public:
     }
 
     [[nodiscard]] bool inspect_window() {
-        // Preserve the process revalidation point after FleX observation.
-        telemetry_pipeline::revalidate_bound_process(runtime_);
+        // Inspection includes process liveness after FleX observation.
         session_ = telemetry_pipeline::inspect_bound_session(runtime_);
         return session_->disposition ==
             telemetry_pipeline::SessionDisposition::ready;
@@ -86,7 +85,8 @@ public:
 
     [[nodiscard]] bool capture_frame() {
         auto captured = telemetry_pipeline::capture_telemetry_frame(
-            runtime_, *session_->window, observed_at_ns_, *drain_->frames());
+            runtime_, *session_->window, observed_at_ns_, *drain_->frames(),
+            resources_.get());
         if (!captured.has_value()) {
             reject_frame(captured.error());
             return false;
@@ -139,6 +139,7 @@ private:
     std::optional<telemetry_pipeline::SessionStageResult> session_;
     std::optional<telemetry_pipeline::PresentDrainResult> drain_;
     std::optional<telemetry_pipeline::TelemetryFrame> frame_;
+    std::shared_ptr<const telemetry::ResourceTelemetrySnapshot> resources_;
     std::optional<telemetry_pipeline::TelemetryPresentation> presentation_;
 };
 

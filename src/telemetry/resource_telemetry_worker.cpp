@@ -21,6 +21,8 @@ namespace {
 #ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
 std::atomic_bool fail_next_telemetry_publication{false};
 kf2::telemetry::detail::GameLogReadHook game_log_read_hook{nullptr};
+std::atomic_uint64_t resource_requests{0};
+kf2::telemetry::detail::ResourceRequestHook resource_request_hook{nullptr};
 #endif
 
 bool same_binding(const ResourceTelemetryBinding& left,
@@ -257,7 +259,8 @@ class NativeResourceSamplers final {
 public:
     explicit NativeResourceSamplers(const ResourceTelemetryBinding& binding)
         : binding_{binding}, process_{game::GameProcessIdentity{
-              binding.identity.pid, binding.identity.process_start_id, {}}} {
+              binding.identity.pid, binding.identity.process_start_id, {},
+              binding.native_process}} {
         bind_gpu(binding);
     }
 
@@ -329,6 +332,15 @@ private:
 }  // namespace
 
 #ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+void detail::set_resource_request_hook_for_testing(
+    ResourceRequestHook hook) noexcept {
+    resource_request_hook = hook;
+}
+
+std::uint64_t detail::resource_requests_for_testing() noexcept {
+    return resource_requests.load();
+}
+
 void detail::set_game_log_read_hook_for_testing(
     GameLogReadHook hook) noexcept {
     game_log_read_hook = hook;
@@ -676,6 +688,10 @@ void ResourceTelemetryWorker::clear() { implementation_->clear(); }
 
 void ResourceTelemetryWorker::request(std::uint64_t sampled_at_ns) {
     implementation_->request(sampled_at_ns);
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+    ++resource_requests;
+    if (resource_request_hook) resource_request_hook(*this);
+#endif
 }
 
 std::shared_ptr<const ResourceTelemetrySnapshot>
