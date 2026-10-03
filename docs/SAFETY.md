@@ -70,6 +70,13 @@ Normal shutdown and recovery restore protected INIs, telemetry modules and
 sources, optional FleX runtime state, the native viewport client, and temporary
 session files. The pre-session snapshot is authoritative.
 
+FleX transactions pin the original runtime directory's Windows volume and file
+identity before changing game files. Restore and recovery reject a different
+installation, including one with the same DLL hashes. Legacy or missing owner
+markers do not authorize writes or evidence cleanup; originals and backups are
+retained for explicit recovery. These checks run at transaction boundaries,
+not in the solver's per-frame path.
+
 Multi-file configuration rollback attempts every written target and verifies
 the exact original bytes. An incomplete rollback or journal completion reports
 recovery required and retains its durable recovery state. Native FPS-cap

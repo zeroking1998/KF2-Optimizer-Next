@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Bound FleX recovery to the original installation's directory identity, so
+  startup discovery cannot restore one game's DLL into another. Legacy or
+  missing ownership evidence is retained for explicit recovery, not guessed.
+
 - Game-folder changes now preserve the original installation until protected
   files are fully restored. Running games, pending launches/restarts and
   unconfirmed recovery block switching; cancelling preserves prepared state.
