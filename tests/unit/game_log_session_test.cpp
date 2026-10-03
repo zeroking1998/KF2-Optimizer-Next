@@ -351,6 +351,15 @@ int main() {
     CHECK(live_after_history.has_value());
     CHECK(live_after_history->telemetry_sample == 5);
     CHECK(live_after_history->telemetry_observed_ns == 4'000'000'000ULL);
+    // Discarding previously current measurements is itself a model change,
+    // even when the next historical block contains only unrelated log noise.
+    const auto historical_noise = batch_stream.feed(
+        "Log: historical diagnostic record\n", 5'000'000'000ULL, false);
+    CHECK(historical_noise.has_value());
+    CHECK(!historical_noise->telemetry_sample);
+    CHECK(historical_noise->telemetry_observed_ns == 0);
+    CHECK(!batch_stream.feed(
+        "Log: more historical diagnostic records\n", 6'000'000'000ULL, false));
 
     const auto parsed = parse_load_map_line(
         "[0053.20] Log: LoadMap: KF-BioticsLab?Name=Player?Team=255?"
