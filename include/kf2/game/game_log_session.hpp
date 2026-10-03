@@ -192,6 +192,9 @@ struct GameLogParserStats {
     std::uint64_t oversized_input_resets{0};
     std::uint64_t oversized_line_drops{0};
     std::uint64_t session_snapshot_copies{0};
+    std::uint64_t backlog_bytes{0};
+    // Time spent catching up, not an inferred timestamp of a log record.
+    std::uint64_t catch_up_age_ns{0};
 };
 
 inline constexpr std::uint64_t kGameLogObservationFreshnessNs =
@@ -200,7 +203,8 @@ inline constexpr std::uint64_t kGameLogObservationFreshnessNs =
 class GameLogSessionParser final {
 public:
     [[nodiscard]] std::optional<GameLogSession> feed(
-        std::string_view bytes, std::uint64_t observed_at_ns = 0);
+        std::string_view bytes, std::uint64_t observed_at_ns = 0,
+        bool measurements_current = true);
     [[nodiscard]] std::optional<GameLogSession> expire_observations(
         std::uint64_t now_ns,
         std::uint64_t maximum_age_ns = kGameLogObservationFreshnessNs) noexcept;

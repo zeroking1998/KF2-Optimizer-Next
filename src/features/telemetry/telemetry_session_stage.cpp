@@ -648,6 +648,17 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
             game_log_new_settings_restart_requested = false;
             game_log_session.reset();
         }
+        if (chunk.catching_up) {
+            // Neither the previous publication nor a partially replayed map
+            // can authorize Adaptive actions while the log reader is behind.
+            game_log_session.reset();
+            game_menu_graphics_readback.reset();
+            corpse_telemetry_tracker.reset();
+            auto status = model.status();
+            status.game_session = L"Waiting for game log catch-up";
+            model.set_status(std::move(status));
+            continue;
+        }
         const auto& boundaries = chunk.boundaries;
         if (boundaries.graphics_readback &&
             (!game_menu_graphics_readback ||

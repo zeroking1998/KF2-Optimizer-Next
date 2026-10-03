@@ -150,6 +150,10 @@ are visible immediately.
 - Noisy game-log batches now compact their incomplete tail only once instead
   of moving the remaining buffer after every line. Session markers, receipts,
   partial lines and existing size limits are unchanged.
+- Large Launch logs now catch up in bounded worker batches instead of exposing
+  old maps and measurements as live telemetry. Adaptive waits for the current
+  tail, historical measurements are discarded, and diagnostics report unread
+  bytes and catch-up duration without additional UI-thread file work.
 - Thread CPU telemetry now keeps its measurement baseline with the verified
   thread handle, resets it for a changed thread instance, and releases exited
   threads during membership refresh without rebuilding a sample hash table.

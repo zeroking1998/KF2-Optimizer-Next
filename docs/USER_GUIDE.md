@@ -236,6 +236,10 @@ safety check. It also retains the awake/sleep counts needed by Adaptive and the
 dashboard, all failures, rollback evidence and the single minimal online
 capability receipt; only diagnostic collection and formatting are omitted.
 The Debug page also links to the portable data folder and current session log.
+Diagnostic reports include unread game-log bytes and time spent catching up
+(not the age of individual log records). Large logs are replayed in bounded
+worker batches; Adaptive waits for the current tail and fresh measurements.
+Current-map one-shot capability receipts remain available after catch-up.
 
 ## 11. Recovery
 

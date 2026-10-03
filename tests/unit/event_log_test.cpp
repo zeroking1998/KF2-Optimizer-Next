@@ -618,7 +618,9 @@ int main() {
         .game_log_stats = {.bytes_received = 100, .lines_processed = 5,
                            .oversized_input_resets = 1,
                            .oversized_line_drops = 2,
-                           .session_snapshot_copies = 3},
+                           .session_snapshot_copies = 3,
+                           .backlog_bytes = 123456,
+                           .catch_up_age_ns = 200000000},
         .retained_crash_records = 3,
         .events = events,
     };
@@ -729,6 +731,8 @@ int main() {
           std::string::npos);
     CHECK(product.find("\"session_snapshot_copies\":3") !=
           std::string::npos);
+    CHECK(product.find("\"backlog_bytes\":123456") != std::string::npos);
+    CHECK(product.find("\"catch_up_age_ns\":200000000") != std::string::npos);
     const auto support = kf2::diagnostics::serialize_support_bundle_json(
         report, "{\"schema\":\"KF2_ISSUE72_INVENTORY_V3\"}");
     CHECK(support.find("KF2_OPTIMIZER_SUPPORT_BUNDLE_V1") != std::string::npos);
