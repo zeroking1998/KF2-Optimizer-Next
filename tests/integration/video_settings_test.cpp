@@ -911,7 +911,7 @@ int main() {
 
     // Every named preset must survive an INI write/read round-trip. In
     // particular, Ultra and Low must not come back as Custom.
-    for (int preset : {0, 3}) {
+    for (int preset : {0, 1, 2, 3}) {
         auto desired = reloaded_defaults.value();
         CHECK(kf2::game::apply_overall_quality_preset(desired, preset));
         const auto preset_preview = kf2::game::build_video_preview(root, desired);
@@ -923,6 +923,64 @@ int main() {
         CHECK(reread.has_value());
         CHECK(reread.value().choices[static_cast<std::size_t>(
                   kf2::game::VideoOption::overall_quality)] == preset);
+
+        kf2::game::GameMenuGraphicsReadback native{
+            .choices = desired.choices,
+            .resolution = desired.resolutions[static_cast<std::size_t>(
+                desired.choices[static_cast<std::size_t>(
+                    kf2::game::VideoOption::resolution)])],
+            .film_grain_percent = 71};
+        const auto presented = kf2::game::present_game_menu_graphics_readback(
+            desired, native);
+        CHECK(presented.choices[static_cast<std::size_t>(
+            kf2::game::VideoOption::overall_quality)] == preset);
+        CHECK(presented.film_grain_percent == 71);
+
+        // A mismatch in any quality component remains Custom on both paths,
+        // with their intentionally distinct native (-1) and INI (4) values.
+        for (const auto component : {
+             kf2::game::VideoOption::environment_detail,
+             kf2::game::VideoOption::character_detail,
+             kf2::game::VideoOption::fx_quality,
+             kf2::game::VideoOption::texture_resolution,
+             kf2::game::VideoOption::texture_filtering,
+             kf2::game::VideoOption::shadow_quality,
+             kf2::game::VideoOption::realtime_reflections,
+             kf2::game::VideoOption::anti_aliasing,
+             kf2::game::VideoOption::bloom,
+             kf2::game::VideoOption::motion_blur,
+             kf2::game::VideoOption::ambient_occlusion,
+             kf2::game::VideoOption::depth_of_field,
+             kf2::game::VideoOption::volumetric_lighting,
+             kf2::game::VideoOption::lens_flares,
+             kf2::game::VideoOption::light_shafts}) {
+            const auto slot = static_cast<std::size_t>(component);
+            auto custom = desired;
+            custom.choices[slot] = (custom.choices[slot] + 1) %
+                kf2::game::video_choice_count(component, custom);
+            auto custom_native = native;
+            custom_native.choices[slot] = custom.choices[slot];
+            const auto custom_presented =
+                kf2::game::present_game_menu_graphics_readback(
+                    desired, custom_native);
+            CHECK(custom_presented.choices[static_cast<std::size_t>(
+                kf2::game::VideoOption::overall_quality)] == -1);
+            CHECK(custom_presented.film_grain_percent == 71);
+            CHECK(custom_presented.choices[static_cast<std::size_t>(
+                kf2::game::VideoOption::nvidia_flex)] ==
+                native.choices[static_cast<std::size_t>(
+                    kf2::game::VideoOption::nvidia_flex)]);
+
+            const auto custom_preview = kf2::game::build_video_preview(root, custom);
+            CHECK(custom_preview.has_value());
+            for (const auto& file : custom_preview.value().files) {
+                write_file(root / file.relative_path, file.proposed_bytes);
+            }
+            const auto custom_reread = kf2::game::read_video_settings(root);
+            CHECK(custom_reread.has_value());
+            CHECK(custom_reread.value().choices[static_cast<std::size_t>(
+                kf2::game::VideoOption::overall_quality)] == 4);
+        }
     }
 
     for (int level = 0; level < 4; ++level) {
