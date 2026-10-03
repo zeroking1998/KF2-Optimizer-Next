@@ -268,8 +268,8 @@ struct UiRuntime {
     telemetry::ResourceTelemetryWorker resource_telemetry_worker;
     std::uint64_t resource_telemetry_generation{0};
     std::uint64_t resource_telemetry_publication_sequence{0};
-    std::uint64_t resource_telemetry_source_announced_generation{0};
-    bool resource_telemetry_nvidia_expected{false};
+    std::shared_ptr<const telemetry::GpuProviderStatus>
+        announced_gpu_provider_status;
     telemetry::GpuUtilizationFilter gpu_utilization_filter;
     std::uint64_t cached_process_memory_sample_ns{0};
     std::uint64_t cached_gpu_sample_ns{0};

@@ -323,6 +323,7 @@ if(BUILD_TESTING)
         KF2_PRESENT_SOURCE_TESTING)
     target_compile_definitions(KF2TestTelemetryCore PUBLIC
         KF2_PDH_GPU_TESTING
+        KF2_NVIDIA_GPU_TESTING
         KF2_PROCESS_METRICS_TESTING)
 
     add_library(KF2TestUiCore STATIC

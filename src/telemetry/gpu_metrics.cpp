@@ -17,6 +17,14 @@
 #include <tuple>
 
 namespace kf2::telemetry {
+#ifdef KF2_NVIDIA_GPU_TESTING
+namespace detail {
+namespace { NvidiaGpuCreateHook nvidia_gpu_create_hook{nullptr}; }
+void set_nvidia_gpu_create_hook_for_testing(NvidiaGpuCreateHook hook) noexcept {
+    nvidia_gpu_create_hook = hook;
+}
+}  // namespace detail
+#endif
 #ifdef KF2_PDH_GPU_TESTING
 namespace detail {
 namespace { PdhGpuApi pdh_gpu_api; }
@@ -361,6 +369,9 @@ Result<ConfiguredGpuAdapter> configured_gpu_adapter_for_process(
 }
 
 struct NvidiaGpuSampler::Impl {
+#ifdef KF2_NVIDIA_GPU_TESTING
+    std::optional<double> percent_for_testing;
+#endif
     NvidiaGpuSource source{NvidiaGpuSource::nvml_utilization};
     HMODULE nvapi_library{};
     NvApiUnload nvapi_unload{};
@@ -470,8 +481,21 @@ NvidiaGpuSampler::NvidiaGpuSampler(NvidiaGpuSampler&&) noexcept = default;
 NvidiaGpuSampler& NvidiaGpuSampler::operator=(NvidiaGpuSampler&&) noexcept = default;
 NvidiaGpuSampler::~NvidiaGpuSampler() = default;
 
+#ifdef KF2_NVIDIA_GPU_TESTING
+NvidiaGpuSampler NvidiaGpuSampler::create_for_testing(double percent) {
+    auto implementation = std::make_unique<Impl>();
+    implementation->percent_for_testing = percent;
+    return NvidiaGpuSampler{std::move(implementation)};
+}
+#endif
+
 Result<NvidiaGpuSampler> NvidiaGpuSampler::create(
     std::wstring_view adapter_name) {
+#ifdef KF2_NVIDIA_GPU_TESTING
+    if (detail::nvidia_gpu_create_hook) {
+        return detail::nvidia_gpu_create_hook(adapter_name);
+    }
+#endif
     // MSI Afterburner uses NVIDIA's dynamic P-state utilization domain. Prefer
     // that documented one-second driver metric so both monitors share the same
     // semantic source without requiring Afterburner to be installed or running.
@@ -610,6 +634,11 @@ Result<NvidiaGpuSampler> NvidiaGpuSampler::create(
 }
 
 Result<double> NvidiaGpuSampler::sample() const {
+#ifdef KF2_NVIDIA_GPU_TESTING
+    if (implementation_ && implementation_->percent_for_testing) {
+        return Result<double>::success(*implementation_->percent_for_testing);
+    }
+#endif
     if (!implementation_) {
         return Result<double>::failure(
             {ErrorCode::internal_failure,

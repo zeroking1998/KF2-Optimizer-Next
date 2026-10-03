@@ -59,6 +59,14 @@ handle for liveness and shares it with CPU/memory sampling when read rights
 permit. Restricted sessions retain read-only observation, and changed process
 identities or signaled handles cannot produce accepted samples.
 
+Missing GPU providers retry independently on the existing resource worker,
+with exponential waits of 1, 2, 4, 8, 16 and at most 30 seconds. Healthy
+providers are never reconstructed for another provider's failure. Immutable
+provider reports and diagnostics change only on a construction attempt;
+unchanged samples do not allocate or copy provider error strings. Process or
+adapter rebinds reset provider state and invalidate old publications. Missing
+measurements remain unavailable, not zero load or confirmed headroom.
+
 Runtime queues, per-tick work, action sizes, retry counts, and history are
 bounded. Actor-scoped state prevents repeated sleep or wake requests for an
 actor already confirmed in that state. Weak world ownership avoids keeping a

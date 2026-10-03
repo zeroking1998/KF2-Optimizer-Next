@@ -58,6 +58,15 @@ struct ResourceSampleRequest final {
     std::uint64_t sampled_at_ns{0};
 };
 
+// Published only when a provider is constructed or retried. Sharing this
+// immutable report avoids copying error strings on every resource sample.
+struct GpuProviderStatus final {
+    std::uint64_t pdh_attempts{0};
+    std::optional<Error> pdh_error;
+    std::uint64_t nvidia_attempts{0};
+    std::optional<Error> nvidia_error;
+};
+
 struct ResourceSampleBatch final {
     ResourceSampleGroup group{ResourceSampleGroup::process_and_memory};
     std::optional<ProcessMetrics> process;
@@ -66,6 +75,7 @@ struct ResourceSampleBatch final {
     std::optional<double> driver_gpu_percent;
     std::optional<NvidiaGpuSource> nvidia_source;
     std::optional<GpuAdapter> detected_process_adapter;
+    std::shared_ptr<const GpuProviderStatus> gpu_provider_status;
 };
 
 struct ResourceTelemetrySnapshot final {
@@ -81,6 +91,7 @@ struct ResourceTelemetrySnapshot final {
     std::optional<double> driver_gpu_percent;
     std::optional<NvidiaGpuSource> nvidia_source;
     std::optional<GpuAdapter> detected_process_adapter;
+    std::shared_ptr<const GpuProviderStatus> gpu_provider_status;
 };
 
 using ResourceSampleFunction = std::function<ResourceSampleBatch(

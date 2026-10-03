@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- GPU telemetry now retries missing Windows and NVIDIA providers independently
+  after transient initialization failures, with backoff capped at 30 seconds.
+  Working providers are retained and retry diagnostics cannot spam every tick.
+
 - Desktop telemetry now submits one resource-worker request per regular cycle
   and shares verified process handles instead of reopening them for each
   liveness or CPU/memory sample. Process exits, PID reuse and restricted access

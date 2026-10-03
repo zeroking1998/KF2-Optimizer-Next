@@ -3782,7 +3782,73 @@ controlled_dxgi_start(kf2::telemetry::SampleIdentity identity,
         Session::test_parser(identity, sink, 1'000'000'000ULL));
 }
 
+int test_gpu_provider_diagnostics() {
+    using namespace kf2;
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"gpu-provider-diagnostics";
+    fs::remove_all(root);
+    {
+        diagnostics::EventLog events{32};
+        app::UiRuntime runtime{root / L"Data", false, config::Settings{},
+            events, std::nullopt, app::StartMode::read_only, root / L"portable"};
+        runtime.game_process = game::GameProcessIdentity{41, 4100};
+        runtime.reset_resource_telemetry_cache(1);
+        telemetry::ResourceTelemetrySnapshot snapshot;
+        snapshot.generation = 1;
+        snapshot.identity = {41, 4100};
+        game::GameWindowState window;
+        window.process = *runtime.game_process;
+        const auto capture = [&] {
+            ++snapshot.publication_sequence;
+            snapshot.gpu_sampled_at_ns = snapshot.publication_sequence;
+            telemetry::FrameMetrics frames;
+            frames.fps = 60.0;
+            frames.frame_time_ms = 1000.0 / 60.0;
+            return telemetry_pipeline::capture_telemetry_frame(runtime, window,
+                snapshot.gpu_sampled_at_ns, frames, &snapshot).has_value();
+        };
+        const Error failure{ErrorCode::platform_failure, L"Provider not ready", 17};
+        const auto baseline = events.stats().appended;
+        snapshot.gpu_provider_status =
+            std::make_shared<const telemetry::GpuProviderStatus>(
+                telemetry::GpuProviderStatus{1, failure, 1, failure});
+        CHECK(capture());
+        CHECK(events.stats().appended == baseline + 2);
+        for (unsigned int tick = 0; tick < 10; ++tick) CHECK(capture());
+        CHECK(events.stats().appended == baseline + 2);
+        snapshot.gpu_provider_status =
+            std::make_shared<const telemetry::GpuProviderStatus>(
+                telemetry::GpuProviderStatus{2, std::nullopt, 1, failure});
+        CHECK(capture());
+        CHECK(events.stats().appended == baseline + 3);
+        snapshot.gpu_provider_status =
+            std::make_shared<const telemetry::GpuProviderStatus>(
+                telemetry::GpuProviderStatus{2, std::nullopt, 2, std::nullopt});
+        snapshot.nvidia_source = telemetry::NvidiaGpuSource::nvapi_dynamic_pstates;
+        CHECK(capture());
+        CHECK(events.stats().appended == baseline + 4);
+        const auto log = events.snapshot();
+        CHECK(std::any_of(log.begin(), log.end(), [](const auto& event) {
+            return event.code == "WINDOWS_GPU_TELEMETRY_RETRY_PENDING" &&
+                event.severity == diagnostics::Severity::warning;
+        }));
+        CHECK(std::any_of(log.begin(), log.end(), [](const auto& event) {
+            return event.code == "NVIDIA_TOTAL_GPU_TELEMETRY_ACTIVE" &&
+                event.severity == diagnostics::Severity::info;
+        }));
+        ++snapshot.generation;
+        CHECK(capture());
+        CHECK(events.stats().appended == baseline + 4);
+        runtime.reset_resource_telemetry_cache(snapshot.generation);
+        CHECK(capture());
+        CHECK(events.stats().appended == baseline + 6);
+    }
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
 int test_initial_dxgi_retry() {
+    CHECK(test_gpu_provider_diagnostics() == EXIT_SUCCESS);
     using namespace kf2;
     using namespace kf2::telemetry_pipeline;
     using Session = platform::windows::DxgiFrameTimingSession;
