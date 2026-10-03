@@ -571,29 +571,6 @@ function bool RestoreSessionWorldRuntime()
     return true;
 }
 
-function bool RestoreSessionGraphics()
-{
-    local bool bGraphicsRestored;
-    local bool bEffectRuntimeRestored;
-
-    bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.
-        RestoreOriginal(AdaptiveGraphicsState);
-    bEffectRuntimeRestored = RestoreSessionWorldRuntime();
-    if (!bGraphicsRestored)
-    {
-        `log("KF2OPT_FIXED_EFFECT_BASELINE state=restore_failed"$
-             " boundary=session_end domain=graphics"$
-             " reason=readback_mismatch");
-    }
-    if (!bGraphicsRestored || !bEffectRuntimeRestored)
-    {
-        return false;
-    }
-    `log("KF2OPT_FIXED_EFFECT_BASELINE state=restored"$
-         " boundary=session_end readback=verified");
-    return true;
-}
-
 function bool ApplyAdaptiveResourceControl(
     string Token, int Sequence, string Resource, int Quality)
 {
@@ -1168,38 +1145,6 @@ function bool ApplyAdaptiveEffectRuntimeReadback(
          " explosion_decals="$WorldInfo.MaxExplosionDecals$
          " readback=verified");
     return true;
-}
-
-function RestoreAdaptiveGraphics()
-{
-    local bool bGraphicsRestored;
-    local bool bEffectRuntimeRestored;
-
-    // Physics ownership must be released even if a separate graphics restore
-    // readback fails; Adaptive-off cannot leave a corpse outside simulation.
-    ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
-    BeginAdaptiveCorpsePhysicsRelease();
-    bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.
-        RestoreOriginal(AdaptiveGraphicsState);
-    bEffectRuntimeRestored = ApplyAdaptiveEffectRuntimeReadback(
-        "restore", 100, true);
-    if (!bGraphicsRestored)
-    {
-        `log("KF2OPT_ADAPTIVE_QUALITY state=restore_failed"$
-             " domain=graphics reason=readback_mismatch");
-    }
-    if (!bEffectRuntimeRestored)
-    {
-        `log("KF2OPT_ADAPTIVE_QUALITY state=restore_failed"$
-             " domain=effect_runtime reason=readback_mismatch");
-    }
-    if (!bGraphicsRestored || !bEffectRuntimeRestored)
-    {
-        return;
-    }
-    AdaptiveGraphicsQuality = 100;
-    AdaptiveGraphicsResource = "recover";
-    `log("KF2OPT_ADAPTIVE_QUALITY state=restored readback=verified");
 }
 
 function int SelectStaggeredCorpse(KFGoreManager GoreManager)
@@ -6355,7 +6300,6 @@ function SampleTelemetry()
     local int CorpseOther;
     local int CorpseFinalPose;
     local int CorpseRecentlyRendered;
-    local int CorpseVisibleAwake;
     local int CorpseOffscreen;
     local int CorpseLodTotal;
     local int CorpseInjuredZones;
@@ -6667,11 +6611,6 @@ function SampleTelemetry()
                 if (Corpse.Mesh.LastRenderTime > WorldInfo.TimeSeconds - 0.3)
                 {
                     ++CorpseRecentlyRendered;
-                    if (Corpse.Physics == PHYS_RigidBody &&
-                        Corpse.Mesh.RigidBodyIsAwake())
-                    {
-                        ++CorpseVisibleAwake;
-                    }
                 }
                 else
                 {

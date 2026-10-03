@@ -96,6 +96,9 @@ are visible immediately.
   and shares verified process handles instead of reopening them for each
   liveness or CPU/memory sample. Process exits, PID reuse and restricted access
   still reject unsafe samples; final log flushing remains explicit.
+- Removed unused runtime helpers and graphics-preview bookkeeping. Corpse
+  telemetry no longer queries native awake state for an unpublished counter;
+  controller inputs, graphics readback and active restoration remain unchanged.
 
 - DXGI frame timestamps now use exact integer clock conversion instead of
   floating-point scaling, preserving nanosecond intervals and rejecting
