@@ -3870,6 +3870,89 @@ int test_initial_dxgi_retry() {
             CHECK(metrics.frames()->reason == telemetry::UnavailableReason::none);
             CHECK(metrics.frames()->quality == telemetry::SampleQuality::good);
             CHECK(dxgi_start_probe.calls == attempts);
+            if (failures == 0) {
+                auto* const session = runtime.present_session.get();
+                const auto resource_generation = runtime.resource_telemetry_generation;
+                const auto old_window = boundary.window;
+                runtime.last_game_window_scan_ns = UINT64_MAX;
+                runtime.try_attach_telemetry();
+                CHECK(runtime.last_game_window_scan_ns == UINT64_MAX);
+                CHECK(DestroyWindow(old_window));
+                boundary.window = nullptr;
+                const auto missing = inspect_bound_session(runtime);
+                CHECK(missing.disposition == SessionDisposition::waiting_for_window);
+                CHECK(!runtime.game_window);
+                CHECK(runtime.present_source.get() == source);
+                CHECK(runtime.last_game_window_scan_ns == 0);
+                runtime.try_attach_telemetry();
+                CHECK(!runtime.game_window);
+                CHECK(runtime.last_game_window_scan_ns != 0);
+                for (unsigned int tick = 0; tick < 20; ++tick) {
+                    const auto previous_scan = runtime.last_game_window_scan_ns;
+                    runtime.try_attach_telemetry();
+                    // Allow an arbitrarily descheduled test without accepting
+                    // a scan sooner than the one-second retry interval.
+                    CHECK(runtime.last_game_window_scan_ns == previous_scan ||
+                          runtime.last_game_window_scan_ns - previous_scan >=
+                              1'000'000'000ULL);
+                    CHECK(!runtime.game_window);
+                }
+                boundary.window = CreateWindowExW(
+                    WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, L"STATIC",
+                    L"Replacement DXGI fixture", WS_POPUP | WS_VISIBLE,
+                    -32000, -32000, 320, 240, nullptr, nullptr,
+                    GetModuleHandleW(nullptr), nullptr);
+                CHECK(boundary.window && boundary.window != old_window);
+                // Drive the next due retry without sleeping in the test.
+                runtime.last_game_window_scan_ns = 1;
+                runtime.try_attach_telemetry();
+                CHECK(runtime.game_window == boundary.window);
+                const auto rebound = inspect_bound_session(runtime);
+                CHECK(rebound.disposition == SessionDisposition::ready);
+                CHECK(rebound.window && rebound.window->window == boundary.window);
+                CHECK(rebound.window->visible && !rebound.window->foreground);
+                const auto presented = overlay::evaluate_overlay({
+                    .enabled = true, .window = *rebound.window,
+                    .frames = *metrics.frames()});
+                CHECK(presented.visible && presented.target_window == boundary.window);
+                ShowWindow(boundary.window, SW_MINIMIZE);
+                const auto minimized = inspect_bound_session(runtime);
+                CHECK(minimized.window && minimized.window->minimized);
+                CHECK(!overlay::evaluate_overlay({
+                    .enabled = true, .window = *minimized.window,
+                    .frames = *metrics.frames()}).visible);
+                ShowWindow(boundary.window, SW_SHOWNOACTIVATE);
+                CHECK(runtime.game_process->pid == process.value().pid);
+                CHECK(runtime.game_process->process_start_id ==
+                      process.value().process_start_id);
+                CHECK(runtime.present_source.get() == source);
+                CHECK(runtime.present_session.get() == session);
+                CHECK(runtime.resource_telemetry_generation == resource_generation);
+                CHECK(runtime.overlay_scene_ready);
+                CHECK(!runtime.game_restart_handoff_previous_process);
+                CHECK(dxgi_start_probe.calls == attempts);
+                const auto preserved = drain(first + 650'500'000ULL);
+                CHECK(preserved.frames() && preserved.frames()->fps);
+                CHECK(preserved.frames()->fps == metrics.frames()->fps);
+                const auto rebound_scan = runtime.last_game_window_scan_ns;
+                runtime.try_attach_telemetry();
+                CHECK(runtime.last_game_window_scan_ns == rebound_scan);
+                // A PID alone cannot bind a candidate owned by a different
+                // process-start identity. A backward clock may retry safely.
+                runtime.game_window = nullptr;
+                ++runtime.game_process->process_start_id;
+                runtime.last_game_window_scan_ns = 0;
+                runtime.try_attach_telemetry();
+                CHECK(!runtime.game_window);
+                runtime.game_process = process.value();
+                runtime.last_game_window_scan_ns = UINT64_MAX;
+                runtime.try_attach_telemetry();
+                CHECK(runtime.game_window == boundary.window);
+                CHECK(runtime.last_game_window_scan_ns != UINT64_MAX);
+                CHECK(runtime.present_source.get() == source);
+                CHECK(runtime.present_session.get() == session);
+                CHECK(!fs::exists(root / L"Config"));
+            }
             // A formerly healthy but now stale stream is not restarted.
             CHECK(drain(first + 4'000'000'000ULL).disposition() ==
                   PresentDrainDisposition::frames_ready);
@@ -3901,6 +3984,7 @@ int test_initial_dxgi_retry() {
               (failures == 0 ? 2U : failures == 3 ? 0U : 1U));
         runtime.detach_telemetry();
         CHECK(!runtime.present_source && !runtime.present_session);
+        CHECK(runtime.last_game_window_scan_ns == 0);
         CHECK(runtime.present_session_started_ns == 0);
         CHECK(runtime.present_session_restart_count == 0);
         CHECK(!fs::exists(root / L"Config"));

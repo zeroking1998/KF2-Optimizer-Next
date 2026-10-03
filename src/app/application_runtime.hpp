@@ -260,6 +260,7 @@ struct UiRuntime {
     game::GameLogParserStats game_log_parser_stats;
     bool overlay_scene_ready{false};
     HWND game_window{};
+    std::uint64_t last_game_window_scan_ns{0};
     std::unique_ptr<telemetry::PresentSource> present_source;
     std::unique_ptr<platform::windows::DxgiFrameTimingSession> present_session;
     std::uint64_t present_session_started_ns{0};
