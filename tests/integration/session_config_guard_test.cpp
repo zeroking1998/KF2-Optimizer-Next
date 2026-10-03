@@ -134,7 +134,7 @@ int main() {
 
     const auto config = root / L"Config";
     write(config / L"KFEngine.ini", "engine-original");
-    write(config / L"Nested/KFGame.ini", "game-original");
+    write(config / L"Nested-\u00e4\u4e2d/KFGame.ini", "game-original");
     write(config / L"KFSystemSettings.ini",
           "[SystemSettings]\r\nbAllowTemporalAA=True\r\n");
     write(config / L"ignored.txt", "not-protected");
@@ -152,8 +152,27 @@ int main() {
     auto snapshot = kf2::config::capture_session_config(config, root / L"State");
     if (!snapshot.has_value()) std::wcerr << snapshot.error().message << L" native=" << snapshot.error().native_code << L'\n';
     CHECK(snapshot.has_value()); CHECK(snapshot.value().file_count == 3);
+
+    const auto manifest_path = snapshot.value().snapshot_root / L"manifest.txt";
+    const auto original_manifest = read(manifest_path);
+    const auto path_begin = original_manifest.find("file=");
+    CHECK(path_begin != std::string::npos);
+    const auto path_end = original_manifest.find('|', path_begin + 5);
+    CHECK(path_end != std::string::npos);
+    for (const std::string malformed_path :
+         {std::string{}, std::string{"0"}, std::string{"0G"},
+          std::string{"4B46456e67696e652e696e69"}, std::string{"00"},
+          std::string(8194, '0')}) {
+        auto malformed = original_manifest;
+        malformed.replace(path_begin + 5, path_end - path_begin - 5, malformed_path);
+        write(manifest_path, malformed.c_str());
+        CHECK(!kf2::config::resume_session_config(config, root / L"State").has_value());
+    }
+    write(manifest_path, original_manifest.c_str());
+    const auto verified_manifest = kf2::config::resume_session_config(config, root / L"State");
+    CHECK(verified_manifest.has_value() && verified_manifest.value().has_value());
     write(config / L"KFEngine.ini", "changed");
-    write(config / L"Nested/KFGame.ini", "changed");
+    write(config / L"Nested-\u00e4\u4e2d/KFGame.ini", "changed");
     write(config / L"KFSystemSettings.ini",
           "[SystemSettings]\r\nbAllowTemporalAA=False\r\n");
     write(config / L"New.ini", "created-by-game");
@@ -161,7 +180,7 @@ int main() {
     auto restored = kf2::config::restore_session_config(snapshot.value());
     CHECK(restored.has_value() && restored.value() == 3);
     CHECK(read(config / L"KFEngine.ini") == "engine-original");
-    CHECK(read(config / L"Nested/KFGame.ini") == "game-original");
+    CHECK(read(config / L"Nested-\u00e4\u4e2d/KFGame.ini") == "game-original");
     CHECK(read(config / L"KFSystemSettings.ini") ==
           "[SystemSettings]\r\nbAllowTemporalAA=False\r\n");
     CHECK(read(config / L"New.ini") == "created-by-game");
