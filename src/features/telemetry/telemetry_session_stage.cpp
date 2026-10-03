@@ -90,18 +90,10 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
     }
 
     const auto previous_process = *runtime.game_process;
-    const auto still_running = runtime.installation
-        ? game::bind_game_process(previous_process.pid,
-              runtime.installation->executable)
-        : Result<game::GameProcessIdentity>::failure(
-              {ErrorCode::not_found, L"KF2 installation unavailable", 0});
-    const bool same_process_running = still_running.has_value() &&
-        still_running.value().pid == previous_process.pid &&
-        still_running.value().process_start_id ==
-            previous_process.process_start_id;
-    const auto process_transition = classify_bound_process_transition(
-        same_process_running, still_running.has_value());
-    if (process_transition == BoundProcessTransition::same_process) {
+    // Binding already verified the executable. Immutable creation time and
+    // liveness suffice while waiting for this process to recreate its window.
+    if (game::is_game_process_current(previous_process)) {
+        if (runtime.game_window) runtime.last_game_window_scan_ns = 0;
         runtime.game_window = nullptr;
         runtime.telemetry_failure = L"Waiting for KF2 window";
         if (runtime.overlay_window) {
@@ -452,6 +444,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     refresh_video_presentation();
     overlay_scene_ready = false;
     game_window = nullptr;
+    last_game_window_scan_ns = 0;
     if (overlay_window) {
         overlay::OverlayPresentation hidden;
         overlay_presentation = hidden;
@@ -764,7 +757,25 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
 }
 
 void UiRuntime::try_attach_telemetry() {
-    if (!installation || present_source) return;
+    if (!installation) return;
+    if (present_source) {
+        // Keep healthy process-bound sources and statistics. Enumerate windows
+        // only when the previous HWND disappeared, at most once per second.
+        if (game_process && !game_window) {
+            const auto now = monotonic_ns();
+            if (last_game_window_scan_ns == 0 || now < last_game_window_scan_ns ||
+                now - last_game_window_scan_ns >= 1'000'000'000ULL) {
+                last_game_window_scan_ns = now;
+                const auto found = game::find_game_window(*game_process);
+                if (found.has_value() &&
+                    game::inspect_game_window(*game_process, found.value()).has_value()) {
+                    game_window = found.value();
+                    telemetry_failure.clear();
+                }
+            }
+        }
+        return;
+    }
     bool confirmed_settings_restart_replacement = false;
     const auto now = monotonic_ns();
     std::optional<game::GameProcessIdentity> process;

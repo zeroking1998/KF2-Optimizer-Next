@@ -88,6 +88,10 @@ are visible immediately.
   floating-point scaling, preserving nanosecond intervals and rejecting
   values outside the supported timestamp range.
 
+- Rebind telemetry and overlay to a replacement KF2 window without discarding
+  the same process's FPS history. Missing-window discovery is rate-limited and
+  retains immutable process-identity checks.
+
 - Bound FleX recovery to the original installation's directory identity, so
   startup discovery cannot restore one game's DLL into another. Legacy or
   missing ownership evidence is retained for explicit recovery, not guessed.
