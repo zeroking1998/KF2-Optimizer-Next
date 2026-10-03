@@ -37,6 +37,13 @@ using kf2::telemetry::ResourceTelemetryWorker;
 std::filesystem::path replacement_game_log;
 std::atomic_bool game_log_replaced{false};
 std::string game_log_append_during_read;
+ResourceTelemetryWorker* rebinding_log_worker{nullptr};
+ResourceTelemetryBinding rebinding_log_binding;
+
+void rebind_game_log_during_read(const std::filesystem::path&) {
+    rebinding_log_worker->clear();
+    static_cast<void>(rebinding_log_worker->bind(rebinding_log_binding));
+}
 
 void append_game_log_during_read(const std::filesystem::path& path) {
     std::ofstream output(path, std::ios::binary | std::ios::app);
@@ -75,6 +82,10 @@ ResourceTelemetryBinding binding(std::uint32_t pid,
     result.adapter_name = L"Test adapter";
     result.adapter_vendor_id = 0x10DE;
     return result;
+}
+
+void truncate_game_log_during_read(const std::filesystem::path& path) {
+    write_file(path, {});
 }
 
 std::uint32_t pdh_opens = 0;
@@ -359,7 +370,228 @@ std::string graphics_readback_line() {
 
 }  // namespace
 
+int test_retained_game_log_handle() {
+    namespace fs = std::filesystem;
+    using namespace kf2::telemetry::detail;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"retained-log";
+    fs::remove_all(root);
+    fs::create_directories(root);
+    const auto log = root / L"Launch.log";
+    write_file(log, "Log: LoadMap: KF-BioticsLab?"
+        "Game=KFGameContent.KFGameInfo_Survival\n");
+    wchar_t module[MAX_PATH + 1]{};
+    const auto length = GetModuleFileNameW(nullptr, module, MAX_PATH);
+    CHECK(length > 0 && length < MAX_PATH);
+    const auto process = kf2::game::bind_game_process(
+        GetCurrentProcessId(), fs::path{module});
+    CHECK(process.has_value());
+    ResourceTelemetryBinding log_binding;
+    log_binding.identity = {process.value().pid, process.value().process_start_id};
+    log_binding.game_log_directory = root;
+    const auto opens = game_log_handle_opens_for_testing();
+    const auto closes = game_log_handle_closes_for_testing();
+    ResourceTelemetryWorker worker;
+    static_cast<void>(worker.bind(log_binding));
+    worker.request(1'000'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    auto chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    for (unsigned int index = 0; index < 50; ++index) {
+        worker.request(1'000'000'001ULL + index);
+        CHECK(worker.wait_until_idle(2s));
+        CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
+    }
+    CHECK(game_log_handle_opens_for_testing() == opens + 1);
+    CHECK(game_log_handle_closes_for_testing() == closes);
+
+    // Ordinary writes, map travel and adapter changes retain the same file.
+    HANDLE live_writer = CreateFileW(log.c_str(), GENERIC_WRITE,
+        FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(live_writer != INVALID_HANDLE_VALUE);
+    LARGE_INTEGER end{};
+    CHECK(SetFilePointerEx(live_writer, end, nullptr, FILE_END));
+    const std::string map_line = "Log: LoadMap: KF-Paris?"
+        "Game=KFGameContent.KFGameInfo_Survival\n";
+    DWORD written = 0;
+    CHECK(WriteFile(live_writer, map_line.data(),
+        static_cast<DWORD>(map_line.size()), &written, nullptr));
+    CHECK(written == map_line.size());
+    log_binding.adapter_name = L"Updated adapter";
+    static_cast<void>(worker.bind(log_binding));
+    static_cast<void>(worker.invalidate_samples());
+    worker.request(1'100'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && !chunks.front().reset_parser);
+    CHECK(chunks.front().parsed_session &&
+        chunks.front().parsed_session->map == "KF-Paris");
+    CHECK(game_log_handle_opens_for_testing() == opens + 1);
+    CHECK(CloseHandle(live_writer));
+
+    // Losing process ownership of an already-bound file is also fail-closed.
+    HANDLE timestamp_file = CreateFileW(log.c_str(), FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(timestamp_file != INVALID_HANDLE_VALUE);
+    const FILETIME stale_time{1, 0};
+    CHECK(SetFileTime(timestamp_file, nullptr, nullptr, &stale_time));
+    CHECK(CloseHandle(timestamp_file));
+    worker.request(1'150'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(!chunks.front().parsed_session);
+    CHECK(game_log_handle_closes_for_testing() == closes + 1);
+    write_file(log, "Log: LoadMap: KF-Paris?"
+        "Game=KFGameContent.KFGameInfo_Survival\n");
+    worker.request(1'160'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(log_binding.identity).size() == 1);
+
+    // Rename must not keep tailing the old, still-readable handle forever.
+    CHECK(MoveFileExW(log.c_str(), (root / L"retired.txt").c_str(), 0));
+    write_file(log, "Log: LoadMap: KF-BurningParis?"
+        "Game=KFGameContent.KFGameInfo_Survival\n");
+    worker.request(1'200'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(!chunks.front().parsed_session && chunks.front().catching_up);
+    CHECK(game_log_handle_closes_for_testing() == closes + 2);
+    worker.request(1'300'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(chunks.front().parsed_session &&
+        chunks.front().parsed_session->map == "KF-BurningParis");
+    CHECK(game_log_handle_opens_for_testing() == opens + 3);
+
+    // The retained handle must not conceal deletion or keep old context live.
+    CHECK(DeleteFileW(log.c_str()));
+    worker.request(1'400'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(!chunks.front().parsed_session);
+    CHECK(game_log_handle_closes_for_testing() == closes + 3);
+    worker.request(1'500'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
+    CHECK(game_log_handle_opens_for_testing() == opens + 3);
+
+    write_file(log, "Log: LoadMap: KF-Paris?"
+        "Game=KFGameContent.KFGameInfo_Survival\n");
+    HANDLE writer = CreateFileW(log.c_str(), GENERIC_WRITE, 0, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(writer != INVALID_HANDLE_VALUE);
+    worker.request(1'600'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
+    CHECK(game_log_handle_opens_for_testing() == opens + 3);
+    CHECK(CloseHandle(writer));
+    worker.request(1'700'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(game_log_handle_opens_for_testing() == opens + 4);
+
+    const auto alias = root / L"alias.txt";
+    CHECK(CreateHardLinkW(alias.c_str(), log.c_str(), nullptr));
+    worker.request(1'800'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(!chunks.front().parsed_session);
+    CHECK(game_log_handle_closes_for_testing() == closes + 4);
+    CHECK(DeleteFileW(alias.c_str()));
+    worker.request(1'900'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(log_binding.identity).size() == 1);
+
+    // Rebinding closes on the worker even without another sample request.
+    auto other_process = log_binding;
+    other_process.identity.process_start_id += 36'000'000'000ULL;
+    static_cast<void>(worker.bind(other_process));
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(game_log_handle_opens_for_testing() == opens + 5);
+    CHECK(game_log_handle_closes_for_testing() == closes + 5);
+    worker.request(2'000'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(other_process.identity).empty());
+    CHECK(game_log_handle_opens_for_testing() == opens + 5);
+    static_cast<void>(worker.bind(log_binding));
+    worker.request(2'100'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(log_binding.identity).size() == 1);
+    worker.clear();
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(game_log_handle_closes_for_testing() == closes + 6);
+
+    for (unsigned int index = 0; index < 10; ++index) {
+        static_cast<void>(worker.bind(log_binding));
+        worker.request(2'200'000'000ULL + index);
+        CHECK(worker.wait_until_idle(2s));
+        CHECK(worker.take_game_log_chunks(log_binding.identity).size() == 1);
+        worker.clear();
+        CHECK(worker.wait_until_idle(2s));
+    }
+    static_cast<void>(worker.bind(log_binding));
+    worker.request(2'300'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    static_cast<void>(worker.take_game_log_chunks(log_binding.identity));
+    {
+        std::ofstream output(log, std::ios::binary | std::ios::app);
+        output << "Log: LoadMap: KF-BurningParis?"
+            "Game=KFGameContent.KFGameInfo_Survival\n";
+    }
+    rebinding_log_worker = &worker;
+    rebinding_log_binding = log_binding;
+    set_game_log_read_hook_for_testing(&rebind_game_log_during_read);
+    worker.request(2'400'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    set_game_log_read_hook_for_testing(nullptr);
+    rebinding_log_worker = nullptr;
+    CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
+    CHECK(game_log_handle_opens_for_testing() == opens + 17);
+    CHECK(game_log_handle_closes_for_testing() == closes + 17);
+    worker.request(2'500'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(chunks.front().parsed_session &&
+        chunks.front().parsed_session->map == "KF-BurningParis");
+    {
+        std::ofstream output(log, std::ios::binary | std::ios::app);
+        output << "Log: LoadMap: KF-Paris?"
+            "Game=KFGameContent.KFGameInfo_Survival\n";
+    }
+    set_game_log_read_hook_for_testing(&truncate_game_log_during_read);
+    worker.request(2'600'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    set_game_log_read_hook_for_testing(nullptr);
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(chunks.front().catching_up && !chunks.front().parsed_session);
+    CHECK(game_log_handle_closes_for_testing() == closes + 18);
+    write_file(log, "Log: LoadMap: KF-Paris?"
+        "Game=KFGameContent.KFGameInfo_Survival\n");
+    worker.request(2'700'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(chunks.front().parsed_session &&
+        chunks.front().parsed_session->map == "KF-Paris");
+    worker.stop();
+    worker.clear();
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(game_log_handle_opens_for_testing() == opens + 19);
+    CHECK(game_log_handle_closes_for_testing() == closes + 19);
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
 int main() {
+    if (test_retained_game_log_handle() != EXIT_SUCCESS) return EXIT_FAILURE;
     CHECK(test_gpu_provider_recovery() == EXIT_SUCCESS);
     CHECK(test_nvidia_provider_recovery() == EXIT_SUCCESS);
     CHECK(test_gpu_provider_backoff() == EXIT_SUCCESS);
@@ -707,6 +939,19 @@ int main() {
         CHECK(chunks.size() == 1);
         CHECK(chunks.front().parsed_session);
         CHECK(chunks.front().parsed_session->zeds_alive == 24);
+        // The raced read used the original inspected file, but the next poll
+        // must discard that handle and explicitly reset before reading anew.
+        worker.request(960'000'000ULL);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+        CHECK(!chunks.front().parsed_session);
+        worker.request(970'000'000ULL);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+        CHECK(chunks.front().parsed_session);
+        CHECK(!chunks.front().parsed_session->zeds_alive);
         worker.stop();
         fs::remove_all(root);
     }
