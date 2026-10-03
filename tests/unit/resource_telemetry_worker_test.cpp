@@ -84,6 +84,17 @@ ResourceTelemetryBinding binding(std::uint32_t pid,
     return result;
 }
 
+bool set_log_write_time(const std::filesystem::path& path, std::uint64_t time) {
+    const HANDLE file = CreateFileW(path.c_str(), FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    const FILETIME timestamp{static_cast<DWORD>(time), static_cast<DWORD>(time >> 32)};
+    const bool set = SetFileTime(file, nullptr, nullptr, &timestamp) != FALSE;
+    const bool closed = CloseHandle(file) != FALSE;
+    return set && closed;
+}
+
 void truncate_game_log_during_read(const std::filesystem::path& path) {
     write_file(path, {});
 }
@@ -385,6 +396,18 @@ int test_retained_game_log_handle() {
     const auto process = kf2::game::bind_game_process(
         GetCurrentProcessId(), fs::path{module});
     CHECK(process.has_value());
+    WIN32_FILE_ATTRIBUTE_DATA initial_file{};
+    CHECK(GetFileAttributesExW(log.c_str(), GetFileExInfoStandard, &initial_file));
+    const auto initial_write =
+        (static_cast<std::uint64_t>(initial_file.ftLastWriteTime.dwHighDateTime) << 32) |
+        initial_file.ftLastWriteTime.dwLowDateTime;
+    std::cout << "initial_log_write=" << initial_write
+              << " process_start=" << process.value().process_start_id
+              << " initially_fresh=" << kf2::game::game_log_belongs_to_process(
+                     initial_write, process.value().process_start_id) << '\n';
+    // Filesystem wall-clock granularity need not match process creation time.
+    // Supply exact fixture metadata; do not relax production identity checks.
+    CHECK(set_log_write_time(log, process.value().process_start_id - 1));
     ResourceTelemetryBinding log_binding;
     log_binding.identity = {process.value().pid, process.value().process_start_id};
     log_binding.game_log_directory = root;
@@ -393,6 +416,11 @@ int test_retained_game_log_handle() {
     ResourceTelemetryWorker worker;
     static_cast<void>(worker.bind(log_binding));
     worker.request(1'000'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
+    CHECK(game_log_handle_opens_for_testing() == opens);
+    CHECK(set_log_write_time(log, process.value().process_start_id));
+    worker.request(1'000'000'001ULL);
     CHECK(worker.wait_until_idle(2s));
     auto chunks = worker.take_game_log_chunks(log_binding.identity);
     CHECK(chunks.size() == 1 && chunks.front().reset_parser);
