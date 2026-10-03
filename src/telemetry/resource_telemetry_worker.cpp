@@ -255,6 +255,24 @@ private:
     bool bound_{false};
 };
 
+struct GpuProviderRetry final {
+    std::uint64_t last_attempt_ns{0};
+    std::uint64_t delay_ns{0};
+
+    bool begin_attempt(std::uint64_t now_ns) noexcept {
+        if (delay_ns != 0) {
+            // Rebase a rolled-back clock without bypassing the backoff. Use
+            // elapsed time rather than a deadline that could overflow.
+            if (now_ns < last_attempt_ns) last_attempt_ns = now_ns;
+            if (now_ns - last_attempt_ns < delay_ns) return false;
+        }
+        last_attempt_ns = now_ns;
+        delay_ns = delay_ns == 0 ? 1'000'000'000ULL
+            : (std::min)(delay_ns * 2, 30'000'000'000ULL);
+        return true;
+    }
+};
+
 class NativeResourceSamplers final {
 public:
     explicit NativeResourceSamplers(const ResourceTelemetryBinding& binding)
@@ -269,19 +287,44 @@ public:
         gpu_.reset();
         nvidia_.reset();
         nvidia_source_.reset();
-        if (binding.adapter_luid) {
+        pdh_retry_ = {};
+        nvidia_retry_ = {};
+        provider_status_.reset();
+    }
+
+    void retry_missing_gpu_providers(std::uint64_t now_ns) {
+        const bool retry_pdh = !gpu_ && binding_.adapter_luid &&
+            pdh_retry_.begin_attempt(now_ns);
+        const bool retry_nvidia = !nvidia_ &&
+            binding_.adapter_vendor_id == 0x10DE &&
+            !binding_.adapter_name.empty() &&
+            nvidia_retry_.begin_attempt(now_ns);
+        if (!retry_pdh && !retry_nvidia) return;
+        auto status = provider_status_ ? *provider_status_ : GpuProviderStatus{};
+        if (retry_pdh) {
+            ++status.pdh_attempts;
             auto gpu = PdhGpuSampler::create(
-                binding.identity.pid, *binding.adapter_luid);
-            if (gpu.has_value()) gpu_.emplace(std::move(gpu.value()));
+                binding_.identity.pid, *binding_.adapter_luid);
+            if (gpu.has_value()) {
+                gpu_.emplace(std::move(gpu.value()));
+                status.pdh_error.reset();
+            } else {
+                status.pdh_error = std::move(gpu.error());
+            }
         }
-        if (binding.adapter_vendor_id == 0x10DE &&
-            !binding.adapter_name.empty()) {
-            auto driver = NvidiaGpuSampler::create(binding.adapter_name);
+        if (retry_nvidia) {
+            ++status.nvidia_attempts;
+            auto driver = NvidiaGpuSampler::create(binding_.adapter_name);
             if (driver.has_value()) {
                 nvidia_source_ = driver.value().source();
                 nvidia_.emplace(std::move(driver.value()));
+                status.nvidia_error.reset();
+            } else {
+                status.nvidia_error = std::move(driver.error());
             }
         }
+        provider_status_ = std::make_shared<const GpuProviderStatus>(
+            std::move(status));
     }
 
     ResourceSampleBatch sample(const ResourceSampleRequest& request) {
@@ -295,6 +338,8 @@ public:
             return batch;
         }
 
+        retry_missing_gpu_providers(request.sampled_at_ns);
+        batch.gpu_provider_status = provider_status_;
         batch.nvidia_source = nvidia_source_;
         if (nvidia_) {
             auto driver = nvidia_->sample();
@@ -327,6 +372,9 @@ private:
     std::optional<PdhGpuSampler> gpu_;
     std::optional<NvidiaGpuSampler> nvidia_;
     std::optional<NvidiaGpuSource> nvidia_source_;
+    GpuProviderRetry pdh_retry_;
+    GpuProviderRetry nvidia_retry_;
+    std::shared_ptr<const GpuProviderStatus> provider_status_;
 };
 
 }  // namespace
@@ -634,6 +682,8 @@ private:
                     next->gpu = std::move(batch.gpu);
                     next->driver_gpu_percent = batch.driver_gpu_percent;
                     next->nvidia_source = batch.nvidia_source;
+                    next->gpu_provider_status =
+                        std::move(batch.gpu_provider_status);
                     next->detected_process_adapter =
                         std::move(batch.detected_process_adapter);
                 }

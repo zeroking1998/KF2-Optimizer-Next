@@ -8,9 +8,11 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
+#include <pdhmsg.h>
 
 #include "kf2/telemetry/resource_telemetry_worker.hpp"
 
@@ -67,6 +69,221 @@ ResourceTelemetryBinding binding(std::uint32_t pid,
     result.adapter_name = L"Test adapter";
     result.adapter_vendor_id = 0x10DE;
     return result;
+}
+
+std::uint32_t pdh_opens = 0;
+std::uint32_t pdh_closes = 0;
+std::uint32_t pdh_failures = 0;
+std::uint32_t nvidia_creates = 0;
+std::uint32_t nvidia_failures = 0;
+
+PDH_STATUS WINAPI open_gpu_query(LPCWSTR, DWORD_PTR, PDH_HQUERY* query) {
+    ++pdh_opens;
+    if (pdh_opens <= pdh_failures) return PDH_INVALID_HANDLE;
+    *query = reinterpret_cast<PDH_HQUERY>(100);
+    return ERROR_SUCCESS;
+}
+PDH_STATUS WINAPI add_gpu_counter(PDH_HQUERY, LPCWSTR, DWORD_PTR,
+                                  PDH_HCOUNTER* counter) {
+    *counter = reinterpret_cast<PDH_HCOUNTER>(1);
+    return ERROR_SUCCESS;
+}
+PDH_STATUS WINAPI collect_gpu_query(PDH_HQUERY) { return ERROR_SUCCESS; }
+PDH_STATUS WINAPI read_gpu_counter(PDH_HCOUNTER, DWORD, LPDWORD, LPDWORD,
+                                   PPDH_FMT_COUNTERVALUE_ITEM_W) {
+    return PDH_NO_DATA;
+}
+PDH_STATUS WINAPI close_gpu_query(PDH_HQUERY) {
+    ++pdh_closes;
+    return ERROR_SUCCESS;
+}
+kf2::Result<kf2::telemetry::NvidiaGpuSampler> create_nvidia_gpu(
+    std::wstring_view) {
+    using kf2::telemetry::NvidiaGpuSampler;
+    if (++nvidia_creates <= nvidia_failures) {
+        return kf2::Result<NvidiaGpuSampler>::failure(
+            {kf2::ErrorCode::platform_failure, L"Test driver is not ready", 17});
+    }
+    return kf2::Result<NvidiaGpuSampler>::success(
+        NvidiaGpuSampler::create_for_testing(62.0));
+}
+
+struct GpuProviderFixture final {
+    GpuProviderFixture(std::uint32_t pdh_fail_count,
+                       std::uint32_t nvidia_fail_count) {
+        pdh_opens = pdh_closes = nvidia_creates = 0;
+        pdh_failures = pdh_fail_count;
+        nvidia_failures = nvidia_fail_count;
+        kf2::telemetry::detail::PdhGpuApi api;
+        api.open = open_gpu_query;
+        api.add = add_gpu_counter;
+        api.collect = collect_gpu_query;
+        api.array = read_gpu_counter;
+        api.close = close_gpu_query;
+        kf2::telemetry::detail::set_pdh_gpu_api_for_testing(api);
+        kf2::telemetry::detail::set_nvidia_gpu_create_hook_for_testing(
+            create_nvidia_gpu);
+    }
+    ~GpuProviderFixture() {
+        kf2::telemetry::detail::set_pdh_gpu_api_for_testing({});
+        kf2::telemetry::detail::set_nvidia_gpu_create_hook_for_testing(nullptr);
+    }
+};
+
+bool sample_gpu(ResourceTelemetryWorker& worker, std::uint64_t now_ns) {
+    // Keep the production alternating schedule; wait before each request so
+    // request coalescing cannot skip either group in a deterministic fixture.
+    worker.request(now_ns);
+    if (!worker.wait_until_idle(2s)) return false;
+    worker.request(now_ns);
+    if (!worker.wait_until_idle(2s)) return false;
+    const auto snapshot = worker.latest();
+    return snapshot && snapshot->gpu_sampled_at_ns == now_ns;
+}
+
+int test_gpu_provider_recovery() {
+    GpuProviderFixture fixture{1, 0};
+    ResourceTelemetryWorker worker;
+    const auto generation = worker.bind(binding(41, 4100, 7));
+    CHECK(sample_gpu(worker, 100));
+    CHECK(pdh_opens == 1 && nvidia_creates == 1);
+    CHECK(worker.latest()->driver_gpu_percent == 62.0);
+    const auto failed = worker.latest()->gpu_provider_status;
+    CHECK(failed && failed->pdh_attempts == 1 && failed->pdh_error);
+    CHECK(failed->pdh_error->native_code == PDH_INVALID_HANDLE);
+    CHECK(failed->nvidia_attempts == 1 && !failed->nvidia_error);
+    CHECK(worker.bind(binding(41, 4100, 7)) == generation);
+    CHECK(sample_gpu(worker, 999'999'999ULL));
+    CHECK(pdh_opens == 1 && nvidia_creates == 1);
+    CHECK(worker.latest()->gpu_provider_status == failed);
+    CHECK(sample_gpu(worker, 1'000'000'100ULL));
+    CHECK(pdh_opens == 2);
+    CHECK(nvidia_creates == 1);
+    CHECK(worker.latest()->gpu.has_value());
+    const auto recovered = worker.latest()->gpu_provider_status;
+    CHECK(recovered && recovered != failed);
+    CHECK(recovered->pdh_attempts == 2 && !recovered->pdh_error);
+    CHECK(failed->pdh_error);  // Published reports remain immutable.
+    CHECK(sample_gpu(worker, 60'000'000'100ULL));
+    CHECK(pdh_opens == 2 && nvidia_creates == 1);
+    CHECK(worker.latest()->gpu_provider_status == recovered);
+    worker.stop();
+    CHECK(pdh_closes == 1);
+    return EXIT_SUCCESS;
+}
+
+int test_nvidia_provider_recovery() {
+    GpuProviderFixture fixture{0, 1};
+    ResourceTelemetryWorker worker;
+    const auto first_generation = worker.bind(binding(41, 4100, 7));
+    worker.request(100);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(pdh_opens == 0 && nvidia_creates == 0);
+    CHECK(sample_gpu(worker, 101));
+    CHECK(pdh_opens == 1 && nvidia_creates == 1);
+    CHECK(!worker.latest()->driver_gpu_percent);
+    auto status = worker.latest()->gpu_provider_status;
+    CHECK(status && !status->pdh_error && status->nvidia_error);
+    CHECK(status->nvidia_error->native_code == 17);
+    CHECK(sample_gpu(worker, 1'000'000'101ULL));
+    CHECK(pdh_opens == 1 && nvidia_creates == 2);
+    CHECK(worker.latest()->driver_gpu_percent == 62.0);
+    status = worker.latest()->gpu_provider_status;
+    CHECK(status && status->nvidia_attempts == 2 && !status->nvidia_error);
+    CHECK(sample_gpu(worker, 40'000'000'000ULL));
+    CHECK(pdh_opens == 1 && nvidia_creates == 2 && pdh_closes == 0);
+    CHECK(worker.latest()->gpu_provider_status == status);
+
+    // A changed adapter restarts only the binding's native GPU providers.
+    CHECK(worker.bind(binding(41, 4100, 8)) != first_generation);
+    CHECK(!worker.latest());
+    CHECK(sample_gpu(worker, 40'000'000'001ULL));
+    CHECK(pdh_opens == 2 && nvidia_creates == 3 && pdh_closes == 1);
+    CHECK(worker.latest()->gpu_provider_status->pdh_attempts == 1);
+    CHECK(worker.latest()->gpu_provider_status->nvidia_attempts == 1);
+    CHECK(worker.bind(binding(42, 4200, 8)) != first_generation);
+    CHECK(sample_gpu(worker, 40'000'000'002ULL));
+    CHECK(pdh_opens == 3 && nvidia_creates == 4 && pdh_closes == 2);
+    worker.stop();
+    CHECK(pdh_closes == 3);
+    return EXIT_SUCCESS;
+}
+
+int test_gpu_provider_backoff() {
+    GpuProviderFixture fixture{UINT32_MAX, UINT32_MAX};
+    ResourceTelemetryWorker worker;
+    static_cast<void>(worker.bind(binding(41, 4100, 7)));
+    CHECK(sample_gpu(worker, 0));
+    CHECK(pdh_opens == 1 && nvidia_creates == 1);
+    auto status = worker.latest()->gpu_provider_status;
+    for (std::uint64_t now = 120'000'000; now < 1'000'000'000;
+         now += 120'000'000) {
+        CHECK(sample_gpu(worker, now));
+        CHECK(worker.latest()->gpu_provider_status == status);
+    }
+    constexpr std::uint64_t attempts[] = {
+        1, 3, 7, 15, 31, 61, 91};  // seconds; capped at 30 s per provider
+    for (const auto seconds : attempts) {
+        const auto before = pdh_opens;
+        CHECK(sample_gpu(worker, seconds * 1'000'000'000ULL - 1));
+        CHECK(pdh_opens == before && nvidia_creates == before);
+        CHECK(worker.latest()->gpu_provider_status == status);
+        CHECK(sample_gpu(worker, seconds * 1'000'000'000ULL));
+        CHECK(pdh_opens == before + 1 && nvidia_creates == before + 1);
+        status = worker.latest()->gpu_provider_status;
+        CHECK(status && status->pdh_error && status->nvidia_error);
+        CHECK(status->pdh_attempts == pdh_opens);
+        CHECK(status->nvidia_attempts == nvidia_creates);
+        CHECK(!worker.latest()->gpu && !worker.latest()->driver_gpu_percent);
+    }
+    CHECK(pdh_closes == 0);
+
+    // A rolled-back clock rebases the wait rather than retrying every tick.
+    CHECK(sample_gpu(worker, 2'000'000'000ULL));
+    CHECK(sample_gpu(worker, 31'999'999'999ULL));
+    CHECK(pdh_opens == 8 && nvidia_creates == 8);
+    CHECK(sample_gpu(worker, 32'000'000'000ULL));
+    CHECK(pdh_opens == 9 && nvidia_creates == 9);
+    return EXIT_SUCCESS;
+}
+
+int test_gpu_provider_binding_boundaries() {
+    GpuProviderFixture fixture{UINT32_MAX, UINT32_MAX};
+    ResourceTelemetryWorker worker;
+    auto current_binding = binding(41, 4100, 7);
+    current_binding.adapter_vendor_id = 0x1002;  // AMD: no NVIDIA retry
+    static_cast<void>(worker.bind(current_binding));
+    CHECK(sample_gpu(worker, 1));
+    CHECK(pdh_opens == 1 && nvidia_creates == 0);
+    CHECK(sample_gpu(worker, 1'000'000'001ULL));
+    CHECK(pdh_opens == 2 && nvidia_creates == 0);
+    CHECK(worker.latest()->gpu_provider_status->nvidia_attempts == 0);
+    current_binding.adapter_vendor_id = 0x8086;
+    static_cast<void>(worker.bind(current_binding));
+    CHECK(sample_gpu(worker, 1'000'000'002ULL));
+    CHECK(pdh_opens == 3 && nvidia_creates == 0);
+
+    current_binding.adapter_luid.reset();
+    current_binding.adapter_name.clear();
+    static_cast<void>(worker.bind(current_binding));
+    CHECK(sample_gpu(worker, 2'000'000'000ULL));
+    CHECK(pdh_opens == 3 && nvidia_creates == 0);
+    CHECK(!worker.latest()->gpu_provider_status);
+
+    current_binding = binding(42, 4200, 8);
+    static_cast<void>(worker.bind(current_binding));
+    constexpr auto maximum = (std::numeric_limits<std::uint64_t>::max)();
+    CHECK(sample_gpu(worker, maximum - 1'000'000'000ULL));
+    CHECK(pdh_opens == 4 && nvidia_creates == 1);
+    CHECK(sample_gpu(worker, maximum - 1));
+    CHECK(pdh_opens == 4 && nvidia_creates == 1);
+    CHECK(sample_gpu(worker, maximum));
+    CHECK(pdh_opens == 5 && nvidia_creates == 2);
+    CHECK(sample_gpu(worker, maximum));
+    CHECK(pdh_opens == 5 && nvidia_creates == 2);
+    worker.clear();
+    CHECK(!worker.latest());
+    return EXIT_SUCCESS;
 }
 
 std::string offline_telemetry_line() {
@@ -137,6 +354,10 @@ std::string graphics_readback_line() {
 }  // namespace
 
 int main() {
+    CHECK(test_gpu_provider_recovery() == EXIT_SUCCESS);
+    CHECK(test_nvidia_provider_recovery() == EXIT_SUCCESS);
+    CHECK(test_gpu_provider_backoff() == EXIT_SUCCESS);
+    CHECK(test_gpu_provider_binding_boundaries() == EXIT_SUCCESS);
     std::chrono::microseconds request_batch_elapsed{};
 
     // Repeatedly exercise the complete lifetime boundary. The worker thread

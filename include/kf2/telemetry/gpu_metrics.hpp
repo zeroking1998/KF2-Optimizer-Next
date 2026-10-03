@@ -172,12 +172,22 @@ public:
         std::wstring_view adapter_name);
     [[nodiscard]] Result<double> sample() const;
     [[nodiscard]] NvidiaGpuSource source() const noexcept;
+#ifdef KF2_NVIDIA_GPU_TESTING
+    [[nodiscard]] static NvidiaGpuSampler create_for_testing(double percent);
+#endif
 
 private:
     struct Impl;
     explicit NvidiaGpuSampler(std::unique_ptr<Impl> implementation);
     std::unique_ptr<Impl> implementation_;
 };
+
+#ifdef KF2_NVIDIA_GPU_TESTING
+namespace detail {
+using NvidiaGpuCreateHook = Result<NvidiaGpuSampler> (*)(std::wstring_view);
+void set_nvidia_gpu_create_hook_for_testing(NvidiaGpuCreateHook hook) noexcept;
+}  // namespace detail
+#endif
 
 class PdhGpuSampler final {
 public:

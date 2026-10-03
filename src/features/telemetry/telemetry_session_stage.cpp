@@ -335,8 +335,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     resource_telemetry_worker.clear();
     resource_telemetry_generation = 0;
     resource_telemetry_publication_sequence = 0;
-    resource_telemetry_source_announced_generation = 0;
-    resource_telemetry_nvidia_expected = false;
+    announced_gpu_provider_status.reset();
     gpu_utilization_filter.reset();
     cached_process_memory_sample_ns = 0;
     cached_gpu_sample_ns = 0;
@@ -1097,8 +1096,6 @@ void UiRuntime::bind_resource_telemetry(
     if (resource_telemetry_generation == generation && generation != 0) {
         return;
     }
-    resource_telemetry_nvidia_expected =
-        adapter && adapter->vendor_id == 0x10DE;
     reset_resource_telemetry_cache(generation);
 }
 
@@ -1106,7 +1103,7 @@ void UiRuntime::reset_resource_telemetry_cache(std::uint64_t generation) {
     if (generation == 0) return;
     resource_telemetry_generation = generation;
     resource_telemetry_publication_sequence = 0;
-    resource_telemetry_source_announced_generation = 0;
+    announced_gpu_provider_status.reset();
     cached_process_memory_sample_ns = 0;
     cached_gpu_sample_ns = 0;
     cached_process_metrics.reset();
