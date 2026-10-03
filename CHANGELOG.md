@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- DXGI frame timestamps now use exact integer clock conversion instead of
+  floating-point scaling, preserving nanosecond intervals and rejecting
+  values outside the supported timestamp range.
+
 - Bound FleX recovery to the original installation's directory identity, so
   startup discovery cannot restore one game's DLL into another. Legacy or
   missing ownership evidence is retained for explicit recovery, not guessed.

@@ -3,6 +3,7 @@
 #include <Windows.h>
 #include <evntrace.h>
 #include <evntcons.h>
+#include <intrin.h>
 
 #include <algorithm>
 #include <atomic>
@@ -57,9 +58,17 @@ struct PresentStartPayload {
 };
 static_assert(sizeof(PresentStartPayload) == 16);
 
-std::uint64_t qpc_to_ns(std::uint64_t ticks, std::uint64_t frequency) {
-    return static_cast<std::uint64_t>(static_cast<long double>(ticks) *
-        1'000'000'000.0L / static_cast<long double>(frequency));
+std::uint64_t qpc_to_ns(std::uint64_t ticks, std::uint64_t frequency,
+                        std::uint64_t nanoseconds_per_tick) {
+    std::uint64_t high{};
+    const auto low = _umul128(ticks,
+        nanoseconds_per_tick ? nanoseconds_per_tick : 1'000'000'000ULL, &high);
+    // Integral Windows clock ratios need only a multiply. Reject timestamps
+    // outside the nanosecond range rather than overflowing or rounding them.
+    if (nanoseconds_per_tick) return high == 0 ? low : 0;
+    if (frequency == 0 || high >= frequency) return 0;
+    std::uint64_t remainder{};
+    return _udiv128(high, low, frequency, &remainder);
 }
 
 bool process_is_alive(DWORD pid, std::uint64_t creation_time = 0) {
@@ -183,6 +192,7 @@ struct DxgiFrameTimingSession::Impl {
     std::uint64_t unreported_pending_loss{};
     std::uint64_t last_pending_cleanup_qpc{};
     std::uint64_t qpc_frequency{};
+    std::uint64_t nanoseconds_per_tick{};
     std::unordered_map<ULONG, PendingPresent> pending_by_thread;
 
     ~Impl() { shutdown(); }
@@ -305,12 +315,15 @@ struct DxgiFrameTimingSession::Impl {
         std::memcpy(&result, record.UserData, sizeof(result));
         if (FAILED(static_cast<HRESULT>(result)) || present.timestamp_qpc == 0)
             return;
+        const auto timestamp_ns = qpc_to_ns(present.timestamp_qpc, qpc_frequency,
+                                            nanoseconds_per_tick);
+        if (timestamp_ns == 0) return;
 
         const auto new_loss = total_loss >= reported_events_lost
             ? total_loss - reported_events_lost : total_loss;
         reported_events_lost = total_loss;
         static_cast<void>(sink->ingest(
-            {identity, qpc_to_ns(present.timestamp_qpc, qpc_frequency),
+            {identity, timestamp_ns,
              1, true, new_loss + unreported_pending_loss, present.swap_chain}));
         unreported_pending_loss = 0;
     }
@@ -443,6 +456,9 @@ std::unique_ptr<DxgiFrameTimingSession> DxgiFrameTimingSession::test_parser(
     impl->identity = identity;
     impl->sink = &sink;
     impl->qpc_frequency = qpc_frequency;
+    impl->nanoseconds_per_tick = qpc_frequency != 0 &&
+        1'000'000'000ULL % qpc_frequency == 0
+        ? 1'000'000'000ULL / qpc_frequency : 0;
     return std::unique_ptr<DxgiFrameTimingSession>{
         new DxgiFrameTimingSession{std::move(impl)}};
 }
@@ -518,6 +534,8 @@ DxgiFrameTimingSession::start(telemetry::SampleIdentity identity,
                  std::to_wstring(GetCurrentProcessId()) + L"-" +
                  std::to_wstring(creation_time);
     impl->qpc_frequency = static_cast<std::uint64_t>(frequency.QuadPart);
+    impl->nanoseconds_per_tick = 1'000'000'000ULL % impl->qpc_frequency == 0
+        ? 1'000'000'000ULL / impl->qpc_frequency : 0;
     const ULONG status = impl->open();
     if (status != ERROR_SUCCESS) {
         return Result<std::unique_ptr<DxgiFrameTimingSession>>::failure(
