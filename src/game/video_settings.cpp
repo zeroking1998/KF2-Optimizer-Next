@@ -1154,11 +1154,8 @@ Result<config::ConfigPreview> build_video_preview(
             ErrorCode::invalid_argument,
             L"Film grain selection is invalid", 0});
     }
-    bool changed = false;
-    const auto apply_result = [&](Result<bool> result) -> bool {
-        if (!result.has_value()) return false;
-        changed = changed || result.value();
-        return true;
+    const auto apply_result = [](Result<bool> result) {
+        return result.has_value();
     };
     const int display = selected(VideoOption::display);
     if (option_changed(VideoOption::display) &&
@@ -1320,8 +1317,6 @@ Result<config::ConfigPreview> build_video_preview(
         option_changed(VideoOption::texture_resolution),
         option_changed(VideoOption::texture_filtering));
     if (!textures.has_value()) return Result<config::ConfigPreview>::failure(textures.error());
-    changed = changed || textures.value();
-    static_cast<void>(changed);
 
     auto engine_parsed = config::IniDocument::parse(snapshot.value().engine);
     if (!engine_parsed.has_value()) {

@@ -569,16 +569,6 @@ static function CopyOwnedSettings(
         Current.CharacterDetail.MaxBodyWoundDecals;
 }
 
-static function CaptureCurrentOwnedSettings(
-    KF2OptimizerAdaptiveGraphicsState Snapshot)
-{
-    local GFXSettings Current;
-
-    if (Snapshot == None) return;
-    GetCurrentGFXSettings(Current);
-    CopyOwnedSettings(Snapshot, Current);
-}
-
 static function bool OwnedSettingsDiffer(
     KF2OptimizerAdaptiveGraphicsState Previous,
     KF2OptimizerAdaptiveGraphicsState Current)

@@ -768,10 +768,6 @@ int main() {
         "function bool EnsureFixedSessionEffects()");
     const auto restore_world_runtime_start = telemetry_source.find(
         "function bool RestoreSessionWorldRuntime()");
-    CHECK(telemetry_source.find("function bool RestoreSessionGraphics()") !=
-          std::string::npos);
-    const auto restore_session_start = telemetry_source.find(
-        "function bool RestoreSessionGraphics()", restore_world_runtime_start);
     CHECK(fixed_effects_start != std::string::npos);
     CHECK(restore_world_runtime_start != std::string::npos);
     const auto fixed_effects_body = telemetry_source.substr(
@@ -791,11 +787,14 @@ int main() {
         "RestoreOriginal(\n                AdaptiveGraphicsState) ||") ==
           std::string::npos);
     const auto adaptive_control_start = telemetry_source.find(
-        "function bool ApplyAdaptiveResourceControl(", restore_session_start);
+        "function bool ApplyAdaptiveResourceControl(", restore_world_runtime_start);
     CHECK(adaptive_control_start != std::string::npos);
+    const auto restore_world_runtime_end = telemetry_source.find(
+        "\nfunction ", restore_world_runtime_start);
+    CHECK(restore_world_runtime_end != std::string::npos);
     const auto restore_world_runtime_body = telemetry_source.substr(
         restore_world_runtime_start,
-        restore_session_start - restore_world_runtime_start);
+        restore_world_runtime_end - restore_world_runtime_start);
     CHECK(restore_world_runtime_body.find(
         "ApplyAdaptiveEffectRuntimeReadback(\n"
         "        \"restore\", 100, true)") != std::string::npos);
@@ -803,26 +802,8 @@ int main() {
           std::string::npos);
     CHECK(restore_world_runtime_body.find(
         "domain=world_runtime") != std::string::npos);
-    const auto restore_session_body = telemetry_source.substr(
-        restore_session_start, adaptive_control_start - restore_session_start);
-    CHECK(restore_session_body.find(
-        "bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.\n"
-        "        RestoreOriginal(AdaptiveGraphicsState)") != std::string::npos);
-    CHECK(restore_session_body.find(
-        "bEffectRuntimeRestored = RestoreSessionWorldRuntime()") !=
-          std::string::npos);
-    CHECK(restore_session_body.find(
-        "domain=graphics") != std::string::npos);
-    CHECK(restore_session_body.find(
-        "domain=effect_runtime") == std::string::npos);
-    CHECK(restore_session_body.find(
-        "if (!bGraphicsRestored || !bEffectRuntimeRestored)") !=
-          std::string::npos);
-    CHECK(restore_session_body.find(
-        "RestoreOriginal(\n            AdaptiveGraphicsState) ||") ==
-          std::string::npos);
     CHECK(telemetry_source.find(
-        "KF2OPT_FIXED_EFFECT_BASELINE state=restored") !=
+        "KF2OPT_FIXED_EFFECT_BASELINE state=world_runtime_restored") !=
           std::string::npos);
     CHECK(interaction_source.find(
         "CurrentProbe.RestoreSessionGraphics()") == std::string::npos);
@@ -875,38 +856,6 @@ int main() {
         "ProcessAdaptiveGraphicsState = None") == std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveGraphicsState = new(self)") == std::string::npos);
-    const auto restore_adaptive_graphics = telemetry_source.find(
-        "function RestoreAdaptiveGraphics()");
-    const auto select_staggered_corpse = telemetry_source.find(
-        "function int SelectStaggeredCorpse(");
-    CHECK(restore_adaptive_graphics != std::string::npos);
-    CHECK(select_staggered_corpse != std::string::npos);
-    CHECK(restore_adaptive_graphics < select_staggered_corpse);
-    const auto restore_adaptive_body = telemetry_source.substr(
-        restore_adaptive_graphics,
-        select_staggered_corpse - restore_adaptive_graphics);
-    CHECK(restore_adaptive_body.find(
-        "bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.\n"
-        "        RestoreOriginal(AdaptiveGraphicsState)") != std::string::npos);
-    CHECK(restore_adaptive_body.find(
-        "bEffectRuntimeRestored = ApplyAdaptiveEffectRuntimeReadback(\n"
-        "        \"restore\", 100, true)") != std::string::npos);
-    CHECK(restore_adaptive_body.find("domain=graphics") != std::string::npos);
-    CHECK(restore_adaptive_body.find("domain=effect_runtime") !=
-          std::string::npos);
-    CHECK(restore_adaptive_body.find(
-        "if (!bGraphicsRestored || !bEffectRuntimeRestored)") !=
-          std::string::npos);
-    CHECK(restore_adaptive_body.find(
-        "RestoreOriginal(\n            AdaptiveGraphicsState) ||") ==
-          std::string::npos);
-    const auto restore_freezes = telemetry_source.find(
-        "BeginAdaptiveCorpsePhysicsRelease();", restore_adaptive_graphics);
-    CHECK(restore_freezes != std::string::npos);
-    CHECK(restore_freezes < telemetry_source.find(
-        "RestoreOriginal(", restore_adaptive_graphics));
-    CHECK(telemetry_source.find("AdaptiveGraphicsState = None",
-        restore_adaptive_graphics) >= select_staggered_corpse);
     const auto interaction_tick = interaction_source.find(
         "event Tick(float DeltaTime)");
     CHECK(interaction_tick != std::string::npos);
@@ -2693,9 +2642,6 @@ int main() {
     // recovery then derive from that rebased baseline instead of the stale
     // first-action snapshot.
     CHECK(graphics_source.find(
-        "static function CaptureCurrentOwnedSettings(") !=
-          std::string::npos);
-    CHECK(graphics_source.find(
         "static function bool OwnedSettingsDiffer(") !=
           std::string::npos);
     const auto menu_rebase_start = graphics_source.find(
@@ -2719,7 +2665,7 @@ int main() {
     const auto owned_copy_start = graphics_source.find(
         "static function CopyOwnedSettings(");
     const auto owned_copy_end = graphics_source.find(
-        "static function CaptureCurrentOwnedSettings(", owned_copy_start);
+        "static function bool OwnedSettingsDiffer(", owned_copy_start);
     CHECK(owned_copy_start != std::string::npos);
     CHECK(owned_copy_end != std::string::npos);
     const auto owned_copy_body = graphics_source.substr(
@@ -3034,6 +2980,8 @@ int main() {
     CHECK(telemetry_source.find(
         "VisibleAwake = AdaptiveCachedVisibleAwakeCorpses;") !=
           std::string::npos);
+    // Only published metrics and controller inputs justify native awake queries.
+    CHECK(telemetry_source.find("CorpseVisibleAwake") == std::string::npos);
     CHECK(telemetry_source.find(
         "AwakeTotal = AdaptiveCachedAwakeCorpses;") !=
           std::string::npos);
