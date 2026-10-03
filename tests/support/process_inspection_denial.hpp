@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 #include <aclapi.h>
+#include <array>
 
 namespace kf2::test {
 
@@ -18,7 +19,7 @@ public:
         if (token_) CloseHandle(token_);
     }
 
-    bool deny(HANDLE owned_process) {
+    bool deny(HANDLE owned_process, DWORD allowed_access = 0) {
         if (process_ || !owned_process) return false;
         process_ = owned_process;
         // An enabled debug privilege bypasses DACLs. Disable only this test
@@ -40,10 +41,20 @@ public:
         if (GetSecurityInfo(process_, SE_KERNEL_OBJECT,
                 DACL_SECURITY_INFORMATION, nullptr, nullptr, &original_dacl_,
                 nullptr, &descriptor_) != ERROR_SUCCESS) return false;
-        ACL empty{};
-        if (!InitializeAcl(&empty, sizeof(empty), ACL_REVISION)) return false;
+        alignas(ACL) std::array<BYTE,
+            sizeof(ACL) + sizeof(ACCESS_ALLOWED_ACE) + SECURITY_MAX_SID_SIZE> storage{};
+        auto* restricted = reinterpret_cast<ACL*>(storage.data());
+        if (!InitializeAcl(restricted, static_cast<DWORD>(storage.size()),
+                ACL_REVISION)) return false;
+        if (allowed_access != 0) {
+            std::array<BYTE, SECURITY_MAX_SID_SIZE> world_sid{};
+            DWORD sid_size = static_cast<DWORD>(world_sid.size());
+            if (!CreateWellKnownSid(WinWorldSid, nullptr, world_sid.data(), &sid_size) ||
+                !AddAccessAllowedAce(restricted, ACL_REVISION,
+                    allowed_access, world_sid.data())) return false;
+        }
         active_ = SetSecurityInfo(process_, SE_KERNEL_OBJECT,
-            DACL_SECURITY_INFORMATION, nullptr, nullptr, &empty, nullptr) ==
+            DACL_SECURITY_INFORMATION, nullptr, nullptr, restricted, nullptr) ==
                 ERROR_SUCCESS;
         return active_;
     }

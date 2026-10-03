@@ -53,6 +53,12 @@ picker or selecting the same folder preserves prepared state.
 
 ## Bounded runtime work
 
+Desktop telemetry submits one resource-worker request per regular cycle;
+explicit final-log flushing is separate. A verified session pins its process
+handle for liveness and shares it with CPU/memory sampling when read rights
+permit. Restricted sessions retain read-only observation, and changed process
+identities or signaled handles cannot produce accepted samples.
+
 Runtime queues, per-tick work, action sizes, retry counts, and history are
 bounded. Actor-scoped state prevents repeated sleep or wake requests for an
 actor already confirmed in that state. Weak world ownership avoids keeping a

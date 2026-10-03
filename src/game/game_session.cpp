@@ -4,6 +4,7 @@
 #include <TlHelp32.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cwctype>
 #include <optional>
 #include <string_view>
@@ -11,6 +12,11 @@
 
 namespace kf2::game {
 namespace {
+
+#ifdef KF2_GAME_PROCESS_TESTING
+std::atomic_uint32_t process_opens{0};
+std::atomic_uint32_t process_creation_queries{0};
+#endif
 
 std::uint64_t file_time_value(const FILETIME& value) {
     return (static_cast<std::uint64_t>(value.dwHighDateTime) << 32U) |
@@ -38,9 +44,19 @@ bool is_overlay_window(HWND window) {
 }
 
 bool process_start_matches(const GameProcessIdentity& identity) {
+    if (identity.native_process) {
+        const HANDLE process = identity.native_process->get(identity);
+        return process && WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+    }
+#ifdef KF2_GAME_PROCESS_TESTING
+    ++process_opens;
+#endif
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
                                  FALSE, identity.pid);
     if (!process) return false;
+#ifdef KF2_GAME_PROCESS_TESTING
+    ++process_creation_queries;
+#endif
     FILETIME creation{}, exit{}, kernel{}, user{};
     const bool matches =
         GetProcessTimes(process, &creation, &exit, &kernel, &user) != FALSE &&
@@ -52,20 +68,47 @@ bool process_start_matches(const GameProcessIdentity& identity) {
 
 }  // namespace
 
+GameProcessHandle::GameProcessHandle(
+    HANDLE handle, std::uint32_t pid, std::uint64_t start,
+    bool metrics_readable) noexcept
+    : handle_{handle}, pid_{pid}, start_{start},
+      metrics_readable_{metrics_readable} {}
+
+GameProcessHandle::~GameProcessHandle() { CloseHandle(handle_); }
+
+HANDLE GameProcessHandle::get(const GameProcessIdentity& identity) const noexcept {
+    return identity.pid == pid_ && identity.process_start_id == start_
+        ? handle_ : nullptr;
+}
+
 Result<GameProcessIdentity> bind_game_process(
     std::uint32_t pid, const std::filesystem::path& expected_executable) {
     if (pid == 0 || expected_executable.empty()) {
         return Result<GameProcessIdentity>::failure(
             {ErrorCode::invalid_argument, L"Game process identity is incomplete", 0});
     }
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
-                                 FALSE, pid);
+#ifdef KF2_GAME_PROCESS_TESTING
+    ++process_opens;
+#endif
+    // Metrics share the session handle when permitted. Restricted processes
+    // still bind with the original read-only observation rights.
+    constexpr DWORD observation_access =
+        PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE;
+    HANDLE opened = OpenProcess(observation_access | PROCESS_VM_READ, FALSE, pid);
+    const bool metrics_readable = opened != nullptr;
+    if (!opened) {
+#ifdef KF2_GAME_PROCESS_TESTING
+        ++process_opens;
+#endif
+        opened = OpenProcess(observation_access, FALSE, pid);
+    }
+    std::unique_ptr<void, decltype(&CloseHandle)> owned{opened, &CloseHandle};
+    const HANDLE process = owned.get();
     if (!process) return Result<GameProcessIdentity>::failure(
         {ErrorCode::access_denied, L"Game process cannot be inspected", GetLastError()});
     const DWORD wait = WaitForSingleObject(process, 0);
     if (wait != WAIT_TIMEOUT) {
         const DWORD error = wait == WAIT_FAILED ? GetLastError() : 0;
-        CloseHandle(process);
         return Result<GameProcessIdentity>::failure(
             {wait == WAIT_OBJECT_0 ? ErrorCode::stale_data
                                   : ErrorCode::platform_failure,
@@ -74,19 +117,19 @@ Result<GameProcessIdentity> bind_game_process(
     FILETIME creation{}, exit{}, kernel{}, user{};
     DWORD length = 32768;
     std::vector<wchar_t> path(length);
+#ifdef KF2_GAME_PROCESS_TESTING
+    ++process_creation_queries;
+#endif
     if (!GetProcessTimes(process, &creation, &exit, &kernel, &user)) {
         const auto error = GetLastError();
-        CloseHandle(process);
         return Result<GameProcessIdentity>::failure(
             {ErrorCode::platform_failure, L"Game process time query failed", error});
     }
     if (!QueryFullProcessImageNameW(process, 0, path.data(), &length)) {
         const auto error = GetLastError();
-        CloseHandle(process);
         return Result<GameProcessIdentity>::failure(
             {ErrorCode::platform_failure, L"Game process path query failed", error});
     }
-    CloseHandle(process);
     if (length == 0 || length > path.size()) {
         return Result<GameProcessIdentity>::failure(
             {ErrorCode::platform_failure, L"Game process path is unavailable", 0});
@@ -106,14 +149,23 @@ Result<GameProcessIdentity> bind_game_process(
         return Result<GameProcessIdentity>::failure(
             {ErrorCode::stale_data, L"Game executable identity does not match", 0});
     }
+    const auto start = file_time_value(creation);
+    auto native_process = std::shared_ptr<const GameProcessHandle>{
+        new GameProcessHandle{owned.release(), pid, start, metrics_readable}};
     return Result<GameProcessIdentity>::success(
-        {pid, file_time_value(creation), std::move(actual)});
+        {pid, start, std::move(actual), std::move(native_process)});
 }
 
 bool is_game_process_current(const GameProcessIdentity& process) noexcept {
     return process.pid != 0 && process.process_start_id != 0 &&
            process_start_matches(process);
 }
+
+#ifdef KF2_GAME_PROCESS_TESTING
+detail::ProcessQueryCounts detail::process_query_counts_for_testing() noexcept {
+    return {process_opens.load(), process_creation_queries.load()};
+}
+#endif
 
 Result<GameWindowState> inspect_game_window(
     const GameProcessIdentity& process, HWND window) {

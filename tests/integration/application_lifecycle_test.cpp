@@ -3127,6 +3127,8 @@ int test_executable_identity_boundaries() {
     CHECK(runtime.game_process.has_value());
     CHECK(runtime.game_process->pid == child.process.dwProcessId);
     const auto first_process = *runtime.game_process;
+    kf2::telemetry::ProcessMetricSampler exited_metrics{first_process};
+    CHECK(exited_metrics.sample().has_value());
     CHECK(kf2::game::is_game_process_current(first_process));
     auto wrong_start = first_process;
     ++wrong_start.process_start_id;
@@ -3145,6 +3147,7 @@ int test_executable_identity_boundaries() {
     CHECK(GetExitCodeProcess(first_retained.handle, &exit_code));
     CHECK(exit_code == STILL_ACTIVE);
     CHECK(!kf2::game::is_game_process_current(first_process));
+    CHECK(!exited_metrics.sample().has_value());
     const auto exited_binding = kf2::game::bind_game_process(
         first_process.pid, executable);
     CHECK(!exited_binding.has_value());
@@ -3871,6 +3874,30 @@ int test_initial_dxgi_retry() {
             CHECK(metrics.frames()->quality == telemetry::SampleQuality::good);
             CHECK(dxgi_start_probe.calls == attempts);
             if (failures == 0) {
+                // Force the worker to finish between pipeline stages: a
+                // second request must not hide behind request coalescing.
+                struct ResourceBoundary {
+                    static void finish_request(telemetry::ResourceTelemetryWorker& worker) {
+                        static_cast<void>(worker.wait_until_idle(
+                            std::chrono::seconds{2}));
+                    }
+                    ~ResourceBoundary() {
+                        telemetry::detail::set_resource_request_hook_for_testing(nullptr);
+                    }
+                } resource_boundary;
+                telemetry::detail::set_resource_request_hook_for_testing(
+                    ResourceBoundary::finish_request);
+                const auto requests_before = telemetry::detail::resource_requests_for_testing();
+                const auto process_queries_before = game::detail::process_query_counts_for_testing();
+                const auto metric_opens_before = telemetry::detail::process_metric_opens_for_testing();
+                runtime.telemetry_tick();
+                CHECK(telemetry::detail::resource_requests_for_testing() == requests_before + 1);
+                const auto resources = runtime.resource_telemetry_worker.latest();
+                CHECK(resources && resources->process);
+                CHECK(telemetry::detail::process_metric_opens_for_testing() == metric_opens_before);
+                const auto process_queries_after = game::detail::process_query_counts_for_testing();
+                CHECK(process_queries_after.opens == process_queries_before.opens);
+                CHECK(process_queries_after.creation_queries == process_queries_before.creation_queries);
                 auto* const session = runtime.present_session.get();
                 const auto resource_generation = runtime.resource_telemetry_generation;
                 const auto old_window = boundary.window;

@@ -108,6 +108,11 @@ private:
     std::uint32_t consecutive_misses_{0};
 };
 }  // namespace detail
+#ifdef KF2_PROCESS_METRICS_TESTING
+namespace detail {
+[[nodiscard]] std::uint32_t process_metric_opens_for_testing() noexcept;
+}
+#endif
 class ProcessMetricSampler final {
 public:
     explicit ProcessMetricSampler(game::GameProcessIdentity identity);
@@ -118,12 +123,12 @@ public:
     ProcessMetricSampler& operator=(ProcessMetricSampler&&) noexcept;
     [[nodiscard]] Result<ProcessMetrics> sample();
 private:
-    class ThreadTracker;
+    class NativeHandles;
     game::GameProcessIdentity identity_;
     std::optional<CpuTimes> previous_;
     std::optional<std::uint64_t> previous_thread_sample_ms_;
     std::optional<std::uint64_t> previous_thread_refresh_ms_;
-    std::unique_ptr<ThreadTracker> thread_tracker_;
+    std::unique_ptr<NativeHandles> native_handles_;
     detail::ThreadPressureCache thread_pressure_cache_;
     bool cpu_capacity_sampled_{false};
     std::optional<std::uint32_t> cached_affinity_logical_processors_;

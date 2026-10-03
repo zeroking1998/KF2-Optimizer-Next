@@ -78,7 +78,8 @@ PresentDrainResult drain_present_stage(app::UiRuntime& runtime,
 
 Result<TelemetryFrame> capture_telemetry_frame(
     app::UiRuntime& runtime, const game::GameWindowState& window,
-    std::uint64_t now_ns, ::kf2::telemetry::FrameMetrics frames) {
+    std::uint64_t now_ns, ::kf2::telemetry::FrameMetrics frames,
+    const ::kf2::telemetry::ResourceTelemetrySnapshot* snapshot) {
     TelemetryFrameInput input;
     input.identity = {runtime.game_process->pid,
                       runtime.game_process->process_start_id};
@@ -91,8 +92,6 @@ Result<TelemetryFrame> capture_telemetry_frame(
     input.adapter_vram_budget_bytes = runtime.adapter_vram_budget;
 
     if (input.frames.fps && input.frames.frame_time_ms) {
-        runtime.resource_telemetry_worker.request(now_ns);
-        const auto snapshot = runtime.resource_telemetry_worker.latest();
         const bool current_snapshot = snapshot &&
             snapshot->generation == runtime.resource_telemetry_generation &&
             snapshot->identity.pid == input.identity.pid &&

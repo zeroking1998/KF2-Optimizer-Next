@@ -3,6 +3,7 @@
 #include <Psapi.h>
 #include <TlHelp32.h>
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <unordered_set>
 #include <unordered_map>
@@ -10,6 +11,9 @@
 
 namespace kf2::telemetry {
 namespace {
+#ifdef KF2_PROCESS_METRICS_TESTING
+std::atomic_uint32_t process_metric_opens{0};
+#endif
 std::uint64_t value(FILETIME time) {
     return (static_cast<std::uint64_t>(time.dwHighDateTime) << 32U) |
            time.dwLowDateTime;
@@ -344,13 +348,25 @@ void detail::ThreadPressureCache::miss(std::uint64_t now_ms) noexcept {
     }
 }
 
-class ProcessMetricSampler::ThreadTracker final {
+class ProcessMetricSampler::NativeHandles final {
 public:
-    ~ThreadTracker() {
+    ~NativeHandles() {
+        if (process_) CloseHandle(process_);
         for (const auto& [thread_id, thread] : handles_) {
             static_cast<void>(thread_id);
             CloseHandle(thread.handle);
         }
+    }
+
+    HANDLE process(std::uint32_t pid) {
+        if (!process_) {
+#ifdef KF2_PROCESS_METRICS_TESTING
+            ++process_metric_opens;
+#endif
+            process_ = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION |
+                PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid);
+        }
+        return process_;
     }
 
     bool refresh(std::uint32_t pid) {
@@ -434,6 +450,7 @@ private:
         std::optional<detail::ThreadCpuTimes> previous;
     };
     std::unordered_map<std::uint32_t, Thread> handles_;
+    HANDLE process_{};
 };
 
 Result<HardwareInventory> query_hardware_inventory() {
@@ -521,7 +538,7 @@ std::optional<double> detail::calculate_thread_cpu_percent(
 
 ProcessMetricSampler::ProcessMetricSampler(game::GameProcessIdentity identity)
     : identity_{std::move(identity)},
-      thread_tracker_{std::make_unique<ThreadTracker>()} {}
+      native_handles_{std::make_unique<NativeHandles>()} {}
 
 ProcessMetricSampler::~ProcessMetricSampler() = default;
 ProcessMetricSampler::ProcessMetricSampler(ProcessMetricSampler&&) noexcept =
@@ -530,10 +547,23 @@ ProcessMetricSampler& ProcessMetricSampler::operator=(
     ProcessMetricSampler&&) noexcept = default;
 
 Result<ProcessMetrics> ProcessMetricSampler::sample() {
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION |
-                                 PROCESS_VM_READ, FALSE, identity_.pid);
+    const auto& bound_process = identity_.native_process;
+    if (bound_process && !bound_process->get(identity_)) {
+        return Result<ProcessMetrics>::failure(
+            {ErrorCode::stale_data, L"Metric process identity changed", 0});
+    }
+    const HANDLE process = bound_process && bound_process->metrics_readable()
+        ? bound_process->get(identity_) : native_handles_->process(identity_.pid);
     if (!process) return Result<ProcessMetrics>::failure(
         {ErrorCode::access_denied, L"Process metrics cannot be read", GetLastError()});
+    const auto wait = WaitForSingleObject(process, 0);
+    if (wait != WAIT_TIMEOUT) {
+        return Result<ProcessMetrics>::failure(
+            {wait == WAIT_OBJECT_0 ? ErrorCode::stale_data
+                                  : ErrorCode::platform_failure,
+             L"Metric process is not running",
+             wait == WAIT_FAILED ? GetLastError() : 0});
+    }
     FILETIME creation{}, exit{}, process_kernel{}, process_user{};
     FILETIME idle{}, system_kernel{}, system_user{};
     PROCESS_MEMORY_COUNTERS_EX memory{};
@@ -545,7 +575,6 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
                         reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),
                         sizeof(memory));
     if (ok && value(creation) != identity_.process_start_id) {
-        CloseHandle(process);
         return Result<ProcessMetrics>::failure(
             {ErrorCode::stale_data, L"Metric process identity changed", 0});
     }
@@ -560,7 +589,6 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
         cpu_capacity_sampled_ = true;
     }
     const DWORD native = ok ? ERROR_SUCCESS : GetLastError();
-    CloseHandle(process);
     if (!ok) return Result<ProcessMetrics>::failure(
         {ErrorCode::platform_failure, L"Process metric query failed", native});
     CpuTimes current{value(system_kernel) + value(system_user),
@@ -586,22 +614,22 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
         thread_now_ms - *previous_thread_sample_ms_ >=
             kThreadSampleIntervalMs) {
         bool thread_pressure_observed = false;
-        const bool refresh_due = thread_tracker_->empty() ||
+        const bool refresh_due = native_handles_->empty() ||
             !previous_thread_refresh_ms_ ||
             thread_now_ms < *previous_thread_refresh_ms_ ||
             thread_now_ms - *previous_thread_refresh_ms_ >=
                 kThreadRefreshIntervalMs;
-        if (refresh_due && thread_tracker_->refresh(identity_.pid)) {
+        if (refresh_due && native_handles_->refresh(identity_.pid)) {
             previous_thread_refresh_ms_ = thread_now_ms;
         }
         // A transient Toolhelp failure must not discard the valid handles
         // from the previous refresh. Continue sampling them and retry the
         // membership refresh on the next telemetry tick.
-        if (!thread_tracker_->empty()) {
+        if (!native_handles_->empty()) {
             const auto elapsed_ms = previous_thread_sample_ms_ &&
                 thread_now_ms > *previous_thread_sample_ms_
                 ? thread_now_ms - *previous_thread_sample_ms_ : 0;
-            if (const auto pressure = thread_tracker_->sample(elapsed_ms)) {
+            if (const auto pressure = native_handles_->sample(elapsed_ms)) {
                 thread_pressure_cache_.observe(*pressure, thread_now_ms);
                 thread_pressure_observed = true;
             }
@@ -627,4 +655,9 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
     result.private_bytes = memory.PrivateUsage;
     return Result<ProcessMetrics>::success(result);
 }
+#ifdef KF2_PROCESS_METRICS_TESTING
+std::uint32_t detail::process_metric_opens_for_testing() noexcept {
+    return process_metric_opens.load();
+}
+#endif
 }  // namespace kf2::telemetry

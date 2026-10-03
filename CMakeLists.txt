@@ -322,7 +322,8 @@ if(BUILD_TESTING)
     target_compile_definitions(KF2TestTelemetryCore PRIVATE
         KF2_PRESENT_SOURCE_TESTING)
     target_compile_definitions(KF2TestTelemetryCore PUBLIC
-        KF2_PDH_GPU_TESTING)
+        KF2_PDH_GPU_TESTING
+        KF2_PROCESS_METRICS_TESTING)
 
     add_library(KF2TestUiCore STATIC
         src/ui/numeric_presentation.cpp
@@ -371,6 +372,7 @@ if(BUILD_TESTING)
     target_include_directories(KF2TestGameCore PUBLIC
         "${PROJECT_SOURCE_DIR}/include"
     )
+    target_compile_definitions(KF2TestGameCore PUBLIC KF2_GAME_PROCESS_TESTING)
 
     add_library(KF2TestOverlayCore STATIC
         src/overlay/overlay_mascot.cpp

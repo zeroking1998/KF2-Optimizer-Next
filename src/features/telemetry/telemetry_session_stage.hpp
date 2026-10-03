@@ -8,6 +8,9 @@
 namespace kf2::app {
 struct UiRuntime;
 }
+namespace kf2::telemetry {
+struct ResourceTelemetrySnapshot;
+}
 
 namespace kf2::telemetry_pipeline {
 
@@ -148,8 +151,8 @@ struct SilentPresentInput final {
 }
 
 void attach_session_sources(app::UiRuntime& runtime);
-void refresh_session_gate(app::UiRuntime& runtime);
-void revalidate_bound_process(app::UiRuntime& runtime);
+[[nodiscard]] std::shared_ptr<const telemetry::ResourceTelemetrySnapshot>
+refresh_session_gate(app::UiRuntime& runtime);
 [[nodiscard]] SessionStageResult inspect_bound_session(
     app::UiRuntime& runtime);
 

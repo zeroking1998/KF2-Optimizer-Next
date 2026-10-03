@@ -462,6 +462,7 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_APPLICATION_LAUNCH_TESTING
     KF2_STARTUP_PREWARMER_TESTING
     KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+    KF2_RESOURCE_TELEMETRY_WORKER_TESTING
 )
 target_link_libraries(kf2_application_lifecycle_test PRIVATE
     user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs uiautomationcore bcrypt
@@ -920,7 +921,7 @@ add_executable(kf2_system_metrics_test
     windows/system_metrics_test.cpp
 )
 target_include_directories(kf2_system_metrics_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
-target_link_libraries(kf2_system_metrics_test PRIVATE psapi dwmapi)
+target_link_libraries(kf2_system_metrics_test PRIVATE psapi dwmapi advapi32)
 add_test(NAME kf2_system_metrics_test COMMAND kf2_system_metrics_test)
 
 add_executable(kf2_hardware_overview_contract_test
