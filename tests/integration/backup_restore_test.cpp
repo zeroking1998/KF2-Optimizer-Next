@@ -444,6 +444,9 @@ int main() {
     const auto complete_export =
         kf2::backup::export_preview_json(complete_catalog);
     CHECK(complete_export.has_value());
+    CHECK(complete_export.value().find(
+        "\"reason\":\"quote \\\" slash \\\\ newline\\nUnicode caf\xc3\xa9\"") !=
+          std::string::npos);
     const auto complete_import =
         kf2::backup::import_requested_changes_json(complete_export.value());
     CHECK(complete_import.has_value());

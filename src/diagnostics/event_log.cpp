@@ -10,6 +10,7 @@
 #include <utility>
 #include <Windows.h>
 
+#include "kf2/core/json_escape.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
 
 namespace kf2::diagnostics {
@@ -51,30 +52,6 @@ std::string utf8(std::wstring_view value) {
     return result;
 }
 
-std::string escape(std::string_view value) {
-    std::ostringstream output;
-    for (const unsigned char character : value) {
-        switch (character) {
-            case '"': output << "\\\""; break;
-            case '\\': output << "\\\\"; break;
-            case '\b': output << "\\b"; break;
-            case '\f': output << "\\f"; break;
-            case '\n': output << "\\n"; break;
-            case '\r': output << "\\r"; break;
-            case '\t': output << "\\t"; break;
-            default:
-                if (character < 0x20) {
-                    constexpr char digits[] = "0123456789abcdef";
-                    output << "\\u00" << digits[character >> 4]
-                           << digits[character & 0x0f];
-                } else {
-                    output << static_cast<char>(character);
-                }
-        }
-    }
-    return output.str();
-}
-
 void write_events(std::ostringstream& output, const std::vector<Event>& events) {
     bool first = true;
     for (const auto& event : events) {
@@ -84,9 +61,9 @@ void write_events(std::ostringstream& output, const std::vector<Event>& events) 
                                event.severity == Severity::warning ? "warning" : "info";
         output << "{\"sequence\":" << event.sequence
                << ",\"severity\":\"" << severity
-               << "\",\"code\":\"" << escape(event.code)
-               << "\",\"source\":\"" << escape(utf8(event.source))
-               << "\",\"message\":\"" << escape(utf8(event.message))
+               << "\",\"code\":\"" << json_escape(event.code)
+               << "\",\"source\":\"" << json_escape(utf8(event.source))
+               << "\",\"message\":\"" << json_escape(utf8(event.message))
                << "\",\"repeat_count\":" << event.repeat_count << "}";
     }
 }
@@ -382,7 +359,7 @@ std::string serialize_events_json(const std::vector<Event>& events) {
 }
 
 std::string serialize_product_report_json(const ProductReport& report) {
-    const auto text = [](std::wstring_view value) { return escape(utf8(value)); };
+    const auto text = [](std::wstring_view value) { return json_escape(utf8(value)); };
     std::ostringstream output;
     output << "{\"schema\":\"KF2_OPTIMIZER_DIAGNOSTICS_V2\""
            << ",\"build_identity\":\"" << text(report.build_identity) << "\""

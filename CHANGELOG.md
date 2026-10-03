@@ -99,6 +99,9 @@ are visible immediately.
 - Removed unused runtime helpers and graphics-preview bookkeeping. Corpse
   telemetry no longer queries native awake state for an unpublished counter;
   controller inputs, graphics readback and active restoration remain unchanged.
+- Configuration-preview, diagnostics and inventory exports now share one JSON
+  string-escaping function instead of three identical copies. Existing output
+  bytes and recovery contracts are unchanged.
 
 - DXGI frame timestamps now use exact integer clock conversion instead of
   floating-point scaling, preserving nanosecond intervals and rejecting

@@ -8,7 +8,9 @@
 #include <iostream>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 #include <Windows.h>
 
@@ -114,6 +116,35 @@ int main() {
     CHECK(json.find("\"version\":1") != std::string::npos);
     CHECK(json.find("\"severity\":\"warning\"") != std::string::npos);
     CHECK(json.find("\"code\":\"C\"") != std::string::npos);
+
+    // Preserve the exact string bytes shared by all JSON exports.
+    const std::pair<std::string, std::string> escaped_codes[]{
+        {"", ""}, {"plain / text", "plain / text"},
+        {"\"\\\b\f\n\r\t", "\\\"\\\\\\b\\f\\n\\r\\t"},
+        {std::string{"\x00\x01\x02\x03\x04\x05\x06\x07"
+                     "\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
+                     "\x10\x11\x12\x13\x14\x15\x16\x17"
+                     "\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f", 32},
+         "\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007"
+         "\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f"
+         "\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017"
+         "\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f"},
+        {"UTF8 \xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80",
+         "UTF8 \xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80"},
+        {"\x7f\x80\xff", "\x7f\x80\xff"},
+    };
+    for (const auto& [input, expected] : escaped_codes) {
+        CHECK(kf2::diagnostics::serialize_events_json(
+            {Event{17, Severity::warning, input, L"", L""}}) ==
+            "{\"version\":1,\"events\":[{\"sequence\":17,"
+            "\"severity\":\"warning\",\"code\":\"" + expected +
+            "\",\"source\":\"\",\"message\":\"\",\"repeat_count\":1}]}");
+    }
+    kf2::diagnostics::ProductReport escaped_report;
+    escaped_report.build_identity = L"quote\"\\\nUnicode caf\u00e9";
+    CHECK(kf2::diagnostics::serialize_product_report_json(escaped_report).find(
+        "\"build_identity\":\"quote\\\"\\\\\\nUnicode caf\xc3\xa9\"") !=
+          std::string::npos);
 
     const auto persistent_root = std::filesystem::temp_directory_path() /
         (L"kf2-event-log-" + std::to_wstring(GetCurrentProcessId()));
