@@ -33,6 +33,7 @@
 
 #include "kf2/app/application.hpp"
 #include "kf2/config/setting_catalog.hpp"
+#include "kf2/flex/flex_lab.hpp"
 #include "kf2/optimizer/startup_gpu_profile.hpp"
 #include "kf2/security/sha256.hpp"
 #include "kf2/ui/shell_layout.hpp"
@@ -2708,9 +2709,86 @@ int test_launch_profile_allocation_failures() {
     return EXIT_SUCCESS;
 }
 
+int test_flex_recovery_installation_owner() {
+    namespace fs = std::filesystem;
+    using namespace kf2;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"flex-owner" /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" +
+         std::to_wstring(GetTickCount64()));
+    const auto old_install = root / L"old";
+    const auto new_install = root / L"new";
+    const auto config = root / L"Documents/Config";
+    const auto portable = root / L"portable";
+    fs::create_directories(portable);
+    const auto write_catalog = [&] {
+        if (!write_complete_config_catalog(config)) return false;
+        auto system = config::IniDocument::parse(read_bytes(config / L"KFSystemSettings.ini"));
+        if (!system.has_value()) return false;
+        if (system.value().upsert(L"SystemSettings", L"bAllowTemporalAA",
+                                  L"False").shadowed_occurrences != 0) return false;
+        write_bytes(config / L"KFSystemSettings.ini", system.value().serialize());
+        return true;
+    };
+    for (const auto& install : {old_install, new_install}) {
+        fs::create_directories(install / L"Binaries/Win64");
+        write_test_pe(install / L"Binaries/Win64/KFGame.exe");
+        write_bytes(install / L"Engine/Config/ConsoleVariables.ini", "[Startup]\r\n");
+    }
+    const game::GameDiscoveryInput discovery{
+        .manual_candidates = {old_install}, .config_root = config,
+        .allowed_config_parent = root / L"Documents"};
+    // Startup can prefer Steam B over saved manual A. It must not consume A's
+    // FleX journal or change B, even when their original runtimes are identical.
+    CHECK(write_catalog());
+    const auto recovery_state = root / L"owner-recovery";
+    const auto old_flex = old_install / L"Binaries/Win64";
+    const auto new_flex = new_install / L"Binaries/Win64";
+    const auto forwarder = root / L"flexRelease_x64.forwarder-lab.dll";
+    write_bytes(old_flex / L"flexRelease_x64.dll", "original-runtime");
+    write_bytes(new_flex / L"flexRelease_x64.dll", "original-runtime");
+    write_bytes(forwarder, "forwarder");
+    CHECK(flex::install_offline_lab({old_flex, recovery_state / L"flex-lab",
+        forwarder, false, true, true, false}).has_value());
+    const auto recovery_marker = recovery_state / L"flex-lab/flex-lab-transaction.marker";
+    const auto recovery_before = read_bytes(recovery_marker);
+    auto fallback_discovery = discovery;
+    fallback_discovery.steam_library_candidates = {new_install};
+    config::Settings recovery_settings;
+    recovery_settings.manual_game_path = *app::path_utf8(old_install);
+    recovery_settings.automatic_update_checks = false;
+    diagnostics::EventLog recovery_events{128};
+    {
+        app::UiRuntime runtime{recovery_state, false, recovery_settings,
+            recovery_events, fallback_discovery, app::StartMode::read_only, portable};
+        CHECK(runtime.installation.has_value());
+        CHECK(runtime.installation->install_root == new_install);
+        CHECK(runtime.model.recovery_required());
+        CHECK(read_bytes(new_flex / L"flexRelease_x64.dll") == "original-runtime");
+        CHECK(!fs::exists(new_flex / L"flexRelease_original.dll"));
+        CHECK(read_bytes(old_flex / L"flexRelease_x64.dll") == "forwarder");
+        CHECK(read_bytes(old_flex / L"flexRelease_original.dll") == "original-runtime");
+        CHECK(read_bytes(recovery_marker) == recovery_before);
+    }
+    const auto recovery_log = recovery_events.snapshot();
+    CHECK(std::any_of(recovery_log.begin(), recovery_log.end(), [](const auto& event) {
+        return event.code == "FLEX_LAB_RECOVERY_BLOCKED";
+    }));
+    {
+        app::UiRuntime runtime{recovery_state, false, recovery_settings,
+            recovery_events, discovery, app::StartMode::read_only, portable};
+        CHECK(!runtime.model.recovery_required());
+        CHECK(read_bytes(old_flex / L"flexRelease_x64.dll") == "original-runtime");
+        CHECK(read_bytes(new_flex / L"flexRelease_x64.dll") == "original-runtime");
+        CHECK(!fs::exists(recovery_marker));
+        CHECK(!fs::exists(old_flex / L"flexRelease_original.dll"));
+    }
+    return EXIT_SUCCESS;
+}
+
 int test_game_folder_ownership() {
     namespace fs = std::filesystem;
     using namespace kf2;
+    CHECK(test_flex_recovery_installation_owner() == EXIT_SUCCESS);
     const auto root = fs::path{KF2_TEST_ROOT} / L"gfo" /
         (std::to_wstring(GetCurrentProcessId()) + L"-" +
          std::to_wstring(GetTickCount64()));
@@ -4143,6 +4221,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     CHECK(test_pending_policy_restage_failure_rollback() == EXIT_SUCCESS);
+    CHECK(test_flex_recovery_installation_owner() == EXIT_SUCCESS);
     CHECK(test_map_prewarm_retry_scheduler() == EXIT_SUCCESS);
     CHECK(test_gameplay_snapshot_lifetime() == EXIT_SUCCESS);
     CHECK(kf2::app::should_prepare_protected_gameplay_provider(
