@@ -304,6 +304,16 @@ int test_flex_report_boundaries() {
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_telemetry ==
         L"FleX active particles: 38 (read-only runtime source; aggregate unavailable)");
+    shared.last_active_particles = shared.max_active_particles = 0;
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry ==
+        L"FleX active particles: 0 (read-only runtime source; aggregate unavailable)");
+    shared.last_active_particles = shared.max_active_particles =
+        std::numeric_limits<LONG>::max();
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry ==
+        L"FleX active particles: 2147483647 (read-only runtime source; aggregate unavailable)");
+    shared.last_active_particles = shared.max_active_particles = 38;
     shared.last_active_count_tick = 1;
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_telemetry == L"FleX active-particle value is stale");
@@ -363,6 +373,31 @@ int test_flex_report_boundaries() {
     shared.velocity_upload_calls = 1;
     shared.particle_download_calls = 4;
     shared.phase_download_calls = 1;
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry ==
+        L"FleX solvers: 1 | particles active/free/capacity: 37/987/1024 | "
+        L"transfers up/down: 6/5 (read-only runtime source)");
+    const auto numeric_shared = shared;
+    shared.live_solvers = shared.max_live_solvers = 64;
+    shared.aggregate_active_particles = 0;
+    shared.aggregate_free_particles = shared.aggregate_particle_capacity =
+        std::numeric_limits<LONG>::max();
+    shared.particle_upload_calls = shared.phase_upload_calls =
+        std::numeric_limits<LONGLONG>::max();
+    shared.velocity_upload_calls = 0;
+    shared.particle_download_calls = shared.phase_download_calls =
+        shared.velocity_download_calls = 0;
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry ==
+        L"FleX solvers: 64 | particles active/free/capacity: 0/2147483647/2147483647 | "
+        L"transfers up/down: 18446744073709551614/0 (read-only runtime source)");
+    shared.aggregate_free_particles = shared.aggregate_particle_capacity = 0;
+    shared.particle_upload_calls = shared.phase_upload_calls = 0;
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry ==
+        L"FleX solvers: 64 | particles active/free/capacity: 0/0/0 | "
+        L"transfers up/down: 0/0 (read-only runtime source)");
+    shared = numeric_shared;
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_telemetry ==
         L"FleX solvers: 1 | particles active/free/capacity: 37/987/1024 | "
