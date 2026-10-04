@@ -170,19 +170,39 @@ app::runtime::DispatchResult export_support(
                     L"initialized. No support bundle was written.");
         return app::runtime::DispatchResult::handled;
     }
+    // Explicit export is a persistence boundary, not another live polling
+    // cadence. Refresh once, then confirm the last verified FleX report.
+    runtime.observe_flex_process();
+    bool flex_saved = true;
+    if (runtime.last_flex_observation &&
+        runtime.last_flex_observation->diagnostics_enabled &&
+        runtime.last_flex_observation->update_calls > 0) {
+        flex_saved = runtime.save_flex_report(*runtime.last_flex_observation);
+        if (!flex_saved) {
+            runtime.events->append({0, product_diagnostics::Severity::warning,
+                "FLEX_REPORT_SAVE_FAILED",
+                L"The last verified FleX report could not be saved; retry the diagnostic export",
+                L"flex"});
+        }
+    }
     const auto document = product_diagnostics::serialize_support_bundle_json(
         make_product_report(runtime), inventory);
     const auto exported = platform::windows::atomic_replace_utf8(
         runtime.settings_path.parent_path() / L"private-support-bundle.json",
         document);
+    if (!exported.has_value()) {
+        show_notice(runtime, ui::NoticeSeverity::error,
+                    L"EXPORT_FAILED", exported.error().message);
+        return app::runtime::DispatchResult::handled;
+    }
     show_notice(runtime,
-                exported.has_value() ? ui::NoticeSeverity::info
-                                     : ui::NoticeSeverity::error,
-                exported.has_value() ? L"SUPPORT_BUNDLE_EXPORTED"
-                                     : L"EXPORT_FAILED",
-                exported.has_value()
+                flex_saved ? ui::NoticeSeverity::info
+                           : ui::NoticeSeverity::warning,
+                flex_saved ? L"SUPPORT_BUNDLE_EXPORTED"
+                           : L"SUPPORT_BUNDLE_PARTIAL",
+                flex_saved
                     ? L"A privacy-safe local support bundle was exported to Data. Nothing was uploaded."
-                    : exported.error().message);
+                    : L"The support bundle was saved, but the FleX report could not be updated. Retry export. Nothing was uploaded.");
     return app::runtime::DispatchResult::handled;
 }
 

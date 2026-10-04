@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- FleX diagnostics no longer serialize or flush a report every two seconds.
+  Live observations stay in memory; session detach and explicit support export
+  save the latest verified counters and report persistence failures.
+
 - Current project and acceptance documents now share source-checked test and
   settings-catalog inventories instead of contradictory old totals. Historical
   gameplay evidence is kept separate from new-build acceptance.
