@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Update and Auto Repair now wait for synchronous Windows ZIP extraction to
+  finish before checking or cleaning staged files; partial or aborted copies
+  fail safely without a fixed-delay completion guess.
+
 - Auto Repair now verifies the exact-version release archive against GitHub's
   published SHA-256 and size before extraction, using the same checks as updates.
   Missing or mismatched metadata cannot authorize repairs.
