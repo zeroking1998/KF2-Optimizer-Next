@@ -1,6 +1,10 @@
 #include "application_runtime.hpp"
 
+#include <algorithm>
 #include <array>
+#include <sstream>
+
+#include "kf2/security/sha256.hpp"
 
 namespace kf2::app {
 namespace {
@@ -10,6 +14,73 @@ using VideoConfigWriteTimes =
 
 constexpr std::uint64_t kAdaptiveFrameRateConfigPollIntervalNs =
     1'000'000'000ULL;
+
+Result<game::VideoSettings> parse_graphics_replay(
+    std::string_view bytes, const config::SessionConfigSnapshot& snapshot) {
+    const auto separator = bytes.find('\n');
+    const auto payload = separator == std::string_view::npos
+        ? std::string_view{} : bytes.substr(separator + 1);
+    const auto hash = security::sha256_hex(payload);
+    int schema{};
+    std::uint64_t volume{}, file{};
+    game::VideoSettings settings;
+    game::Resolution resolution;
+    std::istringstream fields{std::string{payload}};
+    bool valid = bytes.size() <= 4096 && hash.has_value() &&
+        bytes.substr(0, separator) == hash.value() &&
+        bool(fields >> schema >> volume >> file) && schema == 1 &&
+        volume == snapshot.root_volume && file == snapshot.root_file &&
+        (volume != 0 || file != 0);
+    for (auto& choice : settings.choices) valid = bool(fields >> choice) && valid;
+    valid = bool(fields >> resolution.width >> resolution.height >>
+        settings.film_grain_percent >> settings.flex_level) && valid;
+    fields >> std::ws;
+    settings.resolutions = {resolution};
+    valid = valid && fields.eof() && resolution.width >= 640 &&
+        resolution.width <= 16384 && resolution.height >= 480 &&
+        resolution.height <= 16384 && settings.film_grain_percent >= 0 &&
+        settings.film_grain_percent <= 100 && settings.flex_level >= 0 &&
+        settings.flex_level <= 2;
+    for (std::size_t index = 0; index < game::kVideoOptionCount; ++index) {
+        const auto option = static_cast<game::VideoOption>(index);
+        valid = valid && settings.choices[index] >=
+            (option == game::VideoOption::resolution ? 0 : -1) &&
+            settings.choices[index] < game::video_choice_count(option, settings) +
+                (option == game::VideoOption::overall_quality ? 1 : 0);
+    }
+    if (!valid) return Result<game::VideoSettings>::failure({
+        ErrorCode::recovery_required,
+        L"Retained graphics changes failed schema, hash or root verification", 0});
+    return Result<game::VideoSettings>::success(std::move(settings));
+}
+
+Result<std::string> serialize_graphics_replay(
+    const game::VideoSettings& settings,
+    const config::SessionConfigSnapshot& snapshot) {
+    const auto selected = settings.choices[static_cast<std::size_t>(
+        game::VideoOption::resolution)];
+    if (selected < 0 || selected >= static_cast<int>(settings.resolutions.size())) {
+        return Result<std::string>::failure({ErrorCode::invalid_argument,
+            L"Confirmed graphics resolution is invalid", 0});
+    }
+    std::string payload = "1 " + std::to_string(snapshot.root_volume) + " " +
+        std::to_string(snapshot.root_file);
+    for (std::size_t index = 0; index < game::kVideoOptionCount; ++index) {
+        payload += " " + std::to_string(index == static_cast<std::size_t>(
+            game::VideoOption::resolution) ? 0 : settings.choices[index]);
+    }
+    const auto resolution = settings.resolutions[static_cast<std::size_t>(selected)];
+    payload += " " + std::to_string(resolution.width) + " " +
+        std::to_string(resolution.height) + " " +
+        std::to_string(settings.film_grain_percent) + " " +
+        std::to_string(settings.flex_level) + "\n";
+    const auto hash = security::sha256_hex(payload);
+    if (!hash.has_value()) return Result<std::string>::failure(hash.error());
+    auto bytes = hash.value() + "\n" + payload;
+    const auto checked = parse_graphics_replay(bytes, snapshot);
+    if (!checked.has_value()) return Result<std::string>::failure(checked.error());
+    return Result<std::string>::success(std::move(bytes));
+}
 
 std::optional<VideoConfigWriteTimes> read_video_config_write_times(
     const std::filesystem::path& config_root) {
@@ -31,6 +102,100 @@ std::optional<VideoConfigWriteTimes> read_video_config_write_times(
 }
 
 }  // namespace
+
+Result<std::size_t> UiRuntime::restore_session_video_settings() {
+    if (!session_config_snapshot) return Result<std::size_t>::success(0);
+    const auto& snapshot = *session_config_snapshot;
+    const auto journal = snapshot.snapshot_root / L"graphics-replay.txt";
+    std::error_code error;
+    bool pending = std::filesystem::exists(journal, error);
+    if (error) return Result<std::size_t>::failure({ErrorCode::io_failure,
+        L"Graphics replay status could not be inspected",
+        static_cast<std::uint32_t>(error.value())});
+    // Validate the root-bound original snapshot before writing recovery data.
+    // Ordinary restoration uses its existing validation without a second scan.
+    if (pending || session_video_native_changes) {
+        const auto resumed = config::resume_session_config(
+            snapshot.config_root, settings_path.parent_path());
+        if (!resumed.has_value()) return Result<std::size_t>::failure(resumed.error());
+        if (!resumed.value() || resumed.value()->snapshot_root != snapshot.snapshot_root ||
+            resumed.value()->root_volume != snapshot.root_volume ||
+            resumed.value()->root_file != snapshot.root_file) {
+            return Result<std::size_t>::failure({ErrorCode::recovery_required,
+                L"Protected session identity changed before graphics recovery", 0});
+        }
+    }
+    if (!pending && session_video_native_changes) {
+        const auto bytes = serialize_graphics_replay(*session_video_native_changes, snapshot);
+        if (!bytes.has_value()) return Result<std::size_t>::failure(bytes.error());
+        const auto written = platform::windows::atomic_replace_utf8(journal, bytes.value());
+        if (!written.has_value()) return Result<std::size_t>::failure(written.error());
+        const auto verified = platform::windows::read_bounded_verified_file(journal, 4096);
+        if (!verified.has_value()) return Result<std::size_t>::failure(verified.error());
+        if (verified.value() != bytes.value()) return Result<std::size_t>::failure({
+            ErrorCode::stale_data, L"Graphics replay journal readback failed", 0});
+        pending = true;
+    }
+    if (pending) {
+        const auto bytes = platform::windows::read_bounded_verified_file(journal, 4096);
+        if (!bytes.has_value()) return Result<std::size_t>::failure(bytes.error());
+        auto desired = parse_graphics_replay(bytes.value(), snapshot);
+        if (!desired.has_value()) return Result<std::size_t>::failure(desired.error());
+        session_video_native_changes = std::move(desired.value());
+    }
+    const auto restored = config::restore_session_config(snapshot, pending);
+    if (!restored.has_value()) return restored;
+    if (pending) {
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+        const auto probe = [this](VideoPreapplyStage stage) {
+            if (video_preapply_probe_for_testing) video_preapply_probe_for_testing(stage);
+        };
+        probe(VideoPreapplyStage::replay_read);
+#endif
+        const auto original = game::read_video_settings(snapshot.config_root);
+        if (!original.has_value()) return Result<std::size_t>::failure(original.error());
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+        probe(VideoPreapplyStage::replay_preview);
+#endif
+        const auto prepared = game::build_video_preview(
+            snapshot.config_root, *session_video_native_changes, &original.value());
+        if (!prepared.has_value()) return Result<std::size_t>::failure(prepared.error());
+        const bool changed = std::any_of(prepared.value().files.begin(),
+            prepared.value().files.end(), [](const auto& file) {
+                return file.original_bytes != file.proposed_bytes;
+            });
+        if (changed) {
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+            probe(VideoPreapplyStage::replay_apply);
+#endif
+            const auto applied = config::apply_preview(prepared.value(), backups,
+                {.game_running = game_process.has_value()});
+            if (!applied.has_value()) return Result<std::size_t>::failure(applied.error());
+        }
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+        probe(VideoPreapplyStage::replay_verify);
+#endif
+        for (const auto& file : prepared.value().files) {
+            const auto bytes = platform::windows::read_bounded_verified_file(
+                snapshot.config_root / file.relative_path, 16U * 1024U * 1024U);
+            if (!bytes.has_value()) return Result<std::size_t>::failure(bytes.error());
+            if (bytes.value() != file.proposed_bytes) return Result<std::size_t>::failure({
+                ErrorCode::stale_data, L"Confirmed graphics replay readback failed", 0});
+        }
+        const auto completed = config::complete_session_config(snapshot);
+        if (!completed.has_value()) return Result<std::size_t>::failure(completed.error());
+        events->append({0, diagnostics::Severity::info, "KF2_NATIVE_GRAPHICS_PRESERVED",
+            L"Confirmed graphics changes were saved and verified; temporary session values were excluded",
+            L"graphics"});
+    }
+    session_config_snapshot.reset();
+    session_video_runtime.reset();
+    session_video_native_changes.reset();
+    session_config_waiting_for_launch = false;
+    session_config_launch_deadline_ns = 0;
+    if (pending) reload_video_settings();
+    return restored;
+}
 
 void UiRuntime::refresh_video_presentation() {
     auto status = model.status();

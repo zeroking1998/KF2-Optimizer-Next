@@ -298,8 +298,7 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
         }
     }
     if (session_config_snapshot) {
-        const auto restored =
-            config::restore_session_config(*session_config_snapshot);
+        const auto restored = restore_session_video_settings();
         if (!restored.has_value()) {
             events->append({0, diagnostics::Severity::error,
                 "SESSION_CONFIG_RESTORE_FAILED", restored.error().message,
@@ -307,7 +306,7 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
             model.set_recovery_required(true);
             model.set_notice({ui::NoticeSeverity::error,
                 L"SESSION_CONFIG_RESTORE_FAILED", restored.error().message,
-                L"Do not start KF2 again until the protected INI snapshot is restored."});
+                L"The protected originals and confirmed graphics replay remain retained. Keep KF2 closed and restart the Optimizer to retry recovery."});
             complete = false;
         } else {
             events->append({0, diagnostics::Severity::info,
@@ -323,74 +322,6 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
                         std::to_wstring(restored.value()) +
                         L" protected INI files were restored and verified.", L""});
             }
-            session_config_snapshot.reset();
-            session_config_waiting_for_launch = false;
-            session_config_launch_deadline_ns = 0;
-            // Restore the protected originals first, then replay only the
-            // graphics delta observed across KF2's confirmed settings restart.
-            // Temporary protected-session values must never be persisted.
-            if (installation && session_video_native_changes) {
-                const auto original = game::read_video_settings(
-                    installation->config_root);
-                if (original.has_value()) {
-                    if (original.value().choices ==
-                            session_video_native_changes->choices &&
-                        original.value().film_grain_percent ==
-                            session_video_native_changes->film_grain_percent &&
-                        game::video_choice_label(game::VideoOption::resolution,
-                            original.value()) ==
-                            game::video_choice_label(game::VideoOption::resolution,
-                                *session_video_native_changes)) {
-                        session_video_native_changes.reset();
-                    }
-                }
-                if (original.has_value() && session_video_native_changes) {
-                    const auto prepared = game::build_video_preview(
-                        installation->config_root,
-                        *session_video_native_changes, &original.value());
-                    if (prepared.has_value()) {
-                        const auto applied = config::apply_preview(
-                            prepared.value(), backups,
-                            {.game_running = game_process.has_value()});
-                        if (applied.has_value()) {
-                            events->append({0, diagnostics::Severity::info,
-                                "KF2_NATIVE_GRAPHICS_PRESERVED",
-                                L"KF2's confirmed graphics changes were saved separately from temporary protected-session values",
-                                L"graphics"});
-                            reload_video_settings();
-                        } else {
-                            complete = false;
-                            events->append({0, diagnostics::Severity::error,
-                                "KF2_NATIVE_GRAPHICS_SAVE_FAILED",
-                                applied.error().message, L"graphics"});
-                            model.set_notice({ui::NoticeSeverity::warning,
-                                L"KF2_NATIVE_GRAPHICS_SAVE_FAILED",
-                                L"Original INIs were restored, but KF2's graphics change could not be saved: " +
-                                    applied.error().message, L""});
-                        }
-                    } else {
-                        complete = false;
-                        events->append({0, diagnostics::Severity::error,
-                            "KF2_NATIVE_GRAPHICS_SAVE_FAILED",
-                            prepared.error().message, L"graphics"});
-                        model.set_notice({ui::NoticeSeverity::warning,
-                            L"KF2_NATIVE_GRAPHICS_SAVE_FAILED",
-                            L"Original INIs were restored, but KF2's graphics change could not be saved: " +
-                                prepared.error().message, L""});
-                    }
-                } else if (!original.has_value()) {
-                    complete = false;
-                    events->append({0, diagnostics::Severity::error,
-                        "KF2_NATIVE_GRAPHICS_SAVE_FAILED",
-                        original.error().message, L"graphics"});
-                    model.set_notice({ui::NoticeSeverity::warning,
-                        L"KF2_NATIVE_GRAPHICS_SAVE_FAILED",
-                        L"Original INIs were restored, but KF2's graphics change could not be read: " +
-                            original.error().message, L""});
-                }
-            }
-            session_video_runtime.reset();
-            session_video_native_changes.reset();
         }
     }
     if (!restore_fixed_flex_runtime(reason)) complete = false;

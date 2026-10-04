@@ -709,14 +709,30 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
                         recovery_required = true;
                     } else if (resumed.value()) {
                         session_config_snapshot = std::move(*resumed.value());
+                        std::error_code replay_error;
+                        if (std::filesystem::exists(
+                                session_config_snapshot->snapshot_root /
+                                    L"graphics-replay.txt", replay_error) || replay_error) {
+                            recovery_required = true;
+                            event_log.append({0, diagnostics::Severity::warning,
+                                "KF2_NATIVE_GRAPHICS_RECOVERY_DEFERRED",
+                                L"Confirmed graphics recovery is pending; close KF2 before retrying",
+                                L"graphics"});
+                        }
                         event_log.append({0, diagnostics::Severity::info,
                             "SESSION_CONFIG_RESUMED",
                             L"Existing verified KF2 INI snapshot was resumed for the running game session",
                             L"config"});
                     }
                 } else {
-                    const auto ini_recovered = config::recover_session_config(
-                        installation->config_root, state_root, false);
+                    auto resumed = config::resume_session_config(
+                        installation->config_root, state_root);
+                    if (resumed.has_value() && resumed.value()) {
+                        session_config_snapshot = std::move(*resumed.value());
+                    }
+                    const auto ini_recovered = resumed.has_value()
+                        ? restore_session_video_settings()
+                        : Result<std::size_t>::failure(resumed.error());
                     if (!ini_recovered.has_value()) {
                         event_log.append({0, diagnostics::Severity::error,
                             "SESSION_CONFIG_RECOVERY_BLOCKED",

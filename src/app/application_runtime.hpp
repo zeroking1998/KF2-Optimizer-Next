@@ -116,7 +116,10 @@ enum class VideoSyncDisposition {
 };
 
 #if defined(KF2_APPLICATION_VIDEO_TESTING)
-enum class VideoPreapplyStage { restored_read, preview_build };
+enum class VideoPreapplyStage {
+    restored_read, preview_build, replay_read, replay_preview,
+    replay_apply, replay_verify,
+};
 #endif
 
 struct AdaptiveRuntimePendingRequest final {
@@ -469,6 +472,8 @@ struct UiRuntime {
     VideoSyncDisposition synchronize_final_video_settings_from_game();
 
     bool preserve_final_graphics_evidence();
+
+    Result<std::size_t> restore_session_video_settings();
 
     bool restore_live_adaptive_quality(std::wstring_view reason);
 
