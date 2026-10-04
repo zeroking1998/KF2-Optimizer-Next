@@ -90,8 +90,8 @@ are visible immediately.
 
 - Reuse unchanged FleX display state instead of copying the complete UI status
   on every observation and capability check. Borrow constant diagnostic labels
-  instead of allocating them every sample. Live readbacks and control timing
-  remain unchanged.
+  and reuse unchanged particle values instead of allocating their text every
+  sample. Live readbacks and control timing remain unchanged.
 
 - Keep healthy minimal FleX readback available when solver capacity is known
   but active/free particle counts have not been observed. Missing counts stay

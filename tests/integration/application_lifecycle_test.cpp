@@ -268,6 +268,21 @@ int test_flex_report_boundaries() {
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_telemetry ==
         L"FleX solvers: 1 | particle capacity: 1024 | active/free awaiting a fresh count");
+    const auto capacity_label = runtime.model.status().flex_telemetry;
+    publish(61, false);
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry == capacity_label);
+    CHECK(runtime.last_flex_observation->update_calls == 61);
+    shared.aggregate_particle_capacity = 2048;
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry ==
+        L"FleX solvers: 1 | particle capacity: 2048 | active/free awaiting a fresh count");
+    shared.live_solvers = shared.max_live_solvers = 2;
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry ==
+        L"FleX solvers: 2 | particle capacity: 2048 | active/free awaiting a fresh count");
+    shared.live_solvers = shared.max_live_solvers = 1;
+    shared.aggregate_particle_capacity = 1024;
     shared.aggregate_capacity_valid = 0;
     shared.active_count_calls = shared.active_particles_valid = 1;
     shared.last_active_count_tick = GetTickCount64();
@@ -275,6 +290,10 @@ int test_flex_report_boundaries() {
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_telemetry ==
         L"FleX active particles: 37 (read-only runtime source; aggregate unavailable)");
+    shared.last_active_particles = shared.max_active_particles = 38;
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry ==
+        L"FleX active particles: 38 (read-only runtime source; aggregate unavailable)");
     shared.last_active_count_tick = 1;
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_telemetry == L"FleX active-particle value is stale");
@@ -300,6 +319,69 @@ int test_flex_report_boundaries() {
     CHECK(runtime.model.status().flex_telemetry ==
         L"FleX solvers: 1 | particles active/free/capacity: 37/987/1024 | "
         L"transfers up/down: 6/5 (read-only runtime source)");
+    const auto aggregate_label = runtime.model.status().flex_telemetry;
+    publish(62, false);
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry == aggregate_label);
+    CHECK(runtime.last_flex_observation->update_calls == 62);
+    CHECK(runtime.model.status().flex_readback_diagnostics ==
+        L"Minimal safety readback active; reports and extra logs are off");
+    publish(63, true);
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry == aggregate_label);
+    CHECK(runtime.model.status().flex_readback_diagnostics.find(
+        L"updates 63/63") != std::wstring::npos);
+
+    // An unchanged particle label never skips action receipt processing.
+    const auto numeric_request_at = runtime.monotonic_ns();
+    CHECK(runtime.adaptive_actuation.propose(flex_control, 1.0, std::nullopt,
+        kf2::optimizer::AdaptiveCapabilityState::available, numeric_request_at,
+        "flex_shared_memory").status ==
+        kf2::optimizer::AdaptiveActionStatus::proposed);
+    CHECK(runtime.adaptive_actuation.dispatch(flex_control, numeric_request_at));
+    shared.desired_substeps = 1;
+    shared.control_heartbeat_tick = GetTickCount64();
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry == aggregate_label);
+    CHECK(runtime.model.status().flex_action_status == L"APPLIED");
+    CHECK(runtime.model.status().flex_effective_substeps == 1);
+    runtime.adaptive_actuation.invalidate_control(flex_control);
+    shared.desired_substeps = 0;
+    shared.control_heartbeat_tick = 0;
+
+    for (const auto& [counter, expected] : std::array{
+             std::pair{&shared.particle_upload_calls, L"transfers up/down: 7/5"},
+             std::pair{&shared.phase_upload_calls, L"transfers up/down: 8/5"},
+             std::pair{&shared.velocity_upload_calls, L"transfers up/down: 9/5"},
+             std::pair{&shared.particle_download_calls, L"transfers up/down: 9/6"},
+             std::pair{&shared.phase_download_calls, L"transfers up/down: 9/7"},
+             std::pair{&shared.velocity_download_calls, L"transfers up/down: 9/8"}}) {
+        *counter = *counter + 1;
+        runtime.observe_flex_process();
+        CHECK(runtime.model.status().flex_telemetry.find(expected) != std::wstring::npos);
+    }
+    shared.live_solvers = shared.max_live_solvers = 2;
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry.find(
+        L"FleX solvers: 2 | particles active/free/capacity: 37/987/1024") !=
+        std::wstring::npos);
+    shared.aggregate_active_particles = 38;
+    shared.aggregate_free_particles = 986;
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry.find(L"38/986/1024") != std::wstring::npos);
+    shared.aggregate_free_particles = 2010;
+    shared.aggregate_particle_capacity = 2048;
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry.find(
+        L"FleX solvers: 2 | particles active/free/capacity: 38/2010/2048") !=
+        std::wstring::npos);
+    shared.oldest_active_count_tick = 1;
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry ==
+        L"FleX solvers: 2 | particle capacity: 2048 | active/free awaiting a fresh count");
+    shared.oldest_active_count_tick = GetTickCount64();
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry.find(L"38/2010/2048") != std::wstring::npos);
     shared = baseline_shared;
     const auto report = root / L"Data/flex-session-last.json";
 
@@ -358,17 +440,24 @@ int test_flex_report_boundaries() {
     CHECK(read_bytes(report).find("\"update_calls\":183") != std::string::npos);
 
     publish(184);
+    shared.live_solvers = shared.max_live_solvers = 1;
+    shared.aggregate_capacity_valid = 1;
+    shared.aggregate_particle_capacity = 4096;
     runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry.find(L"capacity: 4096") != std::wstring::npos);
     runtime.detach_telemetry(false);
     CHECK(read_bytes(report).find("\"update_calls\":184") != std::string::npos);
     CHECK(!runtime.last_flex_observation.has_value());
+    CHECK(runtime.model.status().flex_telemetry == L"FleX telemetry not observed");
 
     // Diagnostics-off never replaces a previous report, including at detach.
     const auto final_bytes = read_bytes(report);
     const auto final_stamp = fs::last_write_time(report);
     runtime.game_process = kf2::game::GameProcessIdentity{pid, start, {}};
     publish(185, false);
+    shared.aggregate_particle_capacity = 2048;
     runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry.find(L"capacity: 2048") != std::wstring::npos);
     kf2::features::diagnostics::export_support(runtime, {});
     runtime.detach_telemetry(false);
     CHECK(read_bytes(report) == final_bytes);
