@@ -33,124 +33,86 @@ D2D1_RECT_F rectangle(const DipRect& value) noexcept {
     return {value.x, value.y, value.x + value.width, value.y + value.height};
 }
 
-HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
-                   const ShellLayoutResult& layout, const Theme& theme) {
-    ComPtr<ID2D1SolidColorBrush> brush;
-    HRESULT result = target->CreateSolidColorBrush(color(theme.background), &brush);
-    if (FAILED(result)) return result;
-
+struct TextFormats {
     ComPtr<IDWriteTextFormat> body_format;
-    result = write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0F, L"de-de",
-        &body_format);
-    if (FAILED(result)) return result;
-    body_format->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
-    body_format->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
-                                19.0F, 14.5F);
-
     ComPtr<IDWriteTextFormat> section_format;
-    result = write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12.5F, L"de-de",
-        &section_format);
-    if (FAILED(result)) return result;
-    section_format->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
-    section_format->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
-                                   17.0F, 13.0F);
-
     ComPtr<IDWriteTextFormat> heading_format;
-    result = write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 26.0F, L"de-de",
-        &heading_format);
-    if (FAILED(result)) return result;
-
     ComPtr<IDWriteTextFormat> brand_format;
-    result = write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_BOLD,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 20.0F, L"de-de",
-        &brand_format);
-    if (FAILED(result)) return result;
-
     ComPtr<IDWriteTextFormat> brand_mark_format;
-    result = write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_BOLD,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 34.0F, L"de-de",
-        &brand_mark_format);
-    if (FAILED(result)) return result;
-
     ComPtr<IDWriteTextFormat> action_format;
-    result = write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0F, L"de-de",
-        &action_format);
-    if (FAILED(result)) return result;
-    action_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    action_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-
     ComPtr<IDWriteTextFormat> navigation_format;
-    result = write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0F, L"de-de",
-        &navigation_format);
-    if (FAILED(result)) return result;
-    navigation_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-    navigation_format->SetParagraphAlignment(
-        DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-
     ComPtr<IDWriteTextFormat> metric_format;
-    result = write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0F, L"de-de",
-        &metric_format);
-    if (FAILED(result)) return result;
-    metric_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    metric_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-
     ComPtr<IDWriteTextFormat> metric_value_format;
-    result = write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_BOLD,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 15.0F, L"de-de",
-        &metric_value_format);
-    if (FAILED(result)) return result;
-    metric_value_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    metric_value_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-    metric_value_format->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
-                                        19.0F, 14.5F);
-
     ComPtr<IDWriteTextFormat> slider_label_format;
-    result = write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 15.0F, L"de-de",
-        &slider_label_format);
-    if (FAILED(result)) return result;
-
     ComPtr<IDWriteTextFormat> slider_value_format;
-    result = write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_BOLD,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 17.0F, L"de-de",
-        &slider_value_format);
-    if (FAILED(result)) return result;
-    slider_value_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-
     ComPtr<IDWriteTextFormat> tooltip_title_format;
-    result = write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0F, L"de-de",
-        &tooltip_title_format);
-    if (FAILED(result)) return result;
-
     ComPtr<IDWriteTextFormat> tooltip_body_format;
-    result = write_factory->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0F, L"de-de",
-        &tooltip_body_format);
-    if (FAILED(result)) return result;
-    tooltip_body_format->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
-    tooltip_body_format->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
-                                        18.0F, 13.5F);
+#ifdef KF2_DIRECT2D_RENDERER_TESTING
+    unsigned creation_count{0};
+#endif
 
+    HRESULT create(IDWriteFactory* factory) {
+        struct Definition {
+            ComPtr<IDWriteTextFormat> TextFormats::*destination;
+            DWRITE_FONT_WEIGHT weight;
+            float size;
+        };
+        constexpr Definition definitions[]{
+            {&TextFormats::body_format, DWRITE_FONT_WEIGHT_NORMAL, 14.0F},
+            {&TextFormats::section_format, DWRITE_FONT_WEIGHT_SEMI_BOLD, 12.5F},
+            {&TextFormats::heading_format, DWRITE_FONT_WEIGHT_SEMI_BOLD, 26.0F},
+            {&TextFormats::brand_format, DWRITE_FONT_WEIGHT_BOLD, 20.0F},
+            {&TextFormats::brand_mark_format, DWRITE_FONT_WEIGHT_BOLD, 34.0F},
+            {&TextFormats::action_format, DWRITE_FONT_WEIGHT_SEMI_BOLD, 13.0F},
+            {&TextFormats::navigation_format, DWRITE_FONT_WEIGHT_NORMAL, 14.0F},
+            {&TextFormats::metric_format, DWRITE_FONT_WEIGHT_SEMI_BOLD, 14.0F},
+            {&TextFormats::metric_value_format, DWRITE_FONT_WEIGHT_BOLD, 15.0F},
+            {&TextFormats::slider_label_format, DWRITE_FONT_WEIGHT_SEMI_BOLD, 15.0F},
+            {&TextFormats::slider_value_format, DWRITE_FONT_WEIGHT_BOLD, 17.0F},
+            {&TextFormats::tooltip_title_format, DWRITE_FONT_WEIGHT_SEMI_BOLD, 14.0F},
+            {&TextFormats::tooltip_body_format, DWRITE_FONT_WEIGHT_NORMAL, 13.0F},
+        };
+        for (const auto& definition : definitions) {
+            const HRESULT result = factory->CreateTextFormat(
+                L"Segoe UI", nullptr, definition.weight, DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL, definition.size, L"de-de",
+                (this->*definition.destination).GetAddressOf());
+            if (FAILED(result)) return result;
+#ifdef KF2_DIRECT2D_RENDERER_TESTING
+            ++creation_count;
+#endif
+        }
+        body_format->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+        body_format->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
+                                    19.0F, 14.5F);
+        section_format->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+        section_format->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
+                                       17.0F, 13.0F);
+        action_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        action_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+        navigation_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        navigation_format->SetParagraphAlignment(
+            DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        metric_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        metric_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+        metric_value_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        metric_value_format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        metric_value_format->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
+                                            19.0F, 14.5F);
+        slider_value_format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+        tooltip_body_format->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+        tooltip_body_format->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
+                                            18.0F, 13.5F);
+        return S_OK;
+    }
+};
+
+HRESULT draw_shell(ID2D1RenderTarget* target,
+                   const ComPtr<ID2D1SolidColorBrush>& brush,
+                   const TextFormats& formats,
+                   const ShellLayoutResult& layout, const Theme& theme) {
     target->BeginDraw();
     target->Clear(color(theme.background));
     if (layout.exit_progress >= 1.0F) {
@@ -271,7 +233,7 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
             brush->SetOpacity(smooth_motion(brand_progress));
             brush->SetColor(color(mark ? theme.accent : theme.text));
             target->DrawTextW(node.text.c_str(), static_cast<UINT32>(node.text.size()),
-                              mark ? brand_mark_format.Get() : brand_format.Get(),
+                              mark ? formats.brand_mark_format.Get() : formats.brand_format.Get(),
                               rectangle(node.bounds), brush.Get(),
                               D2D1_DRAW_TEXT_OPTIONS_CLIP);
             target->SetTransform(original_transform);
@@ -313,11 +275,11 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
                 node.bounds.y + node.bounds.height - 8.0F};
             brush->SetColor(color(theme.warning));
             target->DrawTextW(title.c_str(), static_cast<UINT32>(title.size()),
-                              metric_format.Get(), title_bounds, brush.Get(),
+                              formats.metric_format.Get(), title_bounds, brush.Get(),
                               D2D1_DRAW_TEXT_OPTIONS_CLIP);
             brush->SetColor(color(value.empty() ? theme.muted_text : theme.text));
             target->DrawTextW(value.c_str(), static_cast<UINT32>(value.size()),
-                              metric_value_format.Get(), value_bounds,
+                              formats.metric_value_format.Get(), value_bounds,
                               brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
             continue;
         }
@@ -373,7 +335,7 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
                 value_pill.left - 12.0F,
                 node.bounds.y + 36.0F};
             target->DrawTextW(node.text.c_str(), static_cast<UINT32>(node.text.size()),
-                              slider_label_format.Get(), label_bounds, brush.Get(),
+                              formats.slider_label_format.Get(), label_bounds, brush.Get(),
                               D2D1_DRAW_TEXT_OPTIONS_CLIP);
             brush->SetColor(color(theme.background));
             target->FillRoundedRectangle(
@@ -391,7 +353,7 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
                                                : theme.muted_text));
             target->DrawTextW(visible_value.c_str(),
                               static_cast<UINT32>(visible_value.size()),
-                              slider_value_format.Get(), value_bounds, brush.Get(),
+                              formats.slider_value_format.Get(), value_bounds, brush.Get(),
                               D2D1_DRAW_TEXT_OPTIONS_CLIP);
 
             const float track_left = node.bounds.x + 28.0F;
@@ -573,7 +535,7 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
             brush->SetColor(color(theme.text));
             target->DrawTextW(
                 node.text.c_str(), static_cast<UINT32>(node.text.size()),
-                tooltip_title_format.Get(), title_bounds, brush.Get(),
+                formats.tooltip_title_format.Get(), title_bounds, brush.Get(),
                 D2D1_DRAW_TEXT_OPTIONS_CLIP);
 
             const D2D1_RECT_F body_bounds{
@@ -584,7 +546,7 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
             target->DrawTextW(
                 node.detail_text.c_str(),
                 static_cast<UINT32>(node.detail_text.size()),
-                tooltip_body_format.Get(), body_bounds, brush.Get(),
+                formats.tooltip_body_format.Get(), body_bounds, brush.Get(),
                 D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
 
@@ -622,15 +584,15 @@ HRESULT draw_shell(ID2D1RenderTarget* target, IDWriteFactory* write_factory,
             bounds.bottom -= 4.0F;
         }
         if (node.role != SemanticRole::tooltip) {
-            IDWriteTextFormat* text_format = body_format.Get();
+            IDWriteTextFormat* text_format = formats.body_format.Get();
             if (heading) {
-                text_format = heading_format.Get();
+                text_format = formats.heading_format.Get();
             } else if (node.role == SemanticRole::action) {
-                text_format = action_format.Get();
+                text_format = formats.action_format.Get();
             } else if (node.role == SemanticRole::navigation_item) {
-                text_format = navigation_format.Get();
+                text_format = formats.navigation_format.Get();
             } else if (section) {
-                text_format = section_format.Get();
+                text_format = formats.section_format.Get();
             }
             target->DrawTextW(node.text.c_str(),
                               static_cast<UINT32>(node.text.size()),
@@ -676,18 +638,35 @@ struct Direct2DShellRenderer::Impl {
     ComPtr<ID2D1Factory1> d2d_factory;
     ComPtr<IDWriteFactory> write_factory;
     ComPtr<IWICImagingFactory> wic_factory;
+    TextFormats formats;
     ComPtr<ID2D1HwndRenderTarget> window_target;
+    ComPtr<ID2D1SolidColorBrush> window_brush;
+#ifdef KF2_DIRECT2D_RENDERER_TESTING
+    unsigned window_brush_creation_count{0};
+#endif
 
     HRESULT ensure_window_target() {
-        if (window_target || pixel_size.width == 0 || pixel_size.height == 0) {
+        if (pixel_size.width == 0 || pixel_size.height == 0) {
             return S_OK;
         }
-        const auto properties = D2D1::RenderTargetProperties(
-            D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(), dpi, dpi);
-        const auto hwnd_properties = D2D1::HwndRenderTargetProperties(
-            window, D2D1::SizeU(pixel_size.width, pixel_size.height));
-        return d2d_factory->CreateHwndRenderTarget(
-            properties, hwnd_properties, &window_target);
+        if (!window_target) {
+            const auto properties = D2D1::RenderTargetProperties(
+                D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(), dpi, dpi);
+            const auto hwnd_properties = D2D1::HwndRenderTargetProperties(
+                window, D2D1::SizeU(pixel_size.width, pixel_size.height));
+            const HRESULT result = d2d_factory->CreateHwndRenderTarget(
+                properties, hwnd_properties, &window_target);
+            if (FAILED(result)) return result;
+        }
+        if (!window_brush) {
+            const HRESULT result = window_target->CreateSolidColorBrush(
+                D2D1::ColorF(D2D1::ColorF::Black), &window_brush);
+            if (FAILED(result)) return result;
+#ifdef KF2_DIRECT2D_RENDERER_TESTING
+            ++window_brush_creation_count;
+#endif
+        }
+        return S_OK;
     }
 };
 
@@ -718,9 +697,12 @@ Result<Direct2DShellRenderer> Direct2DShellRenderer::create(HWND window) {
                                   CLSCTX_INPROC_SERVER,
                                   IID_PPV_ARGS(&implementation->wic_factory));
     }
+    if (SUCCEEDED(result)) {
+        result = implementation->formats.create(implementation->write_factory.Get());
+    }
     if (FAILED(result)) {
         return Result<Direct2DShellRenderer>::failure(
-            {ErrorCode::platform_failure, L"Cannot create graphics factories",
+            {ErrorCode::platform_failure, L"Cannot create graphics resources",
              static_cast<std::uint32_t>(result)});
     }
     RECT area{};
@@ -761,7 +743,8 @@ Result<bool> Direct2DShellRenderer::render(const ShellLayoutResult& layout,
     const HRESULT created = implementation_->ensure_window_target();
     if (FAILED(created)) return platform_failure(L"Cannot create render target", created);
     const HRESULT result = draw_shell(implementation_->window_target.Get(),
-                                      implementation_->write_factory.Get(), layout, theme);
+                                      implementation_->window_brush,
+                                      implementation_->formats, layout, theme);
     if (result == D2DERR_RECREATE_TARGET) {
         discard_device_resources();
         return Result<bool>::success(true);
@@ -771,8 +754,19 @@ Result<bool> Direct2DShellRenderer::render(const ShellLayoutResult& layout,
 }
 
 void Direct2DShellRenderer::discard_device_resources() noexcept {
+    implementation_->window_brush.Reset();
     implementation_->window_target.Reset();
 }
+
+#ifdef KF2_DIRECT2D_RENDERER_TESTING
+unsigned Direct2DShellRenderer::text_format_creations_for_testing() const noexcept {
+    return implementation_->formats.creation_count;
+}
+
+unsigned Direct2DShellRenderer::window_brush_creations_for_testing() const noexcept {
+    return implementation_->window_brush_creation_count;
+}
+#endif
 
 Result<bool> Direct2DShellRenderer::capture_wic_png(
     const std::filesystem::path& path, const ShellLayoutResult& layout,
@@ -795,9 +789,12 @@ Result<bool> Direct2DShellRenderer::capture_wic_png(
                               dpi, dpi),
             &target);
     }
+    ComPtr<ID2D1SolidColorBrush> brush;
     if (SUCCEEDED(result)) {
-        result = draw_shell(target.Get(), implementation_->write_factory.Get(),
-                            layout, theme);
+        result = target->CreateSolidColorBrush(color(theme.background), &brush);
+    }
+    if (SUCCEEDED(result)) {
+        result = draw_shell(target.Get(), brush, implementation_->formats, layout, theme);
     }
     ComPtr<IWICStream> stream;
     ComPtr<IWICBitmapEncoder> encoder;

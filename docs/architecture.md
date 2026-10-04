@@ -236,6 +236,13 @@ implemented.
 into typed events. `ui` owns the platform-independent semantic layout in DIPs,
 Direct2D/DirectWrite rendering, and UI Automation nodes backed by the same
 layout. High contrast is resolved by the theme boundary.
+Numeric animation updates the existing status, metric, and Home slider nodes;
+controller repaint callbacks publish that layout to accessibility without
+rebuilding it. Real model, navigation, or size changes still rebuild the layout.
+Windows visibility events suspend hidden/minimized animation timers without
+stopping runtime telemetry or guarded shutdown. Desktop text formats belong to
+the renderer lifetime; each brush belongs to its render target and is discarded
+with that target. Offscreen captures use their own target-bound brush.
 No legacy implementation is linked or copied.
 
 The optional FleX/runtime laboratory is integrated but default-off. Its

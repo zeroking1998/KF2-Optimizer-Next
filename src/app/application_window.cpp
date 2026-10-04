@@ -77,6 +77,11 @@ void UiRuntime::invalidate() {
         model.set_status(std::move(status));
     }
     controller.synchronize_model();
+    repaint_shell();
+}
+
+void UiRuntime::repaint_shell() {
+    if (!callbacks_ready) return;
     if (automation) {
         static_cast<void>(automation->update_layout(controller.layout()));
     }

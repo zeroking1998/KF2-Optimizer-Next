@@ -557,11 +557,8 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
           StartMode mode,
           std::filesystem::path executable_directory)
     : controller{model,
-                  {.invalidate = [this] { invalidate(); },
-                   .repaint = [this] {
-                       update_animation_cadence();
-                       if (window) window->invalidate();
-                   },
+                  {.invalidate = [this] { repaint_shell(); },
+                   .repaint = [this] { repaint_shell(); },
                    .paint = [this](const ui::ShellLayoutResult& layout) {
                        paint(layout);
                    },

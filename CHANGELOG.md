@@ -88,6 +88,10 @@ are visible immediately.
   Live observations stay in memory; session detach and explicit support export
   save the latest verified counters and report persistence failures.
 
+- Stop rebuilding unrelated UI nodes during numeric animation. Reuse desktop
+  text formats and target-bound brushes, pause hidden/minimized animations,
+  and keep accessibility values aligned with the visible presentation.
+
 - Current project and acceptance documents now share source-checked test and
   settings-catalog inventories instead of contradictory old totals. Historical
   gameplay evidence is kept separate from new-build acceptance.

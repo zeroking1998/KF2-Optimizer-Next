@@ -601,6 +601,7 @@ struct UiRuntime {
     Result<bool> create_window(const std::wstring& title);
 
     void invalidate();
+    void repaint_shell();
 
     void paint(const ui::ShellLayoutResult& layout);
 

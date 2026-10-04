@@ -4830,9 +4830,83 @@ int test_legacy_adaptive_profile(
     return EXIT_SUCCESS;
 }
 
+int test_ui_presentation() {
+    CHECK(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)));
+    struct Apartment {
+        ~Apartment() { CoUninitialize(); }
+    } apartment;
+    const auto state = std::filesystem::path{KF2_TEST_ROOT} / L"ui-presentation";
+    std::filesystem::create_directories(state);
+    kf2::diagnostics::EventLog events{128};
+    kf2::app::UiRuntime runtime{state, false, {}, events, {},
+                                kf2::app::StartMode::read_only, state};
+    CHECK(runtime.create_window(L"KF2 UI presentation test").has_value());
+    CHECK(runtime.automation.has_value());
+    CHECK(!runtime.animation_timer_active);
+    const auto hwnd = static_cast<HWND>(runtime.window->native_handle_for_testing());
+    runtime.window->show(SW_SHOWNOACTIVATE);
+    runtime.controller.on_theme_changed({false, false});
+    runtime.controller.on_resize({1440, 900});
+    runtime.model.commit_target_fps_presentation(60);
+    auto status = runtime.model.status();
+    status.game_detected = true;
+    status.target_fps = 120;
+    runtime.model.set_status(status);
+    runtime.invalidate();
+    CHECK(runtime.animation_timer_active);
+
+    Microsoft::WRL::ComPtr<IUIAutomation> automation;
+    CHECK(SUCCEEDED(CoCreateInstance(CLSID_CUIAutomation, nullptr,
+                                     CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&automation))));
+    Microsoft::WRL::ComPtr<IUIAutomationElement> root;
+    CHECK(SUCCEEDED(automation->ElementFromHandle(hwnd, &root)));
+    VARIANT name{};
+    name.vt = VT_BSTR;
+    name.bstrVal = SysAllocString(L"Target FPS");
+    CHECK(name.bstrVal != nullptr);
+    Microsoft::WRL::ComPtr<IUIAutomationCondition> condition;
+    const HRESULT made_condition = automation->CreatePropertyCondition(
+        UIA_NamePropertyId, name, &condition);
+    VariantClear(&name);
+    CHECK(SUCCEEDED(made_condition));
+    Microsoft::WRL::ComPtr<IUIAutomationElement> slider;
+    CHECK(SUCCEEDED(root->FindFirst(TreeScope_Children, condition.Get(), &slider)));
+    CHECK(slider != nullptr);
+    Microsoft::WRL::ComPtr<IUIAutomationRangeValuePattern> range;
+    CHECK(SUCCEEDED(slider->GetCurrentPatternAs(
+        UIA_RangeValuePatternId, IID_PPV_ARGS(&range))));
+    const auto* nodes = runtime.controller.layout().nodes.data();
+    SendMessageW(hwnd, WM_TIMER, kf2::ui::kAnimationTimerId, 0);
+    CHECK(runtime.controller.layout().nodes.data() == nodes);
+    double visible_value = 0;
+    CHECK(SUCCEEDED(range->get_CurrentValue(&visible_value)));
+    CHECK(visible_value == runtime.model.presented_target_fps());
+    CHECK(visible_value > 60 && visible_value < 120);
+
+    runtime.window->show(SW_MINIMIZE);
+    CHECK(!runtime.animation_timer_active);
+    const int paused_value = runtime.model.presented_target_fps();
+    for (int frame = 0; frame < 100; ++frame) {
+        SendMessageW(hwnd, WM_TIMER, kf2::ui::kAnimationTimerId, 0);
+    }
+    CHECK(runtime.model.presented_target_fps() == paused_value);
+    runtime.window->show(SW_SHOWNOACTIVATE);
+    CHECK(runtime.animation_timer_active);
+    SendMessageW(hwnd, WM_TIMER, kf2::ui::kAnimationTimerId, 0);
+    CHECK(runtime.model.presented_target_fps() > paused_value);
+    CHECK(SUCCEEDED(range->get_CurrentValue(&visible_value)));
+    CHECK(visible_value == runtime.model.presented_target_fps());
+    runtime.window->show(SW_HIDE);
+    CHECK(!runtime.animation_timer_active);
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view{argv[1]} == "--flex-report-boundaries") {
         return test_flex_report_boundaries();
+    }
+    if (argc == 2 && std::string_view{argv[1]} == "--ui-presentation") {
+        return test_ui_presentation();
     }
     if (argc == 2 && std::string_view{argv[1]} == "--initial-dxgi-retry") {
         return test_initial_dxgi_retry();
@@ -4984,6 +5058,7 @@ int main(int argc, char** argv) {
     CHECK(test_flex_recovery_installation_owner() == EXIT_SUCCESS);
     CHECK(test_map_prewarm_retry_scheduler() == EXIT_SUCCESS);
     CHECK(test_gameplay_snapshot_lifetime() == EXIT_SUCCESS);
+    CHECK(test_ui_presentation() == EXIT_SUCCESS);
     CHECK(kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::normal));
     CHECK(!kf2::app::should_prepare_protected_gameplay_provider(
