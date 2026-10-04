@@ -1,6 +1,7 @@
 #include "features/telemetry/telemetry_flex_stage.hpp"
 
 #include <array>
+#include <format>
 #include <string_view>
 
 #include "app/application_runtime.hpp"
@@ -252,25 +253,21 @@ void UiRuntime::observe_flex_process() {
     const std::wstring action_status{
         action_status_view.begin(), action_status_view.end()};
     const std::wstring substep_values = flex_state->diagnostics_enabled
-        ? L"input min/max " + std::to_wstring(flex_state->min_substeps) +
-              L"/" + std::to_wstring(flex_state->max_substeps) +
-              L"  •  forwarded min/max " +
-              std::to_wstring(flex_state->min_forwarded_substeps) + L"/" +
-              std::to_wstring(flex_state->max_forwarded_substeps) +
-              L"  •  latest " + std::to_wstring(flex_state->last_substeps) +
-              L" → " + std::to_wstring(flex_state->last_forwarded_substeps)
+        ? std::format(L"input min/max {}/{}  •  forwarded min/max {}/{}"
+                      L"  •  latest {} → {}",
+              flex_state->min_substeps, flex_state->max_substeps,
+              flex_state->min_forwarded_substeps, flex_state->max_forwarded_substeps,
+              flex_state->last_substeps, flex_state->last_forwarded_substeps)
         : std::wstring{};
     const std::wstring_view substep_status = flex_state->diagnostics_enabled
         ? std::wstring_view{substep_values}
         : L"Detailed substep counters are off; fixed one-substep limit is active";
     const std::wstring readback_values = flex_state->diagnostics_enabled
-        ? std::wstring{L"shared memory "} +
-              (flex_state->pass_through_healthy ? L"healthy" : L"unhealthy") +
-              L"  •  updates " + std::to_wstring(flex_state->successful_updates) +
-              L"/" + std::to_wstring(flex_state->update_calls) +
-              L"  •  constrained " +
-              std::to_wstring(flex_state->constrained_updates) +
-              L"  •  reports and extra logs on"
+        ? std::format(L"shared memory {}  •  updates {}/{}  •  constrained {}"
+                      L"  •  reports and extra logs on",
+              flex_state->pass_through_healthy ? L"healthy" : L"unhealthy",
+              flex_state->successful_updates, flex_state->update_calls,
+              flex_state->constrained_updates)
         : std::wstring{};
     const std::wstring_view readback_status = flex_state->diagnostics_enabled
         ? std::wstring_view{readback_values}

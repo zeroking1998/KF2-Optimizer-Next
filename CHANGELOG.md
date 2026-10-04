@@ -126,6 +126,10 @@ are visible immediately.
 - Baseline corpse sleep now stops before scanning or changing corpses when its
   action-tracking table is full or invalid, retaining fair cursor progress.
 
+- Format FleX diagnostic labels without chains of temporary number strings.
+  Live values and exact displayed text stay unchanged; diagnostics-off still
+  performs no detailed formatting.
+
 - Update and Auto Repair now wait for synchronous Windows ZIP extraction to
   finish before checking or cleaning staged files; partial or aborted copies
   fail safely without a fixed-delay completion guess.
