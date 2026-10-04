@@ -18,6 +18,7 @@
 #include <initializer_list>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -315,6 +316,44 @@ int test_flex_report_boundaries() {
         L"latest 1 → 1") != std::wstring::npos);
     CHECK(runtime.model.status().flex_readback_diagnostics.find(
         L"updates 61/61") != std::wstring::npos);
+
+    // Formatting retains exact diagnostic text at the decoder's boundaries,
+    // including zero, two-digit substeps and full-width update counters.
+    const auto diagnostic_shared = shared;
+    shared.min_substeps = shared.min_forwarded_substeps = 0;
+    shared.max_substeps = shared.last_substeps = 64;
+    shared.max_forwarded_substeps = shared.last_forwarded_substeps = 5;
+    shared.successful_updates = 0;
+    shared.update_calls = shared.constrained_updates =
+        std::numeric_limits<LONGLONG>::max();
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_substep_diagnostics ==
+        L"input min/max 0/64  •  forwarded min/max 0/5  •  latest 64 → 5");
+    CHECK(runtime.model.status().flex_readback_diagnostics ==
+        L"shared memory unhealthy  •  updates 0/9223372036854775807"
+        L"  •  constrained 9223372036854775807  •  reports and extra logs on");
+    shared = diagnostic_shared;
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_substep_diagnostics ==
+        L"input min/max 1/1  •  forwarded min/max 1/1  •  latest 1 → 1");
+    CHECK(runtime.model.status().flex_readback_diagnostics ==
+        L"shared memory healthy  •  updates 61/61  •  constrained 0"
+        L"  •  reports and extra logs on");
+
+    // A diagnostics action can replace labels with waiting text independently
+    // of observation values. The next read must replace it without a cache hit.
+    auto waiting_status = runtime.model.status();
+    waiting_status.flex_substep_diagnostics =
+        L"Waiting for FleX min/max substep telemetry";
+    waiting_status.flex_readback_diagnostics =
+        L"Waiting for shared-memory readback; reports and extra logs are on";
+    runtime.model.set_status(std::move(waiting_status));
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_substep_diagnostics ==
+        L"input min/max 1/1  •  forwarded min/max 1/1  •  latest 1 → 1");
+    CHECK(runtime.model.status().flex_readback_diagnostics ==
+        L"shared memory healthy  •  updates 61/61  •  constrained 0"
+        L"  •  reports and extra logs on");
     shared.aggregate_capacity_valid = shared.aggregate_counts_valid = 1;
     shared.aggregate_active_particles = 37;
     shared.aggregate_free_particles = 987;
