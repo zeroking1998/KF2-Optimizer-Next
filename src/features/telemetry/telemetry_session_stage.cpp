@@ -308,7 +308,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     if (last_flex_observation && last_flex_observation->update_calls > 0 &&
         last_flex_observation->diagnostics_enabled) {
         const auto& observed = *last_flex_observation;
-        const bool saved = save_flex_report(observed, true);
+        const bool saved = save_flex_report(observed);
         events->append({0,
             saved && observed.pass_through_healthy
                 ? diagnostics::Severity::info : diagnostics::Severity::warning,
@@ -407,7 +407,6 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     last_flex_observation_calls = 0;
     flex_observation_announced = false;
     last_flex_observation.reset();
-    last_flex_report_tick = 0;
     flex_minimum_limited = false;
     game_process.reset();
     reset_game_process_discovery();

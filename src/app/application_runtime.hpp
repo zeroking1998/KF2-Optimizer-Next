@@ -353,7 +353,6 @@ struct UiRuntime {
     std::optional<flex::ObservationSnapshot> last_flex_observation;
     std::optional<optimizer::AdaptiveCapabilityState>
         adaptive_flex_capability;
-    std::uint64_t last_flex_report_tick{0};
     bool flex_minimum_limited{false};
     StartMode start_mode{StartMode::normal};
     std::shared_ptr<PackageRepairAsyncState> package_repair_state;
@@ -459,8 +458,7 @@ struct UiRuntime {
                 : std::nullopt);
     }
 
-    bool save_flex_report(const flex::ObservationSnapshot& observed,
-                          bool wait_for_disk = false);
+    bool save_flex_report(const flex::ObservationSnapshot& observed);
 
     void detach_telemetry(bool restore_live_quality = true);
 

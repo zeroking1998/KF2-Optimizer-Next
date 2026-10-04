@@ -34,6 +34,7 @@
 #include "kf2/app/application.hpp"
 #include "kf2/config/setting_catalog.hpp"
 #include "kf2/flex/flex_lab.hpp"
+#include "kf2/flex/flex_observation_shared.hpp"
 #include "kf2/optimizer/startup_gpu_profile.hpp"
 #include "kf2/security/sha256.hpp"
 #include "kf2/ui/shell_layout.hpp"
@@ -114,6 +115,145 @@ void write_bytes(const std::filesystem::path& path, const std::string& bytes) {
     std::filesystem::create_directories(path.parent_path());
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     output << bytes;
+}
+
+int test_flex_report_boundaries() {
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"flex-report-boundaries";
+    fs::remove_all(root);
+    fs::create_directories(root / L"Data");
+    FILETIME created{}, exited{}, kernel{}, user{};
+    CHECK(GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user));
+    const auto pid = GetCurrentProcessId();
+    const auto start = (static_cast<std::uint64_t>(created.dwHighDateTime) << 32U) |
+        created.dwLowDateTime;
+    const auto name = L"Local\\KF2OptimizerNext_FlexObservation_v1_" +
+        std::to_wstring(pid);
+    struct Mapping {
+        HANDLE handle{};
+        kf2::flex::ObservationShared* shared{};
+        ~Mapping() {
+            if (shared) UnmapViewOfFile(shared);
+            if (handle) CloseHandle(handle);
+        }
+    } mapping;
+    mapping.handle = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr,
+        PAGE_READWRITE, 0, sizeof(kf2::flex::ObservationShared), name.c_str());
+    CHECK(mapping.handle);
+    mapping.shared = static_cast<kf2::flex::ObservationShared*>(MapViewOfFile(
+        mapping.handle, FILE_MAP_ALL_ACCESS, 0, 0,
+        sizeof(kf2::flex::ObservationShared)));
+    CHECK(mapping.shared);
+    auto& shared = *mapping.shared;
+    shared = {};
+    shared.magic = kf2::flex::observation_magic;
+    shared.version = kf2::flex::observation_version;
+    shared.size = sizeof(shared);
+    shared.pid = pid;
+    shared.process_start_low = created.dwLowDateTime;
+    shared.process_start_high = created.dwHighDateTime;
+    shared.last_substeps = shared.min_substeps = shared.max_substeps = 1;
+    shared.last_forwarded_substeps = shared.min_forwarded_substeps =
+        shared.max_forwarded_substeps = 1;
+    const float delta_time = 1.0F / 60.0F;
+    std::memcpy(const_cast<LONG*>(&shared.last_delta_time_bits),
+        &delta_time, sizeof(delta_time));
+    const auto publish = [&](int calls, bool diagnostics = true) {
+        shared.update_calls = calls;
+        shared.successful_updates = calls;
+        shared.diagnostics_enabled = diagnostics ? 1 : 0;
+        shared.last_update_tick = GetTickCount64();
+    };
+    kf2::diagnostics::EventLog events{128};
+    kf2::config::Settings settings;
+    settings.debug_flex_diagnostics = true;
+    kf2::app::UiRuntime runtime{root / L"Data", false, settings, events,
+        std::nullopt, kf2::app::StartMode::read_only, root / L"portable"};
+    runtime.game_process = kf2::game::GameProcessIdentity{pid, start, {}};
+    const auto report = root / L"Data/flex-session-last.json";
+
+    // Both repeated and changing live observations stay in memory. No durable
+    // FleX report is submitted, even while detailed diagnostics are enabled.
+    for (int index = 0; index < 64; ++index) {
+        publish(120);
+        runtime.observe_flex_process();
+    }
+    CHECK(runtime.file_writer.wait_until_idle(std::chrono::seconds{5}));
+    CHECK(runtime.last_flex_observation.has_value());
+    CHECK(runtime.last_flex_observation->update_calls == 120);
+    CHECK(!fs::exists(report));
+    for (int calls = 121; calls <= 180; ++calls) {
+        publish(calls);
+        runtime.observe_flex_process();
+    }
+    CHECK(runtime.file_writer.wait_until_idle(std::chrono::seconds{5}));
+    CHECK(runtime.last_flex_observation->update_calls == 180);
+    CHECK(!fs::exists(report));
+
+    // Export reads the latest process-bound observation, not just the previous
+    // UI sample, and confirms that its current checkpoint reached disk.
+    publish(181);
+    CHECK(kf2::features::diagnostics::export_support(runtime, {}) ==
+        kf2::app::runtime::DispatchResult::handled);
+    CHECK(runtime.model.notice()->code == L"SUPPORT_BUNDLE_EXPORTED");
+    CHECK(read_bytes(report).find("\"update_calls\":181") != std::string::npos);
+    const auto bytes = read_bytes(report);
+    const auto stamp = fs::last_write_time(report);
+    publish(182);
+    runtime.observe_flex_process();
+    CHECK(runtime.file_writer.wait_until_idle(std::chrono::seconds{5}));
+    CHECK(read_bytes(report) == bytes);
+    CHECK(fs::last_write_time(report) == stamp);
+
+    // A denied replacement remains visible, keeps the prior report intact,
+    // and can be retried explicitly without adding a background retry loop.
+    HANDLE locked = CreateFileW(report.c_str(), GENERIC_READ, FILE_SHARE_READ,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(locked != INVALID_HANDLE_VALUE);
+    kf2::features::diagnostics::export_support(runtime, {});
+    CloseHandle(locked);
+    CHECK(runtime.model.notice()->code == L"SUPPORT_BUNDLE_PARTIAL");
+    CHECK(read_bytes(report) == bytes);
+    const auto failed_events = events.snapshot();
+    CHECK(std::any_of(failed_events.begin(), failed_events.end(),
+        [](const auto& event) { return event.code == "FLEX_REPORT_SAVE_FAILED"; }));
+    publish(183);
+    kf2::features::diagnostics::export_support(runtime, {});
+    CHECK(runtime.model.notice()->code == L"SUPPORT_BUNDLE_EXPORTED");
+    CHECK(read_bytes(report).find("\"update_calls\":183") != std::string::npos);
+
+    publish(184);
+    runtime.observe_flex_process();
+    runtime.detach_telemetry(false);
+    CHECK(read_bytes(report).find("\"update_calls\":184") != std::string::npos);
+    CHECK(!runtime.last_flex_observation.has_value());
+
+    // Diagnostics-off never replaces a previous report, including at detach.
+    const auto final_bytes = read_bytes(report);
+    const auto final_stamp = fs::last_write_time(report);
+    runtime.game_process = kf2::game::GameProcessIdentity{pid, start, {}};
+    publish(185, false);
+    runtime.observe_flex_process();
+    kf2::features::diagnostics::export_support(runtime, {});
+    runtime.detach_telemetry(false);
+    CHECK(read_bytes(report) == final_bytes);
+    CHECK(fs::last_write_time(report) == final_stamp);
+
+    // A failed final save is reported as a failure, never a successful summary,
+    // and never overwrites the previously confirmed report.
+    runtime.game_process = kf2::game::GameProcessIdentity{pid, start, {}};
+    publish(186);
+    runtime.observe_flex_process();
+    locked = CreateFileW(report.c_str(), GENERIC_READ, FILE_SHARE_READ,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(locked != INVALID_HANDLE_VALUE);
+    runtime.detach_telemetry(false);
+    CloseHandle(locked);
+    CHECK(read_bytes(report) == final_bytes);
+    const auto final_events = events.snapshot();
+    CHECK(std::any_of(final_events.begin(), final_events.end(),
+        [](const auto& event) { return event.code == "FLEX_SESSION_SAVE_FAILED"; }));
+    return EXIT_SUCCESS;
 }
 
 bool wait_for_file(const std::filesystem::path& path,
@@ -4691,6 +4831,9 @@ int test_legacy_adaptive_profile(
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--flex-report-boundaries") {
+        return test_flex_report_boundaries();
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--initial-dxgi-retry") {
         return test_initial_dxgi_retry();
     }
@@ -4836,6 +4979,7 @@ int main(int argc, char** argv) {
     } catch (const std::filesystem::filesystem_error&) {
         return EXIT_FAILURE;
     }
+    CHECK(test_flex_report_boundaries() == EXIT_SUCCESS);
     CHECK(test_pending_policy_restage_failure_rollback() == EXIT_SUCCESS);
     CHECK(test_flex_recovery_installation_owner() == EXIT_SUCCESS);
     CHECK(test_map_prewarm_retry_scheduler() == EXIT_SUCCESS);

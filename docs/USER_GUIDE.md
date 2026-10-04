@@ -214,6 +214,12 @@ page shows incoming and forwarded min/max substeps, solver and particle
 statistics, shared-memory readback health, and report/log state. It can be
 changed during a protected session. Leave it off for the cheapest normal path;
 the fixed one-substep safety limit remains active for user-enabled FleX.
+Live FleX observations remain in memory; there are no periodic report writes,
+even with diagnostics enabled. `flex-session-last.json` is saved only on
+session detach or an explicit support export, using the latest verified
+observation. Failed saves are reported, and an active-session export can be
+retried. An abrupt optimizer termination can lose observations since the last
+explicit export; normal detach retains the final counters.
 **Runtime diagnostics** is a separate, persistent option and is also off
 by default. Enable it before a protected KF2 start only when you need detailed
 corpse/Zed Actor, LOD, bone, injury, freeze and scan-timing evidence. Adaptive

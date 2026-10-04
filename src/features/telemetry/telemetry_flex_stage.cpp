@@ -64,8 +64,7 @@ void run_flex_control_stage(app::UiRuntime& runtime,
 
 namespace kf2::app {
 
-bool UiRuntime::save_flex_report(const flex::ObservationSnapshot& observed,
-                                 bool wait_for_disk) {
+bool UiRuntime::save_flex_report(const flex::ObservationSnapshot& observed) {
     if (observed.update_calls == 0 || !observed.diagnostics_enabled)
         return false;
     std::ostringstream report;
@@ -144,8 +143,7 @@ bool UiRuntime::save_flex_report(const flex::ObservationSnapshot& observed,
     const auto ticket = file_writer.submit(
         settings_path.parent_path() / L"flex-session-last.json", report.str());
     if (ticket == 0) return false;
-    return !wait_for_disk ||
-        file_writer.wait(ticket, std::chrono::seconds{5});
+    return file_writer.wait(ticket, std::chrono::seconds{5});
 }
 
 void UiRuntime::observe_flex_process() {
@@ -249,12 +247,6 @@ void UiRuntime::observe_flex_process() {
         status.flex_readback_diagnostics = readback_status;
         model.set_status(std::move(status));
         invalidate();
-    }
-    const auto report_tick = GetTickCount64();
-    if (flex_state->diagnostics_enabled &&
-        (last_flex_report_tick == 0 || report_tick < last_flex_report_tick ||
-         report_tick - last_flex_report_tick >= 2000)) {
-        if (save_flex_report(*flex_state)) last_flex_report_tick = report_tick;
     }
     if (!flex_observation_announced) {
         flex_observation_announced = true;
