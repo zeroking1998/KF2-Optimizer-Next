@@ -35,6 +35,13 @@ into passes.
 Prefix each script with `pwsh -NoProfile -File` when running it from a normal
 PowerShell terminal.
 
+Desktop presentation changes use the existing controller, renderer, window,
+and lifecycle tests: node stability during numeric animation, exact UI
+Automation range readback, visibility/timer transitions, resource creation
+counts, and device-loss recovery. `validate_gui.ps1` checks the complete capture
+set and repeated-image determinism; private before/after hashes can additionally
+verify pixel-identical output without committing baseline images or benchmarks.
+
 ## Real KF2 checks
 
 Automated tests cannot prove every in-game effect. Changes to protected runtime

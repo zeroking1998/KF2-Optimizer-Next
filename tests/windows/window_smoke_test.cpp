@@ -42,6 +42,7 @@ public:
         ++theme_changes;
     }
     void on_system_resume() override { ++resumes; }
+    void on_visibility_changed(bool value) override { visible = value; }
     bool on_close() override {
         ++closes;
         return true;
@@ -55,6 +56,7 @@ public:
     int theme_changes{0};
     int closes{0};
     int resumes{0};
+    bool visible{true};
     std::vector<kf2::platform::windows::PointerKind> pointer_kinds;
     float last_dpi{0};
     kf2::platform::windows::WindowSize last_size{};
@@ -129,9 +131,18 @@ int main() {
              .renderer_owns_background = true});
         CHECK(created.has_value());
         CHECK(sink.theme_changes == 1);
+        CHECK(!sink.visible);
         CHECK(created.value().native_handle_for_testing() != nullptr);
         const auto window = static_cast<HWND>(
             created.value().native_handle_for_testing());
+        created.value().show(SW_SHOWNOACTIVATE);
+        CHECK(sink.visible);
+        created.value().show(SW_MINIMIZE);
+        CHECK(!sink.visible);
+        created.value().show(SW_SHOWNOACTIVATE);
+        CHECK(sink.visible);
+        created.value().show(SW_HIDE);
+        CHECK(!sink.visible);
         SendMessageW(window, WM_SIZE, SIZE_RESTORED, MAKELPARAM(800, 600));
         CHECK(sink.resizes >= 1);
         CHECK(sink.last_size.width_dip == 800);

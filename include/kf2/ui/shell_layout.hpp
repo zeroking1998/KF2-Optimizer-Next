@@ -95,6 +95,7 @@ struct ShellLayoutResult {
 [[nodiscard]] ShellLayoutResult layout_shell(const UiModel& model,
                                              float width_dip,
                                              float height_dip);
+void refresh_numeric_nodes(ShellLayoutResult& layout, const UiModel& model);
 [[nodiscard]] const SemanticNode* hit_test(const ShellLayoutResult& layout,
                                            DipPoint point) noexcept;
 [[nodiscard]] std::optional<std::wstring> action_help_text(

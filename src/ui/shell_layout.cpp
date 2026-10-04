@@ -131,7 +131,35 @@ std::wstring load_metric(const UiModel& model) {
     return text.str();
 }
 
+std::array<std::wstring, 4> metric_texts(const UiModel& model) {
+    return {metric(L"LIVE FPS", model.presented_live_fps(), 1, L" FPS"),
+            metric(L"FRAME TIME", model.presented_live_frame_time_ms(), 1, L" ms"),
+            load_metric(model), corpse_metric(model)};
+}
+
 }  // namespace
+
+void refresh_numeric_nodes(ShellLayoutResult& layout, const UiModel& model) {
+    const auto metrics = metric_texts(model);
+    constexpr std::array<std::string_view, 4> metric_ids{
+        "metric-0", "metric-1", "metric-2", "metric-3"};
+    for (auto& node : layout.nodes) {
+        if (node.role == SemanticRole::status) {
+            node.text = status_text(model);
+        } else if (node.role == SemanticRole::metric_card) {
+            const auto found = std::find(metric_ids.begin(), metric_ids.end(), node.id);
+            if (found != metric_ids.end()) {
+                node.text = metrics[static_cast<std::size_t>(found - metric_ids.begin())];
+            }
+        } else if (node.slider) {
+            if (node.id == "settings-target-slider") {
+                node.slider->value = model.presented_target_fps();
+            } else if (node.id == "settings-corpses-slider") {
+                node.slider->value = model.presented_corpse_limit();
+            }
+        }
+    }
+}
 
 float pixels_to_dips(float pixels, float dpi) noexcept {
     return dpi > 0.0F ? pixels * 96.0F / dpi : 0.0F;
@@ -274,16 +302,12 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                   static_cast<float>(metric_count));
     const float metric_y = result.metrics_strip.y + 8.0F;
     const float metric_height = std::max(0.0F, result.metrics_strip.height - 16.0F);
-    const std::array<std::wstring, metric_count> metric_texts{
-        metric(L"LIVE FPS", model.presented_live_fps(), 1, L" FPS"),
-        metric(L"FRAME TIME", model.presented_live_frame_time_ms(), 1, L" ms"),
-        load_metric(model),
-        corpse_metric(model)};
+    const auto metrics = metric_texts(model);
     for (std::size_t index = 0; index < metric_count; ++index) {
         result.nodes.push_back({
             "metric-" + std::to_string(index), SemanticRole::metric_card,
             {metric_margin + static_cast<float>(index) * (metric_width + metric_gap),
-             metric_y, metric_width, metric_height}, metric_texts[index]});
+             metric_y, metric_width, metric_height}, metrics[index]});
     }
 
     const bool compact_navigation = result.sidebar.height < 360.0F;

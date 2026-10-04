@@ -589,6 +589,7 @@ add_executable(kf2_direct2d_renderer_test
 )
 target_include_directories(kf2_direct2d_renderer_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_direct2d_renderer_test PRIVATE
+    KF2_DIRECT2D_RENDERER_TESTING
     KF2_GUI_TEST_ROOT=L"${PROJECT_SOURCE_DIR}/out/tests/gui"
 )
 target_link_libraries(kf2_direct2d_renderer_test PRIVATE

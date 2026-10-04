@@ -145,10 +145,17 @@ LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM wparam,
             }
             return 0;
         }
+        case WM_SHOWWINDOW:
+            if (sink != nullptr) {
+                sink->on_visibility_changed(wparam != FALSE && !IsIconic(window));
+            }
+            break;
         case WM_SIZE:
             if (state != nullptr) {
                 state->dpi = static_cast<float>(GetDpiForWindow(window));
                 if (sink != nullptr) {
+                    sink->on_visibility_changed(
+                        IsWindowVisible(window) && wparam != SIZE_MINIMIZED);
                     const float scale = 96.0F / state->dpi;
                     sink->on_resize(
                         {static_cast<float>(LOWORD(lparam)) * scale,
@@ -375,12 +382,14 @@ Result<Window> Window::create(const WindowOptions& options) {
     if (options.sink != nullptr) {
         try {
             options.sink->on_theme_changed(system_theme());
+            options.sink->on_visibility_changed(
+                IsWindowVisible(window) && !IsIconic(window));
         } catch (...) {
             static_cast<void>(DestroyWindow(window));
             delete state;
             return Result<Window>::failure(
                 {ErrorCode::internal_failure,
-                 L"Initial window theme callback failed", 0});
+                 L"Initial window callback failed", 0});
         }
     }
     return Result<Window>::success(Window{window, state});
