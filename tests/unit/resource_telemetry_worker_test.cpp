@@ -10,17 +10,38 @@
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 #include <pdhmsg.h>
 
 #include "kf2/telemetry/resource_telemetry_worker.hpp"
 
+namespace {
+void print_last_game_log_trace(std::ostream& output) {
+    const auto trace = kf2::telemetry::detail::game_log_trace_for_testing();
+    output << "last_log_trace read=" << trace.read.stage
+           << " publication=" << trace.publication_stage
+           << " requested_generation=" << trace.request_generation
+           << " current_generation=" << trace.current_generation
+           << " queued=" << trace.chunk_queued
+           << " sample_exception=" << trace.sample_exception
+           << " process_start=" << trace.read.process_start_filetime
+           << " last_write=" << trace.read.last_write_filetime
+           << " size=" << trace.read.file_size
+           << " attributes=" << trace.read.attributes
+           << " links=" << trace.read.links
+           << " raw_last_windows_error=" << trace.read.last_windows_error
+           << " bytes_read=" << trace.read.bytes_read << '\n';
+}
+}  // namespace
+
 #define CHECK(condition)                                                        \
     do {                                                                        \
         if (!(condition)) {                                                     \
             std::cerr << __FILE__ << ':' << __LINE__                            \
                       << ": check failed: " #condition << '\n';                 \
+            print_last_game_log_trace(std::cerr);                                \
             return EXIT_FAILURE;                                                \
         }                                                                       \
     } while (false)
@@ -381,7 +402,7 @@ std::string graphics_readback_line() {
 
 }  // namespace
 
-int test_retained_game_log_handle() {
+int test_retained_game_log_handle(bool deny_initial_read = false) {
     namespace fs = std::filesystem;
     using namespace kf2::telemetry::detail;
     const auto root = fs::path{KF2_TEST_ROOT} / L"retained-log";
@@ -418,12 +439,37 @@ int test_retained_game_log_handle() {
     worker.request(1'000'000'000ULL);
     CHECK(worker.wait_until_idle(2s));
     CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
+    CHECK(game_log_trace_for_testing().read.stage == "discovery");
     CHECK(game_log_handle_opens_for_testing() == opens);
     CHECK(set_log_write_time(log, process.value().process_start_id));
+    // Explicit negative mode verifies the real assertion's CI failure output.
+    // It is never used as a retry or by the default passing test invocation.
+    struct DeniedRead final {
+        HANDLE handle{INVALID_HANDLE_VALUE};
+        ~DeniedRead() {
+            if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+        }
+    } denied_read;
+    if (deny_initial_read) {
+        denied_read.handle = CreateFileW(log.c_str(), GENERIC_WRITE,
+            FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+            nullptr);
+        CHECK(denied_read.handle != INVALID_HANDLE_VALUE);
+    }
     worker.request(1'000'000'001ULL);
     CHECK(worker.wait_until_idle(2s));
     auto chunks = worker.take_game_log_chunks(log_binding.identity);
     CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    auto trace = game_log_trace_for_testing();
+    CHECK(trace.read.stage == "sampled");
+    CHECK(trace.read.last_write_filetime == process.value().process_start_id);
+    CHECK(trace.read.bytes_read > 0);
+    CHECK(trace.publication_stage == "published" && trace.chunk_queued);
+    CHECK(trace.request_generation == trace.current_generation);
+    std::ostringstream trace_output;
+    print_last_game_log_trace(trace_output);
+    CHECK(trace_output.str().find("read=sampled publication=published") !=
+          std::string::npos);
     for (unsigned int index = 0; index < 50; ++index) {
         worker.request(1'000'000'001ULL + index);
         CHECK(worker.wait_until_idle(2s));
@@ -431,6 +477,8 @@ int test_retained_game_log_handle() {
     }
     CHECK(game_log_handle_opens_for_testing() == opens + 1);
     CHECK(game_log_handle_closes_for_testing() == closes);
+    trace = game_log_trace_for_testing();
+    CHECK(trace.read.stage == "end_of_file" && !trace.chunk_queued);
 
     // Ordinary writes, map travel and adapter changes retain the same file.
     HANDLE live_writer = CreateFileW(log.c_str(), GENERIC_WRITE,
@@ -469,6 +517,7 @@ int test_retained_game_log_handle() {
     chunks = worker.take_game_log_chunks(log_binding.identity);
     CHECK(chunks.size() == 1 && chunks.front().reset_parser);
     CHECK(!chunks.front().parsed_session);
+    CHECK(game_log_trace_for_testing().read.stage == "freshness");
     CHECK(game_log_handle_closes_for_testing() == closes + 1);
     write_file(log, "Log: LoadMap: KF-Paris?"
         "Game=KFGameContent.KFGameInfo_Survival\n");
@@ -517,6 +566,9 @@ int test_retained_game_log_handle() {
     CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
     CHECK(game_log_handle_opens_for_testing() == opens + 3);
     CHECK(CloseHandle(writer));
+    trace = game_log_trace_for_testing();
+    CHECK(trace.read.stage == "open");
+    CHECK(trace.read.last_windows_error == ERROR_SHARING_VIOLATION);
     worker.request(1'700'000'000ULL);
     CHECK(worker.wait_until_idle(2s));
     chunks = worker.take_game_log_chunks(log_binding.identity);
@@ -531,6 +583,8 @@ int test_retained_game_log_handle() {
     CHECK(chunks.size() == 1 && chunks.front().reset_parser);
     CHECK(!chunks.front().parsed_session);
     CHECK(game_log_handle_closes_for_testing() == closes + 4);
+    trace = game_log_trace_for_testing();
+    CHECK(trace.read.stage == "inspection" && trace.read.links == 2);
     CHECK(DeleteFileW(alias.c_str()));
     worker.request(1'900'000'000ULL);
     CHECK(worker.wait_until_idle(2s));
@@ -580,6 +634,10 @@ int test_retained_game_log_handle() {
     set_game_log_read_hook_for_testing(nullptr);
     rebinding_log_worker = nullptr;
     CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
+    trace = game_log_trace_for_testing();
+    CHECK(trace.publication_stage == "generation_rejected");
+    CHECK(!trace.chunk_queued);
+    CHECK(trace.request_generation != trace.current_generation);
     CHECK(game_log_handle_opens_for_testing() == opens + 17);
     CHECK(game_log_handle_closes_for_testing() == closes + 17);
     worker.request(2'500'000'000ULL);
@@ -600,6 +658,7 @@ int test_retained_game_log_handle() {
     chunks = worker.take_game_log_chunks(log_binding.identity);
     CHECK(chunks.size() == 1 && chunks.front().reset_parser);
     CHECK(chunks.front().catching_up && !chunks.front().parsed_session);
+    CHECK(game_log_trace_for_testing().read.stage == "read");
     CHECK(game_log_handle_closes_for_testing() == closes + 18);
     write_file(log, "Log: LoadMap: KF-Paris?"
         "Game=KFGameContent.KFGameInfo_Survival\n");
@@ -618,7 +677,10 @@ int test_retained_game_log_handle() {
     return EXIT_SUCCESS;
 }
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--initial-log-open-failure") {
+        return test_retained_game_log_handle(true);
+    }
     if (test_retained_game_log_handle() != EXIT_SUCCESS) return EXIT_FAILURE;
     CHECK(test_gpu_provider_recovery() == EXIT_SUCCESS);
     CHECK(test_nvidia_provider_recovery() == EXIT_SUCCESS);
@@ -855,6 +917,8 @@ int main() {
         CHECK(snapshot);
         CHECK(snapshot->process_sampled_at_ns == 8'000);
         CHECK(!snapshot->process);
+        CHECK(worker.wait_until_idle(2s));
+        CHECK(kf2::telemetry::detail::game_log_trace_for_testing().sample_exception);
         worker.request(8'100);
         const auto deadline = std::chrono::steady_clock::now() + 2s;
         while (std::chrono::steady_clock::now() < deadline) {
@@ -882,6 +946,9 @@ int main() {
         worker.request(8'500);
         CHECK(worker.wait_until_idle(2s));
         CHECK(!worker.latest());
+        const auto trace = kf2::telemetry::detail::game_log_trace_for_testing();
+        CHECK(trace.publication_stage == "publication_failed");
+        CHECK(!trace.chunk_queued && trace.request_generation == generation);
         worker.request(8'600);
         CHECK(wait_for_generation(worker, generation));
     }
