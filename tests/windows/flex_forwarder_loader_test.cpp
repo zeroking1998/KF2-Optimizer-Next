@@ -71,6 +71,7 @@ int wmain(int argc, wchar_t** argv) {
         // A retained reader keeps the named mapping alive after DLL unload.
         // It must not keep a valid producer publication alive with it.
         if (!FreeLibrary(module)) return 10;
+        if (GetModuleHandleW(L"flexRelease_original.dll")) return 19;
         if (shared->magic != 0 || shared->state != 0 ||
             kf2::flex::read_observation(identity) ||
             reader.read(identity) ||
@@ -87,6 +88,7 @@ int wmain(int argc, wchar_t** argv) {
                 shared->magic != kf2::flex::observation_magic || shared->state != 1 ||
                 !reader.read(identity)) return 17;
             if (!FreeLibrary(module)) return 10;
+            if (GetModuleHandleW(L"flexRelease_original.dll")) return 19;
             if (shared->magic != 0 || shared->state != 0 ||
                 reader.read(identity)) return 18;
         }

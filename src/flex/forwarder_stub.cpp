@@ -1,4 +1,5 @@
 #include <Windows.h>
+#include <atomic>
 #include <limits.h>
 
 #include "kf2/flex/flex_observation_shared.hpp"
@@ -33,7 +34,10 @@ struct SolverSlot {
 SRWLOCK solver_lock = SRWLOCK_INIT;
 SolverSlot solver_slots[64]{};
 volatile LONG solver_quarantine{};
-PVOID volatile flex_update_solver_target{};
+HMODULE forwarder_module{};
+#ifdef KF2_FLEX_FORWARDER_TESTING
+volatile LONGLONG export_lookup_calls{};
+#endif
 
 bool detailed_diagnostics(ObservationShared* shared) noexcept {
     return shared &&
@@ -208,6 +212,10 @@ extern "C" __declspec(dllexport) void flexTestAcquireSolverLock() noexcept {
 extern "C" __declspec(dllexport) void flexTestReleaseSolverLock() noexcept {
     ReleaseSRWLockExclusive(&solver_lock);
 }
+
+extern "C" __declspec(dllexport) long long flexTestExportLookups() noexcept {
+    return InterlockedCompareExchange64(&export_lookup_calls, 0, 0);
+}
 #endif
 
 void saturated_increment(volatile LONGLONG* value) noexcept {
@@ -263,32 +271,35 @@ ObservationShared* observation_state() noexcept {
                                nullptr, nullptr) ? observation : nullptr;
 }
 
-HMODULE original_module() noexcept {
-    // The PE loader has already loaded this sibling because the remaining 37
-    // exports are direct forwarders. Never load a DLL or perform file I/O from
-    // the game call path.
-    return GetModuleHandleW(L"flexRelease_original.dll");
-}
+static_assert(std::atomic<FARPROC>::is_always_lock_free);
 
-PVOID update_solver_target() noexcept {
-    auto* cached = InterlockedCompareExchangePointer(
-        &flex_update_solver_target, nullptr, nullptr);
-    if (cached) return cached;
-    const auto module = original_module();
-    auto* resolved = module ? reinterpret_cast<PVOID>(
-        GetProcAddress(module, "flexUpdateSolver")) : nullptr;
+template <class Function>
+Function original_function(std::atomic<FARPROC>& target,
+                           const char* export_name) noexcept {
+    if (const auto cached = target.load(std::memory_order_acquire))
+        return reinterpret_cast<Function>(cached);
+#ifdef KF2_FLEX_FORWARDER_TESTING
+    InterlockedIncrement64(&export_lookup_calls);
+#endif
+    // Do not load an absent runtime. Resolve a stock PE forwarder only after
+    // the original is present: its loader dependency retains that DLL until
+    // this forwarder unloads, without permanent pinning or DllMain FreeLibrary.
+    if (!GetModuleHandleW(L"flexRelease_original.dll") || !forwarder_module ||
+        !GetProcAddress(forwarder_module, "flexInit")) return nullptr;
+    const auto module = GetModuleHandleW(L"flexRelease_original.dll");
+    const auto resolved = module ? GetProcAddress(module, export_name) : nullptr;
     if (!resolved) return nullptr;
-    auto* previous = InterlockedCompareExchangePointer(
-        &flex_update_solver_target, resolved, nullptr);
-    return previous ? previous : resolved;
+    FARPROC previous = nullptr;
+    target.compare_exchange_strong(previous, resolved,
+        std::memory_order_acq_rel, std::memory_order_acquire);
+    return reinterpret_cast<Function>(previous ? previous : resolved);
 }
 }  // namespace
 
 extern "C" void flexDestroySolver(void* solver) noexcept {
     using Function = void (*)(void*);
-    const auto module = original_module();
-    const auto function = module ? reinterpret_cast<Function>(
-        GetProcAddress(module, "flexDestroySolver")) : nullptr;
+    static constinit std::atomic<FARPROC> target{};
+    const auto function = original_function<Function>(target, "flexDestroySolver");
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && !solver) saturated_increment(&shared->invalid_argument_calls);
@@ -302,9 +313,8 @@ extern "C" void flexDestroySolver(void* solver) noexcept {
 // them, so this relay deliberately follows that verified one-argument ABI.
 extern "C" void* flexCreateSolver(int max_particles) noexcept {
     using Function = void* (*)(int);
-    const auto module = original_module();
-    const auto function = module ? reinterpret_cast<Function>(
-        GetProcAddress(module, "flexCreateSolver")) : nullptr;
+    static constinit std::atomic<FARPROC> target{};
+    const auto function = original_function<Function>(target, "flexCreateSolver");
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && max_particles <= 0)
@@ -324,9 +334,8 @@ extern "C" void* flexCreateSolver(int max_particles) noexcept {
 
 extern "C" int flexGetVersion() noexcept {
     using Function = int (*)();
-    const auto module = original_module();
-    const auto function = module ? reinterpret_cast<Function>(
-        GetProcAddress(module, "flexGetVersion")) : nullptr;
+    static constinit std::atomic<FARPROC> target{};
+    const auto function = original_function<Function>(target, "flexGetVersion");
     if (auto* shared = observation_state(); shared && !function)
         saturated_increment(&shared->missing_original_calls);
     return function ? function() : 0;
@@ -334,9 +343,8 @@ extern "C" int flexGetVersion() noexcept {
 
 extern "C" int flexGetActiveCount(void* solver) noexcept {
     using Function = int (*)(void*);
-    const auto module = original_module();
-    const auto function = module ? reinterpret_cast<Function>(
-        GetProcAddress(module, "flexGetActiveCount")) : nullptr;
+    static constinit std::atomic<FARPROC> target{};
+    const auto function = original_function<Function>(target, "flexGetActiveCount");
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && !solver) saturated_increment(&shared->invalid_argument_calls);
@@ -373,9 +381,8 @@ extern "C" int flexGetActiveCount(void* solver) noexcept {
 
 extern "C" void flexGetBounds(void* solver, void* lower, void* upper) noexcept {
     using Function = void (*)(void*, void*, void*);
-    const auto module = original_module();
-    const auto function = module ? reinterpret_cast<Function>(
-        GetProcAddress(module, "flexGetBounds")) : nullptr;
+    static constinit std::atomic<FARPROC> target{};
+    const auto function = original_function<Function>(target, "flexGetBounds");
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && (!solver || !lower || !upper))
@@ -387,9 +394,8 @@ extern "C" void flexGetBounds(void* solver, void* lower, void* upper) noexcept {
 
 extern "C" void flexSetParams(void* solver, const void* params) noexcept {
     using Function = void (*)(void*, const void*);
-    const auto module = original_module();
-    const auto function = module ? reinterpret_cast<Function>(
-        GetProcAddress(module, "flexSetParams")) : nullptr;
+    static constinit std::atomic<FARPROC> target{};
+    const auto function = original_function<Function>(target, "flexSetParams");
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && (!solver || !params))
@@ -400,13 +406,12 @@ extern "C" void flexSetParams(void* solver, const void* params) noexcept {
 }
 
 template <bool Upload>
-void relay_buffer_transfer(const char* export_name, void* solver,
+void relay_buffer_transfer(std::atomic<FARPROC>& target,
+                           const char* export_name, void* solver,
                            void* buffer, int elements, int memory,
                            volatile LONGLONG kf2::flex::ObservationShared::* counter) noexcept {
     using Function = void (*)(void*, void*, int, int);
-    const auto module = original_module();
-    const auto function = module ? reinterpret_cast<Function>(
-        GetProcAddress(module, export_name)) : nullptr;
+    const auto function = original_function<Function>(target, export_name);
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && (!solver || (!buffer && elements > 0) || elements < 0))
@@ -418,48 +423,53 @@ void relay_buffer_transfer(const char* export_name, void* solver,
 
 extern "C" void flexGetParticles(void* solver, void* particles,
                                   int elements, int memory) noexcept {
-    relay_buffer_transfer<false>("flexGetParticles", solver, particles,
+    static constinit std::atomic<FARPROC> target{};
+    relay_buffer_transfer<false>(target, "flexGetParticles", solver, particles,
         elements, memory, &kf2::flex::ObservationShared::particle_download_calls);
 }
 
 extern "C" void flexGetPhases(void* solver, void* phases,
                                int elements, int memory) noexcept {
-    relay_buffer_transfer<false>("flexGetPhases", solver, phases,
+    static constinit std::atomic<FARPROC> target{};
+    relay_buffer_transfer<false>(target, "flexGetPhases", solver, phases,
         elements, memory, &kf2::flex::ObservationShared::phase_download_calls);
 }
 
 extern "C" void flexGetVelocities(void* solver, void* velocities,
                                    int elements, int memory) noexcept {
-    relay_buffer_transfer<false>("flexGetVelocities", solver, velocities,
+    static constinit std::atomic<FARPROC> target{};
+    relay_buffer_transfer<false>(target, "flexGetVelocities", solver, velocities,
         elements, memory, &kf2::flex::ObservationShared::velocity_download_calls);
 }
 
 extern "C" void flexSetParticles(void* solver, const void* particles,
                                   int elements, int memory) noexcept {
-    relay_buffer_transfer<true>("flexSetParticles", solver,
+    static constinit std::atomic<FARPROC> target{};
+    relay_buffer_transfer<true>(target, "flexSetParticles", solver,
         const_cast<void*>(particles), elements, memory,
         &kf2::flex::ObservationShared::particle_upload_calls);
 }
 
 extern "C" void flexSetPhases(void* solver, const void* phases,
                                int elements, int memory) noexcept {
-    relay_buffer_transfer<true>("flexSetPhases", solver,
+    static constinit std::atomic<FARPROC> target{};
+    relay_buffer_transfer<true>(target, "flexSetPhases", solver,
         const_cast<void*>(phases), elements, memory,
         &kf2::flex::ObservationShared::phase_upload_calls);
 }
 
 extern "C" void flexSetVelocities(void* solver, const void* velocities,
                                    int elements, int memory) noexcept {
-    relay_buffer_transfer<true>("flexSetVelocities", solver,
+    static constinit std::atomic<FARPROC> target{};
+    relay_buffer_transfer<true>(target, "flexSetVelocities", solver,
         const_cast<void*>(velocities), elements, memory,
         &kf2::flex::ObservationShared::velocity_upload_calls);
 }
 
 extern "C" void flexSetFence() noexcept {
     using Function = void (*)();
-    const auto module = original_module();
-    const auto function = module ? reinterpret_cast<Function>(
-        GetProcAddress(module, "flexSetFence")) : nullptr;
+    static constinit std::atomic<FARPROC> target{};
+    const auto function = original_function<Function>(target, "flexSetFence");
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (!function) return;
@@ -473,9 +483,8 @@ extern "C" void flexSetFence() noexcept {
 
 extern "C" void flexWaitFence() noexcept {
     using Function = void (*)();
-    const auto module = original_module();
-    const auto function = module ? reinterpret_cast<Function>(
-        GetProcAddress(module, "flexWaitFence")) : nullptr;
+    static constinit std::atomic<FARPROC> target{};
+    const auto function = original_function<Function>(target, "flexWaitFence");
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (!function) return;
@@ -491,7 +500,8 @@ extern "C" void flexWaitFence() noexcept {
 extern "C" void flexUpdateSolver(void* solver, float delta_time,
                                   int substeps, void* timers) noexcept {
     using Function = void (*)(void*, float, int, void*);
-    const auto function = reinterpret_cast<Function>(update_solver_target());
+    static constinit std::atomic<FARPROC> target{};
+    const auto function = original_function<Function>(target, "flexUpdateSolver");
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && (!solver || substeps < 0 || substeps > 64))
@@ -550,7 +560,8 @@ extern "C" void flexUpdateSolver(void* solver, float delta_time,
     }
 }
 
-extern "C" BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID) noexcept {
+extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) noexcept {
+    if (reason == DLL_PROCESS_ATTACH) forwarder_module = instance;
     if (reason == DLL_PROCESS_DETACH) {
         if (observation) {
             // A reader can retain the mapping after this producer unloads.

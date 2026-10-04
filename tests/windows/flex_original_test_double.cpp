@@ -22,6 +22,12 @@ volatile LONG last_capacity{};
 int solver_tokens[4]{};
 }
 
+// Resolved as a stock PE forwarder to bind the dependency, never invoked by
+// the CPU-only relay tests (and therefore never initializes a GPU runtime).
+extern "C" __declspec(dllexport) void flexInit() noexcept {}
+
+extern "C" __declspec(dllexport) int flexGetVersion() noexcept { return 31; }
+
 extern "C" __declspec(dllexport) void* flexCreateSolver(int capacity) noexcept {
     const auto call = InterlockedIncrement64(&create_calls);
     InterlockedExchange(&last_capacity, capacity);
