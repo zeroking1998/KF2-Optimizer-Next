@@ -10,6 +10,10 @@
 #include <string>
 #include <vector>
 
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+#include <string_view>
+#endif
+
 #include "kf2/game/game_log_session.hpp"
 #include "kf2/game/video_settings.hpp"
 #include "kf2/telemetry/gpu_metrics.hpp"
@@ -133,6 +137,25 @@ private:
 
 #ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
 namespace detail {
+struct GameLogReadTrace final {
+    std::string_view stage{"not_sampled"};
+    std::uint64_t process_start_filetime{0};
+    std::uint64_t last_write_filetime{0};
+    std::uintmax_t file_size{0};
+    std::uint32_t attributes{0};
+    std::uint32_t links{0};
+    std::uint32_t last_windows_error{0};
+    std::uint32_t bytes_read{0};
+};
+struct GameLogTestTrace final {
+    GameLogReadTrace read;
+    std::string_view publication_stage{"not_requested"};
+    std::uint64_t request_generation{0};
+    std::uint64_t current_generation{0};
+    bool chunk_queued{false};
+    bool sample_exception{false};
+};
+[[nodiscard]] GameLogTestTrace game_log_trace_for_testing();
 [[nodiscard]] std::uint64_t game_log_handle_opens_for_testing() noexcept;
 [[nodiscard]] std::uint64_t game_log_handle_closes_for_testing() noexcept;
 using GameLogReadHook = void (*)(const std::filesystem::path&);

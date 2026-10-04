@@ -42,6 +42,18 @@ counts, and device-loss recovery. `validate_gui.ps1` checks the complete capture
 set and repeated-image determinism; private before/after hashes can additionally
 verify pixel-identical output without committing baseline images or benchmarks.
 
+## CI failure diagnosis
+
+The existing resource-worker test records its last log discovery/read and
+publication boundaries only in test builds. Failed assertions print the
+boundary, inspected timestamps/metadata, raw Windows last-error, request/current
+generation and whether a chunk was queued. A metadata rejection does not imply
+the raw last-error describes its cause. Normal app builds contain none of this
+state or recording work. The test's explicit `--initial-log-open-failure` mode
+holds a denied-read lease and must exit with failure; it validates CI failure
+output, not a retry or a passing gameplay check. The historical intermittent
+failure in #685 remains unconfirmed until its actual failing boundary is captured.
+
 ## Real KF2 checks
 
 Automated tests cannot prove every in-game effect. Changes to protected runtime

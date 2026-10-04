@@ -26,6 +26,27 @@ std::atomic_uint64_t resource_requests{0};
 std::atomic_uint64_t game_log_handle_opens{0};
 std::atomic_uint64_t game_log_handle_closes{0};
 kf2::telemetry::detail::ResourceRequestHook resource_request_hook{nullptr};
+std::mutex game_log_trace_mutex;
+detail::GameLogTestTrace game_log_test_trace;
+
+struct TraceGameLogRead final {
+    detail::GameLogReadTrace value;
+    ~TraceGameLogRead() {
+        std::scoped_lock lock{game_log_trace_mutex};
+        game_log_test_trace.read = value;
+    }
+};
+
+void record_game_log_publication(const detail::GameLogTestTrace& trace,
+                                std::string_view stage) {
+    std::scoped_lock lock{game_log_trace_mutex};
+    if (stage == "sampling") game_log_test_trace.read = {};
+    game_log_test_trace.publication_stage = stage;
+    game_log_test_trace.request_generation = trace.request_generation;
+    game_log_test_trace.current_generation = trace.current_generation;
+    game_log_test_trace.chunk_queued = trace.chunk_queued;
+    game_log_test_trace.sample_exception = trace.sample_exception;
+}
 #endif
 
 bool same_binding(const ResourceTelemetryBinding& left,
@@ -150,13 +171,27 @@ public:
         : binding_{std::move(binding)} {}
 
     std::optional<GameLogChunk> sample(std::uint64_t now_ns) {
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+        TraceGameLogRead trace;
+        trace.value.process_start_filetime = binding_.identity.process_start_id;
+        trace.value.stage = "discovery";
+#endif
         if (binding_.game_log_directory.empty()) return std::nullopt;
         bool reset_parser = false;
         if (file_.get() == INVALID_HANDLE_VALUE) {
             const auto selected = game::find_active_game_log(
                 binding_.game_log_directory,
                 binding_.identity.process_start_id);
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+            if (!selected.has_value()) {
+                trace.value.last_windows_error = selected.error().native_code;
+            }
+#endif
             if (!selected.has_value() || !selected.value()) return std::nullopt;
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+            trace.value.stage = "open";
+            trace.value.last_write_filetime = selected.value()->last_write_filetime;
+#endif
             path_ = selected.value()->path;
             file_.reset(CreateFileW(path_.c_str(),
                 FILE_READ_ATTRIBUTES | GENERIC_READ,
@@ -164,6 +199,11 @@ public:
                 nullptr, OPEN_EXISTING,
                 FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
                 nullptr));
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+            if (file_.get() == INVALID_HANDLE_VALUE) {
+                trace.value.last_windows_error = GetLastError();
+            }
+#endif
             if (file_.get() == INVALID_HANDLE_VALUE) return reject_binding();
             // Allocate once per binding, with room for the volume-relative
             // name. Never allocate or reopen an unchanged file on idle polls.
@@ -173,6 +213,9 @@ public:
 
         BY_HANDLE_FILE_INFORMATION information{};
         FILE_STANDARD_INFO standard{};
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+        trace.value.stage = "inspection";
+#endif
         const bool inspected =
             GetFileInformationByHandle(file_.get(), &information) &&
             (information.dwFileAttributes &
@@ -183,6 +226,20 @@ public:
             !standard.Directory && standard.NumberOfLinks == 1 &&
             GetFileInformationByHandleEx(file_.get(), FileNameInfo,
                 name_buffer_.data(), static_cast<DWORD>(name_buffer_.size()));
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+        trace.value.attributes = information.dwFileAttributes;
+        trace.value.links = information.nNumberOfLinks;
+        trace.value.last_write_filetime =
+            (static_cast<std::uint64_t>(information.ftLastWriteTime.dwHighDateTime) << 32) |
+            information.ftLastWriteTime.dwLowDateTime;
+        trace.value.file_size =
+            (static_cast<std::uintmax_t>(information.nFileSizeHigh) << 32) |
+            information.nFileSizeLow;
+        // Raw last-error is meaningful only for a failed Windows API, not a
+        // rejected metadata predicate. Keep the inspected fields alongside it.
+        if (!inspected) trace.value.last_windows_error = GetLastError();
+        if (inspected) trace.value.stage = "file_name";
+#endif
         if (!inspected) return reject_binding();
         const auto* name = reinterpret_cast<const FILE_NAME_INFO*>(
             name_buffer_.data());
@@ -194,6 +251,9 @@ public:
         }
         const std::wstring_view current_name{
             name->FileName, name->FileNameLength / sizeof(wchar_t)};
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+        trace.value.stage = "retained_name";
+#endif
         // File IDs are immutable on a retained handle. Detect rename/delete
         // through that same handle rather than continuing to tail an old file.
         if (bound_ && current_name != bound_name_) return reject_binding();
@@ -208,6 +268,9 @@ public:
             (static_cast<std::uint64_t>(information.ftCreationTime.dwHighDateTime)
              << 32U) |
             information.ftCreationTime.dwLowDateTime;
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+        trace.value.stage = "freshness";
+#endif
         if (!game::game_log_belongs_to_process(
                 last_write, binding_.identity.process_start_id)) {
             return reject_binding();
@@ -215,6 +278,9 @@ public:
         const auto file_index =
             (static_cast<std::uint64_t>(information.nFileIndexHigh) << 32U) |
             information.nFileIndexLow;
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+        trace.value.stage = "file_identity";
+#endif
         if (bound_ &&
             (volume_serial_ != information.dwVolumeSerialNumber ||
              file_index_ != file_index)) {
@@ -248,11 +314,15 @@ public:
             now_ns < caught_up_at_ns_ ||
             now_ns - caught_up_at_ns_ > game::kGameLogObservationFreshnessNs;
         if (size == offset_) {
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+            trace.value.stage = "end_of_file";
+#endif
             caught_up_at_ns_ = now_ns;
             return reset_parser ? std::optional{std::move(chunk)}
                                 : std::nullopt;
         }
 #ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+        trace.value.stage = "seek";
         if (game_log_read_hook != nullptr) game_log_read_hook(path_);
 #endif
         if (offset_ > static_cast<std::uintmax_t>(
@@ -262,6 +332,9 @@ public:
         LARGE_INTEGER position{};
         position.QuadPart = static_cast<LONGLONG>(offset_);
         if (!SetFilePointerEx(file_.get(), position, nullptr, FILE_BEGIN)) {
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+            trace.value.last_windows_error = GetLastError();
+#endif
             return reject_binding();
         }
         const auto requested = static_cast<std::size_t>(
@@ -270,11 +343,21 @@ public:
                 ? kCatchUpLogChunkBytes : kNormalLogChunkBytes));
         chunk.bytes.assign(requested, '\0');
         DWORD received = 0;
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+        trace.value.stage = "read";
+#endif
         if (!ReadFile(file_.get(), chunk.bytes.data(),
                       static_cast<DWORD>(requested), &received, nullptr)) {
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+            trace.value.last_windows_error = GetLastError();
+#endif
             return reject_binding();
         }
         if (received == 0) return reject_binding();
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+        trace.value.bytes_read = received;
+        trace.value.stage = "post_read_size";
+#endif
         chunk.bytes.resize(received);
         offset_ += received;
         // Inspect the same verified handle again: writers may have appended
@@ -302,6 +385,9 @@ public:
         }
         catching_up_ = chunk.catching_up;
         if (!catching_up_) caught_up_at_ns_ = now_ns;
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+        trace.value.stage = "sampled";
+#endif
         return chunk;
     }
 
@@ -469,6 +555,11 @@ private:
 }  // namespace
 
 #ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+detail::GameLogTestTrace detail::game_log_trace_for_testing() {
+    std::scoped_lock lock{game_log_trace_mutex};
+    return game_log_test_trace;
+}
+
 std::uint64_t detail::game_log_handle_opens_for_testing() noexcept {
     return game_log_handle_opens.load();
 }
@@ -671,6 +762,11 @@ private:
             ResourceSampleBatch batch;
             batch.group = request.group;
             std::optional<GameLogChunk> log_chunk;
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+            detail::GameLogTestTrace test_trace;
+            test_trace.request_generation = request_generation;
+            record_game_log_publication(test_trace, "sampling");
+#endif
             try {
                 if (custom_sample_) {
                     batch = custom_sample_(request, stop);
@@ -802,10 +898,16 @@ private:
                     batch = native->sample(request);
                 }
             } catch (const std::exception&) {
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+                test_trace.sample_exception = true;
+#endif
                 // A failed desktop provider invalidates only this group. The
                 // next request retries on the same single worker.
                 batch = {};
             } catch (...) {
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+                test_trace.sample_exception = true;
+#endif
                 batch = {};
             }
             batch.group = request.group;
@@ -818,13 +920,22 @@ private:
                 }
 #endif
                 std::scoped_lock lock{mutex_};
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+                test_trace.current_generation = generation_;
+#endif
                 if (log_chunk && binding_ && !reset_log_ &&
                     same_session(*binding_, request.binding)) {
                     log_chunks_.push_back(std::move(*log_chunk));
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+                    test_trace.chunk_queued = true;
+#endif
                 }
                 if (stop.stop_requested() || !binding_ ||
                     generation_ != request_generation ||
                     !same_binding(*binding_, request.binding)) {
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+                    record_game_log_publication(test_trace, "generation_rejected");
+#endif
                     active_ = false;
                     condition_.notify_all();
                     continue;
@@ -856,9 +967,15 @@ private:
                 next->publication_sequence = publication_sequence_ + 1;
                 publication_sequence_ = next->publication_sequence;
                 published_ = std::move(next);
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+                record_game_log_publication(test_trace, "published");
+#endif
                 active_ = false;
                 condition_.notify_all();
             } catch (...) {
+#ifdef KF2_RESOURCE_TELEMETRY_WORKER_TESTING
+                record_game_log_publication(test_trace, "publication_failed");
+#endif
                 finish_failed_sample();
             }
         }
