@@ -431,6 +431,33 @@ int wmain(int argc, wchar_t** argv) {
         bounds_calls() != 257 || params_calls() != 257 ||
         lower[0] != -1.0F || upper[2] != 3.0F)
         return fail(62, "warm relay repeated lookups or aliased an export");
+
+    const auto gate = reinterpret_cast<void (*)(HANDLE, HANDLE)>(
+        GetProcAddress(original_module, "flexTestSetUpdateGate"));
+    if (!gate) return fail(64, "native completion gate unavailable");
+    const auto completed_publication = [&](int input, int before, int after) {
+        HANDLE entered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!entered || !release) {
+            if (entered) CloseHandle(entered);
+            if (release) CloseHandle(release);
+            return false;
+        }
+        gate(entered, release);
+        std::thread native([&] { update(solver, 1.0F / 60.0F, input, nullptr); });
+        const bool in_flight = WaitForSingleObject(entered, 2000) == WAIT_OBJECT_0 &&
+            shared->last_forwarded_substeps == before &&
+            shared->update_calls == shared->successful_updates + 1;
+        SetEvent(release);
+        native.join();
+        gate(nullptr, nullptr);
+        CloseHandle(entered);
+        CloseHandle(release);
+        return in_flight && shared->last_forwarded_substeps == after &&
+            shared->update_calls == shared->successful_updates;
+    };
+    if (!completed_publication(0, 1, 0) || !completed_publication(4, 0, 1))
+        return fail(65, "forwarded value was published before native completion");
     destroy(solver);
     if (destroy_calls() != 3 || shared->destroy_calls != 3 ||
         shared->live_solvers != 0 || shared->aggregate_capacity_valid != 0 ||

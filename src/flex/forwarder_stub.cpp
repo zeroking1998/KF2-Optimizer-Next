@@ -513,7 +513,6 @@ extern "C" void flexUpdateSolver(void* solver, float delta_time,
         if (forwarded_substeps != substeps) {
             saturated_increment(&shared->constrained_updates);
         }
-        InterlockedExchange(&shared->last_forwarded_substeps, forwarded_substeps);
         if (diagnostics) {
             LONG forwarded_minimum = InterlockedCompareExchange(
                 &shared->min_forwarded_substeps, 0, 0);
@@ -556,7 +555,11 @@ extern "C" void flexUpdateSolver(void* solver, float delta_time,
     }
     if (function) {
         function(solver, delta_time, forwarded_substeps, timers);
-        if (shared) saturated_increment(&shared->successful_updates);
+        if (shared) {
+            // Commit the returned call's value, not an in-flight intention.
+            InterlockedExchange(&shared->last_forwarded_substeps, forwarded_substeps);
+            saturated_increment(&shared->successful_updates);
+        }
     }
 }
 

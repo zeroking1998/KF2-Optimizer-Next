@@ -20,6 +20,8 @@ volatile LONG last_transfer_elements{};
 volatile LONG last_transfer_memory{};
 volatile LONG last_capacity{};
 int solver_tokens[4]{};
+HANDLE update_entered{};
+HANDLE update_release{};
 }
 
 // Resolved as a stock PE forwarder to bind the dependency, never invoked by
@@ -98,6 +100,16 @@ extern "C" __declspec(dllexport) void flexUpdateSolver(
     void*, float, int substeps, void*) noexcept {
     InterlockedExchange(&last_substeps, substeps);
     InterlockedIncrement64(&update_calls);
+    if (update_entered) {
+        SetEvent(update_entered);
+        WaitForSingleObject(update_release, 5000);
+    }
+}
+
+extern "C" __declspec(dllexport) void flexTestSetUpdateGate(
+    HANDLE entered, HANDLE release) noexcept {
+    update_entered = entered;
+    update_release = release;
 }
 
 extern "C" __declspec(dllexport) int flexTestLastSubsteps() noexcept {
