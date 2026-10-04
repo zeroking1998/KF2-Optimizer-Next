@@ -174,7 +174,7 @@ void UiRuntime::observe_flex_process() {
             L"flex"});
     }
     const auto& current = model.status();
-    const std::wstring flex_status = flex_state->aggregate_particles_fresh
+    const std::wstring flex_values = flex_state->aggregate_particles_fresh
         ? L"FleX solvers: " + std::to_wstring(flex_state->live_solvers) +
               L" | particles active/free/capacity: " +
               std::to_wstring(flex_state->aggregate_active_particles) + L"/" +
@@ -197,6 +197,9 @@ void UiRuntime::observe_flex_process() {
             ? L"FleX active particles: " +
                   std::to_wstring(flex_state->active_particles) +
                   L" (read-only runtime source; aggregate unavailable)"
+        : std::wstring{};
+    const std::wstring_view flex_status = !flex_values.empty()
+        ? std::wstring_view{flex_values}
         : flex_state->active_count_calls > 0
             ? L"FleX active-particle value is stale"
             : flex_state->diagnostics_enabled
@@ -216,7 +219,7 @@ void UiRuntime::observe_flex_process() {
         : std::string_view{"NONE"};
     const std::wstring action_status{
         action_status_view.begin(), action_status_view.end()};
-    const std::wstring substep_status = flex_state->diagnostics_enabled
+    const std::wstring substep_values = flex_state->diagnostics_enabled
         ? L"input min/max " + std::to_wstring(flex_state->min_substeps) +
               L"/" + std::to_wstring(flex_state->max_substeps) +
               L"  •  forwarded min/max " +
@@ -224,8 +227,11 @@ void UiRuntime::observe_flex_process() {
               std::to_wstring(flex_state->max_forwarded_substeps) +
               L"  •  latest " + std::to_wstring(flex_state->last_substeps) +
               L" → " + std::to_wstring(flex_state->last_forwarded_substeps)
+        : std::wstring{};
+    const std::wstring_view substep_status = flex_state->diagnostics_enabled
+        ? std::wstring_view{substep_values}
         : L"Detailed substep counters are off; fixed one-substep limit is active";
-    const std::wstring readback_status = flex_state->diagnostics_enabled
+    const std::wstring readback_values = flex_state->diagnostics_enabled
         ? std::wstring{L"shared memory "} +
               (flex_state->pass_through_healthy ? L"healthy" : L"unhealthy") +
               L"  •  updates " + std::to_wstring(flex_state->successful_updates) +
@@ -233,6 +239,9 @@ void UiRuntime::observe_flex_process() {
               L"  •  constrained " +
               std::to_wstring(flex_state->constrained_updates) +
               L"  •  reports and extra logs on"
+        : std::wstring{};
+    const std::wstring_view readback_status = flex_state->diagnostics_enabled
+        ? std::wstring_view{readback_values}
         : L"Minimal safety readback active; reports and extra logs are off";
     if (current.flex_telemetry != flex_status ||
         current.flex_requested_substeps != requested ||
