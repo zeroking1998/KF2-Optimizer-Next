@@ -2906,6 +2906,37 @@ int main() {
     CHECK(telemetry_source.find(
         "RegisterAdaptiveCorpsePhysicsAction(Candidate, \"baseline\")") !=
           std::string::npos);
+    const auto baseline_start = telemetry_source.find(
+        "function int SleepBaselineAwakeMonsterCorpses(");
+    const auto baseline_end = telemetry_source.find(
+        "function int FindFixedMinimumCorpseLodEntry(", baseline_start);
+    CHECK(baseline_end != std::string::npos);
+    const auto baseline_body = telemetry_source.substr(
+        baseline_start, baseline_end - baseline_start);
+    const auto baseline_capacity = baseline_body.find(
+        "if (!EnsureAdaptiveCorpsePhysicsActionIds() ||\n"
+        "        AdaptiveCorpsePhysicsActionIdCount >= 8192)");
+    const auto baseline_loop = baseline_body.find(
+        "for (Offset = 0; Offset < ScanCount; ++Offset)");
+    CHECK(baseline_capacity != std::string::npos);
+    CHECK(baseline_body.find("if (PoolLength <= 0)") < baseline_capacity);
+    CHECK(baseline_body.find(
+        "ScanCount = Min(AdaptiveCorpseScanBudget, PoolLength);") <
+          baseline_capacity);
+    CHECK(baseline_capacity < baseline_loop);
+    const auto baseline_capacity_body = baseline_body.substr(
+        baseline_capacity, baseline_loop - baseline_capacity);
+    CHECK(baseline_capacity_body.find(
+        "AdaptiveBaselineScanCursor =\n"
+        "            (AdaptiveBaselineScanCursor + ScanCount) % PoolLength;\n"
+        "        return 0;") != std::string::npos);
+    CHECK(baseline_loop < baseline_body.find("IsAdaptiveCorpseSettled("));
+    CHECK(baseline_loop < baseline_body.find(
+        "ReserveAdaptivePhysicsMutationForCurrentFrame()"));
+    CHECK(baseline_loop < baseline_body.find("PutRigidBodyToSleep()"));
+    CHECK(baseline_loop < baseline_body.find(
+        "bSkipAllUpdateWhenPhysicsAsleep = true;"));
+    CHECK(baseline_loop < baseline_body.find("bNoSkeletonUpdate = true;"));
     CHECK(telemetry_source.find(
         "0.05 + ((WeightedVisibleZeds - 1.0) / 79.0) * 0.95") !=
           std::string::npos);

@@ -123,6 +123,9 @@ are visible immediately.
   an applied action; existing acknowledgement timeouts and fixed substeps
   remain unchanged.
 
+- Baseline corpse sleep now stops before scanning or changing corpses when its
+  action-tracking table is full or invalid, retaining fair cursor progress.
+
 - Update and Auto Repair now wait for synchronous Windows ZIP extraction to
   finish before checking or cleaning staged files; partial or aborted copies
   fail safely without a fixed-delay completion guess.
