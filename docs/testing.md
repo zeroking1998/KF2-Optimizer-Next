@@ -13,6 +13,13 @@ pwsh -NoProfile -File ./tools/validate_documentation.ps1
 `test.ps1` builds before running the tests. GitHub CI runs the same Debug and
 Release suites with desktop-only checks excluded.
 
+Test and catalog sizes are recorded once in the
+[validation inventory](ISSUE_72_PRODUCT_MATRIX.md#current-validation-inventory).
+Documentation validation checks them against source registrations/definitions
+and rejects stale duplicated totals in current status documents. Counts describe
+the default full Windows build; they do not turn skips or historical results
+into passes.
+
 ## Choose additional checks by change
 
 | Changed area | Additional command |
