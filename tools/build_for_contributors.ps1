@@ -44,7 +44,7 @@ if ($Package) {
     & (Join-Path $PSScriptRoot 'package.ps1') -SkipBuild
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    & (Join-Path $PSScriptRoot 'validate_release.ps1')
+    & (Join-Path $PSScriptRoot 'validate_release.ps1') -DevelopmentPackage
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     Write-Host ''

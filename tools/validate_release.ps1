@@ -1,11 +1,30 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string] $PackageRoot = ''
+    [string] $PackageRoot = '',
+
+    [Parameter()]
+    [string] $ExpectedRevision = 'HEAD',
+
+    [Parameter()]
+    [switch] $DevelopmentPackage
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+$expectedIdentity = (& git -C $projectRoot rev-parse --short=12 --verify `
+    "$ExpectedRevision^{commit}" 2>$null)
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($expectedIdentity)) {
+    throw 'Expected release revision does not resolve to a Git commit'
+}
+if ($DevelopmentPackage) {
+    if ($ExpectedRevision -cne 'HEAD') {
+        throw 'Development package validation must use the current HEAD'
+    }
+    $changes = @(& git -C $projectRoot status --porcelain --untracked-files=normal)
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot determine development source state' }
+    if ($changes.Count -ne 0) { $expectedIdentity = "$expectedIdentity.dirty" }
+}
 if ([string]::IsNullOrWhiteSpace($PackageRoot)) {
     $PackageRoot = Join-Path $projectRoot 'out\package\KF2OptimizerNext'
 }
@@ -91,6 +110,20 @@ if ($packageManifest.schema_version -ne 2 -or
     @($packageManifest.managed_files).Count -ne 15) {
     throw 'Portable package manifest is incomplete or incompatible'
 }
+$packageIdentity = [string]$packageManifest.source_identity
+if (-not $DevelopmentPackage -and $packageIdentity.EndsWith('.dirty')) {
+    throw 'Release candidates must not have a dirty source identity'
+}
+if ($packageIdentity -cne $expectedIdentity) {
+    throw "Stale package source identity: expected $expectedIdentity, found $packageIdentity"
+}
+$executableIdentity = & (Join-Path $PSScriptRoot 'get_executable_build_identity.ps1') `
+    -Executable $executables[0].FullName
+if ($executableIdentity.source_identity -cne $expectedIdentity -or
+    $executableIdentity.version -cne $packageManifest.package_version -or
+    (-not $DevelopmentPackage -and $executableIdentity.channel -cne 'release')) {
+    throw 'Executable build identity does not match the requested release; rebuild the package'
+}
 foreach ($relative in @($packageManifest.managed_files)) {
     $managed = Join-Path $root $relative
     if (-not (Test-Path -LiteralPath $managed -PathType Leaf)) {
@@ -138,6 +171,13 @@ if ($integrityLines.Count -ne 17 -or
     $integrityLines[3] -cne 'file_count=13' -or
     @($integrityLines | Where-Object { $_ -match '^file=' }).Count -ne 13) {
     throw 'Runtime package integrity document is invalid'
+}
+if ($integrityLines[2] -cne "source_identity=$expectedIdentity") {
+    throw 'Runtime package integrity source identity does not match the requested release'
+}
+Write-Host "PASS: executable, manifest and integrity source identity match $expectedIdentity"
+if ($DevelopmentPackage) {
+    Write-Host 'DEVELOPMENT ONLY: this check does not certify a release candidate'
 }
 Write-Host "PASS: package has exactly one portable executable"
 Write-Host "PASS: all fourteen managed payload hashes match"

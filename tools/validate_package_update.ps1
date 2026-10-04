@@ -40,6 +40,7 @@ if (-not (Test-Path -LiteralPath $userFile -PathType Leaf) -or
     throw 'Package update changed or removed portable user data'
 }
 
-& (Join-Path $PSScriptRoot 'validate_release.ps1') -PackageRoot $packageRoot
+& (Join-Path $PSScriptRoot 'validate_release.ps1') -PackageRoot $packageRoot `
+    -DevelopmentPackage
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host 'PASS: portable update removes only managed files and preserves user Data byte-for-byte'
