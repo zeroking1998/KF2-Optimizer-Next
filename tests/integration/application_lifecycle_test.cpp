@@ -222,8 +222,8 @@ int test_flex_report_boundaries() {
     CHECK(runtime.model.status().flex_readback_diagnostics ==
         L"Minimal safety readback active; reports and extra logs are off");
 
-    // Fresh intended values do not acknowledge a failed native relay. Keep
-    // the real action pending, and accept it only after healthy readback.
+    // Fresh intended values do not acknowledge an in-flight or failed native
+    // relay. Keep the action pending until healthy completed readback.
     const auto requested_at = runtime.monotonic_ns();
     constexpr auto flex_control =
         kf2::optimizer::AdaptiveControlId::flex_solver_substeps;
@@ -235,6 +235,15 @@ int test_flex_report_boundaries() {
     shared.desired_substeps = 1;
     shared.control_heartbeat_tick = GetTickCount64();
     shared.successful_updates = 59;
+    shared.last_forwarded_substeps = 0;
+    runtime.observe_flex_process();
+    CHECK(runtime.last_flex_observation &&
+        runtime.last_flex_observation->pass_through_healthy);
+    CHECK(runtime.adaptive_actuation.current(flex_control)->status ==
+        kf2::optimizer::AdaptiveActionStatus::pending);
+    CHECK(runtime.model.status().flex_action_status == L"PENDING");
+    CHECK(!runtime.model.status().flex_effective_substeps);
+    shared.last_forwarded_substeps = 1;
     shared.missing_original_calls = 1;
     runtime.observe_flex_process();
     CHECK(runtime.last_flex_observation &&
