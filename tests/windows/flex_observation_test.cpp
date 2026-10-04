@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <new>
 
 #include "kf2/flex/flex_observation.hpp"
@@ -11,6 +12,57 @@
 namespace {
 
 bool fail_allocations = false;
+
+bool rejects_exited_producer(const kf2::flex::ObservationShared& sample) {
+    wchar_t executable[MAX_PATH]{};
+    if (!GetModuleFileNameW(nullptr, executable, MAX_PATH)) return false;
+    STARTUPINFOW startup{sizeof(startup)};
+    PROCESS_INFORMATION child{};
+    // Only this owned suspended child is terminated; it never runs test code.
+    if (!CreateProcessW(executable, nullptr, nullptr, nullptr, FALSE,
+            CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr, nullptr,
+            &startup, &child)) return false;
+    CloseHandle(child.hThread);
+    const auto close_child = [](void* process) {
+        if (WaitForSingleObject(process, 0) == WAIT_TIMEOUT) {
+            TerminateProcess(process, 1);
+            WaitForSingleObject(process, 2000);
+        }
+        CloseHandle(process);
+    };
+    const std::unique_ptr<void, decltype(close_child)> owned{
+        child.hProcess, close_child};
+    const auto bound = kf2::game::bind_game_process(child.dwProcessId, executable);
+    if (!bound.has_value()) return false;
+    const auto& identity = bound.value();
+    const auto name = L"Local\\KF2OptimizerNext_FlexObservation_v1_" +
+                      std::to_wstring(identity.pid);
+    const std::unique_ptr<void, decltype(&CloseHandle)> mapping{
+        CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+            0, sizeof(sample), name.c_str()), &CloseHandle};
+    if (!mapping) return false;
+    const std::unique_ptr<void, decltype(&UnmapViewOfFile)> view{
+        MapViewOfFile(mapping.get(), FILE_MAP_ALL_ACCESS, 0, 0, sizeof(sample)),
+        &UnmapViewOfFile};
+    if (!view) return false;
+    auto* shared = static_cast<kf2::flex::ObservationShared*>(view.get());
+    *shared = sample;
+    shared->pid = identity.pid;
+    shared->process_start_low = static_cast<LONG>(identity.process_start_id);
+    shared->process_start_high =
+        static_cast<LONG>(identity.process_start_id >> 32U);
+    shared->last_update_tick = GetTickCount64();
+    if (!kf2::flex::read_observation(identity) ||
+        !kf2::flex::write_fixed_control(identity, false)) return false;
+    const auto heartbeat = shared->control_heartbeat_tick;
+    if (!TerminateProcess(owned.get(), 0) ||
+        WaitForSingleObject(owned.get(), 2000) != WAIT_OBJECT_0) return false;
+    // The retained mapping still has matching identity bytes and a fresh tick.
+    return !kf2::flex::read_observation(identity) &&
+           !kf2::flex::write_fixed_control(identity, true) &&
+           shared->diagnostics_enabled == 0 &&
+           shared->control_heartbeat_tick == heartbeat;
+}
 
 }  // namespace
 
@@ -96,7 +148,12 @@ int wmain() {
     const float dt = 1.0F / 60.0F;
     std::memcpy(const_cast<LONG*>(&shared->last_delta_time_bits), &dt, sizeof(dt));
     shared->last_update_tick = GetTickCount64();
-    kf2::game::GameProcessIdentity identity{pid, start, {}};
+    wchar_t executable[MAX_PATH]{};
+    if (!GetModuleFileNameW(nullptr, executable, MAX_PATH)) return 21;
+    auto bound = kf2::game::bind_game_process(pid, executable);
+    if (!bound.has_value()) return 22;
+    auto identity = bound.value();
+    if (identity.process_start_id != start) return 23;
     static_assert(noexcept(kf2::flex::read_observation(identity)));
     static_assert(noexcept(kf2::flex::write_fixed_control(identity, false)));
     const auto result = kf2::flex::read_observation(identity);
@@ -170,6 +227,7 @@ int wmain() {
     shared->update_calls = 121;
     shared->successful_updates = 120;
     shared->last_update_tick = GetTickCount64();
+    const auto before_queries = kf2::game::detail::process_query_counts_for_testing();
     const auto in_flight = kf2::flex::read_observation(identity);
     if (!in_flight || !in_flight->fresh || !in_flight->pass_through_healthy) return 10;
 
@@ -196,6 +254,10 @@ int wmain() {
     if (!kf2::flex::write_fixed_control(identity, true) ||
         shared->desired_substeps != 1 || shared->diagnostics_enabled != 1 ||
         shared->control_heartbeat_tick == 0) return 6;
+    const auto after_queries = kf2::game::detail::process_query_counts_for_testing();
+    if (before_queries.opens != after_queries.opens ||
+        before_queries.creation_queries != after_queries.creation_queries) return 24;
+    if (!rejects_exited_producer(*shared)) return 25;
     identity.process_start_id++;
     if (kf2::flex::read_observation(identity)) return 5;
     if (kf2::flex::write_fixed_control(identity, true)) return 8;

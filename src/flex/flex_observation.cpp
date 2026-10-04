@@ -26,7 +26,7 @@ bool make_observation_mapping_name(
 
 std::optional<ObservationSnapshot> read_observation(
     const game::GameProcessIdentity& process) noexcept {
-    if (process.pid == 0 || process.process_start_id == 0) return std::nullopt;
+    if (!game::is_game_process_current(process)) return std::nullopt;
     std::array<wchar_t, observation_mapping_name_capacity> name{};
     if (!make_observation_mapping_name(process.pid, name)) return std::nullopt;
     HANDLE mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, name.data());
@@ -205,7 +205,7 @@ std::optional<ObservationSnapshot> read_observation(
 
 bool write_fixed_control(const game::GameProcessIdentity& process,
                          bool diagnostics_enabled) noexcept {
-    if (process.pid == 0 || process.process_start_id == 0) return false;
+    if (!game::is_game_process_current(process)) return false;
     std::array<wchar_t, observation_mapping_name_capacity> name{};
     if (!make_observation_mapping_name(process.pid, name)) return false;
     HANDLE mapping = OpenFileMappingW(

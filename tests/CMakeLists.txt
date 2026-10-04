@@ -345,7 +345,8 @@ target_compile_definitions(kf2_flex_lab_test PRIVATE
     KF2_ATOMIC_FILE_TESTING
     KF2_SHA256_TESTING
     KF2_FLEX_LAB_TEST_HOOKS)
-target_link_libraries(kf2_flex_lab_test PRIVATE bcrypt)
+target_link_libraries(kf2_flex_lab_test PRIVATE
+    bcrypt KF2TestGameCore user32 dwmapi)
 add_test(NAME kf2_flex_lab_test COMMAND kf2_flex_lab_test)
 
 add_executable(kf2_offline_telemetry_lab_test
@@ -375,6 +376,8 @@ if(TARGET KF2FlexForwarder)
         "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp")
     target_include_directories(kf2_flex_forwarder_loader_test PRIVATE
         "${PROJECT_SOURCE_DIR}/include")
+    target_link_libraries(kf2_flex_forwarder_loader_test PRIVATE
+        KF2TestGameCore user32 dwmapi)
     target_compile_definitions(kf2_flex_forwarder_loader_test PRIVATE
         KF2_FLEX_RUNTIME=L"D:/Steam/steamapps/common/killingfloor2/Binaries/Win64/flexRelease_x64.dll"
     )
@@ -390,6 +393,8 @@ if(TARGET KF2FlexForwarder)
         "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp")
     target_include_directories(kf2_flex_forwarder_fixed_minimum_test PRIVATE
         "${PROJECT_SOURCE_DIR}/include")
+    target_link_libraries(kf2_flex_forwarder_fixed_minimum_test PRIVATE
+        KF2TestGameCore user32 dwmapi)
     add_dependencies(kf2_flex_forwarder_fixed_minimum_test
         KF2FlexForwarderTest kf2_flex_original_test_double)
     add_test(NAME kf2_flex_forwarder_fixed_minimum_test
@@ -403,6 +408,8 @@ add_executable(kf2_flex_observation_test
     windows/flex_observation_test.cpp
     "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp")
 target_include_directories(kf2_flex_observation_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(kf2_flex_observation_test PRIVATE
+    KF2TestGameCore user32 dwmapi)
 add_test(NAME kf2_flex_observation_test COMMAND kf2_flex_observation_test)
 
 add_executable(kf2_application_lifecycle_test
