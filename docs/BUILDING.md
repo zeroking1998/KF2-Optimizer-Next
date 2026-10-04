@@ -96,6 +96,23 @@ telemetry module instead of silently reusing an older local `.u` file. The
 one-click flow also validates every managed file and package hash before
 reporting success.
 
+The executable carries the same source identity in its Windows version resource
+as the app's title. Packaging checks it before changing an existing destination,
+including with `-SkipBuild`; it cannot relabel an older executable as a new build.
+Contributor packaging explicitly uses `-DevelopmentPackage` for local checks.
+This mode is not release-candidate approval.
+
+Release-candidate validation requires a clean Release identity matching `HEAD`:
+
+```powershell
+pwsh -NoProfile -File ./tools/validate_release.ps1
+```
+
+To inspect an intentional historical package, supply its Git revision explicitly
+with `-ExpectedRevision <commit>`. Manifest, integrity metadata and executable
+must still agree. Dirty packages require `-DevelopmentPackage` and must match
+the current working tree; they are never certified as release candidates.
+
 For an offline build, provide an extracted official release seed manually:
 
 ```powershell

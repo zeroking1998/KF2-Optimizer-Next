@@ -887,6 +887,10 @@ set_tests_properties(kf2_telemetry_build_binding_test PROPERTIES
 add_test(NAME kf2_contributor_package_flow_test
     COMMAND "${CMAKE_COMMAND}"
         "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+        "-DTEST_EXECUTABLE=$<TARGET_FILE:KF2Optimizer>"
+        "-DTEST_BINARY_ROOT=${CMAKE_BINARY_DIR}"
+        "-DTEST_POWERSHELL=${KF2_POWERSHELL_EXECUTABLE}"
+        "-DEXPECTED_BUILD_IDENTITY=${KF2_VERSION}+${KF2_BUILD_COMMIT} (${KF2_BUILD_CHANNEL})"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/architecture/contributor_package_flow_test.cmake")
 set_tests_properties(kf2_contributor_package_flow_test PROPERTIES
     LABELS "architecture;packaging")

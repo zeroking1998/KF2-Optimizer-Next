@@ -116,7 +116,10 @@ string(JOIN "|" KF2_TELEMETRY_STAGE_SOURCES_PIPE
 string(JOIN "|" KF2_APP_TELEMETRY_SOURCES_PIPE
     ${KF2_APP_TELEMETRY_SOURCES})
 
+configure_file(assets/build_identity.rc.in
+    "${CMAKE_CURRENT_BINARY_DIR}/build_identity.rc" @ONLY)
 add_executable(KF2Optimizer WIN32
+    "${CMAKE_CURRENT_BINARY_DIR}/build_identity.rc"
     assets/app.manifest
     assets/mascot/mascot_resources.rc
     src/backup/backup_store.cpp

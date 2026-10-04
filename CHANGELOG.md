@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Portable packaging and release validation now compare the executable's embedded
+  build identity with its manifests and source revision. Stale or dirty packages
+  cannot be silently certified as a new release candidate.
+
 - Removed unused named-profile generation and persistence code. Adaptive still
   starts from user graphics and retains resource-specific control and locks.
 - Shared the backup and protected-session byte codec without changing saved
