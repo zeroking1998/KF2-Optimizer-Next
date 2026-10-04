@@ -57,6 +57,12 @@ version in the configured official repository. Before installation it checks:
 - the extracted package version and build identity;
 - every file in the package integrity manifest.
 
+Auto Repair resolves the installed version through the same official GitHub
+metadata and uses the updater's archive preparation path. Missing, malformed,
+or mismatched archive digests and sizes block repair before extraction; it never
+falls back to an unverified direct download or a different release. Repair uses
+its own temporary subfolder and leaves unrelated working-directory files intact.
+
 The download and extraction happen in a new isolated temporary folder. A copy
 of the running executable becomes the temporary helper. After the main app
 closes, that helper backs up all managed program files, replaces them

@@ -309,12 +309,21 @@ Result<bool> extract(const std::filesystem::path& archive,
         {ErrorCode::io_failure, L"Update ZIP extraction failed",
          static_cast<std::uint32_t>(copied)});
 
-    const auto expected = native_destination / L"KF2OptimizerNext" /
-        L"Data" / L"package-integrity.ini";
+    const auto package = native_destination / L"KF2OptimizerNext";
+    const auto expected = package / L"Data" / L"package-integrity.ini";
     const auto deadline = std::chrono::steady_clock::now() +
         std::chrono::seconds{30};
     while (std::chrono::steady_clock::now() < deadline) {
-        if (std::filesystem::is_regular_file(expected, error) && !error) {
+        // Preserve Auto Repair's existing all-payload existence gate when
+        // sharing preparation. Shell completion itself remains separate.
+        if (std::filesystem::is_regular_file(expected, error) && !error &&
+            std::ranges::all_of(security::managed_package_payload_paths(),
+                [&](std::string_view relative) {
+                    return std::filesystem::is_regular_file(
+                        platform::windows::extended_length_path(
+                            package / std::filesystem::path{relative}), error) &&
+                        !error;
+                })) {
             std::this_thread::sleep_for(std::chrono::milliseconds{100});
             return Result<bool>::success(true);
         }
