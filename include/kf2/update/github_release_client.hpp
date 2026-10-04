@@ -18,4 +18,11 @@ namespace kf2::update {
 [[nodiscard]] Result<std::optional<ReleaseInfo>> query_official_github_releases(
     std::string_view installed_version);
 
+[[nodiscard]] Result<ReleaseInfo> parse_exact_github_release(
+    std::string_view json, std::string_view repository,
+    std::string_view installed_version);
+
+[[nodiscard]] Result<ReleaseInfo> query_exact_official_github_release(
+    std::string_view installed_version);
+
 }  // namespace kf2::update

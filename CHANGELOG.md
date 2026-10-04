@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Auto Repair now verifies the exact-version release archive against GitHub's
+  published SHA-256 and size before extraction, using the same checks as updates.
+  Missing or mismatched metadata cannot authorize repairs.
+
 - Confirmed in-game graphics changes now survive failed session restoration
   and Optimizer restarts. Recovery retains the protected originals until the
   user changes have been written and verified.

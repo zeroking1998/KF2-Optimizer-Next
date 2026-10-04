@@ -111,5 +111,49 @@ int main() {
             release_with_unknown_number(value, true), repository,
             "0.0.2-alpha").has_value());
     }
+
+    // Exact-version repair must not select a newer release from a list.
+    const auto array_json = release_with_unknown_number("1", false);
+    const auto exact_json = array_json.substr(1, array_json.size() - 2);
+    const auto exact = kf2::update::parse_exact_github_release(
+        exact_json, repository, "1.0.0");
+    CHECK(exact.has_value() && exact.value().asset.has_value());
+    CHECK(exact.value().version == "1.0.0");
+    CHECK(exact.value().asset->sha256 == std::string(64, 'a'));
+    CHECK(!kf2::update::parse_exact_github_release(
+        exact_json, repository, "0.0.2-alpha").has_value());
+    CHECK(!kf2::update::parse_exact_github_release(
+        array_json, repository, "1.0.0").has_value());
+    CHECK(!kf2::update::parse_exact_github_release(
+        exact_json + "{}", repository, "1.0.0").has_value());
+    CHECK(!kf2::update::parse_exact_github_release(
+        exact_json, "https://evil.example/repo", "1.0.0").has_value());
+    CHECK(!kf2::update::parse_exact_github_release(
+        exact_json, repository, "../1.0.0").has_value());
+    CHECK(!kf2::update::parse_exact_github_release(
+        exact_json, repository, "v1.0.0").has_value());
+    CHECK(!kf2::update::parse_exact_github_release(
+        std::string(2U * 1024U * 1024U + 1, ' '), repository,
+        "1.0.0").has_value());
+    for (const auto replacement : {"null", "\"sha256:wrong\"",
+                                  "\"md5:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""}) {
+        auto invalid_digest = exact_json;
+        const auto start = invalid_digest.find("\"sha256:");
+        const auto end = invalid_digest.find('"', start + 1);
+        invalid_digest.replace(start, end + 1 - start, replacement);
+        CHECK(!kf2::update::parse_exact_github_release(
+            invalid_digest, repository, "1.0.0").has_value());
+    }
+    auto absent_digest = exact_json;
+    const auto digest_start = absent_digest.find("\"digest\":");
+    const auto digest_end = absent_digest.find(
+        ",\"browser_download_url\"", digest_start);
+    absent_digest.erase(digest_start, digest_end + 1 - digest_start);
+    CHECK(!kf2::update::parse_exact_github_release(
+        absent_digest, repository, "1.0.0").has_value());
+    auto draft = exact_json;
+    draft.replace(draft.find("\"draft\":false"), 13, "\"draft\":true");
+    CHECK(!kf2::update::parse_exact_github_release(
+        draft, repository, "1.0.0").has_value());
     return EXIT_SUCCESS;
 }

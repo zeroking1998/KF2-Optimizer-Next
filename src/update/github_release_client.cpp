@@ -425,13 +425,16 @@ bool valid_sha256(std::string_view value) noexcept {
     });
 }
 
-Result<std::string> fetch_releases_json(std::string_view repository) {
+Result<std::string> fetch_releases_json(
+    std::string_view repository, std::string_view tag = {}) {
     if (!safe_repository(repository)) return Result<std::string>::failure(
         {ErrorCode::invalid_argument, L"Official update repository is invalid", 0});
     constexpr std::string_view prefix{"https://github.com/"};
     const auto slug = repository.substr(prefix.size());
     const std::wstring object = L"/repos/" +
-        std::wstring{slug.begin(), slug.end()} + L"/releases?per_page=100";
+        std::wstring{slug.begin(), slug.end()} +
+        (tag.empty() ? L"/releases?per_page=100" :
+            L"/releases/tags/" + std::wstring{tag.begin(), tag.end()});
     InternetHandle session{WinHttpOpen(
         L"KF2OptimizerNext-UpdateCheck/1.0",
         WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
@@ -451,7 +454,11 @@ Result<std::string> fetch_releases_json(std::string_view repository) {
     const wchar_t* headers =
         L"Accept: application/vnd.github+json\r\n"
         L"X-GitHub-Api-Version: 2022-11-28\r\n";
-    if (WinHttpSendRequest(request.value, headers, static_cast<DWORD>(-1L),
+    // Metadata must come from api.github.com, not a redirected host.
+    DWORD redirect_policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+    if (WinHttpSetOption(request.value, WINHTTP_OPTION_REDIRECT_POLICY,
+                         &redirect_policy, sizeof(redirect_policy)) == FALSE ||
+        WinHttpSendRequest(request.value, headers, static_cast<DWORD>(-1L),
                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) == FALSE ||
         WinHttpReceiveResponse(request.value, nullptr) == FALSE) {
         return Result<std::string>::failure(
@@ -483,6 +490,37 @@ Result<std::string> fetch_releases_json(std::string_view repository) {
     if (body.empty()) return Result<std::string>::failure(
         {ErrorCode::io_failure, L"GitHub returned an empty update response", 0});
     return Result<std::string>::success(std::move(body));
+}
+
+ReleaseInfo release_info(const ParsedRelease& release,
+                         std::string_view repository,
+                         std::string_view version) {
+    ReleaseInfo result{
+        .repository = std::string{repository},
+        .tag = release.tag,
+        .version = std::string{version},
+        .published_at = release.published_at,
+        .changelog = concise_release_notes(release.body)};
+    const std::string expected_name = "KF2OptimizerNext-v" +
+        result.version + "-win64.zip";
+    const std::string expected_url = result.repository + "/releases/download/" +
+        result.tag + "/" + expected_name;
+    for (const auto& asset : release.assets) {
+        if (asset.name != expected_name) continue;
+        const std::string_view digest = asset.digest;
+        if (asset.url == expected_url && asset.size > 0 &&
+            asset.size <= kMaximumAssetBytes && digest.starts_with("sha256:") &&
+            valid_sha256(digest.substr(7))) {
+            result.asset = ReleaseAsset{asset.name, asset.url, asset.size,
+                                        std::string{digest.substr(7)}};
+            break;
+        }
+    }
+    if (!result.asset) {
+        result.install_block_reason =
+            L"The release has no verified portable Windows-x64 package.";
+    }
+    return result;
 }
 
 }  // namespace
@@ -518,33 +556,9 @@ Result<std::optional<ReleaseInfo>> parse_github_releases(
     }
     if (best == nullptr || !best_version) return Result<std::optional<ReleaseInfo>>::success(std::nullopt);
 
-    ReleaseInfo result{
-        .repository = std::string{repository},
-        .tag = best->tag,
-        .version = best_version->canonical,
-        .published_at = best->published_at,
-        .changelog = concise_release_notes(best->body)};
-    const std::string expected_name = "KF2OptimizerNext-v" +
-        result.version + "-win64.zip";
-    const std::string expected_url = result.repository + "/releases/download/" +
-        result.tag + "/" + expected_name;
-    for (const auto& asset : best->assets) {
-        if (asset.name != expected_name) continue;
-        const std::string_view digest = asset.digest;
-        if (asset.url == expected_url && asset.size > 0 &&
-            asset.size <= kMaximumAssetBytes && digest.starts_with("sha256:") &&
-            valid_sha256(digest.substr(7))) {
-            result.asset = ReleaseAsset{asset.name, asset.url, asset.size,
-                                        std::string{digest.substr(7)}};
-            break;
-        }
-    }
-    if (!result.asset) {
-        result.install_block_reason =
-            L"The release has no verified portable Windows-x64 package.";
-    }
     return Result<std::optional<ReleaseInfo>>::success(
-        std::optional<ReleaseInfo>{std::move(result)});
+        std::optional<ReleaseInfo>{release_info(
+            *best, repository, best_version->canonical)});
 }
 
 Result<std::optional<ReleaseInfo>> query_official_github_releases(
@@ -553,6 +567,46 @@ Result<std::optional<ReleaseInfo>> query_official_github_releases(
     const auto json = fetch_releases_json(repository);
     if (!json.has_value()) return Result<std::optional<ReleaseInfo>>::failure(json.error());
     return parse_github_releases(json.value(), repository, installed_version);
+}
+
+Result<ReleaseInfo> parse_exact_github_release(
+    std::string_view json, std::string_view repository,
+    std::string_view installed_version) {
+    const auto version = parse_semantic_version(installed_version);
+    if (!safe_repository(repository) || !version.has_value() ||
+        version.value().canonical != installed_version ||
+        !safe_token(installed_version) || json.empty() ||
+        json.size() > kMaximumResponseBytes) {
+        return Result<ReleaseInfo>::failure(
+            {ErrorCode::invalid_argument, L"Exact release request is invalid", 0});
+    }
+    JsonReader reader{json};
+    const auto release = parse_release(reader);
+    if (!release.has_value()) return Result<ReleaseInfo>::failure(release.error());
+    if (!reader.at_end() || release.value().draft ||
+        release.value().published_at.empty() ||
+        release.value().tag != "v" + std::string{installed_version}) {
+        return Result<ReleaseInfo>::failure(
+            {ErrorCode::access_denied,
+             L"GitHub did not return the exact published release", 0});
+    }
+    auto result = release_info(release.value(), repository, installed_version);
+    if (!result.asset) return Result<ReleaseInfo>::failure(
+        {ErrorCode::access_denied, result.install_block_reason, 0});
+    return Result<ReleaseInfo>::success(std::move(result));
+}
+
+Result<ReleaseInfo> query_exact_official_github_release(
+    std::string_view installed_version) {
+    const auto version = parse_semantic_version(installed_version);
+    if (!version.has_value() || version.value().canonical != installed_version ||
+        !safe_token(installed_version)) return Result<ReleaseInfo>::failure(
+            {ErrorCode::invalid_argument, L"Installed version is invalid", 0});
+    const auto repository = official_release_repository();
+    const auto json = fetch_releases_json(
+        repository, "v" + std::string{installed_version});
+    if (!json.has_value()) return Result<ReleaseInfo>::failure(json.error());
+    return parse_exact_github_release(json.value(), repository, installed_version);
 }
 
 }  // namespace kf2::update

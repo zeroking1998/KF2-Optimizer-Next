@@ -197,13 +197,16 @@ add_test(NAME kf2_package_integrity_test COMMAND kf2_package_integrity_test)
 add_executable(kf2_release_package_repair_test
     windows/release_package_repair_test.cpp
     "${PROJECT_SOURCE_DIR}/src/security/release_package_repair.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/github_release_client.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/update_package.cpp"
 )
 target_include_directories(kf2_release_package_repair_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_release_package_repair_test PRIVATE
-    KF2_RELEASE_REPOSITORY="https://github.com/example/KF2-Optimizer-Next")
+    KF2_RELEASE_REPOSITORY="https://github.com/example/KF2-Optimizer-Next"
+    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/release-package-repair")
 target_link_libraries(kf2_release_package_repair_test PRIVATE
-    bcrypt ole32 oleaut32 shell32 winhttp)
+    bcrypt ole32 oleaut32 shell32 winhttp uuid)
 add_test(NAME kf2_release_package_repair_test
     COMMAND kf2_release_package_repair_test)
 
