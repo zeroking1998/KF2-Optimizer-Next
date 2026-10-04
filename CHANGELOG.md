@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Current project and acceptance documents now share source-checked test and
+  settings-catalog inventories instead of contradictory old totals. Historical
+  gameplay evidence is kept separate from new-build acceptance.
+
 - Update and Auto Repair now wait for synchronous Windows ZIP extraction to
   finish before checking or cleaning staged files; partial or aborted copies
   fail safely without a fixed-delay completion guess.

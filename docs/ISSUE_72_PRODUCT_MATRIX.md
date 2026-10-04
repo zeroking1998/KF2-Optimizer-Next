@@ -3,11 +3,23 @@
 This matrix applies Issue 72 to the new portable, external KF2 Optimizer. It
 does not claim compatibility with the historical product architecture.
 
+## Current validation inventory
+
+- Default full Windows CTest registrations: 121.
+- Native managed settings catalog definitions: 217.
+- Inventory reviewed: 2026-10-04.
+
+These are inventory sizes, not passed-test counts. Documentation validation
+checks the literal CMake test registrations and native catalog definitions;
+fresh CTest discovery is also recorded with each validation run. Debug, Release,
+CI filters, environmental skips, and gameplay evidence remain separate results
+bound to an exact source identity.
+
 | Area | Product status | Current contract |
 |---|---|---|
 | 1. Start and lifecycle | Implemented | Portable direct start, single instance, atomic session marker, recovery detection, verified KF2 identity, safe KF2 launch, clean exit, manifest-owned updates and payload hashes are implemented. Package-integrity failures keep unrelated controls available and expose exact-version GitHub Auto Repair plus verified local-package fallback: only matching-build companion files with verified SHA-256 values are imported atomically, the running executable is never replaced, and a restart plus final package audit is required. |
 | 2. Adaptive control | Implemented | Adaptive/Automatic is the only user mode. It never enables FleX or changes the user's `PhysXLevel`; user-enabled FleX is kept independently at one fixed solver substep and is not part of Adaptive pressure, recovery or mode changes. The offline hook is prepared only for that user-enabled state and restored afterward. Legacy Smart and Manual settings migrate atomically to Adaptive. Explicit safety locks have absolute priority. Missing, stale, contradictory, discontinuous or identity-unbound telemetry fails closed. |
-| 3. Configuration | Implemented, 213-setting verified catalog | Typed preview, bounds/type checks, versioned local import/export, atomic apply, verified backup and complete restore cover 213 KF2 settings in `KFEngine.ini`, `KFGame.ini` and `KFSystemSettings.ini`. The 142 visibility/physics-sensitive controls are protected from pre-launch profile writes. Adaptive uses a pre-launch snapshot/apply/readback transaction and exact post-session restore. Unknown settings are rejected. A copied real three-file configuration passes apply and byte-identical restore without changing the source files. |
+| 3. Configuration | Implemented, verified typed catalog | Typed preview, bounds/type checks, versioned local import/export, atomic apply, verified backup and complete restore cover the [current typed catalog](#current-validation-inventory) in `KFEngine.ini`, `KFGame.ini` and `KFSystemSettings.ini`. Visibility/physics-sensitive controls are protected from pre-launch profile writes. Adaptive uses a pre-launch snapshot/apply/readback transaction and exact post-session restore. Unknown settings are rejected. A copied real three-file configuration passes apply and byte-identical restore without changing the source files. |
 | 4. Hardware telemetry | Implemented core | Direct native DXGI frame data, FPS, frame time, average and 1% low, total process CPU and throttled per-thread CPU use PID/start identity and freshness checks. The visible GPU value prefers the locally installed NVIDIA NVAPI dynamic-Pstate utilization used by MSI Afterburner; no helper program or bundled driver DLL is used. Local NVML and adapter-wide PDH are layered fallbacks, while process VRAM remains PID/LUID-bound. CPU telemetry reports effective logical-core equivalents, active threads, busiest-thread occupancy, dominant-thread CPU-time share and the process' current physical/logical affinity capacity. Diagnostics reports physical/logical CPUs, processor groups, installed/free RAM and physical GPUs with vendor/device ID, dedicated VRAM and locally queried UMD driver identity. Multiple display-path LUIDs backed by the same PCI PnP device are grouped for the overview, and an unambiguous sole physical adapter wins over a virtual display projection. |
 | 5. Gameplay telemetry | Implemented protected-provider aggregate core; exact event details partial | A bounded process-bound parser reads KF2's own `Launch.log`. When the optimizer is already open, an official-SDK-compiled mutator is staged in KF2's user `Published\\BrewedPC` path and prepared through `LocalOptions`, so KF2 started from the optimizer, Steam or a shortcut uses the same protected provider. The mutator inserts a separate interaction into KF2's unchanged native viewport, and the interaction creates the aggregate probe only after an `NM_Standalone` gameplay world exists. Schema 7 keeps the one-second living/corpse counts, visibility, awake/sleep state, runtime budget and scene-pressure inputs required by Adaptive and safety on the normal path. Detailed class/boss/special-move, Actor, LOD, animation, bone, injury, freeze detail, scan timing, corpse-collision decisions and successful physics-action evidence is collected only by the default-off Runtime scan diagnostics option; diagnostic-only native fields are cleared when it is off rather than displayed as zero. The probe also reports five decal managers, gore/world/ground-fire/impact particle pools, classified effects, FleX-surrogate, gib and Zed-Time samples. Its autonomous corpse actuator touches only confirmed members of KFGoreManager's corpse pool and is exposed as a separate capability; its absence does not disable General Adaptive. Every telemetry field is range/invariant-checked, freshness-limited and cleared across network/map/match boundaries. The pinned module and temporary `LocalOptions` bootstrap exist only for the protected session; complete INIs are restored and the exact module is removed afterward. Persistent aggregate per-actor telemetry and exact creation events remain unavailable. With Runtime scan diagnostics enabled, confirmed Optimizer corpse-action receipts expose a session-local `corpse_id` (`Actor.Name:TimeOfDeath-ms`), `distance_units` and effective-awake readback for individual sleep/wake actions. Normal online sessions retain only one compact authenticated sleep-capability receipt without Actor or pool details. Optional Debug-page switches display detailed corpse evidence and separately show metre distances plus session IDs for at most 64 visible living Zeds. The Zed display uses value-only snapshots refreshed no faster than 100 ms, retains no Actor reference, and never runs outside `NM_Standalone`. |
 | 6. Enemy rendering/culling | Native culling plus fixed-minimum living/corpse LOD | KF2/UE3 view-frustum and occlusion culling remains authoritative. A separate bounded session controller fixes every eligible living Zed and corpse to its mesh's final available `MinLodModel`, independent of Adaptive mode, FPS, distance, density and pressure. Exact readback and ownership tracking are required. No enemy is hidden and native culling is untouched. |
@@ -22,12 +34,12 @@ does not claim compatibility with the historical product architecture.
 | 15. Diagnostics/logging | Implemented core | Bounded structured event log, local status/clear actions, atomic versioned JSON report export, crash distinction, read-only KF2 session description, all-adapter/driver diagnostics and no upload. Optimizer preview, exact profile/quality/target context, successful apply, blocked apply and verified restore are recorded explicitly. |
 | 16. Safety/data integrity | Implemented core | Canonical validated game/config paths, atomic files, transactional apply, content-addressed backups, recovery and fail-closed parsing. No anti-cheat or security bypass. |
 | 17. Build/package | Implemented and published as alpha | Native MSVC/CMake builds with both Visual Studio and Ninja, Windows PowerShell 5.1 scripts, dynamically counted CTest inventory, installed FleX ABI audit, one-EXE portable package, payload hashes, user-data-preserving update and current CI are implemented. The Adaptive V2 candidate passes Debug, Release, clean double-build, Ninja, package-integrity and visible GUI checks. The owner-authorized portable `v0.0.4-alpha` pre-release is public and exact-version GitHub Auto Repair is implemented; trusted code signing and independent redistribution review remain external hardening work. |
-| 18. Compatibility/real use | Current-system automation and core official-map runtime paths complete | Current Windows automated tests cover GUI, KF2 detection contracts, native DXGI timing, CPU/GPU, overlay and restore. The current package hash completed protected official-map combat with live FleX forwarding, living/corpse telemetry, 18 applied corpse runtime-budget receipts and exact post-session restore. Isolated visual distance-sleep/proximity-wake proof, more hardware, HDR, mixed-DPI and long soak coverage remain external target-system work. |
+| 18. Compatibility/real use | Current-system automation and core official-map runtime paths complete | Current Windows automated tests cover GUI, KF2 detection contracts, native DXGI timing, CPU/GPU, overlay and restore. A historical package completed protected official-map combat with live FleX forwarding, living/corpse telemetry, 18 applied corpse runtime-budget receipts and exact post-session restore. Isolated visual distance-sleep/proximity-wake proof, more hardware, HDR, mixed-DPI and long soak coverage remain external target-system work. |
 
-## Current working-tree evidence (2026-08-24)
+## Validation scope and historical evidence
 
-- Current Debug and Visual Studio Release builds each pass the complete
-  87-test suite for the General-Adaptive working tree.
+- The [current test inventory](#current-validation-inventory) is checked against the source.
+  Fresh Debug and Release results are recorded per exact PR/release identity.
 - The new Adaptive registry, lock parser and deterministic governor each have
   direct tests, including replay equality, stale/NaN/contradictory telemetry,
   session/map/settings/capability generations, per-capability availability,
@@ -35,17 +47,17 @@ does not claim compatibility with the historical product architecture.
   every supported bottleneck family.
 - The current full regressions include exact
   validation of the installed
-  NVIDIA FleX runtime (52 exports and pinned SHA-256), the 213-setting catalog,
+  NVIDIA FleX runtime (52 exports and pinned SHA-256), the [current typed catalog](#current-validation-inventory),
   the bounded game-log parser and responsive layout.
-- A copied real KF2 three-INI set is revalidated against all 213 catalog settings; apply,
+- A copied real KF2 three-INI set is revalidated against the [current typed catalog](#current-validation-inventory); apply,
   verified backup and restore returned every copy byte-identically while the
   real source INIs stayed byte-identical throughout.
 - Dedicated current tests cover hardware overview, repeated refresh identity
   and top-left/top-right/bottom-left/bottom-right overlay placement.
-- The official KFEditor compiled the current telemetry schema 7 package with
-  0 errors. Visual Studio Release passes 100/100 tests. Ninja is not
-  installed on the current validation host, so no current Ninja result is claimed.
-  Two earlier clean Release builds produced byte-identical EXEs and FleX laboratory forwarders.
+- Historical SDK builds compiled the telemetry package without errors, and
+  two earlier clean Release builds produced byte-identical EXEs and FleX laboratory forwarders.
+  These are prior results, not acceptance of the current binary; fresh Ninja
+  availability and results must be recorded per validation environment.
   The manifest-verified portable package preserves portable user data during updates.
   The final package reached official Biotics Lab, offline Survival, Normal,
   Short through the protected Adaptive start. Live FPS/AVG/1% low/frame time/
