@@ -151,7 +151,7 @@ void UiRuntime::observe_flex_process() {
     if (!game_process) return;
     const auto now_ns = monotonic_ns();
     adaptive_actuation.poll(now_ns);
-    const auto flex_state = flex::read_observation(*game_process);
+    const auto flex_state = flex_observation_reader.read(*game_process);
     if (!flex_state || !flex_state->fresh) return;
     last_flex_observation = *flex_state;
     last_flex_observation_calls = flex_state->update_calls;

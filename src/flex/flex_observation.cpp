@@ -24,16 +24,38 @@ bool make_observation_mapping_name(
 
 }  // namespace
 
-std::optional<ObservationSnapshot> read_observation(
+ObservationReader::~ObservationReader() { reset(); }
+
+void ObservationReader::reset() noexcept {
+    if (shared_) UnmapViewOfFile(shared_);
+    if (mapping_) CloseHandle(mapping_);
+    shared_ = nullptr;
+    mapping_ = nullptr;
+    pid_ = 0;
+    process_start_id_ = 0;
+}
+
+std::optional<ObservationSnapshot> ObservationReader::read(
     const game::GameProcessIdentity& process) noexcept {
-    if (!game::is_game_process_current(process)) return std::nullopt;
-    std::array<wchar_t, observation_mapping_name_capacity> name{};
-    if (!make_observation_mapping_name(process.pid, name)) return std::nullopt;
-    HANDLE mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, name.data());
-    if (!mapping) return std::nullopt;
-    const auto* shared = static_cast<const ObservationShared*>(MapViewOfFile(
-        mapping, FILE_MAP_READ, 0, 0, sizeof(ObservationShared)));
-    if (!shared) { CloseHandle(mapping); return std::nullopt; }
+    if (pid_ != process.pid || process_start_id_ != process.process_start_id)
+        reset();
+    if (!game::is_game_process_current(process)) {
+        reset();
+        return std::nullopt;
+    }
+    if (!shared_) {
+        std::array<wchar_t, observation_mapping_name_capacity> name{};
+        if (!make_observation_mapping_name(process.pid, name)) return std::nullopt;
+        mapping_ = OpenFileMappingW(FILE_MAP_READ, FALSE, name.data());
+        if (!mapping_) return std::nullopt;
+        shared_ = static_cast<const ObservationShared*>(MapViewOfFile(
+            mapping_, FILE_MAP_READ, 0, 0, sizeof(ObservationShared)));
+        if (!shared_) { reset(); return std::nullopt; }
+        pid_ = process.pid;
+        process_start_id_ = process.process_start_id;
+    }
+    // Publication identity can change while a retained view stays mapped.
+    const volatile auto* shared = shared_;
     const std::uint64_t start =
         (static_cast<std::uint64_t>(shared->process_start_high) << 32U) |
         shared->process_start_low;
@@ -192,15 +214,21 @@ std::optional<ObservationSnapshot> read_observation(
               (!std::isfinite(result.last_delta_time) ||
                result.last_delta_time <= 0.0F ||
                result.last_delta_time > 1.0F)))) {
-            UnmapViewOfFile(shared);
-            CloseHandle(mapping);
+            reset();
             return std::nullopt;
         }
     }
-    UnmapViewOfFile(shared);
-    CloseHandle(mapping);
-    if (!valid) return std::nullopt;
+    if (!valid || shared->magic != observation_magic) {
+        reset();
+        return std::nullopt;
+    }
     return result;
+}
+
+std::optional<ObservationSnapshot> read_observation(
+    const game::GameProcessIdentity& process) noexcept {
+    ObservationReader reader;
+    return reader.read(process);
 }
 
 bool write_fixed_control(const game::GameProcessIdentity& process,

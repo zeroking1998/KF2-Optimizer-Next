@@ -351,6 +351,7 @@ struct UiRuntime {
     std::uint64_t last_flex_observation_calls{0};
     bool flex_observation_announced{false};
     std::optional<flex::ObservationSnapshot> last_flex_observation;
+    flex::ObservationReader flex_observation_reader;
     std::optional<optimizer::AdaptiveCapabilityState>
         adaptive_flex_capability;
     bool flex_minimum_limited{false};

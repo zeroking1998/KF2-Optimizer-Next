@@ -347,6 +347,15 @@ int test_flex_report_boundaries() {
     const auto final_events = events.snapshot();
     CHECK(std::any_of(final_events.begin(), final_events.end(),
         [](const auto& event) { return event.code == "FLEX_SESSION_SAVE_FAILED"; }));
+    // Detach must release the cached view even if the final report failed,
+    // while the runtime object itself is still alive.
+    UnmapViewOfFile(mapping.shared);
+    mapping.shared = nullptr;
+    CloseHandle(mapping.handle);
+    mapping.handle = nullptr;
+    HANDLE retained = OpenFileMappingW(FILE_MAP_READ, FALSE, name.c_str());
+    if (retained) CloseHandle(retained);
+    CHECK(!retained);
     return EXIT_SUCCESS;
 }
 
