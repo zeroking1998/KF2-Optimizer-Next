@@ -118,6 +118,10 @@ are visible immediately.
   looking it up on every call. Missing runtimes remain retryable, the original
   DLL stays alive only until forwarder unload, and fixed substeps stay unchanged.
 
+- FleX control confirmation now requires healthy native relay readback.
+  Fresh intended values from a failed relay no longer become an applied action;
+  existing acknowledgement timeouts and fixed substeps remain unchanged.
+
 - Update and Auto Repair now wait for synchronous Windows ZIP extraction to
   finish before checking or cleaning staged files; partial or aborted copies
   fail safely without a fixed-delay completion guess.

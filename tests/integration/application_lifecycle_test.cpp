@@ -221,6 +221,47 @@ int test_flex_report_boundaries() {
         L"Detailed substep counters are off; fixed one-substep limit is active");
     CHECK(runtime.model.status().flex_readback_diagnostics ==
         L"Minimal safety readback active; reports and extra logs are off");
+
+    // Fresh intended values do not acknowledge a failed native relay. Keep
+    // the real action pending, and accept it only after healthy readback.
+    const auto requested_at = runtime.monotonic_ns();
+    constexpr auto flex_control =
+        kf2::optimizer::AdaptiveControlId::flex_solver_substeps;
+    CHECK(runtime.adaptive_actuation.propose(flex_control, 1.0, std::nullopt,
+        kf2::optimizer::AdaptiveCapabilityState::available, requested_at,
+        "flex_shared_memory").status ==
+        kf2::optimizer::AdaptiveActionStatus::proposed);
+    CHECK(runtime.adaptive_actuation.dispatch(flex_control, requested_at));
+    shared.desired_substeps = 1;
+    shared.control_heartbeat_tick = GetTickCount64();
+    shared.successful_updates = 59;
+    shared.missing_original_calls = 1;
+    runtime.observe_flex_process();
+    CHECK(runtime.last_flex_observation &&
+        runtime.last_flex_observation->fresh &&
+        runtime.last_flex_observation->control_fresh &&
+        !runtime.last_flex_observation->pass_through_healthy);
+    CHECK(runtime.adaptive_actuation.current(flex_control)->status ==
+        kf2::optimizer::AdaptiveActionStatus::pending);
+    CHECK(runtime.model.status().flex_action_status == L"PENDING");
+    CHECK(runtime.model.status().flex_requested_substeps == 1);
+    CHECK(!runtime.model.status().flex_effective_substeps);
+    const auto failed_readback_events = events.snapshot();
+    CHECK(std::none_of(failed_readback_events.begin(), failed_readback_events.end(),
+        [](const auto& event) { return event.code == "FLEX_MINIMUM_APPLIED"; }));
+    shared.successful_updates = 60;
+    shared.missing_original_calls = 0;
+    runtime.observe_flex_process();
+    CHECK(runtime.adaptive_actuation.current(flex_control)->status ==
+        kf2::optimizer::AdaptiveActionStatus::applied);
+    CHECK(runtime.model.status().flex_action_status == L"APPLIED");
+    CHECK(runtime.model.status().flex_effective_substeps == 1);
+    const auto healthy_readback_events = events.snapshot();
+    CHECK(std::count_if(healthy_readback_events.begin(), healthy_readback_events.end(),
+        [](const auto& event) { return event.code == "FLEX_MINIMUM_APPLIED"; }) == 1);
+    runtime.adaptive_actuation.invalidate_control(flex_control);
+    shared.desired_substeps = 0;
+    shared.control_heartbeat_tick = 0;
     shared.live_solvers = shared.max_live_solvers = 1;
     shared.aggregate_capacity_valid = 1;
     shared.aggregate_particle_capacity = 1024;

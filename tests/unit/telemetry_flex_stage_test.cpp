@@ -32,6 +32,7 @@ int main() {
     pending.generation = {11, 12, 13, 14, 15};
     kf2::flex::ObservationSnapshot observed;
     observed.fresh = true;
+    observed.pass_through_healthy = true;
     observed.control_fresh = true;
     observed.requested_substeps = 1;
     observed.last_forwarded_substeps = 1;
@@ -42,6 +43,15 @@ int main() {
     CHECK(receipt->observed_value == 1.0);
     CHECK(receipt->generation == pending.generation);
     CHECK(receipt->provider == "flex_shared_memory_readback");
+
+    observed.pass_through_healthy = false;
+    CHECK(!confirmed_flex_readback(&pending, observed, 100).has_value());
+    observed.requested_substeps = 0;
+    pending.requested_value = 0.0;
+    CHECK(!confirmed_flex_readback(&pending, observed, 100).has_value());
+    observed.pass_through_healthy = true;
+    observed.requested_substeps = 1;
+    pending.requested_value = 1.0;
 
     observed.last_forwarded_substeps = 2;
     CHECK(!confirmed_flex_readback(&pending, observed, 100).has_value());
