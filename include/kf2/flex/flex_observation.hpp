@@ -67,6 +67,27 @@ struct ObservationSnapshot {
     double solver_updates_per_second{0.0};
 };
 
+struct ObservationShared;
+
+// Session-owned, single-threaded view. Values and process liveness are read
+// again on each sample; only the mapping/view lifetime is reused.
+class ObservationReader final {
+public:
+    ObservationReader() noexcept = default;
+    ~ObservationReader();
+    ObservationReader(const ObservationReader&) = delete;
+    ObservationReader& operator=(const ObservationReader&) = delete;
+    [[nodiscard]] std::optional<ObservationSnapshot> read(
+        const game::GameProcessIdentity& process) noexcept;
+    void reset() noexcept;
+
+private:
+    HANDLE mapping_{nullptr};
+    const ObservationShared* shared_{nullptr};
+    std::uint32_t pid_{0};
+    std::uint64_t process_start_id_{0};
+};
+
 [[nodiscard]] std::optional<ObservationSnapshot> read_observation(
     const game::GameProcessIdentity& process) noexcept;
 [[nodiscard]] bool write_fixed_control(

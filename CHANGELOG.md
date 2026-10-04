@@ -110,6 +110,10 @@ are visible immediately.
   exits, even if a reader retains its fresh mapping. Normal solver calls remain
   unchanged; the app reuses its existing process handle for the liveness check.
 
+- Keep one verified FleX observation mapping per attached process instead of
+  reopening it on every sample. Values remain live; process replacement,
+  invalid publication and session detach release the view immediately.
+
 - Update and Auto Repair now wait for synchronous Windows ZIP extraction to
   finish before checking or cleaning staged files; partial or aborted copies
   fail safely without a fixed-delay completion guess.

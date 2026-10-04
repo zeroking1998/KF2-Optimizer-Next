@@ -13,7 +13,51 @@ namespace {
 
 bool fail_allocations = false;
 
-bool rejects_exited_producer(const kf2::flex::ObservationShared& sample) {
+bool reuses_session_mapping(const kf2::game::GameProcessIdentity& identity,
+                           kf2::flex::ObservationShared& shared) {
+    DWORD before{}, count{};
+    if (!GetProcessHandleCount(GetCurrentProcess(), &before)) return false;
+    {
+        kf2::flex::ObservationReader reader;
+        static_assert(noexcept(reader.read(identity)) && noexcept(reader.reset()));
+        fail_allocations = true;
+        bool current = true;
+        for (unsigned i = 0; i < 256 && current; ++i) {
+            ++shared.update_calls;
+            ++shared.successful_updates;
+            shared.last_forwarded_substeps = 2 + (i % 3);
+            const auto observed = reader.read(identity);
+            current = observed && observed->fresh && observed->pass_through_healthy &&
+                observed->update_calls == static_cast<std::uint64_t>(shared.update_calls) &&
+                observed->last_forwarded_substeps == shared.last_forwarded_substeps &&
+                GetProcessHandleCount(GetCurrentProcess(), &count) && count == before + 1;
+        }
+        fail_allocations = false;
+        if (!current) return false;
+        shared.last_update_tick = 1;
+        const auto stale = reader.read(identity);
+        if (!stale || stale->fresh) return false;
+        shared.last_update_tick = GetTickCount64();
+        auto wrong_identity = identity;
+        ++wrong_identity.process_start_id;
+        if (reader.read(wrong_identity) ||
+            !GetProcessHandleCount(GetCurrentProcess(), &count) || count != before ||
+            !reader.read(identity)) return false;
+        shared.magic = 0;
+        if (reader.read(identity) ||
+            !GetProcessHandleCount(GetCurrentProcess(), &count) || count != before)
+            return false;
+        shared.magic = kf2::flex::observation_magic;
+        if (!reader.read(identity)) return false;
+        reader.reset();
+        if (!GetProcessHandleCount(GetCurrentProcess(), &count) || count != before ||
+            !reader.read(identity)) return false;
+    }
+    return GetProcessHandleCount(GetCurrentProcess(), &count) && count == before;
+}
+
+bool rejects_exited_producer(const kf2::flex::ObservationShared& sample,
+                            const kf2::game::GameProcessIdentity& previous) {
     wchar_t executable[MAX_PATH]{};
     if (!GetModuleFileNameW(nullptr, executable, MAX_PATH)) return false;
     STARTUPINFOW startup{sizeof(startup)};
@@ -52,16 +96,17 @@ bool rejects_exited_producer(const kf2::flex::ObservationShared& sample) {
     shared->process_start_high =
         static_cast<LONG>(identity.process_start_id >> 32U);
     shared->last_update_tick = GetTickCount64();
-    if (!kf2::flex::read_observation(identity) ||
+    kf2::flex::ObservationReader reader;
+    if (!reader.read(previous) || !reader.read(identity) ||
         !kf2::flex::write_fixed_control(identity, false)) return false;
     const auto heartbeat = shared->control_heartbeat_tick;
     if (!TerminateProcess(owned.get(), 0) ||
         WaitForSingleObject(owned.get(), 2000) != WAIT_OBJECT_0) return false;
     // The retained mapping still has matching identity bytes and a fresh tick.
-    return !kf2::flex::read_observation(identity) &&
+    return !reader.read(identity) && !kf2::flex::read_observation(identity) &&
            !kf2::flex::write_fixed_control(identity, true) &&
            shared->diagnostics_enabled == 0 &&
-           shared->control_heartbeat_tick == heartbeat;
+           shared->control_heartbeat_tick == heartbeat && reader.read(previous);
 }
 
 }  // namespace
@@ -257,7 +302,8 @@ int wmain() {
     const auto after_queries = kf2::game::detail::process_query_counts_for_testing();
     if (before_queries.opens != after_queries.opens ||
         before_queries.creation_queries != after_queries.creation_queries) return 24;
-    if (!rejects_exited_producer(*shared)) return 25;
+    if (!reuses_session_mapping(identity, *shared)) return 26;
+    if (!rejects_exited_producer(*shared, identity)) return 25;
     identity.process_start_id++;
     if (kf2::flex::read_observation(identity)) return 5;
     if (kf2::flex::write_fixed_control(identity, true)) return 8;

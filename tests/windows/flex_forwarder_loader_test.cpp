@@ -38,6 +38,7 @@ int wmain(int argc, wchar_t** argv) {
         (static_cast<std::uint64_t>(created.dwHighDateTime) << 32U) |
             created.dwLowDateTime, {}};
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS);
+    kf2::flex::ObservationReader reader;
     for (unsigned cycle = 0; cycle < 100; ++cycle) {
         const auto cookie = AddDllDirectory(sandbox.c_str());
         HMODULE module = LoadLibraryExW((sandbox / L"flexRelease_x64.dll").c_str(), nullptr,
@@ -66,12 +67,13 @@ int wmain(int argc, wchar_t** argv) {
         if (!shared || shared->magic != kf2::flex::observation_magic ||
             shared->version != kf2::flex::observation_version ||
             shared->pid != GetCurrentProcessId()) return 11;
-        if (!kf2::flex::read_observation(identity)) return 14;
+        if (!reader.read(identity)) return 14;
         // A retained reader keeps the named mapping alive after DLL unload.
         // It must not keep a valid producer publication alive with it.
         if (!FreeLibrary(module)) return 10;
         if (shared->magic != 0 || shared->state != 0 ||
             kf2::flex::read_observation(identity) ||
+            reader.read(identity) ||
             kf2::flex::write_fixed_control(identity, true)) return 15;
         if ((cycle % 2) == 0) {
             module = LoadLibraryExW((sandbox / L"flexRelease_x64.dll").c_str(),
@@ -83,10 +85,10 @@ int wmain(int argc, wchar_t** argv) {
             version = reinterpret_cast<Version>(GetProcAddress(module, "flexGetVersion"));
             if (!version || version() != 31 ||
                 shared->magic != kf2::flex::observation_magic || shared->state != 1 ||
-                !kf2::flex::read_observation(identity)) return 17;
+                !reader.read(identity)) return 17;
             if (!FreeLibrary(module)) return 10;
             if (shared->magic != 0 || shared->state != 0 ||
-                kf2::flex::read_observation(identity)) return 18;
+                reader.read(identity)) return 18;
         }
         UnmapViewOfFile(shared); CloseHandle(mapping);
         mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, mapping_name.c_str());

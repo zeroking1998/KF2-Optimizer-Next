@@ -407,6 +407,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     last_flex_observation_calls = 0;
     flex_observation_announced = false;
     last_flex_observation.reset();
+    flex_observation_reader.reset();
     flex_minimum_limited = false;
     game_process.reset();
     reset_game_process_discovery();
