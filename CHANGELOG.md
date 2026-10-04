@@ -89,7 +89,8 @@ are visible immediately.
   save the latest verified counters and report persistence failures.
 
 - Reuse unchanged FleX display state instead of copying the complete UI status
-  on every observation and capability check. Live readbacks and control timing
+  on every observation and capability check. Borrow constant diagnostic labels
+  instead of allocating them every sample. Live readbacks and control timing
   remain unchanged.
 
 - Keep healthy minimal FleX readback available when solver capacity is known
