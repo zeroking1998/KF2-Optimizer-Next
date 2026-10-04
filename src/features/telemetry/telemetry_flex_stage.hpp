@@ -35,7 +35,8 @@ confirmed_flex_readback(
         now_ns == 0 || !std::isfinite(pending->requested_value) ||
         pending->requested_value < 0.0 || pending->requested_value > 5.0 ||
         std::floor(pending->requested_value) != pending->requested_value ||
-        !observed.fresh || !observed.control_fresh) {
+        !observed.fresh || !observed.control_fresh ||
+        !observed.pass_through_healthy) {
         return std::nullopt;
     }
     const int requested = static_cast<int>(pending->requested_value);
