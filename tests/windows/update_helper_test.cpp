@@ -127,6 +127,27 @@ bool write_request(const std::filesystem::path& work,
                work / L"update-request.ini", bytes).has_value();
 }
 
+// Cleanup runs asynchronously. A failed status read is uncertainty, not
+// confirmed absence; keep it inside the same bounded wait, without throwing.
+bool wait_for_work_removal(
+    const std::filesystem::path& work, DWORD timeout_ms,
+    bool (*read_status)(const std::filesystem::path&, std::error_code&) =
+        &std::filesystem::exists) {
+    const auto deadline = GetTickCount64() + timeout_ms;
+    std::error_code error;
+    do {
+        const bool exists = read_status(work, error);
+        if (!error && !exists) return true;
+        if (GetTickCount64() >= deadline) break;
+        Sleep(25);
+    } while (true);
+    if (error) {
+        std::cerr << "Cleanup directory status remains uncertain: "
+                  << error.value() << ' ' << error.message() << '\n';
+    }
+    return false;
+}
+
 int wmain(int argc, wchar_t** argv) {
     if (argc == 2 && std::wstring_view{argv[1]} == L"--child") {
         Sleep(400);
@@ -205,6 +226,25 @@ int wmain(int argc, wchar_t** argv) {
     fs::remove_all(root, error);
     fs::create_directories(root);
 
+    CHECK(!wait_for_work_removal(root, 0));
+    CHECK(wait_for_work_removal(root / L"not-created", 0));
+    CHECK(!wait_for_work_removal(root, 0,
+        [](const fs::path&, std::error_code& status_error) {
+            status_error = std::make_error_code(std::errc::permission_denied);
+            return false;
+        }));
+    static unsigned status_reads = 0;
+    CHECK(wait_for_work_removal(root, 5'000,
+        [](const fs::path&, std::error_code& status_error) {
+            if (++status_reads == 1) {
+                status_error = std::make_error_code(std::errc::permission_denied);
+            } else {
+                status_error.clear();
+            }
+            return false;
+        }));
+    CHECK(status_reads == 2);
+
     const auto control_root = root / L"control-files";
     fs::create_directories(control_root);
     for (const auto* filename : {
@@ -279,9 +319,7 @@ int wmain(int argc, wchar_t** argv) {
     CHECK(read_file(receipt) == token);
     CloseHandle(child.hProcess);
 
-    const auto deadline = GetTickCount64() + 5'000;
-    while (fs::exists(work) && GetTickCount64() < deadline) Sleep(25);
-    CHECK(!fs::exists(work));
+    CHECK(wait_for_work_removal(work, 5'000));
 
     // Cleanup uncertainty must preserve every byte of the recovery material,
     // record why it was deferred, and still permit a later verified rollback.

@@ -54,6 +54,11 @@ holds a denied-read lease and must exit with failure; it validates CI failure
 output, not a retry or a passing gameplay check. The historical intermittent
 failure in #685 remains unconfirmed until its actual failing boundary is captured.
 
+The update-helper test observes asynchronous work-directory deletion with an
+error-aware five-second wait. Only a successful status read confirming absence
+passes; uncertain status or an existing directory at the deadline fails. No
+full-test retry or production update/cleanup behavior is changed.
+
 ## Real KF2 checks
 
 Automated tests cannot prove every in-game effect. Changes to protected runtime
