@@ -364,9 +364,16 @@ int wmain(int argc, wchar_t** argv) {
         shared->aggregate_counts_valid != 0)
         return fail(18, "final solver retirement was not observed");
 
+    if (!FreeLibrary(forwarder_module)) return fail(28, "forwarder unload failed");
+    if (shared->magic != 0 || shared->state != 0)
+        return fail(29, "retained reader kept an unloaded producer valid");
     UnmapViewOfFile(shared);
     CloseHandle(mapping);
-    FreeLibrary(forwarder_module);
+    mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, mapping_name.c_str());
+    if (mapping) {
+        CloseHandle(mapping);
+        return fail(30, "mapping survived producer and reader release");
+    }
     FreeLibrary(original_module);
     return 0;
 }

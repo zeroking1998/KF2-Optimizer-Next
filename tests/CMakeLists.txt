@@ -370,7 +370,9 @@ if(TARGET KF2FlexForwarder)
     set_target_properties(kf2_flex_original_test_double PROPERTIES
         OUTPUT_NAME "flex_original_test_double")
 
-    add_executable(kf2_flex_forwarder_loader_test windows/flex_forwarder_loader_test.cpp)
+    add_executable(kf2_flex_forwarder_loader_test
+        windows/flex_forwarder_loader_test.cpp
+        "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp")
     target_include_directories(kf2_flex_forwarder_loader_test PRIVATE
         "${PROJECT_SOURCE_DIR}/include")
     target_compile_definitions(kf2_flex_forwarder_loader_test PRIVATE
