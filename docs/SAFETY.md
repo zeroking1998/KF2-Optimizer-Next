@@ -84,6 +84,13 @@ Normal shutdown and recovery restore protected INIs, telemetry modules and
 sources, optional FleX runtime state, the native viewport client, and temporary
 session files. The pre-session snapshot is authoritative.
 
+Confirmed native graphics changes are recorded in a bounded, hash-checked replay
+inside the root-bound session snapshot before restoration starts. Read, preview,
+apply, or verification failures retain both records. A stopped-game startup
+retries recovery using the same path as normal finalization, and removes the
+snapshot only after exact file readback. Temporary Adaptive values are excluded;
+malformed, foreign-root, or unsafe replay files block recovery without writes.
+
 FleX transactions pin the original runtime directory's Windows volume and file
 identity before changing game files. Restore and recovery reject a different
 installation, including one with the same DLL hashes. Legacy or missing owner

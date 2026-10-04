@@ -3480,6 +3480,176 @@ int test_graphics_restaging_failures() {
         CHECK(runtime.model.notice()->code == L"GRAPHICS_SAVE_FAILED");
         CHECK(runtime.model.notice()->recovery_action.empty());
     }
+    // Failed replay must retain both the protected originals and the
+    // confirmed change; otherwise the next recovery cannot retry it.
+    {
+        CHECK(write_complete_config_catalog(config));
+        kf2::diagnostics::EventLog events{128};
+        kf2::app::UiRuntime runtime{root / L"replay", false,
+            kf2::config::Settings{}, events, discovery,
+            kf2::app::StartMode::normal, portable};
+        CHECK(runtime.video_saved.has_value());
+        const auto captured = kf2::config::capture_session_config(
+            config, runtime.settings_path.parent_path());
+        CHECK(captured.has_value());
+        runtime.session_config_snapshot = captured.value();
+        runtime.session_video_native_changes = *runtime.video_saved;
+        runtime.session_video_native_changes->film_grain_percent = 17;
+        fs::rename(runtime.backups.state_root() / L"backups",
+                   runtime.backups.state_root() / L"backups-saved");
+        write_bytes(runtime.backups.state_root() / L"backups", "blocked");
+        CHECK(fs::is_regular_file(runtime.backups.state_root() / L"backups"));
+        CHECK(!runtime.restore_protected_session_config(L"Replay failure"));
+        CHECK(runtime.session_config_snapshot.has_value());
+        CHECK(fs::exists(captured.value().snapshot_root / L"manifest.txt"));
+        CHECK(fs::is_regular_file(captured.value().snapshot_root / L"graphics-replay.txt"));
+        CHECK(runtime.session_video_native_changes.has_value());
+        CHECK(fs::remove(runtime.backups.state_root() / L"backups"));
+        fs::rename(runtime.backups.state_root() / L"backups-saved",
+                   runtime.backups.state_root() / L"backups");
+        const auto replay_retry = runtime.restore_session_video_settings();
+        if (!replay_retry.has_value()) std::wcerr << replay_retry.error().message << L'\n';
+        CHECK(replay_retry.has_value());
+        CHECK(kf2::game::read_video_settings(config).value().film_grain_percent == 17);
+        CHECK(!fs::exists(captured.value().snapshot_root));
+    }
+    // Exercise each replay stage and recover using a fresh runtime, with no
+    // surviving in-memory desired values. These cases share the existing test.
+    for (const auto failed_stage : {Stage::replay_read, Stage::replay_preview,
+                                   Stage::replay_apply, Stage::replay_verify}) {
+        CHECK(write_complete_config_catalog(config));
+        if (failed_stage == Stage::replay_read) {
+            auto system = kf2::config::IniDocument::parse(
+                read_bytes(config / L"KFSystemSettings.ini"));
+            CHECK(system.has_value());
+            CHECK(system.value().upsert(L"SystemSettings", L"ResX", L"960").shadowed_occurrences == 0);
+            CHECK(system.value().upsert(L"SystemSettings", L"ResY", L"540").shadowed_occurrences == 0);
+            write_bytes(config / L"KFSystemSettings.ini", system.value().serialize());
+        }
+        kf2::diagnostics::EventLog events{128};
+        const auto state = root / (L"replay-stage-" +
+            std::to_wstring(static_cast<int>(failed_stage)));
+        kf2::app::UiRuntime runtime{state, false, kf2::config::Settings{},
+            events, discovery, kf2::app::StartMode::normal, portable};
+        CHECK(runtime.video_saved.has_value());
+        const auto captured = kf2::config::capture_session_config(
+            config, runtime.settings_path.parent_path());
+        CHECK(captured.has_value());
+        runtime.session_config_snapshot = captured.value();
+        runtime.session_video_runtime = *runtime.video_saved;
+        runtime.session_video_native_changes = *runtime.video_saved;
+        runtime.session_video_native_changes->film_grain_percent = 23;
+        const auto temporary = kf2::game::build_video_preview(
+            config, kf2::game::recommended_video_defaults(*runtime.video_saved),
+            &*runtime.video_saved);
+        CHECK(temporary.has_value());
+        CHECK(kf2::config::apply_preview(temporary.value(), runtime.backups, {}).has_value());
+        HANDLE lock = INVALID_HANDLE_VALUE;
+        bool injected = false;
+        runtime.video_preapply_probe_for_testing = [&](Stage stage) {
+            if (stage != failed_stage) return;
+            const auto target = config / L"KFSystemSettings.ini";
+            if (stage == Stage::replay_read || stage == Stage::replay_apply) {
+                lock = CreateFileW(target.c_str(), GENERIC_READ,
+                    stage == Stage::replay_read ? 0 : FILE_SHARE_READ, nullptr,
+                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+                injected = lock != INVALID_HANDLE_VALUE;
+            } else {
+                write_bytes(target, read_bytes(target) +
+                    "[SystemSettings]\r\nImageGrainScaler=0.50\r\n");
+                injected = true;
+            }
+        };
+        CHECK(!runtime.restore_protected_session_config(L"Injected replay stage"));
+        CHECK(injected);
+        CHECK(runtime.model.recovery_required());
+        CHECK(runtime.session_config_snapshot.has_value());
+        CHECK(runtime.session_video_runtime.has_value());
+        CHECK(runtime.session_video_native_changes.has_value());
+        const auto journal = captured.value().snapshot_root / L"graphics-replay.txt";
+        CHECK(fs::is_regular_file(journal));
+        const auto retained = read_bytes(journal);
+        CHECK(!kf2::config::recover_session_config(
+            config, runtime.settings_path.parent_path(), false).has_value());
+        CHECK(read_bytes(journal) == retained);
+        if (lock != INVALID_HANDLE_VALUE) CloseHandle(lock);
+        runtime.video_preapply_probe_for_testing = {};
+        if (failed_stage == Stage::replay_read) {
+            const auto live_bytes = read_bytes(config / L"KFSystemSettings.ini");
+            auto corrupt = retained;
+            corrupt[0] = corrupt[0] == '0' ? '1' : '0';
+            write_bytes(journal, corrupt);
+            CHECK(!runtime.restore_session_video_settings().has_value());
+            CHECK(read_bytes(journal) == corrupt);
+            CHECK(read_bytes(config / L"KFSystemSettings.ini") == live_bytes);
+            write_bytes(journal, retained);
+            auto payload = retained.substr(retained.find('\n') + 1);
+            const auto volume_end = payload.find(' ', 2);
+            payload.replace(2, volume_end - 2,
+                std::to_string(captured.value().root_volume ^ 1));
+            const auto foreign_hash = kf2::security::sha256_hex(payload);
+            CHECK(foreign_hash.has_value());
+            const auto foreign_replay = foreign_hash.value() + "\n" + payload;
+            write_bytes(journal, foreign_replay);
+            CHECK(!runtime.restore_session_video_settings().has_value());
+            CHECK(read_bytes(journal) == foreign_replay);
+            CHECK(read_bytes(config / L"KFSystemSettings.ini") == live_bytes);
+            write_bytes(journal, retained);
+            const auto alias = state / L"journal-alias.txt";
+            CHECK(CreateHardLinkW(alias.c_str(), journal.c_str(), nullptr) != FALSE);
+            CHECK(!runtime.restore_session_video_settings().has_value());
+            CHECK(read_bytes(config / L"KFSystemSettings.ini") == live_bytes);
+            CHECK(fs::remove(alias));
+        }
+        runtime.session_config_snapshot.reset(); // Simulate lost process memory.
+        runtime.session_video_runtime.reset();
+        runtime.session_video_native_changes.reset();
+        kf2::diagnostics::EventLog restarted_events{128};
+        kf2::app::UiRuntime restarted{state, false, kf2::config::Settings{},
+            restarted_events, discovery, kf2::app::StartMode::normal, portable};
+        CHECK(!restarted.model.recovery_required());
+        CHECK(!restarted.session_config_snapshot.has_value());
+        CHECK(!fs::exists(captured.value().snapshot_root));
+        const auto saved = kf2::game::read_video_settings(config);
+        CHECK(saved.has_value());
+        CHECK(saved.value().film_grain_percent == 23);
+        CHECK(kf2::game::video_choice_label(kf2::game::VideoOption::resolution,
+            saved.value()) == kf2::game::video_choice_label(
+                kf2::game::VideoOption::resolution, *runtime.video_saved));
+        for (const auto option : {kf2::game::VideoOption::fx_quality,
+                                 kf2::game::VideoOption::texture_resolution,
+                                 kf2::game::VideoOption::motion_blur}) {
+            const auto index = static_cast<std::size_t>(option);
+            CHECK(saved.value().choices[index] == runtime.video_saved->choices[index]);
+        }
+    }
+    {
+        CHECK(write_complete_config_catalog(config));
+        kf2::diagnostics::EventLog events{128};
+        kf2::app::UiRuntime runtime{root / L"replay-journal", false,
+            kf2::config::Settings{}, events, discovery,
+            kf2::app::StartMode::normal, portable};
+        const auto captured = kf2::config::capture_session_config(
+            config, runtime.settings_path.parent_path());
+        CHECK(captured.has_value());
+        runtime.session_config_snapshot = captured.value();
+        runtime.session_video_native_changes = *runtime.video_saved;
+        const auto journal = captured.value().snapshot_root / L"graphics-replay.txt";
+        CHECK(fs::create_directory(journal));
+        const auto live_bytes = read_bytes(config / L"KFSystemSettings.ini");
+        CHECK(!runtime.restore_session_video_settings().has_value());
+        CHECK(runtime.session_video_native_changes.has_value());
+        CHECK(read_bytes(config / L"KFSystemSettings.ini") == live_bytes);
+        CHECK(fs::remove(journal));
+        // No-op replay still verifies and completes, without creating backups.
+        const auto backups_before = runtime.backups.list_backups();
+        CHECK(backups_before.has_value());
+        CHECK(runtime.restore_session_video_settings().has_value());
+        const auto backups_after = runtime.backups.list_backups();
+        CHECK(backups_after.has_value());
+        CHECK(backups_after.value().size() == backups_before.value().size());
+        CHECK(!fs::exists(captured.value().snapshot_root));
+    }
     fs::remove_all(root);
     return EXIT_SUCCESS;
 }

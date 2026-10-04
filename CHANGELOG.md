@@ -84,6 +84,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Confirmed in-game graphics changes now survive failed session restoration
+  and Optimizer restarts. Recovery retains the protected originals until the
+  user changes have been written and verified.
 - Portable packaging and release validation now compare the executable's embedded
   build identity with its manifests and source revision. Stale or dirty packages
   cannot be silently certified as a new release candidate.
