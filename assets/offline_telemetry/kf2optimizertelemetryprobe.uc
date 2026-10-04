@@ -2278,6 +2278,15 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
     AdaptiveBaselineScanCursor =
         Clamp(AdaptiveBaselineScanCursor, 0, PoolLength - 1);
     ScanCount = Min(AdaptiveCorpseScanBudget, PoolLength);
+    // No new baseline action can be owned when tracking is full or invalid.
+    // Advance fairly without inspecting or changing any corpse in that case.
+    if (!EnsureAdaptiveCorpsePhysicsActionIds() ||
+        AdaptiveCorpsePhysicsActionIdCount >= 8192)
+    {
+        AdaptiveBaselineScanCursor =
+            (AdaptiveBaselineScanCursor + ScanCount) % PoolLength;
+        return 0;
+    }
     for (Offset = 0; Offset < ScanCount; ++Offset)
     {
         Index = (AdaptiveBaselineScanCursor + Offset) % PoolLength;
