@@ -88,6 +88,10 @@ are visible immediately.
   Live observations stay in memory; session detach and explicit support export
   save the latest verified counters and report persistence failures.
 
+- Reuse unchanged FleX display state instead of copying the complete UI status
+  on every observation and capability check. Live readbacks and control timing
+  remain unchanged.
+
 - Stop rebuilding unrelated UI nodes during numeric animation. Reuse desktop
   text formats and target-bound brushes, pause hidden/minimized animations,
   and keep accessibility values aligned with the visible presentation.

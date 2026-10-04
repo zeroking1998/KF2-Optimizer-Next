@@ -1,6 +1,7 @@
 #include "features/telemetry/telemetry_flex_stage.hpp"
 
 #include <array>
+#include <string_view>
 
 #include "app/application_runtime.hpp"
 #include "features/telemetry/telemetry_effect_stage.hpp"
@@ -47,10 +48,10 @@ void run_flex_control_stage(app::UiRuntime& runtime,
         frame.flex && frame.flex->last_forwarded_substeps >= 1 &&
         frame.flex->last_forwarded_substeps <= 5;
     const auto decision = decide_flex_control(observed_solver_ready);
-    auto status = runtime.model.status();
-    const std::wstring capability_label = observed_solver_ready
+    const std::wstring_view capability_label = observed_solver_ready
         ? L"AVAILABLE" : L"UNAVAILABLE";
-    if (status.flex_capability != capability_label) {
+    if (runtime.model.status().flex_capability != capability_label) {
+        auto status = runtime.model.status();
         status.flex_capability = capability_label;
         runtime.model.set_status(std::move(status));
         runtime.invalidate();
@@ -172,7 +173,7 @@ void UiRuntime::observe_flex_process() {
                 L", settings=" + std::to_wstring(receipt->generation.settings),
             L"flex"});
     }
-    auto status = model.status();
+    const auto& current = model.status();
     const std::wstring flex_status = flex_state->aggregate_particles_fresh
         ? L"FleX solvers: " + std::to_wstring(flex_state->live_solvers) +
               L" | particles active/free/capacity: " +
@@ -233,12 +234,13 @@ void UiRuntime::observe_flex_process() {
               std::to_wstring(flex_state->constrained_updates) +
               L"  •  reports and extra logs on"
         : L"Minimal safety readback active; reports and extra logs are off";
-    if (status.flex_telemetry != flex_status ||
-        status.flex_requested_substeps != requested ||
-        status.flex_effective_substeps != applied ||
-        status.flex_action_status != action_status ||
-        status.flex_substep_diagnostics != substep_status ||
-        status.flex_readback_diagnostics != readback_status) {
+    if (current.flex_telemetry != flex_status ||
+        current.flex_requested_substeps != requested ||
+        current.flex_effective_substeps != applied ||
+        current.flex_action_status != action_status ||
+        current.flex_substep_diagnostics != substep_status ||
+        current.flex_readback_diagnostics != readback_status) {
+        auto status = current;
         status.flex_telemetry = flex_status;
         status.flex_requested_substeps = requested;
         status.flex_effective_substeps = applied;
