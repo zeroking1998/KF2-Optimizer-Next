@@ -47,6 +47,7 @@
 #include "features/telemetry/telemetry_collection_stage.hpp"
 #include "features/telemetry/telemetry_session_stage.hpp"
 #include "features/telemetry/telemetry_frame.hpp"
+#include "features/telemetry/telemetry_flex_stage.hpp"
 #include "../support/process_inspection_denial.hpp"
 
 #define CHECK(condition)                                                        \
@@ -169,6 +170,47 @@ int test_flex_report_boundaries() {
     settings.debug_flex_diagnostics = true;
     kf2::app::UiRuntime runtime{root / L"Data", false, settings, events,
         std::nullopt, kf2::app::StartMode::read_only, root / L"portable"};
+    kf2::telemetry_pipeline::TelemetryFrame frame;
+    frame.identity = {pid, start};
+    frame.observed_at_ns = runtime.monotonic_ns();
+    const auto unchanged_telemetry = runtime.model.status().telemetry;
+    const auto unchanged_update_status = runtime.model.status().update_status;
+    const auto verify_capability = [&](std::wstring_view expected) {
+        for (int repeat = 0; repeat < 4; ++repeat) {
+            kf2::telemetry_pipeline::run_flex_control_stage(runtime, frame);
+            if (runtime.model.status().flex_capability != expected ||
+                runtime.model.status().telemetry != unchanged_telemetry ||
+                runtime.model.status().update_status != unchanged_update_status)
+                return false;
+        }
+        return true;
+    };
+    CHECK(verify_capability(L"UNAVAILABLE"));
+    frame.flex = kf2::flex::ObservationSnapshot{};
+    frame.flex->fresh = frame.flex->pass_through_healthy = true;
+    frame.flex->last_forwarded_substeps = 1;
+    CHECK(verify_capability(L"UNAVAILABLE"));
+    frame.offline_gameplay = true;
+    CHECK(verify_capability(L"AVAILABLE"));
+    ++runtime.adaptive_map_generation;
+    ++runtime.adaptive_settings_generation;
+    CHECK(verify_capability(L"AVAILABLE"));
+    frame.flex->solver_tracking_quarantined = true;
+    CHECK(verify_capability(L"AVAILABLE"));
+    frame.flex->diagnostics_enabled = true;
+    CHECK(verify_capability(L"UNAVAILABLE"));
+    frame.flex->solver_tracking_quarantined = false;
+    CHECK(verify_capability(L"AVAILABLE"));
+    frame.flex->fresh = false;
+    CHECK(verify_capability(L"UNAVAILABLE"));
+    frame.flex->fresh = true;
+    frame.flex->pass_through_healthy = false;
+    CHECK(verify_capability(L"UNAVAILABLE"));
+    frame.flex->pass_through_healthy = true;
+    frame.flex->last_forwarded_substeps = 0;
+    CHECK(verify_capability(L"UNAVAILABLE"));
+    frame.flex->last_forwarded_substeps = 1;
+    CHECK(verify_capability(L"AVAILABLE"));
     runtime.game_process = kf2::game::GameProcessIdentity{pid, start, {}};
     const auto report = root / L"Data/flex-session-last.json";
 
@@ -181,6 +223,8 @@ int test_flex_report_boundaries() {
     CHECK(runtime.file_writer.wait_until_idle(std::chrono::seconds{5}));
     CHECK(runtime.last_flex_observation.has_value());
     CHECK(runtime.last_flex_observation->update_calls == 120);
+    CHECK(runtime.model.status().flex_readback_diagnostics.find(
+        L"updates 120/120") != std::wstring::npos);
     CHECK(!fs::exists(report));
     for (int calls = 121; calls <= 180; ++calls) {
         publish(calls);
@@ -188,6 +232,8 @@ int test_flex_report_boundaries() {
     }
     CHECK(runtime.file_writer.wait_until_idle(std::chrono::seconds{5}));
     CHECK(runtime.last_flex_observation->update_calls == 180);
+    CHECK(runtime.model.status().flex_readback_diagnostics.find(
+        L"updates 180/180") != std::wstring::npos);
     CHECK(!fs::exists(report));
 
     // Export reads the latest process-bound observation, not just the previous

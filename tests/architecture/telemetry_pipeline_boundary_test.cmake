@@ -296,5 +296,22 @@ if(accepted_flex_receipt EQUAL -1 OR durable_flex_applied_event EQUAL -1 OR
         "FleX APPLIED diagnostics must follow an accepted shared-memory receipt")
 endif()
 
+string(FIND "${flex_stage_text}"
+    "if (runtime.model.status().flex_capability != capability_label)"
+    flex_capability_compare)
+string(FIND "${flex_stage_text}"
+    "auto status = runtime.model.status();" flex_capability_copy)
+string(FIND "${flex_stage_text}"
+    "if (current.flex_telemetry != flex_status" flex_observation_compare)
+string(FIND "${flex_stage_text}"
+    "auto status = current;" flex_observation_copy)
+if(flex_capability_compare EQUAL -1 OR flex_capability_copy EQUAL -1 OR
+   NOT flex_capability_compare LESS flex_capability_copy OR
+   flex_observation_compare EQUAL -1 OR flex_observation_copy EQUAL -1 OR
+   NOT flex_observation_compare LESS flex_observation_copy)
+    message(FATAL_ERROR
+        "FleX presentation must compare represented fields before copying the complete UI status")
+endif()
+
 message(STATUS
     "Telemetry pipeline boundary verified: one orchestrator and eight directional stage modules")
