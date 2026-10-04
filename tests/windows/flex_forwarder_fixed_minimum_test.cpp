@@ -35,6 +35,47 @@ int fail(int code, const char* message) {
     std::cerr << message << " (" << code << ")\n";
     return code;
 }
+
+int test_late_original(const std::filesystem::path& forwarder,
+                       const std::filesystem::path& original) {
+    const auto relay = LoadLibraryExW(forwarder.c_str(), nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!relay) return fail(50, "early forwarder load failed");
+    const auto version = reinterpret_cast<int (*)()>(
+        GetProcAddress(relay, "flexGetVersion"));
+    if (!version || version() != 0 || version() != 0)
+        return fail(51, "missing original was not retried safely");
+    const auto native = LoadLibraryExW(original.c_str(), nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!native) return fail(52, "late original load failed");
+    std::atomic<bool> start{false};
+    std::atomic<bool> valid{true};
+    std::thread callers[4];
+    for (auto& caller : callers) caller = std::thread([&] {
+        while (!start.load(std::memory_order_acquire)) std::this_thread::yield();
+        for (unsigned call = 0; call < 256; ++call)
+            if (version() != 31) valid.store(false, std::memory_order_relaxed);
+    });
+    start.store(true, std::memory_order_release);
+    for (auto& caller : callers) caller.join();
+    if (!valid.load(std::memory_order_relaxed))
+        return fail(53, "concurrent late export resolution failed");
+    if (!FreeLibrary(native)) return fail(54, "host original release failed");
+    // Check lifetime before calling a potentially cached address. The loader
+    // dependency must outlive the host's own reference, without a permanent pin.
+    if (!GetModuleHandleW(L"flexRelease_original.dll"))
+        return fail(55, "relay did not retain the resolved original dependency");
+    const auto lookups = reinterpret_cast<long long (*)()>(
+        GetProcAddress(relay, "flexTestExportLookups"));
+    if (!lookups) return fail(56, "lookup test seam missing");
+    const auto before = lookups();
+    for (unsigned call = 0; call < 256; ++call)
+        if (version() != 31) return fail(57, "cached late version changed");
+    if (lookups() != before) return fail(58, "warm version repeated export lookup");
+    if (!FreeLibrary(relay) || GetModuleHandleW(L"flexRelease_original.dll"))
+        return fail(59, "dependency outlived its forwarder");
+    return 0;
+}
 }
 
 int wmain(int argc, wchar_t** argv) {
@@ -57,6 +98,8 @@ int wmain(int argc, wchar_t** argv) {
 
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS);
     const auto cookie = AddDllDirectory(sandbox.c_str());
+    if (const auto result = test_late_original(forwarder, original); result != 0)
+        return result;
     HMODULE original_module = LoadLibraryExW(original.c_str(), nullptr,
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     HMODULE forwarder_module = LoadLibraryExW(forwarder.c_str(), nullptr,
@@ -358,11 +401,43 @@ int wmain(int argc, wchar_t** argv) {
         shared->aggregate_active_particles != 37 ||
         shared->aggregate_free_particles != 987)
         return fail(17, "solver destruction did not update the aggregate");
+
+    const auto version = reinterpret_cast<int (*)()>(
+        GetProcAddress(forwarder_module, "flexGetVersion"));
+    const auto lookups = reinterpret_cast<long long (*)()>(
+        GetProcAddress(forwarder_module, "flexTestExportLookups"));
+    if (!version || version() != 31 || !lookups)
+        return fail(60, "warm-cache test exports unavailable");
+    const auto lookups_before = lookups();
+    for (unsigned call = 0; call < 256; ++call) {
+        if (version() != 31 || active_count(solver) != 37)
+            return fail(61, "cached return value changed");
+        get_bounds(solver, lower, upper);
+        set_params(solver, &opaque_params);
+        set_particles(solver, particle_buffer, 4, 1);
+        set_phases(solver, phase_buffer, 3, 2);
+        set_velocities(solver, velocity_buffer, 2, 3);
+        get_particles(solver, particle_buffer, 5, 0);
+        get_phases(solver, phase_buffer, 6, 1);
+        get_velocities(solver, velocity_buffer, 7, 2);
+        set_fence(); wait_fence();
+        update(solver, 1.0F / 60.0F, 4, nullptr);
+    }
+    if (lookups() != lookups_before || last() != 1 ||
+        particle_upload_calls() != 258 || phase_upload_calls() != 257 ||
+        velocity_upload_calls() != 257 || particle_download_calls() != 257 ||
+        phase_download_calls() != 257 || velocity_download_calls() != 257 ||
+        fence_set_calls() != 258 || fence_wait_calls() != 257 ||
+        bounds_calls() != 257 || params_calls() != 257 ||
+        lower[0] != -1.0F || upper[2] != 3.0F)
+        return fail(62, "warm relay repeated lookups or aliased an export");
     destroy(solver);
     if (destroy_calls() != 3 || shared->destroy_calls != 3 ||
         shared->live_solvers != 0 || shared->aggregate_capacity_valid != 0 ||
         shared->aggregate_counts_valid != 0)
         return fail(18, "final solver retirement was not observed");
+    if (lookups() != lookups_before)
+        return fail(63, "warm destroy repeated export lookup");
 
     if (!FreeLibrary(forwarder_module)) return fail(28, "forwarder unload failed");
     if (shared->magic != 0 || shared->state != 0)

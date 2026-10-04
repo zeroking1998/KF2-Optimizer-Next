@@ -114,6 +114,10 @@ are visible immediately.
   reopening it on every sample. Values remain live; process replacement,
   invalid publication and session detach release the view immediately.
 
+- Reuse each FleX relay's successfully resolved native export instead of
+  looking it up on every call. Missing runtimes remain retryable, the original
+  DLL stays alive only until forwarder unload, and fixed substeps stay unchanged.
+
 - Update and Auto Repair now wait for synchronous Windows ZIP extraction to
   finish before checking or cleaning staged files; partial or aborted copies
   fail safely without a fixed-delay completion guess.
