@@ -1,18 +1,17 @@
 #include "kf2/update/update_package.hpp"
 
 #include <Windows.h>
-#include <Shldisp.h>
+#include <Shellapi.h>
+#include <ShlObj.h>
 #include <winhttp.h>
 #include <wrl/client.h>
 
 #include <array>
 #include <algorithm>
-#include <chrono>
 #include <cctype>
 #include <fstream>
 #include <ranges>
 #include <string_view>
-#include <thread>
 
 #include "kf2/security/package_integrity.hpp"
 #include "kf2/security/sha256.hpp"
@@ -33,12 +32,6 @@ struct InternetHandle {
 struct FileHandle {
     HANDLE value{INVALID_HANDLE_VALUE};
     ~FileHandle() { if (value != INVALID_HANDLE_VALUE) CloseHandle(value); }
-};
-
-struct VariantOwner {
-    VARIANT value{};
-    VariantOwner() { VariantInit(&value); }
-    ~VariantOwner() { VariantClear(&value); }
 };
 
 struct ComApartment {
@@ -239,101 +232,91 @@ Result<bool> download(const ReleaseAsset& asset,
     return Result<bool>::success(true);
 }
 
-Result<bool> extract(const std::filesystem::path& archive,
-                     const std::filesystem::path& destination) {
-    const auto native_destination = destination.wstring().size() >= MAX_PATH
+}  // namespace
+
+Result<bool> extract_update_archive(const std::filesystem::path& archive,
+                                   const std::filesystem::path& destination) {
+    if (!archive.is_absolute() || !destination.is_absolute()) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument, L"Update extraction paths are invalid", 0});
+    }
+    auto native_destination = destination.wstring().size() >= MAX_PATH
         ? platform::windows::extended_length_path(destination)
         : destination;
-    const auto native_archive = archive.wstring().size() >= MAX_PATH
+    auto native_archive = archive.wstring().size() >= MAX_PATH
         ? platform::windows::extended_length_path(archive)
         : archive;
+    native_destination.make_preferred();
+    native_archive.make_preferred();
+    const DWORD attributes = GetFileAttributesW(native_archive.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES ||
+        (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) {
+        return Result<bool>::failure(
+            {ErrorCode::access_denied, L"Update archive is not a normal file", 0});
+    }
     std::error_code error;
-    std::filesystem::create_directories(native_destination, error);
-    if (error || !normal_directory(native_destination)) return Result<bool>::failure(
+    if (!std::filesystem::create_directory(native_destination, error) ||
+        error || !normal_directory(native_destination)) return Result<bool>::failure(
         {ErrorCode::io_failure, L"Update extraction directory is invalid",
          static_cast<std::uint32_t>(error.value())});
     ComApartment apartment;
     if (FAILED(apartment.result)) return Result<bool>::failure(
         {ErrorCode::platform_failure, L"Windows ZIP support is unavailable",
          static_cast<std::uint32_t>(apartment.result)});
-    IShellDispatch* raw = nullptr;
-    const HRESULT created = CoCreateInstance(
-        CLSID_Shell, nullptr, CLSCTX_INPROC_SERVER, IID_IShellDispatch,
-        reinterpret_cast<void**>(&raw));
-    if (FAILED(created) || raw == nullptr) return Result<bool>::failure(
+    Microsoft::WRL::ComPtr<IFileOperation> operation;
+    HRESULT result = CoCreateInstance(
+        CLSID_FileOperation, nullptr, CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&operation));
+    if (FAILED(result)) return Result<bool>::failure(
         {ErrorCode::platform_failure, L"Windows ZIP support could not start",
-         static_cast<std::uint32_t>(created)});
-    Microsoft::WRL::ComPtr<IShellDispatch> shell;
-    shell.Attach(raw);
-    VariantOwner archive_value;
-    archive_value.value.vt = VT_BSTR;
-    archive_value.value.bstrVal = SysAllocString(native_archive.c_str());
-    VariantOwner destination_value;
-    destination_value.value.vt = VT_BSTR;
-    destination_value.value.bstrVal = SysAllocString(native_destination.c_str());
-    Folder* source_raw = nullptr;
-    Folder* target_raw = nullptr;
-    if (!archive_value.value.bstrVal || !destination_value.value.bstrVal ||
-        FAILED(shell->NameSpace(archive_value.value, &source_raw)) ||
-        !source_raw ||
-        FAILED(shell->NameSpace(destination_value.value, &target_raw)) ||
-        !target_raw) {
-        if (source_raw) source_raw->Release();
-        if (target_raw) target_raw->Release();
+         static_cast<std::uint32_t>(result)});
+    result = operation->SetOperationFlags(
+        FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR |
+        FOF_NOERRORUI | FOFX_EARLYFAILURE);
+    Microsoft::WRL::ComPtr<IShellItem> source;
+    Microsoft::WRL::ComPtr<IShellItem> target;
+    if (FAILED(result) ||
+        FAILED(result = SHCreateItemFromParsingName(native_archive.c_str(), nullptr,
+                                                   IID_PPV_ARGS(&source))) ||
+        FAILED(result = SHCreateItemFromParsingName(native_destination.c_str(), nullptr,
+                                                   IID_PPV_ARGS(&target)))) {
         return Result<bool>::failure(
-            {ErrorCode::access_denied, L"Update package is not a valid ZIP", 0});
+            {ErrorCode::access_denied, L"Update package is not a valid ZIP",
+             static_cast<std::uint32_t>(result)});
     }
-    Microsoft::WRL::ComPtr<Folder> source;
-    Microsoft::WRL::ComPtr<Folder> target;
-    source.Attach(source_raw);
-    target.Attach(target_raw);
-    FolderItems* items_raw = nullptr;
-    if (FAILED(source->Items(&items_raw)) || !items_raw) return Result<bool>::failure(
+    Microsoft::WRL::ComPtr<IEnumShellItems> items;
+    if (FAILED(source->BindToHandler(nullptr, BHID_EnumItems,
+                                    IID_PPV_ARGS(&items)))) return Result<bool>::failure(
         {ErrorCode::access_denied, L"Update ZIP has no readable files", 0});
-    Microsoft::WRL::ComPtr<FolderItems> items;
-    items.Attach(items_raw);
-    IDispatch* dispatch = nullptr;
-    if (FAILED(items->QueryInterface(
-            IID_IDispatch, reinterpret_cast<void**>(&dispatch))) || !dispatch) {
-        return Result<bool>::failure(
-            {ErrorCode::platform_failure, L"Update ZIP cannot be enumerated", 0});
-    }
-    VariantOwner item_value;
-    item_value.value.vt = VT_DISPATCH;
-    item_value.value.pdispVal = dispatch;
-    VariantOwner options;
-    options.value.vt = VT_I4;
-    options.value.lVal = 4 | 16 | 512 | 1024;
-    const HRESULT copied = target->CopyHere(item_value.value, options.value);
-    if (FAILED(copied)) return Result<bool>::failure(
-        {ErrorCode::io_failure, L"Update ZIP extraction failed",
-         static_cast<std::uint32_t>(copied)});
-
-    const auto package = native_destination / L"KF2OptimizerNext";
-    const auto expected = package / L"Data" / L"package-integrity.ini";
-    const auto deadline = std::chrono::steady_clock::now() +
-        std::chrono::seconds{30};
-    while (std::chrono::steady_clock::now() < deadline) {
-        // Preserve Auto Repair's existing all-payload existence gate when
-        // sharing preparation. Shell completion itself remains separate.
-        if (std::filesystem::is_regular_file(expected, error) && !error &&
-            std::ranges::all_of(security::managed_package_payload_paths(),
-                [&](std::string_view relative) {
-                    return std::filesystem::is_regular_file(
-                        platform::windows::extended_length_path(
-                            package / std::filesystem::path{relative}), error) &&
-                        !error;
-                })) {
-            std::this_thread::sleep_for(std::chrono::milliseconds{100});
-            return Result<bool>::success(true);
+    bool queued = false;
+    for (;;) {
+        Microsoft::WRL::ComPtr<IShellItem> item;
+        result = items->Next(1, &item, nullptr);
+        if (result == S_FALSE) break;
+        if (FAILED(result) ||
+            FAILED(result = operation->CopyItem(item.Get(), target.Get(),
+                                                nullptr, nullptr))) {
+            return Result<bool>::failure(
+                {ErrorCode::io_failure, L"Update ZIP cannot be queued",
+                 static_cast<std::uint32_t>(result)});
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds{50});
+        queued = true;
     }
-    return Result<bool>::failure(
-        {ErrorCode::io_failure, L"Update ZIP extraction timed out", WAIT_TIMEOUT});
-}
+    if (!queued) return Result<bool>::failure(
+        {ErrorCode::access_denied, L"Update ZIP has no readable files", 0});
 
-}  // namespace
+    // PerformOperations is the completion boundary, including failure. Unlike
+    // CopyHere, it leaves no background copy racing validation or cleanup.
+    result = operation->PerformOperations();
+    BOOL aborted = TRUE;
+    const HRESULT abort_result = operation->GetAnyOperationsAborted(&aborted);
+    if (SUCCEEDED(result) && FAILED(abort_result)) result = abort_result;
+    if (SUCCEEDED(result) && aborted) result = HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    if (FAILED(result)) return Result<bool>::failure(
+        {ErrorCode::io_failure, L"Update ZIP extraction failed",
+         static_cast<std::uint32_t>(result)});
+    return Result<bool>::success(true);
+}
 
 Result<bool> verify_update_archive(const std::filesystem::path& archive,
                                    const ReleaseAsset& asset) {
@@ -389,7 +372,7 @@ Result<PreparedUpdatePackage> prepare_update_package(
     const ReleaseInfo& release, const std::filesystem::path& new_work_root) {
     return prepare_update_package_with_operations(
         release, new_work_root,
-        {.download = download, .extract = extract});
+        {.download = download, .extract = extract_update_archive});
 }
 
 Result<PreparedUpdatePackage> prepare_update_package_with_operations(

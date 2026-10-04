@@ -63,7 +63,10 @@ or mismatched archive digests and sizes block repair before extraction; it never
 falls back to an unverified direct download or a different release. Repair uses
 its own temporary subfolder and leaves unrelated working-directory files intact.
 
-The download and extraction happen in a new isolated temporary folder. A copy
+The download and extraction happen in a new isolated temporary folder. The ZIP
+is fully extracted by Windows' synchronous file operation before staged-file
+validation or cleanup can run. Copy failures and cancellations stop preparation;
+file existence and a fixed delay are never treated as completion. A copy
 of the running executable becomes the temporary helper. After the main app
 closes, that helper backs up all managed program files, replaces them
 atomically, verifies the installed package and starts the new executable.
