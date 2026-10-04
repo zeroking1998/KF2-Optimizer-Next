@@ -92,6 +92,10 @@ are visible immediately.
   on every observation and capability check. Live readbacks and control timing
   remain unchanged.
 
+- Keep healthy minimal FleX readback available when solver capacity is known
+  but active/free particle counts have not been observed. Missing counts stay
+  unavailable; normal play adds no particle queries or diagnostic collection.
+
 - Stop rebuilding unrelated UI nodes during numeric animation. Reuse desktop
   text formats and target-bound brushes, pause hidden/minimized animations,
   and keep accessibility values aligned with the visible presentation.
