@@ -106,8 +106,9 @@ are visible immediately.
   gameplay evidence is kept separate from new-build acceptance.
 
 - FleX now withdraws its shared-memory publication before the forwarder DLL
-  unloads. A retained reader can no longer mistake an unloaded producer for
-  valid live telemetry; normal solver calls remain unchanged.
+  unloads and rejects observations/control writes after the verified process
+  exits, even if a reader retains its fresh mapping. Normal solver calls remain
+  unchanged; the app reuses its existing process handle for the liveness check.
 
 - Update and Auto Repair now wait for synchronous Windows ZIP extraction to
   finish before checking or cleaning staged files; partial or aborted copies
