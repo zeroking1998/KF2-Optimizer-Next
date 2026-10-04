@@ -64,6 +64,33 @@ void run_flex_control_stage(app::UiRuntime& runtime,
 }  // namespace kf2::telemetry_pipeline
 
 namespace kf2::app {
+namespace {
+
+bool same_particle_presentation(const flex::ObservationSnapshot& previous,
+                                const flex::ObservationSnapshot& current) noexcept {
+    if (previous.aggregate_particles_fresh || current.aggregate_particles_fresh) {
+        return previous.aggregate_particles_fresh && current.aggregate_particles_fresh &&
+            previous.live_solvers == current.live_solvers &&
+            previous.aggregate_active_particles == current.aggregate_active_particles &&
+            previous.free_particles == current.free_particles &&
+            previous.particle_capacity == current.particle_capacity &&
+            previous.particle_upload_calls == current.particle_upload_calls &&
+            previous.phase_upload_calls == current.phase_upload_calls &&
+            previous.velocity_upload_calls == current.velocity_upload_calls &&
+            previous.particle_download_calls == current.particle_download_calls &&
+            previous.phase_download_calls == current.phase_download_calls &&
+            previous.velocity_download_calls == current.velocity_download_calls;
+    }
+    if (previous.particle_capacity_available || current.particle_capacity_available) {
+        return previous.particle_capacity_available && current.particle_capacity_available &&
+            previous.live_solvers == current.live_solvers &&
+            previous.particle_capacity == current.particle_capacity;
+    }
+    return previous.active_particles_fresh && current.active_particles_fresh &&
+        previous.active_particles == current.active_particles;
+}
+
+}  // namespace
 
 bool UiRuntime::save_flex_report(const flex::ObservationSnapshot& observed) {
     if (observed.update_calls == 0 || !observed.diagnostics_enabled)
@@ -153,6 +180,8 @@ void UiRuntime::observe_flex_process() {
     adaptive_actuation.poll(now_ns);
     const auto flex_state = flex_observation_reader.read(*game_process);
     if (!flex_state || !flex_state->fresh) return;
+    const bool reuse_particle_text = last_flex_observation &&
+        same_particle_presentation(*last_flex_observation, *flex_state);
     last_flex_observation = *flex_state;
     last_flex_observation_calls = flex_state->update_calls;
     if (const auto receipt = telemetry_pipeline::confirmed_flex_readback(
@@ -174,7 +203,8 @@ void UiRuntime::observe_flex_process() {
             L"flex"});
     }
     const auto& current = model.status();
-    const std::wstring flex_values = flex_state->aggregate_particles_fresh
+    const std::wstring flex_values = reuse_particle_text ? std::wstring{}
+        : flex_state->aggregate_particles_fresh
         ? L"FleX solvers: " + std::to_wstring(flex_state->live_solvers) +
               L" | particles active/free/capacity: " +
               std::to_wstring(flex_state->aggregate_active_particles) + L"/" +
@@ -198,7 +228,9 @@ void UiRuntime::observe_flex_process() {
                   std::to_wstring(flex_state->active_particles) +
                   L" (read-only runtime source; aggregate unavailable)"
         : std::wstring{};
-    const std::wstring_view flex_status = !flex_values.empty()
+    const std::wstring_view flex_status = reuse_particle_text
+        ? std::wstring_view{current.flex_telemetry}
+        : !flex_values.empty()
         ? std::wstring_view{flex_values}
         : flex_state->active_count_calls > 0
             ? L"FleX active-particle value is stale"
