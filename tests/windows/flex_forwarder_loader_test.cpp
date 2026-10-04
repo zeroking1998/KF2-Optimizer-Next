@@ -1,6 +1,7 @@
 #include <Windows.h>
 #include <filesystem>
 #include <iostream>
+#include "kf2/flex/flex_observation.hpp"
 #include "kf2/flex/flex_observation_shared.hpp"
 
 int wmain(int argc, wchar_t** argv) {
@@ -30,6 +31,12 @@ int wmain(int argc, wchar_t** argv) {
                                sandbox / L"flexRelease_x64.dll",
                                std::filesystem::copy_options::overwrite_existing, ec);
     if (ec) return 5;
+    FILETIME created{}, exited{}, kernel{}, user{};
+    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user))
+        return 13;
+    const kf2::game::GameProcessIdentity identity{GetCurrentProcessId(),
+        (static_cast<std::uint64_t>(created.dwHighDateTime) << 32U) |
+            created.dwLowDateTime, {}};
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS);
     for (unsigned cycle = 0; cycle < 100; ++cycle) {
         const auto cookie = AddDllDirectory(sandbox.c_str());
@@ -59,8 +66,29 @@ int wmain(int argc, wchar_t** argv) {
         if (!shared || shared->magic != kf2::flex::observation_magic ||
             shared->version != kf2::flex::observation_version ||
             shared->pid != GetCurrentProcessId()) return 11;
-        UnmapViewOfFile(shared); CloseHandle(mapping);
+        if (!kf2::flex::read_observation(identity)) return 14;
+        // A retained reader keeps the named mapping alive after DLL unload.
+        // It must not keep a valid producer publication alive with it.
         if (!FreeLibrary(module)) return 10;
+        if (shared->magic != 0 || shared->state != 0 ||
+            kf2::flex::read_observation(identity) ||
+            kf2::flex::write_fixed_control(identity, true)) return 15;
+        if ((cycle % 2) == 0) {
+            module = LoadLibraryExW((sandbox / L"flexRelease_x64.dll").c_str(),
+                nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+            if (!module) return 16;
+            // Resolve a stock forwarded export as on the first load. This
+            // binds the original DLL without initializing a GPU solver.
+            if (!GetProcAddress(module, "flexInit")) return 7;
+            version = reinterpret_cast<Version>(GetProcAddress(module, "flexGetVersion"));
+            if (!version || version() != 31 ||
+                shared->magic != kf2::flex::observation_magic || shared->state != 1 ||
+                !kf2::flex::read_observation(identity)) return 17;
+            if (!FreeLibrary(module)) return 10;
+            if (shared->magic != 0 || shared->state != 0 ||
+                kf2::flex::read_observation(identity)) return 18;
+        }
+        UnmapViewOfFile(shared); CloseHandle(mapping);
         mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, mapping_name.c_str());
         if (mapping) { CloseHandle(mapping); return 12; }
     }

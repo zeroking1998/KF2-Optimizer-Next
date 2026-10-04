@@ -104,6 +104,10 @@ are visible immediately.
   settings-catalog inventories instead of contradictory old totals. Historical
   gameplay evidence is kept separate from new-build acceptance.
 
+- FleX now withdraws its shared-memory publication before the forwarder DLL
+  unloads. A retained reader can no longer mistake an unloaded producer for
+  valid live telemetry; normal solver calls remain unchanged.
+
 - Update and Auto Repair now wait for synchronous Windows ZIP extraction to
   finish before checking or cleaning staged files; partial or aborted copies
   fail safely without a fixed-delay completion guess.

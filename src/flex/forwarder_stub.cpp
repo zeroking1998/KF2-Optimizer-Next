@@ -553,6 +553,10 @@ extern "C" void flexUpdateSolver(void* solver, float delta_time,
 extern "C" BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID) noexcept {
     if (reason == DLL_PROCESS_DETACH) {
         if (observation) {
+            // A reader can retain the mapping after this producer unloads.
+            // Withdraw publication before releasing the producer's view.
+            InterlockedExchange(reinterpret_cast<volatile LONG*>(&observation->magic), 0);
+            InterlockedExchange(&observation->state, 0);
             UnmapViewOfFile(observation);
             observation = nullptr;
         }
