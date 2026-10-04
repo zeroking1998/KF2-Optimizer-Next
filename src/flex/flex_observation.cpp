@@ -184,8 +184,9 @@ std::optional<ObservationSnapshot> read_observation(
              result.last_download_elements < 0 ||
              result.aggregate_active_particles < 0 || result.free_particles < 0 ||
              (result.particle_capacity_available && result.live_solvers == 0) ||
-             (result.particle_capacity_available &&
-              result.aggregate_active_particles + result.free_particles !=
+             (result.particle_capacity_available && aggregate_snapshot_valid &&
+              static_cast<std::int64_t>(result.aggregate_active_particles) +
+                  result.free_particles !=
                   result.particle_capacity) ||
              (result.diagnostics_enabled &&
               (!std::isfinite(result.last_delta_time) ||

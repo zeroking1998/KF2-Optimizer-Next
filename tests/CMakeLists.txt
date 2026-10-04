@@ -384,7 +384,8 @@ if(TARGET KF2FlexForwarder)
         SKIP_RETURN_CODE 77)
 
     add_executable(kf2_flex_forwarder_fixed_minimum_test
-        windows/flex_forwarder_fixed_minimum_test.cpp)
+        windows/flex_forwarder_fixed_minimum_test.cpp
+        "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp")
     target_include_directories(kf2_flex_forwarder_fixed_minimum_test PRIVATE
         "${PROJECT_SOURCE_DIR}/include")
     add_dependencies(kf2_flex_forwarder_fixed_minimum_test

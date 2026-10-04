@@ -6,6 +6,7 @@
 #include <iostream>
 #include <thread>
 
+#include "kf2/flex/flex_observation.hpp"
 #include "kf2/flex/flex_observation_shared.hpp"
 
 namespace {
@@ -163,6 +164,21 @@ int wmain(int argc, wchar_t** argv) {
         shared->min_substeps != LONG_MAX ||
         shared->min_forwarded_substeps != LONG_MAX)
         return fail(23, "detailed diagnostics were not disabled by default");
+    FILETIME created{}, exited{}, kernel{}, user{};
+    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user))
+        return fail(48, "process identity unavailable");
+    const kf2::game::GameProcessIdentity identity{GetCurrentProcessId(),
+        (static_cast<std::uint64_t>(created.dwHighDateTime) << 32U) |
+            created.dwLowDateTime, {}};
+    const auto minimal_readback = kf2::flex::read_observation(identity);
+    if (!minimal_readback || !minimal_readback->fresh ||
+        !minimal_readback->pass_through_healthy ||
+        minimal_readback->last_forwarded_substeps != 1 ||
+        !minimal_readback->particle_capacity_available ||
+        minimal_readback->particle_capacity != 1280 ||
+        minimal_readback->aggregate_particles_fresh ||
+        shared->active_count_calls != 0 || active_calls() != 0)
+        return fail(49, "minimal relay readback requires unrequested particle counts");
     set_fence();
     if (fence_set_calls() != 1 || shared->fence_set_calls != 0)
         return fail(24, "disabled diagnostics recorded a detailed fence sample");

@@ -124,6 +124,34 @@ int wmain() {
         !result->diagnostics_enabled ||
         std::abs(result->solver_updates_per_second - 60.0) > 0.01) return 4;
 
+    // Static capacity is known before particle counts have been observed.
+    // Missing counts must not invalidate the relay or become fresh zero counts.
+    shared->aggregate_counts_valid = 0;
+    shared->aggregate_active_particles = 0;
+    shared->aggregate_free_particles = 0;
+    for (int diagnostics = 0; diagnostics <= 1; ++diagnostics) {
+        shared->diagnostics_enabled = diagnostics;
+        const auto unobserved_counts = kf2::flex::read_observation(identity);
+        if (!unobserved_counts || !unobserved_counts->fresh ||
+            !unobserved_counts->pass_through_healthy ||
+            !unobserved_counts->particle_capacity_available ||
+            unobserved_counts->particle_capacity != 1280 ||
+            unobserved_counts->aggregate_particles_fresh) return 16;
+    }
+    shared->aggregate_counts_valid = 1;
+    if (kf2::flex::read_observation(identity)) return 17;
+    shared->oldest_active_count_tick = 1;
+    if (kf2::flex::read_observation(identity)) return 18;
+    shared->aggregate_active_particles = INT_MAX;
+    shared->aggregate_free_particles = INT_MAX;
+    if (kf2::flex::read_observation(identity)) return 19;
+    shared->aggregate_active_particles = 74;
+    shared->aggregate_free_particles = 1206;
+    const auto stale_counts = kf2::flex::read_observation(identity);
+    if (!stale_counts || !stale_counts->pass_through_healthy ||
+        stale_counts->aggregate_particles_fresh) return 20;
+    shared->oldest_active_count_tick = GetTickCount64();
+
     // Detailed solver tracking is optional. A diagnostics-only tracking failure
     // must not make the fixed one-substep relay unavailable while diagnostics
     // are off, but it remains visible as unhealthy while diagnostics are on.
