@@ -84,6 +84,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Convert the raw Adaptive decision reason once for its two presentation fields
+  while retaining distinct queued-restoration warnings.
 - Reuse the existing Adaptive stability, bottleneck and no-setting action labels
   instead of constructing temporary strings or rewriting unchanged text.
   Controller decisions, displayed values and safety readbacks are unchanged.

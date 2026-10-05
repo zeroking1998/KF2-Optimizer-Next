@@ -151,6 +151,13 @@ foreach(label stability_label bottleneck_label disposition_label)
             "Adaptive constant labels must be compared before assigning owned text: ${label}")
     endif()
 endforeach()
+string(REGEX MATCHALL "widen\\(adaptive_decision\\.reason\\)"
+    adaptive_reason_conversions "${adaptive_controller_text}")
+list(LENGTH adaptive_reason_conversions adaptive_reason_conversion_count)
+if(NOT adaptive_reason_conversion_count EQUAL 1)
+    message(FATAL_ERROR
+        "Adaptive must convert the raw decision reason once and share its text between presentation fields")
+endif()
 reject_literals("${stage_root}/telemetry_presentation_stage.cpp"
     "Presentation stage"
     "DxgiFrameTimingSession"
