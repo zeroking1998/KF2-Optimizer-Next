@@ -34,6 +34,15 @@ if(NOT redundant_exporter_build EQUAL -1 OR package_step EQUAL -1)
         "Contributor packaging must reuse the package-owned exporter prerequisite")
 endif()
 
+string(FIND "${package_script}" "$previousManagedFiles.Add($managed)" path_capture)
+string(FIND "${package_script}" "foreach ($managed in $previousManagedFiles)" removal_pass)
+string(FIND "${package_script}" "Remove-Item -LiteralPath $managed -Force" file_removal)
+if(path_capture EQUAL -1 OR removal_pass EQUAL -1 OR file_removal EQUAL -1 OR
+   path_capture GREATER removal_pass OR removal_pass GREATER file_removal)
+    message(FATAL_ERROR
+        "Validate every previous managed path before the separate removal pass")
+endif()
+
 string(REGEX MATCH
     "build_kf2_telemetry\\.ps1[^\n]*\n[ \t]*if \\(\\$LASTEXITCODE"
     stale_nested_exit_check "${build_script}")

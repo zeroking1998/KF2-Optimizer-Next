@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Reject unsafe previous package manifests before deleting any managed file;
+  validated paths are reused once and portable user Data remains protected.
 - Refresh the package inventory exporter even when skipping the app build;
   stale inventory output can no longer be relabeled as the current build.
 - Correct stale feature-inventory descriptions of catalog totals, payload hashes

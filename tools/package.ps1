@@ -149,6 +149,8 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
         throw 'Existing package manifest has an unsupported schema'
     }
     $destinationPrefix = $destinationRoot.TrimEnd('\') + '\'
+    $previousManagedFiles = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
     foreach ($relative in @($previousManifest.managed_files)) {
         if ($relative -isnot [string] -or [string]::IsNullOrWhiteSpace($relative) -or
             $relative.Contains(':') -or $relative.Contains('..') -or
@@ -163,6 +165,9 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
                 [StringComparison]::OrdinalIgnoreCase)) {
             throw "Existing package manifest escapes the package root: $relative"
         }
+        [void]$previousManagedFiles.Add($managed)
+    }
+    foreach ($managed in $previousManagedFiles) {
         if (Test-Path -LiteralPath $managed -PathType Leaf) {
             Remove-Item -LiteralPath $managed -Force
         }
