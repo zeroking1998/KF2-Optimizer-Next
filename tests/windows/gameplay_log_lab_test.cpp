@@ -3766,8 +3766,15 @@ int main() {
     CHECK(restore_owner_check != std::string::npos);
     CHECK(restore_write != std::string::npos);
     CHECK(restore_owner_check < restore_write);
-    const auto replacement_check = idle_apply.find(
-        "!AdaptiveWorldParticleIdleOwnerMatches(");
+    CHECK(count_occurrences(idle_apply,
+        "AdaptiveWorldParticleIdleOwnerMatches(") == 1);
+    CHECK(idle_apply.find(
+        "bOwnerMatches = StateIndex != INDEX_NONE &&\n"
+        "            AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter);") !=
+          std::string::npos);
+    CHECK(idle_apply.find("if (bOwnerMatches)") <
+          idle_apply.find("LastSeenGeneration ="));
+    const auto replacement_check = idle_apply.find("if (!bOwnerMatches)");
     const auto replacement_capture = idle_apply.find(
         "OriginalSecondsBeforeInactive =");
     CHECK(replacement_check != std::string::npos);
