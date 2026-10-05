@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Preserve existing packages when the required FleX build artifact is missing,
+  checking it before cleanup, copying or unnecessary exporter work.
 - Reject linked package destinations and managed paths before cleanup or writes,
   preserving existing files outside the intended package directory.
 - Reject unsafe previous package manifests before deleting any managed file;
