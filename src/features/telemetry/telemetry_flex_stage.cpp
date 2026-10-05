@@ -181,10 +181,13 @@ void UiRuntime::observe_flex_process() {
     adaptive_actuation.poll(now_ns);
     const auto flex_state = flex_observation_reader.read(*game_process);
     if (!flex_state || !flex_state->fresh) return;
-    const bool reuse_particle_text = last_flex_observation &&
+    const bool reuse_particle_text =
+        flex_particle_text_current && last_flex_observation &&
         same_particle_presentation(*last_flex_observation, *flex_state);
+    // Keep the live observation current even if presentation throws. Only a
+    // completed publication permits borrowing its text on the next observation.
+    flex_particle_text_current = false;
     last_flex_observation = *flex_state;
-    last_flex_observation_calls = flex_state->update_calls;
     if (const auto receipt = telemetry_pipeline::confirmed_flex_readback(
             adaptive_actuation.current(
                 optimizer::AdaptiveControlId::flex_solver_substeps),
@@ -277,6 +280,7 @@ void UiRuntime::observe_flex_process() {
             std::wstring{readback_status});
         invalidate();
     }
+    flex_particle_text_current = true;
     if (!flex_observation_announced) {
         flex_observation_announced = true;
         events->append({0, diagnostics::Severity::info,

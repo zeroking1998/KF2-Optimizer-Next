@@ -346,8 +346,8 @@ struct UiRuntime {
     game::GameLogSessionSnapshot last_report_gameplay_session;
     std::optional<std::uint64_t> adapter_vram_budget;
     std::wstring telemetry_failure;
-    std::uint64_t last_flex_observation_calls{0};
     bool flex_observation_announced{false};
+    bool flex_particle_text_current{false};
     std::optional<flex::ObservationSnapshot> last_flex_observation;
     flex::ObservationReader flex_observation_reader;
     std::optional<optimizer::AdaptiveCapabilityState>

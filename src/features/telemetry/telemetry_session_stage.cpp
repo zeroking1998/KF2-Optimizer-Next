@@ -404,8 +404,8 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     last_frame_metrics = {};
     last_report_gameplay_session.reset();
     adapter_vram_budget.reset();
-    last_flex_observation_calls = 0;
     flex_observation_announced = false;
+    flex_particle_text_current = false;
     last_flex_observation.reset();
     flex_observation_reader.reset();
     flex_minimum_limited = false;
