@@ -46,7 +46,6 @@ struct HookGateDecision {
 [[nodiscard]] Result<RuntimeAudit> audit_runtime(
     const std::filesystem::path& path,
     bool allow_transaction_original_name = false);
-[[nodiscard]] std::string serialize_audit_json(const RuntimeAudit& audit);
 [[nodiscard]] HookGateDecision evaluate_hook_gate(
     const HookGateEvidence& evidence);
 
