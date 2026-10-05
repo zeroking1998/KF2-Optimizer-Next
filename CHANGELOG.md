@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Include both runtime-guard sources in the telemetry build fingerprint so changes
+  cannot silently reuse an older module; no gameplay logic is changed.
 - Reuse completed payload hashes across both package manifests, avoiding a second
   full payload read while preserving independent release validation.
 - Preserve existing packages when the required FleX build artifact is missing,

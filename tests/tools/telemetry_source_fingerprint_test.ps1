@@ -8,20 +8,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$sourceNames = @(
-    'kf2optimizertelemetryprobe.uc'
-    'KF2OptimizerTelemetryMutator.uc'
-    'KF2OptimizerTelemetryInteraction.uc'
-    'KF2OptimizerGraphicsViewport.uc'
-    'KF2OptimizerGraphicsInteraction.uc'
-    'KF2OptimizerOnlineContextInteraction.uc'
-    'KF2OptimizerAdaptiveControlListener.uc'
-    'KF2OptimizerOnlineCorpseController.uc'
-    'KF2OptimizerAdaptiveControlConnection.uc'
-    'KF2OptimizerOnlineGraphicsControlConnection.uc'
-    'KF2OptimizerAdaptiveGraphics.uc'
-    'KF2OptimizerAdaptiveGraphicsState.uc'
-)
+$sourceNames = @(Get-ChildItem -LiteralPath $SourceRoot -File -Filter '*.uc' |
+    Sort-Object Name | ForEach-Object Name)
+if ($sourceNames.Count -eq 0) { throw 'No authored telemetry sources were found.' }
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) `
     ('KF2TelemetryFingerprintTest-' + [Guid]::NewGuid().ToString('N'))
 
@@ -38,38 +27,41 @@ try {
         throw 'Equivalent telemetry sources did not produce the same fingerprint.'
     }
 
-    Add-Content -LiteralPath (Join-Path $temporaryRoot $sourceNames[0]) `
-        -Value "`n// fingerprint regression mutation"
-    $changed = (& $FingerprintScript -SourceRoot $temporaryRoot).Trim()
-    if ($changed -eq $expected) {
-        throw 'A telemetry source change did not invalidate the fingerprint.'
-    }
-
-    Copy-Item -LiteralPath (Join-Path $SourceRoot $sourceNames[0]) `
-        -Destination (Join-Path $temporaryRoot $sourceNames[0]) -Force
-    Add-Content -LiteralPath (Join-Path $temporaryRoot `
-        'KF2OptimizerOnlineCorpseController.uc') `
-        -Value "`n// online corpse controller fingerprint mutation"
-    $controllerChanged = (& $FingerprintScript `
-        -SourceRoot $temporaryRoot).Trim()
-    if ($controllerChanged -eq $expected) {
-        throw 'An online corpse controller change did not invalidate the fingerprint.'
-    }
-
-    Remove-Item -LiteralPath (Join-Path $temporaryRoot $sourceNames[-1])
-    $missingWasRejected = $false
-    try {
-        & $FingerprintScript -SourceRoot $temporaryRoot | Out-Null
-    }
-    catch {
-        $missingWasRejected = $true
-    }
-    if (-not $missingWasRejected) {
-        throw 'A missing telemetry source was not rejected.'
+    foreach ($sourceName in $sourceNames) {
+        $sourcePath = Join-Path $temporaryRoot $sourceName
+        Add-Content -LiteralPath $sourcePath -Value "`n// fingerprint regression mutation"
+        $changed = (& $FingerprintScript -SourceRoot $temporaryRoot).Trim()
+        if ($changed -eq $expected) {
+            throw "Source change did not invalidate the fingerprint: $sourceName"
+        }
+        Copy-Item -LiteralPath (Join-Path $SourceRoot $sourceName) `
+            -Destination $sourcePath -Force
+        Remove-Item -LiteralPath $sourcePath
+        $missingWasRejected = $false
+        try { & $FingerprintScript -SourceRoot $temporaryRoot | Out-Null }
+        catch {
+            if (-not $_.Exception.Message.Contains('Required KF2 telemetry source is missing')) {
+                throw
+            }
+            $missingWasRejected = $true
+        }
+        if (-not $missingWasRejected) {
+            throw "Missing source was not rejected: $sourceName"
+        }
+        Copy-Item -LiteralPath (Join-Path $SourceRoot $sourceName) `
+            -Destination $sourcePath -Force
+        if ((& $FingerprintScript -SourceRoot $temporaryRoot).Trim() -cne $expected) {
+            throw "Restored source did not restore the exact fingerprint: $sourceName"
+        }
     }
 }
 finally {
     if (Test-Path -LiteralPath $temporaryRoot) {
+        $temporaryPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+        if (-not [IO.Path]::GetFullPath($temporaryRoot).StartsWith(
+                $temporaryPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Fingerprint fixture escaped its temporary root.'
+        }
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
     }
 }
