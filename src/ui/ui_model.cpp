@@ -132,6 +132,9 @@ void UiModel::set_flex_observation_status(
     status_.flex_substep_diagnostics = std::move(substep_diagnostics);
     status_.flex_readback_diagnostics = std::move(readback_diagnostics);
 }
+void UiModel::set_flex_capability(std::wstring capability) noexcept {
+    status_.flex_capability = std::move(capability);
+}
 void UiModel::set_notice(Notice notice) { notice_ = std::move(notice); }
 void UiModel::clear_notice() noexcept { notice_.reset(); }
 const std::wstring& UiModel::state_path() const noexcept { return state_path_; }

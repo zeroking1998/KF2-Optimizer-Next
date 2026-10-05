@@ -247,6 +247,10 @@ int test_flex_report_boundaries() {
     settings.debug_flex_diagnostics = true;
     kf2::app::UiRuntime runtime{root / L"Data", false, settings, events,
         std::nullopt, kf2::app::StartMode::read_only, root / L"portable"};
+    auto capability_status = runtime.model.status();
+    capability_status.graphics_values[0] = L"Retained graphics setting storage";
+    runtime.model.set_status(std::move(capability_status));
+    const auto* retained_graphics = runtime.model.status().graphics_values[0].data();
     kf2::telemetry_pipeline::TelemetryFrame frame;
     frame.identity = {pid, start};
     frame.observed_at_ns = runtime.monotonic_ns();
@@ -257,7 +261,10 @@ int test_flex_report_boundaries() {
             kf2::telemetry_pipeline::run_flex_control_stage(runtime, frame);
             if (runtime.model.status().flex_capability != expected ||
                 runtime.model.status().telemetry != unchanged_telemetry ||
-                runtime.model.status().update_status != unchanged_update_status)
+                runtime.model.status().update_status != unchanged_update_status ||
+                runtime.model.status().graphics_values[0] !=
+                    L"Retained graphics setting storage" ||
+                runtime.model.status().graphics_values[0].data() != retained_graphics)
                 return false;
         }
         return true;

@@ -166,6 +166,21 @@ int main() {
     CHECK(model.status().update_status == before_flex.update_status);
     CHECK(model.presented_target_fps() == 119);
     const auto* graphics_text = model.status().graphics_values[3].data();
+    model.set_flex_capability(L"AVAILABLE");
+    CHECK(model.status().flex_capability == L"AVAILABLE");
+    model.set_flex_capability(model.status().flex_capability);
+    CHECK(model.status().flex_capability == L"AVAILABLE");
+    model.set_flex_capability(L"UNAVAILABLE");
+    CHECK(model.status().flex_capability == L"UNAVAILABLE");
+    model.set_flex_capability(L"");
+    CHECK(model.status().flex_capability.empty());
+    CHECK(model.status().graphics_values[3].data() == graphics_text);
+    CHECK(model.status().graphics_values == before_flex.graphics_values);
+    CHECK(model.status().advanced_values == before_flex.advanced_values);
+    CHECK(model.status().update_status == before_flex.update_status);
+    CHECK(model.status().adaptive_state == before_flex.adaptive_state);
+    CHECK(model.presented_target_fps() == 119);
+    CHECK(model.notice() && model.notice()->code == L"UNCHANGED");
     model.set_telemetry_status(L"Confirmed telemetry", L"Confirmed analysis",
         119.5, 8.25, 22.0, 44.0, 3, 9);
     CHECK(model.status().telemetry == L"Confirmed telemetry");

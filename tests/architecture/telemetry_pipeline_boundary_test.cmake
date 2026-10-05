@@ -302,18 +302,21 @@ string(FIND "${flex_stage_text}"
 string(FIND "${flex_stage_text}"
     "auto status = runtime.model.status();" flex_capability_copy)
 string(FIND "${flex_stage_text}"
+    "runtime.model.set_flex_capability(" flex_capability_commit)
+string(FIND "${flex_stage_text}"
     "if (current.flex_telemetry != flex_status" flex_observation_compare)
 string(FIND "${flex_stage_text}"
     "auto status = current;" flex_observation_copy)
 string(FIND "${flex_stage_text}"
     "model.set_flex_observation_status(" flex_observation_commit)
-if(flex_capability_compare EQUAL -1 OR flex_capability_copy EQUAL -1 OR
-   NOT flex_capability_compare LESS flex_capability_copy OR
+if(flex_capability_compare EQUAL -1 OR NOT flex_capability_copy EQUAL -1 OR
+   flex_capability_commit EQUAL -1 OR
+   NOT flex_capability_compare LESS flex_capability_commit OR
    flex_observation_compare EQUAL -1 OR NOT flex_observation_copy EQUAL -1 OR
    flex_observation_commit EQUAL -1 OR
    NOT flex_observation_compare LESS flex_observation_commit)
     message(FATAL_ERROR
-        "FleX presentation must compare represented fields before updating status; observations must not copy the complete UI status")
+        "FleX presentation must compare represented fields before updating status; capability and observations must not copy the complete UI status")
 endif()
 
 message(STATUS

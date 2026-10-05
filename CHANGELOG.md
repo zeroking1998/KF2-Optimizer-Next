@@ -88,6 +88,10 @@ are visible immediately.
   preparation, while keeping live observations and confirmed receipts current.
   Successful unchanged observations retain their existing text reuse.
 
+- Update the changed FleX availability label without copying unrelated graphics,
+  settings and live telemetry display state. Capability checks and control
+  behavior remain unchanged.
+
 - Update only live telemetry display fields instead of copying graphics,
   settings and other unrelated UI status during changing measurements.
   Measurement cadence, Adaptive decisions and overlay updates are unchanged.

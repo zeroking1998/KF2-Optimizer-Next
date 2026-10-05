@@ -183,6 +183,7 @@ public:
         std::wstring telemetry, std::optional<int> requested_substeps,
         std::optional<int> effective_substeps, std::wstring action_status,
         std::wstring substep_diagnostics, std::wstring readback_diagnostics) noexcept;
+    void set_flex_capability(std::wstring capability) noexcept;
     void set_notice(Notice notice);
     void clear_notice() noexcept;
 
