@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Keep online corpse-pressure counts current with bounded, coalesced pool
+  observations. Stale or historical counts no longer become fresh Adaptive
+  pressure; map-scoped capability and maximum-limit readbacks remain separate.
 - Reworked Adaptive into one protected, user-controlled runtime with separate
   CPU, GPU, VRAM, RAM, overdraw, effects, physics, LOD, and corpse-pressure
   paths. Confirmed pressure changes only its matching group, and stable

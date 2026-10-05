@@ -274,7 +274,7 @@ std::optional<bool> apply_online_corpse_line(
         const auto state_end = payload.find(' ');
         if (state_end == std::string_view::npos) return std::nullopt;
         const auto state = payload.substr(0, state_end);
-        if (state != "available" && state != "populated") {
+        if (state != "available" && state != "populated" && state != "pool") {
             return std::nullopt;
         }
         constexpr std::string_view pool_marker = " pool=";
@@ -294,12 +294,17 @@ std::optional<bool> apply_online_corpse_line(
             maximum_text = maximum_text.substr(0, maximum_end);
         }
         const auto maximum = parse_bounded_count(maximum_text);
-        if (!pool || !maximum || *pool > *maximum) return std::nullopt;
+        // The actual pool can temporarily exceed its configured ceiling.
+        if (!pool || !maximum) return std::nullopt;
         const bool changed = session.online_corpse_pool != pool ||
-            session.online_corpse_maximum != maximum;
+            session.online_corpse_maximum != maximum ||
+            session.online_corpse_pool_observed_ns != observed_at_ns;
         session.online_corpse_pool = *pool;
         session.online_corpse_maximum = *maximum;
-        session.online_corpse_capability_observed_ns = observed_at_ns;
+        session.online_corpse_pool_observed_ns = observed_at_ns;
+        if (state != "pool") {
+            session.online_corpse_capability_observed_ns = observed_at_ns;
+        }
         return changed;
     }
     if (line.find(sleep_action_marker) != std::string_view::npos &&
@@ -376,10 +381,12 @@ std::optional<bool> apply_online_corpse_line(
         }
         const bool changed = !session.online_corpse_capacity_verified ||
             session.online_corpse_pool != after ||
-            session.online_corpse_maximum != maximum;
+            session.online_corpse_maximum != maximum ||
+            session.online_corpse_pool_observed_ns != observed_at_ns;
         session.online_corpse_capacity_verified = true;
         session.online_corpse_pool = *after;
         session.online_corpse_maximum = *maximum;
+        session.online_corpse_pool_observed_ns = observed_at_ns;
         session.online_corpse_action_observed_ns = observed_at_ns;
         return changed;
     }

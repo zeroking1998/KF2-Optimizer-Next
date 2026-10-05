@@ -32,10 +32,8 @@ public:
         const bool verified_online = explicit_online && game &&
             game->optimizer_online_read_only && frame.active_gameplay &&
             !game->main_menu && game->phase != game::GameLogPhase::match_ended &&
-            game->online_corpse_pool.has_value() &&
             game->online_corpse_maximum.has_value() &&
-            *game->online_corpse_pool >= 0 &&
-            *game->online_corpse_maximum >= *game->online_corpse_pool &&
+            *game->online_corpse_maximum >= 0 &&
             game->online_corpse_capability_observed_ns != 0 &&
             game->online_corpse_sleep_verified &&
             game->online_corpse_action_observed_ns != 0;

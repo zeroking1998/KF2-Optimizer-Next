@@ -79,8 +79,6 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                     receipt->generation;
                 if (map_changed || generation_changed) {
                     detail::clear_gameplay_snapshot(*current_);
-                }
-                if (map_changed) {
                     current_->map = std::string{receipt->map};
                     current_->phase = GameLogPhase::map_loaded;
                     current_->main_menu = false;
@@ -94,6 +92,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                     current_->online_corpse_lod_verified = false;
                     current_->online_corpse_skeleton_verified = false;
                     current_->online_corpse_capability_observed_ns = 0;
+                    current_->online_corpse_pool_observed_ns = 0;
                     current_->online_corpse_action_observed_ns = 0;
                 }
                 if (map_changed || !current_->optimizer_online_read_only ||
@@ -271,6 +270,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
         // but reading historical measurements does not make them fresh.
         changed = changed || current_->zeds_remaining || current_->zeds_alive ||
             current_->wave_number || current_->wave_total_ai ||
+            current_->online_corpse_pool ||
             current_->telemetry_sample || current_->load_map_observed_ns != 0 ||
             current_->level_loaded_observed_ns != 0 ||
             current_->loading_movie_finished_observed_ns != 0;
@@ -281,6 +281,8 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
         current_->wave_number.reset();
         current_->wave_total_ai.reset();
         current_->wave_observed_ns = 0;
+        current_->online_corpse_pool.reset();
+        current_->online_corpse_pool_observed_ns = 0;
         current_->load_map_observed_ns = 0;
         current_->level_loaded_observed_ns = 0;
         current_->loading_movie_finished_observed_ns = 0;
@@ -308,6 +310,7 @@ std::optional<GameLogSession> GameLogSessionParser::expire_observations(
     };
     expire(current_->zeds_remaining, current_->zeds_remaining_observed_ns);
     expire(current_->zeds_alive, current_->zeds_alive_observed_ns);
+    expire(current_->online_corpse_pool, current_->online_corpse_pool_observed_ns);
     if ((current_->wave_number || current_->wave_total_ai) &&
         current_->wave_observed_ns != 0 && now_ns >= current_->wave_observed_ns &&
         now_ns - current_->wave_observed_ns > maximum_age_ns) {

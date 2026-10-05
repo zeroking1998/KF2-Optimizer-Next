@@ -250,6 +250,13 @@ int main() {
         CHECK(result.runtime_limit == 20);
         CHECK(std::string_view{result.event} ==
               "CORPSE_TELEMETRY_AVAILABLE");
+        replace_gameplay(online, [](auto& gameplay) {
+            gameplay.online_corpse_pool.reset();
+            gameplay.online_corpse_pool_observed_ns = 0;
+        });
+        result = tracker.observe(online);
+        CHECK(result.state == CorpseTelemetryState::available);
+        CHECK(result.runtime_limit == 20);
 
         auto unverified_online = online;
         replace_gameplay(unverified_online, [](auto& gameplay) {
@@ -571,6 +578,7 @@ int main() {
         gameplay.telemetry_observed_ns = 0;
         gameplay.online_corpse_pool = 2;
         gameplay.online_corpse_maximum = 20;
+        gameplay.online_corpse_pool_observed_ns = online.observed_at_ns;
         gameplay.online_corpse_capability_observed_ns =
             online.observed_at_ns;
         gameplay.online_corpse_sleep_verified = true;
@@ -602,6 +610,27 @@ int main() {
           optimizer::AdaptiveCapabilityState::available);
     CHECK(online_sample.live_corpse_burden == 2);
     CHECK(online_sample.adaptive_corpse_runtime_limit == 20);
+    auto expired_online = online;
+    expired_online.observed_at_ns += game::kGameLogObservationFreshnessNs;
+    CHECK(build_adaptive_sample(expired_online, context).sample.live_corpse_burden == 2);
+    ++expired_online.observed_at_ns;
+    const auto expired_online_sample =
+        build_adaptive_sample(expired_online, context).sample;
+    CHECK(!expired_online_sample.live_corpse_burden);
+    CHECK(expired_online_sample.session_class ==
+          optimizer::AdaptiveSessionClass::verified_online);
+    CHECK(expired_online_sample.adaptive_corpse_runtime_limit == 20);
+    CHECK(expired_online_sample.capabilities.corpse_control ==
+          optimizer::AdaptiveCapabilityState::available);
+    replace_gameplay(expired_online, [&](auto& gameplay) {
+        gameplay.online_corpse_pool_observed_ns = expired_online.observed_at_ns + 1;
+    });
+    CHECK(!build_adaptive_sample(expired_online, context).sample.live_corpse_burden);
+    auto unverified_pool = online;
+    replace_gameplay(unverified_pool, [](auto& gameplay) {
+        gameplay.online_corpse_capability_observed_ns = 0;
+    });
+    CHECK(!build_adaptive_sample(unverified_pool, context).sample.live_corpse_burden);
     CHECK(online_sample.capabilities.gore_control ==
           optimizer::AdaptiveCapabilityState::unavailable);
     CHECK(online_sample.capabilities.particle_control ==

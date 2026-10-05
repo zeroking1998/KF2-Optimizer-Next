@@ -761,6 +761,15 @@ int main() {
     CHECK(online_corpse_capacity->online_corpse_capacity_verified);
     CHECK(online_corpse_capacity->online_corpse_pool == 20);
     CHECK(online_corpse_capacity->online_corpse_maximum == 20);
+    CHECK(online_corpse_capacity->online_corpse_pool_observed_ns ==
+          1'350'000'000ULL);
+    CHECK(corpse_stream.feed(
+        "ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=capacity "
+        "corpse_id=KFPawn_ZedCrawler_2 pool_before=21 pool_after=20 "
+        "maximum=20 local_only=true readback=verified\n",
+        1'355'000'000ULL));
+    CHECK(corpse_stream.current()->online_corpse_pool_observed_ns ==
+          1'355'000'000ULL);
     CHECK(!corpse_stream.feed(
         "[0041.13] ScriptLog: KF2OPT_ONLINE_CORPSE_ACTION state=capacity "
         "corpse_id=KFPawn_ZedCrawler_2 pool_before=22 pool_after=20 "
@@ -777,10 +786,12 @@ int main() {
         1'400'000'000ULL).has_value());
     const auto retained_online_corpse = corpse_stream.expire_observations(
         17'000'000'001ULL, 15'000'000'000ULL);
-    CHECK(!retained_online_corpse.has_value());
-    CHECK(corpse_stream.current()->online_corpse_pool == 20);
+    CHECK(retained_online_corpse.has_value());
+    CHECK(!corpse_stream.current()->online_corpse_pool);
+    CHECK(corpse_stream.current()->online_corpse_pool_observed_ns == 0);
     CHECK(corpse_stream.current()->online_corpse_maximum == 20);
     CHECK(corpse_stream.current()->online_corpse_sleep_verified);
+    CHECK(corpse_stream.current()->online_corpse_capability_observed_ns != 0);
 
     // NativeGameLogSampler normally delivers several complete Launch.log
     // records in one chunk. Keep the authenticated online receipt and the
@@ -806,6 +817,93 @@ int main() {
     CHECK(chunked_online->online_corpse_pool == 1);
     CHECK(chunked_online->online_corpse_maximum == 1282);
     CHECK(chunked_online->online_corpse_sleep_verified);
+
+    // Pool measurements are dynamic, unlike the once-per-world capability.
+    GameLogSessionParser pool_stream;
+    CHECK(pool_stream.feed(
+        "Log: LoadMap: KF-OnlinePool?game=kfgamecontent.KFGameInfo_Survival\n"
+        "ScriptLog: KF2OPT_SESSION_CONTEXT schema=2 "
+        "state=online_client_read_only net_mode=NM_Client map=KF-OnlinePool "
+        "generation=1\n"
+        "ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready port=59545\n"
+        "ScriptLog: KF2OPT_ONLINE_CORPSE state=available pool=0 maximum=20 "
+        "local_only=true readback=verified\n", 1'000'000'000ULL));
+    CHECK(pool_stream.current()->online_corpse_pool == 0);
+    CHECK(pool_stream.feed(
+        "ScriptLog: KF2OPT_ONLINE_CORPSE state=pool pool=1 maximum=20 "
+        "local_only=true readback=verified\n", 2'000'000'000ULL));
+    CHECK(pool_stream.current()->online_corpse_pool == 1);
+    CHECK(pool_stream.feed(
+        "ScriptLog: KF2OPT_ONLINE_CORPSE state=pool pool=37 maximum=20 "
+        "local_only=true readback=verified\n", 3'000'000'000ULL));
+    CHECK(pool_stream.current()->online_corpse_pool == 37);
+    CHECK(pool_stream.current()->online_corpse_capability_observed_ns ==
+          1'000'000'000ULL);
+    CHECK(pool_stream.current()->online_corpse_pool_observed_ns ==
+          3'000'000'000ULL);
+    CHECK(pool_stream.feed(
+        "ScriptLog: KF2OPT_ONLINE_CORPSE state=pool pool=3 maximum=20 "
+        "local_only=true readback=verified\n", 4'000'000'000ULL));
+    CHECK(pool_stream.current()->online_corpse_pool == 3);
+    // An unchanged heartbeat refreshes measurement age, not capability age.
+    CHECK(pool_stream.feed(
+        "ScriptLog: KF2OPT_ONLINE_CORPSE state=pool pool=3 maximum=20 "
+        "local_only=true readback=verified\n", 5'000'000'000ULL));
+    CHECK(pool_stream.current()->online_corpse_pool_observed_ns ==
+          5'000'000'000ULL);
+    CHECK(!pool_stream.feed(
+        "ScriptLog: KF2OPT_ONLINE_CORPSE state=pool pool=-1 maximum=20 "
+        "local_only=true readback=verified\n", 6'000'000'000ULL));
+    CHECK(!pool_stream.feed(
+        "ScriptLog: KF2OPT_ONLINE_CORPSE state=pool pool=4 maximum=20 "
+        "local_only=false readback=verified\n", 6'000'000'000ULL));
+    CHECK(pool_stream.current()->online_corpse_pool == 3);
+    CHECK(pool_stream.current()->online_corpse_pool_observed_ns ==
+          5'000'000'000ULL);
+    CHECK(!pool_stream.expire_observations(20'000'000'000ULL));
+    CHECK(pool_stream.current()->online_corpse_pool == 3);
+    CHECK(pool_stream.expire_observations(20'000'000'001ULL));
+    CHECK(!pool_stream.current()->online_corpse_pool);
+    CHECK(pool_stream.current()->online_corpse_maximum == 20);
+    CHECK(pool_stream.current()->online_corpse_capability_observed_ns ==
+          1'000'000'000ULL);
+    CHECK(pool_stream.current()->telemetry_control_port == 59545);
+    CHECK(!pool_stream.expire_observations(21'000'000'000ULL));
+    CHECK(pool_stream.feed(
+        "ScriptLog: KF2OPT_ONLINE_CORPSE state=pool pool=0 maximum=20 "
+        "local_only=true readback=verified\n", 22'000'000'000ULL));
+    CHECK(pool_stream.current()->online_corpse_pool == 0);
+    CHECK(pool_stream.feed(
+        "ScriptLog: KF2OPT_ONLINE_CORPSE state=pool pool=12 maximum=20 "
+        "local_only=true readback=verified\n", 23'000'000'000ULL, false));
+    CHECK(!pool_stream.current()->online_corpse_pool);
+    CHECK(pool_stream.current()->online_corpse_pool_observed_ns == 0);
+    CHECK(pool_stream.current()->online_corpse_capability_observed_ns != 0);
+    CHECK(pool_stream.current()->telemetry_control_port == 59545);
+    CHECK(pool_stream.feed(
+        "ScriptLog: KF2OPT_SESSION_CONTEXT schema=2 "
+        "state=online_client_read_only net_mode=NM_Client map=KF-OnlinePool "
+        "generation=2\n",
+        24'000'000'000ULL));
+    CHECK(!pool_stream.current()->online_corpse_pool);
+    CHECK(!pool_stream.current()->online_corpse_maximum);
+    CHECK(pool_stream.current()->online_corpse_capability_observed_ns == 0);
+    CHECK(!pool_stream.current()->telemetry_control_port);
+    CHECK(pool_stream.feed(
+        "Log: LoadMap: KF-NewOnlinePool?game=kfgamecontent.KFGameInfo_Survival\n",
+        25'000'000'000ULL));
+    CHECK(pool_stream.current()->online_corpse_pool_observed_ns == 0);
+
+    GameLogSessionParser count_without_capability;
+    CHECK(count_without_capability.feed(
+        "Log: LoadMap: KF-OnlinePool?game=kfgamecontent.KFGameInfo_Survival\n"
+        "ScriptLog: KF2OPT_SESSION_CONTEXT schema=2 "
+        "state=online_client_read_only net_mode=NM_Client map=KF-OnlinePool "
+        "generation=1\n"
+        "ScriptLog: KF2OPT_ONLINE_CORPSE state=pool pool=4 maximum=20 "
+        "local_only=true readback=verified\n", 1'000'000'000ULL));
+    CHECK(count_without_capability.current()->online_corpse_pool == 4);
+    CHECK(count_without_capability.current()->online_corpse_capability_observed_ns == 0);
 
     const auto remaining = stream.feed(
         "[0060.10] ScriptLog: @@@@ ZED COUNT DEBUG: "

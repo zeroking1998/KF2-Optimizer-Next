@@ -93,6 +93,15 @@ Expiry clears the displayed value to `UNAVAILABLE`. A newer valid readback
 restores `AVAILABLE`; process changes, provider replacement and rejected session
 boundaries discard the old cache. State events are emitted once per transition.
 
+### Online corpse-pressure measurements
+
+Online corpse-pool measurements use the existing provider tick, not an extra
+Actor scan. Changes are coalesced to at most two reports per second; an unchanged
+pool has a five-second heartbeat. Counts older than fifteen seconds or read from
+historical log catch-up are excluded from Adaptive pressure. Capability and
+maximum-limit readbacks remain map-scoped, and a count-only report cannot establish
+a missing capability. Travel discards the old world's measurements and proofs.
+
 ### Settled corpse freeze
 
 Adaptive mode can move one already sleeping, slow rigid-body corpse out of the
