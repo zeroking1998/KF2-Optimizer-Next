@@ -649,7 +649,7 @@ void UiRuntime::update_adaptive_controller(
     status.adaptive_shadow_mode = optimizer_settings.adaptive_shadow_mode;
 
     status.recommended_profile = L"user settings";
-    status.recommendation_reason = adaptive_profile_reason(adaptive_decision);
+    status.recommendation_reason = widen(adaptive_decision.reason);
     const bool controller_changed =
         adaptive_decision.state != last_adaptive_state ||
         adaptive_decision.disposition != last_adaptive_disposition;

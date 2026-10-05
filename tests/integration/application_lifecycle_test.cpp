@@ -6321,6 +6321,19 @@ int main(int argc, char** argv) {
         frame.observed_at_ns += 250'000'000ULL;
         runtime.update_adaptive_controller(frame);
         CHECK(runtime.model.status().adaptive_runtime_corpse_limit == 2000);
+        CHECK(!runtime.adaptive_decision.reason.empty());
+        const std::wstring decision_reason{runtime.adaptive_decision.reason.begin(),
+            runtime.adaptive_decision.reason.end()};
+        CHECK(runtime.model.status().recommendation_reason == decision_reason);
+        runtime.adaptive_quality_state_known = false;
+        ++frame.observed_at_ns;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.model.status().adaptive_action == L"verify queued restore");
+        CHECK(runtime.model.status().adaptive_reason != decision_reason);
+        CHECK(runtime.model.status().recommendation_reason ==
+              std::wstring(runtime.adaptive_decision.reason.begin(),
+                  runtime.adaptive_decision.reason.end()));
+        runtime.adaptive_quality_state_known = true;
         frame.observed_at_ns += 250'000'000ULL;
         replace_frame_gameplay(frame, [&](auto& gameplay) {
             gameplay.telemetry_corpse_limit = 1950;
