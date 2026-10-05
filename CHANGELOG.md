@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Refresh the package inventory exporter even when skipping the app build;
+  stale inventory output can no longer be relabeled as the current build.
 - Correct stale feature-inventory descriptions of catalog totals, payload hashes
   and CI coverage without changing feature classifications or runtime behavior.
 - Transfer the completed package/support inventory JSON buffer without copying
