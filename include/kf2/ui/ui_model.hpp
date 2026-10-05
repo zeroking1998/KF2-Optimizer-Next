@@ -35,15 +35,41 @@ struct Notice {
     std::wstring recovery_action;
 };
 
-struct UiStatus {
-    std::wstring mode{L"Normal"};
+// An owning presentation snapshot, not controller state. Inheritance below
+// preserves existing field access without a second per-member copy list.
+struct AdaptiveUiStatus {
     bool adaptive_optimization_enabled{true};
+    std::wstring recommended_profile{L"waiting"};
+    std::wstring recommendation_reason{L"Fresh stable telemetry is required"};
+    std::optional<int> adaptive_runtime_corpse_limit;
+    std::wstring adaptive_corpse_capability{L"UNAVAILABLE"};
+    std::wstring adaptive_corpse_action_status{L"NONE"};
+    std::wstring adaptive_particle_capability{L"UNAVAILABLE"};
+    std::wstring adaptive_state{L"observing"};
+    std::wstring adaptive_bottleneck{L"unknown"};
+    std::wstring adaptive_cpu_parallelism{L"not available"};
+    std::wstring adaptive_action{L"none"};
+    std::wstring adaptive_reason{L"Fresh validated telemetry is required"};
+    int adaptive_confidence_percent{0};
+    int adaptive_drop_risk_percent{0};
+    int adaptive_quality_score{100};
+    int adaptive_headroom_available_percent{0};
+    std::wstring adaptive_data_quality{L"NOT_AVAILABLE"};
+    std::wstring adaptive_prediction{L"not available"};
+    std::wstring adaptive_session{L"SESSION_UNKNOWN"};
+    std::wstring adaptive_source{L"not selected"};
+    std::wstring adaptive_safety{L"LAB / SHADOW_ONLY"};
+    std::wstring adaptive_evidence{L"NOT_AVAILABLE"};
+    std::uint64_t adaptive_restore_generation{0};
+    bool adaptive_shadow_mode{false};
+};
+
+struct UiStatus : AdaptiveUiStatus {
+    std::wstring mode{L"Normal"};
     std::wstring game{L"Game not detected"};
     std::wstring game_session;
     std::wstring telemetry{L"Telemetry unavailable"};
     std::wstring performance_analysis{L"Performance analysis unavailable"};
-    std::wstring recommended_profile{L"waiting"};
-    std::wstring recommendation_reason{L"Fresh stable telemetry is required"};
     std::wstring hardware_summary{L"Hardware not refreshed"};
     std::wstring flex_telemetry{L"FleX telemetry not observed"};
     std::wstring flex_substep_diagnostics{L"Detailed substep counters are off"};
@@ -84,31 +110,10 @@ struct UiStatus {
     bool prewarm_active{false};
     int prewarm_percent{0};
     std::wstring prewarm_map;
-    std::optional<int> adaptive_runtime_corpse_limit;
-    std::wstring adaptive_corpse_capability{L"UNAVAILABLE"};
-    std::wstring adaptive_corpse_action_status{L"NONE"};
     std::optional<int> flex_requested_substeps;
     std::optional<int> flex_effective_substeps;
     std::wstring flex_action_status{L"NONE"};
     std::wstring flex_capability{L"UNAVAILABLE"};
-    std::wstring adaptive_particle_capability{L"UNAVAILABLE"};
-    std::wstring adaptive_state{L"observing"};
-    std::wstring adaptive_bottleneck{L"unknown"};
-    std::wstring adaptive_cpu_parallelism{L"not available"};
-    std::wstring adaptive_action{L"none"};
-    std::wstring adaptive_reason{L"Fresh validated telemetry is required"};
-    int adaptive_confidence_percent{0};
-    int adaptive_drop_risk_percent{0};
-    int adaptive_quality_score{100};
-    int adaptive_headroom_available_percent{0};
-    std::wstring adaptive_data_quality{L"NOT_AVAILABLE"};
-    std::wstring adaptive_prediction{L"not available"};
-    std::wstring adaptive_session{L"SESSION_UNKNOWN"};
-    std::wstring adaptive_source{L"not selected"};
-    std::wstring adaptive_safety{L"LAB / SHADOW_ONLY"};
-    std::wstring adaptive_evidence{L"NOT_AVAILABLE"};
-    std::uint64_t adaptive_restore_generation{0};
-    bool adaptive_shadow_mode{false};
     int adaptive_minimum_quality{10};
     int adaptive_maximum_quality{100};
     int adaptive_quality_change_budget{2};
@@ -174,6 +179,7 @@ public:
     void set_build_identity(std::wstring identity);
     void set_recovery_required(bool required) noexcept;
     void set_status(UiStatus status);
+    void set_adaptive_status(AdaptiveUiStatus status) noexcept;
     void set_telemetry_status(
         std::wstring telemetry, std::wstring performance_analysis,
         std::optional<double> fps, std::optional<double> frame_time_ms,
@@ -191,6 +197,7 @@ public:
     [[nodiscard]] const std::wstring& build_identity() const noexcept;
     [[nodiscard]] bool recovery_required() const noexcept;
     [[nodiscard]] const UiStatus& status() const noexcept;
+    [[nodiscard]] const AdaptiveUiStatus& adaptive_status() const noexcept;
     [[nodiscard]] int presented_target_fps() const noexcept;
     [[nodiscard]] int presented_corpse_limit() const noexcept;
     void preview_target_fps(int value) noexcept;

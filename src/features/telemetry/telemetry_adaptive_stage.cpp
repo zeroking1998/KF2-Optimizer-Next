@@ -184,7 +184,7 @@ void UiRuntime::log_adaptive_performance_sample(
 telemetry_pipeline::CorpseTelemetryTracker::Result
 UiRuntime::update_adaptive_corpse_status(
     const telemetry_pipeline::TelemetryFrame& frame,
-    ui::UiStatus& status) {
+    ui::AdaptiveUiStatus& status) {
     const auto corpse_state = corpse_telemetry_tracker.observe(frame,
         game_process && game_process->pid == frame.identity.pid &&
         game_process->process_start_id == frame.identity.process_start_id &&
@@ -209,7 +209,7 @@ UiRuntime::update_adaptive_corpse_status(
 }
 
 bool UiRuntime::present_pending_adaptive_runtime_mode(
-    ui::UiStatus& status) {
+    ui::AdaptiveUiStatus& status) {
     if (!adaptive_runtime_mode_confirmed &&
         (adaptive_runtime_mode_pending.has_value() ||
          adaptive_runtime_mode_port.has_value())) {
