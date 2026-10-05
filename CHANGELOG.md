@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Recompile only the owning telemetry component when the SDK module hash
+  changes, preserving exact module verification without rebuilding unrelated code.
 - Reuse the current emitter-owner check within each particle-control iteration,
   retaining discovery, identity verification, readbacks and restoration.
 - Build waiting or failed-telemetry text only for incomplete frame data, avoiding
