@@ -6384,9 +6384,34 @@ int main(int argc, char** argv) {
         runtime.update_adaptive_controller(frame);
         CHECK(runtime.model.status().adaptive_runtime_corpse_limit == 2000);
         CHECK(!runtime.adaptive_decision.reason.empty());
+        CHECK(runtime.model.status().adaptive_state ==
+              kf2::optimizer::adaptive_stability_state_name(
+                  runtime.adaptive_decision.stability_state));
+        CHECK(runtime.model.status().adaptive_bottleneck ==
+              kf2::optimizer::adaptive_bottleneck_name(
+                  runtime.adaptive_decision.bottleneck.type));
+        CHECK(runtime.model.status().adaptive_action ==
+              kf2::optimizer::adaptive_disposition_name(
+                  runtime.adaptive_decision.disposition));
         const std::wstring decision_reason{runtime.adaptive_decision.reason.begin(),
             runtime.adaptive_decision.reason.end()};
         CHECK(runtime.model.status().recommendation_reason == decision_reason);
+        auto stale_labels = runtime.model.status();
+        stale_labels.adaptive_state = L"old stability";
+        stale_labels.adaptive_bottleneck = L"old bottleneck";
+        stale_labels.adaptive_action = L"old action";
+        runtime.model.set_status(std::move(stale_labels));
+        ++frame.observed_at_ns;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.model.status().adaptive_state ==
+              kf2::optimizer::adaptive_stability_state_name(
+                  runtime.adaptive_decision.stability_state));
+        CHECK(runtime.model.status().adaptive_bottleneck ==
+              kf2::optimizer::adaptive_bottleneck_name(
+                  runtime.adaptive_decision.bottleneck.type));
+        CHECK(runtime.model.status().adaptive_action ==
+              kf2::optimizer::adaptive_disposition_name(
+                  runtime.adaptive_decision.disposition));
         runtime.adaptive_quality_state_known = false;
         ++frame.observed_at_ns;
         runtime.update_adaptive_controller(frame);
