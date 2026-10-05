@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Simplify five corpse/Zed ownership lookups using KF2's native array search,
+  preserving first-match identity and missing-entry behavior without new state.
 - Skip the full world-emitter restoration scan when no Optimizer-owned emitter
   original values remain; nonempty restore and retry behavior is unchanged.
 - Reworked Adaptive into one protected, user-controlled runtime with separate

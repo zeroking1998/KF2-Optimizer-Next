@@ -572,6 +572,23 @@ int main() {
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto online_corpse_controller_source = normalize_newlines(
         read_bytes(KF2_ONLINE_CORPSE_CONTROLLER_SOURCE));
+    // UE3 Find preserves first Actor-identity match / absent=-1 semantics.
+    // Require the exact native intrinsic, not another interpreted lookup loop.
+    for (const auto expected : {
+             "function int FindFixedMinimumLivingVisualEntry(KFPawn_Monster Candidate)\n"
+             "{\n    return FixedMinimumLivingVisualZeds.Find(Candidate);\n}",
+             "function int FindAdaptiveBaselineSettleEntry(KFPawn Candidate)\n"
+             "{\n    return AdaptiveBaselineSettleEntries.Find('Corpse', Candidate);\n}",
+             "function int FindFixedMinimumCorpseLodEntry(KFPawn Candidate)\n"
+             "{\n    return FixedMinimumCorpseLodCorpses.Find(Candidate);\n}",
+             "function int FindAdaptiveDistanceSleptCorpse(KFPawn Candidate)\n"
+             "{\n    return AdaptiveDistanceSleptCorpses.Find('Corpse', Candidate);\n}"}) {
+        CHECK(telemetry_source.find(expected) != std::string::npos);
+    }
+    CHECK(online_corpse_controller_source.find(
+        "function int FindFrozenCorpse(KFPawn Candidate)\n"
+        "{\n    return FrozenCorpses.Find('Corpse', Candidate);\n}") !=
+          std::string::npos);
     const auto connection_source = normalize_newlines(
         read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE));
     const auto online_graphics_connection_source = normalize_newlines(
