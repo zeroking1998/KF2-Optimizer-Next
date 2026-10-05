@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Escape shared JSON string contents directly into the returned owned string,
+  avoiding stream/buffer-copy work while preserving exact serialized bytes.
 - Remove the unused internal Adaptive profile recommendation; user settings,
   real quality budgets, decisions and restoration remain unchanged.
 - Borrow constant telemetry limit-explanation labels instead of allocating
