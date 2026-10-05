@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Remove an unused internal FleX audit JSON exporter and its dedicated escape
+  helper; active DLL verification, hook safety and diagnostic exports are unchanged.
 - Avoid completed-stream copies when displaying live UI metrics and the FPS
   status suffix, preserving exact text, numeric animation and refresh behavior.
 - Write support diagnostics directly into the export and transfer completed
