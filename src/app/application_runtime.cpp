@@ -1,5 +1,6 @@
 #include "application_runtime.hpp"
 
+#include "features/telemetry/telemetry_presentation_stage.hpp"
 #include "kf2/update/update_state.hpp"
 
 #include <system_error>
@@ -111,15 +112,6 @@ Result<config::Settings> load_or_create_settings(
     return Result<config::Settings>::success(std::move(settings));
 }
 
-std::wstring format_gib(std::uint64_t bytes) {
-    std::wostringstream text;
-    text << std::fixed << std::setprecision(1)
-         << static_cast<long double>(bytes) /
-                (1024.0L * 1024.0L * 1024.0L)
-         << L" GiB";
-    return text.str();
-}
-
 Result<bool> open_local_directory(const std::filesystem::path& path) {
     std::error_code error;
     const auto resolved = std::filesystem::weakly_canonical(path, error);
@@ -193,6 +185,7 @@ Result<std::string> read_verified_local_file(const std::filesystem::path& path,
 }
 
 std::wstring query_hardware_summary() {
+    using telemetry_pipeline::format_gib;
     std::wstring result = L"Hardware:";
     const auto inventory = telemetry::query_hardware_inventory();
     if (inventory.has_value()) {
