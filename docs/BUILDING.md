@@ -104,6 +104,8 @@ changing the destination, even when the app build is skipped. This keeps the
 shipped inventory current without a second contributor-owned build step.
 The required FleX forwarding DLL is checked before exporter work or destination
 changes, so a missing build artifact preserves an existing package.
+The two package manifests share the same completed payload hashes instead of
+reading every payload twice. Release validation still hashes files independently.
 All entries in an existing package manifest are validated before cleanup starts;
 an unsafe entry preserves the existing files rather than leaving a partial package.
 Existing junctions or symbolic links in managed output paths or their ancestors
