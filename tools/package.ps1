@@ -45,6 +45,28 @@ $knownManagedPaths = [Collections.Generic.HashSet[string]]::new(
     'Data/package-manifest.json'
 ) | ForEach-Object { [void]$knownManagedPaths.Add($_) }
 
+function Assert-PackagePathsNoReparsePoint([string] $Root, [string[]] $ManagedPaths) {
+    $checkedPaths = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($relative in @('') + $ManagedPaths) {
+        $path = if ($relative) { Join-Path $Root $relative } else { $Root }
+        $path = [IO.Path]::GetFullPath($path)
+        while ($path -and $checkedPaths.Add($path)) {
+            $attributes = [IO.FileAttributes]::Normal
+            try { $attributes = [IO.File]::GetAttributes($path) }
+            catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
+                # Missing outputs are safe to create; other metadata failures propagate.
+            }
+            if ($attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Package destination contains a reparse point: $path"
+            }
+            $path = [IO.Path]::GetDirectoryName($path)
+        }
+    }
+}
+
+Assert-PackagePathsNoReparsePoint $destinationRoot @($knownManagedPaths)
+
 $telemetryModule = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerTelemetry.u'
 $telemetryFingerprintScript = Join-Path $PSScriptRoot `

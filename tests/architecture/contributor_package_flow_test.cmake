@@ -8,6 +8,17 @@ file(READ "${PROJECT_SOURCE_DIR}/tools/build_for_contributors.ps1" build_script)
 file(READ "${PROJECT_SOURCE_DIR}/tools/package.ps1" package_script)
 
 string(FIND "${package_script}"
+    "\nAssert-PackagePathsNoReparsePoint $destinationRoot @($knownManagedPaths)"
+    path_preflight)
+string(FIND "${package_script}"
+    "if (-not (Test-Path -LiteralPath $destinationRoot))" first_destination_mutation)
+if(path_preflight EQUAL -1 OR first_destination_mutation EQUAL -1 OR
+   path_preflight GREATER first_destination_mutation)
+    message(FATAL_ERROR
+        "Reject destination reparse points before any managed cleanup or copy")
+endif()
+
+string(FIND "${package_script}"
     "\n& cmake --build (Join-Path $projectRoot 'out\\build\\windows-x64-release')"
     exporter_build)
 if(exporter_build EQUAL -1)
