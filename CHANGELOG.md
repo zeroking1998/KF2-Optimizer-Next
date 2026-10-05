@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Reuse the existing Adaptive stability, bottleneck and no-setting action labels
+  instead of constructing temporary strings or rewriting unchanged text.
+  Controller decisions, displayed values and safety readbacks are unchanged.
+
 - Recover FleX particle text on the next fresh observation after failed display
   preparation, while keeping live observations and confirmed receipts current.
   Successful unchanged observations retain their existing text reuse.

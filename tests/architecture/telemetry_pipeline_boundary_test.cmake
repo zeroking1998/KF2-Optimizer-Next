@@ -143,6 +143,14 @@ reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
     "evaluate_overlay"
     "overlay_window"
     "game_log_session_parser")
+file(READ "${stage_root}/telemetry_adaptive_controller.cpp" adaptive_controller_text)
+foreach(label stability_label bottleneck_label disposition_label)
+    string(FIND "${adaptive_controller_text}" "!= ${label}" label_compare)
+    if(label_compare EQUAL -1)
+        message(FATAL_ERROR
+            "Adaptive constant labels must be compared before assigning owned text: ${label}")
+    endif()
+endforeach()
 reject_literals("${stage_root}/telemetry_presentation_stage.cpp"
     "Presentation stage"
     "DxgiFrameTimingSession"

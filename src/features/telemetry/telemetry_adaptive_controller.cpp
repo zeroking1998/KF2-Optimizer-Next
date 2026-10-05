@@ -518,12 +518,16 @@ void UiRuntime::update_adaptive_controller(
     adaptive_decision.quality_score =
         static_cast<double>(
             adaptive_resource_quality.effective_quality());
-    status.adaptive_state = std::wstring{
+    const auto stability_label =
         optimizer::adaptive_stability_state_name(
-            adaptive_decision.stability_state)};
-    status.adaptive_bottleneck = std::wstring{
+            adaptive_decision.stability_state);
+    if (status.adaptive_state != stability_label)
+        status.adaptive_state = stability_label;
+    const auto bottleneck_label =
         optimizer::adaptive_bottleneck_name(
-            adaptive_decision.bottleneck.type)};
+            adaptive_decision.bottleneck.type);
+    if (status.adaptive_bottleneck != bottleneck_label)
+        status.adaptive_bottleneck = bottleneck_label;
     {
         std::wostringstream cpu;
         cpu << optimizer::adaptive_cpu_workload_name(
@@ -561,12 +565,16 @@ void UiRuntime::update_adaptive_controller(
         }
         status.adaptive_cpu_parallelism = cpu.str();
     }
-    status.adaptive_action = adaptive_decision.selected_setting.empty()
-        ? std::wstring{optimizer::adaptive_disposition_name(
-              adaptive_decision.disposition)}
-        : widen(adaptive_decision.selected_setting) + L" (" +
+    if (adaptive_decision.selected_setting.empty()) {
+        const auto disposition_label = optimizer::adaptive_disposition_name(
+            adaptive_decision.disposition);
+        if (status.adaptive_action != disposition_label)
+            status.adaptive_action = disposition_label;
+    } else {
+        status.adaptive_action = widen(adaptive_decision.selected_setting) + L" (" +
               std::wstring{optimizer::adaptive_disposition_name(
                   adaptive_decision.disposition)} + L")";
+    }
     status.adaptive_reason = widen(adaptive_decision.reason);
     status.adaptive_confidence_percent = static_cast<int>(std::clamp(
         adaptive_decision.bottleneck.confidence * 100.0, 0.0, 100.0));
