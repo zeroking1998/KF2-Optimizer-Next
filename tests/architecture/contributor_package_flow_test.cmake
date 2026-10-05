@@ -19,11 +19,27 @@ if(path_preflight EQUAL -1 OR first_destination_mutation EQUAL -1 OR
 endif()
 
 string(FIND "${package_script}"
+    "if (-not (Test-Path -LiteralPath $forwarder -PathType Leaf))"
+    forwarder_check)
+string(FIND "${package_script}"
+    "Copy-Item -LiteralPath $forwarder -Destination" forwarder_copy)
+if(forwarder_check EQUAL -1 OR forwarder_copy EQUAL -1 OR
+   forwarder_check GREATER first_destination_mutation OR
+   forwarder_check GREATER forwarder_copy)
+    message(FATAL_ERROR
+        "Check the required FleX build artifact before changing the package destination")
+endif()
+
+string(FIND "${package_script}"
     "\n& cmake --build (Join-Path $projectRoot 'out\\build\\windows-x64-release')"
     exporter_build)
 if(exporter_build EQUAL -1)
     message(FATAL_ERROR
         "Packaging must incrementally build the exporter outside SkipBuild")
+endif()
+if(forwarder_check GREATER exporter_build)
+    message(FATAL_ERROR
+        "Reject a missing FleX artifact before unnecessary exporter work")
 endif()
 
 string(FIND "${package_script}"

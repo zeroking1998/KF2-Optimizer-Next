@@ -147,6 +147,10 @@ if ($executableIdentity.source_identity -cne $commit -or
     $executableIdentity.channel -cne 'release') {
     throw 'Release executable source identity does not match the package; rebuild without -SkipBuild'
 }
+$forwarder = Join-Path $projectRoot 'out\build\windows-x64-release\flexRelease_x64.forwarder-lab.dll'
+if (-not (Test-Path -LiteralPath $forwarder -PathType Leaf)) {
+    throw "Offline FleX laboratory forwarder is missing: $forwarder"
+}
 # The exporter is excluded from normal app builds; refresh it even with SkipBuild.
 & cmake --build (Join-Path $projectRoot 'out\build\windows-x64-release') `
     --config Release --target KF2InventoryExport
@@ -200,10 +204,6 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
 Copy-Item -LiteralPath $source -Destination (Join-Path $destinationRoot 'KF2Optimizer.exe')
 $labDirectory = Join-Path $destinationRoot 'Data\Lab'
 New-Item -ItemType Directory -Path $labDirectory -Force | Out-Null
-$forwarder = Join-Path $projectRoot 'out\build\windows-x64-release\flexRelease_x64.forwarder-lab.dll'
-if (-not (Test-Path -LiteralPath $forwarder -PathType Leaf)) {
-    throw "Offline FleX laboratory forwarder is missing: $forwarder"
-}
 Copy-Item -LiteralPath $forwarder -Destination (Join-Path $labDirectory 'flexRelease_x64.forwarder-lab.dll') -Force
 Copy-Item -LiteralPath $telemetryModule -Destination `
     (Join-Path $labDirectory 'KF2OptimizerTelemetry.u') -Force
