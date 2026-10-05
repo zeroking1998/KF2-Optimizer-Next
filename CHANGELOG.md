@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Correct stale feature-inventory descriptions of catalog totals, payload hashes
+  and CI coverage without changing feature classifications or runtime behavior.
 - Transfer the completed package/support inventory JSON buffer without copying
   the full document; its schema, contents and owning return value are unchanged.
 - Remove an unused internal FleX audit JSON exporter and its dedicated escape
