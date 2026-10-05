@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Avoid completed-stream copies when displaying live UI metrics and the FPS
+  status suffix, preserving exact text, numeric animation and refresh behavior.
 - Write support diagnostics directly into the export and transfer completed
   JSON buffers, preserving exact bytes, event persistence and retry behavior.
 - Transfer completed telemetry display buffers instead of copying them,

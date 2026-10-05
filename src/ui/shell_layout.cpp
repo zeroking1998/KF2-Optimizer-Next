@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <numeric>
 #include <sstream>
+#include <utility>
 
 namespace kf2::ui {
 namespace {
@@ -73,7 +74,7 @@ std::wstring status_text(const UiModel& model) {
         std::wostringstream live;
         live << L"   •   Live " << std::fixed << std::setprecision(1)
              << *presented_fps << L" FPS";
-        text += live.str();
+        text += live.view();
     }
     if (status.prewarm_active) {
         text += L"   •   Warm-up " +
@@ -92,7 +93,7 @@ std::wstring metric(std::wstring_view label, std::optional<double> value,
     } else {
         text << L"—";
     }
-    return text.str();
+    return std::move(text).str();
 }
 
 std::wstring corpse_metric(const UiModel& model) {
@@ -128,7 +129,7 @@ std::wstring load_metric(const UiModel& model) {
     } else {
         text << L"—";
     }
-    return text.str();
+    return std::move(text).str();
 }
 
 std::array<std::wstring, 4> metric_texts(const UiModel& model) {
