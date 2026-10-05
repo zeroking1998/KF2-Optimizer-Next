@@ -14,7 +14,9 @@ are visible immediately.
   of recreating temporary display strings; readback and restore policy is unchanged.
 - Publish Adaptive's own display fields without copying unrelated graphics,
   telemetry, FleX, prewarm and update status on every controller tick.
-- Simplify five corpse/Zed ownership lookups using KF2's native array search,
+- Avoid Weapon classification and repeated null checks for already identified
+  pawns, retaining the existing runtime guard's repair coverage and cadence.
+- Simplify six corpse/Zed ownership lookups using KF2's native array search,
   preserving first-match identity and missing-entry behavior without new state.
 - Skip the full world-emitter restoration scan when no Optimizer-owned emitter
   original values remain; nonempty restore and retry behavior is unchanged.
