@@ -5,6 +5,13 @@ if(NOT DEFINED PROJECT_SOURCE_DIR OR PROJECT_SOURCE_DIR STREQUAL "")
 endif()
 
 file(READ "${PROJECT_SOURCE_DIR}/CMakeLists.txt" product_cmake)
+string(REGEX MATCH
+    "add_compile_definitions\\([^\\)]*KF2_OFFLINE_TELEMETRY_SHA256"
+    global_module_hash "${product_cmake}")
+if(NOT global_module_hash STREQUAL "")
+    message(FATAL_ERROR
+        "The SDK module hash must not change unrelated translation units' compiler options")
+endif()
 set(binding_helper "${PROJECT_SOURCE_DIR}/tools/telemetry_binding.cmake")
 file(READ "${binding_helper}" binding_cmake)
 file(READ "${PROJECT_SOURCE_DIR}/tools/build_kf2_telemetry.ps1"
