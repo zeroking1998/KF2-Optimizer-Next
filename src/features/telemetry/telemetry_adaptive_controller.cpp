@@ -578,9 +578,12 @@ void UiRuntime::update_adaptive_controller(
         if (status.adaptive_action != disposition_label)
             status.adaptive_action = disposition_label;
     } else {
-        status.adaptive_action = widen(adaptive_decision.selected_setting) + L" (" +
-              std::wstring{optimizer::adaptive_disposition_name(
-                  adaptive_decision.disposition)} + L")";
+        status.adaptive_action.assign(adaptive_decision.selected_setting.begin(),
+            adaptive_decision.selected_setting.end());
+        status.adaptive_action += L" (";
+        status.adaptive_action += optimizer::adaptive_disposition_name(
+            adaptive_decision.disposition);
+        status.adaptive_action += L')';
     }
     assign_widened(status.recommendation_reason, adaptive_decision.reason);
     if (status.adaptive_reason != status.recommendation_reason)
@@ -607,13 +610,11 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_data_quality = L"DEGRADED";
     }
     if (adaptive_decision.predicted_frame_time_ms) {
-        std::wostringstream prediction;
-        prediction << std::fixed << std::setprecision(2)
-                   << *adaptive_decision.predicted_frame_time_ms
-                   << L" ms (" << static_cast<int>(std::clamp(
-                          adaptive_decision.prediction_confidence * 100.0,
-                          0.0, 100.0)) << L"%)";
-        status.adaptive_prediction = prediction.str();
+        status.adaptive_prediction.clear();
+        std::format_to(std::back_inserter(status.adaptive_prediction),
+            L"{:.2f} ms ({}%)", *adaptive_decision.predicted_frame_time_ms,
+            static_cast<int>(std::clamp(
+                adaptive_decision.prediction_confidence * 100.0, 0.0, 100.0)));
     } else {
         status.adaptive_prediction = L"not available";
     }
@@ -650,11 +651,13 @@ void UiRuntime::update_adaptive_controller(
                 sample.capabilities.corpse_control));
     } else if (selected_record) {
         assign_widened(status.adaptive_source, selected_record->source);
-        status.adaptive_safety = widen(
-            optimizer::adaptive_safety_class_name(
-                selected_record->safety_class)) + L" / " + widen(
-            optimizer::adaptive_actuation_class_name(
-                selected_record->actuation_class));
+        const auto safety = optimizer::adaptive_safety_class_name(
+            selected_record->safety_class);
+        const auto actuation = optimizer::adaptive_actuation_class_name(
+            selected_record->actuation_class);
+        status.adaptive_safety.assign(safety.begin(), safety.end());
+        status.adaptive_safety += L" / ";
+        status.adaptive_safety.append(actuation.begin(), actuation.end());
         assign_widened(status.adaptive_evidence,
             optimizer::adaptive_evidence_state_name(
                 selected_record->evidence_state));
