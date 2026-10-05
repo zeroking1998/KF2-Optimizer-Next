@@ -6396,10 +6396,13 @@ int main(int argc, char** argv) {
         const std::wstring decision_reason{runtime.adaptive_decision.reason.begin(),
             runtime.adaptive_decision.reason.end()};
         CHECK(runtime.model.status().recommendation_reason == decision_reason);
+        CHECK(runtime.model.status().adaptive_reason == decision_reason);
         auto stale_labels = runtime.model.status();
         stale_labels.adaptive_state = L"old stability";
         stale_labels.adaptive_bottleneck = L"old bottleneck";
         stale_labels.adaptive_action = L"old action";
+        stale_labels.adaptive_reason = L"old reason";
+        stale_labels.recommendation_reason = L"old recommendation";
         runtime.model.set_status(std::move(stale_labels));
         ++frame.observed_at_ns;
         runtime.update_adaptive_controller(frame);
@@ -6412,6 +6415,11 @@ int main(int argc, char** argv) {
         CHECK(runtime.model.status().adaptive_action ==
               kf2::optimizer::adaptive_disposition_name(
                   runtime.adaptive_decision.disposition));
+        CHECK(runtime.model.status().adaptive_reason ==
+              std::wstring(runtime.adaptive_decision.reason.begin(),
+                  runtime.adaptive_decision.reason.end()));
+        CHECK(runtime.model.status().recommendation_reason ==
+              runtime.model.status().adaptive_reason);
         runtime.adaptive_quality_state_known = false;
         ++frame.observed_at_ns;
         runtime.update_adaptive_controller(frame);
@@ -6421,6 +6429,13 @@ int main(int argc, char** argv) {
               std::wstring(runtime.adaptive_decision.reason.begin(),
                   runtime.adaptive_decision.reason.end()));
         runtime.adaptive_quality_state_known = true;
+        ++frame.observed_at_ns;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.model.status().adaptive_reason ==
+              std::wstring(runtime.adaptive_decision.reason.begin(),
+                  runtime.adaptive_decision.reason.end()));
+        CHECK(runtime.model.status().recommendation_reason ==
+              runtime.model.status().adaptive_reason);
         frame.observed_at_ns += 250'000'000ULL;
         replace_frame_gameplay(frame, [&](auto& gameplay) {
             gameplay.telemetry_corpse_limit = 1950;

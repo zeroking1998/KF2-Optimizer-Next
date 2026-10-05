@@ -575,7 +575,8 @@ void UiRuntime::update_adaptive_controller(
               std::wstring{optimizer::adaptive_disposition_name(
                   adaptive_decision.disposition)} + L")";
     }
-    status.adaptive_reason = widen(adaptive_decision.reason);
+    status.recommendation_reason = widen(adaptive_decision.reason);
+    status.adaptive_reason = status.recommendation_reason;
     status.adaptive_confidence_percent = static_cast<int>(std::clamp(
         adaptive_decision.bottleneck.confidence * 100.0, 0.0, 100.0));
     status.adaptive_drop_risk_percent = static_cast<int>(std::clamp(
@@ -657,7 +658,6 @@ void UiRuntime::update_adaptive_controller(
     status.adaptive_shadow_mode = optimizer_settings.adaptive_shadow_mode;
 
     status.recommended_profile = L"user settings";
-    status.recommendation_reason = widen(adaptive_decision.reason);
     const bool controller_changed =
         adaptive_decision.state != last_adaptive_state ||
         adaptive_decision.disposition != last_adaptive_disposition;
