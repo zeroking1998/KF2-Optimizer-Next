@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Build unavailable-analysis text only when FPS is absent, avoiding discarded
+  temporary strings without changing the telemetry or Adaptive display.
 - Publish only changed prewarm display fields and avoid constructing unused
   map diagnostic labels; worker behavior, budgets and progress rules are unchanged.
 - Publish optional overlay diagnostic text without copying unrelated UI,

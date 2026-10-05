@@ -117,10 +117,6 @@ inline constexpr std::uint64_t kOverlayDiagnosticsPublishIntervalNs =
         result.telemetry = text.str();
     }
 
-    result.performance_analysis =
-        L"Performance analysis unavailable | Adaptive: " +
-        std::wstring{adaptive_profile} + L" (" +
-        std::wstring{adaptive_reason} + L")";
     if (frame.frames.fps) {
         const wchar_t* quality =
             frame.frames.quality == ::kf2::telemetry::SampleQuality::good
@@ -143,6 +139,11 @@ inline constexpr std::uint64_t kOverlayDiagnosticsPublishIntervalNs =
                 << L" | Adaptive: " << adaptive_profile << L" ("
                 << adaptive_reason << L")";
         result.performance_analysis = details.str();
+    } else {
+        result.performance_analysis =
+            L"Performance analysis unavailable | Adaptive: " +
+            std::wstring{adaptive_profile} + L" (" +
+            std::wstring{adaptive_reason} + L")";
     }
 
     result.live_fps = frame.frames.fps;
