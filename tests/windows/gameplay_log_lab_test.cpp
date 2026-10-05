@@ -996,6 +996,20 @@ int main() {
     const auto weapon_standalone_guard = graphics_interaction_source.find(
         "if (CurrentWorld.NetMode != NM_Standalone)", runtime_guard);
     CHECK(runtime_guard_function != std::string::npos);
+    const auto guard_end = graphics_interaction_source.find(
+        "\nfunction ", runtime_guard_function + 1);
+    const auto guard_body = std::string_view{graphics_interaction_source}.substr(
+        runtime_guard_function, guard_end - runtime_guard_function);
+    const auto pawn_cast = guard_body.find("Pawn = KFPawn(Candidate);");
+    const auto non_pawn = guard_body.find("if (Pawn == None)", pawn_cast);
+    const auto weapon_cast = guard_body.find("Weapon = KFWeapon(Candidate);");
+    const auto non_pawn_exit = guard_body.find("continue;", non_pawn);
+    CHECK(pawn_cast != std::string_view::npos);
+    CHECK(non_pawn != std::string_view::npos && pawn_cast < non_pawn);
+    CHECK(weapon_cast != std::string_view::npos && non_pawn < weapon_cast);
+    CHECK(non_pawn_exit != std::string_view::npos && weapon_cast < non_pawn_exit);
+    CHECK(guard_body.find("if (Pawn == None || Pawn.bDeleteMe") ==
+          std::string_view::npos);
     CHECK(runtime_guard != std::string::npos);
     CHECK(weapon_standalone_guard != std::string::npos);
     CHECK(runtime_guard < weapon_standalone_guard);
