@@ -65,8 +65,6 @@ inline constexpr std::uint64_t kOverlayDiagnosticsPublishIntervalNs =
     std::wstring_view optimizer_reason, std::wstring_view adaptive_profile,
     std::wstring_view adaptive_reason) {
     StatusProjection result;
-    result.telemetry = telemetry_failure.empty()
-        ? L"Waiting for KF2 frame data" : std::wstring{telemetry_failure};
     if (frame.frames.fps && frame.frames.frame_time_ms) {
         std::wostringstream text;
         text << std::fixed << std::setprecision(1) << *frame.frames.fps
@@ -115,6 +113,9 @@ inline constexpr std::uint64_t kOverlayDiagnosticsPublishIntervalNs =
             if (!frame.flex->pass_through_healthy) text << L" (relay error)";
         }
         result.telemetry = text.str();
+    } else {
+        result.telemetry = telemetry_failure.empty()
+            ? L"Waiting for KF2 frame data" : std::wstring{telemetry_failure};
     }
 
     if (frame.frames.fps) {
