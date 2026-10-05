@@ -84,6 +84,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Update only live telemetry display fields instead of copying graphics,
+  settings and other unrelated UI status during changing measurements.
+  Measurement cadence, Adaptive decisions and overlay updates are unchanged.
+
 - FleX diagnostics no longer serialize or flush a report every two seconds.
   Live observations stay in memory; session detach and explicit support export
   save the latest verified counters and report persistence failures.

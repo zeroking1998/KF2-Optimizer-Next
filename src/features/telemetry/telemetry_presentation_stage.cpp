@@ -163,17 +163,12 @@ void publish_telemetry_presentation(
         current.live_gpu_percent != projection.live_gpu_percent ||
         current.live_active_corpses != projection.live_active_corpses ||
         current.live_sleeping_corpses != projection.live_sleeping_corpses) {
-        auto status = current;
-        status.telemetry = std::move(presentation.status.telemetry);
-        status.performance_analysis =
-            std::move(presentation.status.performance_analysis);
-        status.live_fps = projection.live_fps;
-        status.live_frame_time_ms = projection.live_frame_time_ms;
-        status.live_cpu_percent = projection.live_cpu_percent;
-        status.live_gpu_percent = projection.live_gpu_percent;
-        status.live_active_corpses = projection.live_active_corpses;
-        status.live_sleeping_corpses = projection.live_sleeping_corpses;
-        runtime.model.set_status(std::move(status));
+        runtime.model.set_telemetry_status(
+            std::move(presentation.status.telemetry),
+            std::move(presentation.status.performance_analysis),
+            projection.live_fps, projection.live_frame_time_ms,
+            projection.live_cpu_percent, projection.live_gpu_percent,
+            projection.live_active_corpses, projection.live_sleeping_corpses);
         runtime.invalidate();
     }
 

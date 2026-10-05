@@ -105,6 +105,20 @@ void UiModel::set_recovery_required(bool required) noexcept {
     recovery_required_ = required;
 }
 void UiModel::set_status(UiStatus status) { status_ = std::move(status); }
+void UiModel::set_telemetry_status(
+    std::wstring telemetry, std::wstring performance_analysis,
+    std::optional<double> fps, std::optional<double> frame_time_ms,
+    std::optional<double> cpu_percent, std::optional<double> gpu_percent,
+    std::optional<int> active_corpses, std::optional<int> sleeping_corpses) noexcept {
+    status_.telemetry = std::move(telemetry);
+    status_.performance_analysis = std::move(performance_analysis);
+    status_.live_fps = fps;
+    status_.live_frame_time_ms = frame_time_ms;
+    status_.live_cpu_percent = cpu_percent;
+    status_.live_gpu_percent = gpu_percent;
+    status_.live_active_corpses = active_corpses;
+    status_.live_sleeping_corpses = sleeping_corpses;
+}
 void UiModel::set_flex_observation_status(
     std::wstring telemetry, std::optional<int> requested_substeps,
     std::optional<int> effective_substeps, std::wstring action_status,
