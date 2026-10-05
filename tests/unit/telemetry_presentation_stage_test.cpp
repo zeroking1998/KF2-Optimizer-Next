@@ -139,6 +139,26 @@ int main() {
     CHECK(!missing_projection.live_active_corpses);
     CHECK(!contains(missing_projection.telemetry, L"0.0"));
 
+    const std::wstring embedded_failure{L"source\0unavailable", 18};
+    for (const auto& failure : {std::wstring{}, std::wstring{L"Unavailable"},
+                               embedded_failure}) {
+        for (const bool fps_present : {false, true}) {
+            for (const bool time_present : {false, true}) {
+                telemetry_pipeline::TelemetryFrame boundary;
+                if (fps_present) boundary.frames.fps = 0.0;
+                if (time_present) boundary.frames.frame_time_ms = 0.0;
+                const auto actual = telemetry_pipeline::build_status_projection(
+                    boundary, failure, L"Stable", L"User settings", L"Holding");
+                const std::wstring expected = fps_present && time_present
+                    ? L"0.0 FPS, 0.0 ms"
+                    : failure.empty() ? L"Waiting for KF2 frame data" : failure;
+                CHECK(actual.telemetry == expected);
+                CHECK(actual.live_fps == boundary.frames.fps);
+                CHECK(actual.live_frame_time_ms == boundary.frames.frame_time_ms);
+            }
+        }
+    }
+
     missing.frames.fps = 60.0;
     missing.frames.quality = telemetry::SampleQuality::good;
     const auto partial = telemetry_pipeline::build_status_projection(
