@@ -206,28 +206,22 @@ void UiRuntime::observe_flex_process() {
     const auto& current = model.status();
     const std::wstring flex_values = reuse_particle_text ? std::wstring{}
         : flex_state->aggregate_particles_fresh
-        ? L"FleX solvers: " + std::to_wstring(flex_state->live_solvers) +
-              L" | particles active/free/capacity: " +
-              std::to_wstring(flex_state->aggregate_active_particles) + L"/" +
-              std::to_wstring(flex_state->free_particles) + L"/" +
-              std::to_wstring(flex_state->particle_capacity) +
-              L" | transfers up/down: " +
-              std::to_wstring(flex_state->particle_upload_calls +
-                               flex_state->phase_upload_calls +
-                               flex_state->velocity_upload_calls) + L"/" +
-              std::to_wstring(flex_state->particle_download_calls +
-                               flex_state->phase_download_calls +
-                               flex_state->velocity_download_calls) +
-              L" (read-only runtime source)"
+        ? std::format(L"FleX solvers: {} | particles active/free/capacity: {}/{}/{}"
+                      L" | transfers up/down: {}/{} (read-only runtime source)",
+              flex_state->live_solvers, flex_state->aggregate_active_particles,
+              flex_state->free_particles, flex_state->particle_capacity,
+              flex_state->particle_upload_calls + flex_state->phase_upload_calls +
+                  flex_state->velocity_upload_calls,
+              flex_state->particle_download_calls + flex_state->phase_download_calls +
+                  flex_state->velocity_download_calls)
         : flex_state->particle_capacity_available
-            ? L"FleX solvers: " + std::to_wstring(flex_state->live_solvers) +
-                  L" | particle capacity: " +
-                  std::to_wstring(flex_state->particle_capacity) +
-                  L" | active/free awaiting a fresh count"
+            ? std::format(L"FleX solvers: {} | particle capacity: {}"
+                          L" | active/free awaiting a fresh count",
+                  flex_state->live_solvers, flex_state->particle_capacity)
         : flex_state->active_particles_fresh
-            ? L"FleX active particles: " +
-                  std::to_wstring(flex_state->active_particles) +
-                  L" (read-only runtime source; aggregate unavailable)"
+            ? std::format(L"FleX active particles: {}"
+                          L" (read-only runtime source; aggregate unavailable)",
+                  flex_state->active_particles)
         : std::wstring{};
     const std::wstring_view flex_status = reuse_particle_text
         ? std::wstring_view{current.flex_telemetry}

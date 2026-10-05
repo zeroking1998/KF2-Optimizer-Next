@@ -130,6 +130,9 @@ are visible immediately.
   Live values and exact displayed text stay unchanged; diagnostics-off still
   performs no detailed formatting.
 
+- Format changed FleX particle/capacity labels without temporary numeric-string
+  chains, keeping unchanged labels borrowed and all displayed values current.
+
 - Update and Auto Repair now wait for synchronous Windows ZIP extraction to
   finish before checking or cleaning staged files; partial or aborted copies
   fail safely without a fixed-delay completion guess.
