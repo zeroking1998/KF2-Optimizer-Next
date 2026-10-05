@@ -1,5 +1,7 @@
 #include <cstdlib>
 #include <iostream>
+#include <limits>
+#include <locale>
 #include <string>
 
 #include "features/telemetry/telemetry_presentation_stage.hpp"
@@ -14,6 +16,10 @@
     } while (false)
 
 namespace {
+
+struct CommaPunctuation final : std::numpunct<wchar_t> {
+    wchar_t do_decimal_point() const override { return L','; }
+};
 
 kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     using namespace kf2;
@@ -156,5 +162,22 @@ int main() {
     CHECK(no_fps.performance_analysis ==
           L"Performance analysis unavailable | Adaptive: quality (Holding)");
     CHECK(!no_fps.live_fps && no_fps.live_frame_time_ms == 16.7);
+    const auto saved_locale = std::locale::global(std::locale::classic());
+    CHECK(telemetry_pipeline::format_gib(0) == L"0.0 GiB");
+    CHECK(telemetry_pipeline::format_gib(1) == L"0.0 GiB");
+    CHECK(telemetry_pipeline::format_gib(53'687'091) == L"0.0 GiB");
+    CHECK(telemetry_pipeline::format_gib(53'687'092) == L"0.1 GiB");
+    CHECK(telemetry_pipeline::format_gib((1ULL << 30) - 1) == L"1.0 GiB");
+    CHECK(telemetry_pipeline::format_gib(1ULL << 30) == L"1.0 GiB");
+    CHECK(telemetry_pipeline::format_gib((1ULL << 30) + 1) == L"1.0 GiB");
+    CHECK(telemetry_pipeline::format_gib(6ULL << 30) == L"6.0 GiB");
+    CHECK(telemetry_pipeline::format_gib(
+        std::numeric_limits<std::uint64_t>::max()) == L"17179869184.0 GiB");
+    std::locale::global(std::locale{std::locale::classic(), new CommaPunctuation{}});
+    CHECK(telemetry_pipeline::format_gib(53'687'092) == L"0,1 GiB");
+    CHECK(telemetry_pipeline::format_gib(6ULL << 30) == L"6,0 GiB");
+    CHECK(telemetry_pipeline::format_gib(
+        std::numeric_limits<std::uint64_t>::max()) == L"17179869184,0 GiB");
+    std::locale::global(saved_locale);
     return EXIT_SUCCESS;
 }

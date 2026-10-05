@@ -162,7 +162,6 @@ optimizer::AdaptivePolicy adaptive_policy_from(
     const config::Settings& settings) noexcept;
 Result<config::Settings> load_or_create_settings(
     const std::filesystem::path& path);
-std::wstring format_gib(std::uint64_t bytes);
 Result<bool> open_local_directory(const std::filesystem::path& path);
 std::optional<std::filesystem::path> choose_directory(
     HWND owner, std::wstring_view title);
