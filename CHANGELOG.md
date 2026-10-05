@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Remove the unused internal Adaptive profile recommendation; user settings,
+  real quality budgets, decisions and restoration remain unchanged.
 - Borrow constant telemetry limit-explanation labels instead of allocating
   identical strings; classifications, confidence and displayed text are unchanged.
 - Build Adaptive CPU workload, action, prediction and safety labels in owned
