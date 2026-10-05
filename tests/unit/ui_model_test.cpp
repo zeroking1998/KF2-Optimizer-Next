@@ -165,5 +165,39 @@ int main() {
     CHECK(model.status().advanced_values == before_flex.advanced_values);
     CHECK(model.status().update_status == before_flex.update_status);
     CHECK(model.presented_target_fps() == 119);
+    const auto* graphics_text = model.status().graphics_values[3].data();
+    model.set_telemetry_status(L"Confirmed telemetry", L"Confirmed analysis",
+        119.5, 8.25, 22.0, 44.0, 3, 9);
+    CHECK(model.status().telemetry == L"Confirmed telemetry");
+    CHECK(model.status().performance_analysis == L"Confirmed analysis");
+    CHECK(model.status().live_fps == 119.5);
+    CHECK(model.status().live_frame_time_ms == 8.25);
+    CHECK(model.status().live_cpu_percent == 22.0);
+    CHECK(model.status().live_gpu_percent == 44.0);
+    CHECK(model.status().live_active_corpses == 3);
+    CHECK(model.status().live_sleeping_corpses == 9);
+    const auto& live = model.status();
+    model.set_telemetry_status(live.telemetry, live.performance_analysis,
+        live.live_fps, live.live_frame_time_ms, live.live_cpu_percent,
+        live.live_gpu_percent, live.live_active_corpses, live.live_sleeping_corpses);
+    CHECK(model.status().telemetry == L"Confirmed telemetry");
+    CHECK(model.status().performance_analysis == L"Confirmed analysis");
+    CHECK(model.status().live_fps == 119.5);
+    model.set_telemetry_status(L"", L"", std::nullopt, std::nullopt,
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt);
+    CHECK(model.status().telemetry.empty());
+    CHECK(model.status().performance_analysis.empty());
+    CHECK(!model.status().live_fps);
+    CHECK(!model.status().live_frame_time_ms);
+    CHECK(!model.status().live_cpu_percent);
+    CHECK(!model.status().live_gpu_percent);
+    CHECK(!model.status().live_active_corpses);
+    CHECK(!model.status().live_sleeping_corpses);
+    CHECK(model.status().graphics_values[3].data() == graphics_text);
+    CHECK(model.status().graphics_values == before_flex.graphics_values);
+    CHECK(model.status().advanced_values == before_flex.advanced_values);
+    CHECK(model.status().adaptive_state == before_flex.adaptive_state);
+    CHECK(model.status().update_status == before_flex.update_status);
+    CHECK(model.presented_target_fps() == 119);
     return EXIT_SUCCESS;
 }

@@ -49,6 +49,7 @@
 #include "features/telemetry/telemetry_session_stage.hpp"
 #include "features/telemetry/telemetry_frame.hpp"
 #include "features/telemetry/telemetry_flex_stage.hpp"
+#include "features/telemetry/telemetry_presentation_stage.hpp"
 #include "../support/process_inspection_denial.hpp"
 
 #define CHECK(condition)                                                        \
@@ -117,6 +118,62 @@ void write_bytes(const std::filesystem::path& path, const std::string& bytes) {
     std::filesystem::create_directories(path.parent_path());
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     output << bytes;
+}
+
+int test_telemetry_status_publication() {
+    using namespace kf2;
+    const auto root = std::filesystem::path{KF2_TEST_ROOT} / L"telemetry-status-publication";
+    diagnostics::EventLog events{32};
+    app::UiRuntime runtime{root / L"Data", false, config::Settings{}, events,
+        std::nullopt, app::StartMode::read_only, root / L"portable"};
+    auto status = runtime.model.status();
+    status.graphics_values[0] = L"Unchanged user graphics selection";
+    status.advanced_values[0] = L"Unchanged advanced selection";
+    status.flex_telemetry = L"Unchanged FleX observation";
+    status.update_status = L"Unchanged update result";
+    status.adaptive_reason = L"Unchanged controller reason";
+    runtime.model.set_status(status);
+    runtime.model.preview_target_fps(119);
+    runtime.model.set_notice({ui::NoticeSeverity::warning, L"KEEP", L"Keep notice", L""});
+    const auto* graphics_text = runtime.model.status().graphics_values[0].data();
+    telemetry_pipeline::StatusProjection expected{
+        .telemetry = L"Confirmed telemetry observation",
+        .performance_analysis = L"Confirmed independent analysis",
+        .live_fps = 119.5, .live_frame_time_ms = 8.25,
+        .live_cpu_percent = 22.0, .live_gpu_percent = 44.0,
+        .live_active_corpses = 3, .live_sleeping_corpses = 9};
+    for (int field = -1; field < 16; ++field) {
+        const bool reset = field >= 8;
+        switch (field % 8) {
+            case 0: expected.telemetry = reset ? L"" : L"Changed telemetry observation"; break;
+            case 1: expected.performance_analysis = reset ? L"" : L"Changed independent analysis"; break;
+            case 2: expected.live_fps = reset ? std::nullopt : std::optional{0.0}; break;
+            case 3: expected.live_frame_time_ms = reset ? std::nullopt : std::optional{0.0}; break;
+            case 4: expected.live_cpu_percent = reset ? std::nullopt : std::optional{0.0}; break;
+            case 5: expected.live_gpu_percent = reset ? std::nullopt : std::optional{0.0}; break;
+            case 6: expected.live_active_corpses = reset ? std::nullopt : std::optional{0}; break;
+            case 7: expected.live_sleeping_corpses = reset ? std::nullopt : std::optional{0}; break;
+        }
+        telemetry_pipeline::publish_telemetry_presentation(runtime, {expected, std::nullopt});
+        const auto& actual = runtime.model.status();
+        CHECK(actual.telemetry == expected.telemetry);
+        CHECK(actual.performance_analysis == expected.performance_analysis);
+        CHECK(actual.live_fps == expected.live_fps);
+        CHECK(actual.live_frame_time_ms == expected.live_frame_time_ms);
+        CHECK(actual.live_cpu_percent == expected.live_cpu_percent);
+        CHECK(actual.live_gpu_percent == expected.live_gpu_percent);
+        CHECK(actual.live_active_corpses == expected.live_active_corpses);
+        CHECK(actual.live_sleeping_corpses == expected.live_sleeping_corpses);
+        CHECK(actual.graphics_values == status.graphics_values);
+        CHECK(actual.advanced_values == status.advanced_values);
+        CHECK(actual.flex_telemetry == status.flex_telemetry);
+        CHECK(actual.update_status == status.update_status);
+        CHECK(actual.adaptive_reason == status.adaptive_reason);
+        CHECK(actual.graphics_values[0].data() == graphics_text);
+        CHECK(runtime.model.presented_target_fps() == 119);
+        CHECK(runtime.model.notice() && runtime.model.notice()->code == L"KEEP");
+    }
+    return EXIT_SUCCESS;
 }
 
 int test_flex_report_boundaries() {
@@ -5369,6 +5426,7 @@ int main(int argc, char** argv) {
     } catch (const std::filesystem::filesystem_error&) {
         return EXIT_FAILURE;
     }
+    CHECK(test_telemetry_status_publication() == EXIT_SUCCESS);
     CHECK(test_flex_report_boundaries() == EXIT_SUCCESS);
     CHECK(test_pending_policy_restage_failure_rollback() == EXIT_SUCCESS);
     CHECK(test_flex_recovery_installation_owner() == EXIT_SUCCESS);
