@@ -173,20 +173,6 @@ AdaptiveStabilityState stability_state_for(
     return AdaptiveStabilityState::hold;
 }
 
-Profile profile_for(AdaptivePressure pressure,
-                    int quality_change_budget) noexcept {
-    switch (pressure) {
-        case AdaptivePressure::healthy: return Profile::stability;
-        case AdaptivePressure::warning:
-        case AdaptivePressure::intervention:
-            return quality_change_budget >= 2
-                ? Profile::high_performance : Profile::balanced;
-        case AdaptivePressure::emergency: return Profile::high_performance;
-        case AdaptivePressure::observing: return Profile::balanced;
-    }
-    return Profile::balanced;
-}
-
 std::string_view candidate_setting(AdaptiveBottleneck bottleneck) noexcept {
     switch (bottleneck) {
         case AdaptiveBottleneck::gpu: return "FarParticleLOD";
@@ -1113,8 +1099,6 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     decision.pressure = active_pressure_;
     decision.state = state_for(active_pressure_);
     decision.stability_state = stability_state_for(active_pressure_);
-    decision.recommended_profile = profile_for(
-        active_pressure_, policy.quality_change_budget);
     decision.quality_score = std::clamp(
         sample.quality_score.value_or(
             static_cast<double>(policy.maximum_quality)),

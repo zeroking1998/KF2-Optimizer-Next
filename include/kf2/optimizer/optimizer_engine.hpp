@@ -6,7 +6,6 @@
 
 namespace kf2::optimizer {
 
-enum class Profile { balanced, stability, high_performance, custom };
 enum class Bottleneck {
     unavailable,
     balanced,
