@@ -57,7 +57,7 @@ Bottleneck classify(const OptimizerInput& input) {
     return Bottleneck::balanced;
 }
 
-std::wstring bottleneck_reason(Bottleneck bottleneck) {
+std::wstring_view bottleneck_reason(Bottleneck bottleneck) {
     switch (bottleneck) {
         case Bottleneck::gpu: return L"Fresh telemetry indicates a GPU limit";
         case Bottleneck::cpu:

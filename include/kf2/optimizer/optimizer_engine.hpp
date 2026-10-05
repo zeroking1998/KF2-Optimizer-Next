@@ -2,7 +2,7 @@
 
 #include <cstdint>
 #include <optional>
-#include <string>
+#include <string_view>
 
 namespace kf2::optimizer {
 
@@ -54,7 +54,8 @@ struct OptimizerInput {
 struct OptimizerDecision {
     Bottleneck bottleneck{Bottleneck::unavailable};
     Confidence confidence{Confidence::unavailable};
-    std::wstring reason;
+    // evaluate() borrows immutable process-lifetime labels, never input storage.
+    std::wstring_view reason;
 };
 
 struct StartupMemoryProfile {
