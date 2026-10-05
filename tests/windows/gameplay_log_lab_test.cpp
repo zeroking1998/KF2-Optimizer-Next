@@ -3715,6 +3715,17 @@ int main() {
         idle_restore_start, idle_apply_start - idle_restore_start);
     const auto idle_apply = telemetry_source.substr(
         idle_apply_start, idle_apply_end - idle_apply_start);
+    // Without ownership, no world component can be eligible for restoration.
+    // Keep the common receipt and all nonempty restore-debt work unchanged.
+    CHECK(idle_restore.find(
+        "if (AdaptiveWorldParticleIdleStates.Length > 0)\n    {\n"
+        "        foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)") !=
+          std::string::npos);
+    CHECK(count_occurrences(idle_restore, "WorldInfo.AllActors(") == 1);
+    CHECK(idle_restore.find("bRestorePending = true;") <
+          idle_restore.find("ParticleComponent.SecondsBeforeInactive ="));
+    CHECK(idle_restore.find("reason=readback_mismatch") <
+          idle_restore.find("KF2OPT_WORLD_PARTICLE_IDLE state=restored"));
     const auto restore_owner_check = idle_restore.find(
         "AdaptiveWorldParticleIdleOwnerMatches(");
     const auto restore_write = idle_restore.find(
