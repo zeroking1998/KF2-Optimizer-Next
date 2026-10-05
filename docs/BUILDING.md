@@ -104,6 +104,8 @@ changing the destination, even when the app build is skipped. This keeps the
 shipped inventory current without a second contributor-owned build step.
 All entries in an existing package manifest are validated before cleanup starts;
 an unsafe entry preserves the existing files rather than leaving a partial package.
+Existing junctions or symbolic links in managed output paths or their ancestors
+are rejected before package changes, preventing writes through a redirected folder.
 Contributor packaging explicitly uses `-DevelopmentPackage` for local checks.
 This mode is not release-candidate approval.
 
