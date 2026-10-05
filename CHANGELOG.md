@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Reuse the current emitter-owner check within each particle-control iteration,
+  retaining discovery, identity verification, readbacks and restoration.
 - Build waiting or failed-telemetry text only for incomplete frame data, avoiding
   a discarded string while preserving exact values and optional-zero behavior.
 - Reuse the same GiB text formatter for hardware and telemetry displays,

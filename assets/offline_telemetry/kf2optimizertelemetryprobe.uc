@@ -899,6 +899,7 @@ function bool ApplyAdaptiveWorldParticleIdleControl(int Quality)
     local float DesiredSeconds;
     local float EffectiveSeconds;
     local bool bReadbackMatches;
+    local bool bOwnerMatches;
 
     if (Quality >= 100)
     {
@@ -917,8 +918,9 @@ function bool ApplyAdaptiveWorldParticleIdleControl(int Quality)
         }
         StateIndex = FindAdaptiveWorldParticleIdleState(
             PathName(ParticleComponent), NewStateIndex);
-        if (StateIndex != INDEX_NONE &&
-            AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter))
+        bOwnerMatches = StateIndex != INDEX_NONE &&
+            AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter);
+        if (bOwnerMatches)
         {
             AdaptiveWorldParticleIdleStates[StateIndex].LastSeenGeneration =
                 CurrentGeneration;
@@ -929,8 +931,7 @@ function bool ApplyAdaptiveWorldParticleIdleControl(int Quality)
         {
             continue;
         }
-        if (StateIndex == INDEX_NONE ||
-            !AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter))
+        if (!bOwnerMatches)
         {
             NewState.ComponentPath = PathName(ParticleComponent);
             NewState.OwnerCreationTime = WorldEmitter.CreationTime;
