@@ -832,34 +832,38 @@ function bool RestoreAdaptiveWorldParticleIdleControl()
     ++AdaptiveWorldParticleIdleScanGeneration;
     CurrentGeneration = AdaptiveWorldParticleIdleScanGeneration;
     bReadbackMatches = true;
-    foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
+    // An empty ownership array cannot match or restore any world component.
+    if (AdaptiveWorldParticleIdleStates.Length > 0)
     {
-        ParticleComponent = WorldEmitter.ParticleSystemComponent;
-        if (ParticleComponent == None)
+        foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
         {
-            continue;
+            ParticleComponent = WorldEmitter.ParticleSystemComponent;
+            if (ParticleComponent == None)
+            {
+                continue;
+            }
+            StateIndex = FindAdaptiveWorldParticleIdleState(
+                PathName(ParticleComponent), IgnoredInsertionIndex);
+            if (StateIndex == INDEX_NONE ||
+                !AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter))
+            {
+                continue;
+            }
+            AdaptiveWorldParticleIdleStates[StateIndex].LastSeenGeneration =
+                CurrentGeneration;
+            AdaptiveWorldParticleIdleStates[StateIndex].bRestorePending = true;
+            ParticleComponent.SecondsBeforeInactive =
+                AdaptiveWorldParticleIdleStates[StateIndex].OriginalSecondsBeforeInactive;
+            if (Abs(ParticleComponent.SecondsBeforeInactive -
+                    AdaptiveWorldParticleIdleStates[StateIndex].OriginalSecondsBeforeInactive) >=
+                0.001)
+            {
+                bReadbackMatches = false;
+                continue;
+            }
+            AdaptiveWorldParticleIdleStates[StateIndex].bRestorePending = false;
+            ++RestoredComponents;
         }
-        StateIndex = FindAdaptiveWorldParticleIdleState(
-            PathName(ParticleComponent), IgnoredInsertionIndex);
-        if (StateIndex == INDEX_NONE ||
-            !AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter))
-        {
-            continue;
-        }
-        AdaptiveWorldParticleIdleStates[StateIndex].LastSeenGeneration =
-            CurrentGeneration;
-        AdaptiveWorldParticleIdleStates[StateIndex].bRestorePending = true;
-        ParticleComponent.SecondsBeforeInactive =
-            AdaptiveWorldParticleIdleStates[StateIndex].OriginalSecondsBeforeInactive;
-        if (Abs(ParticleComponent.SecondsBeforeInactive -
-                AdaptiveWorldParticleIdleStates[StateIndex].OriginalSecondsBeforeInactive) >=
-            0.001)
-        {
-            bReadbackMatches = false;
-            continue;
-        }
-        AdaptiveWorldParticleIdleStates[StateIndex].bRestorePending = false;
-        ++RestoredComponents;
     }
     for (CleanupIndex = AdaptiveWorldParticleIdleStates.Length - 1;
          CleanupIndex >= 0; --CleanupIndex)

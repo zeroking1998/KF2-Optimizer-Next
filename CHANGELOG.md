@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Skip the full world-emitter restoration scan when no Optimizer-owned emitter
+  original values remain; nonempty restore and retry behavior is unchanged.
 - Reworked Adaptive into one protected, user-controlled runtime with separate
   CPU, GPU, VRAM, RAM, overdraw, effects, physics, LOD, and corpse-pressure
   paths. Confirmed pressure changes only its matching group, and stable
