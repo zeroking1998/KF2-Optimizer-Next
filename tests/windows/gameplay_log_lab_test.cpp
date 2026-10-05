@@ -581,6 +581,8 @@ int main() {
              "{\n    return AdaptiveBaselineSettleEntries.Find('Corpse', Candidate);\n}",
              "function int FindFixedMinimumCorpseLodEntry(KFPawn Candidate)\n"
              "{\n    return FixedMinimumCorpseLodCorpses.Find(Candidate);\n}",
+             "function int FindAdaptiveCorpseFreeze(KFPawn Candidate)\n"
+             "{\n    return AdaptiveFrozenCorpses.Find('Corpse', Candidate);\n}",
              "function int FindAdaptiveDistanceSleptCorpse(KFPawn Candidate)\n"
              "{\n    return AdaptiveDistanceSleptCorpses.Find('Corpse', Candidate);\n}"}) {
         CHECK(telemetry_source.find(expected) != std::string::npos);
