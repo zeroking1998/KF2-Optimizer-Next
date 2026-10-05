@@ -141,5 +141,20 @@ int main() {
     CHECK(contains(partial.performance_analysis, L"Measurement good"));
     CHECK(!contains(partial.telemetry, L"CPU 0.0%"));
     CHECK(!contains(partial.telemetry, L"GPU total 0.0%"));
+    CHECK(partial.performance_analysis ==
+          L"Measurement good | stutters 0 | lost events 0 | analysis: Stable "
+          L"| Adaptive: quality (Holding)");
+    missing.frames.fps = 0.0;
+    const auto zero = telemetry_pipeline::build_status_projection(
+        missing, L"", L"Stable", L"quality", L"Holding");
+    CHECK(zero.performance_analysis == partial.performance_analysis);
+    CHECK(zero.live_fps == 0.0 && !zero.live_frame_time_ms);
+    missing.frames.fps.reset();
+    missing.frames.frame_time_ms = 16.7;
+    const auto no_fps = telemetry_pipeline::build_status_projection(
+        missing, L"", L"Stable", L"quality", L"Holding");
+    CHECK(no_fps.performance_analysis ==
+          L"Performance analysis unavailable | Adaptive: quality (Holding)");
+    CHECK(!no_fps.live_fps && no_fps.live_frame_time_ms == 16.7);
     return EXIT_SUCCESS;
 }
