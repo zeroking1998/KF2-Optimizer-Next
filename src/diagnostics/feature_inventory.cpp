@@ -50,7 +50,7 @@ constexpr std::array area01_items{
     ItemSpec{FeatureStatus::present, "single-instance protection", "A named mutex and second-launch test enforce one instance."},
     ItemSpec{FeatureStatus::present, "UAC and permissions", "The embedded manifest requests asInvoker and uiAccess=false; no elevation is attempted."},
     ItemSpec{FeatureStatus::present, "path, package, and build validation", "Canonical paths, embedded build identity, PE contract and package validation are active."},
-    ItemSpec{FeatureStatus::present, "installation, repair, update, and migration", "The portable package replaces only manifest-owned program files, preserves settings, logs, backups and profiles byte-for-byte, and verifies fifteen managed payload hashes. A missing or damaged component is reported for repair without disabling unrelated controls. Auto Repair downloads only the exact installed GitHub release for companion-file recovery. The consent-only updater separately checks newer published versions, verifies repository, asset name, size, SHA-256, build and package identity, then uses a temporary helper for backup, atomic replacement, restart acknowledgement, rollback and cleanup. A verified local package remains the offline repair fallback."},
+    ItemSpec{FeatureStatus::present, "installation, repair, update, and migration", "The portable package replaces only manifest-owned program files, preserves settings, logs, backups and profiles byte-for-byte, and checks all manifest-listed payload hashes. A missing or damaged component is reported for repair without disabling unrelated controls. Auto Repair downloads only the exact installed GitHub release for companion-file recovery. The consent-only updater separately checks newer published versions, verifies repository, asset name, size, SHA-256, build and package identity, then uses a temporary helper for backup, atomic replacement, restart acknowledgement, rollback and cleanup. A verified local package remains the offline repair fallback."},
     ItemSpec{FeatureStatus::present, "launching KF2", "Only the verified Steam/KF2 executable is launched."},
     ItemSpec{FeatureStatus::present, "shutdown, removal, and restoration", "Clean app stop and verified restore exist; portable removal needs no uninstaller, and the app deliberately never force-stops KF2."},
     ItemSpec{FeatureStatus::present, "crash, cancellation, restart, and recovery paths", "Unclean sessions and interrupted config/backup/FleX operations recover; privacy-bounded local crash records identify the failing build and exception without dumps or user content."},
@@ -82,7 +82,7 @@ constexpr std::array area02_items{
 };
 
 constexpr AreaContract area03{
-    "Configuration and tweaks", "src/config; src/backup", "Three verified KF2 INIs and a strict 213-setting catalog",
+    "Configuration and tweaks", "src/config; src/backup", "Three verified KF2 INIs and a strict verified settings catalog",
     "A shipped config/B tests", "Only allowlisted keys and ranges may enter preview, import, apply, backup or restore.",
     "Reversible tuning without corrupting unrelated settings.",
     "KF2 updates may change keys; missing, unknown or foreign data fails closed.",
@@ -238,7 +238,7 @@ constexpr AreaContract area10{
     "Aggressive values visibly reduce cosmetics, so Exact/Invisible never change them.",
     "Performance Adaptive profiles and verified setting catalog.", "Automatic protected launch, preview, backup, session capture and full restore.",
     "KF2 configuration.", "Bounds, profile difference, visual comparison and restore tests.",
-    "213-setting catalog tests; optimizer tests; copied-config roundtrip; target gameplay evidence"};
+    "Verified settings catalog tests; optimizer tests; copied-config roundtrip; target gameplay evidence"};
 
 constexpr std::array area10_items{
     ItemSpec{FeatureStatus::present, "blood, wound, floor, and wall decals", "Verified controls plus separate active wound, splatter, pool, impact and explosion decal-manager counts are present."},
@@ -393,7 +393,7 @@ constexpr AreaContract area17{
     "Clean repeatable development and portable delivery.",
     "Publishing, signing, merge, tag and release require explicit user authority.",
     "Development/release process, not a runtime mode.", "Rebuild package while preserving user Data; hashes verify output.",
-    "MSVC x64, Windows SDK, CMake, PowerShell and self-hosted Windows runners.",
+    "MSVC x64, Windows SDK, CMake, PowerShell, GitHub-hosted Windows CI and local desktop/SDK checks.",
     "Full Debug/Release, clean double build, PE/import/package/GUI validation.",
     "tools scripts and workflows; current run evidence generated separately"};
 
@@ -403,7 +403,7 @@ constexpr std::array area17_items{
     ItemSpec{FeatureStatus::present, "PE, import, export, manifest, and protection-flag validation", "PE architecture, manifest, mitigations, imports and FleX exports are validated."},
     ItemSpec{FeatureStatus::partial, "source, release, audit, and recovery packages", "The clean source and portable release plus evidence exist; no redundant historical audit package is required."},
     ItemSpec{FeatureStatus::present, "SHA-256, SBOM, and provenance evidence", "Release evidence generates hashes, SBOM and build/commit metadata."},
-    ItemSpec{FeatureStatus::partial, "CI, Runner 7, workflows, artifacts, and cleanup", "Permanent build/GUI workflows exist on current self-hosted labels; external runner availability is not locally provable."},
+    ItemSpec{FeatureStatus::partial, "CI, workflows, artifacts, and cleanup", "The GitHub-hosted Windows workflow runs Debug/Release validation and uploads a developer executable. Desktop checks and complete portable/SDK packages are separate local validations; CI does not establish gameplay acceptance."},
     ItemSpec{FeatureStatus::partial, "branches, pull requests, issues, labels, and release chain", "Issue/branch flow exists; PR/merge/tag/release are intentionally not performed without authority."},
     ItemSpec{FeatureStatus::present, "no merges, tags, or releases without explicit approval", "Enforced collaboration boundary."},
 };

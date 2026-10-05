@@ -73,6 +73,29 @@ int main() {
         CHECK(record.decision == "PRESENT" || record.decision == "OBSERVE" ||
               record.decision == "LAB" || record.decision == "DISCARD" ||
               record.decision == "IMPLEMENTATION_READY");
+        if (record.id == "I72-A01-F05") {
+            CHECK(record.technical_statement.find(
+                "checks all manifest-listed payload hashes") != std::string::npos);
+        }
+        if (record.id == "I72-A03-F01") {
+            CHECK(record.data_source ==
+                "Three verified KF2 INIs and a strict verified settings catalog");
+        }
+        if (record.id == "I72-A10-F01") {
+            CHECK(record.evidence ==
+                "Verified settings catalog tests; optimizer tests; copied-config "
+                "roundtrip; target gameplay evidence");
+        }
+        if (record.id == "I72-A17-F06") {
+            CHECK(record.name.find("CI, workflows, artifacts, and cleanup") !=
+                  std::string::npos);
+            CHECK(record.dependencies.find("GitHub-hosted Windows CI") !=
+                  std::string::npos);
+            CHECK(record.technical_statement.find(
+                "Desktop checks and complete portable/SDK packages are separate "
+                "local validations; CI does not establish gameplay acceptance.") !=
+                  std::string::npos);
+        }
       }
     }
     const auto json = serialize_feature_inventory_json("test+abc", records);
