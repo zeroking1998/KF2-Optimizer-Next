@@ -99,25 +99,14 @@ int main() {
     const auto frame = complete_frame();
     const auto projection = telemetry_pipeline::build_status_projection(
         frame, L"", L"GPU limited", L"balanced", L"Stable evidence");
-    CHECK(contains(projection.telemetry, L"61.5 FPS, 16.3 ms"));
-    CHECK(contains(projection.telemetry, L"CPU 24.0%"));
-    CHECK(contains(projection.telemetry, L"critical thread 82.0%"));
-    CHECK(contains(projection.telemetry, L"3.25 cores"));
-    CHECK(contains(projection.telemetry, L"7 active threads"));
-    CHECK(contains(projection.telemetry, L"affinity 8C/16T"));
-    CHECK(contains(projection.telemetry, L"RAM 4.0 GiB"));
-    CHECK(contains(projection.telemetry, L"VRAM 6.0 GiB"));
-    CHECK(contains(projection.telemetry, L"GPU total 36.00%"));
-    CHECK(contains(projection.telemetry, L"system RAM 75%"));
-    CHECK(contains(projection.telemetry, L"FleX 4 steps"));
-    CHECK(contains(projection.performance_analysis, L"Measurement degraded"));
-    CHECK(contains(projection.performance_analysis, L"p95 18.5 ms"));
-    CHECK(contains(projection.performance_analysis, L"p99 22.0 ms"));
-    CHECK(contains(projection.performance_analysis, L"stutters 3"));
-    CHECK(contains(projection.performance_analysis, L"lost events 2"));
-    CHECK(contains(projection.performance_analysis, L"analysis: GPU limited"));
-    CHECK(contains(projection.performance_analysis,
-                   L"Adaptive: balanced (Stable evidence)"));
+    CHECK(projection.telemetry ==
+          L"61.5 FPS, 16.3 ms, CPU 24.0% (critical thread 82.0%), 3.25 cores"
+          L" / 7 active threads, affinity 8C/16T, RAM 4.0 GiB, VRAM 6.0 GiB,"
+          L" GPU total 36.00%, system RAM 75%, FleX 4 steps");
+    CHECK(projection.performance_analysis ==
+          L"Measurement degraded | p95 18.5 ms | p99 22.0 ms | stutters 3"
+          L" | lost events 2 | analysis: GPU limited"
+          L" | Adaptive: balanced (Stable evidence)");
     CHECK(projection.live_fps == frame.frames.fps);
     CHECK(projection.live_frame_time_ms == frame.frames.frame_time_ms);
     CHECK(projection.live_cpu_percent == frame.evidence.cpu_percent);
@@ -183,6 +172,23 @@ int main() {
           L"Performance analysis unavailable | Adaptive: quality (Holding)");
     CHECK(!no_fps.live_fps && no_fps.live_frame_time_ms == 16.7);
     const auto saved_locale = std::locale::global(std::locale::classic());
+    const std::wstring prefix =
+        L"Measurement unavailable | stutters 0 | lost events 0 | analysis: ";
+    const std::wstring suffix = L" | Adaptive: User settings (Holding)";
+    for (const std::size_t length : {127U, 128U, 129U, 255U, 256U, 257U,
+                                   511U, 512U, 513U, 4096U}) {
+        std::wstring reason(length - prefix.size() - suffix.size(), L'r');
+        reason.replace(1, 3, L"\0\u00e4\u03a9", 3);
+        const auto expected = prefix + reason + suffix;
+        telemetry_pipeline::TelemetryFrame boundary;
+        boundary.frames.fps = 60.0;
+        boundary.frames.frame_time_ms = 16.3;
+        const auto actual = telemetry_pipeline::build_status_projection(
+            boundary, L"", reason, L"User settings", L"Holding");
+        reason.assign(L"changed after projection");
+        CHECK(actual.telemetry == L"60.0 FPS, 16.3 ms");
+        CHECK(actual.performance_analysis == expected);
+    }
     CHECK(telemetry_pipeline::format_gib(0) == L"0.0 GiB");
     CHECK(telemetry_pipeline::format_gib(1) == L"0.0 GiB");
     CHECK(telemetry_pipeline::format_gib(53'687'091) == L"0.0 GiB");
@@ -194,6 +200,16 @@ int main() {
     CHECK(telemetry_pipeline::format_gib(
         std::numeric_limits<std::uint64_t>::max()) == L"17179869184.0 GiB");
     std::locale::global(std::locale{std::locale::classic(), new CommaPunctuation{}});
+    const auto comma_projection = telemetry_pipeline::build_status_projection(
+        frame, L"", L"GPU limited", L"balanced", L"Stable evidence");
+    CHECK(comma_projection.telemetry ==
+          L"61,5 FPS, 16,3 ms, CPU 24,0% (critical thread 82,0%), 3,25 cores"
+          L" / 7 active threads, affinity 8C/16T, RAM 4,0 GiB, VRAM 6,0 GiB,"
+          L" GPU total 36,00%, system RAM 75%, FleX 4 steps");
+    CHECK(comma_projection.performance_analysis ==
+          L"Measurement degraded | p95 18,5 ms | p99 22,0 ms | stutters 3"
+          L" | lost events 2 | analysis: GPU limited"
+          L" | Adaptive: balanced (Stable evidence)");
     CHECK(telemetry_pipeline::format_gib(53'687'092) == L"0,1 GiB");
     CHECK(telemetry_pipeline::format_gib(6ULL << 30) == L"6,0 GiB");
     CHECK(telemetry_pipeline::format_gib(
