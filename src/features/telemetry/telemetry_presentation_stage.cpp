@@ -212,9 +212,7 @@ void publish_telemetry_presentation(
         L" miss, window checks " +
         std::to_wstring(runtime.overlay_diagnostic_coverage_checks);
     if (runtime.model.status().overlay_diagnostics != summary) {
-        auto status = runtime.model.status();
-        status.overlay_diagnostics = std::move(summary);
-        runtime.model.set_status(std::move(status));
+        runtime.model.set_overlay_diagnostics(std::move(summary));
         runtime.invalidate();
     }
 }

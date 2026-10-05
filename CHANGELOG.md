@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Publish optional overlay diagnostic text without copying unrelated UI,
+  graphics or Adaptive state; diagnostic timing and displayed text are unchanged.
 - Escape shared JSON string contents directly into the returned owned string,
   avoiding stream/buffer-copy work while preserving exact serialized bytes.
 - Remove the unused internal Adaptive profile recommendation; user settings,

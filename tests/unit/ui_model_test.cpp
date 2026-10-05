@@ -121,6 +121,33 @@ int main() {
         CHECK(adaptive_model.presented_target_fps() == 125);
         CHECK(adaptive_model.selected() == Destination::debug);
         CHECK(adaptive_model.notice() && adaptive_model.notice()->code == L"UNCHANGED");
+        static_assert(noexcept(std::declval<UiModel&>().set_overlay_diagnostics(
+            std::declval<std::wstring>())));
+        const auto* adaptive_reason_text =
+            adaptive_model.status().adaptive_reason.data();
+        std::wstring overlay_text = L"Current owned overlay diagnostic summary";
+        adaptive_model.set_overlay_diagnostics(overlay_text);
+        overlay_text[0] = L'X';
+        CHECK(adaptive_model.status().overlay_diagnostics ==
+              L"Current owned overlay diagnostic summary");
+        adaptive_model.set_overlay_diagnostics(
+            adaptive_model.status().overlay_diagnostics);
+        CHECK(adaptive_model.status().overlay_diagnostics ==
+              L"Current owned overlay diagnostic summary");
+        adaptive_model.set_overlay_diagnostics(L"");
+        CHECK(adaptive_model.status().overlay_diagnostics.empty());
+        CHECK(matches(AdaptiveUiStatus{}));
+        CHECK(adaptive_model.status().graphics_values == unrelated.graphics_values);
+        CHECK(adaptive_model.status().advanced_values == unrelated.advanced_values);
+        CHECK(adaptive_model.status().flex_telemetry == unrelated.flex_telemetry);
+        CHECK(adaptive_model.status().telemetry == unrelated.telemetry);
+        CHECK(adaptive_model.status().prewarm_map == unrelated.prewarm_map);
+        CHECK(adaptive_model.status().graphics_values[0].data() == graphics_text);
+        CHECK(adaptive_model.status().update_status.data() == update_text);
+        CHECK(adaptive_model.status().adaptive_reason.data() == adaptive_reason_text);
+        CHECK(adaptive_model.presented_target_fps() == 125);
+        CHECK(adaptive_model.selected() == Destination::debug);
+        CHECK(adaptive_model.notice() && adaptive_model.notice()->code == L"UNCHANGED");
     }
     UiModel model;
     CHECK(model.selected() == Destination::dashboard);

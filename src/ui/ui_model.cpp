@@ -140,6 +140,9 @@ void UiModel::set_flex_observation_status(
 void UiModel::set_flex_capability(std::wstring capability) noexcept {
     status_.flex_capability = std::move(capability);
 }
+void UiModel::set_overlay_diagnostics(std::wstring diagnostics) noexcept {
+    status_.overlay_diagnostics = std::move(diagnostics);
+}
 void UiModel::set_notice(Notice notice) { notice_ = std::move(notice); }
 void UiModel::clear_notice() noexcept { notice_.reset(); }
 const std::wstring& UiModel::state_path() const noexcept { return state_path_; }
