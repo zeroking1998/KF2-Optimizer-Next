@@ -6513,6 +6513,49 @@ int main(int argc, char** argv) {
         CHECK(runtime.model.status().adaptive_corpse_capability == L"AVAILABLE");
         CHECK(runtime.model.status().adaptive_runtime_corpse_limit == 1500);
         CHECK(unrelated_status_unchanged());
+
+        frame.evidence.cpu_percent = 4.6875;
+        frame.evidence.effective_core_usage = 1.5;
+        frame.evidence.critical_core_percent = 90.0;
+        frame.evidence.dominant_thread_share_percent = 60.0;
+        frame.evidence.active_cpu_threads = 4;
+        frame.evidence.affinity_physical_cores = 8;
+        frame.evidence.affinity_logical_processors = 16;
+        frame.evidence.system_logical_processors = 32;
+        ++frame.observed_at_ns;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.adaptive_decision.cpu.workload ==
+              kf2::optimizer::AdaptiveCpuWorkload::main_thread_dominant);
+        CHECK(runtime.model.status().adaptive_cpu_parallelism ==
+              L"main-thread dominant | 1.50 core equivalents | 4 active threads"
+              L" | main 90.0% / 60.0% CPU-time share | affinity 8C/16T (subset)");
+
+        // Present zero values still have units; absent values have no suffix.
+        frame.evidence.cpu_percent = 0.0;
+        frame.evidence.effective_core_usage = 0.0;
+        frame.evidence.critical_core_percent = 0.0;
+        frame.evidence.dominant_thread_share_percent = 0.0;
+        frame.evidence.active_cpu_threads = 0;
+        frame.evidence.affinity_physical_cores = 0;
+        frame.evidence.affinity_logical_processors.reset();
+        frame.evidence.system_logical_processors.reset();
+        ++frame.observed_at_ns;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.model.status().adaptive_cpu_parallelism ==
+              L"idle/frame-limited | 0.00 core equivalents | 0 active threads"
+              L" | main 0.0% / 0.0% CPU-time share | affinity 0C/0T");
+
+        frame.evidence = {};
+        frame.evidence.affinity_logical_processors = 16;
+        ++frame.observed_at_ns;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.model.status().adaptive_cpu_parallelism ==
+              L"unknown | affinity 16T");
+        frame.evidence = {};
+        ++frame.observed_at_ns;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.model.status().adaptive_cpu_parallelism == L"unknown");
+        CHECK(unrelated_status_unchanged());
         runtime.game_process.reset();
     }
 

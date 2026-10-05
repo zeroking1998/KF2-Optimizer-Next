@@ -2,6 +2,9 @@
 
 #include "app/application_runtime.hpp"
 
+#include <format>
+#include <iterator>
+
 namespace kf2::app {
 void UiRuntime::update_adaptive_controller(
     const telemetry_pipeline::TelemetryFrame& frame) {
@@ -537,41 +540,37 @@ void UiRuntime::update_adaptive_controller(
     if (status.adaptive_bottleneck != bottleneck_label)
         status.adaptive_bottleneck = bottleneck_label;
     {
-        std::wostringstream cpu;
-        cpu << optimizer::adaptive_cpu_workload_name(
-            adaptive_decision.cpu.workload);
-        if (adaptive_decision.cpu.effective_core_usage) {
-            cpu << L" | " << std::fixed << std::setprecision(2)
-                << *adaptive_decision.cpu.effective_core_usage
-                << L" core equivalents";
+        auto& cpu = status.adaptive_cpu_parallelism;
+        const auto& report = adaptive_decision.cpu;
+        cpu = optimizer::adaptive_cpu_workload_name(report.workload);
+        if (report.effective_core_usage) {
+            std::format_to(std::back_inserter(cpu),
+                L" | {:.2f} core equivalents", *report.effective_core_usage);
         }
-        if (adaptive_decision.cpu.active_threads) {
-            cpu << L" | " << *adaptive_decision.cpu.active_threads
-                << L" active threads";
+        if (report.active_threads) {
+            std::format_to(std::back_inserter(cpu),
+                L" | {} active threads", *report.active_threads);
         }
-        if (adaptive_decision.cpu.critical_thread_percent) {
-            cpu << L" | main " << std::fixed << std::setprecision(1)
-                << *adaptive_decision.cpu.critical_thread_percent << L"%";
+        if (report.critical_thread_percent) {
+            std::format_to(std::back_inserter(cpu),
+                L" | main {:.1f}%", *report.critical_thread_percent);
         }
-        if (adaptive_decision.cpu.dominant_thread_share_percent) {
-            cpu << L" / " << std::fixed << std::setprecision(1)
-                << *adaptive_decision.cpu.dominant_thread_share_percent
-                << L"% CPU-time share";
+        if (report.dominant_thread_share_percent) {
+            std::format_to(std::back_inserter(cpu),
+                L" / {:.1f}% CPU-time share", *report.dominant_thread_share_percent);
         }
-        if (adaptive_decision.cpu.affinity_physical_cores ||
-            adaptive_decision.cpu.affinity_logical_processors) {
-            cpu << L" | affinity ";
-            if (adaptive_decision.cpu.affinity_physical_cores) {
-                cpu << *adaptive_decision.cpu.affinity_physical_cores
-                    << L"C/";
+        if (report.affinity_physical_cores || report.affinity_logical_processors) {
+            cpu += L" | affinity ";
+            if (report.affinity_physical_cores) {
+                std::format_to(std::back_inserter(cpu),
+                    L"{}C/", *report.affinity_physical_cores);
             }
-            cpu << adaptive_decision.cpu.affinity_logical_processors
-                       .value_or(0) << L"T";
-            if (adaptive_decision.cpu.affinity_limited) {
-                cpu << L" (subset)";
+            std::format_to(std::back_inserter(cpu),
+                L"{}T", report.affinity_logical_processors.value_or(0));
+            if (report.affinity_limited) {
+                cpu += L" (subset)";
             }
         }
-        status.adaptive_cpu_parallelism = cpu.str();
     }
     if (adaptive_decision.selected_setting.empty()) {
         const auto disposition_label = optimizer::adaptive_disposition_name(

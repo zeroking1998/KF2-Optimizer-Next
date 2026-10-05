@@ -174,6 +174,8 @@ if(NOT adaptive_reason_assignment_count EQUAL 1)
 endif()
 reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
     "Adaptive reason reuse" "widen(adaptive_decision.reason)")
+reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
+    "Adaptive CPU display" "std::wostringstream cpu")
 reject_literals("${stage_root}/telemetry_presentation_stage.cpp"
     "Presentation stage"
     "DxgiFrameTimingSession"
