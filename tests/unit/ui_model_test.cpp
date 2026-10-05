@@ -115,5 +115,55 @@ int main() {
     CHECK(model.notice().has_value());
     model.clear_notice();
     CHECK(!model.notice().has_value());
+
+    status.graphics_values[3] = L"Medium";
+    status.advanced_values[4] = L"Observed advanced setting";
+    status.update_status = L"Update check completed";
+    status.adaptive_state = L"evaluating";
+    model.set_status(status);
+    model.preview_target_fps(119);
+    model.set_notice({NoticeSeverity::warning, L"UNCHANGED", L"Keep this notice", L""});
+    const auto before_flex = model.status();
+    model.set_flex_observation_status(L"Current FleX observation", 3, 1,
+        L"APPLIED", L"Current substep counters", L"Current readback counters");
+    CHECK(model.status().flex_telemetry == L"Current FleX observation");
+    CHECK(model.status().flex_requested_substeps == 3);
+    CHECK(model.status().flex_effective_substeps == 1);
+    CHECK(model.status().flex_action_status == L"APPLIED");
+    CHECK(model.status().flex_substep_diagnostics == L"Current substep counters");
+    CHECK(model.status().flex_readback_diagnostics == L"Current readback counters");
+    CHECK(model.status().mode == before_flex.mode);
+    CHECK(model.status().telemetry == before_flex.telemetry);
+    CHECK(model.status().target_fps == before_flex.target_fps);
+    CHECK(model.status().corpse_limit == before_flex.corpse_limit);
+    CHECK(model.status().graphics_values == before_flex.graphics_values);
+    CHECK(model.status().advanced_values == before_flex.advanced_values);
+    CHECK(model.status().update_status == before_flex.update_status);
+    CHECK(model.status().adaptive_state == before_flex.adaptive_state);
+    CHECK(model.presented_target_fps() == 119);
+    CHECK(model.selected() == Destination::advanced);
+    CHECK(model.notice() && model.notice()->code == L"UNCHANGED");
+    const auto& observed = model.status();
+    model.set_flex_observation_status(observed.flex_telemetry,
+        observed.flex_requested_substeps, observed.flex_effective_substeps,
+        observed.flex_action_status, observed.flex_substep_diagnostics,
+        observed.flex_readback_diagnostics);
+    CHECK(model.status().flex_telemetry == L"Current FleX observation");
+    CHECK(model.status().flex_requested_substeps == 3);
+    CHECK(model.status().flex_effective_substeps == 1);
+    CHECK(model.status().flex_action_status == L"APPLIED");
+    CHECK(model.status().flex_substep_diagnostics == L"Current substep counters");
+    CHECK(model.status().flex_readback_diagnostics == L"Current readback counters");
+    model.set_flex_observation_status(L"", std::nullopt, std::nullopt, L"", L"", L"");
+    CHECK(model.status().flex_telemetry.empty());
+    CHECK(!model.status().flex_requested_substeps);
+    CHECK(!model.status().flex_effective_substeps);
+    CHECK(model.status().flex_action_status.empty());
+    CHECK(model.status().flex_substep_diagnostics.empty());
+    CHECK(model.status().flex_readback_diagnostics.empty());
+    CHECK(model.status().graphics_values == before_flex.graphics_values);
+    CHECK(model.status().advanced_values == before_flex.advanced_values);
+    CHECK(model.status().update_status == before_flex.update_status);
+    CHECK(model.presented_target_fps() == 119);
     return EXIT_SUCCESS;
 }

@@ -105,6 +105,19 @@ void UiModel::set_recovery_required(bool required) noexcept {
     recovery_required_ = required;
 }
 void UiModel::set_status(UiStatus status) { status_ = std::move(status); }
+void UiModel::set_flex_observation_status(
+    std::wstring telemetry, std::optional<int> requested_substeps,
+    std::optional<int> effective_substeps, std::wstring action_status,
+    std::wstring substep_diagnostics, std::wstring readback_diagnostics) noexcept {
+    // Owning arguments are prepared before entry; no allocation occurs while
+    // committing these fields, and unrelated status is left untouched.
+    status_.flex_telemetry = std::move(telemetry);
+    status_.flex_requested_substeps = requested_substeps;
+    status_.flex_effective_substeps = effective_substeps;
+    status_.flex_action_status = std::move(action_status);
+    status_.flex_substep_diagnostics = std::move(substep_diagnostics);
+    status_.flex_readback_diagnostics = std::move(readback_diagnostics);
+}
 void UiModel::set_notice(Notice notice) { notice_ = std::move(notice); }
 void UiModel::clear_notice() noexcept { notice_.reset(); }
 const std::wstring& UiModel::state_path() const noexcept { return state_path_; }

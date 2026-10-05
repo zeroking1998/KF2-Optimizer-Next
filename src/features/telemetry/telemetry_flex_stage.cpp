@@ -272,14 +272,9 @@ void UiRuntime::observe_flex_process() {
         current.flex_action_status != action_status ||
         current.flex_substep_diagnostics != substep_status ||
         current.flex_readback_diagnostics != readback_status) {
-        auto status = current;
-        status.flex_telemetry = flex_status;
-        status.flex_requested_substeps = requested;
-        status.flex_effective_substeps = applied;
-        status.flex_action_status = action_status;
-        status.flex_substep_diagnostics = substep_status;
-        status.flex_readback_diagnostics = readback_status;
-        model.set_status(std::move(status));
+        model.set_flex_observation_status(std::wstring{flex_status}, requested,
+            applied, action_status, std::wstring{substep_status},
+            std::wstring{readback_status});
         invalidate();
     }
     if (!flex_observation_announced) {
