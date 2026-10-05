@@ -133,6 +133,9 @@ are visible immediately.
 - Format changed FleX particle/capacity labels without temporary numeric-string
   chains, keeping unchanged labels borrowed and all displayed values current.
 
+- Update only the six FleX observation display fields when they change, avoiding
+  copies of unrelated graphics, settings and update status.
+
 - Update and Auto Repair now wait for synchronous Windows ZIP extraction to
   finish before checking or cleaning staged files; partial or aborted copies
   fail safely without a fixed-delay completion guess.

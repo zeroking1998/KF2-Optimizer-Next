@@ -174,6 +174,10 @@ public:
     void set_build_identity(std::wstring identity);
     void set_recovery_required(bool required) noexcept;
     void set_status(UiStatus status);
+    void set_flex_observation_status(
+        std::wstring telemetry, std::optional<int> requested_substeps,
+        std::optional<int> effective_substeps, std::wstring action_status,
+        std::wstring substep_diagnostics, std::wstring readback_diagnostics) noexcept;
     void set_notice(Notice notice);
     void clear_notice() noexcept;
 
