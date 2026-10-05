@@ -8,6 +8,22 @@ are visible immediately.
 
 ### What's new
 
+- Build waiting or failed-telemetry text only for incomplete frame data, avoiding
+  a discarded string while preserving exact values and optional-zero behavior.
+- Reuse the same GiB text formatter for hardware and telemetry displays,
+  removing duplicate code while preserving precision, locale and units.
+- Build unavailable-analysis text only when FPS is absent, avoiding discarded
+  temporary strings without changing the telemetry or Adaptive display.
+- Publish only changed prewarm display fields and avoid constructing unused
+  map diagnostic labels; worker behavior, budgets and progress rules are unchanged.
+- Publish optional overlay diagnostic text without copying unrelated UI,
+  graphics or Adaptive state; diagnostic timing and displayed text are unchanged.
+- Escape shared JSON string contents directly into the returned owned string,
+  avoiding stream/buffer-copy work while preserving exact serialized bytes.
+- Remove the unused internal Adaptive profile recommendation; user settings,
+  real quality budgets, decisions and restoration remain unchanged.
+- Borrow constant telemetry limit-explanation labels instead of allocating
+  identical strings; classifications, confidence and displayed text are unchanged.
 - Build Adaptive CPU workload, action, prediction and safety labels in owned
   buffers, avoiding temporary strings while preserving values, precision and units.
 - Reuse unchanged Adaptive reason, capability, source and evidence text instead

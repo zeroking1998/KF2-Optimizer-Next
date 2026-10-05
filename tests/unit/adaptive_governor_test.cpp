@@ -16,6 +16,13 @@ namespace {
 
 using namespace kf2::optimizer;
 
+template <typename T>
+concept HasLegacyProfileOutput = requires(T decision) {
+    decision.recommended_profile;
+};
+static_assert(!HasLegacyProfileOutput<AdaptiveDecision>,
+    "Adaptive decisions must not calculate unused profile output");
+
 bool near(double left, double right) {
     return std::abs(left - right) < 0.0001;
 }
@@ -171,8 +178,6 @@ int main() {
         start, 1'000'000'000ULL);
     CHECK(stronger_quality_decision.state ==
           AdaptiveControllerState::intervention);
-    CHECK(stronger_quality_decision.recommended_profile ==
-          Profile::high_performance);
 
     AdaptiveGovernor warning_governor;
     const auto warning = drive(
@@ -244,7 +249,6 @@ int main() {
         start, 4'400'000'000ULL);
     CHECK(persistent_low.state == AdaptiveControllerState::intervention);
     CHECK(persistent_low.current_frame_pressure);
-    CHECK(persistent_low.recommended_profile == Profile::high_performance);
 
     // Characterize the post-map sample that previously triggered a needless
     // 100 -> 80 quality cycle. The governor must still report its frame

@@ -26,7 +26,7 @@ TelemetryPresentation derive_telemetry_presentation(
     const auto& adaptive_status = runtime.model.status();
     result.status = build_status_projection(
         frame, runtime.telemetry_failure,
-        analysis ? std::wstring_view{analysis->reason} : std::wstring_view{},
+        analysis ? analysis->reason : std::wstring_view{},
         adaptive_status.recommended_profile,
         adaptive_status.recommendation_reason);
 
@@ -212,9 +212,7 @@ void publish_telemetry_presentation(
         L" miss, window checks " +
         std::to_wstring(runtime.overlay_diagnostic_coverage_checks);
     if (runtime.model.status().overlay_diagnostics != summary) {
-        auto status = runtime.model.status();
-        status.overlay_diagnostics = std::move(summary);
-        runtime.model.set_status(std::move(status));
+        runtime.model.set_overlay_diagnostics(std::move(summary));
         runtime.invalidate();
     }
 }

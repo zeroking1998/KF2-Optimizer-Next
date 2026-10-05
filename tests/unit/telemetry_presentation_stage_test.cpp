@@ -1,5 +1,7 @@
 #include <cstdlib>
 #include <iostream>
+#include <limits>
+#include <locale>
 #include <string>
 
 #include "features/telemetry/telemetry_presentation_stage.hpp"
@@ -14,6 +16,10 @@
     } while (false)
 
 namespace {
+
+struct CommaPunctuation final : std::numpunct<wchar_t> {
+    wchar_t do_decimal_point() const override { return L','; }
+};
 
 kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     using namespace kf2;
@@ -133,6 +139,26 @@ int main() {
     CHECK(!missing_projection.live_active_corpses);
     CHECK(!contains(missing_projection.telemetry, L"0.0"));
 
+    const std::wstring embedded_failure{L"source\0unavailable", 18};
+    for (const auto& failure : {std::wstring{}, std::wstring{L"Unavailable"},
+                               embedded_failure}) {
+        for (const bool fps_present : {false, true}) {
+            for (const bool time_present : {false, true}) {
+                telemetry_pipeline::TelemetryFrame boundary;
+                if (fps_present) boundary.frames.fps = 0.0;
+                if (time_present) boundary.frames.frame_time_ms = 0.0;
+                const auto actual = telemetry_pipeline::build_status_projection(
+                    boundary, failure, L"Stable", L"User settings", L"Holding");
+                const std::wstring expected = fps_present && time_present
+                    ? L"0.0 FPS, 0.0 ms"
+                    : failure.empty() ? L"Waiting for KF2 frame data" : failure;
+                CHECK(actual.telemetry == expected);
+                CHECK(actual.live_fps == boundary.frames.fps);
+                CHECK(actual.live_frame_time_ms == boundary.frames.frame_time_ms);
+            }
+        }
+    }
+
     missing.frames.fps = 60.0;
     missing.frames.quality = telemetry::SampleQuality::good;
     const auto partial = telemetry_pipeline::build_status_projection(
@@ -141,5 +167,37 @@ int main() {
     CHECK(contains(partial.performance_analysis, L"Measurement good"));
     CHECK(!contains(partial.telemetry, L"CPU 0.0%"));
     CHECK(!contains(partial.telemetry, L"GPU total 0.0%"));
+    CHECK(partial.performance_analysis ==
+          L"Measurement good | stutters 0 | lost events 0 | analysis: Stable "
+          L"| Adaptive: quality (Holding)");
+    missing.frames.fps = 0.0;
+    const auto zero = telemetry_pipeline::build_status_projection(
+        missing, L"", L"Stable", L"quality", L"Holding");
+    CHECK(zero.performance_analysis == partial.performance_analysis);
+    CHECK(zero.live_fps == 0.0 && !zero.live_frame_time_ms);
+    missing.frames.fps.reset();
+    missing.frames.frame_time_ms = 16.7;
+    const auto no_fps = telemetry_pipeline::build_status_projection(
+        missing, L"", L"Stable", L"quality", L"Holding");
+    CHECK(no_fps.performance_analysis ==
+          L"Performance analysis unavailable | Adaptive: quality (Holding)");
+    CHECK(!no_fps.live_fps && no_fps.live_frame_time_ms == 16.7);
+    const auto saved_locale = std::locale::global(std::locale::classic());
+    CHECK(telemetry_pipeline::format_gib(0) == L"0.0 GiB");
+    CHECK(telemetry_pipeline::format_gib(1) == L"0.0 GiB");
+    CHECK(telemetry_pipeline::format_gib(53'687'091) == L"0.0 GiB");
+    CHECK(telemetry_pipeline::format_gib(53'687'092) == L"0.1 GiB");
+    CHECK(telemetry_pipeline::format_gib((1ULL << 30) - 1) == L"1.0 GiB");
+    CHECK(telemetry_pipeline::format_gib(1ULL << 30) == L"1.0 GiB");
+    CHECK(telemetry_pipeline::format_gib((1ULL << 30) + 1) == L"1.0 GiB");
+    CHECK(telemetry_pipeline::format_gib(6ULL << 30) == L"6.0 GiB");
+    CHECK(telemetry_pipeline::format_gib(
+        std::numeric_limits<std::uint64_t>::max()) == L"17179869184.0 GiB");
+    std::locale::global(std::locale{std::locale::classic(), new CommaPunctuation{}});
+    CHECK(telemetry_pipeline::format_gib(53'687'092) == L"0,1 GiB");
+    CHECK(telemetry_pipeline::format_gib(6ULL << 30) == L"6,0 GiB");
+    CHECK(telemetry_pipeline::format_gib(
+        std::numeric_limits<std::uint64_t>::max()) == L"17179869184,0 GiB");
+    std::locale::global(saved_locale);
     return EXIT_SUCCESS;
 }
