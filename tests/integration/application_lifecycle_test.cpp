@@ -6429,7 +6429,7 @@ int main(int argc, char** argv) {
         stale_labels.adaptive_bottleneck = L"old bottleneck";
         stale_labels.adaptive_action = L"old action";
         stale_labels.adaptive_reason = L"old reason";
-        stale_labels.recommendation_reason = L"old recommendation";
+        stale_labels.recommendation_reason.assign(decision_reason.size(), L'?');
         runtime.model.set_adaptive_status(std::move(stale_labels));
         ++frame.observed_at_ns;
         runtime.update_adaptive_controller(frame);

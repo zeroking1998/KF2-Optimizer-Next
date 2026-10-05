@@ -151,13 +151,29 @@ foreach(label stability_label bottleneck_label disposition_label)
             "Adaptive constant labels must be compared before assigning owned text: ${label}")
     endif()
 endforeach()
-string(REGEX MATCHALL "widen\\(adaptive_decision\\.reason\\)"
-    adaptive_reason_conversions "${adaptive_controller_text}")
-list(LENGTH adaptive_reason_conversions adaptive_reason_conversion_count)
-if(NOT adaptive_reason_conversion_count EQUAL 1)
+string(REGEX MATCHALL
+    "assign_widened\\(status\\.recommendation_reason, adaptive_decision\\.reason\\)"
+    adaptive_reason_assignments "${adaptive_controller_text}")
+list(LENGTH adaptive_reason_assignments adaptive_reason_assignment_count)
+foreach(required_text_reuse
+        "if (!std::equal(value.begin(), value.end(), text.begin(), text.end(),"
+        "return static_cast<wchar_t>(source) == presented;"
+        "text.assign(value.begin(), value.end());"
+        "if (status.adaptive_reason != status.recommendation_reason)"
+        "status.adaptive_reason = status.recommendation_reason;")
+    string(FIND "${adaptive_controller_text}" "${required_text_reuse}"
+        text_reuse_required)
+    if(text_reuse_required EQUAL -1)
+        message(FATAL_ERROR
+            "Adaptive text reuse must compare exact content and retain shared reason text")
+    endif()
+endforeach()
+if(NOT adaptive_reason_assignment_count EQUAL 1)
     message(FATAL_ERROR
-        "Adaptive must convert the raw decision reason once and share its text between presentation fields")
+        "Adaptive must conditionally widen the raw reason once and share its text")
 endif()
+reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
+    "Adaptive reason reuse" "widen(adaptive_decision.reason)")
 reject_literals("${stage_root}/telemetry_presentation_stage.cpp"
     "Presentation stage"
     "DxgiFrameTimingSession"

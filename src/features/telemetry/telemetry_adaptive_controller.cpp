@@ -291,7 +291,15 @@ void UiRuntime::update_adaptive_controller(
     const auto widen = [](std::string_view value) {
         return std::wstring{value.begin(), value.end()};
     };
-    status.adaptive_particle_capability = widen(
+    const auto assign_widened = [](std::wstring& text, std::string_view value) {
+        if (!std::equal(value.begin(), value.end(), text.begin(), text.end(),
+                [](char source, wchar_t presented) {
+                    return static_cast<wchar_t>(source) == presented;
+                })) {
+            text.assign(value.begin(), value.end());
+        }
+    };
+    assign_widened(status.adaptive_particle_capability,
         optimizer::adaptive_capability_state_name(
             sample.capabilities.particle_control));
     if (sample.adaptive_corpse_runtime_limit &&
@@ -328,7 +336,7 @@ void UiRuntime::update_adaptive_controller(
     if (const auto* corpse_action = adaptive_actuation.current(
             optimizer::AdaptiveControlId::corpse_runtime_limit);
         corpse_state.state == CorpseTelemetryState::available && corpse_action) {
-        status.adaptive_corpse_action_status = widen(
+        assign_widened(status.adaptive_corpse_action_status,
             optimizer::adaptive_action_status_name(corpse_action->status));
     } else {
         status.adaptive_corpse_action_status = L"NONE";
@@ -575,8 +583,9 @@ void UiRuntime::update_adaptive_controller(
               std::wstring{optimizer::adaptive_disposition_name(
                   adaptive_decision.disposition)} + L")";
     }
-    status.recommendation_reason = widen(adaptive_decision.reason);
-    status.adaptive_reason = status.recommendation_reason;
+    assign_widened(status.recommendation_reason, adaptive_decision.reason);
+    if (status.adaptive_reason != status.recommendation_reason)
+        status.adaptive_reason = status.recommendation_reason;
     status.adaptive_confidence_percent = static_cast<int>(std::clamp(
         adaptive_decision.bottleneck.confidence * 100.0, 0.0, 100.0));
     status.adaptive_drop_risk_percent = static_cast<int>(std::clamp(
@@ -631,23 +640,23 @@ void UiRuntime::update_adaptive_controller(
                 optimizer::AdaptiveSessionClass::verified_offline
             ? L"VERIFIED_OFFLINE / EXACT_READBACK"
             : L"VERIFIED_ONLINE / LOCAL_GRAPHICS_ONLY / EXACT_READBACK";
-        status.adaptive_evidence = widen(
+        assign_widened(status.adaptive_evidence,
             optimizer::adaptive_action_status_name(runtime_record->status));
     } else if (adaptive_decision.selected_setting ==
         "AdaptiveCorpseRuntimeLimit") {
         status.adaptive_source = L"protected autonomous corpse provider";
         status.adaptive_safety = L"PROTECTED / AUTONOMOUS_RUNTIME";
-        status.adaptive_evidence = widen(
+        assign_widened(status.adaptive_evidence,
             optimizer::adaptive_capability_state_name(
                 sample.capabilities.corpse_control));
     } else if (selected_record) {
-        status.adaptive_source = widen(selected_record->source);
+        assign_widened(status.adaptive_source, selected_record->source);
         status.adaptive_safety = widen(
             optimizer::adaptive_safety_class_name(
                 selected_record->safety_class)) + L" / " + widen(
             optimizer::adaptive_actuation_class_name(
                 selected_record->actuation_class));
-        status.adaptive_evidence = widen(
+        assign_widened(status.adaptive_evidence,
             optimizer::adaptive_evidence_state_name(
                 selected_record->evidence_state));
     } else {

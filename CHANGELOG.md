@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Reuse unchanged Adaptive reason, capability, source and evidence text instead
+  of recreating temporary display strings; readback and restore policy is unchanged.
 - Publish Adaptive's own display fields without copying unrelated graphics,
   telemetry, FleX, prewarm and update status on every controller tick.
 - Simplify five corpse/Zed ownership lookups using KF2's native array search,
