@@ -8,8 +8,8 @@ are visible immediately.
 
 ### What's new
 
-- Format CPU workload details directly into Adaptive's owned display text,
-  avoiding fresh stream buffers while preserving values, precision and units.
+- Build Adaptive CPU workload, action, prediction and safety labels in owned
+  buffers, avoiding temporary strings while preserving values, precision and units.
 - Reuse unchanged Adaptive reason, capability, source and evidence text instead
   of recreating temporary display strings; readback and restore policy is unchanged.
 - Publish Adaptive's own display fields without copying unrelated graphics,

@@ -176,6 +176,11 @@ reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
     "Adaptive reason reuse" "widen(adaptive_decision.reason)")
 reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
     "Adaptive CPU display" "std::wostringstream cpu")
+reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
+    "Adaptive composite display"
+    "std::wostringstream prediction"
+    "status.adaptive_action = widen("
+    "status.adaptive_safety = widen(")
 reject_literals("${stage_root}/telemetry_presentation_stage.cpp"
     "Presentation stage"
     "DxgiFrameTimingSession"

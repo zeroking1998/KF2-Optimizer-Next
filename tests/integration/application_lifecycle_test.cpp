@@ -6555,6 +6555,21 @@ int main(int argc, char** argv) {
         ++frame.observed_at_ns;
         runtime.update_adaptive_controller(frame);
         CHECK(runtime.model.status().adaptive_cpu_parallelism == L"unknown");
+
+        frame.frames.quality = kf2::telemetry::SampleQuality::good;
+        frame.frames.reason = kf2::telemetry::UnavailableReason::none;
+        frame.frames.fps = frame.frames.average_fps = 60.0;
+        frame.frames.frame_time_ms = 1000.0 / 60.0;
+        frame.frames.p95_ms = frame.frames.p99_ms = frame.frames.frame_time_ms;
+        frame.frames.newest_present_ns = ++frame.observed_at_ns;
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.adaptive_decision.predicted_frame_time_ms.has_value());
+        CHECK(runtime.model.status().adaptive_prediction == L"16.67 ms (0%)");
+        frame.frames = {};
+        ++frame.observed_at_ns;
+        runtime.update_adaptive_controller(frame);
+        CHECK(!runtime.adaptive_decision.predicted_frame_time_ms);
+        CHECK(runtime.model.status().adaptive_prediction == L"not available");
         CHECK(unrelated_status_unchanged());
         runtime.game_process.reset();
     }
