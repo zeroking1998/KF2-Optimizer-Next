@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Transfer the completed package/support inventory JSON buffer without copying
+  the full document; its schema, contents and owning return value are unchanged.
 - Remove an unused internal FleX audit JSON exporter and its dedicated escape
   helper; active DLL verification, hook safety and diagnostic exports are unchanged.
 - Avoid completed-stream copies when displaying live UI metrics and the FPS

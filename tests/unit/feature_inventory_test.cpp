@@ -85,8 +85,27 @@ int main() {
           std::string::npos);
     const auto escaped = serialize_feature_inventory_json(
         "quote\"\\\nUnicode caf\xc3\xa9", {});
-    CHECK(escaped.find(
-        "\"build_identity\":\"quote\\\"\\\\\\nUnicode caf\xc3\xa9\"") !=
+    CHECK(escaped ==
+        "{\"schema\":\"KF2_ISSUE72_INVENTORY_V3\",\"build_identity\":"
+        "\"quote\\\"\\\\\\nUnicode caf\xc3\xa9\",\"issue\":72,\"function_count\":0,"
+        "\"status_counts\":{\"present\":0,\"partial\":0,\"planned\":0,"
+        "\"discarded\":0,\"implementation_ready\":0},"
+        "\"remaining_scope_counts\":{\"none\":0,\"external_validation\":0,"
+        "\"engine_contract\":0,\"safety_boundary\":0,\"user_authority\":0},"
+        "\"records\":[]}");
+    const auto owned = [&] {
+        auto record = records.back();
+        record.name.assign(4096, 'x');
+        record.name.append(std::string{"\0\"\\\n\x01", 5});
+        record.linkage = "Owned after source destruction";
+        return serialize_feature_inventory_json("growth", {&record, 1});
+    }();
+    const auto subsequent = serialize_feature_inventory_json("unrelated", {});
+    CHECK(subsequent.find("\"build_identity\":\"unrelated\"") !=
+          std::string::npos);
+    CHECK(owned.find("\"name\":\"" + std::string(4096, 'x') +
+        "\\u0000\\\"\\\\\\n\\u0001\"") != std::string::npos);
+    CHECK(owned.find("\"linkage\":\"Owned after source destruction\"") !=
           std::string::npos);
     return EXIT_SUCCESS;
 }

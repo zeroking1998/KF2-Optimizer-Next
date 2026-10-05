@@ -3,6 +3,7 @@
 #include <array>
 #include <iomanip>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 #include "kf2/core/json_escape.hpp"
@@ -686,7 +687,7 @@ std::string serialize_feature_inventory_json(
                << "\",\"linkage\":\"" << json_escape(record.linkage) << "\"}";
     }
     output << "]}";
-    return output.str();
+    return std::move(output).str();
 }
 
 }  // namespace kf2::diagnostics
