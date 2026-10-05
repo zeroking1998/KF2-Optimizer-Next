@@ -102,6 +102,8 @@ including with `-SkipBuild`; it cannot relabel an older executable as a new buil
 Packaging always incrementally builds the small inventory exporter before
 changing the destination, even when the app build is skipped. This keeps the
 shipped inventory current without a second contributor-owned build step.
+All entries in an existing package manifest are validated before cleanup starts;
+an unsafe entry preserves the existing files rather than leaving a partial package.
 Contributor packaging explicitly uses `-DevelopmentPackage` for local checks.
 This mode is not release-candidate approval.
 
