@@ -282,6 +282,7 @@ var float AdaptiveLastNearRagdollRejectRealTime;
 var array<string> AdaptiveCorpsePhysicsActionIds;
 var int AdaptiveCorpsePhysicsActionIdCount;
 var float AdaptiveLastPhysicsMutationWorldTime;
+var int AdaptiveCorpsePhysicsReleasePhase;
 var float AdaptiveLastDistancePhysicsRealTime;
 var float AdaptiveLastCorpseFreezeRealTime;
 var int AdaptiveCorpsePhysicsPressureLevel;
@@ -339,6 +340,7 @@ var int AdaptiveBaselinePruneCursor;
 var int AdaptiveFreezePruneCursor;
 var int AdaptiveDistancePruneCursor;
 var int AdaptiveDistanceWakeScanCursor;
+var int AdaptiveDistanceReleaseWakeCursor;
 var int FixedMinimumCorpseLodPruneCursor;
 // One same-world cursor bounds PawnList traversal without retaining a work
 // queue. It is cleared on disable, manager replacement and world teardown.
@@ -569,29 +571,6 @@ function bool RestoreSessionWorldRuntime()
     return true;
 }
 
-function bool RestoreSessionGraphics()
-{
-    local bool bGraphicsRestored;
-    local bool bEffectRuntimeRestored;
-
-    bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.
-        RestoreOriginal(AdaptiveGraphicsState);
-    bEffectRuntimeRestored = RestoreSessionWorldRuntime();
-    if (!bGraphicsRestored)
-    {
-        `log("KF2OPT_FIXED_EFFECT_BASELINE state=restore_failed"$
-             " boundary=session_end domain=graphics"$
-             " reason=readback_mismatch");
-    }
-    if (!bGraphicsRestored || !bEffectRuntimeRestored)
-    {
-        return false;
-    }
-    `log("KF2OPT_FIXED_EFFECT_BASELINE state=restored"$
-         " boundary=session_end readback=verified");
-    return true;
-}
-
 function bool ApplyAdaptiveResourceControl(
     string Token, int Sequence, string Resource, int Quality)
 {
@@ -639,8 +618,13 @@ function bool ApplyAdaptiveResourceControl(
         {
             return false;
         }
-        AdaptiveGraphicsQuality = Resource ~= "disable" ? 100 : Quality;
-        AdaptiveGraphicsResource = Resource;
+        // Enable carries a corpse ceiling, not a graphics-pressure receipt.
+        // Preserve genuine resource evidence until disable or a quality action.
+        if (Resource ~= "disable")
+        {
+            AdaptiveGraphicsQuality = 100;
+            AdaptiveGraphicsResource = Resource;
+        }
         AdaptiveLastControlSequence = Sequence;
         return true;
     }
@@ -848,34 +832,38 @@ function bool RestoreAdaptiveWorldParticleIdleControl()
     ++AdaptiveWorldParticleIdleScanGeneration;
     CurrentGeneration = AdaptiveWorldParticleIdleScanGeneration;
     bReadbackMatches = true;
-    foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
+    // An empty ownership array cannot match or restore any world component.
+    if (AdaptiveWorldParticleIdleStates.Length > 0)
     {
-        ParticleComponent = WorldEmitter.ParticleSystemComponent;
-        if (ParticleComponent == None)
+        foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
         {
-            continue;
+            ParticleComponent = WorldEmitter.ParticleSystemComponent;
+            if (ParticleComponent == None)
+            {
+                continue;
+            }
+            StateIndex = FindAdaptiveWorldParticleIdleState(
+                PathName(ParticleComponent), IgnoredInsertionIndex);
+            if (StateIndex == INDEX_NONE ||
+                !AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter))
+            {
+                continue;
+            }
+            AdaptiveWorldParticleIdleStates[StateIndex].LastSeenGeneration =
+                CurrentGeneration;
+            AdaptiveWorldParticleIdleStates[StateIndex].bRestorePending = true;
+            ParticleComponent.SecondsBeforeInactive =
+                AdaptiveWorldParticleIdleStates[StateIndex].OriginalSecondsBeforeInactive;
+            if (Abs(ParticleComponent.SecondsBeforeInactive -
+                    AdaptiveWorldParticleIdleStates[StateIndex].OriginalSecondsBeforeInactive) >=
+                0.001)
+            {
+                bReadbackMatches = false;
+                continue;
+            }
+            AdaptiveWorldParticleIdleStates[StateIndex].bRestorePending = false;
+            ++RestoredComponents;
         }
-        StateIndex = FindAdaptiveWorldParticleIdleState(
-            PathName(ParticleComponent), IgnoredInsertionIndex);
-        if (StateIndex == INDEX_NONE ||
-            !AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter))
-        {
-            continue;
-        }
-        AdaptiveWorldParticleIdleStates[StateIndex].LastSeenGeneration =
-            CurrentGeneration;
-        AdaptiveWorldParticleIdleStates[StateIndex].bRestorePending = true;
-        ParticleComponent.SecondsBeforeInactive =
-            AdaptiveWorldParticleIdleStates[StateIndex].OriginalSecondsBeforeInactive;
-        if (Abs(ParticleComponent.SecondsBeforeInactive -
-                AdaptiveWorldParticleIdleStates[StateIndex].OriginalSecondsBeforeInactive) >=
-            0.001)
-        {
-            bReadbackMatches = false;
-            continue;
-        }
-        AdaptiveWorldParticleIdleStates[StateIndex].bRestorePending = false;
-        ++RestoredComponents;
     }
     for (CleanupIndex = AdaptiveWorldParticleIdleStates.Length - 1;
          CleanupIndex >= 0; --CleanupIndex)
@@ -1163,38 +1151,6 @@ function bool ApplyAdaptiveEffectRuntimeReadback(
     return true;
 }
 
-function RestoreAdaptiveGraphics()
-{
-    local bool bGraphicsRestored;
-    local bool bEffectRuntimeRestored;
-
-    // Physics ownership must be released even if a separate graphics restore
-    // readback fails; Adaptive-off cannot leave a corpse outside simulation.
-    ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
-    BeginAdaptiveCorpsePhysicsRelease();
-    bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.
-        RestoreOriginal(AdaptiveGraphicsState);
-    bEffectRuntimeRestored = ApplyAdaptiveEffectRuntimeReadback(
-        "restore", 100, true);
-    if (!bGraphicsRestored)
-    {
-        `log("KF2OPT_ADAPTIVE_QUALITY state=restore_failed"$
-             " domain=graphics reason=readback_mismatch");
-    }
-    if (!bEffectRuntimeRestored)
-    {
-        `log("KF2OPT_ADAPTIVE_QUALITY state=restore_failed"$
-             " domain=effect_runtime reason=readback_mismatch");
-    }
-    if (!bGraphicsRestored || !bEffectRuntimeRestored)
-    {
-        return;
-    }
-    AdaptiveGraphicsQuality = 100;
-    AdaptiveGraphicsResource = "recover";
-    `log("KF2OPT_ADAPTIVE_QUALITY state=restored readback=verified");
-}
-
 function int SelectStaggeredCorpse(KFGoreManager GoreManager)
 {
     local int Index;
@@ -1324,6 +1280,7 @@ function RetireAdaptiveCorpseManagerOwnership(KFGoreManager NewManager)
     bAdaptiveCorpseStaggerInitialized = false;
     AdaptiveFrozenCorpses.Length = 0;
     AdaptiveDistanceSleptCorpses.Length = 0;
+    AdaptiveDistanceReleaseWakeCursor = 0;
     AdaptiveBaselineSettleEntries.Length = 0;
     FixedMinimumCorpseLodCorpses.Length = 0;
     FixedMinimumCorpseLodAppliedMinModels.Length = 0;
@@ -1667,16 +1624,7 @@ function int ResolveAdaptiveLivingEnemyPressureLevel(float PressureScale)
 
 function int FindFixedMinimumLivingVisualEntry(KFPawn_Monster Candidate)
 {
-    local int Index;
-
-    for (Index = 0; Index < FixedMinimumLivingVisualZeds.Length; ++Index)
-    {
-        if (FixedMinimumLivingVisualZeds[Index] == Candidate)
-        {
-            return Index;
-        }
-    }
-    return -1;
+    return FixedMinimumLivingVisualZeds.Find(Candidate);
 }
 
 function bool RemoveFixedMinimumLivingVisualEntry(int Index, string Reason)
@@ -2046,16 +1994,7 @@ function RefreshSleepingCorpseMinimumAnimationState(KFGoreManager GoreManager)
 
 function int FindAdaptiveBaselineSettleEntry(KFPawn Candidate)
 {
-    local int Index;
-
-    for (Index = 0; Index < AdaptiveBaselineSettleEntries.Length; ++Index)
-    {
-        if (AdaptiveBaselineSettleEntries[Index].Corpse == Candidate)
-        {
-            return Index;
-        }
-    }
-    return -1;
+    return AdaptiveBaselineSettleEntries.Find('Corpse', Candidate);
 }
 
 function RemoveAdaptiveBaselineSettleEntry(int Index)
@@ -2330,6 +2269,15 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
     AdaptiveBaselineScanCursor =
         Clamp(AdaptiveBaselineScanCursor, 0, PoolLength - 1);
     ScanCount = Min(AdaptiveCorpseScanBudget, PoolLength);
+    // No new baseline action can be owned when tracking is full or invalid.
+    // Advance fairly without inspecting or changing any corpse in that case.
+    if (!EnsureAdaptiveCorpsePhysicsActionIds() ||
+        AdaptiveCorpsePhysicsActionIdCount >= 8192)
+    {
+        AdaptiveBaselineScanCursor =
+            (AdaptiveBaselineScanCursor + ScanCount) % PoolLength;
+        return 0;
+    }
     for (Offset = 0; Offset < ScanCount; ++Offset)
     {
         Index = (AdaptiveBaselineScanCursor + Offset) % PoolLength;
@@ -2415,16 +2363,7 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
 
 function int FindFixedMinimumCorpseLodEntry(KFPawn Candidate)
 {
-    local int Index;
-
-    for (Index = 0; Index < FixedMinimumCorpseLodCorpses.Length; ++Index)
-    {
-        if (FixedMinimumCorpseLodCorpses[Index] == Candidate)
-        {
-            return Index;
-        }
-    }
-    return -1;
+    return FixedMinimumCorpseLodCorpses.Find(Candidate);
 }
 
 function RemoveFixedMinimumCorpseLodEntry(int Index)
@@ -2486,16 +2425,7 @@ function PruneFixedMinimumCorpseLodEntries()
 
 function int FindAdaptiveDistanceSleptCorpse(KFPawn Candidate)
 {
-    local int Index;
-
-    for (Index = 0; Index < AdaptiveDistanceSleptCorpses.Length; ++Index)
-    {
-        if (AdaptiveDistanceSleptCorpses[Index].Corpse == Candidate)
-        {
-            return Index;
-        }
-    }
-    return -1;
+    return AdaptiveDistanceSleptCorpses.Find('Corpse', Candidate);
 }
 
 function bool EnsureAdaptiveDistanceSleepTransitions()
@@ -3279,16 +3209,7 @@ function bool IsAdaptiveCorpseInPool(KFPawn Candidate)
 
 function int FindAdaptiveCorpseFreeze(KFPawn Candidate)
 {
-    local int Index;
-
-    for (Index = 0; Index < AdaptiveFrozenCorpses.Length; ++Index)
-    {
-        if (AdaptiveFrozenCorpses[Index].Corpse == Candidate)
-        {
-            return Index;
-        }
-    }
-    return -1;
+    return AdaptiveFrozenCorpses.Find('Corpse', Candidate);
 }
 
 function LogAdaptiveCorpseFreezeReleaseFailure(
@@ -3349,7 +3270,8 @@ function bool RestoreAdaptiveCorpseFreezeState(
     }
     bNeedsPhysicsMutation = Candidate.Physics != PHYS_RigidBody;
     if (bNeedsPhysicsMutation &&
-        !ReserveAdaptivePhysicsMutationForCurrentFrame())
+        (WorldInfo == None ||
+         AdaptiveLastPhysicsMutationWorldTime == WorldInfo.TimeSeconds))
     {
         LogAdaptiveCorpseFreezeReleaseFailure(
             CorpseId, "physics_frame_reserved");
@@ -3386,6 +3308,13 @@ function bool RestoreAdaptiveCorpseFreezeState(
     }
     if (bNeedsPhysicsMutation)
     {
+        // Failed collision/tick readback must not consume the physics slot.
+        if (!ReserveAdaptivePhysicsMutationForCurrentFrame())
+        {
+            LogAdaptiveCorpseFreezeReleaseFailure(
+                CorpseId, "physics_frame_reserved");
+            return false;
+        }
         Candidate.SetPhysics(PHYS_RigidBody);
         if (Candidate.Physics != PHYS_RigidBody)
         {
@@ -3429,6 +3358,7 @@ function bool TryRestoreAdaptiveCorpseFreeze(int Index, string Reason)
 function int ReleaseOneAdaptiveCorpseFreeze(bool bRestoreAll)
 {
     local bool bRemoved;
+    local bool bRestoreAttempted;
     local int Index;
     local int Scanned;
     local string CurrentId;
@@ -3448,6 +3378,7 @@ function int ReleaseOneAdaptiveCorpseFreeze(bool bRestoreAll)
             AdaptiveFrozenCorpses.Length - 1);
         Candidate = AdaptiveFrozenCorpses[Index].Corpse;
         bRemoved = false;
+        bRestoreAttempted = false;
         ++Scanned;
         if (Candidate == None || Candidate.bDeleteMe)
         {
@@ -3480,6 +3411,7 @@ function int ReleaseOneAdaptiveCorpseFreeze(bool bRestoreAll)
                      AdaptiveFrozenCorpses[Index].bRestorePending ||
                      !IsAdaptiveCorpseInPool(Candidate))
             {
+                bRestoreAttempted = true;
                 if (TryRestoreAdaptiveCorpseFreeze(
                         Index, bRestoreAll ?
                         "adaptive_disabled" :
@@ -3497,6 +3429,10 @@ function int ReleaseOneAdaptiveCorpseFreeze(bool bRestoreAll)
         AdaptiveFreezePruneCursor = AdaptiveFrozenCorpses.Length > 0 ?
             (bRemoved ? Index % AdaptiveFrozenCorpses.Length :
              (Index + 1) % AdaptiveFrozenCorpses.Length) : 0;
+        if (bRestoreAttempted)
+        {
+            break;
+        }
     }
     return 0;
 }
@@ -3514,6 +3450,7 @@ function int RestoreOneAdaptiveCorpseFreeze()
 function int ReleaseOneRetiredAdaptiveCorpseFreeze()
 {
     local bool bRemoved;
+    local bool bRestoreAttempted;
     local int Index;
     local int Scanned;
     local string CurrentId;
@@ -3534,6 +3471,7 @@ function int ReleaseOneRetiredAdaptiveCorpseFreeze()
             AdaptiveRetiredFrozenCorpses.Length - 1);
         Candidate = AdaptiveRetiredFrozenCorpses[Index].Corpse;
         bRemoved = false;
+        bRestoreAttempted = false;
         ++Scanned;
         if (Candidate == None || Candidate.bDeleteMe)
         {
@@ -3563,28 +3501,36 @@ function int ReleaseOneRetiredAdaptiveCorpseFreeze()
                         "manager_replaced_reused_state_unverified");
                 }
             }
-            else if (RestoreAdaptiveCorpseFreezeState(
-                    Candidate,
-                    AdaptiveRetiredFrozenCorpses[Index].CorpseId,
-                    AdaptiveRetiredFrozenCorpses[Index].bOriginalTickDisabled,
-                    AdaptiveRetiredFrozenCorpses[Index].bOriginalCollideActors,
-                    AdaptiveRetiredFrozenCorpses[Index].bOriginalBlockActors,
-                    AdaptiveRetiredFrozenCorpses[Index].bOriginalIgnoreEncroachers,
-                    AdaptiveRetiredFrozenCorpses[Index].bHadCollisionComponent,
-                    AdaptiveRetiredFrozenCorpses[Index].bOriginalBlockRigidBody,
-                    "manager_replaced"))
+            else
             {
-                AdaptiveRetiredFrozenCorpses.Remove(Index, 1);
-                AdaptiveRetiredFreezeCursor =
-                    AdaptiveRetiredFrozenCorpses.Length > 0 ?
-                    Index % AdaptiveRetiredFrozenCorpses.Length : 0;
-                return 1;
+                bRestoreAttempted = true;
+                if (RestoreAdaptiveCorpseFreezeState(
+                        Candidate,
+                        AdaptiveRetiredFrozenCorpses[Index].CorpseId,
+                        AdaptiveRetiredFrozenCorpses[Index].bOriginalTickDisabled,
+                        AdaptiveRetiredFrozenCorpses[Index].bOriginalCollideActors,
+                        AdaptiveRetiredFrozenCorpses[Index].bOriginalBlockActors,
+                        AdaptiveRetiredFrozenCorpses[Index].bOriginalIgnoreEncroachers,
+                        AdaptiveRetiredFrozenCorpses[Index].bHadCollisionComponent,
+                        AdaptiveRetiredFrozenCorpses[Index].bOriginalBlockRigidBody,
+                        "manager_replaced"))
+                {
+                    AdaptiveRetiredFrozenCorpses.Remove(Index, 1);
+                    AdaptiveRetiredFreezeCursor =
+                        AdaptiveRetiredFrozenCorpses.Length > 0 ?
+                        Index % AdaptiveRetiredFrozenCorpses.Length : 0;
+                    return 1;
+                }
             }
         }
         AdaptiveRetiredFreezeCursor =
             AdaptiveRetiredFrozenCorpses.Length > 0 ?
             (bRemoved ? Index % AdaptiveRetiredFrozenCorpses.Length :
              (Index + 1) % AdaptiveRetiredFrozenCorpses.Length) : 0;
+        if (bRestoreAttempted)
+        {
+            break;
+        }
     }
     return 0;
 }
@@ -3632,9 +3578,14 @@ function int WakeOneRetiredAdaptiveDistanceSleptCorpse()
                 bRemoved = true;
             }
             else if (Candidate.Mesh == None ||
-                     Candidate.Physics != PHYS_RigidBody ||
-                     Candidate.Mesh.RigidBodyIsAwake())
+                     Candidate.Physics != PHYS_RigidBody)
             {
+                AdaptiveRetiredDistanceSleptCorpses.Remove(Index, 1);
+                bRemoved = true;
+            }
+            else if (Candidate.Mesh.RigidBodyIsAwake())
+            {
+                Candidate.Mesh.bNoSkeletonUpdate = false;
                 AdaptiveRetiredDistanceSleptCorpses.Remove(Index, 1);
                 bRemoved = true;
             }
@@ -4108,46 +4059,61 @@ function int WakeAdaptiveDistanceSleptCorpseBatch()
     local int WakeCount;
     local KFPawn Candidate;
 
-    for (Index = AdaptiveDistanceSleptCorpses.Length - 1;
-         Index >= 0 && WakeCount < 1 &&
-         Scanned < AdaptiveCorpseScanBudget; --Index)
+    while (AdaptiveDistanceSleptCorpses.Length > 0 &&
+           Scanned < AdaptiveCorpseScanBudget)
     {
+        Index = Clamp(AdaptiveDistanceReleaseWakeCursor, 0,
+            AdaptiveDistanceSleptCorpses.Length - 1);
         ++Scanned;
         Candidate = AdaptiveDistanceSleptCorpses[Index].Corpse;
         if (Candidate == None || Candidate.bDeleteMe ||
-            Candidate.Mesh == None || Candidate.Physics != PHYS_RigidBody)
+            Candidate.Mesh == None || Candidate.Physics != PHYS_RigidBody ||
+            GetAdaptiveCorpseActionId(Candidate) !=
+                AdaptiveDistanceSleptCorpses[Index].CorpseId)
         {
             RemoveAdaptiveDistanceSleptCorpseEntry(
                 Index, "adaptive_disabled");
+            AdaptiveDistanceReleaseWakeCursor =
+                AdaptiveDistanceSleptCorpses.Length > 0 ?
+                Index % AdaptiveDistanceSleptCorpses.Length : 0;
             continue;
         }
         if (!Candidate.Mesh.RigidBodyIsAwake())
         {
             if (!ReserveAdaptivePhysicsMutationForCurrentFrame())
             {
-                return WakeCount;
+                return 0;
             }
             Candidate.Mesh.WakeRigidBody();
-            if (Candidate.Mesh.RigidBodyIsAwake())
+            if (!Candidate.Mesh.RigidBodyIsAwake())
             {
-                Candidate.Mesh.bNoSkeletonUpdate = false;
-                if (bDetailedRuntimeDiagnostics)
-                {
-                    ++AdaptiveDistancePhysicsWakes;
-                }
-                ++WakeCount;
+                // Keep ownership until wake is verified, but let the next
+                // release turn reach another actor instead of retrying here.
+                AdaptiveDistanceReleaseWakeCursor =
+                    (Index + 1) % AdaptiveDistanceSleptCorpses.Length;
+                return 0;
             }
-            RemoveAdaptiveDistanceSleptCorpseEntry(
-                Index, "adaptive_disabled");
-            // Count attempts, not only successful readbacks, for the per-frame
-            // mutation bound. The repeating release timer handles the rest.
-            return WakeCount;
+            if (bDetailedRuntimeDiagnostics)
+            {
+                ++AdaptiveDistancePhysicsWakes;
+            }
+            ++WakeCount;
         }
+        Candidate.Mesh.bNoSkeletonUpdate = false;
         RemoveAdaptiveDistanceSleptCorpseEntry(
             Index, "adaptive_disabled");
+        AdaptiveDistanceReleaseWakeCursor =
+            AdaptiveDistanceSleptCorpses.Length > 0 ?
+            Index % AdaptiveDistanceSleptCorpses.Length : 0;
+        // Successful and failed attempts both yield within the frame budget.
+        if (WakeCount > 0)
+        {
+            return WakeCount;
+        }
     }
     if (AdaptiveDistanceSleptCorpses.Length == 0)
     {
+        AdaptiveDistanceReleaseWakeCursor = 0;
         ClearTimer(nameof(WakeAdaptiveDistanceSleptCorpseBatch), self);
         if (bDetailedRuntimeDiagnostics)
         {
@@ -4160,11 +4126,51 @@ function int WakeAdaptiveDistanceSleptCorpseBatch()
 
 function AdaptiveCorpsePhysicsRelease()
 {
-    if (RestoreOneAdaptiveCorpseFreeze() <= 0 &&
-        ReleaseOneRetiredAdaptiveCorpseFreeze() <= 0 &&
-        WakeAdaptiveDistanceSleptCorpseBatch() <= 0)
+    local bool bHandled;
+    local int Attempt;
+    local int Phase;
+
+    // Skip empty queues, but give every nonempty queue its own release turn.
+    // A permanently failing physics readback cannot monopolize other queues.
+    for (Attempt = 0; Attempt < 4; ++Attempt)
     {
-        WakeOneRetiredAdaptiveDistanceSleptCorpse();
+        Phase = AdaptiveCorpsePhysicsReleasePhase;
+        AdaptiveCorpsePhysicsReleasePhase = (Phase + 1) % 4;
+        switch (Phase)
+        {
+        case 0:
+            if (AdaptiveFrozenCorpses.Length > 0)
+            {
+                RestoreOneAdaptiveCorpseFreeze();
+                bHandled = true;
+            }
+            break;
+        case 1:
+            if (AdaptiveRetiredFrozenCorpses.Length > 0)
+            {
+                ReleaseOneRetiredAdaptiveCorpseFreeze();
+                bHandled = true;
+            }
+            break;
+        case 2:
+            if (AdaptiveDistanceSleptCorpses.Length > 0)
+            {
+                WakeAdaptiveDistanceSleptCorpseBatch();
+                bHandled = true;
+            }
+            break;
+        case 3:
+            if (AdaptiveRetiredDistanceSleptCorpses.Length > 0)
+            {
+                WakeOneRetiredAdaptiveDistanceSleptCorpse();
+                bHandled = true;
+            }
+            break;
+        }
+        if (bHandled)
+        {
+            break;
+        }
     }
     if (AdaptiveFrozenCorpses.Length == 0 &&
         AdaptiveDistanceSleptCorpses.Length == 0 &&
@@ -6267,7 +6273,6 @@ function SampleTelemetry()
     local int CorpseOther;
     local int CorpseFinalPose;
     local int CorpseRecentlyRendered;
-    local int CorpseVisibleAwake;
     local int CorpseOffscreen;
     local int CorpseLodTotal;
     local int CorpseInjuredZones;
@@ -6579,11 +6584,6 @@ function SampleTelemetry()
                 if (Corpse.Mesh.LastRenderTime > WorldInfo.TimeSeconds - 0.3)
                 {
                     ++CorpseRecentlyRendered;
-                    if (Corpse.Physics == PHYS_RigidBody &&
-                        Corpse.Mesh.RigidBodyIsAwake())
-                    {
-                        ++CorpseVisibleAwake;
-                    }
                 }
                 else
                 {

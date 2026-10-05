@@ -107,6 +107,59 @@ readback. A test that only proves a command was sent is incomplete.
 
 ## Compatibility and safety
 
+### Diagnostic persistence
+
+Ordinary event-log changes share a fixed 250 ms batch in the existing worker.
+Later events do not extend the first pending deadline. Explicit `flush()` and
+healthy destruction bypass that delay; a failed writer keeps its bounded retry
+backoff. The accepted in-memory snapshot stays immediately available to
+diagnostic/support reports. JSON retention and atomic replacement are unchanged.
+
+### PDH GPU sampling
+
+PDH GPU sampling reuses one query-owned raw buffer and one merged value vector.
+Counter items are consumed before the next category overwrites the buffer;
+names and category amounts no longer pass through temporary pair vectors.
+The exact existing identity parser runs once per retained name, including
+invalid names. Up to 4096 names of at most 512 characters are cached per query;
+overflow/long names use uncached parsing without dropping or truncating data.
+Query recreation discards the cache, and moves transfer it with the handles.
+Amounts, validity checks, aggregation and sampling cadence remain uncached.
+
+### Launch.log handle ownership
+
+The resource worker retains one shared read handle per verified Launch.log
+generation. Identity, attributes, process-start ownership, deletion state and
+the handle's current file name are checked before reading; no path reopen or
+per-poll name allocation is required. Rename, replacement, deletion, unsafe
+metadata and I/O failure close the handle and invalidate parser/UI context.
+Truncation resets the offset and parser. Process detach/rebind schedules cleanup
+on the same worker even without a new sample; adapter-only changes and map
+travel retain the handle. A raced read still uses its inspected file, and the
+next poll detects replacement. Existing catch-up/freshness limits remain intact.
+
+### Adaptive Present observations
+
+The live worker computes its overlapping 1/3/5/10-second metrics from one
+interval array and one sort. Window membership excludes each boundary-crossing
+pair; chronological averages and ascending slow-tail sums preserve the generic
+aggregator's exact values. All metrics retain their existing cadence and
+freshness checks without an additional mutable cache. Fixed diagnostic windows
+still use the generic aggregator independently.
+
+Frame metrics carry the actual newest Present timestamp, selected swapchain
+and source generation. An asynchronous UI read must not derive a new Present
+time from its own clock and a cached age. Adaptive accepts each increasing
+timestamp once within the same process/session/map/source/swapchain epoch.
+Repeated or older publications hold before history, smoothing and pressure
+confirmation; UI work, receipts and timeouts still advance independently.
+
+A no-Present stall holds and becomes unavailable after the policy's freshness
+limit (two seconds by default); it does not imply a quality reduction. A fresh
+Present resumes evaluation. Process/session/map/discontinuity resets and
+confirmed quality actions clear duplicate ownership; pre-action frames remain
+excluded by the applied-receipt timestamp.
+
 Preserve the permanent boundary in [Safety](SAFETY.md), the target-FPS range of
 30 through 240 in one-FPS steps, the corpse ceiling of 4 through 2000, bounded
 work, protected restoration, and explicit Unavailable states.

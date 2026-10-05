@@ -1,4 +1,5 @@
 #include <atomic>
+#include <barrier>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -7,7 +8,9 @@
 #include <iostream>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 #include <Windows.h>
 
@@ -22,6 +25,29 @@
             return EXIT_FAILURE;                                                \
         }                                                                       \
     } while (false)
+
+namespace {
+
+struct OwnedHandle {
+    HANDLE value{INVALID_HANDLE_VALUE};
+    ~OwnedHandle() { close(); }
+    void close() {
+        if (value != INVALID_HANDLE_VALUE) CloseHandle(value);
+        value = INVALID_HANDLE_VALUE;
+    }
+};
+
+template <typename Predicate>
+bool await(Predicate predicate) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while (!predicate()) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    return true;
+}
+
+}  // namespace
 
 int main() {
     using kf2::diagnostics::Event;
@@ -91,6 +117,35 @@ int main() {
     CHECK(json.find("\"severity\":\"warning\"") != std::string::npos);
     CHECK(json.find("\"code\":\"C\"") != std::string::npos);
 
+    // Preserve the exact string bytes shared by all JSON exports.
+    const std::pair<std::string, std::string> escaped_codes[]{
+        {"", ""}, {"plain / text", "plain / text"},
+        {"\"\\\b\f\n\r\t", "\\\"\\\\\\b\\f\\n\\r\\t"},
+        {std::string{"\x00\x01\x02\x03\x04\x05\x06\x07"
+                     "\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
+                     "\x10\x11\x12\x13\x14\x15\x16\x17"
+                     "\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f", 32},
+         "\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007"
+         "\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f"
+         "\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017"
+         "\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f"},
+        {"UTF8 \xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80",
+         "UTF8 \xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80"},
+        {"\x7f\x80\xff", "\x7f\x80\xff"},
+    };
+    for (const auto& [input, expected] : escaped_codes) {
+        CHECK(kf2::diagnostics::serialize_events_json(
+            {Event{17, Severity::warning, input, L"", L""}}) ==
+            "{\"version\":1,\"events\":[{\"sequence\":17,"
+            "\"severity\":\"warning\",\"code\":\"" + expected +
+            "\",\"source\":\"\",\"message\":\"\",\"repeat_count\":1}]}");
+    }
+    kf2::diagnostics::ProductReport escaped_report;
+    escaped_report.build_identity = L"quote\"\\\nUnicode caf\u00e9";
+    CHECK(kf2::diagnostics::serialize_product_report_json(escaped_report).find(
+        "\"build_identity\":\"quote\\\"\\\\\\nUnicode caf\xc3\xa9\"") !=
+          std::string::npos);
+
     const auto persistent_root = std::filesystem::temp_directory_path() /
         (L"kf2-event-log-" + std::to_wstring(GetCurrentProcessId()));
     std::filesystem::create_directories(persistent_root);
@@ -113,6 +168,103 @@ int main() {
     persistent.clear();
     CHECK(persistent.flush(std::chrono::seconds{2}));
     CHECK(std::filesystem::file_size(persistent_path) > 0);
+
+    // Ordinary appends share one bounded batch, not one full file rewrite each.
+    const auto batch_path = persistent_root / L"batch.json";
+    std::atomic<int> batch_writes{0};
+    std::mutex batch_mutex;
+    std::condition_variable batch_changed;
+    const auto batch_writer = [&](const std::filesystem::path& path,
+                                  std::string_view bytes) {
+        // Durable I/O may exceed 100 ms even when flush bypasses batching.
+        if (bytes.find("\"DUP\"") != std::string_view::npos)
+            std::this_thread::sleep_for(std::chrono::milliseconds{150});
+        auto result = kf2::platform::windows::atomic_replace_utf8(path, bytes);
+        {
+            std::scoped_lock lock{batch_mutex};
+            ++batch_writes;
+        }
+        batch_changed.notify_all();
+        return result;
+    };
+    {
+        EventLog batched{128, batch_path, batch_writer};
+        CHECK(batch_writes == 1);  // Initial empty atomic document.
+        for (int index = 0; index < 100; ++index) {
+            batched.append(Event{0, Severity::info, "BATCH",
+                std::to_wstring(index), L"test"});
+        }
+        {
+            std::unique_lock lock{batch_mutex};
+            CHECK(!batch_changed.wait_for(lock, std::chrono::milliseconds{100},
+                                          [&] { return batch_writes > 1; }));
+        }
+        CHECK(batched.flush(std::chrono::seconds{2}));
+        CHECK(batch_writes == 2);
+        std::ifstream input(batch_path, std::ios::binary);
+        const std::string saved{std::istreambuf_iterator<char>{input}, {}};
+        CHECK(saved == kf2::diagnostics::serialize_events_json(batched.snapshot()));
+        input.close();
+
+        // Flush requests persistence immediately, including clear. Its completion
+        // budget must allow worker scheduling and durable I/O, not just batching.
+        batched.clear();
+        std::barrier start_flush{3};
+        bool first_flushed = false;
+        bool second_flushed = false;
+        std::jthread first_flush{[&] {
+            start_flush.arrive_and_wait();
+            first_flushed = batched.flush(std::chrono::seconds{2});
+        }};
+        std::jthread second_flush{[&] {
+            start_flush.arrive_and_wait();
+            second_flushed = batched.flush(std::chrono::seconds{2});
+        }};
+        start_flush.arrive_and_wait();
+        first_flush.join();
+        second_flush.join();
+        CHECK(first_flushed && second_flushed);
+        CHECK(batch_writes == 3);
+        CHECK(std::filesystem::file_size(batch_path) ==
+              std::string_view{"{\"version\":1,\"events\":[]}"}.size());
+        batched.append(Event{0, Severity::info, "DUP", L"same", L"test"});
+        batched.append(Event{0, Severity::info, "DUP", L"same", L"test"});
+        CHECK(batched.flush(std::chrono::seconds{2}));
+        CHECK(batch_writes == 4);
+        CHECK(batched.snapshot().front().repeat_count == 2);
+    }
+    batch_writes = 0;
+    {
+        EventLog scheduled{4, batch_path, batch_writer};
+        scheduled.append(Event{0, Severity::info, "DEADLINE", L"latest", L"test"});
+        CHECK(await([&] { return batch_writes == 2; }));
+        CHECK(scheduled.flush(std::chrono::seconds{2}));
+        {
+            std::unique_lock lock{batch_mutex};
+            CHECK(!batch_changed.wait_for(lock, std::chrono::milliseconds{350},
+                                          [&] { return batch_writes > 2; }));
+        }
+        CHECK(batch_writes == 2);  // Idle time must not generate more writes.
+    }
+    batch_writes = 0;
+    {
+        EventLog continuous{4, batch_path, batch_writer};
+        std::jthread producer{[&](std::stop_token stop) {
+            while (!stop.stop_requested()) {
+                continuous.append(Event{0, Severity::info, "CONTINUOUS",
+                    L"same", L"test"});
+                std::this_thread::sleep_for(std::chrono::milliseconds{5});
+            }
+        }};
+        // Later appends cannot keep postponing the first pending deadline.
+        CHECK(await([&] { return batch_writes >= 2; }));
+        producer.request_stop();
+        producer.join();
+        CHECK(continuous.flush(std::chrono::seconds{2}));
+        std::ifstream input(batch_path, std::ios::binary);
+        const std::string saved{std::istreambuf_iterator<char>{input}, {}};
+        CHECK(saved == kf2::diagnostics::serialize_events_json(continuous.snapshot()));
+    }
 
     const auto asynchronous_path = persistent_root / L"asynchronous.json";
     std::mutex writer_mutex;
@@ -158,6 +310,119 @@ int main() {
         CHECK(persisted_json.find("\"message\":\"second\"") !=
               std::string::npos);
     }
+    // Real Windows sharing failures must not permanently disable persistence.
+    const auto retry_path = persistent_root / L"retry.json";
+    {
+        std::ofstream output(retry_path);
+        output << "original evidence";
+    }
+    {
+        OwnedHandle blocked{CreateFileW(retry_path.c_str(), GENERIC_READ, 0,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
+        CHECK(blocked.value != INVALID_HANDLE_VALUE);
+        EventLog retry{4, retry_path};
+        CHECK(!retry.persistence_ready());
+        CHECK(retry.stats().persistence_failures >= 1);
+        retry.append(Event{0, Severity::info, "LATEST", L"startup retry", L"test"});
+        blocked.close();
+        CHECK(retry.flush(std::chrono::seconds{2}));
+        CHECK(retry.persistence_ready());
+        std::ifstream input(retry_path);
+        const std::string saved{std::istreambuf_iterator<char>{input}, {}};
+        CHECK(saved.find("startup retry") != std::string::npos);
+    }
+    {
+        EventLog retry{4, retry_path};
+        OwnedHandle blocked{CreateFileW(retry_path.c_str(), GENERIC_READ, 0,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
+        CHECK(blocked.value != INVALID_HANDLE_VALUE);
+        retry.append(Event{0, Severity::info, "LATEST", L"locked", L"test"});
+        CHECK(await([&] { return !retry.persistence_ready(); }));
+        for (int index = 0; index < 2000; ++index) {
+            retry.append(Event{0, Severity::info, "LATEST",
+                std::to_wstring(index), L"test"});
+        }
+        CHECK(retry.snapshot().size() == 4);
+        blocked.close();
+        CHECK(retry.flush(std::chrono::seconds{2}));
+        CHECK(retry.persistence_ready());
+        std::ifstream input(retry_path);
+        const std::string saved{std::istreambuf_iterator<char>{input}, {}};
+        CHECK(saved.find("1999") != std::string::npos);
+        CHECK(saved.find("\"events\":[]") == std::string::npos);
+    }
+    // The existing writer seam exercises false results, errors and exceptions.
+    // Recovery must not require another append, nor persist the failed copy.
+    for (const int failure : {0, 1, 2}) {
+        std::atomic<bool> fail{true};
+        std::string saved;
+        EventLog retry{4, retry_path,
+            [&](const std::filesystem::path&, std::string_view bytes) {
+                if (fail.load()) {
+                    if (failure == 0) return kf2::Result<bool>::success(false);
+                    if (failure == 1) return kf2::Result<bool>::failure(
+                        {kf2::ErrorCode::io_failure, L"test write failure", 0});
+                    throw std::runtime_error{"test write failure"};
+                }
+                saved = std::string{bytes};
+                return kf2::Result<bool>::success(true);
+            }};
+        CHECK(!retry.persistence_ready());
+        retry.append(Event{0, Severity::info, "LATEST", L"newest", L"test"});
+        fail.store(false);
+        CHECK(retry.flush(std::chrono::seconds{2}));
+        CHECK(retry.persistence_ready());
+        CHECK(saved.find("newest") != std::string::npos);
+        fail.store(true);
+        retry.clear();
+        CHECK(await([&] { return !retry.persistence_ready(); }));
+        fail.store(false);
+        CHECK(retry.flush(std::chrono::seconds{2}));
+        CHECK(saved == "{\"version\":1,\"events\":[]}");
+    }
+    std::atomic<int> failed_writes{0};
+    auto stop_started = std::chrono::steady_clock::now();
+    {
+        EventLog unavailable{4, retry_path,
+            [&](const std::filesystem::path&, std::string_view) {
+                ++failed_writes;
+                return kf2::Result<bool>::success(false);
+            }};
+        for (int index = 0; index < 2000; ++index) {
+            unavailable.append(Event{0, Severity::info, "LATEST",
+                std::to_wstring(index), L"test"});
+        }
+        const auto flush_started = std::chrono::steady_clock::now();
+        CHECK(!unavailable.flush(std::chrono::milliseconds{550}));
+        CHECK(std::chrono::steady_clock::now() - flush_started < std::chrono::seconds{2});
+        CHECK(failed_writes >= 2 && failed_writes <= 4);
+        CHECK(!unavailable.persistence_ready());
+        CHECK(unavailable.snapshot().size() == 4);
+        stop_started = std::chrono::steady_clock::now();
+    }
+    CHECK(std::chrono::steady_clock::now() - stop_started < std::chrono::seconds{2});
+    {
+        EventLog final_drain{4, retry_path};
+        for (int index = 0; index < 100; ++index) {
+            final_drain.append(Event{0, Severity::info, "FINAL",
+                L"last " + std::to_wstring(index), L"test"});
+        }
+        // Healthy destruction retains the existing final-drain behavior.
+    }
+    {
+        std::ifstream input(retry_path);
+        const std::string saved{std::istreambuf_iterator<char>{input}, {}};
+        CHECK(saved.find("last 99") != std::string::npos);
+    }
+    int unsafe_writes = 0;
+    EventLog unsafe{4, L"relative.json",
+        [&](const std::filesystem::path&, std::string_view) {
+            ++unsafe_writes;
+            return kf2::Result<bool>::success(true);
+        }};
+    unsafe.append(Event{0, Severity::info, "LATEST", L"unsafe", L"test"});
+    CHECK(!unsafe.flush(std::chrono::milliseconds{10}));
+    CHECK(unsafe_writes == 0 && !unsafe.persistence_ready());
     std::filesystem::remove_all(persistent_root);
 
     const auto rotation_root = std::filesystem::temp_directory_path() /
@@ -252,8 +517,7 @@ int main() {
         .performance_analysis = L"p95 16.2 ms | p99 17.1 ms | stutters 0",
         .hardware = L"CPU 16 | GPU Test",
         .flex = L"FleX healthy",
-        .optimizer_profile = L"balanced",
-        .quality_policy = L"exact",
+        .optimizer_profile = L"user settings",
         .overlay_position = L"top right",
         .target_fps = 62,
         .overlay_scale_percent = 100,
@@ -385,7 +649,9 @@ int main() {
         .game_log_stats = {.bytes_received = 100, .lines_processed = 5,
                            .oversized_input_resets = 1,
                            .oversized_line_drops = 2,
-                           .session_snapshot_copies = 3},
+                           .session_snapshot_copies = 3,
+                           .backlog_bytes = 123456,
+                           .catch_up_age_ns = 200000000},
         .retained_crash_records = 3,
         .events = events,
     };
@@ -482,6 +748,9 @@ int main() {
                        "\"zed_time_active\":true,\"snapshot_fresh\":true,"
                        "\"oldest_snapshot_age_ms\":250}") !=
           std::string::npos);
+    CHECK(product.find("\"quality_policy\"") == std::string::npos);
+    CHECK(product.find("\"optimizer\":{\"profile\":\"user settings\","
+                       "\"target_fps\":62") != std::string::npos);
     CHECK(product.find("\"performance_analysis\":\"p95 16.2 ms") !=
           std::string::npos);
     CHECK(product.find("\"events\":[") != std::string::npos);
@@ -493,6 +762,8 @@ int main() {
           std::string::npos);
     CHECK(product.find("\"session_snapshot_copies\":3") !=
           std::string::npos);
+    CHECK(product.find("\"backlog_bytes\":123456") != std::string::npos);
+    CHECK(product.find("\"catch_up_age_ns\":200000000") != std::string::npos);
     const auto support = kf2::diagnostics::serialize_support_bundle_json(
         report, "{\"schema\":\"KF2_ISSUE72_INVENTORY_V3\"}");
     CHECK(support.find("KF2_OPTIMIZER_SUPPORT_BUNDLE_V1") != std::string::npos);

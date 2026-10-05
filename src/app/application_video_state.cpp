@@ -1,6 +1,10 @@
 #include "application_runtime.hpp"
 
+#include <algorithm>
 #include <array>
+#include <sstream>
+
+#include "kf2/security/sha256.hpp"
 
 namespace kf2::app {
 namespace {
@@ -10,6 +14,73 @@ using VideoConfigWriteTimes =
 
 constexpr std::uint64_t kAdaptiveFrameRateConfigPollIntervalNs =
     1'000'000'000ULL;
+
+Result<game::VideoSettings> parse_graphics_replay(
+    std::string_view bytes, const config::SessionConfigSnapshot& snapshot) {
+    const auto separator = bytes.find('\n');
+    const auto payload = separator == std::string_view::npos
+        ? std::string_view{} : bytes.substr(separator + 1);
+    const auto hash = security::sha256_hex(payload);
+    int schema{};
+    std::uint64_t volume{}, file{};
+    game::VideoSettings settings;
+    game::Resolution resolution;
+    std::istringstream fields{std::string{payload}};
+    bool valid = bytes.size() <= 4096 && hash.has_value() &&
+        bytes.substr(0, separator) == hash.value() &&
+        bool(fields >> schema >> volume >> file) && schema == 1 &&
+        volume == snapshot.root_volume && file == snapshot.root_file &&
+        (volume != 0 || file != 0);
+    for (auto& choice : settings.choices) valid = bool(fields >> choice) && valid;
+    valid = bool(fields >> resolution.width >> resolution.height >>
+        settings.film_grain_percent >> settings.flex_level) && valid;
+    fields >> std::ws;
+    settings.resolutions = {resolution};
+    valid = valid && fields.eof() && resolution.width >= 640 &&
+        resolution.width <= 16384 && resolution.height >= 480 &&
+        resolution.height <= 16384 && settings.film_grain_percent >= 0 &&
+        settings.film_grain_percent <= 100 && settings.flex_level >= 0 &&
+        settings.flex_level <= 2;
+    for (std::size_t index = 0; index < game::kVideoOptionCount; ++index) {
+        const auto option = static_cast<game::VideoOption>(index);
+        valid = valid && settings.choices[index] >=
+            (option == game::VideoOption::resolution ? 0 : -1) &&
+            settings.choices[index] < game::video_choice_count(option, settings) +
+                (option == game::VideoOption::overall_quality ? 1 : 0);
+    }
+    if (!valid) return Result<game::VideoSettings>::failure({
+        ErrorCode::recovery_required,
+        L"Retained graphics changes failed schema, hash or root verification", 0});
+    return Result<game::VideoSettings>::success(std::move(settings));
+}
+
+Result<std::string> serialize_graphics_replay(
+    const game::VideoSettings& settings,
+    const config::SessionConfigSnapshot& snapshot) {
+    const auto selected = settings.choices[static_cast<std::size_t>(
+        game::VideoOption::resolution)];
+    if (selected < 0 || selected >= static_cast<int>(settings.resolutions.size())) {
+        return Result<std::string>::failure({ErrorCode::invalid_argument,
+            L"Confirmed graphics resolution is invalid", 0});
+    }
+    std::string payload = "1 " + std::to_string(snapshot.root_volume) + " " +
+        std::to_string(snapshot.root_file);
+    for (std::size_t index = 0; index < game::kVideoOptionCount; ++index) {
+        payload += " " + std::to_string(index == static_cast<std::size_t>(
+            game::VideoOption::resolution) ? 0 : settings.choices[index]);
+    }
+    const auto resolution = settings.resolutions[static_cast<std::size_t>(selected)];
+    payload += " " + std::to_string(resolution.width) + " " +
+        std::to_string(resolution.height) + " " +
+        std::to_string(settings.film_grain_percent) + " " +
+        std::to_string(settings.flex_level) + "\n";
+    const auto hash = security::sha256_hex(payload);
+    if (!hash.has_value()) return Result<std::string>::failure(hash.error());
+    auto bytes = hash.value() + "\n" + payload;
+    const auto checked = parse_graphics_replay(bytes, snapshot);
+    if (!checked.has_value()) return Result<std::string>::failure(checked.error());
+    return Result<std::string>::success(std::move(bytes));
+}
 
 std::optional<VideoConfigWriteTimes> read_video_config_write_times(
     const std::filesystem::path& config_root) {
@@ -32,11 +103,105 @@ std::optional<VideoConfigWriteTimes> read_video_config_write_times(
 
 }  // namespace
 
+Result<std::size_t> UiRuntime::restore_session_video_settings() {
+    if (!session_config_snapshot) return Result<std::size_t>::success(0);
+    const auto& snapshot = *session_config_snapshot;
+    const auto journal = snapshot.snapshot_root / L"graphics-replay.txt";
+    std::error_code error;
+    bool pending = std::filesystem::exists(journal, error);
+    if (error) return Result<std::size_t>::failure({ErrorCode::io_failure,
+        L"Graphics replay status could not be inspected",
+        static_cast<std::uint32_t>(error.value())});
+    // Validate the root-bound original snapshot before writing recovery data.
+    // Ordinary restoration uses its existing validation without a second scan.
+    if (pending || session_video_native_changes) {
+        const auto resumed = config::resume_session_config(
+            snapshot.config_root, settings_path.parent_path());
+        if (!resumed.has_value()) return Result<std::size_t>::failure(resumed.error());
+        if (!resumed.value() || resumed.value()->snapshot_root != snapshot.snapshot_root ||
+            resumed.value()->root_volume != snapshot.root_volume ||
+            resumed.value()->root_file != snapshot.root_file) {
+            return Result<std::size_t>::failure({ErrorCode::recovery_required,
+                L"Protected session identity changed before graphics recovery", 0});
+        }
+    }
+    if (!pending && session_video_native_changes) {
+        const auto bytes = serialize_graphics_replay(*session_video_native_changes, snapshot);
+        if (!bytes.has_value()) return Result<std::size_t>::failure(bytes.error());
+        const auto written = platform::windows::atomic_replace_utf8(journal, bytes.value());
+        if (!written.has_value()) return Result<std::size_t>::failure(written.error());
+        const auto verified = platform::windows::read_bounded_verified_file(journal, 4096);
+        if (!verified.has_value()) return Result<std::size_t>::failure(verified.error());
+        if (verified.value() != bytes.value()) return Result<std::size_t>::failure({
+            ErrorCode::stale_data, L"Graphics replay journal readback failed", 0});
+        pending = true;
+    }
+    if (pending) {
+        const auto bytes = platform::windows::read_bounded_verified_file(journal, 4096);
+        if (!bytes.has_value()) return Result<std::size_t>::failure(bytes.error());
+        auto desired = parse_graphics_replay(bytes.value(), snapshot);
+        if (!desired.has_value()) return Result<std::size_t>::failure(desired.error());
+        session_video_native_changes = std::move(desired.value());
+    }
+    const auto restored = config::restore_session_config(snapshot, pending);
+    if (!restored.has_value()) return restored;
+    if (pending) {
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+        const auto probe = [this](VideoPreapplyStage stage) {
+            if (video_preapply_probe_for_testing) video_preapply_probe_for_testing(stage);
+        };
+        probe(VideoPreapplyStage::replay_read);
+#endif
+        const auto original = game::read_video_settings(snapshot.config_root);
+        if (!original.has_value()) return Result<std::size_t>::failure(original.error());
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+        probe(VideoPreapplyStage::replay_preview);
+#endif
+        const auto prepared = game::build_video_preview(
+            snapshot.config_root, *session_video_native_changes, &original.value());
+        if (!prepared.has_value()) return Result<std::size_t>::failure(prepared.error());
+        const bool changed = std::any_of(prepared.value().files.begin(),
+            prepared.value().files.end(), [](const auto& file) {
+                return file.original_bytes != file.proposed_bytes;
+            });
+        if (changed) {
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+            probe(VideoPreapplyStage::replay_apply);
+#endif
+            const auto applied = config::apply_preview(prepared.value(), backups,
+                {.game_running = game_process.has_value()});
+            if (!applied.has_value()) return Result<std::size_t>::failure(applied.error());
+        }
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+        probe(VideoPreapplyStage::replay_verify);
+#endif
+        for (const auto& file : prepared.value().files) {
+            const auto bytes = platform::windows::read_bounded_verified_file(
+                snapshot.config_root / file.relative_path, 16U * 1024U * 1024U);
+            if (!bytes.has_value()) return Result<std::size_t>::failure(bytes.error());
+            if (bytes.value() != file.proposed_bytes) return Result<std::size_t>::failure({
+                ErrorCode::stale_data, L"Confirmed graphics replay readback failed", 0});
+        }
+        const auto completed = config::complete_session_config(snapshot);
+        if (!completed.has_value()) return Result<std::size_t>::failure(completed.error());
+        events->append({0, diagnostics::Severity::info, "KF2_NATIVE_GRAPHICS_PRESERVED",
+            L"Confirmed graphics changes were saved and verified; temporary session values were excluded",
+            L"graphics"});
+    }
+    session_config_snapshot.reset();
+    session_video_runtime.reset();
+    session_video_native_changes.reset();
+    session_config_waiting_for_launch = false;
+    session_config_launch_deadline_ns = 0;
+    if (pending) reload_video_settings();
+    return restored;
+}
+
 void UiRuntime::refresh_video_presentation() {
     auto status = model.status();
     status.graphics_available = video_pending.has_value();
     status.graphics_game_running = installation &&
-        game::find_running_game_process(installation->executable).has_value();
+        game::game_process_may_be_running(installation->executable);
     status.graphics_game_menu_readback = status.graphics_game_running &&
         game_menu_graphics_readback.has_value();
     if (video_pending) {
@@ -288,7 +453,7 @@ void UiRuntime::cycle_video_option(game::VideoOption option) {
         reload_video_settings();
         if (!video_pending) return;
     }
-    if (game::find_running_game_process(installation->executable).has_value()) {
+    if (game::game_process_may_be_running(installation->executable)) {
         model.set_notice({ui::NoticeSeverity::warning, L"GRAPHICS_GAME_RUNNING",
                           L"Close KF2 before changing its video settings.", L""});
         invalidate();
@@ -321,14 +486,20 @@ void UiRuntime::save_video_selection() {
             reload_video_settings();
         }
     }
+    const bool recovery_required = !result.has_value() &&
+        (result.error().code == ErrorCode::recovery_required ||
+         model.recovery_required());
     model.set_notice({
         result.has_value() ? ui::NoticeSeverity::info
                            : ui::NoticeSeverity::warning,
-        result.has_value() ? L"GRAPHICS_SAVED" : L"GRAPHICS_SAVE_FAILED",
+        result.has_value() ? L"GRAPHICS_SAVED"
+            : recovery_required ? L"GRAPHICS_PROTECTED_LAUNCH_RESTORE_FAILED"
+                                : L"GRAPHICS_SAVE_FAILED",
         result.has_value()
             ? L"KF2 graphics saved and verified. A restore backup is available."
-            : L"Graphics were not changed: " + result.error().message,
-        L""});
+            : recovery_required ? result.error().message
+                : L"Graphics were not changed: " + result.error().message,
+        recovery_required ? L"Run Repair before starting KF2." : L""});
     invalidate();
 }
 
@@ -336,8 +507,8 @@ void UiRuntime::reset_video_settings() {
     if (start_mode != StartMode::normal) return;
     if (!video_pending) reload_video_settings();
     if (!video_pending) return;
-    if (installation && game::find_running_game_process(
-            installation->executable).has_value()) {
+    if (installation && game::game_process_may_be_running(
+            installation->executable)) {
         model.set_notice({ui::NoticeSeverity::warning, L"GRAPHICS_GAME_RUNNING",
                           L"Close KF2 before changing its video settings.", L""});
         invalidate();
@@ -373,46 +544,67 @@ Result<config::ApplyResult> UiRuntime::apply_video_settings() {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::invalid_argument, L"No video changes are staged", 0});
     }
-    const bool running = game::find_running_game_process(
-        installation->executable).has_value();
+    const bool running = game::game_process_may_be_running(
+        installation->executable);
     if (running) {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::access_denied, L"Close KF2 before applying video settings", 0});
     }
 
     const bool rebuild_protected_launch = session_config_snapshot.has_value();
+    const auto fail_before_apply = [this, rebuild_protected_launch](
+                                      const Error& error) {
+        if (rebuild_protected_launch) {
+            const auto restored = prepare_automatic_external_launch_profile();
+            if (!restored.has_value() || !restored.value()) {
+                model.set_recovery_required(true);
+                return Result<config::ApplyResult>::failure({
+                    ErrorCode::recovery_required,
+                    L"Graphics preparation failed: " + error.message +
+                        L"; the next protected launch could not be prepared: " +
+                        (restored.has_value()
+                            ? L"Protected launch capabilities are unavailable"
+                            : restored.error().message),
+                    error.native_code});
+            }
+        }
+        return Result<config::ApplyResult>::failure(error);
+    };
     const auto desired = *video_pending;
     const auto staged_base = *video_saved;
     if (rebuild_protected_launch) {
         if (!restore_protected_session_config(
                 L"Explicit graphics settings changed before KF2 start")) {
             return Result<config::ApplyResult>::failure({
-                ErrorCode::io_failure,
+                ErrorCode::recovery_required,
                 L"The prepared KF2 session could not be restored before applying graphics settings",
                 0});
         }
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+        if (video_preapply_probe_for_testing) video_preapply_probe_for_testing(
+            VideoPreapplyStage::restored_read);
+#endif
         const auto original = game::read_video_settings(
             installation->config_root);
         if (!original.has_value()) {
-            static_cast<void>(prepare_automatic_external_launch_profile());
-            return Result<config::ApplyResult>::failure(original.error());
+            return fail_before_apply(original.error());
         }
         const auto rebased = game::rebase_video_changes(
             original.value(), staged_base, desired);
         if (!rebased.has_value()) {
-            static_cast<void>(prepare_automatic_external_launch_profile());
-            return Result<config::ApplyResult>::failure(rebased.error());
+            return fail_before_apply(rebased.error());
         }
         video_saved = original.value();
         video_pending = rebased.value();
     }
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+    if (video_preapply_probe_for_testing) video_preapply_probe_for_testing(
+        VideoPreapplyStage::preview_build);
+#endif
     auto prepared = game::build_video_preview(
         installation->config_root, *video_pending, &*video_saved);
     if (!prepared.has_value()) {
-        if (rebuild_protected_launch) {
-            static_cast<void>(prepare_automatic_external_launch_profile());
-        }
-        return Result<config::ApplyResult>::failure(prepared.error());
+        return fail_before_apply(prepared.error());
     }
     preview = std::move(prepared.value());
     preview_context = L"Explicit KF2 video settings";
@@ -425,19 +617,31 @@ Result<config::ApplyResult> UiRuntime::apply_video_settings() {
                         L"graphics"});
         reload_video_settings();
         if (rebuild_protected_launch) {
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+            if (video_before_protected_rebuild_for_testing)
+                video_before_protected_rebuild_for_testing();
+#endif
             const auto rebuilt = prepare_automatic_external_launch_profile();
-            if (!rebuilt.has_value()) {
+            if (!rebuilt.has_value() || !rebuilt.value()) {
+                const auto cause = rebuilt.has_value()
+                    ? Error{ErrorCode::recovery_required,
+                        L"Protected launch capabilities are unavailable"}
+                    : rebuilt.error();
+                const auto message =
+                    L"The graphics settings were saved, but the next protected KF2 launch could not be prepared: " +
+                    cause.message;
+                model.set_recovery_required(true);
                 events->append({0, diagnostics::Severity::error,
                     "GRAPHICS_PROTECTED_LAUNCH_REBUILD_FAILED",
-                    L"The graphics settings were saved, but protected launch preparation failed: " +
-                        rebuilt.error().message,
+                    message,
                     L"graphics"});
                 model.set_notice({ui::NoticeSeverity::warning,
                     L"GRAPHICS_PROTECTED_LAUNCH_REBUILD_FAILED",
-                    L"The graphics settings were saved, but the next protected KF2 launch could not be prepared: " +
-                        rebuilt.error().message,
+                    message,
                     L"Run Repair before starting KF2."});
                 invalidate();
+                return Result<config::ApplyResult>::failure({
+                    ErrorCode::recovery_required, message, cause.native_code});
             } else {
                 events->append({0, diagnostics::Severity::info,
                     "GRAPHICS_PROTECTED_LAUNCH_REBUILT",

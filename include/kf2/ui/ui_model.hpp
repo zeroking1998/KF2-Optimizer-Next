@@ -35,21 +35,48 @@ struct Notice {
     std::wstring recovery_action;
 };
 
-struct UiStatus {
-    std::wstring mode{L"Normal"};
+// An owning presentation snapshot, not controller state. Inheritance below
+// preserves existing field access without a second per-member copy list.
+struct AdaptiveUiStatus {
     bool adaptive_optimization_enabled{true};
+    std::wstring recommended_profile{L"waiting"};
+    std::wstring recommendation_reason{L"Fresh stable telemetry is required"};
+    std::optional<int> adaptive_runtime_corpse_limit;
+    std::wstring adaptive_corpse_capability{L"UNAVAILABLE"};
+    std::wstring adaptive_corpse_action_status{L"NONE"};
+    std::wstring adaptive_particle_capability{L"UNAVAILABLE"};
+    std::wstring adaptive_state{L"observing"};
+    std::wstring adaptive_bottleneck{L"unknown"};
+    std::wstring adaptive_cpu_parallelism{L"not available"};
+    std::wstring adaptive_action{L"none"};
+    std::wstring adaptive_reason{L"Fresh validated telemetry is required"};
+    int adaptive_confidence_percent{0};
+    int adaptive_drop_risk_percent{0};
+    int adaptive_quality_score{100};
+    int adaptive_headroom_available_percent{0};
+    std::wstring adaptive_data_quality{L"NOT_AVAILABLE"};
+    std::wstring adaptive_prediction{L"not available"};
+    std::wstring adaptive_session{L"SESSION_UNKNOWN"};
+    std::wstring adaptive_source{L"not selected"};
+    std::wstring adaptive_safety{L"LAB / SHADOW_ONLY"};
+    std::wstring adaptive_evidence{L"NOT_AVAILABLE"};
+    std::uint64_t adaptive_restore_generation{0};
+    bool adaptive_shadow_mode{false};
+};
+
+struct UiStatus : AdaptiveUiStatus {
+    std::wstring mode{L"Normal"};
     std::wstring game{L"Game not detected"};
     std::wstring game_session;
     std::wstring telemetry{L"Telemetry unavailable"};
     std::wstring performance_analysis{L"Performance analysis unavailable"};
-    std::wstring recommended_profile{L"waiting"};
-    std::wstring recommendation_reason{L"Fresh stable telemetry is required"};
     std::wstring hardware_summary{L"Hardware not refreshed"};
     std::wstring flex_telemetry{L"FleX telemetry not observed"};
     std::wstring flex_substep_diagnostics{L"Detailed substep counters are off"};
     std::wstring flex_readback_diagnostics{
         L"Minimal safety readback active; reports and extra logs are off"};
     bool game_detected{false};
+    bool game_folder_change_blocked{false};
     std::optional<double> live_fps;
     std::optional<double> live_frame_time_ms;
     std::optional<double> live_cpu_percent;
@@ -73,6 +100,7 @@ struct UiStatus {
         L"Detailed overlay diagnostics are off"};
     std::wstring prewarm_diagnostics{
         L"Detailed prewarm diagnostics are off"};
+    std::optional<bool> event_persistence_available;
     std::wstring overlay_position{L"top right"};
     int overlay_scale_percent{100};
     int target_fps{60};
@@ -82,32 +110,10 @@ struct UiStatus {
     bool prewarm_active{false};
     int prewarm_percent{0};
     std::wstring prewarm_map;
-    std::optional<int> adaptive_runtime_corpse_limit;
-    std::wstring adaptive_corpse_capability{L"UNAVAILABLE"};
-    std::wstring adaptive_corpse_action_status{L"NONE"};
     std::optional<int> flex_requested_substeps;
     std::optional<int> flex_effective_substeps;
     std::wstring flex_action_status{L"NONE"};
     std::wstring flex_capability{L"UNAVAILABLE"};
-    std::wstring adaptive_particle_capability{L"UNAVAILABLE"};
-    std::wstring adaptive_state{L"observing"};
-    std::wstring adaptive_bottleneck{L"unknown"};
-    std::wstring adaptive_cpu_parallelism{L"not available"};
-    std::wstring adaptive_action{L"none"};
-    std::wstring adaptive_reason{L"Fresh validated telemetry is required"};
-    int adaptive_confidence_percent{0};
-    int adaptive_drop_risk_percent{0};
-    int adaptive_quality_score{100};
-    int adaptive_headroom_available_percent{0};
-    std::wstring adaptive_data_quality{L"NOT_AVAILABLE"};
-    std::wstring adaptive_prediction{L"not available"};
-    std::wstring adaptive_session{L"SESSION_UNKNOWN"};
-    std::wstring adaptive_source{L"not selected"};
-    std::wstring adaptive_safety{L"LAB / SHADOW_ONLY"};
-    std::wstring adaptive_evidence{L"NOT_AVAILABLE"};
-    std::uint64_t adaptive_restore_generation{0};
-    bool adaptive_shadow_mode{false};
-    std::wstring adaptive_aggressiveness{L"balanced"};
     int adaptive_minimum_quality{10};
     int adaptive_maximum_quality{100};
     int adaptive_quality_change_budget{2};
@@ -115,7 +121,6 @@ struct UiStatus {
     bool adaptive_emergency_enabled{true};
     bool adaptive_quality_recovery_enabled{true};
     bool adaptive_manual_locks_enabled{true};
-    bool adaptive_calibration_enabled{true};
     bool adaptive_logging{true};
     std::wstring update_installed_version{L"unknown"};
     std::wstring update_available_version{L"None"};
@@ -132,6 +137,7 @@ struct UiStatus {
     bool update_check_completed{false};
     bool update_installable{false};
     bool update_installing{false};
+    bool package_actions_busy{false};
     bool graphics_available{false};
     bool graphics_game_running{false};
     bool graphics_game_menu_readback{false};
@@ -146,7 +152,6 @@ struct UiStatus {
     int advanced_particle_percentage{100};
     int advanced_decal_lifetime{30};
     std::wstring profile{L"user settings"};
-    std::wstring quality{L"exact"};
 };
 
 struct UiAction {
@@ -174,6 +179,17 @@ public:
     void set_build_identity(std::wstring identity);
     void set_recovery_required(bool required) noexcept;
     void set_status(UiStatus status);
+    void set_adaptive_status(AdaptiveUiStatus status) noexcept;
+    void set_telemetry_status(
+        std::wstring telemetry, std::wstring performance_analysis,
+        std::optional<double> fps, std::optional<double> frame_time_ms,
+        std::optional<double> cpu_percent, std::optional<double> gpu_percent,
+        std::optional<int> active_corpses, std::optional<int> sleeping_corpses) noexcept;
+    void set_flex_observation_status(
+        std::wstring telemetry, std::optional<int> requested_substeps,
+        std::optional<int> effective_substeps, std::wstring action_status,
+        std::wstring substep_diagnostics, std::wstring readback_diagnostics) noexcept;
+    void set_flex_capability(std::wstring capability) noexcept;
     void set_notice(Notice notice);
     void clear_notice() noexcept;
 
@@ -181,6 +197,7 @@ public:
     [[nodiscard]] const std::wstring& build_identity() const noexcept;
     [[nodiscard]] bool recovery_required() const noexcept;
     [[nodiscard]] const UiStatus& status() const noexcept;
+    [[nodiscard]] const AdaptiveUiStatus& adaptive_status() const noexcept;
     [[nodiscard]] int presented_target_fps() const noexcept;
     [[nodiscard]] int presented_corpse_limit() const noexcept;
     void preview_target_fps(int value) noexcept;

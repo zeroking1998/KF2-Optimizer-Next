@@ -83,5 +83,10 @@ int main() {
     CHECK(json.find("\"linkage\":") != std::string::npos);
     CHECK(json.find("\"remaining_scope\":\"external_validation\"") !=
           std::string::npos);
+    const auto escaped = serialize_feature_inventory_json(
+        "quote\"\\\nUnicode caf\xc3\xa9", {});
+    CHECK(escaped.find(
+        "\"build_identity\":\"quote\\\"\\\\\\nUnicode caf\xc3\xa9\"") !=
+          std::string::npos);
     return EXIT_SUCCESS;
 }

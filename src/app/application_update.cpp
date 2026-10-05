@@ -8,6 +8,7 @@
 #include <exception>
 #include <mutex>
 #include <optional>
+#include <type_traits>
 
 #include "kf2/platform/windows/atomic_file.hpp"
 #include "kf2/platform/windows/state_environment.hpp"
@@ -72,6 +73,30 @@ update::PersistedUpdateState persisted_state(
     return state;
 }
 
+[[nodiscard]] bool persist_update_snapshot(
+    UiRuntime& runtime, const update::UpdateSnapshot& snapshot) {
+    try {
+        const auto saved = update::save_update_state(
+            runtime.updates.state_path, persisted_state(snapshot));
+        if (saved.has_value()) {
+            if (runtime.model.notice() &&
+                runtime.model.notice()->code == L"UPDATE_STATE_SAVE_FAILED") {
+                runtime.model.clear_notice();
+            }
+            return true;
+        }
+    } catch (...) {
+        // Cache preparation/persistence must not discard a network result or
+        // prevent an already accepted check from starting its worker.
+    }
+    runtime.model.set_notice({
+        ui::NoticeSeverity::error,
+        L"UPDATE_STATE_SAVE_FAILED",
+        L"Update state could not be saved. Unsaved check information is kept only for this session.",
+        L"Check free space and write access, then retry. An ignore preference is not applied until saving succeeds."});
+    return false;
+}
+
 }  // namespace
 
 struct UpdateCheckAsyncState {
@@ -98,6 +123,7 @@ void UiRuntime::refresh_update_presentation() {
     status.automatic_update_checks = snapshot.automatic_checks_enabled;
     status.update_checking = snapshot.phase == update::UpdatePhase::checking;
     status.update_installing = snapshot.phase == update::UpdatePhase::installing;
+    status.package_actions_busy = package_actions_busy();
     status.update_available = snapshot.available_release.has_value();
     status.update_newer_version_known =
         snapshot.available_release.has_value() ||
@@ -105,7 +131,7 @@ void UiRuntime::refresh_update_presentation() {
     status.update_prompt_visible = status.update_newer_version_known &&
         !snapshot.dismissed;
     status.update_check_completed = snapshot.cached_check_completed;
-    status.update_installable = status.update_available &&
+    status.update_installable = status.update_available && !status.package_actions_busy &&
         snapshot.available_release->asset.has_value() &&
         snapshot.available_release->install_block_reason.empty();
     if (snapshot.available_release) {
@@ -142,8 +168,7 @@ void UiRuntime::start_update_check(update::CheckTrigger trigger) {
         refresh_update_presentation();
         return;
     }
-    static_cast<void>(update::save_update_state(
-        updates.state_path, persisted_state(updates.controller.snapshot())));
+    static_cast<void>(persist_update_snapshot(*this, updates.controller.snapshot()));
     try {
         const auto state = std::make_shared<UpdateCheckAsyncState>();
         const std::string installed =
@@ -176,9 +201,8 @@ void UiRuntime::start_update_check(update::CheckTrigger trigger) {
             Result<std::optional<update::ReleaseInfo>>::failure(
                 {ErrorCode::internal_failure,
                  L"Update check could not start its background worker", 0}));
-        static_cast<void>(update::save_update_state(
-            updates.state_path,
-            persisted_state(updates.controller.snapshot())));
+        // Failure changes only volatile status; attempt/backoff metadata was
+        // already attempted above. Do not write the identical state again.
     }
     refresh_update_presentation();
 }
@@ -192,9 +216,11 @@ void UiRuntime::poll_update_check() {
         outcome.emplace(std::move(*updates.check->outcome));
     }
     updates.check.reset();
+    const bool succeeded = outcome->has_value();
     updates.controller.complete_check(std::move(*outcome));
-    static_cast<void>(update::save_update_state(
-        updates.state_path, persisted_state(updates.controller.snapshot())));
+    if (succeeded) {
+        static_cast<void>(persist_update_snapshot(*this, updates.controller.snapshot()));
+    }
     refresh_update_presentation();
 }
 
@@ -222,6 +248,21 @@ void UiRuntime::toggle_adaptive_optimization() {
     if (start_mode != StartMode::normal) return;
     const bool previous = optimizer_settings.adaptive_optimization_enabled;
     const bool requested = !previous;
+    // Persist the user's intent before changing live or deferred control.
+    // A failed write must create no unsaved mode that later reconciliation
+    // could apply, and must not disturb an already confirmed/in-flight mode.
+    auto proposed_settings = optimizer_settings;
+    proposed_settings.adaptive_optimization_enabled = requested;
+    const auto saved = platform::windows::atomic_replace_utf8(
+        settings_path, config::serialize_settings(proposed_settings));
+    if (!saved.has_value()) {
+        model.set_notice({ui::NoticeSeverity::error,
+                          L"ADAPTIVE_SETTING_SAVE_FAILED",
+                          saved.error().message, L""});
+        invalidate();
+        return;
+    }
+    optimizer_settings.adaptive_optimization_enabled = requested;
     const bool live_confirmed = set_live_adaptive_enabled(
         requested, requested ? L"Adaptive enabled by the user"
                              : L"Adaptive disabled by the user");
@@ -245,40 +286,9 @@ void UiRuntime::toggle_adaptive_optimization() {
                 : L"Adaptive was disabled locally; exact KF2 runtime restoration will be confirmed when protected gameplay telemetry is available",
             L"optimizer"});
     }
-    optimizer_settings.adaptive_optimization_enabled = requested;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        settings_path, config::serialize_settings(optimizer_settings));
-    if (!saved.has_value()) {
-        const bool runtime_rolled_back = set_live_adaptive_enabled(
-            previous, L"Adaptive setting save rollback");
-        optimizer_settings.adaptive_optimization_enabled =
-            runtime_rolled_back ? previous : requested;
-        auto status = model.status();
-        status.adaptive_optimization_enabled =
-            optimizer_settings.adaptive_optimization_enabled;
-        status.adaptive_state =
-            optimizer_settings.adaptive_optimization_enabled
-                ? L"observing" : L"off";
-        model.set_status(std::move(status));
-        if (!runtime_rolled_back) {
-            model.set_recovery_required(true);
-            model.set_notice({
-                ui::NoticeSeverity::error,
-                L"ADAPTIVE_SETTING_ROLLBACK_UNCONFIRMED",
-                L"KF2 confirmed the requested Adaptive mode, but the preference could not be saved and the live rollback was not confirmed: " +
-                    saved.error().message,
-                L"Close KF2, then run Repair before the next launch."});
-        } else {
-            model.set_notice({ui::NoticeSeverity::error,
-                              L"ADAPTIVE_SETTING_SAVE_FAILED",
-                              saved.error().message, L""});
-        }
-        invalidate();
-        return;
-    }
     const bool game_running = installation &&
-        game::find_running_game_process(
-            installation->executable).has_value();
+        game::game_process_may_be_running(
+            installation->executable);
     if (!game_running && session_config_snapshot) {
         const bool restored = restore_protected_session_config(
             L"Adaptive mode changed before KF2 start");
@@ -353,23 +363,34 @@ void UiRuntime::dismiss_update() {
 }
 
 void UiRuntime::ignore_update() {
+    if (!updates.controller.snapshot().cached_available_version) {
+        refresh_update_presentation();
+        return;
+    }
     try {
-        updates.controller.ignore_available_version();
+        auto proposed = updates.controller;
+        proposed.ignore_available_version();
+        if (persist_update_snapshot(*this, proposed.snapshot())) {
+            static_assert(std::is_nothrow_move_assignable_v<update::UpdateController>);
+            updates.controller = std::move(proposed);
+        }
     } catch (...) {
         model.set_notice({
             ui::NoticeSeverity::error,
             L"UPDATE_IGNORE_FAILED",
             L"The available version could not be ignored. The previous update state was kept.",
             L"Close memory-intensive applications, then retry."});
-        refresh_update_presentation();
-        return;
     }
-    static_cast<void>(update::save_update_state(
-        updates.state_path, persisted_state(updates.controller.snapshot())));
     refresh_update_presentation();
 }
 
 void UiRuntime::start_update_install() {
+    if (package_actions_busy()) {
+        model.set_notice({ui::NoticeSeverity::info, L"PACKAGE_ACTIONS_BUSY",
+            L"Wait for the current update check, update installation or repair to finish.", L""});
+        refresh_update_presentation();
+        return;
+    }
     bool install_started{false};
     try {
         install_started =

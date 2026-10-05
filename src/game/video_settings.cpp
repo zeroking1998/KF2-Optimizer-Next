@@ -10,6 +10,7 @@
 #include <cwchar>
 #include <cwctype>
 #include <cstdint>
+#include <limits>
 #include <numeric>
 #include <optional>
 #include <string>
@@ -261,6 +262,20 @@ std::size_t index(VideoOption option) noexcept {
     return static_cast<std::size_t>(option);
 }
 
+int recognize_overall_quality(const VideoSettings& settings, int custom) noexcept {
+    for (std::size_t preset = 0; preset < kOverallQualityPresets.size(); ++preset) {
+        bool match = true;
+        for (std::size_t component = 0;
+             component < kOverallQualityTargets.size(); ++component) {
+            match = match && settings.choices[index(
+                kOverallQualityTargets[component])] ==
+                kOverallQualityPresets[preset][component];
+        }
+        if (match) return static_cast<int>(preset);
+    }
+    return custom;
+}
+
 Result<std::string> read_file(const std::filesystem::path& path) {
     auto file = open_video_file(path);
     if (!file.has_value()) return Result<std::string>::failure(file.error());
@@ -277,23 +292,76 @@ bool same(std::optional<std::wstring> value, std::wstring_view expected) {
     return value && lower(*value) == lower(std::wstring{expected});
 }
 
-int integer(const config::IniDocument& document, std::wstring_view key,
-            int fallback) {
-    const auto value = document.find(kSystem, key);
-    if (!value) return fallback;
-    wchar_t* end{};
-    const long result = std::wcstol(value->c_str(), &end, 10);
-    return end != value->c_str() ? static_cast<int>(result) : fallback;
+bool complete_numeric_parse(const std::wstring& value, const wchar_t* end) {
+    const auto limit = value.c_str() + value.size();
+    while (end < limit && (*end == L' ' || *end == L'\t' ||
+           *end == L'\r' || *end == L'\n' || *end == L'\f' || *end == L'\v')) {
+        ++end;
+    }
+    return end == limit;
 }
 
-double number(const config::IniDocument& document, std::wstring_view key,
-              double fallback) {
-    const auto value = document.find(kSystem, key);
-    if (!value) return fallback;
+std::optional<int> parse_integer(const std::wstring& value) {
     wchar_t* end{};
-    const double result = std::wcstod(value->c_str(), &end);
-    return end != value->c_str() ? result : fallback;
+    errno = 0;
+    const long result = std::wcstol(value.c_str(), &end, 10);
+    if (errno == ERANGE || end == value.c_str() ||
+        !complete_numeric_parse(value, end) ||
+        result < std::numeric_limits<int>::min() ||
+        result > std::numeric_limits<int>::max()) return std::nullopt;
+    return static_cast<int>(result);
 }
+
+std::optional<double> parse_number(const std::wstring& value) {
+    wchar_t* end{};
+    errno = 0;
+    const double result = std::wcstod(value.c_str(), &end);
+    if (errno == ERANGE || end == value.c_str() ||
+        !complete_numeric_parse(value, end) || !std::isfinite(result)) {
+        return std::nullopt;
+    }
+    return result;
+}
+
+class VideoNumericReader final {
+public:
+    VideoNumericReader(const config::IniDocument& document,
+                       std::wstring_view section) noexcept
+        : document_{document}, section_{section} {}
+
+    int integer(std::wstring_view key, int fallback,
+                int minimum, int maximum) {
+        const auto text = document_.find(section_, key);
+        if (!text) return fallback;
+        const auto value = parse_integer(*text);
+        if (value && *value >= minimum && *value <= maximum) return *value;
+        reject(key);
+        return fallback;
+    }
+
+    double number(std::wstring_view key, double fallback,
+                  double minimum, double maximum) {
+        const auto text = document_.find(section_, key);
+        if (!text) return fallback;
+        const auto value = parse_number(*text);
+        if (value && *value >= minimum && *value <= maximum) return *value;
+        reject(key);
+        return fallback;
+    }
+
+    const std::optional<Error>& error() const noexcept { return error_; }
+
+private:
+    void reject(std::wstring_view key) {
+        if (!error_) error_ = Error{ErrorCode::stale_data,
+            L"KF2 numeric video setting [" + std::wstring{section_} + L"] " +
+                std::wstring{key} + L" is invalid", 0};
+    }
+
+    const config::IniDocument& document_;
+    std::wstring_view section_;
+    std::optional<Error> error_;
+};
 
 int bool_choice(const config::IniDocument& document, std::wstring_view key,
                 bool inverted = false) {
@@ -363,16 +431,6 @@ Result<bool> put_game_int(config::IniDocument& document,
                           std::wstring_view section,
                           std::wstring_view key, int value) {
     return put_game_value(document, section, key, std::to_wstring(value));
-}
-
-double class_number(const config::IniDocument& document,
-                    std::wstring_view section, std::wstring_view key,
-                    double fallback) {
-    const auto value = document.find(section, key);
-    if (!value) return fallback;
-    wchar_t* end{};
-    const double parsed = std::wcstod(value->c_str(), &end);
-    return end != value->c_str() && std::isfinite(parsed) ? parsed : fallback;
 }
 
 std::optional<std::size_t> tuple_field_value_start(
@@ -464,13 +522,12 @@ std::optional<int> tuple_integer(
     std::wstring_view tuple, std::wstring_view field) {
     const auto value = tuple_field(tuple, field);
     if (!value) return std::nullopt;
-    wchar_t* end{};
-    const long parsed = std::wcstol(value->c_str(), &end, 10);
-    if (end == value->c_str()) return std::nullopt;
-    return static_cast<int>(parsed);
+    return parse_integer(*value);
 }
 
 int texture_resolution_choice(const config::IniDocument& document) {
+    // Missing, malformed, or non-preset tuple integers remain Custom. Never
+    // normalize the user's texture tuple while changing another option.
     bool found = false;
     for (int level = 0; level < 4; ++level) {
         bool matches = true;
@@ -489,13 +546,13 @@ int texture_resolution_choice(const config::IniDocument& document) {
     return found ? -1 : 3;
 }
 
-int texture_filtering_choice(const config::IniDocument& document) {
+int texture_filtering_choice(const config::IniDocument& document,
+                             int anisotropy) {
     constexpr std::array<int, 4> anisotropy_values{1, 1, 4, 16};
     constexpr std::array<std::wstring_view, 4> minmag{
         L"Linear", L"Linear", L"Aniso", L"Aniso"};
     constexpr std::array<std::wstring_view, 4> mip{
         L"Point", L"Linear", L"Linear", L"Linear"};
-    const int anisotropy = integer(document, L"MaxAnisotropy", 16);
     bool found = false;
     for (int level = 0; level < 4; ++level) {
         if (anisotropy != anisotropy_values[level]) continue;
@@ -710,20 +767,8 @@ VideoSettings present_game_menu_graphics_readback(
             result.choices[option] = readback.choices[option];
         }
     }
-    result.choices[index(VideoOption::overall_quality)] = -1;
-    for (int preset = 0; preset < 4; ++preset) {
-        bool match = true;
-        for (std::size_t component = 0;
-             component < kOverallQualityTargets.size(); ++component) {
-            match = match && result.choices[index(
-                kOverallQualityTargets[component])] ==
-                kOverallQualityPresets[preset][component];
-        }
-        if (match) {
-            result.choices[index(VideoOption::overall_quality)] = preset;
-            break;
-        }
-    }
+    result.choices[index(VideoOption::overall_quality)] =
+        recognize_overall_quality(result, -1);
     result.flex_level = std::max(0, result.choices[index(VideoOption::nvidia_flex)]);
     return result;
 }
@@ -931,9 +976,37 @@ Result<VideoSettings> read_video_settings(const std::filesystem::path& config_ro
     auto parsed = config::IniDocument::parse(snapshot.value().system);
     if (!parsed.has_value()) return Result<VideoSettings>::failure(parsed.error());
     const auto& document = parsed.value();
+    auto game_document = config::IniDocument::parse(snapshot.value().game);
+    if (!game_document.has_value()) {
+        return Result<VideoSettings>::failure(game_document.error());
+    }
+    // Missing optional keys keep their existing defaults. Present but invalid
+    // values fail the whole snapshot; no normalized replacement is persisted.
+    VideoNumericReader numbers{document, kSystem};
+    VideoNumericReader script_numbers{game_document.value(), L"Engine.WorldInfo"};
+    const Resolution current{numbers.integer(L"ResX", 1920, 640, 16384),
+                             numbers.integer(L"ResY", 1080, 480, 16384)};
+    const double grain = numbers.number(L"ImageGrainScaler", 0.5, 0.5, 37.5);
+    const int detail_mode = numbers.integer(L"DetailMode", 2, 0, 2);
+    const int skeletal_bias = numbers.integer(L"SkeletalMeshLODBias", 0, 0, 1);
+    const int fog_quality = numbers.integer(L"DistanceFogQuality", 1, 0, 2);
+    const int anisotropy = numbers.integer(L"MaxAnisotropy", 16, 1, 16);
+    const int shadow_resolution = numbers.integer(L"MaxShadowResolution", 1024,
+                                                  256, 4096);
+    const int bloom_quality = numbers.integer(L"BloomQuality", 1, 0, 2);
+    const double shadow_texels = numbers.number(L"ShadowTexelsPerPixel", 1.0,
+                                                0.1, 4.0);
+    const double lifetime = script_numbers.number(L"DestructionLifetimeScale",
+        numbers.number(L"DestructionLifetimeScale", 1.0, 0.1, 2.0), 0.1, 2.0);
+    const double emitter_pool = script_numbers.number(L"EmitterPoolScale",
+        numbers.number(L"EmitterPoolScale", 1.0, 0.25, 4.0), 0.25, 4.0);
+    if (numbers.error()) {
+        return Result<VideoSettings>::failure(*numbers.error());
+    }
+    if (script_numbers.error()) {
+        return Result<VideoSettings>::failure(*script_numbers.error());
+    }
     VideoSettings settings;
-    const Resolution current{integer(document, L"ResX", 1920),
-                             integer(document, L"ResY", 1080)};
     add_resolutions(settings, current);
     settings.choices[index(VideoOption::resolution)] =
         static_cast<int>(std::find_if(settings.resolutions.begin(), settings.resolutions.end(),
@@ -943,47 +1016,34 @@ Result<VideoSettings> read_video_settings(const std::filesystem::path& config_ro
     const bool borderless = same(document.find(kSystem, L"Borderless"), L"true");
     settings.choices[index(VideoOption::display)] = fullscreen ? 2 : borderless ? 1 : 0;
     settings.choices[index(VideoOption::vsync)] = bool_choice(document, L"UseVsync");
-    auto game_document = config::IniDocument::parse(snapshot.value().game);
-    if (!game_document.has_value()) {
-        return Result<VideoSettings>::failure(game_document.error());
-    }
-    const auto& script_document = game_document.value();
     settings.choices[index(VideoOption::variable_frame_rate)] =
         same(game_document.value().find(kGameEngine, L"bSmoothFrameRate"), L"true") ? 0 : 1;
     // KF2's Graphics-menu slider maps [0, 1] to FilmGrainScale [0.5, 37.5].
     settings.film_grain_percent = std::clamp(
-        static_cast<int>((number(document, L"ImageGrainScaler", 0.5) - 0.5) /
-                         37.0 * 100.0 + 0.5),
+        static_cast<int>((grain - 0.5) / 37.0 * 100.0 + 0.5),
         0, 100);
-    const int detail_mode = std::clamp(integer(document, L"DetailMode", 2), 0, 2);
     settings.choices[index(VideoOption::environment_detail)] =
-        detail_mode == 2 && class_number(
-            script_document, L"Engine.WorldInfo", L"DestructionLifetimeScale",
-            number(document, L"DestructionLifetimeScale", 1.0)) >= 1.15
+        detail_mode == 2 && lifetime >= 1.15
             ? 3 : detail_mode;
     settings.choices[index(VideoOption::character_detail)] =
-        integer(document, L"SkeletalMeshLODBias", 0) > 0 ? 0 :
+        skeletal_bias > 0 ? 0 :
         bool_choice(document, L"AllowSubsurfaceScattering") ? 2 : 1;
-    const int fog_quality = integer(document, L"DistanceFogQuality", 1);
-    const double emitter_pool = class_number(
-        script_document, L"Engine.WorldInfo", L"EmitterPoolScale",
-        number(document, L"EmitterPoolScale", 1.0));
     settings.choices[index(VideoOption::fx_quality)] =
         fog_quality <= 0 ? (emitter_pool <= 0.35 ? 0 : 1) :
         (emitter_pool <= 1.1 ? 2 : 3);
     settings.choices[index(VideoOption::texture_resolution)] =
         texture_resolution_choice(document);
     settings.choices[index(VideoOption::texture_filtering)] =
-        texture_filtering_choice(document);
+        texture_filtering_choice(document, anisotropy);
     settings.choices[index(VideoOption::shadow_quality)] =
-        integer(document, L"MaxShadowResolution", 1024) >= 1536 ? 3 :
-        number(document, L"ShadowTexelsPerPixel", 1.0) >= 1.3 ? 2 :
+        shadow_resolution >= 1536 ? 3 :
+        shadow_texels >= 1.3 ? 2 :
         bool_choice(document, L"bAllowWholeSceneDominantShadows") ? 1 : 0;
     settings.choices[index(VideoOption::realtime_reflections)] =
         bool_choice(document, L"bAllowScreenSpaceReflections");
     settings.choices[index(VideoOption::anti_aliasing)] = bool_choice(document, L"PostProcessAA");
     settings.choices[index(VideoOption::bloom)] =
-        bool_choice(document, L"Bloom") ? std::clamp(integer(document, L"BloomQuality", 1), 1, 2) : 0;
+        bool_choice(document, L"Bloom") ? std::clamp(bloom_quality, 1, 2) : 0;
     settings.choices[index(VideoOption::motion_blur)] = bool_choice(document, L"MotionBlur");
     settings.choices[index(VideoOption::ambient_occlusion)] =
         bool_choice(document, L"HBAO") ? 2 : bool_choice(document, L"AmbientOcclusion") ? 1 : 0;
@@ -991,20 +1051,8 @@ Result<VideoSettings> read_video_settings(const std::filesystem::path& config_ro
     settings.choices[index(VideoOption::volumetric_lighting)] = bool_choice(document, L"LightCones");
     settings.choices[index(VideoOption::lens_flares)] = bool_choice(document, L"bAllowLensFlares");
     settings.choices[index(VideoOption::light_shafts)] = bool_choice(document, L"bAllowLightShafts");
-    settings.choices[index(VideoOption::overall_quality)] = 4;
-    for (int preset = 0; preset < 4; ++preset) {
-        bool match = true;
-        for (std::size_t component = 0;
-             component < kOverallQualityTargets.size(); ++component) {
-            match = match && settings.choices[index(
-                kOverallQualityTargets[component])] ==
-                kOverallQualityPresets[preset][component];
-        }
-        if (match) {
-            settings.choices[index(VideoOption::overall_quality)] = preset;
-            break;
-        }
-    }
+    settings.choices[index(VideoOption::overall_quality)] =
+        recognize_overall_quality(settings, 4);
 
     auto engine = config::IniDocument::parse(snapshot.value().engine);
     if (!engine.has_value()) {
@@ -1016,16 +1064,13 @@ Result<VideoSettings> read_video_settings(const std::filesystem::path& config_ro
             ErrorCode::stale_data,
             L"KF2's NVIDIA FleX setting could not be verified", 0});
     }
-    wchar_t* end{};
-    errno = 0;
-    const long flex_level = std::wcstol(flex_value->c_str(), &end, 10);
-    if (errno == ERANGE || end == flex_value->c_str() || *end != L'\0' ||
-        flex_level < 0 || flex_level > 2) {
+    const auto flex_level = parse_integer(*flex_value);
+    if (!flex_level || *flex_level < 0 || *flex_level > 2) {
         return Result<VideoSettings>::failure({
             ErrorCode::stale_data,
             L"KF2's NVIDIA FleX setting is invalid", 0});
     }
-    settings.flex_level = static_cast<int>(flex_level);
+    settings.flex_level = *flex_level;
     settings.choices[index(VideoOption::nvidia_flex)] = settings.flex_level;
     return Result<VideoSettings>::success(std::move(settings));
 }
@@ -1099,11 +1144,8 @@ Result<config::ConfigPreview> build_video_preview(
             ErrorCode::invalid_argument,
             L"Film grain selection is invalid", 0});
     }
-    bool changed = false;
-    const auto apply_result = [&](Result<bool> result) -> bool {
-        if (!result.has_value()) return false;
-        changed = changed || result.value();
-        return true;
+    const auto apply_result = [](Result<bool> result) {
+        return result.has_value();
     };
     const int display = selected(VideoOption::display);
     if (option_changed(VideoOption::display) &&
@@ -1265,8 +1307,6 @@ Result<config::ConfigPreview> build_video_preview(
         option_changed(VideoOption::texture_resolution),
         option_changed(VideoOption::texture_filtering));
     if (!textures.has_value()) return Result<config::ConfigPreview>::failure(textures.error());
-    changed = changed || textures.value();
-    static_cast<void>(changed);
 
     auto engine_parsed = config::IniDocument::parse(snapshot.value().engine);
     if (!engine_parsed.has_value()) {

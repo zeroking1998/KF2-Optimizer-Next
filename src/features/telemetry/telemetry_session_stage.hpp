@@ -8,6 +8,9 @@
 namespace kf2::app {
 struct UiRuntime;
 }
+namespace kf2::telemetry {
+struct ResourceTelemetrySnapshot;
+}
 
 namespace kf2::telemetry_pipeline {
 
@@ -19,21 +22,6 @@ enum class SessionDisposition {
     reconnecting,
     session_ended,
 };
-
-enum class BoundProcessTransition {
-    same_process,
-    replacement_process,
-    ended,
-};
-
-[[nodiscard]] constexpr BoundProcessTransition
-classify_bound_process_transition(bool same_process_running,
-                                  bool verified_process_running) noexcept {
-    if (same_process_running) return BoundProcessTransition::same_process;
-    return verified_process_running
-        ? BoundProcessTransition::replacement_process
-        : BoundProcessTransition::ended;
-}
 
 struct SessionGateInput final {
     bool process_bound{false};
@@ -60,13 +48,25 @@ struct SessionStageResult final {
 
 inline constexpr std::uint64_t kIdleProcessDiscoveryIntervalNs =
     500'000'000ULL;
+inline constexpr std::uint64_t kMaximumIdleProcessDiscoveryIntervalNs =
+    5'000'000'000ULL;
+
+[[nodiscard]] constexpr std::uint64_t next_idle_process_discovery_interval_ns(
+    std::uint64_t current_ns) noexcept {
+    if (current_ns >= kMaximumIdleProcessDiscoveryIntervalNs / 2)
+        return kMaximumIdleProcessDiscoveryIntervalNs;
+    return current_ns < kIdleProcessDiscoveryIntervalNs
+        ? kIdleProcessDiscoveryIntervalNs : current_ns * 2;
+}
 
 [[nodiscard]] constexpr bool should_scan_for_game_process(
     std::uint64_t now_ns, std::uint64_t last_scan_ns,
-    bool restart_handoff_pending) noexcept {
-    return restart_handoff_pending || last_scan_ns == 0 ||
+    bool bounded_launch_pending, std::uint64_t idle_interval_ns) noexcept {
+    const auto interval_ns = bounded_launch_pending
+        ? kIdleProcessDiscoveryIntervalNs : idle_interval_ns;
+    return last_scan_ns == 0 ||
            now_ns < last_scan_ns ||
-           now_ns - last_scan_ns >= kIdleProcessDiscoveryIntervalNs;
+           now_ns - last_scan_ns >= interval_ns;
 }
 
 inline constexpr std::uint64_t kSilentPresentRestartNs = 3'000'000'000ULL;
@@ -113,18 +113,17 @@ struct RestartHandoffInput final {
 
 struct SilentPresentInput final {
     bool scene_ready{false};
-    bool session_bound{false};
     std::optional<double> fps;
     ::kf2::telemetry::UnavailableReason reason{
         ::kf2::telemetry::UnavailableReason::no_samples};
-    std::uint64_t session_started_ns{0};
+    std::uint64_t session_started_ns{0}; // Latest start attempt, including failure.
     std::uint64_t now_ns{0};
     unsigned int restart_count{0};
 };
 
 [[nodiscard]] constexpr bool should_reconnect_silent_present(
     const SilentPresentInput& input) noexcept {
-    return input.scene_ready && input.session_bound && !input.fps &&
+    return input.scene_ready && !input.fps &&
         input.reason == ::kf2::telemetry::UnavailableReason::no_samples &&
         input.session_started_ns != 0 &&
         input.now_ns >= input.session_started_ns &&
@@ -152,8 +151,8 @@ struct SilentPresentInput final {
 }
 
 void attach_session_sources(app::UiRuntime& runtime);
-void refresh_session_gate(app::UiRuntime& runtime);
-void revalidate_bound_process(app::UiRuntime& runtime);
+[[nodiscard]] std::shared_ptr<const telemetry::ResourceTelemetrySnapshot>
+refresh_session_gate(app::UiRuntime& runtime);
 [[nodiscard]] SessionStageResult inspect_bound_session(
     app::UiRuntime& runtime);
 

@@ -38,13 +38,27 @@ bool equals_ascii_case_insensitive(std::string_view left,
     return true;
 }
 
-std::optional<std::uint16_t> parse_adaptive_bridge_line(
+std::optional<AdaptiveBridgeReceipt> parse_adaptive_bridge_line(
     std::string_view line) {
     constexpr std::string_view marker =
-        "KF2OPT_ADAPTIVE_BRIDGE state=ready port=";
+        "KF2OPT_ADAPTIVE_BRIDGE state=";
     const auto marker_offset = line.find(marker);
     if (marker_offset == std::string_view::npos) return std::nullopt;
-    auto value = line.substr(marker_offset + marker.size());
+    const auto state_start = marker_offset + marker.size();
+    const auto state_end = line.find_first_of(" \t\r\n", state_start);
+    const auto state = line.substr(state_start,
+        state_end == std::string_view::npos
+            ? std::string_view::npos : state_end - state_start);
+    if (state == "blocked" || state == "unavailable") {
+        return AdaptiveBridgeReceipt{};
+    }
+    if (state != "ready" || state_end == std::string_view::npos) {
+        return std::nullopt;
+    }
+    constexpr std::string_view port_marker = " port=";
+    auto value = line.substr(state_end);
+    if (!value.starts_with(port_marker)) return std::nullopt;
+    value.remove_prefix(port_marker.size());
     const auto delimiter = value.find_first_of(" \t\r\n");
     if (delimiter != std::string_view::npos) value = value.substr(0, delimiter);
     unsigned int port = 0;
@@ -54,7 +68,7 @@ std::optional<std::uint16_t> parse_adaptive_bridge_line(
         port == 0 || port > 65535) {
         return std::nullopt;
     }
-    return static_cast<std::uint16_t>(port);
+    return AdaptiveBridgeReceipt{static_cast<std::uint16_t>(port)};
 }
 
 std::optional<std::uint64_t> parse_generation(std::string_view value) {

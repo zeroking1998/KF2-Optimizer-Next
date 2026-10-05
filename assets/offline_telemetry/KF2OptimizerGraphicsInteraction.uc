@@ -175,14 +175,15 @@ function GuardRuntimeActors(WorldInfo CurrentWorld)
     // turret subclasses plus every pawn.
     foreach CurrentWorld.DynamicActors(class'Actor', Candidate)
     {
-        Weapon = KFWeapon(Candidate);
-        if (Weapon != None && EnsureTurretWeaponMaterial(Weapon))
-        {
-            ++UpdatedWeaponMaterialCount;
-        }
         Pawn = KFPawn(Candidate);
         if (Pawn == None)
         {
+            // Pawns cannot also be weapons: only classify the other actors.
+            Weapon = KFWeapon(Candidate);
+            if (Weapon != None && EnsureTurretWeaponMaterial(Weapon))
+            {
+                ++UpdatedWeaponMaterialCount;
+            }
             continue;
         }
         if (EnsureWeaponClassFallback(Pawn))
@@ -193,7 +194,7 @@ function GuardRuntimeActors(WorldInfo CurrentWorld)
         {
             ++ReplacedAfflictionCount;
         }
-        if (Pawn == None || Pawn.bDeleteMe ||
+        if (Pawn.bDeleteMe ||
             Pawn.AfflictionHandler == None ||
             Pawn.AfflictionHandler.AfflictionClasses.Length <= AF_FirePanic ||
             Pawn.AfflictionHandler.AfflictionClasses[AF_FirePanic] ==

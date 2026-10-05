@@ -31,6 +31,23 @@ enum class UpdateHelperStopFault {
     wait_timeout,
 };
 
+enum class UpdateCleanupWaitFault {
+    none,
+    open_failure,
+    wait_failure,
+    wait_timeout,
+};
+
+void set_update_cleanup_wait_fault_for_testing(
+    UpdateCleanupWaitFault fault) noexcept;
+
+[[nodiscard]] bool cleanup_update_work_for_testing(
+    std::uint32_t helper_process_id,
+    std::uint64_t helper_process_start_id,
+    const std::filesystem::path& work_root,
+    std::string_view token,
+    std::uint32_t timeout_ms);
+
 void set_update_helper_stop_fault_for_testing(
     UpdateHelperStopFault fault) noexcept;
 

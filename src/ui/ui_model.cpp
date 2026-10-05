@@ -1,6 +1,7 @@
 #include "kf2/ui/ui_model.hpp"
 
 #include <algorithm>
+#include <type_traits>
 #include <utility>
 
 namespace kf2::ui {
@@ -105,6 +106,40 @@ void UiModel::set_recovery_required(bool required) noexcept {
     recovery_required_ = required;
 }
 void UiModel::set_status(UiStatus status) { status_ = std::move(status); }
+void UiModel::set_adaptive_status(AdaptiveUiStatus status) noexcept {
+    static_assert(std::is_nothrow_move_assignable_v<AdaptiveUiStatus>);
+    static_cast<AdaptiveUiStatus&>(status_) = std::move(status);
+}
+void UiModel::set_telemetry_status(
+    std::wstring telemetry, std::wstring performance_analysis,
+    std::optional<double> fps, std::optional<double> frame_time_ms,
+    std::optional<double> cpu_percent, std::optional<double> gpu_percent,
+    std::optional<int> active_corpses, std::optional<int> sleeping_corpses) noexcept {
+    status_.telemetry = std::move(telemetry);
+    status_.performance_analysis = std::move(performance_analysis);
+    status_.live_fps = fps;
+    status_.live_frame_time_ms = frame_time_ms;
+    status_.live_cpu_percent = cpu_percent;
+    status_.live_gpu_percent = gpu_percent;
+    status_.live_active_corpses = active_corpses;
+    status_.live_sleeping_corpses = sleeping_corpses;
+}
+void UiModel::set_flex_observation_status(
+    std::wstring telemetry, std::optional<int> requested_substeps,
+    std::optional<int> effective_substeps, std::wstring action_status,
+    std::wstring substep_diagnostics, std::wstring readback_diagnostics) noexcept {
+    // Owning arguments are prepared before entry; no allocation occurs while
+    // committing these fields, and unrelated status is left untouched.
+    status_.flex_telemetry = std::move(telemetry);
+    status_.flex_requested_substeps = requested_substeps;
+    status_.flex_effective_substeps = effective_substeps;
+    status_.flex_action_status = std::move(action_status);
+    status_.flex_substep_diagnostics = std::move(substep_diagnostics);
+    status_.flex_readback_diagnostics = std::move(readback_diagnostics);
+}
+void UiModel::set_flex_capability(std::wstring capability) noexcept {
+    status_.flex_capability = std::move(capability);
+}
 void UiModel::set_notice(Notice notice) { notice_ = std::move(notice); }
 void UiModel::clear_notice() noexcept { notice_.reset(); }
 const std::wstring& UiModel::state_path() const noexcept { return state_path_; }
@@ -113,6 +148,7 @@ const std::wstring& UiModel::build_identity() const noexcept {
 }
 bool UiModel::recovery_required() const noexcept { return recovery_required_; }
 const UiStatus& UiModel::status() const noexcept { return status_; }
+const AdaptiveUiStatus& UiModel::adaptive_status() const noexcept { return status_; }
 int UiModel::presented_target_fps() const noexcept {
     return numeric_presentation_.target_fps(status_.target_fps);
 }

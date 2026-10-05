@@ -13,24 +13,24 @@ void attach_session_sources(app::UiRuntime& runtime) {
     runtime.try_attach_telemetry();
 }
 
-void refresh_session_gate(app::UiRuntime& runtime) {
+std::shared_ptr<const telemetry::ResourceTelemetrySnapshot>
+refresh_session_gate(app::UiRuntime& runtime) {
     // Continue consuming KF2's own read-only session log after DXGI timing
     // attached; map transitions happen long after the startup gate.
-    if (runtime.game_process) runtime.update_overlay_scene_gate();
-}
-
-void revalidate_bound_process(app::UiRuntime& runtime) {
-    if (!runtime.game_process) return;
-    const auto previous_process = *runtime.game_process;
-    // The executable path was verified when this immutable process identity
-    // was bound. Repeating path lookup and canonicalization every 120 ms adds
-    // no security after the creation timestamp protects against PID reuse.
-    if (!game::is_game_process_current(previous_process)) {
-        runtime.begin_game_restart_handoff(previous_process);
+    if (runtime.game_process) {
+        runtime.resource_telemetry_worker.request(runtime.monotonic_ns());
+        runtime.update_overlay_scene_gate();
     }
+    return runtime.resource_telemetry_worker.latest();
 }
 
 SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
+    // Sessions without a Present source must still observe process exit.
+    if (runtime.game_process && !runtime.present_source &&
+        !game::is_game_process_current(*runtime.game_process)) {
+        const auto previous_process = *runtime.game_process;
+        runtime.begin_game_restart_handoff(previous_process);
+    }
     if (!runtime.game_process || !runtime.present_source) {
         runtime.corpse_telemetry_tracker.reset();
         const std::wstring detail = runtime.telemetry_failure.empty()
@@ -90,18 +90,10 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
     }
 
     const auto previous_process = *runtime.game_process;
-    const auto still_running = runtime.installation
-        ? game::bind_game_process(previous_process.pid,
-              runtime.installation->executable)
-        : Result<game::GameProcessIdentity>::failure(
-              {ErrorCode::not_found, L"KF2 installation unavailable", 0});
-    const bool same_process_running = still_running.has_value() &&
-        still_running.value().pid == previous_process.pid &&
-        still_running.value().process_start_id ==
-            previous_process.process_start_id;
-    const auto process_transition = classify_bound_process_transition(
-        same_process_running, still_running.has_value());
-    if (process_transition == BoundProcessTransition::same_process) {
+    // Binding already verified the executable. Immutable creation time and
+    // liveness suffice while waiting for this process to recreate its window.
+    if (game::is_game_process_current(previous_process)) {
+        if (runtime.game_window) runtime.last_game_window_scan_ns = 0;
         runtime.game_window = nullptr;
         runtime.telemetry_failure = L"Waiting for KF2 window";
         if (runtime.overlay_window) {
@@ -150,8 +142,16 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
         const auto found = game::find_running_game_process(
             installation->executable);
         if (found.has_value()) process = found.value();
+        else if (found.error().code != ErrorCode::not_found) return false;
     }
     if (!process || !game::is_game_process_current(*process)) {
+        if (process) {
+            const auto found = game::find_running_game_process(process->executable);
+            if (!found.has_value() && found.error().code != ErrorCode::not_found) {
+                adaptive_restore_debt = *process;
+                return false;
+            }
+        }
         adaptive_restore_debt.reset();
         return true;
     }
@@ -229,11 +229,9 @@ void UiRuntime::reset_local_adaptive_controller_for_mode(bool enabled) {
 
 bool UiRuntime::set_live_adaptive_enabled(
     bool enabled, std::wstring_view reason) {
-    if (!installation ||
-        !game::find_running_game_process(
-             installation->executable).has_value()) {
-        return true;
-    }
+    if (!installation) return true;
+    const auto running = game::find_running_game_process(installation->executable);
+    if (!running.has_value()) return running.error().code == ErrorCode::not_found;
     if (!game::valid_adaptive_control_token(adaptive_control_token)) {
         return false;
     }
@@ -310,7 +308,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     if (last_flex_observation && last_flex_observation->update_calls > 0 &&
         last_flex_observation->diagnostics_enabled) {
         const auto& observed = *last_flex_observation;
-        const bool saved = save_flex_report(observed, true);
+        const bool saved = save_flex_report(observed);
         events->append({0,
             saved && observed.pass_through_healthy
                 ? diagnostics::Severity::info : diagnostics::Severity::warning,
@@ -337,8 +335,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     resource_telemetry_worker.clear();
     resource_telemetry_generation = 0;
     resource_telemetry_publication_sequence = 0;
-    resource_telemetry_source_announced_generation = 0;
-    resource_telemetry_nvidia_expected = false;
+    announced_gpu_provider_status.reset();
     gpu_utilization_filter.reset();
     cached_process_memory_sample_ns = 0;
     cached_gpu_sample_ns = 0;
@@ -407,12 +404,13 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     last_frame_metrics = {};
     last_report_gameplay_session.reset();
     adapter_vram_budget.reset();
-    last_flex_observation_calls = 0;
     flex_observation_announced = false;
+    flex_particle_text_current = false;
     last_flex_observation.reset();
-    last_flex_report_tick = 0;
+    flex_observation_reader.reset();
     flex_minimum_limited = false;
     game_process.reset();
+    reset_game_process_discovery();
     game_log_startup_exited = false;
     game_log_startup_exit_announced = false;
     game_log_new_settings_restart_requested = false;
@@ -445,6 +443,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     refresh_video_presentation();
     overlay_scene_ready = false;
     game_window = nullptr;
+    last_game_window_scan_ns = 0;
     if (overlay_window) {
         overlay::OverlayPresentation hidden;
         overlay_presentation = hidden;
@@ -586,9 +585,16 @@ void UiRuntime::finalize_ended_game_session() {
     } else if (installation) {
         const auto capped = synchronize_frame_rate_cap();
         if (!capped.has_value()) {
+            session_restored = false;
+            model.set_recovery_required(true);
             events->append({0, diagnostics::Severity::error,
                 "TARGET_FPS_PERSIST_FAILED", capped.error().message,
                 L"config"});
+            model.set_notice({ui::NoticeSeverity::error,
+                L"TARGET_FPS_PERSIST_FAILED",
+                L"Required native FPS-cap synchronization failed: " +
+                    capped.error().message,
+                L"Keep KF2 closed until the native cap can be written and verified."});
         } else if (capped.value().changed) {
             events->append({0, diagnostics::Severity::info,
                 "TARGET_FPS_PERSISTED",
@@ -610,7 +616,7 @@ void UiRuntime::finalize_ended_game_session() {
                          : "KF2_SESSION_RECOVERY_PENDING",
         session_restored
             ? L"No verified replacement process appeared; session telemetry was finalized"
-            : L"No verified replacement process appeared; protected INI finalization is waiting for a stable graphics readback",
+            : L"No verified replacement process appeared; required session finalization remains incomplete",
         L"game"});
     if (session_restored) {
         static_cast<void>(rearm_automatic_external_launch_profile());
@@ -623,9 +629,9 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
     if (!installation || !game_process) return;
     const telemetry::SampleIdentity identity{
         game_process->pid, game_process->process_start_id};
-    const auto now = monotonic_ns();
-    resource_telemetry_worker.request(now);
     if (flush) {
+        // An explicit terminal flush is separate from the periodic cycle.
+        resource_telemetry_worker.request(monotonic_ns());
         static_cast<void>(resource_telemetry_worker.wait_until_idle(
             std::chrono::milliseconds{250}));
     }
@@ -641,6 +647,17 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
             game_log_startup_exit_announced = false;
             game_log_new_settings_restart_requested = false;
             game_log_session.reset();
+        }
+        if (chunk.catching_up) {
+            // Neither the previous publication nor a partially replayed map
+            // can authorize Adaptive actions while the log reader is behind.
+            game_log_session.reset();
+            game_menu_graphics_readback.reset();
+            corpse_telemetry_tracker.reset();
+            auto status = model.status();
+            status.game_session = L"Waiting for game log catch-up";
+            model.set_status(std::move(status));
+            continue;
         }
         const auto& boundaries = chunk.boundaries;
         if (boundaries.graphics_readback &&
@@ -750,7 +767,25 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
 }
 
 void UiRuntime::try_attach_telemetry() {
-    if (!installation || present_source) return;
+    if (!installation) return;
+    if (present_source) {
+        // Keep healthy process-bound sources and statistics. Enumerate windows
+        // only when the previous HWND disappeared, at most once per second.
+        if (game_process && !game_window) {
+            const auto now = monotonic_ns();
+            if (last_game_window_scan_ns == 0 || now < last_game_window_scan_ns ||
+                now - last_game_window_scan_ns >= 1'000'000'000ULL) {
+                last_game_window_scan_ns = now;
+                const auto found = game::find_game_window(*game_process);
+                if (found.has_value() &&
+                    game::inspect_game_window(*game_process, found.value()).has_value()) {
+                    game_window = found.value();
+                    telemetry_failure.clear();
+                }
+            }
+        }
+        return;
+    }
     bool confirmed_settings_restart_replacement = false;
     const auto now = monotonic_ns();
     std::optional<game::GameProcessIdentity> process;
@@ -765,13 +800,53 @@ void UiRuntime::try_attach_telemetry() {
             begin_game_restart_handoff(previous_process);
         }
     }
-    if (!process && telemetry_pipeline::should_scan_for_game_process(
-            now, last_game_process_scan_ns,
-            game_restart_handoff_previous_process.has_value())) {
+    if (!process) {
+        // A permanently staged external-launch profile is not an active
+        // launch. Keep the fast cadence only inside a bounded startup/handoff.
+        const bool bounded_launch =
+            (game_restart_handoff_previous_process.has_value() &&
+             game_restart_handoff_deadline_ns != 0 &&
+             now < game_restart_handoff_deadline_ns) ||
+            (session_config_waiting_for_launch &&
+             session_config_launch_deadline_ns != 0 &&
+             now < session_config_launch_deadline_ns);
+        if (!telemetry_pipeline::should_scan_for_game_process(
+                now, last_game_process_scan_ns, bounded_launch,
+                game_process_discovery_interval_ns)) {
+            // Skipping a query is not fresh evidence that KF2 has closed.
+            return;
+        }
+        const bool clock_rolled_back = now < last_game_process_scan_ns;
+        if (bounded_launch || clock_rolled_back)
+            game_process_discovery_interval_ns =
+                telemetry_pipeline::kIdleProcessDiscoveryIntervalNs;
         last_game_process_scan_ns = now;
         const auto discovered =
             game::find_running_game_process(installation->executable);
-        if (discovered.has_value()) process = discovered.value();
+        if (discovered.has_value()) {
+            game_process_discovery_interval_ns =
+                telemetry_pipeline::kIdleProcessDiscoveryIntervalNs;
+            const auto current = game::verify_game_executable_identity(*installation);
+            if (!current.has_value()) {
+                const auto refreshed = revalidate_game_installation();
+                telemetry_failure = refreshed.has_value()
+                    ? L"KF2 executable changed; installation revalidated before retrying telemetry"
+                    : refreshed.error().message;
+                // Do not bind the stale candidate or mistake rejection for a
+                // closed game and restore its protected INIs while it runs.
+                return;
+            }
+            process = discovered.value();
+        } else {
+            if (!bounded_launch && !clock_rolled_back)
+                game_process_discovery_interval_ns =
+                    telemetry_pipeline::next_idle_process_discovery_interval_ns(
+                        game_process_discovery_interval_ns);
+            if (discovered.error().code != ErrorCode::not_found) {
+                telemetry_failure = discovered.error().message;
+                return;
+            }
+        }
     }
     if (game_restart_handoff_previous_process) {
         const auto& previous = *game_restart_handoff_previous_process;
@@ -959,12 +1034,13 @@ void UiRuntime::try_attach_telemetry() {
         game_process->pid, game_process->process_start_id};
     present_source = std::make_unique<telemetry::PresentSource>(identity, 2400);
     static_cast<void>(present_source->start());
+    // Failed starts share the existing bounded silent-session retry clock.
+    present_session_started_ns = monotonic_ns();
+    present_session_restart_count = 0;
     auto frame_timing = platform::windows::DxgiFrameTimingSession::start(
         identity, *present_source);
     if (frame_timing.has_value()) {
         present_session = std::move(frame_timing.value());
-        present_session_started_ns = monotonic_ns();
-        present_session_restart_count = 0;
         telemetry_failure.clear();
     } else {
         telemetry_failure = L"DXGI frame timing unavailable: " +
@@ -1014,6 +1090,7 @@ void UiRuntime::bind_resource_telemetry(
     telemetry::ResourceTelemetryBinding binding;
     binding.identity = {
         game_process->pid, game_process->process_start_id};
+    binding.native_process = game_process->native_process;
     if (installation) {
         binding.game_log_directory =
             installation->config_root.parent_path() / L"Logs";
@@ -1030,8 +1107,6 @@ void UiRuntime::bind_resource_telemetry(
     if (resource_telemetry_generation == generation && generation != 0) {
         return;
     }
-    resource_telemetry_nvidia_expected =
-        adapter && adapter->vendor_id == 0x10DE;
     reset_resource_telemetry_cache(generation);
 }
 
@@ -1039,7 +1114,7 @@ void UiRuntime::reset_resource_telemetry_cache(std::uint64_t generation) {
     if (generation == 0) return;
     resource_telemetry_generation = generation;
     resource_telemetry_publication_sequence = 0;
-    resource_telemetry_source_announced_generation = 0;
+    announced_gpu_provider_status.reset();
     cached_process_memory_sample_ns = 0;
     cached_gpu_sample_ns = 0;
     cached_process_metrics.reset();

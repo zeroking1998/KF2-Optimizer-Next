@@ -17,11 +17,11 @@ double normalized(double value, double healthy, double critical) noexcept {
     return std::clamp((value - healthy) / (critical - healthy), 0.0, 1.0);
 }
 
-double occupancy(const std::optional<double>& used,
-                 const std::optional<double>& budget) noexcept {
+std::optional<double> occupancy(const std::optional<double>& used,
+                                const std::optional<double>& budget) noexcept {
     if (!valid_nonnegative(used) || !valid_nonnegative(budget) ||
         *budget <= 0.0) {
-        return 0.0;
+        return std::nullopt;
     }
     return std::clamp(*used / *budget, 0.0, 1.0);
 }
@@ -100,14 +100,14 @@ ResourcePressureSnapshot ResourcePressureEstimator::evaluate(
         result.gpu.confidence = std::min(result.gpu.confidence, 0.55);
     }
 
-    const double vram_occupancy = occupancy(
+    const auto vram_occupancy = occupancy(
         input.vram_used_bytes, input.vram_budget_bytes);
-    result.vram.raw = normalized(vram_occupancy, 0.80, 0.97);
+    result.vram.raw = normalized(vram_occupancy.value_or(0.0), 0.80, 0.97);
+    // A field alone cannot establish headroom. Keep the existing confidence
+    // for complete measurements, but do not count incomplete tuples.
     result.vram.confidence = confidence_for({
-        input.vram_used_bytes.has_value(),
-        input.vram_budget_bytes.has_value()});
-    if (valid_nonnegative(input.vram_used_bytes) &&
-        valid_nonnegative(input.vram_budget_bytes) &&
+        vram_occupancy.has_value(), vram_occupancy.has_value()});
+    if (vram_occupancy &&
         *input.vram_budget_bytes >= *input.vram_used_bytes) {
         result.vram.reserve_bytes =
             *input.vram_budget_bytes - *input.vram_used_bytes;
@@ -116,23 +116,23 @@ ResourcePressureSnapshot ResourcePressureEstimator::evaluate(
         }
     }
 
-    const double ram_occupancy = occupancy(
+    const auto ram_occupancy = occupancy(
         input.ram_used_bytes, input.ram_budget_bytes);
-    const double commit_occupancy = occupancy(
+    const auto commit_occupancy = occupancy(
         input.commit_used_bytes, input.commit_budget_bytes);
-    const double paging = std::clamp(
-        input.paging_pressure.value_or(0.0), 0.0, 1.0);
+    const bool paging_valid = valid_nonnegative(input.paging_pressure) &&
+        *input.paging_pressure <= 1.0;
+    const double paging = paging_valid ? *input.paging_pressure : 0.0;
     result.ram.raw = std::max({
-        normalized(ram_occupancy, 0.78, 0.96),
-        normalized(commit_occupancy, 0.75, 0.95), paging});
-    result.ram.confidence = confidence_for({
-        input.ram_used_bytes.has_value(), input.ram_budget_bytes.has_value(),
-        input.commit_used_bytes.has_value(),
-        input.commit_budget_bytes.has_value(),
-        input.process_private_bytes.has_value(),
-        input.paging_pressure.has_value()});
-    if (valid_nonnegative(input.ram_used_bytes) &&
-        valid_nonnegative(input.ram_budget_bytes) &&
+        normalized(ram_occupancy.value_or(0.0), 0.78, 0.96),
+        normalized(commit_occupancy.value_or(0.0), 0.75, 0.95), paging});
+    result.ram.confidence = ram_occupancy || commit_occupancy || paging_valid
+        ? confidence_for({
+              ram_occupancy.has_value(), ram_occupancy.has_value(),
+              commit_occupancy.has_value(), commit_occupancy.has_value(),
+              valid_nonnegative(input.process_private_bytes), paging_valid})
+        : confidence_for({});
+    if (ram_occupancy &&
         *input.ram_budget_bytes >= *input.ram_used_bytes) {
         result.ram.reserve_bytes =
             *input.ram_budget_bytes - *input.ram_used_bytes;
@@ -140,8 +140,7 @@ ResourcePressureSnapshot ResourcePressureEstimator::evaluate(
             result.ram.raw = std::max(result.ram.raw, 0.90);
         }
     }
-    if (valid_nonnegative(input.commit_used_bytes) &&
-        valid_nonnegative(input.commit_budget_bytes) &&
+    if (commit_occupancy &&
         *input.commit_budget_bytes >= *input.commit_used_bytes) {
         const double commit_reserve =
             *input.commit_budget_bytes - *input.commit_used_bytes;

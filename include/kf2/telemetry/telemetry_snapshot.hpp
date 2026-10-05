@@ -37,6 +37,10 @@ struct FrameMetrics {
     std::size_t stutter_count{0};
     std::uint64_t age_ns{0};
     std::uint64_t loss_count{0};
+    // Stable provenance of the selected Present window, not its UI read time.
+    std::uint64_t newest_present_ns{0};
+    std::uint64_t source_generation{0};
+    std::uint64_t stream_id{0};
     SampleQuality quality{SampleQuality::unavailable};
     UnavailableReason reason{UnavailableReason::no_samples};
 };

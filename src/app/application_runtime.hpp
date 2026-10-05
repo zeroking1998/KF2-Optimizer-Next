@@ -25,6 +25,7 @@
 #include "kf2/app/build_identity.hpp"
 #include "kf2/optimizer/quality_response.hpp"
 #include "features/telemetry/corpse_telemetry_state.hpp"
+#include "features/telemetry/telemetry_session_stage.hpp"
 #include "kf2/backup/restore_transaction.hpp"
 #include "kf2/config/ini_document.hpp"
 #include "kf2/config/adaptive_locks.hpp"
@@ -48,7 +49,6 @@
 #include "kf2/optimizer/adaptive_governor.hpp"
 #include "kf2/optimizer/adaptive_session.hpp"
 #include "kf2/optimizer/adaptive_actuation.hpp"
-#include "kf2/optimizer/adaptive_profile.hpp"
 #include "kf2/optimizer/optimizer_engine.hpp"
 #include "kf2/platform/windows/dxgi_frame_timing_session.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
@@ -62,6 +62,7 @@
 #include "kf2/telemetry/gpu_metrics.hpp"
 #include "kf2/telemetry/resource_telemetry_worker.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
+#include "kf2/security/package_integrity.hpp"
 
 namespace kf2::telemetry_pipeline {
 struct TelemetryFrame;
@@ -73,6 +74,18 @@ struct PackageRepairAsyncState;
 struct UpdateCheckAsyncState;
 struct UpdateInstallAsyncState;
 
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+enum class ProtectedLaunchPreparationStage {
+    captured_settings,
+    launch_profile,
+    overlay_display,
+    capabilities,
+};
+struct UiRuntime;
+void set_protected_launch_probe_for_testing(
+    void (*probe)(UiRuntime&, ProtectedLaunchPreparationStage)) noexcept;
+#endif
+
 #if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
 enum class UiRuntimeShutdownPhase {
     live_adaptive_restore,
@@ -83,6 +96,9 @@ enum class UiRuntimeShutdownPhase {
 using UiRuntimeShutdownProbe = void (*)(UiRuntimeShutdownPhase);
 void set_ui_runtime_shutdown_probe_for_testing(
     UiRuntimeShutdownProbe probe) noexcept;
+using AutoPackageRepairOperation = Result<security::PackageRepairResult> (*)();
+void set_auto_package_repair_operation_for_testing(
+    AutoPackageRepairOperation operation) noexcept;
 #endif
 
 using PendingPolicyRestageOperation = std::function<Result<bool>(
@@ -98,6 +114,13 @@ enum class VideoSyncDisposition {
     retryable_unstable,
     hard_failure,
 };
+
+#if defined(KF2_APPLICATION_VIDEO_TESTING)
+enum class VideoPreapplyStage {
+    restored_read, preview_build, replay_read, replay_preview,
+    replay_apply, replay_verify,
+};
+#endif
 
 struct AdaptiveRuntimePendingRequest final {
     std::uint64_t sequence{0};
@@ -137,8 +160,6 @@ struct AdvancedSettingsRuntimeState final {
 
 optimizer::AdaptivePolicy adaptive_policy_from(
     const config::Settings& settings) noexcept;
-std::wstring adaptive_profile_reason(
-    const optimizer::AdaptiveDecision& decision);
 Result<config::Settings> load_or_create_settings(
     const std::filesystem::path& path);
 std::wstring format_gib(std::uint64_t bytes);
@@ -171,6 +192,11 @@ struct UiRuntime {
     backup::BackupStore backups;
     std::optional<game::GameDiscoveryInput> discovery_input;
     std::optional<game::GameInstallation> installation;
+    bool game_folder_selection_active{false};
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+    std::function<std::optional<std::filesystem::path>()>
+        game_directory_chooser_for_testing;
+#endif
 #if defined(KF2_APPLICATION_RESTORE_TESTING)
     std::function<Result<game::FrameRateCapResult>()>
         frame_rate_cap_sync_for_testing;
@@ -218,6 +244,8 @@ struct UiRuntime {
     std::uint64_t map_prewarm_retry_not_before_ns{0};
     std::uint64_t prewarm_diagnostics_last_published_ns{0};
     std::uint64_t last_game_process_scan_ns{0};
+    std::uint64_t game_process_discovery_interval_ns{
+        telemetry_pipeline::kIdleProcessDiscoveryIntervalNs};
     std::optional<game::GameProcessIdentity>
         game_restart_handoff_previous_process;
     std::uint64_t game_restart_handoff_deadline_ns{0};
@@ -232,6 +260,7 @@ struct UiRuntime {
     game::GameLogParserStats game_log_parser_stats;
     bool overlay_scene_ready{false};
     HWND game_window{};
+    std::uint64_t last_game_window_scan_ns{0};
     std::unique_ptr<telemetry::PresentSource> present_source;
     std::unique_ptr<platform::windows::DxgiFrameTimingSession> present_session;
     std::uint64_t present_session_started_ns{0};
@@ -239,8 +268,8 @@ struct UiRuntime {
     telemetry::ResourceTelemetryWorker resource_telemetry_worker;
     std::uint64_t resource_telemetry_generation{0};
     std::uint64_t resource_telemetry_publication_sequence{0};
-    std::uint64_t resource_telemetry_source_announced_generation{0};
-    bool resource_telemetry_nvidia_expected{false};
+    std::shared_ptr<const telemetry::GpuProviderStatus>
+        announced_gpu_provider_status;
     telemetry::GpuUtilizationFilter gpu_utilization_filter;
     std::uint64_t cached_process_memory_sample_ns{0};
     std::uint64_t cached_gpu_sample_ns{0};
@@ -317,24 +346,29 @@ struct UiRuntime {
     game::GameLogSessionSnapshot last_report_gameplay_session;
     std::optional<std::uint64_t> adapter_vram_budget;
     std::wstring telemetry_failure;
-    std::uint64_t last_flex_observation_calls{0};
     bool flex_observation_announced{false};
+    bool flex_particle_text_current{false};
     std::optional<flex::ObservationSnapshot> last_flex_observation;
+    flex::ObservationReader flex_observation_reader;
     std::optional<optimizer::AdaptiveCapabilityState>
         adaptive_flex_capability;
-    std::uint64_t last_flex_report_tick{0};
     bool flex_minimum_limited{false};
     StartMode start_mode{StartMode::normal};
     std::shared_ptr<PackageRepairAsyncState> package_repair_state;
-    std::function<void(std::function<void()>)> package_repair_worker_launcher{
+    std::jthread package_repair_worker;
+    std::function<std::jthread(std::function<void()>)> package_repair_worker_launcher{
         [](std::function<void()> worker) {
-            std::thread{std::move(worker)}.detach();
+            return std::jthread{std::move(worker)};
         }};
+    bool package_repair_close_requested{false};
+    bool package_repair_recovery_required{false};
     UpdateRuntimeState updates;
     std::optional<game::VideoSettings> video_saved;
     std::optional<game::VideoSettings> video_pending;
 #if defined(KF2_APPLICATION_VIDEO_TESTING)
     std::function<void()> video_sync_before_verification_for_testing;
+    std::function<void(VideoPreapplyStage)> video_preapply_probe_for_testing;
+    std::function<void()> video_before_protected_rebuild_for_testing;
 #endif
     std::optional<game::GameMenuGraphicsReadback> game_menu_graphics_readback;
     // Keep the temporary live profile separate from the user's saved graphics.
@@ -368,6 +402,22 @@ struct UiRuntime {
         const config::Settings& settings, StartMode mode) const;
     void enforce_saved_frame_control_compatibility();
     void initialize_update_state(const config::Settings& settings);
+    [[nodiscard]] bool package_actions_busy() const noexcept {
+        const auto phase = updates.controller.snapshot().phase;
+        return package_repair_state || phase == update::UpdatePhase::checking ||
+            phase == update::UpdatePhase::installing;
+    }
+    [[nodiscard]] bool game_folder_change_blocked() const noexcept {
+        return game_process || present_source || adaptive_restore_debt ||
+            game_restart_handoff_previous_process ||
+            game_restart_handoff_deadline_ns != 0 ||
+            game_log_new_settings_restart_requested ||
+            session_config_launch_deadline_ns != 0 ||
+            (session_config_snapshot && !session_config_waiting_for_launch) ||
+            final_graphics_capture_pending || adaptive_control_pending ||
+            adaptive_runtime_mode_pending || model.recovery_required() ||
+            package_repair_state || updates.check || updates.install;
+    }
 
     UiRuntime(const std::filesystem::path& state_root, bool recovery_required,
               const config::Settings& settings, diagnostics::EventLog& event_log,
@@ -376,6 +426,11 @@ struct UiRuntime {
               std::filesystem::path executable_directory);
 
     std::uint64_t monotonic_ns() const;
+    void reset_game_process_discovery() noexcept {
+        last_game_process_scan_ns = 0;
+        game_process_discovery_interval_ns =
+            telemetry_pipeline::kIdleProcessDiscoveryIntervalNs;
+    }
 
     [[nodiscard]] int effective_target_fps() const noexcept {
         return optimizer::effective_adaptive_target_fps(
@@ -402,8 +457,7 @@ struct UiRuntime {
                 : std::nullopt);
     }
 
-    bool save_flex_report(const flex::ObservationSnapshot& observed,
-                          bool wait_for_disk = false);
+    bool save_flex_report(const flex::ObservationSnapshot& observed);
 
     void detach_telemetry(bool restore_live_quality = true);
 
@@ -415,6 +469,8 @@ struct UiRuntime {
     VideoSyncDisposition synchronize_final_video_settings_from_game();
 
     bool preserve_final_graphics_evidence();
+
+    Result<std::size_t> restore_session_video_settings();
 
     bool restore_live_adaptive_quality(std::wstring_view reason);
 
@@ -437,6 +493,7 @@ struct UiRuntime {
     void start_auto_package_repair();
 
     void poll_auto_package_repair();
+    [[nodiscard]] bool can_close_after_package_repair();
 
     void start_update_check(update::CheckTrigger trigger);
     void poll_update_check();
@@ -499,8 +556,8 @@ struct UiRuntime {
     telemetry_pipeline::CorpseTelemetryTracker::Result
     update_adaptive_corpse_status(
         const telemetry_pipeline::TelemetryFrame& frame,
-        ui::UiStatus& status);
-    bool present_pending_adaptive_runtime_mode(ui::UiStatus& status);
+        ui::AdaptiveUiStatus& status);
+    bool present_pending_adaptive_runtime_mode(ui::AdaptiveUiStatus& status);
     optimizer::QualityResponse::Context observe_adaptive_quality_response(
         const telemetry_pipeline::TelemetryFrame& frame);
     void log_adaptive_quality_response(
@@ -525,6 +582,7 @@ struct UiRuntime {
     Result<bool> prepare_automatic_protected_launch_capabilities(
         bool fixed_flex_launch);
 
+    Result<bool> revalidate_game_installation();
     Result<bool> prepare_automatic_external_launch_profile();
 
     Result<bool> rearm_automatic_external_launch_profile();
@@ -542,6 +600,7 @@ struct UiRuntime {
     Result<bool> create_window(const std::wstring& title);
 
     void invalidate();
+    void repaint_shell();
 
     void paint(const ui::ShellLayoutResult& layout);
 

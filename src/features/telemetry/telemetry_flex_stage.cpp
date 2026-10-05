@@ -1,6 +1,8 @@
 #include "features/telemetry/telemetry_flex_stage.hpp"
 
 #include <array>
+#include <format>
+#include <string_view>
 
 #include "app/application_runtime.hpp"
 #include "features/telemetry/telemetry_effect_stage.hpp"
@@ -47,12 +49,10 @@ void run_flex_control_stage(app::UiRuntime& runtime,
         frame.flex && frame.flex->last_forwarded_substeps >= 1 &&
         frame.flex->last_forwarded_substeps <= 5;
     const auto decision = decide_flex_control(observed_solver_ready);
-    auto status = runtime.model.status();
-    const std::wstring capability_label = observed_solver_ready
+    const std::wstring_view capability_label = observed_solver_ready
         ? L"AVAILABLE" : L"UNAVAILABLE";
-    if (status.flex_capability != capability_label) {
-        status.flex_capability = capability_label;
-        runtime.model.set_status(std::move(status));
+    if (runtime.model.status().flex_capability != capability_label) {
+        runtime.model.set_flex_capability(std::wstring{capability_label});
         runtime.invalidate();
     }
     apply_flex_control_effect(
@@ -63,9 +63,35 @@ void run_flex_control_stage(app::UiRuntime& runtime,
 }  // namespace kf2::telemetry_pipeline
 
 namespace kf2::app {
+namespace {
 
-bool UiRuntime::save_flex_report(const flex::ObservationSnapshot& observed,
-                                 bool wait_for_disk) {
+bool same_particle_presentation(const flex::ObservationSnapshot& previous,
+                                const flex::ObservationSnapshot& current) noexcept {
+    if (previous.aggregate_particles_fresh || current.aggregate_particles_fresh) {
+        return previous.aggregate_particles_fresh && current.aggregate_particles_fresh &&
+            previous.live_solvers == current.live_solvers &&
+            previous.aggregate_active_particles == current.aggregate_active_particles &&
+            previous.free_particles == current.free_particles &&
+            previous.particle_capacity == current.particle_capacity &&
+            previous.particle_upload_calls == current.particle_upload_calls &&
+            previous.phase_upload_calls == current.phase_upload_calls &&
+            previous.velocity_upload_calls == current.velocity_upload_calls &&
+            previous.particle_download_calls == current.particle_download_calls &&
+            previous.phase_download_calls == current.phase_download_calls &&
+            previous.velocity_download_calls == current.velocity_download_calls;
+    }
+    if (previous.particle_capacity_available || current.particle_capacity_available) {
+        return previous.particle_capacity_available && current.particle_capacity_available &&
+            previous.live_solvers == current.live_solvers &&
+            previous.particle_capacity == current.particle_capacity;
+    }
+    return previous.active_particles_fresh && current.active_particles_fresh &&
+        previous.active_particles == current.active_particles;
+}
+
+}  // namespace
+
+bool UiRuntime::save_flex_report(const flex::ObservationSnapshot& observed) {
     if (observed.update_calls == 0 || !observed.diagnostics_enabled)
         return false;
     std::ostringstream report;
@@ -144,18 +170,22 @@ bool UiRuntime::save_flex_report(const flex::ObservationSnapshot& observed,
     const auto ticket = file_writer.submit(
         settings_path.parent_path() / L"flex-session-last.json", report.str());
     if (ticket == 0) return false;
-    return !wait_for_disk ||
-        file_writer.wait(ticket, std::chrono::seconds{5});
+    return file_writer.wait(ticket, std::chrono::seconds{5});
 }
 
 void UiRuntime::observe_flex_process() {
     if (!game_process) return;
     const auto now_ns = monotonic_ns();
     adaptive_actuation.poll(now_ns);
-    const auto flex_state = flex::read_observation(*game_process);
+    const auto flex_state = flex_observation_reader.read(*game_process);
     if (!flex_state || !flex_state->fresh) return;
+    const bool reuse_particle_text =
+        flex_particle_text_current && last_flex_observation &&
+        same_particle_presentation(*last_flex_observation, *flex_state);
+    // Keep the live observation current even if presentation throws. Only a
+    // completed publication permits borrowing its text on the next observation.
+    flex_particle_text_current = false;
     last_flex_observation = *flex_state;
-    last_flex_observation_calls = flex_state->update_calls;
     if (const auto receipt = telemetry_pipeline::confirmed_flex_readback(
             adaptive_actuation.current(
                 optimizer::AdaptiveControlId::flex_solver_substeps),
@@ -174,30 +204,30 @@ void UiRuntime::observe_flex_process() {
                 L", settings=" + std::to_wstring(receipt->generation.settings),
             L"flex"});
     }
-    auto status = model.status();
-    const std::wstring flex_status = flex_state->aggregate_particles_fresh
-        ? L"FleX solvers: " + std::to_wstring(flex_state->live_solvers) +
-              L" | particles active/free/capacity: " +
-              std::to_wstring(flex_state->aggregate_active_particles) + L"/" +
-              std::to_wstring(flex_state->free_particles) + L"/" +
-              std::to_wstring(flex_state->particle_capacity) +
-              L" | transfers up/down: " +
-              std::to_wstring(flex_state->particle_upload_calls +
-                               flex_state->phase_upload_calls +
-                               flex_state->velocity_upload_calls) + L"/" +
-              std::to_wstring(flex_state->particle_download_calls +
-                               flex_state->phase_download_calls +
-                               flex_state->velocity_download_calls) +
-              L" (read-only runtime source)"
+    const auto& current = model.status();
+    const std::wstring flex_values = reuse_particle_text ? std::wstring{}
+        : flex_state->aggregate_particles_fresh
+        ? std::format(L"FleX solvers: {} | particles active/free/capacity: {}/{}/{}"
+                      L" | transfers up/down: {}/{} (read-only runtime source)",
+              flex_state->live_solvers, flex_state->aggregate_active_particles,
+              flex_state->free_particles, flex_state->particle_capacity,
+              flex_state->particle_upload_calls + flex_state->phase_upload_calls +
+                  flex_state->velocity_upload_calls,
+              flex_state->particle_download_calls + flex_state->phase_download_calls +
+                  flex_state->velocity_download_calls)
         : flex_state->particle_capacity_available
-            ? L"FleX solvers: " + std::to_wstring(flex_state->live_solvers) +
-                  L" | particle capacity: " +
-                  std::to_wstring(flex_state->particle_capacity) +
-                  L" | active/free awaiting a fresh count"
+            ? std::format(L"FleX solvers: {} | particle capacity: {}"
+                          L" | active/free awaiting a fresh count",
+                  flex_state->live_solvers, flex_state->particle_capacity)
         : flex_state->active_particles_fresh
-            ? L"FleX active particles: " +
-                  std::to_wstring(flex_state->active_particles) +
-                  L" (read-only runtime source; aggregate unavailable)"
+            ? std::format(L"FleX active particles: {}"
+                          L" (read-only runtime source; aggregate unavailable)",
+                  flex_state->active_particles)
+        : std::wstring{};
+    const std::wstring_view flex_status = reuse_particle_text
+        ? std::wstring_view{current.flex_telemetry}
+        : !flex_values.empty()
+        ? std::wstring_view{flex_values}
         : flex_state->active_count_calls > 0
             ? L"FleX active-particle value is stale"
             : flex_state->diagnostics_enabled
@@ -217,45 +247,38 @@ void UiRuntime::observe_flex_process() {
         : std::string_view{"NONE"};
     const std::wstring action_status{
         action_status_view.begin(), action_status_view.end()};
-    const std::wstring substep_status = flex_state->diagnostics_enabled
-        ? L"input min/max " + std::to_wstring(flex_state->min_substeps) +
-              L"/" + std::to_wstring(flex_state->max_substeps) +
-              L"  •  forwarded min/max " +
-              std::to_wstring(flex_state->min_forwarded_substeps) + L"/" +
-              std::to_wstring(flex_state->max_forwarded_substeps) +
-              L"  •  latest " + std::to_wstring(flex_state->last_substeps) +
-              L" → " + std::to_wstring(flex_state->last_forwarded_substeps)
+    const std::wstring substep_values = flex_state->diagnostics_enabled
+        ? std::format(L"input min/max {}/{}  •  forwarded min/max {}/{}"
+                      L"  •  latest {} → {}",
+              flex_state->min_substeps, flex_state->max_substeps,
+              flex_state->min_forwarded_substeps, flex_state->max_forwarded_substeps,
+              flex_state->last_substeps, flex_state->last_forwarded_substeps)
+        : std::wstring{};
+    const std::wstring_view substep_status = flex_state->diagnostics_enabled
+        ? std::wstring_view{substep_values}
         : L"Detailed substep counters are off; fixed one-substep limit is active";
-    const std::wstring readback_status = flex_state->diagnostics_enabled
-        ? std::wstring{L"shared memory "} +
-              (flex_state->pass_through_healthy ? L"healthy" : L"unhealthy") +
-              L"  •  updates " + std::to_wstring(flex_state->successful_updates) +
-              L"/" + std::to_wstring(flex_state->update_calls) +
-              L"  •  constrained " +
-              std::to_wstring(flex_state->constrained_updates) +
-              L"  •  reports and extra logs on"
+    const std::wstring readback_values = flex_state->diagnostics_enabled
+        ? std::format(L"shared memory {}  •  updates {}/{}  •  constrained {}"
+                      L"  •  reports and extra logs on",
+              flex_state->pass_through_healthy ? L"healthy" : L"unhealthy",
+              flex_state->successful_updates, flex_state->update_calls,
+              flex_state->constrained_updates)
+        : std::wstring{};
+    const std::wstring_view readback_status = flex_state->diagnostics_enabled
+        ? std::wstring_view{readback_values}
         : L"Minimal safety readback active; reports and extra logs are off";
-    if (status.flex_telemetry != flex_status ||
-        status.flex_requested_substeps != requested ||
-        status.flex_effective_substeps != applied ||
-        status.flex_action_status != action_status ||
-        status.flex_substep_diagnostics != substep_status ||
-        status.flex_readback_diagnostics != readback_status) {
-        status.flex_telemetry = flex_status;
-        status.flex_requested_substeps = requested;
-        status.flex_effective_substeps = applied;
-        status.flex_action_status = action_status;
-        status.flex_substep_diagnostics = substep_status;
-        status.flex_readback_diagnostics = readback_status;
-        model.set_status(std::move(status));
+    if (current.flex_telemetry != flex_status ||
+        current.flex_requested_substeps != requested ||
+        current.flex_effective_substeps != applied ||
+        current.flex_action_status != action_status ||
+        current.flex_substep_diagnostics != substep_status ||
+        current.flex_readback_diagnostics != readback_status) {
+        model.set_flex_observation_status(std::wstring{flex_status}, requested,
+            applied, action_status, std::wstring{substep_status},
+            std::wstring{readback_status});
         invalidate();
     }
-    const auto report_tick = GetTickCount64();
-    if (flex_state->diagnostics_enabled &&
-        (last_flex_report_tick == 0 || report_tick < last_flex_report_tick ||
-         report_tick - last_flex_report_tick >= 2000)) {
-        if (save_flex_report(*flex_state)) last_flex_report_tick = report_tick;
-    }
+    flex_particle_text_current = true;
     if (!flex_observation_announced) {
         flex_observation_announced = true;
         events->append({0, diagnostics::Severity::info,

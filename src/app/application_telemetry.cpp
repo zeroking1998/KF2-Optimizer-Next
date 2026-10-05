@@ -28,6 +28,7 @@ std::wstring_view prewarm_state_text(
         case game::StartupPrewarmState::skipped_no_files:
             return L"no files";
         case game::StartupPrewarmState::failed: return L"failed";
+        case game::StartupPrewarmState::incomplete: return L"incomplete";
     }
     return L"unknown";
 }
@@ -51,7 +52,7 @@ public:
     }
 
     void refresh_session_gate() {
-        telemetry_pipeline::refresh_session_gate(runtime_);
+        resources_ = telemetry_pipeline::refresh_session_gate(runtime_);
     }
 
     void observe_flex() {
@@ -59,8 +60,7 @@ public:
     }
 
     [[nodiscard]] bool inspect_window() {
-        // Preserve the process revalidation point after FleX observation.
-        telemetry_pipeline::revalidate_bound_process(runtime_);
+        // Inspection includes process liveness after FleX observation.
         session_ = telemetry_pipeline::inspect_bound_session(runtime_);
         return session_->disposition ==
             telemetry_pipeline::SessionDisposition::ready;
@@ -85,7 +85,8 @@ public:
 
     [[nodiscard]] bool capture_frame() {
         auto captured = telemetry_pipeline::capture_telemetry_frame(
-            runtime_, *session_->window, observed_at_ns_, *drain_->frames());
+            runtime_, *session_->window, observed_at_ns_, *drain_->frames(),
+            resources_.get());
         if (!captured.has_value()) {
             reject_frame(captured.error());
             return false;
@@ -138,6 +139,7 @@ private:
     std::optional<telemetry_pipeline::SessionStageResult> session_;
     std::optional<telemetry_pipeline::PresentDrainResult> drain_;
     std::optional<telemetry_pipeline::TelemetryFrame> frame_;
+    std::shared_ptr<const telemetry::ResourceTelemetrySnapshot> resources_;
     std::optional<telemetry_pipeline::TelemetryPresentation> presentation_;
 };
 
@@ -190,8 +192,8 @@ void UiRuntime::runtime_tick() {
 }
 
 void UiRuntime::start_startup_prewarm() {
-    if (!installation || game::find_running_game_process(
-            installation->executable).has_value()) {
+    if (!installation || game::game_process_may_be_running(
+            installation->executable)) {
         return;
     }
     startup_prewarm_announced = false;
@@ -264,16 +266,25 @@ void UiRuntime::poll_startup_prewarm() {
     if (startup_prewarm_announced) return;
     switch (current.state) {
         case game::StartupPrewarmState::complete:
+        case game::StartupPrewarmState::incomplete:
             startup_prewarm_announced = true;
             publish_prewarm_diagnostics(current, L"Startup", true);
             {
                 auto status = model.status();
                 status.prewarm_active = false;
-                status.prewarm_percent = 100;
+                status.prewarm_percent = prewarm_percent(current);
                 status.prewarm_map.clear();
                 model.set_status(std::move(status));
             }
-            if (optimizer_settings.debug_runtime_diagnostics &&
+            if (current.state == game::StartupPrewarmState::incomplete) {
+                events->append({0, diagnostics::Severity::warning,
+                    "STARTUP_PREWARM_INCOMPLETE",
+                    L"Startup preparation stopped with " +
+                        std::to_wstring(current.bytes_read) + L"/" +
+                        std::to_wstring(current.bytes_planned) +
+                        L" bytes read; KF2 launch remains available",
+                    L"performance"});
+            } else if (optimizer_settings.debug_runtime_diagnostics &&
                 current.diagnostics) {
                 events->append({0, diagnostics::Severity::info,
                     "STARTUP_PREWARM_COMPLETED",
@@ -365,6 +376,7 @@ void UiRuntime::poll_map_prewarm() {
         current.state == game::StartupPrewarmState::idle;
     const bool terminal =
         current.state == game::StartupPrewarmState::complete ||
+        current.state == game::StartupPrewarmState::incomplete ||
         current.state == game::StartupPrewarmState::cancelled ||
         game::startup_prewarm_retryable(current.state);
     if (!map_prewarm_active.empty() && terminal) {
@@ -374,8 +386,10 @@ void UiRuntime::poll_map_prewarm() {
         auto status = model.status();
         status.prewarm_active = false;
         status.prewarm_map.clear();
-        status.prewarm_percent = current.state ==
-            game::StartupPrewarmState::complete ? 100 : 0;
+        status.prewarm_percent =
+            current.state == game::StartupPrewarmState::complete ||
+            current.state == game::StartupPrewarmState::incomplete
+                ? prewarm_percent(current) : 0;
         model.set_status(std::move(status));
         if (current.state == game::StartupPrewarmState::complete) {
             map_prewarm_retry_not_before_ns = 0;
@@ -389,6 +403,15 @@ void UiRuntime::poll_map_prewarm() {
                         L" MiB) in the Windows file cache before map loading",
                     L"performance"});
             }
+        } else if (current.state == game::StartupPrewarmState::incomplete) {
+            map_prewarm_retry_not_before_ns = 0;
+            events->append({0, diagnostics::Severity::warning,
+                "MAP_PREWARM_INCOMPLETE",
+                L"Map preparation for " + completed_map + L" stopped with " +
+                    std::to_wstring(current.bytes_read) + L"/" +
+                    std::to_wstring(current.bytes_planned) +
+                    L" bytes read; map loading remains available",
+                L"performance"});
         } else if (game::startup_prewarm_retryable(current.state) &&
                    completed_map == map_prewarm_observed) {
             map_prewarm_retry_not_before_ns =
@@ -482,6 +505,17 @@ void UiRuntime::system_resume() {
 
 
 void UiRuntime::telemetry_tick() {
+    // Observe health only on the relevant page and redraw only on transition.
+    // Never append an event about the event writer's own failure/recovery.
+    if (model.selected() == ui::Destination::diagnostics) {
+        const bool available = events->persistence_ready();
+        if (model.status().event_persistence_available != available) {
+            auto status = model.status();
+            status.event_persistence_available = available;
+            model.set_status(std::move(status));
+            invalidate();
+        }
+    }
     RuntimeTelemetryPipeline pipeline{*this};
     static_cast<void>(
         telemetry_pipeline::run_ordered_telemetry_pipeline(pipeline));

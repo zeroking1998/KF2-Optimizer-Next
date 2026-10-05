@@ -29,6 +29,9 @@ void set_session_status_hook_for_testing(SessionStatusHook hook) noexcept;
     const std::filesystem::path& config_root,
     const std::filesystem::path& state_root);
 [[nodiscard]] Result<std::size_t> restore_session_config(
+    const SessionConfigSnapshot& snapshot, bool retain_snapshot = false);
+// Only finalize after the caller's confirmed graphics replay passed readback.
+[[nodiscard]] Result<bool> complete_session_config(
     const SessionConfigSnapshot& snapshot);
 [[nodiscard]] Result<std::optional<SessionConfigSnapshot>>
 resume_session_config(

@@ -8,6 +8,18 @@ are visible immediately.
 
 ### What's new
 
+- Build Adaptive CPU workload, action, prediction and safety labels in owned
+  buffers, avoiding temporary strings while preserving values, precision and units.
+- Reuse unchanged Adaptive reason, capability, source and evidence text instead
+  of recreating temporary display strings; readback and restore policy is unchanged.
+- Publish Adaptive's own display fields without copying unrelated graphics,
+  telemetry, FleX, prewarm and update status on every controller tick.
+- Avoid Weapon classification and repeated null checks for already identified
+  pawns, retaining the existing runtime guard's repair coverage and cadence.
+- Simplify six corpse/Zed ownership lookups using KF2's native array search,
+  preserving first-match identity and missing-entry behavior without new state.
+- Skip the full world-emitter restoration scan when no Optimizer-owned emitter
+  original values remain; nonempty restore and retry behavior is unchanged.
 - Reworked Adaptive into one protected, user-controlled runtime with separate
   CPU, GPU, VRAM, RAM, overdraw, effects, physics, LOD, and corpse-pressure
   paths. Confirmed pressure changes only its matching group, and stable
@@ -87,6 +99,302 @@ are visible immediately.
 - Living Zeds retain their original offscreen animation flags when restoration
   fails. Bounded scans retry without blocking other Zeds or recording reduced
   flags as originals, including after a corpse-manager replacement.
+- Convert the raw Adaptive decision reason once for its two presentation fields
+  while retaining distinct queued-restoration warnings.
+- Reuse the existing Adaptive stability, bottleneck and no-setting action labels
+  instead of constructing temporary strings or rewriting unchanged text.
+  Controller decisions, displayed values and safety readbacks are unchanged.
+
+- Recover FleX particle text on the next fresh observation after failed display
+  preparation, while keeping live observations and confirmed receipts current.
+  Successful unchanged observations retain their existing text reuse.
+
+- Update the changed FleX availability label without copying unrelated graphics,
+  settings and live telemetry display state. Capability checks and control
+  behavior remain unchanged.
+
+- Update only live telemetry display fields instead of copying graphics,
+  settings and other unrelated UI status during changing measurements.
+  Measurement cadence, Adaptive decisions and overlay updates are unchanged.
+
+- FleX diagnostics no longer serialize or flush a report every two seconds.
+  Live observations stay in memory; session detach and explicit support export
+  save the latest verified counters and report persistence failures.
+
+- Reuse unchanged FleX display state instead of copying the complete UI status
+  on every observation and capability check. Borrow constant diagnostic labels
+  and reuse unchanged particle values instead of allocating their text every
+  sample. Live readbacks and control timing remain unchanged.
+
+- Keep healthy minimal FleX readback available when solver capacity is known
+  but active/free particle counts have not been observed. Missing counts stay
+  unavailable; normal play adds no particle queries or diagnostic collection.
+
+- Stop rebuilding unrelated UI nodes during numeric animation. Reuse desktop
+  text formats and target-bound brushes, pause hidden/minimized animations,
+  and keep accessibility values aligned with the visible presentation.
+
+- Current project and acceptance documents now share source-checked test and
+  settings-catalog inventories instead of contradictory old totals. Historical
+  gameplay evidence is kept separate from new-build acceptance.
+
+- FleX now withdraws its shared-memory publication before the forwarder DLL
+  unloads and rejects observations/control writes after the verified process
+  exits, even if a reader retains its fresh mapping. Normal solver calls remain
+  unchanged; the app reuses its existing process handle for the liveness check.
+
+- Keep one verified FleX observation mapping per attached process instead of
+  reopening it on every sample. Values remain live; process replacement,
+  invalid publication and session detach release the view immediately.
+
+- Reuse each FleX relay's successfully resolved native export instead of
+  looking it up on every call. Missing runtimes remain retryable, the original
+  DLL stays alive only until forwarder unload, and fixed substeps stay unchanged.
+
+- FleX control confirmation now requires healthy, completed native readback.
+  Fresh intended values from a failed or still running relay no longer become
+  an applied action; existing acknowledgement timeouts and fixed substeps
+  remain unchanged.
+
+- Baseline corpse sleep now stops before scanning or changing corpses when its
+  action-tracking table is full or invalid, retaining fair cursor progress.
+
+- Format FleX diagnostic labels without chains of temporary number strings.
+  Live values and exact displayed text stay unchanged; diagnostics-off still
+  performs no detailed formatting.
+
+- Format changed FleX particle/capacity labels without temporary numeric-string
+  chains, keeping unchanged labels borrowed and all displayed values current.
+
+- Update only the six FleX observation display fields when they change, avoiding
+  copies of unrelated graphics, settings and update status.
+
+- Update and Auto Repair now wait for synchronous Windows ZIP extraction to
+  finish before checking or cleaning staged files; partial or aborted copies
+  fail safely without a fixed-delay completion guess.
+
+- Auto Repair now verifies the exact-version release archive against GitHub's
+  published SHA-256 and size before extraction, using the same checks as updates.
+  Missing or mismatched metadata cannot authorize repairs.
+
+- Confirmed in-game graphics changes now survive failed session restoration
+  and Optimizer restarts. Recovery retains the protected originals until the
+  user changes have been written and verified.
+- Portable packaging and release validation now compare the executable's embedded
+  build identity with its manifests and source revision. Stale or dirty packages
+  cannot be silently certified as a new release candidate.
+
+- Removed unused named-profile generation and persistence code. Adaptive still
+  starts from user graphics and retains resource-specific control and locks.
+- Shared the backup and protected-session byte codec without changing saved
+  formats, path checks, or configuration restoration.
+- Simplified graphics preset recognition without changing KF2's vanilla
+  values, custom settings, or either graphics readback path.
+
+- Advanced settings changed before a prepared protected launch now remain
+  personal settings after cancellation, shutdown and restart. Failed saves
+  roll back safely; blocked restoration retains verified recovery data.
+
+- GPU telemetry now retries missing Windows and NVIDIA providers independently
+  after transient initialization failures, with backoff capped at 30 seconds.
+  Working providers are retained and retry diagnostics cannot spam every tick.
+
+- Desktop telemetry now submits one resource-worker request per regular cycle
+  and shares verified process handles instead of reopening them for each
+  liveness or CPU/memory sample. Process exits, PID reuse and restricted access
+  still reject unsafe samples; final log flushing remains explicit.
+- Removed unused runtime helpers and graphics-preview bookkeeping. Corpse
+  telemetry no longer queries native awake state for an unpublished counter;
+  controller inputs, graphics readback and active restoration remain unchanged.
+- Configuration-preview, diagnostics and inventory exports now share one JSON
+  string-escaping function instead of three identical copies. Existing output
+  bytes and recovery contracts are unchanged.
+
+- DXGI frame timestamps now use exact integer clock conversion instead of
+  floating-point scaling, preserving nanosecond intervals and rejecting
+  values outside the supported timestamp range.
+
+- Rebind telemetry and overlay to a replacement KF2 window without discarding
+  the same process's FPS history. Missing-window discovery is rate-limited and
+  retains immutable process-identity checks.
+
+- Bound FleX recovery to the original installation's directory identity, so
+  startup discovery cannot restore one game's DLL into another. Legacy or
+  missing ownership evidence is retained for explicit recovery, not guessed.
+
+- Game-folder changes now preserve the original installation until protected
+  files are fully restored. Running games, pending launches/restarts and
+  unconfirmed recovery block switching; cancelling preserves prepared state.
+
+- GPU counter sampling now reuses its buffers and remembers parsed counter
+  identities instead of repeatedly allocating and parsing unchanged names.
+  Measurements, GPU attribution and sampling cadence remain unchanged.
+- DXGI live statistics now share one interval sort for their overlapping
+  windows instead of rebuilding four independent arrays. FPS, 1% lows,
+  percentiles, freshness and diagnostic comparisons are unchanged.
+- Idle KF2 process discovery now backs off instead of repeatedly scanning the
+  Windows process list. App launches and restart handoffs wake discovery;
+  skipped queries no longer imply that KF2 has closed.
+- Concurrent DXGI streams no longer falsely interrupt Adaptive quality-response
+  windows. Only the selected stream's lifetime and real source loss invalidate
+  the comparison; unrelated streams no longer allocate copied windows.
+- Initial DXGI frame-timing failures now share the existing bounded startup
+  retry, so a transient failure can recover FPS telemetry without restarting KF2.
+- Verified online Adaptive graphics changes now use the same session checks
+  for selection and response evaluation, avoiding false restoration after a
+  measured improvement. Unknown sessions and incomplete comparisons still fail closed.
+- Missing or shortened prewarm files now retain their actual byte progress
+  instead of being reported as 100% complete. Incomplete map preparation does
+  not repeatedly reread files or block KF2 loading.
+- Hybrid-GPU attribution ranks the combined dedicated and shared process
+  allocation correctly, while preserving renderer preference and tie handling.
+- Removed the inert Adaptive calibration preference. Older settings migrate
+  safely without changing the user's active preferences or controller behavior.
+- The full self-check uses the authoritative catalog size and reports its
+  actual setting count instead of falsely rejecting the valid catalog because
+  of an obsolete independent total.
+- Ordinary diagnostic events now share a fixed 250 ms persistence batch,
+  avoiding repeated full-history copies and atomic file replacements during
+  bursts. Explicit flush and healthy shutdown bypass the batch delay; bounded
+  failure retries, retention and the atomic JSON format are unchanged.
+- All native build paths now share automatic binding to the exact local
+  telemetry module. Direct CMake and incremental builds no longer inherit
+  an outdated default hash; explicit mismatched pins fail during configuration.
+- Noisy game-log batches now compact their incomplete tail only once instead
+  of moving the remaining buffer after every line. Session markers, receipts,
+  partial lines and existing size limits are unchanged.
+- Large Launch logs now catch up in bounded worker batches instead of exposing
+  old maps and measurements as live telemetry. Adaptive waits for the current
+  tail, historical measurements are discarded, and diagnostics report unread
+  bytes and catch-up duration without additional UI-thread file work.
+- Launch.log sampling now retains one verified read handle instead of reopening
+  the file every poll. Rotation, deletion, truncation and process changes reset
+  parser ownership safely; detach releases the handle without another sample.
+- Thread CPU telemetry now keeps its measurement baseline with the verified
+  thread handle, resets it for a changed thread instance, and releases exited
+  threads during membership refresh without rebuilding a sample hash table.
+- Adaptive now honors disabled automatic quality recovery. Confirmed pressure
+  can still reduce quality, and disabling Adaptive or rolling back an ineffective
+  change still restores protected settings.
+- Configuration rollback now verifies every restored file and retains recovery
+  state when a write, readback or journal completion fails. Native FPS-cap
+  changes retain both original files until confirmed, so the next stopped-game
+  startup can recover an interrupted change before restoring protected INIs.
+- Auto Repair now finishes its background work before the app closes, with a
+  visible waiting message. Unverified repair rollback or unexpected repair
+  errors preserve the interrupted-session marker instead of marking shutdown clean.
+- Temporary event-log write failures now retry in the background with bounded
+  backoff, preserving the latest events. Help & Repair shows storage availability
+  without generating more log events about the writer itself.
+- Online corpse sleep and capacity checks now use bounded, rotating scans,
+  including retry pauses after misses. The local controller reuses its
+  viewport-owned monitor, and missing corpse support no longer logs every frame.
+- Online Adaptive enable verifies its prerequisites before changing the corpse
+  maximum. Rejected re-enables restore the previous limit and retain rollback
+  ownership until verified, without losing the session-original value.
+
+- DXGI frame telemetry identifies its ETW owner by PID and process start time,
+  so a crashed session cannot block a new optimizer instance after PID reuse.
+
+- Enabling Adaptive no longer treats the selected corpse maximum as a
+  confirmed graphics-quality reduction. Genuine graphics evidence is preserved.
+
+- Adaptive now counts each Present observation once. Delayed or repeated
+  asynchronous FPS windows cannot manufacture pressure or recovery evidence.
+
+- Process inspection failures no longer mean KF2 is closed. Configuration,
+  package recovery, launch preparation and other stopped-game writes wait
+  until the process state can be verified safely.
+- Keep unsuccessful corpse wake attempts tracked for fair, bounded retries,
+  and restore skeleton updates when wake is confirmed, including late wakes.
+- Offline corpse restoration now yields after a failed attempt and fairly
+  shares release turns with active/retired wake queues. Failed collision/tick
+  readbacks no longer consume the physics slot; original retry state is kept.
+- Temporary gameplay-telemetry expiry no longer discards the Adaptive listener
+  port. Fresh measurements can resume control without another readiness line;
+  map/provider changes and explicit listener failures still invalidate the port.
+- DXGI stale-session cleanup now processes safely returned ETW entries when more
+  sessions exist than its fixed buffer can hold. Array bounds and malformed
+  session names are checked without adding retries or a larger startup scan.
+- Failed native FPS-cap synchronization now keeps session finalization incomplete,
+  preserves an actionable error and blocks automatic launch rearming instead of
+  reporting that all required state was restored.
+- Closing the optimizer while KF2 is running now retains protected INIs, runtime
+  packages and their durable recovery snapshots. Cleanup is retried after KF2
+  ends instead of rewriting live state or marking incomplete recovery clean.
+- FPS telemetry now recovers after a transient capture loss once the measurement
+  window is wholly fresh. Affected windows and stale cached results stay blocked;
+  Adaptive and quality-response diagnostics no longer require a session restart.
+- Graphics saves now retain a Repair warning if rebuilding the protected KF2
+  launch fails or is unavailable. Successfully saved values remain intact
+  instead of hiding the partial failure behind a generic success notice.
+- Adaptive toggles now save the preference before changing live or deferred
+  control. Failed writes leave the previous mode intact and cannot apply an
+  unsaved change when gameplay confirmation returns later.
+- Fixed a shutdown race that could leave the native frame-statistics worker
+  asleep forever when stopping capture or changing sessions.
+- Native FPS capture now bounds orphaned Present starts and invalidates pending
+  pairs after ETW loss, avoiding session-long thread-state accumulation.
+- Failed online corpse readbacks no longer stall Freeze, LOD or skeleton scans.
+  Failed attempts also respect the existing cooldowns, while freeze rollback
+  retains original state until restoration is verified.
+- Removed the inert saved quality-policy preference and its misleading status
+  and diagnostic labels. Valid legacy values migrate away once while user
+  graphics, goals and Adaptive control remain unchanged.
+- Online corpse LOD and sleeping-skeleton scans now keep independent progress,
+  so alternating checks no longer permanently skip parts of the corpse pool.
+  Existing scan budgets and action cadence remain unchanged.
+- Retired hidden Adaptive aggressiveness profiles. Legacy values migrate away,
+  so identical user settings now use the same fixed controller policy instead
+  of different behavior inherited from old portable settings.
+- Failed application initialization no longer creates a false interrupted-session
+  marker. Genuine prior interruption evidence remains unchanged until startup
+  reaches the operational boundary.
+- Adaptive quality recovery now requires a complete valid memory measurement
+  or explicit valid paging signal. Partial, invalid or zero-budget memory
+  values no longer masquerade as confirmed free capacity.
+- Failed graphics preparation now reports both the graphics error and loss
+  of protected launch preparation, with a recovery-required Repair instruction
+  instead of an incomplete “graphics unchanged” notice.
+- Failed protected launch preparation now distinguishes verified rollback
+  from recovery-required state. Startup no longer claims safe restoration
+  when rollback failed; the authoritative recovery snapshot is retained.
+- Deferred update cleanup now records why helper exit could not be confirmed.
+  Recovery receipts, journals and verified rollback files remain unchanged;
+  a diagnostic-write failure cannot authorize deletion or fail a ready update.
+- Exited KF2 processes no longer remain bound while telemetry retains a
+  process handle. Nonblocking liveness checks preserve PID-reuse protection
+  and let normal restart handoff bind the replacement process.
+- KF2 launch preparation and new telemetry bindings now recheck the discovered
+  executable's volume/file identity. Replaced files require full installation
+  validation; invalid replacements cannot reuse a prepared start or discard
+  its recovery snapshot. Normal sampling adds no executable file queries.
+- Graphics INI reads now reject incomplete, non-finite, overflowing, and
+  out-of-range numbers before converting them to resolution or quality values.
+  Invalid texture-tuple integers remain Custom without silent normalization.
+- DXGI timing startup now stops its ETW session and joins any created worker
+  if another worker cannot start, returning unavailable telemetry instead of
+  terminating the application. A later attempt can start normally.
+- Accessibility slider requests are bounded before numeric conversion, so
+  extreme values reach the correct endpoint. Invalid slider metadata and
+  non-finite requests are rejected without calling the setting callback.
+- Automatic update checks no longer inherit an extended cooldown from future
+  saved timestamps after a backward clock jump. Normal daily throttling and
+  failed-check retry delays remain unchanged.
+- Update-state write failures are now visible without discarding a completed
+  check. Don't show again changes only after its preference is saved; retrying
+  a successful save clears the matching warning. Failed checks no longer
+  write unchanged cache data twice.
+- Update installation, Auto Repair and manual package import now share a busy
+  gate. Repair cannot start during an update check or installation; updates
+  cannot install during Repair. Buttons match the gate, and safe close-waiting
+  and verified repair rollback remain unchanged.
+- Embedded overlay PNGs now require a loaded handle, readable bytes and a
+  non-empty buffer before decoding. Failed resources keep the procedural
+  overlay fallback without breaking otherwise valid images.
+- FleX recovery now uses the remaining transaction-hash-verified original when
+  the other recovery copy is missing, damaged, or unreadable. Diagnostics
+  identify the selected source without weakening marker-free legacy recovery.
 - Failed live graphics restoration now remains pending across telemetry
   reconnects. Adaptive preserves the last confirmed quality and retries in the
   background before resuming control instead of assuming an unconfirmed 100%.

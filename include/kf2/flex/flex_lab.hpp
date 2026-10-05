@@ -42,10 +42,12 @@ struct LabTransactionResult {
 [[nodiscard]] Result<bool> restore_offline_lab(
     const std::filesystem::path& game_directory,
     const std::filesystem::path& state_directory,
-    bool game_running);
+    bool game_running,
+    std::wstring* recovery_details = nullptr);
 [[nodiscard]] Result<bool> recover_offline_lab(
     const std::filesystem::path& game_directory,
     const std::filesystem::path& state_directory,
-    bool game_running);
+    bool game_running,
+    std::wstring* recovery_details = nullptr);
 
 }  // namespace kf2::flex

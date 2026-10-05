@@ -131,7 +131,35 @@ std::wstring load_metric(const UiModel& model) {
     return text.str();
 }
 
+std::array<std::wstring, 4> metric_texts(const UiModel& model) {
+    return {metric(L"LIVE FPS", model.presented_live_fps(), 1, L" FPS"),
+            metric(L"FRAME TIME", model.presented_live_frame_time_ms(), 1, L" ms"),
+            load_metric(model), corpse_metric(model)};
+}
+
 }  // namespace
+
+void refresh_numeric_nodes(ShellLayoutResult& layout, const UiModel& model) {
+    const auto metrics = metric_texts(model);
+    constexpr std::array<std::string_view, 4> metric_ids{
+        "metric-0", "metric-1", "metric-2", "metric-3"};
+    for (auto& node : layout.nodes) {
+        if (node.role == SemanticRole::status) {
+            node.text = status_text(model);
+        } else if (node.role == SemanticRole::metric_card) {
+            const auto found = std::find(metric_ids.begin(), metric_ids.end(), node.id);
+            if (found != metric_ids.end()) {
+                node.text = metrics[static_cast<std::size_t>(found - metric_ids.begin())];
+            }
+        } else if (node.slider) {
+            if (node.id == "settings-target-slider") {
+                node.slider->value = model.presented_target_fps();
+            } else if (node.id == "settings-corpses-slider") {
+                node.slider->value = model.presented_corpse_limit();
+            }
+        }
+    }
+}
 
 float pixels_to_dips(float pixels, float dpi) noexcept {
     return dpi > 0.0F ? pixels * 96.0F / dpi : 0.0F;
@@ -154,6 +182,8 @@ bool intersects(const DipRect& left, const DipRect& right) noexcept {
 
 ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                                float height_dip) {
+    const bool package_actions_busy = model.status().package_actions_busy ||
+        model.status().update_checking || model.status().update_installing;
     const float width = std::max(0.0F, width_dip);
     const float height = std::max(0.0F, height_dip);
     const float footer_y = std::max(0.0F, height - kFooterHeight);
@@ -224,7 +254,7 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                                                 : L"UPDATES";
         const bool update_enabled = !status.update_checking &&
             !status.update_installing &&
-            (!install_action || status.update_installable);
+            (!install_action || (status.update_installable && !package_actions_busy));
         float x = header_actions_left;
         result.nodes.push_back({
             "header-update", SemanticRole::action,
@@ -248,7 +278,7 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
             {x, 17.0F, header_action_widths[2], 44.0F}, L"REPAIR",
             std::nullopt, false,
             model.focused_action() == "header-repair",
-            !status.update_installing, "header-repair"});
+            !package_actions_busy, "header-repair"});
     }
 
     constexpr float status_left_padding = 32.0F;
@@ -272,16 +302,12 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                   static_cast<float>(metric_count));
     const float metric_y = result.metrics_strip.y + 8.0F;
     const float metric_height = std::max(0.0F, result.metrics_strip.height - 16.0F);
-    const std::array<std::wstring, metric_count> metric_texts{
-        metric(L"LIVE FPS", model.presented_live_fps(), 1, L" FPS"),
-        metric(L"FRAME TIME", model.presented_live_frame_time_ms(), 1, L" ms"),
-        load_metric(model),
-        corpse_metric(model)};
+    const auto metrics = metric_texts(model);
     for (std::size_t index = 0; index < metric_count; ++index) {
         result.nodes.push_back({
             "metric-" + std::to_string(index), SemanticRole::metric_card,
             {metric_margin + static_cast<float>(index) * (metric_width + metric_gap),
-             metric_y, metric_width, metric_height}, metric_texts[index]});
+             metric_y, metric_width, metric_height}, metrics[index]});
     }
 
     const bool compact_navigation = result.sidebar.height < 360.0F;
@@ -414,7 +440,7 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
             action_index = 0;
             if (status.update_available) {
                 add_action("settings-updates-install", L"INSTALL UPDATE",
-                           status.update_installable, true);
+                           status.update_installable && !package_actions_busy, true);
             } else {
                 add_action("settings-updates-check",
                            L"LOAD UPDATE DETAILS", true, true);
@@ -435,7 +461,9 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
                    model.status().game_detected, true);
         add_action("game-select-install",
                    model.status().game_detected
-                       ? L"CHANGE GAME FOLDER" : L"SELECT GAME FOLDER");
+                       ? L"CHANGE GAME FOLDER" : L"SELECT GAME FOLDER",
+                   !status.game_folder_change_blocked &&
+                       !model.recovery_required());
         cursor = grid_base +
             static_cast<float>((action_index + action_columns - 1) /
                                action_columns) * kActionStride + 8.0F;
@@ -776,12 +804,20 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
         add_action("diagnostics-open-log", L"OPEN SESSION LOG");
     } else if (model.selected() == Destination::diagnostics) {
         float cursor = grid_base;
+        const auto available = model.status().event_persistence_available;
+        add_section("diagnostics-event-storage",
+            !available.has_value() ? L"Event log storage: not checked" :
+            *available ? L"Event log storage: available" :
+                L"Event log storage: unavailable — check Data/Logs access",
+            cursor, 48.0F);
+        cursor += 56.0F;
         add_section("diagnostics-check-section", L"FIX A PROBLEM", cursor);
         cursor += 34.0F;
         grid_base = cursor;
         action_index = 0;
         add_action("diagnostics-full-check", L"CHECK EVERYTHING");
-        add_action("diagnostics-repair-package", L"IMPORT REPAIR PACKAGE");
+        add_action("diagnostics-repair-package", L"IMPORT REPAIR PACKAGE",
+                   !package_actions_busy);
         cursor = grid_base + kActionStride + 8.0F;
         add_section("diagnostics-recovery-section",
                     L"BACKUP & RESTORE", cursor);

@@ -7,14 +7,37 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cwctype>
+#include <limits>
 #include <map>
 #include <regex>
 #include <set>
+#include <span>
 #include <tuple>
-#include <type_traits>
 
 namespace kf2::telemetry {
+#ifdef KF2_NVIDIA_GPU_TESTING
+namespace detail {
+namespace { NvidiaGpuCreateHook nvidia_gpu_create_hook{nullptr}; }
+void set_nvidia_gpu_create_hook_for_testing(NvidiaGpuCreateHook hook) noexcept {
+    nvidia_gpu_create_hook = hook;
+}
+}  // namespace detail
+#endif
+#ifdef KF2_PDH_GPU_TESTING
+namespace detail {
+namespace { PdhGpuApi pdh_gpu_api; }
+void set_pdh_gpu_api_for_testing(const PdhGpuApi& api) noexcept {
+    pdh_gpu_api = api;
+}
+}  // namespace detail
+#define PdhOpenQueryW detail::pdh_gpu_api.open
+#define PdhAddEnglishCounterW detail::pdh_gpu_api.add
+#define PdhCollectQueryData detail::pdh_gpu_api.collect
+#define PdhGetFormattedCounterArrayW detail::pdh_gpu_api.array
+#define PdhCloseQuery detail::pdh_gpu_api.close
+#endif
 namespace {
 LUID unpack_luid(std::uint64_t packed) {
     LUID luid{};
@@ -346,6 +369,9 @@ Result<ConfiguredGpuAdapter> configured_gpu_adapter_for_process(
 }
 
 struct NvidiaGpuSampler::Impl {
+#ifdef KF2_NVIDIA_GPU_TESTING
+    std::optional<double> percent_for_testing;
+#endif
     NvidiaGpuSource source{NvidiaGpuSource::nvml_utilization};
     HMODULE nvapi_library{};
     NvApiUnload nvapi_unload{};
@@ -455,8 +481,21 @@ NvidiaGpuSampler::NvidiaGpuSampler(NvidiaGpuSampler&&) noexcept = default;
 NvidiaGpuSampler& NvidiaGpuSampler::operator=(NvidiaGpuSampler&&) noexcept = default;
 NvidiaGpuSampler::~NvidiaGpuSampler() = default;
 
+#ifdef KF2_NVIDIA_GPU_TESTING
+NvidiaGpuSampler NvidiaGpuSampler::create_for_testing(double percent) {
+    auto implementation = std::make_unique<Impl>();
+    implementation->percent_for_testing = percent;
+    return NvidiaGpuSampler{std::move(implementation)};
+}
+#endif
+
 Result<NvidiaGpuSampler> NvidiaGpuSampler::create(
     std::wstring_view adapter_name) {
+#ifdef KF2_NVIDIA_GPU_TESTING
+    if (detail::nvidia_gpu_create_hook) {
+        return detail::nvidia_gpu_create_hook(adapter_name);
+    }
+#endif
     // MSI Afterburner uses NVIDIA's dynamic P-state utilization domain. Prefer
     // that documented one-second driver metric so both monitors share the same
     // semantic source without requiring Afterburner to be installed or running.
@@ -595,6 +634,11 @@ Result<NvidiaGpuSampler> NvidiaGpuSampler::create(
 }
 
 Result<double> NvidiaGpuSampler::sample() const {
+#ifdef KF2_NVIDIA_GPU_TESTING
+    if (implementation_ && implementation_->percent_for_testing) {
+        return Result<double>::success(*implementation_->percent_for_testing);
+    }
+#endif
     if (!implementation_) {
         return Result<double>::failure(
             {ErrorCode::internal_failure,
@@ -687,40 +731,37 @@ Result<std::uint64_t> adapter_luid_for_window(HWND window) {
         {ErrorCode::not_found, L"Window monitor adapter LUID was not found", 0});
 }
 namespace {
-template <typename Value>
-Result<std::vector<std::pair<std::wstring, Value>>> read_array(
-    PDH_HCOUNTER counter, DWORD format) {
+enum class CounterKind { utilization, dedicated, shared };
+
+Result<std::span<const PDH_FMT_COUNTERVALUE_ITEM_W>> read_array(
+    PDH_HCOUNTER counter, DWORD format, std::vector<std::byte>& storage) {
+    using Items = std::span<const PDH_FMT_COUNTERVALUE_ITEM_W>;
     DWORD bytes = 0, count = 0;
     PDH_STATUS status = PdhGetFormattedCounterArrayW(counter, format,
                                                      &bytes, &count, nullptr);
     if (status == PDH_NO_DATA) {
-        return Result<std::vector<std::pair<std::wstring, Value>>>::success({});
+        return Result<Items>::success({});
     }
-    if (status != PDH_MORE_DATA) return Result<std::vector<std::pair<std::wstring, Value>>>::failure(
+    if (status != PDH_MORE_DATA) return Result<Items>::failure(
         {ErrorCode::platform_failure, L"GPU counter array size query failed",
          static_cast<std::uint32_t>(status)});
-    std::vector<std::byte> storage(bytes);
+    // Keep the largest buffer for this query; never shrink between categories
+    // or samples. PDH's zero-size query remains the authority for required size.
+    if (storage.size() < bytes) storage.resize(bytes);
+    bytes = static_cast<DWORD>(storage.size());
     auto* items = reinterpret_cast<PDH_FMT_COUNTERVALUE_ITEM_W*>(storage.data());
     status = PdhGetFormattedCounterArrayW(counter, format, &bytes, &count, items);
-    if (status != ERROR_SUCCESS) return Result<std::vector<std::pair<std::wstring, Value>>>::failure(
+    if (status != ERROR_SUCCESS) return Result<Items>::failure(
         {ErrorCode::platform_failure, L"GPU counter array query failed",
          static_cast<std::uint32_t>(status)});
-    std::vector<std::pair<std::wstring, Value>> result;
-    for (DWORD index = 0; index < count; ++index) {
-        if (items[index].FmtValue.CStatus != PDH_CSTATUS_VALID_DATA &&
-            items[index].FmtValue.CStatus != PDH_CSTATUS_NEW_DATA) continue;
-        if constexpr (std::is_same_v<Value, double>) {
-            result.emplace_back(items[index].szName, items[index].FmtValue.doubleValue);
-        } else {
-            result.emplace_back(items[index].szName,
-                static_cast<Value>(std::max<LONGLONG>(0, items[index].FmtValue.largeValue)));
-        }
-    }
-    return Result<std::vector<std::pair<std::wstring, Value>>>::success(std::move(result));
+    return Result<Items>::success({items, count});
 }
 }
 
 std::optional<GpuInstanceIdentity> parse_gpu_instance(std::wstring_view instance) {
+#ifdef KF2_PDH_GPU_TESTING
+    if (detail::pdh_gpu_api.before_parse) detail::pdh_gpu_api.before_parse(instance);
+#endif
     static const std::wregex pattern{
         LR"(^pid_([0-9]+)_luid_0x([0-9a-fA-F]+)_0x([0-9a-fA-F]+)(?:_.*)?$)"};
     static const std::wregex engine_pattern{
@@ -756,6 +797,8 @@ std::optional<std::uint64_t> active_process_gpu_adapter_luid(
     struct Candidate {
         double busiest_3d_engine{0.0};
         double busiest_engine{0.0};
+        std::uint64_t dedicated_bytes{0};
+        std::uint64_t shared_bytes{0};
         std::uint64_t memory_bytes{0};
         bool has_3d_engine{false};
         bool has_engine{false};
@@ -766,8 +809,10 @@ std::optional<std::uint64_t> active_process_gpu_adapter_luid(
             continue;
         }
         auto& candidate = candidates[value.identity.adapter_luid];
-        candidate.memory_bytes = std::max(
-            candidate.memory_bytes, value.dedicated_bytes + value.shared_bytes);
+        candidate.dedicated_bytes = std::max(
+            candidate.dedicated_bytes, value.dedicated_bytes);
+        candidate.shared_bytes = std::max(
+            candidate.shared_bytes, value.shared_bytes);
         if (value.identity.engine == L"memory" ||
             value.utilization_percent < 0.0 ||
             value.utilization_percent > 100.0) {
@@ -784,8 +829,14 @@ std::optional<std::uint64_t> active_process_gpu_adapter_luid(
     }
 
     std::uint64_t largest_3d_memory{0};
-    for (const auto& [ignored, candidate] : candidates) {
+    for (auto& [ignored, candidate] : candidates) {
         static_cast<void>(ignored);
+        // PDH emits separate category records. Combine their maxima once per
+        // adapter in this existing pass, without double-counting duplicates.
+        candidate.memory_bytes = candidate.dedicated_bytes + std::min(
+            candidate.shared_bytes,
+            (std::numeric_limits<std::uint64_t>::max)() -
+                candidate.dedicated_bytes);
         if (candidate.has_3d_engine) {
             largest_3d_memory = std::max(
                 largest_3d_memory, candidate.memory_bytes);
@@ -802,7 +853,8 @@ std::optional<std::uint64_t> active_process_gpu_adapter_luid(
         return preferred_adapter_luid;
     }
 
-    std::optional<std::pair<std::uint64_t, Candidate>> best;
+    std::optional<std::uint64_t> best;
+    std::tuple<bool, std::uint64_t, double> best_rank{};
     bool tied{false};
     for (const auto& [luid, candidate] : candidates) {
         if (!candidate.has_engine) continue;
@@ -811,23 +863,15 @@ std::optional<std::uint64_t> active_process_gpu_adapter_luid(
             candidate.memory_bytes,
             candidate.has_3d_engine ? candidate.busiest_3d_engine
                                     : candidate.busiest_engine};
-        const auto best_rank = best
-            ? std::tuple{
-                  best->second.has_3d_engine,
-                  best->second.memory_bytes,
-                  best->second.has_3d_engine
-                      ? best->second.busiest_3d_engine
-                      : best->second.busiest_engine}
-            : decltype(rank){};
         if (!best || rank > best_rank) {
-            best = std::pair{luid, candidate};
+            best = luid;
+            best_rank = rank;
             tied = false;
         } else if (rank == best_rank) {
             tied = true;
         }
     }
-    return best && !tied ? std::optional<std::uint64_t>{best->first}
-                         : std::nullopt;
+    return tied ? std::nullopt : best;
 }
 
 GpuMetrics aggregate_gpu_counters(const std::vector<GpuCounterValue>& values,
@@ -1025,6 +1069,15 @@ void GpuUtilizationFilter::reset() noexcept {
     adapter_ = {};
 }
 
+struct PdhGpuSampler::Storage final {
+    std::vector<std::byte> buffer;
+    std::vector<GpuCounterValue> values;
+    std::map<std::wstring, std::optional<GpuInstanceIdentity>, std::less<>> identities;
+    static constexpr std::size_t kMaximumIdentities = 4096;
+    static constexpr std::size_t kMaximumCachedNameLength = 512;
+};
+
+PdhGpuSampler::PdhGpuSampler() : storage_{std::make_unique<Storage>()} {}
 PdhGpuSampler::PdhGpuSampler(PdhGpuSampler&& other) noexcept { *this = std::move(other); }
 PdhGpuSampler& PdhGpuSampler::operator=(PdhGpuSampler&& other) noexcept {
     if (this != &other) {
@@ -1033,11 +1086,18 @@ PdhGpuSampler& PdhGpuSampler::operator=(PdhGpuSampler&& other) noexcept {
         utilization_ = std::exchange(other.utilization_, nullptr);
         dedicated_ = std::exchange(other.dedicated_, nullptr);
         shared_ = std::exchange(other.shared_, nullptr);
+        storage_ = std::move(other.storage_);
         pid_ = other.pid_; adapter_luid_ = other.adapter_luid_; warmed_ = other.warmed_;
     }
     return *this;
 }
 PdhGpuSampler::~PdhGpuSampler() { if (query_) PdhCloseQuery(query_); }
+
+#ifdef KF2_PDH_GPU_TESTING
+std::size_t PdhGpuSampler::cached_instance_count_for_testing() const noexcept {
+    return storage_ ? storage_->identities.size() : 0;
+}
+#endif
 
 Result<PdhGpuSampler> PdhGpuSampler::create(std::uint32_t pid,
                                             std::uint64_t adapter_luid) {
@@ -1064,22 +1124,46 @@ Result<GpuMetrics> PdhGpuSampler::sample() {
         {ErrorCode::platform_failure, L"GPU PDH collection failed",
          static_cast<std::uint32_t>(collected)});
     if (!std::exchange(warmed_, true)) return Result<GpuMetrics>::success({});
-    auto utilization = read_array<double>(utilization_, PDH_FMT_DOUBLE);
-    auto dedicated = read_array<std::uint64_t>(dedicated_, PDH_FMT_LARGE);
-    auto shared = read_array<std::uint64_t>(shared_, PDH_FMT_LARGE);
+    auto& values = storage_->values;
+    values.clear();
+    const auto append = [&](PDH_HCOUNTER counter, DWORD format, CounterKind kind) {
+        const auto items = read_array(counter, format, storage_->buffer);
+        if (!items.has_value()) return Result<bool>::failure(items.error());
+        for (const auto& item : items.value()) {
+            if (item.FmtValue.CStatus != PDH_CSTATUS_VALID_DATA &&
+                item.FmtValue.CStatus != PDH_CSTATUS_NEW_DATA) continue;
+            const std::wstring_view name{item.szName};
+            auto found = storage_->identities.find(name);
+            std::optional<GpuInstanceIdentity> uncached;
+            if (found == storage_->identities.end()) {
+                auto parsed = parse_gpu_instance(name);
+                if (storage_->identities.size() < Storage::kMaximumIdentities &&
+                    name.size() <= Storage::kMaximumCachedNameLength) {
+                    found = storage_->identities.emplace(name, std::move(parsed)).first;
+                } else {
+                    // Bound retention without truncating names, evicting active
+                    // identities or dropping counters when the cache is full.
+                    uncached = std::move(parsed);
+                }
+            }
+            const auto& identity = found == storage_->identities.end()
+                ? uncached : found->second;
+            if (!identity) continue;
+            const auto memory = kind == CounterKind::utilization ? 0 :
+                static_cast<std::uint64_t>(std::max<LONGLONG>(0, item.FmtValue.largeValue));
+            values.push_back({*identity,
+                kind == CounterKind::utilization ? item.FmtValue.doubleValue : 0,
+                kind == CounterKind::dedicated ? memory : 0,
+                kind == CounterKind::shared ? memory : 0});
+        }
+        return Result<bool>::success(true);
+    };
+    const auto utilization = append(utilization_, PDH_FMT_DOUBLE, CounterKind::utilization);
+    const auto dedicated = append(dedicated_, PDH_FMT_LARGE, CounterKind::dedicated);
+    const auto shared = append(shared_, PDH_FMT_LARGE, CounterKind::shared);
     if (!utilization.has_value()) return Result<GpuMetrics>::failure(utilization.error());
     if (!dedicated.has_value()) return Result<GpuMetrics>::failure(dedicated.error());
     if (!shared.has_value()) return Result<GpuMetrics>::failure(shared.error());
-    std::vector<GpuCounterValue> values;
-    for (const auto& [name, amount] : utilization.value()) {
-        if (auto identity = parse_gpu_instance(name)) values.push_back({*identity, amount, 0, 0});
-    }
-    for (const auto& [name, amount] : dedicated.value()) {
-        if (auto identity = parse_gpu_instance(name)) values.push_back({*identity, 0, amount, 0});
-    }
-    for (const auto& [name, amount] : shared.value()) {
-        if (auto identity = parse_gpu_instance(name)) values.push_back({*identity, 0, 0, amount});
-    }
     auto result = aggregate_gpu_counters(values, pid_, adapter_luid_);
     result.process_adapter_luid = active_process_gpu_adapter_luid(
         values, pid_, adapter_luid_);

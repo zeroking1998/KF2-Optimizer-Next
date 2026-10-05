@@ -37,16 +37,7 @@ if(NOT KF2_PGO_MODE STREQUAL "OFF")
     endif()
     cmake_path(NORMAL_PATH KF2_PGO_PGD)
 endif()
-set(KF2_OFFLINE_TELEMETRY_SHA256
-    "b4d826c1a64286b7f98634e13c5592486aed2e8c1fd162394a3be7e3b3f79300"
-    CACHE STRING "SHA-256 of the exact locally compiled offline telemetry module")
-string(LENGTH "${KF2_OFFLINE_TELEMETRY_SHA256}" KF2_TELEMETRY_HASH_LENGTH)
-if(NOT KF2_TELEMETRY_HASH_LENGTH EQUAL 64 OR
-   NOT KF2_OFFLINE_TELEMETRY_SHA256 MATCHES "^[0-9A-Fa-f]+$")
-    message(FATAL_ERROR "KF2_OFFLINE_TELEMETRY_SHA256 must be exactly 64 hexadecimal characters")
-endif()
-string(TOLOWER "${KF2_OFFLINE_TELEMETRY_SHA256}"
-    KF2_OFFLINE_TELEMETRY_SHA256)
+include("${PROJECT_SOURCE_DIR}/tools/telemetry_binding.cmake")
 set(KF2_RELEASE_REPOSITORY "" CACHE STRING "HTTPS GitHub repository used for exact-version release repair")
 if(KF2_RELEASE_REPOSITORY STREQUAL "")
     execute_process(
@@ -125,7 +116,10 @@ string(JOIN "|" KF2_TELEMETRY_STAGE_SOURCES_PIPE
 string(JOIN "|" KF2_APP_TELEMETRY_SOURCES_PIPE
     ${KF2_APP_TELEMETRY_SOURCES})
 
+configure_file(assets/build_identity.rc.in
+    "${CMAKE_CURRENT_BINARY_DIR}/build_identity.rc" @ONLY)
 add_executable(KF2Optimizer WIN32
+    "${CMAKE_CURRENT_BINARY_DIR}/build_identity.rc"
     assets/app.manifest
     assets/mascot/mascot_resources.rc
     src/backup/backup_store.cpp
@@ -178,7 +172,6 @@ add_executable(KF2Optimizer WIN32
     src/overlay/overlay_window_render.cpp
     src/overlay/overlay_window_static.cpp
     src/overlay/overlay_window.cpp
-    src/optimizer/adaptive_profile.cpp
     src/optimizer/adaptive_registry.cpp
     src/optimizer/adaptive_actuation.cpp
     src/optimizer/adaptive_governor.cpp
@@ -330,6 +323,10 @@ if(BUILD_TESTING)
     )
     target_compile_definitions(KF2TestTelemetryCore PRIVATE
         KF2_PRESENT_SOURCE_TESTING)
+    target_compile_definitions(KF2TestTelemetryCore PUBLIC
+        KF2_PDH_GPU_TESTING
+        KF2_NVIDIA_GPU_TESTING
+        KF2_PROCESS_METRICS_TESTING)
 
     add_library(KF2TestUiCore STATIC
         src/ui/numeric_presentation.cpp
@@ -378,6 +375,7 @@ if(BUILD_TESTING)
     target_include_directories(KF2TestGameCore PUBLIC
         "${PROJECT_SOURCE_DIR}/include"
     )
+    target_compile_definitions(KF2TestGameCore PUBLIC KF2_GAME_PROCESS_TESTING)
 
     add_library(KF2TestOverlayCore STATIC
         src/overlay/overlay_mascot.cpp

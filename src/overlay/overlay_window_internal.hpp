@@ -17,6 +17,10 @@
 
 namespace kf2::overlay {
 
+#if defined(KF2_OVERLAY_WINDOW_TESTING)
+enum class BitmapResourceFailure { none, missing, load, lock, empty };
+#endif
+
 struct MascotAnimationAsset {
     float sample_rate_fps{120.0F};
     float idle_period_ms{5000.0F};
@@ -162,6 +166,9 @@ struct OverlayWindowState {
     std::uint64_t diagnostic_counter_frequency{0};
 #if defined(KF2_OVERLAY_WINDOW_TESTING)
     HRESULT test_end_draw_result{S_OK};
+    BitmapResourceFailure test_bitmap_resource_failure{
+        BitmapResourceFailure::none};
+    std::size_t test_bitmap_decode_attempts{0};
 #endif
     ~OverlayWindowState();
 };

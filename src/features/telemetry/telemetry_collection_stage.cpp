@@ -21,6 +21,45 @@ std::optional<flex::ObservationSnapshot> current_flex_snapshot(
     return runtime.last_flex_observation;
 }
 
+void announce_gpu_providers(
+    app::UiRuntime& runtime,
+    const ::kf2::telemetry::ResourceTelemetrySnapshot& snapshot) {
+    const auto& status = snapshot.gpu_provider_status;
+    const auto& previous = runtime.announced_gpu_provider_status;
+    if (!status || status == previous) return;
+    if (status->pdh_attempts != 0 &&
+        (!previous || previous->pdh_attempts != status->pdh_attempts)) {
+        runtime.events->append({0,
+            status->pdh_error ? diagnostics::Severity::warning
+                              : diagnostics::Severity::info,
+            status->pdh_error ? "WINDOWS_GPU_TELEMETRY_RETRY_PENDING"
+                              : "WINDOWS_GPU_TELEMETRY_ACTIVE",
+            status->pdh_error
+                ? L"Windows GPU telemetry initialization failed; retries back off to 30 seconds: " +
+                    status->pdh_error->message
+                : L"Windows GPU telemetry provider is active",
+            L"telemetry"});
+    }
+    if (status->nvidia_attempts != 0 &&
+        (!previous || previous->nvidia_attempts != status->nvidia_attempts)) {
+        const bool afterburner_compatible = snapshot.nvidia_source ==
+            ::kf2::telemetry::NvidiaGpuSource::nvapi_dynamic_pstates;
+        runtime.events->append({0,
+            status->nvidia_error ? diagnostics::Severity::warning
+                                 : diagnostics::Severity::info,
+            status->nvidia_error ? "NVIDIA_TOTAL_GPU_TELEMETRY_FALLBACK"
+                                 : "NVIDIA_TOTAL_GPU_TELEMETRY_ACTIVE",
+            status->nvidia_error
+                ? L"NVIDIA driver utilization is unavailable; Windows GPU telemetry is used when available and driver retries back off to 30 seconds: " +
+                    status->nvidia_error->message
+                : afterburner_compatible
+                    ? L"GPU usage uses the installed NVIDIA driver's dynamic P-state utilization domain, matching MSI Afterburner semantics"
+                    : L"GPU usage uses the installed NVIDIA driver's local NVML whole-device fallback",
+            L"telemetry"});
+    }
+    runtime.announced_gpu_provider_status = status;
+}
+
 }  // namespace
 
 PresentDrainResult drain_present_stage(app::UiRuntime& runtime,
@@ -35,12 +74,11 @@ PresentDrainResult drain_present_stage(app::UiRuntime& runtime,
     auto frames = runtime.present_source->latest_drain().value_or(
         ::kf2::telemetry::FrameMetrics{});
     // A stale Launch.log can make the startup gate look ready before KF2's
-    // new DX11 swap chain begins presenting. An embedded ETW session that
-    // stays completely silent is restarted a bounded number of times; a
-    // healthy or merely stale stream is never churned.
+    // new DX11 swap chain begins presenting. Failed starts and completely
+    // silent sessions share one bounded retry; healthy or merely stale
+    // streams are never churned.
     if (should_reconnect_silent_present({
             .scene_ready = runtime.overlay_scene_ready,
-            .session_bound = runtime.present_session != nullptr,
             .fps = frames.fps,
             .reason = frames.reason,
             .session_started_ns = runtime.present_session_started_ns,
@@ -62,7 +100,7 @@ PresentDrainResult drain_present_stage(app::UiRuntime& runtime,
                 L"Reconnecting KF2 frame telemetry";
             runtime.events->append(
                 {0, diagnostics::Severity::info, "DXGI_FRAME_TIMING_RECONNECTED",
-                 L"Silent startup telemetry was reconnected after KF2 reached the main menu",
+                 L"KF2 frame telemetry was reconnected after a failed start or missing startup samples",
                  L"telemetry"});
         } else {
             runtime.telemetry_failure = L"DXGI frame timing reconnect failed: " +
@@ -79,7 +117,8 @@ PresentDrainResult drain_present_stage(app::UiRuntime& runtime,
 
 Result<TelemetryFrame> capture_telemetry_frame(
     app::UiRuntime& runtime, const game::GameWindowState& window,
-    std::uint64_t now_ns, ::kf2::telemetry::FrameMetrics frames) {
+    std::uint64_t now_ns, ::kf2::telemetry::FrameMetrics frames,
+    const ::kf2::telemetry::ResourceTelemetrySnapshot* snapshot) {
     TelemetryFrameInput input;
     input.identity = {runtime.game_process->pid,
                       runtime.game_process->process_start_id};
@@ -92,8 +131,6 @@ Result<TelemetryFrame> capture_telemetry_frame(
     input.adapter_vram_budget_bytes = runtime.adapter_vram_budget;
 
     if (input.frames.fps && input.frames.frame_time_ms) {
-        runtime.resource_telemetry_worker.request(now_ns);
-        const auto snapshot = runtime.resource_telemetry_worker.latest();
         const bool current_snapshot = snapshot &&
             snapshot->generation == runtime.resource_telemetry_generation &&
             snapshot->identity.pid == input.identity.pid &&
@@ -131,29 +168,7 @@ Result<TelemetryFrame> capture_telemetry_frame(
                     runtime.cached_driver_gpu_percent =
                         snapshot->driver_gpu_percent;
                     accepted_new_gpu_sample = true;
-                    if (runtime.resource_telemetry_nvidia_expected &&
-                        runtime.resource_telemetry_source_announced_generation !=
-                            snapshot->generation) {
-                        runtime.resource_telemetry_source_announced_generation =
-                            snapshot->generation;
-                        const bool afterburner_compatible =
-                            snapshot->nvidia_source ==
-                            ::kf2::telemetry::NvidiaGpuSource::
-                                nvapi_dynamic_pstates;
-                        runtime.events->append({0,
-                            snapshot->nvidia_source
-                                ? diagnostics::Severity::info
-                                : diagnostics::Severity::warning,
-                            snapshot->nvidia_source
-                                ? "NVIDIA_TOTAL_GPU_TELEMETRY_ACTIVE"
-                                : "NVIDIA_TOTAL_GPU_TELEMETRY_FALLBACK",
-                            snapshot->nvidia_source
-                                ? afterburner_compatible
-                                    ? L"GPU usage uses the installed NVIDIA driver's dynamic P-state utilization domain, matching MSI Afterburner semantics"
-                                    : L"GPU usage uses the installed NVIDIA driver's local NVML whole-device fallback"
-                                : L"NVIDIA driver utilization is unavailable; adapter-wide Windows GPU telemetry is used",
-                            L"telemetry"});
-                    }
+                    announce_gpu_providers(runtime, *snapshot);
                 }
             }
             const auto raw_process_gpu = runtime.cached_gpu_metrics

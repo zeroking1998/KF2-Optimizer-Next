@@ -112,6 +112,19 @@ if ($executableText.IndexOf(
         $actualTelemetryHash, [StringComparison]::Ordinal) -lt 0) {
     throw 'Release executable is not bound to the exact locally compiled telemetry module; rebuild without -SkipBuild'
 }
+$commit = (& git -C $projectRoot rev-parse --short=12 HEAD 2>$null)
+if (-not $commit) { throw 'Package source revision is unavailable' }
+$workingTreeChanges = @(& git -C $projectRoot status --porcelain `
+    --untracked-files=normal 2>$null)
+if ($LASTEXITCODE -ne 0) { throw 'Package source state is unavailable' }
+if ($workingTreeChanges.Count -ne 0) { $commit = "$commit.dirty" }
+$executableIdentity = & (Join-Path $PSScriptRoot 'get_executable_build_identity.ps1') `
+    -Executable $source
+if ($executableIdentity.source_identity -cne $commit -or
+    $executableIdentity.version -cne '0.0.4-alpha' -or
+    $executableIdentity.channel -cne 'release') {
+    throw 'Release executable source identity does not match the package; rebuild without -SkipBuild'
+}
 if (-not (Test-Path -LiteralPath $destinationRoot)) {
     New-Item -ItemType Directory -Path $destinationRoot | Out-Null
 }
@@ -192,11 +205,6 @@ $inventoryExporter = Join-Path $projectRoot `
 if (-not (Test-Path -LiteralPath $inventoryExporter -PathType Leaf)) {
     throw 'Issue 72 inventory exporter is missing'
 }
-$commit = (& git -C $projectRoot rev-parse --short=12 HEAD 2>$null)
-if (-not $commit) { $commit = 'unknown' }
-$workingTreeChanges = @(& git -C $projectRoot status --porcelain `
-    --untracked-files=normal 2>$null)
-if ($workingTreeChanges.Count -ne 0) { $commit = "$commit.dirty" }
 $inventoryJson = Join-Path $documentationDirectory `
     'issue72-feature-inventory.json'
 & $inventoryExporter $inventoryJson "0.0.4-alpha+$commit (release)"

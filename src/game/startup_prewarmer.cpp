@@ -22,6 +22,7 @@ namespace kf2::game {
 namespace {
 
 #ifdef KF2_STARTUP_PREWARMER_TESTING
+std::atomic<detail::StartupPrewarmPlanHook> prewarm_plan_hook{nullptr};
 std::atomic_bool fail_next_prewarm_plan{false};
 std::atomic<std::int64_t> next_prewarm_worker_entry_delay_ms{0};
 std::atomic<std::int64_t> prewarm_discovery_delay_ms{0};
@@ -46,6 +47,11 @@ std::optional<std::size_t> volume_extent_bytes(DWORD extent_count) noexcept {
 }  // namespace
 
 #ifdef KF2_STARTUP_PREWARMER_TESTING
+void detail::set_startup_prewarm_plan_hook_for_testing(
+    StartupPrewarmPlanHook hook) noexcept {
+    prewarm_plan_hook.store(hook, std::memory_order_release);
+}
+
 void detail::fail_next_startup_prewarm_plan() noexcept {
     fail_next_prewarm_plan.store(true, std::memory_order_release);
 }
@@ -518,6 +524,13 @@ struct StartupPrewarmer::Impl final {
         bytes_planned = planned;
         state = StartupPrewarmState::running;
 
+#ifdef KF2_STARTUP_PREWARMER_TESTING
+        if (const auto hook = prewarm_plan_hook.exchange(
+                nullptr, std::memory_order_acq_rel)) {
+            hook(plan);
+        }
+#endif
+
         HANDLE thread = GetCurrentThread();
         const bool background = SetThreadPriority(
             thread, THREAD_MODE_BACKGROUND_BEGIN) != FALSE;
@@ -564,9 +577,13 @@ struct StartupPrewarmer::Impl final {
             static_cast<void>(SetThreadPriority(
                 thread, THREAD_MODE_BACKGROUND_END));
         }
-        state = stop.stop_requested()
-            ? StartupPrewarmState::cancelled
-            : StartupPrewarmState::complete;
+        if (stop.stop_requested()) {
+            state = StartupPrewarmState::cancelled;
+        } else {
+            state = bytes_read.load(std::memory_order_relaxed) == planned
+                ? StartupPrewarmState::complete
+                : StartupPrewarmState::incomplete;
+        }
     }
 };
 

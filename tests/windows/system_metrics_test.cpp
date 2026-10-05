@@ -1,5 +1,4 @@
 #include <Windows.h>
-#include <atomic>
 #include <bit>
 #include <cstdlib>
 #include <iostream>
@@ -7,6 +6,7 @@
 #include <vector>
 #include "kf2/game/game_session.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
+#include "../support/process_inspection_denial.hpp"
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
@@ -118,6 +118,25 @@ int main() {
     CHECK(calculate_thread_cpu_percent(100, 50'100, 100).value() == 5.0);
     CHECK(calculate_thread_cpu_percent(100, 2'000'100, 100).value() == 100.0);
 
+    // Numeric thread IDs are not instance identities. Never subtract CPU
+    // counters from different creation times, even when the new counter grew.
+    using detail::ThreadCpuTimes;
+    const ThreadCpuTimes old_thread{1'000, 100};
+    for (const auto reused_ticks : {50ULL, 100ULL, 50'100ULL}) {
+        CHECK(!detail::calculate_thread_cpu_percent(
+            old_thread, ThreadCpuTimes{2'000, reused_ticks}, 100));
+    }
+    CHECK(!detail::calculate_thread_cpu_percent(
+        ThreadCpuTimes{}, ThreadCpuTimes{0, 50'000}, 100));
+    CHECK(!detail::calculate_thread_cpu_percent(
+        old_thread, ThreadCpuTimes{1'000, 50'100}, 0));
+    CHECK(!detail::calculate_thread_cpu_percent(
+        old_thread, ThreadCpuTimes{1'000, 50}, 100));
+    CHECK(detail::calculate_thread_cpu_percent(
+        old_thread, ThreadCpuTimes{1'000, 50'100}, 100).value() == 5.0);
+    CHECK(detail::calculate_thread_cpu_percent(
+        old_thread, old_thread, 100).value() == 0.0);
+
     const detail::ThreadPressureMetrics pressure{
         98.0, 1.25, 78.4, 3};
     detail::ThreadPressureCache terminated_threads;
@@ -149,6 +168,7 @@ int main() {
     const auto identity = kf2::game::bind_game_process(GetCurrentProcessId(), path);
     CHECK(identity.has_value());
     ProcessMetricSampler sampler{identity.value()};
+    const auto opens_before = detail::process_metric_opens_for_testing();
     const auto first = sampler.sample();
     CHECK(first.has_value());
     CHECK(first.value().working_set_bytes > 0);
@@ -161,6 +181,7 @@ int main() {
     Sleep(520);
     const auto third = sampler.sample();
     CHECK(third.has_value());
+    CHECK(detail::process_metric_opens_for_testing() == opens_before);
     CHECK(third.value().critical_core_percent.has_value());
     CHECK(*third.value().critical_core_percent >= 0.0);
     CHECK(*third.value().critical_core_percent <= 100.0);
@@ -188,16 +209,49 @@ int main() {
           third.value().system_logical_processors);
     auto stale = identity.value(); ++stale.process_start_id;
     CHECK(!ProcessMetricSampler{stale}.sample().has_value());
+    stale = identity.value(); ++stale.pid;
+    CHECK(!ProcessMetricSampler{stale}.sample().has_value());
+    {
+        auto detached = identity.value();
+        detached.native_process.reset();
+        const auto before = detail::process_metric_opens_for_testing();
+        ProcessMetricSampler standalone{detached};
+        CHECK(standalone.sample().has_value());
+        CHECK(standalone.sample().has_value());
+        auto moved = std::move(standalone);
+        CHECK(moved.sample().has_value());
+        CHECK(detail::process_metric_opens_for_testing() == before + 1);
+    }
+    {
+        // Denying VM_READ must not break read-only session observation.
+        std::unique_ptr<void, decltype(&CloseHandle)> owned{
+            OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId()), &CloseHandle};
+        CHECK(owned);
+        kf2::test::ProcessInspectionDenial denial;
+        CHECK(denial.deny(owned.get(), PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE));
+        const auto limited = kf2::game::bind_game_process(GetCurrentProcessId(), path);
+        CHECK(limited.has_value());
+        CHECK(limited.value().native_process);
+        CHECK(!limited.value().native_process->metrics_readable());
+        CHECK(kf2::game::is_game_process_current(limited.value()));
+        ProcessMetricSampler restricted{limited.value()};
+        CHECK(!restricted.sample().has_value());
+        CHECK(denial.restore());
+        const auto before = detail::process_metric_opens_for_testing();
+        CHECK(restricted.sample().has_value());
+        CHECK(restricted.sample().has_value());
+        CHECK(detail::process_metric_opens_for_testing() == before + 1);
+    }
 
-    std::atomic_bool keep_workers{true};
-    std::vector<std::thread> workers;
+    std::vector<std::jthread> workers;
     for (int index = 0; index < 8; ++index) {
-        workers.emplace_back([&] {
-            while (keep_workers.load(std::memory_order_relaxed)) Sleep(5);
+        workers.emplace_back([](std::stop_token stop) {
+            while (!stop.stop_requested()) Sleep(5);
         });
     }
     DWORD handles_before = 0;
     CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_before));
+    constexpr DWORD kAmbientHandleAllowance = 2;
     {
         ProcessMetricSampler tracked{identity.value()};
         CHECK(tracked.sample().has_value());
@@ -206,15 +260,26 @@ int main() {
                                     &handles_while_tracked));
         CHECK(handles_while_tracked >=
               handles_before + static_cast<DWORD>(workers.size()));
+
+        for (auto& worker : workers) worker.request_stop();
+        for (auto& worker : workers) worker.join();
+        DWORD handles_after_exit = 0;
+        CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after_exit));
+        // Exercise the real five-second membership refresh: exited workers'
+        // cached handles must be released while the sampler remains alive.
+        Sleep(5'050);
+        CHECK(tracked.sample().has_value());
+        DWORD handles_after_refresh = 0;
+        CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after_refresh));
+        CHECK(handles_after_refresh + static_cast<DWORD>(workers.size()) <=
+              handles_after_exit + kAmbientHandleAllowance);
     }
     DWORD handles_after = 0;
     CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after));
     // The process-wide count can move by a handle or two when Windows or the
-    // test runtime performs unrelated asynchronous work. The eight persistent
-    // worker threads make a tracker leak much larger than that ambient noise.
-    constexpr DWORD kAmbientHandleAllowance = 2;
-    CHECK(handles_after <= handles_before + kAmbientHandleAllowance);
-    keep_workers.store(false, std::memory_order_relaxed);
-    for (auto& worker : workers) worker.join();
+    // test runtime performs unrelated asynchronous work. Joined workers no
+    // longer own the eight native handles counted before sampling started.
+    CHECK(handles_after + static_cast<DWORD>(workers.size()) <=
+          handles_before + kAmbientHandleAllowance);
     return EXIT_SUCCESS;
 }
