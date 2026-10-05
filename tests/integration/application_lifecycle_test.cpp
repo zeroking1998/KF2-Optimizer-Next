@@ -52,6 +52,25 @@
 #include "features/telemetry/telemetry_presentation_stage.hpp"
 #include "../support/process_inspection_denial.hpp"
 
+namespace {
+thread_local bool fail_flex_text_allocation{};
+}
+
+void* operator new(std::size_t size) {
+    if (fail_flex_text_allocation) {
+        fail_flex_text_allocation = false;
+        throw std::bad_alloc{};
+    }
+    for (;;) {
+        if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+        const auto handler = std::get_new_handler();
+        if (!handler) throw std::bad_alloc{};
+        handler();
+    }
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
+
 #define CHECK(condition)                                                        \
     do {                                                                        \
         if (!(condition)) {                                                     \
@@ -340,6 +359,42 @@ int test_flex_report_boundaries() {
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_telemetry == capacity_label);
     CHECK(runtime.last_flex_observation->update_calls == 61);
+    CHECK(runtime.adaptive_actuation.propose(flex_control, 1.0, std::nullopt,
+        kf2::optimizer::AdaptiveCapabilityState::available, runtime.monotonic_ns(),
+        "flex_shared_memory").status ==
+        kf2::optimizer::AdaptiveActionStatus::proposed);
+    CHECK(runtime.adaptive_actuation.dispatch(flex_control, runtime.monotonic_ns()));
+    shared.desired_substeps = 1;
+    shared.control_heartbeat_tick = GetTickCount64();
+    shared.aggregate_particle_capacity = 4096;
+    const auto before_text_failure = runtime.model.status();
+    bool text_failed = false;
+    fail_flex_text_allocation = true;
+    try { runtime.observe_flex_process(); }
+    catch (const std::bad_alloc&) { text_failed = true; }
+    fail_flex_text_allocation = false;
+    CHECK(text_failed);
+    CHECK(runtime.last_flex_observation->particle_capacity == 4096);
+    CHECK(runtime.adaptive_actuation.current(flex_control)->status ==
+        kf2::optimizer::AdaptiveActionStatus::applied);
+    CHECK(runtime.model.status().flex_telemetry == before_text_failure.flex_telemetry);
+    CHECK(runtime.model.status().flex_requested_substeps ==
+        before_text_failure.flex_requested_substeps);
+    CHECK(runtime.model.status().flex_effective_substeps ==
+        before_text_failure.flex_effective_substeps);
+    CHECK(runtime.model.status().flex_action_status ==
+        before_text_failure.flex_action_status);
+    CHECK(runtime.model.status().flex_substep_diagnostics ==
+        before_text_failure.flex_substep_diagnostics);
+    CHECK(runtime.model.status().flex_readback_diagnostics ==
+        before_text_failure.flex_readback_diagnostics);
+    runtime.observe_flex_process();
+    CHECK(runtime.model.status().flex_telemetry ==
+        L"FleX solvers: 1 | particle capacity: 4096 | active/free awaiting a fresh count");
+    CHECK(runtime.model.status().flex_action_status == L"APPLIED");
+    runtime.adaptive_actuation.invalidate_control(flex_control);
+    shared.desired_substeps = 0;
+    shared.control_heartbeat_tick = 0;
     shared.aggregate_particle_capacity = 2048;
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_telemetry ==
