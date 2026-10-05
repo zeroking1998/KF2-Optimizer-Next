@@ -146,6 +146,34 @@ int main() {
         "\"build_identity\":\"quote\\\"\\\\\\nUnicode caf\xc3\xa9\"") !=
           std::string::npos);
 
+    // Returned documents own their complete bytes after stream destruction,
+    // including buffer-growth boundaries and embedded-NUL UTF-8 conversion.
+    for (const std::size_t length : {15U, 127U, 255U, 511U, 1024U, 4096U}) {
+        const std::wstring message = std::wstring(length, L'x') +
+            std::wstring{L"\0caf\u00e9\n", 6};
+        const auto saved = kf2::diagnostics::serialize_events_json({
+            Event{UINT64_MAX, Severity::error, "OWNED", message,
+                  L"source", UINT32_MAX, true}});
+        CHECK(saved == "{\"version\":1,\"events\":[{\"sequence\":18446744073709551615,"
+              "\"severity\":\"error\",\"code\":\"OWNED\",\"source\":\"source\","
+              "\"message\":\"" + std::string(length, 'x') +
+              "\\u0000caf\xc3\xa9\\n\",\"repeat_count\":4294967295}]}");
+        CHECK(kf2::diagnostics::serialize_events_json({}) ==
+              "{\"version\":1,\"events\":[]}");
+        CHECK(saved.find("\\u0000caf\xc3\xa9\\n") != std::string::npos);
+    }
+    const auto unavailable_report =
+        kf2::diagnostics::serialize_product_report_json({});
+    kf2::diagnostics::ProductReport zero_report;
+    zero_report.zeds_alive = 0;
+    zero_report.corpse_collide_dead = false;
+    const auto known_zero_report =
+        kf2::diagnostics::serialize_product_report_json(zero_report);
+    CHECK(unavailable_report.find("\"zeds_alive\":null") != std::string::npos);
+    CHECK(unavailable_report.find("\"corpse_collide_dead\":null") != std::string::npos);
+    CHECK(known_zero_report.find("\"zeds_alive\":0") != std::string::npos);
+    CHECK(known_zero_report.find("\"corpse_collide_dead\":false") != std::string::npos);
+
     const auto persistent_root = std::filesystem::temp_directory_path() /
         (L"kf2-event-log-" + std::to_wstring(GetCurrentProcessId()));
     std::filesystem::create_directories(persistent_root);
@@ -772,6 +800,17 @@ int main() {
     CHECK(support.find("command line") != std::string::npos);
     CHECK(kf2::diagnostics::serialize_support_bundle_json(report, "invalid")
               .find("\"issue72_inventory\":null") != std::string::npos);
+    for (const std::string_view inventory : {
+             "", "invalid", "{}", "{\"value\":\"caf\xc3\xa9\"}"}) {
+        const std::string expected_inventory =
+            inventory.starts_with('{') && inventory.ends_with('}')
+                ? std::string{inventory} : "null";
+        CHECK(kf2::diagnostics::serialize_support_bundle_json(report, inventory) ==
+              "{\"schema\":\"KF2_OPTIMIZER_SUPPORT_BUNDLE_V1\","
+              "\"privacy\":\"Local only; no dump, command line, user files or uploaded data\","
+              "\"diagnostics\":" + product + ",\"issue72_inventory\":" +
+              expected_inventory + "}");
+    }
 
     EventLog concurrent{200};
     std::vector<std::thread> workers;

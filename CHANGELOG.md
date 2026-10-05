@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Write support diagnostics directly into the export and transfer completed
+  JSON buffers, preserving exact bytes, event persistence and retry behavior.
 - Transfer completed telemetry display buffers instead of copying them,
   preserving exact text, locale, live values and Adaptive behavior without a cache.
 - Recompile only the owning telemetry component when the SDK module hash
