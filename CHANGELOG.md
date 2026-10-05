@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Publish only changed prewarm display fields and avoid constructing unused
+  map diagnostic labels; worker behavior, budgets and progress rules are unchanged.
 - Publish optional overlay diagnostic text without copying unrelated UI,
   graphics or Adaptive state; diagnostic timing and displayed text are unchanged.
 - Escape shared JSON string contents directly into the returned owned string,

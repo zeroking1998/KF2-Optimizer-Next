@@ -241,9 +241,7 @@ void UiRuntime::publish_prewarm_diagnostics(
             L"started";
     }
     if (model.status().prewarm_diagnostics == summary) return;
-    auto status = model.status();
-    status.prewarm_diagnostics = std::move(summary);
-    model.set_status(std::move(status));
+    model.set_prewarm_diagnostics(std::move(summary));
     invalidate();
 }
 
@@ -251,14 +249,11 @@ void UiRuntime::poll_startup_prewarm() {
     const auto current = startup_prewarmer.snapshot();
     if (!game_process && (current.state == game::StartupPrewarmState::waiting ||
                           current.state == game::StartupPrewarmState::running)) {
-        auto status = model.status();
+        const auto& status = model.status();
         const int percent = prewarm_percent(current);
         if (!status.prewarm_active || status.prewarm_percent != percent ||
             !status.prewarm_map.empty()) {
-            status.prewarm_active = true;
-            status.prewarm_percent = percent;
-            status.prewarm_map.clear();
-            model.set_status(std::move(status));
+            model.set_prewarm_progress(true, percent, L"");
             invalidate();
         }
         publish_prewarm_diagnostics(current, L"Startup");
@@ -269,13 +264,7 @@ void UiRuntime::poll_startup_prewarm() {
         case game::StartupPrewarmState::incomplete:
             startup_prewarm_announced = true;
             publish_prewarm_diagnostics(current, L"Startup", true);
-            {
-                auto status = model.status();
-                status.prewarm_active = false;
-                status.prewarm_percent = prewarm_percent(current);
-                status.prewarm_map.clear();
-                model.set_status(std::move(status));
-            }
+            model.set_prewarm_progress(false, prewarm_percent(current), L"");
             if (current.state == game::StartupPrewarmState::incomplete) {
                 events->append({0, diagnostics::Severity::warning,
                     "STARTUP_PREWARM_INCOMPLETE",
@@ -299,12 +288,8 @@ void UiRuntime::poll_startup_prewarm() {
         case game::StartupPrewarmState::cancelled:
             startup_prewarm_announced = true;
             publish_prewarm_diagnostics(current, L"Startup", true);
-            {
-                auto status = model.status();
-                status.prewarm_active = false;
-                status.prewarm_map.clear();
-                model.set_status(std::move(status));
-            }
+            model.set_prewarm_progress(
+                false, model.status().prewarm_percent, L"");
             if (optimizer_settings.debug_runtime_diagnostics &&
                 current.diagnostics && current.bytes_read != 0) {
                 events->append({0, diagnostics::Severity::info,
@@ -325,13 +310,7 @@ void UiRuntime::poll_startup_prewarm() {
         case game::StartupPrewarmState::failed:
             startup_prewarm_announced = true;
             publish_prewarm_diagnostics(current, L"Startup", true);
-            {
-                auto status = model.status();
-                status.prewarm_active = false;
-                status.prewarm_percent = 0;
-                status.prewarm_map.clear();
-                model.set_status(std::move(status));
-            }
+            model.set_prewarm_progress(false, 0, L"");
             events->append({0, diagnostics::Severity::warning,
                 "STARTUP_PREWARM_FAILED",
                 L"Startup preparation failed safely; KF2 launch remains "
@@ -381,16 +360,14 @@ void UiRuntime::poll_map_prewarm() {
         game::startup_prewarm_retryable(current.state);
     if (!map_prewarm_active.empty() && terminal) {
         const auto completed_map = std::exchange(map_prewarm_active, {});
-        publish_prewarm_diagnostics(
-            current, L"Map " + completed_map, true);
-        auto status = model.status();
-        status.prewarm_active = false;
-        status.prewarm_map.clear();
-        status.prewarm_percent =
+        if (optimizer_settings.debug_runtime_diagnostics) {
+            publish_prewarm_diagnostics(
+                current, L"Map " + completed_map, true);
+        }
+        model.set_prewarm_progress(false,
             current.state == game::StartupPrewarmState::complete ||
             current.state == game::StartupPrewarmState::incomplete
-                ? prewarm_percent(current) : 0;
-        model.set_status(std::move(status));
+                ? prewarm_percent(current) : 0, L"");
         if (current.state == game::StartupPrewarmState::complete) {
             map_prewarm_retry_not_before_ns = 0;
             if (optimizer_settings.debug_runtime_diagnostics &&
@@ -419,16 +396,15 @@ void UiRuntime::poll_map_prewarm() {
         }
         invalidate();
     } else if (!map_prewarm_active.empty()) {
-        publish_prewarm_diagnostics(
-            current, L"Map " + map_prewarm_active);
-        auto status = model.status();
+        if (optimizer_settings.debug_runtime_diagnostics) {
+            publish_prewarm_diagnostics(
+                current, L"Map " + map_prewarm_active);
+        }
+        const auto& status = model.status();
         const int percent = prewarm_percent(current);
         if (!status.prewarm_active || status.prewarm_percent != percent ||
             status.prewarm_map != map_prewarm_active) {
-            status.prewarm_active = true;
-            status.prewarm_percent = percent;
-            status.prewarm_map = map_prewarm_active;
-            model.set_status(std::move(status));
+            model.set_prewarm_progress(true, percent, map_prewarm_active);
             invalidate();
         }
     }
@@ -454,11 +430,7 @@ void UiRuntime::poll_map_prewarm() {
             optimizer_settings.debug_runtime_diagnostics;
         prewarm_diagnostics_last_published_ns = 0;
         map_prewarmer.start(installation->install_root, std::move(options));
-        auto status = model.status();
-        status.prewarm_active = true;
-        status.prewarm_percent = 0;
-        status.prewarm_map = map_prewarm_active;
-        model.set_status(std::move(status));
+        model.set_prewarm_progress(true, 0, map_prewarm_active);
         invalidate();
     }
 }
@@ -476,11 +448,7 @@ void UiRuntime::stop_map_prewarm_for_load() {
     map_prewarm_last_attempted.clear();
     map_prewarm_observed.clear();
     map_prewarm_retry_not_before_ns = 0;
-    auto status = model.status();
-    status.prewarm_active = false;
-    status.prewarm_percent = 0;
-    status.prewarm_map.clear();
-    model.set_status(std::move(status));
+    model.set_prewarm_progress(false, 0, L"");
     invalidate();
 }
 
