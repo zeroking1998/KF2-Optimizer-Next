@@ -1631,16 +1631,7 @@ function int ResolveAdaptiveLivingEnemyPressureLevel(float PressureScale)
 
 function int FindFixedMinimumLivingVisualEntry(KFPawn_Monster Candidate)
 {
-    local int Index;
-
-    for (Index = 0; Index < FixedMinimumLivingVisualZeds.Length; ++Index)
-    {
-        if (FixedMinimumLivingVisualZeds[Index] == Candidate)
-        {
-            return Index;
-        }
-    }
-    return -1;
+    return FixedMinimumLivingVisualZeds.Find(Candidate);
 }
 
 function RemoveFixedMinimumLivingVisualEntry(int Index)
@@ -1998,16 +1989,7 @@ function RefreshSleepingCorpseMinimumAnimationState(KFGoreManager GoreManager)
 
 function int FindAdaptiveBaselineSettleEntry(KFPawn Candidate)
 {
-    local int Index;
-
-    for (Index = 0; Index < AdaptiveBaselineSettleEntries.Length; ++Index)
-    {
-        if (AdaptiveBaselineSettleEntries[Index].Corpse == Candidate)
-        {
-            return Index;
-        }
-    }
-    return -1;
+    return AdaptiveBaselineSettleEntries.Find('Corpse', Candidate);
 }
 
 function RemoveAdaptiveBaselineSettleEntry(int Index)
@@ -2376,16 +2358,7 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
 
 function int FindFixedMinimumCorpseLodEntry(KFPawn Candidate)
 {
-    local int Index;
-
-    for (Index = 0; Index < FixedMinimumCorpseLodCorpses.Length; ++Index)
-    {
-        if (FixedMinimumCorpseLodCorpses[Index] == Candidate)
-        {
-            return Index;
-        }
-    }
-    return -1;
+    return FixedMinimumCorpseLodCorpses.Find(Candidate);
 }
 
 function RemoveFixedMinimumCorpseLodEntry(int Index)
@@ -2447,16 +2420,7 @@ function PruneFixedMinimumCorpseLodEntries()
 
 function int FindAdaptiveDistanceSleptCorpse(KFPawn Candidate)
 {
-    local int Index;
-
-    for (Index = 0; Index < AdaptiveDistanceSleptCorpses.Length; ++Index)
-    {
-        if (AdaptiveDistanceSleptCorpses[Index].Corpse == Candidate)
-        {
-            return Index;
-        }
-    }
-    return -1;
+    return AdaptiveDistanceSleptCorpses.Find('Corpse', Candidate);
 }
 
 function bool EnsureAdaptiveDistanceSleepTransitions()

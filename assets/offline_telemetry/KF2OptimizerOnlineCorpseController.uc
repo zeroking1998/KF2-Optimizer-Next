@@ -49,16 +49,7 @@ function KF2OptimizerOnlineContextInteraction GetOnlineInteraction()
 
 function int FindFrozenCorpse(KFPawn Candidate)
 {
-    local int Index;
-
-    for (Index = 0; Index < FrozenCorpses.Length; ++Index)
-    {
-        if (FrozenCorpses[Index].Corpse == Candidate)
-        {
-            return Index;
-        }
-    }
-    return -1;
+    return FrozenCorpses.Find('Corpse', Candidate);
 }
 
 function int AdoptRestoreOwnership(
