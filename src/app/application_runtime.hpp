@@ -160,8 +160,6 @@ struct AdvancedSettingsRuntimeState final {
 
 optimizer::AdaptivePolicy adaptive_policy_from(
     const config::Settings& settings) noexcept;
-std::wstring adaptive_profile_reason(
-    const optimizer::AdaptiveDecision& decision);
 Result<config::Settings> load_or_create_settings(
     const std::filesystem::path& path);
 std::wstring format_gib(std::uint64_t bytes);

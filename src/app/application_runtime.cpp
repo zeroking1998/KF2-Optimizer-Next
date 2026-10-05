@@ -36,12 +36,6 @@ optimizer::AdaptivePolicy adaptive_policy_from(
     };
 }
 
-std::wstring adaptive_profile_reason(
-    const optimizer::AdaptiveDecision& decision) {
-    const std::string_view reason = decision.reason;
-    return std::wstring{reason.begin(), reason.end()};
-}
-
 Result<config::Settings> load_or_create_settings(
     const std::filesystem::path& path) {
     config::Settings settings;
