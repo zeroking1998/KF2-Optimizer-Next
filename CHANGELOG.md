@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Publish Adaptive's own display fields without copying unrelated graphics,
+  telemetry, FleX, prewarm and update status on every controller tick.
 - Simplify five corpse/Zed ownership lookups using KF2's native array search,
   preserving first-match identity and missing-entry behavior without new state.
 - Skip the full world-emitter restoration scan when no Optimizer-owned emitter

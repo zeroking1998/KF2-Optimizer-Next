@@ -1,5 +1,8 @@
 #include <cstdlib>
 #include <iostream>
+#include <limits>
+#include <type_traits>
+#include <utility>
 
 #include "kf2/ui/ui_model.hpp"
 
@@ -14,6 +17,111 @@
 
 int main() {
     using namespace kf2::ui;
+    static_assert(std::is_nothrow_move_assignable_v<AdaptiveUiStatus>);
+    {
+        UiModel adaptive_model;
+        UiStatus unrelated;
+        unrelated.graphics_values.fill(L"Saved graphics values remain unchanged");
+        unrelated.advanced_values.fill(L"Saved advanced values remain unchanged");
+        unrelated.flex_telemetry = L"Current FleX telemetry remains unchanged";
+        unrelated.telemetry = L"Current frame telemetry remains unchanged";
+        unrelated.prewarm_map = L"Current map prewarm remains unchanged";
+        unrelated.target_fps = 119;
+        unrelated.active_target_fps = 60;
+        unrelated.corpse_limit = 1242;
+        unrelated.active_corpse_limit = 2000;
+        adaptive_model.set_status(unrelated);
+        adaptive_model.preview_target_fps(125);
+        adaptive_model.set_notice({NoticeSeverity::warning, L"UNCHANGED",
+            L"Current safety notice", L""});
+        static_cast<void>(adaptive_model.focus_destination(Destination::debug));
+        static_cast<void>(adaptive_model.activate_focused());
+        auto prepared = adaptive_model.adaptive_status();
+        constexpr std::array text_fields{
+            &AdaptiveUiStatus::recommended_profile,
+            &AdaptiveUiStatus::recommendation_reason,
+            &AdaptiveUiStatus::adaptive_corpse_capability,
+            &AdaptiveUiStatus::adaptive_corpse_action_status,
+            &AdaptiveUiStatus::adaptive_particle_capability,
+            &AdaptiveUiStatus::adaptive_state,
+            &AdaptiveUiStatus::adaptive_bottleneck,
+            &AdaptiveUiStatus::adaptive_cpu_parallelism,
+            &AdaptiveUiStatus::adaptive_action,
+            &AdaptiveUiStatus::adaptive_reason,
+            &AdaptiveUiStatus::adaptive_data_quality,
+            &AdaptiveUiStatus::adaptive_prediction,
+            &AdaptiveUiStatus::adaptive_session,
+            &AdaptiveUiStatus::adaptive_source,
+            &AdaptiveUiStatus::adaptive_safety,
+            &AdaptiveUiStatus::adaptive_evidence};
+        int label_index = 0;
+        for (const auto field : text_fields) {
+            prepared.*field = L"Current Adaptive label " +
+                std::to_wstring(++label_index);
+        }
+        prepared.adaptive_optimization_enabled = false;
+        prepared.adaptive_shadow_mode = true;
+        prepared.adaptive_runtime_corpse_limit = 1500;
+        prepared.adaptive_confidence_percent = 91;
+        prepared.adaptive_drop_risk_percent = 32;
+        prepared.adaptive_quality_score = 75;
+        prepared.adaptive_headroom_available_percent = 12;
+        prepared.adaptive_restore_generation =
+            std::numeric_limits<std::uint64_t>::max();
+
+        // An unrelated publication made after staging must survive the commit.
+        auto newer_status = adaptive_model.status();
+        newer_status.update_status = L"Newer update status must not roll back";
+        adaptive_model.set_status(std::move(newer_status));
+        const auto* graphics_text = adaptive_model.status().graphics_values[0].data();
+        const auto* update_text = adaptive_model.status().update_status.data();
+        const auto matches = [&](const AdaptiveUiStatus& expected) {
+            const auto& current = adaptive_model.adaptive_status();
+            for (const auto field : text_fields) {
+                if (current.*field != expected.*field) return false;
+            }
+            return current.adaptive_optimization_enabled ==
+                    expected.adaptive_optimization_enabled &&
+                current.adaptive_shadow_mode == expected.adaptive_shadow_mode &&
+                current.adaptive_runtime_corpse_limit ==
+                    expected.adaptive_runtime_corpse_limit &&
+                current.adaptive_confidence_percent ==
+                    expected.adaptive_confidence_percent &&
+                current.adaptive_drop_risk_percent ==
+                    expected.adaptive_drop_risk_percent &&
+                current.adaptive_quality_score == expected.adaptive_quality_score &&
+                current.adaptive_headroom_available_percent ==
+                    expected.adaptive_headroom_available_percent &&
+                current.adaptive_restore_generation ==
+                    expected.adaptive_restore_generation;
+        };
+        adaptive_model.set_adaptive_status(prepared);
+        CHECK(matches(prepared));
+        adaptive_model.set_adaptive_status(adaptive_model.adaptive_status());
+        CHECK(matches(prepared));
+        for (const auto field : text_fields) prepared.*field = L"";
+        prepared.adaptive_runtime_corpse_limit.reset();
+        adaptive_model.set_adaptive_status(prepared);
+        CHECK(matches(prepared));
+        adaptive_model.set_adaptive_status(AdaptiveUiStatus{});
+        CHECK(matches(AdaptiveUiStatus{}));
+        CHECK(adaptive_model.status().graphics_values == unrelated.graphics_values);
+        CHECK(adaptive_model.status().advanced_values == unrelated.advanced_values);
+        CHECK(adaptive_model.status().flex_telemetry == unrelated.flex_telemetry);
+        CHECK(adaptive_model.status().telemetry == unrelated.telemetry);
+        CHECK(adaptive_model.status().prewarm_map == unrelated.prewarm_map);
+        CHECK(adaptive_model.status().target_fps == 119);
+        CHECK(adaptive_model.status().active_target_fps == 60);
+        CHECK(adaptive_model.status().corpse_limit == 1242);
+        CHECK(adaptive_model.status().active_corpse_limit == 2000);
+        CHECK(adaptive_model.status().graphics_values[0].data() == graphics_text);
+        CHECK(adaptive_model.status().update_status.data() == update_text);
+        CHECK(adaptive_model.status().update_status ==
+              L"Newer update status must not roll back");
+        CHECK(adaptive_model.presented_target_fps() == 125);
+        CHECK(adaptive_model.selected() == Destination::debug);
+        CHECK(adaptive_model.notice() && adaptive_model.notice()->code == L"UNCHANGED");
+    }
     UiModel model;
     CHECK(model.selected() == Destination::dashboard);
     CHECK((kDestinations == std::array{

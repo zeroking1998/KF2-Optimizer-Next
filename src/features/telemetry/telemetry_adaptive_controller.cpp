@@ -7,7 +7,7 @@ void UiRuntime::update_adaptive_controller(
     const telemetry_pipeline::TelemetryFrame& frame) {
     const auto now_ns = frame.observed_at_ns;
     const bool active_gameplay = frame.active_gameplay;
-    auto status = model.status();
+    auto status = model.adaptive_status();
     poll_adaptive_runtime_mode();
     reconcile_adaptive_runtime_mode(frame);
     if (adaptive_restore_debt) {
@@ -22,14 +22,14 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_quality_score =
             adaptive_resource_quality.effective_quality();
         status.adaptive_data_quality = L"DEGRADED";
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
     log_adaptive_performance_sample(frame);
     const auto corpse_state = update_adaptive_corpse_status(frame, status);
     using telemetry_pipeline::CorpseTelemetryState;
     if (present_pending_adaptive_runtime_mode(status)) {
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
     if (!optimizer_settings.adaptive_optimization_enabled) {
@@ -50,7 +50,7 @@ void UiRuntime::update_adaptive_controller(
         adaptive_gameplay_active = false;
         adaptive_governor.reset();
         adaptive_decision = {};
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
     status.adaptive_optimization_enabled = true;
@@ -71,7 +71,7 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_safety = L"no actuator";
         status.adaptive_evidence = L"FRAME_RATE_MODE_CHANGED";
         status.recommendation_reason = status.adaptive_reason;
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
     const auto response_context = observe_adaptive_quality_response(frame);
@@ -107,7 +107,7 @@ void UiRuntime::update_adaptive_controller(
         status.recommended_profile = L"user settings";
         status.recommendation_reason =
             L"KF2 starts from the user's saved graphics; live telemetry may make temporary runtime changes";
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
 
@@ -146,7 +146,7 @@ void UiRuntime::update_adaptive_controller(
         last_adaptive_disposition = optimizer::AdaptiveDisposition::hold;
         last_adaptive_bottleneck = optimizer::AdaptiveBottleneck::unknown;
         last_adaptive_decision_log_ns = 0;
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
 
@@ -246,7 +246,7 @@ void UiRuntime::update_adaptive_controller(
             status.adaptive_safety = L"no actuator";
             status.adaptive_evidence = L"NOT_AVAILABLE";
             status.recommendation_reason = status.adaptive_reason;
-            model.set_status(std::move(status));
+            model.set_adaptive_status(std::move(status));
             return;
         }
         if (present_source) present_source->reset_statistics();
@@ -254,7 +254,7 @@ void UiRuntime::update_adaptive_controller(
             "ADAPTIVE_FRAME_WINDOW_RESET",
             L"Adaptive discarded pre-map and loading-frame statistics and is collecting a fresh gameplay window",
             L"optimizer"});
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
 
@@ -872,7 +872,7 @@ void UiRuntime::update_adaptive_controller(
         last_adaptive_bottleneck = adaptive_decision.bottleneck.type;
         last_adaptive_decision_log_ns = now_ns;
     }
-    model.set_status(std::move(status));
+    model.set_adaptive_status(std::move(status));
 }
 
 }  // namespace kf2::app

@@ -6379,7 +6379,34 @@ int main(int argc, char** argv) {
             gameplay.telemetry_corpse_total = 20;
             gameplay.telemetry_observed_ns = frame.observed_at_ns;
         });
+        auto unrelated_status = runtime.model.status();
+        unrelated_status.graphics_values.fill(L"Unchanged saved graphics text");
+        unrelated_status.advanced_values.fill(L"Unchanged saved advanced text");
+        unrelated_status.update_changelog = L"Unchanged update changelog text";
+        unrelated_status.flex_telemetry = L"Unchanged FleX telemetry text";
+        unrelated_status.target_fps = 119;
+        unrelated_status.active_target_fps = 60;
+        unrelated_status.corpse_limit = 1242;
+        unrelated_status.active_corpse_limit = 2000;
+        runtime.model.set_status(std::move(unrelated_status));
+        runtime.model.preview_target_fps(125);
+        const auto* graphics_text = runtime.model.status().graphics_values[0].data();
+        const auto* advanced_text = runtime.model.status().advanced_values[0].data();
+        const auto* update_text = runtime.model.status().update_changelog.data();
+        const auto* flex_text = runtime.model.status().flex_telemetry.data();
+        const auto unrelated_status_unchanged = [&] {
+            const auto& current = runtime.model.status();
+            return current.graphics_values[0].data() == graphics_text &&
+                current.advanced_values[0].data() == advanced_text &&
+                current.update_changelog.data() == update_text &&
+                current.flex_telemetry.data() == flex_text &&
+                current.target_fps == 119 && current.active_target_fps == 60 &&
+                current.corpse_limit == 1242 &&
+                current.active_corpse_limit == 2000 &&
+                runtime.model.presented_target_fps() == 125;
+        };
         runtime.update_adaptive_controller(frame);
+        CHECK(unrelated_status_unchanged());
         frame.observed_at_ns += 250'000'000ULL;
         runtime.update_adaptive_controller(frame);
         CHECK(runtime.model.status().adaptive_runtime_corpse_limit == 2000);
@@ -6397,13 +6424,13 @@ int main(int argc, char** argv) {
             runtime.adaptive_decision.reason.end()};
         CHECK(runtime.model.status().recommendation_reason == decision_reason);
         CHECK(runtime.model.status().adaptive_reason == decision_reason);
-        auto stale_labels = runtime.model.status();
+        auto stale_labels = runtime.model.adaptive_status();
         stale_labels.adaptive_state = L"old stability";
         stale_labels.adaptive_bottleneck = L"old bottleneck";
         stale_labels.adaptive_action = L"old action";
         stale_labels.adaptive_reason = L"old reason";
         stale_labels.recommendation_reason = L"old recommendation";
-        runtime.model.set_status(std::move(stale_labels));
+        runtime.model.set_adaptive_status(std::move(stale_labels));
         ++frame.observed_at_ns;
         runtime.update_adaptive_controller(frame);
         CHECK(runtime.model.status().adaptive_state ==
@@ -6485,6 +6512,7 @@ int main(int argc, char** argv) {
         runtime.update_adaptive_controller(frame);
         CHECK(runtime.model.status().adaptive_corpse_capability == L"AVAILABLE");
         CHECK(runtime.model.status().adaptive_runtime_corpse_limit == 1500);
+        CHECK(unrelated_status_unchanged());
         runtime.game_process.reset();
     }
 

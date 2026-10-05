@@ -556,8 +556,8 @@ struct UiRuntime {
     telemetry_pipeline::CorpseTelemetryTracker::Result
     update_adaptive_corpse_status(
         const telemetry_pipeline::TelemetryFrame& frame,
-        ui::UiStatus& status);
-    bool present_pending_adaptive_runtime_mode(ui::UiStatus& status);
+        ui::AdaptiveUiStatus& status);
+    bool present_pending_adaptive_runtime_mode(ui::AdaptiveUiStatus& status);
     optimizer::QualityResponse::Context observe_adaptive_quality_response(
         const telemetry_pipeline::TelemetryFrame& frame);
     void log_adaptive_quality_response(
