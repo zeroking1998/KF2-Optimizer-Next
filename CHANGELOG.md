@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Transfer completed telemetry display buffers instead of copying them,
+  preserving exact text, locale, live values and Adaptive behavior without a cache.
 - Recompile only the owning telemetry component when the SDK module hash
   changes, preserving exact module verification without rebuilding unrelated code.
 - Reuse the current emitter-owner check within each particle-control iteration,

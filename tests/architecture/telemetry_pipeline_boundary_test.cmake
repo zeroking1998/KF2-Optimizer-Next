@@ -191,6 +191,10 @@ reject_literals("${stage_root}/telemetry_presentation_stage.cpp"
     "write_fixed_control"
     "atomic_replace_utf8"
     "restore_protected_session_config")
+reject_literals("${stage_root}/telemetry_presentation_stage.hpp"
+    "Completed telemetry buffer transfer"
+    "result.telemetry = text.str()"
+    "result.performance_analysis = details.str()")
 reject_literals("${stage_root}/telemetry_effect_stage.cpp"
     "Effect stage"
     "DxgiFrameTimingSession::start"
