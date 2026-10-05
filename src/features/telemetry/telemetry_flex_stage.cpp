@@ -52,9 +52,7 @@ void run_flex_control_stage(app::UiRuntime& runtime,
     const std::wstring_view capability_label = observed_solver_ready
         ? L"AVAILABLE" : L"UNAVAILABLE";
     if (runtime.model.status().flex_capability != capability_label) {
-        auto status = runtime.model.status();
-        status.flex_capability = capability_label;
-        runtime.model.set_status(std::move(status));
+        runtime.model.set_flex_capability(std::wstring{capability_label});
         runtime.invalidate();
     }
     apply_flex_control_effect(
