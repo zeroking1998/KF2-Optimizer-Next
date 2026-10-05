@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Reuse completed payload hashes across both package manifests, avoiding a second
+  full payload read while preserving independent release validation.
 - Preserve existing packages when the required FleX build artifact is missing,
   checking it before cleanup, copying or unnecessary exporter work.
 - Reject linked package destinations and managed paths before cleanup or writes,

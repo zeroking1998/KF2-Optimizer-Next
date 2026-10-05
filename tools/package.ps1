@@ -273,13 +273,10 @@ $integrityLines | Set-Content -LiteralPath $integrityPath -Encoding ascii
 
 $payloadFiles = @($integrityPayloadFiles) + 'Data/package-integrity.ini'
 $managedFiles = @($payloadFiles) + 'Data/package-manifest.json'
-$payloadHashes = @($payloadFiles | ForEach-Object {
-    $payloadPath = Join-Path $destinationRoot $_
-    [ordered]@{
-        path = $_
-        sha256 = (Get-FileHash -LiteralPath $payloadPath -Algorithm SHA256).Hash
-    }
-})
+$payloadHashes = @($integrityHashes) + [ordered]@{
+    path = 'Data/package-integrity.ini'
+    sha256 = (Get-FileHash -LiteralPath $integrityPath -Algorithm SHA256).Hash
+}
 $packageManifest = [ordered]@{
     schema_version = 2
     product = 'KF2 Optimizer Next'

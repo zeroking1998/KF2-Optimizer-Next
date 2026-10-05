@@ -120,6 +120,38 @@ try {
             (Join-Path $root 'Data/Documentation/issue72-feature-inventory.json') -Encoding utf8
     $matchingArguments = if ($development) { @('-DevelopmentPackage') } else { @() }
     Write-Manifest $identity.source_identity
+    & {
+        # Execute the production manifest projection against independently hashed files.
+        $expected = (Get-Content -LiteralPath $manifestPath -Raw |
+            ConvertFrom-Json).payload_hashes
+        $integrityHashes = @($expected | Select-Object -First $payload.Count)
+        $destinationRoot = $root
+        $payloadFiles = @($payload) + 'Data/package-integrity.ini'
+        $hashCalls = [Collections.Generic.List[string]]::new()
+        function Get-FileHash([string] $LiteralPath, [string] $Algorithm) {
+            $hashCalls.Add($LiteralPath)
+            Microsoft.PowerShell.Utility\Get-FileHash -LiteralPath $LiteralPath -Algorithm $Algorithm
+        }
+        $projection = $packageAst.Find({ param($node)
+            $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+            $node.Left.Extent.Text -ceq '$payloadHashes'
+        }, $true)
+        if ($null -eq $projection) { throw 'Package payload hash projection is missing' }
+        . ([scriptblock]::Create($projection.Extent.Text))
+        if ($hashCalls.Count -ne 1 -or $hashCalls[0] -ine $integrityPath) {
+            throw 'Package manifest must reuse payload hashes and hash only the new integrity file'
+        }
+        if (@($payloadHashes).Count -ne @($expected).Count) {
+            throw 'Package hash projection changed payload coverage'
+        }
+        for ($index = 0; $index -lt $expected.Count; ++$index) {
+            if ($payloadHashes[$index].path -cne $expected[$index].path -or
+                $payloadHashes[$index].sha256 -cne $expected[$index].sha256) {
+                throw 'Package hash projection changed the exact ordered path/hash entries'
+            }
+        }
+        Write-Host 'PASS: package manifest reuses exact ordered payload hashes and reads only the new integrity file'
+    }
     if ($identity.source_identity -notin @($current, "$current.dirty")) {
         # Direct CMake developer builds may intentionally use "unknown".
         Check-Validation 'Stale package source identity'
