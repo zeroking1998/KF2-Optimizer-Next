@@ -125,6 +125,15 @@ if ($executableIdentity.source_identity -cne $commit -or
     $executableIdentity.channel -cne 'release') {
     throw 'Release executable source identity does not match the package; rebuild without -SkipBuild'
 }
+# The exporter is excluded from normal app builds; refresh it even with SkipBuild.
+& cmake --build (Join-Path $projectRoot 'out\build\windows-x64-release') `
+    --config Release --target KF2InventoryExport
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$inventoryExporter = Join-Path $projectRoot `
+    'out\build\windows-x64-release\Release\KF2InventoryExport.exe'
+if (-not (Test-Path -LiteralPath $inventoryExporter -PathType Leaf)) {
+    throw 'Issue 72 inventory exporter is missing'
+}
 if (-not (Test-Path -LiteralPath $destinationRoot)) {
     New-Item -ItemType Directory -Path $destinationRoot | Out-Null
 }
@@ -195,16 +204,6 @@ $projectLicenseSource = Join-Path $projectRoot 'LICENSE'
 Copy-Item -LiteralPath $projectLicenseSource -Destination `
     (Join-Path $documentationDirectory 'LICENSE') -Force
 
-if (-not $SkipBuild) {
-    & cmake --build (Join-Path $projectRoot 'out\build\windows-x64-release') `
-        --config Release --target KF2InventoryExport
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-}
-$inventoryExporter = Join-Path $projectRoot `
-    'out\build\windows-x64-release\Release\KF2InventoryExport.exe'
-if (-not (Test-Path -LiteralPath $inventoryExporter -PathType Leaf)) {
-    throw 'Issue 72 inventory exporter is missing'
-}
 $inventoryJson = Join-Path $documentationDirectory `
     'issue72-feature-inventory.json'
 & $inventoryExporter $inventoryJson "0.0.4-alpha+$commit (release)"

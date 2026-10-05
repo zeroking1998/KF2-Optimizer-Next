@@ -99,6 +99,9 @@ reporting success.
 The executable carries the same source identity in its Windows version resource
 as the app's title. Packaging checks it before changing an existing destination,
 including with `-SkipBuild`; it cannot relabel an older executable as a new build.
+Packaging always incrementally builds the small inventory exporter before
+changing the destination, even when the app build is skipped. This keeps the
+shipped inventory current without a second contributor-owned build step.
 Contributor packaging explicitly uses `-DevelopmentPackage` for local checks.
 This mode is not release-candidate approval.
 

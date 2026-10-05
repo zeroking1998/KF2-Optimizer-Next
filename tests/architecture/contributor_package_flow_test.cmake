@@ -5,21 +5,33 @@ if(NOT DEFINED PROJECT_SOURCE_DIR OR PROJECT_SOURCE_DIR STREQUAL "")
 endif()
 
 file(READ "${PROJECT_SOURCE_DIR}/tools/build_for_contributors.ps1" build_script)
+file(READ "${PROJECT_SOURCE_DIR}/tools/package.ps1" package_script)
 
-string(FIND "${build_script}"
-    "--config Release --target KF2InventoryExport"
+string(FIND "${package_script}"
+    "\n& cmake --build (Join-Path $projectRoot 'out\\build\\windows-x64-release')"
     exporter_build)
 if(exporter_build EQUAL -1)
     message(FATAL_ERROR
-        "Contributor packaging must build the inventory exporter explicitly")
+        "Packaging must incrementally build the exporter outside SkipBuild")
 endif()
 
-string(FIND "${build_script}"
-    "package.ps1') -SkipBuild"
-    package_step)
-if(package_step EQUAL -1 OR exporter_build GREATER package_step)
+string(FIND "${package_script}"
+    "--config Release --target KF2InventoryExport"
+    exporter_target)
+string(FIND "${package_script}"
+    "if (-not (Test-Path -LiteralPath $destinationRoot))"
+    destination_step)
+if(exporter_target EQUAL -1 OR destination_step EQUAL -1 OR
+   exporter_build GREATER exporter_target OR exporter_target GREATER destination_step)
     message(FATAL_ERROR
-        "The inventory exporter must be built before packaging starts")
+        "The current exporter must be built before the package destination changes")
+endif()
+
+string(FIND "${build_script}" "KF2InventoryExport" redundant_exporter_build)
+string(FIND "${build_script}" "package.ps1') -SkipBuild" package_step)
+if(NOT redundant_exporter_build EQUAL -1 OR package_step EQUAL -1)
+    message(FATAL_ERROR
+        "Contributor packaging must reuse the package-owned exporter prerequisite")
 endif()
 
 string(REGEX MATCH
