@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Borrow constant telemetry limit-explanation labels instead of allocating
+  identical strings; classifications, confidence and displayed text are unchanged.
 - Build Adaptive CPU workload, action, prediction and safety labels in owned
   buffers, avoiding temporary strings while preserving values, precision and units.
 - Reuse unchanged Adaptive reason, capability, source and evidence text instead

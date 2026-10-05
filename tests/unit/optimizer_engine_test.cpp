@@ -48,6 +48,8 @@ int main() {
     CHECK(gpu.bottleneck == Bottleneck::gpu);
     CHECK(gpu.confidence == Confidence::high);
     CHECK(gpu.reason == L"Fresh telemetry indicates a GPU limit");
+    const auto repeated_gpu = evaluate(gpu_bound);
+    CHECK(gpu.reason.data() == repeated_gpu.reason.data());
 
     OptimizerInput capped = gpu_bound;
     capped.target_fps = 60;
@@ -123,5 +125,24 @@ int main() {
         gpu_bound.target_fps = target;
         CHECK(evaluate(gpu_bound).bottleneck == Bottleneck::gpu);
     }
+    const OptimizerInput reason_inputs[]{unavailable, balanced, gpu_bound,
+        cpu_bound, ram_bound, vram_bound, capped};
+    const wchar_t* reason_texts[]{
+        L"Fresh complete telemetry is required for Adaptive decisions",
+        L"No single limiting component is proven",
+        L"Fresh telemetry indicates a GPU limit",
+        L"Fresh telemetry indicates a saturated KF2 process, dominant engine thread or broad parallel CPU pressure with GPU reserve",
+        L"Fresh system telemetry indicates physical RAM pressure",
+        L"Fresh telemetry indicates dedicated VRAM pressure",
+        L"Frame rate is close to the selected cap without saturation"};
+    for (std::size_t index = 0; index < 7; ++index) {
+        const auto first = evaluate(reason_inputs[index]);
+        const auto again = evaluate(reason_inputs[index]);
+        const auto copy = first;
+        CHECK(first.reason == reason_texts[index]);
+        CHECK(first.reason.data() == again.reason.data());
+        CHECK(copy.reason.data() == first.reason.data());
+    }
+    CHECK(gpu.reason == L"Fresh telemetry indicates a GPU limit");
     return EXIT_SUCCESS;
 }

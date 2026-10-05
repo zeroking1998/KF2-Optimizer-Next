@@ -26,7 +26,7 @@ TelemetryPresentation derive_telemetry_presentation(
     const auto& adaptive_status = runtime.model.status();
     result.status = build_status_projection(
         frame, runtime.telemetry_failure,
-        analysis ? std::wstring_view{analysis->reason} : std::wstring_view{},
+        analysis ? analysis->reason : std::wstring_view{},
         adaptive_status.recommended_profile,
         adaptive_status.recommendation_reason);
 
