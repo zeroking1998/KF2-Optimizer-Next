@@ -178,7 +178,7 @@ int main() {
     for (const std::size_t length : {127U, 128U, 129U, 255U, 256U, 257U,
                                    511U, 512U, 513U, 4096U}) {
         std::wstring reason(length - prefix.size() - suffix.size(), L'r');
-        reason.replace(1, 3, L"\0äΩ", 3);
+        reason.replace(1, 3, L"\0\u00e4\u03a9", 3);
         const auto expected = prefix + reason + suffix;
         telemetry_pipeline::TelemetryFrame boundary;
         boundary.frames.fps = 60.0;
