@@ -8,6 +8,10 @@ are visible immediately.
 
 ### What's new
 
+- Transfer completed Adaptive performance-sample and quality-response diagnostic
+  buffers instead of copying them; exact text, logging gates, sample cadence and
+  retained-event bounds are unchanged.
+
 - Transfer completed Adaptive diagnostic buffers instead of copying them;
   log text, bounds, diagnostic gates and controller behavior are unchanged.
 - Include both runtime-guard sources in the telemetry build fingerprint so changes
