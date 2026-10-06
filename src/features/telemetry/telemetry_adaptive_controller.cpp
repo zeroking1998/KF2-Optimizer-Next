@@ -505,7 +505,7 @@ void UiRuntime::update_adaptive_controller(
                         << L"; lastAppliedNs=" << adaptive_quality_last_applied_ns;
                     events->append({0, diagnostics::Severity::info,
                         "ADAPTIVE_RUNTIME_QUALITY_REQUESTED",
-                        request_log.str(), L"optimizer"});
+                        std::move(request_log).str(), L"optimizer"});
                 }
             } else {
                 static_cast<void>(adaptive_actuation.receive({
@@ -871,7 +871,7 @@ void UiRuntime::update_adaptive_controller(
                      << status.adaptive_restore_generation;
         events->append({0, diagnostics::Severity::info,
             "ADAPTIVE_DECISION",
-            decision_log.str(),
+            std::move(decision_log).str(),
             L"optimizer"});
         last_adaptive_state = adaptive_decision.state;
         last_adaptive_disposition = adaptive_decision.disposition;

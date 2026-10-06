@@ -8,6 +8,8 @@ are visible immediately.
 
 ### What's new
 
+- Transfer completed Adaptive diagnostic buffers instead of copying them;
+  log text, bounds, diagnostic gates and controller behavior are unchanged.
 - Include both runtime-guard sources in the telemetry build fingerprint so changes
   cannot silently reuse an older module; no gameplay logic is changed.
 - Reuse completed payload hashes across both package manifests, avoiding a second
