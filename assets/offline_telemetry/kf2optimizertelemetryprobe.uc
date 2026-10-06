@@ -218,6 +218,7 @@ var int ProfileZedDebugMilliseconds;
 var int ProfileMaxZedDebugMilliseconds;
 var int ProfileClockAnomalies;
 var DiagnosticEffectTelemetrySnapshot CachedDiagnosticEffects;
+var bool bDiagnosticEffectCacheInitialized;
 var WorldEmitterTelemetrySnapshot CachedWorldEmitters;
 var array<WorldEmitterTemplateTelemetrySnapshot> CachedWorldEmitterTemplates;
 var array<WorldEmitterTemplateTelemetrySnapshot> CachedWorldEmitterTraversalSnapshots;
@@ -5996,9 +5997,19 @@ function RefreshDiagnosticEffectCache()
     local KFProj_HansSmokeGrenade SmokeGrenadeProjectile;
     local KFProj_BloatPukeMine PukeMineProjectile;
 
+    if (!bDetailedRuntimeDiagnostics)
+    {
+        if (bDiagnosticEffectCacheInitialized)
+        {
+            CachedDiagnosticEffects = default.CachedDiagnosticEffects;
+            bDiagnosticEffectCacheInitialized = false;
+        }
+        return;
+    }
+
     // Bootstrap one complete snapshot, then rotate one typed iterator per
     // sample. Diagnostic actor scans therefore never stack in a normal frame.
-    if (SampleSequence == 0 ||
+    if (!bDiagnosticEffectCacheInitialized ||
         SampleSequence % DiagnosticEffectScanInterval == 0)
     {
         CachedDiagnosticEffects.SprayActors = 0;
@@ -6030,7 +6041,7 @@ function RefreshDiagnosticEffectCache()
         }
     }
 
-    if (SampleSequence == 0 ||
+    if (!bDiagnosticEffectCacheInitialized ||
         SampleSequence % DiagnosticEffectScanInterval == 1)
     {
         CachedDiagnosticEffects.ExplosionActors = 0;
@@ -6089,7 +6100,7 @@ function RefreshDiagnosticEffectCache()
         }
     }
 
-    if (SampleSequence == 0 ||
+    if (!bDiagnosticEffectCacheInitialized ||
         SampleSequence % DiagnosticEffectScanInterval == 2)
     {
         CachedDiagnosticEffects.SmokeGrenadeProjectiles = 0;
@@ -6104,7 +6115,7 @@ function RefreshDiagnosticEffectCache()
         }
     }
 
-    if (SampleSequence == 0 ||
+    if (!bDiagnosticEffectCacheInitialized ||
         SampleSequence % DiagnosticEffectScanInterval == 3)
     {
         CachedDiagnosticEffects.PukeMineProjectiles = 0;
@@ -6124,7 +6135,7 @@ function RefreshDiagnosticEffectCache()
         }
     }
 
-    if (SampleSequence == 0 ||
+    if (!bDiagnosticEffectCacheInitialized ||
         SampleSequence % DiagnosticEffectScanInterval == 4)
     {
         CachedDiagnosticEffects.VisibleGibs = 0;
@@ -6136,6 +6147,7 @@ function RefreshDiagnosticEffectCache()
             }
         }
     }
+    bDiagnosticEffectCacheInitialized = true;
 }
 
 function RefreshWorldEmitterCache(bool bCollectWorldParticleGroups)
