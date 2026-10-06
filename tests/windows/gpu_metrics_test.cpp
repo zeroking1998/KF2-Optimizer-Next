@@ -115,6 +115,7 @@ bool equivalent_metrics(const GpuMetrics& actual, std::uint32_t pid, std::uint64
     const bool valid_adapter = adapter && expected.reason != UnavailableReason::source_failure;
     return actual.gpu_percent == expected.gpu_percent && actual.dedicated_bytes == expected.dedicated_bytes &&
         actual.shared_bytes == expected.shared_bytes && actual.adapter_gpu_percent == adapter &&
+        !actual.adapter_local_usage_bytes && !actual.adapter_local_budget_bytes &&
         actual.process_adapter_luid == active_process_gpu_adapter_luid(values, pid, luid) &&
         actual.quality == (valid_adapter ? SampleQuality::good : expected.quality) &&
         actual.reason == (valid_adapter ? UnavailableReason::none : expected.reason);
@@ -479,7 +480,6 @@ int wmain(int argc, wchar_t** argv) {
         {{4242, 3, L"3D", 0, 0}, 30.0, 3 * gib, 0},
     }, 4242) == 3);
     CHECK(!adapter_luid_for_window(nullptr).has_value());
-    CHECK(!query_gpu_memory_budget(0).has_value());
     const auto parsed = parse_gpu_instance(
         L"pid_4242_luid_0x00000001_0x00000002_phys_0_eng_3_engtype_3D");
     CHECK(parsed.has_value());
@@ -608,11 +608,16 @@ int wmain(int argc, wchar_t** argv) {
     CHECK(filtered.continuity_samples == 2);
 
     for (const auto& adapter : unique_physical_gpu_adapters(adapters.value())) {
-        const auto memory = query_gpu_memory_budget(adapter.luid);
-        if (memory.has_value()) {
-            CHECK(memory.value().budget_bytes > 0);
-            CHECK(memory.value().current_usage_bytes <=
-                  memory.value().budget_bytes * 2);
+        // DXGI's caller-local budget is not the usage/budget of this target
+        // process, nor an adapter-wide observation. Do not publish it as either.
+        auto foreign_sampler = PdhGpuSampler::create(
+            GetCurrentProcessId() + 1, adapter.luid);
+        if (foreign_sampler.has_value()) {
+            CHECK(foreign_sampler.value().sample().has_value());
+            const auto foreign_sample = foreign_sampler.value().sample();
+            CHECK(foreign_sample.has_value());
+            CHECK(!foreign_sample.value().adapter_local_usage_bytes);
+            CHECK(!foreign_sample.value().adapter_local_budget_bytes);
         }
         if (adapter.vendor_id != 0x10DE) continue;
         auto driver = NvidiaGpuSampler::create(adapter.name);

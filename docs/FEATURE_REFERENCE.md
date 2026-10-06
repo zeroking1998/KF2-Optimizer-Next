@@ -24,6 +24,18 @@
 
 ## Important distinctions
 
+### GPU memory scope
+
+The native GPU sampler measures dedicated and shared memory for the KF2 process
+on the selected adapter. It does not publish the Optimizer's own DXGI memory
+usage or budget as KF2 or adapter-wide memory. Adapter-wide memory observations
+remain unavailable without a matching, verified source.
+
+Adaptive's existing fallback compares KF2's measured dedicated usage with the
+adapter's physical dedicated capacity. That capacity is not KF2's dynamic
+Windows memory budget, and the comparison does not measure other processes'
+VRAM pressure. GPU-load collection and sampling intervals are unchanged.
+
 ### Idle process discovery
 
 When no verified KF2 process is present, discovery starts immediately and backs
