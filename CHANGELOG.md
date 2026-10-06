@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Let native pawn/weapon iterators filter runtime-guard targets, avoiding script
+  casts for unrelated actors without changing repairs or their 50–250 ms cadence.
+
 - Skip diagnostic-only spray, explosion, projectile and gib Actor scans while
   Runtime diagnostics is off; Adaptive inputs remain active and uncollected
   counters are not reported as measured zero.

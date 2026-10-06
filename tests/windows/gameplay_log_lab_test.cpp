@@ -1000,21 +1000,36 @@ int main() {
         "\nfunction ", runtime_guard_function + 1);
     const auto guard_body = std::string_view{graphics_interaction_source}.substr(
         runtime_guard_function, guard_end - runtime_guard_function);
-    const auto pawn_cast = guard_body.find("Pawn = KFPawn(Candidate);");
-    const auto non_pawn = guard_body.find("if (Pawn == None)", pawn_cast);
-    const auto weapon_cast = guard_body.find("Weapon = KFWeapon(Candidate);");
-    const auto non_pawn_exit = guard_body.find("continue;", non_pawn);
-    CHECK(pawn_cast != std::string_view::npos);
-    CHECK(non_pawn != std::string_view::npos && pawn_cast < non_pawn);
-    CHECK(weapon_cast != std::string_view::npos && non_pawn < weapon_cast);
-    CHECK(non_pawn_exit != std::string_view::npos && weapon_cast < non_pawn_exit);
+    const auto pawn_scan = guard_body.find(
+        "foreach CurrentWorld.AllPawns(class'KFPawn', Pawn)");
+    const auto weapon_scan = guard_body.find(
+        "foreach CurrentWorld.DynamicActors(class'KFWeapon', Weapon)");
+    const auto changed_check = guard_body.find(
+        "bChanged = UpdatedWeaponMaterialCount > 0 ||");
+    CHECK(pawn_scan != std::string_view::npos);
+    CHECK(weapon_scan != std::string_view::npos && pawn_scan < weapon_scan);
+    CHECK(changed_check != std::string_view::npos && weapon_scan < changed_check);
+    CHECK(guard_body.find("EnsureWeaponClassFallback(Pawn)", pawn_scan) <
+          weapon_scan);
+    CHECK(guard_body.find("ReplaceExistingFireAffliction(Pawn)", pawn_scan) <
+          weapon_scan);
+    CHECK(guard_body.find("EnsureTurretWeaponMaterial(Weapon)", weapon_scan) <
+          changed_check);
+    CHECK(guard_body.find("Pawn = KFPawn(Candidate);") ==
+          std::string_view::npos);
+    CHECK(guard_body.find("Weapon = KFWeapon(Candidate);") ==
+          std::string_view::npos);
     CHECK(guard_body.find("if (Pawn == None || Pawn.bDeleteMe") ==
           std::string_view::npos);
     CHECK(runtime_guard != std::string::npos);
     CHECK(weapon_standalone_guard != std::string::npos);
     CHECK(runtime_guard < weapon_standalone_guard);
     CHECK(count_occurrences(graphics_interaction_source,
-        "foreach CurrentWorld.DynamicActors(class'Actor', Candidate)") == 1);
+        "foreach CurrentWorld.DynamicActors(class'Actor', Candidate)") == 0);
+    CHECK(count_occurrences(graphics_interaction_source,
+        "foreach CurrentWorld.AllPawns(class'KFPawn', Pawn)") == 1);
+    CHECK(count_occurrences(graphics_interaction_source,
+        "foreach CurrentWorld.DynamicActors(class'KFWeapon', Weapon)") == 1);
     CHECK(graphics_interaction_source.find(
         "DynamicActors(class'KFWeap_HRG_Warthog'") == std::string::npos);
     CHECK(graphics_interaction_source.find(
