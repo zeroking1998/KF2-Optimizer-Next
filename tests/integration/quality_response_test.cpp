@@ -9,6 +9,44 @@ int main() {
     const kf2::telemetry::SampleIdentity id{42, 123};
     constexpr std::uint64_t second = 1'000'000'000ULL;
     const QualityResponse::Context context{id, "KF-Test", 5, 60, 20, 40, true};
+    // Two concurrently presenting chains must not interrupt the lifetime of
+    // the selected diagnostic stream just because event delivery alternates.
+    {
+        PresentSource concurrent{id, 4096};
+        CHECK(concurrent.start().has_value());
+        for (auto at = 5 * second; at <= 10 * second; at += 25'000'000ULL) {
+            CHECK(concurrent.ingest({id, at, 1, true, 0, 7}));
+            CHECK(concurrent.ingest({id, at, 1, true, 0, 8}));
+        }
+        const auto before = concurrent.measure_window(5 * second, 10 * second);
+        CHECK(before.complete);
+        CHECK(before.stream_id == 7 && before.count == 201);
+        CHECK(concurrent.ingest({id, 8 * second, 1, true, 0, 9}));
+        const auto with_secondary = concurrent.measure_window(5 * second, 10 * second);
+        CHECK(with_secondary.complete && with_secondary.generation == before.generation);
+        QualityResponse tracker;
+        for (auto at = 4 * second; at <= 10 * second; at += second / 4)
+            CHECK(!tracker.observe(context, at));
+        tracker.begin(30, "gpu", 100, 90, 10 * second, context, before);
+        tracker.confirm(30, 10 * second);
+        for (auto at = 11 * second; at <= 16 * second; at += 20'000'000ULL) {
+            CHECK(concurrent.ingest({id, at, 1, true, 0, 8}));
+            CHECK(concurrent.ingest({id, at, 1, true, 0, 7}));
+        }
+        CHECK(concurrent.ingest({id, 13 * second, 1, true, 0, 10}));
+        const auto after = concurrent.measure_window(11 * second, 16 * second);
+        CHECK(after.complete);
+        CHECK(after.stream_id == 7 && after.count == 251);
+        CHECK(before.generation == after.generation);
+        const auto reread = concurrent.measure_window(5 * second, 10 * second);
+        CHECK(reread.complete && reread.generation == before.generation);
+        std::optional<QualityResponse::Report> result;
+        for (auto at = 10 * second + second / 4; at <= 16 * second; at += second / 4)
+            if (auto report = tracker.observe(context, at, after)) result = report;
+        CHECK(result && result->result == "improved");
+        CHECK(std::abs(*result->before.metrics.average_fps - 40.0) < 0.001);
+        CHECK(std::abs(*result->after.metrics.average_fps - 50.0) < 0.001);
+    }
     // Real ETW delivery can lag the event clock by 250 ms. Preserve exact
     // event-time bounds and let the missing tail arrive before judging it.
     for (const auto lag : {second / 4, second / 2, second * 3 / 4}) {
@@ -39,7 +77,7 @@ int main() {
             } else CHECK(!result);
         }
     }
-    for (const int scenario : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}) {
+    for (const int scenario : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}) {
         PresentSource source{id, 4096};
         CHECK(source.start().has_value());
         for (auto at = 5 * second; at <= 10 * second; at += 25'000'000ULL)
@@ -61,15 +99,39 @@ int main() {
         if (scenario == 8) tracker.refresh_baseline(11 * second + second / 4, before);
         if (scenario == 13) source.reset_statistics();
         if (scenario == 14) {
+            // A sparse secondary chain is not a replacement of the selected
+            // chain. Both comparison windows still belong to chain 7.
             CHECK(source.ingest({id, 10 * second + second / 4, 1, true, 0, 8}));
+            CHECK(source.ingest({id, 10 * second + second / 2, 1, true, 0, 7}));
+        }
+        if (scenario == 15) {
+            CHECK(source.ingest({id, 10 * second + second / 2, 1, true, 0, 8}));
+        }
+        if (scenario == 16) {
+            // Retire chain 7 from the bounded cache, then reuse its handle.
+            // Identical IDs do not imply identical swapchain lifetimes.
+            for (std::uint64_t stream = 20; stream <= 36; ++stream)
+                CHECK(source.ingest({id, 10 * second + second / 4 +
+                    (stream - 20) * 1'000'000ULL, 1, true, 0, stream}));
             CHECK(source.ingest({id, 10 * second + second / 2, 1, true, 0, 7}));
         }
         const auto interval = scenario == 0 ? 20'000'000ULL :
             scenario == 2 ? 40'000'000ULL : 25'000'000ULL;
         for (auto at = 11 * second; at <= 16 * second; at += interval)
-            CHECK(source.ingest({id, at, 1, true, 0, scenario == 6 ? 8ULL : 7ULL}));
+            CHECK(source.ingest({id, at, 1, true, 0,
+                scenario == 6 || scenario == 15 ? 8ULL : 7ULL}));
         auto after = source.measure_window(11 * second, 16 * second);
         CHECK(after.complete || scenario == 6);
+        if (scenario == 14) {
+            CHECK(after.stream_id == before.stream_id);
+            CHECK(after.generation == before.generation);
+        }
+        if (scenario == 15 || scenario == 16) {
+            CHECK(after.generation > before.generation);
+            CHECK((after.stream_id == before.stream_id) == (scenario == 16));
+            CHECK(!source.measure_window(10 * second + 490'000'000ULL,
+                                         16 * second).complete);
+        }
         if (scenario == 9) after.complete = false;
         auto current = context;
         std::optional<QualityResponse::Report> result;
@@ -87,10 +149,11 @@ int main() {
             CHECK(result);
             CHECK(result->sequence == 12);
             const std::string expected = scenario == 0 ? "improved" :
-                scenario == 1 ? "no_clear_change" : scenario == 2 ? "worsened" :
+                scenario == 1 || scenario == 14 ? "no_clear_change" : scenario == 2 ? "worsened" :
                 scenario == 5 ? "inconclusive:scene_changed_or_unknown" :
                 scenario == 6 ? "inconclusive:incomplete_post_window" :
-                scenario >= 13 ? "inconclusive:present_source_interrupted" :
+                scenario == 15 ? "inconclusive:present_stream_changed" :
+                scenario == 13 || scenario == 16 ? "inconclusive:present_source_interrupted" :
                 scenario == 8 ? "inconclusive:incomplete_baseline" :
                 scenario == 9 ? "inconclusive:incomplete_post_window" :
                 scenario == 10 ? "inconclusive:observation_gap" :

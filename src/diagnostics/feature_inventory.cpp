@@ -3,7 +3,10 @@
 #include <array>
 #include <iomanip>
 #include <sstream>
+#include <utility>
 #include <vector>
+
+#include "kf2/core/json_escape.hpp"
 
 namespace kf2::diagnostics {
 namespace {
@@ -47,7 +50,7 @@ constexpr std::array area01_items{
     ItemSpec{FeatureStatus::present, "single-instance protection", "A named mutex and second-launch test enforce one instance."},
     ItemSpec{FeatureStatus::present, "UAC and permissions", "The embedded manifest requests asInvoker and uiAccess=false; no elevation is attempted."},
     ItemSpec{FeatureStatus::present, "path, package, and build validation", "Canonical paths, embedded build identity, PE contract and package validation are active."},
-    ItemSpec{FeatureStatus::present, "installation, repair, update, and migration", "The portable package replaces only manifest-owned program files, preserves settings, logs, backups and profiles byte-for-byte, and verifies fifteen managed payload hashes. A missing or damaged component is reported for repair without disabling unrelated controls. Auto Repair downloads only the exact installed GitHub release for companion-file recovery. The consent-only updater separately checks newer published versions, verifies repository, asset name, size, SHA-256, build and package identity, then uses a temporary helper for backup, atomic replacement, restart acknowledgement, rollback and cleanup. A verified local package remains the offline repair fallback."},
+    ItemSpec{FeatureStatus::present, "installation, repair, update, and migration", "The portable package replaces only manifest-owned program files, preserves settings, logs, backups and profiles byte-for-byte, and checks all manifest-listed payload hashes. A missing or damaged component is reported for repair without disabling unrelated controls. Auto Repair downloads only the exact installed GitHub release for companion-file recovery. The consent-only updater separately checks newer published versions, verifies repository, asset name, size, SHA-256, build and package identity, then uses a temporary helper for backup, atomic replacement, restart acknowledgement, rollback and cleanup. A verified local package remains the offline repair fallback."},
     ItemSpec{FeatureStatus::present, "launching KF2", "Only the verified Steam/KF2 executable is launched."},
     ItemSpec{FeatureStatus::present, "shutdown, removal, and restoration", "Clean app stop and verified restore exist; portable removal needs no uninstaller, and the app deliberately never force-stops KF2."},
     ItemSpec{FeatureStatus::present, "crash, cancellation, restart, and recovery paths", "Unclean sessions and interrupted config/backup/FleX operations recover; privacy-bounded local crash records identify the failing build and exception without dumps or user content."},
@@ -64,7 +67,7 @@ constexpr AreaContract area02{
     "Automatic launch application requires a verified session snapshot, backup, readback and safe restore.",
     "Native DXGI timing, system telemetry, settings and verified KF2 catalog.",
     "Adaptive migration, freshness, bounds, lock priority, cooldown, restart and fallback tests.",
-    "kf2_adaptive_profile_test; kf2_adaptive_governor_test; kf2_optimizer_engine_test; kf2_settings_test; lifecycle test"};
+    "kf2_adaptive_governor_test; kf2_optimizer_engine_test; kf2_settings_test; lifecycle test"};
 
 constexpr std::array area02_items{
     ItemSpec{FeatureStatus::present, "unambiguous Adaptive control", "Adaptive is the only visible and actionable optimizer mode."},
@@ -79,7 +82,7 @@ constexpr std::array area02_items{
 };
 
 constexpr AreaContract area03{
-    "Configuration and tweaks", "src/config; src/backup", "Three verified KF2 INIs and a strict 213-setting catalog",
+    "Configuration and tweaks", "src/config; src/backup", "Three verified KF2 INIs and a strict verified settings catalog",
     "A shipped config/B tests", "Only allowlisted keys and ranges may enter preview, import, apply, backup or restore.",
     "Reversible tuning without corrupting unrelated settings.",
     "KF2 updates may change keys; missing, unknown or foreign data fails closed.",
@@ -235,7 +238,7 @@ constexpr AreaContract area10{
     "Aggressive values visibly reduce cosmetics, so Exact/Invisible never change them.",
     "Performance Adaptive profiles and verified setting catalog.", "Automatic protected launch, preview, backup, session capture and full restore.",
     "KF2 configuration.", "Bounds, profile difference, visual comparison and restore tests.",
-    "213-setting catalog tests; optimizer tests; copied-config roundtrip; target gameplay evidence"};
+    "Verified settings catalog tests; optimizer tests; copied-config roundtrip; target gameplay evidence"};
 
 constexpr std::array area10_items{
     ItemSpec{FeatureStatus::present, "blood, wound, floor, and wall decals", "Verified controls plus separate active wound, splatter, pool, impact and explosion decal-manager counts are present."},
@@ -294,14 +297,14 @@ constexpr std::array area12_items{
 };
 
 constexpr AreaContract area13{
-    "Adaptive performance and profiles", "src/optimizer/adaptive_governor.cpp; src/optimizer/adaptive_profile.cpp; src/optimizer/optimizer_engine.cpp",
+    "Adaptive performance and quality control", "src/optimizer/adaptive_governor.cpp; src/optimizer/optimizer_engine.cpp",
     "Fresh frame, CPU, GPU, VRAM and RAM evidence", "B measured",
-    "Validated sampling, hysteresis, dwell, bounded profiles, recovery, resource attribution and explicit safety-lock priority are deterministic.",
-    "Stable automatic profile control without rapid quality oscillation.",
+    "Validated sampling, hysteresis, dwell, bounded quality, recovery, resource attribution and explicit safety-lock priority are deterministic.",
+    "Stable automatic quality control without rapid quality oscillation.",
     "Live changes require verified offline gameplay, an authenticated loopback command and exact engine readback; owned values restore to their captured originals.",
-    "Adaptive automatic profile with bounded safety locks.", "Automatic protected launch transaction, session token, exact runtime readback and backup/restore.",
-    "Telemetry and catalog profiles.", "Degrade, recover, neutral band, stale, safety-lock and quality-policy tests.",
-    "kf2_adaptive_profile_test; kf2_adaptive_governor_test; kf2_telemetry_adaptive_stage_test; kf2_adaptive_control_client_test"};
+    "Resource-specific Adaptive quality control with bounded safety locks.", "Automatic protected launch transaction, session token, exact runtime readback and backup/restore.",
+    "Telemetry and verified setting catalog.", "Degrade, recover, neutral band, stale, safety-lock and quality-policy tests.",
+    "kf2_adaptive_governor_test; kf2_telemetry_adaptive_stage_test; kf2_adaptive_control_client_test"};
 
 constexpr std::array area13_items{
     ItemSpec{FeatureStatus::present, "target FPS and frame-time budget", "Every integer target from 30 through 240 drives exact relative frame-time bands."},
@@ -390,7 +393,7 @@ constexpr AreaContract area17{
     "Clean repeatable development and portable delivery.",
     "Publishing, signing, merge, tag and release require explicit user authority.",
     "Development/release process, not a runtime mode.", "Rebuild package while preserving user Data; hashes verify output.",
-    "MSVC x64, Windows SDK, CMake, PowerShell and self-hosted Windows runners.",
+    "MSVC x64, Windows SDK, CMake, PowerShell, GitHub-hosted Windows CI and local desktop/SDK checks.",
     "Full Debug/Release, clean double build, PE/import/package/GUI validation.",
     "tools scripts and workflows; current run evidence generated separately"};
 
@@ -400,7 +403,7 @@ constexpr std::array area17_items{
     ItemSpec{FeatureStatus::present, "PE, import, export, manifest, and protection-flag validation", "PE architecture, manifest, mitigations, imports and FleX exports are validated."},
     ItemSpec{FeatureStatus::partial, "source, release, audit, and recovery packages", "The clean source and portable release plus evidence exist; no redundant historical audit package is required."},
     ItemSpec{FeatureStatus::present, "SHA-256, SBOM, and provenance evidence", "Release evidence generates hashes, SBOM and build/commit metadata."},
-    ItemSpec{FeatureStatus::partial, "CI, Runner 7, workflows, artifacts, and cleanup", "Permanent build/GUI workflows exist on current self-hosted labels; external runner availability is not locally provable."},
+    ItemSpec{FeatureStatus::partial, "CI, workflows, artifacts, and cleanup", "The GitHub-hosted Windows workflow runs Debug/Release validation and uploads a developer executable. Desktop checks and complete portable/SDK packages are separate local validations; CI does not establish gameplay acceptance."},
     ItemSpec{FeatureStatus::partial, "branches, pull requests, issues, labels, and release chain", "Issue/branch flow exists; PR/merge/tag/release are intentionally not performed without authority."},
     ItemSpec{FeatureStatus::present, "no merges, tags, or releases without explicit approval", "Enforced collaboration boundary."},
 };
@@ -569,30 +572,6 @@ const std::vector<FeatureRecord>& inventory(
     return records;
 }
 
-std::string escape(std::string_view value) {
-    std::ostringstream output;
-    for (const unsigned char character : value) {
-        switch (character) {
-            case '"': output << "\\\""; break;
-            case '\\': output << "\\\\"; break;
-            case '\b': output << "\\b"; break;
-            case '\f': output << "\\f"; break;
-            case '\n': output << "\\n"; break;
-            case '\r': output << "\\r"; break;
-            case '\t': output << "\\t"; break;
-            default:
-                if (character < 0x20) {
-                    constexpr char digits[] = "0123456789abcdef";
-                    output << "\\u00" << digits[character >> 4]
-                           << digits[character & 0x0f];
-                } else {
-                    output << static_cast<char>(character);
-                }
-        }
-    }
-    return output.str();
-}
-
 }  // namespace
 
 std::span<const FeatureRecord> issue72_feature_inventory(
@@ -655,7 +634,7 @@ std::string serialize_feature_inventory_json(
     }
     std::ostringstream output;
     output << "{\"schema\":\"KF2_ISSUE72_INVENTORY_V3\",\"build_identity\":\""
-           << escape(build_identity) << "\",\"issue\":72,\"function_count\":"
+           << json_escape(build_identity) << "\",\"issue\":72,\"function_count\":"
            << records.size() << ",\"status_counts\":{\"present\":"
            << status_counts[static_cast<std::size_t>(FeatureStatus::present)]
            << ",\"partial\":"
@@ -685,30 +664,30 @@ std::string serialize_feature_inventory_json(
     for (const auto& record : records) {
         if (!first) output << ',';
         first = false;
-        output << "{\"id\":\"" << escape(record.id)
-               << "\",\"name\":\"" << escape(record.name)
+        output << "{\"id\":\"" << json_escape(record.id)
+               << "\",\"name\":\"" << json_escape(record.name)
                << "\",\"area\":" << record.area
                << ",\"item\":" << record.item
                << ",\"status\":\"" << status_name(record.status)
                << "\",\"remaining_scope\":\""
                << remaining_scope_name(record.remaining_scope)
-               << "\",\"user_requirement\":\"" << escape(record.user_requirement)
-               << "\",\"code_path\":\"" << escape(record.code_path)
-               << "\",\"data_source\":\"" << escape(record.data_source)
-               << "\",\"trust_class\":\"" << escape(record.trust_class)
-               << "\",\"technical_statement\":\"" << escape(record.technical_statement)
-               << "\",\"expected_benefit\":\"" << escape(record.expected_benefit)
-               << "\",\"risks\":\"" << escape(record.risks)
-               << "\",\"mode_support\":\"" << escape(record.mode_support)
-               << "\",\"reversible_path\":\"" << escape(record.reversible_path)
-               << "\",\"dependencies\":\"" << escape(record.dependencies)
-               << "\",\"required_tests\":\"" << escape(record.required_tests)
-               << "\",\"evidence\":\"" << escape(record.evidence)
-               << "\",\"decision\":\"" << escape(record.decision)
-               << "\",\"linkage\":\"" << escape(record.linkage) << "\"}";
+               << "\",\"user_requirement\":\"" << json_escape(record.user_requirement)
+               << "\",\"code_path\":\"" << json_escape(record.code_path)
+               << "\",\"data_source\":\"" << json_escape(record.data_source)
+               << "\",\"trust_class\":\"" << json_escape(record.trust_class)
+               << "\",\"technical_statement\":\"" << json_escape(record.technical_statement)
+               << "\",\"expected_benefit\":\"" << json_escape(record.expected_benefit)
+               << "\",\"risks\":\"" << json_escape(record.risks)
+               << "\",\"mode_support\":\"" << json_escape(record.mode_support)
+               << "\",\"reversible_path\":\"" << json_escape(record.reversible_path)
+               << "\",\"dependencies\":\"" << json_escape(record.dependencies)
+               << "\",\"required_tests\":\"" << json_escape(record.required_tests)
+               << "\",\"evidence\":\"" << json_escape(record.evidence)
+               << "\",\"decision\":\"" << json_escape(record.decision)
+               << "\",\"linkage\":\"" << json_escape(record.linkage) << "\"}";
     }
     output << "]}";
-    return output.str();
+    return std::move(output).str();
 }
 
 }  // namespace kf2::diagnostics

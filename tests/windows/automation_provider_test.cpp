@@ -13,6 +13,7 @@
 #include <new>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 
 #include "kf2/platform/windows/window.hpp"
 #include "kf2/platform/windows/window_events.hpp"
@@ -43,6 +44,31 @@ int runtime_suffix(IUIAutomationElement* element) {
     }
     SafeArrayDestroy(runtime_id);
     return value;
+}
+
+bool direct_runtime_id(IRawElementProviderFragment* fragment, int& suffix) {
+    SAFEARRAY* runtime_id = nullptr;
+    const auto result = fragment->GetRuntimeId(&runtime_id);
+    if (FAILED(result) || !runtime_id) {
+        if (runtime_id) SafeArrayDestroy(runtime_id);
+        return false;
+    }
+    LONG lower = -1;
+    LONG upper = -1;
+    VARTYPE type = VT_EMPTY;
+    LONG position = 0;
+    int prefix = 0;
+    bool valid = SafeArrayGetDim(runtime_id) == 1 &&
+        SUCCEEDED(SafeArrayGetVartype(runtime_id, &type)) && type == VT_I4 &&
+        SUCCEEDED(SafeArrayGetLBound(runtime_id, 1, &lower)) && lower == 0 &&
+        SUCCEEDED(SafeArrayGetUBound(runtime_id, 1, &upper)) && upper == 1 &&
+        SUCCEEDED(SafeArrayGetElement(runtime_id, &position, &prefix)) &&
+        prefix == UiaAppendRuntimeId;
+    position = 1;
+    valid = valid &&
+        SUCCEEDED(SafeArrayGetElement(runtime_id, &position, &suffix)) &&
+        suffix > 0;
+    return SUCCEEDED(SafeArrayDestroy(runtime_id)) && valid;
 }
 
 class AutomationSink final : public kf2::platform::windows::WindowEventSink {
@@ -195,6 +221,78 @@ int main() {
     CHECK(SUCCEEDED(range->SetValue(144.0)));
     CHECK(changed_slider == "settings-target-slider");
     CHECK(changed_slider_value == 144);
+
+    // A client may request any double, not only values on the visual track.
+    for (const auto& [requested, expected_value] : {
+             std::pair{30.0, 30}, std::pair{240.0, 240},
+             std::pair{144.49, 144}, std::pair{144.5, 145},
+             std::pair{std::numeric_limits<double>::max(), 240},
+             std::pair{-std::numeric_limits<double>::max(), 30}}) {
+        CHECK(SUCCEEDED(range->SetValue(requested)));
+        if (changed_slider_value != expected_value) {
+            std::cerr << "Slider request " << requested << " returned "
+                      << changed_slider_value << "; expected "
+                      << expected_value << '\n';
+        }
+        CHECK(changed_slider_value == expected_value);
+    }
+    for (const double invalid : {
+             std::numeric_limits<double>::quiet_NaN(),
+             std::numeric_limits<double>::infinity(),
+             -std::numeric_limits<double>::infinity()}) {
+        const int unchanged_value = changed_slider_value;
+        CHECK(range->SetValue(invalid) == UIA_E_NOTSUPPORTED);
+        CHECK(changed_slider_value == unchanged_value);
+    }
+
+    // Exercise metadata through the real provider, without a second slider
+    // implementation in the test. Provider identity stays unchanged.
+    auto numeric_layout = kf2::ui::layout_shell(model, 800.0F, 520.0F);
+    auto* numeric_slider = [&]() -> kf2::ui::SemanticNode* {
+        for (auto& node : numeric_layout.nodes) {
+            if (node.action_id == "settings-target-slider") return &node;
+        }
+        return nullptr;
+    }();
+    CHECK(numeric_slider != nullptr && numeric_slider->slider.has_value());
+    for (const auto invalid : {
+             kf2::ui::SliderInfo{30, 29, 30, 1},
+             kf2::ui::SliderInfo{30, 240, 30, 0},
+             kf2::ui::SliderInfo{30, 240, 30, -1}}) {
+        numeric_slider->slider = invalid;
+        CHECK(provider.value().update_layout(numeric_layout));
+        const int unchanged_value = changed_slider_value;
+        CHECK(range->SetValue(144.0) == UIA_E_NOTSUPPORTED);
+        CHECK(changed_slider_value == unchanged_value);
+    }
+    numeric_slider->slider = kf2::ui::SliderInfo{10, 31, 10, 4};
+    CHECK(provider.value().update_layout(numeric_layout));
+    for (const auto& [requested, expected_value] : {
+             std::pair{10.0, 10}, std::pair{31.0, 31},
+             std::pair{11.99, 10}, std::pair{12.0, 14},
+             std::pair{29.0, 30}, std::pair{30.5, 30}}) {
+        CHECK(SUCCEEDED(range->SetValue(requested)));
+        CHECK(changed_slider_value == expected_value);
+    }
+    numeric_slider->slider = kf2::ui::SliderInfo{
+        std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), 0, 1};
+    CHECK(provider.value().update_layout(numeric_layout));
+    for (const auto& [requested, expected_value] : {
+             std::pair{0.0, 0},
+             std::pair{std::numeric_limits<double>::max(),
+                       std::numeric_limits<int>::max()},
+             std::pair{-std::numeric_limits<double>::max(),
+                       std::numeric_limits<int>::min()}}) {
+        CHECK(SUCCEEDED(range->SetValue(requested)));
+        CHECK(changed_slider_value == expected_value);
+    }
+    numeric_slider->slider = kf2::ui::SliderInfo{42, 42, 42, 1};
+    CHECK(provider.value().update_layout(numeric_layout));
+    CHECK(SUCCEEDED(range->SetValue(std::numeric_limits<double>::max())));
+    CHECK(changed_slider_value == 42);
+    CHECK(provider.value().update_layout(
+        kf2::ui::layout_shell(model, 800.0F, 520.0F)));
+    CHECK(SUCCEEDED(range->SetValue(144.0)));
 
     callback_failure = CallbackFailure::slider;
     CHECK(range->SetValue(150.0) == E_FAIL);
@@ -380,7 +478,26 @@ int main() {
     CHECK(retained_child != nullptr);
     ComPtr<IRawElementProviderFragment> retained_fragment;
     CHECK(SUCCEEDED(retained_child.As(&retained_fragment)));
+    CHECK(retained_fragment->GetRuntimeId(nullptr) == E_POINTER);
+    int original_id = 0;
+    CHECK(direct_runtime_id(retained_fragment.Get(), original_id));
+    for (LONG position = 0; position < 2; ++position) {
+        const HRESULT failure = position == 0 ? E_ACCESSDENIED : E_UNEXPECTED;
+        provider.value().fail_runtime_id_write_for_testing(position, failure);
+        // The provider must clear even a pre-populated caller output pointer.
+        SAFEARRAY* failed_id = reinterpret_cast<SAFEARRAY*>(1);
+        CHECK(retained_fragment->GetRuntimeId(&failed_id) == failure);
+        CHECK(failed_id == nullptr);
+        CHECK(provider.value().runtime_id_cleanup_result_for_testing() == S_OK);
+        int retried_id = 0;
+        CHECK(direct_runtime_id(retained_fragment.Get(), retried_id));
+        CHECK(retried_id == original_id);
+    }
     provider.value().disconnect_for_testing();
+    SAFEARRAY* disconnected_id = reinterpret_cast<SAFEARRAY*>(1);
+    CHECK(retained_fragment->GetRuntimeId(&disconnected_id) ==
+          UIA_E_ELEMENTNOTAVAILABLE);
+    CHECK(disconnected_id == nullptr);
     for (const auto direction : {NavigateDirection_NextSibling,
                                  NavigateDirection_PreviousSibling}) {
         IRawElementProviderFragment* sibling = retained_fragment.Get();

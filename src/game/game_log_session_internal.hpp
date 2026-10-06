@@ -24,6 +24,10 @@ struct GameplayUiContextReceipt {
     std::optional<std::uint64_t> generation;
 };
 
+struct AdaptiveBridgeReceipt {
+    std::optional<std::uint16_t> port;
+};
+
 inline constexpr std::size_t kMaximumLineBytes = 16 * 1024;
 
 [[nodiscard]] bool equals_ascii_case_insensitive(
@@ -32,7 +36,7 @@ inline constexpr std::size_t kMaximumLineBytes = 16 * 1024;
     std::string_view line);
 [[nodiscard]] std::optional<std::pair<int, int>> parse_wave_snapshot_line(
     std::string_view line);
-[[nodiscard]] std::optional<std::uint16_t> parse_adaptive_bridge_line(
+[[nodiscard]] std::optional<AdaptiveBridgeReceipt> parse_adaptive_bridge_line(
     std::string_view line);
 [[nodiscard]] std::optional<GameplayUiContextReceipt>
 parse_gameplay_ui_context_line(

@@ -72,8 +72,8 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     if (control->id == runtime::ControlId::film_grain) {
         if (!video_pending) reload_video_settings();
         if (!video_pending) return;
-        if (installation && game::find_running_game_process(
-                installation->executable).has_value()) {
+        if (installation && game::game_process_may_be_running(
+                installation->executable)) {
             show_notice(ui::NoticeSeverity::warning, L"GRAPHICS_GAME_RUNNING",
                         L"Close KF2 before changing its video settings.");
             return;
@@ -151,8 +151,8 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     }
 
     const bool game_running = installation &&
-        game::find_running_game_process(
-            installation->executable).has_value();
+        game::game_process_may_be_running(
+            installation->executable);
     const bool policy_bound_to_running_process =
         adaptive_session_policy.has_value() && game_running;
     if (adaptive_policy_changed) {
@@ -392,6 +392,9 @@ Result<config::ApplyResult> UiRuntime::apply(
                             L" files; verified restore backup created",
                         L"config"});
     } else {
+        if (applied.error().code == ErrorCode::recovery_required) {
+            model.set_recovery_required(true);
+        }
         events->append({0, diagnostics::Severity::warning,
                         "CONFIG_APPLY_BLOCKED", applied.error().message,
                         L"config"});
@@ -417,6 +420,7 @@ Result<backup::RestoreResult> UiRuntime::restore(
     if (restored.has_value()) {
         const auto capped = synchronize_frame_rate_cap();
         if (!capped.has_value()) {
+            model.set_recovery_required(true);
             const std::wstring incomplete_message =
                 L"Restored " +
                 std::to_wstring(restored.value().files_restored) +
@@ -442,6 +446,9 @@ Result<backup::RestoreResult> UiRuntime::restore(
                             L"a pre-restore backup was created",
                         L"config"});
     } else {
+        if (restored.error().code == ErrorCode::recovery_required) {
+            model.set_recovery_required(true);
+        }
         events->append({0, diagnostics::Severity::warning,
                         "RESTORE_BLOCKED", restored.error().message,
                         L"config"});

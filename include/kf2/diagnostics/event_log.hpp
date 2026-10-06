@@ -82,6 +82,7 @@ public:
     [[nodiscard]] EventLogStats stats() const noexcept;
 
 private:
+    static constexpr std::chrono::milliseconds kInitialPersistenceRetryDelay{250};
     const std::size_t capacity_;
     mutable std::mutex mutex_;
     std::deque<Event> events_;
@@ -90,9 +91,11 @@ private:
     PersistFunction persist_;
     bool persistence_ready_{false};
     bool persistence_pending_{false};
-    bool persistence_active_{false};
     std::uint64_t persistence_revision_{0};
     std::uint64_t persisted_revision_{0};
+    std::chrono::steady_clock::time_point persistence_batch_due_{};
+    std::chrono::milliseconds persistence_retry_delay_{kInitialPersistenceRetryDelay};
+    std::chrono::steady_clock::time_point persistence_retry_at_{};
     std::condition_variable persistence_changed_;
     std::jthread persistence_worker_;
     EventLogStats stats_{};
@@ -114,7 +117,6 @@ struct ProductReport {
     std::wstring hardware;
     std::wstring flex;
     std::wstring optimizer_profile;
-    std::wstring quality_policy;
     std::wstring overlay_position;
     int target_fps{0};
     int overlay_scale_percent{100};

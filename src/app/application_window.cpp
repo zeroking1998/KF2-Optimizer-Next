@@ -69,7 +69,19 @@ Result<bool> UiRuntime::create_window(const std::wstring& title) {
 
 void UiRuntime::invalidate() {
     if (!callbacks_ready) return;
+    const bool folder_blocked = game_folder_selection_active ||
+        game_folder_change_blocked();
+    if (model.status().game_folder_change_blocked != folder_blocked) {
+        auto status = model.status();
+        status.game_folder_change_blocked = folder_blocked;
+        model.set_status(std::move(status));
+    }
     controller.synchronize_model();
+    repaint_shell();
+}
+
+void UiRuntime::repaint_shell() {
+    if (!callbacks_ready) return;
     if (automation) {
         static_cast<void>(automation->update_layout(controller.layout()));
     }

@@ -9,6 +9,7 @@
 #include <set>
 
 #include "kf2/backup/restore_transaction.hpp"
+#include "kf2/core/hex_codec.hpp"
 #include "kf2/config/apply_transaction.hpp"
 #include "kf2/config/setting_catalog.hpp"
 
@@ -93,10 +94,32 @@ std::string replace_manifest_file_field(std::string manifest,
 }  // namespace
 
 int main() {
+    std::string all_bytes;
+    for (int value = 0; value < 256; ++value) {
+        all_bytes.push_back(static_cast<char>(value));
+    }
+    constexpr std::string_view expected_hex =
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+        "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f"
+        "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f"
+        "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"
+        "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+        "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf"
+        "e0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff";
+    CHECK(kf2::hex_encode(all_bytes) == expected_hex);
+    CHECK(kf2::hex_decode(expected_hex) == all_bytes);
+    CHECK(kf2::hex_encode({}).empty());
+    CHECK(kf2::hex_decode("") == std::string{});
+    for (const auto invalid : {"0", "0G", "00A0", "!1", "0F"}) {
+        CHECK(!kf2::hex_decode(invalid).has_value());
+    }
+    CHECK(kf2::hex_decode(std::string(8194, '0')) == std::string(4097, '\0'));
+
     namespace fs = std::filesystem;
     const fs::path root{KF2_TEST_ROOT};
     fs::remove_all(root);
-    const auto config_root = root / L"Config";
+    const auto config_root = root / L"Config-\u00e4\u4e2d";
     const auto target = config_root / L"KFEngine.ini";
     const std::string original = "[Engine.Engine]\r\nMaxSmoothedFrameRate=62\r\n";
     const std::string proposed = "[Engine.Engine]\r\nMaxSmoothedFrameRate=90\r\n";
@@ -320,6 +343,17 @@ int main() {
     write_bytes(applied.value().backup.manifest_path, original_manifest);
     CHECK(store.load_backup(applied.value().backup.id).has_value());
 
+    for (const std::string malformed_path :
+         {"", "0", "0G", "4B46456e67696e652e696e69", "00"}) {
+        const auto malformed = replace_manifest_file_field(
+            original_manifest, 0, malformed_path);
+        CHECK(!malformed.empty());
+        write_bytes(applied.value().backup.manifest_path, malformed);
+        CHECK(!store.load_backup(applied.value().backup.id).has_value());
+    }
+    write_bytes(applied.value().backup.manifest_path, original_manifest);
+    CHECK(store.load_backup(applied.value().backup.id).has_value());
+
     auto boundary_manifest = replace_manifest_file_field(
         original_manifest, 1, "0");
     boundary_manifest = replace_manifest_file_field(
@@ -444,6 +478,9 @@ int main() {
     const auto complete_export =
         kf2::backup::export_preview_json(complete_catalog);
     CHECK(complete_export.has_value());
+    CHECK(complete_export.value().find(
+        "\"reason\":\"quote \\\" slash \\\\ newline\\nUnicode caf\xc3\xa9\"") !=
+          std::string::npos);
     const auto complete_import =
         kf2::backup::import_requested_changes_json(complete_export.value());
     CHECK(complete_import.has_value());

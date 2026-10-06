@@ -8,17 +8,40 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
+#include <pdhmsg.h>
 
 #include "kf2/telemetry/resource_telemetry_worker.hpp"
+
+namespace {
+void print_last_game_log_trace(std::ostream& output) {
+    const auto trace = kf2::telemetry::detail::game_log_trace_for_testing();
+    output << "last_log_trace read=" << trace.read.stage
+           << " publication=" << trace.publication_stage
+           << " requested_generation=" << trace.request_generation
+           << " current_generation=" << trace.current_generation
+           << " queued=" << trace.chunk_queued
+           << " sample_exception=" << trace.sample_exception
+           << " process_start=" << trace.read.process_start_filetime
+           << " last_write=" << trace.read.last_write_filetime
+           << " size=" << trace.read.file_size
+           << " attributes=" << trace.read.attributes
+           << " links=" << trace.read.links
+           << " raw_last_windows_error=" << trace.read.last_windows_error
+           << " bytes_read=" << trace.read.bytes_read << '\n';
+}
+}  // namespace
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
         if (!(condition)) {                                                     \
             std::cerr << __FILE__ << ':' << __LINE__                            \
                       << ": check failed: " #condition << '\n';                 \
+            print_last_game_log_trace(std::cerr);                                \
             return EXIT_FAILURE;                                                \
         }                                                                       \
     } while (false)
@@ -34,6 +57,19 @@ using kf2::telemetry::ResourceTelemetryWorker;
 
 std::filesystem::path replacement_game_log;
 std::atomic_bool game_log_replaced{false};
+std::string game_log_append_during_read;
+ResourceTelemetryWorker* rebinding_log_worker{nullptr};
+ResourceTelemetryBinding rebinding_log_binding;
+
+void rebind_game_log_during_read(const std::filesystem::path&) {
+    rebinding_log_worker->clear();
+    static_cast<void>(rebinding_log_worker->bind(rebinding_log_binding));
+}
+
+void append_game_log_during_read(const std::filesystem::path& path) {
+    std::ofstream output(path, std::ios::binary | std::ios::app);
+    output << game_log_append_during_read;
+}
 
 void replace_game_log_during_read(const std::filesystem::path& path) {
     game_log_replaced.store(
@@ -67,6 +103,236 @@ ResourceTelemetryBinding binding(std::uint32_t pid,
     result.adapter_name = L"Test adapter";
     result.adapter_vendor_id = 0x10DE;
     return result;
+}
+
+bool set_log_write_time(const std::filesystem::path& path, std::uint64_t time) {
+    const HANDLE file = CreateFileW(path.c_str(), FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    const FILETIME timestamp{static_cast<DWORD>(time), static_cast<DWORD>(time >> 32)};
+    const bool set = SetFileTime(file, nullptr, nullptr, &timestamp) != FALSE;
+    const bool closed = CloseHandle(file) != FALSE;
+    return set && closed;
+}
+
+void truncate_game_log_during_read(const std::filesystem::path& path) {
+    write_file(path, {});
+}
+
+std::uint32_t pdh_opens = 0;
+std::uint32_t pdh_closes = 0;
+std::uint32_t pdh_failures = 0;
+std::uint32_t nvidia_creates = 0;
+std::uint32_t nvidia_failures = 0;
+
+PDH_STATUS WINAPI open_gpu_query(LPCWSTR, DWORD_PTR, PDH_HQUERY* query) {
+    ++pdh_opens;
+    if (pdh_opens <= pdh_failures) return PDH_INVALID_HANDLE;
+    *query = reinterpret_cast<PDH_HQUERY>(100);
+    return ERROR_SUCCESS;
+}
+PDH_STATUS WINAPI add_gpu_counter(PDH_HQUERY, LPCWSTR, DWORD_PTR,
+                                  PDH_HCOUNTER* counter) {
+    *counter = reinterpret_cast<PDH_HCOUNTER>(1);
+    return ERROR_SUCCESS;
+}
+PDH_STATUS WINAPI collect_gpu_query(PDH_HQUERY) { return ERROR_SUCCESS; }
+PDH_STATUS WINAPI read_gpu_counter(PDH_HCOUNTER, DWORD, LPDWORD, LPDWORD,
+                                   PPDH_FMT_COUNTERVALUE_ITEM_W) {
+    return PDH_NO_DATA;
+}
+PDH_STATUS WINAPI close_gpu_query(PDH_HQUERY) {
+    ++pdh_closes;
+    return ERROR_SUCCESS;
+}
+kf2::Result<kf2::telemetry::NvidiaGpuSampler> create_nvidia_gpu(
+    std::wstring_view) {
+    using kf2::telemetry::NvidiaGpuSampler;
+    if (++nvidia_creates <= nvidia_failures) {
+        return kf2::Result<NvidiaGpuSampler>::failure(
+            {kf2::ErrorCode::platform_failure, L"Test driver is not ready", 17});
+    }
+    return kf2::Result<NvidiaGpuSampler>::success(
+        NvidiaGpuSampler::create_for_testing(62.0));
+}
+
+struct GpuProviderFixture final {
+    GpuProviderFixture(std::uint32_t pdh_fail_count,
+                       std::uint32_t nvidia_fail_count) {
+        pdh_opens = pdh_closes = nvidia_creates = 0;
+        pdh_failures = pdh_fail_count;
+        nvidia_failures = nvidia_fail_count;
+        kf2::telemetry::detail::PdhGpuApi api;
+        api.open = open_gpu_query;
+        api.add = add_gpu_counter;
+        api.collect = collect_gpu_query;
+        api.array = read_gpu_counter;
+        api.close = close_gpu_query;
+        kf2::telemetry::detail::set_pdh_gpu_api_for_testing(api);
+        kf2::telemetry::detail::set_nvidia_gpu_create_hook_for_testing(
+            create_nvidia_gpu);
+    }
+    ~GpuProviderFixture() {
+        kf2::telemetry::detail::set_pdh_gpu_api_for_testing({});
+        kf2::telemetry::detail::set_nvidia_gpu_create_hook_for_testing(nullptr);
+    }
+};
+
+bool sample_gpu(ResourceTelemetryWorker& worker, std::uint64_t now_ns) {
+    // Keep the production alternating schedule; wait before each request so
+    // request coalescing cannot skip either group in a deterministic fixture.
+    worker.request(now_ns);
+    if (!worker.wait_until_idle(2s)) return false;
+    worker.request(now_ns);
+    if (!worker.wait_until_idle(2s)) return false;
+    const auto snapshot = worker.latest();
+    return snapshot && snapshot->gpu_sampled_at_ns == now_ns;
+}
+
+int test_gpu_provider_recovery() {
+    GpuProviderFixture fixture{1, 0};
+    ResourceTelemetryWorker worker;
+    const auto generation = worker.bind(binding(41, 4100, 7));
+    CHECK(sample_gpu(worker, 100));
+    CHECK(pdh_opens == 1 && nvidia_creates == 1);
+    CHECK(worker.latest()->driver_gpu_percent == 62.0);
+    const auto failed = worker.latest()->gpu_provider_status;
+    CHECK(failed && failed->pdh_attempts == 1 && failed->pdh_error);
+    CHECK(failed->pdh_error->native_code == PDH_INVALID_HANDLE);
+    CHECK(failed->nvidia_attempts == 1 && !failed->nvidia_error);
+    CHECK(worker.bind(binding(41, 4100, 7)) == generation);
+    CHECK(sample_gpu(worker, 999'999'999ULL));
+    CHECK(pdh_opens == 1 && nvidia_creates == 1);
+    CHECK(worker.latest()->gpu_provider_status == failed);
+    CHECK(sample_gpu(worker, 1'000'000'100ULL));
+    CHECK(pdh_opens == 2);
+    CHECK(nvidia_creates == 1);
+    CHECK(worker.latest()->gpu.has_value());
+    const auto recovered = worker.latest()->gpu_provider_status;
+    CHECK(recovered && recovered != failed);
+    CHECK(recovered->pdh_attempts == 2 && !recovered->pdh_error);
+    CHECK(failed->pdh_error);  // Published reports remain immutable.
+    CHECK(sample_gpu(worker, 60'000'000'100ULL));
+    CHECK(pdh_opens == 2 && nvidia_creates == 1);
+    CHECK(worker.latest()->gpu_provider_status == recovered);
+    worker.stop();
+    CHECK(pdh_closes == 1);
+    return EXIT_SUCCESS;
+}
+
+int test_nvidia_provider_recovery() {
+    GpuProviderFixture fixture{0, 1};
+    ResourceTelemetryWorker worker;
+    const auto first_generation = worker.bind(binding(41, 4100, 7));
+    worker.request(100);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(pdh_opens == 0 && nvidia_creates == 0);
+    CHECK(sample_gpu(worker, 101));
+    CHECK(pdh_opens == 1 && nvidia_creates == 1);
+    CHECK(!worker.latest()->driver_gpu_percent);
+    auto status = worker.latest()->gpu_provider_status;
+    CHECK(status && !status->pdh_error && status->nvidia_error);
+    CHECK(status->nvidia_error->native_code == 17);
+    CHECK(sample_gpu(worker, 1'000'000'101ULL));
+    CHECK(pdh_opens == 1 && nvidia_creates == 2);
+    CHECK(worker.latest()->driver_gpu_percent == 62.0);
+    status = worker.latest()->gpu_provider_status;
+    CHECK(status && status->nvidia_attempts == 2 && !status->nvidia_error);
+    CHECK(sample_gpu(worker, 40'000'000'000ULL));
+    CHECK(pdh_opens == 1 && nvidia_creates == 2 && pdh_closes == 0);
+    CHECK(worker.latest()->gpu_provider_status == status);
+
+    // A changed adapter restarts only the binding's native GPU providers.
+    CHECK(worker.bind(binding(41, 4100, 8)) != first_generation);
+    CHECK(!worker.latest());
+    CHECK(sample_gpu(worker, 40'000'000'001ULL));
+    CHECK(pdh_opens == 2 && nvidia_creates == 3 && pdh_closes == 1);
+    CHECK(worker.latest()->gpu_provider_status->pdh_attempts == 1);
+    CHECK(worker.latest()->gpu_provider_status->nvidia_attempts == 1);
+    CHECK(worker.bind(binding(42, 4200, 8)) != first_generation);
+    CHECK(sample_gpu(worker, 40'000'000'002ULL));
+    CHECK(pdh_opens == 3 && nvidia_creates == 4 && pdh_closes == 2);
+    worker.stop();
+    CHECK(pdh_closes == 3);
+    return EXIT_SUCCESS;
+}
+
+int test_gpu_provider_backoff() {
+    GpuProviderFixture fixture{UINT32_MAX, UINT32_MAX};
+    ResourceTelemetryWorker worker;
+    static_cast<void>(worker.bind(binding(41, 4100, 7)));
+    CHECK(sample_gpu(worker, 0));
+    CHECK(pdh_opens == 1 && nvidia_creates == 1);
+    auto status = worker.latest()->gpu_provider_status;
+    for (std::uint64_t now = 120'000'000; now < 1'000'000'000;
+         now += 120'000'000) {
+        CHECK(sample_gpu(worker, now));
+        CHECK(worker.latest()->gpu_provider_status == status);
+    }
+    constexpr std::uint64_t attempts[] = {
+        1, 3, 7, 15, 31, 61, 91};  // seconds; capped at 30 s per provider
+    for (const auto seconds : attempts) {
+        const auto before = pdh_opens;
+        CHECK(sample_gpu(worker, seconds * 1'000'000'000ULL - 1));
+        CHECK(pdh_opens == before && nvidia_creates == before);
+        CHECK(worker.latest()->gpu_provider_status == status);
+        CHECK(sample_gpu(worker, seconds * 1'000'000'000ULL));
+        CHECK(pdh_opens == before + 1 && nvidia_creates == before + 1);
+        status = worker.latest()->gpu_provider_status;
+        CHECK(status && status->pdh_error && status->nvidia_error);
+        CHECK(status->pdh_attempts == pdh_opens);
+        CHECK(status->nvidia_attempts == nvidia_creates);
+        CHECK(!worker.latest()->gpu && !worker.latest()->driver_gpu_percent);
+    }
+    CHECK(pdh_closes == 0);
+
+    // A rolled-back clock rebases the wait rather than retrying every tick.
+    CHECK(sample_gpu(worker, 2'000'000'000ULL));
+    CHECK(sample_gpu(worker, 31'999'999'999ULL));
+    CHECK(pdh_opens == 8 && nvidia_creates == 8);
+    CHECK(sample_gpu(worker, 32'000'000'000ULL));
+    CHECK(pdh_opens == 9 && nvidia_creates == 9);
+    return EXIT_SUCCESS;
+}
+
+int test_gpu_provider_binding_boundaries() {
+    GpuProviderFixture fixture{UINT32_MAX, UINT32_MAX};
+    ResourceTelemetryWorker worker;
+    auto current_binding = binding(41, 4100, 7);
+    current_binding.adapter_vendor_id = 0x1002;  // AMD: no NVIDIA retry
+    static_cast<void>(worker.bind(current_binding));
+    CHECK(sample_gpu(worker, 1));
+    CHECK(pdh_opens == 1 && nvidia_creates == 0);
+    CHECK(sample_gpu(worker, 1'000'000'001ULL));
+    CHECK(pdh_opens == 2 && nvidia_creates == 0);
+    CHECK(worker.latest()->gpu_provider_status->nvidia_attempts == 0);
+    current_binding.adapter_vendor_id = 0x8086;
+    static_cast<void>(worker.bind(current_binding));
+    CHECK(sample_gpu(worker, 1'000'000'002ULL));
+    CHECK(pdh_opens == 3 && nvidia_creates == 0);
+
+    current_binding.adapter_luid.reset();
+    current_binding.adapter_name.clear();
+    static_cast<void>(worker.bind(current_binding));
+    CHECK(sample_gpu(worker, 2'000'000'000ULL));
+    CHECK(pdh_opens == 3 && nvidia_creates == 0);
+    CHECK(!worker.latest()->gpu_provider_status);
+
+    current_binding = binding(42, 4200, 8);
+    static_cast<void>(worker.bind(current_binding));
+    constexpr auto maximum = (std::numeric_limits<std::uint64_t>::max)();
+    CHECK(sample_gpu(worker, maximum - 1'000'000'000ULL));
+    CHECK(pdh_opens == 4 && nvidia_creates == 1);
+    CHECK(sample_gpu(worker, maximum - 1));
+    CHECK(pdh_opens == 4 && nvidia_creates == 1);
+    CHECK(sample_gpu(worker, maximum));
+    CHECK(pdh_opens == 5 && nvidia_creates == 2);
+    CHECK(sample_gpu(worker, maximum));
+    CHECK(pdh_opens == 5 && nvidia_creates == 2);
+    worker.clear();
+    CHECK(!worker.latest());
+    return EXIT_SUCCESS;
 }
 
 std::string offline_telemetry_line() {
@@ -136,7 +402,290 @@ std::string graphics_readback_line() {
 
 }  // namespace
 
-int main() {
+int test_retained_game_log_handle(bool deny_initial_read = false) {
+    namespace fs = std::filesystem;
+    using namespace kf2::telemetry::detail;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"retained-log";
+    fs::remove_all(root);
+    fs::create_directories(root);
+    const auto log = root / L"Launch.log";
+    write_file(log, "Log: LoadMap: KF-BioticsLab?"
+        "Game=KFGameContent.KFGameInfo_Survival\n");
+    wchar_t module[MAX_PATH + 1]{};
+    const auto length = GetModuleFileNameW(nullptr, module, MAX_PATH);
+    CHECK(length > 0 && length < MAX_PATH);
+    const auto process = kf2::game::bind_game_process(
+        GetCurrentProcessId(), fs::path{module});
+    CHECK(process.has_value());
+    WIN32_FILE_ATTRIBUTE_DATA initial_file{};
+    CHECK(GetFileAttributesExW(log.c_str(), GetFileExInfoStandard, &initial_file));
+    const auto initial_write =
+        (static_cast<std::uint64_t>(initial_file.ftLastWriteTime.dwHighDateTime) << 32) |
+        initial_file.ftLastWriteTime.dwLowDateTime;
+    std::cout << "initial_log_write=" << initial_write
+              << " process_start=" << process.value().process_start_id
+              << " initially_fresh=" << kf2::game::game_log_belongs_to_process(
+                     initial_write, process.value().process_start_id) << '\n';
+    // Filesystem wall-clock granularity need not match process creation time.
+    // Supply exact fixture metadata; do not relax production identity checks.
+    CHECK(set_log_write_time(log, process.value().process_start_id - 1));
+    ResourceTelemetryBinding log_binding;
+    log_binding.identity = {process.value().pid, process.value().process_start_id};
+    log_binding.game_log_directory = root;
+    const auto opens = game_log_handle_opens_for_testing();
+    const auto closes = game_log_handle_closes_for_testing();
+    ResourceTelemetryWorker worker;
+    static_cast<void>(worker.bind(log_binding));
+    worker.request(1'000'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
+    CHECK(game_log_trace_for_testing().read.stage == "discovery");
+    CHECK(game_log_handle_opens_for_testing() == opens);
+    CHECK(set_log_write_time(log, process.value().process_start_id));
+    // Explicit negative mode verifies the real assertion's CI failure output.
+    // It is never used as a retry or by the default passing test invocation.
+    struct DeniedRead final {
+        HANDLE handle{INVALID_HANDLE_VALUE};
+        ~DeniedRead() {
+            if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+        }
+    } denied_read;
+    if (deny_initial_read) {
+        denied_read.handle = CreateFileW(log.c_str(), GENERIC_WRITE,
+            FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+            nullptr);
+        CHECK(denied_read.handle != INVALID_HANDLE_VALUE);
+    }
+    worker.request(1'000'000'001ULL);
+    CHECK(worker.wait_until_idle(2s));
+    auto chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    auto trace = game_log_trace_for_testing();
+    CHECK(trace.read.stage == "sampled");
+    CHECK(trace.read.last_write_filetime == process.value().process_start_id);
+    CHECK(trace.read.bytes_read > 0);
+    CHECK(trace.publication_stage == "published" && trace.chunk_queued);
+    CHECK(trace.request_generation == trace.current_generation);
+    std::ostringstream trace_output;
+    print_last_game_log_trace(trace_output);
+    CHECK(trace_output.str().find("read=sampled publication=published") !=
+          std::string::npos);
+    for (unsigned int index = 0; index < 50; ++index) {
+        worker.request(1'000'000'001ULL + index);
+        CHECK(worker.wait_until_idle(2s));
+        CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
+    }
+    CHECK(game_log_handle_opens_for_testing() == opens + 1);
+    CHECK(game_log_handle_closes_for_testing() == closes);
+    trace = game_log_trace_for_testing();
+    CHECK(trace.read.stage == "end_of_file" && !trace.chunk_queued);
+
+    // Ordinary writes, map travel and adapter changes retain the same file.
+    HANDLE live_writer = CreateFileW(log.c_str(), GENERIC_WRITE,
+        FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(live_writer != INVALID_HANDLE_VALUE);
+    LARGE_INTEGER end{};
+    CHECK(SetFilePointerEx(live_writer, end, nullptr, FILE_END));
+    const std::string map_line = "Log: LoadMap: KF-Paris?"
+        "Game=KFGameContent.KFGameInfo_Survival\n";
+    DWORD written = 0;
+    CHECK(WriteFile(live_writer, map_line.data(),
+        static_cast<DWORD>(map_line.size()), &written, nullptr));
+    CHECK(written == map_line.size());
+    log_binding.adapter_name = L"Updated adapter";
+    static_cast<void>(worker.bind(log_binding));
+    static_cast<void>(worker.invalidate_samples());
+    worker.request(1'100'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && !chunks.front().reset_parser);
+    CHECK(chunks.front().parsed_session &&
+        chunks.front().parsed_session->map == "KF-Paris");
+    CHECK(game_log_handle_opens_for_testing() == opens + 1);
+    CHECK(CloseHandle(live_writer));
+
+    // Losing process ownership of an already-bound file is also fail-closed.
+    HANDLE timestamp_file = CreateFileW(log.c_str(), FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(timestamp_file != INVALID_HANDLE_VALUE);
+    const FILETIME stale_time{1, 0};
+    CHECK(SetFileTime(timestamp_file, nullptr, nullptr, &stale_time));
+    CHECK(CloseHandle(timestamp_file));
+    worker.request(1'150'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(!chunks.front().parsed_session);
+    CHECK(game_log_trace_for_testing().read.stage == "freshness");
+    CHECK(game_log_handle_closes_for_testing() == closes + 1);
+    write_file(log, "Log: LoadMap: KF-Paris?"
+        "Game=KFGameContent.KFGameInfo_Survival\n");
+    worker.request(1'160'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(log_binding.identity).size() == 1);
+
+    // Rename must not keep tailing the old, still-readable handle forever.
+    CHECK(MoveFileExW(log.c_str(), (root / L"retired.txt").c_str(), 0));
+    write_file(log, "Log: LoadMap: KF-BurningParis?"
+        "Game=KFGameContent.KFGameInfo_Survival\n");
+    worker.request(1'200'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(!chunks.front().parsed_session && chunks.front().catching_up);
+    CHECK(game_log_handle_closes_for_testing() == closes + 2);
+    worker.request(1'300'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(chunks.front().parsed_session &&
+        chunks.front().parsed_session->map == "KF-BurningParis");
+    CHECK(game_log_handle_opens_for_testing() == opens + 3);
+
+    // The retained handle must not conceal deletion or keep old context live.
+    CHECK(DeleteFileW(log.c_str()));
+    worker.request(1'400'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(!chunks.front().parsed_session);
+    CHECK(game_log_handle_closes_for_testing() == closes + 3);
+    worker.request(1'500'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
+    CHECK(game_log_handle_opens_for_testing() == opens + 3);
+
+    write_file(log, "Log: LoadMap: KF-Paris?"
+        "Game=KFGameContent.KFGameInfo_Survival\n");
+    HANDLE writer = CreateFileW(log.c_str(), GENERIC_WRITE, 0, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(writer != INVALID_HANDLE_VALUE);
+    worker.request(1'600'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
+    CHECK(game_log_handle_opens_for_testing() == opens + 3);
+    CHECK(CloseHandle(writer));
+    trace = game_log_trace_for_testing();
+    CHECK(trace.read.stage == "open");
+    CHECK(trace.read.last_windows_error == ERROR_SHARING_VIOLATION);
+    worker.request(1'700'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(game_log_handle_opens_for_testing() == opens + 4);
+
+    const auto alias = root / L"alias.txt";
+    CHECK(CreateHardLinkW(alias.c_str(), log.c_str(), nullptr));
+    worker.request(1'800'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(!chunks.front().parsed_session);
+    CHECK(game_log_handle_closes_for_testing() == closes + 4);
+    trace = game_log_trace_for_testing();
+    CHECK(trace.read.stage == "inspection" && trace.read.links == 2);
+    CHECK(DeleteFileW(alias.c_str()));
+    worker.request(1'900'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(log_binding.identity).size() == 1);
+
+    // Rebinding closes on the worker even without another sample request.
+    auto other_process = log_binding;
+    other_process.identity.process_start_id += 36'000'000'000ULL;
+    static_cast<void>(worker.bind(other_process));
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(game_log_handle_opens_for_testing() == opens + 5);
+    CHECK(game_log_handle_closes_for_testing() == closes + 5);
+    worker.request(2'000'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(other_process.identity).empty());
+    CHECK(game_log_handle_opens_for_testing() == opens + 5);
+    static_cast<void>(worker.bind(log_binding));
+    worker.request(2'100'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(worker.take_game_log_chunks(log_binding.identity).size() == 1);
+    worker.clear();
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(game_log_handle_closes_for_testing() == closes + 6);
+
+    for (unsigned int index = 0; index < 10; ++index) {
+        static_cast<void>(worker.bind(log_binding));
+        worker.request(2'200'000'000ULL + index);
+        CHECK(worker.wait_until_idle(2s));
+        CHECK(worker.take_game_log_chunks(log_binding.identity).size() == 1);
+        worker.clear();
+        CHECK(worker.wait_until_idle(2s));
+    }
+    static_cast<void>(worker.bind(log_binding));
+    worker.request(2'300'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    static_cast<void>(worker.take_game_log_chunks(log_binding.identity));
+    {
+        std::ofstream output(log, std::ios::binary | std::ios::app);
+        output << "Log: LoadMap: KF-BurningParis?"
+            "Game=KFGameContent.KFGameInfo_Survival\n";
+    }
+    rebinding_log_worker = &worker;
+    rebinding_log_binding = log_binding;
+    set_game_log_read_hook_for_testing(&rebind_game_log_during_read);
+    worker.request(2'400'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    set_game_log_read_hook_for_testing(nullptr);
+    rebinding_log_worker = nullptr;
+    CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
+    trace = game_log_trace_for_testing();
+    CHECK(trace.publication_stage == "generation_rejected");
+    CHECK(!trace.chunk_queued);
+    CHECK(trace.request_generation != trace.current_generation);
+    CHECK(game_log_handle_opens_for_testing() == opens + 17);
+    CHECK(game_log_handle_closes_for_testing() == closes + 17);
+    worker.request(2'500'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(chunks.front().parsed_session &&
+        chunks.front().parsed_session->map == "KF-BurningParis");
+    {
+        std::ofstream output(log, std::ios::binary | std::ios::app);
+        output << "Log: LoadMap: KF-Paris?"
+            "Game=KFGameContent.KFGameInfo_Survival\n";
+    }
+    set_game_log_read_hook_for_testing(&truncate_game_log_during_read);
+    worker.request(2'600'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    set_game_log_read_hook_for_testing(nullptr);
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(chunks.front().catching_up && !chunks.front().parsed_session);
+    CHECK(game_log_trace_for_testing().read.stage == "read");
+    CHECK(game_log_handle_closes_for_testing() == closes + 18);
+    write_file(log, "Log: LoadMap: KF-Paris?"
+        "Game=KFGameContent.KFGameInfo_Survival\n");
+    worker.request(2'700'000'000ULL);
+    CHECK(worker.wait_until_idle(2s));
+    chunks = worker.take_game_log_chunks(log_binding.identity);
+    CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+    CHECK(chunks.front().parsed_session &&
+        chunks.front().parsed_session->map == "KF-Paris");
+    worker.stop();
+    worker.clear();
+    CHECK(worker.wait_until_idle(2s));
+    CHECK(game_log_handle_opens_for_testing() == opens + 19);
+    CHECK(game_log_handle_closes_for_testing() == closes + 19);
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
+
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--initial-log-open-failure") {
+        return test_retained_game_log_handle(true);
+    }
+    if (test_retained_game_log_handle() != EXIT_SUCCESS) return EXIT_FAILURE;
+    CHECK(test_gpu_provider_recovery() == EXIT_SUCCESS);
+    CHECK(test_nvidia_provider_recovery() == EXIT_SUCCESS);
+    CHECK(test_gpu_provider_backoff() == EXIT_SUCCESS);
+    CHECK(test_gpu_provider_binding_boundaries() == EXIT_SUCCESS);
     std::chrono::microseconds request_batch_elapsed{};
 
     // Repeatedly exercise the complete lifetime boundary. The worker thread
@@ -368,6 +917,8 @@ int main() {
         CHECK(snapshot);
         CHECK(snapshot->process_sampled_at_ns == 8'000);
         CHECK(!snapshot->process);
+        CHECK(worker.wait_until_idle(2s));
+        CHECK(kf2::telemetry::detail::game_log_trace_for_testing().sample_exception);
         worker.request(8'100);
         const auto deadline = std::chrono::steady_clock::now() + 2s;
         while (std::chrono::steady_clock::now() < deadline) {
@@ -395,6 +946,9 @@ int main() {
         worker.request(8'500);
         CHECK(worker.wait_until_idle(2s));
         CHECK(!worker.latest());
+        const auto trace = kf2::telemetry::detail::game_log_trace_for_testing();
+        CHECK(trace.publication_stage == "publication_failed");
+        CHECK(!trace.chunk_queued && trace.request_generation == generation);
         worker.request(8'600);
         CHECK(wait_for_generation(worker, generation));
     }
@@ -480,6 +1034,19 @@ int main() {
         CHECK(chunks.size() == 1);
         CHECK(chunks.front().parsed_session);
         CHECK(chunks.front().parsed_session->zeds_alive == 24);
+        // The raced read used the original inspected file, but the next poll
+        // must discard that handle and explicitly reset before reading anew.
+        worker.request(960'000'000ULL);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+        CHECK(!chunks.front().parsed_session);
+        worker.request(970'000'000ULL);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+        CHECK(chunks.front().parsed_session);
+        CHECK(!chunks.front().parsed_session->zeds_alive);
         worker.stop();
         fs::remove_all(root);
     }
@@ -620,6 +1187,11 @@ int main() {
             // have crossed its freshness window must publish the refreshed
             // observation times to the application boundary.
             constexpr std::uint64_t repeated_at_ns = 17'100'000'001ULL;
+            // Establish a current EOF before these newly written receipts.
+            // A first read after a long pause must not freshen old history.
+            worker.request(repeated_at_ns - 1);
+            CHECK(worker.wait_until_idle(2s));
+            static_cast<void>(worker.take_game_log_chunks(log_binding.identity));
             {
                 std::ofstream output(log, std::ios::binary | std::ios::app);
                 output << "[0075.11] ScriptLog: @@@@ ZED COUNT DEBUG: "
@@ -719,6 +1291,221 @@ int main() {
             CHECK(!chunks.front().parsed_session);
             CHECK(chunks.front().parser_stats.lines_processed == 1);
         }
+        fs::remove_all(root);
+    }
+
+    // A large existing log must not expose its historical first map as live
+    // gameplay while the bounded reader is still catching up to the tail.
+    {
+        namespace fs = std::filesystem;
+        const auto root = fs::path{KF2_TEST_ROOT} / L"log-backlog";
+        fs::remove_all(root);
+        fs::create_directories(root);
+        const auto log = root / L"Launch.log";
+        const std::string old_map =
+            "Log: LoadMap: KF-BioticsLab?"
+            "Game=KFGameContent.KFGameInfo_Survival\n"
+            "ScriptLog: WI.NetMode:  NM_Standalone\n";
+        std::string history = old_map + offline_telemetry_line() +
+            "Log: WidgetInitialized - WidgetName:  StartMenu\n" +
+            "ScriptLog: KF2OPT_MAP_SELECTION schema=1 "
+            "state=menu map=KF-BioticsLab\n";
+        while (history.size() < 2 * 1024 * 1024) {
+            history += "Log: historical diagnostic record\n";
+        }
+        history += "Log: LoadMap: KF-BurningParis?"
+                   "Game=KFGameContent.KFGameInfo_Survival\n"
+                   "ScriptLog: WI.NetMode:  NM_Client\n"
+                   "ScriptLog: KF2OPT_SESSION_CONTEXT schema=1 "
+                   "state=online_client_read_only net_mode=NM_Client "
+                   "map=KF-BurningParis\n"
+                   "ScriptLog: KF2OPT_ONLINE_CORPSE state=available "
+                   "pool=0 maximum=20 local_only=true readback=verified\n" +
+                   graphics_readback_line();
+        write_file(log, history);
+        wchar_t module[MAX_PATH + 1]{};
+        const DWORD length = GetModuleFileNameW(nullptr, module, MAX_PATH);
+        CHECK(length > 0 && length < MAX_PATH);
+        const auto process = kf2::game::bind_game_process(
+            GetCurrentProcessId(), fs::path{module});
+        CHECK(process.has_value());
+        ResourceTelemetryBinding log_binding;
+        log_binding.identity = {
+            process.value().pid, process.value().process_start_id};
+        log_binding.game_log_directory = root;
+        ResourceTelemetryWorker worker;
+        static_cast<void>(worker.bind(log_binding));
+        auto now_ns = 50'000'000'000ULL;
+        worker.request(now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        auto chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        CHECK(!chunks.front().parsed_session);
+        CHECK(chunks.front().catching_up);
+        CHECK(chunks.front().bytes.empty());
+        CHECK(chunks.front().parser_stats.bytes_received == 512 * 1024);
+        CHECK(chunks.front().parser_stats.backlog_bytes ==
+              history.size() - 512 * 1024);
+        CHECK(chunks.front().parser_stats.catch_up_age_ns == 0);
+        CHECK(!chunks.front().boundaries.startup_ready);
+        unsigned int samples = 1;
+        while (chunks.front().catching_up && samples < 6) {
+            now_ns += 200'000'000ULL;
+            worker.request(now_ns);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(chunks.front().parser_stats.oversized_input_resets == 0);
+            if (chunks.front().catching_up) {
+                CHECK(!chunks.front().parsed_session);
+                CHECK(chunks.front().parser_stats.catch_up_age_ns ==
+                      now_ns - 50'000'000'000ULL);
+            }
+            ++samples;
+        }
+        CHECK(samples == 5);
+        CHECK(!chunks.front().catching_up);
+        CHECK(chunks.front().parser_stats.backlog_bytes == 0);
+        CHECK(chunks.front().parsed_session);
+        CHECK(chunks.front().parsed_session->map == "KF-BurningParis");
+        CHECK(chunks.front().parsed_session->net_mode == "NM_Client");
+        CHECK(!chunks.front().parsed_session->telemetry_sample);
+        CHECK(chunks.front().parsed_session->telemetry_observed_ns == 0);
+        CHECK(chunks.front().parsed_session->online_corpse_maximum == 20);
+        CHECK(chunks.front().parsed_session->online_corpse_capability_observed_ns != 0);
+        CHECK(chunks.front().boundaries.startup_ready);
+        CHECK(chunks.front().boundaries.graphics_readback);
+        CHECK(!chunks.front().boundaries.map_prewarm_selection);
+
+        const auto append = [&](std::string_view bytes) {
+            std::ofstream output(log, std::ios::binary | std::ios::app);
+            output << bytes;
+        };
+        append("ScriptLog: WI.NetMode:  NM_Standalone\n" +
+               offline_telemetry_line());
+        now_ns += 200'000'000ULL;
+        worker.request(now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        CHECK(chunks.front().parsed_session);
+        CHECK(chunks.front().parsed_session->telemetry_observed_ns == now_ns);
+        CHECK(chunks.front().parsed_session->telemetry_sample == 1);
+
+        // Sustained writes six times the old read budget still reach EOF in
+        // each bounded sample and retain newly produced, current measurements.
+        std::string burst;
+        while (burst.size() < 192 * 1024) burst += "Log: live diagnostic record\n";
+        for (int index = 0; index < 12; ++index) {
+            append(burst + offline_telemetry_line());
+            now_ns += 200'000'000ULL;
+            worker.request(now_ns);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(!chunks.front().catching_up);
+            CHECK(!chunks.front().historical);
+            CHECK(chunks.front().parser_stats.backlog_bytes == 0);
+            CHECK(chunks.front().parsed_session);
+            CHECK(chunks.front().parsed_session->telemetry_observed_ns == now_ns);
+        }
+
+        // Growth during ReadFile must use the new EOF, not the pre-read size.
+        append("Log: triggering concurrent append\n");
+        game_log_append_during_read = burst + burst + burst + offline_telemetry_line();
+        kf2::telemetry::detail::set_game_log_read_hook_for_testing(
+            &append_game_log_during_read);
+        now_ns += 200'000'000ULL;
+        worker.request(now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        kf2::telemetry::detail::set_game_log_read_hook_for_testing(nullptr);
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        CHECK(chunks.front().catching_up);
+        CHECK(!chunks.front().parsed_session);
+        CHECK(chunks.front().parser_stats.backlog_bytes ==
+              game_log_append_during_read.size());
+        for (int index = 0; index < 2; ++index) {
+            now_ns += 200'000'000ULL;
+            worker.request(now_ns);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+        }
+        CHECK(!chunks.front().catching_up);
+        CHECK(chunks.front().parsed_session);
+        CHECK(!chunks.front().parsed_session->telemetry_sample);
+
+        // Unread records accumulated during a long pause are history even if
+        // the entire tail fits in one sample; newly written data works again.
+        append(offline_telemetry_line());
+        now_ns += kf2::game::kGameLogObservationFreshnessNs + 1;
+        worker.request(now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        CHECK(chunks.front().historical);
+        CHECK(!chunks.front().catching_up);
+        CHECK(chunks.front().parsed_session);
+        CHECK(!chunks.front().parsed_session->telemetry_sample);
+        append(offline_telemetry_line());
+        worker.request(++now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        CHECK(chunks.front().parsed_session);
+        CHECK(chunks.front().parsed_session->telemetry_observed_ns == now_ns);
+        // An overloaded writer cannot force an unbounded read or make a
+        // behind-tail snapshot current. Stop writing and bounded catch-up
+        // must recover instead of starving permanently.
+        const auto overloaded_burst = burst + burst + burst + burst +
+            offline_telemetry_line();
+        auto previous_received = chunks.front().parser_stats.bytes_received;
+        for (int index = 0; index < 5; ++index) {
+            append(overloaded_burst);
+            now_ns += 200'000'000ULL;
+            worker.request(now_ns);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            CHECK(chunks.front().catching_up);
+            CHECK(!chunks.front().parsed_session);
+            CHECK(chunks.front().parser_stats.bytes_received - previous_received ==
+                  512 * 1024);
+            previous_received = chunks.front().parser_stats.bytes_received;
+        }
+        for (int index = 0; index < 4 && chunks.front().catching_up; ++index) {
+            now_ns += 200'000'000ULL;
+            worker.request(now_ns);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+        }
+        CHECK(!chunks.front().catching_up);
+        CHECK(chunks.front().parsed_session);
+        CHECK(!chunks.front().parsed_session->telemetry_sample);
+        CHECK(chunks.front().parser_stats.oversized_input_resets == 0);
+
+        append(overloaded_burst);
+        worker.request(++now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1 && chunks.front().catching_up);
+        // Truncation during catch-up resets both context and deferred events.
+        write_file(log, old_map + offline_telemetry_line());
+        worker.request(++now_ns);
+        CHECK(worker.wait_until_idle(2s));
+        chunks = worker.take_game_log_chunks(log_binding.identity);
+        CHECK(chunks.size() == 1);
+        CHECK(chunks.front().reset_parser);
+        CHECK(!chunks.front().catching_up);
+        CHECK(chunks.front().parser_stats.backlog_bytes == 0);
+        CHECK(chunks.front().parsed_session);
+        CHECK(chunks.front().parsed_session->map == "KF-BioticsLab");
+        CHECK(!chunks.front().parsed_session->online_corpse_maximum);
+        CHECK(!chunks.front().parsed_session->telemetry_sample);
+        CHECK(!chunks.front().boundaries.startup_ready);
+        worker.stop();
         fs::remove_all(root);
     }
 

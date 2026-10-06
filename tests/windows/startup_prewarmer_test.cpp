@@ -64,9 +64,9 @@ kf2::game::StartupPrewarmSnapshot wait_for_terminal(
     kf2::game::StartupPrewarmer& prewarmer) {
     for (int attempt = 0; attempt < 200; ++attempt) {
         const auto current = prewarmer.snapshot();
-        if (current.state == kf2::game::StartupPrewarmState::complete ||
-            current.state == kf2::game::StartupPrewarmState::cancelled ||
-            kf2::game::startup_prewarm_retryable(current.state)) {
+        if (current.state != kf2::game::StartupPrewarmState::idle &&
+            current.state != kf2::game::StartupPrewarmState::waiting &&
+            current.state != kf2::game::StartupPrewarmState::running) {
             return current;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds{5});
@@ -168,6 +168,7 @@ int main(int argc, char** argv) {
     CHECK(!startup_prewarm_retryable(StartupPrewarmState::idle));
     CHECK(!startup_prewarm_retryable(StartupPrewarmState::complete));
     CHECK(!startup_prewarm_retryable(StartupPrewarmState::cancelled));
+    CHECK(!startup_prewarm_retryable(StartupPrewarmState::incomplete));
 
     const auto process_suffix = std::to_wstring(GetCurrentProcessId());
     const auto root = std::filesystem::temp_directory_path() /
@@ -392,6 +393,59 @@ int main(int argc, char** argv) {
     CHECK(solid_state.snapshot().bytes_read == 3072);
     CHECK(!solid_state.snapshot().diagnostics.has_value());
 
+    const auto incomplete_root = root / L"incomplete";
+    const auto incomplete_file = incomplete_root / L"KFGame/BrewedPC/Engine.u";
+    StartupPrewarmer incomplete;
+    auto incomplete_options = StartupPrewarmOptions{
+        .idle_delay = std::chrono::milliseconds{0},
+        .storage_override = StorageKind::solid_state,
+        .available_memory_override = 4 * gib,
+        .collect_diagnostics = true,
+    };
+    write_file(incomplete_file, 4096);
+    detail::set_startup_prewarm_plan_hook_for_testing([](auto files) {
+        std::filesystem::remove(files.front().path);
+    });
+    incomplete.start(incomplete_root, incomplete_options);
+    const auto disappeared = wait_for_terminal(incomplete);
+    CHECK(disappeared.state == StartupPrewarmState::incomplete);
+    CHECK(disappeared.bytes_planned == 4096);
+    CHECK(disappeared.bytes_read == 0);
+    CHECK(disappeared.diagnostics &&
+          disappeared.diagnostics->file_open_failures == 1);
+
+    write_file(incomplete_file, 4096);
+    detail::set_startup_prewarm_plan_hook_for_testing([](auto files) {
+        std::filesystem::resize_file(files.front().path, 3);
+    });
+    incomplete.start(incomplete_root, incomplete_options);
+    const auto shortened = wait_for_terminal(incomplete);
+    CHECK(shortened.state == StartupPrewarmState::incomplete);
+    CHECK(shortened.bytes_planned == 4096);
+    CHECK(shortened.bytes_read == 3);
+    CHECK(shortened.diagnostics &&
+          shortened.diagnostics->file_read_failures == 1);
+
+    incomplete_options.collect_diagnostics = false;
+    write_file(incomplete_file, 4096);
+    detail::set_startup_prewarm_plan_hook_for_testing([](auto files) {
+        std::filesystem::resize_file(files.front().path, 3);
+    });
+    incomplete.start(incomplete_root, incomplete_options);
+    const auto without_diagnostics = wait_for_terminal(incomplete);
+    CHECK(without_diagnostics.state == StartupPrewarmState::incomplete);
+    CHECK(without_diagnostics.bytes_planned == 4096);
+    CHECK(without_diagnostics.bytes_read == 3);
+    CHECK(!without_diagnostics.diagnostics);
+
+    write_file(incomplete_file, 4096);
+    incomplete.start(incomplete_root, incomplete_options);
+    const auto retried = wait_for_terminal(incomplete);
+    CHECK(retried.state == StartupPrewarmState::complete);
+    CHECK(retried.bytes_read == retried.bytes_planned);
+    incomplete.stop_and_wait();
+    std::filesystem::remove_all(incomplete_root);
+
     StartupPrewarmer failed_then_recovered;
     detail::fail_next_startup_prewarm_plan();
     failed_then_recovered.start(root, {
@@ -471,10 +525,9 @@ int main(int argc, char** argv) {
         real.start(real_root, std::move(real_options));
         for (int attempt = 0; attempt < 2000; ++attempt) {
             const auto state = real.snapshot().state;
-            if (state == StartupPrewarmState::complete ||
-                state == StartupPrewarmState::skipped_unknown_storage ||
-                state == StartupPrewarmState::skipped_low_memory ||
-                state == StartupPrewarmState::skipped_no_files) break;
+            if (state != StartupPrewarmState::idle &&
+                state != StartupPrewarmState::waiting &&
+                state != StartupPrewarmState::running) break;
             std::this_thread::sleep_for(std::chrono::milliseconds{5});
         }
         const auto measured = real.snapshot();

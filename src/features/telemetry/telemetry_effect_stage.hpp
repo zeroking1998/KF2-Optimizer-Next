@@ -1,6 +1,6 @@
 #pragma once
 
-#include "kf2/optimizer/adaptive_profile.hpp"
+#include "kf2/optimizer/adaptive_registry.hpp"
 
 namespace kf2::app {
 struct UiRuntime;

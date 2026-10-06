@@ -2,8 +2,12 @@
 #include <d3d11.h>
 #include <dxgi.h>
 
+#include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
+#include <span>
 
 #include "kf2/platform/windows/dxgi_frame_timing_session.hpp"
 #include "kf2/overlay/overlay_policy.hpp"
@@ -43,10 +47,38 @@ void pump_messages() {
     }
 }
 
+std::optional<double> producer_fps(std::span<const std::uint64_t> starts,
+                                  std::uint64_t newest_ns) {
+    constexpr std::uint64_t live_window_ns = 1'000'000'000;
+    const auto end = std::upper_bound(starts.begin(), starts.end(), newest_ns);
+    const auto first = std::lower_bound(starts.begin(), end,
+        newest_ns > live_window_ns ? newest_ns - live_window_ns : 0);
+    const auto count = end - first;
+    if (count < 2 || *(end - 1) <= *first) return std::nullopt;
+    return static_cast<double>(count - 1) * 1'000'000'000.0 /
+        static_cast<double>(*(end - 1) - *first);
+}
+
 }  // namespace
 
 int main() {
     using namespace kf2::telemetry;
+    // A slow startup must not lower the independent reference for a fast tail.
+    // Keep this regression deterministic instead of depending on DWM stalls.
+    std::array<std::uint64_t, 120> uneven_starts{};
+    uneven_starts[0] = 1'000'000'000;
+    for (std::size_t index = 1; index < uneven_starts.size(); ++index) {
+        uneven_starts[index] = uneven_starts[index - 1] +
+            (index < 30 ? 200'000'000 : 16'000'000);
+    }
+    CHECK(producer_fps(uneven_starts, uneven_starts.back()) == 62.5);
+    CHECK(!producer_fps({}, 0));
+    CHECK(!producer_fps(std::span{uneven_starts}.first(1), uneven_starts[0]));
+    CHECK(producer_fps(uneven_starts, uneven_starts[80]) == 62.5);
+    const double whole_run_fps = 119.0 * 1'000'000'000.0 /
+        static_cast<double>(uneven_starts.back() - uneven_starts.front());
+    CHECK(*producer_fps(uneven_starts, uneven_starts.back()) > whole_run_fps * 1.35);
+
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     WNDCLASSW window_class{};
     window_class.hInstance = instance;
@@ -123,39 +155,46 @@ int main() {
     Sleep(150);
     const auto probe_metrics = source.drain(monotonic_ns(), 2'000'000'000ULL);
     CHECK(!probe_metrics.fps.has_value());
-    const auto producer_started_ns = monotonic_ns();
+    std::array<std::uint64_t, 120> primary_starts{};
+    std::array<std::uint64_t, 120> secondary_starts{};
     for (int frame = 0; frame < 120; ++frame) {
         pump_messages();
         const float shade = static_cast<float>(frame % 16) / 15.0F;
         const float color[4]{0.10F, shade, 0.30F, 1.0F};
         context->ClearRenderTargetView(primary_target, color);
         // WARP is not required to honor DXGI's refresh synchronization. Pace
-        // the known input explicitly so its completed-display rate has an
+        // the known input explicitly so its successful-present cadence has an
         // independent, driver-neutral expectation.
+        primary_starts[frame] = monotonic_ns();
         CHECK(SUCCEEDED(swap_chain->Present(0, 0)));
+        secondary_starts[frame] = monotonic_ns();
         CHECK(SUCCEEDED(secondary_swap_chain->Present(0, 0)));
         Sleep(16);
     }
-    const auto producer_elapsed_ns = monotonic_ns() - producer_started_ns;
-    CHECK(producer_elapsed_ns > 0);
-    const double produced_fps = 120.0 * 1'000'000'000.0 /
-                                static_cast<double>(producer_elapsed_ns);
     pump_messages();
     Sleep(500);
     CHECK(session.value()->stop().has_value());
     const auto metrics = source.drain(monotonic_ns(), 2'000'000'000ULL);
     CHECK(source.stop().has_value());
     if (metrics.fps) {
-        std::cout << "Produced FPS: " << produced_fps
+        const auto primary_id = reinterpret_cast<std::uint64_t>(swap_chain);
+        const auto secondary_id = reinterpret_cast<std::uint64_t>(secondary_swap_chain);
+        CHECK(metrics.stream_id == primary_id || metrics.stream_id == secondary_id);
+        const auto produced = producer_fps(
+            metrics.stream_id == primary_id ? primary_starts : secondary_starts,
+            metrics.newest_present_ns);
+        CHECK(produced.has_value());
+        std::cout << "Produced live-window FPS: " << *produced
                   << ", measured completed-present FPS: " << *metrics.fps
                   << '\n';
-        // Compare against the fixture's real cadence. WARP, DWM and Sleep(16)
-        // are scheduler-dependent, so a fixed FPS floor is not meaningful.
-        CHECK(*metrics.fps >= produced_fps * 0.65);
-        CHECK(*metrics.fps <= produced_fps * 1.35);
+        // Compare the selected swap chain over the same one-second interval,
+        // ending at the newest captured PresentStart (not ETW delivery time).
+        // Startup stalls and the final Sleep do not belong to this live rate.
+        CHECK(*metrics.fps >= *produced * 0.65);
+        CHECK(*metrics.fps <= *produced * 1.35);
         // A process can own several swap chains. Only one coherent stream is
         // allowed to contribute frames; otherwise both fixtures are mixed.
-        CHECK(*metrics.fps < produced_fps * 1.65);
+        CHECK(*metrics.fps < *produced * 1.65);
         CHECK(metrics.quality == SampleQuality::good);
     } else {
         CHECK(metrics.reason == UnavailableReason::no_samples ||

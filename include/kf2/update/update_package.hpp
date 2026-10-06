@@ -25,6 +25,11 @@ struct UpdatePackageOperations {
     const std::filesystem::path& archive,
     const ReleaseAsset& asset);
 
+// Returns only after Windows finishes every queued extraction operation.
+[[nodiscard]] Result<bool> extract_update_archive(
+    const std::filesystem::path& archive,
+    const std::filesystem::path& new_destination);
+
 [[nodiscard]] Result<bool> validate_staged_update_package(
     const std::filesystem::path& staged_root,
     const ReleaseInfo& release);

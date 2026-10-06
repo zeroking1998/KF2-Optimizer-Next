@@ -78,6 +78,20 @@ struct AdaptiveRuntimeProviderIdentity final {
            now_ns - last_log_ns >= kAdaptiveBottleneckLogIntervalNs;
 }
 
+[[nodiscard]] inline bool adaptive_action_text_matches(
+    std::wstring_view text, std::string_view setting,
+    std::wstring_view disposition) noexcept {
+    if (setting.empty()) return text == disposition;
+    return text.size() == setting.size() + disposition.size() + 3 &&
+        std::equal(setting.begin(), setting.end(), text.begin(),
+            [](char source, wchar_t presented) {
+                return static_cast<wchar_t>(source) == presented;
+            }) &&
+        text.substr(setting.size(), 2) == L" (" &&
+        text.substr(setting.size() + 2, disposition.size()) == disposition &&
+        text.back() == L')';
+}
+
 struct AdaptiveSampleContext final {
     int current_quality{-1};
     int minimum_quality{10};
@@ -97,6 +111,25 @@ struct AdaptiveSampleBuildResult final {
     bool waiting_for_gameplay_telemetry{false};
 };
 
+[[nodiscard]] inline optimizer::AdaptiveSessionClass adaptive_session_class(
+    const TelemetryFrame& frame) noexcept {
+    if (!frame.gameplay) return optimizer::AdaptiveSessionClass::unknown;
+    if (frame.offline_gameplay) {
+        return optimizer::AdaptiveSessionClass::verified_offline;
+    }
+    if (!frame.gameplay->optimizer_online_read_only) {
+        return optimizer::AdaptiveSessionClass::unknown;
+    }
+    const auto& mode = frame.gameplay->net_mode;
+    if (mode == "NM_ListenServer") {
+        return optimizer::AdaptiveSessionClass::host_or_listen_server;
+    }
+    if (mode == "NM_Client" || mode == "NM_DedicatedServer") {
+        return optimizer::AdaptiveSessionClass::verified_online;
+    }
+    return optimizer::AdaptiveSessionClass::unknown;
+}
+
 [[nodiscard]] inline bool requires_fresh_frame_window(
     const AdaptiveSampleBuildResult& result) noexcept {
     return result.sample.map_changed || result.waiting_for_gameplay_telemetry;
@@ -109,11 +142,11 @@ struct AdaptiveSampleBuildResult final {
 [[nodiscard]] inline bool adaptive_frame_boundary_requires_drain(
     const TelemetryFrame& frame, std::uint64_t not_before_ns) noexcept {
     if (not_before_ns == 0) return false;
-    if (!frame.frames.fps || frame.frames.age_ns > frame.observed_at_ns) {
+    if (!frame.frames.fps || frame.frames.newest_present_ns == 0 ||
+        frame.frames.newest_present_ns > frame.observed_at_ns) {
         return true;
     }
-    const auto newest_present_ns =
-        frame.observed_at_ns - frame.frames.age_ns;
+    const auto newest_present_ns = frame.frames.newest_present_ns;
     return newest_present_ns < not_before_ns ||
            newest_present_ns - not_before_ns <
                ::kf2::telemetry::PresentSource::longest_window_ns;
@@ -450,9 +483,11 @@ select_adaptive_runtime_control(
         ? *context.decision_frames : frame.frames;
     sample.pid = frame.identity.pid;
     sample.process_start_id = frame.identity.process_start_id;
-    sample.timestamp_ns = frame.observed_at_ns >= frames.age_ns
-        ? frame.observed_at_ns - frames.age_ns : 0;
+    sample.timestamp_ns = frames.newest_present_ns <= frame.observed_at_ns
+        ? frames.newest_present_ns : 0;
     sample.session_generation = frame.identity.process_start_id;
+    sample.frame_generation = frames.source_generation;
+    sample.frame_stream_id = frames.stream_id;
     sample.adapter_luid = frame.adapter_luid;
     sample.fps = frames.fps;
     sample.average_fps = frames.average_fps;
@@ -566,16 +601,7 @@ select_adaptive_runtime_control(
                 (context.last_telemetry_sample == 0 ||
                  result.telemetry_sample < context.last_telemetry_sample);
         }
-        if (frame.offline_gameplay) {
-            sample.session_class =
-                optimizer::AdaptiveSessionClass::verified_offline;
-        } else if (frame.gameplay->net_mode &&
-                   frame.gameplay->optimizer_online_read_only) {
-            sample.session_class =
-                frame.gameplay->net_mode->find("Listen") != std::string::npos
-                    ? optimizer::AdaptiveSessionClass::host_or_listen_server
-                    : optimizer::AdaptiveSessionClass::verified_online;
-        }
+        sample.session_class = adaptive_session_class(frame);
         if ((!frame.gameplay->map.empty() &&
              frame.gameplay->map != result.map) || telemetry_restarted) {
             result.map = frame.gameplay->map;

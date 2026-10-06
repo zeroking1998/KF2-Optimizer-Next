@@ -71,6 +71,16 @@ int main() {
     CHECK(action(dashboard, "dashboard-diagnostics") == nullptr);
     CHECK(action(dashboard, "dashboard-refresh") == nullptr);
     CHECK(action(dashboard, "game-select-install") != nullptr);
+    CHECK(action(dashboard, "game-select-install")->enabled);
+    auto folder_status = model.status();
+    folder_status.game_folder_change_blocked = true;
+    model.set_status(folder_status);
+    CHECK(!action(layout_shell(model, 1440, 900), "game-select-install")->enabled);
+    folder_status.game_folder_change_blocked = false;
+    model.set_status(folder_status);
+    model.set_recovery_required(true);
+    CHECK(!action(layout_shell(model, 1440, 900), "game-select-install")->enabled);
+    model.set_recovery_required(false);
     CHECK(action(dashboard, "settings-animations") == nullptr);
     CHECK(action(dashboard, "settings-updates-automatic") != nullptr);
     CHECK(node(dashboard, "header-auto-updates") != nullptr);
@@ -101,6 +111,46 @@ int main() {
           std::wstring::npos);
     CHECK(node(gpu_dashboard, "metric-2")->text.find(L"GPU 72%") !=
           std::wstring::npos);
+
+    {
+        UiModel metrics_model;
+        auto status = metrics_model.status();
+        status.game_detected = true;
+        status.mode = L"Adaptive / Automatic";
+        status.target_fps = 119;
+        status.corpse_limit = 128;
+        status.live_fps = 119.9;
+        status.live_frame_time_ms = 8.3;
+        status.live_cpu_percent = 0.0;
+        status.live_gpu_percent = 72.0;
+        status.game_gpu_name = L"Test GPU";
+        metrics_model.set_status(status);
+        auto metrics_layout = layout_shell(metrics_model, 1440, 900);
+        CHECK(node(metrics_layout, "metric-0")->text == L"LIVE FPS\n119.9 FPS");
+        CHECK(node(metrics_layout, "metric-1")->text == L"FRAME TIME\n8.3 ms");
+        CHECK(node(metrics_layout, "metric-2")->text ==
+              L"GAME LOAD\nTest GPU\nCPU 0%  \u2022  GPU 72%");
+        const auto saved_status = node(metrics_layout, "status")->text;
+        CHECK(saved_status ==
+              L"Ready   \u2022   Adaptive on   \u2022   Target 119 FPS"
+              L"   \u2022   Maximum corpses 128   \u2022   Live 119.9 FPS");
+
+        // Metric consumers retain separate owning text, even for repeated IDs.
+        metrics_layout.nodes.push_back(*node(metrics_layout, "metric-2"));
+        status.live_cpu_percent.reset();
+        status.live_frame_time_ms.reset();
+        metrics_model.set_status(status);
+        refresh_numeric_nodes(metrics_layout, metrics_model);
+        for (const auto& item : metrics_layout.nodes) {
+            if (item.id == "metric-2") {
+                CHECK(item.text ==
+                      L"GAME LOAD\nTest GPU\nCPU \u2014  \u2022  GPU 72%");
+            }
+        }
+        CHECK(node(metrics_layout, "metric-1")->text == L"FRAME TIME\n\u2014");
+        CHECK(node(metrics_layout, "status")->text.find(L"Live") == std::wstring::npos);
+        CHECK(saved_status.ends_with(L"Live 119.9 FPS"));
+    }
 
     std::set<std::string> ids;
     std::array<DipRect, 6> navigation{};
@@ -353,6 +403,21 @@ int main() {
     CHECK(node(diagnostics, "diagnostics-check-section") != nullptr);
     CHECK(node(diagnostics, "diagnostics-recovery-section") != nullptr);
     CHECK(node(diagnostics, "diagnostics-reports-section") != nullptr);
+    CHECK(node(diagnostics, "diagnostics-event-storage") != nullptr);
+    CHECK(node(diagnostics, "diagnostics-event-storage")->text ==
+          L"Event log storage: not checked");
+    auto persistence_status = model.status();
+    for (const bool available : {false, true}) {
+        persistence_status.event_persistence_available = available;
+        model.set_status(persistence_status);
+        const auto observed = layout_shell(model, 1440, 900);
+        const auto* storage = node(observed, "diagnostics-event-storage");
+        CHECK(storage != nullptr);
+        CHECK(storage->text == (available ? L"Event log storage: available" :
+            L"Event log storage: unavailable — check Data/Logs access"));
+        CHECK(storage->bounds.y + storage->bounds.height <=
+              node(observed, "diagnostics-check-section")->bounds.y);
+    }
 
     static_cast<void>(model.focus_destination(Destination::dashboard));
     static_cast<void>(model.activate_focused());
@@ -463,6 +528,28 @@ int main() {
     CHECK(action(available_updates, "settings-updates-install") != nullptr);
     CHECK(action(available_updates, "settings-updates-later") != nullptr);
     CHECK(action(available_updates, "settings-updates-ignore") != nullptr);
+
+    // Busy state must disable every mutation entry, even if the presentation
+    // still carries a previously installable release during a transition.
+    for (int mode = 0; mode < 3; ++mode) {
+        auto busy_status = available_status;
+        busy_status.update_checking = mode == 0;
+        busy_status.update_installing = mode == 1;
+        busy_status.package_actions_busy = mode == 2;
+        model.set_status(busy_status);
+        static_cast<void>(model.focus_destination(Destination::dashboard));
+        static_cast<void>(model.activate_focused());
+        const auto busy_home = layout_shell(model, 1440, 900);
+        CHECK(!action(busy_home, "header-update-install")->enabled);
+        CHECK(!action(busy_home, "settings-updates-install")->enabled);
+        CHECK(!action(busy_home, "header-repair")->enabled);
+        static_cast<void>(model.focus_destination(Destination::diagnostics));
+        static_cast<void>(model.activate_focused());
+        const auto busy_repair = layout_shell(model, 1440, 900);
+        CHECK(!action(busy_repair, "diagnostics-repair-package")->enabled);
+    }
+    static_cast<void>(model.focus_destination(Destination::dashboard));
+    static_cast<void>(model.activate_focused());
 
     auto cached_available_status = home_status;
     cached_available_status.update_newer_version_known = true;

@@ -197,13 +197,16 @@ add_test(NAME kf2_package_integrity_test COMMAND kf2_package_integrity_test)
 add_executable(kf2_release_package_repair_test
     windows/release_package_repair_test.cpp
     "${PROJECT_SOURCE_DIR}/src/security/release_package_repair.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/github_release_client.cpp"
+    "${PROJECT_SOURCE_DIR}/src/update/update_package.cpp"
 )
 target_include_directories(kf2_release_package_repair_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_release_package_repair_test PRIVATE
-    KF2_RELEASE_REPOSITORY="https://github.com/example/KF2-Optimizer-Next")
+    KF2_RELEASE_REPOSITORY="https://github.com/example/KF2-Optimizer-Next"
+    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/release-package-repair")
 target_link_libraries(kf2_release_package_repair_test PRIVATE
-    bcrypt ole32 oleaut32 shell32 winhttp)
+    bcrypt ole32 oleaut32 shell32 winhttp uuid)
 add_test(NAME kf2_release_package_repair_test
     COMMAND kf2_release_package_repair_test)
 
@@ -237,6 +240,7 @@ add_executable(kf2_frame_rate_cap_test
 target_include_directories(kf2_frame_rate_cap_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_frame_rate_cap_test PRIVATE
+    KF2_ATOMIC_FILE_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/frame-rate-cap")
 add_test(NAME kf2_frame_rate_cap_test COMMAND kf2_frame_rate_cap_test)
 
@@ -341,7 +345,8 @@ target_compile_definitions(kf2_flex_lab_test PRIVATE
     KF2_ATOMIC_FILE_TESTING
     KF2_SHA256_TESTING
     KF2_FLEX_LAB_TEST_HOOKS)
-target_link_libraries(kf2_flex_lab_test PRIVATE bcrypt)
+target_link_libraries(kf2_flex_lab_test PRIVATE
+    bcrypt KF2TestGameCore user32 dwmapi)
 add_test(NAME kf2_flex_lab_test COMMAND kf2_flex_lab_test)
 
 add_executable(kf2_offline_telemetry_lab_test
@@ -366,9 +371,13 @@ if(TARGET KF2FlexForwarder)
     set_target_properties(kf2_flex_original_test_double PROPERTIES
         OUTPUT_NAME "flex_original_test_double")
 
-    add_executable(kf2_flex_forwarder_loader_test windows/flex_forwarder_loader_test.cpp)
+    add_executable(kf2_flex_forwarder_loader_test
+        windows/flex_forwarder_loader_test.cpp
+        "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp")
     target_include_directories(kf2_flex_forwarder_loader_test PRIVATE
         "${PROJECT_SOURCE_DIR}/include")
+    target_link_libraries(kf2_flex_forwarder_loader_test PRIVATE
+        KF2TestGameCore user32 dwmapi)
     target_compile_definitions(kf2_flex_forwarder_loader_test PRIVATE
         KF2_FLEX_RUNTIME=L"D:/Steam/steamapps/common/killingfloor2/Binaries/Win64/flexRelease_x64.dll"
     )
@@ -380,9 +389,12 @@ if(TARGET KF2FlexForwarder)
         SKIP_RETURN_CODE 77)
 
     add_executable(kf2_flex_forwarder_fixed_minimum_test
-        windows/flex_forwarder_fixed_minimum_test.cpp)
+        windows/flex_forwarder_fixed_minimum_test.cpp
+        "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp")
     target_include_directories(kf2_flex_forwarder_fixed_minimum_test PRIVATE
         "${PROJECT_SOURCE_DIR}/include")
+    target_link_libraries(kf2_flex_forwarder_fixed_minimum_test PRIVATE
+        KF2TestGameCore user32 dwmapi)
     add_dependencies(kf2_flex_forwarder_fixed_minimum_test
         KF2FlexForwarderTest kf2_flex_original_test_double)
     add_test(NAME kf2_flex_forwarder_fixed_minimum_test
@@ -396,6 +408,8 @@ add_executable(kf2_flex_observation_test
     windows/flex_observation_test.cpp
     "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp")
 target_include_directories(kf2_flex_observation_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(kf2_flex_observation_test PRIVATE
+    KF2TestGameCore user32 dwmapi)
 add_test(NAME kf2_flex_observation_test COMMAND kf2_flex_observation_test)
 
 add_executable(kf2_application_lifecycle_test
@@ -424,7 +438,6 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/game/startup_prewarmer.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/advanced_settings.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/video_settings.cpp"
-    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_profile.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_actuation.cpp"
     "${PROJECT_SOURCE_DIR}/src/optimizer/startup_gpu_profile.cpp"
     "${PROJECT_SOURCE_DIR}/src/platform/windows/dxgi_frame_timing_session.cpp"
@@ -455,9 +468,13 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_TELEMETRY_ASSET=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetry.u"
     KF2_APPLICATION_VIDEO_TESTING
     KF2_APPLICATION_SHUTDOWN_TESTING
+    KF2_ATOMIC_FILE_TESTING
+    KF2_PACKAGE_INTEGRITY_TESTING
     KF2_APPLICATION_RESTORE_TESTING
     KF2_APPLICATION_LAUNCH_TESTING
     KF2_STARTUP_PREWARMER_TESTING
+    KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+    KF2_RESOURCE_TELEMETRY_WORKER_TESTING
 )
 target_link_libraries(kf2_application_lifecycle_test PRIVATE
     user32 gdi32 shell32 ole32 oleaut32 uuid d2d1 dwrite windowscodecs uiautomationcore bcrypt
@@ -468,6 +485,10 @@ set_tests_properties(kf2_application_lifecycle_test PROPERTIES
     LABELS "requires-desktop")
 add_test(NAME kf2_package_repair_worker_start_test
     COMMAND kf2_application_lifecycle_test --package-repair-start-failure)
+add_test(NAME kf2_package_repair_shutdown_test
+    COMMAND kf2_application_lifecycle_test --package-repair-shutdown)
+add_test(NAME kf2_frame_rate_cap_recovery_startup_test
+    COMMAND kf2_application_lifecycle_test --frame-rate-cap-recovery-startup)
 add_test(NAME kf2_update_worker_exception_test
     COMMAND kf2_application_lifecycle_test --update-worker-exceptions)
 add_test(NAME kf2_gpu_profile_persistence_rollback_test
@@ -476,20 +497,52 @@ add_test(NAME kf2_gpu_profile_persistence_rollback_test
 add_test(NAME kf2_map_prewarm_start_visibility_test
     COMMAND kf2_application_lifecycle_test
         --map-prewarm-start-visibility)
+add_test(NAME kf2_verified_online_quality_response_test
+    COMMAND kf2_application_lifecycle_test
+        --verified-online-quality-response)
 add_test(NAME kf2_runtime_shutdown_exception_test
     COMMAND kf2_application_lifecycle_test
         --runtime-shutdown-exceptions)
+add_test(NAME kf2_protected_shutdown_running_game_test
+    COMMAND kf2_application_lifecycle_test --protected-shutdown-running-game)
+add_test(NAME kf2_protected_shutdown_uninspectable_game_test
+    COMMAND kf2_application_lifecycle_test --protected-shutdown-uninspectable-game)
+add_test(NAME kf2_protected_shutdown_running_game_module_test
+    COMMAND kf2_application_lifecycle_test --protected-shutdown-running-game-module)
+set_tests_properties(kf2_protected_shutdown_running_game_module_test PROPERTIES
+    SKIP_RETURN_CODE 77)
 add_test(NAME kf2_restore_cap_sync_failure_test
     COMMAND kf2_application_lifecycle_test
         --restore-cap-sync-failure)
+add_test(NAME kf2_session_cap_finalization_failure_test
+    COMMAND kf2_application_lifecycle_test --session-cap-finalization-failure)
 add_test(NAME kf2_launch_profile_allocation_test
     COMMAND kf2_application_lifecycle_test
         --launch-profile-allocation)
+add_test(NAME kf2_executable_identity_boundary_test
+    COMMAND kf2_application_lifecycle_test --executable-identity)
+add_test(NAME kf2_protected_launch_rollback_test
+    COMMAND kf2_application_lifecycle_test --protected-launch-rollback)
+add_test(NAME kf2_graphics_restaging_failure_test
+    COMMAND kf2_application_lifecycle_test --graphics-restaging-failure)
+add_test(NAME kf2_graphics_protected_rebuild_failure_test
+    COMMAND kf2_application_lifecycle_test --graphics-protected-rebuild-failure)
+add_test(NAME kf2_startup_session_marker_test
+    COMMAND kf2_application_lifecycle_test --startup-session-marker)
+add_test(NAME kf2_initial_dxgi_retry_test
+    COMMAND kf2_application_lifecycle_test --initial-dxgi-retry)
+add_test(NAME kf2_legacy_adaptive_profile_test
+    COMMAND kf2_application_lifecycle_test --legacy-adaptive-profile)
+add_test(NAME kf2_legacy_quality_policy_test
+    COMMAND kf2_application_lifecycle_test --legacy-quality-policy)
 add_test(NAME kf2_stopped_target_fps_transaction_test
     COMMAND kf2_application_lifecycle_test
         --stopped-target-fps-transaction)
 add_test(NAME kf2_adaptive_restore_debt_test
     COMMAND kf2_application_lifecycle_test --adaptive-restore-debt)
+add_test(NAME kf2_adaptive_toggle_save_failure_test
+    COMMAND kf2_application_lifecycle_test --adaptive-toggle-save-failure)
+set_tests_properties(kf2_adaptive_toggle_save_failure_test PROPERTIES TIMEOUT 15)
 
 add_executable(kf2_state_environment_test
     windows/state_environment_test.cpp
@@ -546,6 +599,7 @@ add_executable(kf2_direct2d_renderer_test
 )
 target_include_directories(kf2_direct2d_renderer_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_direct2d_renderer_test PRIVATE
+    KF2_DIRECT2D_RENDERER_TESTING
     KF2_GUI_TEST_ROOT=L"${PROJECT_SOURCE_DIR}/out/tests/gui"
 )
 target_link_libraries(kf2_direct2d_renderer_test PRIVATE
@@ -699,6 +753,7 @@ add_executable(kf2_config_apply_test
 target_include_directories(kf2_config_apply_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_config_apply_test PRIVATE
     KF2_CONFIG_APPLY_TESTING
+    KF2_ATOMIC_FILE_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/config-apply"
 )
 target_link_libraries(kf2_config_apply_test PRIVATE bcrypt)
@@ -799,6 +854,8 @@ target_include_directories(kf2_adaptive_quality_response_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/src")
 add_test(NAME kf2_adaptive_quality_response_test
     COMMAND kf2_adaptive_quality_response_test)
+add_test(NAME kf2_present_loss_recovery_test
+    COMMAND kf2_adaptive_quality_response_test --present-loss-recovery)
 
 add_executable(kf2_telemetry_presentation_stage_test
     unit/telemetry_presentation_stage_test.cpp
@@ -832,6 +889,11 @@ set_tests_properties(kf2_telemetry_pipeline_boundary_test PROPERTIES
 add_test(NAME kf2_telemetry_build_binding_test
     COMMAND "${CMAKE_COMMAND}"
         "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+        "-DTEST_BINARY_ROOT=${CMAKE_CURRENT_BINARY_DIR}"
+        "-DTEST_ROOT=${KF2_TEST_SANDBOX_ROOT}/telemetry-build-binding"
+        "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+        "-DTEST_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+        "-DTEST_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/architecture/telemetry_build_binding_test.cmake")
 set_tests_properties(kf2_telemetry_build_binding_test PROPERTIES
     LABELS "architecture;telemetry")
@@ -839,6 +901,10 @@ set_tests_properties(kf2_telemetry_build_binding_test PROPERTIES
 add_test(NAME kf2_contributor_package_flow_test
     COMMAND "${CMAKE_COMMAND}"
         "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+        "-DTEST_EXECUTABLE=$<TARGET_FILE:KF2Optimizer>"
+        "-DTEST_BINARY_ROOT=${CMAKE_BINARY_DIR}"
+        "-DTEST_POWERSHELL=${KF2_POWERSHELL_EXECUTABLE}"
+        "-DEXPECTED_BUILD_IDENTITY=${KF2_VERSION}+${KF2_BUILD_COMMIT} (${KF2_BUILD_CHANNEL})"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/architecture/contributor_package_flow_test.cmake")
 set_tests_properties(kf2_contributor_package_flow_test PROPERTIES
     LABELS "architecture;packaging")
@@ -854,7 +920,7 @@ add_executable(kf2_game_session_test
     windows/game_session_test.cpp
 )
 target_include_directories(kf2_game_session_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
-target_link_libraries(kf2_game_session_test PRIVATE user32 dwmapi)
+target_link_libraries(kf2_game_session_test PRIVATE user32 dwmapi advapi32)
 add_test(NAME kf2_game_session_test COMMAND kf2_game_session_test)
 
 add_executable(kf2_startup_prewarmer_test
@@ -872,7 +938,7 @@ add_executable(kf2_system_metrics_test
     windows/system_metrics_test.cpp
 )
 target_include_directories(kf2_system_metrics_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
-target_link_libraries(kf2_system_metrics_test PRIVATE psapi dwmapi)
+target_link_libraries(kf2_system_metrics_test PRIVATE psapi dwmapi advapi32)
 add_test(NAME kf2_system_metrics_test COMMAND kf2_system_metrics_test)
 
 add_executable(kf2_hardware_overview_contract_test
@@ -900,6 +966,9 @@ target_include_directories(kf2_present_source_test PRIVATE "${PROJECT_SOURCE_DIR
 target_compile_definitions(kf2_present_source_test PRIVATE
     KF2_PRESENT_SOURCE_TESTING)
 add_test(NAME kf2_present_source_test COMMAND kf2_present_source_test)
+add_test(NAME kf2_present_source_shutdown_test
+    COMMAND kf2_present_source_test --shutdown-before-wait)
+set_tests_properties(kf2_present_source_shutdown_test PROPERTIES TIMEOUT 5)
 
 add_executable(kf2_dxgi_frame_timing_session_test
     windows/dxgi_frame_timing_session_test.cpp
@@ -946,11 +1015,13 @@ add_test(NAME kf2_overlay_position_contract_test
 
 add_executable(kf2_overlay_window_test
     windows/overlay_window_test.cpp
+    windows/overlay_resources_test.rc
 )
 target_include_directories(kf2_overlay_window_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_include_directories(kf2_overlay_window_test PRIVATE
     "${PROJECT_SOURCE_DIR}/src/overlay")
 target_compile_definitions(kf2_overlay_window_test PRIVATE
+    KF2_OVERLAY_TEST_PNG_PATH="${PROJECT_SOURCE_DIR}/assets/mascot/generated/premium_mutant_low_idle_sheet.png"
     KF2_MASCOT_ANIMATION_ASSET_PATH=L"${PROJECT_SOURCE_DIR}/assets/mascot/premium_mascot.kfanim")
 target_link_libraries(kf2_overlay_window_test PRIVATE user32 gdi32 d2d1 dwrite)
 add_test(NAME kf2_overlay_window_test COMMAND kf2_overlay_window_test)
@@ -969,15 +1040,6 @@ target_include_directories(kf2_startup_gpu_profile_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_startup_gpu_profile_test
     COMMAND kf2_startup_gpu_profile_test)
-
-add_executable(kf2_adaptive_profile_test
-    unit/adaptive_profile_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/optimizer/adaptive_profile.cpp"
-)
-target_include_directories(kf2_adaptive_profile_test PRIVATE
-    "${PROJECT_SOURCE_DIR}/include")
-target_link_libraries(kf2_adaptive_profile_test PRIVATE user32)
-add_test(NAME kf2_adaptive_profile_test COMMAND kf2_adaptive_profile_test)
 
 add_executable(kf2_adaptive_registry_test
     unit/adaptive_registry_test.cpp
@@ -1045,7 +1107,6 @@ set(KF2_FOUNDATION_TEST_TARGETS
     kf2_adaptive_quality_response_test
     kf2_optimizer_engine_test
     kf2_startup_gpu_profile_test
-    kf2_adaptive_profile_test
     kf2_adaptive_registry_test
     kf2_adaptive_locks_test
     kf2_adaptive_governor_test
@@ -1056,7 +1117,6 @@ endforeach()
 
 set(KF2_CONFIG_CORE_TEST_TARGETS
     kf2_adaptive_locks_test
-    kf2_adaptive_profile_test
     kf2_application_lifecycle_test
     kf2_backup_restore_test
     kf2_config_apply_test

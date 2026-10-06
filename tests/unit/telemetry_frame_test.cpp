@@ -167,6 +167,17 @@ int main() {
           input.adapter_gpu->adapter_local_usage_bytes);
     CHECK(frame.evidence.adapter_vram_budget_bytes ==
           input.adapter_gpu->adapter_local_budget_bytes);
+    auto process_memory_only = complete_input();
+    process_memory_only.adapter_gpu->adapter_local_usage_bytes.reset();
+    process_memory_only.adapter_gpu->adapter_local_budget_bytes.reset();
+    const auto process_memory_frame = build_telemetry_frame(process_memory_only);
+    CHECK(process_memory_frame.has_value());
+    CHECK(!process_memory_frame.value().evidence.adapter_vram_used_bytes);
+    CHECK(!process_memory_frame.value().evidence.adapter_vram_budget_bytes);
+    CHECK(process_memory_frame.value().evidence.dedicated_vram_bytes ==
+          process_memory_only.adapter_gpu->dedicated_bytes);
+    CHECK(process_memory_frame.value().evidence.dedicated_vram_budget_bytes ==
+          process_memory_only.adapter_vram_budget_bytes);
     CHECK(frame.evidence.system_ram_budget_bytes ==
           input.system_memory->total_physical_bytes);
     CHECK(frame.evidence.system_ram_used_bytes.has_value());

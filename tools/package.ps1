@@ -45,6 +45,28 @@ $knownManagedPaths = [Collections.Generic.HashSet[string]]::new(
     'Data/package-manifest.json'
 ) | ForEach-Object { [void]$knownManagedPaths.Add($_) }
 
+function Assert-PackagePathsNoReparsePoint([string] $Root, [string[]] $ManagedPaths) {
+    $checkedPaths = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($relative in @('') + $ManagedPaths) {
+        $path = if ($relative) { Join-Path $Root $relative } else { $Root }
+        $path = [IO.Path]::GetFullPath($path)
+        while ($path -and $checkedPaths.Add($path)) {
+            $attributes = [IO.FileAttributes]::Normal
+            try { $attributes = [IO.File]::GetAttributes($path) }
+            catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
+                # Missing outputs are safe to create; other metadata failures propagate.
+            }
+            if ($attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Package destination contains a reparse point: $path"
+            }
+            $path = [IO.Path]::GetDirectoryName($path)
+        }
+    }
+}
+
+Assert-PackagePathsNoReparsePoint $destinationRoot @($knownManagedPaths)
+
 $telemetryModule = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerTelemetry.u'
 $telemetryFingerprintScript = Join-Path $PSScriptRoot `
@@ -112,6 +134,32 @@ if ($executableText.IndexOf(
         $actualTelemetryHash, [StringComparison]::Ordinal) -lt 0) {
     throw 'Release executable is not bound to the exact locally compiled telemetry module; rebuild without -SkipBuild'
 }
+$commit = (& git -C $projectRoot rev-parse --short=12 HEAD 2>$null)
+if (-not $commit) { throw 'Package source revision is unavailable' }
+$workingTreeChanges = @(& git -C $projectRoot status --porcelain `
+    --untracked-files=normal 2>$null)
+if ($LASTEXITCODE -ne 0) { throw 'Package source state is unavailable' }
+if ($workingTreeChanges.Count -ne 0) { $commit = "$commit.dirty" }
+$executableIdentity = & (Join-Path $PSScriptRoot 'get_executable_build_identity.ps1') `
+    -Executable $source
+if ($executableIdentity.source_identity -cne $commit -or
+    $executableIdentity.version -cne '0.0.4-alpha' -or
+    $executableIdentity.channel -cne 'release') {
+    throw 'Release executable source identity does not match the package; rebuild without -SkipBuild'
+}
+$forwarder = Join-Path $projectRoot 'out\build\windows-x64-release\flexRelease_x64.forwarder-lab.dll'
+if (-not (Test-Path -LiteralPath $forwarder -PathType Leaf)) {
+    throw "Offline FleX laboratory forwarder is missing: $forwarder"
+}
+# The exporter is excluded from normal app builds; refresh it even with SkipBuild.
+& cmake --build (Join-Path $projectRoot 'out\build\windows-x64-release') `
+    --config Release --target KF2InventoryExport
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$inventoryExporter = Join-Path $projectRoot `
+    'out\build\windows-x64-release\Release\KF2InventoryExport.exe'
+if (-not (Test-Path -LiteralPath $inventoryExporter -PathType Leaf)) {
+    throw 'Issue 72 inventory exporter is missing'
+}
 if (-not (Test-Path -LiteralPath $destinationRoot)) {
     New-Item -ItemType Directory -Path $destinationRoot | Out-Null
 }
@@ -127,6 +175,8 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
         throw 'Existing package manifest has an unsupported schema'
     }
     $destinationPrefix = $destinationRoot.TrimEnd('\') + '\'
+    $previousManagedFiles = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
     foreach ($relative in @($previousManifest.managed_files)) {
         if ($relative -isnot [string] -or [string]::IsNullOrWhiteSpace($relative) -or
             $relative.Contains(':') -or $relative.Contains('..') -or
@@ -141,6 +191,9 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
                 [StringComparison]::OrdinalIgnoreCase)) {
             throw "Existing package manifest escapes the package root: $relative"
         }
+        [void]$previousManagedFiles.Add($managed)
+    }
+    foreach ($managed in $previousManagedFiles) {
         if (Test-Path -LiteralPath $managed -PathType Leaf) {
             Remove-Item -LiteralPath $managed -Force
         }
@@ -151,10 +204,6 @@ if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
 Copy-Item -LiteralPath $source -Destination (Join-Path $destinationRoot 'KF2Optimizer.exe')
 $labDirectory = Join-Path $destinationRoot 'Data\Lab'
 New-Item -ItemType Directory -Path $labDirectory -Force | Out-Null
-$forwarder = Join-Path $projectRoot 'out\build\windows-x64-release\flexRelease_x64.forwarder-lab.dll'
-if (-not (Test-Path -LiteralPath $forwarder -PathType Leaf)) {
-    throw "Offline FleX laboratory forwarder is missing: $forwarder"
-}
 Copy-Item -LiteralPath $forwarder -Destination (Join-Path $labDirectory 'flexRelease_x64.forwarder-lab.dll') -Force
 Copy-Item -LiteralPath $telemetryModule -Destination `
     (Join-Path $labDirectory 'KF2OptimizerTelemetry.u') -Force
@@ -182,21 +231,6 @@ $projectLicenseSource = Join-Path $projectRoot 'LICENSE'
 Copy-Item -LiteralPath $projectLicenseSource -Destination `
     (Join-Path $documentationDirectory 'LICENSE') -Force
 
-if (-not $SkipBuild) {
-    & cmake --build (Join-Path $projectRoot 'out\build\windows-x64-release') `
-        --config Release --target KF2InventoryExport
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-}
-$inventoryExporter = Join-Path $projectRoot `
-    'out\build\windows-x64-release\Release\KF2InventoryExport.exe'
-if (-not (Test-Path -LiteralPath $inventoryExporter -PathType Leaf)) {
-    throw 'Issue 72 inventory exporter is missing'
-}
-$commit = (& git -C $projectRoot rev-parse --short=12 HEAD 2>$null)
-if (-not $commit) { $commit = 'unknown' }
-$workingTreeChanges = @(& git -C $projectRoot status --porcelain `
-    --untracked-files=normal 2>$null)
-if ($workingTreeChanges.Count -ne 0) { $commit = "$commit.dirty" }
 $inventoryJson = Join-Path $documentationDirectory `
     'issue72-feature-inventory.json'
 & $inventoryExporter $inventoryJson "0.0.4-alpha+$commit (release)"
@@ -239,13 +273,10 @@ $integrityLines | Set-Content -LiteralPath $integrityPath -Encoding ascii
 
 $payloadFiles = @($integrityPayloadFiles) + 'Data/package-integrity.ini'
 $managedFiles = @($payloadFiles) + 'Data/package-manifest.json'
-$payloadHashes = @($payloadFiles | ForEach-Object {
-    $payloadPath = Join-Path $destinationRoot $_
-    [ordered]@{
-        path = $_
-        sha256 = (Get-FileHash -LiteralPath $payloadPath -Algorithm SHA256).Hash
-    }
-})
+$payloadHashes = @($integrityHashes) + [ordered]@{
+    path = 'Data/package-integrity.ini'
+    sha256 = (Get-FileHash -LiteralPath $integrityPath -Algorithm SHA256).Hash
+}
 $packageManifest = [ordered]@{
     schema_version = 2
     product = 'KF2 Optimizer Next'

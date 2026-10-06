@@ -1,3 +1,4 @@
+#include <array>
 #include <cstdlib>
 #include <chrono>
 #include <iostream>
@@ -14,6 +15,13 @@
 namespace {
 
 using namespace kf2::optimizer;
+
+template <typename T>
+concept HasLegacyProfileOutput = requires(T decision) {
+    decision.recommended_profile;
+};
+static_assert(!HasLegacyProfileOutput<AdaptiveDecision>,
+    "Adaptive decisions must not calculate unused profile output");
 
 bool near(double left, double right) {
     return std::abs(left - right) < 0.0001;
@@ -170,8 +178,6 @@ int main() {
         start, 1'000'000'000ULL);
     CHECK(stronger_quality_decision.state ==
           AdaptiveControllerState::intervention);
-    CHECK(stronger_quality_decision.recommended_profile ==
-          Profile::high_performance);
 
     AdaptiveGovernor warning_governor;
     const auto warning = drive(
@@ -243,7 +249,6 @@ int main() {
         start, 4'400'000'000ULL);
     CHECK(persistent_low.state == AdaptiveControllerState::intervention);
     CHECK(persistent_low.current_frame_pressure);
-    CHECK(persistent_low.recommended_profile == Profile::high_performance);
 
     // Characterize the post-map sample that previously triggered a needless
     // 100 -> 80 quality cycle. The governor must still report its frame
@@ -480,12 +485,96 @@ int main() {
     CHECK(recovery.quality_recovery_eligible);
     CHECK(recovery.reason ==
           "stable_headroom_slow_quality_recovery_eligible");
+
+    // Disabling automatic recovery holds quality even with confirmed reserve,
+    // including when the controller was already eligible before the change.
+    auto recovery_disabled = adaptive;
+    recovery_disabled.quality_recovery_enabled = false;
+    AdaptiveGovernor disabled_recovery_governor;
+    const auto disabled_recovery = drive(
+        disabled_recovery_governor, recovery_disabled, recovery_sample,
+        start, 6'200'000'000ULL);
+    CHECK(disabled_recovery.state == AdaptiveControllerState::stable);
+    CHECK(disabled_recovery.resources.recovery_safe);
+    CHECK(!disabled_recovery.quality_recovery_eligible);
+    CHECK(disabled_recovery.stability_state == AdaptiveStabilityState::stable);
+    CHECK(disabled_recovery.reason == "stable_or_reserve_insufficient_hold");
+    recovery_sample.timestamp_ns = start + 6'400'000'000ULL;
+    const auto switched_off = recovery_governor.evaluate(
+        recovery_disabled, recovery_sample, recovery_sample.timestamp_ns);
+    CHECK(!switched_off.quality_recovery_eligible);
+    CHECK(switched_off.stability_state == AdaptiveStabilityState::stable);
+    recovery_sample.timestamp_ns += 200'000'000ULL;
+    CHECK(recovery_governor.evaluate(
+        adaptive, recovery_sample, recovery_sample.timestamp_ns)
+        .quality_recovery_eligible);
+
+    // This preference must not suppress correction under actual pressure.
+    AdaptiveGovernor disabled_recovery_pressure_governor;
+    AdaptiveGovernor enabled_recovery_pressure_governor;
+    const auto pressured = sample(start, 30.0, 33.33, 42.0, 35.0, 98.0);
+    const auto disabled_pressure = drive(disabled_recovery_pressure_governor,
+        recovery_disabled, pressured, start, 1'000'000'000ULL);
+    const auto enabled_pressure = drive(enabled_recovery_pressure_governor,
+        adaptive, pressured, start, 1'000'000'000ULL);
+    CHECK(disabled_pressure.state == AdaptiveControllerState::emergency);
+    CHECK(disabled_pressure.state == enabled_pressure.state);
+    CHECK(disabled_pressure.disposition == enabled_pressure.disposition);
+    CHECK(disabled_pressure.selected_setting == enabled_pressure.selected_setting);
+    CHECK(disabled_pressure.proposed_value == enabled_pressure.proposed_value);
+
     recovery_governor.reset();
     recovery_sample.timestamp_ns = start + 7'000'000'000ULL;
     const auto recovery_after_reset = recovery_governor.evaluate(
         adaptive, recovery_sample, recovery_sample.timestamp_ns);
     CHECK(recovery_after_reset.state == AdaptiveControllerState::observing);
     CHECK(!recovery_after_reset.quality_recovery_eligible);
+
+    auto unknown_memory = recovery_sample;
+    unknown_memory.process_gpu_percent.reset();
+    unknown_memory.gpu_percent.reset();
+    unknown_memory.vram_used_bytes.reset();
+    unknown_memory.vram_budget_bytes.reset();
+    unknown_memory.ram_used_bytes.reset();
+    unknown_memory.ram_budget_bytes.reset();
+    constexpr std::array partial_memory_fields{
+        &AdaptiveSample::vram_used_bytes, &AdaptiveSample::vram_budget_bytes,
+        &AdaptiveSample::ram_used_bytes, &AdaptiveSample::ram_budget_bytes,
+        &AdaptiveSample::commit_used_bytes, &AdaptiveSample::commit_budget_bytes,
+        &AdaptiveSample::process_private_bytes,
+    };
+    for (const auto field : partial_memory_fields) {
+        AdaptiveGovernor partial_memory_governor;
+        auto partial = unknown_memory;
+        partial.*field = 2.0 * 1024.0 * 1024.0 * 1024.0;
+        const auto blocked = drive(
+            partial_memory_governor, adaptive, partial,
+            start, 6'200'000'000ULL);
+        CHECK(blocked.state == AdaptiveControllerState::stable);
+        CHECK(!blocked.resources.recovery_safe);
+        CHECK(!blocked.quality_recovery_eligible);
+        CHECK(blocked.stability_state != AdaptiveStabilityState::recovering);
+
+        // A complete healthy tuple restores eligibility without needing a
+        // Governor reset or GPU-specific counters.
+        partial.vram_used_bytes = recovery_sample.vram_used_bytes;
+        partial.vram_budget_bytes = recovery_sample.vram_budget_bytes;
+        const auto confirmed = drive(
+            partial_memory_governor, adaptive, partial,
+            start + 6'400'000'000ULL, 6'200'000'000ULL);
+        CHECK(confirmed.resources.recovery_safe);
+        CHECK(confirmed.quality_recovery_eligible);
+    }
+    AdaptiveGovernor invalid_budget_governor;
+    auto invalid_budget = unknown_memory;
+    invalid_budget.vram_used_bytes = 0.0;
+    invalid_budget.vram_budget_bytes =
+        std::numeric_limits<double>::quiet_NaN();
+    const auto invalid_memory = drive(
+        invalid_budget_governor, adaptive, invalid_budget,
+        start, 6'200'000'000ULL);
+    CHECK(!invalid_memory.resources.recovery_safe);
+    CHECK(!invalid_memory.quality_recovery_eligible);
 
     AdaptiveGovernor gpu_governor;
     const auto gpu = drive(
@@ -1069,6 +1158,102 @@ int main() {
           AdaptiveControllerState::observing);
     CHECK(discontinuity_decision.reason ==
           "telemetry_transition_stabilization_hold");
+
+    // Re-publishing an asynchronous frame window is not another observation.
+    // Changing resource readbacks while no new frame exists must not smooth
+    // those values or add prediction/history confirmation.
+    AdaptiveGovernor unique_observations;
+    AdaptiveGovernor repeated_observations;
+    auto observation = sample(start, 50.0, 20.0, 24.0, 40.0, 80.0);
+    static_cast<void>(unique_observations.evaluate(adaptive, observation, start));
+    static_cast<void>(repeated_observations.evaluate(adaptive, observation, start));
+    auto repeated_observation = observation;
+    repeated_observation.cpu_percent = 99.0;
+    repeated_observation.gpu_percent = 99.0;
+    repeated_observation.process_gpu_percent = 99.0;
+    for (std::uint64_t repeat = 1; repeat <= 15; ++repeat) {
+        const auto duplicate = repeated_observations.evaluate(
+            adaptive, repeated_observation, start + repeat * 100'000'000ULL);
+        CHECK(duplicate.disposition == AdaptiveDisposition::hold);
+        CHECK(duplicate.reason == "duplicate_frame_observation_hold");
+        CHECK(duplicate.data.quality == AdaptiveDataQuality::degraded);
+        CHECK(duplicate.prediction_confidence == 0.0);
+    }
+    observation.timestamp_ns += 1'600'000'000ULL;
+    const auto unique_result = unique_observations.evaluate(
+        adaptive, observation, observation.timestamp_ns);
+    const auto repeated_result = repeated_observations.evaluate(
+        adaptive, observation, observation.timestamp_ns);
+    CHECK(unique_result.state == repeated_result.state);
+    CHECK(unique_result.disposition == repeated_result.disposition);
+    CHECK(unique_result.predicted_frame_time_ms ==
+          repeated_result.predicted_frame_time_ms);
+    CHECK(unique_result.prediction_confidence ==
+          repeated_result.prediction_confidence);
+    CHECK(unique_result.resources.total == repeated_result.resources.total);
+    CHECK(unique_result.resources.gpu.smoothed ==
+          repeated_result.resources.gpu.smoothed);
+
+    // A late result cannot move observation history backwards. After the
+    // freshness deadline a no-Present stall holds without inventing pressure;
+    // the next real observation is accepted normally.
+    auto delayed_observation = observation;
+    delayed_observation.timestamp_ns -= 100'000'000ULL;
+    CHECK(repeated_observations.evaluate(adaptive, delayed_observation,
+        observation.timestamp_ns).reason == "duplicate_frame_observation_hold");
+    const auto stalled = repeated_observations.evaluate(adaptive, observation,
+        observation.timestamp_ns + adaptive.freshness_limit_ns + 1);
+    CHECK(stalled.reason == "stale_telemetry");
+    CHECK(stalled.disposition == AdaptiveDisposition::hold);
+    CHECK(stalled.data.quality == AdaptiveDataQuality::not_available);
+    observation.timestamp_ns += adaptive.freshness_limit_ns + 2;
+    CHECK(repeated_observations.evaluate(adaptive, observation,
+        observation.timestamp_ns).reason != "duplicate_frame_observation_hold");
+
+    // Process/session/map/drain/swapchain epochs reset duplicate ownership,
+    // even when the first timestamp happens to equal the preceding epoch.
+    for (int boundary_kind = 0; boundary_kind < 7; ++boundary_kind) {
+        AdaptiveGovernor epoch_governor;
+        auto epoch = sample(start, 50.0, 20.0, 24.0, 40.0, 80.0);
+        static_cast<void>(epoch_governor.evaluate(adaptive, epoch, start));
+        switch (boundary_kind) {
+            case 0: ++epoch.pid; break;
+            case 1: ++epoch.process_start_id; break;
+            case 2: ++epoch.session_generation; break;
+            case 3: ++epoch.map_generation; break;
+            case 4: ++epoch.frame_generation; break;
+            case 5: ++epoch.frame_stream_id; break;
+            case 6: epoch.discontinuity = true; break;
+        }
+        CHECK(epoch_governor.evaluate(adaptive, epoch, start + 200'000'000ULL).
+              reason != "duplicate_frame_observation_hold");
+        epoch.discontinuity = false;
+        epoch.timestamp_ns += 3'200'000'000ULL;
+        CHECK(epoch_governor.evaluate(adaptive, epoch, epoch.timestamp_ns).
+              reason != "duplicate_frame_observation_hold");
+        CHECK(epoch_governor.evaluate(adaptive, epoch, epoch.timestamp_ns + 1).
+              reason == "duplicate_frame_observation_hold");
+    }
+
+    AdaptiveGovernor flagged_governor;
+    auto flagged = sample(start, 50.0, 20.0, 24.0, 40.0, 80.0);
+    static_cast<void>(flagged_governor.evaluate(adaptive, flagged, start));
+    flagged.timestamp_ns += 200'000'000ULL;
+    flagged.duplicate_sample = true;
+    CHECK(flagged_governor.evaluate(adaptive, flagged, flagged.timestamp_ns).
+          reason == "duplicate_frame_observation_hold");
+    flagged.duplicate_sample = false;
+    CHECK(flagged_governor.evaluate(adaptive, flagged, flagged.timestamp_ns).
+          reason != "duplicate_frame_observation_hold");
+    flagged_governor.reset();
+    CHECK(flagged_governor.evaluate(adaptive, flagged, flagged.timestamp_ns).
+          reason != "duplicate_frame_observation_hold");
+    flagged_governor.notify_quality_applied(flagged.timestamp_ns + 1);
+    CHECK(flagged_governor.evaluate(adaptive, flagged, flagged.timestamp_ns + 1).
+          reason == "quality_applied_waiting_for_fresh_frame");
+    flagged.timestamp_ns += 2;
+    CHECK(flagged_governor.evaluate(adaptive, flagged, flagged.timestamp_ns).
+          reason != "duplicate_frame_observation_hold");
 
     // The same recorded trace must yield the same decisions. This is the
     // offline replay contract used to regression-test the controller without

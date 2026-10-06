@@ -24,6 +24,7 @@ struct ShellControllerCallbacks {
     std::function<void(std::string_view)> activate_action;
     std::function<void(std::string_view, int)> set_slider_value;
     std::function<void()> request_close;
+    std::function<bool()> can_close;
     std::function<void()> theme_changed;
 };
 
@@ -37,6 +38,7 @@ public:
     void on_key(platform::windows::KeyEvent event) override;
     void on_pointer(platform::windows::PointerEvent event) override;
     void on_theme_changed(platform::windows::ThemeChangedEvent event) override;
+    void on_visibility_changed(bool visible) override;
     [[nodiscard]] bool on_close() override;
     LRESULT on_get_object(WPARAM wparam, LPARAM lparam) override;
     void on_timer(UINT_PTR timer_id = kAnimationTimerId) override;
@@ -99,6 +101,7 @@ private:
     float exit_progress_{0.0F};
     bool closing_{false};
     bool close_ready_{false};
+    bool presentation_visible_{true};
     std::optional<std::string> pressed_node_id_;
     std::optional<std::string> dragged_slider_id_;
     std::optional<int> dragged_slider_value_;

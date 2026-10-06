@@ -11,6 +11,7 @@ namespace {
 
 #if defined(KF2_APPLICATION_LAUNCH_TESTING)
 void (*launch_change_probe)(config::SettingId, std::size_t){};
+void (*protected_launch_probe)(UiRuntime&, ProtectedLaunchPreparationStage){};
 #endif
 
 void upsert_startup_change(
@@ -56,6 +57,11 @@ std::optional<std::wstring_view> persisted_physical_gpu_key(
 void set_launch_change_probe_for_testing(
     void (*probe)(config::SettingId, std::size_t)) noexcept {
     launch_change_probe = probe;
+}
+
+void set_protected_launch_probe_for_testing(
+    void (*probe)(UiRuntime&, ProtectedLaunchPreparationStage)) noexcept {
+    protected_launch_probe = probe;
 }
 #endif
 
@@ -314,7 +320,7 @@ Result<game::FrameRateCapResult> UiRuntime::synchronize_frame_rate_cap() {
             {ErrorCode::not_found, L"Game not detected", 0});
     }
     return game::persist_frame_rate_cap(
-        *installation, optimizer_settings.target_fps);
+        *installation, optimizer_settings.target_fps, settings_path.parent_path());
 }
 
 Result<bool> UiRuntime::apply_overlay_compatible_display_mode() {
@@ -429,17 +435,45 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities(
     return Result<bool>::success(true);
 }
 
+Result<bool> UiRuntime::revalidate_game_installation() {
+    if (!installation) {
+        return Result<bool>::failure({ErrorCode::not_found,
+            L"A verified KF2 installation is unavailable", 0});
+    }
+    const auto current = game::verify_game_executable_identity(*installation);
+    if (current.has_value()) return current;
+    if (!discovery_input) return Result<bool>::failure(current.error());
+
+    // Revalidate the selected installation, not another Steam library. Keep
+    // the previous paths and protected snapshot available for restoration if
+    // an update is incomplete or its replacement executable is invalid.
+    auto refreshed = game::validate_game_candidate(
+        installation->install_root, installation->config_root,
+        discovery_input->allowed_config_parent, installation->source);
+    if (!refreshed.has_value()) return Result<bool>::failure(refreshed.error());
+    refreshed.value().duplicate_candidates_ignored =
+        installation->duplicate_candidates_ignored;
+    installation = std::move(refreshed.value());
+    events->append({0, diagnostics::Severity::info,
+        "GAME_EXECUTABLE_REVALIDATED",
+        L"The changed KF2 executable passed installation validation before protected integration resumed",
+        L"discovery"});
+    return Result<bool>::success(true);
+}
+
 Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
     if (start_mode != StartMode::normal || !installation) {
         return Result<bool>::success(false);
     }
+    const auto verified = revalidate_game_installation();
+    if (!verified.has_value()) return verified;
     if (session_config_snapshot) {
         return Result<bool>::success(
             session_config_waiting_for_launch &&
             session_config_launch_deadline_ns == 0);
     }
-    if (game::find_running_game_process(
-            installation->executable).has_value()) {
+    if (game::game_process_may_be_running(
+            installation->executable)) {
         events->append({0, diagnostics::Severity::warning,
             "ADAPTIVE_EXTERNAL_LAUNCH_TOO_LATE",
             L"KF2 was already running before the protected Adaptive runtime capabilities could be prepared; the native FPS cap remains independent and uses the saved value after restart",
@@ -458,13 +492,26 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
         L"The exact pre-game KF2 INI state was captured before automatic external-launch preparation",
         L"config"});
 
+    const auto fail_preparation = [this](const Error& error,
+                                        std::wstring_view reason) {
+        if (restore_protected_session_config(reason)) {
+            return Result<bool>::failure(error);
+        }
+        model.set_recovery_required(true);
+        return Result<bool>::failure({ErrorCode::recovery_required,
+            error.message + L"; protected launch rollback could not be confirmed",
+            error.native_code});
+    };
+
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+    if (protected_launch_probe) protected_launch_probe(
+        *this, ProtectedLaunchPreparationStage::captured_settings);
+#endif
     const auto captured_values = config::read_catalog_values(
         session_config_snapshot->snapshot_root / L"files");
     if (!captured_values.has_value()) {
-        const auto error = captured_values.error();
-        static_cast<void>(restore_protected_session_config(
-            L"The captured FleX setting could not be verified"));
-        return Result<bool>::failure(error);
+        return fail_preparation(captured_values.error(),
+            L"The captured FleX setting could not be verified");
     }
     const auto physx = captured_values.value().find(
         config::SettingId::physx_level);
@@ -472,37 +519,41 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
         physx == captured_values.value().end()
             ? nullptr : std::get_if<int>(&physx->second);
     if (!configured_physx_level) {
-        static_cast<void>(restore_protected_session_config(
-            L"The captured FleX setting was unavailable"));
-        return Result<bool>::failure({
+        return fail_preparation({
             ErrorCode::stale_data,
             L"The user's captured KF2 FleX setting could not be verified",
-            0});
+            0}, L"The captured FleX setting was unavailable");
     }
     const bool fixed_flex_launch = should_prepare_fixed_flex_runtime(
         start_mode, *configured_physx_level);
 
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+    if (protected_launch_probe) protected_launch_probe(
+        *this, ProtectedLaunchPreparationStage::launch_profile);
+#endif
     const auto applied = apply_adaptive_launch_profile(fixed_flex_launch);
     if (!applied.has_value()) {
-        const auto error = applied.error();
-        static_cast<void>(restore_protected_session_config(
-            L"Automatic external-launch preparation failed"));
-        return Result<bool>::failure(error);
+        return fail_preparation(applied.error(),
+            L"Automatic external-launch preparation failed");
     }
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+    if (protected_launch_probe) protected_launch_probe(
+        *this, ProtectedLaunchPreparationStage::overlay_display);
+#endif
     const auto overlay_display = apply_overlay_compatible_display_mode();
     if (!overlay_display.has_value()) {
-        const auto error = overlay_display.error();
-        static_cast<void>(restore_protected_session_config(
-            L"Overlay-compatible fullscreen preparation failed"));
-        return Result<bool>::failure(error);
+        return fail_preparation(overlay_display.error(),
+            L"Overlay-compatible fullscreen preparation failed");
     }
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+    if (protected_launch_probe) protected_launch_probe(
+        *this, ProtectedLaunchPreparationStage::capabilities);
+#endif
     const auto capabilities =
         prepare_automatic_protected_launch_capabilities(fixed_flex_launch);
     if (!capabilities.has_value()) {
-        const auto error = capabilities.error();
-        static_cast<void>(restore_protected_session_config(
-            L"Automatic external-launch capability preparation failed"));
-        return Result<bool>::failure(error);
+        return fail_preparation(capabilities.error(),
+            L"Automatic external-launch capability preparation failed");
     }
 
     // A zero deadline deliberately means that the verified runtime

@@ -81,10 +81,10 @@ void ShellController::on_timer(UINT_PTR timer_id) {
         if (callbacks_.tick) callbacks_.tick();
         return;
     }
-    if (timer_id != kAnimationTimerId) return;
+    if (timer_id != kAnimationTimerId || !presentation_visible_) return;
     bool changed = model_.advance_numeric_presentation(theme_.animations_enabled);
     if (changed) {
-        synchronize_model();
+        refresh_numeric_nodes(layout_, model_);
     }
 
     const float previous_startup = startup_progress_;
@@ -315,8 +315,28 @@ void ShellController::on_theme_changed(platform::windows::ThemeChangedEvent even
     if (callbacks_.theme_changed) callbacks_.theme_changed();
 }
 
+void ShellController::on_visibility_changed(bool visible) {
+    if (presentation_visible_ == visible) return;
+    presentation_visible_ = visible;
+    if (!visible && closing_ && !close_ready_) {
+        close_ready_ = true;
+        exit_progress_ = 1.0F;
+        layout_.exit_progress = 1.0F;
+        if (callbacks_.request_close) callbacks_.request_close();
+    }
+    if (callbacks_.repaint) callbacks_.repaint();
+}
+
 bool ShellController::on_close() {
-    if (close_ready_ || !theme_.animations_enabled ||
+    if (callbacks_.can_close && !callbacks_.can_close()) {
+        closing_ = false;
+        close_ready_ = false;
+        exit_progress_ = 0.0F;
+        layout_.exit_progress = 0.0F;
+        if (callbacks_.invalidate) callbacks_.invalidate();
+        return false;
+    }
+    if (close_ready_ || !presentation_visible_ || !theme_.animations_enabled ||
         !callbacks_.request_close) {
         return true;
     }
@@ -332,7 +352,7 @@ const Theme& ShellController::theme() const noexcept { return theme_; }
 float ShellController::dpi() const noexcept { return dpi_; }
 
 bool ShellController::animation_active() const noexcept {
-    if (!theme_.animations_enabled) return false;
+    if (!presentation_visible_ || !theme_.animations_enabled) return false;
     if (startup_progress_ < 1.0F || page_transition_progress_ < 1.0F ||
         navigation_transition_progress_ < 1.0F ||
         update_glow_progress_ < 1.0F ||

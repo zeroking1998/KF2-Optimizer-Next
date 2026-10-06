@@ -34,6 +34,7 @@ enum class StartupPrewarmState {
     skipped_low_memory,
     skipped_no_files,
     failed,
+    incomplete,
 };
 
 struct StartupPrewarmFile {
@@ -103,6 +104,9 @@ private:
 
 #ifdef KF2_STARTUP_PREWARMER_TESTING
 namespace detail {
+using StartupPrewarmPlanHook = void (*)(std::span<const StartupPrewarmFile>);
+void set_startup_prewarm_plan_hook_for_testing(
+    StartupPrewarmPlanHook hook) noexcept;
 void fail_next_startup_prewarm_plan() noexcept;
 void delay_next_startup_prewarm_worker_entry(
     std::chrono::milliseconds delay) noexcept;

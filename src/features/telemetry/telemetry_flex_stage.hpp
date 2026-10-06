@@ -29,13 +29,16 @@ confirmed_flex_readback(
     const optimizer::AdaptiveActionRecord* pending,
     const flex::ObservationSnapshot& observed,
     std::uint64_t now_ns) noexcept {
+    // The producer publishes forwarded values only after native return. A
+    // matching completed value remains valid while the next update is in flight.
     if (!pending ||
         pending->status != optimizer::AdaptiveActionStatus::pending ||
         pending->control != optimizer::AdaptiveControlId::flex_solver_substeps ||
         now_ns == 0 || !std::isfinite(pending->requested_value) ||
         pending->requested_value < 0.0 || pending->requested_value > 5.0 ||
         std::floor(pending->requested_value) != pending->requested_value ||
-        !observed.fresh || !observed.control_fresh) {
+        !observed.fresh || !observed.control_fresh ||
+        !observed.pass_through_healthy || observed.successful_updates == 0) {
         return std::nullopt;
     }
     const int requested = static_cast<int>(pending->requested_value);

@@ -45,6 +45,8 @@ struct GameInstallation {
 
 [[nodiscard]] Result<GameInstallation> discover_game_installation(
     const GameDiscoveryInput& input);
+[[nodiscard]] Result<bool> verify_game_executable_identity(
+    const GameInstallation& installation);
 [[nodiscard]] Result<GameDiscoveryInput> default_game_discovery_input();
 [[nodiscard]] Result<std::vector<std::filesystem::path>>
 parse_steam_library_folders(std::string_view document);

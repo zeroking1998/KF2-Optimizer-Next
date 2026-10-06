@@ -11,6 +11,7 @@
 
 #include "kf2/config/kf2_catalog.hpp"
 #include "kf2/config/setting_catalog.hpp"
+#include "kf2/core/json_escape.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
 #include "kf2/security/sha256.hpp"
 
@@ -42,30 +43,6 @@ std::string utf8(std::wstring_view value) {
         return {};
     }
     return result;
-}
-
-std::string json_escape(std::string_view value) {
-    std::ostringstream output;
-    for (const unsigned char character : value) {
-        switch (character) {
-            case '"': output << "\\\""; break;
-            case '\\': output << "\\\\"; break;
-            case '\b': output << "\\b"; break;
-            case '\f': output << "\\f"; break;
-            case '\n': output << "\\n"; break;
-            case '\r': output << "\\r"; break;
-            case '\t': output << "\\t"; break;
-            default:
-                if (character < 0x20) {
-                    constexpr char digits[] = "0123456789abcdef";
-                    output << "\\u00" << digits[character >> 4]
-                           << digits[character & 0x0f];
-                } else {
-                    output << static_cast<char>(character);
-                }
-        }
-    }
-    return output.str();
 }
 
 Result<std::string> read_bytes(const std::filesystem::path& path) {
@@ -574,6 +551,19 @@ Result<RecoveryResult> recover_transactions(
                             target, current.value(), original.value());
                     if (!restored.has_value()) {
                         return Result<RecoveryResult>::failure(restored.error());
+                    }
+                    const auto readback = read_bytes(target);
+                    if (!readback.has_value()) {
+                        auto recovery_error = readback.error();
+                        recovery_error.code = ErrorCode::recovery_required;
+                        recovery_error.message =
+                            L"Configuration recovery readback failed: " + recovery_error.message;
+                        return Result<RecoveryResult>::failure(std::move(recovery_error));
+                    }
+                    if (readback.value() != original.value()) {
+                        return Result<RecoveryResult>::failure({
+                            ErrorCode::recovery_required,
+                            L"Configuration recovery did not pass exact readback", 0});
                     }
                 }
             }
