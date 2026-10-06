@@ -6604,6 +6604,73 @@ int main(int argc, char** argv) {
         runtime.game_process.reset();
     }
 
+    // Completed diagnostic buffers remain owned after their local streams
+    // disappear. Keep both gates, exact units, missing data and event bounds.
+    {
+        kf2::diagnostics::EventLog events{8};
+        kf2::app::UiRuntime runtime{root / L"Data-adaptive-log-buffers", false,
+            kf2::config::Settings{}, events, std::nullopt,
+            kf2::app::StartMode::read_only, root / L"portable"};
+        runtime.adaptive_runtime_mode_confirmed = true;
+        kf2::telemetry_pipeline::TelemetryFrame frame;
+        frame.active_gameplay = true;
+        frame.identity.process_start_id = 42;
+        frame.observed_at_ns = 10'000'000'000ULL;
+        frame.frames.quality = kf2::telemetry::SampleQuality::good;
+        frame.frames.fps = 119.0;
+        frame.frames.frame_time_ms = 8.5;
+        frame.frames.average_fps = 118.0;
+        frame.frames.p95_ms = 9.5;
+        frame.frames.sustained_one_percent_low_fps = 110.0;
+        frame.frames.one_percent_low_fps = 109.0;
+        frame.frames.stutter_count = 3;
+        replace_frame_gameplay(frame, [](auto& gameplay) { gameplay.map = "KF-Test"; });
+        kf2::optimizer::QualityResponse::Report report{
+            .sequence = 7, .resource = "gpu", .from = 100, .to = 90,
+            .result = "inconclusive:missing_metrics"};
+        report.before.span_ns = 5'000'000'000ULL;
+        report.before.count = 12;
+        report.before.metrics.average_fps = 120.0;
+        report.before.metrics.p95_ms = 9.5;
+        report.before.metrics.one_percent_low_fps = 110.0;
+        for (int gates = 0; gates != 4; ++gates) {
+            events.clear();
+            runtime.optimizer_settings.adaptive_logging = (gates & 1) != 0;
+            runtime.optimizer_settings.debug_runtime_diagnostics = (gates & 2) != 0;
+            runtime.log_adaptive_performance_sample(frame);
+            runtime.log_adaptive_quality_response(report);
+            const auto readings = events.snapshot();
+            CHECK(readings.size() == (gates == 3 ? 2U : 0U));
+            if (gates != 3) continue;
+            CHECK(readings[0].code == "PERFORMANCE_SAMPLE");
+            CHECK(readings[0].source == L"telemetry");
+            CHECK(readings[0].severity == kf2::diagnostics::Severity::info);
+            CHECK(readings[0].message ==
+                L"mode=on; current=119.00 FPS; frame=8.50 ms; avg3s=118.00 FPS; "
+                L"p95=9.50 ms; 1%low3s=110.00 FPS; 1%low10s=109.00 FPS; "
+                L"stutters5s=3; sampleNs=10000000000; processStartId=42; map=KF-Test");
+            CHECK(readings[1].code == "ADAPTIVE_QUALITY_RESPONSE");
+            CHECK(readings[1].source == L"optimizer");
+            CHECK(readings[1].severity == kf2::diagnostics::Severity::info);
+            CHECK(readings[1].message ==
+                L"seq=7; resource=gpu; quality=100->90; result=inconclusive:missing_metrics; "
+                L"nominalWindowMs=5000; settleMs=1000; causalProof=false; "
+                L"beforeSpanMs=5000; beforeFrames=12; beforeAvgFps=120; beforeP95ms=9.5; "
+                L"beforeLowFps=110; afterSpanMs=0; afterFrames=0; afterAvgFps=NOT_AVAILABLE; "
+                L"afterP95ms=NOT_AVAILABLE; afterLowFps=NOT_AVAILABLE");
+        }
+        const auto count = events.snapshot().size();
+        runtime.log_adaptive_performance_sample(frame);
+        runtime.log_adaptive_quality_response(std::nullopt);
+        CHECK(events.snapshot().size() == count);
+        events.clear();
+        report.resource.assign(1500, 'x');
+        runtime.log_adaptive_quality_response(report);
+        const auto bounded = events.snapshot();
+        CHECK(bounded.size() == 1 && bounded[0].message.size() == 1024);
+        CHECK(bounded[0].message.starts_with(L"seq=7; resource="));
+    }
+
     // Direct online travel can recreate the provider while the process and
     // numeric UDP port stay unchanged. The old APPLIED receipt must cease to
     // authorize actions as soon as the new World generation is observed.
