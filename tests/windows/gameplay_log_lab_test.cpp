@@ -3061,6 +3061,23 @@ int main() {
           std::string::npos);
     // Only published metrics and controller inputs justify native awake queries.
     CHECK(telemetry_source.find("CorpseVisibleAwake") == std::string::npos);
+    const auto sample_start = telemetry_source.find("function SampleTelemetry()");
+    const auto sample_end = telemetry_source.find(
+        "function QuiesceForWorldTeardown()", sample_start);
+    CHECK(sample_start != std::string::npos && sample_end != std::string::npos);
+    const auto sample_body = telemetry_source.substr(
+        sample_start, sample_end - sample_start);
+    CHECK(count_occurrences(sample_body, "Corpse.Mesh.RigidBodyIsAwake()") == 1);
+    const auto corpse_total = sample_body.find("++CorpseTotal;");
+    const auto awake_observation = sample_body.find(
+        "bCorpseAwake = Corpse.Physics == PHYS_RigidBody &&\n"
+        "                Corpse.Mesh != None && Corpse.Mesh.RigidBodyIsAwake();");
+    const auto corpse_eligibility = sample_body.find(
+        "if (!Corpse.bDeleteMe && KFPawn_Monster(Corpse) != None &&");
+    CHECK(corpse_total != std::string::npos);
+    CHECK(corpse_eligibility != std::string::npos);
+    CHECK(awake_observation > corpse_total && awake_observation < corpse_eligibility);
+    CHECK(count_occurrences(sample_body, "if (bCorpseAwake)") == 3);
     CHECK(telemetry_source.find(
         "AwakeTotal = AdaptiveCachedAwakeCorpses;") !=
           std::string::npos);

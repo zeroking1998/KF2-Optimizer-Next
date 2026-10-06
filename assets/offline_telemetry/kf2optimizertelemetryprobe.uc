@@ -6278,6 +6278,7 @@ function SampleTelemetry()
     local int CorpseTotal;
     local int CorpseAwake;
     local int CorpseSleeping;
+    local bool bCorpseAwake;
     local int CorpseOther;
     local int CorpseFinalPose;
     local int CorpseRecentlyRendered;
@@ -6575,6 +6576,9 @@ function SampleTelemetry()
                 continue;
             }
             ++CorpseTotal;
+            // One native observation feeds both telemetry and pressure counts.
+            bCorpseAwake = Corpse.Physics == PHYS_RigidBody &&
+                Corpse.Mesh != None && Corpse.Mesh.RigidBodyIsAwake();
             if (bDetailedRuntimeDiagnostics)
             {
                 CollisionProbeCorpse = Corpse;
@@ -6607,14 +6611,12 @@ function SampleTelemetry()
                     WorldInfo.TimeSeconds - 0.3)
                 {
                     ++AdaptiveCachedVisibleCorpses;
-                    if (Corpse.Physics == PHYS_RigidBody &&
-                        Corpse.Mesh.RigidBodyIsAwake())
+                    if (bCorpseAwake)
                     {
                         ++AdaptiveCachedVisibleAwakeCorpses;
                     }
                 }
-                if (Corpse.Physics == PHYS_RigidBody &&
-                    Corpse.Mesh.RigidBodyIsAwake())
+                if (bCorpseAwake)
                 {
                     ++AdaptiveCachedAwakeCorpses;
                 }
@@ -6653,7 +6655,7 @@ function SampleTelemetry()
             {
                 ++CorpseOther;
             }
-            else if (Corpse.Mesh.RigidBodyIsAwake())
+            else if (bCorpseAwake)
             {
                 ++CorpseAwake;
             }

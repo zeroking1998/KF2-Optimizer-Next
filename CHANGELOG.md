@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Reuse one physics awake observation per corpse in each offline telemetry
+  sample, preserving pressure and published counts without a retained cache.
+
 - Let native pawn/weapon iterators filter runtime-guard targets, avoiding script
   casts for unrelated actors without changing repairs or their 50–250 ms cadence.
 
