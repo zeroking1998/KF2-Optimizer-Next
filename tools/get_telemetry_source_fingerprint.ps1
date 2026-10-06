@@ -16,6 +16,8 @@ $sourceNames = @(
     'KF2OptimizerTelemetryInteraction.uc'
     'KF2OptimizerGraphicsViewport.uc'
     'KF2OptimizerGraphicsInteraction.uc'
+    'KF2OptimizerFireAffliction.uc'
+    'KF2OptimizerWeaponFallback.uc'
     'KF2OptimizerOnlineContextInteraction.uc'
     'KF2OptimizerAdaptiveControlListener.uc'
     'KF2OptimizerOnlineCorpseController.uc'

@@ -90,10 +90,10 @@ Later builds reuse the local ignored module as their seed.
 
 The complete package is written to `out/package/KF2OptimizerNext`. The scripts
 bind the application to the newly compiled telemetry hash and refuse to create
-a reduced or mismatched package. A deterministic fingerprint covers all seven
-UnrealScript source files. If any source changes, packaging recompiles the
-telemetry module instead of silently reusing an older local `.u` file. The
-one-click flow also validates every managed file and package hash before
+a reduced or mismatched package. A deterministic fingerprint covers every required
+UnrealScript source, including both runtime guards. If any source changes,
+packaging recompiles the telemetry module instead of silently reusing an older
+local `.u` file. The one-click flow also validates every managed file and package hash before
 reporting success.
 
 The executable carries the same source identity in its Windows version resource
