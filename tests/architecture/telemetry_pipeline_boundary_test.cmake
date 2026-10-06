@@ -181,6 +181,10 @@ reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
     "std::wostringstream prediction"
     "status.adaptive_action = widen("
     "status.adaptive_safety = widen(")
+reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
+    "Completed Adaptive diagnostic buffer transfer"
+    "request_log.str()"
+    "decision_log.str()")
 reject_literals("${stage_root}/telemetry_presentation_stage.cpp"
     "Presentation stage"
     "DxgiFrameTimingSession"

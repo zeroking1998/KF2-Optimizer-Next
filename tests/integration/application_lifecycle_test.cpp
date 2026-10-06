@@ -6571,6 +6571,36 @@ int main(int argc, char** argv) {
         CHECK(!runtime.adaptive_decision.predicted_frame_time_ms);
         CHECK(runtime.model.status().adaptive_prediction == L"not available");
         CHECK(unrelated_status_unchanged());
+
+        // The diagnostic-only buffer transfer retains both gates and an
+        // owned, bounded decision event after the local stream is destroyed.
+        for (int gates = 0; gates != 4; ++gates) {
+            runtime.optimizer_settings.adaptive_logging = (gates & 1) != 0;
+            runtime.optimizer_settings.debug_runtime_diagnostics = (gates & 2) != 0;
+            runtime.last_adaptive_state =
+                kf2::optimizer::AdaptiveControllerState::disabled;
+            transition_events.clear();
+            ++frame.observed_at_ns;
+            runtime.update_adaptive_controller(frame);
+            const auto diagnostic_events = transition_events.snapshot();
+            const auto decision_event = std::find_if(
+                diagnostic_events.begin(), diagnostic_events.end(),
+                [](const auto& event) { return event.code == "ADAPTIVE_DECISION"; });
+            CHECK((decision_event != diagnostic_events.end()) == (gates == 3));
+            if (gates == 3) {
+                CHECK(decision_event->severity == kf2::diagnostics::Severity::info);
+                CHECK(decision_event->source == L"optimizer");
+                CHECK(decision_event->message.starts_with(
+                    L"State=" + runtime.model.status().adaptive_state + L"; target="));
+                CHECK(decision_event->message.find(
+                    L"; current=NOT_AVAILABLE; avg3s=NOT_AVAILABLE; p95=NOT_AVAILABLE") !=
+                    std::wstring::npos);
+                CHECK(decision_event->message.find(L"; GPU=NOT_AVAILABLE") !=
+                    std::wstring::npos);
+                CHECK(decision_event->message.size() == 1024);
+            }
+            CHECK(unrelated_status_unchanged());
+        }
         runtime.game_process.reset();
     }
 
