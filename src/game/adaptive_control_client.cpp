@@ -22,12 +22,12 @@ namespace {
 std::atomic_bool fail_next_dispatch_publication{false};
 #endif
 
-constexpr std::array<std::string_view, 10> kAdaptiveResourceNames{
+constexpr std::array<std::string_view, 11> kAdaptiveResourceNames{
     "cpu", "gpu", "vram", "ram", "overdraw", "effects", "mixed",
-    "recover", "enable", "disable"};
+    "recover", "enable", "disable", "overhead"};
 static_assert(
     kAdaptiveResourceNames.size() ==
-    static_cast<std::size_t>(AdaptiveResourceControl::disable) + 1);
+    static_cast<std::size_t>(AdaptiveResourceControl::overhead) + 1);
 
 class WinsockSession final {
 public:
@@ -169,7 +169,8 @@ int AdaptiveResourceQualityState::control_quality(
             return std::min({cpu, gpu, vram, ram});
         case AdaptiveResourceControl::recover:
         case AdaptiveResourceControl::enable:
-        case AdaptiveResourceControl::disable: return effective_quality();
+        case AdaptiveResourceControl::disable:
+        case AdaptiveResourceControl::overhead: return effective_quality();
     }
     return effective_quality();
 }
@@ -197,6 +198,7 @@ void AdaptiveResourceQualityState::apply(
             break;
         case AdaptiveResourceControl::enable:
         case AdaptiveResourceControl::disable:
+        case AdaptiveResourceControl::overhead:
             break;
     }
 }
@@ -251,6 +253,8 @@ Result<std::string> build_adaptive_control_command(
         request.resource == AdaptiveResourceControl::enable;
     const bool valid_value = mode_enable
         ? request.quality >= 4 && request.quality <= 2000
+        : request.resource == AdaptiveResourceControl::overhead
+            ? request.quality == 100
         : request.quality >= 10 && request.quality <= 100;
     if (request.port == 0 || !valid_adaptive_control_token(request.token) ||
         request.sequence == 0 || !valid_value || request.timeout_ms < 25 ||
@@ -284,8 +288,7 @@ std::optional<AdaptiveControlReceipt> parse_adaptive_control_receipt(
     const auto quality_text = take_token(response);
     if (prefix != "KF2OPT_ACK" ||
         (status != "applied" && status != "restored" &&
-         status != "unknown" && status != "unsupported") ||
-        !response.empty()) {
+         status != "unknown" && status != "unsupported")) {
         return std::nullopt;
     }
     AdaptiveControlReceipt receipt;
@@ -296,6 +299,20 @@ std::optional<AdaptiveControlReceipt> parse_adaptive_control_receipt(
         return std::nullopt;
     }
     receipt.resource = *resource;
+    if (*resource == AdaptiveResourceControl::overhead) {
+        std::uint64_t elapsed_ms{}, work_ms{};
+        const auto elapsed_text = take_token(response);
+        const auto work_text = take_token(response);
+        if (status != "applied" || receipt.quality != 100 ||
+            !parse_integer(elapsed_text, elapsed_ms) ||
+            !parse_integer(work_text, work_ms) || elapsed_ms > 4000 ||
+            work_ms > elapsed_ms) return std::nullopt;
+        if (elapsed_ms != 0) {
+            receipt.script_work_ns = work_ms * 1'000'000ULL;
+            receipt.script_elapsed_ns = elapsed_ms * 1'000'000ULL;
+        }
+    }
+    if (!response.empty()) return std::nullopt;
     if (status == "applied") {
         receipt.status = AdaptiveControlReceiptStatus::applied;
     } else if (status == "restored") {

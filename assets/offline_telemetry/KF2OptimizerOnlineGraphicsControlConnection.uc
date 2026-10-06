@@ -19,10 +19,12 @@ function RequestClose()
 
 function ConnectionTimedOut()
 {
+    local int WorkStarted;
     if (bDeleteMe)
     {
         return;
     }
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
     bCleanupStarted = true;
     ClearTimer(nameof(ConnectionTimedOut), self);
     Close();
@@ -30,16 +32,20 @@ function ConnectionTimedOut()
     {
         Destroy();
     }
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
 }
 
 event Closed()
 {
+    local int WorkStarted;
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
     bCleanupStarted = true;
     ClearTimer(nameof(ConnectionTimedOut), self);
     if (!bDeleteMe)
     {
         Destroy();
     }
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
 }
 
 function string TakeToken(out string Line)
@@ -61,6 +67,8 @@ function string TakeToken(out string Line)
 
 event Accepted()
 {
+    local int WorkStarted;
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
     LinkMode = MODE_Line;
     ReceiveMode = RMODE_Event;
     SetTimer(ConnectionDeadlineSeconds, false,
@@ -70,9 +78,18 @@ event Accepted()
         `log("KF2OPT_ONLINE_GRAPHICS_BRIDGE state=rejected reason=non_loopback");
         RequestClose();
     }
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
 }
 
 event ReceivedLine(string Line)
+{
+    local int WorkStarted;
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
+    HandleMeasuredLine(Line);
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
+}
+
+function HandleMeasuredLine(string Line)
 {
     local string Prefix;
     local string Token;
@@ -86,6 +103,7 @@ event ReceivedLine(string Line)
     local KF2OptimizerOnlineContextInteraction CurrentInteraction;
     local string InteractionPath;
     local bool Applied;
+    local string OverheadReceipt;
 
     if (bCleanupStarted)
     {
@@ -109,6 +127,15 @@ event ReceivedLine(string Line)
     if (Prefix != "KF2OPT" || Len(Line) != 0)
     {
         SendText("KF2OPT_ACK "$SequenceText$" failed malformed");
+        RequestClose();
+        return;
+    }
+
+    if (Resource == "overhead" && Quality == 100)
+    {
+        OverheadReceipt = class'KF2OptimizerTelemetryProbe'.static.
+            ReadOwnWork(Token, Sequence);
+        if (Len(OverheadReceipt) > 0) SendText(OverheadReceipt);
         RequestClose();
         return;
     }

@@ -36,7 +36,7 @@ void ObservationReader::reset() noexcept {
 }
 
 std::optional<ObservationSnapshot> ObservationReader::read(
-    const game::GameProcessIdentity& process) noexcept {
+    const game::GameProcessIdentity& process, bool measure_own_work) noexcept {
     if (pid_ != process.pid || process_start_id_ != process.process_start_id)
         reset();
     if (!game::is_game_process_current(process)) {
@@ -46,10 +46,10 @@ std::optional<ObservationSnapshot> ObservationReader::read(
     if (!shared_) {
         std::array<wchar_t, observation_mapping_name_capacity> name{};
         if (!make_observation_mapping_name(process.pid, name)) return std::nullopt;
-        mapping_ = OpenFileMappingW(FILE_MAP_READ, FALSE, name.data());
+        mapping_ = OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, name.data());
         if (!mapping_) return std::nullopt;
-        shared_ = static_cast<const ObservationShared*>(MapViewOfFile(
-            mapping_, FILE_MAP_READ, 0, 0, sizeof(ObservationShared)));
+        shared_ = static_cast<ObservationShared*>(MapViewOfFile(
+            mapping_, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, sizeof(ObservationShared)));
         if (!shared_) { reset(); return std::nullopt; }
         pid_ = process.pid;
         process_start_id_ = process.process_start_id;
@@ -158,6 +158,21 @@ std::optional<ObservationSnapshot> ObservationReader::read(
         const LONG bits = shared->last_delta_time_bits;
         std::memcpy(&result.last_delta_time, &bits, sizeof(bits));
         const auto now = GetTickCount64();
+        // Reuse this session view; self-work does not enable detailed FleX
+        // diagnostics. A crashed/disconnected app loses the three-second lease.
+        const auto lease = InterlockedCompareExchange64(
+            &shared_->own_work_lease_tick, 0, 0);
+        if (measure_own_work && shared->own_work_frequency > 0) {
+            if (lease <= static_cast<LONGLONG>(now + 1500))
+                InterlockedExchange64(&shared_->own_work_lease_tick,
+                                      static_cast<LONGLONG>(now + 3000));
+            const auto ticks = InterlockedCompareExchange64(&shared_->own_work_ticks, 0, 0);
+            if (ticks >= 0) result.own_work_ns = static_cast<std::uint64_t>(
+                static_cast<long double>(ticks) * 1'000'000'000.0L /
+                shared->own_work_frequency);
+        } else if (lease != 0) {
+            InterlockedExchange64(&shared_->own_work_lease_tick, 0);
+        }
         result.fresh = result.last_update_tick != 0 && now >= result.last_update_tick &&
                        now - result.last_update_tick <= 3000;
         const bool counters_match =

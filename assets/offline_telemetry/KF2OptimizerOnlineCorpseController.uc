@@ -553,6 +553,14 @@ function bool RunOneFixedMinimumVisualAction()
 
 event Tick(float DeltaTime)
 {
+    local int WorkStarted;
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
+    OwnWorkTick(DeltaTime);
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
+}
+
+function OwnWorkTick(float DeltaTime)
+{
     local KF2OptimizerOnlineContextInteraction CurrentInteraction;
 
     Super.Tick(DeltaTime);
@@ -584,7 +592,9 @@ event Destroyed()
     local int Transferred;
     local KF2OptimizerOnlineContextInteraction CurrentInteraction;
     local KF2OptimizerOnlineCorpseController Replacement;
+    local int WorkStarted;
 
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
     CurrentInteraction = GetOnlineInteraction();
     if (CurrentInteraction != None &&
         CurrentInteraction.IsOnlineSessionEnding())
@@ -625,6 +635,7 @@ event Destroyed()
     }
     FrozenCorpses.Length = 0;
     Super.Destroyed();
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
 }
 
 defaultproperties

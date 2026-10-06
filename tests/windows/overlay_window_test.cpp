@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <filesystem>
 #include <iostream>
 #include <iterator>
 #include <string>
@@ -42,6 +43,41 @@ bool nearly_equal(float left, float right) {
 namespace kf2::overlay {
 
 struct OverlayWindowTestAccess {
+    static bool capture_png(OverlayWindow& overlay, const std::filesystem::path& path) {
+        if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return false;
+        struct Apartment final {
+            ~Apartment() { CoUninitialize(); }
+        } apartment;
+        Microsoft::WRL::ComPtr<IWICImagingFactory> factory;
+        if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+            CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)))) return false;
+        auto& state = *overlay.state_;
+        DIBSECTION pixels{};
+        if (!GetObjectW(state.bitmap, sizeof(pixels), &pixels) ||
+            !pixels.dsBm.bmBits) return false;
+        Microsoft::WRL::ComPtr<IWICBitmap> bitmap;
+        auto result = factory->CreateBitmapFromMemory(
+            state.bitmap_size.cx, state.bitmap_size.cy, GUID_WICPixelFormat32bppPBGRA,
+            pixels.dsBm.bmWidthBytes, pixels.dsBm.bmWidthBytes * state.bitmap_size.cy,
+            static_cast<BYTE*>(pixels.dsBm.bmBits), &bitmap);
+        Microsoft::WRL::ComPtr<IWICStream> stream;
+        Microsoft::WRL::ComPtr<IWICBitmapEncoder> encoder;
+        Microsoft::WRL::ComPtr<IWICBitmapFrameEncode> frame;
+        if (SUCCEEDED(result)) result = factory->CreateStream(&stream);
+        if (SUCCEEDED(result)) result = stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE);
+        if (SUCCEEDED(result)) result = factory->CreateEncoder(
+            GUID_ContainerFormatPng, nullptr, &encoder);
+        if (SUCCEEDED(result)) result = encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache);
+        if (SUCCEEDED(result)) result = encoder->CreateNewFrame(&frame, nullptr);
+        if (SUCCEEDED(result)) result = frame->Initialize(nullptr);
+        if (SUCCEEDED(result)) result = frame->SetSize(state.bitmap_size.cx, state.bitmap_size.cy);
+        auto format = GUID_WICPixelFormat32bppBGRA;
+        if (SUCCEEDED(result)) result = frame->SetPixelFormat(&format);
+        if (SUCCEEDED(result)) result = frame->WriteSource(bitmap.Get(), nullptr);
+        if (SUCCEEDED(result)) result = frame->Commit();
+        if (SUCCEEDED(result)) result = encoder->Commit();
+        return SUCCEEDED(result);
+    }
     static void fail_next_draw_with_device_loss(OverlayWindow& overlay) {
         overlay.state_->test_end_draw_result = D2DERR_RECREATE_TARGET;
     }
@@ -80,7 +116,7 @@ struct OverlayWindowTestAccess {
 
 }  // namespace kf2::overlay
 
-int main() {
+int main(int argc, char** argv) {
     const auto module = GetModuleHandleW(nullptr);
     const auto png_resource = FindResourceW(module, MAKEINTRESOURCEW(202),
                                                RT_RCDATA);
@@ -391,6 +427,44 @@ int main() {
     CHECK(!cleared_diagnostics.enabled);
     CHECK(cleared_diagnostics.update_calls == 0);
     CHECK(cleared_diagnostics.redraws == 0);
+    {
+        auto own_created = kf2::overlay::OverlayWindow::create();
+        CHECK(own_created.has_value());
+        auto own_overlay = std::move(own_created.value());
+        own_overlay.set_diagnostics_enabled(true);
+        auto own_shown = shown;
+        own_shown.visible = true;
+        own_shown.animations_enabled = false;
+        own_shown.show_fps = false;
+        own_shown.show_frame_time = false;
+        own_shown.show_cpu = false;
+        own_shown.show_gpu = false;
+        own_shown.show_memory = false;
+        own_shown.bounds = {100, 120, 400, 520};
+        own_shown.self_overhead.emplace();
+        own_shown.self_overhead->values = {
+            L"0.2 %", L"65 MB", L"0.1 KB/s", L"8", L"0.12 ms/s", L"0.08 ms/s",
+            L"0.04 ms/s", L"0.15 ms/s", L"0.10 ms/s", L"1 ms/s", L"0.02 ms/s", L"0.51 ms/s",
+            L"0.05 %", L"3.1 MB", L"1.2 MB", L"50.2 MB"};
+        CHECK(own_overlay.update(own_shown).has_value());
+        const auto first = own_overlay.render_count();
+        CHECK(first == 1);
+        if (argc == 2) CHECK(kf2::overlay::OverlayWindowTestAccess::capture_png(
+            own_overlay, std::filesystem::path{argv[1]}));
+        for (int frame = 0; frame < 100; ++frame) {
+            const auto repeated = own_overlay.update(own_shown);
+            CHECK(repeated.has_value() && !repeated.value());
+        }
+        CHECK(own_overlay.render_count() == first);
+        CHECK(own_overlay.graph_geometry_build_count() == 0);
+        CHECK(own_overlay.static_layer_build_count() == 0);
+        own_shown.self_overhead->values[0] = L"0.3 %";
+        CHECK(own_overlay.update(own_shown).has_value());
+        CHECK(own_overlay.render_count() == first + 1);
+        own_shown.visible = false;
+        CHECK(own_overlay.update(own_shown).has_value());
+        CHECK(!IsWindowVisible(own_overlay.native_handle()));
+    }
     DestroyWindow(replacement_window);
     return EXIT_SUCCESS;
 }

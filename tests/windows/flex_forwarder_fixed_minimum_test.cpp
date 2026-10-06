@@ -435,6 +435,12 @@ int wmain(int argc, wchar_t** argv) {
     const auto gate = reinterpret_cast<void (*)(HANDLE, HANDLE)>(
         GetProcAddress(original_module, "flexTestSetUpdateGate"));
     if (!gate) return fail(64, "native completion gate unavailable");
+    if (shared->own_work_ticks != 0)
+        return fail(66, "disabled self-work measurement recorded native work");
+    kf2::flex::ObservationReader work_reader;
+    const auto work_start = work_reader.read(identity, true);
+    if (!work_start || !work_start->own_work_ns)
+        return fail(67, "self-work measurement could not start");
     const auto completed_publication = [&](int input, int before, int after) {
         HANDLE entered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -444,20 +450,42 @@ int wmain(int argc, wchar_t** argv) {
             return false;
         }
         gate(entered, release);
+        const auto ticks_before = shared->own_work_ticks;
         std::thread native([&] { update(solver, 1.0F / 60.0F, input, nullptr); });
         const bool in_flight = WaitForSingleObject(entered, 2000) == WAIT_OBJECT_0 &&
             shared->last_forwarded_substeps == before &&
             shared->update_calls == shared->successful_updates + 1;
+        // The original call is blocked on purpose. Its native wait must not
+        // appear in the Optimizer wrapper's elapsed-work counter.
+        Sleep(250);
+        const bool native_not_counted = shared->own_work_ticks == ticks_before;
         SetEvent(release);
         native.join();
         gate(nullptr, nullptr);
         CloseHandle(entered);
         CloseHandle(release);
-        return in_flight && shared->last_forwarded_substeps == after &&
+        return in_flight && native_not_counted &&
+            shared->own_work_ticks > ticks_before &&
+            shared->own_work_ticks - ticks_before < shared->own_work_frequency / 8 &&
+            shared->last_forwarded_substeps == after &&
             shared->update_calls == shared->successful_updates;
     };
     if (!completed_publication(0, 1, 0) || !completed_publication(4, 0, 1))
         return fail(65, "forwarded value was published before native completion");
+    const auto work_end = work_reader.read(identity, true);
+    if (!work_end || !work_end->own_work_ns ||
+        *work_end->own_work_ns <= *work_start->own_work_ns)
+        return fail(68, "completed wrapper work was not published");
+    static_cast<void>(work_reader.read(identity));
+    const auto ticks_off = shared->own_work_ticks;
+    if (version() != 31 || shared->own_work_ticks != ticks_off)
+        return fail(69, "disabled wrapper still measured work");
+    InterlockedExchange64(&shared->own_work_lease_tick,
+                          static_cast<LONGLONG>(GetTickCount64() - 1));
+    if (version() != 31 || shared->own_work_ticks != ticks_off ||
+        shared->own_work_lease_tick != 0)
+        return fail(70, "expired self-work lease kept measuring");
+    work_reader.reset();
     destroy(solver);
     if (destroy_calls() != 3 || shared->destroy_calls != 3 ||
         shared->live_solvers != 0 || shared->aggregate_capacity_valid != 0 ||

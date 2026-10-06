@@ -17,6 +17,18 @@
 
 int main() {
     using namespace kf2::ui;
+    {
+        UiModel own_work_model;
+        CHECK(!own_work_model.status().self_overhead_enabled);
+        kf2::diagnostics::SelfOverheadPresentation readings;
+        readings.values[0] = L"0.2 %";
+        readings.values[9] = L"1 ms/s";
+        const auto* graphics = own_work_model.status().graphics_values[0].data();
+        own_work_model.set_self_overhead(readings);
+        CHECK(own_work_model.status().self_overhead == readings);
+        CHECK(own_work_model.status().graphics_values[0].data() == graphics);
+        CHECK(!own_work_model.status().self_overhead_enabled);
+    }
     static_assert(std::is_nothrow_move_assignable_v<AdaptiveUiStatus>);
     {
         UiModel adaptive_model;

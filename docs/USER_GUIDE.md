@@ -204,6 +204,51 @@ position, and metric visibility are stored in the portable `Data` directory.
 
 ## 10. Debug
 
+**Self-overhead overlay** is a temporary ON/OFF switch, off on every Optimizer
+start. It shows Optimizer resources and Telemetry, DXGI, Adaptive, Overlay and
+UnrealScript and native FleX-wrapper work in a compact panel over KF2. It has no graphs, animations or
+continuous logs and refreshes about once per second; the existing FPS overlay
+is independent. CPU is the Optimizer's share of all logical processors, RAM
+is its working set in decimal MB, and I/O is process read/write traffic in
+decimal KB/s (including cached/file and socket traffic, not physical disk speed).
+Private RAM is the process's committed private bytes, not an additional amount
+to add to its resident RAM. GPU is the busiest measured engine for the Optimizer
+PID across adapters, read from the existing raw PDH collection without a second
+query, smoothing or a driver-wide substitute. It is unavailable without a fresh
+game resource query. GPU local/non-local memory comes directly from DXGI's
+current-process usage for every enumerated hardware adapter and physical node;
+unavailable nodes invalidate that total rather than producing a partial sum.
+Adapter handles are cached until a topology change or the switch is turned off.
+Local memory is not necessarily dedicated VRAM on an integrated GPU. These
+memory classes overlap with process/system accounting and are not added to RAM.
+
+**Telemetry CPU** is Windows-accounted resource-worker CPU time. **Telemetry
+time** is separately timed UI telemetry work, excluding the nested Governor
+and overlay scopes. **DXGI CPU** includes both ETW workers and the FPS statistics
+worker. Adaptive, Overlay, Script and FleX time are measured elapsed durations,
+not CPU attribution; scheduling delays and synchronous waits can be included.
+**App CPU total** comes directly from Windows process CPU counters and includes
+every Optimizer thread, including UI, diagnostics and unlisted work. It does
+not add elapsed durations to CPU time or sum overlapping component rows.
+An exact combined CPU total including code inside KF2 is not available from
+these elapsed clocks and is not fabricated. UnrealScript's shipping clock
+resolves whole milliseconds, so its measured rate is displayed without decimal
+places; invalid or overflowing intervals are unavailable, not clipped. A dash
+means warming up or unavailable, never a fabricated zero. Inactive means no
+game process, not a presumed zero from a graphics setting. A protected game
+session and its matching provider are required for script readings. Native FleX
+counts only the Optimizer's wrapper, not the original solver or its waits; it
+uses the existing shared-memory channel without enabling detailed diagnostics.
+Script readings include periodic controls, restore timers and instrumented
+client callbacks; initial work before measurement starts and later engine/GPU
+work are not reconstructed. Switching off stops polls and releases both game
+measurement leases within three seconds.
+The panel explicitly marks downstream KF2 engine/GPU work and desktop compositor
+(DWM) work as not attributable. It measures the Optimizer process and timed
+instrumented code inside KF2, not the causal cost of every resulting engine call,
+allocation or rendered effect. It is not a whole-system overhead profiler and
+does not claim that every performance effect is captured.
+
 Open **Debug** to enable temporary in-game evidence markers for corpse actions
 or living-Zed distances. Both options are off by default and affect only the
 next protected KF2 start; they never change a game that is already running.

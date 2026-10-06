@@ -145,6 +145,52 @@ int test_telemetry_status_publication() {
     diagnostics::EventLog events{32};
     app::UiRuntime runtime{root / L"Data", false, config::Settings{}, events,
         std::nullopt, app::StartMode::read_only, root / L"portable"};
+    runtime.sample_self_overhead(1'000'000'000ULL);
+    CHECK(runtime.self_overhead_sample_ns == 0);
+    auto own_status = runtime.model.status();
+    own_status.self_overhead_enabled = true;
+    runtime.model.set_status(own_status);
+    const auto no_log = events.snapshot().size();
+    runtime.sample_self_overhead(1'000'000'000ULL);
+    CHECK(runtime.self_overhead_sample_ns == 1'000'000'000ULL);
+    CHECK(runtime.model.status().self_overhead.values.size() == 16);
+    CHECK(runtime.model.status().self_overhead.values[0] == L"—");
+    CHECK(runtime.model.status().self_overhead.values[1].find(L"MB") != std::wstring::npos);
+    CHECK(runtime.model.status().self_overhead.values[15].find(L"MB") != std::wstring::npos);
+    CHECK(runtime.model.status().self_overhead.values[12] == L"—");
+    CHECK(runtime.model.status().self_overhead.values[9] == L"Inactive");
+    runtime.sample_self_overhead(1'999'999'999ULL);
+    CHECK(runtime.self_overhead_sample_ns == 1'000'000'000ULL);
+    runtime.sample_self_overhead(2'000'000'000ULL);
+    CHECK(runtime.self_overhead_sample_ns == 2'000'000'000ULL);
+    CHECK(runtime.model.status().self_overhead.values[0].find(L"%") != std::wstring::npos);
+    CHECK(runtime.model.status().self_overhead.values[10] == L"Inactive");
+    CHECK(runtime.model.status().self_overhead.values[11].find(L"ms/s") != std::wstring::npos);
+    const auto previous_cpu = runtime.self_overhead_previous.cpu_ns;
+    runtime.self_overhead_previous.io_bytes = 0;
+    write_bytes(root / L"measured-io.bin", std::string(4096, 'x'));
+    runtime.self_telemetry_work_ns += 900'000'000;
+    runtime.self_adaptive_work_ns += 800'000'000;
+    runtime.sample_self_overhead(3'000'000'000ULL);
+    CHECK(previous_cpu && runtime.self_overhead_previous.cpu_ns);
+    wchar_t expected_total[64]{};
+    swprintf_s(expected_total, L"%.2f ms/s",
+        static_cast<double>(*runtime.self_overhead_previous.cpu_ns - *previous_cpu) / 1'000'000.0);
+    CHECK(runtime.model.status().self_overhead.values[11] == expected_total);
+    CHECK(runtime.self_overhead_previous.io_bytes &&
+        *runtime.self_overhead_previous.io_bytes >= 4096);
+    wchar_t expected_io[64]{};
+    swprintf_s(expected_io, L"%.1f KB/s",
+        static_cast<double>(*runtime.self_overhead_previous.io_bytes) / 1000.0);
+    CHECK(runtime.model.status().self_overhead.values[2] == expected_io);
+    CHECK(runtime.model.status().self_overhead.values[5] == L"900.00 ms/s");
+    CHECK(runtime.model.status().self_overhead.values[7] == L"800.00 ms/s");
+    CHECK(events.snapshot().size() == no_log);
+    own_status.self_overhead_enabled = false;
+    runtime.model.set_status(own_status);
+    runtime.sample_self_overhead(4'000'000'000ULL);
+    CHECK(!runtime.self_overhead_collecting && runtime.self_overhead_sample_ns == 0);
+    CHECK(!runtime.self_overhead_dispatcher.busy());
     auto status = runtime.model.status();
     status.graphics_values[0] = L"Unchanged user graphics selection";
     status.advanced_values[0] = L"Unchanged advanced selection";

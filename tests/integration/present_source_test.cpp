@@ -187,6 +187,8 @@ int main(int argc, char** argv) {
     using namespace kf2::telemetry;
     const SampleIdentity game{1234, 5678};
     PresentSource source{game, 256};
+    CHECK(source.cpu_work_ns().has_value());
+    const auto initial_cpu = *source.cpu_work_ns();
     CHECK(!source.drain(1, 500).fps.has_value());
     CHECK(source.start().has_value());
     for (std::uint64_t i = 0; i <= 120; ++i) {
@@ -194,6 +196,7 @@ int main(int argc, char** argv) {
                              1, true, 0}));
     }
     auto fresh = source.drain(2'921'000'000ULL, 500'000'000ULL);
+    CHECK(source.cpu_work_ns() && *source.cpu_work_ns() >= initial_cpu);
     CHECK(fresh.fps.has_value());
     CHECK(*fresh.fps > 62.0 && *fresh.fps < 63.0);
     CHECK(fresh.quality == SampleQuality::good);

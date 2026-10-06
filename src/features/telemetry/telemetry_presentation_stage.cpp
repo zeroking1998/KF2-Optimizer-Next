@@ -42,7 +42,7 @@ TelemetryPresentation derive_telemetry_presentation(
         runtime.overlay_diagnostics_last_published_ns = 0;
     }
     runtime.overlay_window->set_diagnostics_enabled(
-        collect_overlay_diagnostics);
+        collect_overlay_diagnostics || runtime.self_overhead_collecting);
     const auto process_ram_bytes = frame.process
         ? std::optional<std::uint64_t>{frame.process->working_set_bytes}
         : std::nullopt;

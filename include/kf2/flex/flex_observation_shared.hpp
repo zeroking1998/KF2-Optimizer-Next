@@ -5,7 +5,7 @@
 namespace kf2::flex {
 
 inline constexpr DWORD observation_magic = 0x314F464B; // KFO1
-inline constexpr DWORD observation_version = 10;
+inline constexpr DWORD observation_version = 11;
 
 [[nodiscard]] constexpr int fixed_minimum_substeps(int original) noexcept {
     return original > 1 ? 1 : original;
@@ -73,8 +73,11 @@ struct alignas(8) ObservationShared {
     volatile LONG last_download_memory;
     volatile LONG solver_tracking_quarantined;
     volatile LONG diagnostics_enabled;
+    volatile LONGLONG own_work_lease_tick;
+    volatile LONGLONG own_work_ticks;
+    LONGLONG own_work_frequency;
 };
 
-static_assert(sizeof(ObservationShared) == 360);
+static_assert(sizeof(ObservationShared) == 384);
 
 }  // namespace kf2::flex

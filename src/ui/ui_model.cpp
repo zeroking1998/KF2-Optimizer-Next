@@ -5,6 +5,10 @@
 #include <utility>
 
 namespace kf2::ui {
+void UiModel::set_self_overhead(
+    const diagnostics::SelfOverheadPresentation& values) {
+    status_.self_overhead = values;
+}
 namespace {
 
 std::size_t enum_index(Destination destination) {

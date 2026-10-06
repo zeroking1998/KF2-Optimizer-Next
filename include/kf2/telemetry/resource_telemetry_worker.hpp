@@ -64,6 +64,7 @@ struct ResourceSampleRequest final {
     ResourceTelemetryBinding binding;
     ResourceSampleGroup group{ResourceSampleGroup::process_and_memory};
     std::uint64_t sampled_at_ns{0};
+    bool collect_own_gpu{false};
 };
 
 // Published only when a provider is constructed or retried. Sharing this
@@ -84,6 +85,7 @@ struct ResourceSampleBatch final {
     std::optional<NvidiaGpuSource> nvidia_source;
     std::optional<GpuAdapter> detected_process_adapter;
     std::shared_ptr<const GpuProviderStatus> gpu_provider_status;
+    std::optional<double> own_gpu_percent;
 };
 
 struct ResourceTelemetrySnapshot final {
@@ -100,6 +102,7 @@ struct ResourceTelemetrySnapshot final {
     std::optional<NvidiaGpuSource> nvidia_source;
     std::optional<GpuAdapter> detected_process_adapter;
     std::shared_ptr<const GpuProviderStatus> gpu_provider_status;
+    std::optional<double> own_gpu_percent;
 };
 
 using ResourceSampleFunction = std::function<ResourceSampleBatch(
@@ -123,12 +126,14 @@ public:
     [[nodiscard]] std::uint64_t invalidate_samples();
     void clear();
     void request(std::uint64_t sampled_at_ns);
+    void set_own_gpu_enabled(bool enabled);
     [[nodiscard]] std::shared_ptr<const ResourceTelemetrySnapshot> latest()
         const;
     [[nodiscard]] std::vector<GameLogChunk> take_game_log_chunks(
         SampleIdentity identity);
     [[nodiscard]] bool wait_until_idle(std::chrono::milliseconds timeout);
     void stop();
+    [[nodiscard]] std::optional<std::uint64_t> cpu_work_ns() const noexcept;
 
 private:
     class Impl;

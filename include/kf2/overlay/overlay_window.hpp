@@ -18,6 +18,7 @@ struct OverlayDiagnostics final {
     std::uint64_t skipped_redraws{0};
     std::uint64_t last_render_us{0};
     std::uint64_t maximum_render_us{0};
+    std::uint64_t total_render_us{0};
 };
 
 class OverlayWindow final {

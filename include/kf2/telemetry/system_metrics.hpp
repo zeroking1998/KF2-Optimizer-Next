@@ -7,6 +7,16 @@
 #include "kf2/game/game_session.hpp"
 
 namespace kf2::telemetry {
+struct OwnProcessCounters final {
+    std::optional<std::uint64_t> cpu_ns;
+    std::optional<std::uint64_t> io_bytes;
+    std::optional<std::uint64_t> ram_bytes;
+    std::optional<std::uint64_t> private_bytes;
+    std::optional<std::uint32_t> threads;
+};
+[[nodiscard]] OwnProcessCounters query_own_process_counters() noexcept;
+[[nodiscard]] std::optional<std::uint64_t> query_thread_cpu_ns(
+    void* native_thread) noexcept;
 struct HardwareInventory {
     std::uint32_t physical_cores{0};
     std::uint32_t logical_processors{0};

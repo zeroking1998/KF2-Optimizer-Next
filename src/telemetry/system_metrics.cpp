@@ -1,4 +1,5 @@
 #include "kf2/telemetry/system_metrics.hpp"
+#include "kf2/platform/windows/thread_cpu_time.hpp"
 #include <Windows.h>
 #include <Psapi.h>
 #include <TlHelp32.h>
@@ -10,6 +11,48 @@
 #include <vector>
 
 namespace kf2::telemetry {
+std::optional<std::uint64_t> query_thread_cpu_ns(void* native_thread) noexcept {
+    return platform::windows::thread_cpu_ns(native_thread);
+}
+
+OwnProcessCounters query_own_process_counters() noexcept {
+    OwnProcessCounters result;
+    const auto process = GetCurrentProcess();
+    FILETIME creation{}, exit{}, kernel{}, user{};
+    if (GetProcessTimes(process, &creation, &exit, &kernel, &user)) {
+        const auto ticks = [](FILETIME time) {
+            return (static_cast<std::uint64_t>(time.dwHighDateTime) << 32U) |
+                time.dwLowDateTime;
+        };
+        result.cpu_ns = (ticks(kernel) + ticks(user)) * 100ULL;
+    }
+    IO_COUNTERS io{};
+    if (GetProcessIoCounters(process, &io)) {
+        result.io_bytes = io.ReadTransferCount + io.WriteTransferCount;
+    }
+    PROCESS_MEMORY_COUNTERS_EX memory{};
+    memory.cb = sizeof(memory);
+    if (GetProcessMemoryInfo(process,
+            reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory))) {
+        result.ram_bytes = memory.WorkingSetSize;
+        result.private_bytes = memory.PrivateUsage;
+    }
+    const auto snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32 entry{sizeof(entry)};
+        if (Process32First(snapshot, &entry)) {
+            do {
+                if (entry.th32ProcessID == GetCurrentProcessId()) {
+                    result.threads = entry.cntThreads;
+                    break;
+                }
+            } while (Process32Next(snapshot, &entry));
+        }
+        CloseHandle(snapshot);
+    }
+    return result;
+}
+
 namespace {
 #ifdef KF2_PROCESS_METRICS_TESTING
 std::atomic_uint32_t process_metric_opens{0};

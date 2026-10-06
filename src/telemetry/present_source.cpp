@@ -1,4 +1,5 @@
 #include "kf2/telemetry/present_source.hpp"
+#include "kf2/platform/windows/thread_cpu_time.hpp"
 #include <Windows.h>
 #include <algorithm>
 #include <atomic>
@@ -132,6 +133,11 @@ PresentSource::PresentSource(SampleIdentity identity, std::size_t capacity)
     : identity_{identity},
       capacity_{std::max<std::size_t>(2, capacity)},
       drain_worker_{[this](std::stop_token stop) { drain_worker(stop); }} {}
+
+std::optional<std::uint64_t> PresentSource::cpu_work_ns() noexcept {
+    return drain_worker_.joinable()
+        ? platform::windows::thread_cpu_ns(drain_worker_.native_handle()) : std::nullopt;
+}
 
 PresentSource::~PresentSource() {
     {

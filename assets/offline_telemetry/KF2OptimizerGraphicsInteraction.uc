@@ -339,6 +339,14 @@ function string ObserveMenuGraphicsAndRebase()
 
 event Tick(float DeltaTime)
 {
+    local int WorkStarted;
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
+    OwnWorkTick(DeltaTime);
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
+}
+
+function OwnWorkTick(float DeltaTime)
+{
     local LocalPlayer PrimaryPlayer;
     local PlayerController PrimaryController;
     local WorldInfo CurrentWorld;

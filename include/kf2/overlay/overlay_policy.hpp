@@ -1,4 +1,5 @@
 #pragma once
+#include "kf2/diagnostics/self_overhead.hpp"
 #include "kf2/game/game_session.hpp"
 #include "kf2/telemetry/telemetry_snapshot.hpp"
 
@@ -46,6 +47,7 @@ struct OverlayPresentation {
     bool show_gpu{true};
     bool show_memory{false};
     bool animations_enabled{true};
+    std::optional<diagnostics::SelfOverheadPresentation> self_overhead;
 };
 [[nodiscard]] OverlayPresentation evaluate_overlay(const OverlayPolicyInput& input);
 }  // namespace kf2::overlay
