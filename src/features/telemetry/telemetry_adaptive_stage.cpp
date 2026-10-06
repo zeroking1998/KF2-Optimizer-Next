@@ -174,7 +174,7 @@ void UiRuntime::log_adaptive_performance_sample(
                                         frame.gameplay->map.end()};
         }
         events->append({0, diagnostics::Severity::info,
-                        "PERFORMANCE_SAMPLE", measurement.str(),
+                        "PERFORMANCE_SAMPLE", std::move(measurement).str(),
                         L"telemetry"});
         last_performance_sample_log_ns = now_ns;
         last_performance_sample_adaptive_mode = adaptive_mode;
@@ -184,7 +184,7 @@ void UiRuntime::log_adaptive_performance_sample(
 telemetry_pipeline::CorpseTelemetryTracker::Result
 UiRuntime::update_adaptive_corpse_status(
     const telemetry_pipeline::TelemetryFrame& frame,
-    ui::UiStatus& status) {
+    ui::AdaptiveUiStatus& status) {
     const auto corpse_state = corpse_telemetry_tracker.observe(frame,
         game_process && game_process->pid == frame.identity.pid &&
         game_process->process_start_id == frame.identity.process_start_id &&
@@ -209,7 +209,7 @@ UiRuntime::update_adaptive_corpse_status(
 }
 
 bool UiRuntime::present_pending_adaptive_runtime_mode(
-    ui::UiStatus& status) {
+    ui::AdaptiveUiStatus& status) {
     if (!adaptive_runtime_mode_confirmed &&
         (adaptive_runtime_mode_pending.has_value() ||
          adaptive_runtime_mode_port.has_value())) {
@@ -264,7 +264,7 @@ void UiRuntime::log_adaptive_quality_response(
     append(L"before", report->before);
     append(L"after", report->after);
     events->append({0, diagnostics::Severity::info,
-        "ADAPTIVE_QUALITY_RESPONSE", message.str(), L"optimizer"});
+        "ADAPTIVE_QUALITY_RESPONSE", std::move(message).str(), L"optimizer"});
 }
 
 optimizer::QualityResponse::Context
@@ -277,7 +277,9 @@ UiRuntime::observe_adaptive_quality_response(
         frame.gameplay ? frame.gameplay->telemetry_living_visible : std::nullopt,
         frame.gameplay ? frame.gameplay->telemetry_corpse_total : std::nullopt,
         frame.active_gameplay &&
-        frame.offline_gameplay && frame.gameplay && frame.adapter_luid &&
+        telemetry_pipeline::adaptive_session_class(frame) !=
+            optimizer::AdaptiveSessionClass::unknown &&
+        frame.gameplay && frame.adapter_luid &&
         frame.gameplay->telemetry_sample.value_or(0) > 0 &&
         frame.gameplay->telemetry_observed_ns != 0 &&
         now_ns >= frame.gameplay->telemetry_observed_ns &&

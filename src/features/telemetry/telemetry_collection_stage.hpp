@@ -74,6 +74,7 @@ private:
 
 [[nodiscard]] Result<TelemetryFrame> capture_telemetry_frame(
     app::UiRuntime& runtime, const game::GameWindowState& window,
-    std::uint64_t now_ns, ::kf2::telemetry::FrameMetrics frames);
+    std::uint64_t now_ns, ::kf2::telemetry::FrameMetrics frames,
+    const ::kf2::telemetry::ResourceTelemetrySnapshot* snapshot);
 
 }  // namespace kf2::telemetry_pipeline

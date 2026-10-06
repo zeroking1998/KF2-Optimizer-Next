@@ -30,6 +30,10 @@ public:
                                       const Theme& theme);
     [[nodiscard]] Result<bool> resize(PixelSize size, float dpi);
     void discard_device_resources() noexcept;
+#ifdef KF2_DIRECT2D_RENDERER_TESTING
+    [[nodiscard]] unsigned text_format_creations_for_testing() const noexcept;
+    [[nodiscard]] unsigned window_brush_creations_for_testing() const noexcept;
+#endif
     [[nodiscard]] Result<bool> capture_wic_png(
         const std::filesystem::path& path, const ShellLayoutResult& layout,
         const Theme& theme, PixelSize pixel_size, float dpi);

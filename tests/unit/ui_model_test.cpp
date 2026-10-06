@@ -1,5 +1,8 @@
 #include <cstdlib>
 #include <iostream>
+#include <limits>
+#include <type_traits>
+#include <utility>
 
 #include "kf2/ui/ui_model.hpp"
 
@@ -14,6 +17,187 @@
 
 int main() {
     using namespace kf2::ui;
+    static_assert(std::is_nothrow_move_assignable_v<AdaptiveUiStatus>);
+    {
+        UiModel adaptive_model;
+        UiStatus unrelated;
+        unrelated.graphics_values.fill(L"Saved graphics values remain unchanged");
+        unrelated.advanced_values.fill(L"Saved advanced values remain unchanged");
+        unrelated.flex_telemetry = L"Current FleX telemetry remains unchanged";
+        unrelated.telemetry = L"Current frame telemetry remains unchanged";
+        unrelated.prewarm_map = L"Current map prewarm remains unchanged";
+        unrelated.target_fps = 119;
+        unrelated.active_target_fps = 60;
+        unrelated.corpse_limit = 1242;
+        unrelated.active_corpse_limit = 2000;
+        adaptive_model.set_status(unrelated);
+        adaptive_model.preview_target_fps(125);
+        adaptive_model.set_notice({NoticeSeverity::warning, L"UNCHANGED",
+            L"Current safety notice", L""});
+        static_cast<void>(adaptive_model.focus_destination(Destination::debug));
+        static_cast<void>(adaptive_model.activate_focused());
+        auto prepared = adaptive_model.adaptive_status();
+        constexpr std::array text_fields{
+            &AdaptiveUiStatus::recommended_profile,
+            &AdaptiveUiStatus::recommendation_reason,
+            &AdaptiveUiStatus::adaptive_corpse_capability,
+            &AdaptiveUiStatus::adaptive_corpse_action_status,
+            &AdaptiveUiStatus::adaptive_particle_capability,
+            &AdaptiveUiStatus::adaptive_state,
+            &AdaptiveUiStatus::adaptive_bottleneck,
+            &AdaptiveUiStatus::adaptive_cpu_parallelism,
+            &AdaptiveUiStatus::adaptive_action,
+            &AdaptiveUiStatus::adaptive_reason,
+            &AdaptiveUiStatus::adaptive_data_quality,
+            &AdaptiveUiStatus::adaptive_prediction,
+            &AdaptiveUiStatus::adaptive_session,
+            &AdaptiveUiStatus::adaptive_source,
+            &AdaptiveUiStatus::adaptive_safety,
+            &AdaptiveUiStatus::adaptive_evidence};
+        int label_index = 0;
+        for (const auto field : text_fields) {
+            prepared.*field = L"Current Adaptive label " +
+                std::to_wstring(++label_index);
+        }
+        prepared.adaptive_optimization_enabled = false;
+        prepared.adaptive_shadow_mode = true;
+        prepared.adaptive_runtime_corpse_limit = 1500;
+        prepared.adaptive_confidence_percent = 91;
+        prepared.adaptive_drop_risk_percent = 32;
+        prepared.adaptive_quality_score = 75;
+        prepared.adaptive_headroom_available_percent = 12;
+        prepared.adaptive_restore_generation =
+            std::numeric_limits<std::uint64_t>::max();
+
+        // An unrelated publication made after staging must survive the commit.
+        auto newer_status = adaptive_model.status();
+        newer_status.update_status = L"Newer update status must not roll back";
+        adaptive_model.set_status(std::move(newer_status));
+        const auto* graphics_text = adaptive_model.status().graphics_values[0].data();
+        const auto* update_text = adaptive_model.status().update_status.data();
+        const auto matches = [&](const AdaptiveUiStatus& expected) {
+            const auto& current = adaptive_model.adaptive_status();
+            for (const auto field : text_fields) {
+                if (current.*field != expected.*field) return false;
+            }
+            return current.adaptive_optimization_enabled ==
+                    expected.adaptive_optimization_enabled &&
+                current.adaptive_shadow_mode == expected.adaptive_shadow_mode &&
+                current.adaptive_runtime_corpse_limit ==
+                    expected.adaptive_runtime_corpse_limit &&
+                current.adaptive_confidence_percent ==
+                    expected.adaptive_confidence_percent &&
+                current.adaptive_drop_risk_percent ==
+                    expected.adaptive_drop_risk_percent &&
+                current.adaptive_quality_score == expected.adaptive_quality_score &&
+                current.adaptive_headroom_available_percent ==
+                    expected.adaptive_headroom_available_percent &&
+                current.adaptive_restore_generation ==
+                    expected.adaptive_restore_generation;
+        };
+        adaptive_model.set_adaptive_status(prepared);
+        CHECK(matches(prepared));
+        adaptive_model.set_adaptive_status(adaptive_model.adaptive_status());
+        CHECK(matches(prepared));
+        for (const auto field : text_fields) prepared.*field = L"";
+        prepared.adaptive_runtime_corpse_limit.reset();
+        adaptive_model.set_adaptive_status(prepared);
+        CHECK(matches(prepared));
+        adaptive_model.set_adaptive_status(AdaptiveUiStatus{});
+        CHECK(matches(AdaptiveUiStatus{}));
+        CHECK(adaptive_model.status().graphics_values == unrelated.graphics_values);
+        CHECK(adaptive_model.status().advanced_values == unrelated.advanced_values);
+        CHECK(adaptive_model.status().flex_telemetry == unrelated.flex_telemetry);
+        CHECK(adaptive_model.status().telemetry == unrelated.telemetry);
+        CHECK(adaptive_model.status().prewarm_map == unrelated.prewarm_map);
+        CHECK(adaptive_model.status().target_fps == 119);
+        CHECK(adaptive_model.status().active_target_fps == 60);
+        CHECK(adaptive_model.status().corpse_limit == 1242);
+        CHECK(adaptive_model.status().active_corpse_limit == 2000);
+        CHECK(adaptive_model.status().graphics_values[0].data() == graphics_text);
+        CHECK(adaptive_model.status().update_status.data() == update_text);
+        CHECK(adaptive_model.status().update_status ==
+              L"Newer update status must not roll back");
+        CHECK(adaptive_model.presented_target_fps() == 125);
+        CHECK(adaptive_model.selected() == Destination::debug);
+        CHECK(adaptive_model.notice() && adaptive_model.notice()->code == L"UNCHANGED");
+        static_assert(noexcept(std::declval<UiModel&>().set_overlay_diagnostics(
+            std::declval<std::wstring>())));
+        const auto* adaptive_reason_text =
+            adaptive_model.status().adaptive_reason.data();
+        std::wstring overlay_text = L"Current owned overlay diagnostic summary";
+        adaptive_model.set_overlay_diagnostics(overlay_text);
+        overlay_text[0] = L'X';
+        CHECK(adaptive_model.status().overlay_diagnostics ==
+              L"Current owned overlay diagnostic summary");
+        adaptive_model.set_overlay_diagnostics(
+            adaptive_model.status().overlay_diagnostics);
+        CHECK(adaptive_model.status().overlay_diagnostics ==
+              L"Current owned overlay diagnostic summary");
+        adaptive_model.set_overlay_diagnostics(L"");
+        CHECK(adaptive_model.status().overlay_diagnostics.empty());
+        CHECK(matches(AdaptiveUiStatus{}));
+        CHECK(adaptive_model.status().graphics_values == unrelated.graphics_values);
+        CHECK(adaptive_model.status().advanced_values == unrelated.advanced_values);
+        CHECK(adaptive_model.status().flex_telemetry == unrelated.flex_telemetry);
+        CHECK(adaptive_model.status().telemetry == unrelated.telemetry);
+        CHECK(adaptive_model.status().prewarm_map == unrelated.prewarm_map);
+        CHECK(adaptive_model.status().graphics_values[0].data() == graphics_text);
+        CHECK(adaptive_model.status().update_status.data() == update_text);
+        CHECK(adaptive_model.status().adaptive_reason.data() == adaptive_reason_text);
+        CHECK(adaptive_model.presented_target_fps() == 125);
+        CHECK(adaptive_model.selected() == Destination::debug);
+        CHECK(adaptive_model.notice() && adaptive_model.notice()->code == L"UNCHANGED");
+    }
+    {
+        UiModel prewarm_model;
+        UiStatus seeded;
+        seeded.graphics_values.fill(L"Saved graphics values remain unchanged");
+        seeded.advanced_values.fill(L"Saved advanced values remain unchanged");
+        seeded.target_fps = 119;
+        seeded.corpse_limit = 1242;
+        prewarm_model.set_status(seeded);
+        prewarm_model.preview_target_fps(125);
+        const auto* graphics_text = prewarm_model.status().graphics_values[0].data();
+        const auto* adaptive_text = prewarm_model.status().adaptive_reason.data();
+        static_assert(noexcept(std::declval<UiModel&>().set_prewarm_progress(
+            true, 37, std::declval<std::wstring>())));
+        static_assert(noexcept(std::declval<UiModel&>().set_prewarm_diagnostics(
+            std::declval<std::wstring>())));
+        std::wstring map = L"KF-PrivateProgress";
+        prewarm_model.set_prewarm_progress(true, 37, map);
+        map[0] = L'X';
+        CHECK(prewarm_model.status().prewarm_active);
+        CHECK(prewarm_model.status().prewarm_percent == 37);
+        CHECK(prewarm_model.status().prewarm_map == L"KF-PrivateProgress");
+        prewarm_model.set_prewarm_progress(
+            true, 58, prewarm_model.status().prewarm_map);
+        CHECK(prewarm_model.status().prewarm_percent == 58);
+        CHECK(prewarm_model.status().prewarm_map == L"KF-PrivateProgress");
+        prewarm_model.set_prewarm_progress(
+            false, prewarm_model.status().prewarm_percent, L"");
+        CHECK(!prewarm_model.status().prewarm_active);
+        CHECK(prewarm_model.status().prewarm_percent == 58);
+        CHECK(prewarm_model.status().prewarm_map.empty());
+        prewarm_model.set_prewarm_progress(false, 0, L"");
+        CHECK(prewarm_model.status().prewarm_percent == 0);
+        std::wstring diagnostics = L"Current owned prewarm diagnostics";
+        prewarm_model.set_prewarm_diagnostics(diagnostics);
+        diagnostics[0] = L'X';
+        prewarm_model.set_prewarm_diagnostics(
+            prewarm_model.status().prewarm_diagnostics);
+        CHECK(prewarm_model.status().prewarm_diagnostics ==
+              L"Current owned prewarm diagnostics");
+        prewarm_model.set_prewarm_diagnostics(L"");
+        CHECK(prewarm_model.status().prewarm_diagnostics.empty());
+        CHECK(prewarm_model.status().graphics_values == seeded.graphics_values);
+        CHECK(prewarm_model.status().advanced_values == seeded.advanced_values);
+        CHECK(prewarm_model.status().graphics_values[0].data() == graphics_text);
+        CHECK(prewarm_model.status().adaptive_reason.data() == adaptive_text);
+        CHECK(prewarm_model.status().target_fps == 119);
+        CHECK(prewarm_model.status().corpse_limit == 1242);
+        CHECK(prewarm_model.presented_target_fps() == 125);
+    }
     UiModel model;
     CHECK(model.selected() == Destination::dashboard);
     CHECK((kDestinations == std::array{
@@ -115,5 +299,104 @@ int main() {
     CHECK(model.notice().has_value());
     model.clear_notice();
     CHECK(!model.notice().has_value());
+
+    status.graphics_values[3] = L"Medium";
+    status.advanced_values[4] = L"Observed advanced setting";
+    status.update_status = L"Update check completed";
+    status.adaptive_state = L"evaluating";
+    model.set_status(status);
+    model.preview_target_fps(119);
+    model.set_notice({NoticeSeverity::warning, L"UNCHANGED", L"Keep this notice", L""});
+    const auto before_flex = model.status();
+    model.set_flex_observation_status(L"Current FleX observation", 3, 1,
+        L"APPLIED", L"Current substep counters", L"Current readback counters");
+    CHECK(model.status().flex_telemetry == L"Current FleX observation");
+    CHECK(model.status().flex_requested_substeps == 3);
+    CHECK(model.status().flex_effective_substeps == 1);
+    CHECK(model.status().flex_action_status == L"APPLIED");
+    CHECK(model.status().flex_substep_diagnostics == L"Current substep counters");
+    CHECK(model.status().flex_readback_diagnostics == L"Current readback counters");
+    CHECK(model.status().mode == before_flex.mode);
+    CHECK(model.status().telemetry == before_flex.telemetry);
+    CHECK(model.status().target_fps == before_flex.target_fps);
+    CHECK(model.status().corpse_limit == before_flex.corpse_limit);
+    CHECK(model.status().graphics_values == before_flex.graphics_values);
+    CHECK(model.status().advanced_values == before_flex.advanced_values);
+    CHECK(model.status().update_status == before_flex.update_status);
+    CHECK(model.status().adaptive_state == before_flex.adaptive_state);
+    CHECK(model.presented_target_fps() == 119);
+    CHECK(model.selected() == Destination::advanced);
+    CHECK(model.notice() && model.notice()->code == L"UNCHANGED");
+    const auto& observed = model.status();
+    model.set_flex_observation_status(observed.flex_telemetry,
+        observed.flex_requested_substeps, observed.flex_effective_substeps,
+        observed.flex_action_status, observed.flex_substep_diagnostics,
+        observed.flex_readback_diagnostics);
+    CHECK(model.status().flex_telemetry == L"Current FleX observation");
+    CHECK(model.status().flex_requested_substeps == 3);
+    CHECK(model.status().flex_effective_substeps == 1);
+    CHECK(model.status().flex_action_status == L"APPLIED");
+    CHECK(model.status().flex_substep_diagnostics == L"Current substep counters");
+    CHECK(model.status().flex_readback_diagnostics == L"Current readback counters");
+    model.set_flex_observation_status(L"", std::nullopt, std::nullopt, L"", L"", L"");
+    CHECK(model.status().flex_telemetry.empty());
+    CHECK(!model.status().flex_requested_substeps);
+    CHECK(!model.status().flex_effective_substeps);
+    CHECK(model.status().flex_action_status.empty());
+    CHECK(model.status().flex_substep_diagnostics.empty());
+    CHECK(model.status().flex_readback_diagnostics.empty());
+    CHECK(model.status().graphics_values == before_flex.graphics_values);
+    CHECK(model.status().advanced_values == before_flex.advanced_values);
+    CHECK(model.status().update_status == before_flex.update_status);
+    CHECK(model.presented_target_fps() == 119);
+    const auto* graphics_text = model.status().graphics_values[3].data();
+    model.set_flex_capability(L"AVAILABLE");
+    CHECK(model.status().flex_capability == L"AVAILABLE");
+    model.set_flex_capability(model.status().flex_capability);
+    CHECK(model.status().flex_capability == L"AVAILABLE");
+    model.set_flex_capability(L"UNAVAILABLE");
+    CHECK(model.status().flex_capability == L"UNAVAILABLE");
+    model.set_flex_capability(L"");
+    CHECK(model.status().flex_capability.empty());
+    CHECK(model.status().graphics_values[3].data() == graphics_text);
+    CHECK(model.status().graphics_values == before_flex.graphics_values);
+    CHECK(model.status().advanced_values == before_flex.advanced_values);
+    CHECK(model.status().update_status == before_flex.update_status);
+    CHECK(model.status().adaptive_state == before_flex.adaptive_state);
+    CHECK(model.presented_target_fps() == 119);
+    CHECK(model.notice() && model.notice()->code == L"UNCHANGED");
+    model.set_telemetry_status(L"Confirmed telemetry", L"Confirmed analysis",
+        119.5, 8.25, 22.0, 44.0, 3, 9);
+    CHECK(model.status().telemetry == L"Confirmed telemetry");
+    CHECK(model.status().performance_analysis == L"Confirmed analysis");
+    CHECK(model.status().live_fps == 119.5);
+    CHECK(model.status().live_frame_time_ms == 8.25);
+    CHECK(model.status().live_cpu_percent == 22.0);
+    CHECK(model.status().live_gpu_percent == 44.0);
+    CHECK(model.status().live_active_corpses == 3);
+    CHECK(model.status().live_sleeping_corpses == 9);
+    const auto& live = model.status();
+    model.set_telemetry_status(live.telemetry, live.performance_analysis,
+        live.live_fps, live.live_frame_time_ms, live.live_cpu_percent,
+        live.live_gpu_percent, live.live_active_corpses, live.live_sleeping_corpses);
+    CHECK(model.status().telemetry == L"Confirmed telemetry");
+    CHECK(model.status().performance_analysis == L"Confirmed analysis");
+    CHECK(model.status().live_fps == 119.5);
+    model.set_telemetry_status(L"", L"", std::nullopt, std::nullopt,
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt);
+    CHECK(model.status().telemetry.empty());
+    CHECK(model.status().performance_analysis.empty());
+    CHECK(!model.status().live_fps);
+    CHECK(!model.status().live_frame_time_ms);
+    CHECK(!model.status().live_cpu_percent);
+    CHECK(!model.status().live_gpu_percent);
+    CHECK(!model.status().live_active_corpses);
+    CHECK(!model.status().live_sleeping_corpses);
+    CHECK(model.status().graphics_values[3].data() == graphics_text);
+    CHECK(model.status().graphics_values == before_flex.graphics_values);
+    CHECK(model.status().advanced_values == before_flex.advanced_values);
+    CHECK(model.status().adaptive_state == before_flex.adaptive_state);
+    CHECK(model.status().update_status == before_flex.update_status);
+    CHECK(model.presented_target_fps() == 119);
     return EXIT_SUCCESS;
 }

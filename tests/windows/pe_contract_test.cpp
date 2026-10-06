@@ -64,6 +64,7 @@ int main(int argc, char** argv) {
         executable.c_str(), nullptr,
         LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
     CHECK(image != nullptr);
+    CHECK(FindResourceW(image, MAKEINTRESOURCEW(1), RT_VERSION) != nullptr);
     const HRSRC manifest_resource =
         FindResourceW(image, MAKEINTRESOURCEW(1), RT_MANIFEST);
     CHECK(manifest_resource != nullptr);

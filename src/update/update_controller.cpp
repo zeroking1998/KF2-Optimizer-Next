@@ -85,12 +85,14 @@ CheckStart UpdateController::begin_check(
         if (!snapshot_.automatic_checks_enabled) {
             return CheckStart::automatic_disabled;
         }
-        if (snapshot_.last_check_unix_seconds > 0 && now_unix_seconds >= 0 &&
+        // A backward wall-clock jump makes the stored time stale, not recent.
+        if (snapshot_.last_check_unix_seconds > 0 &&
+            now_unix_seconds >= snapshot_.last_check_unix_seconds &&
             now_unix_seconds - snapshot_.last_check_unix_seconds <
                 kAutomaticCheckIntervalSeconds) return CheckStart::throttled;
         if (snapshot_.automatic_failure_count > 0 &&
             snapshot_.last_attempt_unix_seconds > 0 &&
-            now_unix_seconds >= 0 &&
+            now_unix_seconds >= snapshot_.last_attempt_unix_seconds &&
             now_unix_seconds - snapshot_.last_attempt_unix_seconds <
                 automatic_failure_retry_seconds(
                     snapshot_.automatic_failure_count)) {

@@ -45,11 +45,56 @@ struct OverlayWindowTestAccess {
     static void fail_next_draw_with_device_loss(OverlayWindow& overlay) {
         overlay.state_->test_end_draw_result = D2DERR_RECREATE_TARGET;
     }
+
+    static bool guarded_resource_loading(OverlayWindow& overlay) {
+        auto& state = *overlay.state_;
+        if (!state.wic_factory || !state.mascot_bitmap ||
+            !state.low_mascot_bitmap || state.test_bitmap_decode_attempts != 2) {
+            return false;
+        }
+        state.test_bitmap_resource_failure = BitmapResourceFailure::missing;
+        if (FAILED(detail::create_overlay_device_resources(state)) ||
+            state.mascot_bitmap || state.low_mascot_bitmap ||
+            state.test_bitmap_decode_attempts != 2) return false;
+        std::size_t expected_attempts = 2;
+        for (const auto failure : {BitmapResourceFailure::load,
+                                   BitmapResourceFailure::lock,
+                                   BitmapResourceFailure::empty}) {
+            state.test_bitmap_resource_failure = failure;
+            ++expected_attempts;  // Only the unaffected second PNG may decode.
+            if (FAILED(detail::create_overlay_device_resources(state)) ||
+                state.mascot_bitmap || !state.low_mascot_bitmap ||
+                state.test_bitmap_decode_attempts != expected_attempts) {
+                std::cerr << "Invalid bitmap resource reached decoder; attempts: "
+                          << state.test_bitmap_decode_attempts << "; expected: "
+                          << expected_attempts << '\n';
+                return false;
+            }
+        }
+        state.test_bitmap_resource_failure = BitmapResourceFailure::none;
+        return SUCCEEDED(detail::create_overlay_device_resources(state)) &&
+               state.mascot_bitmap && state.low_mascot_bitmap &&
+               state.test_bitmap_decode_attempts == expected_attempts + 2;
+    }
 };
 
 }  // namespace kf2::overlay
 
 int main() {
+    const auto module = GetModuleHandleW(nullptr);
+    const auto png_resource = FindResourceW(module, MAKEINTRESOURCEW(202),
+                                               RT_RCDATA);
+    CHECK(png_resource != nullptr);
+    CHECK(SizeofResource(module, png_resource) > 0);
+    CHECK(FindResourceW(module, MAKEINTRESOURCEW(201), RT_RCDATA) == nullptr);
+    CHECK(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)));
+    {
+        auto resource_probe = kf2::overlay::OverlayWindow::create();
+        CHECK(resource_probe.has_value());
+        CHECK(kf2::overlay::OverlayWindowTestAccess::guarded_resource_loading(
+            resource_probe.value()));
+    }
+    CoUninitialize();
     const kf2::overlay::MascotAnimationAsset defaults;
     bool malformed_valid = true;
     const auto malformed =

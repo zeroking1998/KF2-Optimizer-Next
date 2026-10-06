@@ -208,7 +208,8 @@ Result<Settings> parse_settings(std::string_view text) {
                     return invalid_settings(
                         L"adaptive_aggressiveness is invalid");
                 }
-                settings.adaptive_aggressiveness = value;
+                // Retired hidden profile. Validate legacy input, but do not
+                // retain it or let it change the fixed controller policy.
             } else if (key == "adaptive_minimum_quality") {
                 const auto parsed = parse_integer(value);
                 if (!parsed.has_value() || parsed.value() < 10 ||
@@ -283,7 +284,8 @@ Result<Settings> parse_settings(std::string_view text) {
                     return invalid_settings(
                         L"adaptive_calibration_enabled is invalid");
                 }
-                settings.adaptive_calibration_enabled = parsed.value();
+                // Retired no-op option. Validate legacy input for migration,
+                // but do not persist or forward a nonexistent behavior gate.
             } else if (key == "adaptive_logging") {
                 const auto parsed = parse_boolean(value);
                 if (!parsed.has_value()) {
@@ -358,7 +360,9 @@ Result<Settings> parse_settings(std::string_view text) {
                     value != "performance") {
                     return invalid_settings(L"quality_policy is invalid");
                 }
-                settings.quality_policy = value;
+                // Retired inert preference: validate legacy input, then
+                // remove it from canonical settings without selecting policy.
+                settings.legacy_quality_policy_migrated = true;
             } else if (key == "optimizer_profile") {
                 // Legacy portable builds persisted a named startup profile.
                 // User-owned graphics now come directly from KF2, so accept
@@ -432,8 +436,6 @@ std::string serialize_settings(const Settings& settings) {
            << '\n'
            << "restore_config_after_game="
            << (settings.restore_config_after_game ? "true" : "false") << '\n'
-           << "adaptive_aggressiveness="
-           << settings.adaptive_aggressiveness << '\n'
            << "adaptive_minimum_quality="
            << settings.adaptive_minimum_quality << '\n'
            << "adaptive_maximum_quality="
@@ -448,15 +450,12 @@ std::string serialize_settings(const Settings& settings) {
            << (settings.adaptive_quality_recovery_enabled ? "true" : "false") << '\n'
            << "adaptive_manual_locks_enabled="
            << (settings.adaptive_manual_locks_enabled ? "true" : "false") << '\n'
-           << "adaptive_calibration_enabled="
-           << (settings.adaptive_calibration_enabled ? "true" : "false") << '\n'
            << "adaptive_logging="
            << (settings.adaptive_logging ? "true" : "false") << '\n'
            << "overlay_position=" << settings.overlay_position << '\n'
            << "overlay_scale_percent=" << settings.overlay_scale_percent << '\n'
            << "target_fps=" << settings.target_fps << '\n'
-           << "corpse_limit=" << settings.corpse_limit << '\n'
-           << "quality_policy=" << settings.quality_policy << '\n';
+           << "corpse_limit=" << settings.corpse_limit << '\n';
     if (!settings.manual_game_path.empty()) {
         output << "manual_game_path=" << settings.manual_game_path << '\n';
     }

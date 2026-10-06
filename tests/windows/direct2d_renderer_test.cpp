@@ -87,6 +87,8 @@ int wmain(int argument_count, wchar_t** arguments) {
     auto renderer = kf2::ui::Direct2DShellRenderer::create(
         static_cast<HWND>(window.value().native_handle_for_testing()));
     CHECK(renderer.has_value());
+    CHECK(renderer.value().text_format_creations_for_testing() == 13);
+    CHECK(renderer.value().window_brush_creations_for_testing() == 0);
 
     kf2::ui::UiModel model;
     model.set_state_path(L"C:\\KF2Optimizer\\Data");
@@ -94,10 +96,17 @@ int wmain(int argument_count, wchar_t** arguments) {
     const auto theme = kf2::ui::resolve_theme({});
     CHECK(renderer.value().resize({800, 520}, 96.0F).has_value());
     CHECK(renderer.value().render(layout, theme).has_value());
+    for (int frame = 0; frame < 20; ++frame) {
+        CHECK(renderer.value().render(layout, theme).has_value());
+    }
+    CHECK(renderer.value().text_format_creations_for_testing() == 13);
+    CHECK(renderer.value().window_brush_creations_for_testing() == 1);
     CHECK(renderer.value().resize({0, 0}, 96.0F).has_value());
     renderer.value().discard_device_resources();
     CHECK(renderer.value().resize({800, 520}, 192.0F).has_value());
     CHECK(renderer.value().render(layout, theme).has_value());
+    CHECK(renderer.value().text_format_creations_for_testing() == 13);
+    CHECK(renderer.value().window_brush_creations_for_testing() == 2);
 
     const auto output = argument_count > 1
                             ? std::filesystem::path{arguments[1]}
@@ -325,6 +334,10 @@ int wmain(int argument_count, wchar_t** arguments) {
     CHECK(update_png.height == 900);
     CHECK(update_png.distinct_colors > 16);
 
+    CHECK(renderer.value().text_format_creations_for_testing() == 13);
+    CHECK(renderer.value().window_brush_creations_for_testing() == 2);
+    CHECK(renderer.value().render(layout, theme).has_value());
+    CHECK(renderer.value().window_brush_creations_for_testing() == 2);
     CoUninitialize();
     return EXIT_SUCCESS;
 }

@@ -173,20 +173,6 @@ AdaptiveStabilityState stability_state_for(
     return AdaptiveStabilityState::hold;
 }
 
-Profile profile_for(AdaptivePressure pressure,
-                    int quality_change_budget) noexcept {
-    switch (pressure) {
-        case AdaptivePressure::healthy: return Profile::stability;
-        case AdaptivePressure::warning:
-        case AdaptivePressure::intervention:
-            return quality_change_budget >= 2
-                ? Profile::high_performance : Profile::balanced;
-        case AdaptivePressure::emergency: return Profile::high_performance;
-        case AdaptivePressure::observing: return Profile::balanced;
-    }
-    return Profile::balanced;
-}
-
 std::string_view candidate_setting(AdaptiveBottleneck bottleneck) noexcept {
     switch (bottleneck) {
         case AdaptiveBottleneck::gpu: return "FarParticleLOD";
@@ -642,6 +628,7 @@ AdaptiveDataQualityReport validate_adaptive_sample(
 
 void AdaptiveGovernor::reset_for_boundary(
     std::uint64_t now_ns, bool telemetry_transition) noexcept {
+    last_frame_timestamp_ns_ = 0;
     history_size_ = 0;
     history_next_ = 0;
     smoothed_frame_time_ms_.reset();
@@ -860,21 +847,29 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     }
     decision.settings_generation = settings_generation_;
 
-    const bool boundary = target_changed || sample.discontinuity ||
+    const bool frame_transition = identity_pid_ != 0 &&
+        (sample.frame_generation != frame_generation_ ||
+         sample.frame_stream_id != frame_stream_id_);
+    const bool boundary = target_changed || frame_transition ||
+        sample.discontinuity ||
         sample.session_changed ||
         sample.map_changed ||
+        sample.pid != identity_pid_ ||
         sample.process_start_id != identity_start_id_ ||
         (session_generation_ != 0 &&
          sample.session_generation != session_generation_) ||
         (map_generation_ != 0 && sample.map_generation != map_generation_);
-    const bool telemetry_transition = sample.discontinuity ||
+    const bool telemetry_transition = frame_transition || sample.discontinuity ||
         sample.session_changed || sample.map_changed;
     if (boundary) {
         reset_for_boundary(now_ns, telemetry_transition);
     }
+    identity_pid_ = sample.pid;
     identity_start_id_ = sample.process_start_id;
     session_generation_ = sample.session_generation;
     map_generation_ = sample.map_generation;
+    frame_generation_ = sample.frame_generation;
+    frame_stream_id_ = sample.frame_stream_id;
     decision.restore_generation = restore_generation_;
     decision.settings_generation = settings_generation_;
 
@@ -901,6 +896,22 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
         decision.reason = "boundary_stabilization_hold";
         return decision;
     }
+
+    // UI/control time still advances above, but a cached or delayed window
+    // cannot reweight history, resources or pressure/recovery confirmation.
+    // A no-Present stall becomes stale through the existing freshness limit;
+    // no quality action is inferred from repeatedly reading the last frame.
+    if (sample.duplicate_sample ||
+        sample.timestamp_ns <= last_frame_timestamp_ns_) {
+        decision.data.quality = AdaptiveDataQuality::degraded;
+        decision.data.confidence_factor = 0.0;
+        decision.data.reason = "duplicate_frame_observation";
+        decision.state = AdaptiveControllerState::observing;
+        decision.disposition = AdaptiveDisposition::hold;
+        decision.reason = "duplicate_frame_observation_hold";
+        return decision;
+    }
+    last_frame_timestamp_ns_ = sample.timestamp_ns;
 
     const double target_frame_time = stability_bands.target_frame_time_ms;
     const auto frame_analysis = update_frame_analysis(
@@ -1088,14 +1099,13 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     decision.pressure = active_pressure_;
     decision.state = state_for(active_pressure_);
     decision.stability_state = stability_state_for(active_pressure_);
-    decision.recommended_profile = profile_for(
-        active_pressure_, policy.quality_change_budget);
     decision.quality_score = std::clamp(
         sample.quality_score.value_or(
             static_cast<double>(policy.maximum_quality)),
         static_cast<double>(policy.minimum_quality),
         static_cast<double>(policy.maximum_quality));
     decision.quality_recovery_eligible =
+        policy.quality_recovery_enabled &&
         active_pressure_ == AdaptivePressure::healthy &&
         desired_level == FrameSignalLevel::healthy &&
         !long_low_unhealthy &&
@@ -1117,8 +1127,7 @@ AdaptiveDecision AdaptiveGovernor::evaluate(
     }
     if (active_pressure_ == AdaptivePressure::healthy) {
         decision.disposition = AdaptiveDisposition::hold;
-        decision.reason = policy.quality_recovery_enabled &&
-                                  decision.quality_recovery_eligible
+        decision.reason = decision.quality_recovery_eligible
             ? "stable_headroom_slow_quality_recovery_eligible"
             : "stable_or_reserve_insufficient_hold";
         return decision;
@@ -1268,6 +1277,7 @@ void AdaptiveGovernor::notify_quality_applied(
     // performance-evidence epoch. Keep resource smoothing and ownership state:
     // memory or compute pressure may remain dangerous after a graphics step.
     quality_applied_not_before_ns_ = applied_ns;
+    last_frame_timestamp_ns_ = 0;
     history_ = {};
     history_size_ = 0;
     history_next_ = 0;
@@ -1294,9 +1304,13 @@ void AdaptiveGovernor::reset() noexcept {
     low_percentile_pressure_since_ns_ = 0;
     last_direction_change_ns_ = 0;
     last_evaluation_ns_ = 0;
+    last_frame_timestamp_ns_ = 0;
+    identity_pid_ = 0;
     identity_start_id_ = 0;
     session_generation_ = 0;
     map_generation_ = 0;
+    frame_generation_ = 0;
+    frame_stream_id_ = 0;
     restore_generation_ = 0;
     settings_generation_ = 0;
     stabilization_until_ns_ = 0;

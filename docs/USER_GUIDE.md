@@ -20,6 +20,10 @@ unrelated controls available.
    background.
 3. Restart KF2 Optimizer after the verified repair completes.
 
+If you close the app during Auto Repair, it shows a waiting message and closes
+automatically after repair finishes. Do not force it to stop: a forced exit can
+still interrupt repair, and the next start will detect mismatched package files.
+
 Auto Repair never uses a generic latest-release address. An installation with
 version `0.0.4-alpha` requests only tag `v0.0.4-alpha` and its identically
 versioned Windows ZIP. The repair accepts only the same build identity and an
@@ -55,6 +59,11 @@ preserved-data details.
 Start the optimizer and open **Home**. If KF2 was not detected, choose
 **Select game folder**. A missing or ambiguous path keeps dependent controls
 unavailable.
+
+Close KF2 before changing its folder. A pending launch, restart or unfinished
+protected recovery blocks the change. Prepared files are restored in the old
+installation before the new path is saved; cancelling the picker or selecting
+the current folder leaves the prepared state intact.
 
 ## 3. Choose the performance target
 
@@ -93,6 +102,11 @@ settings selected by the user, user-selected FleX minimum and fixed-minimum
 Zed/corpse visual controls remain available while Adaptive is off. The saved
 state is also reapplied after a map change.
 
+The saved `adaptive_quality_recovery_enabled` preference controls automatic
+quality increases under stable headroom. When disabled, Adaptive can still
+reduce quality under confirmed pressure. This preference does not block rollback
+of an ineffective change or restoration when Adaptive is disabled or KF2 closes.
+
 The optimizer never enables FleX. If FleX is off in KF2, it remains off and no
 FleX runtime hook is installed. If the user enabled FleX in KF2, the protected
 session requests the fixed minimum solver work independently of Adaptive mode.
@@ -109,6 +123,11 @@ While KF2 is running in its main menu, the page shows values confirmed by
 KF2's own applied Graphics-menu getter, including **INI override** where a
 saved value does not match a built-in preset. Values selected in KF2's menu
 before pressing **Apply** are not yet treated as applied settings.
+Present numeric INI values must be complete, finite, and within the supported
+ranges. An invalid scalar value makes the graphics snapshot unavailable and
+identifies the setting without rewriting it. Missing optional keys retain their
+existing display defaults. Malformed or non-preset texture-tuple integers remain
+**Custom** and are preserved unless you explicitly change that texture option.
 The app does not expose VSync or Variable frame rate controls. When KF2 is
 closed and the app opens, an enabled VSync value or disabled frame-rate
 smoothing is corrected through the same verified backup transaction. An
@@ -140,8 +159,12 @@ settings and are independent of Adaptive.
 Click an On/Off or enumerated option, or use the sliders for render scale,
 particle amount, and decal lifetime. Each change is saved and verified
 immediately. KF2 must be closed, and the app creates a restore backup before
-writing. If writing or verification fails, the controls return to the values
-currently stored by KF2.
+writing. When a protected launch is prepared, this page reads personal values
+from its snapshot, saves only your change, then rebuilds the prepared launch.
+The saved settings survive launch cancellation, app shutdown and restart.
+If saving fails, the controls reload the saved personal values. If restoration
+cannot finish, keep KF2 closed and use the retained backup or repair the
+protected launch before retrying; the app does not report the edit as saved.
 
 Hover over any button or slider to see what it changes and its visual or
 performance trade-off. These descriptions also distinguish user-owned
@@ -191,10 +214,18 @@ page shows incoming and forwarded min/max substeps, solver and particle
 statistics, shared-memory readback health, and report/log state. It can be
 changed during a protected session. Leave it off for the cheapest normal path;
 the fixed one-substep safety limit remains active for user-enabled FleX.
+Live FleX observations remain in memory; there are no periodic report writes,
+even with diagnostics enabled. `flex-session-last.json` is saved only on
+session detach or an explicit support export, using the latest verified
+observation. Failed saves are reported, and an active-session export can be
+retried. An abrupt optimizer termination can lose observations since the last
+explicit export; normal detach retains the final counters.
 **Runtime diagnostics** is a separate, persistent option and is also off
 by default. Enable it before a protected KF2 start only when you need detailed
-corpse/Zed Actor, LOD, bone, injury, freeze and scan-timing evidence. Adaptive
-still receives its required counts, visibility and awake/sleep state while the
+corpse/Zed Actor, LOD, bone, injury, freeze and scan-timing evidence. KF2 telemetry
+also omits the diagnostic-only spray, explosion, projectile and gib Actor scans
+while this option is off; enabling it collects a complete initial snapshot.
+Adaptive still receives its required counts, visibility and awake/sleep state while the
 option is off; unavailable diagnostic-only fields are shown as not measured,
 not as zero. The same switch enables detailed Adaptive performance samples,
 pressure/decision history and quality-response evidence. Exact controller
@@ -213,6 +244,10 @@ safety check. It also retains the awake/sleep counts needed by Adaptive and the
 dashboard, all failures, rollback evidence and the single minimal online
 capability receipt; only diagnostic collection and formatting are omitted.
 The Debug page also links to the portable data folder and current session log.
+Diagnostic reports include unread game-log bytes and time spent catching up
+(not the age of individual log records). Large logs are replayed in bounded
+worker batches; Adaptive waits for the current tail and fresh measurements.
+Current-map one-shot capability receipts remain available after catch-up.
 
 ## 11. Recovery
 
@@ -220,6 +255,12 @@ If KF2 or the optimizer ends unexpectedly, reopen the optimizer and use the
 recovery status on **Help & Repair**. Recovery restores protected INIs,
 runtime modules, and temporary session state from the recorded pre-session
 snapshot. Do not delete the `Data` directory before recovery is complete.
+
+If a configuration or native FPS-cap change reports pending recovery, close
+KF2 and restart the optimizer. It verifies the original bytes before clearing
+the recovery state. Locked files, conflicting edits or a damaged recovery
+record remain blocked and visible; recovery does not overwrite unknown edits.
+Resolve the reported conflict before launching from the optimizer again.
 
 See [Support](../SUPPORT.md) before sharing logs publicly.
 

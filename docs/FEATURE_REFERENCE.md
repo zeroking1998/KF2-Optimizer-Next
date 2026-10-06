@@ -24,6 +24,58 @@
 
 ## Important distinctions
 
+### GPU memory scope
+
+The native GPU sampler measures dedicated and shared memory for the KF2 process
+on the selected adapter. It does not publish the Optimizer's own DXGI memory
+usage or budget as KF2 or adapter-wide memory. Adapter-wide memory observations
+remain unavailable without a matching, verified source.
+
+Adaptive's existing fallback compares KF2's measured dedicated usage with the
+adapter's physical dedicated capacity. That capacity is not KF2's dynamic
+Windows memory budget, and the comparison does not measure other processes'
+VRAM pressure. GPU-load collection and sampling intervals are unchanged.
+
+### Idle process discovery
+
+When no verified KF2 process is present, discovery starts immediately and backs
+off after misses to one, two, four and at most five seconds between queries.
+External Steam/shortcut launches are detected by the next scheduled query,
+subject to the existing UI callback cadence. The app's Launch action and a
+restart handoff reset the schedule immediately and use the short 500 ms cadence
+only inside their bounded launch/replacement window. A permanently staged
+external-launch profile does not keep fast polling active. Discovery errors
+also back off without being treated as proof that KF2 is closed.
+
+Skipped queries never trigger protected-session restoration. A found process,
+telemetry detach or backward clock resets the backoff; existing executable and
+immutable process-identity verification remain unchanged. No new timer, worker
+or normal-play diagnostic counter is required.
+
+### Native frame timing recovery
+
+Concurrent DXGI streams retain separate diagnostic lifetimes, so interleaved
+presents and unused secondary chains do not invalidate a selected stream's
+quality-response windows. Replaced or recreated selected streams, source
+resets, and real event loss remain inconclusive. Window selection uses the
+existing bounded stream cache and copies only the selected interval.
+
+An initial DXGI start failure and a completely silent startup session share
+the same three-second retry interval and limit of two retries. Recovery waits
+for the existing process-bound main-menu gate and keeps the same measurement
+source. Healthy or merely stale streams are not restarted. Exhausted retries
+remain explicitly unavailable; a successful start alone is not a fresh FPS sample.
+
+### Optional file prewarming
+
+Startup and selected-map warming report completion only when all planned bytes
+have been read. Missing files, read errors and premature end-of-file retain
+actual progress and produce one incomplete warning, including with diagnostics
+disabled. KF2 launch and map loading remain available. Incomplete jobs do not
+automatically reread the same plan; a later launch or changed map selection can
+start new preparation. Transient storage, memory and discovery skips retain
+their existing bounded retry policy.
+
 ### Adaptive frame pressure
 
 Offline quality decisions wait for a fresh gameplay-provider sample after
@@ -66,6 +118,13 @@ same actor ID. Disabling Adaptive mode restores optimizer-owned freezes to
 actors that may already be leaving the world.
 
 ### Quality-response diagnostics
+
+Dispatch and response evaluation share the same verified offline/online session
+classification. Online client, listen-server and dedicated-server session modes
+still require the protected session receipt and fresh provider telemetry.
+Unknown or unverified modes are not comparable. Authenticated APPLIED readback,
+scene stability and complete local frame windows remain required; online mode
+alone is not evidence that a quality reduction helped.
 
 `ADAPTIVE_QUALITY_RESPONSE` compares a five-second pre-request window with a
 five-second window starting one second after an authenticated APPLIED receipt.

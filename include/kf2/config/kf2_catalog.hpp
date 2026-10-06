@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -7,6 +8,8 @@
 #include <variant>
 
 namespace kf2::config {
+
+inline constexpr std::size_t kVerifiedSettingCount{217};
 
 enum class SettingId {
     target_fps,

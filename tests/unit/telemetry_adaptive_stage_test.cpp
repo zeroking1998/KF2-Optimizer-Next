@@ -37,6 +37,9 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     frame.identity = {42, 9001};
     frame.observed_at_ns = 20'000'000'000ULL;
     frame.frames.age_ns = 1'000'000'000ULL;
+    frame.frames.newest_present_ns = 19'000'000'000ULL;
+    frame.frames.source_generation = 7;
+    frame.frames.stream_id = 31;
     frame.frames.fps = 58.0;
     frame.frames.average_fps = 54.0;
     frame.frames.frame_time_ms = 17.2;
@@ -121,6 +124,45 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
 }  // namespace
 
 int main() {
+    {
+        using kf2::telemetry_pipeline::adaptive_action_text_matches;
+        const std::string_view settings[] = {"", "A", "RuntimeGpuQuality",
+            "AdaptiveCorpseRuntimeLimit", "RuntimeGpuQualityExtra"};
+        const std::wstring_view dispositions[] = {L"none", L"hold", L"shadow",
+            L"proposed", L"keep", L"rollback", L"blocked", L"skipped unavailable",
+            L"pending", L"applied", L"failed", L"restart required"};
+        for (const auto setting : settings) {
+            for (const auto disposition : dispositions) {
+                const auto expected = setting.empty() ? std::wstring{disposition}
+                    : std::wstring{setting.begin(), setting.end()} + L" (" +
+                      std::wstring{disposition} + L")";
+                CHECK(adaptive_action_text_matches(expected, setting, disposition));
+                CHECK(!adaptive_action_text_matches(L"", setting, disposition));
+                CHECK(!adaptive_action_text_matches(expected + L"x", setting, disposition));
+                CHECK(!adaptive_action_text_matches(L"x" + expected, setting, disposition));
+                auto changed = expected;
+                changed.back() = L'X';
+                CHECK(!adaptive_action_text_matches(changed, setting, disposition));
+                if (setting.empty()) continue;
+                changed = expected;
+                changed[0] = L'X';
+                CHECK(!adaptive_action_text_matches(changed, setting, disposition));
+                for (const auto offset : {setting.size(), setting.size() + 1,
+                         setting.size() + 2}) {
+                    changed = expected;
+                    changed[offset] = L'X';
+                    CHECK(!adaptive_action_text_matches(changed, setting, disposition));
+                }
+                CHECK(!adaptive_action_text_matches(expected, setting, L"failed" == disposition
+                    ? L"shadow" : L"failed"));
+            }
+        }
+        CHECK(!adaptive_action_text_matches(L"A (hold)", "B", L"hold"));
+        CHECK(!adaptive_action_text_matches(L"RuntimeGpuQualityExtra (hold)",
+            "RuntimeGpuQuality", L"hold"));
+        CHECK(!adaptive_action_text_matches(L"hold", "A", L"hold"));
+        CHECK(!adaptive_action_text_matches(L"A (hold)", "", L"hold"));
+    }
     {
         using namespace kf2::telemetry_pipeline;
         constexpr std::uint64_t second = 1'000'000'000ULL;
@@ -320,7 +362,7 @@ int main() {
     CHECK(adaptive_frame_boundary_requires_drain(
         unavailable_frames, 1));
     auto invalid_age = frame;
-    invalid_age.frames.age_ns = invalid_age.observed_at_ns + 1;
+    invalid_age.frames.newest_present_ns = invalid_age.observed_at_ns + 1;
     CHECK(adaptive_frame_boundary_requires_drain(invalid_age, 1));
 
     // LoadMap is announced before the protected provider starts ticking.
@@ -398,6 +440,19 @@ int main() {
     CHECK(sample.pid == 42);
     CHECK(sample.process_start_id == 9001);
     CHECK(sample.timestamp_ns == 19'000'000'000ULL);
+    CHECK(sample.frame_generation == 7);
+    CHECK(sample.frame_stream_id == 31);
+    auto delayed_readback = frame;
+    delayed_readback.observed_at_ns += 200'000'000ULL;
+    const auto delayed_sample = build_adaptive_sample(delayed_readback, context).sample;
+    CHECK(delayed_sample.timestamp_ns == sample.timestamp_ns);
+    CHECK(delayed_sample.frame_generation == sample.frame_generation);
+    CHECK(delayed_sample.frame_stream_id == sample.frame_stream_id);
+    CHECK(adaptive_frame_boundary_requires_drain(
+        delayed_readback, 9'000'000'001ULL));
+    auto missing_present_time = frame;
+    missing_present_time.frames.newest_present_ns = 0;
+    CHECK(build_adaptive_sample(missing_present_time, context).sample.timestamp_ns == 0);
     CHECK(sample.session_generation == 9001);
     CHECK(sample.adapter_luid == 77);
     CHECK(sample.fps == frame.frames.fps);
@@ -435,6 +490,30 @@ int main() {
           static_cast<double>(*frame.evidence.adapter_vram_used_bytes));
     CHECK(sample.vram_budget_bytes ==
           static_cast<double>(*frame.evidence.adapter_vram_budget_bytes));
+    auto process_memory_only = frame;
+    process_memory_only.evidence.adapter_vram_used_bytes.reset();
+    process_memory_only.evidence.adapter_vram_budget_bytes.reset();
+    for (const bool offline : {true, false}) {
+        process_memory_only.offline_gameplay = offline;
+        replace_gameplay(process_memory_only, [offline](auto& gameplay) {
+            gameplay.net_mode = offline ? "NM_Standalone" : "NM_Client";
+        });
+        const auto process_sample = build_adaptive_sample(
+            process_memory_only, context).sample;
+        CHECK(process_sample.vram_used_bytes ==
+              static_cast<double>(*frame.evidence.dedicated_vram_bytes));
+        CHECK(process_sample.vram_budget_bytes ==
+              static_cast<double>(*frame.evidence.dedicated_vram_budget_bytes));
+    }
+    process_memory_only.evidence.dedicated_vram_bytes = 0;
+    CHECK(build_adaptive_sample(process_memory_only, context).
+              sample.vram_used_bytes == 0.0);
+    process_memory_only.evidence.dedicated_vram_bytes.reset();
+    process_memory_only.evidence.dedicated_vram_budget_bytes.reset();
+    const auto unknown_memory = build_adaptive_sample(
+        process_memory_only, context).sample;
+    CHECK(!unknown_memory.vram_used_bytes);
+    CHECK(!unknown_memory.vram_budget_bytes);
     CHECK(sample.ram_used_bytes ==
           static_cast<double>(*frame.evidence.system_ram_used_bytes));
     CHECK(sample.ram_budget_bytes ==
@@ -771,6 +850,7 @@ int main() {
         .frame_time_ms = 1000.0 / 60.0,
         .p95_ms = 1000.0 / 60.0, .p99_ms = 1000.0 / 60.0,
         .one_percent_low_fps = 60.0,
+        .newest_present_ns = frame.observed_at_ns,
         .quality = telemetry::SampleQuality::good,
         .reason = telemetry::UnavailableReason::none};
     const auto fresh_sample = build_adaptive_sample(frame, fresh_context).sample;

@@ -3,10 +3,21 @@
 // exact original KFEngine.ini after KF2 exits.
 class KF2OptimizerGraphicsViewport extends KFGameViewportClient;
 
+// Viewport-owned only: never retain a World or Actor across server travel.
+var private KF2OptimizerOnlineContextInteraction OnlineMonitor;
+
+function KF2OptimizerOnlineContextInteraction GetOnlineMonitor()
+{
+    if (OnlineMonitor == None || GlobalInteractions.Find(OnlineMonitor) == -1)
+    {
+        return None;
+    }
+    return OnlineMonitor;
+}
+
 event bool Init(out string OutError)
 {
     local KF2OptimizerGraphicsInteraction Monitor;
-    local KF2OptimizerOnlineContextInteraction OnlineMonitor;
 
     if (!Super.Init(OutError))
     {

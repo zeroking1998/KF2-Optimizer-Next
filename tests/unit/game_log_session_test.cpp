@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -148,10 +149,173 @@ bool rejects_offline_telemetry(std::string line) {
            !parser.current()->telemetry_sample.has_value();
 }
 
+int test_bridge_capability_lifetime() {
+    using namespace kf2::game;
+    const std::string initial =
+        "Log: LoadMap: KF-BioticsLab?Game=KFGameContent.KFGameInfo_Survival\n"
+        "ScriptLog: WI.NetMode:  NM_Standalone\n"
+        "ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready port=49152\n" +
+        telemetry_line(1);
+    GameLogSessionParser parser;
+    CHECK(parser.feed(initial, 1'000'000'000ULL));
+    CHECK(parser.current()->telemetry_control_port == 49152);
+    CHECK(parser.current()->telemetry_living_zeds == 23);
+    const auto expired = parser.expire_observations(16'000'000'001ULL);
+    CHECK(expired);
+    CHECK(expired->telemetry_control_port == 49152);
+    CHECK(!expired->telemetry_sample && !expired->telemetry_living_zeds &&
+        !expired->telemetry_corpse_total && !expired->telemetry_world_particles);
+    CHECK(expired->telemetry_observed_ns == 0);
+    CHECK(!parser.expire_observations(16'000'000'002ULL));
+    const auto resumed = parser.feed(telemetry_line(2), 17'000'000'000ULL);
+    CHECK(resumed && resumed->telemetry_control_port == 49152);
+    CHECK(resumed->telemetry_sample == 2 && resumed->telemetry_living_zeds == 23);
+    CHECK(resumed->telemetry_observed_ns == 17'000'000'000ULL);
+    // No second ready line is needed. Malformed/unknown states cannot remove
+    // the valid capability; explicit listener failures can.
+    for (const auto* line : {
+        "KF2OPT_ADAPTIVE_BRIDGE state=ready port=0\n",
+        "KF2OPT_ADAPTIVE_BRIDGE state=ready port=65536\n",
+        "KF2OPT_ADAPTIVE_BRIDGE state=unavailable_extra reason=x\n",
+        "KF2OPT_ADAPTIVE_BRIDGE state=blocked_extra reason=x\n"}) {
+        CHECK(!parser.feed(line, 18'000'000'000ULL));
+        CHECK(parser.current()->telemetry_control_port == 49152);
+    }
+    for (const auto* state : {"blocked", "unavailable"}) {
+        CHECK(parser.feed("ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=" +
+            std::string{state} + " reason=listener_failed\n", 18'000'000'000ULL));
+        CHECK(!parser.current()->telemetry_control_port);
+        CHECK(parser.current()->telemetry_sample == 2);
+        (void)parser.feed(telemetry_line(2), 18'000'000'000ULL);
+        CHECK(!parser.current()->telemetry_control_port);
+        CHECK(parser.feed("KF2OPT_ADAPTIVE_BRIDGE state=ready port=49152\n"));
+    }
+    for (const auto* boundary : {
+        "Log: LoadMap: KF-Outpost\n",
+        "Log: LoadMap: KFMainMenu\n",
+        "ScriptLog: WI.NetMode:  NM_Client\n",
+        "ScriptLog: KFGameInfo_Survival_0 - MatchEnded.BeginState\n",
+        "ScriptLog: KF2OPT_SESSION_CONTEXT schema=2 state=online_client_read_only "
+            "net_mode=NM_Client map=KF-BioticsLab generation=8\n"}) {
+        GameLogSessionParser boundary_parser;
+        CHECK(boundary_parser.feed(initial, 1'000'000'000ULL));
+        CHECK(boundary_parser.expire_observations(16'000'000'001ULL));
+        CHECK(boundary_parser.feed(boundary, 17'000'000'000ULL));
+        CHECK(!boundary_parser.current()->telemetry_control_port);
+    }
+    parser.reset();
+    CHECK(!parser.current());
+    CHECK(parser.feed("Log: LoadMap: KF-BioticsLab\n"));
+    CHECK(!parser.current()->telemetry_control_port);
+    return EXIT_SUCCESS;
+}
+
+int test_chunk_boundaries() {
+    using namespace kf2::game;
+    constexpr std::size_t kMaximumLine = 16 * 1024;
+    constexpr std::size_t kMaximumChunk = 4 * kMaximumLine;
+    const std::string offline =
+        "\n\r\nLog: LoadMap: KF-Outpost\r\n"
+        "ScriptLog: WI.NetMode: NM_Standalone\n"
+        "ScriptLog: @@@@ ZED COUNT DEBUG: AIAliveCount = 7\r\n";
+    const std::string online =
+        "Log: LoadMap: KF-Outpost\n"
+        "ScriptLog: KF2OPT_SESSION_CONTEXT schema=2 "
+        "state=online_client_read_only net_mode=NM_Client "
+        "map=KF-Outpost generation=7\r\n"
+        "ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready port=59545\n"
+        "ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=2 state=trader "
+        "net_mode=NM_Client map=KF-Outpost generation=7\r\n"
+        "ScriptLog: KF2OPT_ONLINE_CORPSE state=populated pool=1 "
+        "maximum=1282 local_only=true readback=verified\n";
+    for (const auto& input : {offline, online}) {
+        GameLogSessionParser whole;
+        CHECK(whole.feed(input, 50));
+        CHECK(whole.current()->map == "KF-Outpost");
+        CHECK(whole.stats().session_snapshot_copies == 1);
+        if (input == offline) {
+            CHECK(whole.current()->net_mode == "NM_Standalone");
+            CHECK(whole.current()->zeds_alive == 7);
+        } else {
+            CHECK(whole.current()->net_mode == "NM_Client");
+            CHECK(whole.current()->optimizer_session_generation == 7);
+            CHECK(whole.current()->telemetry_control_port == 59545);
+            CHECK(whole.current()->gameplay_ui_context == GameplayUiContext::trader);
+            CHECK(whole.current()->online_corpse_pool == 1);
+        }
+        const auto line_count = static_cast<std::uint64_t>(
+            std::count(input.begin(), input.end(), '\n'));
+        // Every split includes splits inside markers and between CR and LF.
+        for (std::size_t split = 0; split <= input.size(); ++split) {
+            GameLogSessionParser fragmented;
+            (void)fragmented.feed(std::string_view{input}.substr(0, split), 50);
+            (void)fragmented.feed(std::string_view{input}.substr(split), 50);
+            CHECK(fragmented.current() == whole.current());
+            CHECK(fragmented.stats().bytes_received == input.size());
+            CHECK(fragmented.stats().lines_processed == line_count);
+            CHECK(fragmented.stats().oversized_input_resets == 0);
+            CHECK(fragmented.stats().oversized_line_drops == 0);
+        }
+    }
+
+    const std::string load_map = "Log: LoadMap: KF-Outpost";
+    const std::string maximum_line =
+        std::string(kMaximumLine - load_map.size(), 'x') + load_map;
+    GameLogSessionParser maximum;
+    CHECK(!maximum.feed(maximum_line));
+    CHECK(maximum.feed("\r\n"));
+    CHECK(maximum.current()->map == "KF-Outpost");
+    CHECK(maximum.stats().lines_processed == 1);
+    CHECK(maximum.stats().oversized_line_drops == 0);
+
+    GameLogSessionParser oversized;
+    CHECK(oversized.feed(std::string(kMaximumLine + 1, 'x') + "\n" +
+                         load_map + "\n"));
+    CHECK(oversized.current()->map == "KF-Outpost");
+    CHECK(oversized.stats().lines_processed == 2);
+    CHECK(oversized.stats().oversized_line_drops == 1);
+    const auto valid_then_oversized =
+        load_map + "\n" + std::string(kMaximumLine + 1, 'x');
+    GameLogSessionParser trailer;
+    CHECK(trailer.feed(valid_then_oversized));
+    CHECK(trailer.stats().lines_processed == 1);
+    CHECK(trailer.stats().oversized_line_drops == 1);
+    CHECK(trailer.feed("Log: LoadMap: KF-BioticsLab\n"));
+    CHECK(trailer.current()->map == "KF-BioticsLab");
+
+    // Preserve the whole-input bound, including a pending partial line.
+    GameLogSessionParser capacity;
+    CHECK(!capacity.feed(maximum_line));
+    const auto maximum_chunk = "\n" +
+        std::string(kMaximumChunk - load_map.size() - 3, 'x') +
+        "\n" + load_map + "\n";
+    CHECK(maximum_chunk.size() == kMaximumChunk);
+    CHECK(capacity.feed(maximum_chunk));
+    CHECK(capacity.current()->map == "KF-Outpost");
+    CHECK(capacity.stats().oversized_input_resets == 1);
+    CHECK(capacity.stats().oversized_line_drops == 1);
+    CHECK(capacity.stats().lines_processed == 3);
+
+    GameLogSessionParser short_lines;
+    const std::string noise(32 * 1024, '\n');
+    CHECK(!short_lines.feed(noise + "Log: LoadMa"));
+    CHECK(short_lines.stats().lines_processed == noise.size());
+    CHECK(short_lines.feed("p: KF-Outpost\n"));
+    CHECK(short_lines.current()->map == "KF-Outpost");
+    CHECK(short_lines.stats().lines_processed == noise.size() + 1);
+    const auto received = short_lines.stats().bytes_received;
+    CHECK(!short_lines.feed({}));
+    CHECK(short_lines.stats().bytes_received == received);
+    CHECK(short_lines.stats().session_snapshot_copies == 1);
+    return EXIT_SUCCESS;
+}
+
 }  // namespace
 
 int main() {
     using namespace kf2::game;
+    CHECK(test_bridge_capability_lifetime() == EXIT_SUCCESS);
+    CHECK(test_chunk_boundaries() == EXIT_SUCCESS);
 
     GameLogSessionParser batch_stream;
     const auto batch = batch_stream.feed(
@@ -169,6 +333,33 @@ int main() {
     CHECK(repeated_batch_telemetry->telemetry_observed_ns ==
           2'000'000'000ULL);
     CHECK(batch_stream.stats().session_snapshot_copies == 2);
+
+    const auto historical = batch_stream.feed(
+        "ScriptLog: @@@@ ZED COUNT DEBUG: AIAliveCount = 24\n"
+        "ScriptLog: KFAISpawnManager.SetupNextWave() NextWave: 0 WaveTotalAI: 93\n" +
+        telemetry_line(4), 3'000'000'000ULL, false);
+    CHECK(historical.has_value());
+    CHECK(historical->map == "KF-BioticsLab");
+    CHECK(historical->net_mode == "NM_Standalone");
+    CHECK(!historical->zeds_alive);
+    CHECK(!historical->wave_number);
+    CHECK(!historical->telemetry_sample);
+    CHECK(historical->telemetry_observed_ns == 0);
+    CHECK(historical->load_map_observed_ns == 0);
+    const auto live_after_history = batch_stream.feed(
+        telemetry_line(5), 4'000'000'000ULL);
+    CHECK(live_after_history.has_value());
+    CHECK(live_after_history->telemetry_sample == 5);
+    CHECK(live_after_history->telemetry_observed_ns == 4'000'000'000ULL);
+    // Discarding previously current measurements is itself a model change,
+    // even when the next historical block contains only unrelated log noise.
+    const auto historical_noise = batch_stream.feed(
+        "Log: historical diagnostic record\n", 5'000'000'000ULL, false);
+    CHECK(historical_noise.has_value());
+    CHECK(!historical_noise->telemetry_sample);
+    CHECK(historical_noise->telemetry_observed_ns == 0);
+    CHECK(!batch_stream.feed(
+        "Log: more historical diagnostic records\n", 6'000'000'000ULL, false));
 
     const auto parsed = parse_load_map_line(
         "[0053.20] Log: LoadMap: KF-BioticsLab?Name=Player?Team=255?"
@@ -826,6 +1017,41 @@ int main() {
     CHECK(!diagnostics_off->telemetry_corpse_lod_total.has_value());
     CHECK(!diagnostics_off->telemetry_dismembered_corpses.has_value());
     CHECK(diagnostics_off->telemetry_corpse_collide_dead == true);
+    CHECK(!diagnostics_off->telemetry_visible_gibs.has_value());
+    CHECK(!diagnostics_off->telemetry_spray_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_fire_spray_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_toxic_spray_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_other_spray_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_damaging_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_fire_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_toxic_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_other_damaging_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_unclassified_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_lingering_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_smoke_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_bloat_king_fart_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_smoke_grenade_projectiles.has_value());
+    CHECK(!diagnostics_off->telemetry_puke_mine_projectiles.has_value());
+    CHECK(!diagnostics_off->telemetry_bloat_king_puke_mine_projectiles.has_value());
+    CHECK(diagnostics_off->telemetry_world_particles == 987);
+    CHECK(diagnostics_off->telemetry_particle_peak_capacity == 2048);
+    CHECK(diagnostics_off->telemetry_wound_decals == 12);
+    const auto diagnostics_on = diagnostics_off_stream.feed(telemetry_line(3));
+    CHECK(diagnostics_on.has_value());
+    CHECK(diagnostics_on->telemetry_visible_gibs == 11);
+    CHECK(diagnostics_on->telemetry_spray_actors == 6);
+    CHECK(diagnostics_on->telemetry_explosion_actors == 5);
+    CHECK(diagnostics_on->telemetry_smoke_grenade_projectiles == 2);
+    CHECK(diagnostics_on->telemetry_puke_mine_projectiles == 3);
+    const auto diagnostics_zero = diagnostics_off_stream.feed(
+        replace_once(empty_telemetry_line(), "sample=1", "sample=4"));
+    CHECK(diagnostics_zero.has_value());
+    CHECK(diagnostics_zero->telemetry_visible_gibs == 0);
+    CHECK(diagnostics_zero->telemetry_spray_actors == 0);
+    CHECK(diagnostics_zero->telemetry_explosion_actors == 0);
+    CHECK(diagnostics_zero->telemetry_smoke_grenade_projectiles == 0);
+    CHECK(diagnostics_zero->telemetry_puke_mine_projectiles == 0);
     CHECK(!stream.feed(telemetry_line(8, 4),
                        4'600'000'000ULL).has_value());
     // Previous telemetry schemas remain unsupported rather than being parsed

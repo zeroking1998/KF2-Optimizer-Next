@@ -1,0 +1,3 @@
+// Real PNG resources provide a positive control for injected loader failures.
+202 RCDATA KF2_OVERLAY_TEST_PNG_PATH
+203 RCDATA KF2_OVERLAY_TEST_PNG_PATH

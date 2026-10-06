@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <charconv>
 #include <cctype>
@@ -44,6 +45,8 @@ struct DirectoryIdentity {
 
 #if defined(KF2_UPDATE_HELPER_TESTING)
 UpdateHelperStopFault g_stop_fault{UpdateHelperStopFault::none};
+std::atomic<UpdateCleanupWaitFault> g_cleanup_wait_fault{
+    UpdateCleanupWaitFault::none};
 #endif
 
 std::uint64_t process_start_id(HANDLE process) noexcept {
@@ -60,6 +63,12 @@ UpdateProcessWaitResult wait_for_process_instance(
     if (process_id == 0 || expected_start_id == 0) {
         return UpdateProcessWaitResult::failed;
     }
+#if defined(KF2_UPDATE_HELPER_TESTING)
+    const auto fault = g_cleanup_wait_fault.load();
+    if (fault == UpdateCleanupWaitFault::open_failure) {
+        return UpdateProcessWaitResult::failed;
+    }
+#endif
     HANDLE process = OpenProcess(
         SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_id);
     if (!process) {
@@ -76,7 +85,13 @@ UpdateProcessWaitResult wait_for_process_instance(
         CloseHandle(process);
         return UpdateProcessWaitResult::exited_or_missing;
     }
-    const DWORD waited = WaitForSingleObject(process, timeout_ms);
+    DWORD waited = 0;
+#if defined(KF2_UPDATE_HELPER_TESTING)
+    if (fault == UpdateCleanupWaitFault::wait_failure) waited = WAIT_FAILED;
+    else if (fault == UpdateCleanupWaitFault::wait_timeout) waited = WAIT_TIMEOUT;
+    else
+#endif
+    waited = WaitForSingleObject(process, timeout_ms);
     CloseHandle(process);
     if (waited == WAIT_OBJECT_0) {
         return UpdateProcessWaitResult::exited_or_missing;
@@ -404,6 +419,37 @@ std::optional<DirectoryIdentity> validated_cleanup_identity(
     return directory_identity(work);
 }
 
+bool cleanup_update_work(
+    std::uint32_t helper_id, std::uint64_t helper_start_id,
+    const std::filesystem::path& work, std::string_view token,
+    const DirectoryIdentity& identity, DWORD timeout_ms) {
+    const auto waited = wait_for_process_instance(
+        helper_id, helper_start_id, timeout_ms);
+    if (waited != UpdateProcessWaitResult::exited_or_missing) {
+        const auto current_identity = directory_identity(work);
+        const auto marker = read_small_file(work / L"update.marker");
+        if (!current_identity || *current_identity != identity ||
+            !marker.has_value() || marker.value() != token) return false;
+        // The existing journal stays authoritative. This bounded diagnostic
+        // neither authorizes cleanup nor turns retention into update failure.
+        const std::string report = "schema_version=1\nstate=deferred\nreason=" +
+            std::string{waited == UpdateProcessWaitResult::timed_out
+                ? "helper_wait_timeout" : "helper_exit_unconfirmed"} +
+            "\nhelper_process_id=" + std::to_string(helper_id) +
+            "\nhelper_process_start_id=" + std::to_string(helper_start_id) + "\n";
+        static_cast<void>(platform::windows::atomic_replace_utf8(
+            work / L"cleanup-deferred.ini", report));
+        return false;
+    }
+    const auto current_identity = validated_cleanup_identity(work, token);
+    if (!current_identity || *current_identity != identity) return false;
+    std::error_code error;
+    std::filesystem::remove_all(work, error);
+    if (error) return false;
+    std::filesystem::remove(work.parent_path(), error);
+    return true;
+}
+
 Result<bool> write_request(const std::filesystem::path& path,
                            const HelperRequest& request) {
     const auto target = utf8_from_wide(request.target_root.wstring());
@@ -506,6 +552,22 @@ Result<bool> launch_cleanup_instance(const HelperRequest& request) {
 }  // namespace
 
 #if defined(KF2_UPDATE_HELPER_TESTING)
+void set_update_cleanup_wait_fault_for_testing(
+    UpdateCleanupWaitFault fault) noexcept {
+    g_cleanup_wait_fault.store(fault);
+}
+
+bool cleanup_update_work_for_testing(
+    std::uint32_t helper_process_id,
+    std::uint64_t helper_process_start_id,
+    const std::filesystem::path& work_root,
+    std::string_view token,
+    std::uint32_t timeout_ms) {
+    const auto identity = validated_cleanup_identity(work_root, token);
+    return identity && cleanup_update_work(helper_process_id,
+        helper_process_start_id, work_root, token, *identity, timeout_ms);
+}
+
 void set_update_helper_stop_fault_for_testing(
     UpdateHelperStopFault fault) noexcept {
     g_stop_fault = fault;
@@ -850,15 +912,13 @@ Result<bool> schedule_update_cleanup(
     const std::string owned_token{token};
     std::thread([work, helper_id, helper_start_id, owned_token,
                  identity = *identity] {
-        if (wait_for_process_instance(helper_id, helper_start_id, 30'000) !=
-            UpdateProcessWaitResult::exited_or_missing) return;
-        const auto current_identity = validated_cleanup_identity(
-            work, owned_token);
-        if (!current_identity || *current_identity != identity) return;
-        std::error_code ignored;
-        std::filesystem::remove_all(work, ignored);
-        const auto parent = work.parent_path();
-        std::filesystem::remove(parent, ignored);
+        try {
+            static_cast<void>(cleanup_update_work(helper_id, helper_start_id,
+                work, owned_token, identity, 30'000));
+        } catch (...) {
+            // Deferred cleanup must not terminate a successfully restarted app.
+            // The existing journal remains the recovery authority.
+        }
     }).detach();
     return Result<bool>::success(true);
 }

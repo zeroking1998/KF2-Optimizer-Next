@@ -52,7 +52,7 @@ int main() {
     CHECK(parsed.value().debug_corpse_physics_control);
     CHECK(parsed.value().overlay_position == "bottom_left");
     CHECK(parsed.value().overlay_scale_percent == 175);
-    CHECK(parsed.value().quality_policy == "invisible");
+    CHECK(parsed.value().legacy_quality_policy_migrated);
     CHECK(parsed.value().manual_game_path == "D:\\Steam\\KillingFloor2");
     CHECK(parsed.value().extras.at("custom_key") == "preserved");
     const auto migrated_serialized = serialize_settings(parsed.value());
@@ -111,10 +111,80 @@ int main() {
         "adaptive_quality_change_budget=3\nadaptive_headroom_percent=12\n"
         "adaptive_shadow_mode=true\n");
     CHECK(adaptive.has_value());
-    CHECK(adaptive.value().adaptive_aggressiveness == "aggressive");
+    CHECK(!adaptive.value().extras.contains("adaptive_aggressiveness"));
     CHECK(adaptive.value().adaptive_minimum_quality == 55);
     CHECK(adaptive.value().adaptive_maximum_quality == 95);
     CHECK(adaptive.value().adaptive_optimization_enabled);
+    for (const auto legacy : {"conservative", "balanced", "aggressive"}) {
+        const auto migrated_profile = parse_settings(
+            std::string{"schema_version=1\nadaptive_aggressiveness="} +
+            legacy + "\ntarget_fps=119\ncorpse_limit=1272\ncustom_key=kept\n");
+        CHECK(migrated_profile.has_value());
+        CHECK(migrated_profile.value().target_fps == 119);
+        CHECK(migrated_profile.value().corpse_limit == 1272);
+        CHECK(migrated_profile.value().extras.at("custom_key") == "kept");
+        CHECK(!migrated_profile.value().extras.contains("adaptive_aggressiveness"));
+        const auto canonical = serialize_settings(migrated_profile.value());
+        CHECK(canonical.find("adaptive_aggressiveness=") == std::string::npos);
+        const auto reloaded = parse_settings(canonical);
+        CHECK(reloaded.has_value());
+        CHECK(serialize_settings(reloaded.value()) == canonical);
+    }
+    CHECK(!parse_settings(
+        "schema_version=1\nadaptive_aggressiveness=unknown\n").has_value());
+    CHECK(!parse_settings(
+        "schema_version=1\nadaptive_aggressiveness=balanced\n"
+        "adaptive_aggressiveness=aggressive\n").has_value());
+    const std::string current_preferences =
+        "schema_version=1\ntarget_fps=119\ncorpse_limit=1272\n"
+        "adaptive_optimization_enabled=false\nadaptive_logging=false\n"
+        "custom_key=kept\n";
+    const auto current = parse_settings(current_preferences);
+    CHECK(current.has_value());
+    const auto expected_preferences = serialize_settings(current.value());
+    for (const auto legacy : {"true", "false"}) {
+        const auto migrated_calibration = parse_settings(
+            current_preferences + "adaptive_calibration_enabled=" +
+            legacy + "\n");
+        CHECK(migrated_calibration.has_value());
+        CHECK(!migrated_calibration.value().extras.contains(
+            "adaptive_calibration_enabled"));
+        const auto canonical = serialize_settings(migrated_calibration.value());
+        CHECK(canonical.find("adaptive_calibration_enabled=") ==
+              std::string::npos);
+        CHECK(canonical == expected_preferences);
+        const auto reloaded = parse_settings(canonical);
+        CHECK(reloaded.has_value());
+        CHECK(serialize_settings(reloaded.value()) == canonical);
+    }
+    CHECK(!parse_settings(
+        "schema_version=1\nadaptive_calibration_enabled=maybe\n").has_value());
+    CHECK(!parse_settings(
+        "schema_version=1\nadaptive_calibration_enabled=\n").has_value());
+    CHECK(!parse_settings(
+        "schema_version=1\nadaptive_calibration_enabled=true\n"
+        "adaptive_calibration_enabled=false\n").has_value());
+    for (const auto legacy : {"exact", "invisible", "performance"}) {
+        const auto migrated_quality = parse_settings(
+            std::string{"schema_version=1\nquality_policy="} + legacy +
+            "\ntarget_fps=119\ncorpse_limit=1272\ncustom_key=kept\n");
+        CHECK(migrated_quality.has_value());
+        CHECK(migrated_quality.value().legacy_quality_policy_migrated);
+        CHECK(migrated_quality.value().target_fps == 119);
+        CHECK(migrated_quality.value().corpse_limit == 1272);
+        CHECK(migrated_quality.value().extras.at("custom_key") == "kept");
+        CHECK(!migrated_quality.value().extras.contains("quality_policy"));
+        const auto canonical = serialize_settings(migrated_quality.value());
+        CHECK(canonical.find("quality_policy=") == std::string::npos);
+        const auto reloaded = parse_settings(canonical);
+        CHECK(reloaded.has_value());
+        CHECK(!reloaded.value().legacy_quality_policy_migrated);
+        CHECK(serialize_settings(reloaded.value()) == canonical);
+    }
+    CHECK(!parse_settings(
+        "schema_version=1\nquality_policy=exact\nquality_policy=invisible\n")
+        .has_value());
+    CHECK(!parse_settings("schema_version=1\nquality_policy=\n").has_value());
     const auto adaptive_off = parse_settings(
         "schema_version=1\nadaptive_optimization_enabled=false\n");
     CHECK(adaptive_off.has_value());
@@ -261,17 +331,15 @@ int main() {
           "debug_runtime_diagnostics=false\n"
           "debug_corpse_physics_control=false\n"
           "restore_config_after_game=true\n"
-          "adaptive_aggressiveness=balanced\n"
           "adaptive_minimum_quality=10\nadaptive_maximum_quality=100\n"
           "adaptive_quality_change_budget=2\nadaptive_headroom_percent=8\n"
           "adaptive_emergency_enabled=true\n"
           "adaptive_quality_recovery_enabled=true\n"
           "adaptive_manual_locks_enabled=true\n"
-          "adaptive_calibration_enabled=true\nadaptive_logging=true\n"
+          "adaptive_logging=true\n"
           "overlay_position=top_right\n"
           "overlay_scale_percent=100\n"
-          "target_fps=60\ncorpse_limit=20\n"
-          "quality_policy=exact\n");
+          "target_fps=60\ncorpse_limit=20\n");
 
     Settings with_extras;
     CHECK(serialize_settings(with_extras).find(

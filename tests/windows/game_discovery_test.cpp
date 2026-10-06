@@ -121,6 +121,26 @@ int main() {
     CHECK(found.value().source == kf2::game::DiscoverySource::manual);
     CHECK(found.value().duplicate_candidates_ignored == 1);
     CHECK(found.value().executable_identity.file_index != 0);
+    CHECK(kf2::game::verify_game_executable_identity(found.value()).has_value());
+    auto unknown_identity = found.value();
+    unknown_identity.executable_identity = {};
+    CHECK(!kf2::game::verify_game_executable_identity(unknown_identity).has_value());
+    auto wrong_volume = found.value();
+    ++wrong_volume.executable_identity.volume_serial;
+    CHECK(!kf2::game::verify_game_executable_identity(wrong_volume).has_value());
+    const auto replacement_executable = executable.parent_path() / L"replacement.exe";
+    write_test_pe(replacement_executable, IMAGE_FILE_MACHINE_AMD64);
+    CHECK(ReplaceFileW(executable.c_str(), replacement_executable.c_str(), nullptr,
+        REPLACEFILE_WRITE_THROUGH, nullptr, nullptr));
+    const auto stale_identity = kf2::game::verify_game_executable_identity(found.value());
+    CHECK(!stale_identity.has_value());
+    CHECK(stale_identity.error().code == kf2::ErrorCode::stale_data);
+    const auto refreshed = kf2::game::discover_game_installation(input);
+    CHECK(refreshed.has_value());
+    CHECK(kf2::game::verify_game_executable_identity(refreshed.value()).has_value());
+    fs::remove(executable);
+    CHECK(!kf2::game::verify_game_executable_identity(refreshed.value()).has_value());
+    write_test_pe(executable, IMAGE_FILE_MACHINE_AMD64);
 
     const auto outside_binaries = fixture / L"outside-binaries";
     const auto outside_executable =

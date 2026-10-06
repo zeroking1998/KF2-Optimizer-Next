@@ -26,7 +26,6 @@ struct Settings {
     // active but all optimizer-owned corpse reductions are disabled.
     bool debug_corpse_physics_control{false};
     bool restore_config_after_game{true};
-    std::string adaptive_aggressiveness{"balanced"};
     int adaptive_minimum_quality{10};
     int adaptive_maximum_quality{100};
     int adaptive_quality_change_budget{2};
@@ -35,7 +34,6 @@ struct Settings {
     bool adaptive_quality_recovery_enabled{true};
     bool adaptive_manual_locks_enabled{true};
     bool adaptive_shadow_mode{false};
-    bool adaptive_calibration_enabled{true};
     bool adaptive_logging{true};
     std::string overlay_position{"top_right"};
     int overlay_scale_percent{100};
@@ -43,8 +41,8 @@ struct Settings {
     // Transient load evidence. It is intentionally not serialized.
     bool target_fps_migrated{false};
     bool adaptive_quality_range_migrated{false};
+    bool legacy_quality_policy_migrated{false};
     int corpse_limit{20};
-    std::string quality_policy{"exact"};
     std::string manual_game_path;
     std::map<std::string, std::string> extras;
 };

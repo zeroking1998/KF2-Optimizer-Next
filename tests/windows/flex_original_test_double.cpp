@@ -20,7 +20,15 @@ volatile LONG last_transfer_elements{};
 volatile LONG last_transfer_memory{};
 volatile LONG last_capacity{};
 int solver_tokens[4]{};
+HANDLE update_entered{};
+HANDLE update_release{};
 }
+
+// Resolved as a stock PE forwarder to bind the dependency, never invoked by
+// the CPU-only relay tests (and therefore never initializes a GPU runtime).
+extern "C" __declspec(dllexport) void flexInit() noexcept {}
+
+extern "C" __declspec(dllexport) int flexGetVersion() noexcept { return 31; }
 
 extern "C" __declspec(dllexport) void* flexCreateSolver(int capacity) noexcept {
     const auto call = InterlockedIncrement64(&create_calls);
@@ -92,6 +100,16 @@ extern "C" __declspec(dllexport) void flexUpdateSolver(
     void*, float, int substeps, void*) noexcept {
     InterlockedExchange(&last_substeps, substeps);
     InterlockedIncrement64(&update_calls);
+    if (update_entered) {
+        SetEvent(update_entered);
+        WaitForSingleObject(update_release, 5000);
+    }
+}
+
+extern "C" __declspec(dllexport) void flexTestSetUpdateGate(
+    HANDLE entered, HANDLE release) noexcept {
+    update_entered = entered;
+    update_release = release;
 }
 
 extern "C" __declspec(dllexport) int flexTestLastSubsteps() noexcept {

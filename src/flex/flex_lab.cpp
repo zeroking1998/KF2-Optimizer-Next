@@ -2,7 +2,6 @@
 
 #include <Windows.h>
 
-#include <optional>
 #include <string_view>
 #include <system_error>
 
@@ -144,7 +143,31 @@ struct LabMarker {
     std::string state;
     std::string original_hash;
     std::string forwarder_hash;
+    std::string owner_hash;
 };
+
+Result<std::string> installation_identity(const std::filesystem::path& game) {
+    HANDLE directory = CreateFileW(game.c_str(), FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr);
+    if (directory == INVALID_HANDLE_VALUE) return Result<std::string>::failure(
+        {ErrorCode::access_denied, L"FleX installation identity cannot be opened",
+         GetLastError()});
+    BY_HANDLE_FILE_INFORMATION info{};
+    const bool inspected = GetFileInformationByHandle(directory, &info) != FALSE;
+    const auto native = inspected ? ERROR_INVALID_DATA : GetLastError();
+    CloseHandle(directory);
+    const auto index = (static_cast<std::uint64_t>(info.nFileIndexHigh) << 32U) |
+        info.nFileIndexLow;
+    if (!game.is_absolute() || !inspected || index == 0 ||
+        (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+        (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+        return Result<std::string>::failure(
+            {ErrorCode::access_denied, L"FleX installation identity is unsafe", native});
+    return security::sha256_hex(std::to_string(info.dwVolumeSerialNumber) +
+        ":" + std::to_string(index));
+}
 
 Result<LabMarker> parse_marker(const std::filesystem::path& marker) {
     const auto marker_bytes = platform::windows::read_bounded_verified_file(
@@ -153,14 +176,17 @@ Result<LabMarker> parse_marker(const std::filesystem::path& marker) {
         return Result<LabMarker>::failure(marker_bytes.error());
     }
     const std::string& bytes = marker_bytes.value();
-    constexpr std::string_view prefix = "schema=2\nstate=";
+    constexpr std::string_view prefix = "schema=3\nstate=";
     if (!bytes.starts_with(prefix)) return Result<LabMarker>::failure(
-        {ErrorCode::invalid_argument, L"FleX laboratory transaction marker is invalid", 0});
+        {ErrorCode::invalid_argument,
+         L"FleX recovery requires an installation-bound transaction; unrecognized or legacy evidence was retained", 0});
     const auto state_end = bytes.find('\n', prefix.size());
     const auto original_prefix = bytes.find("original_sha256=", state_end);
     const auto forwarder_prefix = bytes.find("forwarder_sha256=", state_end);
+    const auto owner_prefix = bytes.find("owner_sha256=", state_end);
     if (state_end == std::string::npos || original_prefix == std::string::npos ||
-        forwarder_prefix == std::string::npos) return Result<LabMarker>::failure(
+        forwarder_prefix == std::string::npos || owner_prefix == std::string::npos)
+        return Result<LabMarker>::failure(
             {ErrorCode::invalid_argument, L"FleX laboratory marker fields are missing", 0});
     LabMarker parsed;
     parsed.state = bytes.substr(prefix.size(), state_end - prefix.size());
@@ -170,35 +196,33 @@ Result<LabMarker> parse_marker(const std::filesystem::path& marker) {
     const auto forwarder_end = bytes.find('\n', forwarder_start);
     parsed.original_hash = bytes.substr(original_start, original_end - original_start);
     parsed.forwarder_hash = bytes.substr(forwarder_start, forwarder_end - forwarder_start);
+    const auto owner_start = owner_prefix + std::string_view{"owner_sha256="}.size();
+    parsed.owner_hash = bytes.substr(owner_start, bytes.find('\n', owner_start) - owner_start);
     const auto valid_hash = [](const std::string& hash) {
         return hash.size() == 64 &&
             hash.find_first_not_of("0123456789abcdef") == std::string::npos;
     };
     if ((parsed.state != "installing" && parsed.state != "installed") ||
-        !valid_hash(parsed.original_hash) || !valid_hash(parsed.forwarder_hash))
+        !valid_hash(parsed.original_hash) || !valid_hash(parsed.forwarder_hash) ||
+        !valid_hash(parsed.owner_hash) || bytes != "schema=3\nstate=" + parsed.state +
+            "\noriginal_sha256=" + parsed.original_hash +
+            "\nforwarder_sha256=" + parsed.forwarder_hash +
+            "\nowner_sha256=" + parsed.owner_hash + "\n")
         return Result<LabMarker>::failure(
             {ErrorCode::invalid_argument, L"FleX laboratory marker hash is invalid", 0});
     return Result<LabMarker>::success(std::move(parsed));
 }
 
-Result<std::string> parse_legacy_original_hash(
-    const std::filesystem::path& marker) {
-    const auto marker_bytes = platform::windows::read_bounded_verified_file(
-        marker, maximum_marker_bytes);
-    if (!marker_bytes.has_value()) {
-        return Result<std::string>::failure(marker_bytes.error());
-    }
-    const std::string& bytes = marker_bytes.value();
-    constexpr std::string_view prefix = "schema=1\noriginal_sha256=";
-    if (!bytes.starts_with(prefix)) return Result<std::string>::failure(
-        {ErrorCode::invalid_argument, L"Legacy FleX marker is invalid", 0});
-    const auto end = bytes.find('\n', prefix.size());
-    const auto hash = bytes.substr(prefix.size(), end - prefix.size());
-    if (hash.size() != 64 ||
-        hash.find_first_not_of("0123456789abcdef") != std::string::npos)
-        return Result<std::string>::failure(
-            {ErrorCode::invalid_argument, L"Legacy FleX marker hash is invalid", 0});
-    return Result<std::string>::success(hash);
+Result<LabMarker> owned_marker(const std::filesystem::path& game,
+                              const std::filesystem::path& marker) {
+    auto parsed = parse_marker(marker);
+    if (!parsed.has_value()) return parsed;
+    const auto identity = installation_identity(game);
+    if (!identity.has_value()) return Result<LabMarker>::failure(identity.error());
+    if (parsed.value().owner_hash != identity.value()) return Result<LabMarker>::failure(
+        {ErrorCode::stale_data,
+         L"FleX recovery belongs to a different installation; select its original KF2 folder", 0});
+    return parsed;
 }
 
 }  // namespace
@@ -239,23 +263,27 @@ Result<LabTransactionResult> install_offline_lab(const LabTransactionOptions& o)
             L"An unfinished FleX laboratory transaction requires recovery", 0});
     const auto original_hash = hash_file(active);
     const auto forwarder_hash = hash_file(o.forwarder_dll);
+    const auto owner_hash = installation_identity(o.game_directory);
     if (!original_hash.has_value()) return Result<LabTransactionResult>::failure(original_hash.error());
     if (!forwarder_hash.has_value()) return Result<LabTransactionResult>::failure(forwarder_hash.error());
+    if (!owner_hash.has_value()) return Result<LabTransactionResult>::failure(owner_hash.error());
 #if defined(KF2_FLEX_LAB_TEST_HOOKS)
     run_install_test_hook(LabInstallTestCheckpoint::sources_hashed);
 #endif
     auto copied = copy_verified(active, backup, original_hash.value());
     if (!copied.has_value()) return Result<LabTransactionResult>::failure(copied.error());
-    copied = copy_verified(active, original, original_hash.value());
-    if (!copied.has_value()) return Result<LabTransactionResult>::failure(copied.error());
     const auto marker_text = [&](std::string_view state) {
-        return "schema=2\nstate=" + std::string{state} +
+        return "schema=3\nstate=" + std::string{state} +
             "\noriginal_sha256=" + original_hash.value() +
-            "\nforwarder_sha256=" + forwarder_hash.value() + "\n";
+            "\nforwarder_sha256=" + forwarder_hash.value() +
+            "\nowner_sha256=" + owner_hash.value() + "\n";
     };
     const auto marked = platform::windows::atomic_replace_utf8(
         marker, marker_text("installing"));
     if (!marked.has_value()) return Result<LabTransactionResult>::failure(marked.error());
+    // Persist ownership before creating any in-game recovery residue.
+    copied = copy_verified(active, original, original_hash.value());
+    if (!copied.has_value()) return Result<LabTransactionResult>::failure(copied.error());
 #if defined(KF2_FLEX_LAB_TEST_HOOKS)
     run_install_test_hook(LabInstallTestCheckpoint::marker_written);
 #endif
@@ -278,7 +306,9 @@ Result<LabTransactionResult> install_offline_lab(const LabTransactionOptions& o)
 }
 
 Result<bool> restore_offline_lab(const std::filesystem::path& game,
-                                 const std::filesystem::path& state, bool running) {
+                                 const std::filesystem::path& state, bool running,
+                                 std::wstring* recovery_details) {
+    if (recovery_details != nullptr) recovery_details->clear();
     const auto checked = preflight(game, state, running);
     if (!checked.has_value()) return checked;
     const auto active = game / active_name;
@@ -289,25 +319,37 @@ Result<bool> restore_offline_lab(const std::filesystem::path& game,
     const auto original_exists = inspected_exists(original);
     const auto backup_exists = inspected_exists(backup);
     if (!marker_exists.has_value()) return marker_exists;
-    if (!original_exists.has_value()) return original_exists;
-    if (!backup_exists.has_value()) return backup_exists;
-    if (!marker_exists.value() && !original_exists.value())
-        return Result<bool>::failure(
-            {ErrorCode::not_found, L"No active FleX laboratory transaction exists", 0});
-    const auto source = backup_exists.value() ? backup : original;
-    if (!backup_exists.value() && !original_exists.value()) return Result<bool>::failure(
-        {ErrorCode::not_found, L"Verified FleX laboratory backup is missing", 0});
-    std::optional<std::string> expected_hash;
-    if (marker_exists.value()) {
-        const auto parsed = parse_marker(marker);
-        if (!parsed.has_value()) return Result<bool>::failure(parsed.error());
-        expected_hash = parsed.value().original_hash;
+    if (!marker_exists.value()) return Result<bool>::failure(
+        {ErrorCode::not_found,
+         L"FleX recovery requires an installation-bound marker; recovery copies were retained", 0});
+    const auto parsed = owned_marker(game, marker);
+    if (!parsed.has_value()) return Result<bool>::failure(parsed.error());
+    const auto verify_source = [&](const std::filesystem::path& path,
+                                   const Result<bool>& exists) {
+        if (!exists.has_value())
+            return Result<std::string>::failure(exists.error());
+        if (!exists.value()) return Result<std::string>::failure(
+            {ErrorCode::not_found, L"Recovery copy is missing", 0});
+        auto hash = hash_file(path);
+        if (hash.has_value() && hash.value() != parsed.value().original_hash)
+            return Result<std::string>::failure(
+                {ErrorCode::stale_data,
+                 L"Recovery copy does not match the transaction marker", 0});
+        return hash;
+    };
+    const auto backup_hash = verify_source(backup, backup_exists);
+    const auto original_hash = verify_source(original, original_exists);
+    if (!backup_hash.has_value() && !original_hash.has_value()) {
+        auto error = backup_hash.error().code == ErrorCode::not_found
+            ? original_hash.error() : backup_hash.error();
+        error.message = L"No verified FleX recovery copy is available. State backup: " +
+            backup_hash.error().message + L"; in-game original: " +
+            original_hash.error().message;
+        return Result<bool>::failure(std::move(error));
     }
-    const auto source_before = hash_file(source);
-    if (!source_before.has_value()) return Result<bool>::failure(source_before.error());
-    if (expected_hash && source_before.value() != *expected_hash)
-        return Result<bool>::failure(
-            {ErrorCode::stale_data, L"FleX backup does not match the transaction marker", 0});
+    const bool use_backup = backup_hash.has_value();
+    const auto& source = use_backup ? backup : original;
+    const auto& source_before = use_backup ? backup_hash : original_hash;
     auto copied = replace_verified(source, active, source_before.value());
     if (!copied.has_value()) return copied;
     const auto source_hash = hash_file(source); const auto active_hash = hash_file(active);
@@ -320,22 +362,35 @@ Result<bool> restore_offline_lab(const std::filesystem::path& game,
     std::filesystem::remove(marker, ec);
     if (ec) return Result<bool>::failure({ErrorCode::io_failure,
         L"FleX transaction marker removal failed", static_cast<std::uint32_t>(ec.value())});
+    if (recovery_details != nullptr) {
+        *recovery_details = use_backup ? L"Recovery source: verified state backup."
+                                      : L"Recovery source: verified in-game original.";
+        const auto& other = use_backup ? original_hash : backup_hash;
+        if (!other.has_value()) {
+            *recovery_details += use_backup ? L" In-game original rejected: "
+                                            : L" State backup rejected: ";
+            *recovery_details += other.error().message;
+        }
+    }
     return Result<bool>::success(true);
 }
 
 Result<bool> recover_offline_lab(const std::filesystem::path& game,
-                                 const std::filesystem::path& state, bool running) {
+                                 const std::filesystem::path& state, bool running,
+                                 std::wstring* recovery_details) {
+    if (recovery_details != nullptr) recovery_details->clear();
     const auto marker = state / marker_name;
     const auto marker_exists = inspected_exists(marker);
     const auto original_exists = inspected_exists(game / original_name);
     if (!marker_exists.has_value()) return marker_exists;
-    if (!original_exists.has_value()) return original_exists;
-    if (!marker_exists.value() && !original_exists.value()) {
-        return Result<bool>::success(false);
+    if (!marker_exists.value()) {
+        if (!original_exists.has_value()) return original_exists;
+        if (!original_exists.value()) return Result<bool>::success(false);
     }
     if (marker_exists.value()) {
-        const auto parsed = parse_marker(marker);
-        if (parsed.has_value() && parsed.value().state == "installed") {
+        const auto parsed = owned_marker(game, marker);
+        if (!parsed.has_value()) return Result<bool>::failure(parsed.error());
+        if (parsed.value().state == "installed") {
             const auto active_hash = hash_file(game / active_name);
             const auto original_hash = hash_file(game / original_name);
             const auto backup_hash = hash_file(state / backup_name);
@@ -347,28 +402,8 @@ Result<bool> recover_offline_lab(const std::filesystem::path& game,
                 return Result<bool>::success(false);
             }
         }
-        // Schema 1 could remain after an older build had already restored the
-        // active DLL but failed to remove its marker. Remove only this harmless
-        // residue after both active runtime and backup match its pinned hash.
-        if (!parsed.has_value() && !original_exists.value()) {
-            const auto legacy = parse_legacy_original_hash(marker);
-            const auto active_hash = hash_file(game / active_name);
-            const auto backup_hash = hash_file(state / backup_name);
-            if (legacy.has_value() && active_hash.has_value() &&
-                backup_hash.has_value() &&
-                active_hash.value() == legacy.value() &&
-                backup_hash.value() == legacy.value()) {
-                std::error_code ec;
-                std::filesystem::remove(marker, ec);
-                if (ec) return Result<bool>::failure(
-                    {ErrorCode::io_failure,
-                     L"Legacy FleX marker cleanup failed",
-                     static_cast<std::uint32_t>(ec.value())});
-                return Result<bool>::success(true);
-            }
-        }
     }
-    return restore_offline_lab(game, state, running);
+    return restore_offline_lab(game, state, running, recovery_details);
 }
 
 }  // namespace kf2::flex

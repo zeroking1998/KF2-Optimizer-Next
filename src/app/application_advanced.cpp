@@ -6,7 +6,7 @@ void UiRuntime::refresh_advanced_presentation() {
     auto status = model.status();
     status.advanced_available = advanced_settings.pending.has_value();
     status.advanced_game_running = installation &&
-        game::find_running_game_process(installation->executable).has_value();
+        game::game_process_may_be_running(installation->executable);
     status.advanced_dirty = advanced_settings.saved &&
         advanced_settings.pending &&
         *advanced_settings.saved != *advanced_settings.pending;
@@ -40,7 +40,9 @@ void UiRuntime::reload_advanced_settings() {
         return;
     }
     const auto loaded = game::read_advanced_game_settings(
-        installation->config_root);
+        session_config_snapshot
+            ? session_config_snapshot->snapshot_root / L"files"
+            : installation->config_root);
     if (!loaded.has_value()) {
         advanced_settings.saved.reset();
         advanced_settings.pending.reset();
@@ -60,7 +62,7 @@ void UiRuntime::cycle_advanced_option(game::AdvancedOption option) {
         reload_advanced_settings();
         if (!advanced_settings.pending) return;
     }
-    if (game::find_running_game_process(installation->executable).has_value()) {
+    if (game::game_process_may_be_running(installation->executable)) {
         model.set_notice({
             ui::NoticeSeverity::warning, L"ADVANCED_GAME_RUNNING",
             L"Close KF2 before changing advanced game settings.", L""});
@@ -78,7 +80,7 @@ void UiRuntime::stage_advanced_slider(
         reload_advanced_settings();
         if (!advanced_settings.pending) return;
     }
-    if (game::find_running_game_process(installation->executable).has_value()) {
+    if (game::game_process_may_be_running(installation->executable)) {
         model.set_notice({
             ui::NoticeSeverity::warning, L"ADVANCED_GAME_RUNNING",
             L"Close KF2 before changing advanced game settings.", L""});
@@ -108,8 +110,10 @@ void UiRuntime::save_advanced_selection(std::wstring_view label) {
         reload_advanced_settings();
         model.set_notice({
             ui::NoticeSeverity::warning, L"ADVANCED_SAVE_FAILED",
-            std::wstring{label} + L" was not saved: " + error.message,
-            L"The controls were restored to the values currently stored by KF2."});
+            std::wstring{label} + L" could not be saved safely: " + error.message,
+            model.recovery_required()
+                ? L"Keep KF2 closed; restore the retained backup or repair the protected launch before retrying."
+                : L"The controls were reloaded from the saved personal settings."});
         invalidate();
         return;
     }
@@ -126,7 +130,7 @@ void UiRuntime::reset_advanced_settings() {
         reload_advanced_settings();
         if (!advanced_settings.pending) return;
     }
-    if (game::find_running_game_process(installation->executable).has_value()) {
+    if (game::game_process_may_be_running(installation->executable)) {
         model.set_notice({
             ui::NoticeSeverity::warning, L"ADVANCED_GAME_RUNNING",
             L"Close KF2 before changing advanced game settings.", L""});
@@ -151,26 +155,91 @@ Result<config::ApplyResult> UiRuntime::apply_advanced_settings() {
             {ErrorCode::invalid_argument,
              L"The selected advanced settings are already saved", 0});
     }
-    if (game::find_running_game_process(installation->executable).has_value()) {
+    if (game::game_process_may_be_running(installation->executable)) {
         return Result<config::ApplyResult>::failure(
             {ErrorCode::access_denied,
              L"Close KF2 before applying advanced game settings", 0});
     }
+    if (start_mode != StartMode::normal || model.recovery_required() ||
+        session_config_launch_deadline_ns != 0 || final_graphics_capture_pending ||
+        (session_config_snapshot && !session_config_waiting_for_launch)) {
+        return Result<config::ApplyResult>::failure({ErrorCode::access_denied,
+            L"Complete the protected launch or recovery before changing advanced settings",
+            0});
+    }
+
+    const bool staged = session_config_snapshot.has_value();
+    if (staged && !restore_protected_session_config(
+            L"Saving advanced settings before the protected launch")) {
+        return Result<config::ApplyResult>::failure({ErrorCode::recovery_required,
+            L"The protected originals could not be restored; recovery data was retained",
+            0});
+    }
+    // Reuse the existing protected-launch transaction and verified apply backup.
+    // Only the explicit delta reaches personal INIs, never temporary session values.
+    const auto fail = [this, staged](Error error) {
+        preview.reset();
+        if (staged && error.code != ErrorCode::recovery_required &&
+            !model.recovery_required()) {
+            const auto rearmed = prepare_automatic_external_launch_profile();
+            if (!rearmed.has_value() || !rearmed.value()) {
+                model.set_recovery_required(true);
+                error.code = ErrorCode::recovery_required;
+                error.message += L"; the protected launch could not be prepared again";
+                if (!rearmed.has_value()) error.message += L": " + rearmed.error().message;
+            }
+        }
+        return Result<config::ApplyResult>::failure(std::move(error));
+    };
     auto prepared = prepare(
         changes, L"Explicit user-selected advanced KF2 settings");
     if (!prepared.has_value()) {
-        return Result<config::ApplyResult>::failure(prepared.error());
+        return fail(prepared.error());
     }
     auto result = apply({.game_running = false});
-    if (result.has_value()) {
-        last_backup_id = result.value().backup.id;
-        events->append({
-            0, diagnostics::Severity::info,
-            "ADVANCED_SETTINGS_EXPLICIT_APPLIED",
-            L"Explicit user-selected advanced KF2 INI settings were applied and verified",
-            L"advanced"});
-        reload_advanced_settings();
+    if (!result.has_value()) return fail(result.error());
+    const auto backup_id = result.value().backup.id;
+    if (staged) {
+        const auto rearmed = prepare_automatic_external_launch_profile();
+        if (!rearmed.has_value() || !rearmed.value()) {
+            last_backup_id = backup_id;
+            Error error = rearmed.has_value()
+                ? Error{ErrorCode::access_denied,
+                    L"The protected launch is unavailable", 0}
+                : rearmed.error();
+            // Never restore an edit backup over an unresolved temporary profile.
+            if (!restore_protected_session_config(
+                    L"Rolling back an advanced-settings rebuild failure")) {
+                model.set_recovery_required(true);
+                error.code = ErrorCode::recovery_required;
+                error.message += L"; protected restoration is incomplete; the edit backup was retained";
+                return fail(std::move(error));
+            }
+            const auto rolled_back = backup::restore_backup(
+                backups, backup_id, installation->config_root,
+                {.game_running = game::game_process_may_be_running(
+                    installation->executable)});
+            if (!rolled_back.has_value()) {
+                model.set_recovery_required(true);
+                error.code = ErrorCode::recovery_required;
+                error.message += L"; the edit backup could not be restored: " +
+                    rolled_back.error().message;
+                return fail(std::move(error));
+            }
+            events->append({0, diagnostics::Severity::warning,
+                "ADVANCED_SETTINGS_ROLLED_BACK",
+                L"The advanced edit was rolled back from its verified backup after protected-launch rebuilding failed",
+                L"advanced"});
+            return fail(std::move(error));
+        }
     }
+    last_backup_id = backup_id;
+    events->append({
+        0, diagnostics::Severity::info,
+        "ADVANCED_SETTINGS_EXPLICIT_APPLIED",
+        L"Explicit user-selected advanced KF2 INI settings were applied and verified",
+        L"advanced"});
+    reload_advanced_settings();
     return result;
 }
 

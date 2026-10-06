@@ -6,6 +6,7 @@
 #include <iostream>
 
 #include "kf2/game/game_session.hpp"
+#include "../support/process_inspection_denial.hpp"
 
 #define CHECK(condition) do { if (!(condition)) {                              \
     std::cerr << __FILE__ << ':' << __LINE__ << ": check failed: "            \
@@ -73,10 +74,31 @@ int wmain(int argc, wchar_t** argv) {
     CHECK(window != nullptr);
     const auto found_process = kf2::game::find_running_game_process(executable);
     CHECK(found_process.has_value());
+    CHECK(kf2::game::game_process_may_be_running(executable));
+    {
+        kf2::test::ProcessInspectionDenial denied;
+        CHECK(denied.deny(GetCurrentProcess()));
+        const auto ambiguous = kf2::game::find_running_game_process(executable);
+        CHECK(!ambiguous.has_value());
+        CHECK(ambiguous.error().code == kf2::ErrorCode::access_denied);
+        CHECK(ambiguous.error().native_code == ERROR_ACCESS_DENIED);
+        CHECK(kf2::game::game_process_may_be_running(executable));
+        CHECK(denied.restore());
+    }
+    CHECK(kf2::game::find_running_game_process(executable).has_value());
     const auto wrong_process = kf2::game::find_running_game_process(
         std::filesystem::path{executable}.parent_path() / L"KFGame.exe");
     CHECK(!wrong_process.has_value());
     CHECK(wrong_process.error().code == kf2::ErrorCode::not_found);
+    CHECK(!kf2::game::game_process_may_be_running(
+        std::filesystem::path{executable}.parent_path() / L"KFGame.exe"));
+    const auto other_executable = std::filesystem::path{executable}.parent_path() /
+        L"other-path" / std::filesystem::path{executable}.filename();
+    const auto other_process = kf2::game::find_running_game_process(other_executable);
+    CHECK(!other_process.has_value());
+    CHECK(other_process.error().code == kf2::ErrorCode::not_found);
+    CHECK(!kf2::game::game_process_may_be_running(other_executable));
+    CHECK(kf2::game::game_process_may_be_running({}));
 
     auto hidden = kf2::game::inspect_game_window(bound.value(), window);
     CHECK(hidden.has_value());

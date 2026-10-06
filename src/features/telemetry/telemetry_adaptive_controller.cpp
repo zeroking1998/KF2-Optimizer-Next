@@ -2,12 +2,15 @@
 
 #include "app/application_runtime.hpp"
 
+#include <format>
+#include <iterator>
+
 namespace kf2::app {
 void UiRuntime::update_adaptive_controller(
     const telemetry_pipeline::TelemetryFrame& frame) {
     const auto now_ns = frame.observed_at_ns;
     const bool active_gameplay = frame.active_gameplay;
-    auto status = model.status();
+    auto status = model.adaptive_status();
     poll_adaptive_runtime_mode();
     reconcile_adaptive_runtime_mode(frame);
     if (adaptive_restore_debt) {
@@ -22,14 +25,14 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_quality_score =
             adaptive_resource_quality.effective_quality();
         status.adaptive_data_quality = L"DEGRADED";
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
     log_adaptive_performance_sample(frame);
     const auto corpse_state = update_adaptive_corpse_status(frame, status);
     using telemetry_pipeline::CorpseTelemetryState;
     if (present_pending_adaptive_runtime_mode(status)) {
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
     if (!optimizer_settings.adaptive_optimization_enabled) {
@@ -50,7 +53,7 @@ void UiRuntime::update_adaptive_controller(
         adaptive_gameplay_active = false;
         adaptive_governor.reset();
         adaptive_decision = {};
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
     status.adaptive_optimization_enabled = true;
@@ -71,7 +74,7 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_safety = L"no actuator";
         status.adaptive_evidence = L"FRAME_RATE_MODE_CHANGED";
         status.recommendation_reason = status.adaptive_reason;
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
     const auto response_context = observe_adaptive_quality_response(frame);
@@ -107,7 +110,7 @@ void UiRuntime::update_adaptive_controller(
         status.recommended_profile = L"user settings";
         status.recommendation_reason =
             L"KF2 starts from the user's saved graphics; live telemetry may make temporary runtime changes";
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
 
@@ -146,7 +149,7 @@ void UiRuntime::update_adaptive_controller(
         last_adaptive_disposition = optimizer::AdaptiveDisposition::hold;
         last_adaptive_bottleneck = optimizer::AdaptiveBottleneck::unknown;
         last_adaptive_decision_log_ns = 0;
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
 
@@ -246,7 +249,7 @@ void UiRuntime::update_adaptive_controller(
             status.adaptive_safety = L"no actuator";
             status.adaptive_evidence = L"NOT_AVAILABLE";
             status.recommendation_reason = status.adaptive_reason;
-            model.set_status(std::move(status));
+            model.set_adaptive_status(std::move(status));
             return;
         }
         if (present_source) present_source->reset_statistics();
@@ -254,7 +257,7 @@ void UiRuntime::update_adaptive_controller(
             "ADAPTIVE_FRAME_WINDOW_RESET",
             L"Adaptive discarded pre-map and loading-frame statistics and is collecting a fresh gameplay window",
             L"optimizer"});
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
 
@@ -291,7 +294,15 @@ void UiRuntime::update_adaptive_controller(
     const auto widen = [](std::string_view value) {
         return std::wstring{value.begin(), value.end()};
     };
-    status.adaptive_particle_capability = widen(
+    const auto assign_widened = [](std::wstring& text, std::string_view value) {
+        if (!std::equal(value.begin(), value.end(), text.begin(), text.end(),
+                [](char source, wchar_t presented) {
+                    return static_cast<wchar_t>(source) == presented;
+                })) {
+            text.assign(value.begin(), value.end());
+        }
+    };
+    assign_widened(status.adaptive_particle_capability,
         optimizer::adaptive_capability_state_name(
             sample.capabilities.particle_control));
     if (sample.adaptive_corpse_runtime_limit &&
@@ -328,7 +339,7 @@ void UiRuntime::update_adaptive_controller(
     if (const auto* corpse_action = adaptive_actuation.current(
             optimizer::AdaptiveControlId::corpse_runtime_limit);
         corpse_state.state == CorpseTelemetryState::available && corpse_action) {
-        status.adaptive_corpse_action_status = widen(
+        assign_widened(status.adaptive_corpse_action_status,
             optimizer::adaptive_action_status_name(corpse_action->status));
     } else {
         status.adaptive_corpse_action_status = L"NONE";
@@ -494,7 +505,7 @@ void UiRuntime::update_adaptive_controller(
                         << L"; lastAppliedNs=" << adaptive_quality_last_applied_ns;
                     events->append({0, diagnostics::Severity::info,
                         "ADAPTIVE_RUNTIME_QUALITY_REQUESTED",
-                        request_log.str(), L"optimizer"});
+                        std::move(request_log).str(), L"optimizer"});
                 }
             } else {
                 static_cast<void>(adaptive_actuation.receive({
@@ -518,56 +529,66 @@ void UiRuntime::update_adaptive_controller(
     adaptive_decision.quality_score =
         static_cast<double>(
             adaptive_resource_quality.effective_quality());
-    status.adaptive_state = std::wstring{
+    const auto stability_label =
         optimizer::adaptive_stability_state_name(
-            adaptive_decision.stability_state)};
-    status.adaptive_bottleneck = std::wstring{
+            adaptive_decision.stability_state);
+    if (status.adaptive_state != stability_label)
+        status.adaptive_state = stability_label;
+    const auto bottleneck_label =
         optimizer::adaptive_bottleneck_name(
-            adaptive_decision.bottleneck.type)};
+            adaptive_decision.bottleneck.type);
+    if (status.adaptive_bottleneck != bottleneck_label)
+        status.adaptive_bottleneck = bottleneck_label;
     {
-        std::wostringstream cpu;
-        cpu << optimizer::adaptive_cpu_workload_name(
-            adaptive_decision.cpu.workload);
-        if (adaptive_decision.cpu.effective_core_usage) {
-            cpu << L" | " << std::fixed << std::setprecision(2)
-                << *adaptive_decision.cpu.effective_core_usage
-                << L" core equivalents";
+        auto& cpu = status.adaptive_cpu_parallelism;
+        const auto& report = adaptive_decision.cpu;
+        cpu = optimizer::adaptive_cpu_workload_name(report.workload);
+        if (report.effective_core_usage) {
+            std::format_to(std::back_inserter(cpu),
+                L" | {:.2f} core equivalents", *report.effective_core_usage);
         }
-        if (adaptive_decision.cpu.active_threads) {
-            cpu << L" | " << *adaptive_decision.cpu.active_threads
-                << L" active threads";
+        if (report.active_threads) {
+            std::format_to(std::back_inserter(cpu),
+                L" | {} active threads", *report.active_threads);
         }
-        if (adaptive_decision.cpu.critical_thread_percent) {
-            cpu << L" | main " << std::fixed << std::setprecision(1)
-                << *adaptive_decision.cpu.critical_thread_percent << L"%";
+        if (report.critical_thread_percent) {
+            std::format_to(std::back_inserter(cpu),
+                L" | main {:.1f}%", *report.critical_thread_percent);
         }
-        if (adaptive_decision.cpu.dominant_thread_share_percent) {
-            cpu << L" / " << std::fixed << std::setprecision(1)
-                << *adaptive_decision.cpu.dominant_thread_share_percent
-                << L"% CPU-time share";
+        if (report.dominant_thread_share_percent) {
+            std::format_to(std::back_inserter(cpu),
+                L" / {:.1f}% CPU-time share", *report.dominant_thread_share_percent);
         }
-        if (adaptive_decision.cpu.affinity_physical_cores ||
-            adaptive_decision.cpu.affinity_logical_processors) {
-            cpu << L" | affinity ";
-            if (adaptive_decision.cpu.affinity_physical_cores) {
-                cpu << *adaptive_decision.cpu.affinity_physical_cores
-                    << L"C/";
+        if (report.affinity_physical_cores || report.affinity_logical_processors) {
+            cpu += L" | affinity ";
+            if (report.affinity_physical_cores) {
+                std::format_to(std::back_inserter(cpu),
+                    L"{}C/", *report.affinity_physical_cores);
             }
-            cpu << adaptive_decision.cpu.affinity_logical_processors
-                       .value_or(0) << L"T";
-            if (adaptive_decision.cpu.affinity_limited) {
-                cpu << L" (subset)";
+            std::format_to(std::back_inserter(cpu),
+                L"{}T", report.affinity_logical_processors.value_or(0));
+            if (report.affinity_limited) {
+                cpu += L" (subset)";
             }
         }
-        status.adaptive_cpu_parallelism = cpu.str();
     }
-    status.adaptive_action = adaptive_decision.selected_setting.empty()
-        ? std::wstring{optimizer::adaptive_disposition_name(
-              adaptive_decision.disposition)}
-        : widen(adaptive_decision.selected_setting) + L" (" +
-              std::wstring{optimizer::adaptive_disposition_name(
-                  adaptive_decision.disposition)} + L")";
-    status.adaptive_reason = widen(adaptive_decision.reason);
+    const auto disposition_label = optimizer::adaptive_disposition_name(
+        adaptive_decision.disposition);
+    if (adaptive_decision.selected_setting.empty()) {
+        if (status.adaptive_action != disposition_label)
+            status.adaptive_action = disposition_label;
+    } else if (!telemetry_pipeline::adaptive_action_text_matches(
+            status.adaptive_action, adaptive_decision.selected_setting,
+            disposition_label)) {
+        status.adaptive_action.assign(adaptive_decision.selected_setting.begin(),
+            adaptive_decision.selected_setting.end());
+        status.adaptive_action += L" (";
+        status.adaptive_action += disposition_label;
+        status.adaptive_action += L')';
+    }
+    assign_widened(status.recommendation_reason, adaptive_decision.reason);
+    if (status.adaptive_reason != status.recommendation_reason)
+        status.adaptive_reason = status.recommendation_reason;
     status.adaptive_confidence_percent = static_cast<int>(std::clamp(
         adaptive_decision.bottleneck.confidence * 100.0, 0.0, 100.0));
     status.adaptive_drop_risk_percent = static_cast<int>(std::clamp(
@@ -590,13 +611,11 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_data_quality = L"DEGRADED";
     }
     if (adaptive_decision.predicted_frame_time_ms) {
-        std::wostringstream prediction;
-        prediction << std::fixed << std::setprecision(2)
-                   << *adaptive_decision.predicted_frame_time_ms
-                   << L" ms (" << static_cast<int>(std::clamp(
-                          adaptive_decision.prediction_confidence * 100.0,
-                          0.0, 100.0)) << L"%)";
-        status.adaptive_prediction = prediction.str();
+        status.adaptive_prediction.clear();
+        std::format_to(std::back_inserter(status.adaptive_prediction),
+            L"{:.2f} ms ({}%)", *adaptive_decision.predicted_frame_time_ms,
+            static_cast<int>(std::clamp(
+                adaptive_decision.prediction_confidence * 100.0, 0.0, 100.0)));
     } else {
         status.adaptive_prediction = L"not available";
     }
@@ -622,23 +641,25 @@ void UiRuntime::update_adaptive_controller(
                 optimizer::AdaptiveSessionClass::verified_offline
             ? L"VERIFIED_OFFLINE / EXACT_READBACK"
             : L"VERIFIED_ONLINE / LOCAL_GRAPHICS_ONLY / EXACT_READBACK";
-        status.adaptive_evidence = widen(
+        assign_widened(status.adaptive_evidence,
             optimizer::adaptive_action_status_name(runtime_record->status));
     } else if (adaptive_decision.selected_setting ==
         "AdaptiveCorpseRuntimeLimit") {
         status.adaptive_source = L"protected autonomous corpse provider";
         status.adaptive_safety = L"PROTECTED / AUTONOMOUS_RUNTIME";
-        status.adaptive_evidence = widen(
+        assign_widened(status.adaptive_evidence,
             optimizer::adaptive_capability_state_name(
                 sample.capabilities.corpse_control));
     } else if (selected_record) {
-        status.adaptive_source = widen(selected_record->source);
-        status.adaptive_safety = widen(
-            optimizer::adaptive_safety_class_name(
-                selected_record->safety_class)) + L" / " + widen(
-            optimizer::adaptive_actuation_class_name(
-                selected_record->actuation_class));
-        status.adaptive_evidence = widen(
+        assign_widened(status.adaptive_source, selected_record->source);
+        const auto safety = optimizer::adaptive_safety_class_name(
+            selected_record->safety_class);
+        const auto actuation = optimizer::adaptive_actuation_class_name(
+            selected_record->actuation_class);
+        status.adaptive_safety.assign(safety.begin(), safety.end());
+        status.adaptive_safety += L" / ";
+        status.adaptive_safety.append(actuation.begin(), actuation.end());
+        assign_widened(status.adaptive_evidence,
             optimizer::adaptive_evidence_state_name(
                 selected_record->evidence_state));
     } else {
@@ -649,7 +670,6 @@ void UiRuntime::update_adaptive_controller(
     status.adaptive_shadow_mode = optimizer_settings.adaptive_shadow_mode;
 
     status.recommended_profile = L"user settings";
-    status.recommendation_reason = adaptive_profile_reason(adaptive_decision);
     const bool controller_changed =
         adaptive_decision.state != last_adaptive_state ||
         adaptive_decision.disposition != last_adaptive_disposition;
@@ -852,7 +872,7 @@ void UiRuntime::update_adaptive_controller(
                      << status.adaptive_restore_generation;
         events->append({0, diagnostics::Severity::info,
             "ADAPTIVE_DECISION",
-            decision_log.str(),
+            std::move(decision_log).str(),
             L"optimizer"});
         last_adaptive_state = adaptive_decision.state;
         last_adaptive_disposition = adaptive_decision.disposition;
@@ -864,7 +884,7 @@ void UiRuntime::update_adaptive_controller(
         last_adaptive_bottleneck = adaptive_decision.bottleneck.type;
         last_adaptive_decision_log_ns = now_ns;
     }
-    model.set_status(std::move(status));
+    model.set_adaptive_status(std::move(status));
 }
 
 }  // namespace kf2::app

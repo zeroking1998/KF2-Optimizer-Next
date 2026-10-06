@@ -1,5 +1,6 @@
 #include "application_runtime.hpp"
 
+#include "features/telemetry/telemetry_presentation_stage.hpp"
 #include "kf2/update/update_state.hpp"
 
 #include <system_error>
@@ -19,16 +20,9 @@ void set_ui_runtime_shutdown_probe_for_testing(
 
 optimizer::AdaptivePolicy adaptive_policy_from(
     const config::Settings& settings) noexcept {
-    optimizer::AdaptiveAggressiveness aggressiveness =
-        optimizer::AdaptiveAggressiveness::balanced;
-    if (settings.adaptive_aggressiveness == "conservative") {
-        aggressiveness = optimizer::AdaptiveAggressiveness::conservative;
-    } else if (settings.adaptive_aggressiveness == "aggressive") {
-        aggressiveness = optimizer::AdaptiveAggressiveness::aggressive;
-    }
+    // Controller timing uses one fixed default, never a persisted profile.
     return {
         .target_fps = settings.target_fps,
-        .aggressiveness = aggressiveness,
         .minimum_quality = settings.adaptive_minimum_quality,
         .maximum_quality = settings.adaptive_maximum_quality,
         .quality_change_budget = settings.adaptive_quality_change_budget,
@@ -39,15 +33,8 @@ optimizer::AdaptivePolicy adaptive_policy_from(
             settings.adaptive_quality_recovery_enabled,
         .manual_locks_enabled = settings.adaptive_manual_locks_enabled,
         .shadow_mode = settings.adaptive_shadow_mode,
-        .calibration_enabled = settings.adaptive_calibration_enabled,
         .adaptive_logging = settings.adaptive_logging,
     };
-}
-
-std::wstring adaptive_profile_reason(
-    const optimizer::AdaptiveDecision& decision) {
-    const std::string_view reason = decision.reason;
-    return std::wstring{reason.begin(), reason.end()};
 }
 
 Result<config::Settings> load_or_create_settings(
@@ -86,8 +73,12 @@ Result<config::Settings> load_or_create_settings(
                 bytes.find("manual_gore_effect_limit=") != std::string::npos ||
                 bytes.find("adaptive_enabled=") != std::string::npos ||
                 bytes.find("adaptive_online_allowed=") != std::string::npos ||
+                bytes.find("adaptive_aggressiveness=") != std::string::npos ||
                 bytes.find("adaptive_shadow_mode=") != std::string::npos ||
+                bytes.find("adaptive_calibration_enabled=") !=
+                    std::string::npos ||
                 parsed.value().target_fps_migrated ||
+                parsed.value().legacy_quality_policy_migrated ||
                 parsed.value().adaptive_quality_range_migrated;
             if (canonicalization_needed) {
                 const auto migrated =
@@ -119,15 +110,6 @@ Result<config::Settings> load_or_create_settings(
         }
     }
     return Result<config::Settings>::success(std::move(settings));
-}
-
-std::wstring format_gib(std::uint64_t bytes) {
-    std::wostringstream text;
-    text << std::fixed << std::setprecision(1)
-         << static_cast<long double>(bytes) /
-                (1024.0L * 1024.0L * 1024.0L)
-         << L" GiB";
-    return text.str();
 }
 
 Result<bool> open_local_directory(const std::filesystem::path& path) {
@@ -203,6 +185,7 @@ Result<std::string> read_verified_local_file(const std::filesystem::path& path,
 }
 
 std::wstring query_hardware_summary() {
+    using telemetry_pipeline::format_gib;
     std::wstring result = L"Hardware:";
     const auto inventory = telemetry::query_hardware_inventory();
     if (inventory.has_value()) {
@@ -236,6 +219,13 @@ std::wstring query_hardware_summary() {
 
 bool UiRuntime::stop_shutdown_workers() noexcept {
     bool complete = true;
+    try {
+        if (package_repair_worker.joinable()) package_repair_worker.join();
+        poll_auto_package_repair();
+        if (package_repair_recovery_required) complete = false;
+    } catch (...) {
+        complete = false;
+    }
     const auto stop_prewarmer = [&](game::StartupPrewarmer& prewarmer) noexcept {
         try {
             prewarmer.stop_and_wait();
@@ -416,9 +406,6 @@ Result<bool> UiRuntime::save_adaptive_locks() {
 void UiRuntime::update_adaptive_policy_status(ui::UiStatus& status) const {
     status.adaptive_shadow_mode =
         optimizer_settings.adaptive_shadow_mode;
-    status.adaptive_aggressiveness = std::wstring{
-        optimizer_settings.adaptive_aggressiveness.begin(),
-        optimizer_settings.adaptive_aggressiveness.end()};
     status.adaptive_minimum_quality =
         optimizer_settings.adaptive_minimum_quality;
     status.adaptive_maximum_quality =
@@ -433,8 +420,6 @@ void UiRuntime::update_adaptive_policy_status(ui::UiStatus& status) const {
         optimizer_settings.adaptive_quality_recovery_enabled;
     status.adaptive_manual_locks_enabled =
         optimizer_settings.adaptive_manual_locks_enabled;
-    status.adaptive_calibration_enabled =
-        optimizer_settings.adaptive_calibration_enabled;
     status.adaptive_logging = optimizer_settings.adaptive_logging;
 }
 
@@ -503,8 +488,6 @@ ui::UiStatus UiRuntime::make_initial_status(
                 : L"top right";
     status.hardware_summary = query_hardware_summary();
     status.profile = L"user settings";
-    status.quality = std::wstring{
-        settings.quality_policy.begin(), settings.quality_policy.end()};
     status.recommended_profile = L"user settings";
     status.recommendation_reason =
         L"KF2 starts from the user's saved graphics; Adaptive reacts only to validated gameplay telemetry";
@@ -515,7 +498,7 @@ void UiRuntime::enforce_saved_frame_control_compatibility() {
     // Prevent VSync and disabled frame-rate smoothing from competing with
     // Target FPS. Do not describe an already-running game as changed live.
     if (start_mode != StartMode::normal || !installation || !video_pending ||
-        game::find_running_game_process(installation->executable).has_value()) {
+        game::game_process_may_be_running(installation->executable)) {
         return;
     }
     const auto vsync = static_cast<std::size_t>(game::VideoOption::vsync);
@@ -561,11 +544,8 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
           StartMode mode,
           std::filesystem::path executable_directory)
     : controller{model,
-                  {.invalidate = [this] { invalidate(); },
-                   .repaint = [this] {
-                       update_animation_cadence();
-                       if (window) window->invalidate();
-                   },
+                  {.invalidate = [this] { repaint_shell(); },
+                   .repaint = [this] { repaint_shell(); },
                    .paint = [this](const ui::ShellLayoutResult& layout) {
                        paint(layout);
                    },
@@ -589,6 +569,9 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
                        const auto handle = static_cast<HWND>(
                            window->native_handle_for_testing());
                        if (handle) PostMessageW(handle, WM_CLOSE, 0, 0);
+                   },
+                   .can_close = [this] {
+                       return can_close_after_package_repair();
                    },
                    .theme_changed = [this] {
                        update_animation_cadence();
@@ -625,106 +608,143 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
             status.game = L"Game detected: " + installation->install_root.wstring();
             status.game_detected = true;
             const auto game_running =
-                game::find_running_game_process(installation->executable).has_value();
-            const auto telemetry_recovered =
-                game::recover_offline_telemetry_lab(
-                    installation->config_root,
-                    state_root, game_running);
-            if (!telemetry_recovered.has_value()) {
+                game::game_process_may_be_running(installation->executable);
+            const auto cap_recovered = game::recover_frame_rate_cap(
+                *installation, state_root, game_running);
+            if (!cap_recovered.has_value()) {
                 event_log.append({0, diagnostics::Severity::error,
-                    "OFFLINE_TELEMETRY_RECOVERY_BLOCKED",
-                    telemetry_recovered.error().message, L"game"});
+                    "TARGET_FPS_RECOVERY_BLOCKED", cap_recovered.error().message,
+                    L"config"});
                 recovery_required = true;
-            } else if (telemetry_recovered.value().cleaned) {
+            } else if (cap_recovered.value()) {
                 event_log.append({0, diagnostics::Severity::warning,
-                    "OFFLINE_TELEMETRY_RECOVERED",
-                    L"Stale optimizer-owned offline telemetry package was verified and removed",
-                    L"game"});
-            } else if (telemetry_recovered.value().active) {
-                event_log.append({0, diagnostics::Severity::info,
-                    "OFFLINE_TELEMETRY_RESUMED",
-                    L"The running KF2 process retained its verified offline telemetry package",
-                    L"game"});
+                    "TARGET_FPS_RECOVERED",
+                    L"Interrupted native FPS cap transaction was restored and verified",
+                    L"config"});
             }
-            const auto flex_directory = installation->install_root /
-                L"Binaries" / L"Win64";
-            const auto flex_state = state_root / L"flex-lab";
-            std::error_code flex_status_error;
-            const bool flex_marker_exists = std::filesystem::exists(
-                flex_state / L"flex-lab-transaction.marker",
-                flex_status_error);
-            const bool flex_original_exists = !flex_status_error &&
-                std::filesystem::exists(
-                    flex_directory / L"flexRelease_original.dll",
-                    flex_status_error);
-            const bool flex_transaction_exists =
-                flex_marker_exists || flex_original_exists;
-            const auto recovered = flex_status_error
-                ? Result<bool>::failure(
-                      {ErrorCode::io_failure,
-                       L"FleX recovery status cannot be inspected",
-                       static_cast<std::uint32_t>(flex_status_error.value())})
-                : (!game_running && flex_transaction_exists
-                       ? flex::restore_offline_lab(
-                             flex_directory, flex_state, false)
-                       : flex::recover_offline_lab(
-                             flex_directory, flex_state, game_running));
-            if (!recovered.has_value()) {
-                event_log.append({0, diagnostics::Severity::error,
-                                  "FLEX_LAB_RECOVERY_BLOCKED",
-                                  recovered.error().message, L"flex"});
-                recovery_required = true;
-            } else if (recovered.value()) {
-                event_log.append({0, diagnostics::Severity::warning,
-                                  "FLEX_LAB_RECOVERED",
-                                  L"Interrupted offline FleX laboratory state was restored and verified",
-                                  L"flex"});
-            }
-            if (game_running) {
-                auto resumed = config::resume_session_config(
-                    installation->config_root, state_root);
-                if (!resumed.has_value()) {
+            // The pending cap owns KFGame.ini. Restore it before any protected
+            // session recovery changes those same bytes.
+            if (cap_recovered.has_value()) {
+                const auto telemetry_recovered =
+                    game::recover_offline_telemetry_lab(
+                        installation->config_root,
+                        state_root, game_running);
+                if (!telemetry_recovered.has_value()) {
                     event_log.append({0, diagnostics::Severity::error,
-                        "SESSION_CONFIG_RESUME_FAILED",
-                        resumed.error().message, L"config"});
+                        "OFFLINE_TELEMETRY_RECOVERY_BLOCKED",
+                        telemetry_recovered.error().message, L"game"});
                     recovery_required = true;
-                } else if (resumed.value()) {
-                    session_config_snapshot = std::move(*resumed.value());
-                    event_log.append({0, diagnostics::Severity::info,
-                        "SESSION_CONFIG_RESUMED",
-                        L"Existing verified KF2 INI snapshot was resumed for the running game session",
-                        L"config"});
-                }
-            } else {
-                const auto ini_recovered = config::recover_session_config(
-                    installation->config_root, state_root, false);
-                if (!ini_recovered.has_value()) {
-                    event_log.append({0, diagnostics::Severity::error,
-                        "SESSION_CONFIG_RECOVERY_BLOCKED",
-                        ini_recovered.error().message, L"config"});
-                    recovery_required = true;
-                } else if (ini_recovered.value() > 0) {
+                } else if (telemetry_recovered.value().cleaned) {
                     event_log.append({0, diagnostics::Severity::warning,
-                        "SESSION_CONFIG_RECOVERED",
-                        L"Deferred KF2 INI session snapshot was restored and verified; temporal anti-aliasing remains disabled",
-                        L"config"});
+                        "OFFLINE_TELEMETRY_RECOVERED",
+                        L"Stale optimizer-owned offline telemetry package was verified and removed",
+                        L"game"});
+                } else if (telemetry_recovered.value().active) {
+                    event_log.append({0, diagnostics::Severity::info,
+                        "OFFLINE_TELEMETRY_RESUMED",
+                        L"The running KF2 process retained its verified offline telemetry package",
+                        L"game"});
                 }
-                if (ini_recovered.has_value() &&
-                    telemetry_recovered.has_value() &&
-                    !telemetry_recovered.value().active) {
-                    const auto stale_configuration =
-                        game::cleanup_stale_offline_gameplay_configuration(
-                            installation->config_root, false);
-                    if (!stale_configuration.has_value()) {
+                const auto flex_directory = installation->install_root /
+                    L"Binaries" / L"Win64";
+                const auto flex_state = state_root / L"flex-lab";
+                std::error_code flex_status_error;
+                const bool flex_marker_exists = std::filesystem::exists(
+                    flex_state / L"flex-lab-transaction.marker",
+                    flex_status_error);
+                const bool flex_original_exists = !flex_status_error &&
+                    std::filesystem::exists(
+                        flex_directory / L"flexRelease_original.dll",
+                        flex_status_error);
+                const bool flex_transaction_exists =
+                    flex_marker_exists || flex_original_exists;
+                std::wstring flex_recovery_details;
+                const auto recovered = flex_status_error
+                    ? Result<bool>::failure(
+                          {ErrorCode::io_failure,
+                           L"FleX recovery status cannot be inspected",
+                           static_cast<std::uint32_t>(flex_status_error.value())})
+                    : (!game_running && flex_transaction_exists
+                           ? flex::restore_offline_lab(
+                                 flex_directory, flex_state, false,
+                                 &flex_recovery_details)
+                           : flex::recover_offline_lab(
+                                 flex_directory, flex_state, game_running,
+                                 &flex_recovery_details));
+                if (!recovered.has_value()) {
+                    event_log.append({0, diagnostics::Severity::error,
+                                      "FLEX_LAB_RECOVERY_BLOCKED",
+                                      recovered.error().message, L"flex"});
+                    recovery_required = true;
+                } else if (recovered.value()) {
+                    event_log.append({0, diagnostics::Severity::warning,
+                                      "FLEX_LAB_RECOVERED",
+                                      L"Interrupted offline FleX laboratory state was restored and verified. " +
+                                          flex_recovery_details,
+                                      L"flex"});
+                }
+                if (game_running) {
+                    auto resumed = config::resume_session_config(
+                        installation->config_root, state_root);
+                    if (!resumed.has_value()) {
                         event_log.append({0, diagnostics::Severity::error,
-                            "STALE_TELEMETRY_CONFIG_RECOVERY_BLOCKED",
-                            stale_configuration.error().message, L"config"});
+                            "SESSION_CONFIG_RESUME_FAILED",
+                            resumed.error().message, L"config"});
                         recovery_required = true;
-                    } else if (stale_configuration.value()) {
-                        event_log.append({0, diagnostics::Severity::warning,
-                            "STALE_TELEMETRY_CONFIG_RECOVERED",
-                            L"Stale optimizer-owned KF2 telemetry configuration was removed before the next protected snapshot",
+                    } else if (resumed.value()) {
+                        session_config_snapshot = std::move(*resumed.value());
+                        std::error_code replay_error;
+                        if (std::filesystem::exists(
+                                session_config_snapshot->snapshot_root /
+                                    L"graphics-replay.txt", replay_error) || replay_error) {
+                            recovery_required = true;
+                            event_log.append({0, diagnostics::Severity::warning,
+                                "KF2_NATIVE_GRAPHICS_RECOVERY_DEFERRED",
+                                L"Confirmed graphics recovery is pending; close KF2 before retrying",
+                                L"graphics"});
+                        }
+                        event_log.append({0, diagnostics::Severity::info,
+                            "SESSION_CONFIG_RESUMED",
+                            L"Existing verified KF2 INI snapshot was resumed for the running game session",
                             L"config"});
+                    }
+                } else {
+                    auto resumed = config::resume_session_config(
+                        installation->config_root, state_root);
+                    if (resumed.has_value() && resumed.value()) {
+                        session_config_snapshot = std::move(*resumed.value());
+                    }
+                    const auto ini_recovered = resumed.has_value()
+                        ? restore_session_video_settings()
+                        : Result<std::size_t>::failure(resumed.error());
+                    if (!ini_recovered.has_value()) {
+                        event_log.append({0, diagnostics::Severity::error,
+                            "SESSION_CONFIG_RECOVERY_BLOCKED",
+                            ini_recovered.error().message, L"config"});
+                        recovery_required = true;
+                    } else if (ini_recovered.value() > 0) {
+                        event_log.append({0, diagnostics::Severity::warning,
+                            "SESSION_CONFIG_RECOVERED",
+                            L"Deferred KF2 INI session snapshot was restored and verified; temporal anti-aliasing remains disabled",
+                            L"config"});
+                    }
+                    if (ini_recovered.has_value() &&
+                        telemetry_recovered.has_value() &&
+                        !telemetry_recovered.value().active) {
+                        const auto stale_configuration =
+                            game::cleanup_stale_offline_gameplay_configuration(
+                                installation->config_root, false);
+                        if (!stale_configuration.has_value()) {
+                            event_log.append({0, diagnostics::Severity::error,
+                                "STALE_TELEMETRY_CONFIG_RECOVERY_BLOCKED",
+                                stale_configuration.error().message, L"config"});
+                            recovery_required = true;
+                        } else if (stale_configuration.value()) {
+                            event_log.append({0, diagnostics::Severity::warning,
+                                "STALE_TELEMETRY_CONFIG_RECOVERED",
+                                L"Stale optimizer-owned KF2 telemetry configuration was removed before the next protected snapshot",
+                                L"config"});
+                        }
                     }
                 }
             }

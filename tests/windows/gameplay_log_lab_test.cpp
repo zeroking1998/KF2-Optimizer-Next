@@ -1,6 +1,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -61,6 +62,435 @@ std::set<std::string> setting_members(
         fields.emplace(text.substr(start, end - start));
     }
     return fields;
+}
+
+bool adaptive_mode_preserves_graphics_receipt(std::string_view body) {
+    constexpr std::string_view reset =
+        "if (Resource ~= \"disable\")\n        {\n"
+        "            AdaptiveGraphicsQuality = 100;\n"
+        "            AdaptiveGraphicsResource = Resource;\n        }";
+    return body.find(reset) != std::string_view::npos &&
+        count_occurrences(body, "AdaptiveGraphicsQuality =") == 1 &&
+        count_occurrences(body, "AdaptiveGraphicsResource =") == 1 &&
+        body.find("SetAdaptiveRuntimeEnabled") < body.find(reset) &&
+        body.find(reset) < body.find("AdaptiveLastControlSequence = Sequence;");
+}
+
+bool online_enable_is_transactional(std::string_view body) {
+    const auto prerequisite = body.find("!EnsureOnlineFixedEffectsBaseline(CurrentWorld)");
+    const auto reject = body.find("return false;", prerequisite);
+    const auto pending_check = body.find("if (!RestoreOnlineEnableMaximum(GoreManager))");
+    const auto previous = body.find(
+        "OnlineCorpseEnablePreviousMaximum = GoreManager.MaxDeadBodies;");
+    const auto write = body.find("GoreManager.MaxDeadBodies = Quality;");
+    const auto mismatch = body.find("if (GoreManager.MaxDeadBodies != Quality)");
+    const auto debt = body.find("bOnlineCorpseEnableRestorePending = true;", mismatch);
+    const auto rollback = body.find("RestoreOnlineEnableMaximum(GoreManager);", debt);
+    const auto failure = body.find("return false;", rollback);
+    const auto commit = body.find("bOnlineGraphicsEnabled = true;");
+    return prerequisite != std::string_view::npos && reject < write &&
+        pending_check < prerequisite && previous < write && write < mismatch &&
+        mismatch < debt && debt < rollback && rollback < failure && failure < commit &&
+        count_occurrences(body, "GoreManager.MaxDeadBodies = Quality;") == 1 &&
+        body.find("RestoreOnlineCorpseMaximum") == std::string_view::npos;
+}
+
+bool online_pool_scan_is_bounded(std::string_view body, std::string_view cursor,
+                                 std::string_view timestamp) {
+    const auto attempt = body.find(std::string{timestamp} +
+                                  " = CurrentWorld.RealTimeSeconds;");
+    const auto manager = body.find("GoreManager =");
+    const auto empty = body.find("if (PoolLength == 0) return false;");
+    const auto budget = body.find("ScanCount = Min(OnlineCorpseScanBudget, PoolLength);");
+    const auto loop = body.find("for (Scanned = 0; Scanned < ScanCount; ++Scanned)");
+    const auto advance = body.find(std::string{cursor} + " = (Index + 1) % PoolLength;");
+    const auto candidate = body.find("Candidate = GoreManager.CorpsePool[Index];");
+    return attempt != std::string_view::npos && attempt < manager &&
+        empty != std::string_view::npos && empty < budget && budget < loop &&
+        loop < advance && advance < candidate &&
+        body.find("Index = " + std::string{cursor} + ";", loop) < advance &&
+        count_occurrences(body, std::string{timestamp} + " =") == 1;
+}
+
+std::string online_visual_cursor(std::string_view body) {
+    constexpr std::string_view prefix = "Index = (";
+    const auto start = body.find(prefix);
+    if (start == std::string_view::npos) return {};
+    const auto end = body.find(" + Offset) % PoolLength;", start);
+    if (end == std::string_view::npos) return {};
+    return std::string{body.substr(start + prefix.size(),
+                                  end - start - prefix.size())};
+}
+
+// Source contracts below bind this deterministic model to the UC cursor,
+// budget and advance rules. This does not execute UnrealScript or physics.
+struct OnlineVisualScanModel {
+    bool shared_cursor{};
+    std::array<int, 2> cursors{};
+    int phase{};
+};
+
+bool covers_online_visual_pool(OnlineVisualScanModel& model,
+                              const std::vector<int>& pool,
+                              bool intermittent_actions,
+                              bool failed_readbacks = false) {
+    const auto length = static_cast<int>(pool.size());
+    std::array<std::vector<bool>, 2> seen{
+        std::vector<bool>(pool.size()), std::vector<bool>(pool.size())};
+    auto done = seen;
+    // Each successful action advances at least one slot; a no-action visit
+    // advances up to eight. Two full per-category cycles are ample for both.
+    for (int visit = 0; visit < 4 * length + 2; ++visit) {
+        const auto phase = model.phase;
+        auto& cursor = model.cursors[model.shared_cursor ? 0 : phase];
+        if (length == 0) {
+            cursor = 0;
+        } else {
+            cursor = std::clamp(cursor, 0, length - 1);
+            const auto scan_count = std::min(8, length);
+            int inspected = 0;
+            int actions = 0;
+            for (int offset = 0; offset < scan_count; ++offset) {
+                const auto index = (cursor + offset) % length;
+                ++inspected;
+                seen[phase][index] = true;
+                if (intermittent_actions && pool[index] % 3 == phase &&
+                    !done[phase][index]) {
+                    // The first eligible entry of either category may fail
+                    // permanently; later eligible entries can still succeed.
+                    if (!failed_readbacks || pool[index] > 1) {
+                        done[phase][index] = true;
+                    }
+                    ++actions;
+                    cursor = (index + 1) % length;
+                    break;
+                }
+            }
+            if (actions == 0) cursor = (cursor + scan_count) % length;
+            if (inspected > 8 || actions > 1 || cursor < 0 ||
+                cursor >= length) return false;
+        }
+        model.phase = (phase + 1) % 2;
+    }
+    return std::all_of(seen[0].begin(), seen[0].end(),
+                       [](bool value) { return value; }) &&
+           std::all_of(seen[1].begin(), seen[1].end(),
+                       [](bool value) { return value; });
+}
+
+bool advances_online_attempt(std::string_view body, std::string_view cursor,
+                             std::string_view first_write,
+                             std::string_view attempt_clock) {
+    const auto write = body.find(first_write);
+    const auto advance = body.find(std::string{cursor} +
+        " = (Index + 1) % PoolLength;");
+    const auto stamp = body.find(std::string{attempt_clock} +
+        " = WorldInfo.RealTimeSeconds;");
+    if (write == std::string_view::npos || advance >= write || stamp >= write) {
+        std::cerr << cursor << ": mismatch can bypass cursor/cooldown progress\n";
+        return false;
+    }
+    return true;
+}
+
+bool online_freeze_progress_after_rollback(int length) {
+    std::vector<bool> completed(static_cast<std::size_t>(length));
+    int cursor = 0;
+    for (int visit = 0; visit < 2 * length; ++visit) {
+        const auto scan_count = std::min(8, length);
+        bool attempted = false;
+        for (int offset = 0; offset < scan_count; ++offset) {
+            const auto index = (cursor + offset) % length;
+            if (completed[index]) continue;
+            cursor = (index + 1) % length;
+            attempted = true;
+            // Entry zero always fails readback, but immediate rollback
+            // succeeds, removing its ledger entry and leaving it eligible.
+            if (index != 0) completed[index] = true;
+            break;
+        }
+        if (!attempted) cursor = (cursor + scan_count) % length;
+    }
+    return !completed[0] &&
+        std::all_of(completed.begin() + 1, completed.end(),
+                    [](bool value) { return value; });
+}
+
+bool online_restore_advances_after_failure(std::string_view body) {
+    const auto attempt = body.find("TryRestoreOnlineCorpse(Index, bRestoreAll ?");
+    const auto advance = body.find(
+        "        ReleaseScanCursor = FrozenCorpses.Length > 0 ?\n"
+        "            (bRemoved ? Index % FrozenCorpses.Length :\n"
+        "             (Index + 1) % FrozenCorpses.Length) : 0;");
+    return attempt != std::string_view::npos &&
+        advance != std::string_view::npos && attempt < advance &&
+        body.substr(attempt, advance - attempt).find("return false;") ==
+            std::string_view::npos;
+}
+
+constexpr std::string_view online_restore_readback_fields[] = {
+    "Candidate.Physics != PHYS_RigidBody ||",
+    "Candidate.bCollideActors != Original.bOriginalCollideActors ||",
+    "Candidate.bBlockActors != Original.bOriginalBlockActors ||",
+    "Candidate.bIgnoreEncroachers != Original.bOriginalIgnoreEncroachers ||",
+    "Candidate.bTickIsDisabled != Original.bOriginalTickDisabled ||",
+    "(Candidate.CollisionComponent != None) !=\n"
+    "            Original.bHadCollisionComponent ||",
+    "(Original.bHadCollisionComponent &&\n"
+    "         Candidate.CollisionComponent.BlockRigidBody !=\n"
+    "             Original.bOriginalBlockRigidBody)",
+};
+
+bool online_restore_has_complete_readback(std::string_view body) {
+    const auto begin = body.find("if (Candidate.Physics != PHYS_RigidBody ||");
+    const auto end = body.find("LastPhysicsMutationRealTime =", begin);
+    if (begin == std::string_view::npos || end == std::string_view::npos) {
+        return false;
+    }
+    const auto guard = body.substr(begin, end - begin);
+    return std::all_of(std::begin(online_restore_readback_fields),
+                       std::end(online_restore_readback_fields),
+                       [guard](std::string_view field) {
+                           return guard.find(field) != std::string_view::npos;
+                       }) &&
+        guard.find("\"restore_readback_mismatch\");\n        return false;") !=
+            std::string_view::npos &&
+        body.find("\"collision_component_missing\");\n            return false;") !=
+            std::string_view::npos &&
+        body.find("FrozenCorpses.Remove(") == std::string_view::npos;
+}
+
+// Models the source-bound restore-all loop, not UnrealScript/PhysX execution.
+// A failed ledger record keeps its original collision/tick state for retry.
+bool online_restore_progress(int length, int failed_id,
+                             bool legacy_reverse_scan = false) {
+    struct OriginalState {
+        int id;
+        std::array<bool, 6> collision_and_tick;
+        bool operator==(const OriginalState&) const = default;
+    };
+    const auto fails = [failed_id](int id) {
+        return failed_id == -2 || id == failed_id;
+    };
+    std::vector<OriginalState> ledger;
+    std::vector<OriginalState> expected_remaining;
+    for (int id = 0; id < length; ++id) {
+        OriginalState original{id, {}};
+        for (std::size_t bit = 0; bit < original.collision_and_tick.size(); ++bit) {
+            original.collision_and_tick[bit] = (id & (1 << bit)) != 0;
+        }
+        ledger.push_back(original);
+        if (fails(id)) expected_remaining.push_back(original);
+    }
+    std::size_t cursor = 0;
+    for (int visit = 0; visit < 2 * length + 1 && !ledger.empty(); ++visit) {
+        int inspected = 0;
+        int successful_mutations = 0;
+        while (!ledger.empty() && inspected < 8) {
+            const auto index = legacy_reverse_scan ? ledger.size() - 1
+                : std::min(cursor, ledger.size() - 1);
+            ++inspected;
+            if (fails(ledger[index].id)) {
+                if (legacy_reverse_scan) break;
+                cursor = (index + 1) % ledger.size();
+            } else {
+                ledger.erase(ledger.begin() + index);
+                cursor = ledger.empty() ? 0 : index % ledger.size();
+                ++successful_mutations;
+                break;
+            }
+        }
+        if (inspected > 8 || successful_mutations > 1 ||
+            (!ledger.empty() && cursor >= ledger.size())) return false;
+    }
+    return ledger == expected_remaining;
+}
+
+struct OfflineReleasePolicy {
+    bool late_reservation;
+    bool yield_after_attempt;
+    bool fair_lanes;
+};
+
+bool offline_restore_yields_after_attempt(std::string_view body,
+                                         std::string_view restore_call) {
+    const auto flag = body.find("bRestoreAttempted = true;");
+    const auto attempt = body.find(restore_call);
+    const auto advance = body.find("(Index + 1) %", attempt);
+    const auto yield = body.find("if (bRestoreAttempted)", advance);
+    return flag != std::string_view::npos &&
+        attempt != std::string_view::npos && flag < attempt &&
+        advance != std::string_view::npos && yield != std::string_view::npos;
+}
+
+// Source-bound model of the shared one-physics-attempt-per-frame budget and
+// active/retired freeze/wake queues. It does not execute UnrealScript/PhysX.
+bool offline_release_progress(int length, int failed_id, bool physics_failure,
+                              OfflineReleasePolicy policy) {
+    std::array<std::vector<int>, 4> queues;
+    std::array<std::vector<int>, 4> expected;
+    for (int id = 0; id < length; ++id) {
+        for (int lane = 0; lane < 2; ++lane) {
+            queues[lane].push_back(id);
+            if (id == failed_id) expected[lane].push_back(id);
+        }
+    }
+    queues[2] = queues[3] = {0, 1};
+    std::array<std::size_t, 2> cursors{};
+    int phase = 0;
+    for (int callback = 0; callback < 8 * length + 32; ++callback) {
+        int lane = -1;
+        for (int slot = 0; slot < 4; ++slot) {
+            const int candidate = policy.fair_lanes ? phase : slot;
+            if (policy.fair_lanes) phase = (phase + 1) % 4;
+            if (!queues[candidate].empty()) {
+                lane = candidate;
+                break;
+            }
+        }
+        if (lane < 0) break;
+        auto& queue = queues[lane];
+        bool reserved = false;
+        int reservations = 0;
+        int physics_attempts = 0;
+        int inspected = 0;
+        if (lane >= 2) {
+            queue.erase(queue.begin());
+            ++physics_attempts;
+        } else {
+            auto& cursor = cursors[lane];
+            while (!queue.empty() && inspected < 64) {
+                const auto index = std::min(cursor, queue.size() - 1);
+                ++inspected;
+                const bool failed = queue[index] == failed_id;
+                bool restored = false;
+                if (!reserved) {
+                    if (!policy.late_reservation || !failed || physics_failure) {
+                        reserved = true;
+                        ++reservations;
+                    }
+                    if (!failed || physics_failure) ++physics_attempts;
+                    restored = !failed;
+                }
+                if (restored) {
+                    queue.erase(queue.begin() + index);
+                    cursor = queue.empty() ? 0 : index % queue.size();
+                    break;
+                }
+                cursor = (index + 1) % queue.size();
+                if (policy.yield_after_attempt) break;
+            }
+        }
+        if (inspected > 64 || reservations > 1 || physics_attempts > 1 ||
+            (lane < 2 && !queue.empty() && cursors[lane] >= queue.size())) {
+            return false;
+        }
+    }
+    return queues == expected;
+}
+
+struct OfflineWakePolicy {
+    bool retain_failed;
+    bool advance_failed;
+    bool restore_already_awake;
+    bool validate_identity;
+};
+
+OfflineWakePolicy offline_wake_policy(std::string_view body) {
+    const auto call = body.find("Candidate.Mesh.WakeRigidBody();");
+    const auto readback = body.find(
+        "if (!Candidate.Mesh.RigidBodyIsAwake())", call);
+    const auto skeleton = body.find(
+        "Candidate.Mesh.bNoSkeletonUpdate = false;", call);
+    const auto failure = readback != std::string_view::npos &&
+        skeleton != std::string_view::npos && readback < skeleton
+        ? body.substr(readback, skeleton - readback) : std::string_view{};
+    return {
+        .retain_failed = !failure.empty() &&
+            failure.find("return 0;") != std::string_view::npos &&
+            failure.find("RemoveAdaptiveDistanceSleptCorpseEntry") ==
+                std::string_view::npos,
+        .advance_failed = failure.find("(Index + 1) %") !=
+            std::string_view::npos && failure.find(
+                "AdaptiveDistanceReleaseWakeCursor") != std::string_view::npos,
+        .restore_already_awake = body.find(
+            "\n        }\n        Candidate.Mesh.bNoSkeletonUpdate = false;") !=
+                std::string_view::npos,
+        .validate_identity = body.find(
+            "GetAdaptiveCorpseActionId(Candidate) !=") < call,
+    };
+}
+
+// Source-bound release model, not a PhysX simulation. Each invocation may
+// inspect 64 entries, but only one wake attempt may consume the frame slot.
+bool offline_wake_progress(int length, int failed_id, bool late_wake,
+                           bool invalid_entries, OfflineWakePolicy policy) {
+    struct Entry {
+        int id;
+        int invalid_kind;
+        bool awake;
+        bool skeleton_disabled;
+    };
+    std::vector<Entry> ledger;
+    std::vector<int> expected;
+    for (int id = 0; id < length; ++id) {
+        const int invalid_kind = invalid_entries ? id % 5 : 0;
+        ledger.push_back({id, invalid_kind, id % 3 == 1, true});
+        if (!late_wake && invalid_kind == 0 &&
+            (failed_id == -2 || id == failed_id)) {
+            ledger.back().awake = false;
+            expected.push_back(id);
+        }
+        if (id == failed_id) ledger.back().awake = false;
+    }
+    std::size_t cursor = 0;
+    for (int callback = 0; callback < 4 * length + 16 && !ledger.empty();
+         ++callback) {
+        if (late_wake && callback >= length + 2) {
+            for (auto& entry : ledger) {
+                if (entry.id == failed_id) entry.awake = true;
+            }
+        }
+        int inspected = 0;
+        int attempts = 0;
+        while (!ledger.empty() && inspected < 64) {
+            const auto index = policy.advance_failed
+                ? std::min(cursor, ledger.size() - 1) : ledger.size() - 1;
+            auto& entry = ledger[index];
+            ++inspected;
+            // Kinds 1/2/3/4: deleted, reused, missing mesh, non-rigid.
+            const bool invalid = entry.invalid_kind != 0 &&
+                (entry.invalid_kind != 2 || policy.validate_identity);
+            if (!invalid && entry.invalid_kind != 0) return false;
+            if (!invalid && !entry.awake) {
+                // Another physics action can already own this frame.
+                if (callback % 5 == 0) break;
+                ++attempts;
+                entry.awake = !(failed_id == -2 || entry.id == failed_id);
+                if (!entry.awake && policy.retain_failed) {
+                    cursor = (index + 1) % ledger.size();
+                    break;
+                }
+                if (entry.awake) entry.skeleton_disabled = false;
+            } else if (!invalid && policy.restore_already_awake) {
+                entry.skeleton_disabled = false;
+            }
+            if (!invalid && (!entry.awake || entry.skeleton_disabled)) {
+                return false;
+            }
+            ledger.erase(ledger.begin() + index);
+            cursor = ledger.empty() ? 0 : index % ledger.size();
+            if (attempts > 0) break;
+        }
+        if (attempts > 1 || inspected > 64 ||
+            (!ledger.empty() && cursor >= ledger.size())) return false;
+    }
+    std::vector<int> remaining;
+    for (const auto& entry : ledger) {
+        if (entry.awake || !entry.skeleton_disabled) return false;
+        remaining.push_back(entry.id);
+    }
+    return remaining == expected;
 }
 
 std::size_t settled_after_bounded_scans(
@@ -155,6 +585,25 @@ int main() {
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto online_corpse_controller_source = normalize_newlines(
         read_bytes(KF2_ONLINE_CORPSE_CONTROLLER_SOURCE));
+    // UE3 Find preserves first Actor-identity match / absent=-1 semantics.
+    // Require the exact native intrinsic, not another interpreted lookup loop.
+    for (const auto expected : {
+             "function int FindFixedMinimumLivingVisualEntry(KFPawn_Monster Candidate)\n"
+             "{\n    return FixedMinimumLivingVisualZeds.Find(Candidate);\n}",
+             "function int FindAdaptiveBaselineSettleEntry(KFPawn Candidate)\n"
+             "{\n    return AdaptiveBaselineSettleEntries.Find('Corpse', Candidate);\n}",
+             "function int FindFixedMinimumCorpseLodEntry(KFPawn Candidate)\n"
+             "{\n    return FixedMinimumCorpseLodCorpses.Find(Candidate);\n}",
+             "function int FindAdaptiveCorpseFreeze(KFPawn Candidate)\n"
+             "{\n    return AdaptiveFrozenCorpses.Find('Corpse', Candidate);\n}",
+             "function int FindAdaptiveDistanceSleptCorpse(KFPawn Candidate)\n"
+             "{\n    return AdaptiveDistanceSleptCorpses.Find('Corpse', Candidate);\n}"}) {
+        CHECK(telemetry_source.find(expected) != std::string::npos);
+    }
+    CHECK(online_corpse_controller_source.find(
+        "function int FindFrozenCorpse(KFPawn Candidate)\n"
+        "{\n    return FrozenCorpses.Find('Corpse', Candidate);\n}") !=
+          std::string::npos);
     const auto connection_source = normalize_newlines(
         read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE));
     const auto online_graphics_connection_source = normalize_newlines(
@@ -228,7 +677,6 @@ int main() {
     CHECK(telemetry_source.find(
         "if (!bAdaptiveRuntimeEnabled)\n    {\n        `log(\"KF2OPT_ADAPTIVE_QUALITY") !=
           std::string::npos);
-    CHECK(telemetry_source.find("WakeCount < 1") != std::string::npos);
     CHECK(telemetry_source.find(
         "KF2OPT_ADAPTIVE_MODE state=disabled fixed_effect_quality=") !=
           std::string::npos);
@@ -245,6 +693,70 @@ int main() {
     const auto adaptive_control_body = telemetry_source.substr(
         adaptive_control_function,
         adaptive_control_end - adaptive_control_function);
+    const auto mode_start = adaptive_control_body.find(
+        "if ((Resource ~= \"enable\") || (Resource ~= \"disable\"))");
+    const auto mode_end = adaptive_control_body.find(
+        "if (!bAdaptiveRuntimeEnabled)", mode_start);
+    CHECK(mode_start != std::string::npos && mode_end != std::string::npos);
+    const auto mode_body = adaptive_control_body.substr(mode_start, mode_end - mode_start);
+    const bool preserves_graphics_receipt =
+        adaptive_mode_preserves_graphics_receipt(mode_body);
+    CHECK(preserves_graphics_receipt);
+    auto polluted_mode = mode_body;
+    polluted_mode += "AdaptiveGraphicsQuality = Quality;";
+    CHECK(!adaptive_mode_preserves_graphics_receipt(polluted_mode));
+    auto wrong_mode_guard = mode_body;
+    const auto disable_guard = wrong_mode_guard.find("if (Resource ~= \"disable\")");
+    CHECK(disable_guard != std::string::npos);
+    wrong_mode_guard.replace(disable_guard,
+        std::string_view{"if (Resource ~= \"disable\")"}.size(),
+        "if (Resource ~= \"enable\")");
+    CHECK(!adaptive_mode_preserves_graphics_receipt(wrong_mode_guard));
+    // Source-bound transition model; it does not execute UnrealScript. The
+    // unchanged pressure predicate below is checked against the source too.
+    for (const int corpse_limit : {4, 20, 99, 100, 2000}) {
+        int confirmed_quality = 100;
+        std::string confirmed_resource = "recover";
+        int sequence = 0;
+        const auto pressure = [&] {
+            return sequence > 0 && confirmed_quality >= 10 &&
+                confirmed_quality < 100 && confirmed_resource != "recover";
+        };
+        const auto mode = [&](bool enabled, bool applied) {
+            if (!applied) return false;
+            if (!enabled) {
+                confirmed_quality = 100;
+                confirmed_resource = "disable";
+            } else if (!preserves_graphics_receipt) {
+                confirmed_quality = corpse_limit;
+                confirmed_resource = "enable";
+            }
+            ++sequence;
+            return true;
+        };
+        CHECK(corpse_limit >= 4 && corpse_limit <= 2000);
+        CHECK(!mode(true, false));
+        CHECK(sequence == 0 && confirmed_quality == 100 && !pressure());
+        CHECK(mode(true, true));
+        CHECK(confirmed_quality == 100 && confirmed_resource == "recover");
+        CHECK(!pressure());
+        for (const auto resource : {"cpu", "gpu"}) {
+            confirmed_quality = 75;
+            confirmed_resource = resource;
+            ++sequence;
+            CHECK(pressure());
+            const auto receipt_sequence = sequence;
+            CHECK(!mode(true, false));
+            CHECK(sequence == receipt_sequence);
+            CHECK(mode(true, true));
+            CHECK(confirmed_quality == 75 && confirmed_resource == resource);
+            CHECK(pressure());
+        }
+        CHECK(mode(false, true));
+        CHECK(confirmed_quality == 100 && !pressure());
+        CHECK(mode(true, true));
+        CHECK(!pressure());
+    }
     CHECK(adaptive_control_body.find("IsAdaptiveControlResource(Resource)") !=
           std::string::npos);
     CHECK(adaptive_control_body.find("IsAdaptiveQualityResource(Resource)") !=
@@ -288,10 +800,6 @@ int main() {
         "function bool EnsureFixedSessionEffects()");
     const auto restore_world_runtime_start = telemetry_source.find(
         "function bool RestoreSessionWorldRuntime()");
-    CHECK(telemetry_source.find("function bool RestoreSessionGraphics()") !=
-          std::string::npos);
-    const auto restore_session_start = telemetry_source.find(
-        "function bool RestoreSessionGraphics()", restore_world_runtime_start);
     CHECK(fixed_effects_start != std::string::npos);
     CHECK(restore_world_runtime_start != std::string::npos);
     const auto fixed_effects_body = telemetry_source.substr(
@@ -311,11 +819,14 @@ int main() {
         "RestoreOriginal(\n                AdaptiveGraphicsState) ||") ==
           std::string::npos);
     const auto adaptive_control_start = telemetry_source.find(
-        "function bool ApplyAdaptiveResourceControl(", restore_session_start);
+        "function bool ApplyAdaptiveResourceControl(", restore_world_runtime_start);
     CHECK(adaptive_control_start != std::string::npos);
+    const auto restore_world_runtime_end = telemetry_source.find(
+        "\nfunction ", restore_world_runtime_start);
+    CHECK(restore_world_runtime_end != std::string::npos);
     const auto restore_world_runtime_body = telemetry_source.substr(
         restore_world_runtime_start,
-        restore_session_start - restore_world_runtime_start);
+        restore_world_runtime_end - restore_world_runtime_start);
     CHECK(restore_world_runtime_body.find(
         "ApplyAdaptiveEffectRuntimeReadback(\n"
         "        \"restore\", 100, true)") != std::string::npos);
@@ -323,26 +834,8 @@ int main() {
           std::string::npos);
     CHECK(restore_world_runtime_body.find(
         "domain=world_runtime") != std::string::npos);
-    const auto restore_session_body = telemetry_source.substr(
-        restore_session_start, adaptive_control_start - restore_session_start);
-    CHECK(restore_session_body.find(
-        "bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.\n"
-        "        RestoreOriginal(AdaptiveGraphicsState)") != std::string::npos);
-    CHECK(restore_session_body.find(
-        "bEffectRuntimeRestored = RestoreSessionWorldRuntime()") !=
-          std::string::npos);
-    CHECK(restore_session_body.find(
-        "domain=graphics") != std::string::npos);
-    CHECK(restore_session_body.find(
-        "domain=effect_runtime") == std::string::npos);
-    CHECK(restore_session_body.find(
-        "if (!bGraphicsRestored || !bEffectRuntimeRestored)") !=
-          std::string::npos);
-    CHECK(restore_session_body.find(
-        "RestoreOriginal(\n            AdaptiveGraphicsState) ||") ==
-          std::string::npos);
     CHECK(telemetry_source.find(
-        "KF2OPT_FIXED_EFFECT_BASELINE state=restored") !=
+        "KF2OPT_FIXED_EFFECT_BASELINE state=world_runtime_restored") !=
           std::string::npos);
     CHECK(interaction_source.find(
         "CurrentProbe.RestoreSessionGraphics()") == std::string::npos);
@@ -395,38 +888,6 @@ int main() {
         "ProcessAdaptiveGraphicsState = None") == std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveGraphicsState = new(self)") == std::string::npos);
-    const auto restore_adaptive_graphics = telemetry_source.find(
-        "function RestoreAdaptiveGraphics()");
-    const auto select_staggered_corpse = telemetry_source.find(
-        "function int SelectStaggeredCorpse(");
-    CHECK(restore_adaptive_graphics != std::string::npos);
-    CHECK(select_staggered_corpse != std::string::npos);
-    CHECK(restore_adaptive_graphics < select_staggered_corpse);
-    const auto restore_adaptive_body = telemetry_source.substr(
-        restore_adaptive_graphics,
-        select_staggered_corpse - restore_adaptive_graphics);
-    CHECK(restore_adaptive_body.find(
-        "bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.\n"
-        "        RestoreOriginal(AdaptiveGraphicsState)") != std::string::npos);
-    CHECK(restore_adaptive_body.find(
-        "bEffectRuntimeRestored = ApplyAdaptiveEffectRuntimeReadback(\n"
-        "        \"restore\", 100, true)") != std::string::npos);
-    CHECK(restore_adaptive_body.find("domain=graphics") != std::string::npos);
-    CHECK(restore_adaptive_body.find("domain=effect_runtime") !=
-          std::string::npos);
-    CHECK(restore_adaptive_body.find(
-        "if (!bGraphicsRestored || !bEffectRuntimeRestored)") !=
-          std::string::npos);
-    CHECK(restore_adaptive_body.find(
-        "RestoreOriginal(\n            AdaptiveGraphicsState) ||") ==
-          std::string::npos);
-    const auto restore_freezes = telemetry_source.find(
-        "BeginAdaptiveCorpsePhysicsRelease();", restore_adaptive_graphics);
-    CHECK(restore_freezes != std::string::npos);
-    CHECK(restore_freezes < telemetry_source.find(
-        "RestoreOriginal(", restore_adaptive_graphics));
-    CHECK(telemetry_source.find("AdaptiveGraphicsState = None",
-        restore_adaptive_graphics) >= select_staggered_corpse);
     const auto interaction_tick = interaction_source.find(
         "event Tick(float DeltaTime)");
     CHECK(interaction_tick != std::string::npos);
@@ -548,11 +1009,40 @@ int main() {
     const auto weapon_standalone_guard = graphics_interaction_source.find(
         "if (CurrentWorld.NetMode != NM_Standalone)", runtime_guard);
     CHECK(runtime_guard_function != std::string::npos);
+    const auto guard_end = graphics_interaction_source.find(
+        "\nfunction ", runtime_guard_function + 1);
+    const auto guard_body = std::string_view{graphics_interaction_source}.substr(
+        runtime_guard_function, guard_end - runtime_guard_function);
+    const auto pawn_scan = guard_body.find(
+        "foreach CurrentWorld.AllPawns(class'KFPawn', Pawn)");
+    const auto weapon_scan = guard_body.find(
+        "foreach CurrentWorld.DynamicActors(class'KFWeapon', Weapon)");
+    const auto changed_check = guard_body.find(
+        "bChanged = UpdatedWeaponMaterialCount > 0 ||");
+    CHECK(pawn_scan != std::string_view::npos);
+    CHECK(weapon_scan != std::string_view::npos && pawn_scan < weapon_scan);
+    CHECK(changed_check != std::string_view::npos && weapon_scan < changed_check);
+    CHECK(guard_body.find("EnsureWeaponClassFallback(Pawn)", pawn_scan) <
+          weapon_scan);
+    CHECK(guard_body.find("ReplaceExistingFireAffliction(Pawn)", pawn_scan) <
+          weapon_scan);
+    CHECK(guard_body.find("EnsureTurretWeaponMaterial(Weapon)", weapon_scan) <
+          changed_check);
+    CHECK(guard_body.find("Pawn = KFPawn(Candidate);") ==
+          std::string_view::npos);
+    CHECK(guard_body.find("Weapon = KFWeapon(Candidate);") ==
+          std::string_view::npos);
+    CHECK(guard_body.find("if (Pawn == None || Pawn.bDeleteMe") ==
+          std::string_view::npos);
     CHECK(runtime_guard != std::string::npos);
     CHECK(weapon_standalone_guard != std::string::npos);
     CHECK(runtime_guard < weapon_standalone_guard);
     CHECK(count_occurrences(graphics_interaction_source,
-        "foreach CurrentWorld.DynamicActors(class'Actor', Candidate)") == 1);
+        "foreach CurrentWorld.DynamicActors(class'Actor', Candidate)") == 0);
+    CHECK(count_occurrences(graphics_interaction_source,
+        "foreach CurrentWorld.AllPawns(class'KFPawn', Pawn)") == 1);
+    CHECK(count_occurrences(graphics_interaction_source,
+        "foreach CurrentWorld.DynamicActors(class'KFWeapon', Weapon)") == 1);
     CHECK(graphics_interaction_source.find(
         "DynamicActors(class'KFWeap_HRG_Warthog'") == std::string::npos);
     CHECK(graphics_interaction_source.find(
@@ -763,12 +1253,257 @@ int main() {
     CHECK(corpse_capture_call != std::string::npos);
     CHECK(corpse_limit_write != std::string::npos);
     CHECK(corpse_capture_call < corpse_limit_write);
+    const auto online_enable_start = online_apply_body.find("if (Resource ~= \"enable\")");
+    const auto online_enable_end = online_apply_body.find("if (Quality < 10 || Quality > 100)");
+    CHECK(online_enable_start != std::string::npos &&
+          online_enable_end != std::string::npos);
+    const auto online_enable_body = online_apply_body.substr(
+        online_enable_start, online_enable_end - online_enable_start);
+    CHECK(online_enable_is_transactional(online_enable_body));
     const auto enable_failure_restore = online_apply_body.find(
-        "RestoreOnlineCorpseMaximum(CurrentWorld, \"enable_failure\")",
+        "RestoreOnlineEnableMaximum(GoreManager);",
         corpse_limit_write);
     CHECK(enable_failure_restore != std::string::npos);
     CHECK(enable_failure_restore < online_apply_body.find(
         "bOnlineGraphicsEnabled = true"));
+    auto premature_enable = online_enable_body;
+    const auto previous_capture = premature_enable.find(
+        "OnlineCorpseEnablePreviousMaximum = GoreManager.MaxDeadBodies;");
+    CHECK(previous_capture != std::string::npos);
+    premature_enable.replace(previous_capture,
+        std::string_view{"OnlineCorpseEnablePreviousMaximum = GoreManager.MaxDeadBodies;"}.size(),
+        "OnlineCorpseEnablePreviousMaximum = OnlineCorpseOriginalMaximum;");
+    CHECK(!online_enable_is_transactional(premature_enable));
+    CHECK(!online_enable_is_transactional(
+        online_enable_body + "GoreManager.MaxDeadBodies = Quality;"));
+    const auto enable_restore_start = online_context_source.find(
+        "function bool RestoreOnlineEnableMaximum(");
+    CHECK(enable_restore_start != std::string::npos);
+    const auto enable_restore_body = online_context_source.substr(
+        enable_restore_start, online_apply_function - enable_restore_start);
+    const auto enable_restore_write = enable_restore_body.find(
+        "GoreManager.MaxDeadBodies = OnlineCorpseEnablePreviousMaximum;");
+    const auto enable_restore_mismatch = enable_restore_body.find(
+        "GoreManager.MaxDeadBodies != OnlineCorpseEnablePreviousMaximum");
+    const auto enable_restore_reject = enable_restore_body.find(
+        "return false;", enable_restore_mismatch);
+    const auto enable_debt_clear = enable_restore_body.find(
+        "bOnlineCorpseEnableRestorePending = false;");
+    CHECK(enable_restore_write != std::string::npos &&
+          enable_restore_mismatch != std::string::npos &&
+          enable_restore_reject != std::string::npos &&
+          enable_debt_clear != std::string::npos);
+    CHECK(enable_restore_write < enable_restore_mismatch &&
+          enable_restore_mismatch < enable_restore_reject &&
+          enable_restore_reject < enable_debt_clear);
+    CHECK(enable_restore_body.find("ownership=retained") != std::string::npos);
+    CHECK(enable_restore_body.find("ClearOnlineCorpseMaximumSnapshot") ==
+          std::string::npos);
+    const auto capacity_start = online_context_source.find(
+        "function bool TryEnforceOnlineCorpseCapacity(");
+    const auto capacity_end = online_context_source.find(
+        "function ResetOnlineGraphicsListenerHealth(", capacity_start);
+    CHECK(capacity_start != std::string::npos && capacity_end != std::string::npos);
+    const auto capacity_body = online_context_source.substr(
+        capacity_start, capacity_end - capacity_start);
+    const auto pending_capacity_hold = capacity_body.find(
+        "if (!bOnlineGraphicsEnabled || bOnlineCorpseEnableRestorePending ||");
+    CHECK(pending_capacity_hold != std::string::npos);
+    CHECK(capacity_body.find("return false;", pending_capacity_hold) <
+          capacity_body.find("GoreManager ="));
+    const auto sleep_body = online_context_source.substr(
+        online_sleep_function, capacity_start - online_sleep_function);
+    CHECK(online_context_source.find("const OnlineCorpseScanBudget=64;") !=
+          std::string::npos);
+    CHECK(online_pool_scan_is_bounded(sleep_body,
+        "OnlineCorpseSleepScanCursor", "OnlineCorpseLastSleepRealTime"));
+    CHECK(online_pool_scan_is_bounded(capacity_body,
+        "OnlineCorpseCapacityScanCursor", "OnlineCorpseLastCapacityRealTime"));
+    CHECK(sleep_body.find(
+        "CurrentWorld.RealTimeSeconds - OnlineCorpseLastSleepRealTime < 0.15") !=
+          std::string::npos);
+    CHECK(capacity_body.find(
+        "CurrentWorld.RealTimeSeconds - OnlineCorpseLastCapacityRealTime < 0.45") !=
+          std::string::npos);
+    CHECK(count_occurrences(sleep_body, "PutRigidBodyToSleep();") == 1);
+    CHECK(count_occurrences(capacity_body, "RemoveAndDeleteCorpse(Index)") == 1);
+    CHECK(count_occurrences(online_context_source,
+        "OnlineCorpseSleepScanCursor = 0;") == 2);
+    CHECK(count_occurrences(online_context_source,
+        "OnlineCorpseCapacityScanCursor = 0;") == 2);
+    CHECK(count_occurrences(online_context_source,
+        "OnlineCorpseLastSleepRealTime = 0.0;") == 2);
+    CHECK(count_occurrences(online_context_source,
+        "OnlineCorpseLastCapacityRealTime = 0.0;") == 2);
+    auto unbounded_scan = sleep_body;
+    const std::string budget_rule = "ScanCount = Min(OnlineCorpseScanBudget, PoolLength);";
+    unbounded_scan.replace(unbounded_scan.find(budget_rule), budget_rule.size(),
+                           "ScanCount = PoolLength;");
+    CHECK(!online_pool_scan_is_bounded(unbounded_scan,
+        "OnlineCorpseSleepScanCursor", "OnlineCorpseLastSleepRealTime"));
+    auto stuck_scan = capacity_body;
+    const std::string advance_rule = "OnlineCorpseCapacityScanCursor = (Index + 1) % PoolLength;";
+    stuck_scan.erase(stuck_scan.find(advance_rule), advance_rule.size());
+    CHECK(!online_pool_scan_is_bounded(stuck_scan,
+        "OnlineCorpseCapacityScanCursor", "OnlineCorpseLastCapacityRealTime"));
+    // Source-bound scheduling model, not execution of UnrealScript/physics.
+    for (const int length : {0, 1, 63, 64, 65, 2000}) {
+        for (const bool failed_readback : {false, true}) {
+            std::vector<bool> seen(static_cast<std::size_t>(length));
+            int cursor = 0;
+            for (int visit = 0; visit <= length; ++visit) {
+                int inspected = 0;
+                int actions = 0;
+                for (; inspected < std::min(64, length);) {
+                    const auto index = cursor;
+                    cursor = (index + 1) % length;
+                    seen[index] = true;
+                    ++inspected;
+                    // Permanent readback failure at every slot must still
+                    // progress; misses process only the admitted budget.
+                    if (failed_readback) { ++actions; break; }
+                }
+                CHECK(inspected <= 64 && actions <= 1);
+                CHECK(length == 0 || (cursor >= 0 && cursor < length));
+            }
+            CHECK(std::all_of(seen.begin(), seen.end(), [](bool v) { return v; }));
+            // Shrunken/repopulated pools never use an old out-of-range index.
+            for (const int changed_length : {0, 1, 7, 2000}) {
+                if (changed_length == 0) continue;
+                cursor = std::clamp(cursor, 0, changed_length - 1);
+                CHECK(cursor >= 0 && cursor < changed_length);
+            }
+        }
+    }
+    for (const double interval : {0.15, 0.45}) {
+        for (const int fps : {30, 60, 120, 240}) {
+            double last_attempt = 0.0;
+            int attempts = 0;
+            for (int frame = 1; frame <= fps * 10; ++frame) {
+                const auto now = static_cast<double>(frame) / fps;
+                if (now - last_attempt < interval) continue;
+                last_attempt = now; // Includes missing manager, miss and failure.
+                ++attempts;
+            }
+            CHECK(attempts > 0 && attempts <= static_cast<int>(10.0 / interval));
+            last_attempt = 0.0; // Existing world/session resets clear cadence.
+            CHECK(1.0 - last_attempt >= interval);
+        }
+    }
+    const auto capability_start = online_context_source.find(
+        "function ReportOnlineCorpseCapability(");
+    const auto capability_end = online_context_source.find(
+        "function bool RestoreOnlineSessionState(", capability_start);
+    CHECK(capability_start != std::string::npos && capability_end != std::string::npos);
+    const auto capability_body = online_context_source.substr(
+        capability_start, capability_end - capability_start);
+    const auto unavailable_guard = capability_body.find("if (!bOnlineCorpseUnavailableReported)");
+    const auto unavailable_log = capability_body.find("state=unavailable reason=no_gore_manager");
+    CHECK(unavailable_guard != std::string::npos && unavailable_guard < unavailable_log);
+    CHECK(capability_body.find("bOnlineCorpseUnavailableReported = true;",
+        unavailable_guard) < unavailable_log);
+    const auto recovered = capability_body.find("if (bOnlineCorpseUnavailableReported)");
+    CHECK(recovered > unavailable_log && recovered < capability_body.find("state=available"));
+    CHECK(capability_body.find("bOnlineCorpseCapabilityReported = false;", recovered) <
+          capability_body.find("state=available"));
+    CHECK(capability_body.find("bOnlineCorpseUnavailableReported = false;", recovered) <
+          capability_body.find("state=available"));
+    CHECK(count_occurrences(online_context_source,
+        "bOnlineCorpseUnavailableReported = false;") == 3);
+    const auto bridge_start = online_corpse_controller_source.find(
+        "function KF2OptimizerOnlineContextInteraction GetOnlineInteraction()");
+    const auto bridge_end = online_corpse_controller_source.find(
+        "function int FindFrozenCorpse(", bridge_start);
+    CHECK(bridge_start != std::string::npos && bridge_end != std::string::npos);
+    const auto bridge_body = online_corpse_controller_source.substr(
+        bridge_start, bridge_end - bridge_start);
+    CHECK(bridge_body.find("KF2OptimizerGraphicsViewport(CurrentEngine.GameViewport)") !=
+          std::string::npos);
+    CHECK(bridge_body.find("return CurrentViewport.GetOnlineMonitor();") != std::string::npos);
+    CHECK(bridge_body.find("FindObject") == std::string::npos);
+    CHECK(bridge_body.find("PathName") == std::string::npos);
+    CHECK(graphics_viewport_source.find(
+        "var private KF2OptimizerOnlineContextInteraction OnlineMonitor;") != std::string::npos);
+    CHECK(graphics_viewport_source.find(
+        "OnlineMonitor == None || GlobalInteractions.Find(OnlineMonitor) == -1") !=
+          std::string::npos);
+    CHECK(graphics_viewport_source.find("var WorldInfo") == std::string::npos);
+    CHECK(graphics_viewport_source.find("var Actor") == std::string::npos);
+    const auto maximum_clear_start = online_context_source.find(
+        "function ClearOnlineCorpseMaximumSnapshot()");
+    const auto maximum_clear_end = online_context_source.find(
+        "function DiscardOnlineCorpseMaximumSnapshot(");
+    CHECK(maximum_clear_start != std::string::npos &&
+          maximum_clear_end != std::string::npos);
+    CHECK(online_context_source.substr(maximum_clear_start,
+        maximum_clear_end - maximum_clear_start).find(
+            "bOnlineCorpseEnableRestorePending = false;") != std::string::npos);
+    // Source-bound failure model, not live UnrealScript/engine injection.
+    struct EnableState {
+        int limit{20}, original{}, previous{}, sequence{};
+        bool captured{}, pending{}, enabled{};
+        bool apply(int requested, int prerequisite_failure,
+                   bool write_mismatch, bool rollback_mismatch) {
+            if (!captured) { original = limit; captured = true; }
+            if (pending) {
+                if (rollback_mismatch) return false;
+                limit = previous;
+                pending = false;
+            }
+            if (prerequisite_failure != 0) return false;
+            previous = limit;
+            if (write_mismatch) {
+                limit = requested + 1;
+                pending = true;
+                if (!rollback_mismatch) { limit = previous; pending = false; }
+                return false;
+            }
+            limit = requested;
+            enabled = true;
+            ++sequence;
+            return true;
+        }
+        bool restore(bool mismatch) {
+            if (mismatch) return false;
+            limit = original;
+            captured = pending = enabled = false;
+            return true;
+        }
+    };
+    for (const int maximum : {4, 20, 99, 100, 2000}) {
+        for (const int prerequisite : {1, 2, 3}) {
+            EnableState state;
+            CHECK(!state.apply(maximum, prerequisite, false, false));
+            CHECK(state.limit == 20 && state.sequence == 0 && !state.enabled);
+            CHECK(!state.apply(maximum, 0, true, false));
+            CHECK(state.limit == 20 && !state.pending && state.sequence == 0);
+            CHECK(!state.apply(maximum, 0, true, true));
+            CHECK(state.pending && state.previous == 20 && !state.enabled);
+            CHECK(!state.apply(maximum, prerequisite, false, false));
+            CHECK(state.limit == 20 && !state.pending && state.sequence == 0);
+            CHECK(state.apply(maximum, 0, false, false));
+            const int next = maximum == 4 ? 2000 : 4;
+            CHECK(!state.apply(next, prerequisite, false, false));
+            CHECK(state.limit == maximum && state.sequence == 1 && state.enabled);
+            CHECK(!state.apply(next, 0, true, false));
+            CHECK(state.limit == maximum && !state.pending && state.sequence == 1);
+            CHECK(!state.apply(next, 0, true, true));
+            CHECK(state.pending && state.previous == maximum && state.original == 20);
+            const auto partial = state.limit;
+            CHECK(!state.apply(next, 0, false, true));
+            CHECK(state.limit == partial && state.previous == maximum && state.sequence == 1);
+            CHECK(!state.apply(next, prerequisite, false, false));
+            CHECK(state.limit == maximum && !state.pending && state.sequence == 1);
+            CHECK(state.apply(next, 0, false, false));
+            CHECK(state.limit == next && state.sequence == 2 && state.original == 20);
+            CHECK(!state.apply(maximum, 0, true, true));
+            CHECK(!state.restore(true) && state.pending && state.captured);
+            CHECK(state.restore(false) && state.limit == 20 && !state.pending);
+            state.limit = 60; // New World: no previous-world restore ownership.
+            CHECK(!state.apply(maximum, prerequisite, false, false));
+            CHECK(state.original == 60 && state.limit == 60 && state.sequence == 2);
+        }
+    }
     CHECK(online_apply_body.find(
         "RestoreOnlineCorpseMaximum(CurrentWorld, \"disable\")") !=
           std::string::npos);
@@ -946,6 +1681,23 @@ int main() {
           std::string::npos);
     CHECK(online_release_body.find(
         "(Index + 1) % FrozenCorpses.Length") != std::string::npos);
+    CHECK(online_restore_advances_after_failure(online_release_body));
+    auto blocked_release = online_release_body;
+    const auto attempt = blocked_release.find(
+        "TryRestoreOnlineCorpse(Index, bRestoreAll ?");
+    const auto failure_exit = blocked_release.find(
+        "        ReleaseScanCursor = FrozenCorpses.Length", attempt);
+    CHECK(failure_exit != std::string::npos);
+    blocked_release.insert(failure_exit, "        return false;\n");
+    CHECK(!online_restore_advances_after_failure(blocked_release));
+    CHECK(!online_restore_progress(9, 8, true));
+    for (const auto length : {0, 1, 2, 8, 9, 16, 17, 2000}) {
+        CHECK(online_restore_progress(length, -1));
+        CHECK(online_restore_progress(length, -2));
+        CHECK(online_restore_progress(length, 0));
+        CHECK(online_restore_progress(length, length / 2));
+        CHECK(online_restore_progress(length, length - 1));
+    }
     CHECK(online_corpse_controller_source.find(
         "state=release_failed corpse_id=") != std::string::npos);
     CHECK(online_corpse_controller_source.find(
@@ -1025,6 +1777,34 @@ int main() {
     CHECK(online_restore_start != std::string::npos);
     const auto online_restore_body = online_corpse_controller_source.substr(
         online_restore_start, online_release_start - online_restore_start);
+    CHECK(online_restore_has_complete_readback(online_restore_body));
+    // Removing any single readback rejects the restore contract, including
+    // ignore-encroachers and missing/unexpected collision-component cases.
+    for (const auto field : online_restore_readback_fields) {
+        auto incomplete_readback = online_restore_body;
+        const auto position = incomplete_readback.find(field);
+        CHECK(position != std::string::npos);
+        incomplete_readback.erase(position, field.size());
+        CHECK(!online_restore_has_complete_readback(incomplete_readback));
+    }
+    auto discarded_original = online_restore_body;
+    discarded_original.insert(0, "FrozenCorpses.Remove(Index, 1);\n");
+    CHECK(!online_restore_has_complete_readback(discarded_original));
+    auto missing_component_accepted = online_restore_body;
+    const auto missing_component_return = missing_component_accepted.find(
+        "return false;", missing_component_accepted.find(
+            "\"collision_component_missing\""));
+    CHECK(missing_component_return != std::string::npos);
+    missing_component_accepted.erase(missing_component_return,
+                                    std::string_view{"return false;"}.size());
+    CHECK(!online_restore_has_complete_readback(missing_component_accepted));
+    CHECK(online_restore_body.find("Original = FrozenCorpses[Index];") !=
+          std::string::npos);
+    CHECK(online_restore_body.find("FrozenCorpses.Remove(") ==
+          std::string::npos);
+    CHECK(online_restore_body.find(
+        "\"restore_readback_mismatch\");\n        return false;") !=
+          std::string::npos);
     CHECK(online_restore_body.find(
         "if (Candidate.Physics != PHYS_RigidBody)") != std::string::npos);
     CHECK(online_restore_body.find(
@@ -1061,6 +1841,107 @@ int main() {
           std::string::npos);
     CHECK(online_corpse_controller_source.find("RemoteRole=ROLE_None") !=
           std::string::npos);
+    const auto online_lod_start = online_corpse_controller_source.find(
+        "function bool ApplyOneFixedMinimumCorpseLod()");
+    const auto online_skeleton_start = online_corpse_controller_source.find(
+        "function bool ApplyOneSleepingCorpseSkeletonMinimum()");
+    const auto online_visual_start = online_corpse_controller_source.find(
+        "function bool RunOneFixedMinimumVisualAction()");
+    CHECK(online_lod_start < online_skeleton_start);
+    CHECK(online_skeleton_start < online_visual_start);
+    CHECK(online_visual_start < online_tick_start);
+    const auto online_lod_body = online_corpse_controller_source.substr(
+        online_lod_start, online_skeleton_start - online_lod_start);
+    const auto online_skeleton_body = online_corpse_controller_source.substr(
+        online_skeleton_start, online_visual_start - online_skeleton_start);
+    const auto lod_cursor = online_visual_cursor(online_lod_body);
+    const auto skeleton_cursor = online_visual_cursor(online_skeleton_body);
+    CHECK(!lod_cursor.empty());
+    CHECK(!skeleton_cursor.empty());
+    std::vector<int> sixteen_corpses;
+    for (int id = 0; id < 16; ++id) sixteen_corpses.push_back(id);
+    OnlineVisualScanModel no_action_model{lod_cursor == skeleton_cursor};
+    CHECK(covers_online_visual_pool(no_action_model, sixteen_corpses, false));
+    for (const auto length : {8, 9, 16, 17, 2000}) {
+        std::vector<int> pool;
+        for (int id = 0; id < length; ++id) pool.push_back(id);
+        for (const auto actions : {false, true}) {
+            OnlineVisualScanModel model{lod_cursor == skeleton_cursor};
+            CHECK(covers_online_visual_pool(model, pool, actions));
+            // Preserve progress through growth, shrink and middle removal.
+            for (int id = length; id < length + 9; ++id) pool.push_back(id);
+            CHECK(covers_online_visual_pool(model, pool, actions));
+            pool.resize(9);
+            model.cursors = {-5, 2001}; // The same clamp as the UC functions.
+            CHECK(covers_online_visual_pool(model, pool, actions));
+            pool.erase(pool.begin() + 3);
+            CHECK(covers_online_visual_pool(model, pool, actions));
+            CHECK(covers_online_visual_pool(model, {}, actions));
+            CHECK(model.cursors[0] == 0 && model.cursors[1] == 0);
+            CHECK(covers_online_visual_pool(model, pool, actions));
+            // A new world-owned controller starts with fresh zero cursors.
+            model = OnlineVisualScanModel{lod_cursor == skeleton_cursor};
+            CHECK(covers_online_visual_pool(model, pool, actions));
+            pool.clear();
+            for (int id = 0; id < length; ++id) pool.push_back(id);
+        }
+    }
+    for (const auto* body : {&online_lod_body, &online_skeleton_body}) {
+        const auto cursor = online_visual_cursor(*body);
+        CHECK(body->find("ScanCount = Min(8, PoolLength);") !=
+              std::string::npos);
+        CHECK(body->find(cursor + " = 0;") != std::string::npos);
+        CHECK(body->find(cursor + " = Clamp(\n        " + cursor +
+              ", 0, PoolLength - 1);") != std::string::npos);
+        CHECK(body->find(cursor + " = (Index + 1) % PoolLength;") !=
+              std::string::npos);
+        CHECK(body->find(cursor + " =\n        (" + cursor +
+              " + ScanCount) % PoolLength;") != std::string::npos);
+        CHECK(count_occurrences(*body, cursor) == 7);
+        CHECK(online_corpse_controller_source.find("var int " + cursor +
+              ";") != std::string::npos);
+    }
+    CHECK(lod_cursor != skeleton_cursor);
+    bool mismatch_progress = advances_online_attempt(
+        online_freeze_body, "FreezeScanCursor", "Candidate.SetCollision(",
+        "LastPhysicsMutationRealTime");
+    mismatch_progress = advances_online_attempt(
+        online_lod_body, lod_cursor,
+        "Candidate.Mesh.MinLodModel = TargetMinLod;",
+        "LastVisualMutationRealTime") && mismatch_progress;
+    mismatch_progress = advances_online_attempt(
+        online_skeleton_body, skeleton_cursor,
+        "Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;",
+        "LastVisualMutationRealTime") && mismatch_progress;
+    CHECK(mismatch_progress);
+    CHECK(online_freeze_body.find(
+        "WorldInfo.RealTimeSeconds - LastPhysicsMutationRealTime < 0.45") !=
+          std::string::npos);
+    CHECK(count_occurrences(online_freeze_body,
+        "FreezeScanCursor = (Index + 1) % PoolLength;") == 1);
+    CHECK(count_occurrences(online_freeze_body,
+        "LastPhysicsMutationRealTime = WorldInfo.RealTimeSeconds;") == 1);
+    for (const auto length : {1, 2, 8, 9, 16, 17, 2000}) {
+        std::vector<int> pool;
+        for (int id = 0; id < length; ++id) pool.push_back(id);
+        OnlineVisualScanModel model;
+        CHECK(covers_online_visual_pool(model, pool, true, true));
+        CHECK(online_freeze_progress_after_rollback(length));
+    }
+    const auto online_visual_body = online_corpse_controller_source.substr(
+        online_visual_start, online_tick_start - online_visual_start);
+    CHECK(online_visual_body.find(
+        "WorldInfo.RealTimeSeconds - LastVisualMutationRealTime < 0.20") !=
+          std::string::npos);
+    CHECK(online_visual_body.find(
+        "VisualControlPhase = (VisualControlPhase + 1) % 2;") !=
+          std::string::npos);
+    CHECK(count_occurrences(online_visual_body,
+        "bActionTaken = ApplyOneFixedMinimumCorpseLod();") == 1);
+    CHECK(count_occurrences(online_visual_body,
+        "bActionTaken = ApplyOneSleepingCorpseSkeletonMinimum();") == 1);
+    CHECK(online_visual_body.find("else\n    {\n        bActionTaken = "
+        "ApplyOneSleepingCorpseSkeletonMinimum();") != std::string::npos);
     CHECK(listener_source.find(
         "class'KF2OptimizerOnlineCorpseController'") != std::string::npos);
     CHECK(online_graphics_connection_source.find(
@@ -1868,9 +2749,6 @@ int main() {
     // recovery then derive from that rebased baseline instead of the stale
     // first-action snapshot.
     CHECK(graphics_source.find(
-        "static function CaptureCurrentOwnedSettings(") !=
-          std::string::npos);
-    CHECK(graphics_source.find(
         "static function bool OwnedSettingsDiffer(") !=
           std::string::npos);
     const auto menu_rebase_start = graphics_source.find(
@@ -1894,7 +2772,7 @@ int main() {
     const auto owned_copy_start = graphics_source.find(
         "static function CopyOwnedSettings(");
     const auto owned_copy_end = graphics_source.find(
-        "static function CaptureCurrentOwnedSettings(", owned_copy_start);
+        "static function bool OwnedSettingsDiffer(", owned_copy_start);
     CHECK(owned_copy_start != std::string::npos);
     CHECK(owned_copy_end != std::string::npos);
     const auto owned_copy_body = graphics_source.substr(
@@ -2007,6 +2885,10 @@ int main() {
     CHECK(telemetry_source.find(
         "function bool HasConfirmedAdaptivePerformancePressure()") !=
           std::string::npos);
+    CHECK(telemetry_source.find(
+        "return AdaptiveLastControlSequence > 0 &&\n"
+        "        AdaptiveGraphicsQuality >= 10 && AdaptiveGraphicsQuality < 100 &&\n"
+        "        !(AdaptiveGraphicsResource ~= \"recover\")") != std::string::npos);
     CHECK(telemetry_source.find(
         "if (!HasConfirmedAdaptivePerformancePressure())") !=
           std::string::npos);
@@ -2157,6 +3039,37 @@ int main() {
     CHECK(telemetry_source.find(
         "RegisterAdaptiveCorpsePhysicsAction(Candidate, \"baseline\")") !=
           std::string::npos);
+    const auto baseline_start = telemetry_source.find(
+        "function int SleepBaselineAwakeMonsterCorpses(");
+    const auto baseline_end = telemetry_source.find(
+        "function int FindFixedMinimumCorpseLodEntry(", baseline_start);
+    CHECK(baseline_end != std::string::npos);
+    const auto baseline_body = telemetry_source.substr(
+        baseline_start, baseline_end - baseline_start);
+    const auto baseline_capacity = baseline_body.find(
+        "if (!EnsureAdaptiveCorpsePhysicsActionIds() ||\n"
+        "        AdaptiveCorpsePhysicsActionIdCount >= 8192)");
+    const auto baseline_loop = baseline_body.find(
+        "for (Offset = 0; Offset < ScanCount; ++Offset)");
+    CHECK(baseline_capacity != std::string::npos);
+    CHECK(baseline_body.find("if (PoolLength <= 0)") < baseline_capacity);
+    CHECK(baseline_body.find(
+        "ScanCount = Min(AdaptiveCorpseScanBudget, PoolLength);") <
+          baseline_capacity);
+    CHECK(baseline_capacity < baseline_loop);
+    const auto baseline_capacity_body = baseline_body.substr(
+        baseline_capacity, baseline_loop - baseline_capacity);
+    CHECK(baseline_capacity_body.find(
+        "AdaptiveBaselineScanCursor =\n"
+        "            (AdaptiveBaselineScanCursor + ScanCount) % PoolLength;\n"
+        "        return 0;") != std::string::npos);
+    CHECK(baseline_loop < baseline_body.find("IsAdaptiveCorpseSettled("));
+    CHECK(baseline_loop < baseline_body.find(
+        "ReserveAdaptivePhysicsMutationForCurrentFrame()"));
+    CHECK(baseline_loop < baseline_body.find("PutRigidBodyToSleep()"));
+    CHECK(baseline_loop < baseline_body.find(
+        "bSkipAllUpdateWhenPhysicsAsleep = true;"));
+    CHECK(baseline_loop < baseline_body.find("bNoSkeletonUpdate = true;"));
     CHECK(telemetry_source.find(
         "0.05 + ((WeightedVisibleZeds - 1.0) / 79.0) * 0.95") !=
           std::string::npos);
@@ -2231,6 +3144,8 @@ int main() {
     CHECK(telemetry_source.find(
         "VisibleAwake = AdaptiveCachedVisibleAwakeCorpses;") !=
           std::string::npos);
+    // Only published metrics and controller inputs justify native awake queries.
+    CHECK(telemetry_source.find("CorpseVisibleAwake") == std::string::npos);
     CHECK(telemetry_source.find(
         "AwakeTotal = AdaptiveCachedAwakeCorpses;") !=
           std::string::npos);
@@ -2739,7 +3654,7 @@ int main() {
     const auto diagnostic_scan_start = telemetry_source.find(
         "function RefreshDiagnosticEffectCache()");
     const auto diagnostic_scan_end = telemetry_source.find(
-        "function SampleTelemetry()", diagnostic_scan_start);
+        "function RefreshWorldEmitterCache(", diagnostic_scan_start);
     CHECK(diagnostic_scan_start != std::string::npos);
     CHECK(diagnostic_scan_end != std::string::npos);
     const auto diagnostic_scan = telemetry_source.substr(
@@ -2764,7 +3679,21 @@ int main() {
         CHECK(telemetry_source.find(phased_effect_scan) != std::string::npos);
     }
     CHECK(count_occurrences(
-        telemetry_source, "SampleSequence == 0 ||") >= 5);
+        diagnostic_scan, "!bDiagnosticEffectCacheInitialized ||") == 5);
+    const auto diagnostics_gate = diagnostic_scan.find(
+        "if (!bDetailedRuntimeDiagnostics)");
+    const auto diagnostics_return = diagnostic_scan.find("return;", diagnostics_gate);
+    CHECK(diagnostics_gate != std::string::npos);
+    CHECK(diagnostics_return < diagnostic_scan.find("foreach WorldInfo.AllActors"));
+    CHECK(diagnostic_scan.find(
+        "CachedDiagnosticEffects = default.CachedDiagnosticEffects;") !=
+          std::string::npos);
+    CHECK(diagnostic_scan.find("bDiagnosticEffectCacheInitialized = false;") !=
+          std::string::npos);
+    CHECK(diagnostic_scan.find("bDiagnosticEffectCacheInitialized = true;") !=
+          std::string::npos);
+    CHECK(diagnostic_scan.find("bDiagnosticEffectCacheInitialized = true;") >
+          diagnostic_scan.rfind("foreach WorldInfo.AllActors"));
     CHECK(telemetry_source.find(
         "rotate one typed iterator per sample") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -2933,6 +3862,17 @@ int main() {
         idle_restore_start, idle_apply_start - idle_restore_start);
     const auto idle_apply = telemetry_source.substr(
         idle_apply_start, idle_apply_end - idle_apply_start);
+    // Without ownership, no world component can be eligible for restoration.
+    // Keep the common receipt and all nonempty restore-debt work unchanged.
+    CHECK(idle_restore.find(
+        "if (AdaptiveWorldParticleIdleStates.Length > 0)\n    {\n"
+        "        foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)") !=
+          std::string::npos);
+    CHECK(count_occurrences(idle_restore, "WorldInfo.AllActors(") == 1);
+    CHECK(idle_restore.find("bRestorePending = true;") <
+          idle_restore.find("ParticleComponent.SecondsBeforeInactive ="));
+    CHECK(idle_restore.find("reason=readback_mismatch") <
+          idle_restore.find("KF2OPT_WORLD_PARTICLE_IDLE state=restored"));
     const auto restore_owner_check = idle_restore.find(
         "AdaptiveWorldParticleIdleOwnerMatches(");
     const auto restore_write = idle_restore.find(
@@ -2940,8 +3880,15 @@ int main() {
     CHECK(restore_owner_check != std::string::npos);
     CHECK(restore_write != std::string::npos);
     CHECK(restore_owner_check < restore_write);
-    const auto replacement_check = idle_apply.find(
-        "!AdaptiveWorldParticleIdleOwnerMatches(");
+    CHECK(count_occurrences(idle_apply,
+        "AdaptiveWorldParticleIdleOwnerMatches(") == 1);
+    CHECK(idle_apply.find(
+        "bOwnerMatches = StateIndex != INDEX_NONE &&\n"
+        "            AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter);") !=
+          std::string::npos);
+    CHECK(idle_apply.find("if (bOwnerMatches)") <
+          idle_apply.find("LastSeenGeneration ="));
+    const auto replacement_check = idle_apply.find("if (!bOwnerMatches)");
     const auto replacement_capture = idle_apply.find(
         "OriginalSecondsBeforeInactive =");
     CHECK(replacement_check != std::string::npos);
@@ -3426,6 +4373,69 @@ int main() {
     CHECK(freeze_release_body.find(
         "(Index + 1) % AdaptiveFrozenCorpses.Length") !=
           std::string::npos);
+    const auto restore_state_start = telemetry_source.find(
+        "function bool RestoreAdaptiveCorpseFreezeState(");
+    const auto restore_state_end = telemetry_source.find(
+        "function bool TryRestoreAdaptiveCorpseFreeze(", restore_state_start);
+    CHECK(restore_state_start != std::string::npos);
+    CHECK(restore_state_end != std::string::npos);
+    const auto restore_state_body = telemetry_source.substr(
+        restore_state_start, restore_state_end - restore_state_start);
+    const auto reservation = restore_state_body.find(
+        "!ReserveAdaptivePhysicsMutationForCurrentFrame()");
+    const auto readback = restore_state_body.find(
+        "if (Candidate.bCollideActors != bOriginalCollideActors ||");
+    const auto physics_write = restore_state_body.find(
+        "Candidate.SetPhysics(PHYS_RigidBody);");
+    const auto release_callback_start = telemetry_source.find(
+        "function AdaptiveCorpsePhysicsRelease()");
+    const auto release_callback_end = telemetry_source.find(
+        "function BeginAdaptiveCorpsePhysicsRelease()", release_callback_start);
+    CHECK(release_callback_start != std::string::npos);
+    CHECK(release_callback_end != std::string::npos);
+    const auto release_callback = telemetry_source.substr(
+        release_callback_start, release_callback_end - release_callback_start);
+    const OfflineReleasePolicy release_policy{
+        .late_reservation = readback != std::string::npos &&
+            reservation != std::string::npos && readback < reservation &&
+            reservation < physics_write,
+        .yield_after_attempt = offline_restore_yields_after_attempt(
+            freeze_release_body, "TryRestoreAdaptiveCorpseFreeze(") &&
+            offline_restore_yields_after_attempt(retired_freeze_release_body,
+                "RestoreAdaptiveCorpseFreezeState("),
+        .fair_lanes = release_callback.find(
+            "for (Attempt = 0; Attempt < 4; ++Attempt)") != std::string::npos &&
+            release_callback.find(
+                "AdaptiveCorpsePhysicsReleasePhase = (Phase + 1) % 4;") !=
+                std::string::npos &&
+            count_occurrences(release_callback, "bHandled = true;") == 4 &&
+            release_callback.find(
+                "if (bHandled)\n        {\n            break;") !=
+                std::string::npos};
+    CHECK(restore_state_body.find("AdaptiveFrozenCorpses") ==
+          std::string::npos);
+    CHECK(telemetry_source.find("const AdaptiveCorpseScanBudget=64;") !=
+          std::string::npos);
+    for (const auto* queue : {"AdaptiveFrozenCorpses",
+        "AdaptiveRetiredFrozenCorpses", "AdaptiveDistanceSleptCorpses",
+        "AdaptiveRetiredDistanceSleptCorpses"}) {
+        CHECK(release_callback.find(std::string{queue} + ".Length > 0)") !=
+              std::string::npos);
+    }
+    // Existing main's early reservation + 64-slot wrap can revisit the same
+    // failed actor forever; a single physics-failing actor also blocks wakes.
+    CHECK(!offline_release_progress(64, 0, false, {false, false, false}));
+    CHECK(!offline_release_progress(1, 0, true, {true, true, false}));
+    CHECK(!offline_release_progress(64, 0, true, {true, false, true}));
+    CHECK(offline_release_progress(64, 0, false, release_policy));
+    for (const auto length : {0, 1, 2, 8, 9, 64, 65, 128, 129, 2000}) {
+        for (const bool physics_failure : {false, true}) {
+            for (const int failed_id : {-1, 0, length / 2, length - 1}) {
+                CHECK(offline_release_progress(
+                    length, failed_id, physics_failure, release_policy));
+            }
+        }
+    }
     CHECK(telemetry_source.find(
         "function PruneAdaptiveCorpseFreezes()\n"
         "{\n    ReleaseOneAdaptiveCorpseFreeze(false);") !=
@@ -3477,6 +4487,71 @@ int main() {
     CHECK(wake_call < wake_readback);
     CHECK(wake_readback < wake_tracking_release);
     CHECK(wake_tracking_release < wake_receipt);
+    const auto release_wake_start = telemetry_source.find(
+        "function int WakeAdaptiveDistanceSleptCorpseBatch()");
+    const auto release_wake_end = telemetry_source.find(
+        "\nfunction ", release_wake_start + 1);
+    CHECK(release_wake_start != std::string::npos);
+    CHECK(release_wake_end != std::string::npos);
+    const auto release_wake_body = telemetry_source.substr(
+        release_wake_start, release_wake_end - release_wake_start);
+    const auto release_wake_policy = offline_wake_policy(release_wake_body);
+    CHECK(release_wake_policy.retain_failed);
+    CHECK(release_wake_policy.advance_failed);
+    CHECK(release_wake_policy.restore_already_awake);
+    CHECK(release_wake_policy.validate_identity);
+    auto lost_retry_release = release_wake_body;
+    const auto release_wake_call = lost_retry_release.find(
+        "Candidate.Mesh.WakeRigidBody();");
+    const auto failed_wake_return = lost_retry_release.find(
+        "return 0;", release_wake_call);
+    CHECK(failed_wake_return != std::string::npos);
+    lost_retry_release.insert(failed_wake_return,
+        "RemoveAdaptiveDistanceSleptCorpseEntry(Index, \"adaptive_disabled\");\n");
+    CHECK(!offline_wake_policy(lost_retry_release).retain_failed);
+    auto stuck_cursor_release = release_wake_body;
+    const auto failed_cursor_advance = stuck_cursor_release.find(
+        "(Index + 1) %", release_wake_call);
+    CHECK(failed_cursor_advance != std::string::npos);
+    stuck_cursor_release.replace(failed_cursor_advance,
+        std::string_view{"(Index + 1) %"}.size(), "Index %");
+    CHECK(!offline_wake_policy(stuck_cursor_release).advance_failed);
+    CHECK(count_occurrences(release_wake_body,
+        "Candidate.Mesh.WakeRigidBody();") == 1);
+    CHECK(release_wake_body.find("Scanned < AdaptiveCorpseScanBudget") !=
+          std::string::npos);
+    CHECK(release_wake_body.find(
+        "if (WakeCount > 0)\n        {\n            return WakeCount;") !=
+          std::string::npos);
+    CHECK(release_wake_body.find("AdaptiveDistanceWakeScanCursor") ==
+          std::string::npos);
+    CHECK(retired_sleep_release_body.find(
+        "else if (Candidate.Mesh.RigidBodyIsAwake())\n"
+        "            {\n"
+        "                Candidate.Mesh.bNoSkeletonUpdate = false;\n"
+        "                AdaptiveRetiredDistanceSleptCorpses.Remove(Index, 1);") !=
+          std::string::npos);
+    const OfflineWakePolicy correct_wake_policy{true, true, true, true};
+    CHECK(!offline_wake_progress(1, 0, false, false,
+                                {false, false, false, false}));
+    CHECK(!offline_wake_progress(2, 1, false, false,
+                                {true, false, true, true}));
+    CHECK(!offline_wake_progress(2, -1, false, false,
+                                {true, true, false, true}));
+    CHECK(!offline_wake_progress(5, -1, false, true,
+                                {true, true, true, false}));
+    for (const int length : {0, 1, 2, 8, 9, 64, 65, 128, 129, 2000}) {
+        for (const int failed_id : {-2, -1, 0, length / 2, length - 1}) {
+            CHECK(offline_wake_progress(length, failed_id, false, false,
+                                       correct_wake_policy));
+            CHECK(offline_wake_progress(length, failed_id, false, false,
+                                       release_wake_policy));
+        }
+        CHECK(offline_wake_progress(length, 0, true, false,
+                                   release_wake_policy));
+        CHECK(offline_wake_progress(length, -1, false, true,
+                                   release_wake_policy));
+    }
     CHECK(telemetry_source.find(
         "function int WakeNearAdaptiveDistanceSleptCorpses()") !=
           std::string::npos);

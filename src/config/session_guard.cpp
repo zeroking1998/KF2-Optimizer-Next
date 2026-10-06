@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "kf2/config/ini_document.hpp"
+#include "kf2/core/hex_codec.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
 #include "kf2/security/sha256.hpp"
 
@@ -116,35 +117,9 @@ bool valid_hash(std::string_view hash) {
            hash.find_first_not_of("0123456789abcdef") == std::string_view::npos;
 }
 
-std::string hex_encode(std::string_view bytes) {
-    constexpr char digits[] = "0123456789abcdef";
-    std::string result;
-    result.reserve(bytes.size() * 2);
-    for (const unsigned char byte : bytes) {
-        result.push_back(digits[byte >> 4U]);
-        result.push_back(digits[byte & 0x0FU]);
-    }
-    return result;
-}
-
 std::optional<std::string> hex_decode(std::string_view text) {
-    if (text.empty() || (text.size() % 2) != 0 || text.size() > 8192) {
-        return std::nullopt;
-    }
-    const auto nibble = [](char value) -> int {
-        if (value >= '0' && value <= '9') return value - '0';
-        if (value >= 'a' && value <= 'f') return value - 'a' + 10;
-        return -1;
-    };
-    std::string result;
-    result.reserve(text.size() / 2);
-    for (std::size_t index = 0; index < text.size(); index += 2) {
-        const int high = nibble(text[index]);
-        const int low = nibble(text[index + 1]);
-        if (high < 0 || low < 0) return std::nullopt;
-        result.push_back(static_cast<char>((high << 4) | low));
-    }
-    return result;
+    if (text.empty() || text.size() > 8192) return std::nullopt;
+    return kf2::hex_decode(text);
 }
 
 std::string path_bytes(const std::filesystem::path& path) {
@@ -611,7 +586,8 @@ Result<SessionConfigSnapshot> capture_session_config(
         root_identity.value().first, root_identity.value().second});
 }
 
-Result<std::size_t> restore_session_config(const SessionConfigSnapshot& snapshot) {
+Result<std::size_t> restore_session_config(const SessionConfigSnapshot& snapshot,
+                                         bool retain_snapshot) {
     auto tree_safe = validate_snapshot_tree(snapshot.snapshot_root);
     if (!tree_safe.has_value()) {
         return Result<std::size_t>::failure(tree_safe.error());
@@ -627,6 +603,14 @@ Result<std::size_t> restore_session_config(const SessionConfigSnapshot& snapshot
         return Result<std::size_t>::failure(
             {ErrorCode::access_denied,
              L"In-memory session root identity does not match the manifest", 0});
+    }
+    std::error_code replay_error;
+    const bool replay_pending = path_exists(
+        snapshot.snapshot_root / L"graphics-replay.txt", replay_error);
+    if (replay_error || (replay_pending && !retain_snapshot)) {
+        return Result<std::size_t>::failure(
+            {ErrorCode::recovery_required,
+             L"Confirmed graphics replay must finish before snapshot cleanup", 0});
     }
 
     std::size_t restored = 0;
@@ -669,9 +653,24 @@ Result<std::size_t> restore_session_config(const SessionConfigSnapshot& snapshot
     if (!temporal_aa_disabled.has_value()) {
         return Result<std::size_t>::failure(temporal_aa_disabled.error());
     }
-    auto removed = remove_snapshot_tree(snapshot.snapshot_root);
-    if (!removed.has_value()) return Result<std::size_t>::failure(removed.error());
+    if (!retain_snapshot) {
+        auto removed = complete_session_config(snapshot);
+        if (!removed.has_value()) return Result<std::size_t>::failure(removed.error());
+    }
     return Result<std::size_t>::success(restored);
+}
+
+Result<bool> complete_session_config(const SessionConfigSnapshot& snapshot) {
+    auto manifest = parse_manifest(snapshot.snapshot_root / L"manifest.txt");
+    if (!manifest.has_value()) return Result<bool>::failure(manifest.error());
+    auto bound = validate_root_binding(snapshot.config_root, manifest.value());
+    if (!bound.has_value()) return bound;
+    if (snapshot.root_volume != manifest.value().root_volume ||
+        snapshot.root_file != manifest.value().root_file) {
+        return Result<bool>::failure(
+            {ErrorCode::access_denied, L"Session cleanup root identity changed", 0});
+    }
+    return remove_snapshot_tree(snapshot.snapshot_root);
 }
 
 Result<std::optional<SessionConfigSnapshot>> resume_session_config(

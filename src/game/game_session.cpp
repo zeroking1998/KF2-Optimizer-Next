@@ -4,12 +4,19 @@
 #include <TlHelp32.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cwctype>
+#include <optional>
 #include <string_view>
 #include <vector>
 
 namespace kf2::game {
 namespace {
+
+#ifdef KF2_GAME_PROCESS_TESTING
+std::atomic_uint32_t process_opens{0};
+std::atomic_uint32_t process_creation_queries{0};
+#endif
 
 std::uint64_t file_time_value(const FILETIME& value) {
     return (static_cast<std::uint64_t>(value.dwHighDateTime) << 32U) |
@@ -17,9 +24,6 @@ std::uint64_t file_time_value(const FILETIME& value) {
 }
 
 std::wstring folded(std::filesystem::path path) {
-    std::error_code error;
-    path = std::filesystem::weakly_canonical(path, error);
-    if (error) return {};
     auto value = path.native();
     std::transform(value.begin(), value.end(), value.begin(),
                    [](wchar_t character) { return std::towlower(character); });
@@ -40,18 +44,42 @@ bool is_overlay_window(HWND window) {
 }
 
 bool process_start_matches(const GameProcessIdentity& identity) {
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,
+    if (identity.native_process) {
+        const HANDLE process = identity.native_process->get(identity);
+        return process && WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+    }
+#ifdef KF2_GAME_PROCESS_TESTING
+    ++process_opens;
+#endif
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
                                  FALSE, identity.pid);
     if (!process) return false;
+#ifdef KF2_GAME_PROCESS_TESTING
+    ++process_creation_queries;
+#endif
     FILETIME creation{}, exit{}, kernel{}, user{};
     const bool matches =
         GetProcessTimes(process, &creation, &exit, &kernel, &user) != FALSE &&
-        file_time_value(creation) == identity.process_start_id;
+        file_time_value(creation) == identity.process_start_id &&
+        WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
     CloseHandle(process);
     return matches;
 }
 
 }  // namespace
+
+GameProcessHandle::GameProcessHandle(
+    HANDLE handle, std::uint32_t pid, std::uint64_t start,
+    bool metrics_readable) noexcept
+    : handle_{handle}, pid_{pid}, start_{start},
+      metrics_readable_{metrics_readable} {}
+
+GameProcessHandle::~GameProcessHandle() { CloseHandle(handle_); }
+
+HANDLE GameProcessHandle::get(const GameProcessIdentity& identity) const noexcept {
+    return identity.pid == pid_ && identity.process_start_id == start_
+        ? handle_ : nullptr;
+}
 
 Result<GameProcessIdentity> bind_game_process(
     std::uint32_t pid, const std::filesystem::path& expected_executable) {
@@ -59,27 +87,73 @@ Result<GameProcessIdentity> bind_game_process(
         return Result<GameProcessIdentity>::failure(
             {ErrorCode::invalid_argument, L"Game process identity is incomplete", 0});
     }
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
-                                 FALSE, pid);
+#ifdef KF2_GAME_PROCESS_TESTING
+    ++process_opens;
+#endif
+    // Metrics share the session handle when permitted. Restricted processes
+    // still bind with the original read-only observation rights.
+    constexpr DWORD observation_access =
+        PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE;
+    HANDLE opened = OpenProcess(observation_access | PROCESS_VM_READ, FALSE, pid);
+    const bool metrics_readable = opened != nullptr;
+    if (!opened) {
+#ifdef KF2_GAME_PROCESS_TESTING
+        ++process_opens;
+#endif
+        opened = OpenProcess(observation_access, FALSE, pid);
+    }
+    std::unique_ptr<void, decltype(&CloseHandle)> owned{opened, &CloseHandle};
+    const HANDLE process = owned.get();
     if (!process) return Result<GameProcessIdentity>::failure(
         {ErrorCode::access_denied, L"Game process cannot be inspected", GetLastError()});
+    const DWORD wait = WaitForSingleObject(process, 0);
+    if (wait != WAIT_TIMEOUT) {
+        const DWORD error = wait == WAIT_FAILED ? GetLastError() : 0;
+        return Result<GameProcessIdentity>::failure(
+            {wait == WAIT_OBJECT_0 ? ErrorCode::stale_data
+                                  : ErrorCode::platform_failure,
+             L"Game process is not running", error});
+    }
     FILETIME creation{}, exit{}, kernel{}, user{};
     DWORD length = 32768;
     std::vector<wchar_t> path(length);
-    const bool times_ok = GetProcessTimes(process, &creation, &exit, &kernel, &user);
-    const bool path_ok = QueryFullProcessImageNameW(process, 0, path.data(), &length);
-    CloseHandle(process);
-    if (!times_ok || !path_ok) return Result<GameProcessIdentity>::failure(
-        {ErrorCode::platform_failure, L"Game process identity query failed",
-         GetLastError()});
-    path.resize(length);
-    const std::filesystem::path actual{path.data()};
-    if (folded(actual).empty() || folded(actual) != folded(expected_executable)) {
+#ifdef KF2_GAME_PROCESS_TESTING
+    ++process_creation_queries;
+#endif
+    if (!GetProcessTimes(process, &creation, &exit, &kernel, &user)) {
+        const auto error = GetLastError();
+        return Result<GameProcessIdentity>::failure(
+            {ErrorCode::platform_failure, L"Game process time query failed", error});
+    }
+    if (!QueryFullProcessImageNameW(process, 0, path.data(), &length)) {
+        const auto error = GetLastError();
+        return Result<GameProcessIdentity>::failure(
+            {ErrorCode::platform_failure, L"Game process path query failed", error});
+    }
+    if (length == 0 || length > path.size()) {
+        return Result<GameProcessIdentity>::failure(
+            {ErrorCode::platform_failure, L"Game process path is unavailable", 0});
+    }
+    std::error_code canonical_error;
+    auto actual = std::filesystem::weakly_canonical(
+        std::filesystem::path{std::wstring{path.data(), length}}, canonical_error);
+    if (canonical_error) return Result<GameProcessIdentity>::failure(
+        {ErrorCode::platform_failure, L"Game process path cannot be verified",
+         static_cast<std::uint32_t>(canonical_error.value())});
+    const auto expected = std::filesystem::weakly_canonical(
+        expected_executable, canonical_error);
+    if (canonical_error) return Result<GameProcessIdentity>::failure(
+        {ErrorCode::platform_failure, L"Expected game path cannot be verified",
+         static_cast<std::uint32_t>(canonical_error.value())});
+    if (folded(actual) != folded(expected)) {
         return Result<GameProcessIdentity>::failure(
             {ErrorCode::stale_data, L"Game executable identity does not match", 0});
     }
+    const auto start = file_time_value(creation);
+    auto native_process = std::shared_ptr<const GameProcessHandle>{
+        new GameProcessHandle{owned.release(), pid, start, metrics_readable}};
     return Result<GameProcessIdentity>::success(
-        {pid, file_time_value(creation), std::filesystem::weakly_canonical(actual)});
+        {pid, start, std::move(actual), std::move(native_process)});
 }
 
 bool is_game_process_current(const GameProcessIdentity& process) noexcept {
@@ -87,14 +161,20 @@ bool is_game_process_current(const GameProcessIdentity& process) noexcept {
            process_start_matches(process);
 }
 
+#ifdef KF2_GAME_PROCESS_TESTING
+detail::ProcessQueryCounts detail::process_query_counts_for_testing() noexcept {
+    return {process_opens.load(), process_creation_queries.load()};
+}
+#endif
+
 Result<GameWindowState> inspect_game_window(
     const GameProcessIdentity& process, HWND window) {
     if (!IsWindow(window)) return Result<GameWindowState>::failure(
         {ErrorCode::not_found, L"Game window no longer exists", 0});
     // The executable path was verified when the session was bound. During the
-    // 120 ms hot path, the immutable process creation time is sufficient to
-    // reject exits and PID reuse without querying and canonicalizing the EXE
-    // path again on every frame sample.
+    // 120 ms hot path, a nonblocking liveness check and immutable creation
+    // time reject exits and PID reuse without querying and canonicalizing
+    // the EXE path again on every frame sample.
     if (!is_game_process_current(process)) {
         return Result<GameWindowState>::failure(
             {ErrorCode::stale_data, L"Game process was restarted", 0});
@@ -172,6 +252,7 @@ Result<GameProcessIdentity> find_running_game_process(
     if (snapshot == INVALID_HANDLE_VALUE) return Result<GameProcessIdentity>::failure(
         {ErrorCode::platform_failure, L"Process list cannot be inspected", GetLastError()});
     PROCESSENTRY32W entry{sizeof(entry)};
+    std::optional<Error> inspection_error;
     if (Process32FirstW(snapshot, &entry)) {
         do {
             // The snapshot already provides the executable name. Avoid
@@ -188,11 +269,33 @@ Result<GameProcessIdentity> find_running_game_process(
                 CloseHandle(snapshot);
                 return candidate;
             }
+            // Only a verified exit or different executable proves that this
+            // exact-name candidate is irrelevant. Query failures are unsafe.
+            if (candidate.error().code != ErrorCode::stale_data &&
+                (!inspection_error ||
+                 candidate.error().code == ErrorCode::access_denied)) {
+                inspection_error = std::move(candidate.error());
+            }
         } while (Process32NextW(snapshot, &entry));
     }
+    const auto enumeration_error = GetLastError();
     CloseHandle(snapshot);
+    if (inspection_error) {
+        return Result<GameProcessIdentity>::failure(std::move(*inspection_error));
+    }
+    if (enumeration_error != ERROR_NO_MORE_FILES) {
+        return Result<GameProcessIdentity>::failure(
+            {ErrorCode::platform_failure, L"Process list traversal failed",
+             enumeration_error});
+    }
     return Result<GameProcessIdentity>::failure(
         {ErrorCode::not_found, L"KF2 process is not running", 0});
+}
+
+bool game_process_may_be_running(
+    const std::filesystem::path& expected_executable) {
+    const auto process = find_running_game_process(expected_executable);
+    return process.has_value() || process.error().code != ErrorCode::not_found;
 }
 
 Result<HWND> find_game_window(const GameProcessIdentity& process) {

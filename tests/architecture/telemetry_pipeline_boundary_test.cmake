@@ -118,6 +118,8 @@ reject_literals("${stage_root}/telemetry_collection_stage.cpp"
     "PdhGpuSampler"
     "NvidiaGpuSampler"
     "->sample()"
+    "resource_telemetry_worker.request"
+    "resource_telemetry_worker.latest"
     "write_fixed_control"
     "atomic_replace_utf8"
     "evaluate_overlay"
@@ -141,6 +143,55 @@ reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
     "evaluate_overlay"
     "overlay_window"
     "game_log_session_parser")
+file(READ "${stage_root}/telemetry_adaptive_controller.cpp" adaptive_controller_text)
+foreach(label stability_label bottleneck_label disposition_label)
+    string(FIND "${adaptive_controller_text}" "!= ${label}" label_compare)
+    if(label_compare EQUAL -1)
+        message(FATAL_ERROR
+            "Adaptive constant labels must be compared before assigning owned text: ${label}")
+    endif()
+endforeach()
+string(REGEX MATCHALL
+    "assign_widened\\(status\\.recommendation_reason, adaptive_decision\\.reason\\)"
+    adaptive_reason_assignments "${adaptive_controller_text}")
+list(LENGTH adaptive_reason_assignments adaptive_reason_assignment_count)
+foreach(required_text_reuse
+        "if (!std::equal(value.begin(), value.end(), text.begin(), text.end(),"
+        "return static_cast<wchar_t>(source) == presented;"
+        "text.assign(value.begin(), value.end());"
+        "if (status.adaptive_reason != status.recommendation_reason)"
+        "status.adaptive_reason = status.recommendation_reason;")
+    string(FIND "${adaptive_controller_text}" "${required_text_reuse}"
+        text_reuse_required)
+    if(text_reuse_required EQUAL -1)
+        message(FATAL_ERROR
+            "Adaptive text reuse must compare exact content and retain shared reason text")
+    endif()
+endforeach()
+if(NOT adaptive_reason_assignment_count EQUAL 1)
+    message(FATAL_ERROR
+        "Adaptive must conditionally widen the raw reason once and share its text")
+endif()
+reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
+    "Adaptive reason reuse" "widen(adaptive_decision.reason)")
+reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
+    "Adaptive CPU display" "std::wostringstream cpu")
+reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
+    "Adaptive composite display"
+    "std::wostringstream prediction"
+    "status.adaptive_action = widen("
+    "status.adaptive_safety = widen(")
+reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
+    "Completed Adaptive diagnostic buffer transfer"
+    "request_log.str()"
+    "decision_log.str()")
+reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
+    "Unchanged selected Adaptive action text"
+    "    } else {\n        status.adaptive_action.assign(adaptive_decision.selected_setting.begin(),")
+reject_literals("${stage_root}/telemetry_adaptive_stage.cpp"
+    "Completed Adaptive sample and response buffer transfer"
+    "measurement.str()"
+    "message.str()")
 reject_literals("${stage_root}/telemetry_presentation_stage.cpp"
     "Presentation stage"
     "DxgiFrameTimingSession"
@@ -151,6 +202,10 @@ reject_literals("${stage_root}/telemetry_presentation_stage.cpp"
     "write_fixed_control"
     "atomic_replace_utf8"
     "restore_protected_session_config")
+reject_literals("${stage_root}/telemetry_presentation_stage.hpp"
+    "Completed telemetry buffer transfer"
+    "result.telemetry = text.str()"
+    "result.performance_analysis = details.str()")
 reject_literals("${stage_root}/telemetry_effect_stage.cpp"
     "Effect stage"
     "DxgiFrameTimingSession::start"
@@ -292,6 +347,29 @@ if(accepted_flex_receipt EQUAL -1 OR durable_flex_applied_event EQUAL -1 OR
    NOT accepted_flex_receipt LESS durable_flex_applied_event)
     message(FATAL_ERROR
         "FleX APPLIED diagnostics must follow an accepted shared-memory receipt")
+endif()
+
+string(FIND "${flex_stage_text}"
+    "if (runtime.model.status().flex_capability != capability_label)"
+    flex_capability_compare)
+string(FIND "${flex_stage_text}"
+    "auto status = runtime.model.status();" flex_capability_copy)
+string(FIND "${flex_stage_text}"
+    "runtime.model.set_flex_capability(" flex_capability_commit)
+string(FIND "${flex_stage_text}"
+    "if (current.flex_telemetry != flex_status" flex_observation_compare)
+string(FIND "${flex_stage_text}"
+    "auto status = current;" flex_observation_copy)
+string(FIND "${flex_stage_text}"
+    "model.set_flex_observation_status(" flex_observation_commit)
+if(flex_capability_compare EQUAL -1 OR NOT flex_capability_copy EQUAL -1 OR
+   flex_capability_commit EQUAL -1 OR
+   NOT flex_capability_compare LESS flex_capability_commit OR
+   flex_observation_compare EQUAL -1 OR NOT flex_observation_copy EQUAL -1 OR
+   flex_observation_commit EQUAL -1 OR
+   NOT flex_observation_compare LESS flex_observation_commit)
+    message(FATAL_ERROR
+        "FleX presentation must compare represented fields before updating status; capability and observations must not copy the complete UI status")
 endif()
 
 message(STATUS

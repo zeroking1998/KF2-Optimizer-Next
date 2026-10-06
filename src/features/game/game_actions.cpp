@@ -9,6 +9,22 @@ namespace {
 namespace product_diagnostics = ::kf2::diagnostics;
 namespace product_game = ::kf2::game;
 
+bool unowned_protected_state(const std::filesystem::path& state_root) {
+    std::error_code error;
+    for (const auto* relative : {L"offline-telemetry-lab/module.marker",
+                                L"flex-lab/flex-lab-transaction.marker",
+                                L"session-config/active"}) {
+        if (std::filesystem::exists(state_root / relative, error) || error) return true;
+    }
+    // A completed cap journal is intentionally retained as an empty file.
+    const auto cap = state_root / L"frame-rate-cap.recovery";
+    if (!std::filesystem::exists(cap, error)) return static_cast<bool>(error);
+    const auto status = std::filesystem::symlink_status(cap, error);
+    if (error || !std::filesystem::is_regular_file(status)) return true;
+    const auto size = std::filesystem::file_size(cap, error);
+    return error || size != 0;
+}
+
 void show_notice(app::UiRuntime& runtime, ui::NoticeSeverity severity,
                  std::wstring code, std::wstring message) {
     runtime.model.set_notice(
@@ -39,7 +55,44 @@ app::runtime::DispatchResult open_directory(
 
 app::runtime::DispatchResult select_install(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
-    const auto selected = app::choose_game_directory(
+    const auto blocked = [&] {
+        return runtime.game_folder_change_blocked() ||
+            (runtime.installation && product_game::game_process_may_be_running(
+                runtime.installation->executable));
+    };
+    const auto reject_busy = [&] {
+        show_notice(runtime, ui::NoticeSeverity::warning,
+                    L"GAME_FOLDER_CHANGE_BLOCKED",
+                    L"Close KF2 and finish any pending launch, restart or protected recovery before changing the game folder.");
+        return app::runtime::DispatchResult::handled;
+    };
+    if (!runtime.installation &&
+        unowned_protected_state(runtime.settings_path.parent_path())) {
+        runtime.model.set_recovery_required(true);
+        return reject_busy();
+    }
+    if (runtime.game_folder_selection_active || blocked()) return reject_busy();
+    // The modal picker pumps messages. Preserve ownership and prevent nested
+    // selection/launch actions until the entire switch has completed.
+    runtime.game_folder_selection_active = true;
+    struct SelectionGuard {
+        app::UiRuntime& runtime;
+        ~SelectionGuard() noexcept {
+            runtime.game_folder_selection_active = false;
+            try {
+                runtime.invalidate();
+            } catch (...) {
+                // UI refresh must not prevent releasing the selection guard.
+            }
+        }
+    } guard{runtime};
+    runtime.invalidate();
+    const auto selected =
+#if defined(KF2_APPLICATION_LAUNCH_TESTING)
+        runtime.game_directory_chooser_for_testing
+            ? runtime.game_directory_chooser_for_testing() :
+#endif
+        app::choose_game_directory(
         runtime.window
             ? static_cast<HWND>(
                   runtime.window->native_handle_for_testing())
@@ -67,6 +120,17 @@ app::runtime::DispatchResult select_install(
                     validated.error().message);
         return app::runtime::DispatchResult::handled;
     }
+    // Installations can share user INIs and the provider directory. Neither
+    // process may be running (or uninspectable) before restoring those files.
+    if (blocked() || product_game::game_process_may_be_running(
+            validated.value().executable)) return reject_busy();
+    if (runtime.installation && validated.value().install_root ==
+            runtime.installation->install_root) {
+        show_notice(runtime, ui::NoticeSeverity::info,
+                    L"GAME_PATH_UNCHANGED",
+                    L"The selected KF2 folder is already in use.");
+        return app::runtime::DispatchResult::handled;
+    }
     const auto encoded = app::path_utf8(validated.value().install_root);
     if (!encoded) {
         show_notice(runtime, ui::NoticeSeverity::error,
@@ -74,6 +138,16 @@ app::runtime::DispatchResult select_install(
                     L"The selected path cannot be stored as valid UTF-8.");
         return app::runtime::DispatchResult::handled;
     }
+    const bool was_prepared = runtime.session_config_snapshot &&
+        runtime.session_config_waiting_for_launch;
+    // FleX/provider/cap journals can outlive the INI snapshot. The old owner
+    // and durable path must remain unchanged unless every cleanup succeeds.
+    if (!runtime.restore_protected_session_config(
+            L"Changing the verified KF2 installation")) {
+        return app::runtime::DispatchResult::handled;
+    }
+    if (blocked() || product_game::game_process_may_be_running(
+            validated.value().executable)) return reject_busy();
     const auto previous = runtime.optimizer_settings.manual_game_path;
     runtime.optimizer_settings.manual_game_path = *encoded;
     const auto saved = platform::windows::atomic_replace_utf8(
@@ -83,9 +157,15 @@ app::runtime::DispatchResult select_install(
         runtime.optimizer_settings.manual_game_path = previous;
         show_notice(runtime, ui::NoticeSeverity::error,
                     L"SETTINGS_SAVE_FAILED", saved.error().message);
+        if (was_prepared) {
+            const auto rearmed = runtime.rearm_automatic_external_launch_profile();
+            // Failed re-preparation owns the more important recovery notice.
+            if (!rearmed.has_value()) return app::runtime::DispatchResult::handled;
+        }
         return app::runtime::DispatchResult::handled;
     }
     runtime.installation = std::move(validated.value());
+    runtime.reset_game_process_discovery();
     runtime.start_startup_prewarm();
     runtime.reload_video_settings();
     runtime.reload_advanced_settings();
@@ -99,6 +179,12 @@ app::runtime::DispatchResult select_install(
          "GAME_PATH_SELECTED",
          L"A manually selected KF2 folder passed executable and config-root validation",
          L"discovery"});
+    if (was_prepared) {
+        const auto rearmed = runtime.rearm_automatic_external_launch_profile();
+        if (!rearmed.has_value() || !rearmed.value()) {
+            return app::runtime::DispatchResult::handled;
+        }
+    }
     show_notice(runtime, ui::NoticeSeverity::info,
                 L"GAME_PATH_SELECTED",
                 L"The selected KF2 folder was verified and saved locally.");
@@ -114,14 +200,27 @@ app::runtime::DispatchResult open_config(
 
 app::runtime::DispatchResult launch(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
+    if (runtime.game_folder_selection_active) {
+        show_notice(runtime, ui::NoticeSeverity::warning,
+                    L"GAME_FOLDER_CHANGE_BLOCKED",
+                    L"Finish selecting the KF2 installation before starting the game.");
+        return app::runtime::DispatchResult::handled;
+    }
     if (!runtime.installation) {
         show_notice(runtime, ui::NoticeSeverity::warning,
                     L"GAME_LAUNCH_UNAVAILABLE",
                     L"A verified KF2 installation was not found.");
         return app::runtime::DispatchResult::handled;
     }
-    if (product_game::find_running_game_process(
-            runtime.installation->executable).has_value()) {
+    const auto verified = runtime.revalidate_game_installation();
+    if (!verified.has_value()) {
+        show_notice(runtime, ui::NoticeSeverity::error,
+                    L"GAME_EXECUTABLE_REVALIDATION_FAILED",
+                    verified.error().message);
+        return app::runtime::DispatchResult::handled;
+    }
+    if (product_game::game_process_may_be_running(
+            runtime.installation->executable)) {
         show_notice(runtime, ui::NoticeSeverity::info,
                     L"GAME_ALREADY_RUNNING",
                     L"Killing Floor 2 is already running.");
@@ -241,6 +340,7 @@ app::runtime::DispatchResult launch(
                 ? std::numeric_limits<std::uint64_t>::max()
                 : now + kLaunchSafetyTimeoutNs;
     }
+    runtime.reset_game_process_discovery();
     runtime.startup_prewarmer.request_stop();
     if (!ShellExecuteExW(&launch_request)) {
         const DWORD launch_error = GetLastError();

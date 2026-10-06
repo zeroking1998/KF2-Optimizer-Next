@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <new>
 
 #include "kf2/flex/flex_observation.hpp"
@@ -11,6 +12,102 @@
 namespace {
 
 bool fail_allocations = false;
+
+bool reuses_session_mapping(const kf2::game::GameProcessIdentity& identity,
+                           kf2::flex::ObservationShared& shared) {
+    DWORD before{}, count{};
+    if (!GetProcessHandleCount(GetCurrentProcess(), &before)) return false;
+    {
+        kf2::flex::ObservationReader reader;
+        static_assert(noexcept(reader.read(identity)) && noexcept(reader.reset()));
+        fail_allocations = true;
+        bool current = true;
+        for (unsigned i = 0; i < 256 && current; ++i) {
+            ++shared.update_calls;
+            ++shared.successful_updates;
+            shared.last_forwarded_substeps = 2 + (i % 3);
+            const auto observed = reader.read(identity);
+            current = observed && observed->fresh && observed->pass_through_healthy &&
+                observed->update_calls == static_cast<std::uint64_t>(shared.update_calls) &&
+                observed->last_forwarded_substeps == shared.last_forwarded_substeps &&
+                GetProcessHandleCount(GetCurrentProcess(), &count) && count == before + 1;
+        }
+        fail_allocations = false;
+        if (!current) return false;
+        shared.last_update_tick = 1;
+        const auto stale = reader.read(identity);
+        if (!stale || stale->fresh) return false;
+        shared.last_update_tick = GetTickCount64();
+        auto wrong_identity = identity;
+        ++wrong_identity.process_start_id;
+        if (reader.read(wrong_identity) ||
+            !GetProcessHandleCount(GetCurrentProcess(), &count) || count != before ||
+            !reader.read(identity)) return false;
+        shared.magic = 0;
+        if (reader.read(identity) ||
+            !GetProcessHandleCount(GetCurrentProcess(), &count) || count != before)
+            return false;
+        shared.magic = kf2::flex::observation_magic;
+        if (!reader.read(identity)) return false;
+        reader.reset();
+        if (!GetProcessHandleCount(GetCurrentProcess(), &count) || count != before ||
+            !reader.read(identity)) return false;
+    }
+    return GetProcessHandleCount(GetCurrentProcess(), &count) && count == before;
+}
+
+bool rejects_exited_producer(const kf2::flex::ObservationShared& sample,
+                            const kf2::game::GameProcessIdentity& previous) {
+    wchar_t executable[MAX_PATH]{};
+    if (!GetModuleFileNameW(nullptr, executable, MAX_PATH)) return false;
+    STARTUPINFOW startup{sizeof(startup)};
+    PROCESS_INFORMATION child{};
+    // Only this owned suspended child is terminated; it never runs test code.
+    if (!CreateProcessW(executable, nullptr, nullptr, nullptr, FALSE,
+            CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr, nullptr,
+            &startup, &child)) return false;
+    CloseHandle(child.hThread);
+    const auto close_child = [](void* process) {
+        if (WaitForSingleObject(process, 0) == WAIT_TIMEOUT) {
+            TerminateProcess(process, 1);
+            WaitForSingleObject(process, 2000);
+        }
+        CloseHandle(process);
+    };
+    const std::unique_ptr<void, decltype(close_child)> owned{
+        child.hProcess, close_child};
+    const auto bound = kf2::game::bind_game_process(child.dwProcessId, executable);
+    if (!bound.has_value()) return false;
+    const auto& identity = bound.value();
+    const auto name = L"Local\\KF2OptimizerNext_FlexObservation_v1_" +
+                      std::to_wstring(identity.pid);
+    const std::unique_ptr<void, decltype(&CloseHandle)> mapping{
+        CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+            0, sizeof(sample), name.c_str()), &CloseHandle};
+    if (!mapping) return false;
+    const std::unique_ptr<void, decltype(&UnmapViewOfFile)> view{
+        MapViewOfFile(mapping.get(), FILE_MAP_ALL_ACCESS, 0, 0, sizeof(sample)),
+        &UnmapViewOfFile};
+    if (!view) return false;
+    auto* shared = static_cast<kf2::flex::ObservationShared*>(view.get());
+    *shared = sample;
+    shared->pid = identity.pid;
+    shared->process_start_low = static_cast<LONG>(identity.process_start_id);
+    shared->process_start_high =
+        static_cast<LONG>(identity.process_start_id >> 32U);
+    shared->last_update_tick = GetTickCount64();
+    kf2::flex::ObservationReader reader;
+    if (!reader.read(previous) || !reader.read(identity) ||
+        !kf2::flex::write_fixed_control(identity, false)) return false;
+    const auto heartbeat = shared->control_heartbeat_tick;
+    if (!TerminateProcess(owned.get(), 0) ||
+        WaitForSingleObject(owned.get(), 2000) != WAIT_OBJECT_0) return false;
+    // The retained mapping still has matching identity bytes and a fresh tick.
+    return !reader.read(identity) && !kf2::flex::read_observation(identity) &&
+           !kf2::flex::write_fixed_control(identity, true) &&
+           shared->diagnostics_enabled == 0 &&
+           shared->control_heartbeat_tick == heartbeat && reader.read(previous);
+}
 
 }  // namespace
 
@@ -96,7 +193,12 @@ int wmain() {
     const float dt = 1.0F / 60.0F;
     std::memcpy(const_cast<LONG*>(&shared->last_delta_time_bits), &dt, sizeof(dt));
     shared->last_update_tick = GetTickCount64();
-    kf2::game::GameProcessIdentity identity{pid, start, {}};
+    wchar_t executable[MAX_PATH]{};
+    if (!GetModuleFileNameW(nullptr, executable, MAX_PATH)) return 21;
+    auto bound = kf2::game::bind_game_process(pid, executable);
+    if (!bound.has_value()) return 22;
+    auto identity = bound.value();
+    if (identity.process_start_id != start) return 23;
     static_assert(noexcept(kf2::flex::read_observation(identity)));
     static_assert(noexcept(kf2::flex::write_fixed_control(identity, false)));
     const auto result = kf2::flex::read_observation(identity);
@@ -124,6 +226,34 @@ int wmain() {
         !result->diagnostics_enabled ||
         std::abs(result->solver_updates_per_second - 60.0) > 0.01) return 4;
 
+    // Static capacity is known before particle counts have been observed.
+    // Missing counts must not invalidate the relay or become fresh zero counts.
+    shared->aggregate_counts_valid = 0;
+    shared->aggregate_active_particles = 0;
+    shared->aggregate_free_particles = 0;
+    for (int diagnostics = 0; diagnostics <= 1; ++diagnostics) {
+        shared->diagnostics_enabled = diagnostics;
+        const auto unobserved_counts = kf2::flex::read_observation(identity);
+        if (!unobserved_counts || !unobserved_counts->fresh ||
+            !unobserved_counts->pass_through_healthy ||
+            !unobserved_counts->particle_capacity_available ||
+            unobserved_counts->particle_capacity != 1280 ||
+            unobserved_counts->aggregate_particles_fresh) return 16;
+    }
+    shared->aggregate_counts_valid = 1;
+    if (kf2::flex::read_observation(identity)) return 17;
+    shared->oldest_active_count_tick = 1;
+    if (kf2::flex::read_observation(identity)) return 18;
+    shared->aggregate_active_particles = INT_MAX;
+    shared->aggregate_free_particles = INT_MAX;
+    if (kf2::flex::read_observation(identity)) return 19;
+    shared->aggregate_active_particles = 74;
+    shared->aggregate_free_particles = 1206;
+    const auto stale_counts = kf2::flex::read_observation(identity);
+    if (!stale_counts || !stale_counts->pass_through_healthy ||
+        stale_counts->aggregate_particles_fresh) return 20;
+    shared->oldest_active_count_tick = GetTickCount64();
+
     // Detailed solver tracking is optional. A diagnostics-only tracking failure
     // must not make the fixed one-substep relay unavailable while diagnostics
     // are off, but it remains visible as unhealthy while diagnostics are on.
@@ -142,6 +272,7 @@ int wmain() {
     shared->update_calls = 121;
     shared->successful_updates = 120;
     shared->last_update_tick = GetTickCount64();
+    const auto before_queries = kf2::game::detail::process_query_counts_for_testing();
     const auto in_flight = kf2::flex::read_observation(identity);
     if (!in_flight || !in_flight->fresh || !in_flight->pass_through_healthy) return 10;
 
@@ -168,6 +299,11 @@ int wmain() {
     if (!kf2::flex::write_fixed_control(identity, true) ||
         shared->desired_substeps != 1 || shared->diagnostics_enabled != 1 ||
         shared->control_heartbeat_tick == 0) return 6;
+    const auto after_queries = kf2::game::detail::process_query_counts_for_testing();
+    if (before_queries.opens != after_queries.opens ||
+        before_queries.creation_queries != after_queries.creation_queries) return 24;
+    if (!reuses_session_mapping(identity, *shared)) return 26;
+    if (!rejects_exited_producer(*shared, identity)) return 25;
     identity.process_start_id++;
     if (kf2::flex::read_observation(identity)) return 5;
     if (kf2::flex::write_fixed_control(identity, true)) return 8;

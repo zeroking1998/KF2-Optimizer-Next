@@ -62,6 +62,7 @@ public:
     virtual void on_key(KeyEvent event) = 0;
     virtual void on_pointer(PointerEvent event) = 0;
     virtual void on_theme_changed(ThemeChangedEvent event) = 0;
+    virtual void on_visibility_changed(bool) {}
     [[nodiscard]] virtual bool on_close() = 0;
     virtual LRESULT on_get_object(WPARAM, LPARAM) { return 0; }
     virtual void on_timer(UINT_PTR) {}

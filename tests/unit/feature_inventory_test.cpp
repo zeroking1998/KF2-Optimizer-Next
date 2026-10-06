@@ -73,6 +73,29 @@ int main() {
         CHECK(record.decision == "PRESENT" || record.decision == "OBSERVE" ||
               record.decision == "LAB" || record.decision == "DISCARD" ||
               record.decision == "IMPLEMENTATION_READY");
+        if (record.id == "I72-A01-F05") {
+            CHECK(record.technical_statement.find(
+                "checks all manifest-listed payload hashes") != std::string::npos);
+        }
+        if (record.id == "I72-A03-F01") {
+            CHECK(record.data_source ==
+                "Three verified KF2 INIs and a strict verified settings catalog");
+        }
+        if (record.id == "I72-A10-F01") {
+            CHECK(record.evidence ==
+                "Verified settings catalog tests; optimizer tests; copied-config "
+                "roundtrip; target gameplay evidence");
+        }
+        if (record.id == "I72-A17-F06") {
+            CHECK(record.name.find("CI, workflows, artifacts, and cleanup") !=
+                  std::string::npos);
+            CHECK(record.dependencies.find("GitHub-hosted Windows CI") !=
+                  std::string::npos);
+            CHECK(record.technical_statement.find(
+                "Desktop checks and complete portable/SDK packages are separate "
+                "local validations; CI does not establish gameplay acceptance.") !=
+                  std::string::npos);
+        }
       }
     }
     const auto json = serialize_feature_inventory_json("test+abc", records);
@@ -82,6 +105,30 @@ int main() {
     CHECK(json.find("\"id\":\"I72-A18-F08\"") != std::string::npos);
     CHECK(json.find("\"linkage\":") != std::string::npos);
     CHECK(json.find("\"remaining_scope\":\"external_validation\"") !=
+          std::string::npos);
+    const auto escaped = serialize_feature_inventory_json(
+        "quote\"\\\nUnicode caf\xc3\xa9", {});
+    CHECK(escaped ==
+        "{\"schema\":\"KF2_ISSUE72_INVENTORY_V3\",\"build_identity\":"
+        "\"quote\\\"\\\\\\nUnicode caf\xc3\xa9\",\"issue\":72,\"function_count\":0,"
+        "\"status_counts\":{\"present\":0,\"partial\":0,\"planned\":0,"
+        "\"discarded\":0,\"implementation_ready\":0},"
+        "\"remaining_scope_counts\":{\"none\":0,\"external_validation\":0,"
+        "\"engine_contract\":0,\"safety_boundary\":0,\"user_authority\":0},"
+        "\"records\":[]}");
+    const auto owned = [&] {
+        auto record = records.back();
+        record.name.assign(4096, 'x');
+        record.name.append(std::string{"\0\"\\\n\x01", 5});
+        record.linkage = "Owned after source destruction";
+        return serialize_feature_inventory_json("growth", {&record, 1});
+    }();
+    const auto subsequent = serialize_feature_inventory_json("unrelated", {});
+    CHECK(subsequent.find("\"build_identity\":\"unrelated\"") !=
+          std::string::npos);
+    CHECK(owned.find("\"name\":\"" + std::string(4096, 'x') +
+        "\\u0000\\\"\\\\\\n\\u0001\"") != std::string::npos);
+    CHECK(owned.find("\"linkage\":\"Owned after source destruction\"") !=
           std::string::npos);
     return EXIT_SUCCESS;
 }

@@ -54,7 +54,8 @@ Application::~Application() noexcept {
 
 Result<Application> Application::start(const StartOptions& options) {
     if (options.state_root.empty() || options.executable_root.empty() ||
-        options.instance_name.empty()) {
+        options.instance_name.empty() || options.identity.pid == 0 ||
+        options.identity.process_start_id == 0) {
         return Result<Application>::failure(
             {ErrorCode::invalid_argument, L"Application start options are invalid", 0});
     }
@@ -100,12 +101,6 @@ Result<Application> Application::start(const StartOptions& options) {
     if (!settings.has_value()) {
         return Result<Application>::failure(settings.error());
     }
-    auto session = SessionGuard::start(options.state_root / L"session.marker",
-                                       options.identity);
-    if (!session.has_value()) {
-        return Result<Application>::failure(session.error());
-    }
-
     const auto event_log_rotation = diagnostics::prepare_event_log_rotation(
         options.state_root / L"logs");
     auto events = std::make_unique<diagnostics::EventLog>(
@@ -140,12 +135,6 @@ Result<Application> Application::start(const StartOptions& options) {
                             L" bounded local optimizer crash record(s) are available in Data\\logs\\crashes",
                         L"diagnostics"});
     }
-    if (session.value().previous_session_unclean()) {
-        events->append({0, diagnostics::Severity::info, "PREVIOUS_APP_INTERRUPTED",
-                        L"The previous app process ended without its final marker; protected state is being verified",
-                        L"session"});
-    }
-
     // An interrupted app process is diagnostic evidence, not by itself a
     // recovery condition. The banner is reserved for a transaction, FleX lab
     // or INI snapshot that cannot be safely verified or restored below.
@@ -178,11 +167,14 @@ Result<Application> Application::start(const StartOptions& options) {
     if (!runtime->model.recovery_required() &&
         options.mode == StartMode::normal) {
         const bool game_running = runtime->installation &&
-            game::find_running_game_process(
-                runtime->installation->executable).has_value();
+            game::game_process_may_be_running(
+                runtime->installation->executable);
         if (runtime->installation && !game_running) {
             const auto capped = runtime->synchronize_frame_rate_cap();
             if (!capped.has_value()) {
+                const bool cap_recovery_required =
+                    capped.error().code == ErrorCode::recovery_required;
+                if (cap_recovery_required) runtime->model.set_recovery_required(true);
                 events->append({0, diagnostics::Severity::error,
                     "TARGET_FPS_PERSIST_FAILED", capped.error().message,
                     L"config"});
@@ -191,7 +183,9 @@ Result<Application> Application::start(const StartOptions& options) {
                     L"TARGET_FPS_PERSIST_FAILED",
                     L"KF2's native FPS cap could not be prepared: " +
                         capped.error().message,
-                    L"The app remains available; KF2 settings were not partially changed."});
+                    cap_recovery_required
+                        ? L"Close KF2, then restart KF2 Optimizer to recover the saved transaction."
+                        : L"The app remains available; the native cap change was not committed."});
             } else if (capped.value().changed) {
                 events->append({0, diagnostics::Severity::info,
                     "TARGET_FPS_PERSISTED",
@@ -216,7 +210,10 @@ Result<Application> Application::start(const StartOptions& options) {
                 L"ADAPTIVE_EXTERNAL_LAUNCH_PREPARE_FAILED",
                 L"Adaptive launch capabilities could not be prepared safely: " +
                     prepared.error().message,
-                L"No game files were left partially changed."});
+                runtime->model.recovery_required() ||
+                        prepared.error().code == ErrorCode::recovery_required
+                    ? L"Do not start KF2 until Repair confirms that all protected files were restored."
+                    : L"No game files were left partially changed."});
         }
     }
     if (!options.startup_warning.empty()) {
@@ -235,9 +232,25 @@ Result<Application> Application::start(const StartOptions& options) {
         }
     }
 
+    // Initialization failure is not an interrupted operational session.
+    // Commit the unclean marker only after runtime/window initialization;
+    // until this boundary, prior marker bytes (or absence) stay untouched.
+    auto ready_state_root = options.state_root;
+    auto session = SessionGuard::start(ready_state_root / L"session.marker",
+                                       options.identity);
+    if (!session.has_value()) {
+        return Result<Application>::failure(session.error());
+    }
+    if (session.value().previous_session_unclean()) {
+        events->append({0, diagnostics::Severity::info, "PREVIOUS_APP_INTERRUPTED",
+                        L"The previous app process ended without its final marker",
+                        L"session"});
+    }
+
     rollback.active = false;
     return Result<Application>::success(Application{
-        options.state_root, std::move(instance.value()), std::move(session.value()),
+        std::move(ready_state_root), std::move(instance.value()),
+        std::move(session.value()),
         std::move(settings.value()), std::move(events), std::move(runtime), owns_com});
 }
 

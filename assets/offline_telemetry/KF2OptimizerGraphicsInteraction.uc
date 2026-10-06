@@ -151,7 +151,6 @@ function ResetRuntimeGuardCadence()
 
 function GuardRuntimeActors(WorldInfo CurrentWorld)
 {
-    local Actor Candidate;
     local KFWeapon Weapon;
     local KFPawn Pawn;
     local int UpdatedWeaponMaterialCount;
@@ -170,21 +169,10 @@ function GuardRuntimeActors(WorldInfo CurrentWorld)
         RuntimeGuardIntervalSeconds = RuntimeGuardInitialSeconds;
     }
 
-    // DynamicActors traverses the world's dynamic actor list. Handle the two
-    // guarded domains in one pass instead of repeating that traversal for two
-    // turret subclasses plus every pawn.
-    foreach CurrentWorld.DynamicActors(class'Actor', Candidate)
+    // Let native iterators filter the two disjoint domains. Unrelated actors
+    // need no script-level pawn/weapon casts; newly spawned weapons stay visible.
+    foreach CurrentWorld.AllPawns(class'KFPawn', Pawn)
     {
-        Weapon = KFWeapon(Candidate);
-        if (Weapon != None && EnsureTurretWeaponMaterial(Weapon))
-        {
-            ++UpdatedWeaponMaterialCount;
-        }
-        Pawn = KFPawn(Candidate);
-        if (Pawn == None)
-        {
-            continue;
-        }
         if (EnsureWeaponClassFallback(Pawn))
         {
             ++UpdatedWeaponClassCount;
@@ -193,7 +181,7 @@ function GuardRuntimeActors(WorldInfo CurrentWorld)
         {
             ++ReplacedAfflictionCount;
         }
-        if (Pawn == None || Pawn.bDeleteMe ||
+        if (Pawn.bDeleteMe ||
             Pawn.AfflictionHandler == None ||
             Pawn.AfflictionHandler.AfflictionClasses.Length <= AF_FirePanic ||
             Pawn.AfflictionHandler.AfflictionClasses[AF_FirePanic] ==
@@ -207,6 +195,13 @@ function GuardRuntimeActors(WorldInfo CurrentWorld)
             class'KF2OptimizerFireAffliction')
         {
             ++UpdatedAfflictionCount;
+        }
+    }
+    foreach CurrentWorld.DynamicActors(class'KFWeapon', Weapon)
+    {
+        if (EnsureTurretWeaponMaterial(Weapon))
+        {
+            ++UpdatedWeaponMaterialCount;
         }
     }
     bChanged = UpdatedWeaponMaterialCount > 0 ||

@@ -24,7 +24,8 @@ bool game_log_requests_settings_restart(std::string_view text) noexcept {
 }
 
 std::optional<GameLogSession> GameLogSessionParser::feed(
-    std::string_view bytes, std::uint64_t observed_at_ns) {
+    std::string_view bytes, std::uint64_t observed_at_ns,
+    bool measurements_current) {
     if (bytes.empty()) return std::nullopt;
     add_saturated(stats_.bytes_received, bytes.size());
     if (bytes.size() > detail::kMaximumLineBytes * 4) {
@@ -39,16 +40,11 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
     }
     pending_.append(bytes);
     bool changed = false;
+    std::size_t consumed = 0;
     for (;;) {
-        const auto newline = pending_.find('\n');
-        if (newline == std::string::npos) {
-            if (pending_.size() > detail::kMaximumLineBytes) {
-                pending_.clear();
-                add_saturated(stats_.oversized_line_drops);
-            }
-            break;
-        }
-        auto line = std::string_view{pending_}.substr(0, newline);
+        const auto newline = pending_.find('\n', consumed);
+        if (newline == std::string::npos) break;
+        auto line = std::string_view{pending_}.substr(consumed, newline - consumed);
         if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
         add_saturated(stats_.lines_processed);
         if (line.size() <= detail::kMaximumLineBytes) {
@@ -113,12 +109,12 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                         receipt->generation;
                     changed = true;
                 }
-            } else if (const auto port =
+            } else if (const auto bridge =
                            detail::parse_adaptive_bridge_line(line);
                        current_ && !current_->main_menu &&
-                       current_->phase != GameLogPhase::match_ended && port) {
-                if (current_->telemetry_control_port != port) {
-                    current_->telemetry_control_port = port;
+                       current_->phase != GameLogPhase::match_ended && bridge) {
+                if (current_->telemetry_control_port != bridge->port) {
+                    current_->telemetry_control_port = bridge->port;
                     changed = true;
                 }
             } else if (const auto online_corpse_changed =
@@ -260,7 +256,35 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
         } else {
             add_saturated(stats_.oversized_line_drops);
         }
-        pending_.erase(0, newline + 1);
+        consumed = newline + 1;
+    }
+    // Keep views valid throughout the batch and move the incomplete suffix
+    // only once, rather than shifting every remaining line after each record.
+    if (pending_.size() - consumed > detail::kMaximumLineBytes) {
+        pending_.clear();
+        add_saturated(stats_.oversized_line_drops);
+    } else if (consumed != 0) {
+        pending_.erase(0, consumed);
+    }
+    if (current_ && !measurements_current) {
+        // Catch-up reconstructs the latest map and its one-shot capabilities,
+        // but reading historical measurements does not make them fresh.
+        changed = changed || current_->zeds_remaining || current_->zeds_alive ||
+            current_->wave_number || current_->wave_total_ai ||
+            current_->telemetry_sample || current_->load_map_observed_ns != 0 ||
+            current_->level_loaded_observed_ns != 0 ||
+            current_->loading_movie_finished_observed_ns != 0;
+        current_->zeds_remaining.reset();
+        current_->zeds_remaining_observed_ns = 0;
+        current_->zeds_alive.reset();
+        current_->zeds_alive_observed_ns = 0;
+        current_->wave_number.reset();
+        current_->wave_total_ai.reset();
+        current_->wave_observed_ns = 0;
+        current_->load_map_observed_ns = 0;
+        current_->level_loaded_observed_ns = 0;
+        current_->loading_movie_finished_observed_ns = 0;
+        detail::clear_offline_telemetry_snapshot(*current_);
     }
     if (!changed || !current_) return std::nullopt;
     auto snapshot = std::optional<GameLogSession>{*current_};

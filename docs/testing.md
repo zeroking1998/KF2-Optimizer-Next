@@ -13,6 +13,13 @@ pwsh -NoProfile -File ./tools/validate_documentation.ps1
 `test.ps1` builds before running the tests. GitHub CI runs the same Debug and
 Release suites with desktop-only checks excluded.
 
+Test and catalog sizes are recorded once in the
+[validation inventory](ISSUE_72_PRODUCT_MATRIX.md#current-validation-inventory).
+Documentation validation checks them against source registrations/definitions
+and rejects stale duplicated totals in current status documents. Counts describe
+the default full Windows build; they do not turn skips or historical results
+into passes.
+
 ## Choose additional checks by change
 
 | Changed area | Additional command |
@@ -27,6 +34,30 @@ Release suites with desktop-only checks excluded.
 
 Prefix each script with `pwsh -NoProfile -File` when running it from a normal
 PowerShell terminal.
+
+Desktop presentation changes use the existing controller, renderer, window,
+and lifecycle tests: node stability during numeric animation, exact UI
+Automation range readback, visibility/timer transitions, resource creation
+counts, and device-loss recovery. `validate_gui.ps1` checks the complete capture
+set and repeated-image determinism; private before/after hashes can additionally
+verify pixel-identical output without committing baseline images or benchmarks.
+
+## CI failure diagnosis
+
+The existing resource-worker test records its last log discovery/read and
+publication boundaries only in test builds. Failed assertions print the
+boundary, inspected timestamps/metadata, raw Windows last-error, request/current
+generation and whether a chunk was queued. A metadata rejection does not imply
+the raw last-error describes its cause. Normal app builds contain none of this
+state or recording work. The test's explicit `--initial-log-open-failure` mode
+holds a denied-read lease and must exit with failure; it validates CI failure
+output, not a retry or a passing gameplay check. The historical intermittent
+failure in #685 remains unconfirmed until its actual failing boundary is captured.
+
+The update-helper test observes asynchronous work-directory deletion with an
+error-aware five-second wait. Only a successful status read confirming absence
+passes; uncertain status or an existing directory at the deadline fails. No
+full-test retry or production update/cleanup behavior is changed.
 
 ## Real KF2 checks
 

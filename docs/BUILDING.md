@@ -56,6 +56,15 @@ out/build/windows-x64-release/Release/KF2Optimizer.exe
 
 For a faster development build, replace `Release` with `Debug`.
 
+CMake derives the telemetry hash from the local compiled module for every
+build entry point, including direct CMake, Ninja, GUI checks and PGO. The
+default `KF2_OFFLINE_TELEMETRY_SHA256=AUTO` also follows module creation or
+replacement during incremental builds. An explicit hash remains supported,
+but configuration rejects it if it differs from the existing module. The
+normal scripts select `AUTO` to clear older cached pins. SDK-less developer
+builds remain supported; complete packaging still requires a source-verified
+SDK module.
+
 The one-click command accepts the same options. For example:
 
 ```powershell
@@ -81,11 +90,39 @@ Later builds reuse the local ignored module as their seed.
 
 The complete package is written to `out/package/KF2OptimizerNext`. The scripts
 bind the application to the newly compiled telemetry hash and refuse to create
-a reduced or mismatched package. A deterministic fingerprint covers all seven
-UnrealScript source files. If any source changes, packaging recompiles the
-telemetry module instead of silently reusing an older local `.u` file. The
-one-click flow also validates every managed file and package hash before
+a reduced or mismatched package. A deterministic fingerprint covers every required
+UnrealScript source, including both runtime guards. If any source changes,
+packaging recompiles the telemetry module instead of silently reusing an older
+local `.u` file. The one-click flow also validates every managed file and package hash before
 reporting success.
+
+The executable carries the same source identity in its Windows version resource
+as the app's title. Packaging checks it before changing an existing destination,
+including with `-SkipBuild`; it cannot relabel an older executable as a new build.
+Packaging always incrementally builds the small inventory exporter before
+changing the destination, even when the app build is skipped. This keeps the
+shipped inventory current without a second contributor-owned build step.
+The required FleX forwarding DLL is checked before exporter work or destination
+changes, so a missing build artifact preserves an existing package.
+The two package manifests share the same completed payload hashes instead of
+reading every payload twice. Release validation still hashes files independently.
+All entries in an existing package manifest are validated before cleanup starts;
+an unsafe entry preserves the existing files rather than leaving a partial package.
+Existing junctions or symbolic links in managed output paths or their ancestors
+are rejected before package changes, preventing writes through a redirected folder.
+Contributor packaging explicitly uses `-DevelopmentPackage` for local checks.
+This mode is not release-candidate approval.
+
+Release-candidate validation requires a clean Release identity matching `HEAD`:
+
+```powershell
+pwsh -NoProfile -File ./tools/validate_release.ps1
+```
+
+To inspect an intentional historical package, supply its Git revision explicitly
+with `-ExpectedRevision <commit>`. Manifest, integrity metadata and executable
+must still agree. Dirty packages require `-DevelopmentPackage` and must match
+the current working tree; they are never certified as release candidates.
 
 For an offline build, provide an extracted official release seed manually:
 

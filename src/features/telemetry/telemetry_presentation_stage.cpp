@@ -26,7 +26,7 @@ TelemetryPresentation derive_telemetry_presentation(
     const auto& adaptive_status = runtime.model.status();
     result.status = build_status_projection(
         frame, runtime.telemetry_failure,
-        analysis ? std::wstring_view{analysis->reason} : std::wstring_view{},
+        analysis ? analysis->reason : std::wstring_view{},
         adaptive_status.recommended_profile,
         adaptive_status.recommendation_reason);
 
@@ -163,17 +163,12 @@ void publish_telemetry_presentation(
         current.live_gpu_percent != projection.live_gpu_percent ||
         current.live_active_corpses != projection.live_active_corpses ||
         current.live_sleeping_corpses != projection.live_sleeping_corpses) {
-        auto status = current;
-        status.telemetry = std::move(presentation.status.telemetry);
-        status.performance_analysis =
-            std::move(presentation.status.performance_analysis);
-        status.live_fps = projection.live_fps;
-        status.live_frame_time_ms = projection.live_frame_time_ms;
-        status.live_cpu_percent = projection.live_cpu_percent;
-        status.live_gpu_percent = projection.live_gpu_percent;
-        status.live_active_corpses = projection.live_active_corpses;
-        status.live_sleeping_corpses = projection.live_sleeping_corpses;
-        runtime.model.set_status(std::move(status));
+        runtime.model.set_telemetry_status(
+            std::move(presentation.status.telemetry),
+            std::move(presentation.status.performance_analysis),
+            projection.live_fps, projection.live_frame_time_ms,
+            projection.live_cpu_percent, projection.live_gpu_percent,
+            projection.live_active_corpses, projection.live_sleeping_corpses);
         runtime.invalidate();
     }
 
@@ -217,9 +212,7 @@ void publish_telemetry_presentation(
         L" miss, window checks " +
         std::to_wstring(runtime.overlay_diagnostic_coverage_checks);
     if (runtime.model.status().overlay_diagnostics != summary) {
-        auto status = runtime.model.status();
-        status.overlay_diagnostics = std::move(summary);
-        runtime.model.set_status(std::move(status));
+        runtime.model.set_overlay_diagnostics(std::move(summary));
         runtime.invalidate();
     }
 }

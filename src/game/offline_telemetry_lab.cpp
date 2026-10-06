@@ -15,7 +15,13 @@
 #include "kf2/platform/windows/atomic_file.hpp"
 #include "kf2/security/sha256.hpp"
 
+#ifndef KF2_OFFLINE_TELEMETRY_SHA256
+#error "The offline telemetry component requires its verified module hash"
+#endif
+
 namespace kf2::game {
+const char kOfflineTelemetryModuleSha256[] = KF2_OFFLINE_TELEMETRY_SHA256;
+
 namespace {
 
 // The current SDK-compiled package is about 393 KiB. Keep a bounded ceiling

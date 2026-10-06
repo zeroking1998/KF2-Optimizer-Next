@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
 #include <thread>
 
@@ -126,6 +127,27 @@ bool write_request(const std::filesystem::path& work,
                work / L"update-request.ini", bytes).has_value();
 }
 
+// Cleanup runs asynchronously. A failed status read is uncertainty, not
+// confirmed absence; keep it inside the same bounded wait, without throwing.
+bool wait_for_work_removal(
+    const std::filesystem::path& work, DWORD timeout_ms,
+    bool (*read_status)(const std::filesystem::path&, std::error_code&) =
+        &std::filesystem::exists) {
+    const auto deadline = GetTickCount64() + timeout_ms;
+    std::error_code error;
+    do {
+        const bool exists = read_status(work, error);
+        if (!error && !exists) return true;
+        if (GetTickCount64() >= deadline) break;
+        Sleep(25);
+    } while (true);
+    if (error) {
+        std::cerr << "Cleanup directory status remains uncertain: "
+                  << error.value() << ' ' << error.message() << '\n';
+    }
+    return false;
+}
+
 int wmain(int argc, wchar_t** argv) {
     if (argc == 2 && std::wstring_view{argv[1]} == L"--child") {
         Sleep(400);
@@ -204,6 +226,25 @@ int wmain(int argc, wchar_t** argv) {
     fs::remove_all(root, error);
     fs::create_directories(root);
 
+    CHECK(!wait_for_work_removal(root, 0));
+    CHECK(wait_for_work_removal(root / L"not-created", 0));
+    CHECK(!wait_for_work_removal(root, 0,
+        [](const fs::path&, std::error_code& status_error) {
+            status_error = std::make_error_code(std::errc::permission_denied);
+            return false;
+        }));
+    static unsigned status_reads = 0;
+    CHECK(wait_for_work_removal(root, 5'000,
+        [](const fs::path&, std::error_code& status_error) {
+            if (++status_reads == 1) {
+                status_error = std::make_error_code(std::errc::permission_denied);
+            } else {
+                status_error.clear();
+            }
+            return false;
+        }));
+    CHECK(status_reads == 2);
+
     const auto control_root = root / L"control-files";
     fs::create_directories(control_root);
     for (const auto* filename : {
@@ -278,9 +319,86 @@ int wmain(int argc, wchar_t** argv) {
     CHECK(read_file(receipt) == token);
     CloseHandle(child.hProcess);
 
-    const auto deadline = GetTickCount64() + 5'000;
-    while (fs::exists(work) && GetTickCount64() < deadline) Sleep(25);
-    CHECK(!fs::exists(work));
+    CHECK(wait_for_work_removal(work, 5'000));
+
+    // Cleanup uncertainty must preserve every byte of the recovery material,
+    // record why it was deferred, and still permit a later verified rollback.
+    const auto deferred_nonce = GetTickCount64() + 100U;
+    std::uint64_t case_index = 0;
+    for (const auto fault : {
+             kf2::update::UpdateCleanupWaitFault::none,
+             kf2::update::UpdateCleanupWaitFault::open_failure,
+             kf2::update::UpdateCleanupWaitFault::wait_failure,
+             kf2::update::UpdateCleanupWaitFault::wait_timeout}) {
+        const auto case_work = update_root /
+            (std::to_wstring(GetCurrentProcessId()) + L"-" +
+             std::to_wstring(deferred_nonce + case_index));
+        const auto case_target = root / std::to_wstring(case_index++);
+        const auto case_backup = case_work / L"backup";
+        write_package(case_target, "old-build", "0.0.4", "old");
+        write_package(case_work / L"staged", "new-build", "0.0.5", "new");
+        CHECK(write_request(case_work, case_target, token));
+        const kf2::update::UpdateTransactionRequest case_transaction{
+            .target_root = case_target,
+            .staged_root = case_work / L"staged",
+            .backup_root = case_backup,
+            .expected_new_version = "0.0.5"};
+        CHECK(kf2::update::apply_update_transaction(case_transaction).has_value());
+        CHECK(kf2::update::mark_update_transaction_handoff_ready(
+            case_transaction).has_value());
+        write_file(case_work / L"ready.receipt", token);
+        std::map<fs::path, std::string> retained;
+        for (const auto& entry : fs::recursive_directory_iterator(case_work)) {
+            if (entry.is_regular_file()) {
+                retained.emplace(entry.path(), read_file(entry.path()));
+            }
+        }
+        kf2::update::set_update_cleanup_wait_fault_for_testing(fault);
+        const bool removed = kf2::update::cleanup_update_work_for_testing(
+            GetCurrentProcessId(), process_start_id(GetCurrentProcess()),
+            case_work, token, 0);
+        kf2::update::set_update_cleanup_wait_fault_for_testing(
+            kf2::update::UpdateCleanupWaitFault::none);
+        CHECK(!removed);
+        if (fault == kf2::update::UpdateCleanupWaitFault::open_failure) {
+            const auto report_path = case_work / L"cleanup-deferred.ini";
+            const auto original_report = read_file(report_path);
+            HANDLE locked_report = CreateFileW(report_path.c_str(), GENERIC_READ,
+                FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                nullptr);
+            CHECK(locked_report != INVALID_HANDLE_VALUE);
+            const bool removed_with_locked_report =
+                kf2::update::cleanup_update_work_for_testing(
+                    GetCurrentProcessId(), process_start_id(GetCurrentProcess()),
+                    case_work, token, 0);
+            CloseHandle(locked_report);
+            CHECK(!removed_with_locked_report);
+            CHECK(read_file(report_path) == original_report);
+        }
+        for (const auto& [path, bytes] : retained) {
+            CHECK(fs::is_regular_file(path));
+            CHECK(read_file(path) == bytes);
+        }
+        const auto report = read_file(case_work / L"cleanup-deferred.ini");
+        CHECK(report.find("state=deferred\n") != std::string::npos);
+        CHECK(report.find(fault == kf2::update::UpdateCleanupWaitFault::none ||
+                fault == kf2::update::UpdateCleanupWaitFault::wait_timeout
+            ? "reason=helper_wait_timeout\n"
+            : "reason=helper_exit_unconfirmed\n") != std::string::npos);
+        // A missed readiness receipt must not lose the verified old package.
+        CHECK(fs::remove(case_work / L"ready.receipt"));
+        CHECK(kf2::update::rollback_update_transaction(
+            case_target, case_backup).has_value());
+        CHECK(kf2::update::package_version(case_target).value() == "0.0.4");
+        CHECK(read_file(case_target / L"KF2Optimizer.exe") == "old executable");
+        // A reused PID belongs to a different process instance; never wait
+        // on or terminate that unrelated process to clean the verified result.
+        CHECK(kf2::update::cleanup_update_work_for_testing(
+            GetCurrentProcessId(), process_start_id(GetCurrentProcess()) + 1U,
+            case_work, token, 30'000));
+        CHECK(!fs::exists(case_work));
+        CHECK(WaitForSingleObject(GetCurrentProcess(), 0) == WAIT_TIMEOUT);
+    }
 
     // A matching marker alone must never authorize recursive deletion.
     const auto marker_only = update_root /

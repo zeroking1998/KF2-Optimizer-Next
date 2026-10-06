@@ -33,6 +33,8 @@ public:
     [[nodiscard]] bool update_layout(ShellLayoutResult layout) noexcept;
 #if defined(KF2_AUTOMATION_PROVIDER_TESTING)
     void fail_next_child_allocation_for_testing() noexcept;
+    void fail_runtime_id_write_for_testing(LONG position, HRESULT failure) noexcept;
+    [[nodiscard]] HRESULT runtime_id_cleanup_result_for_testing() const noexcept;
     [[nodiscard]] IUnknown* retain_child_for_testing(
         std::size_t index) const noexcept;
     void disconnect_for_testing() noexcept;

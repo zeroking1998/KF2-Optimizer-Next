@@ -10,6 +10,7 @@
 #include <utility>
 #include <Windows.h>
 
+#include "kf2/core/json_escape.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
 
 namespace kf2::diagnostics {
@@ -18,6 +19,8 @@ namespace {
 constexpr std::uintmax_t kMaximumPreviousEventLogBytes =
     2U * 1024U * 1024U;
 constexpr std::size_t kMaximumRetainedEventLogs = 2;
+constexpr std::chrono::milliseconds kPersistenceBatchDelay{250};
+constexpr std::chrono::milliseconds kMaximumPersistenceRetryDelay{5000};
 
 bool is_retained_audit_event(const Event& event) noexcept {
     if (event.severity != Severity::info) return true;
@@ -49,30 +52,6 @@ std::string utf8(std::wstring_view value) {
     return result;
 }
 
-std::string escape(std::string_view value) {
-    std::ostringstream output;
-    for (const unsigned char character : value) {
-        switch (character) {
-            case '"': output << "\\\""; break;
-            case '\\': output << "\\\\"; break;
-            case '\b': output << "\\b"; break;
-            case '\f': output << "\\f"; break;
-            case '\n': output << "\\n"; break;
-            case '\r': output << "\\r"; break;
-            case '\t': output << "\\t"; break;
-            default:
-                if (character < 0x20) {
-                    constexpr char digits[] = "0123456789abcdef";
-                    output << "\\u00" << digits[character >> 4]
-                           << digits[character & 0x0f];
-                } else {
-                    output << static_cast<char>(character);
-                }
-        }
-    }
-    return output.str();
-}
-
 void write_events(std::ostringstream& output, const std::vector<Event>& events) {
     bool first = true;
     for (const auto& event : events) {
@@ -82,9 +61,9 @@ void write_events(std::ostringstream& output, const std::vector<Event>& events) 
                                event.severity == Severity::warning ? "warning" : "info";
         output << "{\"sequence\":" << event.sequence
                << ",\"severity\":\"" << severity
-               << "\",\"code\":\"" << escape(event.code)
-               << "\",\"source\":\"" << escape(utf8(event.source))
-               << "\",\"message\":\"" << escape(utf8(event.message))
+               << "\",\"code\":\"" << json_escape(event.code)
+               << "\",\"source\":\"" << json_escape(utf8(event.source))
+               << "\",\"message\":\"" << json_escape(utf8(event.message))
                << "\",\"repeat_count\":" << event.repeat_count << "}";
     }
 }
@@ -177,10 +156,10 @@ EventLog::EventLog(std::size_t capacity,
             }
             if (!initialized) {
                 record_persistence_failure_locked();
-            } else {
-                persistence_worker_ = std::jthread(
-                    [this](std::stop_token stop) { persist_worker(stop); });
             }
+            // A validated path may be temporarily locked even at startup.
+            persistence_worker_ = std::jthread(
+                [this](std::stop_token stop) { persist_worker(stop); });
         }
     }
 }
@@ -249,13 +228,13 @@ void EventLog::clear() {
 bool EventLog::flush(std::chrono::milliseconds timeout) {
     std::unique_lock lock{mutex_};
     if (persistence_path_.empty()) return true;
-    if (!persistence_ready_) return false;
+    if (!persistence_worker_.joinable()) return false;
     const auto target_revision = persistence_revision_;
-    persistence_changed_.notify_one();
+    if (persistence_pending_) persistence_batch_due_ = {};
+    persistence_changed_.notify_all();
     const auto completed = persistence_changed_.wait_for(
         lock, timeout, [&] {
-            return persisted_revision_ >= target_revision ||
-                   !persistence_ready_;
+            return persistence_ready_ && persisted_revision_ >= target_revision;
         });
     return completed && persistence_ready_ &&
            persisted_revision_ >= target_revision;
@@ -284,10 +263,17 @@ EventLogStats EventLog::stats() const noexcept {
 }
 
 void EventLog::schedule_persist_locked() noexcept {
-    if (!persistence_ready_ || persistence_path_.empty()) return;
+    if (!persistence_worker_.joinable() || persistence_path_.empty()) return;
     if (persistence_revision_ != UINT64_MAX) ++persistence_revision_;
+    const bool was_pending = persistence_pending_;
     persistence_pending_ = true;
-    persistence_changed_.notify_one();
+    if (!was_pending) {
+        // A fixed first-event deadline batches bursts without starving writes
+        // during continuous logging. Explicit flush/shutdown bypasses it.
+        persistence_batch_due_ =
+            std::chrono::steady_clock::now() + kPersistenceBatchDelay;
+        persistence_changed_.notify_one();
+    }
 }
 
 void EventLog::persist_worker(std::stop_token stop) noexcept {
@@ -299,20 +285,33 @@ void EventLog::persist_worker(std::stop_token stop) noexcept {
             persistence_changed_.wait(lock, [&] {
                 return persistence_pending_ || stop.stop_requested();
             });
+            // Preserve the healthy final drain, but never wait/retry a known
+            // failed writer during destruction. Shutdown has its own flush.
+            if (stop.stop_requested() &&
+                (!persistence_pending_ || !persistence_ready_)) return;
             if (!persistence_pending_) {
-                if (stop.stop_requested()) return;
                 continue;
+            }
+            if (!persistence_ready_) {
+                persistence_changed_.wait_until(lock, persistence_retry_at_, [&] {
+                    return stop.stop_requested();
+                });
+                if (stop.stop_requested()) return;
+            } else if (!stop.stop_requested()) {
+                persistence_changed_.wait_until(lock, persistence_batch_due_, [&] {
+                    return stop.stop_requested() ||
+                        persistence_batch_due_ <= std::chrono::steady_clock::now();
+                });
             }
             try {
                 copy.assign(events_.begin(), events_.end());
             } catch (...) {
                 record_persistence_failure_locked();
                 persistence_changed_.notify_all();
-                return;
+                continue;
             }
             revision = persistence_revision_;
             persistence_pending_ = false;
-            persistence_active_ = true;
         }
 
         bool succeeded = false;
@@ -326,11 +325,13 @@ void EventLog::persist_worker(std::stop_token stop) noexcept {
 
         {
             std::scoped_lock lock{mutex_};
-            persistence_active_ = false;
             if (!succeeded) {
                 record_persistence_failure_locked();
             } else {
                 persisted_revision_ = std::max(persisted_revision_, revision);
+                persistence_ready_ = true;
+                persistence_retry_delay_ = kInitialPersistenceRetryDelay;
+                persistence_retry_at_ = {};
             }
         }
         persistence_changed_.notify_all();
@@ -339,7 +340,11 @@ void EventLog::persist_worker(std::stop_token stop) noexcept {
 
 void EventLog::record_persistence_failure_locked() noexcept {
     persistence_ready_ = false;
-    persistence_pending_ = false;
+    // Retry a fresh bounded snapshot, including appends/clear during failure.
+    persistence_pending_ = true;
+    persistence_retry_at_ = std::chrono::steady_clock::now() + persistence_retry_delay_;
+    persistence_retry_delay_ = std::min(persistence_retry_delay_ * 2,
+                                       kMaximumPersistenceRetryDelay);
     if (stats_.persistence_failures != UINT64_MAX) {
         ++stats_.persistence_failures;
     }
@@ -350,12 +355,13 @@ std::string serialize_events_json(const std::vector<Event>& events) {
     output << "{\"version\":1,\"events\":[";
     write_events(output, events);
     output << "]}";
-    return output.str();
+    return std::move(output).str();
 }
 
-std::string serialize_product_report_json(const ProductReport& report) {
-    const auto text = [](std::wstring_view value) { return escape(utf8(value)); };
-    std::ostringstream output;
+namespace {
+
+void write_product_report(std::ostringstream& output, const ProductReport& report) {
+    const auto text = [](std::wstring_view value) { return json_escape(utf8(value)); };
     output << "{\"schema\":\"KF2_OPTIMIZER_DIAGNOSTICS_V2\""
            << ",\"build_identity\":\"" << text(report.build_identity) << "\""
            << ",\"runtime\":{\"mode\":\"" << text(report.mode)
@@ -561,8 +567,7 @@ std::string serialize_product_report_json(const ProductReport& report) {
     }
     output << '}';
     output << "},\"optimizer\":{\"profile\":\""
-           << text(report.optimizer_profile) << "\",\"quality_policy\":\""
-           << text(report.quality_policy) << "\",\"target_fps\":"
+           << text(report.optimizer_profile) << "\",\"target_fps\":"
            << report.target_fps << ",\"restore_config_after_game\":"
            << (report.restore_config_after_game ? "true" : "false")
            << "},\"overlay\":{\"enabled\":"
@@ -585,13 +590,22 @@ std::string serialize_product_report_json(const ProductReport& report) {
            << report.game_log_stats.oversized_line_drops
            << ",\"session_snapshot_copies\":"
            << report.game_log_stats.session_snapshot_copies
+           << ",\"backlog_bytes\":" << report.game_log_stats.backlog_bytes
+           << ",\"catch_up_age_ns\":" << report.game_log_stats.catch_up_age_ns
            << "},\"crash_records\":{\"retained\":"
            << report.retained_crash_records
            << ",\"content_included\":false}"
            << ",\"events\":[";
     write_events(output, report.events);
     output << "]}";
-    return output.str();
+}
+
+}  // namespace
+
+std::string serialize_product_report_json(const ProductReport& report) {
+    std::ostringstream output;
+    write_product_report(output, report);
+    return std::move(output).str();
 }
 
 std::string serialize_support_bundle_json(
@@ -602,12 +616,13 @@ std::string serialize_support_bundle_json(
     std::ostringstream output;
     output << "{\"schema\":\"KF2_OPTIMIZER_SUPPORT_BUNDLE_V1\""
            << ",\"privacy\":\"Local only; no dump, command line, user files or uploaded data\""
-           << ",\"diagnostics\":" << serialize_product_report_json(report)
-           << ",\"issue72_inventory\":";
+           << ",\"diagnostics\":";
+    write_product_report(output, report);
+    output << ",\"issue72_inventory\":";
     if (inventory_is_object) output << issue72_inventory_json;
     else output << "null";
     output << '}';
-    return output.str();
+    return std::move(output).str();
 }
 
 }  // namespace kf2::diagnostics

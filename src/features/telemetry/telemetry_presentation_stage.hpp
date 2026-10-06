@@ -6,6 +6,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "features/telemetry/telemetry_frame.hpp"
 #include "kf2/overlay/overlay_policy.hpp"
@@ -65,8 +66,6 @@ inline constexpr std::uint64_t kOverlayDiagnosticsPublishIntervalNs =
     std::wstring_view optimizer_reason, std::wstring_view adaptive_profile,
     std::wstring_view adaptive_reason) {
     StatusProjection result;
-    result.telemetry = telemetry_failure.empty()
-        ? L"Waiting for KF2 frame data" : std::wstring{telemetry_failure};
     if (frame.frames.fps && frame.frames.frame_time_ms) {
         std::wostringstream text;
         text << std::fixed << std::setprecision(1) << *frame.frames.fps
@@ -114,13 +113,12 @@ inline constexpr std::uint64_t kOverlayDiagnosticsPublishIntervalNs =
             text << L", FleX " << frame.flex->last_substeps << L" steps";
             if (!frame.flex->pass_through_healthy) text << L" (relay error)";
         }
-        result.telemetry = text.str();
+        result.telemetry = std::move(text).str();
+    } else {
+        result.telemetry = telemetry_failure.empty()
+            ? L"Waiting for KF2 frame data" : std::wstring{telemetry_failure};
     }
 
-    result.performance_analysis =
-        L"Performance analysis unavailable | Adaptive: " +
-        std::wstring{adaptive_profile} + L" (" +
-        std::wstring{adaptive_reason} + L")";
     if (frame.frames.fps) {
         const wchar_t* quality =
             frame.frames.quality == ::kf2::telemetry::SampleQuality::good
@@ -142,7 +140,12 @@ inline constexpr std::uint64_t kOverlayDiagnosticsPublishIntervalNs =
                 << L" | analysis: " << optimizer_reason
                 << L" | Adaptive: " << adaptive_profile << L" ("
                 << adaptive_reason << L")";
-        result.performance_analysis = details.str();
+        result.performance_analysis = std::move(details).str();
+    } else {
+        result.performance_analysis =
+            L"Performance analysis unavailable | Adaptive: " +
+            std::wstring{adaptive_profile} + L" (" +
+            std::wstring{adaptive_reason} + L")";
     }
 
     result.live_fps = frame.frames.fps;

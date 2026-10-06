@@ -64,13 +64,6 @@ if ($releaseRepository -match '\.git$') {
     $releaseRepository = $releaseRepository.Substring(
         0, $releaseRepository.Length - 4)
 }
-$telemetryModule = Join-Path $projectRoot `
-    'assets\offline_telemetry\KF2OptimizerTelemetry.u'
-$telemetryHash = if (Test-Path -LiteralPath $telemetryModule -PathType Leaf) {
-    (Get-FileHash -LiteralPath $telemetryModule -Algorithm SHA256).Hash.ToLowerInvariant()
-} else {
-    '589aa708392e2c26abc753ce272c6e146f274623181015e8f6bdc201ccb8e2f0'
-}
 $buildTesting = if ($ValidationScope -eq 'Full') { 'ON' } else { 'OFF' }
 
 $configureArguments = @(
@@ -83,7 +76,7 @@ $configureArguments = @(
     '-DKF2_VERSION=0.0.4-alpha',
     "-DKF2_BUILD_COMMIT=$commit",
     "-DKF2_BUILD_CHANNEL=$channel",
-    "-DKF2_OFFLINE_TELEMETRY_SHA256=$telemetryHash"
+    '-DKF2_OFFLINE_TELEMETRY_SHA256=AUTO'
 )
 if ($releaseRepository -match '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
     $configureArguments += "-DKF2_RELEASE_REPOSITORY=$releaseRepository"

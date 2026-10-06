@@ -424,7 +424,21 @@ int main() {
     controller.synchronize_model();
     CHECK(model.presented_target_fps() == 60);
     CHECK(model.presented_corpse_limit() == 20);
+    const auto* animated_nodes = controller.layout().nodes.data();
+    const auto unchanged_nodes = controller.layout().nodes;
     controller.on_timer();
+    CHECK(controller.layout().nodes.data() == animated_nodes);
+    CHECK(controller.layout().nodes.size() == unchanged_nodes.size());
+    for (std::size_t index = 0; index < unchanged_nodes.size(); ++index) {
+        const auto& before = unchanged_nodes[index];
+        const auto& after = controller.layout().nodes[index];
+        CHECK(after.id == before.id);
+        CHECK(after.bounds == before.bounds);
+        if (before.role != SemanticRole::status &&
+            before.role != SemanticRole::metric_card) {
+            CHECK(after.text == before.text);
+        }
+    }
     CHECK(model.presented_target_fps() > 60);
     CHECK(model.presented_target_fps() < 120);
     CHECK(model.presented_corpse_limit() > 20);
@@ -504,6 +518,22 @@ int main() {
     CHECK(model.presented_live_active_corpses() == 50);
     CHECK(model.presented_live_sleeping_corpses() == 100);
 
+    animated_status.target_fps = 180;
+    model.set_status(animated_status);
+    controller.on_visibility_changed(false);
+    const int hidden_target = model.presented_target_fps();
+    const float hidden_startup = controller.layout().startup_progress;
+    CHECK(!controller.animation_active());
+    for (int frame = 0; frame < 100; ++frame) controller.on_timer();
+    CHECK(model.presented_target_fps() == hidden_target);
+    CHECK(controller.layout().startup_progress == hidden_startup);
+    controller.on_timer(kRuntimeTimerId);
+    CHECK(ticks == 1);
+    controller.on_visibility_changed(true);
+    CHECK(controller.animation_active());
+    controller.on_timer();
+    CHECK(model.presented_target_fps() > hidden_target);
+
     controller.on_theme_changed({true, true});
     CHECK(theme_changes == 1);
     CHECK(!controller.theme().animations_enabled);
@@ -527,9 +557,9 @@ int main() {
     CHECK(model.presented_live_active_corpses() == 5);
     CHECK(model.presented_live_sleeping_corpses() == 15);
     CHECK(invalidations >= 8);
-    CHECK(ticks == 0);
-    controller.on_timer(kRuntimeTimerId);
     CHECK(ticks == 1);
+    controller.on_timer(kRuntimeTimerId);
+    CHECK(ticks == 2);
     controller.on_system_resume();
     CHECK(resumes == 1);
     controller.on_key({WindowKey::f10});
@@ -550,6 +580,47 @@ int main() {
     CHECK(closing_controller.layout().exit_progress == 1.0F);
     CHECK(close_requests == 1);
     CHECK(closing_controller.on_close());
+
+    UiModel hidden_closing_model;
+    int hidden_close_requests = 0;
+    ShellController hidden_closing_controller{
+        hidden_closing_model,
+        {.request_close = [&] { ++hidden_close_requests; }}};
+    CHECK(!hidden_closing_controller.on_close());
+    hidden_closing_controller.on_visibility_changed(false);
+    CHECK(hidden_close_requests == 1);
+    CHECK(!hidden_closing_controller.animation_active());
+    CHECK(hidden_closing_controller.on_close());
+    hidden_closing_controller.on_timer();
+    CHECK(hidden_close_requests == 1);
+
+    UiModel guarded_model;
+    bool allow_close = false;
+    int guarded_close_requests = 0;
+    ShellController guarded_controller{
+        guarded_model,
+        {.request_close = [&] { ++guarded_close_requests; },
+         .can_close = [&] { return allow_close; }}};
+    CHECK(!guarded_controller.on_close());
+    for (int frame = 0; frame < 60; ++frame) guarded_controller.on_timer();
+    CHECK(guarded_controller.layout().exit_progress == 0.0F);
+    CHECK(guarded_close_requests == 0);
+    guarded_controller.on_theme_changed({true, true});
+    CHECK(!guarded_controller.on_close());
+    allow_close = true;
+    CHECK(guarded_controller.on_close());
+    guarded_controller.on_theme_changed({false, false});
+    CHECK(!guarded_controller.on_close());
+    for (int frame = 0; frame < 60; ++frame) guarded_controller.on_timer();
+    CHECK(guarded_close_requests == 1);
+    // A new operation during the exit animation must re-arm the guard.
+    allow_close = false;
+    CHECK(!guarded_controller.on_close());
+    CHECK(guarded_controller.layout().exit_progress == 0.0F);
+    guarded_controller.on_visibility_changed(false);
+    CHECK(!guarded_controller.on_close());
+    allow_close = true;
+    CHECK(guarded_controller.on_close());
 
     // A rejected persistence request must not leave a preview looking saved.
     UiModel rejected_model;
