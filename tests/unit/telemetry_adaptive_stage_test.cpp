@@ -125,6 +125,45 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
 
 int main() {
     {
+        using kf2::telemetry_pipeline::adaptive_action_text_matches;
+        const std::string_view settings[] = {"", "A", "RuntimeGpuQuality",
+            "AdaptiveCorpseRuntimeLimit", "RuntimeGpuQualityExtra"};
+        const std::wstring_view dispositions[] = {L"none", L"hold", L"shadow",
+            L"proposed", L"keep", L"rollback", L"blocked", L"skipped unavailable",
+            L"pending", L"applied", L"failed", L"restart required"};
+        for (const auto setting : settings) {
+            for (const auto disposition : dispositions) {
+                const auto expected = setting.empty() ? std::wstring{disposition}
+                    : std::wstring{setting.begin(), setting.end()} + L" (" +
+                      std::wstring{disposition} + L")";
+                CHECK(adaptive_action_text_matches(expected, setting, disposition));
+                CHECK(!adaptive_action_text_matches(L"", setting, disposition));
+                CHECK(!adaptive_action_text_matches(expected + L"x", setting, disposition));
+                CHECK(!adaptive_action_text_matches(L"x" + expected, setting, disposition));
+                auto changed = expected;
+                changed.back() = L'X';
+                CHECK(!adaptive_action_text_matches(changed, setting, disposition));
+                if (setting.empty()) continue;
+                changed = expected;
+                changed[0] = L'X';
+                CHECK(!adaptive_action_text_matches(changed, setting, disposition));
+                for (const auto offset : {setting.size(), setting.size() + 1,
+                         setting.size() + 2}) {
+                    changed = expected;
+                    changed[offset] = L'X';
+                    CHECK(!adaptive_action_text_matches(changed, setting, disposition));
+                }
+                CHECK(!adaptive_action_text_matches(expected, setting, L"failed" == disposition
+                    ? L"shadow" : L"failed"));
+            }
+        }
+        CHECK(!adaptive_action_text_matches(L"A (hold)", "B", L"hold"));
+        CHECK(!adaptive_action_text_matches(L"RuntimeGpuQualityExtra (hold)",
+            "RuntimeGpuQuality", L"hold"));
+        CHECK(!adaptive_action_text_matches(L"hold", "A", L"hold"));
+        CHECK(!adaptive_action_text_matches(L"A (hold)", "", L"hold"));
+    }
+    {
         using namespace kf2::telemetry_pipeline;
         constexpr std::uint64_t second = 1'000'000'000ULL;
         auto ready = complete_frame();

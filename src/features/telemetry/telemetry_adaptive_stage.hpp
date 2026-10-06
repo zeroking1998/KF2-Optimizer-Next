@@ -78,6 +78,20 @@ struct AdaptiveRuntimeProviderIdentity final {
            now_ns - last_log_ns >= kAdaptiveBottleneckLogIntervalNs;
 }
 
+[[nodiscard]] inline bool adaptive_action_text_matches(
+    std::wstring_view text, std::string_view setting,
+    std::wstring_view disposition) noexcept {
+    if (setting.empty()) return text == disposition;
+    return text.size() == setting.size() + disposition.size() + 3 &&
+        std::equal(setting.begin(), setting.end(), text.begin(),
+            [](char source, wchar_t presented) {
+                return static_cast<wchar_t>(source) == presented;
+            }) &&
+        text.substr(setting.size(), 2) == L" (" &&
+        text.substr(setting.size() + 2, disposition.size()) == disposition &&
+        text.back() == L')';
+}
+
 struct AdaptiveSampleContext final {
     int current_quality{-1};
     int minimum_quality{10};

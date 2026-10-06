@@ -572,17 +572,18 @@ void UiRuntime::update_adaptive_controller(
             }
         }
     }
+    const auto disposition_label = optimizer::adaptive_disposition_name(
+        adaptive_decision.disposition);
     if (adaptive_decision.selected_setting.empty()) {
-        const auto disposition_label = optimizer::adaptive_disposition_name(
-            adaptive_decision.disposition);
         if (status.adaptive_action != disposition_label)
             status.adaptive_action = disposition_label;
-    } else {
+    } else if (!telemetry_pipeline::adaptive_action_text_matches(
+            status.adaptive_action, adaptive_decision.selected_setting,
+            disposition_label)) {
         status.adaptive_action.assign(adaptive_decision.selected_setting.begin(),
             adaptive_decision.selected_setting.end());
         status.adaptive_action += L" (";
-        status.adaptive_action += optimizer::adaptive_disposition_name(
-            adaptive_decision.disposition);
+        status.adaptive_action += disposition_label;
         status.adaptive_action += L')';
     }
     assign_widened(status.recommendation_reason, adaptive_decision.reason);
