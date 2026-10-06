@@ -3554,7 +3554,7 @@ int main() {
     const auto diagnostic_scan_start = telemetry_source.find(
         "function RefreshDiagnosticEffectCache()");
     const auto diagnostic_scan_end = telemetry_source.find(
-        "function SampleTelemetry()", diagnostic_scan_start);
+        "function RefreshWorldEmitterCache(", diagnostic_scan_start);
     CHECK(diagnostic_scan_start != std::string::npos);
     CHECK(diagnostic_scan_end != std::string::npos);
     const auto diagnostic_scan = telemetry_source.substr(
@@ -3579,7 +3579,21 @@ int main() {
         CHECK(telemetry_source.find(phased_effect_scan) != std::string::npos);
     }
     CHECK(count_occurrences(
-        telemetry_source, "SampleSequence == 0 ||") >= 5);
+        diagnostic_scan, "!bDiagnosticEffectCacheInitialized ||") == 5);
+    const auto diagnostics_gate = diagnostic_scan.find(
+        "if (!bDetailedRuntimeDiagnostics)");
+    const auto diagnostics_return = diagnostic_scan.find("return;", diagnostics_gate);
+    CHECK(diagnostics_gate != std::string::npos);
+    CHECK(diagnostics_return < diagnostic_scan.find("foreach WorldInfo.AllActors"));
+    CHECK(diagnostic_scan.find(
+        "CachedDiagnosticEffects = default.CachedDiagnosticEffects;") !=
+          std::string::npos);
+    CHECK(diagnostic_scan.find("bDiagnosticEffectCacheInitialized = false;") !=
+          std::string::npos);
+    CHECK(diagnostic_scan.find("bDiagnosticEffectCacheInitialized = true;") !=
+          std::string::npos);
+    CHECK(diagnostic_scan.find("bDiagnosticEffectCacheInitialized = true;") >
+          diagnostic_scan.rfind("foreach WorldInfo.AllActors"));
     CHECK(telemetry_source.find(
         "rotate one typed iterator per sample") != std::string::npos);
     CHECK(telemetry_source.find(

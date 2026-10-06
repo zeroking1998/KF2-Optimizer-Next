@@ -8,6 +8,10 @@ are visible immediately.
 
 ### What's new
 
+- Skip diagnostic-only spray, explosion, projectile and gib Actor scans while
+  Runtime diagnostics is off; Adaptive inputs remain active and uncollected
+  counters are not reported as measured zero.
+
 - Reuse unchanged selected Adaptive action text instead of rebuilding it;
   exact labels, decisions, diagnostics and restoration are unchanged.
 
