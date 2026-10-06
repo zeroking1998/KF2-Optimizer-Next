@@ -185,6 +185,9 @@ reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
     "Completed Adaptive diagnostic buffer transfer"
     "request_log.str()"
     "decision_log.str()")
+reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
+    "Unchanged selected Adaptive action text"
+    "    } else {\n        status.adaptive_action.assign(adaptive_decision.selected_setting.begin(),")
 reject_literals("${stage_root}/telemetry_adaptive_stage.cpp"
     "Completed Adaptive sample and response buffer transfer"
     "measurement.str()"

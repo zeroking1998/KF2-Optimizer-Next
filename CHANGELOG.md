@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Reuse unchanged selected Adaptive action text instead of rebuilding it;
+  exact labels, decisions, diagnostics and restoration are unchanged.
+
 - Transfer completed Adaptive performance-sample and quality-response diagnostic
   buffers instead of copying them; exact text, logging gates, sample cadence and
   retained-event bounds are unchanged.
