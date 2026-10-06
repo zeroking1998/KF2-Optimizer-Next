@@ -490,6 +490,30 @@ int main() {
           static_cast<double>(*frame.evidence.adapter_vram_used_bytes));
     CHECK(sample.vram_budget_bytes ==
           static_cast<double>(*frame.evidence.adapter_vram_budget_bytes));
+    auto process_memory_only = frame;
+    process_memory_only.evidence.adapter_vram_used_bytes.reset();
+    process_memory_only.evidence.adapter_vram_budget_bytes.reset();
+    for (const bool offline : {true, false}) {
+        process_memory_only.offline_gameplay = offline;
+        replace_gameplay(process_memory_only, [offline](auto& gameplay) {
+            gameplay.net_mode = offline ? "NM_Standalone" : "NM_Client";
+        });
+        const auto process_sample = build_adaptive_sample(
+            process_memory_only, context).sample;
+        CHECK(process_sample.vram_used_bytes ==
+              static_cast<double>(*frame.evidence.dedicated_vram_bytes));
+        CHECK(process_sample.vram_budget_bytes ==
+              static_cast<double>(*frame.evidence.dedicated_vram_budget_bytes));
+    }
+    process_memory_only.evidence.dedicated_vram_bytes = 0;
+    CHECK(build_adaptive_sample(process_memory_only, context).
+              sample.vram_used_bytes == 0.0);
+    process_memory_only.evidence.dedicated_vram_bytes.reset();
+    process_memory_only.evidence.dedicated_vram_budget_bytes.reset();
+    const auto unknown_memory = build_adaptive_sample(
+        process_memory_only, context).sample;
+    CHECK(!unknown_memory.vram_used_bytes);
+    CHECK(!unknown_memory.vram_budget_bytes);
     CHECK(sample.ram_used_bytes ==
           static_cast<double>(*frame.evidence.system_ram_used_bytes));
     CHECK(sample.ram_budget_bytes ==

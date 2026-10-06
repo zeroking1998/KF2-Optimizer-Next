@@ -186,57 +186,6 @@ Function nvml_export(HMODULE library, const char* name) {
 }
 }  // namespace
 
-Result<GpuMemoryBudget> query_gpu_memory_budget(
-    std::uint64_t adapter_luid) {
-    if (adapter_luid == 0) {
-        return Result<GpuMemoryBudget>::failure(
-            {ErrorCode::invalid_argument, L"GPU adapter identity is missing", 0});
-    }
-    Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
-    const HRESULT created = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
-    if (FAILED(created)) {
-        return Result<GpuMemoryBudget>::failure(
-            {ErrorCode::platform_failure,
-             L"DXGI factory could not be created",
-             static_cast<std::uint32_t>(created)});
-    }
-    const LUID expected = unpack_luid(adapter_luid);
-    for (UINT index = 0;; ++index) {
-        Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
-        const HRESULT found = factory->EnumAdapters1(index, &adapter);
-        if (found == DXGI_ERROR_NOT_FOUND) break;
-        if (FAILED(found)) continue;
-        DXGI_ADAPTER_DESC1 description{};
-        if (FAILED(adapter->GetDesc1(&description)) ||
-            description.AdapterLuid.LowPart != expected.LowPart ||
-            description.AdapterLuid.HighPart != expected.HighPart) {
-            continue;
-        }
-        Microsoft::WRL::ComPtr<IDXGIAdapter3> adapter3;
-        const HRESULT upgraded = adapter.As(&adapter3);
-        if (FAILED(upgraded)) {
-            return Result<GpuMemoryBudget>::failure(
-                {ErrorCode::platform_failure,
-                 L"DXGI video-memory budgets are not supported",
-                 static_cast<std::uint32_t>(upgraded)});
-        }
-        DXGI_QUERY_VIDEO_MEMORY_INFO info{};
-        const HRESULT queried = adapter3->QueryVideoMemoryInfo(
-            0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info);
-        if (FAILED(queried) || info.Budget == 0) {
-            return Result<GpuMemoryBudget>::failure(
-                {ErrorCode::platform_failure,
-                 L"DXGI video-memory budget is unavailable",
-                 static_cast<std::uint32_t>(queried)});
-        }
-        return Result<GpuMemoryBudget>::success({
-            info.CurrentUsage, info.Budget,
-            info.AvailableForReservation});
-    }
-    return Result<GpuMemoryBudget>::failure(
-        {ErrorCode::not_found, L"GPU adapter identity is no longer present", 0});
-}
-
 std::optional<ProcessGpuPreference> parse_windows_gpu_preference(
     std::wstring_view value) noexcept {
     const auto trim = [](std::wstring_view text) {
@@ -1167,12 +1116,6 @@ Result<GpuMetrics> PdhGpuSampler::sample() {
     auto result = aggregate_gpu_counters(values, pid_, adapter_luid_);
     result.process_adapter_luid = active_process_gpu_adapter_luid(
         values, pid_, adapter_luid_);
-    if (const auto memory = query_gpu_memory_budget(adapter_luid_);
-        memory.has_value()) {
-        result.adapter_local_usage_bytes =
-            memory.value().current_usage_bytes;
-        result.adapter_local_budget_bytes = memory.value().budget_bytes;
-    }
     result.adapter_gpu_percent = aggregate_adapter_gpu_percent(
         values, adapter_luid_);
     if (result.adapter_gpu_percent &&

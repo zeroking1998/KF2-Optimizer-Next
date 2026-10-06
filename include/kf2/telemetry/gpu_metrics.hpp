@@ -47,17 +47,14 @@ struct GpuMetrics {
     std::optional<double> adapter_gpu_percent;
     std::uint64_t dedicated_bytes{0};
     std::uint64_t shared_bytes{0};
+    // Only for verified adapter-wide observations. Caller-local DXGI budgets
+    // cannot describe the sampled process or the whole adapter.
     std::optional<std::uint64_t> adapter_local_usage_bytes;
     std::optional<std::uint64_t> adapter_local_budget_bytes;
     // Adapter that currently carries this process's busiest GPU engine.
     std::optional<std::uint64_t> process_adapter_luid;
     SampleQuality quality{SampleQuality::unavailable};
     UnavailableReason reason{UnavailableReason::no_samples};
-};
-struct GpuMemoryBudget final {
-    std::uint64_t current_usage_bytes{0};
-    std::uint64_t budget_bytes{0};
-    std::uint64_t available_for_reservation_bytes{0};
 };
 struct GpuAdapter {
     std::uint64_t luid{0};
@@ -90,8 +87,6 @@ parse_windows_gpu_preference(std::wstring_view value) noexcept;
 [[nodiscard]] Result<ConfiguredGpuAdapter> configured_gpu_adapter_for_process(
     const std::filesystem::path& executable);
 [[nodiscard]] Result<std::vector<GpuAdapter>> enumerate_gpu_adapters();
-[[nodiscard]] Result<GpuMemoryBudget> query_gpu_memory_budget(
-    std::uint64_t adapter_luid);
 [[nodiscard]] std::vector<GpuAdapter> unique_physical_gpu_adapters(
     const std::vector<GpuAdapter>& adapters);
 [[nodiscard]] std::optional<GpuAdapter> find_hardware_gpu_adapter_by_luid(
