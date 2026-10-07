@@ -1151,9 +1151,7 @@ int main() {
     CHECK(online_context_source.find(
         "KF2OPT_ONLINE_CORPSE state=available") != std::string::npos);
     CHECK(online_context_source.find(
-        "KF2OPT_ONLINE_CORPSE state=populated") != std::string::npos);
-    CHECK(online_context_source.find(
-        "GoreManager.CorpsePool.Length > 0") != std::string::npos);
+        "KF2OPT_ONLINE_CORPSE state=pool") != std::string::npos);
     CHECK(online_context_source.find("local_only=true readback=verified") !=
           std::string::npos);
     CHECK(online_context_source.find(
@@ -1397,6 +1395,37 @@ int main() {
           capability_body.find("state=available"));
     CHECK(count_occurrences(online_context_source,
         "bOnlineCorpseUnavailableReported = false;") == 3);
+    CHECK(capability_body.find("SinceLastReport < 0.5") != std::string::npos);
+    CHECK(capability_body.find("SinceLastReport < 5.0") != std::string::npos);
+    CHECK(capability_body.find("LastReportedOnlineCorpsePool == PoolLength") !=
+          std::string::npos);
+    CHECK(capability_body.find("LastReportedOnlineCorpseMaximum == Maximum") !=
+          std::string::npos);
+    CHECK(count_occurrences(capability_body, "GoreManager.CorpsePool.Length") == 1);
+    CHECK(capability_body.find("AllActors") == std::string::npos);
+    CHECK(count_occurrences(online_context_source,
+        "OnlineCorpseLastPoolReportRealTime = 0.0;") == 2);
+    // Source-bound cadence model, not live UnrealScript execution.
+    for (const int fps : {30, 60, 120, 240}) {
+        double last_report = 0.0;
+        int reports = 0;
+        for (int frame = 1; frame <= fps * 10; ++frame) {
+            const double now = static_cast<double>(frame) / fps;
+            if (now - last_report < 0.5) continue;
+            last_report = now;
+            ++reports;
+        }
+        CHECK(reports > 0 && reports <= 20);
+        last_report = 0.0;
+        reports = 0;
+        for (int frame = 1; frame <= fps * 10; ++frame) {
+            const double now = static_cast<double>(frame) / fps;
+            if (now - last_report < 5.0) continue;
+            last_report = now;
+            ++reports;
+        }
+        CHECK(reports == 2);
+    }
     const auto bridge_start = online_corpse_controller_source.find(
         "function KF2OptimizerOnlineContextInteraction GetOnlineInteraction()");
     const auto bridge_end = online_corpse_controller_source.find(
