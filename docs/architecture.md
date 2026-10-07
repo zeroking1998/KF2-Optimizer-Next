@@ -152,8 +152,14 @@ Verified standalone gameplay also exposes a session-scoped loopback actuator.
 The optimizer sends a monotonically sequenced command with a random 128-bit
 token and a CPU, GPU, VRAM, RAM, mixed or recovery group. KF2 rebuilds the
 requested group from its current graphics settings, changes only the owned
-fields and returns `APPLIED` only after exact readback. Intervention lowers one
-native tier, emergency may lower two and stable recovery raises one. Missing or
+fields and returns `APPLIED` only after exact readback.
+Adaptive writes script-owned defaults transiently rather than invoking KF2's
+disk-persisting menu setters. Native settings are reapplied only when their
+owned values differ; script-only or already-matching requests skip that engine
+update but still receive a fresh readback. The same path handles rollback and
+restoration. Actual native changes may still refresh render or streaming state.
+Intervention lowers one native tier, emergency may lower two and stable recovery
+raises one. Missing or
 stale telemetry, Zed Time, an online/unknown session, shadow mode, missing bridge
 capability or a readback mismatch prevents the change. Display mode, resolution,
 VSync, variable frame rate, anti-aliasing and FleX are not owned by this path.
