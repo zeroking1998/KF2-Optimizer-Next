@@ -63,6 +63,11 @@ struct SystemMemoryMetrics {
     std::uint64_t current_thread_ticks,
     std::uint64_t elapsed_ms);
 namespace detail {
+// Discovers only this process's threads. Callers may use Toolhelp when process
+// snapshotting is unavailable, but never after identity/exit rejection.
+[[nodiscard]] Result<std::vector<std::uint32_t>> query_process_thread_ids(
+    const game::GameProcessIdentity& identity);
+
 struct ThreadCpuTimes {
     std::uint64_t creation_ticks{0};
     std::uint64_t cpu_ticks{0};
@@ -111,6 +116,7 @@ private:
 #ifdef KF2_PROCESS_METRICS_TESTING
 namespace detail {
 [[nodiscard]] std::uint32_t process_metric_opens_for_testing() noexcept;
+void fail_next_process_thread_snapshot_walk_for_testing() noexcept;
 }
 #endif
 class ProcessMetricSampler final {
