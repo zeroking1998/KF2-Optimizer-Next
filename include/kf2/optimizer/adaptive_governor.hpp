@@ -209,7 +209,6 @@ struct AdaptiveDecision {
     AdaptiveBottleneckReport bottleneck;
     AdaptiveCpuReport cpu;
     ResourcePressureSnapshot resources;
-    Profile recommended_profile{Profile::balanced};
     std::string_view selected_setting;
     std::string_view reason{"disabled"};
     std::optional<double> old_value;

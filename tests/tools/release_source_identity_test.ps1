@@ -62,6 +62,48 @@ function Check-Validation([string] $ExpectedError, [string[]] $Arguments = @()) 
 }
 
 try {
+    # Execute the actual package preflight without requiring SDK/package inputs.
+    $packageAst = [Management.Automation.Language.Parser]::ParseFile(
+        (Join-Path $projectRoot 'tools/package.ps1'), [ref]$null, [ref]$null)
+    $preflight = $packageAst.Find({ param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq 'Assert-PackagePathsNoReparsePoint'
+    }, $true)
+    if ($null -eq $preflight) { throw 'Package reparse-point preflight is missing' }
+    . ([scriptblock]::Create($preflight.Extent.Text))
+    $linkRoot = Join-Path $root 'path-validation'
+    $linkTarget = Join-Path $root 'private-link-target'
+    New-Item -ItemType Directory -Path $linkRoot, $linkTarget -Force | Out-Null
+    $managedPaths = @('KF2Optimizer.exe', 'Data/Documentation/README.md',
+        'Data/Lab/KF2OptimizerTelemetry.u')
+    Assert-PackagePathsNoReparsePoint $linkRoot $managedPaths
+    Assert-PackagePathsNoReparsePoint (Join-Path $root 'not-yet-created') $managedPaths
+    foreach ($relative in @('linked-root', 'Data', 'Data/Documentation', 'Data/Lab',
+                            'Data/Documentation/README.md')) {
+        $junction = Join-Path $linkRoot $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $junction) -Force |
+            Out-Null
+        New-Item -ItemType Junction -Path $junction -Target $linkTarget | Out-Null
+        try {
+            $rejected = $false
+            try {
+                $checkedRoot = if ($relative -eq 'linked-root') { $junction } else { $linkRoot }
+                Assert-PackagePathsNoReparsePoint $checkedRoot $managedPaths
+            } catch {
+                if (-not $_.Exception.Message.Contains('Package destination contains a reparse point')) {
+                    throw
+                }
+                $rejected = $true
+            }
+            if (-not $rejected) { throw "Package accepted a junction at $relative" }
+            if (-not (Test-Path -LiteralPath $linkTarget -PathType Container)) {
+                throw 'Preflight changed the private link target'
+            }
+        } finally {
+            Remove-Item -LiteralPath $junction -Force
+        }
+    }
+    Write-Host 'PASS: real package preflight accepts ordinary/missing paths and rejects root/directory/leaf junctions'
     foreach ($relative in $payload) {
         $path = Join-Path $root $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
@@ -78,6 +120,38 @@ try {
             (Join-Path $root 'Data/Documentation/issue72-feature-inventory.json') -Encoding utf8
     $matchingArguments = if ($development) { @('-DevelopmentPackage') } else { @() }
     Write-Manifest $identity.source_identity
+    & {
+        # Execute the production manifest projection against independently hashed files.
+        $expected = (Get-Content -LiteralPath $manifestPath -Raw |
+            ConvertFrom-Json).payload_hashes
+        $integrityHashes = @($expected | Select-Object -First $payload.Count)
+        $destinationRoot = $root
+        $payloadFiles = @($payload) + 'Data/package-integrity.ini'
+        $hashCalls = [Collections.Generic.List[string]]::new()
+        function Get-FileHash([string] $LiteralPath, [string] $Algorithm) {
+            $hashCalls.Add($LiteralPath)
+            Microsoft.PowerShell.Utility\Get-FileHash -LiteralPath $LiteralPath -Algorithm $Algorithm
+        }
+        $projection = $packageAst.Find({ param($node)
+            $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+            $node.Left.Extent.Text -ceq '$payloadHashes'
+        }, $true)
+        if ($null -eq $projection) { throw 'Package payload hash projection is missing' }
+        . ([scriptblock]::Create($projection.Extent.Text))
+        if ($hashCalls.Count -ne 1 -or $hashCalls[0] -ine $integrityPath) {
+            throw 'Package manifest must reuse payload hashes and hash only the new integrity file'
+        }
+        if (@($payloadHashes).Count -ne @($expected).Count) {
+            throw 'Package hash projection changed payload coverage'
+        }
+        for ($index = 0; $index -lt $expected.Count; ++$index) {
+            if ($payloadHashes[$index].path -cne $expected[$index].path -or
+                $payloadHashes[$index].sha256 -cne $expected[$index].sha256) {
+                throw 'Package hash projection changed the exact ordered path/hash entries'
+            }
+        }
+        Write-Host 'PASS: package manifest reuses exact ordered payload hashes and reads only the new integrity file'
+    }
     if ($identity.source_identity -notin @($current, "$current.dirty")) {
         # Direct CMake developer builds may intentionally use "unknown".
         Check-Validation 'Stale package source identity'

@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <Psapi.h>
 #include <TlHelp32.h>
+#include <processsnapshot.h>
 #include <algorithm>
 #include <atomic>
 #include <bit>
@@ -13,6 +14,7 @@ namespace kf2::telemetry {
 namespace {
 #ifdef KF2_PROCESS_METRICS_TESTING
 std::atomic_uint32_t process_metric_opens{0};
+std::atomic_bool fail_next_thread_snapshot_walk{false};
 #endif
 std::uint64_t value(FILETIME time) {
     return (static_cast<std::uint64_t>(time.dwHighDateTime) << 32U) |
@@ -348,6 +350,60 @@ void detail::ThreadPressureCache::miss(std::uint64_t now_ms) noexcept {
     }
 }
 
+Result<std::vector<std::uint32_t>> detail::query_process_thread_ids(
+    const game::GameProcessIdentity& identity) {
+    using ThreadIds = std::vector<std::uint32_t>;
+    std::unique_ptr<void, decltype(&CloseHandle)> process{
+        OpenProcess(PROCESS_QUERY_INFORMATION | SYNCHRONIZE, FALSE, identity.pid),
+        &CloseHandle};
+    if (!process) return Result<ThreadIds>::failure(
+        {ErrorCode::access_denied, L"Process thread snapshot cannot be opened", GetLastError()});
+    FILETIME creation{}, exit{}, kernel{}, user{};
+    if (!GetProcessTimes(process.get(), &creation, &exit, &kernel, &user))
+        return Result<ThreadIds>::failure(
+            {ErrorCode::platform_failure, L"Thread snapshot identity query failed", GetLastError()});
+    if (value(creation) != identity.process_start_id ||
+        WaitForSingleObject(process.get(), 0) != WAIT_TIMEOUT)
+        return Result<ThreadIds>::failure(
+            {ErrorCode::stale_data, L"Thread snapshot process identity changed", 0});
+
+    HPSS captured{};
+    const auto capture_status = PssCaptureSnapshot(
+        process.get(), PSS_CAPTURE_THREADS, 0, &captured);
+    if (capture_status != ERROR_SUCCESS) return Result<ThreadIds>::failure(
+        {ErrorCode::platform_failure, L"Process thread snapshot failed", capture_status});
+    const auto free_snapshot = [](void* snapshot) {
+        PssFreeSnapshot(GetCurrentProcess(), static_cast<HPSS>(snapshot));
+    };
+    std::unique_ptr<void, decltype(free_snapshot)> snapshot{captured, free_snapshot};
+    HPSSWALK created_marker{};
+    const auto marker_status = PssWalkMarkerCreate(nullptr, &created_marker);
+    if (marker_status != ERROR_SUCCESS) return Result<ThreadIds>::failure(
+        {ErrorCode::platform_failure, L"Thread snapshot walk marker failed", marker_status});
+    const auto free_marker = [](void* marker) {
+        PssWalkMarkerFree(static_cast<HPSSWALK>(marker));
+    };
+    std::unique_ptr<void, decltype(free_marker)> marker{created_marker, free_marker};
+    ThreadIds ids;
+    PSS_THREAD_ENTRY entry{};
+    DWORD status;
+    while ((status = PssWalkSnapshot(captured, PSS_WALK_THREADS,
+                created_marker, &entry, sizeof(entry))) == ERROR_SUCCESS) {
+        if (entry.ProcessId != identity.pid) return Result<ThreadIds>::failure(
+            {ErrorCode::stale_data, L"Thread snapshot contains a foreign process", 0});
+        if ((entry.Flags & PSS_THREAD_FLAGS_TERMINATED) == 0)
+            ids.push_back(entry.ThreadId);
+#ifdef KF2_PROCESS_METRICS_TESTING
+        if (fail_next_thread_snapshot_walk.exchange(false))
+            return Result<ThreadIds>::failure(
+                {ErrorCode::platform_failure, L"Injected partial thread snapshot failure", ERROR_GEN_FAILURE});
+#endif
+    }
+    if (status != ERROR_NO_MORE_ITEMS) return Result<ThreadIds>::failure(
+        {ErrorCode::platform_failure, L"Process thread snapshot walk failed", status});
+    return Result<ThreadIds>::success(std::move(ids));
+}
+
 class ProcessMetricSampler::NativeHandles final {
 public:
     ~NativeHandles() {
@@ -369,19 +425,28 @@ public:
         return process_;
     }
 
-    bool refresh(std::uint32_t pid) {
-        const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-        if (snapshot == INVALID_HANDLE_VALUE) return false;
+    bool refresh(const game::GameProcessIdentity& identity) {
+        const auto pid = identity.pid;
         std::unordered_set<std::uint32_t> current;
-        THREADENTRY32 entry{sizeof(entry)};
-        if (Thread32First(snapshot, &entry)) {
-            do {
-                if (entry.th32OwnerProcessID == pid) {
-                    current.insert(entry.th32ThreadID);
-                }
-            } while (Thread32Next(snapshot, &entry));
+        const auto scoped = detail::query_process_thread_ids(identity);
+        if (scoped.has_value()) {
+            current.insert(scoped.value().begin(), scoped.value().end());
+        } else {
+            if (scoped.error().code == ErrorCode::stale_data) return false;
+            // Preserve the existing read-only path for restricted processes
+            // or a failed snapshot. A partial PSS walk never replaces handles.
+            const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+            if (snapshot == INVALID_HANDLE_VALUE) return false;
+            THREADENTRY32 entry{sizeof(entry)};
+            if (Thread32First(snapshot, &entry)) {
+                do {
+                    if (entry.th32OwnerProcessID == pid) {
+                        current.insert(entry.th32ThreadID);
+                    }
+                } while (Thread32Next(snapshot, &entry));
+            }
+            CloseHandle(snapshot);
         }
-        CloseHandle(snapshot);
 
         for (auto iterator = handles_.begin(); iterator != handles_.end();) {
             if (current.contains(iterator->first) &&
@@ -603,9 +668,9 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
     previous_ = current;
 
     // Cached handles keep CPU-time sampling responsive at 500 ms. Refresh the
-    // membership separately because Toolhelp enumerates every thread on the
-    // machine; KF2's long-lived game/render threads stay continuously sampled,
-    // while a newly created thread becomes visible within five seconds.
+    // membership separately. A process-scoped snapshot avoids enumerating all
+    // Windows threads when query rights permit; restricted sessions retain
+    // Toolhelp. New threads still become visible within five seconds.
     constexpr std::uint64_t kThreadSampleIntervalMs = 500;
     constexpr std::uint64_t kThreadRefreshIntervalMs = 5'000;
     const std::uint64_t thread_now_ms = GetTickCount64();
@@ -619,10 +684,10 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
             thread_now_ms < *previous_thread_refresh_ms_ ||
             thread_now_ms - *previous_thread_refresh_ms_ >=
                 kThreadRefreshIntervalMs;
-        if (refresh_due && native_handles_->refresh(identity_.pid)) {
+        if (refresh_due && native_handles_->refresh(identity_)) {
             previous_thread_refresh_ms_ = thread_now_ms;
         }
-        // A transient Toolhelp failure must not discard the valid handles
+        // A transient discovery failure must not discard the valid handles
         // from the previous refresh. Continue sampling them and retry the
         // membership refresh on the next telemetry tick.
         if (!native_handles_->empty()) {
@@ -658,6 +723,9 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
 #ifdef KF2_PROCESS_METRICS_TESTING
 std::uint32_t detail::process_metric_opens_for_testing() noexcept {
     return process_metric_opens.load();
+}
+void detail::fail_next_process_thread_snapshot_walk_for_testing() noexcept {
+    fail_next_thread_snapshot_walk.store(true);
 }
 #endif
 }  // namespace kf2::telemetry

@@ -1017,6 +1017,41 @@ int main() {
     CHECK(!diagnostics_off->telemetry_corpse_lod_total.has_value());
     CHECK(!diagnostics_off->telemetry_dismembered_corpses.has_value());
     CHECK(diagnostics_off->telemetry_corpse_collide_dead == true);
+    CHECK(!diagnostics_off->telemetry_visible_gibs.has_value());
+    CHECK(!diagnostics_off->telemetry_spray_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_fire_spray_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_toxic_spray_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_other_spray_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_damaging_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_fire_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_toxic_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_other_damaging_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_unclassified_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_lingering_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_smoke_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_bloat_king_fart_explosion_actors.has_value());
+    CHECK(!diagnostics_off->telemetry_smoke_grenade_projectiles.has_value());
+    CHECK(!diagnostics_off->telemetry_puke_mine_projectiles.has_value());
+    CHECK(!diagnostics_off->telemetry_bloat_king_puke_mine_projectiles.has_value());
+    CHECK(diagnostics_off->telemetry_world_particles == 987);
+    CHECK(diagnostics_off->telemetry_particle_peak_capacity == 2048);
+    CHECK(diagnostics_off->telemetry_wound_decals == 12);
+    const auto diagnostics_on = diagnostics_off_stream.feed(telemetry_line(3));
+    CHECK(diagnostics_on.has_value());
+    CHECK(diagnostics_on->telemetry_visible_gibs == 11);
+    CHECK(diagnostics_on->telemetry_spray_actors == 6);
+    CHECK(diagnostics_on->telemetry_explosion_actors == 5);
+    CHECK(diagnostics_on->telemetry_smoke_grenade_projectiles == 2);
+    CHECK(diagnostics_on->telemetry_puke_mine_projectiles == 3);
+    const auto diagnostics_zero = diagnostics_off_stream.feed(
+        replace_once(empty_telemetry_line(), "sample=1", "sample=4"));
+    CHECK(diagnostics_zero.has_value());
+    CHECK(diagnostics_zero->telemetry_visible_gibs == 0);
+    CHECK(diagnostics_zero->telemetry_spray_actors == 0);
+    CHECK(diagnostics_zero->telemetry_explosion_actors == 0);
+    CHECK(diagnostics_zero->telemetry_smoke_grenade_projectiles == 0);
+    CHECK(diagnostics_zero->telemetry_puke_mine_projectiles == 0);
     CHECK(!stream.feed(telemetry_line(8, 4),
                        4'600'000'000ULL).has_value());
     // Previous telemetry schemas remain unsupported rather than being parsed

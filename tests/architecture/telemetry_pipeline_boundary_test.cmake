@@ -181,6 +181,17 @@ reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
     "std::wostringstream prediction"
     "status.adaptive_action = widen("
     "status.adaptive_safety = widen(")
+reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
+    "Completed Adaptive diagnostic buffer transfer"
+    "request_log.str()"
+    "decision_log.str()")
+reject_literals("${stage_root}/telemetry_adaptive_controller.cpp"
+    "Unchanged selected Adaptive action text"
+    "    } else {\n        status.adaptive_action.assign(adaptive_decision.selected_setting.begin(),")
+reject_literals("${stage_root}/telemetry_adaptive_stage.cpp"
+    "Completed Adaptive sample and response buffer transfer"
+    "measurement.str()"
+    "message.str()")
 reject_literals("${stage_root}/telemetry_presentation_stage.cpp"
     "Presentation stage"
     "DxgiFrameTimingSession"
@@ -191,6 +202,10 @@ reject_literals("${stage_root}/telemetry_presentation_stage.cpp"
     "write_fixed_control"
     "atomic_replace_utf8"
     "restore_protected_session_config")
+reject_literals("${stage_root}/telemetry_presentation_stage.hpp"
+    "Completed telemetry buffer transfer"
+    "result.telemetry = text.str()"
+    "result.performance_analysis = details.str()")
 reject_literals("${stage_root}/telemetry_effect_stage.cpp"
     "Effect stage"
     "DxgiFrameTimingSession::start"

@@ -531,6 +531,10 @@ bool apply_offline_telemetry_snapshot(
         if (target) changed = true;
         target.reset();
     };
+    const auto update_diagnostic = [&](auto& target, const auto value) noexcept {
+        if (telemetry.scan_diagnostics) update(target, value);
+        else reset(target);
+    };
     update(session.telemetry_sample, telemetry.sample);
     update(session.telemetry_living_zeds, telemetry.living);
     update(session.telemetry_living_visible, telemetry.living_visible);
@@ -639,35 +643,35 @@ bool apply_offline_telemetry_snapshot(
     update(
         session.telemetry_corpse_collide_living_after_sleep,
         telemetry.corpse_collide_living_after_sleep);
-    update(session.telemetry_visible_gibs, telemetry.gibs);
-    update(session.telemetry_spray_actors, telemetry.spray_actors);
-    update(session.telemetry_fire_spray_actors, telemetry.fire_spray_actors);
-    update(session.telemetry_toxic_spray_actors, telemetry.toxic_spray_actors);
-    update(session.telemetry_other_spray_actors, telemetry.other_spray_actors);
-    update(session.telemetry_explosion_actors, telemetry.explosion_actors);
-    update(
+    update_diagnostic(session.telemetry_visible_gibs, telemetry.gibs);
+    update_diagnostic(session.telemetry_spray_actors, telemetry.spray_actors);
+    update_diagnostic(session.telemetry_fire_spray_actors, telemetry.fire_spray_actors);
+    update_diagnostic(session.telemetry_toxic_spray_actors, telemetry.toxic_spray_actors);
+    update_diagnostic(session.telemetry_other_spray_actors, telemetry.other_spray_actors);
+    update_diagnostic(session.telemetry_explosion_actors, telemetry.explosion_actors);
+    update_diagnostic(
         session.telemetry_damaging_explosion_actors,
         telemetry.damaging_explosion_actors);
-    update(session.telemetry_fire_explosion_actors, telemetry.fire_explosion_actors);
-    update(session.telemetry_toxic_explosion_actors, telemetry.toxic_explosion_actors);
-    update(
+    update_diagnostic(session.telemetry_fire_explosion_actors, telemetry.fire_explosion_actors);
+    update_diagnostic(session.telemetry_toxic_explosion_actors, telemetry.toxic_explosion_actors);
+    update_diagnostic(
         session.telemetry_other_damaging_explosion_actors,
         telemetry.other_damaging_explosion_actors);
-    update(
+    update_diagnostic(
         session.telemetry_unclassified_explosion_actors,
         telemetry.unclassified_explosion_actors);
-    update(
+    update_diagnostic(
         session.telemetry_lingering_explosion_actors,
         telemetry.lingering_explosion_actors);
-    update(session.telemetry_smoke_explosion_actors, telemetry.smoke_explosion_actors);
-    update(
+    update_diagnostic(session.telemetry_smoke_explosion_actors, telemetry.smoke_explosion_actors);
+    update_diagnostic(
         session.telemetry_bloat_king_fart_explosion_actors,
         telemetry.bloat_king_fart_explosion_actors);
-    update(
+    update_diagnostic(
         session.telemetry_smoke_grenade_projectiles,
         telemetry.smoke_grenade_projectiles);
-    update(session.telemetry_puke_mine_projectiles, telemetry.puke_mine_projectiles);
-    update(
+    update_diagnostic(session.telemetry_puke_mine_projectiles, telemetry.puke_mine_projectiles);
+    update_diagnostic(
         session.telemetry_bloat_king_puke_mine_projectiles,
         telemetry.bloat_king_puke_mine_projectiles);
     update(session.telemetry_wound_decals, telemetry.wound_decals);

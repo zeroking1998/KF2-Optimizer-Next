@@ -90,15 +90,26 @@ Later builds reuse the local ignored module as their seed.
 
 The complete package is written to `out/package/KF2OptimizerNext`. The scripts
 bind the application to the newly compiled telemetry hash and refuse to create
-a reduced or mismatched package. A deterministic fingerprint covers all seven
-UnrealScript source files. If any source changes, packaging recompiles the
-telemetry module instead of silently reusing an older local `.u` file. The
-one-click flow also validates every managed file and package hash before
+a reduced or mismatched package. A deterministic fingerprint covers every required
+UnrealScript source, including both runtime guards. If any source changes,
+packaging recompiles the telemetry module instead of silently reusing an older
+local `.u` file. The one-click flow also validates every managed file and package hash before
 reporting success.
 
 The executable carries the same source identity in its Windows version resource
 as the app's title. Packaging checks it before changing an existing destination,
 including with `-SkipBuild`; it cannot relabel an older executable as a new build.
+Packaging always incrementally builds the small inventory exporter before
+changing the destination, even when the app build is skipped. This keeps the
+shipped inventory current without a second contributor-owned build step.
+The required FleX forwarding DLL is checked before exporter work or destination
+changes, so a missing build artifact preserves an existing package.
+The two package manifests share the same completed payload hashes instead of
+reading every payload twice. Release validation still hashes files independently.
+All entries in an existing package manifest are validated before cleanup starts;
+an unsafe entry preserves the existing files rather than leaving a partial package.
+Existing junctions or symbolic links in managed output paths or their ancestors
+are rejected before package changes, preventing writes through a redirected folder.
 Contributor packaging explicitly uses `-DevelopmentPackage` for local checks.
 This mode is not release-candidate approval.
 

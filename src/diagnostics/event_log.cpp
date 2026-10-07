@@ -355,12 +355,13 @@ std::string serialize_events_json(const std::vector<Event>& events) {
     output << "{\"version\":1,\"events\":[";
     write_events(output, events);
     output << "]}";
-    return output.str();
+    return std::move(output).str();
 }
 
-std::string serialize_product_report_json(const ProductReport& report) {
+namespace {
+
+void write_product_report(std::ostringstream& output, const ProductReport& report) {
     const auto text = [](std::wstring_view value) { return json_escape(utf8(value)); };
-    std::ostringstream output;
     output << "{\"schema\":\"KF2_OPTIMIZER_DIAGNOSTICS_V2\""
            << ",\"build_identity\":\"" << text(report.build_identity) << "\""
            << ",\"runtime\":{\"mode\":\"" << text(report.mode)
@@ -597,7 +598,14 @@ std::string serialize_product_report_json(const ProductReport& report) {
            << ",\"events\":[";
     write_events(output, report.events);
     output << "]}";
-    return output.str();
+}
+
+}  // namespace
+
+std::string serialize_product_report_json(const ProductReport& report) {
+    std::ostringstream output;
+    write_product_report(output, report);
+    return std::move(output).str();
 }
 
 std::string serialize_support_bundle_json(
@@ -608,12 +616,13 @@ std::string serialize_support_bundle_json(
     std::ostringstream output;
     output << "{\"schema\":\"KF2_OPTIMIZER_SUPPORT_BUNDLE_V1\""
            << ",\"privacy\":\"Local only; no dump, command line, user files or uploaded data\""
-           << ",\"diagnostics\":" << serialize_product_report_json(report)
-           << ",\"issue72_inventory\":";
+           << ",\"diagnostics\":";
+    write_product_report(output, report);
+    output << ",\"issue72_inventory\":";
     if (inventory_is_object) output << issue72_inventory_json;
     else output << "null";
     output << '}';
-    return output.str();
+    return std::move(output).str();
 }
 
 }  // namespace kf2::diagnostics

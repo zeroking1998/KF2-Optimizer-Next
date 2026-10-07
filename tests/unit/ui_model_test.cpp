@@ -121,6 +121,82 @@ int main() {
         CHECK(adaptive_model.presented_target_fps() == 125);
         CHECK(adaptive_model.selected() == Destination::debug);
         CHECK(adaptive_model.notice() && adaptive_model.notice()->code == L"UNCHANGED");
+        static_assert(noexcept(std::declval<UiModel&>().set_overlay_diagnostics(
+            std::declval<std::wstring>())));
+        const auto* adaptive_reason_text =
+            adaptive_model.status().adaptive_reason.data();
+        std::wstring overlay_text = L"Current owned overlay diagnostic summary";
+        adaptive_model.set_overlay_diagnostics(overlay_text);
+        overlay_text[0] = L'X';
+        CHECK(adaptive_model.status().overlay_diagnostics ==
+              L"Current owned overlay diagnostic summary");
+        adaptive_model.set_overlay_diagnostics(
+            adaptive_model.status().overlay_diagnostics);
+        CHECK(adaptive_model.status().overlay_diagnostics ==
+              L"Current owned overlay diagnostic summary");
+        adaptive_model.set_overlay_diagnostics(L"");
+        CHECK(adaptive_model.status().overlay_diagnostics.empty());
+        CHECK(matches(AdaptiveUiStatus{}));
+        CHECK(adaptive_model.status().graphics_values == unrelated.graphics_values);
+        CHECK(adaptive_model.status().advanced_values == unrelated.advanced_values);
+        CHECK(adaptive_model.status().flex_telemetry == unrelated.flex_telemetry);
+        CHECK(adaptive_model.status().telemetry == unrelated.telemetry);
+        CHECK(adaptive_model.status().prewarm_map == unrelated.prewarm_map);
+        CHECK(adaptive_model.status().graphics_values[0].data() == graphics_text);
+        CHECK(adaptive_model.status().update_status.data() == update_text);
+        CHECK(adaptive_model.status().adaptive_reason.data() == adaptive_reason_text);
+        CHECK(adaptive_model.presented_target_fps() == 125);
+        CHECK(adaptive_model.selected() == Destination::debug);
+        CHECK(adaptive_model.notice() && adaptive_model.notice()->code == L"UNCHANGED");
+    }
+    {
+        UiModel prewarm_model;
+        UiStatus seeded;
+        seeded.graphics_values.fill(L"Saved graphics values remain unchanged");
+        seeded.advanced_values.fill(L"Saved advanced values remain unchanged");
+        seeded.target_fps = 119;
+        seeded.corpse_limit = 1242;
+        prewarm_model.set_status(seeded);
+        prewarm_model.preview_target_fps(125);
+        const auto* graphics_text = prewarm_model.status().graphics_values[0].data();
+        const auto* adaptive_text = prewarm_model.status().adaptive_reason.data();
+        static_assert(noexcept(std::declval<UiModel&>().set_prewarm_progress(
+            true, 37, std::declval<std::wstring>())));
+        static_assert(noexcept(std::declval<UiModel&>().set_prewarm_diagnostics(
+            std::declval<std::wstring>())));
+        std::wstring map = L"KF-PrivateProgress";
+        prewarm_model.set_prewarm_progress(true, 37, map);
+        map[0] = L'X';
+        CHECK(prewarm_model.status().prewarm_active);
+        CHECK(prewarm_model.status().prewarm_percent == 37);
+        CHECK(prewarm_model.status().prewarm_map == L"KF-PrivateProgress");
+        prewarm_model.set_prewarm_progress(
+            true, 58, prewarm_model.status().prewarm_map);
+        CHECK(prewarm_model.status().prewarm_percent == 58);
+        CHECK(prewarm_model.status().prewarm_map == L"KF-PrivateProgress");
+        prewarm_model.set_prewarm_progress(
+            false, prewarm_model.status().prewarm_percent, L"");
+        CHECK(!prewarm_model.status().prewarm_active);
+        CHECK(prewarm_model.status().prewarm_percent == 58);
+        CHECK(prewarm_model.status().prewarm_map.empty());
+        prewarm_model.set_prewarm_progress(false, 0, L"");
+        CHECK(prewarm_model.status().prewarm_percent == 0);
+        std::wstring diagnostics = L"Current owned prewarm diagnostics";
+        prewarm_model.set_prewarm_diagnostics(diagnostics);
+        diagnostics[0] = L'X';
+        prewarm_model.set_prewarm_diagnostics(
+            prewarm_model.status().prewarm_diagnostics);
+        CHECK(prewarm_model.status().prewarm_diagnostics ==
+              L"Current owned prewarm diagnostics");
+        prewarm_model.set_prewarm_diagnostics(L"");
+        CHECK(prewarm_model.status().prewarm_diagnostics.empty());
+        CHECK(prewarm_model.status().graphics_values == seeded.graphics_values);
+        CHECK(prewarm_model.status().advanced_values == seeded.advanced_values);
+        CHECK(prewarm_model.status().graphics_values[0].data() == graphics_text);
+        CHECK(prewarm_model.status().adaptive_reason.data() == adaptive_text);
+        CHECK(prewarm_model.status().target_fps == 119);
+        CHECK(prewarm_model.status().corpse_limit == 1242);
+        CHECK(prewarm_model.presented_target_fps() == 125);
     }
     UiModel model;
     CHECK(model.selected() == Destination::dashboard);

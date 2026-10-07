@@ -221,6 +221,7 @@ var int ProfileZedDebugMilliseconds;
 var int ProfileMaxZedDebugMilliseconds;
 var int ProfileClockAnomalies;
 var DiagnosticEffectTelemetrySnapshot CachedDiagnosticEffects;
+var bool bDiagnosticEffectCacheInitialized;
 var WorldEmitterTelemetrySnapshot CachedWorldEmitters;
 var array<WorldEmitterTemplateTelemetrySnapshot> CachedWorldEmitterTemplates;
 var array<WorldEmitterTemplateTelemetrySnapshot> CachedWorldEmitterTraversalSnapshots;
@@ -902,6 +903,7 @@ function bool ApplyAdaptiveWorldParticleIdleControl(int Quality)
     local float DesiredSeconds;
     local float EffectiveSeconds;
     local bool bReadbackMatches;
+    local bool bOwnerMatches;
 
     if (Quality >= 100)
     {
@@ -920,8 +922,9 @@ function bool ApplyAdaptiveWorldParticleIdleControl(int Quality)
         }
         StateIndex = FindAdaptiveWorldParticleIdleState(
             PathName(ParticleComponent), NewStateIndex);
-        if (StateIndex != INDEX_NONE &&
-            AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter))
+        bOwnerMatches = StateIndex != INDEX_NONE &&
+            AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter);
+        if (bOwnerMatches)
         {
             AdaptiveWorldParticleIdleStates[StateIndex].LastSeenGeneration =
                 CurrentGeneration;
@@ -932,8 +935,7 @@ function bool ApplyAdaptiveWorldParticleIdleControl(int Quality)
         {
             continue;
         }
-        if (StateIndex == INDEX_NONE ||
-            !AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter))
+        if (!bOwnerMatches)
         {
             NewState.ComponentPath = PathName(ParticleComponent);
             NewState.OwnerCreationTime = WorldEmitter.CreationTime;
@@ -6025,9 +6027,19 @@ function RefreshDiagnosticEffectCache()
     local KFProj_HansSmokeGrenade SmokeGrenadeProjectile;
     local KFProj_BloatPukeMine PukeMineProjectile;
 
+    if (!bDetailedRuntimeDiagnostics)
+    {
+        if (bDiagnosticEffectCacheInitialized)
+        {
+            CachedDiagnosticEffects = default.CachedDiagnosticEffects;
+            bDiagnosticEffectCacheInitialized = false;
+        }
+        return;
+    }
+
     // Bootstrap one complete snapshot, then rotate one typed iterator per
     // sample. Diagnostic actor scans therefore never stack in a normal frame.
-    if (SampleSequence == 0 ||
+    if (!bDiagnosticEffectCacheInitialized ||
         SampleSequence % DiagnosticEffectScanInterval == 0)
     {
         CachedDiagnosticEffects.SprayActors = 0;
@@ -6059,7 +6071,7 @@ function RefreshDiagnosticEffectCache()
         }
     }
 
-    if (SampleSequence == 0 ||
+    if (!bDiagnosticEffectCacheInitialized ||
         SampleSequence % DiagnosticEffectScanInterval == 1)
     {
         CachedDiagnosticEffects.ExplosionActors = 0;
@@ -6118,7 +6130,7 @@ function RefreshDiagnosticEffectCache()
         }
     }
 
-    if (SampleSequence == 0 ||
+    if (!bDiagnosticEffectCacheInitialized ||
         SampleSequence % DiagnosticEffectScanInterval == 2)
     {
         CachedDiagnosticEffects.SmokeGrenadeProjectiles = 0;
@@ -6133,7 +6145,7 @@ function RefreshDiagnosticEffectCache()
         }
     }
 
-    if (SampleSequence == 0 ||
+    if (!bDiagnosticEffectCacheInitialized ||
         SampleSequence % DiagnosticEffectScanInterval == 3)
     {
         CachedDiagnosticEffects.PukeMineProjectiles = 0;
@@ -6153,7 +6165,7 @@ function RefreshDiagnosticEffectCache()
         }
     }
 
-    if (SampleSequence == 0 ||
+    if (!bDiagnosticEffectCacheInitialized ||
         SampleSequence % DiagnosticEffectScanInterval == 4)
     {
         CachedDiagnosticEffects.VisibleGibs = 0;
@@ -6165,6 +6177,7 @@ function RefreshDiagnosticEffectCache()
             }
         }
     }
+    bDiagnosticEffectCacheInitialized = true;
 }
 
 function RefreshWorldEmitterCache(bool bCollectWorldParticleGroups)
@@ -6295,6 +6308,7 @@ function SampleTelemetry()
     local int CorpseTotal;
     local int CorpseAwake;
     local int CorpseSleeping;
+    local bool bCorpseAwake;
     local int CorpseOther;
     local int CorpseFinalPose;
     local int CorpseRecentlyRendered;
@@ -6592,6 +6606,9 @@ function SampleTelemetry()
                 continue;
             }
             ++CorpseTotal;
+            // One native observation feeds both telemetry and pressure counts.
+            bCorpseAwake = Corpse.Physics == PHYS_RigidBody &&
+                Corpse.Mesh != None && Corpse.Mesh.RigidBodyIsAwake();
             if (bDetailedRuntimeDiagnostics)
             {
                 CollisionProbeCorpse = Corpse;
@@ -6624,14 +6641,12 @@ function SampleTelemetry()
                     WorldInfo.TimeSeconds - 0.3)
                 {
                     ++AdaptiveCachedVisibleCorpses;
-                    if (Corpse.Physics == PHYS_RigidBody &&
-                        Corpse.Mesh.RigidBodyIsAwake())
+                    if (bCorpseAwake)
                     {
                         ++AdaptiveCachedVisibleAwakeCorpses;
                     }
                 }
-                if (Corpse.Physics == PHYS_RigidBody &&
-                    Corpse.Mesh.RigidBodyIsAwake())
+                if (bCorpseAwake)
                 {
                     ++AdaptiveCachedAwakeCorpses;
                 }
@@ -6670,7 +6685,7 @@ function SampleTelemetry()
             {
                 ++CorpseOther;
             }
-            else if (Corpse.Mesh.RigidBodyIsAwake())
+            else if (bCorpseAwake)
             {
                 ++CorpseAwake;
             }
@@ -7007,8 +7022,10 @@ function SampleTelemetry()
     {
         ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
     }
-    bCollectWorldParticleGroups = SampleSequence == 0 ||
-        SampleSequence % WorldParticleGroupScanInterval == 5;
+    // Template attribution is a diagnostic report, not an Adaptive input.
+    bCollectWorldParticleGroups = bDetailedRuntimeDiagnostics &&
+        (SampleSequence == 0 ||
+         SampleSequence % WorldParticleGroupScanInterval == 5);
     if (bCollectWorldParticleGroups)
     {
         ScannedWorldParticleGroups.Length = 0;

@@ -190,6 +190,9 @@ public:
         std::optional<int> effective_substeps, std::wstring action_status,
         std::wstring substep_diagnostics, std::wstring readback_diagnostics) noexcept;
     void set_flex_capability(std::wstring capability) noexcept;
+    void set_overlay_diagnostics(std::wstring diagnostics) noexcept;
+    void set_prewarm_progress(bool active, int percent, std::wstring map) noexcept;
+    void set_prewarm_diagnostics(std::wstring diagnostics) noexcept;
     void set_notice(Notice notice);
     void clear_notice() noexcept;
 

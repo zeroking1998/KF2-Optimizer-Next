@@ -174,7 +174,7 @@ void UiRuntime::log_adaptive_performance_sample(
                                         frame.gameplay->map.end()};
         }
         events->append({0, diagnostics::Severity::info,
-                        "PERFORMANCE_SAMPLE", measurement.str(),
+                        "PERFORMANCE_SAMPLE", std::move(measurement).str(),
                         L"telemetry"});
         last_performance_sample_log_ns = now_ns;
         last_performance_sample_adaptive_mode = adaptive_mode;
@@ -264,7 +264,7 @@ void UiRuntime::log_adaptive_quality_response(
     append(L"before", report->before);
     append(L"after", report->after);
     events->append({0, diagnostics::Severity::info,
-        "ADAPTIVE_QUALITY_RESPONSE", message.str(), L"optimizer"});
+        "ADAPTIVE_QUALITY_RESPONSE", std::move(message).str(), L"optimizer"});
 }
 
 optimizer::QualityResponse::Context

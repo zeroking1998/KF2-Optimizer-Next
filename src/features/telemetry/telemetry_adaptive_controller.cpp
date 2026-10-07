@@ -505,7 +505,7 @@ void UiRuntime::update_adaptive_controller(
                         << L"; lastAppliedNs=" << adaptive_quality_last_applied_ns;
                     events->append({0, diagnostics::Severity::info,
                         "ADAPTIVE_RUNTIME_QUALITY_REQUESTED",
-                        request_log.str(), L"optimizer"});
+                        std::move(request_log).str(), L"optimizer"});
                 }
             } else {
                 static_cast<void>(adaptive_actuation.receive({
@@ -572,17 +572,18 @@ void UiRuntime::update_adaptive_controller(
             }
         }
     }
+    const auto disposition_label = optimizer::adaptive_disposition_name(
+        adaptive_decision.disposition);
     if (adaptive_decision.selected_setting.empty()) {
-        const auto disposition_label = optimizer::adaptive_disposition_name(
-            adaptive_decision.disposition);
         if (status.adaptive_action != disposition_label)
             status.adaptive_action = disposition_label;
-    } else {
+    } else if (!telemetry_pipeline::adaptive_action_text_matches(
+            status.adaptive_action, adaptive_decision.selected_setting,
+            disposition_label)) {
         status.adaptive_action.assign(adaptive_decision.selected_setting.begin(),
             adaptive_decision.selected_setting.end());
         status.adaptive_action += L" (";
-        status.adaptive_action += optimizer::adaptive_disposition_name(
-            adaptive_decision.disposition);
+        status.adaptive_action += disposition_label;
         status.adaptive_action += L')';
     }
     assign_widened(status.recommendation_reason, adaptive_decision.reason);
@@ -871,7 +872,7 @@ void UiRuntime::update_adaptive_controller(
                      << status.adaptive_restore_generation;
         events->append({0, diagnostics::Severity::info,
             "ADAPTIVE_DECISION",
-            decision_log.str(),
+            std::move(decision_log).str(),
             L"optimizer"});
         last_adaptive_state = adaptive_decision.state;
         last_adaptive_disposition = adaptive_decision.disposition;

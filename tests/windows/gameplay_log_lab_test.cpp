@@ -1042,11 +1042,40 @@ int main() {
     const auto weapon_standalone_guard = graphics_interaction_source.find(
         "if (CurrentWorld.NetMode != NM_Standalone)", runtime_guard);
     CHECK(runtime_guard_function != std::string::npos);
+    const auto guard_end = graphics_interaction_source.find(
+        "\nfunction ", runtime_guard_function + 1);
+    const auto guard_body = std::string_view{graphics_interaction_source}.substr(
+        runtime_guard_function, guard_end - runtime_guard_function);
+    const auto pawn_scan = guard_body.find(
+        "foreach CurrentWorld.AllPawns(class'KFPawn', Pawn)");
+    const auto weapon_scan = guard_body.find(
+        "foreach CurrentWorld.DynamicActors(class'KFWeapon', Weapon)");
+    const auto changed_check = guard_body.find(
+        "bChanged = UpdatedWeaponMaterialCount > 0 ||");
+    CHECK(pawn_scan != std::string_view::npos);
+    CHECK(weapon_scan != std::string_view::npos && pawn_scan < weapon_scan);
+    CHECK(changed_check != std::string_view::npos && weapon_scan < changed_check);
+    CHECK(guard_body.find("EnsureWeaponClassFallback(Pawn)", pawn_scan) <
+          weapon_scan);
+    CHECK(guard_body.find("ReplaceExistingFireAffliction(Pawn)", pawn_scan) <
+          weapon_scan);
+    CHECK(guard_body.find("EnsureTurretWeaponMaterial(Weapon)", weapon_scan) <
+          changed_check);
+    CHECK(guard_body.find("Pawn = KFPawn(Candidate);") ==
+          std::string_view::npos);
+    CHECK(guard_body.find("Weapon = KFWeapon(Candidate);") ==
+          std::string_view::npos);
+    CHECK(guard_body.find("if (Pawn == None || Pawn.bDeleteMe") ==
+          std::string_view::npos);
     CHECK(runtime_guard != std::string::npos);
     CHECK(weapon_standalone_guard != std::string::npos);
     CHECK(runtime_guard < weapon_standalone_guard);
     CHECK(count_occurrences(graphics_interaction_source,
-        "foreach CurrentWorld.DynamicActors(class'Actor', Candidate)") == 1);
+        "foreach CurrentWorld.DynamicActors(class'Actor', Candidate)") == 0);
+    CHECK(count_occurrences(graphics_interaction_source,
+        "foreach CurrentWorld.AllPawns(class'KFPawn', Pawn)") == 1);
+    CHECK(count_occurrences(graphics_interaction_source,
+        "foreach CurrentWorld.DynamicActors(class'KFWeapon', Weapon)") == 1);
     CHECK(graphics_interaction_source.find(
         "DynamicActors(class'KFWeap_HRG_Warthog'") == std::string::npos);
     CHECK(graphics_interaction_source.find(
@@ -3078,6 +3107,23 @@ int main() {
           std::string::npos);
     // Only published metrics and controller inputs justify native awake queries.
     CHECK(telemetry_source.find("CorpseVisibleAwake") == std::string::npos);
+    const auto sample_start = telemetry_source.find("function SampleTelemetry()");
+    const auto sample_end = telemetry_source.find(
+        "function QuiesceForWorldTeardown()", sample_start);
+    CHECK(sample_start != std::string::npos && sample_end != std::string::npos);
+    const auto sample_body = telemetry_source.substr(
+        sample_start, sample_end - sample_start);
+    CHECK(count_occurrences(sample_body, "Corpse.Mesh.RigidBodyIsAwake()") == 1);
+    const auto corpse_total = sample_body.find("++CorpseTotal;");
+    const auto awake_observation = sample_body.find(
+        "bCorpseAwake = Corpse.Physics == PHYS_RigidBody &&\n"
+        "                Corpse.Mesh != None && Corpse.Mesh.RigidBodyIsAwake();");
+    const auto corpse_eligibility = sample_body.find(
+        "if (!Corpse.bDeleteMe && KFPawn_Monster(Corpse) != None &&");
+    CHECK(corpse_total != std::string::npos);
+    CHECK(corpse_eligibility != std::string::npos);
+    CHECK(awake_observation > corpse_total && awake_observation < corpse_eligibility);
+    CHECK(count_occurrences(sample_body, "if (bCorpseAwake)") == 3);
     CHECK(telemetry_source.find(
         "AwakeTotal = AdaptiveCachedAwakeCorpses;") !=
           std::string::npos);
@@ -3586,7 +3632,7 @@ int main() {
     const auto diagnostic_scan_start = telemetry_source.find(
         "function RefreshDiagnosticEffectCache()");
     const auto diagnostic_scan_end = telemetry_source.find(
-        "function SampleTelemetry()", diagnostic_scan_start);
+        "function RefreshWorldEmitterCache(", diagnostic_scan_start);
     CHECK(diagnostic_scan_start != std::string::npos);
     CHECK(diagnostic_scan_end != std::string::npos);
     const auto diagnostic_scan = telemetry_source.substr(
@@ -3611,7 +3657,21 @@ int main() {
         CHECK(telemetry_source.find(phased_effect_scan) != std::string::npos);
     }
     CHECK(count_occurrences(
-        telemetry_source, "SampleSequence == 0 ||") >= 5);
+        diagnostic_scan, "!bDiagnosticEffectCacheInitialized ||") == 5);
+    const auto diagnostics_gate = diagnostic_scan.find(
+        "if (!bDetailedRuntimeDiagnostics)");
+    const auto diagnostics_return = diagnostic_scan.find("return;", diagnostics_gate);
+    CHECK(diagnostics_gate != std::string::npos);
+    CHECK(diagnostics_return < diagnostic_scan.find("foreach WorldInfo.AllActors"));
+    CHECK(diagnostic_scan.find(
+        "CachedDiagnosticEffects = default.CachedDiagnosticEffects;") !=
+          std::string::npos);
+    CHECK(diagnostic_scan.find("bDiagnosticEffectCacheInitialized = false;") !=
+          std::string::npos);
+    CHECK(diagnostic_scan.find("bDiagnosticEffectCacheInitialized = true;") !=
+          std::string::npos);
+    CHECK(diagnostic_scan.find("bDiagnosticEffectCacheInitialized = true;") >
+          diagnostic_scan.rfind("foreach WorldInfo.AllActors"));
     CHECK(telemetry_source.find(
         "rotate one typed iterator per sample") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -3703,6 +3763,9 @@ int main() {
     }
     CHECK(telemetry_source.find(
         "const WorldParticleGroupScanInterval=30;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "bCollectWorldParticleGroups = bDetailedRuntimeDiagnostics &&") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "struct WorldParticleGroupTelemetrySnapshot") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -3798,8 +3861,15 @@ int main() {
     CHECK(restore_owner_check != std::string::npos);
     CHECK(restore_write != std::string::npos);
     CHECK(restore_owner_check < restore_write);
-    const auto replacement_check = idle_apply.find(
-        "!AdaptiveWorldParticleIdleOwnerMatches(");
+    CHECK(count_occurrences(idle_apply,
+        "AdaptiveWorldParticleIdleOwnerMatches(") == 1);
+    CHECK(idle_apply.find(
+        "bOwnerMatches = StateIndex != INDEX_NONE &&\n"
+        "            AdaptiveWorldParticleIdleOwnerMatches(StateIndex, WorldEmitter);") !=
+          std::string::npos);
+    CHECK(idle_apply.find("if (bOwnerMatches)") <
+          idle_apply.find("LastSeenGeneration ="));
+    const auto replacement_check = idle_apply.find("if (!bOwnerMatches)");
     const auto replacement_capture = idle_apply.find(
         "OriginalSecondsBeforeInactive =");
     CHECK(replacement_check != std::string::npos);

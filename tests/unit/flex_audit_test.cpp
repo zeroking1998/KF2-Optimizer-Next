@@ -46,10 +46,6 @@ int main() {
         std::filesystem::remove_all(sandbox, ec);
         return 1;
     }
-    const auto json = kf2::flex::serialize_audit_json(audit.value());
-    if (json.find("offline_lab_only") == std::string::npos ||
-        json.find("abi_compatible") == std::string::npos)
-        return 2;
     kf2::flex::HookGateEvidence gate{
         .abi_compatible = true,
         .exact_runtime_identity = true,

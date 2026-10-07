@@ -8,13 +8,89 @@ are visible immediately.
 
 ### What's new
 
+- Bound corpse and living-Zed tracking history without discarding restoration
+  originals; permanent corpse-LOD readback receipts roll over at capacity.
+
+- Skip diagnostic particle-template attribution and its detailed reports while
+  Runtime diagnostics is off; normal particle measurements and Adaptive inputs
+  remain available, without changing the report format or sampling interval.
+
+- Discover KF2 thread membership with a process-scoped snapshot instead of
+  walking every Windows thread when query rights permit. Keep the original
+  read-only fallback, CPU-time measurements and sampling intervals unchanged.
+
+- Reuse one physics awake observation per corpse in each offline telemetry
+  sample, preserving pressure and published counts without a retained cache.
+
+- Let native pawn/weapon iterators filter runtime-guard targets, avoiding script
+  casts for unrelated actors without changing repairs or their 50–250 ms cadence.
+
+- Skip diagnostic-only spray, explosion, projectile and gib Actor scans while
+  Runtime diagnostics is off; Adaptive inputs remain active and uncollected
+  counters are not reported as measured zero.
+
+- Reuse unchanged selected Adaptive action text instead of rebuilding it;
+  exact labels, decisions, diagnostics and restoration are unchanged.
+
+- Transfer completed Adaptive performance-sample and quality-response diagnostic
+  buffers instead of copying them; exact text, logging gates, sample cadence and
+  retained-event bounds are unchanged.
+
+- Transfer completed Adaptive diagnostic buffers instead of copying them;
+  log text, bounds, diagnostic gates and controller behavior are unchanged.
+- Include both runtime-guard sources in the telemetry build fingerprint so changes
+  cannot silently reuse an older module; no gameplay logic is changed.
+- Reuse completed payload hashes across both package manifests, avoiding a second
+  full payload read while preserving independent release validation.
+- Preserve existing packages when the required FleX build artifact is missing,
+  checking it before cleanup, copying or unnecessary exporter work.
+- Reject linked package destinations and managed paths before cleanup or writes,
+  preserving existing files outside the intended package directory.
+- Reject unsafe previous package manifests before deleting any managed file;
+  validated paths are reused once and portable user Data remains protected.
+- Refresh the package inventory exporter even when skipping the app build;
+  stale inventory output can no longer be relabeled as the current build.
+- Correct stale feature-inventory descriptions of catalog totals, payload hashes
+  and CI coverage without changing feature classifications or runtime behavior.
+- Transfer the completed package/support inventory JSON buffer without copying
+  the full document; its schema, contents and owning return value are unchanged.
+- Remove an unused internal FleX audit JSON exporter and its dedicated escape
+  helper; active DLL verification, hook safety and diagnostic exports are unchanged.
+- Avoid completed-stream copies when displaying live UI metrics and the FPS
+  status suffix, preserving exact text, numeric animation and refresh behavior.
+- Write support diagnostics directly into the export and transfer completed
+  JSON buffers, preserving exact bytes, event persistence and retry behavior.
+- Transfer completed telemetry display buffers instead of copying them,
+  preserving exact text, locale, live values and Adaptive behavior without a cache.
+- Recompile only the owning telemetry component when the SDK module hash
+  changes, preserving exact module verification without rebuilding unrelated code.
+- Reuse the current emitter-owner check within each particle-control iteration,
+  retaining discovery, identity verification, readbacks and restoration.
+- Build waiting or failed-telemetry text only for incomplete frame data, avoiding
+  a discarded string while preserving exact values and optional-zero behavior.
+- Reuse the same GiB text formatter for hardware and telemetry displays,
+  removing duplicate code while preserving precision, locale and units.
+- Build unavailable-analysis text only when FPS is absent, avoiding discarded
+  temporary strings without changing the telemetry or Adaptive display.
+- Publish only changed prewarm display fields and avoid constructing unused
+  map diagnostic labels; worker behavior, budgets and progress rules are unchanged.
+- Publish optional overlay diagnostic text without copying unrelated UI,
+  graphics or Adaptive state; diagnostic timing and displayed text are unchanged.
+- Escape shared JSON string contents directly into the returned owned string,
+  avoiding stream/buffer-copy work while preserving exact serialized bytes.
+- Remove the unused internal Adaptive profile recommendation; user settings,
+  real quality budgets, decisions and restoration remain unchanged.
+- Borrow constant telemetry limit-explanation labels instead of allocating
+  identical strings; classifications, confidence and displayed text are unchanged.
 - Build Adaptive CPU workload, action, prediction and safety labels in owned
   buffers, avoiding temporary strings while preserving values, precision and units.
 - Reuse unchanged Adaptive reason, capability, source and evidence text instead
   of recreating temporary display strings; readback and restore policy is unchanged.
 - Publish Adaptive's own display fields without copying unrelated graphics,
   telemetry, FleX, prewarm and update status on every controller tick.
-- Simplify five corpse/Zed ownership lookups using KF2's native array search,
+- Avoid Weapon classification and repeated null checks for already identified
+  pawns, retaining the existing runtime guard's repair coverage and cadence.
+- Simplify six corpse/Zed ownership lookups using KF2's native array search,
   preserving first-match identity and missing-entry behavior without new state.
 - Skip the full world-emitter restoration scan when no Optimizer-owned emitter
   original values remain; nonempty restore and retry behavior is unchanged.
@@ -93,6 +169,10 @@ are visible immediately.
   included.
 
 ### Bug fixes
+
+- Stop passing the Optimizer's own GPU-memory usage and budget to Adaptive as
+  KF2/adapter-wide VRAM pressure. Keep KF2's process-bound memory counters and
+  remove the unnecessary recurring DXGI adapter lookup and budget query.
 
 - Convert the raw Adaptive decision reason once for its two presentation fields
   while retaining distinct queued-restoration warnings.

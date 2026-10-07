@@ -112,6 +112,46 @@ int main() {
     CHECK(node(gpu_dashboard, "metric-2")->text.find(L"GPU 72%") !=
           std::wstring::npos);
 
+    {
+        UiModel metrics_model;
+        auto status = metrics_model.status();
+        status.game_detected = true;
+        status.mode = L"Adaptive / Automatic";
+        status.target_fps = 119;
+        status.corpse_limit = 128;
+        status.live_fps = 119.9;
+        status.live_frame_time_ms = 8.3;
+        status.live_cpu_percent = 0.0;
+        status.live_gpu_percent = 72.0;
+        status.game_gpu_name = L"Test GPU";
+        metrics_model.set_status(status);
+        auto metrics_layout = layout_shell(metrics_model, 1440, 900);
+        CHECK(node(metrics_layout, "metric-0")->text == L"LIVE FPS\n119.9 FPS");
+        CHECK(node(metrics_layout, "metric-1")->text == L"FRAME TIME\n8.3 ms");
+        CHECK(node(metrics_layout, "metric-2")->text ==
+              L"GAME LOAD\nTest GPU\nCPU 0%  \u2022  GPU 72%");
+        const auto saved_status = node(metrics_layout, "status")->text;
+        CHECK(saved_status ==
+              L"Ready   \u2022   Adaptive on   \u2022   Target 119 FPS"
+              L"   \u2022   Maximum corpses 128   \u2022   Live 119.9 FPS");
+
+        // Metric consumers retain separate owning text, even for repeated IDs.
+        metrics_layout.nodes.push_back(*node(metrics_layout, "metric-2"));
+        status.live_cpu_percent.reset();
+        status.live_frame_time_ms.reset();
+        metrics_model.set_status(status);
+        refresh_numeric_nodes(metrics_layout, metrics_model);
+        for (const auto& item : metrics_layout.nodes) {
+            if (item.id == "metric-2") {
+                CHECK(item.text ==
+                      L"GAME LOAD\nTest GPU\nCPU \u2014  \u2022  GPU 72%");
+            }
+        }
+        CHECK(node(metrics_layout, "metric-1")->text == L"FRAME TIME\n\u2014");
+        CHECK(node(metrics_layout, "status")->text.find(L"Live") == std::wstring::npos);
+        CHECK(saved_status.ends_with(L"Live 119.9 FPS"));
+    }
+
     std::set<std::string> ids;
     std::array<DipRect, 6> navigation{};
     std::size_t navigation_index = 0;

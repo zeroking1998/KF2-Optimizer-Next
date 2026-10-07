@@ -43,7 +43,7 @@ pwsh -NoProfile -File tools/build_kf2_telemetry.ps1
 ```
 
 The script discovers the normal Steam SDK location or accepts `-SdkRoot`. It
-temporarily stages only this project's nine `.uc` files in the installed SDK,
+temporarily stages only this project's `.uc` sources in the installed SDK,
 invokes `KFEditor.exe make -useunpublished`, copies the generated module into
 the local ignored asset path, and restores `KFEngine.ini`, any previous
 unpublished module, and SDK staging state. KFEditor requires the previous
@@ -125,6 +125,18 @@ invalid names. Up to 4096 names of at most 512 characters are cached per query;
 overflow/long names use uncached parsing without dropping or truncating data.
 Query recreation discards the cache, and moves transfer it with the handles.
 Amounts, validity checks, aggregation and sampling cadence remain uncached.
+
+### Process thread discovery
+
+Thread membership refresh first uses a process-scoped Windows snapshot with
+`PSS_CAPTURE_THREADS` only. A temporary query handle verifies the bound process
+creation time and liveness; no thread contexts, memory clone or process writes
+are requested. All snapshot resources are released before return. Missing query
+rights or a failed capture/walk use the existing Toolhelp path; a stale identity
+never falls back, and a partial snapshot never replaces the handle cache.
+CPU-time measurements still use the same cached thread handles every 500 ms,
+with membership refreshed every five seconds. No new worker, timer or retained
+cache is introduced.
 
 ### Launch.log handle ownership
 

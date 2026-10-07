@@ -5,9 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <fstream>
-#include <iomanip>
 #include <iterator>
-#include <sstream>
 #include <system_error>
 
 #include "kf2/security/sha256.hpp"
@@ -40,18 +38,6 @@ std::wstring file_version(const std::filesystem::path& path) {
            std::to_wstring(LOWORD(info->dwFileVersionMS)) + L"." +
            std::to_wstring(HIWORD(info->dwFileVersionLS)) + L"." +
            std::to_wstring(LOWORD(info->dwFileVersionLS));
-}
-
-std::string escape_json(std::string_view value) {
-    std::ostringstream out;
-    for (const unsigned char c : value) {
-        if (c == '\\' || c == '"') out << '\\' << static_cast<char>(c);
-        else if (c < 0x20) out << "\\u" << std::hex << std::setw(4)
-                               << std::setfill('0') << static_cast<unsigned>(c)
-                               << std::dec;
-        else out << static_cast<char>(c);
-    }
-    return out.str();
 }
 
 template <class T>
@@ -188,39 +174,6 @@ Result<RuntimeAudit> audit_runtime(const std::filesystem::path& path,
         audit.exports.size() == 52 && audit.file_version == L"1.0.5.0" &&
         audit.sha256 == known_kf2_flex_105_sha256;
     return Result<RuntimeAudit>::success(std::move(audit));
-}
-
-std::string serialize_audit_json(const RuntimeAudit& audit) {
-    std::ostringstream out;
-    const auto path_utf8_raw = audit.path.generic_u8string();
-    const std::string path_utf8{reinterpret_cast<const char*>(path_utf8_raw.data()),
-                                path_utf8_raw.size()};
-    std::string version;
-    version.reserve(audit.file_version.size());
-    for (const wchar_t value : audit.file_version) {
-        if (value < L'0' || value > L'9') {
-            version.push_back(value == L'.' ? '.' : '?');
-        } else {
-            version.push_back(static_cast<char>('0' + (value - L'0')));
-        }
-    }
-    out << "{\n  \"schema_version\": 1,\n  \"mode\": \"offline_lab_only\",\n"
-        << "  \"path\": \"" << escape_json(path_utf8) << "\",\n"
-        << "  \"size_bytes\": " << audit.size_bytes << ",\n"
-        << "  \"sha256\": \"" << audit.sha256 << "\",\n"
-        << "  \"file_version\": \"" << escape_json(version) << "\",\n"
-        << "  \"abi_compatible\": " << (audit.abi_compatible ? "true" : "false")
-        << ",\n  \"exact_known_runtime\": "
-        << (audit.exact_known_runtime ? "true" : "false")
-        << ",\n  \"exports\": [";
-    for (std::size_t i = 0; i < audit.exports.size(); ++i)
-        out << (i ? ", " : "") << '"' << escape_json(audit.exports[i]) << '"';
-    out << "],\n  \"missing_required_exports\": [";
-    for (std::size_t i = 0; i < audit.missing_required_exports.size(); ++i)
-        out << (i ? ", " : "") << '"'
-            << escape_json(audit.missing_required_exports[i]) << '"';
-    out << "]\n}\n";
-    return out.str();
 }
 
 HookGateDecision evaluate_hook_gate(const HookGateEvidence& evidence) {

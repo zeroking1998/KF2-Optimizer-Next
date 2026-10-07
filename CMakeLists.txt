@@ -62,8 +62,10 @@ add_compile_definitions(
     WIN32_LEAN_AND_MEAN
     NOMINMAX
     _WIN32_WINNT=0x0A00
-    KF2_OFFLINE_TELEMETRY_SHA256="${KF2_OFFLINE_TELEMETRY_SHA256}"
 )
+set_property(SOURCE src/game/offline_telemetry_lab.cpp APPEND PROPERTY
+    COMPILE_DEFINITIONS
+    KF2_OFFLINE_TELEMETRY_SHA256="${KF2_OFFLINE_TELEMETRY_SHA256}")
 
 if(MSVC)
     add_compile_options(/W4 /WX /permissive- /utf-8 /EHsc /Brepro)
@@ -447,4 +449,8 @@ if(BUILD_TESTING)
             DEPENDS "${KF2_FLEX_TEST_FORWARDER}")
     endif()
     add_subdirectory(tests)
+    set_property(SOURCE "${PROJECT_SOURCE_DIR}/src/game/offline_telemetry_lab.cpp"
+        DIRECTORY "${PROJECT_SOURCE_DIR}/tests" APPEND PROPERTY
+        COMPILE_DEFINITIONS
+        KF2_OFFLINE_TELEMETRY_SHA256="${KF2_OFFLINE_TELEMETRY_SHA256}")
 endif()
