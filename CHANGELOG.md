@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Steam achievement warming now runs in the main menu before offline or online
+  play, verifies loaded images, and does not repeat after successful map travel.
+
 - Stop passing the Optimizer's own GPU-memory usage and budget to Adaptive as
   KF2/adapter-wide VRAM pressure. Keep KF2's process-bound memory counters and
   remove the unnecessary recurring DXGI adapter lookup and budget query.

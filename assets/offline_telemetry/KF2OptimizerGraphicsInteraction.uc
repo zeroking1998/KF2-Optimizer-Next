@@ -5,6 +5,9 @@ class KF2OptimizerGraphicsInteraction extends Interaction
 
 const RuntimeGuardInitialSeconds=0.05;
 const RuntimeGuardMaximumSeconds=0.25;
+const AchievementPrewarmRequestTimeoutSeconds=10.0;
+const AchievementPrewarmRetrySeconds=1.0;
+const AchievementPrewarmMaxAttempts=3;
 
 var float NextReadRealTime;
 var float LastObservedRealTime;
@@ -20,6 +23,181 @@ var float NextRuntimeGuardRealTime;
 var float RuntimeGuardIntervalSeconds;
 var bool bFireAfflictionGuardReported;
 var bool bWeaponClassFallbackGuardReported;
+var bool bAchievementPrewarmRequested;
+var bool bAchievementPrewarmComplete;
+var bool bAchievementPrewarmDelegateRegistered;
+var bool bAchievementPrewarmReadbackPending;
+var bool bAchievementPrewarmSessionEnding;
+var byte AchievementPrewarmPlayerControllerId;
+var int AchievementPrewarmAttempts;
+var int AchievementPrewarmReadbacks;
+var float AchievementPrewarmElapsedSeconds;
+var float AchievementPrewarmNextAttemptSeconds;
+var float AchievementPrewarmRequestStartedSeconds;
+
+function ClearAchievementPrewarmDelegate()
+{
+    local OnlineSubsystem OnlineSub;
+
+    if (!bAchievementPrewarmDelegateRegistered)
+    {
+        return;
+    }
+    OnlineSub = class'GameEngine'.static.GetOnlineSubsystem();
+    if (OnlineSub != None && OnlineSub.PlayerInterface != None)
+    {
+        OnlineSub.PlayerInterface.ClearReadAchievementsCompleteDelegate(
+            AchievementPrewarmPlayerControllerId,
+            OnAchievementPrewarmComplete);
+    }
+    bAchievementPrewarmDelegateRegistered = false;
+}
+
+function OnAchievementPrewarmComplete(int TitleId)
+{
+    if (!bAchievementPrewarmRequested)
+    {
+        return;
+    }
+    bAchievementPrewarmRequested = false;
+    bAchievementPrewarmReadbackPending = true;
+    AchievementPrewarmRequestStartedSeconds = 0.0;
+    AchievementPrewarmNextAttemptSeconds = AchievementPrewarmElapsedSeconds +
+        AchievementPrewarmRetrySeconds;
+    ClearAchievementPrewarmDelegate();
+    // Completion may arrive after an online join. Convert/check images only
+    // on a later main-menu tick, never inside the callback during gameplay.
+    `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=read_complete title="$
+         TitleId$" attempts="$AchievementPrewarmAttempts);
+}
+
+function TryPrewarmAchievements(
+    PlayerController PrimaryController, string CurrentMapName)
+{
+    local LocalPlayer PrimaryPlayer;
+    local OnlineSubsystem OnlineSub;
+    local byte PlayerControllerId;
+    local array<AchievementDetails> Achievements;
+    local EOnlineEnumerationReadState ReadState;
+    local int AchievementIndex;
+    local int MissingImages;
+
+    if (bAchievementPrewarmComplete || bAchievementPrewarmSessionEnding ||
+        AchievementPrewarmReadbacks >= AchievementPrewarmMaxAttempts)
+    {
+        return;
+    }
+    if (bAchievementPrewarmRequested)
+    {
+        if (AchievementPrewarmElapsedSeconds -
+                AchievementPrewarmRequestStartedSeconds >=
+                AchievementPrewarmRequestTimeoutSeconds)
+        {
+            ClearAchievementPrewarmDelegate();
+            bAchievementPrewarmRequested = false;
+            AchievementPrewarmRequestStartedSeconds = 0.0;
+            AchievementPrewarmNextAttemptSeconds =
+                AchievementPrewarmElapsedSeconds + AchievementPrewarmRetrySeconds;
+            `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=timeout attempt="$
+                 AchievementPrewarmAttempts);
+        }
+        return;
+    }
+    if ((!bAchievementPrewarmReadbackPending &&
+         AchievementPrewarmAttempts >= AchievementPrewarmMaxAttempts) ||
+        PrimaryController == None || PrimaryController.bDeleteMe ||
+        PrimaryController.WorldInfo == None ||
+        PrimaryController.WorldInfo.bDeleteMe || GamePlayers.Length == 0 ||
+        !(CurrentMapName ~= "KFMainMenu") ||
+        AchievementPrewarmElapsedSeconds < AchievementPrewarmNextAttemptSeconds)
+    {
+        return;
+    }
+    PrimaryPlayer = GamePlayers[0];
+    if (PrimaryPlayer == None)
+    {
+        return;
+    }
+    PlayerControllerId = byte(PrimaryPlayer.ControllerId);
+    OnlineSub = class'GameEngine'.static.GetOnlineSubsystem();
+    if (OnlineSub == None || OnlineSub.PlayerInterface == None ||
+        OnlineSub.PlayerInterface.GetLoginStatus(PlayerControllerId) <=
+            LS_NotLoggedIn ||
+        OnlineSub.PlayerInterface.IsGuestLogin(PlayerControllerId))
+    {
+        AchievementPrewarmNextAttemptSeconds =
+            AchievementPrewarmElapsedSeconds + AchievementPrewarmRetrySeconds;
+        return;
+    }
+    if (bAchievementPrewarmReadbackPending)
+    {
+        ++AchievementPrewarmReadbacks;
+        ReadState = OnlineSub.PlayerInterface.GetAchievements(
+            AchievementPrewarmPlayerControllerId, Achievements, 0);
+        for (AchievementIndex = 0; AchievementIndex < Achievements.Length;
+             ++AchievementIndex)
+        {
+            if (Achievements[AchievementIndex].Image == None)
+            {
+                ++MissingImages;
+            }
+        }
+        if (ReadState == OERS_Done && Achievements.Length > 0 &&
+            MissingImages == 0)
+        {
+            bAchievementPrewarmReadbackPending = false;
+            bAchievementPrewarmComplete = true;
+            `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=complete"$
+                 " readback=verified achievements="$Achievements.Length$
+                 " attempts="$AchievementPrewarmAttempts$
+                 " readbacks="$AchievementPrewarmReadbacks);
+        }
+        else if (AchievementPrewarmReadbacks >= AchievementPrewarmMaxAttempts)
+        {
+            bAchievementPrewarmReadbackPending = false;
+            `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=unverified"$
+                 " achievements="$Achievements.Length$
+                 " missing_images="$MissingImages$" read_state="$ReadState);
+        }
+        else
+        {
+            AchievementPrewarmNextAttemptSeconds =
+                AchievementPrewarmElapsedSeconds + AchievementPrewarmRetrySeconds;
+        }
+        return;
+    }
+
+    AchievementPrewarmPlayerControllerId = PlayerControllerId;
+    OnlineSub.PlayerInterface.AddReadAchievementsCompleteDelegate(
+        PlayerControllerId, OnAchievementPrewarmComplete);
+    bAchievementPrewarmDelegateRegistered = true;
+    bAchievementPrewarmRequested = true;
+    AchievementPrewarmRequestStartedSeconds = AchievementPrewarmElapsedSeconds;
+    ++AchievementPrewarmAttempts;
+    `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=requested"$
+         " text=true images=true attempt="$AchievementPrewarmAttempts);
+    if (!OnlineSub.PlayerInterface.ReadAchievements(
+            PlayerControllerId, 0, true, true))
+    {
+        bAchievementPrewarmRequested = false;
+        AchievementPrewarmRequestStartedSeconds = 0.0;
+        ClearAchievementPrewarmDelegate();
+        AchievementPrewarmNextAttemptSeconds =
+            AchievementPrewarmElapsedSeconds + AchievementPrewarmRetrySeconds;
+        `log("KF2OPT_ACHIEVEMENT_PREWARM schema=1 state=deferred attempt="$
+             AchievementPrewarmAttempts);
+    }
+}
+
+function NotifyGameSessionEnded()
+{
+    bAchievementPrewarmSessionEnding = true;
+    ClearAchievementPrewarmDelegate();
+    bAchievementPrewarmRequested = false;
+    AchievementPrewarmRequestStartedSeconds = 0.0;
+    // Keep verified completion and bounded attempts across map travel. A
+    // completed prewarm must not repeat for every offline or online map.
+}
 
 function bool EnsureTurretWeaponMaterial(KFWeapon Weapon)
 {
@@ -375,9 +553,22 @@ event Tick(float DeltaTime)
         ResetMenuGraphicsObservation();
         bFireAfflictionGuardReported = false;
         bWeaponClassFallbackGuardReported = false;
+        bAchievementPrewarmSessionEnding = false;
     }
     LastObservedRealTime = CurrentWorld.RealTimeSeconds;
     LastRuntimeGuardMapName = CurrentMapName;
+    // Use the persistent viewport clock: WorldInfo time restarts on map travel.
+    // Completed/exhausted work and gameplay never enter the Steam helper.
+    if (!bAchievementPrewarmComplete &&
+        AchievementPrewarmReadbacks < AchievementPrewarmMaxAttempts &&
+        (bAchievementPrewarmReadbackPending ||
+         AchievementPrewarmAttempts < AchievementPrewarmMaxAttempts ||
+         bAchievementPrewarmRequested) &&
+        (CurrentMapName ~= "KFMainMenu"))
+    {
+        AchievementPrewarmElapsedSeconds += FMax(0.0, DeltaTime);
+        TryPrewarmAchievements(PrimaryController, CurrentMapName);
+    }
     GuardRuntimeActors(CurrentWorld);
     KFPC = KFPlayerController(PrimaryController);
     bGraphicsMenuOpen = IsGraphicsMenuOpen(KFPC);
