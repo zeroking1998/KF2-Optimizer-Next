@@ -8,6 +8,10 @@ are visible immediately.
 
 ### What's new
 
+- Discover KF2 thread membership with a process-scoped snapshot instead of
+  walking every Windows thread when query rights permit. Keep the original
+  read-only fallback, CPU-time measurements and sampling intervals unchanged.
+
 - Reuse one physics awake observation per corpse in each offline telemetry
   sample, preserving pressure and published counts without a retained cache.
 

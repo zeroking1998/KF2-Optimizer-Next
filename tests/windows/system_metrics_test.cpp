@@ -1,4 +1,5 @@
 #include <Windows.h>
+#include <algorithm>
 #include <bit>
 #include <cstdlib>
 #include <iostream>
@@ -167,6 +168,29 @@ int main() {
     CHECK(GetModuleFileNameW(nullptr, path, MAX_PATH) > 0);
     const auto identity = kf2::game::bind_game_process(GetCurrentProcessId(), path);
     CHECK(identity.has_value());
+    const auto own_threads = detail::query_process_thread_ids(identity.value());
+    CHECK(own_threads.has_value());
+    CHECK(std::find(own_threads.value().begin(), own_threads.value().end(),
+                   GetCurrentThreadId()) != own_threads.value().end());
+    auto snapshot_stale = identity.value();
+    ++snapshot_stale.process_start_id;
+    const auto stale_threads = detail::query_process_thread_ids(snapshot_stale);
+    CHECK(!stale_threads.has_value());
+    CHECK(stale_threads.error().code == kf2::ErrorCode::stale_data);
+    detail::fail_next_process_thread_snapshot_walk_for_testing();
+    const auto partial_threads = detail::query_process_thread_ids(identity.value());
+    CHECK(!partial_threads.has_value());
+    CHECK(partial_threads.error().code == kf2::ErrorCode::platform_failure);
+    {
+        detail::fail_next_process_thread_snapshot_walk_for_testing();
+        ProcessMetricSampler partial_fallback{identity.value()};
+        CHECK(partial_fallback.sample().has_value());
+        Sleep(520);
+        const auto sampled = partial_fallback.sample();
+        CHECK(sampled.has_value());
+        CHECK(sampled.value().critical_core_percent.has_value());
+        CHECK(sampled.value().effective_core_usage.has_value());
+    }
     ProcessMetricSampler sampler{identity.value()};
     const auto opens_before = detail::process_metric_opens_for_testing();
     const auto first = sampler.sample();
@@ -223,6 +247,27 @@ int main() {
         CHECK(detail::process_metric_opens_for_testing() == before + 1);
     }
     {
+        // Broader query rights may be denied even while the original metric
+        // handle remains readable. Thread pressure must keep working then.
+        std::unique_ptr<void, decltype(&CloseHandle)> owned{
+            OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId()), &CloseHandle};
+        CHECK(owned);
+        kf2::test::ProcessInspectionDenial denial;
+        CHECK(denial.deny(owned.get(), PROCESS_QUERY_LIMITED_INFORMATION |
+            PROCESS_VM_READ | SYNCHRONIZE));
+        const auto unavailable = detail::query_process_thread_ids(identity.value());
+        CHECK(!unavailable.has_value());
+        CHECK(unavailable.error().code == kf2::ErrorCode::access_denied);
+        ProcessMetricSampler fallback{identity.value()};
+        CHECK(fallback.sample().has_value());
+        Sleep(520);
+        const auto sampled = fallback.sample();
+        CHECK(sampled.has_value());
+        CHECK(sampled.value().critical_core_percent.has_value());
+        CHECK(sampled.value().effective_core_usage.has_value());
+        CHECK(denial.restore());
+    }
+    {
         // Denying VM_READ must not break read-only session observation.
         std::unique_ptr<void, decltype(&CloseHandle)> owned{
             OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId()), &CloseHandle};
@@ -248,6 +293,12 @@ int main() {
         workers.emplace_back([](std::stop_token stop) {
             while (!stop.stop_requested()) Sleep(5);
         });
+    }
+    const auto worker_ids = detail::query_process_thread_ids(identity.value());
+    CHECK(worker_ids.has_value());
+    for (auto& worker : workers) {
+        CHECK(std::find(worker_ids.value().begin(), worker_ids.value().end(),
+            GetThreadId(worker.native_handle())) != worker_ids.value().end());
     }
     DWORD handles_before = 0;
     CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_before));
