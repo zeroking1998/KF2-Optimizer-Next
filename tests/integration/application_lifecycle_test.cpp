@@ -2510,8 +2510,10 @@ int test_session_cap_finalization_failure() {
 // exact receipt validation without requiring KF2 or desktop interaction.
 class AdaptiveTestReceiver final {
 public:
-    explicit AdaptiveTestReceiver(std::string receipt_status)
-        : listener_{socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)} {
+    explicit AdaptiveTestReceiver(std::string receipt_status,
+                                  bool gated = false, int requests = 1)
+        : listener_{socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)},
+          reply_allowed_{!gated} {
         sockaddr_in address{};
         address.sin_family = AF_INET;
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -2522,50 +2524,287 @@ public:
         if (getsockname(listener_, reinterpret_cast<sockaddr*>(&address),
                         &length) != 0) return;
         port = ntohs(address.sin_port);
-        worker_ = std::jthread{[this, status = std::move(receipt_status)] {
-            fd_set ready;
-            FD_ZERO(&ready);
-            FD_SET(listener_, &ready);
-            timeval timeout{3, 0};
-            if (select(0, &ready, nullptr, nullptr, &timeout) <= 0) return;
-            const SOCKET connection = accept(listener_, nullptr, nullptr);
-            if (connection == INVALID_SOCKET) return;
-            const DWORD receive_timeout = 2000;
-            setsockopt(connection, SOL_SOCKET, SO_RCVTIMEO,
-                reinterpret_cast<const char*>(&receive_timeout),
-                sizeof(receive_timeout));
-            char buffer[256]{};
-            std::string request;
-            while (request.find('\n') == std::string::npos) {
-                const int size = recv(connection, buffer, sizeof(buffer), 0);
-                if (size <= 0) break;
-                request.append(buffer, static_cast<std::size_t>(size));
+        worker_ = std::jthread{[this, status = std::move(receipt_status), requests] {
+            for (int request_index = 0; request_index < requests; ++request_index) {
+                fd_set ready;
+                FD_ZERO(&ready);
+                FD_SET(listener_, &ready);
+                timeval timeout{3, 0};
+                if (select(0, &ready, nullptr, nullptr, &timeout) <= 0) return;
+                const SOCKET connection = accept(listener_, nullptr, nullptr);
+                if (connection == INVALID_SOCKET) return;
+                const DWORD receive_timeout = 2000;
+                setsockopt(connection, SOL_SOCKET, SO_RCVTIMEO,
+                    reinterpret_cast<const char*>(&receive_timeout),
+                    sizeof(receive_timeout));
+                char buffer[256]{};
+                std::string request;
+                while (request.find('\n') == std::string::npos) {
+                    const int size = recv(connection, buffer, sizeof(buffer), 0);
+                    if (size <= 0) break;
+                    request.append(buffer, static_cast<std::size_t>(size));
+                }
+                std::istringstream parsed{request};
+                std::string prefix, token, sequence, resource, quality;
+                parsed >> prefix >> token >> sequence >> resource >> quality;
+                command = request;
+                const auto gate_deadline = std::chrono::steady_clock::now() +
+                    std::chrono::seconds{3};
+                while (!reply_allowed_.load() &&
+                       std::chrono::steady_clock::now() < gate_deadline) Sleep(1);
+                if (status == "timeout") {
+                    Sleep(650);
+                } else {
+                    const auto reply = "KF2OPT_ACK " + sequence + " " + status +
+                        " " + resource + " " + quality + "\r\n";
+                    send(connection, reply.data(), static_cast<int>(reply.size()), 0);
+                }
+                closesocket(connection);
             }
-            std::istringstream parsed{request};
-            std::string prefix, token, sequence, resource, quality;
-            parsed >> prefix >> token >> sequence >> resource >> quality;
-            command = request;
-            if (status == "timeout") {
-                Sleep(650);
-            } else {
-                const auto reply = "KF2OPT_ACK " + sequence + " " + status +
-                    " " + resource + " " + quality + "\r\n";
-                send(connection, reply.data(), static_cast<int>(reply.size()), 0);
-            }
-            closesocket(connection);
         }};
     }
     ~AdaptiveTestReceiver() {
         finish();
         if (listener_ != INVALID_SOCKET) closesocket(listener_);
     }
-    void finish() { if (worker_.joinable()) worker_.join(); }
+    void finish() {
+        reply_allowed_.store(true);
+        if (worker_.joinable()) worker_.join();
+    }
     std::uint16_t port{};
     std::string command;
 private:
     SOCKET listener_{INVALID_SOCKET};
     std::jthread worker_;
+    std::atomic_bool reply_allowed_{true};
 };
+
+int test_live_corpse_limit() {
+    using namespace kf2;
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"live-corpse-limit";
+    fs::remove_all(root);
+    fs::create_directories(root / L"Data");
+    fs::create_directories(root / L"negative");
+    wchar_t executable[32768]{};
+    CHECK(GetModuleFileNameW(nullptr, executable, 32768) != 0);
+    const auto process = game::bind_game_process(GetCurrentProcessId(), executable);
+    CHECK(process.has_value());
+    WSADATA winsock{};
+    CHECK(WSAStartup(MAKEWORD(2, 2), &winsock) == 0);
+    for (const bool adaptive : {false, true}) {
+        for (const auto mode : {"NM_Standalone", "NM_Client", "NM_ListenServer"}) {
+            diagnostics::EventLog events{32};
+            config::Settings initial;
+            initial.adaptive_optimization_enabled = adaptive;
+            app::UiRuntime runtime{root / L"Data", false, initial, events,
+                std::nullopt, app::StartMode::normal, root / L"portable"};
+            runtime.installation = game::GameInstallation{
+                .install_root = root, .executable = executable,
+                .config_root = root / L"Config"};
+            runtime.game_process = process.value();
+            runtime.adaptive_session_policy = game::OfflineAdaptiveSessionPolicy{20, 120, 2};
+            runtime.adaptive_control_token = "0123456789abcdef0123456789abcdef";
+            runtime.adaptive_resource_quality.gpu = 65;
+            auto status = runtime.model.status();
+            status.active_corpse_limit = 20;
+            runtime.model.set_status(status);
+            AdaptiveTestReceiver receiver{"applied", true};
+            CHECK(receiver.port != 0);
+            telemetry_pipeline::TelemetryFrame frame;
+            frame.identity = {process.value().pid, process.value().process_start_id};
+            frame.observed_at_ns = runtime.monotonic_ns();
+            game::GameLogSessionParser parser;
+            (void)parser.feed("Log: LoadMap: KF-Test?Game=KFGameContent.KFGameInfo_Survival\n",
+                frame.observed_at_ns);
+            if (std::string_view{mode} == "NM_Standalone") {
+                (void)parser.feed("ScriptLog: WI.NetMode: NM_Standalone\n",
+                    frame.observed_at_ns);
+            } else {
+                (void)parser.feed("ScriptLog: KF2OPT_SESSION_CONTEXT schema=2 state=" +
+                    std::string{std::string_view{mode} == "NM_Client"
+                        ? "online_client_read_only" : "online_host_read_only"} +
+                    " net_mode=" + mode + " map=KF-Test generation=42\n",
+                    frame.observed_at_ns);
+            }
+            (void)parser.feed("ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready port=" +
+                std::to_string(receiver.port) + "\n", frame.observed_at_ns);
+            CHECK(parser.current());
+            CHECK(parser.current()->telemetry_control_port == receiver.port);
+            CHECK(parser.current()->telemetry_observed_ns == 0);
+            frame.gameplay = game::make_game_log_session_snapshot(*parser.current());
+            runtime.adaptive_runtime_mode_confirmed = true;
+            const auto settings_path = runtime.settings_path;
+            runtime.settings_path = root / L"missing-parent" / L"settings.ini";
+            runtime.set_slider_value("settings-corpses-slider", 1272);
+            CHECK(runtime.optimizer_settings.corpse_limit == 20);
+            CHECK(!runtime.live_corpse_limit_change);
+            CHECK(runtime.adaptive_control_sequence == 0);
+            runtime.settings_path = settings_path;
+            runtime.set_slider_value("settings-corpses-slider", 1272);
+            CHECK(runtime.live_corpse_limit_change);
+            CHECK(runtime.effective_corpse_limit() == 20);
+            CHECK(runtime.model.status().active_corpse_limit == 20);
+            CHECK(runtime.optimizer_settings.corpse_limit == 1272);
+            runtime.update_live_corpse_limit(frame, status);
+            CHECK(runtime.live_corpse_limit_change->pending);
+            CHECK(status.live_corpse_limit_pending);
+            // An edit while the ACK is in flight must coalesce, not spawn
+            // another worker or incorrectly mark the new value applied.
+            runtime.set_slider_value("settings-corpses-slider", 2000);
+            runtime.update_live_corpse_limit(frame, status);
+            CHECK(runtime.adaptive_control_sequence == 1);
+            receiver.finish();
+            const auto poll = [&] {
+                const auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::seconds{3};
+                while (runtime.live_corpse_limit_change->pending &&
+                       std::chrono::steady_clock::now() < deadline) {
+                    runtime.update_live_corpse_limit(frame, status);
+                    Sleep(1);
+                }
+            };
+            poll();
+            CHECK(runtime.effective_corpse_limit() == 1272);
+            CHECK(status.active_corpse_limit == 1272);
+            CHECK(status.live_corpse_limit_pending);
+            CHECK(runtime.optimizer_settings.adaptive_optimization_enabled == adaptive);
+            CHECK(runtime.adaptive_resource_quality.gpu == 65);
+            CHECK(receiver.command.find(" corpse_limit 1272\n") != std::string::npos);
+            CHECK(receiver.command.find(" enable ") == std::string::npos);
+            CHECK(app::load_or_create_settings(runtime.settings_path).value().corpse_limit == 2000);
+            AdaptiveTestReceiver final_receiver{"applied"};
+            replace_frame_gameplay(frame, [&](auto& session) {
+                session.telemetry_control_port = final_receiver.port;
+            });
+            runtime.update_live_corpse_limit(frame, status);
+            CHECK(runtime.live_corpse_limit_change->pending);
+            final_receiver.finish();
+            poll();
+            CHECK(runtime.effective_corpse_limit() == 2000);
+            CHECK(!status.live_corpse_limit_unknown);
+            CHECK(!status.live_corpse_limit_pending);
+            // A mode command may change the native count before its ACK is
+            // lost. Never keep presenting the old count as confirmed.
+            AdaptiveTestReceiver mode_receiver{"unknown"};
+            replace_frame_gameplay(frame, [&](auto& session) {
+                session.telemetry_control_port = mode_receiver.port;
+            });
+            runtime.game_log_session = frame.gameplay;
+            CHECK(!runtime.set_live_adaptive_enabled(false, L"lost mode ACK"));
+            mode_receiver.finish();
+            CHECK(!runtime.live_corpse_limit_change->applied_limit);
+            runtime.update_live_corpse_limit(frame, status, false);
+            CHECK(status.live_corpse_limit_unknown);
+            CHECK(runtime.optimizer_settings.adaptive_optimization_enabled == adaptive);
+            CHECK(runtime.adaptive_resource_quality.gpu == 65);
+            // The second goal targets a fresh provider. Reject a completed
+            // receipt if its world generation changes before polling it.
+            AdaptiveTestReceiver stale_receiver{"applied"};
+            replace_frame_gameplay(frame, [&](auto& session) {
+                session.telemetry_control_port = stale_receiver.port;
+            });
+            runtime.update_live_corpse_limit(frame, status);
+            CHECK(runtime.live_corpse_limit_change->pending);
+            stale_receiver.finish();
+            replace_frame_gameplay(frame, [](auto& session) {
+                session.optimizer_session_generation = 43;
+                session.telemetry_control_port.reset();
+            });
+            poll();
+            CHECK(runtime.effective_corpse_limit() == 2000);
+            CHECK(!runtime.live_corpse_limit_change->pending);
+            CHECK(runtime.optimizer_settings.corpse_limit == 2000);
+            CHECK(runtime.adaptive_resource_quality.gpu == 65);
+            // Drain a real completed request through the normal pipeline,
+            // even without a KF2 window, Present frames or live process.
+            AdaptiveTestReceiver ended_receiver{"applied", true};
+            replace_frame_gameplay(frame, [&](auto& session) {
+                session.telemetry_control_port = ended_receiver.port;
+            });
+            runtime.update_live_corpse_limit(frame, status);
+            CHECK(runtime.live_corpse_limit_change->pending);
+            runtime.detach_telemetry(false);
+            runtime.installation.reset();
+            runtime.telemetry_tick();
+            CHECK(runtime.live_corpse_limit_change);
+            CHECK(runtime.game_folder_change_blocked());
+            CHECK(runtime.model.status().game_folder_change_blocked);
+            ended_receiver.finish();
+            const auto ended_deadline = std::chrono::steady_clock::now() +
+                std::chrono::seconds{3};
+            while (runtime.live_corpse_limit_change &&
+                   std::chrono::steady_clock::now() < ended_deadline) {
+                runtime.telemetry_tick();
+                Sleep(1);
+            }
+            CHECK(!runtime.live_corpse_limit_change);
+            CHECK(!runtime.game_folder_change_blocked());
+            CHECK(!runtime.model.status().game_folder_change_blocked);
+        }
+    }
+    for (const auto receipt : {"unknown", "restored", "unsupported", "timeout"}) {
+        diagnostics::EventLog events{32};
+        app::UiRuntime runtime{root / L"negative", false, config::Settings{},
+            events, std::nullopt, app::StartMode::normal, root / L"portable"};
+        runtime.installation = game::GameInstallation{
+            .install_root = root, .executable = executable, .config_root = root};
+        runtime.game_process = process.value();
+        runtime.adaptive_session_policy = game::OfflineAdaptiveSessionPolicy{20, 120, 2};
+        runtime.adaptive_control_token = "0123456789abcdef0123456789abcdef";
+        runtime.adaptive_runtime_mode_confirmed = true;
+        runtime.set_slider_value("settings-corpses-slider", 4);
+        telemetry_pipeline::TelemetryFrame frame;
+        frame.identity = {process.value().pid, process.value().process_start_id};
+        frame.observed_at_ns = runtime.monotonic_ns();
+        AdaptiveTestReceiver receiver{receipt, false, 3};
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            replace_frame_gameplay(frame, [&](auto& session) {
+                session.optimizer_session_generation.reset();
+                session.net_mode = "NM_Standalone";
+                session.telemetry_control_port = receiver.port;
+                session.telemetry_observed_ns = frame.observed_at_ns;
+            });
+            auto status = runtime.model.status();
+            runtime.update_live_corpse_limit(frame, status);
+            CHECK(runtime.live_corpse_limit_change->pending);
+            const auto deadline = std::chrono::steady_clock::now() +
+                std::chrono::seconds{3};
+            while (runtime.live_corpse_limit_change->pending &&
+                   std::chrono::steady_clock::now() < deadline) {
+                runtime.update_live_corpse_limit(frame, status);
+                Sleep(1);
+            }
+            CHECK(!runtime.live_corpse_limit_change->pending);
+            CHECK(runtime.effective_corpse_limit() == 20);
+            CHECK(!runtime.live_corpse_limit_change->applied_limit);
+            // Same endpoint, failed readback: no repeated request before its
+            // five-second deadline. A missing token also forbids all sends.
+            const auto sequence = runtime.adaptive_control_sequence;
+            runtime.update_live_corpse_limit(frame, status);
+            CHECK(runtime.adaptive_control_sequence == sequence);
+            runtime.adaptive_control_token.clear();
+            frame.observed_at_ns += 5'000'000'000ULL;
+            runtime.update_live_corpse_limit(frame, status);
+            CHECK(runtime.adaptive_control_sequence == sequence);
+            runtime.adaptive_control_token = "0123456789abcdef0123456789abcdef";
+        }
+        receiver.finish();
+        CHECK(runtime.live_corpse_limit_change->attempts == 3);
+        auto exhausted_status = runtime.model.status();
+        replace_frame_gameplay(frame, [&](auto& session) {
+            session.telemetry_observed_ns = frame.observed_at_ns;
+        });
+        const auto exhausted_sequence = runtime.adaptive_control_sequence;
+        runtime.update_live_corpse_limit(frame, exhausted_status);
+        CHECK(runtime.adaptive_control_sequence == exhausted_sequence);
+        CHECK(!exhausted_status.live_corpse_limit_pending);
+        runtime.detach_telemetry(false);
+    }
+    WSACleanup();
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
+}
 
 int test_online_quality_response_case(
     std::string_view mode, std::uint64_t post_step_ns,
@@ -5343,6 +5582,9 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string_view{argv[1]} == "--ui-presentation") {
         return test_ui_presentation();
     }
+    if (argc == 2 && std::string_view{argv[1]} == "--live-corpse-limit") {
+        return test_live_corpse_limit();
+    }
     if (argc == 2 && std::string_view{argv[1]} == "--initial-dxgi-retry") {
         return test_initial_dxgi_retry();
     }
@@ -5492,6 +5734,7 @@ int main(int argc, char** argv) {
     CHECK(test_flex_report_boundaries() == EXIT_SUCCESS);
     CHECK(test_pending_policy_restage_failure_rollback() == EXIT_SUCCESS);
     CHECK(test_flex_recovery_installation_owner() == EXIT_SUCCESS);
+    CHECK(test_live_corpse_limit() == EXIT_SUCCESS);
     CHECK(test_map_prewarm_retry_scheduler() == EXIT_SUCCESS);
     CHECK(test_gameplay_snapshot_lifetime() == EXIT_SUCCESS);
     CHECK(test_ui_presentation() == EXIT_SUCCESS);

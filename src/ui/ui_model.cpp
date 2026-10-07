@@ -110,6 +110,9 @@ void UiModel::set_adaptive_status(AdaptiveUiStatus status) noexcept {
     static_assert(std::is_nothrow_move_assignable_v<AdaptiveUiStatus>);
     static_cast<AdaptiveUiStatus&>(status_) = std::move(status);
 }
+void UiModel::set_live_corpse_limit_status(LiveCorpseLimitUiStatus status) noexcept {
+    static_cast<LiveCorpseLimitUiStatus&>(status_) = std::move(status);
+}
 void UiModel::set_telemetry_status(
     std::wstring telemetry, std::wstring performance_analysis,
     std::optional<double> fps, std::optional<double> frame_time_ms,
@@ -161,6 +164,9 @@ const std::wstring& UiModel::build_identity() const noexcept {
 bool UiModel::recovery_required() const noexcept { return recovery_required_; }
 const UiStatus& UiModel::status() const noexcept { return status_; }
 const AdaptiveUiStatus& UiModel::adaptive_status() const noexcept { return status_; }
+const LiveCorpseLimitUiStatus& UiModel::live_corpse_limit_status() const noexcept {
+    return status_;
+}
 int UiModel::presented_target_fps() const noexcept {
     return numeric_presentation_.target_fps(status_.target_fps);
 }

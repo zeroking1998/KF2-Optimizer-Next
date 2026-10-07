@@ -131,6 +131,18 @@ struct AdaptiveRuntimePendingRequest final {
     game::AdaptiveResourceControl resource{game::AdaptiveResourceControl::mixed};
 };
 
+// One user goal and one in-flight request; rapid slider edits are coalesced.
+struct LiveCorpseLimitChange final {
+    telemetry::SampleIdentity identity;
+    std::optional<std::uint64_t> provider_generation;
+    std::optional<std::uint16_t> port;
+    std::string map;
+    std::optional<int> applied_limit;
+    std::optional<game::AdaptiveControlRequest> pending;
+    std::uint64_t next_attempt_ns{0};
+    int attempts{0};
+};
+
 struct UpdateRuntimeState final {
     UpdateRuntimeState(std::string installed_version,
                        std::filesystem::path persisted_state_path)
@@ -286,6 +298,7 @@ struct UiRuntime {
     optimizer::AdaptiveActuationTracker adaptive_actuation;
     game::AdaptiveControlDispatcher adaptive_control_dispatcher;
     game::AdaptiveControlDispatcher adaptive_mode_dispatcher;
+    std::optional<LiveCorpseLimitChange> live_corpse_limit_change;
     std::optional<AdaptiveRuntimePendingRequest>
         adaptive_control_pending;
     std::string adaptive_control_token;
@@ -414,7 +427,9 @@ struct UiRuntime {
             session_config_launch_deadline_ns != 0 ||
             (session_config_snapshot && !session_config_waiting_for_launch) ||
             final_graphics_capture_pending || adaptive_control_pending ||
-            adaptive_runtime_mode_pending || model.recovery_required() ||
+            adaptive_runtime_mode_pending ||
+            (live_corpse_limit_change && live_corpse_limit_change->pending) ||
+            model.recovery_required() ||
             package_repair_state || updates.check || updates.install;
     }
 
@@ -548,6 +563,10 @@ struct UiRuntime {
         const telemetry_pipeline::TelemetryFrame& frame);
 
     void poll_adaptive_runtime_mode();
+    void invalidate_live_corpse_limit();
+    void update_live_corpse_limit(
+        const telemetry_pipeline::TelemetryFrame& frame, ui::LiveCorpseLimitUiStatus& status,
+        bool allow_dispatch = true);
     void reconcile_adaptive_runtime_mode(
         const telemetry_pipeline::TelemetryFrame& frame);
     void log_adaptive_performance_sample(

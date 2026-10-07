@@ -1241,12 +1241,26 @@ int main() {
     CHECK(corpse_limit_write != std::string::npos);
     CHECK(corpse_capture_call < corpse_limit_write);
     const auto online_enable_start = online_apply_body.find("if (Resource ~= \"enable\")");
-    const auto online_enable_end = online_apply_body.find("if (Quality < 10 || Quality > 100)");
+    const auto online_enable_end = online_apply_body.find("if (Resource ~= \"corpse_limit\")");
     CHECK(online_enable_start != std::string::npos &&
           online_enable_end != std::string::npos);
     const auto online_enable_body = online_apply_body.substr(
         online_enable_start, online_enable_end - online_enable_start);
     CHECK(online_enable_is_transactional(online_enable_body));
+    // The count-only transaction is separate from enable: it must preserve
+    // mode and physics ownership while verifying this manager's readback.
+    const auto count_end = online_apply_body.find("if (Quality < 10 || Quality > 100)");
+    CHECK(count_end > online_enable_end && count_end != std::string::npos);
+    const auto count_body = online_apply_body.substr(
+        online_enable_end, count_end - online_enable_end);
+    CHECK(count_body.find("Quality < 4 || Quality > 2000") != std::string::npos);
+    CHECK(count_body.find("CaptureOnlineCorpseMaximum") <
+          count_body.find("GoreManager.MaxDeadBodies = Quality;"));
+    CHECK(count_body.find("GoreManager.MaxDeadBodies != Quality") <
+          count_body.find("OnlineGraphicsLastSequence = Sequence;"));
+    CHECK(count_body.find("bOnlineGraphicsEnabled =") == std::string::npos);
+    CHECK(count_body.find("bOnlineCorpseSleepArmed =") == std::string::npos);
+    CHECK(count_body.find("RemoveAndDeleteCorpse") == std::string::npos);
     const auto enable_failure_restore = online_apply_body.find(
         "RestoreOnlineEnableMaximum(GoreManager);",
         corpse_limit_write);

@@ -13,6 +13,7 @@ void run_adaptive_stage(app::UiRuntime& runtime,
 
 namespace kf2::app {
 void UiRuntime::poll_adaptive_runtime_mode() {
+    if (live_corpse_limit_change && live_corpse_limit_change->pending) return;
     if (auto mode_outcome = adaptive_mode_dispatcher.poll()) {
         // Detach invalidates the request, not the live restore obligation.
         if (!adaptive_runtime_mode_pending) return;
@@ -27,6 +28,11 @@ void UiRuntime::poll_adaptive_runtime_mode() {
                 game::AdaptiveControlReceiptStatus::applied &&
             mode_outcome->value().resource == expected_resource;
         const bool readback_confirmed = adaptive_runtime_mode_confirmed;
+        if (readback_confirmed && live_corpse_limit_change) {
+            // A mode restore may restore the native maximum. Reconfirm the
+            // independent user goal without toggling mode a second time.
+            invalidate_live_corpse_limit();
+        }
         const bool debt_restored = adaptive_restore_debt &&
             !expected_enabled && readback_confirmed;
         if (debt_restored) {
@@ -64,6 +70,110 @@ void UiRuntime::poll_adaptive_runtime_mode() {
                 L"optimizer"});
         }
         adaptive_runtime_mode_pending.reset();
+    }
+}
+
+void UiRuntime::invalidate_live_corpse_limit() {
+    if (!live_corpse_limit_change) return;
+    live_corpse_limit_change->applied_limit.reset();
+    live_corpse_limit_change->attempts = 0;
+    live_corpse_limit_change->next_attempt_ns = 0;
+}
+
+void UiRuntime::update_live_corpse_limit(
+    const telemetry_pipeline::TelemetryFrame& frame, ui::LiveCorpseLimitUiStatus& status,
+    bool allow_dispatch) {
+    status.live_corpse_limit_pending = false;
+    status.live_corpse_limit_unknown = false;
+    if (!live_corpse_limit_change) return;
+    auto& change = *live_corpse_limit_change;
+    const bool same_process = game_process &&
+        game_process->pid == change.identity.pid &&
+        game_process->process_start_id == change.identity.process_start_id &&
+        frame.identity.pid == change.identity.pid &&
+        frame.identity.process_start_id == change.identity.process_start_id;
+    // Offline telemetry has no context generation. Online context and bridge
+    // announcements are transition-only, not heartbeats. The authenticated
+    // response proves listener liveness without extra Actor polling.
+    const bool fresh_provider = same_process && frame.gameplay &&
+        frame.gameplay->telemetry_control_port && !frame.gameplay->main_menu &&
+        frame.gameplay->phase != game::GameLogPhase::match_ended &&
+        !frame.gameplay->loading_movie_active &&
+        ((frame.gameplay->net_mode == "NM_Standalone" &&
+          !frame.gameplay->optimizer_online_read_only) ||
+         (frame.gameplay->optimizer_online_read_only &&
+          frame.gameplay->optimizer_session_generation &&
+          frame.gameplay->optimizer_session_context_observed_ns != 0));
+    const bool same_provider = fresh_provider &&
+        change.provider_generation == frame.gameplay->optimizer_session_generation &&
+        change.port == frame.gameplay->telemetry_control_port &&
+        change.map == frame.gameplay->map;
+    if (change.pending) {
+        if (auto outcome = adaptive_mode_dispatcher.poll()) {
+            const auto request = std::move(*change.pending);
+            change.pending.reset();
+            const bool applied = same_provider && outcome->has_value() &&
+                outcome->value().status == game::AdaptiveControlReceiptStatus::applied &&
+                outcome->value().sequence == request.sequence &&
+                outcome->value().resource == game::AdaptiveResourceControl::corpse_limit &&
+                outcome->value().quality == request.quality;
+            if (applied) {
+                change.applied_limit = request.quality;
+                if (request.quality != optimizer_settings.corpse_limit)
+                    change.next_attempt_ns = frame.observed_at_ns + 250'000'000ULL;
+                if (adaptive_session_policy)
+                    adaptive_session_policy->corpse_maximum = request.quality;
+                status.active_corpse_limit = request.quality;
+                if (request.quality == optimizer_settings.corpse_limit) {
+                    model.set_notice({ui::NoticeSeverity::info,
+                        L"CORPSE_LIMIT_APPLIED",
+                        L"KF2 confirmed maximum corpses: " +
+                            std::to_wstring(request.quality), L""});
+                }
+            } else if (same_process) {
+                change.applied_limit.reset();
+                model.set_notice({ui::NoticeSeverity::warning,
+                    L"CORPSE_LIMIT_UNCONFIRMED",
+                    L"KF2 did not confirm the live corpse limit. The saved value remains available for the next start.", L""});
+            }
+        }
+    }
+    if (!same_process) {
+        // Consume the obsolete worker first; never apply its receipt to a
+        // replacement process. No extra process query is added to this tick.
+        if (!change.pending) live_corpse_limit_change.reset();
+        return;
+    }
+    if (fresh_provider && !same_provider && !change.pending) {
+        change.provider_generation = frame.gameplay->optimizer_session_generation;
+        change.port = frame.gameplay->telemetry_control_port;
+        change.map = frame.gameplay->map;
+        change.applied_limit.reset();
+        change.attempts = 0;
+        change.next_attempt_ns = 0;
+    }
+    status.live_corpse_limit_unknown = change.pending || !change.applied_limit;
+    if (change.applied_limit == optimizer_settings.corpse_limit && same_provider) return;
+    status.live_corpse_limit_pending = change.attempts < 3 || change.pending.has_value();
+    if (!allow_dispatch || !fresh_provider || !adaptive_runtime_mode_confirmed ||
+        adaptive_restore_debt || model.recovery_required() || change.pending ||
+        adaptive_mode_dispatcher.busy() || adaptive_control_dispatcher.busy() ||
+        !adaptive_session_policy ||
+        !game::valid_adaptive_control_token(adaptive_control_token) ||
+        change.attempts >= 3 || frame.observed_at_ns < change.next_attempt_ns) return;
+    const auto sequence = game::next_adaptive_control_sequence(adaptive_control_sequence);
+    if (!sequence) return;
+    game::AdaptiveControlRequest request{
+        .port = *change.port, .token = adaptive_control_token,
+        .sequence = *sequence, .resource = game::AdaptiveResourceControl::corpse_limit,
+        .quality = optimizer_settings.corpse_limit};
+    ++change.attempts;
+    change.next_attempt_ns = frame.observed_at_ns + 5'000'000'000ULL;
+    const auto started = adaptive_mode_dispatcher.start(request);
+    if (started.has_value() && started.value()) {
+        adaptive_control_sequence = *sequence;
+        change.pending = std::move(request);
+        status.live_corpse_limit_unknown = true;
     }
 }
 
@@ -129,6 +239,8 @@ void UiRuntime::reconcile_adaptive_runtime_mode(
     if (started.has_value() && started.value()) {
         adaptive_control_sequence = *next_sequence;
         adaptive_runtime_mode_pending = desired_enabled;
+        // The receiver can restore the count even if its mode ACK is lost.
+        invalidate_live_corpse_limit();
     } else {
         events->append({0, diagnostics::Severity::warning,
             "ADAPTIVE_RUNTIME_MODE_RECONCILE_FAILED",

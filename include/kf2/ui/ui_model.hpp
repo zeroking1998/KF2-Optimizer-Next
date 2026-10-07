@@ -64,7 +64,13 @@ struct AdaptiveUiStatus {
     bool adaptive_shadow_mode{false};
 };
 
-struct UiStatus : AdaptiveUiStatus {
+struct LiveCorpseLimitUiStatus {
+    std::optional<int> active_corpse_limit;
+    bool live_corpse_limit_pending{false};
+    bool live_corpse_limit_unknown{false};
+};
+
+struct UiStatus : AdaptiveUiStatus, LiveCorpseLimitUiStatus {
     std::wstring mode{L"Normal"};
     std::wstring game{L"Game not detected"};
     std::wstring game_session;
@@ -106,7 +112,6 @@ struct UiStatus : AdaptiveUiStatus {
     int target_fps{60};
     std::optional<int> active_target_fps;
     int corpse_limit{20};
-    std::optional<int> active_corpse_limit;
     bool prewarm_active{false};
     int prewarm_percent{0};
     std::wstring prewarm_map;
@@ -180,6 +185,7 @@ public:
     void set_recovery_required(bool required) noexcept;
     void set_status(UiStatus status);
     void set_adaptive_status(AdaptiveUiStatus status) noexcept;
+    void set_live_corpse_limit_status(LiveCorpseLimitUiStatus status) noexcept;
     void set_telemetry_status(
         std::wstring telemetry, std::wstring performance_analysis,
         std::optional<double> fps, std::optional<double> frame_time_ms,
@@ -201,6 +207,7 @@ public:
     [[nodiscard]] bool recovery_required() const noexcept;
     [[nodiscard]] const UiStatus& status() const noexcept;
     [[nodiscard]] const AdaptiveUiStatus& adaptive_status() const noexcept;
+    [[nodiscard]] const LiveCorpseLimitUiStatus& live_corpse_limit_status() const noexcept;
     [[nodiscard]] int presented_target_fps() const noexcept;
     [[nodiscard]] int presented_corpse_limit() const noexcept;
     void preview_target_fps(int value) noexcept;

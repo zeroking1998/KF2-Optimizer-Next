@@ -446,6 +446,22 @@ int main() {
               L"Maximum corpses 2000") != std::wstring::npos);
     CHECK(node(staged_target_home, "status")->text.find(
               L"20 next start") != std::wstring::npos);
+    home_status.live_corpse_limit_pending = true;
+    model.set_status(home_status);
+    const auto pending_corpses_home = layout_shell(model, 1440, 900);
+    CHECK(node(pending_corpses_home, "status")->text.find(
+              L"20 awaiting confirmation") != std::wstring::npos);
+    CHECK(node(pending_corpses_home, "status")->text.find(
+              L"20 next start") == std::wstring::npos);
+    home_status.live_corpse_limit_unknown = true;
+    model.set_status(home_status);
+    const auto unconfirmed_corpses_home = layout_shell(model, 1440, 900);
+    CHECK(node(unconfirmed_corpses_home, "status")->text.find(
+              L"Maximum corpses unconfirmed") != std::wstring::npos);
+    CHECK(node(unconfirmed_corpses_home, "status")->text.find(
+              L"Maximum corpses 2000") == std::wstring::npos);
+    home_status.live_corpse_limit_unknown = false;
+    home_status.live_corpse_limit_pending = false;
     home_status.prewarm_active = true;
     home_status.prewarm_percent = 47;
     home_status.prewarm_map = L"KF-BioticsLab";
