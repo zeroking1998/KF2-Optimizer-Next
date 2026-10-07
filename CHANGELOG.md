@@ -91,6 +91,12 @@ are visible immediately.
   preserving first-match identity and missing-entry behavior without new state.
 - Skip the full world-emitter restoration scan when no Optimizer-owned emitter
   original values remain; nonempty restore and retry behavior is unchanged.
+- Target FPS can now change live in protected KF2 sessions, online or offline
+  and with Adaptive off. The UI and Adaptive goal update only after KF2 confirms
+  the current Engine limit; lost replies pause Adaptive without guessing the cap.
+  Listener discovery also works in the main menu and still discards the old
+  address at map or session boundaries. The menu listener does not trigger
+  Adaptive gameplay-mode retries.
 - Reworked Adaptive into one protected, user-controlled runtime with separate
   CPU, GPU, VRAM, RAM, overdraw, effects, physics, LOD, and corpse-pressure
   paths. Confirmed pressure changes only its matching group, and stable
@@ -297,6 +303,9 @@ are visible immediately.
   startup discovery cannot restore one game's DLL into another. Legacy or
   missing ownership evidence is retained for explicit recovery, not guessed.
 
+- Closing the optimizer in KF2's main menu now restores owned process graphics
+  through the authenticated menu bridge, without requiring a gameplay probe.
+  Failed readbacks retain restore ownership; the selected FPS limit is unchanged.
 - Game-folder changes now preserve the original installation until protected
   files are fully restored. Running games, pending launches/restarts and
   unconfirmed recovery block switching; cancelling preserves prepared state.

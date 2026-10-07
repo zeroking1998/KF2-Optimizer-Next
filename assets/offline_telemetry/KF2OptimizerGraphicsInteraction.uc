@@ -20,6 +20,41 @@ var float NextRuntimeGuardRealTime;
 var float RuntimeGuardIntervalSeconds;
 var bool bFireAfflictionGuardReported;
 var bool bWeaponClassFallbackGuardReported;
+var bool bMenuFrameRateListenerReady;
+var float NextMenuFrameRateListenerRealTime;
+var float MenuFrameRateListenerRetryDelay;
+
+function EnsureMenuFrameRateListener(WorldInfo CurrentWorld, PlayerController Controller)
+{
+    local KF2OptimizerAdaptiveControlListener Listener;
+
+    if (bMenuFrameRateListenerReady || CurrentWorld == None || Controller == None ||
+        CurrentWorld.NetMode != NM_Standalone ||
+        !(CurrentWorld.GetMapName(true) ~= "KFMainMenu") ||
+        Len(class'KF2OptimizerTelemetryProbe'.default.AdaptiveControlToken) != 32 ||
+        CurrentWorld.RealTimeSeconds < NextMenuFrameRateListenerRealTime)
+    {
+        return;
+    }
+    foreach CurrentWorld.DynamicActors(class'KF2OptimizerAdaptiveControlListener', Listener)
+    {
+        if (Listener != None && !Listener.bDeleteMe && Listener.LinkState == STATE_Listening)
+        {
+            bMenuFrameRateListenerReady = true;
+            return;
+        }
+    }
+    Listener = Controller.Spawn(class'KF2OptimizerAdaptiveControlListener');
+    bMenuFrameRateListenerReady = Listener != None && !Listener.bDeleteMe &&
+        Listener.LinkState == STATE_Listening;
+    if (!bMenuFrameRateListenerReady)
+    {
+        if (MenuFrameRateListenerRetryDelay <= 0.0) MenuFrameRateListenerRetryDelay = 0.5;
+        NextMenuFrameRateListenerRealTime = CurrentWorld.RealTimeSeconds +
+            MenuFrameRateListenerRetryDelay;
+        MenuFrameRateListenerRetryDelay = FMin(8.0, MenuFrameRateListenerRetryDelay * 2.0);
+    }
+}
 
 function bool EnsureTurretWeaponMaterial(KFWeapon Weapon)
 {
@@ -341,6 +376,7 @@ event Tick(float DeltaTime)
     local string SelectedMap;
     local string CurrentMapName;
     local bool bGraphicsMenuOpen;
+    local KF2OptimizerGraphicsViewport FrameRateViewport;
 
     if (GamePlayers.Length == 0)
     {
@@ -375,6 +411,9 @@ event Tick(float DeltaTime)
         ResetMenuGraphicsObservation();
         bFireAfflictionGuardReported = false;
         bWeaponClassFallbackGuardReported = false;
+        bMenuFrameRateListenerReady = false;
+        NextMenuFrameRateListenerRealTime = 0.0;
+        MenuFrameRateListenerRetryDelay = 0.5;
     }
     LastObservedRealTime = CurrentWorld.RealTimeSeconds;
     LastRuntimeGuardMapName = CurrentMapName;
@@ -409,6 +448,19 @@ event Tick(float DeltaTime)
         ResetMenuGraphicsObservation();
     }
     bGraphicsMenuWasOpen = bGraphicsMenuOpen;
+    // Reuse the bounded native menu observation in every net mode. Include
+    // the viewport sequence so old logs cannot invalidate a fresh receipt.
+    if (Readback != "")
+    {
+        FrameRateViewport = KF2OptimizerGraphicsViewport(Outer);
+        if (FrameRateViewport != None) Readback $= FrameRateViewport.FrameRateReadback();
+        else Readback $= " frame_rate_sequence=0 frame_rate_limit=0";
+        if (Readback != LastReadback)
+        {
+            LastReadback = Readback;
+            `log("KF2OPT_GFX_MENU schema=3 state=applied " $ Readback);
+        }
+    }
     if (CurrentWorld.NetMode != NM_Standalone)
     {
         return;
@@ -416,6 +468,7 @@ event Tick(float DeltaTime)
 
     if (CurrentMapName ~= "KFMainMenu")
     {
+        EnsureMenuFrameRateListener(CurrentWorld, PrimaryController);
         LastVotedMap = "";
         if (KFPC != None && KFPC.MyGFxManager != None &&
             KFPC.MyGFxManager.StartMenu != None &&
@@ -427,11 +480,6 @@ event Tick(float DeltaTime)
                 LastSelectedMap = SelectedMap;
                 `log("KF2OPT_MAP_SELECTION schema=1 state=menu map="$SelectedMap);
             }
-        }
-        if (Readback != "" && Readback != LastReadback)
-        {
-            LastReadback = Readback;
-            `log("KF2OPT_GFX_MENU schema=2 state=applied " $ Readback);
         }
         return;
     }

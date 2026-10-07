@@ -466,6 +466,21 @@ int main() {
     const auto menu_readback =
         kf2::game::parse_game_menu_graphics_readback(menu_line);
     CHECK(menu_readback.has_value());
+    CHECK(!menu_readback->frame_rate_sequence);
+    auto current_menu_line = menu_line;
+    current_menu_line.replace(current_menu_line.find("schema=2"), 8, "schema=3");
+    current_menu_line += " frame_rate_sequence=7 frame_rate_limit=119";
+    const auto current_menu = kf2::game::parse_game_menu_graphics_readback(current_menu_line);
+    CHECK(current_menu && current_menu->frame_rate_sequence == 7 &&
+          current_menu->frame_rate_limit == 119);
+    CHECK(!kf2::game::parse_game_menu_graphics_readback(
+        current_menu_line + " unexpected=1"));
+    CHECK(!kf2::game::parse_game_menu_graphics_readback(std::string{current_menu_line}.replace(
+        current_menu_line.find("frame_rate_sequence=7"), 21,
+        "frame_rate_sequence=-1")));
+    CHECK(!kf2::game::parse_game_menu_graphics_readback(std::string{current_menu_line}.replace(
+        current_menu_line.find("frame_rate_limit=119"), 20,
+        "frame_rate_limit=241")));
     CHECK(menu_readback->resolution.width == 2560);
     CHECK(menu_readback->film_grain_percent == 25);
     CHECK(menu_readback->choices[static_cast<std::size_t>(

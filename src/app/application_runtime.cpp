@@ -404,6 +404,7 @@ Result<bool> UiRuntime::save_adaptive_locks() {
 }
 
 void UiRuntime::update_adaptive_policy_status(ui::UiStatus& status) const {
+    present_live_frame_rate(status);
     status.adaptive_shadow_mode =
         optimizer_settings.adaptive_shadow_mode;
     status.adaptive_minimum_quality =

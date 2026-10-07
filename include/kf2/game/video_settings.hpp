@@ -58,6 +58,8 @@ struct GameMenuGraphicsReadback {
     std::array<int, kVideoOptionCount> choices{};
     Resolution resolution{};
     int film_grain_percent{};
+    std::optional<int> frame_rate_sequence;
+    std::optional<int> frame_rate_limit;
     bool operator==(const GameMenuGraphicsReadback&) const = default;
 };
 

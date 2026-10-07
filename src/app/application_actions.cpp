@@ -136,6 +136,14 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
             previous.adaptive_headroom_percent &&
         optimizer_settings.overlay_scale_percent ==
             previous.overlay_scale_percent) {
+        // A deliberate retry of an unconfirmed/saved target needs no new
+        // settings write. Never duplicate a command already awaiting a reply.
+        if (control->id == runtime::ControlId::target_fps && game_process &&
+            (!live_frame_rate || (!frame_rate_pending && !live_frame_rate->queued)) &&
+            (model.status().target_fps_unknown ||
+             model.status().active_target_fps != std::optional<int>{value})) {
+            queue_live_frame_rate(value);
+        }
         return;
     }
 
@@ -166,6 +174,11 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
     const bool target_staged_for_restart =
         optimizer_settings.target_fps != previous.target_fps &&
         policy_bound_to_running_process;
+    if (game_running && optimizer_settings.target_fps != previous.target_fps) {
+        // Saving a desired target is not a live receipt. Rebase only after
+        // the current KF2 Engine confirms the authenticated runtime command.
+        adaptive_policy_changed = false;
+    }
 
     // The saved target and native startup cap commit together. Do not publish
     // the new status, rebase Adaptive, or restage a pending launch until the
@@ -333,6 +346,8 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
 
     if (optimizer_settings.target_fps != previous.target_fps &&
         installation && game_running) {
+        queue_live_frame_rate(optimizer_settings.target_fps);
+        if (live_frame_rate_unsettled()) return;
         message += target_staged_for_restart
             ? L"; saved for the next KF2 start; this session keeps its active native FPS target"
             : L"; the native cap will use it after KF2 restarts";

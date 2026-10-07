@@ -56,9 +56,9 @@ foreach(expected IN LISTS canonical_feature_sources)
 endforeach()
 
 list(LENGTH app_sources app_source_count)
-if(NOT app_source_count EQUAL 15)
+if(NOT app_source_count EQUAL 16)
     message(FATAL_ERROR
-        "Shared app action list must contain eight runtime plus seven feature sources")
+        "Shared app action list must contain nine runtime plus seven feature sources")
 endif()
 set(unique_app_sources ${app_sources})
 list(REMOVE_DUPLICATES unique_app_sources)
