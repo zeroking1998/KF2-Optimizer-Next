@@ -1,4 +1,5 @@
 #include "kf2/platform/windows/dxgi_frame_timing_session.hpp"
+#include "kf2/platform/windows/thread_cpu_time.hpp"
 
 #include <Windows.h>
 #include <evntrace.h>
@@ -573,6 +574,14 @@ DxgiFrameTimingSession::start(telemetry::SampleIdentity identity,
 Result<bool> DxgiFrameTimingSession::stop() {
     if (implementation_) implementation_->shutdown();
     return Result<bool>::success(true);
+}
+
+std::optional<std::uint64_t> DxgiFrameTimingSession::cpu_work_ns() const noexcept {
+    if (!implementation_ || !implementation_->trace_worker.joinable() ||
+        !implementation_->flush_worker.joinable()) return std::nullopt;
+    const auto trace = thread_cpu_ns(implementation_->trace_worker.native_handle());
+    const auto flush = thread_cpu_ns(implementation_->flush_worker.native_handle());
+    return trace && flush ? std::optional{*trace + *flush} : std::nullopt;
 }
 
 }  // namespace kf2::platform::windows

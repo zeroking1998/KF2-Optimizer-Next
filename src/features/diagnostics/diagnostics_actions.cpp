@@ -434,6 +434,28 @@ app::runtime::DispatchResult toggle_flex_diagnostics(
     return app::runtime::DispatchResult::handled;
 }
 
+app::runtime::DispatchResult toggle_self_overhead(
+    app::UiRuntime& runtime, const app::runtime::NoPayload&) {
+    const bool enabled = !runtime.model.status().self_overhead_enabled;
+    if (enabled && !runtime.self_overhead_window) {
+        auto created = overlay::OverlayWindow::create();
+        if (!created.has_value()) {
+            show_notice(runtime, ui::NoticeSeverity::error,
+                L"SELF_OVERHEAD_UNAVAILABLE", created.error().message);
+            return app::runtime::DispatchResult::handled;
+        }
+        runtime.self_overhead_window.emplace(std::move(created.value()));
+    }
+    auto status = runtime.model.status();
+    status.self_overhead_enabled = enabled;
+    runtime.model.set_status(std::move(status));
+    runtime.self_overhead_sample_ns = 0;
+    runtime.sample_self_overhead(runtime.monotonic_ns());
+    runtime.update_self_overhead_overlay();
+    runtime.invalidate();
+    return app::runtime::DispatchResult::handled;
+}
+
 app::runtime::DispatchResult toggle_runtime_diagnostics(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
     const bool previous =
@@ -458,7 +480,8 @@ app::runtime::DispatchResult toggle_runtime_diagnostics(
     runtime.overlay_diagnostics_last_published_ns = 0;
     runtime.prewarm_diagnostics_last_published_ns = 0;
     if (runtime.overlay_window) {
-        runtime.overlay_window->set_diagnostics_enabled(enabled);
+        runtime.overlay_window->set_diagnostics_enabled(
+            enabled || runtime.self_overhead_collecting);
     }
     auto status = runtime.model.status();
     status.debug_runtime_diagnostics = enabled;

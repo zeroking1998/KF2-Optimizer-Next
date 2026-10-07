@@ -7,13 +7,29 @@
 #include <vector>
 #include "kf2/game/game_session.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
+#include "kf2/diagnostics/self_overhead.hpp"
 #include "../support/process_inspection_denial.hpp"
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
 
 int main() {
+    using kf2::diagnostics::work_ms_per_second;
+    CHECK(work_ms_per_second(10, 120'010, 1'000'000'000) == 0.12);
+    CHECK(work_ms_per_second(10, 240'010, 2'000'000'000) == 0.12);
+    CHECK(work_ms_per_second(10, 10, 1'000'000'000) == 0.0);
+    CHECK(!work_ms_per_second(10, 9, 1'000'000'000));
+    CHECK(!work_ms_per_second(10, 20, 0));
+    CHECK(!work_ms_per_second(std::nullopt, 20, 1'000'000'000));
+    CHECK(!work_ms_per_second(10, std::nullopt, 1'000'000'000));
     using namespace kf2::telemetry;
+    const auto own = query_own_process_counters();
+    CHECK(own.cpu_ns.has_value() && own.io_bytes.has_value());
+    CHECK(own.ram_bytes && *own.ram_bytes > 0);
+    CHECK(own.private_bytes && *own.private_bytes > 0);
+    CHECK(own.threads && *own.threads > 0);
+    CHECK(query_thread_cpu_ns(GetCurrentThread()).has_value());
+    CHECK(!query_thread_cpu_ns(nullptr));
     using detail::CpuCapacityObservation;
     using detail::CpuSetQueryState;
     using detail::ProcessorGroupMask;

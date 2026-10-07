@@ -186,6 +186,82 @@ Function nvml_export(HMODULE library, const char* name) {
 }
 }  // namespace
 
+struct OwnGpuMemorySampler::Storage final {
+    struct Adapter {
+        Microsoft::WRL::ComPtr<IDXGIAdapter3> handle;
+        UINT nodes{0};
+    };
+    Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
+    std::vector<Adapter> adapters;
+    bool complete{false};
+};
+
+OwnGpuMemorySampler::OwnGpuMemorySampler() = default;
+OwnGpuMemorySampler::~OwnGpuMemorySampler() = default;
+void OwnGpuMemorySampler::reset() noexcept { storage_.reset(); }
+
+OwnGpuMemory OwnGpuMemorySampler::sample() {
+    if (!storage_ || !storage_->complete || !storage_->factory->IsCurrent()) {
+        auto next = std::make_unique<Storage>();
+        if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&next->factory)))) return {};
+        std::set<std::uint64_t> seen;
+        for (UINT index = 0;; ++index) {
+            Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+            const auto found = next->factory->EnumAdapters1(index, &adapter);
+            if (found == DXGI_ERROR_NOT_FOUND) {
+                next->complete = !next->adapters.empty();
+                break;
+            }
+            if (FAILED(found)) break;
+            DXGI_ADAPTER_DESC1 description{};
+            if (FAILED(adapter->GetDesc1(&description))) break;
+            if (description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
+            const auto luid = (static_cast<std::uint64_t>(
+                static_cast<std::uint32_t>(description.AdapterLuid.HighPart)) << 32U) |
+                description.AdapterLuid.LowPart;
+            if (!seen.insert(luid).second) continue;
+            Storage::Adapter target;
+            if (FAILED(adapter.As(&target.handle))) break;
+            D3DKMT_OPENADAPTERFROMLUID opened{};
+            opened.AdapterLuid = description.AdapterLuid;
+            if (D3DKMTOpenAdapterFromLuid(&opened) != 0) break;
+            D3DKMT_PHYSICAL_ADAPTER_COUNT count{};
+            D3DKMT_QUERYADAPTERINFO query{};
+            query.hAdapter = opened.hAdapter;
+            query.Type = KMTQAITYPE_PHYSICALADAPTERCOUNT;
+            query.pPrivateDriverData = &count;
+            query.PrivateDriverDataSize = sizeof(count);
+            const auto queried = D3DKMTQueryAdapterInfo(&query);
+            D3DKMT_CLOSEADAPTER close{opened.hAdapter};
+            static_cast<void>(D3DKMTCloseAdapter(&close));
+            if (queried != 0 || count.Count == 0 || count.Count > 64) break;
+            target.nodes = count.Count;
+            next->adapters.push_back(std::move(target));
+        }
+        storage_ = std::move(next);
+    }
+    if (!storage_->complete) return {};
+    OwnGpuMemory result{0, 0};
+    for (const auto& adapter : storage_->adapters) {
+        for (UINT node = 0; node < adapter.nodes; ++node) {
+            for (const auto group : {DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
+                                     DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL}) {
+                auto& total = group == DXGI_MEMORY_SEGMENT_GROUP_LOCAL
+                    ? result.local_bytes : result.nonlocal_bytes;
+                if (!total) continue;
+                DXGI_QUERY_VIDEO_MEMORY_INFO info{};
+                if (FAILED(adapter.handle->QueryVideoMemoryInfo(node, group, &info)) ||
+                    info.CurrentUsage > (std::numeric_limits<std::uint64_t>::max)() - *total) {
+                    total.reset(); // Never present a partial sum as all adapters.
+                } else {
+                    *total += info.CurrentUsage;
+                }
+            }
+        }
+    }
+    return result;
+}
+
 std::optional<ProcessGpuPreference> parse_windows_gpu_preference(
     std::wstring_view value) noexcept {
     const auto trim = [](std::wstring_view text) {
@@ -1022,9 +1098,26 @@ struct PdhGpuSampler::Storage final {
     std::vector<std::byte> buffer;
     std::vector<GpuCounterValue> values;
     std::map<std::wstring, std::optional<GpuInstanceIdentity>, std::less<>> identities;
+    bool valid{false};
     static constexpr std::size_t kMaximumIdentities = 4096;
     static constexpr std::size_t kMaximumCachedNameLength = 512;
 };
+
+std::optional<double> PdhGpuSampler::latest_process_gpu_percent(
+    std::uint32_t pid) const noexcept {
+    if (!storage_ || !storage_->valid) return std::nullopt;
+    std::optional<double> busiest;
+    for (const auto& value : storage_->values) {
+        if (value.identity.pid != pid || value.identity.engine == L"memory") continue;
+        if (!std::isfinite(value.utilization_percent) ||
+            value.utilization_percent < 0 || value.utilization_percent > 100) {
+            return std::nullopt;
+        }
+        busiest = busiest ? std::max(*busiest, value.utilization_percent)
+                          : value.utilization_percent;
+    }
+    return busiest;
+}
 
 PdhGpuSampler::PdhGpuSampler() : storage_{std::make_unique<Storage>()} {}
 PdhGpuSampler::PdhGpuSampler(PdhGpuSampler&& other) noexcept { *this = std::move(other); }
@@ -1068,6 +1161,7 @@ Result<PdhGpuSampler> PdhGpuSampler::create(std::uint32_t pid,
 }
 
 Result<GpuMetrics> PdhGpuSampler::sample() {
+    if (storage_) storage_->valid = false;
     const PDH_STATUS collected = PdhCollectQueryData(query_);
     if (collected != ERROR_SUCCESS) return Result<GpuMetrics>::failure(
         {ErrorCode::platform_failure, L"GPU PDH collection failed",
@@ -1113,6 +1207,7 @@ Result<GpuMetrics> PdhGpuSampler::sample() {
     if (!utilization.has_value()) return Result<GpuMetrics>::failure(utilization.error());
     if (!dedicated.has_value()) return Result<GpuMetrics>::failure(dedicated.error());
     if (!shared.has_value()) return Result<GpuMetrics>::failure(shared.error());
+    storage_->valid = true;
     auto result = aggregate_gpu_counters(values, pid_, adapter_luid_);
     result.process_adapter_luid = active_process_gpu_adapter_luid(
         values, pid_, adapter_luid_);

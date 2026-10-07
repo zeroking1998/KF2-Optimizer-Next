@@ -177,7 +177,8 @@ void UiRuntime::observe_flex_process() {
     if (!game_process) return;
     const auto now_ns = monotonic_ns();
     adaptive_actuation.poll(now_ns);
-    const auto flex_state = flex_observation_reader.read(*game_process);
+    const auto flex_state = flex_observation_reader.read(
+        *game_process, self_overhead_collecting);
     if (!flex_state || !flex_state->fresh) return;
     const bool reuse_particle_text =
         flex_particle_text_current && last_flex_observation &&

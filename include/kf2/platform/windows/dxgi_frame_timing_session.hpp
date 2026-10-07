@@ -23,6 +23,7 @@ public:
     [[nodiscard]] static Result<std::unique_ptr<DxgiFrameTimingSession>> start(
         telemetry::SampleIdentity identity, telemetry::PresentSource& sink);
     [[nodiscard]] Result<bool> stop();
+    [[nodiscard]] std::optional<std::uint64_t> cpu_work_ns() const noexcept;
 
 #ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
     using TestStartOperation = Result<std::unique_ptr<DxgiFrameTimingSession>> (*)(

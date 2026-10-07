@@ -22,7 +22,30 @@
 
 int main() {
     using namespace kf2::game;
+    const auto work_receipt = parse_adaptive_control_receipt(
+        "KF2OPT_ACK 1 applied overhead 100 1000 5\n");
+    CHECK(work_receipt.has_value());
+    CHECK(work_receipt->script_work_ns == 5'000'000);
+    CHECK(work_receipt->script_elapsed_ns == 1'000'000'000);
+    CHECK(!parse_adaptive_control_receipt("KF2OPT_ACK 1 applied overhead 100"));
+    CHECK(!parse_adaptive_control_receipt("KF2OPT_ACK 1 applied overhead 100 1000 1001"));
+    CHECK(!parse_adaptive_control_receipt("KF2OPT_ACK 1 applied overhead 100 4001 0"));
+    CHECK(!parse_adaptive_control_receipt("KF2OPT_ACK 1 applied overhead 100 1000 -1"));
+    CHECK(!parse_adaptive_control_receipt("KF2OPT_ACK 1 applied overhead 99 1000 1"));
+    CHECK(!parse_adaptive_control_receipt("KF2OPT_ACK 1 applied overhead 100 1000 1 junk"));
+    CHECK(!parse_adaptive_control_receipt("KF2OPT_ACK 1 applied cpu 100 1000 1"));
+    const auto warming = parse_adaptive_control_receipt(
+        "KF2OPT_ACK 2 applied overhead 100 0 0");
+    CHECK(warming && !warming->script_work_ns && !warming->script_elapsed_ns);
     constexpr auto token = "0123456789abcdef0123456789abcdef";
+    const auto overhead_command = build_adaptive_control_command({
+        .port = 17777, .token = token, .sequence = 1,
+        .resource = AdaptiveResourceControl::overhead, .quality = 100});
+    CHECK(overhead_command.has_value() && overhead_command.value() ==
+        "KF2OPT 0123456789abcdef0123456789abcdef 1 overhead 100\n");
+    CHECK(!build_adaptive_control_command({
+        .port = 17777, .token = token, .sequence = 1,
+        .resource = AdaptiveResourceControl::overhead, .quality = 50}).has_value());
     CHECK(valid_adaptive_control_token(token));
     CHECK(!valid_adaptive_control_token("0123"));
     CHECK(!valid_adaptive_control_token(
@@ -199,6 +222,10 @@ int main() {
         "KF2OPT_ACK 42 applied flex 50").has_value());
 
     AdaptiveResourceQualityState quality{100};
+    quality.apply({1, AdaptiveResourceControl::overhead, 10});
+    CHECK(quality.cpu == 100 && quality.gpu == 100 &&
+          quality.vram == 100 && quality.ram == 100 &&
+          quality.overdraw == 100 && quality.effects == 100);
     CHECK(quality.effective_quality() == 100);
     CHECK(quality.control_quality(AdaptiveResourceControl::gpu) == 100);
     quality.apply({1, AdaptiveResourceControl::gpu, 60});

@@ -22,6 +22,49 @@ using kf2::flex::ObservationShared;
 INIT_ONCE observation_once{};
 HANDLE observation_mapping{};
 ObservationShared* observation{};
+// Opt-in elapsed wrapper work, excluding the original KF2/FleX call. No
+// clocks, allocations or locks when the app's shared-memory lease is off.
+class OwnWork final {
+public:
+    OwnWork() noexcept {
+        if (!observation) return;
+        const auto lease = observation->own_work_lease_tick;
+        if (lease == 0) return;
+        if (lease <= static_cast<LONGLONG>(GetTickCount64())) {
+            InterlockedCompareExchange64(&observation->own_work_lease_tick, 0, lease);
+            return;
+        }
+        shared_ = observation;
+        resume();
+    }
+    ~OwnWork() noexcept {
+        pause();
+        if (shared_ && ticks_ > 0) InterlockedAdd64(&shared_->own_work_ticks, ticks_);
+    }
+    template <class Function, class... Args>
+    auto forward(Function function, Args... args) noexcept -> decltype(function(args...)) {
+        pause();
+        struct Resume {
+            OwnWork& work;
+            ~Resume() noexcept { work.resume(); }
+        } resume_after{*this};
+        return function(args...);
+    }
+private:
+    void resume() noexcept {
+        if (shared_ && !QueryPerformanceCounter(&started_)) started_.QuadPart = 0;
+    }
+    void pause() noexcept {
+        LARGE_INTEGER finished{};
+        if (started_.QuadPart > 0 && QueryPerformanceCounter(&finished) &&
+            finished.QuadPart >= started_.QuadPart)
+            ticks_ += finished.QuadPart - started_.QuadPart;
+        started_.QuadPart = 0;
+    }
+    ObservationShared* shared_{};
+    LARGE_INTEGER started_{};
+    LONGLONG ticks_{};
+};
 struct SolverSlot {
     void* solver{};
     unsigned calls{};
@@ -259,6 +302,9 @@ BOOL CALLBACK initialize_observation(PINIT_ONCE, PVOID, PVOID*) noexcept {
     shared->min_forwarded_substeps = LONG_MAX;
     shared->min_active_particles = LONG_MAX;
     shared->state = 1;
+    LARGE_INTEGER frequency{};
+    if (QueryPerformanceFrequency(&frequency))
+        shared->own_work_frequency = frequency.QuadPart;
     InterlockedExchange(reinterpret_cast<volatile LONG*>(&shared->magic),
                         static_cast<LONG>(kf2::flex::observation_magic));
     observation_mapping = mapping;
@@ -297,6 +343,7 @@ Function original_function(std::atomic<FARPROC>& target,
 }  // namespace
 
 extern "C" void flexDestroySolver(void* solver) noexcept {
+    OwnWork work;
     using Function = void (*)(void*);
     static constinit std::atomic<FARPROC> target{};
     const auto function = original_function<Function>(target, "flexDestroySolver");
@@ -305,13 +352,14 @@ extern "C" void flexDestroySolver(void* solver) noexcept {
     if (shared && !solver) saturated_increment(&shared->invalid_argument_calls);
     retire_solver(solver, shared);
     if (shared) saturated_increment(&shared->destroy_calls);
-    if (function) function(solver);
+    if (function) work.forward(function, solver);
 }
 
 // The pinned KF2 1.0.5 binary at ordinal 9 consumes only the first integer
 // argument. Its entry point stores ECX and overwrites RDX/R8 without reading
 // them, so this relay deliberately follows that verified one-argument ABI.
 extern "C" void* flexCreateSolver(int max_particles) noexcept {
+    OwnWork work;
     using Function = void* (*)(int);
     static constinit std::atomic<FARPROC> target{};
     const auto function = original_function<Function>(target, "flexCreateSolver");
@@ -319,7 +367,7 @@ extern "C" void* flexCreateSolver(int max_particles) noexcept {
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && max_particles <= 0)
         saturated_increment(&shared->invalid_argument_calls);
-    void* const solver = function ? function(max_particles) : nullptr;
+    void* const solver = function ? work.forward(function, max_particles) : nullptr;
     if (function) {
         if (shared) {
             saturated_increment(&shared->create_calls);
@@ -333,22 +381,24 @@ extern "C" void* flexCreateSolver(int max_particles) noexcept {
 }
 
 extern "C" int flexGetVersion() noexcept {
+    OwnWork work;
     using Function = int (*)();
     static constinit std::atomic<FARPROC> target{};
     const auto function = original_function<Function>(target, "flexGetVersion");
     if (auto* shared = observation_state(); shared && !function)
         saturated_increment(&shared->missing_original_calls);
-    return function ? function() : 0;
+    return function ? work.forward(function) : 0;
 }
 
 extern "C" int flexGetActiveCount(void* solver) noexcept {
+    OwnWork work;
     using Function = int (*)(void*);
     static constinit std::atomic<FARPROC> target{};
     const auto function = original_function<Function>(target, "flexGetActiveCount");
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && !solver) saturated_increment(&shared->invalid_argument_calls);
-    const int count = function ? function(solver) : 0;
+    const int count = function ? work.forward(function, solver) : 0;
     if (function && count >= 0) {
         if (detailed_diagnostics(shared)) {
             InterlockedExchange(&shared->last_active_particles, count);
@@ -380,6 +430,7 @@ extern "C" int flexGetActiveCount(void* solver) noexcept {
 }
 
 extern "C" void flexGetBounds(void* solver, void* lower, void* upper) noexcept {
+    OwnWork work;
     using Function = void (*)(void*, void*, void*);
     static constinit std::atomic<FARPROC> target{};
     const auto function = original_function<Function>(target, "flexGetBounds");
@@ -387,12 +438,13 @@ extern "C" void flexGetBounds(void* solver, void* lower, void* upper) noexcept {
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && (!solver || !lower || !upper))
         saturated_increment(&shared->invalid_argument_calls);
-    if (function) function(solver, lower, upper);
+    if (function) work.forward(function, solver, lower, upper);
     if (function && detailed_diagnostics(shared))
         saturated_increment(&shared->bounds_calls);
 }
 
 extern "C" void flexSetParams(void* solver, const void* params) noexcept {
+    OwnWork work;
     using Function = void (*)(void*, const void*);
     static constinit std::atomic<FARPROC> target{};
     const auto function = original_function<Function>(target, "flexSetParams");
@@ -400,7 +452,7 @@ extern "C" void flexSetParams(void* solver, const void* params) noexcept {
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && (!solver || !params))
         saturated_increment(&shared->invalid_argument_calls);
-    if (function) function(solver, params);
+    if (function) work.forward(function, solver, params);
     if (function && detailed_diagnostics(shared))
         saturated_increment(&shared->params_calls);
 }
@@ -410,13 +462,14 @@ void relay_buffer_transfer(std::atomic<FARPROC>& target,
                            const char* export_name, void* solver,
                            void* buffer, int elements, int memory,
                            volatile LONGLONG kf2::flex::ObservationShared::* counter) noexcept {
+    OwnWork work;
     using Function = void (*)(void*, void*, int, int);
     const auto function = original_function<Function>(target, export_name);
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && (!solver || (!buffer && elements > 0) || elements < 0))
         saturated_increment(&shared->invalid_argument_calls);
-    if (function) function(solver, buffer, elements, memory);
+    if (function) work.forward(function, solver, buffer, elements, memory);
     if (function && detailed_diagnostics(shared))
         record_transfer(shared, Upload, &(shared->*counter), elements, memory);
 }
@@ -467,13 +520,14 @@ extern "C" void flexSetVelocities(void* solver, const void* velocities,
 }
 
 extern "C" void flexSetFence() noexcept {
+    OwnWork work;
     using Function = void (*)();
     static constinit std::atomic<FARPROC> target{};
     const auto function = original_function<Function>(target, "flexSetFence");
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (!function) return;
-    function();
+    work.forward(function);
     if (detailed_diagnostics(shared)) {
         saturated_increment(&shared->fence_set_calls);
         InterlockedExchange64(&shared->last_fence_set_tick,
@@ -482,6 +536,7 @@ extern "C" void flexSetFence() noexcept {
 }
 
 extern "C" void flexWaitFence() noexcept {
+    OwnWork work;
     using Function = void (*)();
     static constinit std::atomic<FARPROC> target{};
     const auto function = original_function<Function>(target, "flexWaitFence");
@@ -489,7 +544,7 @@ extern "C" void flexWaitFence() noexcept {
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (!function) return;
     // This relay never adds a wait. It observes only the exact wait KF2 requested.
-    function();
+    work.forward(function);
     if (detailed_diagnostics(shared)) {
         saturated_increment(&shared->fence_wait_calls);
         InterlockedExchange64(&shared->last_fence_wait_tick,
@@ -499,6 +554,7 @@ extern "C" void flexWaitFence() noexcept {
 
 extern "C" void flexUpdateSolver(void* solver, float delta_time,
                                   int substeps, void* timers) noexcept {
+    OwnWork work;
     using Function = void (*)(void*, float, int, void*);
     static constinit std::atomic<FARPROC> target{};
     const auto function = original_function<Function>(target, "flexUpdateSolver");
@@ -554,7 +610,7 @@ extern "C" void flexUpdateSolver(void* solver, float delta_time,
                               static_cast<LONGLONG>(GetTickCount64()));
     }
     if (function) {
-        function(solver, delta_time, forwarded_substeps, timers);
+        work.forward(function, solver, delta_time, forwarded_substeps, timers);
         if (shared) {
             // Commit the returned call's value, not an in-flight intention.
             InterlockedExchange(&shared->last_forwarded_substeps, forwarded_substeps);

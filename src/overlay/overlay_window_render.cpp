@@ -5,6 +5,52 @@
 #include <cmath>
 
 namespace kf2::overlay {
+namespace {
+void draw_self_overhead(OverlayWindowState& state, LONG width, LONG height,
+                        const diagnostics::SelfOverheadPresentation& values) {
+    auto* target = state.render_target.Get();
+    target->SetTransform(D2D1::Matrix3x2F::Scale(
+        static_cast<float>(width) / 300.0F, static_cast<float>(height) / 400.0F));
+    const auto card = D2D1::RoundedRect(D2D1::RectF(1, 1, 299, 399), 9, 9);
+    target->FillRoundedRectangle(card, state.background.Get());
+    target->DrawRoundedRectangle(card, state.border.Get(), 1.0F);
+    target->DrawLine(D2D1::Point2F(14, 8), D2D1::Point2F(62, 8),
+                     state.accent.Get(), 2.0F);
+    const auto text = [&](std::wstring_view value, float left, float top,
+                          float right, ID2D1Brush* brush, IDWriteTextFormat* format) {
+        target->DrawTextW(value.data(), static_cast<UINT32>(value.size()),
+            format, D2D1::RectF(left, top, right, top + 19), brush,
+            D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    };
+    text(L"KF2 OPTIMIZER · SELF WORK", 14, 15, 288,
+        state.foreground.Get(), state.title_format.Get());
+    struct Row { std::wstring_view label; std::size_t value; };
+    constexpr std::array<Row, 16> rows{{
+        {L"CPU", 0}, {L"RAM resident", 1}, {L"RAM private", 15}, {L"I/O", 2},
+        {L"Threads", 3}, {L"GPU busiest engine", 12}, {L"GPU local memory", 13},
+        {L"GPU non-local", 14}, {L"Telemetry CPU", 4}, {L"Telemetry time", 5},
+        {L"DXGI CPU", 6}, {L"Adaptive time", 7}, {L"Overlay time", 8},
+        {L"Script time", 9}, {L"FleX time", 10}, {L"App CPU total", 11}}};
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        const float top = index < 8 ? 40.0F + static_cast<float>(index) * 18.0F
+            : index < 15 ? 195.0F + static_cast<float>(index - 8) * 17.0F : 326.0F;
+        auto* brush = index == 15 ? state.accent.Get() : state.foreground.Get();
+        text(rows[index].label, 14, top, 159, brush, state.title_format.Get());
+        text(values.values[rows[index].value], 165, top, 288, brush,
+             state.system_value_format.Get());
+    }
+    for (const float y : {187.0F, 318.0F}) {
+        target->DrawLine(D2D1::Point2F(14, y), D2D1::Point2F(286, y),
+                         state.border.Get(), 1.0F);
+    }
+    text(L"1 s · CPU and elapsed time are separate", 14, 351, 288,
+         state.muted.Get(), state.title_format.Get());
+    text(L"Script clock: 1 ms · — unavailable", 14, 366, 288,
+         state.muted.Get(), state.title_format.Get());
+    text(L"KF2 engine / DWM: not attributable", 14, 381, 288,
+         state.muted.Get(), state.title_format.Get());
+}
+}  // namespace
 
 Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     if (!state_) return Result<bool>::failure(
@@ -68,11 +114,22 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         state_->target.show_cpu != presentation.show_cpu ||
         state_->target.show_gpu != presentation.show_gpu ||
         state_->target.show_memory != presentation.show_memory ||
+        state_->target.self_overhead != presentation.self_overhead ||
         state_->target.animations_enabled != presentation.animations_enabled;
     detail::prepare_visibility_animation(
         *state_, presentation, geometry_changed, frame_now_ms);
-    const auto metric_update = detail::update_overlay_metrics(
-        *state_, presentation, frame_now_ms, content_changed);
+    MetricUpdateResult metric_update{};
+    if (presentation.self_overhead) {
+        if (!geometry_changed && !content_changed && !state_->redraw_required &&
+            !window_recreated && !owner_changed) return Result<bool>::success(false);
+        state_->target = presentation;
+        state_->has_target = true;
+        state_->has_visual = presentation.visible;
+        if (presentation.visible) state_->visual = presentation;
+    } else {
+        metric_update = detail::update_overlay_metrics(
+            *state_, presentation, frame_now_ms, content_changed);
+    }
     if (!state_->has_visual) {
         ShowWindow(state_->window, SW_HIDE);
         state_->animating = false;
@@ -207,7 +264,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
     }
     RECT local{0, 0, width, height};
     HRESULT result = state_->render_target->BindDC(state_->memory_dc, &local);
-    if (SUCCEEDED(result) &&
+    if (SUCCEEDED(result) && !presentation.self_overhead &&
         !detail::static_layer_matches(*state_, static_width, static_height)) {
         result = detail::rebuild_static_layer(
             *state_, static_width, static_height);
@@ -216,6 +273,9 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
         state_->render_target->BeginDraw();
         state_->render_target->Clear(D2D1::ColorF(0, 0.0F));
         state_->render_target->SetTransform(D2D1::Matrix3x2F::Identity());
+        if (presentation.self_overhead) {
+            draw_self_overhead(*state_, width, height, *presentation.self_overhead);
+        } else {
         state_->render_target->DrawBitmap(
             state_->static_layer_bitmap.Get(),
             D2D1::RectF(0.0F, 0.0F, static_cast<float>(width),
@@ -223,6 +283,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
             1.0F, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
         detail::draw_overlay_metrics(
             *state_, width, height, frame_now_ms, linear);
+        }
         result = state_->render_target->EndDraw();
 #if defined(KF2_OVERLAY_WINDOW_TESTING)
         if (state_->test_end_draw_result != S_OK) {
@@ -294,6 +355,7 @@ Result<bool> OverlayWindow::update(const OverlayPresentation& presentation) {
                     static_cast<long double>(
                         state_->diagnostic_counter_frequency));
                 state_->diagnostic_last_render_us = elapsed_us;
+                state_->diagnostic_total_render_us += elapsed_us;
                 state_->diagnostic_maximum_render_us = std::max(
                     state_->diagnostic_maximum_render_us, elapsed_us);
             }

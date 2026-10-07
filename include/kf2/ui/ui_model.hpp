@@ -1,4 +1,5 @@
 #pragma once
+#include "kf2/diagnostics/self_overhead.hpp"
 
 #include <array>
 #include <cstddef>
@@ -101,6 +102,8 @@ struct UiStatus : AdaptiveUiStatus {
     std::wstring prewarm_diagnostics{
         L"Detailed prewarm diagnostics are off"};
     std::optional<bool> event_persistence_available;
+    diagnostics::SelfOverheadPresentation self_overhead;
+    bool self_overhead_enabled{false};
     std::wstring overlay_position{L"top right"};
     int overlay_scale_percent{100};
     int target_fps{60};
@@ -191,6 +194,7 @@ public:
         std::wstring substep_diagnostics, std::wstring readback_diagnostics) noexcept;
     void set_flex_capability(std::wstring capability) noexcept;
     void set_overlay_diagnostics(std::wstring diagnostics) noexcept;
+    void set_self_overhead(const diagnostics::SelfOverheadPresentation& values);
     void set_prewarm_progress(bool active, int percent, std::wstring map) noexcept;
     void set_prewarm_diagnostics(std::wstring diagnostics) noexcept;
     void set_notice(Notice notice);

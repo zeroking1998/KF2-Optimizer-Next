@@ -478,7 +478,9 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     Sleep(20);
+    CHECK(session.value()->cpu_work_ns().has_value());
     CHECK(session.value()->stop().has_value());
+    CHECK(!session.value()->cpu_work_ns());
     CHECK(session.value()->stop().has_value());
     CHECK(source.stop().has_value());
     return EXIT_SUCCESS;

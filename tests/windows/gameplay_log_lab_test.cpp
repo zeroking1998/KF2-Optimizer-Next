@@ -4330,6 +4330,17 @@ int main() {
     CHECK(release_callback_end != std::string::npos);
     const auto release_callback = telemetry_source.substr(
         release_callback_start, release_callback_end - release_callback_start);
+    CHECK(release_callback.find("static.BeginOwnWork();") <
+          release_callback.find("OwnWorkAdaptiveCorpsePhysicsRelease();"));
+    CHECK(release_callback.find("OwnWorkAdaptiveCorpsePhysicsRelease();") <
+          release_callback.find("static.EndOwnWork(WorkStarted);"));
+    const auto meter_start = telemetry_source.find("static function EndOwnWork(");
+    const auto meter_end = telemetry_source.find("function InsertAdaptiveZedDebugMarkerByDistance(", meter_start);
+    CHECK(meter_start != std::string::npos && meter_end != std::string::npos);
+    const auto meter = telemetry_source.substr(meter_start, meter_end - meter_start);
+    CHECK(meter.find("Work = Min(") == std::string::npos);
+    CHECK(meter.find("OwnWorkMilliseconds = Min(") == std::string::npos);
+    CHECK(meter.find("default.OwnWorkMilliseconds = -1;") != std::string::npos);
     const OfflineReleasePolicy release_policy{
         .late_reservation = readback != std::string::npos &&
             reservation != std::string::npos && readback < reservation &&

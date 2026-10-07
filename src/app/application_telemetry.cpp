@@ -5,6 +5,7 @@
 #include "features/telemetry/telemetry_pipeline.hpp"
 #include "features/telemetry/telemetry_presentation_stage.hpp"
 #include "features/telemetry/telemetry_session_stage.hpp"
+#include <cwchar>
 
 namespace kf2::app {
 namespace {
@@ -62,6 +63,9 @@ public:
     [[nodiscard]] bool inspect_window() {
         // Inspection includes process liveness after FleX observation.
         session_ = telemetry_pipeline::inspect_bound_session(runtime_);
+        if (runtime_.self_overhead_collecting) {
+            runtime_.self_overhead_game_window = session_->window;
+        }
         return session_->disposition ==
             telemetry_pipeline::SessionDisposition::ready;
     }
@@ -171,6 +175,7 @@ void UiRuntime::runtime_tick() {
     poll_update_check();
     poll_update_install();
     const auto now = monotonic_ns();
+    sample_self_overhead(now);
     poll_map_prewarm();
     if ((model.selected() == ui::Destination::graphics ||
          (session_config_snapshot && session_video_runtime)) &&
@@ -183,12 +188,212 @@ void UiRuntime::runtime_tick() {
     if (last_telemetry_tick_ns == 0 || now < last_telemetry_tick_ns ||
         now - last_telemetry_tick_ns >= kTelemetryIntervalNs) {
         last_telemetry_tick_ns = now;
+        const auto work_started = self_overhead_collecting ? monotonic_ns() : 0;
+        const auto adaptive_before = self_adaptive_work_ns;
+        const auto overlay_before = self_overhead_collecting && overlay_window
+            ? overlay_window->diagnostics().total_render_us : 0;
         telemetry_tick();
+        if (self_overhead_collecting) {
+            const auto work_finished = monotonic_ns();
+            const auto overlay_after = overlay_window
+                ? overlay_window->diagnostics().total_render_us : 0;
+            const auto nested = self_adaptive_work_ns - adaptive_before +
+                (overlay_after >= overlay_before
+                    ? (overlay_after - overlay_before) * 1000ULL : 0);
+            if (work_finished >= work_started &&
+                work_finished - work_started >= nested) {
+                self_telemetry_work_ns += work_finished - work_started - nested;
+            }
+        }
         return;
     }
     if (overlay_window && overlay_presentation) {
         static_cast<void>(overlay_window->update(*overlay_presentation));
     }
+}
+
+void UiRuntime::sample_self_overhead(std::uint64_t now_ns) {
+    const bool visible = model.status().self_overhead_enabled;
+    if (!visible && !self_overhead_collecting) return;
+    if (!visible) {
+        self_overhead_collecting = false;
+        resource_telemetry_worker.set_own_gpu_enabled(false);
+        self_overhead_gpu_memory.reset();
+        self_overhead_sample_ns = 0;
+        self_overhead_game_window.reset();
+        self_script_work_ms_per_second.reset();
+        if (game_process) static_cast<void>(flex_observation_reader.read(*game_process));
+        static_cast<void>(self_overhead_dispatcher.poll());
+        if (overlay_window) overlay_window->set_diagnostics_enabled(
+            optimizer_settings.debug_runtime_diagnostics);
+        if (self_overhead_window) self_overhead_window->set_diagnostics_enabled(false);
+        return;
+    }
+    if (!self_overhead_collecting) resource_telemetry_worker.set_own_gpu_enabled(true);
+    self_overhead_collecting = true;
+    if (self_overhead_sample_ns && now_ns >= self_overhead_sample_ns &&
+        now_ns - self_overhead_sample_ns < 1'000'000'000ULL) return;
+    if (overlay_window) overlay_window->set_diagnostics_enabled(true);
+    const auto elapsed = self_overhead_sample_ns && now_ns > self_overhead_sample_ns
+        ? now_ns - self_overhead_sample_ns : 0;
+    if (self_overhead_window) self_overhead_window->set_diagnostics_enabled(true);
+    const auto process_start = game_process ? game_process->process_start_id : 0;
+    const auto* provider = last_report_gameplay_session &&
+            last_report_gameplay_session->telemetry_control_port
+        ? &*last_report_gameplay_session : game_log_session
+            ? &*game_log_session : nullptr;
+    const auto port = provider ? provider->telemetry_control_port : std::nullopt;
+    if (port != self_overhead_pending_port) {
+        self_script_work_ms_per_second.reset();
+        self_overhead_reply_ns = 0;
+    }
+    if (process_start != self_overhead_process_start_id || elapsed == 0) {
+        self_script_work_ms_per_second.reset();
+        self_overhead_reply_ns = 0;
+        static_cast<void>(self_overhead_dispatcher.poll());
+        self_overhead_process_start_id = process_start;
+        // A new worker clock must establish a baseline even if its cumulative
+        // CPU time happens to exceed that of the previous DXGI session.
+        self_overhead_clocks = {};
+    } else if (auto reply = self_overhead_dispatcher.poll()) {
+        if (reply->has_value() &&
+            self_overhead_pending_process_start_id == process_start &&
+            self_overhead_pending_port == port) {
+            const auto& receipt = reply->value();
+            self_script_work_ms_per_second = diagnostics::work_ms_per_second(
+                0, receipt.script_work_ns, receipt.script_elapsed_ns.value_or(0));
+            self_overhead_reply_ns = now_ns;
+        } else {
+            self_script_work_ms_per_second.reset();
+        }
+    }
+    if (self_overhead_reply_ns == 0 || now_ns < self_overhead_reply_ns ||
+        now_ns - self_overhead_reply_ns > 2'000'000'000ULL) {
+        self_script_work_ms_per_second.reset();
+    }
+    if (game_process && port &&
+        game::valid_adaptive_control_token(adaptive_control_token) &&
+        !self_overhead_dispatcher.busy() && self_overhead_sequence < 2'147'483'647) {
+        self_overhead_pending_process_start_id = process_start;
+        self_overhead_pending_port = port;
+        static_cast<void>(self_overhead_dispatcher.start({
+            .port = *port,
+            .token = adaptive_control_token, .sequence = ++self_overhead_sequence,
+            .resource = game::AdaptiveResourceControl::overhead,
+            .quality = 100, .timeout_ms = 250}));
+    }
+    const auto current = telemetry::query_own_process_counters();
+    const auto worker = resource_telemetry_worker.cpu_work_ns();
+    const auto overlay_work = ((overlay_window
+        ? overlay_window->diagnostics().total_render_us : 0) +
+        (self_overhead_window
+            ? self_overhead_window->diagnostics().total_render_us : 0)) * 1000ULL;
+    if (self_overhead_dxgi_started_ns != present_session_started_ns) {
+        self_overhead_clocks[2].reset();
+        self_overhead_dxgi_started_ns = present_session_started_ns;
+    }
+    const auto flex = game_process
+        ? flex_observation_reader.read(*game_process, true) : std::nullopt;
+    const auto trace_cpu = present_session ? present_session->cpu_work_ns() : std::nullopt;
+    const auto drain_cpu = present_source ? present_source->cpu_work_ns() : std::nullopt;
+    const std::array<std::optional<std::uint64_t>, 6> clocks{
+        worker, self_telemetry_work_ns,
+        trace_cpu && drain_cpu ? std::optional{*trace_cpu + *drain_cpu} : std::nullopt,
+        self_adaptive_work_ns, overlay_work, flex ? flex->own_work_ns : std::nullopt};
+    auto& presentation = self_overhead_readings;
+    presentation.values.fill(L"—");
+    wchar_t buffer[64]{};
+    const auto format = [&](std::size_t index, std::optional<double> value,
+                            const wchar_t* pattern) {
+        if (!value) return;
+        swprintf_s(buffer, pattern, *value);
+        presentation.values[index].assign(buffer);
+    };
+    const auto cpu_work = diagnostics::work_ms_per_second(
+        self_overhead_previous.cpu_ns, current.cpu_ns, elapsed);
+    const auto processors = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    format(0, cpu_work && processors
+        ? std::optional{*cpu_work / (10.0 * processors)} : std::nullopt, L"%.1f %%");
+    format(1, current.ram_bytes
+        ? std::optional{static_cast<double>(*current.ram_bytes) / 1'000'000.0}
+        : std::nullopt, L"%.0f MB");
+    const auto io = diagnostics::work_ms_per_second(
+        self_overhead_previous.io_bytes, current.io_bytes, elapsed);
+    // Convert the byte rate from MB/s to decimal KB/s.
+    format(2, io ? std::optional{*io * 1000.0} : std::nullopt, L"%.1f KB/s");
+    if (current.threads) presentation.values[3] = std::to_wstring(*current.threads);
+    for (std::size_t index = 0; index < 5; ++index) {
+        format(index + 4, diagnostics::work_ms_per_second(
+            self_overhead_clocks[index], clocks[index], elapsed), L"%.2f ms/s");
+    }
+    // The script clock resolves only whole milliseconds. Do not suggest
+    // hundredth-millisecond precision or replace an absent producer with zero.
+    format(9, self_script_work_ms_per_second, L"%.0f ms/s");
+    const auto native = diagnostics::work_ms_per_second(
+        self_overhead_clocks[5], clocks[5], elapsed);
+    format(10, native, L"%.2f ms/s");
+    // Windows measures all app threads, including unlisted work. Wall-clock
+    // scopes in KF2 cannot produce an exact cross-process CPU total.
+    format(11, cpu_work, L"%.2f ms/s");
+    const auto gpu = resource_telemetry_worker.latest();
+    if (game_process && gpu && gpu->identity.pid == game_process->pid &&
+        gpu->identity.process_start_id == game_process->process_start_id &&
+        gpu->gpu_sampled_at_ns && now_ns >= gpu->gpu_sampled_at_ns &&
+        now_ns - gpu->gpu_sampled_at_ns <= 2'000'000'000ULL) {
+        format(12, gpu->own_gpu_percent, L"%.2f %%");
+    }
+    const auto gpu_memory = self_overhead_gpu_memory.sample();
+    const auto megabytes = [](std::optional<std::uint64_t> bytes) -> std::optional<double> {
+        return bytes ? std::optional{static_cast<double>(*bytes) / 1'000'000.0}
+                     : std::nullopt;
+    };
+    format(13, megabytes(gpu_memory.local_bytes), L"%.1f MB");
+    format(14, megabytes(gpu_memory.nonlocal_bytes), L"%.1f MB");
+    format(15, megabytes(current.private_bytes), L"%.1f MB");
+    if (!game_process) {
+        presentation.values[9] = L"Inactive";
+        presentation.values[10] = L"Inactive";
+    }
+    self_overhead_previous = current;
+    self_overhead_clocks = clocks;
+    self_overhead_sample_ns = now_ns;
+    if (presentation != model.status().self_overhead) {
+        model.set_self_overhead(presentation);
+        if (model.selected() == ui::Destination::debug) invalidate();
+    }
+    self_overhead_overlay.self_overhead = model.status().self_overhead;
+    update_self_overhead_overlay();
+}
+
+void UiRuntime::update_self_overhead_overlay() {
+    if (!self_overhead_window) return;
+    if (!model.status().self_overhead_enabled && !self_overhead_overlay.visible) return;
+    self_overhead_overlay.visible = false;
+    self_overhead_overlay.target_window = nullptr;
+    self_overhead_overlay.animations_enabled = false;
+    self_overhead_overlay.show_fps = false;
+    self_overhead_overlay.show_frame_time = false;
+    self_overhead_overlay.show_cpu = false;
+    self_overhead_overlay.show_gpu = false;
+    self_overhead_overlay.show_memory = false;
+    if (model.status().self_overhead_enabled && game_process &&
+        self_overhead_game_window &&
+        self_overhead_game_window->process.process_start_id == game_process->process_start_id) {
+        const auto& game = *self_overhead_game_window;
+        self_overhead_overlay.target_window = game.window;
+        if (game.visible && !game.minimized && !game.cloaked && game.foreground) {
+            // Fixed Debug panel, constrained to KF2's client.
+            const auto& bounds = game.client_bounds;
+            const LONG width = std::min<LONG>(300, bounds.right - bounds.left - 20);
+            const LONG height = std::min<LONG>(400, bounds.bottom - bounds.top - 20);
+            if (width >= 220 && height >= 360) {
+                self_overhead_overlay.bounds = {bounds.left + 10, bounds.top + 10,
+                    bounds.left + 10 + width, bounds.top + 10 + height};
+                self_overhead_overlay.visible = true;
+            }
+        }
+    }
+    static_cast<void>(self_overhead_window->update(self_overhead_overlay));
 }
 
 void UiRuntime::start_startup_prewarm() {
@@ -484,9 +689,11 @@ void UiRuntime::telemetry_tick() {
             invalidate();
         }
     }
+    if (self_overhead_collecting) self_overhead_game_window.reset();
     RuntimeTelemetryPipeline pipeline{*this};
     static_cast<void>(
         telemetry_pipeline::run_ordered_telemetry_pipeline(pipeline));
+    update_self_overhead_overlay();
 }
 
 }  // namespace kf2::app

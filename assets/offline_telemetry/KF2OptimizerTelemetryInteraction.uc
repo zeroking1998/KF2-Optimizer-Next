@@ -466,6 +466,14 @@ function bool GetStandaloneGameplayContext(
 
 event Tick(float DeltaTime)
 {
+    local int WorkStarted;
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
+    OwnWorkTick(DeltaTime);
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
+}
+
+function OwnWorkTick(float DeltaTime)
+{
     local KF2OptimizerTelemetryProbe CurrentProbe;
     local KF2OptimizerAdaptiveControlListener CurrentListener;
     local PlayerController PrimaryController;

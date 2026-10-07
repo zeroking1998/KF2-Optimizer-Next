@@ -735,6 +735,11 @@ ShellLayoutResult layout_shell(const UiModel& model, float width_dip,
     } else if (model.selected() == Destination::debug) {
         const auto& status = model.status();
         float cursor = grid_base;
+        add_action("debug-self-overhead",
+            status.self_overhead_enabled
+                ? L"SELF-OVERHEAD OVERLAY: ON" : L"SELF-OVERHEAD OVERLAY: OFF",
+            true, status.self_overhead_enabled);
+        cursor = grid_base + kActionStride + 12.0F;
         add_section("debug-markers-section",
                     L"IN-GAME MARKERS — NEXT PROTECTED START", cursor);
         cursor += 34.0F;

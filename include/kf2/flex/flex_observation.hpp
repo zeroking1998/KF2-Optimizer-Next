@@ -8,6 +8,7 @@
 namespace kf2::flex {
 
 struct ObservationSnapshot {
+    std::optional<std::uint64_t> own_work_ns;
     std::uint64_t update_calls{0};
     std::uint64_t successful_updates{0};
     std::uint64_t destroy_calls{0};
@@ -78,12 +79,13 @@ public:
     ObservationReader(const ObservationReader&) = delete;
     ObservationReader& operator=(const ObservationReader&) = delete;
     [[nodiscard]] std::optional<ObservationSnapshot> read(
-        const game::GameProcessIdentity& process) noexcept;
+        const game::GameProcessIdentity& process,
+        bool measure_own_work = false) noexcept;
     void reset() noexcept;
 
 private:
     HANDLE mapping_{nullptr};
-    const ObservationShared* shared_{nullptr};
+    ObservationShared* shared_{nullptr};
     std::uint32_t pid_{0};
     std::uint64_t process_start_id_{0};
 };
