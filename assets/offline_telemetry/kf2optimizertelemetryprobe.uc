@@ -6992,8 +6992,10 @@ function SampleTelemetry()
     {
         ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
     }
-    bCollectWorldParticleGroups = SampleSequence == 0 ||
-        SampleSequence % WorldParticleGroupScanInterval == 5;
+    // Template attribution is a diagnostic report, not an Adaptive input.
+    bCollectWorldParticleGroups = bDetailedRuntimeDiagnostics &&
+        (SampleSequence == 0 ||
+         SampleSequence % WorldParticleGroupScanInterval == 5);
     if (bCollectWorldParticleGroups)
     {
         ScannedWorldParticleGroups.Length = 0;
