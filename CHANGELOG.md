@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep retained-log test timestamps deterministic through live appends and file
+  recreation, without changing runtime log ownership or freshness checks.
+
 - Stop passing the Optimizer's own GPU-memory usage and budget to Adaptive as
   KF2/adapter-wide VRAM pressure. Keep KF2's process-bound memory counters and
   remove the unnecessary recurring DXGI adapter lookup and budget query.
