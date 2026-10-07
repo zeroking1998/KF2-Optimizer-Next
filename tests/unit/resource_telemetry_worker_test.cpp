@@ -484,6 +484,10 @@ int test_retained_game_log_handle(bool deny_initial_read = false) {
     HANDLE live_writer = CreateFileW(log.c_str(), GENERIC_WRITE,
         FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     CHECK(live_writer != INVALID_HANDLE_VALUE);
+    // Keep the explicit process-owned fixture timestamp while this writer is
+    // open; ordinary writes otherwise replace it with filesystem wall time.
+    const FILETIME preserve_write_time{MAXDWORD, MAXDWORD};
+    CHECK(SetFileTime(live_writer, nullptr, nullptr, &preserve_write_time));
     LARGE_INTEGER end{};
     CHECK(SetFilePointerEx(live_writer, end, nullptr, FILE_END));
     const std::string map_line = "Log: LoadMap: KF-Paris?"
@@ -492,6 +496,10 @@ int test_retained_game_log_handle(bool deny_initial_read = false) {
     CHECK(WriteFile(live_writer, map_line.data(),
         static_cast<DWORD>(map_line.size()), &written, nullptr));
     CHECK(written == map_line.size());
+    FILETIME appended_write_time{};
+    CHECK(GetFileTime(live_writer, nullptr, nullptr, &appended_write_time));
+    CHECK(((static_cast<std::uint64_t>(appended_write_time.dwHighDateTime) << 32) |
+           appended_write_time.dwLowDateTime) == process.value().process_start_id);
     log_binding.adapter_name = L"Updated adapter";
     static_cast<void>(worker.bind(log_binding));
     static_cast<void>(worker.invalidate_samples());
@@ -521,6 +529,7 @@ int test_retained_game_log_handle(bool deny_initial_read = false) {
     CHECK(game_log_handle_closes_for_testing() == closes + 1);
     write_file(log, "Log: LoadMap: KF-Paris?"
         "Game=KFGameContent.KFGameInfo_Survival\n");
+    CHECK(set_log_write_time(log, process.value().process_start_id));
     worker.request(1'160'000'000ULL);
     CHECK(worker.wait_until_idle(2s));
     CHECK(worker.take_game_log_chunks(log_binding.identity).size() == 1);
@@ -529,6 +538,7 @@ int test_retained_game_log_handle(bool deny_initial_read = false) {
     CHECK(MoveFileExW(log.c_str(), (root / L"retired.txt").c_str(), 0));
     write_file(log, "Log: LoadMap: KF-BurningParis?"
         "Game=KFGameContent.KFGameInfo_Survival\n");
+    CHECK(set_log_write_time(log, process.value().process_start_id));
     worker.request(1'200'000'000ULL);
     CHECK(worker.wait_until_idle(2s));
     chunks = worker.take_game_log_chunks(log_binding.identity);
@@ -558,6 +568,7 @@ int test_retained_game_log_handle(bool deny_initial_read = false) {
 
     write_file(log, "Log: LoadMap: KF-Paris?"
         "Game=KFGameContent.KFGameInfo_Survival\n");
+    CHECK(set_log_write_time(log, process.value().process_start_id));
     HANDLE writer = CreateFileW(log.c_str(), GENERIC_WRITE, 0, nullptr,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     CHECK(writer != INVALID_HANDLE_VALUE);
@@ -626,6 +637,7 @@ int test_retained_game_log_handle(bool deny_initial_read = false) {
         output << "Log: LoadMap: KF-BurningParis?"
             "Game=KFGameContent.KFGameInfo_Survival\n";
     }
+    CHECK(set_log_write_time(log, process.value().process_start_id));
     rebinding_log_worker = &worker;
     rebinding_log_binding = log_binding;
     set_game_log_read_hook_for_testing(&rebind_game_log_during_read);
@@ -651,6 +663,7 @@ int test_retained_game_log_handle(bool deny_initial_read = false) {
         output << "Log: LoadMap: KF-Paris?"
             "Game=KFGameContent.KFGameInfo_Survival\n";
     }
+    CHECK(set_log_write_time(log, process.value().process_start_id));
     set_game_log_read_hook_for_testing(&truncate_game_log_during_read);
     worker.request(2'600'000'000ULL);
     CHECK(worker.wait_until_idle(2s));
@@ -662,6 +675,7 @@ int test_retained_game_log_handle(bool deny_initial_read = false) {
     CHECK(game_log_handle_closes_for_testing() == closes + 18);
     write_file(log, "Log: LoadMap: KF-Paris?"
         "Game=KFGameContent.KFGameInfo_Survival\n");
+    CHECK(set_log_write_time(log, process.value().process_start_id));
     worker.request(2'700'000'000ULL);
     CHECK(worker.wait_until_idle(2s));
     chunks = worker.take_game_log_chunks(log_binding.identity);
