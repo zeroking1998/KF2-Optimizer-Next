@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <initializer_list>
 #include <iterator>
 #include <set>
 #include <string>
@@ -591,6 +592,51 @@ int main() {
         "function int FindFrozenCorpse(KFPawn Candidate)\n"
         "{\n    return FrozenCorpses.Find('Corpse', Candidate);\n}") !=
           std::string::npos);
+    CHECK(telemetry_source.find("const MaxTrackedActorEntries=8192;") !=
+          std::string::npos);
+    struct TrackingAdmissionRule {
+        bool online;
+        std::string_view function;
+        std::string_view guard;
+        std::string_view reject;
+        std::string_view allocation;
+    };
+    for (const TrackingAdmissionRule rule : std::initializer_list<TrackingAdmissionRule>{
+             {false, "function bool ApplyLivingEnemyMinimumVisuals()",
+              "if (FixedMinimumLivingVisualZeds.Length >= MaxTrackedActorEntries)",
+              "ScanPawn = FixedMinimumLivingScanPawn;\n                continue;",
+              "FixedMinimumLivingVisualZeds.AddItem(Candidate);"},
+             {false, "function bool IsAdaptiveCorpseSettled(",
+              "if (AdaptiveBaselineSettleEntries.Length >= MaxTrackedActorEntries)",
+              "return false;", "AdaptiveBaselineSettleEntries.Length = EntryIndex + 1;"},
+             {false, "function bool FreezeOnePressureEligibleCorpse(",
+              "if (AdaptiveFrozenCorpses.Length + AdaptiveRetiredFrozenCorpses.Length >=\n"
+              "        MaxTrackedActorEntries)", "return false;",
+              "AdaptiveFrozenCorpses.Length = Index + 1;"},
+             {false, "function bool SleepOneDistantMonsterCorpse(",
+              "if (AdaptiveDistanceSleptCorpses.Length +\n"
+              "        AdaptiveRetiredDistanceSleptCorpses.Length >= MaxTrackedActorEntries)",
+              "return false;", "Candidate.Mesh.PutRigidBodyToSleep();"},
+             {false, "function bool ApplyOneFixedMinimumCorpseLod(",
+              "if (FixedMinimumCorpseLodCorpses.Length >= MaxTrackedActorEntries)",
+              "RemoveFixedMinimumCorpseLodEntry(0);",
+              "FixedMinimumCorpseLodCorpses.AddItem(Candidate);"},
+             {true, "function bool FreezeOneOnlineCorpse()",
+              "if (FrozenCorpses.Length >=\n"
+              "            class'KF2OptimizerTelemetryProbe'.const.MaxTrackedActorEntries)",
+              "continue;", "FrozenCorpses.AddItem(Original);"}}) {
+        const auto& source = rule.online ? online_corpse_controller_source : telemetry_source;
+        const auto start = source.find(rule.function);
+        CHECK(start != std::string::npos);
+        const auto end = source.find("\nfunction ", start + rule.function.size());
+        const auto body = std::string_view{source}.substr(start, end - start);
+        const auto guard = body.find(rule.guard);
+        const auto allocation = body.find(rule.allocation);
+        CHECK(guard != std::string_view::npos);
+        CHECK(allocation != std::string_view::npos && guard < allocation);
+        CHECK(body.substr(guard, allocation - guard).find(rule.reject) !=
+              std::string_view::npos);
+    }
     const auto connection_source = normalize_newlines(
         read_bytes(KF2_ADAPTIVE_CONNECTION_SOURCE));
     const auto online_graphics_connection_source = normalize_newlines(
@@ -4525,8 +4571,11 @@ int main() {
     CHECK(telemetry_source.find(
         "MaximumMinLod = Candidate.Mesh.SkeletalMesh.LODInfo.Length - 1",
         lod_selector) != std::string::npos);
+    // Bounded receipt history must roll over, not suppress fixed-minimum LOD.
     CHECK(telemetry_source.find(
-        "FixedMinimumCorpseLodCorpses.Length >=", lod_apply) ==
+        "RemoveFixedMinimumCorpseLodEntry(0);", lod_apply) != std::string::npos);
+    CHECK(telemetry_source.find(
+        "Max(0, FixedMinimumCorpseLodPruneCursor - 1)", lod_apply) !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "CandidateTarget = MaximumMinLod", lod_selector) !=

@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Bound corpse and living-Zed tracking history without discarding restoration
+  originals; permanent corpse-LOD readback receipts roll over at capacity.
+
 - Skip diagnostic particle-template attribution and its detailed reports while
   Runtime diagnostics is off; normal particle measurements and Adaptive inputs
   remain available, without changing the report format or sampling interval.
