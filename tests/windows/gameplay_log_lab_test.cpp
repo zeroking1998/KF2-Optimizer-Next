@@ -3718,6 +3718,9 @@ int main() {
     CHECK(telemetry_source.find(
         "const WorldParticleGroupScanInterval=30;") != std::string::npos);
     CHECK(telemetry_source.find(
+        "bCollectWorldParticleGroups = bDetailedRuntimeDiagnostics &&") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
         "struct WorldParticleGroupTelemetrySnapshot") != std::string::npos);
     CHECK(telemetry_source.find(
         "var array<WorldParticleGroupTelemetrySnapshot> "

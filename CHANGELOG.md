@@ -8,6 +8,10 @@ are visible immediately.
 
 ### What's new
 
+- Skip diagnostic particle-template attribution and its detailed reports while
+  Runtime diagnostics is off; normal particle measurements and Adaptive inputs
+  remain available, without changing the report format or sampling interval.
+
 - Discover KF2 thread membership with a process-scoped snapshot instead of
   walking every Windows thread when query rights permit. Keep the original
   read-only fallback, CPU-time measurements and sampling intervals unchanged.
