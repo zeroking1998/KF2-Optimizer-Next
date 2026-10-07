@@ -171,6 +171,9 @@ are visible immediately.
   KF2/adapter-wide VRAM pressure. Keep KF2's process-bound memory counters and
   remove the unnecessary recurring DXGI adapter lookup and budget query.
 
+- Living Zeds retain their original offscreen animation flags when restoration
+  fails. Bounded scans retry without blocking other Zeds or recording reduced
+  flags as originals, including after a corpse-manager replacement.
 - Convert the raw Adaptive decision reason once for its two presentation fields
   while retaining distinct queued-restoration warnings.
 - Reuse the existing Adaptive stability, bottleneck and no-setting action labels
