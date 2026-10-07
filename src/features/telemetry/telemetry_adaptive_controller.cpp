@@ -61,7 +61,7 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_state = L"observing";
         status.adaptive_action = L"hold";
         status.adaptive_reason = L"Waiting for a confirmed native FPS limit";
-        model.set_status(std::move(status));
+        model.set_adaptive_status(std::move(status));
         return;
     }
     if (reset_adaptive_frame_window_for_rate_mode_change(
