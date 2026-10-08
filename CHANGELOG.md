@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Exclude ignored build trees before repository validation, avoiding unnecessary
+  traversal and interference from changing test fixtures without skipping source checks.
+
 - Keep Target FPS and corpse-limit slider values correct when a settings
   callback rebuilds the UI during keyboard changes.
 
