@@ -209,15 +209,14 @@ void UiRuntime::start_update_check(update::CheckTrigger trigger) {
 
 void UiRuntime::poll_update_check() {
     if (!updates.check) return;
-    std::optional<Result<std::optional<update::ReleaseInfo>>> outcome;
+    bool succeeded = false;
     {
         std::scoped_lock lock{updates.check->mutex};
         if (!updates.check->outcome) return;
-        outcome.emplace(std::move(*updates.check->outcome));
+        succeeded = updates.check->outcome->has_value();
+        updates.controller.complete_check(std::move(*updates.check->outcome));
     }
     updates.check.reset();
-    const bool succeeded = outcome->has_value();
-    updates.controller.complete_check(std::move(*outcome));
     if (succeeded) {
         static_cast<void>(persist_update_snapshot(*this, updates.controller.snapshot()));
     }

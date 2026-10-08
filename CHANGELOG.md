@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Preserve coherent update-check state and its completed background result if
+  completion runs out of memory, allowing a later retry without repeating the request.
+
 - Report GPU startup-profile allocation failures through the existing launch
   rollback instead of terminating; avoid a redundant selected-adapter copy.
 
