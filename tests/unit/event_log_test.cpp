@@ -21,10 +21,13 @@
 
 namespace {
 thread_local bool fail_next_allocation = false;
+thread_local int fail_large_allocation_after = -1;
 }
 
 void* operator new(std::size_t size) {
-    if (std::exchange(fail_next_allocation, false)) throw std::bad_alloc{};
+    if (std::exchange(fail_next_allocation, false) ||
+        (size >= 512 && fail_large_allocation_after >= 0 &&
+         fail_large_allocation_after-- == 0)) throw std::bad_alloc{};
     if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
     throw std::bad_alloc{};
 }
@@ -886,6 +889,38 @@ int main() {
               "\"diagnostics\":" + product + ",\"issue72_inventory\":" +
               expected_inventory + "}");
     }
+
+    // Sweep growing buffers, excluding tiny checked-STL proxy allocations.
+    const auto check_serialization_failures = [](const auto& serialize) {
+        const auto expected = serialize();
+        bool tested_failure = false;
+        bool reached_end = false;
+        for (int index = 0; index < 64; ++index) {
+            fail_large_allocation_after = index;
+            std::string actual;
+            bool threw = false;
+            try { actual = serialize(); }
+            catch (...) { threw = true; }
+            const bool injected = fail_large_allocation_after < 0;
+            fail_large_allocation_after = -1;
+            CHECK(injected || !threw);
+            CHECK(threw || actual == expected);
+            tested_failure |= injected;
+            if (!injected) { reached_end = true; break; }
+        }
+        CHECK(tested_failure);
+        CHECK(reached_end);
+        return EXIT_SUCCESS;
+    };
+    CHECK(check_serialization_failures([&] {
+        return kf2::diagnostics::serialize_events_json(long_session_events);
+    }) == EXIT_SUCCESS);
+    CHECK(check_serialization_failures([&] {
+        return kf2::diagnostics::serialize_product_report_json(report);
+    }) == EXIT_SUCCESS);
+    CHECK(check_serialization_failures([&] {
+        return kf2::diagnostics::serialize_support_bundle_json(report, "{}");
+    }) == EXIT_SUCCESS);
 
     EventLog concurrent{200};
     std::vector<std::thread> workers;
