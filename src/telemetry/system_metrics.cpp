@@ -15,6 +15,7 @@ namespace {
 #ifdef KF2_PROCESS_METRICS_TESTING
 std::atomic_uint32_t process_metric_opens{0};
 std::atomic_bool fail_next_thread_snapshot_walk{false};
+std::atomic_int fail_next_toolhelp_thread_walk{-1};
 #endif
 std::uint64_t value(FILETIME time) {
     return (static_cast<std::uint64_t>(time.dwHighDateTime) << 32U) |
@@ -438,14 +439,30 @@ public:
             const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
             if (snapshot == INVALID_HANDLE_VALUE) return false;
             THREADENTRY32 entry{sizeof(entry)};
-            if (Thread32First(snapshot, &entry)) {
+            BOOL has_entry = Thread32First(snapshot, &entry);
+#ifdef KF2_PROCESS_METRICS_TESTING
+            const int injected_failure = fail_next_toolhelp_thread_walk.exchange(-1);
+            if (injected_failure == 0) {
+                SetLastError(ERROR_GEN_FAILURE);
+                has_entry = FALSE;
+            }
+#endif
+            if (has_entry) {
                 do {
                     if (entry.th32OwnerProcessID == pid) {
                         current.insert(entry.th32ThreadID);
+#ifdef KF2_PROCESS_METRICS_TESTING
+                        if (injected_failure == 1) {
+                            SetLastError(ERROR_GEN_FAILURE);
+                            break;
+                        }
+#endif
                     }
                 } while (Thread32Next(snapshot, &entry));
             }
+            const DWORD traversal_error = GetLastError();
             CloseHandle(snapshot);
+            if (traversal_error != ERROR_NO_MORE_FILES) return false;
         }
 
         for (auto iterator = handles_.begin(); iterator != handles_.end();) {
@@ -726,6 +743,10 @@ std::uint32_t detail::process_metric_opens_for_testing() noexcept {
 }
 void detail::fail_next_process_thread_snapshot_walk_for_testing() noexcept {
     fail_next_thread_snapshot_walk.store(true);
+}
+void detail::fail_next_toolhelp_thread_walk_for_testing(
+    bool after_matching_entry) noexcept {
+    fail_next_toolhelp_thread_walk.store(after_matching_entry ? 1 : 0);
 }
 #endif
 }  // namespace kf2::telemetry

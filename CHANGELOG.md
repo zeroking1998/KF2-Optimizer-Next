@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep valid cached thread measurements after an incomplete Toolhelp traversal
+  and retry on the next sample instead of accepting partial membership.
+
 - Close the game-discovery snapshot even if candidate inspection throws,
   preserving process identity checks without adding queries or allocations.
 
