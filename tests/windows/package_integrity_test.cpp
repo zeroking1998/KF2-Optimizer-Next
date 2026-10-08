@@ -8,6 +8,7 @@
 
 #include "kf2/security/package_integrity.hpp"
 #include "kf2/security/sha256.hpp"
+#include "kf2/platform/windows/atomic_file.hpp"
 
 #define CHECK(condition) do { if (!(condition)) {                              \
     std::cerr << __FILE__ << ':' << __LINE__ << ": check failed: "            \
@@ -103,6 +104,30 @@ void damage_repair_target(const std::filesystem::path& root) {
     std::filesystem::remove(root / L"Data/package-integrity.ini", error);
 }
 
+std::filesystem::path concurrent_target;
+std::size_t mutation_visit{};
+std::size_t mutation_on_visit{};
+bool concurrent_edit_written{};
+
+void edit_during_atomic_commit(
+    kf2::platform::windows::AtomicFileMutationStage stage,
+    const std::filesystem::path& path) {
+    using Stage = kf2::platform::windows::AtomicFileMutationStage;
+    if (path != concurrent_target ||
+        (stage != Stage::atomic_after_validation &&
+         stage != Stage::conditional_after_validation &&
+         stage != Stage::conditional_remove_before_lock) ||
+        ++mutation_visit != mutation_on_visit) return;
+    write_file(path, "concurrent edit");
+    concurrent_edit_written = read_file(path) == "concurrent edit";
+}
+
+void create_after_first_repair(std::size_t count) {
+    if (count != 1) return;
+    write_file(concurrent_target, "concurrent edit");
+    concurrent_edit_written = read_file(concurrent_target) == "concurrent edit";
+}
+
 }  // namespace
 
 int main() {
@@ -177,6 +202,53 @@ int main() {
     CHECK(unchanged.value().repaired_files == 0);
     CHECK(unchanged.value().already_valid_files == 13);
     CHECK(!unchanged.value().restart_required);
+
+    for (int scenario = 0; scenario < 4; ++scenario) {
+        const bool during_rollback = (scenario & 1) != 0;
+        const bool initially_missing = (scenario & 2) != 0;
+        write_package(repair_target, "test-build");
+        concurrent_target = repair_target / L"Data/Documentation/USER_GUIDE.md";
+        write_file(concurrent_target, "damaged user guide");
+        if (initially_missing) CHECK(fs::remove(concurrent_target));
+        mutation_visit = 0;
+        mutation_on_visit = during_rollback ? 2 : 1;
+        concurrent_edit_written = false;
+        kf2::platform::windows::set_atomic_file_mutation_hook_for_testing(
+            edit_during_atomic_commit);
+        if (during_rollback) {
+            kf2::security::set_package_repair_fault_for_testing(
+                kf2::security::PackageRepairFaultInjection::after_replacement, 1);
+        }
+        const auto raced = kf2::security::repair_package_from_directory(
+            repair_target, repair_source, "test-build");
+        kf2::platform::windows::set_atomic_file_mutation_hook_for_testing(nullptr);
+        kf2::security::set_package_repair_fault_for_testing(
+            kf2::security::PackageRepairFaultInjection::none);
+        CHECK(concurrent_edit_written);
+        CHECK(read_file(concurrent_target) == "concurrent edit");
+        CHECK(!raced.has_value());
+        if (during_rollback) {
+            CHECK(raced.error().code == kf2::ErrorCode::recovery_required);
+        } else if (!initially_missing) {
+            CHECK(raced.error().code == kf2::ErrorCode::stale_data);
+        }
+    }
+
+    // A missing planned target can appear before the atomic helper observes it.
+    write_package(repair_target, "test-build");
+    const auto earlier_target = repair_target / L"Data/Documentation/README.md";
+    write_file(earlier_target, "original damaged readme");
+    CHECK(fs::remove(concurrent_target));
+    concurrent_edit_written = false;
+    kf2::security::set_package_repair_progress_for_testing(create_after_first_repair);
+    const auto appeared = kf2::security::repair_package_from_directory(
+        repair_target, repair_source, "test-build");
+    kf2::security::set_package_repair_progress_for_testing(nullptr);
+    CHECK(concurrent_edit_written);
+    CHECK(!appeared.has_value());
+    CHECK(appeared.error().code == kf2::ErrorCode::stale_data);
+    CHECK(read_file(concurrent_target) == "concurrent edit");
+    CHECK(read_file(earlier_target) == "original damaged readme");
 
     for (const std::size_t interruption : {1U, 2U, 4U}) {
         write_package(repair_target, "test-build");

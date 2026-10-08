@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -19,6 +20,7 @@ void set_bounded_read_hook_for_testing(BoundedReadHook hook) noexcept;
 enum class AtomicFileMutationStage {
     atomic_after_validation,
     conditional_after_validation,
+    conditional_remove_before_lock,
     quarantine_after_source_validation,
     quarantine_after_candidate_validation,
 };
@@ -31,10 +33,14 @@ void set_atomic_file_mutation_hook_for_testing(
 [[nodiscard]] Result<bool> atomic_replace_utf8(
     const std::filesystem::path& target,
     std::string_view bytes);
+// nullopt requires absence; an empty string requires an existing empty file.
 [[nodiscard]] Result<bool> atomic_replace_utf8_if_unchanged(
     const std::filesystem::path& target,
-    std::string_view expected_bytes,
+    std::optional<std::string_view> expected_bytes,
     std::string_view replacement_bytes);
+[[nodiscard]] Result<bool> remove_file_if_unchanged(
+    const std::filesystem::path& target,
+    std::string_view expected_bytes);
 [[nodiscard]] Result<std::filesystem::path> quarantine_regular_file(
     const std::filesystem::path& source,
     std::wstring_view suffix = L".corrupt",
