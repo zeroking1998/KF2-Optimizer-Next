@@ -6,6 +6,20 @@
 
 #include "kf2/update/update_controller.hpp"
 
+namespace { thread_local int fail_allocation_after{-1}; }
+
+void* operator new(std::size_t size) {
+    if (fail_allocation_after == 0) {
+        fail_allocation_after = -1;
+        throw std::bad_alloc{};
+    }
+    if (fail_allocation_after > 0) --fail_allocation_after;
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
+
 #define CHECK(expression) do { if (!(expression)) return EXIT_FAILURE; } while (false)
 
 namespace {
@@ -350,5 +364,46 @@ int main() {
     CHECK(throws_on_next_allocation(
         [&] { ignore_allocation_failure.ignore_available_version(); }));
     CHECK(same_snapshot(ignore_allocation_failure.snapshot(), ignore_before));
+
+    // Failure in either actual completion allocation must preserve both the
+    // controller and the caller's outcome, allowing the same result to retry.
+    for (const int failed_allocation : {0, 1}) {
+        UpdateController completion{"0.0.2-alpha"};
+        completion.restore_preferences(true, now - 100, true, "0.0.3-alpha");
+        CHECK(completion.begin_check(CheckTrigger::manual, now) == CheckStart::started);
+        const auto before = completion.snapshot();
+        auto next = release();
+        next.version = std::string(64, 'v');
+        next.install_block_reason = std::wstring(128, L'b');
+        auto outcome = kf2::Result<std::optional<ReleaseInfo>>::success(std::move(next));
+        bool threw = false;
+        fail_allocation_after = failed_allocation;
+        try { completion.complete_check(std::move(outcome)); }
+        catch (const std::bad_alloc&) { threw = true; }
+        fail_allocation_after = -1;
+        CHECK(threw);
+        CHECK(same_snapshot(completion.snapshot(), before));
+        CHECK(outcome.has_value() && outcome.value());
+        CHECK(outcome.value()->version == std::string(64, 'v'));
+        CHECK(outcome.value()->install_block_reason == std::wstring(128, L'b'));
+        completion.complete_check(std::move(outcome));
+        CHECK(completion.snapshot().phase == UpdatePhase::available);
+        CHECK(completion.snapshot().last_check_unix_seconds == now);
+        CHECK(completion.snapshot().cached_available_version == std::string(64, 'v'));
+        CHECK(completion.snapshot().status == std::wstring(128, L'b'));
+    }
+
+    UpdateController error_completion{"0.0.2-alpha"};
+    CHECK(error_completion.begin_check(CheckTrigger::manual, now) == CheckStart::started);
+    auto error_outcome = kf2::Result<std::optional<ReleaseInfo>>::failure(
+        {kf2::ErrorCode::io_failure, std::wstring(128, L'e'), 5});
+    bool error_threw = false;
+    fail_allocation_after = 0;
+    try { error_completion.complete_check(std::move(error_outcome)); }
+    catch (const std::bad_alloc&) { error_threw = true; }
+    fail_allocation_after = -1;
+    CHECK(!error_threw);
+    CHECK(error_completion.snapshot().phase == UpdatePhase::error);
+    CHECK(error_completion.snapshot().status == std::wstring(128, L'e'));
     return EXIT_SUCCESS;
 }

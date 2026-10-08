@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -119,34 +120,39 @@ CheckStart UpdateController::begin_check(
 }
 
 void UpdateController::complete_check(
-    Result<std::optional<ReleaseInfo>> result) {
+    Result<std::optional<ReleaseInfo>>&& result) {
     if (snapshot_.phase != UpdatePhase::checking) return;
+    static_assert(std::is_nothrow_move_assignable_v<std::wstring>);
     if (!result.has_value()) {
+        snapshot_.status = std::move(result.error().message);
         snapshot_.phase = UpdatePhase::error;
-        snapshot_.status = result.error().message;
         return;
     }
+    auto& available = result.value();
+    auto cached_version = available
+        ? std::optional<std::string>{available->version} : std::nullopt;
+    // String assignment retains the old status on failure. Complete all
+    // allocating work before committing metadata or consuming the outcome.
+    const std::wstring_view status = !available
+        ? std::wstring_view{L"The installed version is current."}
+        : available->install_block_reason.empty()
+            ? std::wstring_view{L"A new version is available."}
+            : std::wstring_view{available->install_block_reason};
+    snapshot_.status = status;
+    static_assert(std::is_nothrow_move_assignable_v<decltype(snapshot_.available_release)>);
+    static_assert(std::is_nothrow_move_assignable_v<decltype(cached_version)>);
     snapshot_.last_check_unix_seconds =
         snapshot_.last_attempt_unix_seconds > 0
             ? snapshot_.last_attempt_unix_seconds
             : snapshot_.last_check_unix_seconds;
     snapshot_.automatic_failure_count = 0;
-    snapshot_.available_release = std::move(result.value());
+    snapshot_.available_release = std::move(available);
     snapshot_.cached_check_completed = true;
-    snapshot_.cached_available_version = snapshot_.available_release
-        ? std::optional<std::string>{snapshot_.available_release->version}
-        : std::nullopt;
+    snapshot_.cached_available_version = std::move(cached_version);
     snapshot_.dismissed = snapshot_.cached_available_version &&
         *snapshot_.cached_available_version == snapshot_.ignored_version;
-    if (snapshot_.available_release) {
-        snapshot_.phase = UpdatePhase::available;
-        snapshot_.status = snapshot_.available_release->install_block_reason.empty()
-            ? L"A new version is available."
-            : snapshot_.available_release->install_block_reason;
-    } else {
-        snapshot_.phase = UpdatePhase::current;
-        snapshot_.status = L"The installed version is current.";
-    }
+    snapshot_.phase = snapshot_.available_release
+        ? UpdatePhase::available : UpdatePhase::current;
 }
 
 void UpdateController::set_automatic_checks_enabled(bool enabled) noexcept {

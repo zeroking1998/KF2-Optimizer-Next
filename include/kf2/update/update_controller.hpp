@@ -66,7 +66,8 @@ public:
                              std::uint32_t automatic_failure_count = 0);
     [[nodiscard]] CheckStart begin_check(CheckTrigger trigger,
                                          std::int64_t now_unix_seconds);
-    void complete_check(Result<std::optional<ReleaseInfo>> result);
+    // Consume only after completion can commit; retain result on allocation failure.
+    void complete_check(Result<std::optional<ReleaseInfo>>&& result);
     void set_automatic_checks_enabled(bool enabled) noexcept;
     [[nodiscard]] bool begin_install_with_user_consent();
     void complete_install_failure(std::wstring message);

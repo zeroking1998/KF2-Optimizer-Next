@@ -1622,6 +1622,37 @@ int test_update_worker_exception_boundaries() {
     CHECK(runtime.updates.controller.snapshot().status ==
           L"Update check could not start its background worker");
 
+    runtime.updates.worker_launcher = [](std::function<void()> worker) { worker(); };
+    int completion_requests = 0;
+    runtime.updates.check_operation = [&](std::string_view) {
+        ++completion_requests;
+        kf2::update::ReleaseInfo found;
+        found.version = std::string(64, 'v');
+        return kf2::Result<std::optional<kf2::update::ReleaseInfo>>::success(
+            std::move(found));
+    };
+    runtime.start_update_check(kf2::update::CheckTrigger::manual);
+    const auto pending_check = runtime.updates.check;
+    CHECK(pending_check);
+    const auto completion_before = runtime.updates.controller.snapshot();
+    bool completion_threw = false;
+    fail_flex_text_allocation = true;
+    try { runtime.poll_update_check(); }
+    catch (const std::bad_alloc&) { completion_threw = true; }
+    fail_flex_text_allocation = false;
+    CHECK(completion_threw);
+    CHECK(runtime.updates.check == pending_check);
+    const auto& completion_after = runtime.updates.controller.snapshot();
+    CHECK(completion_after.phase == completion_before.phase);
+    CHECK(completion_after.last_check_unix_seconds == completion_before.last_check_unix_seconds);
+    CHECK(completion_after.cached_available_version == completion_before.cached_available_version);
+    CHECK(completion_after.status == completion_before.status);
+    runtime.poll_update_check();
+    CHECK(!runtime.updates.check);
+    CHECK(runtime.updates.controller.snapshot().phase == kf2::update::UpdatePhase::available);
+    CHECK(runtime.updates.controller.snapshot().cached_available_version == std::string(64, 'v'));
+    CHECK(completion_requests == 1);
+
     fs::remove_all(test_root);
     return EXIT_SUCCESS;
 }
