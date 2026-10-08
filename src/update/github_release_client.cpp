@@ -123,7 +123,9 @@ public:
     Result<std::uint64_t> unsigned_number() {
         whitespace();
         if (offset_ >= text_.size() || !std::isdigit(
-                static_cast<unsigned char>(text_[offset_]))) {
+                static_cast<unsigned char>(text_[offset_])) ||
+            (text_[offset_] == '0' && offset_ + 1 < text_.size() &&
+             std::isdigit(static_cast<unsigned char>(text_[offset_ + 1])))) {
             return Result<std::uint64_t>::failure(
                 {ErrorCode::invalid_argument, L"GitHub JSON number is invalid", 0});
         }
