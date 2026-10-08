@@ -17,7 +17,7 @@
 #include "kf2/update/semantic_version.hpp"
 
 #ifndef KF2_RELEASE_REPOSITORY
-#define KF2_RELEASE_REPOSITORY ""
+#error KF2_RELEASE_REPOSITORY must be supplied by the build
 #endif
 
 namespace kf2::update {
