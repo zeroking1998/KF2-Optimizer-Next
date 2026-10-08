@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Apply the existing online corpse mutation cooldown after rejected restores,
+  preventing repeated native writes while retaining originals and fair retries.
+
 - Keep retained-log test timestamps deterministic through live appends and file
   recreation, without changing runtime log ownership or freshness checks.
 

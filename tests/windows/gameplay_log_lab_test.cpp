@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -215,6 +216,25 @@ bool online_restore_advances_after_failure(std::string_view body) {
             std::string_view::npos;
 }
 
+bool online_restore_reserves_failed_attempt(std::string_view body) {
+    const auto stamp = body.find(
+        "LastPhysicsMutationRealTime = WorldInfo.RealTimeSeconds;");
+    const auto first_write = body.find("Candidate.SetPhysics(");
+    return stamp != std::string_view::npos &&
+        first_write != std::string_view::npos && stamp < first_write;
+}
+
+bool online_restore_yields_after_failed_attempt(std::string_view body) {
+    const auto advance = body.find(
+        "(Index + 1) % FrozenCorpses.Length) : 0;");
+    const auto yield = body.find(
+        "if (WorldInfo.RealTimeSeconds - LastPhysicsMutationRealTime < 0.45)",
+        advance);
+    return advance != std::string_view::npos &&
+        yield != std::string_view::npos &&
+        body.substr(yield).find("return false;") != std::string_view::npos;
+}
+
 constexpr std::string_view online_restore_readback_fields[] = {
     "Candidate.Physics != PHYS_RigidBody ||",
     "Candidate.bCollideActors != Original.bOriginalCollideActors ||",
@@ -230,7 +250,7 @@ constexpr std::string_view online_restore_readback_fields[] = {
 
 bool online_restore_has_complete_readback(std::string_view body) {
     const auto begin = body.find("if (Candidate.Physics != PHYS_RigidBody ||");
-    const auto end = body.find("LastPhysicsMutationRealTime =", begin);
+    const auto end = body.find("if (!bRestoreReceiptReported)", begin);
     if (begin == std::string_view::npos || end == std::string_view::npos) {
         return false;
     }
@@ -272,25 +292,56 @@ bool online_restore_progress(int length, int failed_id,
     std::size_t cursor = 0;
     for (int visit = 0; visit < 2 * length + 1 && !ledger.empty(); ++visit) {
         int inspected = 0;
-        int successful_mutations = 0;
+        int restore_attempts = 0;
         while (!ledger.empty() && inspected < 8) {
             const auto index = legacy_reverse_scan ? ledger.size() - 1
                 : std::min(cursor, ledger.size() - 1);
             ++inspected;
+            ++restore_attempts;
             if (fails(ledger[index].id)) {
                 if (legacy_reverse_scan) break;
                 cursor = (index + 1) % ledger.size();
+                break;
             } else {
                 ledger.erase(ledger.begin() + index);
                 cursor = ledger.empty() ? 0 : index % ledger.size();
-                ++successful_mutations;
                 break;
             }
         }
-        if (inspected > 8 || successful_mutations > 1 ||
+        if (inspected > 8 || restore_attempts > 1 ||
             (!ledger.empty() && cursor >= ledger.size())) return false;
     }
     return ledger == expected_remaining;
+}
+
+struct OnlineRestoreAttemptCounts {
+    int attempts{0};
+    int maximum_per_frame{0};
+    int following_freezes{0};
+};
+
+// Repeated rejected setters: the original-state ledger stays owned throughout.
+OnlineRestoreAttemptCounts online_failed_restore_counts(
+    int fps, bool reserve_before_write, bool yield_after_attempt) {
+    OnlineRestoreAttemptCounts counts;
+    constexpr std::int64_t cooldown_ns = 450'000'000;
+    std::int64_t last_mutation_ns = -cooldown_ns;
+    for (int frame = 0; frame < 30 * fps; ++frame) {
+        const auto now_ns = static_cast<std::int64_t>(frame) * 1'000'000'000 / fps;
+        if (now_ns - last_mutation_ns < cooldown_ns) continue;
+        int frame_attempts = 0;
+        for (int inspected = 0; inspected < 8; ++inspected) {
+            ++frame_attempts;
+            if (reserve_before_write) last_mutation_ns = now_ns;
+            if (yield_after_attempt &&
+                now_ns - last_mutation_ns < cooldown_ns) break;
+        }
+        counts.attempts += frame_attempts;
+        counts.maximum_per_frame = std::max(
+            counts.maximum_per_frame, frame_attempts);
+        if (now_ns - last_mutation_ns >= cooldown_ns) ++counts.following_freezes;
+    }
+    return counts;
 }
 
 struct OfflineReleasePolicy {
@@ -1764,6 +1815,40 @@ int main() {
     CHECK(online_restore_start != std::string::npos);
     const auto online_restore_body = online_corpse_controller_source.substr(
         online_restore_start, online_release_start - online_restore_start);
+    CHECK(online_restore_reserves_failed_attempt(online_restore_body));
+    CHECK(online_restore_yields_after_failed_attempt(online_release_body));
+    for (const int fps : {30, 60, 120, 240}) {
+        const auto bounded = online_failed_restore_counts(
+            fps, online_restore_reserves_failed_attempt(online_restore_body),
+            online_restore_yields_after_failed_attempt(online_release_body));
+        CHECK(bounded.attempts > 0 && bounded.attempts <= 67);
+        CHECK(bounded.maximum_per_frame == 1);
+        CHECK(bounded.following_freezes == 0);
+        const auto original = online_failed_restore_counts(fps, false, false);
+        CHECK(original.attempts == 30 * fps * 8);
+        CHECK(original.maximum_per_frame == 8);
+        CHECK(original.following_freezes == 30 * fps);
+        CHECK(bounded.attempts * 100 <= original.attempts);
+        CHECK(online_failed_restore_counts(fps, true, false)
+                  .maximum_per_frame == 8);
+        CHECK(online_failed_restore_counts(fps, false, true)
+                  .maximum_per_frame == 8);
+    }
+    auto late_restore_reservation = online_restore_body;
+    const std::string restore_stamp =
+        "LastPhysicsMutationRealTime = WorldInfo.RealTimeSeconds;";
+    const auto restore_stamp_position = late_restore_reservation.find(restore_stamp);
+    CHECK(restore_stamp_position != std::string::npos);
+    late_restore_reservation.erase(restore_stamp_position, restore_stamp.size());
+    late_restore_reservation += restore_stamp;
+    CHECK(!online_restore_reserves_failed_attempt(late_restore_reservation));
+    auto repeated_failed_restore = online_release_body;
+    const std::string restore_yield =
+        "if (WorldInfo.RealTimeSeconds - LastPhysicsMutationRealTime < 0.45)";
+    const auto restore_yield_position = repeated_failed_restore.find(restore_yield);
+    CHECK(restore_yield_position != std::string::npos);
+    repeated_failed_restore.erase(restore_yield_position, restore_yield.size());
+    CHECK(!online_restore_yields_after_failed_attempt(repeated_failed_restore));
     CHECK(online_restore_has_complete_readback(online_restore_body));
     // Removing any single readback rejects the restore contract, including
     // ignore-encroachers and missing/unexpected collision-component cases.
