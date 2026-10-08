@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Let telemetry snapshot allocation failures reach the existing worker recovery
+  path instead of terminating the Optimizer when old log measurements expire.
+
 - Preserve concurrent file edits during portable-package repair and rollback;
   require the expected original content or absence before committing a repair.
 
