@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Reject incomplete diagnostic JSON on serialization failure instead of
+  overwriting a valid log or reporting a partial support export as successful.
+
 - Restore queued Adaptive quality changes against the originating resource,
   keeping rollback selection and command previous values consistent when pressure shifts.
 
