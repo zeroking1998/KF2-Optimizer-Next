@@ -151,6 +151,33 @@ bool rejects_offline_telemetry(std::string line) {
 
 int test_bridge_capability_lifetime() {
     using namespace kf2::game;
+    // The user-owned FPS limit is available in the menu too. Discover only
+    // the current listener; menu readiness must not imply gameplay telemetry.
+    GameLogSessionParser menu_parser;
+    CHECK(menu_parser.feed("Log: LoadMap: KFMainMenu\n"
+        "ScriptLog: WI.NetMode:  NM_Standalone\n"
+        "ScriptLog: KF2OPT_ADAPTIVE_BRIDGE state=ready port=57871\n"));
+    CHECK(menu_parser.current()->main_menu);
+    CHECK(menu_parser.current()->telemetry_control_port == 57871);
+    CHECK(!menu_parser.current()->telemetry_sample);
+    CHECK(menu_parser.feed(
+        "KF2OPT_ADAPTIVE_BRIDGE state=unavailable reason=bind_failed\n"));
+    CHECK(!menu_parser.current()->telemetry_control_port);
+    CHECK(menu_parser.feed(
+        "KF2OPT_ADAPTIVE_BRIDGE state=ready port=57872\n"));
+    CHECK(menu_parser.current()->telemetry_control_port == 57872);
+    CHECK(menu_parser.feed("Log: LoadMap: KF-BioticsLab\n"));
+    CHECK(!menu_parser.current()->telemetry_control_port);
+    CHECK(menu_parser.feed(
+        "KF2OPT_ADAPTIVE_BRIDGE state=ready port=57873\n"));
+    CHECK(menu_parser.current()->telemetry_control_port == 57873);
+    CHECK(menu_parser.feed("Log: LoadMap: KFMainMenu?closed\n"));
+    CHECK(!menu_parser.current()->telemetry_control_port);
+    CHECK(menu_parser.feed(
+        "KF2OPT_ADAPTIVE_BRIDGE state=ready port=57874\n"));
+    CHECK(menu_parser.current()->telemetry_control_port == 57874);
+    CHECK(menu_parser.current()->main_menu);
+    CHECK(!menu_parser.current()->telemetry_sample);
     const std::string initial =
         "Log: LoadMap: KF-BioticsLab?Game=KFGameContent.KFGameInfo_Survival\n"
         "ScriptLog: WI.NetMode:  NM_Standalone\n"

@@ -40,7 +40,7 @@ constexpr TooltipEntry kTooltips[]{
     {"debug-flex-diagnostics", L"Collects detailed FleX min/max substeps, solver and particle statistics, shared-memory readbacks, reports, and extra logs. Leave it off for the cheapest normal runtime path; the fixed one-substep limit remains active."},
     {"debug-runtime-diagnostics", L"Collects detailed corpse/Zed scans, Adaptive decisions, overlay render/redraw/window checks, and prewarm file/cache evidence. Leave it off for the cheapest normal path; control logic, errors, and required safety readbacks remain active."},
 
-    {"settings-target-slider", L"Sets KF2's native FPS limit from 30 to 240. Adaptive uses the same target. An external driver limit or a screen refresh limit can still keep displayed FPS below it."},
+    {"settings-target-slider", L"Saves KF2's native FPS limit from 30 to 240. During a protected session, the live change and Adaptive target wait for KF2 confirmation, even with Adaptive off. If unavailable, the saved value applies next start. Load or external limits can keep FPS below it."},
     {"settings-corpses-slider", L"Sets the maximum corpse ceiling and saves it immediately. Adaptive may use fewer corpses under confirmed scene or frame-time pressure."},
 
     {"graphics-resolution", L"Sets the number of output pixels. Higher resolutions look sharper but increase GPU work and VRAM use."},

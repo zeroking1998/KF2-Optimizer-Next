@@ -434,6 +434,8 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     status.live_active_corpses.reset();
     status.live_sleeping_corpses.reset();
     status.active_target_fps.reset();
+    status.target_fps_pending = false;
+    status.target_fps_unknown = false;
     status.active_corpse_limit.reset();
     status.graphics_game_menu_readback = false;
     status.recommended_profile = L"user settings";
@@ -460,6 +462,7 @@ void UiRuntime::begin_game_restart_handoff(
     const bool new_settings_restart =
         game_log_new_settings_restart_requested;
     detach_telemetry(false);
+    live_frame_rate.reset();
     game_restart_handoff_previous_process = previous_process;
     game_restart_handoff_new_settings = new_settings_restart;
     const auto now = monotonic_ns();
@@ -664,6 +667,7 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
             (!game_menu_graphics_readback ||
              *game_menu_graphics_readback != *boundaries.graphics_readback)) {
             game_menu_graphics_readback = *boundaries.graphics_readback;
+            observe_live_frame_rate(*game_menu_graphics_readback);
             refresh_video_presentation();
             events->append({0, diagnostics::Severity::info,
                 "KF2_APPLIED_GRAPHICS_MENU_READBACK",
@@ -942,6 +946,10 @@ void UiRuntime::try_attach_telemetry() {
         game_process->pid != process.value().pid ||
         game_process->process_start_id != process.value().process_start_id;
     if (new_process) {
+        if (live_frame_rate && live_frame_rate->identity !=
+                telemetry::SampleIdentity{process->pid, process->process_start_id}) {
+            live_frame_rate.reset();
+        }
         if (adaptive_restore_debt &&
             (adaptive_restore_debt->pid != process->pid ||
              adaptive_restore_debt->process_start_id != process->process_start_id)) {
@@ -990,6 +998,11 @@ void UiRuntime::try_attach_telemetry() {
     // other periods in which KF2 has no inspectable top-level window yet.
     startup_prewarmer.request_stop();
     game_process = process.value();
+    // Present after binding: a recoverable detach must not replace the live
+    // Engine limit with the launch INI's older cap. PID reuse cannot own it.
+    auto bound_status = model.status();
+    present_live_frame_rate(bound_status);
+    model.set_status(std::move(bound_status));
     bind_resource_telemetry(std::nullopt);
     auto found_window = game::find_game_window(process.value());
     if (!found_window.has_value()) {

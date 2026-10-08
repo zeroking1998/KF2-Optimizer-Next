@@ -86,7 +86,9 @@ void UiRuntime::reconcile_adaptive_runtime_mode(
     // Fail closed at the World boundary, before a fresh listener has a port
     // or the previous asynchronous request has finished.
     if (new_provider) adaptive_runtime_mode_confirmed = false;
-    if (!frame.gameplay->telemetry_control_port ||
+    // A menu listener serves FPS control, not a gameplay mode provider.
+    if (frame.gameplay->main_menu ||
+        !frame.gameplay->telemetry_control_port ||
         !game::valid_adaptive_control_token(adaptive_control_token)) {
         return;
     }
