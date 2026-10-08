@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Close the game-discovery snapshot even if candidate inspection throws,
+  preserving process identity checks without adding queries or allocations.
+
 - Continue independent SDK cleanup after a file-restoration error, retaining
   recovery backups and reporting failures without hiding the original build error.
 

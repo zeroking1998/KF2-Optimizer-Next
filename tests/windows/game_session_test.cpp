@@ -4,9 +4,30 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <new>
 
 #include "kf2/game/game_session.hpp"
 #include "../support/process_inspection_denial.hpp"
+
+namespace {
+thread_local bool fail_inspection_buffer_allocation = false;
+}
+
+void* operator new(std::size_t size) {
+    if (fail_inspection_buffer_allocation && size >= 32768 * sizeof(wchar_t)) {
+        fail_inspection_buffer_allocation = false;
+        throw std::bad_alloc{};
+    }
+    for (;;) {
+        if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+        const auto handler = std::get_new_handler();
+        if (!handler) throw std::bad_alloc{};
+        handler();
+    }
+}
+
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(condition) do { if (!(condition)) {                              \
     std::cerr << __FILE__ << ':' << __LINE__ << ": check failed: "            \
@@ -61,6 +82,31 @@ int wmain(int argc, wchar_t** argv) {
                                    L"KFGame.exe");
     CHECK(!wrong.has_value());
     CHECK(wrong.error().code == kf2::ErrorCode::stale_data);
+
+    {
+        const std::filesystem::path expected_executable{executable};
+        CHECK(kf2::game::find_running_game_process(expected_executable).has_value());
+        DWORD handles_before = 0;
+        CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_before));
+        const auto queries_before =
+            kf2::game::detail::process_query_counts_for_testing();
+        fail_inspection_buffer_allocation = true;
+        bool threw = false;
+        try { (void)kf2::game::find_running_game_process(expected_executable); }
+        catch (const std::bad_alloc&) { threw = true; }
+        const bool injected = !fail_inspection_buffer_allocation;
+        fail_inspection_buffer_allocation = false;
+        const auto queries_after =
+            kf2::game::detail::process_query_counts_for_testing();
+        DWORD handles_after = 0;
+        CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after));
+        CHECK(injected && threw);
+        // Locate the failure inside binding, after process-open but before its
+        // creation-time query, while the outer discovery snapshot is still open.
+        CHECK(queries_after.opens > queries_before.opens);
+        CHECK(queries_after.creation_queries == queries_before.creation_queries);
+        CHECK(handles_after == handles_before);
+    }
 
     const wchar_t* class_name = L"KF2OptimizerNext-GameSessionTest";
     WNDCLASSW window_class{};
