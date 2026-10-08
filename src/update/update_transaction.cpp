@@ -264,20 +264,41 @@ Result<UpdateJournal> read_bound_journal(
     return journal;
 }
 
-bool owner_is_active(const UpdateJournal& journal) noexcept {
+Result<bool> owner_is_active(const UpdateJournal& journal) {
     if (journal.owner_process_id == GetCurrentProcessId() &&
         journal.owner_process_start_id == process_start_id(GetCurrentProcess())) {
-        return false;
+        return Result<bool>::success(false);
     }
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
                                  FALSE, journal.owner_process_id);
-    if (!process) return false;
-    DWORD exit_code = 0;
-    const bool active = GetExitCodeProcess(process, &exit_code) &&
-        exit_code == STILL_ACTIVE &&
-        process_start_id(process) == journal.owner_process_start_id;
+    if (!process) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_INVALID_PARAMETER) return Result<bool>::success(false);
+        return Result<bool>::failure(
+            {ErrorCode::platform_failure,
+             L"Update owner process cannot be opened safely", error});
+    }
+    const DWORD waited = WaitForSingleObject(process, 0);
+    if (waited == WAIT_OBJECT_0) {
+        CloseHandle(process);
+        return Result<bool>::success(false);
+    }
+    if (waited != WAIT_TIMEOUT) {
+        const DWORD error = GetLastError();
+        CloseHandle(process);
+        return Result<bool>::failure(
+            {ErrorCode::platform_failure,
+             L"Update owner process exit cannot be verified", error});
+    }
+    const auto start_id = process_start_id(process);
+    const DWORD error = GetLastError();
     CloseHandle(process);
-    return active;
+    if (start_id == 0) {
+        return Result<bool>::failure(
+            {ErrorCode::platform_failure,
+             L"Update owner process identity cannot be verified", error});
+    }
+    return Result<bool>::success(start_id == journal.owner_process_start_id);
 }
 
 std::vector<std::string_view> managed_paths() {
@@ -933,7 +954,11 @@ Result<UpdateRecoveryResult> recover_update_transaction(
     if (!backup.has_value()) {
         return Result<UpdateRecoveryResult>::failure(backup.error());
     }
-    if (owner_is_active(journal.value())) {
+    const auto owner_active = owner_is_active(journal.value());
+    if (!owner_active.has_value()) {
+        return Result<UpdateRecoveryResult>::failure(owner_active.error());
+    }
+    if (owner_active.value()) {
         return Result<UpdateRecoveryResult>::success(
             {UpdateRecoveryState::owner_active,
              journal.value().replaced_files});

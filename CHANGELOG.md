@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Preserve update files and recovery records when the owner process cannot be
+  queried, instead of treating an unknown process state as permission to roll back.
+
 - Preserve bounded diagnostic text when a UTF-16 character crosses the message
   or source limit, instead of exporting an empty field.
 
