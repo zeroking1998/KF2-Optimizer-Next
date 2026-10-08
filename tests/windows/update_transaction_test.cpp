@@ -188,11 +188,28 @@ int check_owner_recovery(const std::filesystem::path& root) {
     CHECK(read_file(journal_path) == journal);
     CHECK(user_data_unchanged(target));
 
-    // A terminated process can use STILL_ACTIVE as its exit code. Its handle
-    // is signaled nonetheless, so recovery must not treat it as a live owner.
     CHECK(SetSecurityInfo(child.process.hProcess, SE_KERNEL_OBJECT,
                           DACL_SECURITY_INFORMATION, nullptr, nullptr,
                           nullptr, nullptr) == ERROR_SUCCESS);
+    using kf2::update::UpdateOwnerQueryFault;
+    for (const auto fault : {UpdateOwnerQueryFault::identity_failure,
+                             UpdateOwnerQueryFault::wait_failure}) {
+        kf2::update::set_update_owner_query_fault_for_testing(fault);
+        const auto failed_query = kf2::update::recover_update_transaction(request);
+        kf2::update::set_update_owner_query_fault_for_testing(
+            UpdateOwnerQueryFault::none);
+        CHECK(!failed_query.has_value());
+        const DWORD expected_error = fault == UpdateOwnerQueryFault::identity_failure
+            ? ERROR_ACCESS_DENIED : ERROR_INVALID_HANDLE;
+        CHECK(failed_query.error().native_code == expected_error);
+        CHECK(WaitForSingleObject(child.process.hProcess, 0) == WAIT_TIMEOUT);
+        CHECK(read_file(target / L"KF2Optimizer.exe") == target_before);
+        CHECK(read_file(journal_path) == journal);
+        CHECK(user_data_unchanged(target));
+    }
+
+    // A terminated process can use STILL_ACTIVE as its exit code. Its handle
+    // is signaled nonetheless, so recovery must not treat it as a live owner.
     CHECK(TerminateProcess(child.process.hProcess, STILL_ACTIVE));
     CHECK(WaitForSingleObject(child.process.hProcess, 5'000) == WAIT_OBJECT_0);
     const auto stopped = kf2::update::recover_update_transaction(request);

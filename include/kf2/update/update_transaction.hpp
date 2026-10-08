@@ -51,6 +51,8 @@ struct UpdateOwnerIdentity {
 };
 
 #if defined(KF2_UPDATE_TRANSACTION_TESTING)
+enum class UpdateOwnerQueryFault { none, identity_failure, wait_failure };
+void set_update_owner_query_fault_for_testing(UpdateOwnerQueryFault fault) noexcept;
 using ManagedReadHook = void (*)(const std::filesystem::path& path);
 void set_managed_read_hook_for_testing(ManagedReadHook hook) noexcept;
 #endif
