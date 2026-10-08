@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Preserve bounded diagnostic text when a UTF-16 character crosses the message
+  or source limit, instead of exporting an empty field.
+
 - Apply the existing online corpse mutation cooldown after rejected restores,
   preventing repeated native writes while retaining originals and fair retries.
 

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <barrier>
 #include <chrono>
@@ -116,6 +117,42 @@ int main() {
     CHECK(json.find("\"version\":1") != std::string::npos);
     CHECK(json.find("\"severity\":\"warning\"") != std::string::npos);
     CHECK(json.find("\"code\":\"C\"") != std::string::npos);
+
+    // Bounded messages and sources must remain serializable UTF-16, even when
+    // a non-BMP character straddles their respective code-unit limits.
+    for (const std::size_t limit : {128U, 1024U}) {
+        for (const std::size_t prefix : {
+                limit - 4, limit - 2, limit - 1, limit, limit + 1}) {
+            const auto input = std::wstring(prefix, L'x') + L"\U0001f600yyyy";
+            const bool pair_fits = prefix + 2 <= limit;
+            const auto expected = std::wstring(std::min(prefix, limit), L'x') +
+                (pair_fits ? std::wstring{L"\U0001f600"} +
+                    std::wstring(limit - prefix - 2, L'y') : std::wstring{});
+            const auto expected_utf8 = std::string(std::min(prefix, limit), 'x') +
+                (pair_fits ? "\xf0\x9f\x98\x80" +
+                    std::string(limit - prefix - 2, 'y') : std::string{});
+            EventLog unicode_boundary{1};
+            unicode_boundary.append(Event{0, Severity::error, "UNICODE_LIMIT",
+                limit == 1024 ? input : L"message",
+                limit == 128 ? input : L"source"});
+            const auto saved_events = unicode_boundary.snapshot();
+            CHECK(saved_events.size() == 1);
+            CHECK((limit == 1024 ? saved_events[0].message :
+                   saved_events[0].source) == expected);
+            const auto saved_json =
+                kf2::diagnostics::serialize_events_json(saved_events);
+            CHECK(saved_json.find(std::string{limit == 1024 ?
+                "\"message\":\"" : "\"source\":\""} + expected_utf8 + "\"") !=
+                std::string::npos);
+        }
+        const auto exact = std::wstring(limit - 2, L'x') + L"\U0001f600";
+        EventLog exact_boundary{1};
+        exact_boundary.append(Event{0, Severity::warning, "EXACT_LIMIT",
+            limit == 1024 ? exact : L"message",
+            limit == 128 ? exact : L"source"});
+        CHECK((limit == 1024 ? exact_boundary.snapshot()[0].message :
+               exact_boundary.snapshot()[0].source) == exact);
+    }
 
     // Preserve the exact string bytes shared by all JSON exports.
     const std::pair<std::string, std::string> escaped_codes[]{
