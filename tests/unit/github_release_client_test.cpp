@@ -75,6 +75,15 @@ int main() {
 
     CHECK(!kf2::update::parse_github_releases(
         "not-json", repository, "0.0.2-alpha").has_value());
+    for (const auto* json : {"[]junk", "[][]", "[] {}", "[{}]junk"}) {
+        CHECK(!kf2::update::parse_github_releases(
+            json, repository, "0.0.2-alpha").has_value());
+    }
+    for (const auto* json : {"[]", "[] \r\n\t"}) {
+        const auto empty = kf2::update::parse_github_releases(
+            json, repository, "0.0.2-alpha");
+        CHECK(empty.has_value() && !empty.value().has_value());
+    }
     CHECK(!kf2::update::parse_github_releases(
         "[]", "https://evil.example/repo", "0.0.2-alpha").has_value());
 
