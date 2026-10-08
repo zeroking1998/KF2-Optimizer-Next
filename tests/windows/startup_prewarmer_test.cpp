@@ -9,12 +9,30 @@
 #include <cstddef>
 #include <cstring>
 #include <cstdlib>
+#include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <new>
 #include <system_error>
 #include <thread>
 #include <utility>
+
+namespace {
+thread_local int allocation_fail_after = -1;
+}
+
+void* operator new(std::size_t size) {
+    if (allocation_fail_after >= 0 && allocation_fail_after-- == 0) {
+        allocation_fail_after = -1;
+        throw std::bad_alloc{};
+    }
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 namespace {
 static_assert(!noexcept(
@@ -187,6 +205,44 @@ int main(int argc, char** argv) {
     CHECK(!cleanup_error);
     CHECK(storage_kind_for_path(long_root) ==
           storage_kind_for_path(std::filesystem::temp_directory_path()));
+
+    // Fail real allocations at successive storage-discovery boundaries. An
+    // optional probe must return unknown, not terminate or leak an open volume.
+    const auto storage_probe_path = std::filesystem::temp_directory_path();
+    const auto detected_storage = storage_kind_for_path(storage_probe_path);
+    DWORD handles_before = 0;
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_before));
+    const auto original_terminate = std::set_terminate([] {
+        std::fputs("Storage probe terminated instead of containing allocation failure\n", stderr);
+        std::_Exit(EXIT_FAILURE);
+    });
+    // MSVC's checked string move allocates a proxy inside noexcept. Sweep all
+    // allocations in Release; Debug exercises the first application allocation.
+    constexpr int allocation_probes = _ITERATOR_DEBUG_LEVEL == 0 ? 64 : 1;
+    int injected_failures = 0;
+    bool reached_probe_end = false;
+    for (int index = 0; index < allocation_probes; ++index) {
+        allocation_fail_after = index;
+        const auto observed = storage_kind_for_path(storage_probe_path);
+        const bool injected = allocation_fail_after == -1;
+        allocation_fail_after = -1;
+        if (injected) {
+            ++injected_failures;
+            CHECK(observed == StorageKind::unknown);
+        } else {
+            CHECK(observed == detected_storage);
+            reached_probe_end = true;
+            break;
+        }
+    }
+    std::set_terminate(original_terminate);
+    CHECK(injected_failures > 0);
+    if constexpr (_ITERATOR_DEBUG_LEVEL == 0) {
+        CHECK(reached_probe_end);
+    }
+    DWORD handles_after = 0;
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after));
+    CHECK(handles_after <= handles_before);
     std::filesystem::remove_all(native_long_root, cleanup_error);
     write_file(root / L"KFGame/BrewedPC/GlobalShaderCache-PC-D3D-SM5.bin",
                1024);
