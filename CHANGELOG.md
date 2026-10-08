@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Clear startup Warm-up progress when preparation is skipped for unknown storage,
+  insufficient memory or no eligible files, instead of leaving it stuck at 0%.
+
 - Reject malformed leading-zero file sizes in GitHub release metadata while
   preserving valid sizes and the existing installation limits.
 
