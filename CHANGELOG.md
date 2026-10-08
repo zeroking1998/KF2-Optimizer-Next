@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Restore queued Adaptive quality changes against the originating resource,
+  keeping rollback selection and command previous values consistent when pressure shifts.
+
 - Keep the Optimizer usable in memory if its optional event-log worker cannot
   start, reporting persistence unavailable without claiming a successful flush.
 

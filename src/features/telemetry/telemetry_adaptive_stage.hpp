@@ -169,6 +169,7 @@ struct AdaptiveRuntimeControlInput final {
     int reduction_floor_quality{10};
     std::optional<int> rollback_quality;
     std::optional<game::AdaptiveResourceControl> rollback_resource;
+    std::optional<int> rollback_current_quality;
     bool quality_state_known{true};
     bool current_frame_pressure{false};
     bool current_resource_pressure{false};
@@ -311,12 +312,16 @@ select_adaptive_runtime_control(
         return std::nullopt;
     }
 
-    if (input.rollback_quality && input.rollback_resource &&
-        *input.rollback_quality > input.current_quality) {
-        return AdaptiveRuntimeControlSelection{
-            *input.rollback_resource,
-            std::clamp(*input.rollback_quality,
-                       input.minimum_quality, input.maximum_quality)};
+    if (input.rollback_quality && input.rollback_resource) {
+        if (!input.rollback_current_quality ||
+            *input.rollback_current_quality < 10 ||
+            *input.rollback_current_quality > 100) return std::nullopt;
+        if (*input.rollback_quality > *input.rollback_current_quality) {
+            return AdaptiveRuntimeControlSelection{
+                *input.rollback_resource,
+                std::clamp(*input.rollback_quality,
+                           input.minimum_quality, input.maximum_quality)};
+        }
     }
 
     int desired = input.current_quality;
