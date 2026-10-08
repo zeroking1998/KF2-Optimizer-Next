@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Handle GPU monitor-enumeration failures without crashing the Optimizer;
+  preserve the native error and existing telemetry fallback.
+
 - Preserve coherent update-check state and its completed background result if
   completion runs out of memory, allowing a later retry without repeating the request.
 

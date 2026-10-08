@@ -7,6 +7,8 @@
 #include <new>
 #include "kf2/telemetry/gpu_metrics.hpp"
 #include <pdhmsg.h>
+#include <dxgi.h>
+#include <wrl/implements.h>
 
 namespace {
 thread_local bool count_allocations = false;
@@ -32,6 +34,88 @@ void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 namespace {
 using namespace kf2::telemetry;
+HRESULT adapter_result = S_OK;
+HRESULT output_result = DXGI_ERROR_NOT_FOUND;
+UINT adapter_calls = 0;
+UINT output_calls = 0;
+
+template <typename Interface>
+struct DxgiObject : Microsoft::WRL::RuntimeClass<
+    Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>, Interface> {
+    HRESULT STDMETHODCALLTYPE SetPrivateData(REFGUID, UINT, const void*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE SetPrivateDataInterface(REFGUID, const IUnknown*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetPrivateData(REFGUID, UINT*, void*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetParent(REFIID, void**) override { return E_NOTIMPL; }
+};
+
+struct ProbeAdapter final : DxgiObject<IDXGIAdapter1> {
+    HRESULT STDMETHODCALLTYPE EnumOutputs(UINT, IDXGIOutput** output) override {
+        ++output_calls;
+        *output = nullptr;
+        return output_result;
+    }
+    HRESULT STDMETHODCALLTYPE GetDesc(DXGI_ADAPTER_DESC*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE CheckInterfaceSupport(REFGUID, LARGE_INTEGER*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetDesc1(DXGI_ADAPTER_DESC1* description) override {
+        *description = {};
+        return S_OK;
+    }
+};
+
+struct ProbeFactory final : DxgiObject<IDXGIFactory1> {
+    HRESULT STDMETHODCALLTYPE EnumAdapters1(UINT index, IDXGIAdapter1** adapter) override {
+        ++adapter_calls;
+        *adapter = nullptr;
+        if (index != 0) return DXGI_ERROR_NOT_FOUND;
+        if (FAILED(adapter_result)) return adapter_result;
+        return Microsoft::WRL::Make<ProbeAdapter>().CopyTo(adapter);
+    }
+    BOOL STDMETHODCALLTYPE IsCurrent() override { return TRUE; }
+    HRESULT STDMETHODCALLTYPE EnumAdapters(UINT, IDXGIAdapter**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE MakeWindowAssociation(HWND, UINT) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetWindowAssociation(HWND*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE CreateSwapChain(IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE CreateSoftwareAdapter(HMODULE, IDXGIAdapter**) override { return E_NOTIMPL; }
+};
+
+HRESULT WINAPI create_probe_factory(REFIID iid, void** factory) {
+    return Microsoft::WRL::Make<ProbeFactory>().CopyTo(iid, factory);
+}
+
+int test_dxgi_enumeration_failures() {
+    const auto previous_mode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    struct ResetFactory {
+        UINT previous_mode;
+        ~ResetFactory() {
+            detail::set_dxgi_factory_for_testing(nullptr);
+            SetErrorMode(previous_mode);
+        }
+    } reset{previous_mode};
+    const auto window = GetDesktopWindow();
+    CHECK(MonitorFromWindow(window, MONITOR_DEFAULTTONULL) != nullptr);
+    detail::set_dxgi_factory_for_testing(create_probe_factory);
+    // End-of-list remains normal. Other failures must stop before dereferencing
+    // the API's null output and preserve the exact native error.
+    for (const auto status : {DXGI_ERROR_NOT_FOUND, E_FAIL, DXGI_ERROR_DEVICE_REMOVED}) {
+        for (const bool fail_adapter : {false, true}) {
+            adapter_result = fail_adapter ? status : S_OK;
+            output_result = fail_adapter ? DXGI_ERROR_NOT_FOUND : status;
+            adapter_calls = output_calls = 0;
+            std::cerr << "DXGI enumeration probe: " << (fail_adapter ? "adapter" : "output")
+                      << ", HRESULT=" << std::hex << status << std::dec << '\n';
+            const auto result = adapter_luid_for_window(window);
+            CHECK(!result.has_value());
+            CHECK(result.error().code == (status == DXGI_ERROR_NOT_FOUND
+                ? kf2::ErrorCode::not_found : kf2::ErrorCode::platform_failure));
+            CHECK(result.error().native_code == (status == DXGI_ERROR_NOT_FOUND
+                ? 0U : static_cast<std::uint32_t>(status)));
+            CHECK(adapter_calls == (status == DXGI_ERROR_NOT_FOUND && !fail_adapter ? 2U : 1U));
+            CHECK(output_calls == (fail_adapter ? 0U : 1U));
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
 struct CounterEntry {
     std::wstring name;
     double utilization{0};
@@ -298,6 +382,7 @@ int wmain(int argc, wchar_t** argv) {
         return EXIT_SUCCESS;
     }
     CHECK(test_reused_pdh_samples() == EXIT_SUCCESS);
+    CHECK(test_dxgi_enumeration_failures() == EXIT_SUCCESS);
     const auto adapters = enumerate_gpu_adapters();
     CHECK(adapters.has_value());
     CHECK(!adapters.value().empty());

@@ -25,6 +25,8 @@ struct PdhGpuApi final {
     void (*before_parse)(std::wstring_view){nullptr};
 };
 void set_pdh_gpu_api_for_testing(const PdhGpuApi& api) noexcept;
+using DxgiFactoryCreate = HRESULT (WINAPI*)(REFIID, void**);
+void set_dxgi_factory_for_testing(DxgiFactoryCreate create) noexcept;
 }  // namespace detail
 #endif
 struct GpuInstanceIdentity {
