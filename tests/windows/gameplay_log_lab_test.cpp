@@ -1578,8 +1578,20 @@ int main() {
     CHECK(online_disable_sequence < online_disable_restore);
     CHECK(online_disable_restore < online_disable_fixed);
     CHECK(online_disable_fixed < online_disable_corpse_limit);
-    CHECK(online_disable_body.find(
-        "return bCorpseMaximumRestored;") != std::string::npos);
+    const auto online_disable_failure = online_disable_body.find(
+        "if (!bGraphicsRestored || !bFixedEffectsApplied ||\n"
+        "            !bCorpseMaximumRestored)");
+    const auto online_disable_verified = online_disable_body.find(
+        "state=disabled fixed_effect_quality=");
+    CHECK(online_disable_failure != std::string::npos);
+    CHECK(online_disable_verified != std::string::npos);
+    CHECK(online_disable_failure < online_disable_verified);
+    const auto online_disable_failure_body = online_disable_body.substr(
+        online_disable_failure, online_disable_verified - online_disable_failure);
+    CHECK(online_disable_failure_body.find("return false;") != std::string::npos);
+    CHECK(online_disable_failure_body.find("return true;") == std::string::npos);
+    CHECK(online_disable_failure_body.find("return bCorpseMaximumRestored;") ==
+          std::string::npos);
     CHECK(online_disable_body.find("readback=deferred") !=
           std::string::npos);
     CHECK(online_context_source.find(

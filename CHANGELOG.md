@@ -167,6 +167,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep online Adaptive-off restoration pending if original graphics, fixed
+  effects or the corpse limit fail readback, instead of falsely confirming
+  success from the corpse limit alone. Physics release remains independent.
+
 - Preserve bounded diagnostic text when a UTF-16 character crosses the message
   or source limit, instead of exporting an empty field.
 

@@ -232,6 +232,11 @@ bool UiRuntime::set_live_adaptive_enabled(
     if (!installation) return true;
     const auto running = game::find_running_game_process(installation->executable);
     if (!running.has_value()) return running.error().code == ErrorCode::not_found;
+    if (!enabled) {
+        // Reserve the obligation before a failed send can trigger local reset.
+        adaptive_restore_debt = running.value();
+        adaptive_quality_state_known = false;
+    }
     if (!game::valid_adaptive_control_token(adaptive_control_token)) {
         return false;
     }
