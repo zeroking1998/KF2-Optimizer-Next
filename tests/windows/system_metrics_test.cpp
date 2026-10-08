@@ -312,13 +312,26 @@ int main() {
         CHECK(handles_while_tracked >=
               handles_before + static_cast<DWORD>(workers.size()));
 
+        // A failed first entry or partial fallback must preserve all cached
+        // workers and leave membership refresh due for the next sample.
+        Sleep(5'050);
+        for (const bool after_matching_entry : {true, false}) {
+            detail::fail_next_process_thread_snapshot_walk_for_testing();
+            detail::fail_next_toolhelp_thread_walk_for_testing(after_matching_entry);
+            CHECK(tracked.sample().has_value());
+            DWORD handles_after_failure = 0;
+            CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after_failure));
+            CHECK(handles_after_failure + kAmbientHandleAllowance >=
+                  handles_while_tracked);
+            Sleep(520);
+        }
+
         for (auto& worker : workers) worker.request_stop();
         for (auto& worker : workers) worker.join();
         DWORD handles_after_exit = 0;
         CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after_exit));
-        // Exercise the real five-second membership refresh: exited workers'
-        // cached handles must be released while the sampler remains alive.
-        Sleep(5'050);
+        // Failed refreshes must not delay retry for another five seconds.
+        // A complete refresh still releases exited workers' cached handles.
         CHECK(tracked.sample().has_value());
         DWORD handles_after_refresh = 0;
         CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after_refresh));
