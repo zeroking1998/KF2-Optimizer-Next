@@ -551,9 +551,10 @@ add_executable(kf2_state_environment_test
 )
 target_include_directories(kf2_state_environment_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_state_environment_test PRIVATE
+    KF2_STATE_ENVIRONMENT_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/state-environment"
 )
-target_link_libraries(kf2_state_environment_test PRIVATE shell32 ole32)
+target_link_libraries(kf2_state_environment_test PRIVATE shell32 ole32 advapi32)
 add_test(NAME kf2_state_environment_test COMMAND kf2_state_environment_test)
 
 add_executable(kf2_numeric_presentation_test

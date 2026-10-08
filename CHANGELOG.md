@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep startup compatible with older Windows 10 installations lacking
+  GetTempPath2W, without falling back to an unisolated temporary directory for SYSTEM.
+
 - Stop configured-GPU lookup on DXGI errors instead of repeatedly querying or
   reporting an unresolved selection as successful.
 

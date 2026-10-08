@@ -5,6 +5,10 @@
 
 #include "kf2/core/result.hpp"
 
+#if defined(KF2_STATE_ENVIRONMENT_TESTING)
+#include <Windows.h>
+#endif
+
 namespace kf2::platform::windows {
 
 [[nodiscard]] inline std::filesystem::path extended_length_path(
@@ -25,6 +29,14 @@ namespace kf2::platform::windows {
 [[nodiscard]] Result<std::filesystem::path> executable_path();
 [[nodiscard]] Result<std::filesystem::path> executable_directory();
 [[nodiscard]] Result<std::filesystem::path> temporary_directory();
+#if defined(KF2_STATE_ENVIRONMENT_TESTING)
+struct TemporaryDirectoryTestHooks {
+    decltype(&GetTempPathW) temp_path2{nullptr};
+    decltype(&GetTokenInformation) query_token{GetTokenInformation};
+};
+void set_temporary_directory_test_hooks(
+    const TemporaryDirectoryTestHooks* hooks) noexcept;
+#endif
 [[nodiscard]] Result<std::filesystem::path> local_app_data_directory();
 [[nodiscard]] bool probe_writable_directory(
     const std::filesystem::path& directory) noexcept;
