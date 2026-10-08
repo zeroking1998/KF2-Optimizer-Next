@@ -788,22 +788,53 @@ int main() {
     rollback.reduction_floor_quality = 20;
     rollback.rollback_quality = 20;
     rollback.rollback_resource = game::AdaptiveResourceControl::mixed;
+    rollback.rollback_current_quality = 10;
     rollback.current_frame_pressure = true;
     rollback.current_resource_pressure = false;
     selected = select_adaptive_runtime_control(rollback);
     CHECK(selected);
     CHECK(selected->resource == game::AdaptiveResourceControl::mixed);
     CHECK(selected->quality == 20);
+    // CPU rollback must not be blocked when pressure moves to an unchanged GPU.
+    auto changed_pressure = rollback;
+    changed_pressure.primary_resource = optimizer::ResourceKind::gpu;
+    changed_pressure.current_quality = 100;
+    changed_pressure.reduction_floor_quality = 100;
+    changed_pressure.rollback_quality = 100;
+    changed_pressure.rollback_resource = game::AdaptiveResourceControl::cpu;
+    changed_pressure.rollback_current_quality = 80;
+    selected = select_adaptive_runtime_control(changed_pressure);
+    CHECK(selected);
+    CHECK(selected->resource == game::AdaptiveResourceControl::cpu);
+    CHECK(selected->quality == 100);
+    // The inverse mismatch must not retry a resource that is already restored.
+    changed_pressure.current_quality = 80;
+    changed_pressure.reduction_floor_quality = 80;
+    changed_pressure.rollback_current_quality = 100;
+    CHECK(!select_adaptive_runtime_control(changed_pressure));
+    for (const auto invalid : {std::optional<int>{}, std::optional<int>{0},
+                               std::optional<int>{101}}) {
+        changed_pressure.rollback_current_quality = invalid;
+        CHECK(!select_adaptive_runtime_control(changed_pressure));
+    }
+    // Origin quality describes confirmed state, not a policy-constrained value.
+    changed_pressure.current_quality = 100;
+    changed_pressure.minimum_quality = 40;
+    changed_pressure.rollback_current_quality = 20;
+    selected = select_adaptive_runtime_control(changed_pressure);
+    CHECK(selected && selected->quality == 100);
     // Inject a runtime-readback failure followed by one composite rollback
     // readback failure for every quality group. Native must re-verify the exact
     // previous value even though it equals the last confirmed value.
     auto unknown_composition = rollback;
     unknown_composition.current_quality = 70;
     unknown_composition.rollback_quality = 70;
+    unknown_composition.rollback_current_quality.reset();
     unknown_composition.quality_state_known = false;
     unknown_composition.map_ready_ns = unknown_composition.now_ns;
     unknown_composition.last_applied_ns = unknown_composition.now_ns;
-    for (const auto resource : {game::AdaptiveResourceControl::gpu,
+    for (const auto resource : {game::AdaptiveResourceControl::mixed,
+             game::AdaptiveResourceControl::gpu,
              game::AdaptiveResourceControl::cpu,
              game::AdaptiveResourceControl::vram,
              game::AdaptiveResourceControl::ram,

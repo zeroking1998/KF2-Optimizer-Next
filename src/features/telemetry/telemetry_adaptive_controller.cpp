@@ -394,6 +394,10 @@ void UiRuntime::update_adaptive_controller(
                     pressure_resource),
             .rollback_quality = adaptive_quality_rollback_target,
             .rollback_resource = adaptive_quality_rollback_resource,
+            .rollback_current_quality = adaptive_quality_rollback_resource
+                ? std::optional<int>{adaptive_resource_quality.control_quality(
+                      *adaptive_quality_rollback_resource)}
+                : std::nullopt,
             .quality_state_known = adaptive_quality_state_known,
             .current_frame_pressure =
                 adaptive_decision.current_frame_pressure,
@@ -436,7 +440,8 @@ void UiRuntime::update_adaptive_controller(
             L"optimizer"});
     }
     if (runtime_selection && next_sequence) {
-        const auto previous_quality = selected_runtime_quality;
+        const auto previous_quality = adaptive_resource_quality.control_quality(
+            runtime_selection->resource);
         const auto& proposed = adaptive_actuation.propose(
             runtime_control,
             static_cast<double>(runtime_selection->quality),
