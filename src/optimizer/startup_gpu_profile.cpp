@@ -35,22 +35,22 @@ std::optional<StartupGpuProfileResolution> resolve_startup_gpu_profile(
     const std::vector<telemetry::GpuAdapter>& physical_adapters,
     std::optional<std::wstring_view> configured_physical_key,
     std::optional<std::wstring_view> previously_confirmed_physical_key,
-    bool previous_confirmation_matches_current_preference) noexcept {
+    bool previous_confirmation_matches_current_preference) {
     if (physical_adapters.empty()) return std::nullopt;
-    if (const auto configured = find_by_physical_key(
+    if (auto configured = find_by_physical_key(
             physical_adapters, configured_physical_key)) {
         return resolution_for(
-            *configured, StartupGpuProfileSource::configured_adapter);
+            std::move(*configured), StartupGpuProfileSource::configured_adapter);
     }
     if (physical_adapters.size() == 1) {
         return resolution_for(
             physical_adapters.front(), StartupGpuProfileSource::sole_adapter);
     }
     if (previous_confirmation_matches_current_preference) {
-        if (const auto previous = find_by_physical_key(
+        if (auto previous = find_by_physical_key(
                 physical_adapters, previously_confirmed_physical_key)) {
             return resolution_for(
-                *previous,
+                std::move(*previous),
                 StartupGpuProfileSource::previously_confirmed_adapter);
         }
     }

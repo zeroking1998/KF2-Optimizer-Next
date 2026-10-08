@@ -23,6 +23,9 @@ int main() {
     const auto discrete = adapter(22, L"Discrete GPU", 24, L"PCI\\DGPU");
     const std::vector hybrid{integrated, discrete};
 
+    CHECK(!noexcept(resolve_startup_gpu_profile(
+        hybrid, std::nullopt, std::nullopt, false)));
+
     const auto to_integrated = resolve_startup_gpu_profile(
         hybrid, L"PCI\\IGPU", L"PCI\\DGPU", false);
     CHECK(to_integrated.has_value());
