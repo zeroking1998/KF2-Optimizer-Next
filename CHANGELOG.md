@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep optional prewarming unavailable instead of terminating the Optimizer if
+  storage detection runs out of memory; release its volume handle on failure.
+
 - Keep startup compatible with older Windows 10 installations lacking
   GetTempPath2W, without falling back to an unisolated temporary directory for SYSTEM.
 

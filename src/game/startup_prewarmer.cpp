@@ -78,7 +78,7 @@ std::uint64_t detail::startup_prewarm_discovery_steps_for_testing() noexcept {
 
 std::optional<std::vector<std::uint32_t>>
 detail::parse_volume_disk_extents(std::span<const std::byte> storage,
-                                  std::size_t returned_bytes) noexcept {
+                                  std::size_t returned_bytes) {
     if (storage.size() > kMaximumVolumeExtentBufferBytes ||
         returned_bytes < kVolumeExtentHeaderBytes ||
         returned_bytes > storage.size()) {
@@ -133,7 +133,7 @@ std::uint64_t available_physical_memory() noexcept {
 }
 
 std::optional<std::vector<std::uint32_t>> disk_numbers_for_path(
-    const std::filesystem::path& path) noexcept {
+    const std::filesystem::path& path) {
     std::vector<wchar_t> volume_root(32768);
     const auto native_path =
         platform::windows::extended_length_path(path);
@@ -152,6 +152,10 @@ std::optional<std::vector<std::uint32_t>> disk_numbers_for_path(
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr, OPEN_EXISTING, 0, nullptr);
     if (volume == INVALID_HANDLE_VALUE) return std::nullopt;
+    struct CloseVolume {
+        HANDLE value;
+        ~CloseVolume() noexcept { CloseHandle(value); }
+    } close_volume{volume};
 
     std::vector<std::byte> storage(
         detail::kInitialVolumeExtentBufferBytes);
@@ -162,14 +166,12 @@ std::optional<std::vector<std::uint32_t>> disk_numbers_for_path(
             storage.data(), static_cast<DWORD>(storage.size()), &returned,
             nullptr);
         if (queried) {
-            CloseHandle(volume);
             return detail::parse_volume_disk_extents(storage, returned);
         }
 
         const DWORD error = GetLastError();
         if (error != ERROR_MORE_DATA &&
             error != ERROR_INSUFFICIENT_BUFFER) {
-            CloseHandle(volume);
             return std::nullopt;
         }
 
@@ -181,23 +183,20 @@ std::optional<std::vector<std::uint32_t>> disk_numbers_for_path(
             std::memcpy(&extent_count, storage.data(), sizeof(extent_count));
             const auto required = volume_extent_bytes(extent_count);
             if (!required) {
-                CloseHandle(volume);
                 return std::nullopt;
             }
             next_size = std::max(next_size, *required);
         }
         if (next_size <= storage.size() ||
             next_size > detail::kMaximumVolumeExtentBufferBytes) {
-            CloseHandle(volume);
             return std::nullopt;
         }
         storage.resize(next_size);
     }
-    CloseHandle(volume);
     return std::nullopt;
 }
 
-std::optional<bool> disk_incurs_seek_penalty(std::uint32_t number) noexcept {
+std::optional<bool> disk_incurs_seek_penalty(std::uint32_t number) {
     const std::wstring device = L"\\\\.\\PhysicalDrive" +
         std::to_wstring(number);
     HANDLE disk = CreateFileW(
@@ -428,14 +427,18 @@ std::vector<StartupPrewarmFile> build_startup_prewarm_plan(
 
 StorageKind storage_kind_for_path(
     const std::filesystem::path& path) noexcept {
-    const auto disks = disk_numbers_for_path(path);
-    if (!disks || disks->empty()) return StorageKind::unknown;
-    for (const auto number : *disks) {
-        const auto penalty = disk_incurs_seek_penalty(number);
-        if (!penalty) return StorageKind::unknown;
-        if (*penalty) return StorageKind::rotational;
+    try {
+        const auto disks = disk_numbers_for_path(path);
+        if (!disks || disks->empty()) return StorageKind::unknown;
+        for (const auto number : *disks) {
+            const auto penalty = disk_incurs_seek_penalty(number);
+            if (!penalty) return StorageKind::unknown;
+            if (*penalty) return StorageKind::rotational;
+        }
+        return StorageKind::solid_state;
+    } catch (...) {
+        return StorageKind::unknown;
     }
-    return StorageKind::solid_state;
 }
 
 bool startup_prewarm_retryable(StartupPrewarmState state) noexcept {
