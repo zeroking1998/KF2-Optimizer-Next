@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Stop configured-GPU lookup on DXGI errors instead of repeatedly querying or
+  reporting an unresolved selection as successful.
+
 - Handle GPU monitor-enumeration failures without crashing the Optimizer;
   preserve the native error and existing telemetry fallback.
 

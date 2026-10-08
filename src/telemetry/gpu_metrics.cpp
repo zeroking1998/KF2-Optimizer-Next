@@ -30,12 +30,16 @@ namespace detail {
 namespace {
 PdhGpuApi pdh_gpu_api;
 DxgiFactoryCreate dxgi_factory_create{CreateDXGIFactory1};
+decltype(&RegGetValueW) gpu_preference_read{RegGetValueW};
 }
 void set_pdh_gpu_api_for_testing(const PdhGpuApi& api) noexcept {
     pdh_gpu_api = api;
 }
 void set_dxgi_factory_for_testing(DxgiFactoryCreate create) noexcept {
     dxgi_factory_create = create ? create : CreateDXGIFactory1;
+}
+void set_gpu_preference_reader_for_testing(decltype(&RegGetValueW) read) noexcept {
+    gpu_preference_read = read ? read : RegGetValueW;
 }
 }  // namespace detail
 #define PdhOpenQueryW detail::pdh_gpu_api.open
@@ -44,6 +48,7 @@ void set_dxgi_factory_for_testing(DxgiFactoryCreate create) noexcept {
 #define PdhGetFormattedCounterArrayW detail::pdh_gpu_api.array
 #define PdhCloseQuery detail::pdh_gpu_api.close
 #define CreateDXGIFactory1 detail::dxgi_factory_create
+#define RegGetValueW detail::gpu_preference_read
 #endif
 namespace {
 LUID unpack_luid(std::uint64_t packed) {
@@ -309,7 +314,10 @@ Result<ConfiguredGpuAdapter> configured_gpu_adapter_for_process(
         const HRESULT found = factory6->EnumAdapterByGpuPreference(
             index, dxgi_preference, IID_PPV_ARGS(&adapter));
         if (found == DXGI_ERROR_NOT_FOUND) break;
-        if (FAILED(found)) continue;
+        if (FAILED(found)) return Result<ConfiguredGpuAdapter>::failure(
+            {ErrorCode::platform_failure,
+             L"DXGI configured GPU enumeration failed",
+             static_cast<std::uint32_t>(found)});
         DXGI_ADAPTER_DESC1 description{};
         if (FAILED(adapter->GetDesc1(&description)) ||
             (description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0) {
