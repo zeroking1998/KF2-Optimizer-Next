@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Report GPU startup-profile allocation failures through the existing launch
+  rollback instead of terminating; avoid a redundant selected-adapter copy.
+
 - Keep wrapped changelog bullet text intact in the in-app update notes.
 
 - Restore the configured update and Auto Repair repository in the shipped app.

@@ -29,7 +29,7 @@ resolve_startup_gpu_profile(
     const std::vector<telemetry::GpuAdapter>& physical_adapters,
     std::optional<std::wstring_view> configured_physical_key,
     std::optional<std::wstring_view> previously_confirmed_physical_key,
-    bool previous_confirmation_matches_current_preference) noexcept;
+    bool previous_confirmation_matches_current_preference);
 
 [[nodiscard]] std::wstring_view startup_gpu_profile_source_label(
     StartupGpuProfileSource source) noexcept;
