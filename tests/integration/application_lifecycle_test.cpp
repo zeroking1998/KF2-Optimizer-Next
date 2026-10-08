@@ -1831,6 +1831,59 @@ int test_prewarm_incomplete_publication(bool map_job, bool diagnostics) {
     return EXIT_SUCCESS;
 }
 
+int test_startup_prewarm_skips_clear_progress() {
+    namespace fs = std::filesystem;
+    using kf2::game::StorageKind;
+    using kf2::game::StartupPrewarmState;
+    const auto test_root = fs::path{KF2_TEST_ROOT} / L"startup-prewarm-skips";
+    fs::create_directories(test_root);
+    kf2::diagnostics::EventLog events{128};
+    kf2::app::UiRuntime runtime{test_root / L"Data", false,
+        kf2::config::Settings{}, events, std::nullopt,
+        kf2::app::StartMode::read_only, test_root / L"portable"};
+    auto status = runtime.model.status();
+    status.game_detected = true;
+    runtime.model.set_status(std::move(status));
+    runtime.controller.on_resize({1440, 900});
+    const auto shows_warmup = [&] {
+        const auto& nodes = runtime.controller.layout().nodes;
+        return std::any_of(nodes.begin(), nodes.end(), [](const auto& node) {
+            return node.role == kf2::ui::SemanticRole::status &&
+                node.text.find(L"Warm-up") != std::wstring::npos;
+        });
+    };
+    for (const auto expected : {StartupPrewarmState::skipped_unknown_storage,
+                                StartupPrewarmState::skipped_low_memory,
+                                StartupPrewarmState::skipped_no_files}) {
+        runtime.startup_prewarm_announced = false;
+        runtime.model.set_prewarm_progress(true, 0, L"");
+        runtime.invalidate();
+        CHECK(shows_warmup());
+        runtime.startup_prewarmer.start(test_root, {
+            .idle_delay = std::chrono::milliseconds{0},
+            .storage_override = expected == StartupPrewarmState::skipped_unknown_storage
+                ? StorageKind::unknown : StorageKind::solid_state,
+            .available_memory_override = expected == StartupPrewarmState::skipped_low_memory
+                ? 2ULL * 1024 * 1024 * 1024 : 4ULL * 1024 * 1024 * 1024,
+            .include_common_startup_files = false,
+        });
+        for (int attempt = 0; attempt < 200 &&
+             runtime.startup_prewarmer.snapshot().state == StartupPrewarmState::waiting;
+             ++attempt) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        }
+        CHECK(runtime.startup_prewarmer.snapshot().state == expected);
+        runtime.poll_startup_prewarm();
+        CHECK(runtime.startup_prewarm_announced);
+        CHECK(!runtime.model.status().prewarm_active);
+        CHECK(runtime.model.status().prewarm_percent == 0);
+        CHECK(!shows_warmup());
+        runtime.startup_prewarmer.stop_and_wait();
+    }
+    fs::remove_all(test_root);
+    return EXIT_SUCCESS;
+}
+
 int test_map_prewarm_start_is_visible_before_worker_entry() {
     namespace fs = std::filesystem;
     using kf2::game::StartupPrewarmState;
@@ -5459,6 +5512,7 @@ int main(int argc, char** argv) {
     if (argc == 2 &&
         std::string_view{argv[1]} ==
             "--map-prewarm-start-visibility") {
+        CHECK(test_startup_prewarm_skips_clear_progress() == EXIT_SUCCESS);
         for (const bool map_job : {false, true}) {
             for (const bool diagnostics : {false, true}) {
                 CHECK(test_prewarm_incomplete_publication(

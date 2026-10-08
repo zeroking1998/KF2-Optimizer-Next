@@ -305,6 +305,8 @@ void UiRuntime::poll_startup_prewarm() {
         case game::StartupPrewarmState::skipped_low_memory:
         case game::StartupPrewarmState::skipped_no_files:
             startup_prewarm_announced = true;
+            model.set_prewarm_progress(false, 0, L"");
+            invalidate();
             publish_prewarm_diagnostics(current, L"Startup", true);
             break;
         case game::StartupPrewarmState::failed:
