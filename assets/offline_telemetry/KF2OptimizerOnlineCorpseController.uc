@@ -150,6 +150,8 @@ function bool TryRestoreOnlineCorpse(int Index, string Reason)
             Original.CorpseId, "identity_not_owned");
         return false;
     }
+    // A rejected readback still consumed native mutation work.
+    LastPhysicsMutationRealTime = WorldInfo.RealTimeSeconds;
     if (Candidate.Physics != PHYS_RigidBody)
     {
         Candidate.SetPhysics(PHYS_RigidBody);
@@ -185,7 +187,6 @@ function bool TryRestoreOnlineCorpse(int Index, string Reason)
             Original.CorpseId, "restore_readback_mismatch");
         return false;
     }
-    LastPhysicsMutationRealTime = WorldInfo.RealTimeSeconds;
     if (!bRestoreReceiptReported)
     {
         bRestoreReceiptReported = true;
@@ -277,6 +278,10 @@ function bool ReleaseOneOnlineCorpse(bool bRestoreAll)
         ReleaseScanCursor = FrozenCorpses.Length > 0 ?
             (bRemoved ? Index % FrozenCorpses.Length :
              (Index + 1) % FrozenCorpses.Length) : 0;
+        if (WorldInfo.RealTimeSeconds - LastPhysicsMutationRealTime < 0.45)
+        {
+            return false;
+        }
     }
     return false;
 }
