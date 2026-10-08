@@ -12,6 +12,7 @@
 int main() {
     constexpr std::string_view repository =
         "https://github.com/example/KF2-Optimizer-Next";
+    CHECK(kf2::update::official_release_repository() == repository);
     const std::string releases = R"json([
       {
         "tag_name":"v0.0.2-alpha",

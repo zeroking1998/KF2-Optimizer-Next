@@ -169,6 +169,8 @@ are visible immediately.
 
 - Keep wrapped changelog bullet text intact in the in-app update notes.
 
+- Restore the configured update and Auto Repair repository in the shipped app.
+
 - Let telemetry snapshot allocation failures reach the existing worker recovery
   path instead of terminating the Optimizer when old log measurements expire.
 
