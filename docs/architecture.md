@@ -153,6 +153,10 @@ The optimizer sends a monotonically sequenced command with a random 128-bit
 token and a CPU, GPU, VRAM, RAM, mixed or recovery group. KF2 rebuilds the
 requested group from its current graphics settings, changes only the owned
 fields and returns `APPLIED` only after exact readback.
+Film grain and motion blur remain user-owned. Adaptive does not reduce,
+snapshot, rebase or restore either value; each composition starts from current
+graphics, so both pass through unchanged. Menu observation and manual edits
+remain available independently of Adaptive.
 Adaptive writes script-owned defaults transiently rather than invoking KF2's
 disk-persisting menu setters. Native settings are reapplied only when their
 owned values differ; script-only or already-matching requests skip that engine

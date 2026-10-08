@@ -60,7 +60,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
     local int MinShadowResolution;
     local float ShadowDensity;
     local float ShadowDistance;
-    local int MotionBlurQuality;
     local int DepthOfFieldQuality;
     local int DistanceFogQuality;
 
@@ -72,7 +71,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
         MinShadowResolution = 32;
         ShadowDensity = 2.25;
         ShadowDistance = 1.0;
-        MotionBlurQuality = 1;
         DepthOfFieldQuality = 3;
         DistanceFogQuality = 1;
     }
@@ -83,7 +81,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
         MinShadowResolution = 48;
         ShadowDensity = 2.0;
         ShadowDistance = 0.95;
-        MotionBlurQuality = 1;
         DepthOfFieldQuality = 3;
         DistanceFogQuality = 1;
     }
@@ -94,7 +91,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
         MinShadowResolution = 64;
         ShadowDensity = 1.75;
         ShadowDistance = 0.9;
-        MotionBlurQuality = 1;
         DepthOfFieldQuality = 2;
         DistanceFogQuality = 1;
     }
@@ -105,7 +101,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
         MinShadowResolution = 80;
         ShadowDensity = 1.5;
         ShadowDistance = 0.85;
-        MotionBlurQuality = 0;
         DepthOfFieldQuality = 2;
         DistanceFogQuality = 1;
     }
@@ -116,7 +111,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
         MinShadowResolution = 112;
         ShadowDensity = 1.25;
         ShadowDistance = 0.8;
-        MotionBlurQuality = 0;
         DepthOfFieldQuality = 1;
         DistanceFogQuality = 0;
     }
@@ -127,7 +121,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
         MinShadowResolution = 128;
         ShadowDensity = 1.0;
         ShadowDistance = 0.75;
-        MotionBlurQuality = 0;
         DepthOfFieldQuality = 0;
         DistanceFogQuality = 0;
     }
@@ -147,8 +140,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
     Requested.Bloom.BloomQuality = Min(
         Requested.Bloom.BloomQuality,
         Quality >= 90 ? 5 : (Quality >= 70 ? 4 : 3));
-    Requested.MotionBlur.MotionBlurQuality = Min(
-        Requested.MotionBlur.MotionBlurQuality, MotionBlurQuality);
     Requested.DepthOfField.DepthOfFieldQuality = Min(
         Requested.DepthOfField.DepthOfFieldQuality, DepthOfFieldQuality);
     Requested.FX.DistanceFogQuality = Min(
@@ -500,7 +491,6 @@ static function CopyOwnedSettings(
     Snapshot.bOriginalForegroundPreshadows =
         Current.Shadows.AllowForegroundPreshadows;
     Snapshot.OriginalBloomQuality = Current.Bloom.BloomQuality;
-    Snapshot.OriginalMotionBlurQuality = Current.MotionBlur.MotionBlurQuality;
     Snapshot.OriginalDepthOfFieldQuality =
         Current.DepthOfField.DepthOfFieldQuality;
     Snapshot.OriginalDistanceFogQuality = Current.FX.DistanceFogQuality;
@@ -595,8 +585,6 @@ static function bool OwnedSettingsDiffer(
            Previous.bOriginalForegroundPreshadows !=
                Current.bOriginalForegroundPreshadows ||
            Previous.OriginalBloomQuality != Current.OriginalBloomQuality ||
-           Previous.OriginalMotionBlurQuality !=
-               Current.OriginalMotionBlurQuality ||
            Previous.OriginalDepthOfFieldQuality !=
                Current.OriginalDepthOfFieldQuality ||
            Previous.OriginalDistanceFogQuality !=
@@ -730,10 +718,6 @@ static function bool RebaseOriginalFromMenuChange(
             Current.bOriginalForegroundPreshadows;
     if (Previous.OriginalBloomQuality != Current.OriginalBloomQuality)
         Snapshot.OriginalBloomQuality = Current.OriginalBloomQuality;
-    if (Previous.OriginalMotionBlurQuality !=
-        Current.OriginalMotionBlurQuality)
-        Snapshot.OriginalMotionBlurQuality =
-            Current.OriginalMotionBlurQuality;
     if (Previous.OriginalDepthOfFieldQuality !=
         Current.OriginalDepthOfFieldQuality)
         Snapshot.OriginalDepthOfFieldQuality =
@@ -917,8 +901,6 @@ static function RestoreOwnedSettings(
     Requested.Shadows.AllowForegroundPreshadows =
         Snapshot.bOriginalForegroundPreshadows;
     Requested.Bloom.BloomQuality = Snapshot.OriginalBloomQuality;
-    Requested.MotionBlur.MotionBlurQuality =
-        Snapshot.OriginalMotionBlurQuality;
     Requested.DepthOfField.DepthOfFieldQuality =
         Snapshot.OriginalDepthOfFieldQuality;
     Requested.FX.DistanceFogQuality = Snapshot.OriginalDistanceFogQuality;
@@ -1012,8 +994,6 @@ static function bool NativeReadbackMatches(
            Observed.Shadows.AllowForegroundPreshadows ==
                Requested.Shadows.AllowForegroundPreshadows &&
            Observed.Bloom.BloomQuality == Requested.Bloom.BloomQuality &&
-           Observed.MotionBlur.MotionBlurQuality ==
-               Requested.MotionBlur.MotionBlurQuality &&
            Observed.DepthOfField.DepthOfFieldQuality ==
                Requested.DepthOfField.DepthOfFieldQuality &&
            Observed.FX.DistanceFogQuality == Requested.FX.DistanceFogQuality &&

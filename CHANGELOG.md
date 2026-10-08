@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Keep motion blur entirely under manual control, like film grain. Adaptive
+  no longer reduces or restores it; both remain available in Game graphics.
+
 - Skip diagnostic particle-template attribution and its detailed reports while
   Runtime diagnostics is off; normal particle measurements and Adaptive inputs
   remain available, without changing the report format or sampling interval.

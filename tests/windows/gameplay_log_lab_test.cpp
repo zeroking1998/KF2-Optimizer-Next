@@ -2589,9 +2589,16 @@ int main() {
     CHECK(graphics_source.find(
         "Requested.TextureResolution.ShadowmapBias = Max") !=
           std::string::npos);
-    CHECK(graphics_source.find(
-        "Requested.MotionBlur.MotionBlurQuality = Min") !=
-          std::string::npos);
+    // These two effects are user-owned, not Adaptive reduction, restore or
+    // acknowledgement fields. Keep their separate menu observation intact.
+    const auto menu_readback_start = graphics_source.find(
+        "static function string MenuReadback(");
+    CHECK(menu_readback_start != std::string::npos);
+    const auto adaptive_graphics_body = graphics_source.substr(0, menu_readback_start);
+    CHECK(adaptive_graphics_body.find("MotionBlur") == std::string::npos);
+    CHECK(adaptive_graphics_body.find("FilmGrain") == std::string::npos);
+    CHECK(graphics_source.substr(menu_readback_start).find(
+        "Current.MotionBlur, default.MotionBlurPresets") != std::string::npos);
     CHECK(graphics_source.find(
         "Requested.EnvironmentDetail.AllowLightFunctions = false") !=
           std::string::npos);
@@ -2799,11 +2806,11 @@ int main() {
     const auto script_readback_fields = setting_members(graphics_source.substr(
         script_readback_start, combined_readback_start - script_readback_start),
         "Observed.");
-    CHECK(readback_fields.size() == 42);
+    CHECK(readback_fields.size() == 41);
     CHECK(script_readback_fields.size() == 14);
     readback_fields.insert(script_readback_fields.begin(), script_readback_fields.end());
     CHECK(readback_fields == setting_members(owned_copy_body, "Current."));
-    CHECK(readback_fields.size() == 56);
+    CHECK(readback_fields.size() == 55);
     CHECK(graphics_source.substr(
         combined_readback_start, transient_script_start - combined_readback_start)
         .find("NativeReadbackMatches(Observed, Requested) &&\n"
@@ -2825,7 +2832,7 @@ int main() {
                 name_start, name_end - name_start));
         }
     }
-    CHECK(owned_fields.size() == 56);
+    CHECK(owned_fields.size() == 55);
     for (const auto& field : owned_fields) {
         CHECK(menu_rebase_body.find("Snapshot." + field) !=
               std::string::npos);
