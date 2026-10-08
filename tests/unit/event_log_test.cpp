@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <barrier>
 #include <chrono>
