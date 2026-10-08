@@ -80,6 +80,8 @@ unknown process-query/wait result or timeout retains the receipt, journal,
 staged package and backup for next-start recovery. A small
 `cleanup-deferred.ini` in the temporary update folder records the reason when
 writable; it is diagnostic only, not an update failure or a cleanup permit.
+Startup recovery also preserves the managed files and recovery records when
+the transaction owner's process state or identity cannot be verified.
 
 ## Files that remain unchanged
 
