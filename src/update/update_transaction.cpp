@@ -272,6 +272,13 @@ Result<bool> owner_is_active(const UpdateJournal& journal) {
     }
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
                                  FALSE, journal.owner_process_id);
+#if defined(KF2_UPDATE_TRANSACTION_TESTING)
+    if (owner_query_fault == UpdateOwnerQueryFault::open_failure) {
+        if (process) CloseHandle(process);
+        process = nullptr;
+        SetLastError(ERROR_ACCESS_DENIED);
+    }
+#endif
     if (!process) {
         const DWORD error = GetLastError();
         if (error == ERROR_INVALID_PARAMETER) return Result<bool>::success(false);

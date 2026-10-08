@@ -1,5 +1,4 @@
 #include <Windows.h>
-#include <Aclapi.h>
 
 #include <cstdlib>
 #include <filesystem>
@@ -170,37 +169,19 @@ int check_owner_recovery(const std::filesystem::path& root) {
     CHECK(read_file(target / L"KF2Optimizer.exe") == target_before);
     CHECK(read_file(journal_path) == journal);
 
-    ACL empty_acl{};
-    CHECK(InitializeAcl(&empty_acl, sizeof(empty_acl), ACL_REVISION));
-    CHECK(SetSecurityInfo(child.process.hProcess, SE_KERNEL_OBJECT,
-                          DACL_SECURITY_INFORMATION, nullptr, nullptr,
-                          &empty_acl, nullptr) == ERROR_SUCCESS);
-    HANDLE denied = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
-                                FALSE, child.process.dwProcessId);
-    const DWORD open_error = GetLastError();
-    if (denied) CloseHandle(denied);
-    CHECK(!denied && open_error == ERROR_ACCESS_DENIED);
-    const auto unknown = kf2::update::recover_update_transaction(request);
-    CHECK(!unknown.has_value());
-    CHECK(unknown.error().native_code == ERROR_ACCESS_DENIED);
-    CHECK(WaitForSingleObject(child.process.hProcess, 0) == WAIT_TIMEOUT);
-    CHECK(read_file(target / L"KF2Optimizer.exe") == target_before);
-    CHECK(read_file(journal_path) == journal);
-    CHECK(user_data_unchanged(target));
-
-    CHECK(SetSecurityInfo(child.process.hProcess, SE_KERNEL_OBJECT,
-                          DACL_SECURITY_INFORMATION, nullptr, nullptr,
-                          nullptr, nullptr) == ERROR_SUCCESS);
     using kf2::update::UpdateOwnerQueryFault;
-    for (const auto fault : {UpdateOwnerQueryFault::identity_failure,
+    // Inject failures instead of relying on a DACL: SeDebugPrivilege can
+    // bypass that ACL on elevated runners. The owner is still a real process.
+    for (const auto fault : {UpdateOwnerQueryFault::open_failure,
+                             UpdateOwnerQueryFault::identity_failure,
                              UpdateOwnerQueryFault::wait_failure}) {
         kf2::update::set_update_owner_query_fault_for_testing(fault);
         const auto failed_query = kf2::update::recover_update_transaction(request);
         kf2::update::set_update_owner_query_fault_for_testing(
             UpdateOwnerQueryFault::none);
         CHECK(!failed_query.has_value());
-        const DWORD expected_error = fault == UpdateOwnerQueryFault::identity_failure
-            ? ERROR_ACCESS_DENIED : ERROR_INVALID_HANDLE;
+        const DWORD expected_error = fault == UpdateOwnerQueryFault::wait_failure
+            ? ERROR_INVALID_HANDLE : ERROR_ACCESS_DENIED;
         CHECK(failed_query.error().native_code == expected_error);
         CHECK(WaitForSingleObject(child.process.hProcess, 0) == WAIT_TIMEOUT);
         CHECK(read_file(target / L"KF2Optimizer.exe") == target_before);
