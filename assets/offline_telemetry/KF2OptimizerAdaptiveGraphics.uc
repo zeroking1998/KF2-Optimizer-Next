@@ -1144,13 +1144,27 @@ static function ApplyTransientScriptSettings(GFXSettings Requested)
 static function ApplyChangedSettings(
     GFXSettings Current, GFXSettings Requested, out GFXSettings Observed)
 {
+    local bool bNativeChanged;
+    local bool bScriptChanged;
+
+    bNativeChanged = !NativeReadbackMatches(Current, Requested);
+    bScriptChanged = !ScriptReadbackMatches(Current, Requested);
+    // Pause actual writes through the graphics-menu closing edge. The caller
+    // keeps its existing readback failure/retry path; no false APPLIED receipt.
+    if ((bNativeChanged || bScriptChanged) &&
+        class'KF2OptimizerGraphicsInteraction'.static.
+            IsGraphicsMenuTransactionOpen())
+    {
+        GetCurrentGFXSettings(Observed);
+        return;
+    }
     // KF2's native setter can refresh render/streaming state. Do not invoke it
     // for matching native values, even when script-owned budgets changed.
-    if (!NativeReadbackMatches(Current, Requested))
+    if (bNativeChanged)
     {
         SetNativeSettings(Requested);
     }
-    if (!ScriptReadbackMatches(Current, Requested))
+    if (bScriptChanged)
     {
         ApplyTransientScriptSettings(Requested);
     }

@@ -158,6 +158,13 @@ disk-persisting menu setters. Native settings are reapplied only when their
 owned values differ; script-only or already-matching requests skip that engine
 update but still receive a fresh readback. The same path handles rollback and
 restoration. Actual native changes may still refresh render or streaming state.
+During a protected session, stable INI writes update the observed runtime only;
+they never establish user intent. The existing graphics-menu observer reports
+bounded before/after applied readbacks after its opening baseline. Only changed
+fields enter user replay; passive reads cannot retain temporary FX or normalize
+an untouched film-grain value. The worker folds multiple edits per field in one
+fixed-size record, including during log catch-up. Automatic graphics writes wait
+until the menu's closing observation, using existing readback/retry handling.
 Intervention lowers one native tier, emergency may lower two and stable recovery
 raises one. Missing or
 stale telemetry, Zed Time, an online/unknown session, shadow mode, missing bridge

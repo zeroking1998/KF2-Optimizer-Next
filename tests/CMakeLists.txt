@@ -481,6 +481,8 @@ target_link_libraries(kf2_application_lifecycle_test PRIVATE
     dwmapi psapi advapi32 pdh dxgi version winhttp ws2_32
 )
 add_test(NAME kf2_application_lifecycle_test COMMAND kf2_application_lifecycle_test)
+add_test(NAME kf2_protected_graphics_restore_test
+    COMMAND kf2_application_lifecycle_test --protected-graphics-restore)
 set_tests_properties(kf2_application_lifecycle_test PROPERTIES
     LABELS "requires-desktop")
 add_test(NAME kf2_package_repair_worker_start_test

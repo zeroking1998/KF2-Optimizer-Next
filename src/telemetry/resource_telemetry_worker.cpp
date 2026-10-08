@@ -145,6 +145,12 @@ private:
                 game::parse_game_menu_graphics_readback(line)) {
             events.graphics_readback = *readback;
         }
+        if (verified_log_identity) {
+            if (const auto changes = game::parse_game_menu_graphics_changes(line)) {
+                game::merge_game_menu_graphics_changes(
+                    events.graphics_user_changes, *changes);
+            }
+        }
         if (const auto selected_map =
                 game::map_prewarm_request_from_log_line(line)) {
             events.map_prewarm_selection = *selected_map;
@@ -806,6 +812,11 @@ private:
                                     if (boundaries.graphics_readback) {
                                         catch_up_boundaries.graphics_readback =
                                             std::move(boundaries.graphics_readback);
+                                    }
+                                    if (boundaries.graphics_user_changes) {
+                                        game::merge_game_menu_graphics_changes(
+                                            catch_up_boundaries.graphics_user_changes,
+                                            *boundaries.graphics_user_changes);
                                     }
                                     catch_up_boundaries.load_map_started |=
                                         boundaries.load_map_started;

@@ -24,6 +24,7 @@ namespace kf2::telemetry {
 
 struct GameLogBoundaryEvents final {
     std::optional<game::GameMenuGraphicsReadback> graphics_readback;
+    std::optional<game::GameMenuGraphicsChanges> graphics_user_changes;
     std::optional<std::wstring> map_prewarm_selection;
     bool load_map_started{false};
     bool new_settings_restart_requested{false};

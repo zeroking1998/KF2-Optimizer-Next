@@ -2711,11 +2711,18 @@ int main() {
     const auto changed_settings_body = graphics_source.substr(
         changed_settings_start, changed_settings_end - changed_settings_start);
     CHECK(changed_settings_body.find(
-        "if (!NativeReadbackMatches(Current, Requested))") != std::string::npos);
+        "bNativeChanged = !NativeReadbackMatches(Current, Requested);") != std::string::npos);
     CHECK(changed_settings_body.find(
-        "if (!ScriptReadbackMatches(Current, Requested))") != std::string::npos);
-    CHECK(changed_settings_body.find("GetCurrentGFXSettings(Observed);") >
+        "bScriptChanged = !ScriptReadbackMatches(Current, Requested);") != std::string::npos);
+    CHECK(changed_settings_body.rfind("GetCurrentGFXSettings(Observed);") >
           changed_settings_body.find("ApplyTransientScriptSettings(Requested);"));
+    const auto menu_write_guard = changed_settings_body.find("IsGraphicsMenuTransactionOpen()");
+    CHECK(menu_write_guard != std::string::npos);
+    CHECK(menu_write_guard < changed_settings_body.find("SetNativeSettings(Requested);"));
+    CHECK(menu_write_guard < changed_settings_body.find("ApplyTransientScriptSettings(Requested);"));
+    CHECK(changed_settings_body.find("GetCurrentGFXSettings(Observed);", menu_write_guard) <
+          changed_settings_body.find("return;", menu_write_guard));
+    CHECK(graphics_interaction_source.find("Monitor.bGraphicsMenuWasOpen") != std::string::npos);
     CHECK(count_occurrences(graphics_source, "SetNativeSettings(Requested);") == 1);
     CHECK(count_occurrences(graphics_source,
         "ApplyChangedSettings(Current, Requested, Observed);") == 4);
@@ -2832,6 +2839,13 @@ int main() {
           std::string::npos);
     CHECK(graphics_interaction_source.find(
         "RebaseOriginalFromMenuChange(") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "bMenuGraphicsStateInitialized && bGraphicsMenuWasOpen &&") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "KF2OPT_GFX_USER schema=2 state=applied before ") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "PreviousMenuReadback $ \" after \" $ Readback") != std::string::npos);
     CHECK(interaction_source.find(
         "function KF2OptimizerAdaptiveGraphicsState "
         "PeekProcessAdaptiveGraphicsState()") != std::string::npos);

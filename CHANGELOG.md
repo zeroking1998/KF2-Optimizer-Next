@@ -167,6 +167,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep temporary Adaptive graphics out of saved user settings after travel,
+  mode changes and shutdown. Replay only applied graphics-menu deltas, retain
+  untouched raw INI values, and defer automatic writes while that menu closes.
+
 - Keep retained-log test timestamps deterministic through live appends and file
   recreation, without changing runtime log ownership or freshness checks.
 

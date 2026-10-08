@@ -660,6 +660,9 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
             continue;
         }
         const auto& boundaries = chunk.boundaries;
+        if (boundaries.graphics_user_changes) {
+            retain_game_menu_graphics_changes(*boundaries.graphics_user_changes);
+        }
         if (boundaries.graphics_readback &&
             (!game_menu_graphics_readback ||
              *game_menu_graphics_readback != *boundaries.graphics_readback)) {

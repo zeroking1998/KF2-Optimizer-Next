@@ -1157,17 +1157,49 @@ int main(int argc, char** argv) {
             CHECK(boundaries.graphics_readback.has_value());
             CHECK(boundaries.graphics_readback->resolution.width == 2560);
             CHECK(boundaries.graphics_readback->film_grain_percent == 25);
+            CHECK(!boundaries.graphics_user_changes);
             CHECK(boundaries.map_prewarm_selection ==
                   std::optional<std::wstring>{L"KF-BurningParis"});
             CHECK(boundaries.new_settings_restart_requested);
             CHECK(boundaries.startup_ready);
             CHECK(boundaries.verified_engine_exit);
 
+            // User intent survives other menu observations in the same chunk.
+            // Repeated edits are folded per field, never kept as an event list.
+            auto before = graphics_readback_line();
+            before = before.substr(before.find("resx="));
+            before.pop_back();
+            auto after = before;
+            after.replace(after.find("motion_blur=0"), 13, "motion_blur=1");
+            auto next = after;
+            next.replace(next.find("film_grain=25"), 13, "film_grain=80");
+            {
+                std::ofstream output(log, std::ios::binary | std::ios::app);
+                output << "ScriptLog: KF2OPT_GFX_USER schema=2 state=applied before "
+                       << before << " after " << after << '\n'
+                       << graphics_readback_line()
+                       << "ScriptLog: KF2OPT_GFX_USER schema=2 state=applied before "
+                       << after << " after " << next << '\n'
+                       << graphics_readback_line();
+            }
+            worker.request(2'060'000'000ULL);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1);
+            const auto& changes = chunks.front().boundaries.graphics_user_changes;
+            CHECK(changes);
+            const auto motion = static_cast<std::size_t>(kf2::game::VideoOption::motion_blur);
+            CHECK(changes->changed[motion]);
+            CHECK(changes->applied.choices[motion] == 1);
+            CHECK(changes->film_grain_changed);
+            CHECK(changes->applied.film_grain_percent == 80);
+
             // Invalid structured lines and an oversized record cannot create
             // a boundary event or leak an unbounded tail into the next chunk.
             {
                 std::ofstream output(log, std::ios::binary | std::ios::app);
                 output << "ScriptLog: KF2OPT_GFX_MENU schema=1 state=applied\n"
+                          "ScriptLog: KF2OPT_GFX_USER schema=2 state=applied before invalid after invalid\n"
                           "ScriptLog: KF2OPT_MAP_SELECTION schema=1 "
                           "state=menu map=../unsafe\n"
                        << std::string(4097, 'x')
@@ -1178,6 +1210,7 @@ int main(int argc, char** argv) {
             chunks = worker.take_game_log_chunks(log_binding.identity);
             CHECK(chunks.size() == 1);
             CHECK(!chunks.front().boundaries.graphics_readback);
+            CHECK(!chunks.front().boundaries.graphics_user_changes);
             CHECK(!chunks.front().boundaries.map_prewarm_selection);
             CHECK(!chunks.front().boundaries.startup_ready);
 

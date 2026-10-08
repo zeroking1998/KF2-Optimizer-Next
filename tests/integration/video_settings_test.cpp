@@ -517,6 +517,47 @@ int main() {
     malformed_menu.replace(malformed_menu.find("flex=0"), 6, "flex=9");
     CHECK(!kf2::game::parse_game_menu_graphics_readback(
         malformed_menu).has_value());
+    // Menu deltas retain only explicitly edited fields, not the other live
+    // Adaptive values carried by the same readback. Multiple edits fold into
+    // one bounded record without losing a choice changed back to its start.
+    const auto before_payload = menu_line.substr(menu_line.find("resx="));
+    auto after_payload = before_payload;
+    after_payload.replace(after_payload.find("motion_blur=0"), 13, "motion_blur=1");
+    const auto edit_line = "ScriptLog: KF2OPT_GFX_USER schema=2 state=applied before " +
+        before_payload + " after " + after_payload;
+    const auto edit = kf2::game::parse_game_menu_graphics_changes(edit_line);
+    CHECK(edit.has_value());
+    CHECK(!kf2::game::parse_game_menu_graphics_changes(menu_line));
+    CHECK(!kf2::game::parse_game_menu_graphics_readback(edit_line));
+    CHECK(!kf2::game::parse_game_menu_graphics_changes(edit_line + " flex=0"));
+    CHECK(!kf2::game::parse_game_menu_graphics_changes(edit_line.substr(0, edit_line.size() - 1)));
+    CHECK(!kf2::game::parse_game_menu_graphics_changes(std::string(4096, 'x') + edit_line));
+    const auto motion_index = static_cast<std::size_t>(kf2::game::VideoOption::motion_blur);
+    const auto fx_index = static_cast<std::size_t>(kf2::game::VideoOption::fx_quality);
+    CHECK(edit->changed[motion_index]);
+    CHECK(!edit->changed[fx_index] && !edit->film_grain_changed);
+    auto personal = pending;
+    personal.choices[fx_index] = 3;
+    const auto edited = kf2::game::apply_game_menu_graphics_changes(personal, *edit);
+    CHECK(edited.choices[motion_index] == 1);
+    CHECK(edited.choices[fx_index] == 3);
+    CHECK(edited.film_grain_percent == personal.film_grain_percent);
+    CHECK(edited.resolutions == personal.resolutions);
+    auto next_payload = after_payload;
+    next_payload.replace(next_payload.find("film_grain=25"), 13, "film_grain=80");
+    next_payload.replace(next_payload.find("motion_blur=1"), 13, "motion_blur=0");
+    const auto second = kf2::game::parse_game_menu_graphics_changes(
+        "KF2OPT_GFX_USER schema=2 state=applied before " + after_payload +
+        " after " + next_payload);
+    CHECK(second.has_value());
+    std::optional<kf2::game::GameMenuGraphicsChanges> merged;
+    kf2::game::merge_game_menu_graphics_changes(merged, *edit);
+    kf2::game::merge_game_menu_graphics_changes(merged, *second);
+    CHECK(merged->changed[motion_index] && merged->film_grain_changed);
+    const auto twice_edited = kf2::game::apply_game_menu_graphics_changes(personal, *merged);
+    CHECK(twice_edited.choices[motion_index] == 0);
+    CHECK(twice_edited.choices[fx_index] == 3);
+    CHECK(twice_edited.film_grain_percent == 80);
     const auto variable_enabled =
         kf2::game::read_variable_frame_rate_enabled(root);
     CHECK(variable_enabled.has_value());

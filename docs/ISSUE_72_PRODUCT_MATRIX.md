@@ -5,7 +5,7 @@ does not claim compatibility with the historical product architecture.
 
 ## Current validation inventory
 
-- Default full Windows CTest registrations: 121.
+- Default full Windows CTest registrations: 122.
 - Native managed settings catalog definitions: 217.
 - Inventory reviewed: 2026-10-04.
 
