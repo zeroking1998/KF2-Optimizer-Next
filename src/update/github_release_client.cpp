@@ -384,16 +384,17 @@ Result<std::vector<ParsedRelease>> parse_release_array(std::string_view json) {
     if (!reader.consume('[')) return Result<std::vector<ParsedRelease>>::failure(
         {ErrorCode::invalid_argument, L"GitHub release response is malformed", 0});
     std::vector<ParsedRelease> releases;
-    if (reader.consume(']')) return Result<std::vector<ParsedRelease>>::success(std::move(releases));
-    for (;;) {
-        if (releases.size() >= 100) return Result<std::vector<ParsedRelease>>::failure(
-            {ErrorCode::access_denied, L"GitHub returned too many releases", 0});
-        auto release = parse_release(reader);
-        if (!release.has_value()) return Result<std::vector<ParsedRelease>>::failure(release.error());
-        releases.push_back(std::move(release.value()));
-        if (reader.consume(']')) break;
-        if (!reader.consume(',')) return Result<std::vector<ParsedRelease>>::failure(
-            {ErrorCode::invalid_argument, L"GitHub release response is malformed", 0});
+    if (!reader.consume(']')) {
+        for (;;) {
+            if (releases.size() >= 100) return Result<std::vector<ParsedRelease>>::failure(
+                {ErrorCode::access_denied, L"GitHub returned too many releases", 0});
+            auto release = parse_release(reader);
+            if (!release.has_value()) return Result<std::vector<ParsedRelease>>::failure(release.error());
+            releases.push_back(std::move(release.value()));
+            if (reader.consume(']')) break;
+            if (!reader.consume(',')) return Result<std::vector<ParsedRelease>>::failure(
+                {ErrorCode::invalid_argument, L"GitHub release response is malformed", 0});
+        }
     }
     if (!reader.at_end()) return Result<std::vector<ParsedRelease>>::failure(
         {ErrorCode::invalid_argument, L"GitHub release response has trailing data", 0});

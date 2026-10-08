@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Reject trailing data after empty GitHub release lists instead of reporting
+  a successful update check with no newer release.
+
 - Exclude ignored build trees before repository validation, avoiding unnecessary
   traversal and interference from changing test fixtures without skipping source checks.
 
