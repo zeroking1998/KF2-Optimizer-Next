@@ -170,6 +170,9 @@ are visible immediately.
 - Let telemetry snapshot allocation failures reach the existing worker recovery
   path instead of terminating the Optimizer when old log measurements expire.
 
+- Avoid temporary allocations in recovery-setting lookup, preventing process
+  termination if memory allocation fails during backup-manifest recovery.
+
 - Preserve concurrent file edits during portable-package repair and rollback;
   require the expected original content or absence before committing a repair.
 
