@@ -34,9 +34,20 @@ bool is_retained_audit_event(const Event& event) noexcept {
            has_suffix("_REMOVED");
 }
 
-template <typename String>
-void truncate(String& value, std::size_t maximum) {
+void truncate(std::string& value, std::size_t maximum) {
     if (value.size() > maximum) {
+        value.resize(maximum);
+    }
+}
+
+void truncate(std::wstring& value, std::size_t maximum) {
+    if (value.size() > maximum) {
+        // Windows wide text is UTF-16; do not leave half a valid pair behind.
+        if (maximum > 0 && value[maximum - 1] >= 0xD800 &&
+            value[maximum - 1] <= 0xDBFF && value[maximum] >= 0xDC00 &&
+            value[maximum] <= 0xDFFF) {
+            --maximum;
+        }
         value.resize(maximum);
     }
 }
