@@ -130,10 +130,11 @@ Result<VerifiedHandle> open_verified_directory(
 }
 
 Result<VerifiedHandle> open_verified_regular_file(
-    const std::filesystem::path& path, DWORD desired_access) {
+    const std::filesystem::path& path, DWORD desired_access,
+    DWORD sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE) {
     UniqueHandle file{CreateFileW(
         native_path(path).c_str(), desired_access,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        sharing, nullptr,
         OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr)};
     if (file.get() == INVALID_HANDLE_VALUE) {
         const DWORD native = GetLastError();
@@ -753,7 +754,8 @@ Result<bool> atomic_replace_utf8(const std::filesystem::path& target,
 }
 
 Result<bool> atomic_replace_utf8_if_unchanged(
-    const std::filesystem::path& target, std::string_view expected_bytes,
+    const std::filesystem::path& target,
+    std::optional<std::string_view> expected_bytes,
     std::string_view replacement_bytes) {
     if (target.empty() || target.filename().empty() || !target.is_absolute() ||
         !target.has_root_name() ||
@@ -775,11 +777,19 @@ Result<bool> atomic_replace_utf8_if_unchanged(
     }
     auto observed_target =
         open_verified_regular_file(target, FILE_READ_ATTRIBUTES);
-    if (!observed_target.has_value()) {
+    const bool target_exists = observed_target.has_value();
+    if (!target_exists &&
+        (expected_bytes.has_value() ||
+         observed_target.error().code != ErrorCode::not_found)) {
         return Result<bool>::failure(observed_target.error());
     }
+    if (target_exists && !expected_bytes.has_value()) {
+        return Result<bool>::failure(
+            {ErrorCode::stale_data,
+             L"Conditional atomic target is no longer absent", 0});
+    }
     observed_parent.value().handle.close();
-    observed_target.value().handle.close();
+    if (target_exists) observed_target.value().handle.close();
 
 #if defined(KF2_ATOMIC_FILE_TESTING)
     invoke_atomic_file_mutation_hook(
@@ -790,6 +800,17 @@ Result<bool> atomic_replace_utf8_if_unchanged(
         target.parent_path(), observed_parent.value().information);
     if (!locked_parent.has_value()) {
         return Result<bool>::failure(locked_parent.error());
+    }
+    if (!target_exists) {
+        auto prepared = write_unique_temporary(target, replacement_bytes);
+        if (!prepared.has_value()) return Result<bool>::failure(prepared.error());
+        auto committed = rename_open_file_in_place(
+            prepared.value().handle.get(), locked_parent.value().handle.get(),
+            target.filename(), false);
+        if (!committed.has_value()) {
+            static_cast<void>(discard_prepared_file(prepared.value()));
+        }
+        return committed;
     }
     auto unchanged = path_matches_identity(
         target, observed_target.value().information);
@@ -835,7 +856,7 @@ Result<bool> atomic_replace_utf8_if_unchanged(
         return Result<bool>::failure(captured.error());
     }
     auto matches = regular_file_matches(
-        captured.value().handle.get(), expected_bytes);
+        captured.value().handle.get(), expected_bytes.value());
     if (matches.has_value() && matches.value()) {
         auto removed = remove_open_file(captured.value().handle.get());
         if (removed.has_value()) return Result<bool>::success(true);
@@ -854,6 +875,45 @@ Result<bool> atomic_replace_utf8_if_unchanged(
     return Result<bool>::failure(
         {ErrorCode::stale_data,
          L"Configuration changed before atomic replacement", 0});
+}
+
+Result<bool> remove_file_if_unchanged(
+    const std::filesystem::path& target, std::string_view expected_bytes) {
+    if (target.empty() || target.filename().empty() || !target.is_absolute() ||
+        !target.has_root_name() ||
+        target.filename().wstring().find(L':') != std::wstring::npos) {
+        return Result<bool>::failure(
+            {ErrorCode::invalid_argument,
+             L"Conditional removal target is invalid", 0});
+    }
+    for (const auto& component : target.relative_path()) {
+        if (component == L"." || component == L"..") {
+            return unsafe_target(
+                L"Conditional removal contains an unsafe path component");
+        }
+    }
+    auto parent = open_verified_directory(target.parent_path(), false);
+    if (!parent.has_value()) return Result<bool>::failure(parent.error());
+#if defined(KF2_ATOMIC_FILE_TESTING)
+    invoke_atomic_file_mutation_hook(
+        AtomicFileMutationStage::conditional_remove_before_lock, target);
+#endif
+    // Deny writes and replacement until the same verified handle is removed.
+    auto file = open_verified_regular_file(
+        target, GENERIC_READ | DELETE | FILE_READ_ATTRIBUTES, FILE_SHARE_READ);
+    if (!file.has_value()) {
+        return file.error().code == ErrorCode::not_found
+            ? Result<bool>::success(false)
+            : Result<bool>::failure(file.error());
+    }
+    auto matches = regular_file_matches(file.value().handle.get(), expected_bytes);
+    if (!matches.has_value()) return matches;
+    if (!matches.value()) {
+        return Result<bool>::failure(
+            {ErrorCode::stale_data,
+             L"File changed before conditional removal", 0});
+    }
+    return remove_open_file(file.value().handle.get());
 }
 
 Result<std::filesystem::path> quarantine_regular_file(

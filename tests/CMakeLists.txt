@@ -189,6 +189,7 @@ add_executable(kf2_package_integrity_test
 target_include_directories(kf2_package_integrity_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_package_integrity_test PRIVATE
+    KF2_ATOMIC_FILE_TESTING
     KF2_PACKAGE_INTEGRITY_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/package-integrity")
 target_link_libraries(kf2_package_integrity_test PRIVATE bcrypt)

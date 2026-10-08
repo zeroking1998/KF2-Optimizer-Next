@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Preserve concurrent file edits during portable-package repair and rollback;
+  require the expected original content or absence before committing a repair.
+
 - Clear startup Warm-up progress when preparation is skipped for unknown storage,
   insufficient memory or no eligible files, instead of leaving it stuck at 0%.
 

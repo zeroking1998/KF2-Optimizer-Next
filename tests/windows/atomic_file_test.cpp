@@ -279,6 +279,49 @@ int main() {
         CHECK(!name.starts_with(L"conditional.ini.rollback."));
     }
 
+    const auto created = root / L"conditional-created.ini";
+    CHECK(kf2::platform::windows::atomic_replace_utf8_if_unchanged(
+        created, std::nullopt, "").has_value());
+    CHECK(fs::exists(created));
+    CHECK(!kf2::platform::windows::atomic_replace_utf8_if_unchanged(
+        created, std::nullopt, "must not survive").has_value());
+    CHECK(read_bytes(created).empty());
+    CHECK(kf2::platform::windows::atomic_replace_utf8_if_unchanged(
+        created, "", "created content").has_value());
+    CHECK(!kf2::platform::windows::remove_file_if_unchanged(
+        created, "stale content").has_value());
+    CHECK(read_bytes(created) == "created content");
+    const auto removed = kf2::platform::windows::remove_file_if_unchanged(
+        created, "created content");
+    CHECK(removed.has_value() && removed.value());
+    CHECK(!fs::exists(created));
+    const auto absent_removed = kf2::platform::windows::remove_file_if_unchanged(
+        created, "created content");
+    CHECK(absent_removed.has_value() && !absent_removed.value());
+    CHECK(!kf2::platform::windows::atomic_replace_utf8_if_unchanged(
+        created, "", "must not appear").has_value());
+    CHECK(!fs::exists(created));
+    CHECK(!kf2::platform::windows::remove_file_if_unchanged(
+        fs::path{L"relative.ini"}, "").has_value());
+    CHECK(kf2::platform::windows::atomic_replace_utf8_if_unchanged(
+        created, std::nullopt, "writer-owned content").has_value());
+    HANDLE writer = CreateFileW(created.c_str(), GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(writer != INVALID_HANDLE_VALUE);
+    const auto writer_blocked = kf2::platform::windows::remove_file_if_unchanged(
+        created, "writer-owned content");
+    CHECK(CloseHandle(writer) != FALSE);
+    CHECK(!writer_blocked.has_value());
+    CHECK(read_bytes(created) == "writer-owned content");
+    CHECK(kf2::platform::windows::remove_file_if_unchanged(
+        created, "writer-owned content").has_value());
+    for (const auto& entry : fs::directory_iterator(root)) {
+        const auto name = entry.path().filename().wstring();
+        CHECK(!name.starts_with(L"conditional-created.ini.tmp."));
+        CHECK(!name.starts_with(L"conditional-created.ini.rollback."));
+    }
+
     const auto missing_parent = root / L"missing" / L"settings.ini";
     const auto failed = kf2::platform::windows::atomic_replace_utf8(
         missing_parent, "must not appear");
@@ -297,6 +340,10 @@ int main() {
         kf2::platform::windows::atomic_replace_utf8(linked, "must be blocked");
     CHECK(!hardlink_blocked.has_value());
     CHECK(hardlink_blocked.error().code == kf2::ErrorCode::access_denied);
+    CHECK(read_bytes(linked) == "linked old");
+    CHECK(read_bytes(alias) == "linked old");
+    CHECK(!kf2::platform::windows::remove_file_if_unchanged(
+        linked, "linked old").has_value());
     CHECK(read_bytes(linked) == "linked old");
     CHECK(read_bytes(alias) == "linked old");
 
@@ -404,6 +451,19 @@ int main() {
     CHECK(target_swapped.error().code == kf2::ErrorCode::stale_data);
     CHECK(read_bytes(swapped_target_original) == "original target content");
     CHECK(read_bytes(swapped_target) == "replacement target content");
+
+    arm_atomic_swap(
+        kf2::platform::windows::AtomicFileMutationStage::
+            conditional_remove_before_lock,
+        swapped_target_original, swapped_target_replacement);
+    const auto removal_swapped = kf2::platform::windows::remove_file_if_unchanged(
+        swapped_target, "replacement target content");
+    disarm_atomic_swap();
+    CHECK(mutation_succeeded);
+    CHECK(!removal_swapped.has_value());
+    CHECK(removal_swapped.error().code == kf2::ErrorCode::stale_data);
+    CHECK(read_bytes(swapped_target) == "original target content");
+    CHECK(read_bytes(swapped_target_replacement) == "replacement target content");
 
     const auto swapped_source = root / L"swapped-source.ini";
     const auto swapped_source_original = root / L"swapped-source-original.ini";
