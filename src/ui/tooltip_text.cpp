@@ -41,7 +41,7 @@ constexpr TooltipEntry kTooltips[]{
     {"debug-runtime-diagnostics", L"Collects detailed corpse/Zed scans, Adaptive decisions, overlay render/redraw/window checks, and prewarm file/cache evidence. Leave it off for the cheapest normal path; control logic, errors, and required safety readbacks remain active."},
 
     {"settings-target-slider", L"Sets KF2's native FPS limit from 30 to 240. Adaptive uses the same target. An external driver limit or a screen refresh limit can still keep displayed FPS below it."},
-    {"settings-corpses-slider", L"Sets the maximum corpse ceiling and saves it immediately. Adaptive may use fewer corpses under confirmed scene or frame-time pressure."},
+    {"settings-corpses-slider", L"Saves the maximum corpse ceiling immediately and requests a confirmed live change from a supported KF2 provider. Missing confirmation keeps the saved value for the next start. Lowering the ceiling does not instantly remove existing corpses; increasing it cannot restore removed corpses. Adaptive may use fewer corpses under confirmed frame-time pressure."},
 
     {"graphics-resolution", L"Sets the number of output pixels. Higher resolutions look sharper but increase GPU work and VRAM use."},
     {"graphics-overall-quality", L"Changes the main quality controls together. Higher presets improve detail and effects but increase CPU, GPU, and VRAM demand."},

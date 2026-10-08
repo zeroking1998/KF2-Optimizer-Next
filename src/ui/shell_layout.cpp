@@ -62,10 +62,14 @@ std::wstring status_text(const UiModel& model) {
         configured_corpses);
     std::wstring corpses = L"Maximum corpses " +
                            std::to_wstring(displayed_corpses);
-    if (status.active_corpse_limit &&
-        *status.active_corpse_limit != configured_corpses) {
+    if (status.live_corpse_limit_unknown)
+        corpses = L"Maximum corpses unconfirmed";
+    if (status.live_corpse_limit_unknown ||
+        (status.active_corpse_limit &&
+         *status.active_corpse_limit != configured_corpses)) {
         corpses += L"   •   " + std::to_wstring(configured_corpses) +
-                   L" next start";
+                   (status.live_corpse_limit_pending
+                        ? L" awaiting confirmation" : L" next start");
     }
     std::wstring text = L"Ready   •   " + mode + L"   •   " + target +
                         L"   •   " + corpses;

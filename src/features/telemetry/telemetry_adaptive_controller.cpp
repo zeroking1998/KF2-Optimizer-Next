@@ -13,6 +13,9 @@ void UiRuntime::update_adaptive_controller(
     auto status = model.adaptive_status();
     poll_adaptive_runtime_mode();
     reconcile_adaptive_runtime_mode(frame);
+    auto corpse_status = model.live_corpse_limit_status();
+    update_live_corpse_limit(frame, corpse_status);
+    model.set_live_corpse_limit_status(std::move(corpse_status));
     if (adaptive_restore_debt) {
         // Do not rebase on gameplay/menu entry or issue reductions while the
         // previous live composition has not been restored by KF2.
@@ -355,6 +358,8 @@ void UiRuntime::update_adaptive_controller(
         frame.gameplay->telemetry_control_port.has_value() &&
         game::valid_adaptive_control_token(adaptive_control_token) &&
         adaptive_runtime_mode_confirmed &&
+        !adaptive_mode_dispatcher.busy() &&
+        (!live_corpse_limit_change || live_corpse_limit_change->applied_limit) &&
         !adaptive_control_dispatcher.busy();
     const auto pressure_resource =
         telemetry_pipeline::adaptive_runtime_resource(

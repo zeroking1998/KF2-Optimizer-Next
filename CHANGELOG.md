@@ -91,6 +91,9 @@ are visible immediately.
   preserving first-match identity and missing-entry behavior without new state.
 - Skip the full world-emitter restoration scan when no Optimizer-owned emitter
   original values remain; nonempty restore and retry behavior is unchanged.
+- Maximum corpses can be changed during a supported protected offline or
+  online session. The new ceiling is shown as active only after KF2 confirms
+  it; changing this goal does not toggle Adaptive or reset frozen corpses.
 - Reworked Adaptive into one protected, user-controlled runtime with separate
   CPU, GPU, VRAM, RAM, overdraw, effects, physics, LOD, and corpse-pressure
   paths. Confirmed pressure changes only its matching group, and stable

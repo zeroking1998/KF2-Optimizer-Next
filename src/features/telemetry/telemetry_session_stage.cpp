@@ -184,6 +184,8 @@ bool UiRuntime::restore_live_adaptive_quality(std::wstring_view reason) {
             L"optimizer"});
         return false;
     }
+    if (adaptive_mode_dispatcher.busy()) return false;
+    invalidate_live_corpse_limit();
     const auto restored = game::send_adaptive_control({
         .port = *port,
         .token = adaptive_control_token,
@@ -255,6 +257,7 @@ bool UiRuntime::set_live_adaptive_enabled(
             L"optimizer"});
         return false;
     }
+    invalidate_live_corpse_limit();
     const auto changed = game::send_adaptive_control({
         .port = port,
         .token = adaptive_control_token,
@@ -435,6 +438,8 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     status.live_sleeping_corpses.reset();
     status.active_target_fps.reset();
     status.active_corpse_limit.reset();
+    status.live_corpse_limit_pending = false;
+    status.live_corpse_limit_unknown = false;
     status.graphics_game_menu_readback = false;
     status.recommended_profile = L"user settings";
     status.recommendation_reason =
@@ -481,6 +486,8 @@ void UiRuntime::begin_game_restart_handoff(
     auto status = model.status();
     status.active_target_fps.reset();
     status.active_corpse_limit.reset();
+    status.live_corpse_limit_pending = false;
+    status.live_corpse_limit_unknown = false;
     model.set_status(std::move(status));
     events->append({0, diagnostics::Severity::info,
         "KF2_SESSION_RESTART_WAIT",

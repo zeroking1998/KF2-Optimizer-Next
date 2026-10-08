@@ -245,6 +245,7 @@ var string AdaptiveGraphicsResource;
 var int AdaptiveLastControlSequence;
 var transient bool bAdaptiveQualityRestoreCompletedForLastCommand;
 var bool bAdaptiveCorpseStaggerInitialized;
+var bool bAdaptiveCorpseMaximumCaptured;
 var int AdaptiveCorpseTarget;
 var int AdaptiveCorpseOriginalLimit;
 var int AdaptiveCorpseRuntimeLimit;
@@ -587,7 +588,17 @@ function bool ApplyAdaptiveResourceControl(
     if (!ValidAdaptiveControlToken(Token) || Sequence <= 0 ||
         Sequence <= AdaptiveLastControlSequence ||
         !class'KF2OptimizerAdaptiveGraphics'.static.
-            IsAdaptiveControlResource(Resource) ||
+            IsAdaptiveControlResource(Resource))
+    {
+        return false;
+    }
+    if (Resource ~= "corpse_limit")
+    {
+        if (!SetLiveCorpseMaximum(Quality)) return false;
+        AdaptiveLastControlSequence = Sequence;
+        return true;
+    }
+    if (
         (((Resource ~= "enable") && (Quality < 4 || Quality > 2000)) ||
          (!(Resource ~= "enable") && (Quality < 10 || Quality > 100))) ||
         (!((Resource ~= "enable") || (Resource ~= "disable")) &&
@@ -682,6 +693,49 @@ function bool ApplyAdaptiveResourceControl(
          " resource="$Resource$" quality="$Quality$
          " stage="$QualityStage$
          " readback=verified");
+    return true;
+}
+
+function bool SetLiveCorpseMaximum(int Maximum)
+{
+    local KFGoreManager GoreManager;
+    local int PreviousMaximum;
+
+    if (Maximum < 4 || Maximum > 2000 || WorldInfo == None ||
+        WorldInfo.NetMode != NM_Standalone || bAdaptiveRuntimeQuiesced)
+    {
+        return false;
+    }
+    GoreManager = KFGoreManager(WorldInfo.MyGoreEffectManager);
+    if (GoreManager == None || GoreManager.bDeleteMe) return false;
+    RetireAdaptiveCorpseManagerOwnership(GoreManager);
+    if (!bAdaptiveCorpseMaximumCaptured)
+    {
+        AdaptiveCorpseOriginalLimit = GoreManager.MaxDeadBodies;
+        AdaptiveCorpseManager = GoreManager;
+        bAdaptiveCorpseMaximumCaptured = true;
+    }
+    PreviousMaximum = GoreManager.MaxDeadBodies;
+    GoreManager.MaxDeadBodies = Maximum;
+    if (GoreManager.MaxDeadBodies != Maximum)
+    {
+        GoreManager.MaxDeadBodies = PreviousMaximum;
+        return false;
+    }
+    // No reinitialization, SaveConfig, mode switch or Actor scan. Preserve all
+    // same-manager physics/visual ledgers and the original restore maximum.
+    AdaptiveCorpseMaximum = Maximum;
+    AdaptiveCorpseTarget = Maximum;
+    if (bAdaptiveRuntimeEnabled && bAdaptiveCorpseStaggerInitialized)
+    {
+        AdaptiveCorpseRuntimeLimit = Clamp(AdaptiveCorpseRuntimeLimit, 4, Maximum);
+    }
+    else
+    {
+        AdaptiveCorpseRuntimeLimit = Maximum;
+    }
+    `log("KF2OPT_CORPSE_MAXIMUM state=applied maximum="$Maximum$
+         " readback=verified mode_unchanged=true");
     return true;
 }
 
@@ -1250,7 +1304,7 @@ function RetireAdaptiveCorpseManagerOwnership(KFGoreManager NewManager)
 
     if (AdaptiveCorpseManager == NewManager ||
         (AdaptiveCorpseManager == None &&
-         !bAdaptiveCorpseStaggerInitialized))
+         !bAdaptiveCorpseStaggerInitialized && !bAdaptiveCorpseMaximumCaptured))
     {
         return;
     }
@@ -1280,6 +1334,7 @@ function RetireAdaptiveCorpseManagerOwnership(KFGoreManager NewManager)
     // separate fair cursor after the new manager has initialized.
     AdaptiveCorpseManager = None;
     bAdaptiveCorpseStaggerInitialized = false;
+    bAdaptiveCorpseMaximumCaptured = false;
     AdaptiveFrozenCorpses.Length = 0;
     AdaptiveDistanceSleptCorpses.Length = 0;
     AdaptiveDistanceReleaseWakeCursor = 0;
@@ -1334,7 +1389,11 @@ function InitializeAdaptiveCorpseStagger(KFGoreManager GoreManager)
 {
     RetireAdaptiveCorpseManagerOwnership(GoreManager);
     AdaptiveCorpseManager = GoreManager;
-    AdaptiveCorpseOriginalLimit = GoreManager.MaxDeadBodies;
+    if (!bAdaptiveCorpseMaximumCaptured)
+    {
+        AdaptiveCorpseOriginalLimit = GoreManager.MaxDeadBodies;
+        bAdaptiveCorpseMaximumCaptured = true;
+    }
     if (AdaptiveCorpseMaximum >= 4 && AdaptiveCorpseMaximum <= 2000)
     {
         AdaptiveCorpseTarget = AdaptiveCorpseMaximum;

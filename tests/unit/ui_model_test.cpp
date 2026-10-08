@@ -18,6 +18,7 @@
 int main() {
     using namespace kf2::ui;
     static_assert(std::is_nothrow_move_assignable_v<AdaptiveUiStatus>);
+    static_assert(std::is_trivially_copyable_v<LiveCorpseLimitUiStatus>);
     {
         UiModel adaptive_model;
         UiStatus unrelated;
@@ -103,6 +104,22 @@ int main() {
         prepared.adaptive_runtime_corpse_limit.reset();
         adaptive_model.set_adaptive_status(prepared);
         CHECK(matches(prepared));
+        auto corpse_status = adaptive_model.live_corpse_limit_status();
+        corpse_status.active_corpse_limit = 1272;
+        corpse_status.live_corpse_limit_pending = true;
+        corpse_status.live_corpse_limit_unknown = true;
+        adaptive_model.set_live_corpse_limit_status(corpse_status);
+        CHECK(adaptive_model.status().active_corpse_limit == 1272);
+        CHECK(adaptive_model.status().live_corpse_limit_pending);
+        CHECK(adaptive_model.status().live_corpse_limit_unknown);
+        CHECK(matches(prepared));
+        CHECK(adaptive_model.status().graphics_values[0].data() == graphics_text);
+        CHECK(adaptive_model.status().update_status.data() == update_text);
+        adaptive_model.set_live_corpse_limit_status(LiveCorpseLimitUiStatus{});
+        CHECK(!adaptive_model.status().active_corpse_limit &&
+              !adaptive_model.status().live_corpse_limit_pending &&
+              !adaptive_model.status().live_corpse_limit_unknown);
+        adaptive_model.set_live_corpse_limit_status(unrelated);
         adaptive_model.set_adaptive_status(AdaptiveUiStatus{});
         CHECK(matches(AdaptiveUiStatus{}));
         CHECK(adaptive_model.status().graphics_values == unrelated.graphics_values);
