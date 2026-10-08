@@ -199,6 +199,21 @@ int wmain() {
     if (!bound.has_value()) return 22;
     auto identity = bound.value();
     if (identity.process_start_id != start) return 23;
+    // Opt-in work uses the existing session view and leaves detailed diagnostics alone.
+    shared->own_work_frequency = 10'000'000;
+    shared->own_work_ticks = 120'000;
+    kf2::flex::ObservationReader own_work_reader;
+    const auto measured = own_work_reader.read(identity, true);
+    if (!measured || measured->own_work_ns != 12'000'000 ||
+        shared->own_work_lease_tick <= static_cast<LONGLONG>(GetTickCount64()) ||
+        shared->diagnostics_enabled != 1) return 27;
+    const auto disabled = own_work_reader.read(identity);
+    if (!disabled || disabled->own_work_ns || shared->own_work_lease_tick != 0)
+        return 28;
+    auto wrong_work_identity = identity;
+    ++wrong_work_identity.process_start_id;
+    if (own_work_reader.read(wrong_work_identity, true) ||
+        shared->own_work_lease_tick != 0) return 29;
     static_assert(noexcept(kf2::flex::read_observation(identity)));
     static_assert(noexcept(kf2::flex::write_fixed_control(identity, false)));
     const auto result = kf2::flex::read_observation(identity);

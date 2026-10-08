@@ -59,6 +59,22 @@ struct GpuMetrics {
     SampleQuality quality{SampleQuality::unavailable};
     UnavailableReason reason{UnavailableReason::no_samples};
 };
+struct OwnGpuMemory final {
+    std::optional<std::uint64_t> local_bytes;
+    std::optional<std::uint64_t> nonlocal_bytes;
+};
+// Current-process DXGI usage, not PDH allocation estimates or KF2 memory.
+// Adapter handles are retained until a topology change or diagnostics OFF.
+class OwnGpuMemorySampler final {
+public:
+    OwnGpuMemorySampler();
+    ~OwnGpuMemorySampler();
+    [[nodiscard]] OwnGpuMemory sample();
+    void reset() noexcept;
+private:
+    struct Storage;
+    std::unique_ptr<Storage> storage_;
+};
 struct GpuAdapter {
     std::uint64_t luid{0};
     std::wstring name;
@@ -197,6 +213,9 @@ public:
     [[nodiscard]] static Result<PdhGpuSampler> create(std::uint32_t pid,
                                                        std::uint64_t adapter_luid);
     [[nodiscard]] Result<GpuMetrics> sample();
+    // Reads the last successful raw collection without polling/filtering.
+    [[nodiscard]] std::optional<double> latest_process_gpu_percent(
+        std::uint32_t pid) const noexcept;
 #ifdef KF2_PDH_GPU_TESTING
     [[nodiscard]] std::size_t cached_instance_count_for_testing() const noexcept;
 #endif

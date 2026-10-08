@@ -54,6 +54,14 @@ function bool AdoptExisting(KFAffliction_Fire Existing)
 
 function ToggleEffects(bool bEnabled, optional bool bDummy)
 {
+    local int WorkStarted;
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
+    ToggleMeasuredEffects(bEnabled, bDummy);
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
+}
+
+function ToggleMeasuredEffects(bool bEnabled, optional bool bDummy)
+{
     // Do not create client effects on a dedicated server.
     if (PawnOwner.WorldInfo.NetMode == NM_DedicatedServer)
     {

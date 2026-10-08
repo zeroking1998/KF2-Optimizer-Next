@@ -236,6 +236,7 @@ std::array<std::vector<CounterEntry>, 3> counter_arrays;
 std::size_t parse_calls = 0;
 std::size_t closed_queries = 0;
 std::size_t next_counter = 0;
+std::size_t collections = 0;
 int failed_array = -1;
 bool collection_failed = false;
 bool fail_data_read = false;
@@ -250,6 +251,7 @@ PDH_STATUS WINAPI add_counter(PDH_HQUERY, LPCWSTR, DWORD_PTR, PDH_HCOUNTER* coun
     return ERROR_SUCCESS;
 }
 PDH_STATUS WINAPI collect_query(PDH_HQUERY query) {
+    ++collections;
     return !query || collection_failed ? PDH_INVALID_HANDLE : ERROR_SUCCESS;
 }
 PDH_STATUS WINAPI close_query(PDH_HQUERY) {
@@ -346,9 +348,20 @@ int test_reused_pdh_samples() {
     const auto warmup = sampler.value().sample();
     CHECK(warmup.has_value());
     CHECK(!warmup.value().gpu_percent);
+    CHECK(!sampler.value().latest_process_gpu_percent(7777));
     const auto first = sampler.value().sample();
     CHECK(first.has_value());
     CHECK(equivalent_metrics(first.value(), 4242, luid));
+    const auto collected = collections;
+    CHECK(sampler.value().latest_process_gpu_percent(7777) == 40.0);
+    CHECK(sampler.value().latest_process_gpu_percent(4242) == 99.0);
+    CHECK(!sampler.value().latest_process_gpu_percent(9999));
+    CHECK(collections == collected); // No second query for the app's PID.
+    counter_arrays[0][1].utilization = std::numeric_limits<double>::quiet_NaN();
+    CHECK(sampler.value().sample().has_value());
+    CHECK(!sampler.value().latest_process_gpu_percent(7777));
+    counter_arrays[0][1].utilization = 40;
+    CHECK(sampler.value().sample().has_value());
     CHECK(sampler.value().cached_instance_count_for_testing() == 7);
     parse_calls = 0;
     allocations = raw_allocations = 0;
@@ -390,6 +403,7 @@ int test_reused_pdh_samples() {
     fail_data_read = false;
     collection_failed = true;
     CHECK(!sampler.value().sample().has_value());
+    CHECK(!sampler.value().latest_process_gpu_percent(7777));
     collection_failed = false;
     changed = sampler.value().sample();
     CHECK(changed.has_value());
@@ -831,6 +845,16 @@ int wmain(int argc, wchar_t** argv) {
             std::cout << "NVIDIA_DRIVER_GPU_PERCENT=" << sample.value() << '\n';
         }
     }
+
+    OwnGpuMemorySampler own_memory;
+    const auto own_first = own_memory.sample();
+    const auto own_cached = own_memory.sample();
+    CHECK(own_cached.local_bytes.has_value() == own_first.local_bytes.has_value());
+    CHECK(own_cached.nonlocal_bytes.has_value() == own_first.nonlocal_bytes.has_value());
+    own_memory.reset();
+    const auto own_reopened = own_memory.sample();
+    CHECK(own_reopened.local_bytes.has_value() == own_first.local_bytes.has_value());
+    CHECK(own_reopened.nonlocal_bytes.has_value() == own_first.nonlocal_bytes.has_value());
 
     auto sampler = PdhGpuSampler::create(GetCurrentProcessId(), 0);
     if (sampler.has_value()) {

@@ -243,6 +243,14 @@ var transient bool bFixedSessionEffectsApplied;
 var int AdaptiveGraphicsQuality;
 var string AdaptiveGraphicsResource;
 var int AdaptiveLastControlSequence;
+// Process-local, leased meter. No logs, scans or persistent settings. The
+// shipping engine clock has millisecond resolution; report it honestly.
+// UE3 permits mutable class-default storage only for config properties. These
+// are transient receipts in practice: this meter never calls SaveConfig.
+var globalconfig bool bOwnWorkMeasuring;
+var globalconfig int OwnWorkLastQueryMilliseconds;
+var globalconfig int OwnWorkMilliseconds;
+var globalconfig int OwnWorkDepth;
 var transient bool bAdaptiveQualityRestoreCompletedForLastCommand;
 var bool bAdaptiveCorpseStaggerInitialized;
 var int AdaptiveCorpseTarget;
@@ -4123,6 +4131,14 @@ function int WakeAdaptiveDistanceSleptCorpseBatch()
 
 function AdaptiveCorpsePhysicsRelease()
 {
+    local int WorkStarted;
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
+    OwnWorkAdaptiveCorpsePhysicsRelease();
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
+}
+
+function OwnWorkAdaptiveCorpsePhysicsRelease()
+{
     local bool bHandled;
     local int Attempt;
     local int Phase;
@@ -5602,6 +5618,14 @@ function LogWorldParticleGroupAttribution()
 
 function AdaptiveCorpseLoadControl()
 {
+    local int WorkStarted;
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
+    OwnWorkAdaptiveCorpseLoadControl();
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
+}
+
+function OwnWorkAdaptiveCorpseLoadControl()
+{
     local int ProfileStartMilliseconds;
     local int ProfileElapsedMilliseconds;
     local bool bActionTaken;
@@ -5620,6 +5644,14 @@ function AdaptiveCorpseLoadControl()
 }
 
 function FixedMinimumVisualControl()
+{
+    local int WorkStarted;
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
+    OwnWorkFixedMinimumVisualControl();
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
+}
+
+function OwnWorkFixedMinimumVisualControl()
 {
     local bool bActionTaken;
 
@@ -5714,8 +5746,9 @@ event PreBeginPlay()
     SampleTelemetry();
 }
 
-function int GetProfileSystemMilliseconds()
+static function int GetProfileSystemMilliseconds()
 {
+    local WorldInfo ClockOwner;
     local int Year;
     local int Month;
     local int DayOfWeek;
@@ -5725,10 +5758,90 @@ function int GetProfileSystemMilliseconds()
     local int Second;
     local int Millisecond;
 
-    GetSystemTime(
+    ClockOwner = class'WorldInfo'.static.GetWorldInfo();
+    if (ClockOwner == None) return -1;
+    ClockOwner.GetSystemTime(
         Year, Month, DayOfWeek, Day,
         Hour, Minute, Second, Millisecond);
     return (((Hour * 60) + Minute) * 60 + Second) * 1000 + Millisecond;
+}
+
+static function int OwnWorkElapsed(int StartMilliseconds, int EndMilliseconds)
+{
+    return (EndMilliseconds - StartMilliseconds + 86400000) % 86400000;
+}
+
+static function int BeginOwnWork()
+{
+    local int NowMilliseconds;
+    if (!default.bOwnWorkMeasuring) return -2;
+    // Nested roots are already covered; do not query the clock twice.
+    if (default.OwnWorkDepth > 0)
+    {
+        ++default.OwnWorkDepth;
+        return -1;
+    }
+    NowMilliseconds = GetProfileSystemMilliseconds();
+    if (NowMilliseconds < 0) return -2;
+    if (OwnWorkElapsed(default.OwnWorkLastQueryMilliseconds,
+                       NowMilliseconds) > 3000)
+    {
+        default.bOwnWorkMeasuring = false;
+        default.OwnWorkDepth = 0;
+        return -2;
+    }
+    ++default.OwnWorkDepth;
+    return default.OwnWorkDepth == 1 ? NowMilliseconds : -1;
+}
+
+static function EndOwnWork(int StartMilliseconds)
+{
+    local int Elapsed;
+    if (StartMilliseconds == -2) return;
+    default.OwnWorkDepth = Max(0, default.OwnWorkDepth - 1);
+    if (StartMilliseconds >= 0)
+    {
+        Elapsed = GetProfileSystemMilliseconds();
+        if (Elapsed < 0)
+        {
+            default.OwnWorkMilliseconds = -1;
+            return;
+        }
+        Elapsed = OwnWorkElapsed(StartMilliseconds, Elapsed);
+        // Invalid intervals are unavailable, never clipped into valid data.
+        if (Elapsed > 3000 || default.OwnWorkMilliseconds < 0 ||
+            default.OwnWorkMilliseconds > 4000 - Elapsed)
+            default.OwnWorkMilliseconds = -1;
+        else
+            default.OwnWorkMilliseconds += Elapsed;
+    }
+}
+
+static function string ReadOwnWork(string Token, int Sequence)
+{
+    local int NowMilliseconds;
+    local int Elapsed;
+    local int Work;
+    if (Len(default.AdaptiveControlToken) != 32 ||
+        Token != default.AdaptiveControlToken || Sequence <= 0) return "";
+    // This only reads/re-arms diagnostics, not game state. Do not retain a
+    // command sequence that would block a reconnecting Optimizer process.
+    NowMilliseconds = GetProfileSystemMilliseconds();
+    if (NowMilliseconds < 0) return "";
+    if (default.bOwnWorkMeasuring)
+    {
+        Elapsed = OwnWorkElapsed(default.OwnWorkLastQueryMilliseconds,
+                                 NowMilliseconds);
+        if (Elapsed > 3000 || default.OwnWorkMilliseconds < 0 ||
+            default.OwnWorkMilliseconds > Elapsed)
+            Elapsed = 0;
+        else
+            Work = default.OwnWorkMilliseconds;
+    }
+    default.OwnWorkLastQueryMilliseconds = NowMilliseconds;
+    default.OwnWorkMilliseconds = 0;
+    default.bOwnWorkMeasuring = true;
+    return "KF2OPT_ACK "$Sequence$" applied overhead 100 "$Elapsed$" "$Work;
 }
 
 function InsertAdaptiveZedDebugMarkerByDistance(
@@ -5945,6 +6058,15 @@ function EnsureAdaptiveDebugMarkerPostRender()
 }
 
 simulated event PostRenderFor(PlayerController PC,
+    Canvas MarkerCanvas, vector CameraPosition, vector CameraDir)
+{
+    local int WorkStarted;
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
+    RenderMeasuredMarkers(PC, MarkerCanvas, CameraPosition, CameraDir);
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
+}
+
+simulated function RenderMeasuredMarkers(PlayerController PC,
     Canvas MarkerCanvas, vector CameraPosition, vector CameraDir)
 {
     if (PC == None || MarkerCanvas == None)
@@ -6242,6 +6364,14 @@ function RefreshWorldEmitterCache(bool bCollectWorldParticleGroups)
 }
 
 function SampleTelemetry()
+{
+    local int WorkStarted;
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
+    OwnWorkSampleTelemetry();
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
+}
+
+function OwnWorkSampleTelemetry()
 {
     local KFPawn_Monster Zed;
     local array<class<KFPawn_Monster> > LivingClasses;
@@ -7414,8 +7544,11 @@ function QuiesceForWorldTeardown()
 
 event Destroyed()
 {
+    local int WorkStarted;
+    WorkStarted = class'KF2OptimizerTelemetryProbe'.static.BeginOwnWork();
     QuiesceForWorldTeardown();
     Super.Destroyed();
+    class'KF2OptimizerTelemetryProbe'.static.EndOwnWork(WorkStarted);
 }
 
 defaultproperties

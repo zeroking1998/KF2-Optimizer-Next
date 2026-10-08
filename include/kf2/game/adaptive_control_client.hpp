@@ -23,6 +23,7 @@ enum class AdaptiveResourceControl : std::uint8_t {
     recover,
     enable,
     disable,
+    overhead,
 };
 
 struct AdaptiveControlRequest final {
@@ -46,6 +47,8 @@ struct AdaptiveControlReceipt final {
     AdaptiveResourceControl resource{AdaptiveResourceControl::mixed};
     int quality{100};
     AdaptiveControlReceiptStatus status{AdaptiveControlReceiptStatus::applied};
+    std::optional<std::uint64_t> script_work_ns;
+    std::optional<std::uint64_t> script_elapsed_ns;
 };
 
 struct AdaptiveResourceQualityState final {

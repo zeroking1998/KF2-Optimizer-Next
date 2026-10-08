@@ -32,6 +32,16 @@ are visible immediately.
 - Transfer completed Adaptive performance-sample and quality-response diagnostic
   buffers instead of copying them; exact text, logging gates, sample cadence and
   retained-event bounds are unchanged.
+- Add an opt-in Debug self-overhead overlay with once-per-second CPU, RAM,
+  I/O, thread and measured component readings, including logging-free UnrealScript
+  and native FleX-wrapper elapsed time. Separate CPU from elapsed measurements,
+  include the FPS statistics worker, and derive app CPU total from Windows
+  process counters without mixed-time sums. Invalid readings stay unavailable
+  and script readings respect the clock's 1 ms resolution. Original solver work is excluded;
+  add private RAM, raw process GPU load and direct local/non-local GPU memory
+  with retained adapter handles and no duplicate GPU polling. Clearly identify
+  downstream KF2/compositor costs as not attributable; existing FPS overlay,
+  Adaptive settings and gameplay are unchanged.
 
 - Transfer completed Adaptive diagnostic buffers instead of copying them;
   log text, bounds, diagnostic gates and controller behavior are unchanged.

@@ -523,6 +523,10 @@ public:
         if (gpu_) {
             auto gpu = gpu_->sample();
             if (gpu.has_value()) {
+                if (request.collect_own_gpu) {
+                    batch.own_gpu_percent =
+                        gpu_->latest_process_gpu_percent(GetCurrentProcessId());
+                }
                 batch.gpu = std::move(gpu.value());
                 if (batch.gpu->process_adapter_luid &&
                     (!binding_.adapter_luid ||
@@ -594,6 +598,10 @@ public:
           thread_{[this](std::stop_token stop) { run(stop); }} {}
 
     ~Impl() { stop(); }
+    std::optional<std::uint64_t> cpu_work_ns() noexcept {
+        return thread_.joinable()
+            ? query_thread_cpu_ns(thread_.native_handle()) : std::nullopt;
+    }
 
     std::uint64_t bind(ResourceTelemetryBinding binding) {
         std::scoped_lock lock{mutex_};
@@ -641,6 +649,11 @@ public:
         pending_at_ns_ = sampled_at_ns;
         pending_ = true;
         condition_.notify_one();
+    }
+
+    void set_own_gpu_enabled(bool enabled) {
+        std::scoped_lock lock{mutex_};
+        collect_own_gpu_ = enabled;
     }
 
     std::shared_ptr<const ResourceTelemetrySnapshot> latest() const {
@@ -750,6 +763,7 @@ private:
                 request.binding = *binding_;
                 request.group = next_group_;
                 request.sampled_at_ns = pending_at_ns_;
+                request.collect_own_gpu = collect_own_gpu_;
                 request_generation = generation_;
                 pending_ = false;
                 active_ = true;
@@ -957,6 +971,8 @@ private:
                 } else {
                     next->gpu_sampled_at_ns = request.sampled_at_ns;
                     next->gpu = std::move(batch.gpu);
+                    next->own_gpu_percent = collect_own_gpu_ && request.collect_own_gpu
+                        ? batch.own_gpu_percent : std::nullopt;
                     next->driver_gpu_percent = batch.driver_gpu_percent;
                     next->nvidia_source = batch.nvidia_source;
                     next->gpu_provider_status =
@@ -989,6 +1005,7 @@ private:
     bool pending_{false};
     bool reset_log_{false};
     bool active_{false};
+    bool collect_own_gpu_{false};
     std::uint64_t pending_at_ns_{0};
     std::uint64_t generation_{0};
     std::uint64_t publication_sequence_{0};
@@ -1044,5 +1061,13 @@ bool ResourceTelemetryWorker::wait_until_idle(
 }
 
 void ResourceTelemetryWorker::stop() { implementation_->stop(); }
+
+std::optional<std::uint64_t> ResourceTelemetryWorker::cpu_work_ns() const noexcept {
+    return implementation_->cpu_work_ns();
+}
+
+void ResourceTelemetryWorker::set_own_gpu_enabled(bool enabled) {
+    implementation_->set_own_gpu_enabled(enabled);
+}
 
 }  // namespace kf2::telemetry

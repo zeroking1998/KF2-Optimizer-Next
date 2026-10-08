@@ -346,6 +346,10 @@ int main() {
         L"Map KF-Test: running, SSD, cache 64/128 MiB";
     model.set_status(debug_status);
     const auto debug = layout_shell(model, 1440, 900);
+    CHECK(action(debug, "debug-self-overhead") != nullptr);
+    CHECK(!action(debug, "debug-self-overhead")->selected);
+    CHECK(action(debug, "debug-self-overhead")->text == L"SELF-OVERHEAD OVERLAY: OFF");
+    CHECK(action_help_text("debug-self-overhead").has_value());
     CHECK(node(debug, "debug-markers-section") != nullptr);
     CHECK(node(debug, "debug-tools-section") != nullptr);
     CHECK(action(debug, "debug-corpse-markers") != nullptr);

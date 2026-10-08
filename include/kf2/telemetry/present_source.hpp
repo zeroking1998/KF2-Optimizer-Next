@@ -54,6 +54,7 @@ public:
     [[nodiscard]] std::optional<FrameMetrics> latest_drain(
         std::uint64_t not_before_ns = 0) const;
     [[nodiscard]] bool wait_for_drain(std::chrono::milliseconds timeout);
+    [[nodiscard]] std::optional<std::uint64_t> cpu_work_ns() noexcept;
 private:
     struct Stream {
         std::deque<PresentTimestamp> presents;

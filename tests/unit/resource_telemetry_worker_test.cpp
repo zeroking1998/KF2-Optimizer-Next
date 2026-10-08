@@ -754,6 +754,33 @@ int main(int argc, char** argv) {
         CHECK(priority == THREAD_PRIORITY_NORMAL);
     }
 
+    // The diagnostic PID readback rides the existing GPU group. OFF neither
+    // requests another sample nor publishes in-flight diagnostic results.
+    {
+        std::atomic<int> calls{0};
+        ResourceTelemetryWorker worker{
+            [&](const ResourceSampleRequest& request, std::stop_token) {
+                ++calls;
+                ResourceSampleBatch batch;
+                batch.group = request.group;
+                if (request.collect_own_gpu) batch.own_gpu_percent = 0.25;
+                return batch;
+            }};
+        static_cast<void>(worker.bind(binding(41, 4100, 7)));
+        CHECK(sample_gpu(worker, 1'000));
+        CHECK(!worker.latest()->own_gpu_percent);
+        const auto before = calls.load();
+        worker.set_own_gpu_enabled(true);
+        CHECK(calls == before);
+        CHECK(sample_gpu(worker, 2'000));
+        CHECK(worker.latest()->own_gpu_percent == 0.25);
+        worker.set_own_gpu_enabled(false);
+        CHECK(sample_gpu(worker, 3'000));
+        CHECK(!worker.latest()->own_gpu_percent);
+        worker.clear();
+        CHECK(!worker.latest());
+    }
+
     // One worker serializes collection and coalesces repeated UI requests to
     // at most one pending sample while a sample is already running.
     {

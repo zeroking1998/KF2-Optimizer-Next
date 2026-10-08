@@ -81,6 +81,7 @@ enum class ActionId : std::uint16_t {
     debug_corpse_physics_control = 131,
     debug_flex_diagnostics = 132,
     debug_runtime_diagnostics = 133,
+    debug_self_overhead = 134,
 };
 
 enum class ControlId : std::uint8_t {

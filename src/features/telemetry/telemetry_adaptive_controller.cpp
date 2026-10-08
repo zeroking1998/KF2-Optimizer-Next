@@ -268,6 +268,9 @@ void UiRuntime::update_adaptive_controller(
     adaptive_decision = adaptive_governor.evaluate(
         policy, sample, now_ns, adaptive_lock_cache);
     const auto controller_finished_ns = monotonic_ns();
+    if (self_overhead_collecting && controller_finished_ns >= controller_started_ns) {
+        self_adaptive_work_ns += controller_finished_ns - controller_started_ns;
+    }
     const auto controller_cost_ns =
         controller_finished_ns >= controller_started_ns
             ? controller_finished_ns - controller_started_ns

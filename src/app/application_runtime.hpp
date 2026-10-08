@@ -267,6 +267,25 @@ struct UiRuntime {
     telemetry::ResourceTelemetryWorker resource_telemetry_worker;
     std::uint64_t resource_telemetry_generation{0};
     std::uint64_t resource_telemetry_publication_sequence{0};
+    bool self_overhead_collecting{false};
+    std::optional<overlay::OverlayWindow> self_overhead_window;
+    overlay::OverlayPresentation self_overhead_overlay;
+    std::optional<game::GameWindowState> self_overhead_game_window;
+    diagnostics::SelfOverheadPresentation self_overhead_readings;
+    std::uint64_t self_overhead_sample_ns{0};
+    telemetry::OwnProcessCounters self_overhead_previous;
+    telemetry::OwnGpuMemorySampler self_overhead_gpu_memory;
+    std::array<std::optional<std::uint64_t>, 6> self_overhead_clocks{};
+    std::uint64_t self_telemetry_work_ns{0};
+    std::uint64_t self_adaptive_work_ns{0};
+    game::AdaptiveControlDispatcher self_overhead_dispatcher;
+    std::uint64_t self_overhead_sequence{0};
+    std::uint64_t self_overhead_process_start_id{0};
+    std::uint64_t self_overhead_pending_process_start_id{0};
+    std::optional<std::uint16_t> self_overhead_pending_port;
+    std::uint64_t self_overhead_dxgi_started_ns{0};
+    std::uint64_t self_overhead_reply_ns{0};
+    std::optional<double> self_script_work_ms_per_second;
     std::shared_ptr<const telemetry::GpuProviderStatus>
         announced_gpu_provider_status;
     telemetry::GpuUtilizationFilter gpu_utilization_filter;
@@ -480,6 +499,8 @@ struct UiRuntime {
     void update_overlay_scene_gate(bool flush = false);
 
     void runtime_tick();
+    void sample_self_overhead(std::uint64_t now_ns);
+    void update_self_overhead_overlay();
     void start_startup_prewarm();
     void poll_startup_prewarm();
     void poll_map_prewarm();

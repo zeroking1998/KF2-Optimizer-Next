@@ -19,6 +19,7 @@ void OverlayWindow::set_diagnostics_enabled(bool enabled) noexcept {
     state_->diagnostic_skipped_redraws = 0;
     state_->diagnostic_last_render_us = 0;
     state_->diagnostic_maximum_render_us = 0;
+    state_->diagnostic_total_render_us = 0;
     state_->diagnostic_counter_frequency = 0;
     state_->graph_geometry_builds = 0;
     state_->static_layer_builds = 0;
@@ -39,7 +40,8 @@ OverlayDiagnostics OverlayWindow::diagnostics() const noexcept {
         state_->diagnostic_redraws,
         state_->diagnostic_skipped_redraws,
         state_->diagnostic_last_render_us,
-        state_->diagnostic_maximum_render_us};
+        state_->diagnostic_maximum_render_us,
+        state_->diagnostic_total_render_us};
 }
 
 HWND OverlayWindow::native_handle() const noexcept {

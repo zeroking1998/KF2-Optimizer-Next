@@ -163,6 +163,7 @@ struct OverlayWindowState {
     std::uint64_t diagnostic_skipped_redraws{0};
     std::uint64_t diagnostic_last_render_us{0};
     std::uint64_t diagnostic_maximum_render_us{0};
+    std::uint64_t diagnostic_total_render_us{0};
     std::uint64_t diagnostic_counter_frequency{0};
 #if defined(KF2_OVERLAY_WINDOW_TESTING)
     HRESULT test_end_draw_result{S_OK};
