@@ -314,6 +314,9 @@ int test_chunk_boundaries() {
 
 int main() {
     using namespace kf2::game;
+    GameLogSessionParser expiry_contract;
+    // Returning an owning snapshot may allocate; the worker must be able to catch it.
+    CHECK(!noexcept(expiry_contract.expire_observations(1)));
     CHECK(test_bridge_capability_lifetime() == EXIT_SUCCESS);
     CHECK(test_chunk_boundaries() == EXIT_SUCCESS);
 

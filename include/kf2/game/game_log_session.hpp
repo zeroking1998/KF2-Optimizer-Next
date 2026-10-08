@@ -207,7 +207,7 @@ public:
         bool measurements_current = true);
     [[nodiscard]] std::optional<GameLogSession> expire_observations(
         std::uint64_t now_ns,
-        std::uint64_t maximum_age_ns = kGameLogObservationFreshnessNs) noexcept;
+        std::uint64_t maximum_age_ns = kGameLogObservationFreshnessNs);
     void reset() noexcept;
     [[nodiscard]] const std::optional<GameLogSession>& current() const noexcept;
     [[nodiscard]] GameLogParserStats stats() const noexcept;
