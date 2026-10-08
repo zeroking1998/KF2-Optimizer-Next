@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep Target FPS and corpse-limit slider values correct when a settings
+  callback rebuilds the UI during keyboard changes.
+
 - Preserve update files and recovery records when the owner process cannot be
   queried, instead of treating an unknown process state as permission to roll back.
 
