@@ -66,22 +66,38 @@ std::string concise_release_notes(std::string_view markdown) {
     }
     std::array<std::vector<std::string>, 3> lines;
     Section active = Section::none;
+    bool can_continue = false;
     std::istringstream input{std::string{markdown}};
     std::string line;
     while (std::getline(input, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (line.starts_with('#')) {
             active = section_from_heading(line);
+            can_continue = false;
             continue;
         }
         if (active == Section::none) continue;
         auto value = trim(line);
-        if (value.empty()) continue;
-        if (!value.starts_with("- ") && !value.starts_with("* ")) continue;
-        value.replace(0, 2, "- ");
+        if (value.empty()) {
+            can_continue = false;
+            continue;
+        }
         const auto index = static_cast<std::size_t>(active) - 1U;
-        if (lines[index].size() < 32U && value.size() <= 512U) {
-            lines[index].push_back(std::move(value));
+        auto& items = lines[index];
+        if (value.starts_with("- ") || value.starts_with("* ")) {
+            value.replace(0, 2, "- ");
+            can_continue = items.size() < 32U && value.size() <= 512U;
+            if (can_continue) items.push_back(std::move(value));
+        } else if (can_continue &&
+                   (line.starts_with("  ") || line.starts_with('\t'))) {
+            if (items.back().size() + 1U + value.size() <= 512U) {
+                items.back().append(" ").append(value);
+            } else {
+                items.pop_back(); // Reject the oversized item, not a partial warning.
+                can_continue = false;
+            }
+        } else {
+            can_continue = false;
         }
     }
 

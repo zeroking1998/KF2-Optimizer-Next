@@ -167,6 +167,8 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep wrapped changelog bullet text intact in the in-app update notes.
+
 - Let telemetry snapshot allocation failures reach the existing worker recovery
   path instead of terminating the Optimizer when old log measurements expire.
 

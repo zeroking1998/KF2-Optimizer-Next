@@ -40,6 +40,39 @@ int main() {
     CHECK(concise.find("WinHTTP") == std::string::npos);
     CHECK(concise.find("Security") == std::string::npos);
 
+    const auto wrapped = kf2::update::concise_release_notes(
+        "## Bug fixes\n- Preserve original\n  settings after exit.\n"
+        "\n  Unrelated paragraph.\n"
+        "## Technical details\n- Hidden implementation\n  detail.\n"
+        "## Important notes\r\n* Updates require\r\n\tapproval.\r\n");
+    CHECK(wrapped == "## Bug fixes\n- Preserve original settings after exit."
+        "\n\n## Important notes\n- Updates require approval.");
+    CHECK(kf2::update::concise_release_notes(
+        "## Bug fixes\n  Orphan continuation.\n- Accepted.\n"
+        "Unrelated paragraph.\n  Still unrelated.\n- Next item.\n") ==
+        "## Bug fixes\n- Accepted.\n- Next item.");
+
+    const std::string boundary_item = "- " + std::string(508, 'x');
+    CHECK(kf2::update::concise_release_notes(
+        "## Bug fixes\n" + boundary_item + "\n  y\n") ==
+        "## Bug fixes\n" + boundary_item + " y");
+    CHECK(kf2::update::concise_release_notes(
+        "## Bug fixes\n- Kept.\n" + boundary_item + "\n  yz\n"
+        "  Detached.\n- Also kept.\n") ==
+        "## Bug fixes\n- Kept.\n- Also kept.");
+    CHECK(kf2::update::concise_release_notes(
+        "## Bug fixes\n- Kept.\n- " + std::string(511, 'x') +
+        "\n  Detached.\n") == "## Bug fixes\n- Kept.");
+
+    std::string many_items = "## Bug fixes\n";
+    std::string expected_items = "## Bug fixes";
+    for (int index = 0; index < 32; ++index) {
+        many_items += "- Kept.\n";
+        expected_items += "\n- Kept.";
+    }
+    many_items += "- Rejected.\n  Detached.\n";
+    CHECK(kf2::update::concise_release_notes(many_items) == expected_items);
+
     const auto fallback = kf2::update::concise_release_notes(
         "A long unstructured release description.");
     CHECK(fallback ==
