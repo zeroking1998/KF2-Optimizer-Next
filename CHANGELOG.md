@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Reject malformed leading-zero file sizes in GitHub release metadata while
+  preserving valid sizes and the existing installation limits.
+
 - Reject trailing data after empty GitHub release lists instead of reporting
   a successful update check with no newer release.
 
