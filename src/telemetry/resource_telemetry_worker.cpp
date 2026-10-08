@@ -96,7 +96,8 @@ private:
 class GameLogBoundaryExtractor final {
 public:
     GameLogBoundaryEvents feed(std::string_view bytes,
-                               bool verified_log_identity) {
+                               bool verified_log_identity,
+                               bool allow_graphics_changes) {
         GameLogBoundaryEvents events;
         std::size_t offset = 0;
         while (offset < bytes.size()) {
@@ -117,12 +118,16 @@ public:
                     break;
                 }
             } else {
+                if (pending_.empty()) {
+                    pending_graphics_authorized_ = allow_graphics_changes;
+                }
                 pending_.append(segment);
                 if (newline == std::string_view::npos) break;
                 if (!pending_.empty() && pending_.back() == '\r') {
                     pending_.pop_back();
                 }
-                consume_line(pending_, verified_log_identity, events);
+                consume_line(pending_, verified_log_identity,
+                             pending_graphics_authorized_, events);
                 pending_.clear();
             }
             offset = newline + 1;
@@ -133,6 +138,7 @@ public:
     void reset() noexcept {
         pending_.clear();
         dropping_oversized_line_ = false;
+        pending_graphics_authorized_ = false;
     }
 
 private:
@@ -140,12 +146,13 @@ private:
 
     static void consume_line(std::string_view line,
                              bool verified_log_identity,
+                             bool allow_graphics_changes,
                              GameLogBoundaryEvents& events) {
         if (const auto readback =
                 game::parse_game_menu_graphics_readback(line)) {
             events.graphics_readback = *readback;
         }
-        if (verified_log_identity) {
+        if (allow_graphics_changes) {
             if (const auto changes = game::parse_game_menu_graphics_changes(line)) {
                 game::merge_game_menu_graphics_changes(
                     events.graphics_user_changes, *changes);
@@ -169,6 +176,7 @@ private:
 
     std::string pending_;
     bool dropping_oversized_line_{false};
+    bool pending_graphics_authorized_{false};
 };
 
 class NativeGameLogSampler final {
@@ -313,6 +321,7 @@ public:
         GameLogChunk chunk;
         chunk.identity = binding_.identity;
         chunk.reset_parser = reset_parser;
+        chunk.after_initial_read = caught_up_at_ns_ != 0;
         chunk.creation_filetime = creation;
         constexpr std::uintmax_t kNormalLogChunkBytes = 32 * 1024;
         constexpr std::uintmax_t kCatchUpLogChunkBytes = 512 * 1024;
@@ -805,7 +814,9 @@ private:
                                         log_chunk->creation_filetime,
                                         request.binding.identity.process_start_id);
                                 auto boundaries = log_boundaries.feed(
-                                    log_chunk->bytes, verified_log_identity);
+                                    log_chunk->bytes, verified_log_identity,
+                                    verified_log_identity ||
+                                        log_chunk->after_initial_read);
                                 if (log_chunk->historical) {
                                     // Preserve bounded lifecycle/readback state,
                                     // not historical speculative prewarm work.

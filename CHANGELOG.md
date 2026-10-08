@@ -170,6 +170,8 @@ are visible immediately.
 - Keep temporary Adaptive graphics out of saved user settings after travel,
   mode changes and shutdown. Replay only applied graphics-menu deltas, retain
   untouched raw INI values, and defer automatic writes while that menu closes.
+  Retain new menu edits when KF2 reuses an older Launch.log, without accepting
+  that file's initial history as current edits.
 
 - Keep retained-log test timestamps deterministic through live appends and file
   recreation, without changing runtime log ownership or freshness checks.

@@ -1182,6 +1182,16 @@ int main(int argc, char** argv) {
                        << after << " after " << next << '\n'
                        << graphics_readback_line();
             }
+            // KF2 reuses Launch.log without changing its creation date. New
+            // menu edits still belong to the already-bound current stream.
+            const HANDLE timestamp_file = CreateFileW(log.c_str(),
+                FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE |
+                    FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL, nullptr);
+            CHECK(timestamp_file != INVALID_HANDLE_VALUE);
+            const FILETIME old_creation{1, 0};
+            CHECK(SetFileTime(timestamp_file, &old_creation, nullptr, nullptr));
+            CHECK(CloseHandle(timestamp_file));
             worker.request(2'060'000'000ULL);
             CHECK(worker.wait_until_idle(2s));
             chunks = worker.take_game_log_chunks(log_binding.identity);
@@ -1337,6 +1347,56 @@ int main(int argc, char** argv) {
             CHECK(!chunks.front().boundaries.map_prewarm_selection);
             CHECK(!chunks.front().parsed_session);
             CHECK(chunks.front().parser_stats.lines_processed == 1);
+        }
+        // A reused file's initial history is not current user intent, including
+        // an old partial record completed after the initial EOF. Genuine new
+        // records survive a delayed read without freshening old measurements.
+        {
+            auto before = graphics_readback_line();
+            before = before.substr(before.find("resx="));
+            before.pop_back();
+            auto after = before;
+            after.replace(after.find("motion_blur=0"), 13, "motion_blur=1");
+            auto stale = after;
+            stale.replace(stale.find("film_grain=25"), 13, "film_grain=80");
+            const std::string marker =
+                "ScriptLog: KF2OPT_GFX_USER schema=2 state=applied before ";
+            const auto stale_record = marker + before + " after " + stale;
+            {
+                std::ofstream output(log, std::ios::binary | std::ios::trunc);
+                output << stale_record << '\n' << stale_record.substr(0, 100);
+            }
+            ResourceTelemetryWorker worker;
+            static_cast<void>(worker.bind(log_binding));
+            worker.request(1'000'000'000ULL);
+            CHECK(worker.wait_until_idle(2s));
+            auto chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+            CHECK(!chunks.front().boundaries.graphics_user_changes);
+            {
+                std::ofstream output(log, std::ios::binary | std::ios::app);
+                output << stale_record.substr(100) << '\n'
+                       << marker << before << " after " << after << '\n'
+                       << "Exit: Exiting.\n";
+            }
+            worker.request(20'000'000'000ULL);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1 && chunks.front().historical);
+            const auto& changes = chunks.front().boundaries.graphics_user_changes;
+            CHECK(changes);
+            CHECK(changes->changed[static_cast<std::size_t>(
+                kf2::game::VideoOption::motion_blur)]);
+            CHECK(!changes->film_grain_changed);
+            CHECK(!chunks.front().boundaries.verified_engine_exit);
+            // A different process binding must establish its own baseline.
+            ++log_binding.identity.process_start_id;
+            static_cast<void>(worker.bind(log_binding));
+            worker.request(21'000'000'000ULL);
+            CHECK(worker.wait_until_idle(2s));
+            chunks = worker.take_game_log_chunks(log_binding.identity);
+            CHECK(chunks.size() == 1 && chunks.front().reset_parser);
+            CHECK(!chunks.front().boundaries.graphics_user_changes);
         }
         fs::remove_all(root);
     }

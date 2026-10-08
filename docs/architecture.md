@@ -165,6 +165,12 @@ fields enter user replay; passive reads cannot retain temporary FX or normalize
 an untouched film-grain value. The worker folds multiple edits per field in one
 fixed-size record, including during log catch-up. Automatic graphics writes wait
 until the menu's closing observation, using existing readback/retry handling.
+Reused log files can have creation dates older than the current KF2 process.
+New menu records are accepted after the verified, identity-pinned reader first
+reaches EOF; initial history and partial historical records remain excluded.
+Process/file rebinds and truncation reset that baseline. This uses the existing
+read cursor and EOF timestamp, not another poll or timer. Engine-exit ownership
+and measurement-freshness checks are unchanged.
 Intervention lowers one native tier, emergency may lower two and stable recovery
 raises one. Missing or
 stale telemetry, Zed Time, an online/unknown session, shadow mode, missing bridge
