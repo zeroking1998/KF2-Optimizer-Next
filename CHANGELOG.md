@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Continue independent SDK cleanup after a file-restoration error, retaining
+  recovery backups and reporting failures without hiding the original build error.
+
 - Reject incomplete diagnostic JSON on serialization failure instead of
   overwriting a valid log or reporting a partial support export as successful.
 
