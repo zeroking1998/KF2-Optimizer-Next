@@ -9,6 +9,7 @@ const RuntimeGuardMaximumSeconds=0.25;
 var float NextReadRealTime;
 var float LastObservedRealTime;
 var string LastReadback;
+var string PreviousMenuReadback;
 var KF2OptimizerAdaptiveGraphicsState PreviousMenuGraphicsState;
 var KF2OptimizerAdaptiveGraphicsState CurrentMenuGraphicsState;
 var bool bMenuGraphicsStateInitialized;
@@ -237,7 +238,7 @@ function GuardRuntimeActors(WorldInfo CurrentWorld)
     }
 }
 
-function bool IsGraphicsMenuOpen(KFPlayerController KFPC)
+static function bool IsGraphicsMenuOpen(KFPlayerController KFPC)
 {
     return KFPC != None && KFPC.MyGFxManager != None &&
         KFPC.MyGFxManager.bMenusOpen &&
@@ -246,10 +247,36 @@ function bool IsGraphicsMenuOpen(KFPlayerController KFPC)
             KFPC.MyGFxManager.OptionsGraphicsMenu;
 }
 
+// Include the closing edge until the existing observer has captured Apply.
+// Automatic graphics writes must not be mistaken for an edit in this window.
+static function bool IsGraphicsMenuTransactionOpen()
+{
+    local Engine CurrentEngine;
+    local KF2OptimizerGraphicsInteraction Monitor;
+
+    CurrentEngine = class'Engine'.static.GetEngine();
+    if (CurrentEngine == None || CurrentEngine.GameViewport == None)
+    {
+        return false;
+    }
+    if (CurrentEngine.GamePlayers.Length > 0 &&
+        CurrentEngine.GamePlayers[0] != None &&
+        IsGraphicsMenuOpen(KFPlayerController(
+            CurrentEngine.GamePlayers[0].Actor)))
+    {
+        return true;
+    }
+    Monitor = KF2OptimizerGraphicsInteraction(FindObject(
+        PathName(CurrentEngine.GameViewport)$".KF2OptimizerGraphicsInteraction",
+        class'KF2OptimizerGraphicsInteraction'));
+    return Monitor != None && Monitor.bGraphicsMenuWasOpen;
+}
+
 function ResetMenuGraphicsObservation()
 {
     bMenuGraphicsStateInitialized = false;
     bGraphicsMenuWasOpen = false;
+    PreviousMenuReadback = "";
 }
 
 function string ObserveMenuGraphicsAndRebase()
@@ -282,7 +309,7 @@ function string ObserveMenuGraphicsAndRebase()
 
     Readback = class'KF2OptimizerAdaptiveGraphics'.static.
         MenuReadback(CurrentMenuGraphicsState);
-    if (bMenuGraphicsStateInitialized &&
+    if (bMenuGraphicsStateInitialized && bGraphicsMenuWasOpen &&
         class'KF2OptimizerAdaptiveGraphics'.static.OwnedSettingsDiffer(
             PreviousMenuGraphicsState, CurrentMenuGraphicsState))
     {
@@ -324,6 +351,16 @@ function string ObserveMenuGraphicsAndRebase()
                  " composition=preserved");
         }
     }
+    // A passive main-menu read or the first observation on opening the menu
+    // is not an edit. Report only the applied fields changed after that edge.
+    if (bMenuGraphicsStateInitialized && bGraphicsMenuWasOpen &&
+        PreviousMenuReadback != "" && Readback != "" &&
+        PreviousMenuReadback != Readback)
+    {
+        `log("KF2OPT_GFX_USER schema=2 state=applied before " $
+            PreviousMenuReadback $ " after " $ Readback);
+    }
+    PreviousMenuReadback = Readback;
     SwapState = PreviousMenuGraphicsState;
     PreviousMenuGraphicsState = CurrentMenuGraphicsState;
     CurrentMenuGraphicsState = SwapState;

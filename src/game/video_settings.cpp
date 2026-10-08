@@ -671,15 +671,10 @@ void set_video_read_hook_for_testing(VideoReadHook hook) noexcept {
 }
 #endif
 
+namespace {
+
 std::optional<GameMenuGraphicsReadback>
-parse_game_menu_graphics_readback(std::string_view line) {
-    constexpr std::string_view marker =
-        "KF2OPT_GFX_MENU schema=2 state=applied ";
-    const auto start = line.find(marker);
-    if (start == std::string_view::npos || line.size() > 4096) {
-        return std::nullopt;
-    }
-    std::string_view payload = line.substr(start + marker.size());
+parse_menu_graphics_payload(std::string_view payload) {
     constexpr std::array<std::string_view, 23> names{{
         "resx", "resy", "display_full", "display_borderless", "vsync",
         "variable_fps", "film_grain", "environment", "character", "fx",
@@ -744,6 +739,86 @@ parse_game_menu_graphics_readback(std::string_view line) {
     for (std::size_t field = 0; field < options.size(); ++field) {
         result.choices[index(options[field])] = values[field + 7];
     }
+    return result;
+}
+
+}  // namespace
+
+std::optional<GameMenuGraphicsReadback>
+parse_game_menu_graphics_readback(std::string_view line) {
+    constexpr std::string_view marker =
+        "KF2OPT_GFX_MENU schema=2 state=applied ";
+    const auto start = line.find(marker);
+    if (start == std::string_view::npos || line.size() > 4096) {
+        return std::nullopt;
+    }
+    return parse_menu_graphics_payload(line.substr(start + marker.size()));
+}
+
+std::optional<GameMenuGraphicsChanges>
+parse_game_menu_graphics_changes(std::string_view line) {
+    constexpr std::string_view marker =
+        "KF2OPT_GFX_USER schema=2 state=applied before ";
+    constexpr std::string_view separator = " after ";
+    const auto start = line.find(marker);
+    if (start == std::string_view::npos || line.size() > 4096) {
+        return std::nullopt;
+    }
+    const auto payload = line.substr(start + marker.size());
+    const auto split = payload.find(separator);
+    if (split == std::string_view::npos) return std::nullopt;
+    const auto before = parse_menu_graphics_payload(payload.substr(0, split));
+    const auto after = parse_menu_graphics_payload(
+        payload.substr(split + separator.size()));
+    if (!before || !after) return std::nullopt;
+    GameMenuGraphicsChanges changes{.applied = *after};
+    for (std::size_t option = 0; option < kVideoOptionCount; ++option) {
+        changes.changed[option] = before->choices[option] != after->choices[option];
+    }
+    changes.changed[index(VideoOption::resolution)] =
+        before->resolution != after->resolution;
+    changes.film_grain_changed =
+        before->film_grain_percent != after->film_grain_percent;
+    return changes;
+}
+
+void merge_game_menu_graphics_changes(
+    std::optional<GameMenuGraphicsChanges>& pending,
+    const GameMenuGraphicsChanges& incoming) {
+    if (!pending) {
+        pending = incoming;
+        return;
+    }
+    for (std::size_t option = 0; option < kVideoOptionCount; ++option) {
+        if (incoming.changed[option]) {
+            pending->changed[option] = true;
+            pending->applied.choices[option] = incoming.applied.choices[option];
+        }
+    }
+    if (incoming.changed[index(VideoOption::resolution)]) {
+        pending->applied.resolution = incoming.applied.resolution;
+    }
+    if (incoming.film_grain_changed) {
+        pending->film_grain_changed = true;
+        pending->applied.film_grain_percent = incoming.applied.film_grain_percent;
+    }
+}
+
+VideoSettings apply_game_menu_graphics_changes(
+    const VideoSettings& baseline, const GameMenuGraphicsChanges& changes) {
+    auto result = present_game_menu_graphics_readback(baseline, changes.applied);
+    for (std::size_t option = 0; option < kVideoOptionCount; ++option) {
+        if (!changes.changed[option]) result.choices[option] = baseline.choices[option];
+    }
+    if (!changes.changed[index(VideoOption::resolution)]) {
+        result.resolutions = baseline.resolutions;
+    }
+    if (!changes.film_grain_changed) {
+        result.film_grain_percent = baseline.film_grain_percent;
+    }
+    result.choices[index(VideoOption::overall_quality)] =
+        recognize_overall_quality(result, -1);
+    result.flex_level = std::max(0, result.choices[index(VideoOption::nvidia_flex)]);
     return result;
 }
 

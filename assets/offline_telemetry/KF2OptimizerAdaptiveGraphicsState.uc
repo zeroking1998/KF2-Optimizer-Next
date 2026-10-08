@@ -33,7 +33,6 @@ var bool bOriginalDynamicShadows;
 var bool bOriginalPerObjectShadows;
 var bool bOriginalForegroundPreshadows;
 var int OriginalBloomQuality;
-var int OriginalMotionBlurQuality;
 var int OriginalDepthOfFieldQuality;
 var int OriginalDistanceFogQuality;
 var bool bOriginalScreenSpaceReflections;

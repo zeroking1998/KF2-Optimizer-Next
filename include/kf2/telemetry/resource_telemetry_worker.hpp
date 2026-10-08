@@ -24,6 +24,7 @@ namespace kf2::telemetry {
 
 struct GameLogBoundaryEvents final {
     std::optional<game::GameMenuGraphicsReadback> graphics_readback;
+    std::optional<game::GameMenuGraphicsChanges> graphics_user_changes;
     std::optional<std::wstring> map_prewarm_selection;
     bool load_map_started{false};
     bool new_settings_restart_requested{false};
@@ -53,6 +54,9 @@ struct GameLogChunk final {
     // Worker-private input classification; historical measurements are never
     // published as current, even in the final catch-up chunk.
     bool historical{false};
+    // Bytes appended after this verified binding first reached EOF. File
+    // creation time can predate KF2 when Launch.log is reused.
+    bool after_initial_read{false};
     std::uint64_t creation_filetime{0};
     std::string bytes;
     GameLogBoundaryEvents boundaries;

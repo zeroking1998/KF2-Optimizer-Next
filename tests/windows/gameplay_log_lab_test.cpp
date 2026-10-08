@@ -51,6 +51,19 @@ std::size_t count_occurrences(std::string_view text, std::string_view needle) {
     return count;
 }
 
+std::set<std::string> setting_members(
+    std::string_view text, std::string_view prefix) {
+    std::set<std::string> fields;
+    for (auto cursor = text.find(prefix); cursor != std::string_view::npos;
+         cursor = text.find(prefix, cursor + prefix.size())) {
+        const auto start = cursor + prefix.size();
+        const auto end = text.find_first_not_of(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.", start);
+        fields.emplace(text.substr(start, end - start));
+    }
+    return fields;
+}
+
 bool adaptive_mode_preserves_graphics_receipt(std::string_view body) {
     constexpr std::string_view reset =
         "if (Resource ~= \"disable\")\n        {\n"
@@ -2576,9 +2589,16 @@ int main() {
     CHECK(graphics_source.find(
         "Requested.TextureResolution.ShadowmapBias = Max") !=
           std::string::npos);
-    CHECK(graphics_source.find(
-        "Requested.MotionBlur.MotionBlurQuality = Min") !=
-          std::string::npos);
+    // These two effects are user-owned, not Adaptive reduction, restore or
+    // acknowledgement fields. Keep their separate menu observation intact.
+    const auto menu_readback_start = graphics_source.find(
+        "static function string MenuReadback(");
+    CHECK(menu_readback_start != std::string::npos);
+    const auto adaptive_graphics_body = graphics_source.substr(0, menu_readback_start);
+    CHECK(adaptive_graphics_body.find("MotionBlur") == std::string::npos);
+    CHECK(adaptive_graphics_body.find("FilmGrain") == std::string::npos);
+    CHECK(graphics_source.substr(menu_readback_start).find(
+        "Current.MotionBlur, default.MotionBlurPresets") != std::string::npos);
     CHECK(graphics_source.find(
         "Requested.EnvironmentDetail.AllowLightFunctions = false") !=
           std::string::npos);
@@ -2685,6 +2705,59 @@ int main() {
     CHECK(graphics_source.find(
         "static function bool ApplyQualityComposition(") !=
           std::string::npos);
+    // Adaptive is transient: never use the menu's disk-persisting setters.
+    // Script-only and already-matching requests must not reapply the renderer.
+    CHECK(graphics_source.find("SetScriptSettings(") == std::string::npos);
+    CHECK(graphics_source.find("StaticSaveConfig(") == std::string::npos);
+    const auto changed_settings_start = graphics_source.find(
+        "static function ApplyChangedSettings(");
+    const auto changed_settings_end = graphics_source.find(
+        "static function SetQualityRestoreDebt(", changed_settings_start);
+    CHECK(changed_settings_start != std::string::npos);
+    CHECK(changed_settings_end != std::string::npos);
+    const auto changed_settings_body = graphics_source.substr(
+        changed_settings_start, changed_settings_end - changed_settings_start);
+    CHECK(changed_settings_body.find(
+        "bNativeChanged = !NativeReadbackMatches(Current, Requested);") != std::string::npos);
+    CHECK(changed_settings_body.find(
+        "bScriptChanged = !ScriptReadbackMatches(Current, Requested);") != std::string::npos);
+    CHECK(changed_settings_body.rfind("GetCurrentGFXSettings(Observed);") >
+          changed_settings_body.find("ApplyTransientScriptSettings(Requested);"));
+    const auto menu_write_guard = changed_settings_body.find("IsGraphicsMenuTransactionOpen()");
+    CHECK(menu_write_guard != std::string::npos);
+    CHECK(menu_write_guard < changed_settings_body.find("SetNativeSettings(Requested);"));
+    CHECK(menu_write_guard < changed_settings_body.find("ApplyTransientScriptSettings(Requested);"));
+    CHECK(changed_settings_body.find("GetCurrentGFXSettings(Observed);", menu_write_guard) <
+          changed_settings_body.find("return;", menu_write_guard));
+    CHECK(graphics_interaction_source.find("Monitor.bGraphicsMenuWasOpen") != std::string::npos);
+    CHECK(count_occurrences(graphics_source, "SetNativeSettings(Requested);") == 1);
+    CHECK(count_occurrences(graphics_source,
+        "ApplyChangedSettings(Current, Requested, Observed);") == 4);
+    const std::vector<std::string> transient_script_assignments{
+        "class'WorldInfo'.default.DestructionLifetimeScale",
+        "class'WorldInfo'.default.EmitterPoolScale",
+        "class'KFMuzzleFlash'.default.ShellEjectLifetime",
+        "class'WorldInfo'.default.bAllowExplosionLights",
+        "class'KFSprayActor'.default.bAllowSprayLights",
+        "class'KFWeap_FlameBase'.default.bArePilotLightsAllowed",
+        "class'KFGoreManager'.default.bAllowBloodSplatterDecals",
+        "class'KFImpactEffectManager'.default.MaxImpactEffectDecals",
+        "class'WorldInfo'.default.MaxExplosionDecals",
+        "class'KFGoreManager'.default.GoreFXLifetimeMultiplier",
+        "class'KFGoreManager'.default.MaxBloodEffects",
+        "class'KFGoreManager'.default.MaxGoreEffects",
+        "class'KFGoreManager'.default.MaxPersistentSplatsPerFrame",
+        "class'KFGoreManager'.default.MaxBodyWoundDecals"};
+    const auto transient_script_start = graphics_source.find(
+        "static function ApplyTransientScriptSettings(");
+    CHECK(transient_script_start != std::string::npos);
+    const auto transient_script_body = graphics_source.substr(
+        transient_script_start, changed_settings_start - transient_script_start);
+    CHECK(count_occurrences(transient_script_body, ".default.") ==
+          transient_script_assignments.size());
+    for (const auto& assignment : transient_script_assignments) {
+        CHECK(transient_script_body.find(assignment + " =") != std::string::npos);
+    }
     // A confirmed KF2 graphics-menu change must replace only the changed
     // user-owned baseline groups.  The next Adaptive composition and final
     // recovery then derive from that rebased baseline instead of the stale
@@ -2718,6 +2791,32 @@ int main() {
     CHECK(owned_copy_end != std::string::npos);
     const auto owned_copy_body = graphics_source.substr(
         owned_copy_start, owned_copy_end - owned_copy_start);
+    const auto native_readback_start = graphics_source.find(
+        "static function bool NativeReadbackMatches(");
+    const auto script_readback_start = graphics_source.find(
+        "static function bool ScriptReadbackMatches(");
+    const auto combined_readback_start = graphics_source.find(
+        "static function bool ReadbackMatches(");
+    CHECK(native_readback_start != std::string::npos);
+    CHECK(script_readback_start != std::string::npos);
+    CHECK(combined_readback_start != std::string::npos);
+    auto readback_fields = setting_members(graphics_source.substr(
+        native_readback_start, script_readback_start - native_readback_start),
+        "Observed.");
+    const auto script_readback_fields = setting_members(graphics_source.substr(
+        script_readback_start, combined_readback_start - script_readback_start),
+        "Observed.");
+    CHECK(readback_fields.size() == 41);
+    CHECK(script_readback_fields.size() == 14);
+    readback_fields.insert(script_readback_fields.begin(), script_readback_fields.end());
+    CHECK(readback_fields == setting_members(owned_copy_body, "Current."));
+    CHECK(readback_fields.size() == 55);
+    CHECK(graphics_source.substr(
+        combined_readback_start, transient_script_start - combined_readback_start)
+        .find("NativeReadbackMatches(Observed, Requested) &&\n"
+              "        ScriptReadbackMatches(Observed, Requested)") != std::string::npos);
+    CHECK(setting_members(transient_script_body, "Requested.") ==
+          script_readback_fields);
     std::set<std::string> owned_fields;
     for (auto cursor = owned_copy_body.find("Snapshot.");
          cursor != std::string::npos;
@@ -2733,7 +2832,7 @@ int main() {
                 name_start, name_end - name_start));
         }
     }
-    CHECK(owned_fields.size() == 56);
+    CHECK(owned_fields.size() == 55);
     for (const auto& field : owned_fields) {
         CHECK(menu_rebase_body.find("Snapshot." + field) !=
               std::string::npos);
@@ -2747,6 +2846,13 @@ int main() {
           std::string::npos);
     CHECK(graphics_interaction_source.find(
         "RebaseOriginalFromMenuChange(") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "bMenuGraphicsStateInitialized && bGraphicsMenuWasOpen &&") !=
+          std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "KF2OPT_GFX_USER schema=2 state=applied before ") != std::string::npos);
+    CHECK(graphics_interaction_source.find(
+        "PreviousMenuReadback $ \" after \" $ Readback") != std::string::npos);
     CHECK(interaction_source.find(
         "function KF2OptimizerAdaptiveGraphicsState "
         "PeekProcessAdaptiveGraphicsState()") != std::string::npos);

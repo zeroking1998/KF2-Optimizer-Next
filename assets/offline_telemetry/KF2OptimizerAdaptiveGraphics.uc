@@ -60,7 +60,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
     local int MinShadowResolution;
     local float ShadowDensity;
     local float ShadowDistance;
-    local int MotionBlurQuality;
     local int DepthOfFieldQuality;
     local int DistanceFogQuality;
 
@@ -72,7 +71,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
         MinShadowResolution = 32;
         ShadowDensity = 2.25;
         ShadowDistance = 1.0;
-        MotionBlurQuality = 1;
         DepthOfFieldQuality = 3;
         DistanceFogQuality = 1;
     }
@@ -83,7 +81,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
         MinShadowResolution = 48;
         ShadowDensity = 2.0;
         ShadowDistance = 0.95;
-        MotionBlurQuality = 1;
         DepthOfFieldQuality = 3;
         DistanceFogQuality = 1;
     }
@@ -94,7 +91,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
         MinShadowResolution = 64;
         ShadowDensity = 1.75;
         ShadowDistance = 0.9;
-        MotionBlurQuality = 1;
         DepthOfFieldQuality = 2;
         DistanceFogQuality = 1;
     }
@@ -105,7 +101,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
         MinShadowResolution = 80;
         ShadowDensity = 1.5;
         ShadowDistance = 0.85;
-        MotionBlurQuality = 0;
         DepthOfFieldQuality = 2;
         DistanceFogQuality = 1;
     }
@@ -116,7 +111,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
         MinShadowResolution = 112;
         ShadowDensity = 1.25;
         ShadowDistance = 0.8;
-        MotionBlurQuality = 0;
         DepthOfFieldQuality = 1;
         DistanceFogQuality = 0;
     }
@@ -127,7 +121,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
         MinShadowResolution = 128;
         ShadowDensity = 1.0;
         ShadowDistance = 0.75;
-        MotionBlurQuality = 0;
         DepthOfFieldQuality = 0;
         DistanceFogQuality = 0;
     }
@@ -147,8 +140,6 @@ static function ApplyGpu(out GFXSettings Requested, int Quality)
     Requested.Bloom.BloomQuality = Min(
         Requested.Bloom.BloomQuality,
         Quality >= 90 ? 5 : (Quality >= 70 ? 4 : 3));
-    Requested.MotionBlur.MotionBlurQuality = Min(
-        Requested.MotionBlur.MotionBlurQuality, MotionBlurQuality);
     Requested.DepthOfField.DepthOfFieldQuality = Min(
         Requested.DepthOfField.DepthOfFieldQuality, DepthOfFieldQuality);
     Requested.FX.DistanceFogQuality = Min(
@@ -500,7 +491,6 @@ static function CopyOwnedSettings(
     Snapshot.bOriginalForegroundPreshadows =
         Current.Shadows.AllowForegroundPreshadows;
     Snapshot.OriginalBloomQuality = Current.Bloom.BloomQuality;
-    Snapshot.OriginalMotionBlurQuality = Current.MotionBlur.MotionBlurQuality;
     Snapshot.OriginalDepthOfFieldQuality =
         Current.DepthOfField.DepthOfFieldQuality;
     Snapshot.OriginalDistanceFogQuality = Current.FX.DistanceFogQuality;
@@ -595,8 +585,6 @@ static function bool OwnedSettingsDiffer(
            Previous.bOriginalForegroundPreshadows !=
                Current.bOriginalForegroundPreshadows ||
            Previous.OriginalBloomQuality != Current.OriginalBloomQuality ||
-           Previous.OriginalMotionBlurQuality !=
-               Current.OriginalMotionBlurQuality ||
            Previous.OriginalDepthOfFieldQuality !=
                Current.OriginalDepthOfFieldQuality ||
            Previous.OriginalDistanceFogQuality !=
@@ -730,10 +718,6 @@ static function bool RebaseOriginalFromMenuChange(
             Current.bOriginalForegroundPreshadows;
     if (Previous.OriginalBloomQuality != Current.OriginalBloomQuality)
         Snapshot.OriginalBloomQuality = Current.OriginalBloomQuality;
-    if (Previous.OriginalMotionBlurQuality !=
-        Current.OriginalMotionBlurQuality)
-        Snapshot.OriginalMotionBlurQuality =
-            Current.OriginalMotionBlurQuality;
     if (Previous.OriginalDepthOfFieldQuality !=
         Current.OriginalDepthOfFieldQuality)
         Snapshot.OriginalDepthOfFieldQuality =
@@ -917,8 +901,6 @@ static function RestoreOwnedSettings(
     Requested.Shadows.AllowForegroundPreshadows =
         Snapshot.bOriginalForegroundPreshadows;
     Requested.Bloom.BloomQuality = Snapshot.OriginalBloomQuality;
-    Requested.MotionBlur.MotionBlurQuality =
-        Snapshot.OriginalMotionBlurQuality;
     Requested.DepthOfField.DepthOfFieldQuality =
         Snapshot.OriginalDepthOfFieldQuality;
     Requested.FX.DistanceFogQuality = Snapshot.OriginalDistanceFogQuality;
@@ -988,7 +970,7 @@ static function RestoreOwnedSettings(
         Snapshot.OriginalMaxBodyWoundDecals;
 }
 
-static function bool ReadbackMatches(
+static function bool NativeReadbackMatches(
     GFXSettings Observed, GFXSettings Requested)
 {
     return Observed.Shadows.MaxWholeSceneDominantShadowResolution ==
@@ -1012,8 +994,6 @@ static function bool ReadbackMatches(
            Observed.Shadows.AllowForegroundPreshadows ==
                Requested.Shadows.AllowForegroundPreshadows &&
            Observed.Bloom.BloomQuality == Requested.Bloom.BloomQuality &&
-           Observed.MotionBlur.MotionBlurQuality ==
-               Requested.MotionBlur.MotionBlurQuality &&
            Observed.DepthOfField.DepthOfFieldQuality ==
                Requested.DepthOfField.DepthOfFieldQuality &&
            Observed.FX.DistanceFogQuality == Requested.FX.DistanceFogQuality &&
@@ -1037,13 +1017,6 @@ static function bool ReadbackMatches(
                Requested.FX.DropParticleDistortion &&
            Observed.FX.AllowSecondaryBloodEffects ==
                Requested.FX.AllowSecondaryBloodEffects &&
-           Observed.FX.AllowExplosionLights ==
-               Requested.FX.AllowExplosionLights &&
-           Observed.FX.AllowSprayActorLights ==
-               Requested.FX.AllowSprayActorLights &&
-           Observed.FX.AllowPilotLights == Requested.FX.AllowPilotLights &&
-           Observed.FX.AllowBloodSplatterDecals ==
-               Requested.FX.AllowBloodSplatterDecals &&
            Observed.CharacterDetail.AllowSubsurfaceScattering ==
                Requested.CharacterDetail.AllowSubsurfaceScattering &&
            Observed.CharacterDetail.ShouldCorpseCollideWithDead ==
@@ -1056,9 +1029,6 @@ static function bool ReadbackMatches(
                Requested.EnvironmentDetail.AllowLightFunctions &&
            Observed.EnvironmentDetail.DetailMode ==
                Requested.EnvironmentDetail.DetailMode &&
-           Abs(Observed.EnvironmentDetail.DestructionLifetimeScale -
-               Requested.EnvironmentDetail.DestructionLifetimeScale) <
-               0.001 &&
            Observed.CharacterDetail.SkeletalMeshLODBias ==
                Requested.CharacterDetail.SkeletalMeshLODBias &&
            Abs(Observed.CharacterDetail.KinematicUpdateDistFactorScale -
@@ -1078,7 +1048,22 @@ static function bool ReadbackMatches(
            Observed.TextureResolution.ShadowmapBias ==
                Requested.TextureResolution.ShadowmapBias &&
            Observed.TextureFiltering.MaxAnisotropy ==
-               Requested.TextureFiltering.MaxAnisotropy &&
+               Requested.TextureFiltering.MaxAnisotropy;
+}
+
+static function bool ScriptReadbackMatches(
+    GFXSettings Observed, GFXSettings Requested)
+{
+    return Observed.FX.AllowExplosionLights ==
+               Requested.FX.AllowExplosionLights &&
+           Observed.FX.AllowSprayActorLights ==
+               Requested.FX.AllowSprayActorLights &&
+           Observed.FX.AllowPilotLights == Requested.FX.AllowPilotLights &&
+           Observed.FX.AllowBloodSplatterDecals ==
+               Requested.FX.AllowBloodSplatterDecals &&
+           Abs(Observed.EnvironmentDetail.DestructionLifetimeScale -
+               Requested.EnvironmentDetail.DestructionLifetimeScale) <
+               0.001 &&
            Abs(Observed.FX.EmitterPoolScale -
                Requested.FX.EmitterPoolScale) < 0.001 &&
            Abs(Observed.FX.ShellEjectLifetime -
@@ -1095,6 +1080,76 @@ static function bool ReadbackMatches(
                Requested.FX.MaxPersistentSplatsPerFrame &&
            Observed.CharacterDetail.MaxBodyWoundDecals ==
                Requested.CharacterDetail.MaxBodyWoundDecals;
+}
+
+static function bool ReadbackMatches(
+    GFXSettings Observed, GFXSettings Requested)
+{
+    return NativeReadbackMatches(Observed, Requested) &&
+        ScriptReadbackMatches(Observed, Requested);
+}
+
+// The stock menu setters persist several config classes on every call.
+// Adaptive owns only these temporary defaults; live-manager readback and
+// session restoration remain the caller's responsibility.
+static function ApplyTransientScriptSettings(GFXSettings Requested)
+{
+    class'WorldInfo'.default.DestructionLifetimeScale =
+        Requested.EnvironmentDetail.DestructionLifetimeScale;
+    class'WorldInfo'.default.EmitterPoolScale = Requested.FX.EmitterPoolScale;
+    class'KFMuzzleFlash'.default.ShellEjectLifetime =
+        Requested.FX.ShellEjectLifetime;
+    class'WorldInfo'.default.bAllowExplosionLights =
+        Requested.FX.AllowExplosionLights;
+    class'KFSprayActor'.default.bAllowSprayLights =
+        Requested.FX.AllowSprayActorLights;
+    class'KFWeap_FlameBase'.default.bArePilotLightsAllowed =
+        Requested.FX.AllowPilotLights;
+    class'KFGoreManager'.default.bAllowBloodSplatterDecals =
+        Requested.FX.AllowBloodSplatterDecals;
+    class'KFImpactEffectManager'.default.MaxImpactEffectDecals =
+        Requested.FX.MaxImpactEffectDecals;
+    class'WorldInfo'.default.MaxExplosionDecals =
+        Requested.FX.MaxExplosionDecals;
+    class'KFGoreManager'.default.GoreFXLifetimeMultiplier =
+        Requested.FX.GoreFXLifetimeMultiplier;
+    class'KFGoreManager'.default.MaxBloodEffects = Requested.FX.MaxBloodEffects;
+    class'KFGoreManager'.default.MaxGoreEffects = Requested.FX.MaxGoreEffects;
+    class'KFGoreManager'.default.MaxPersistentSplatsPerFrame =
+        Requested.FX.MaxPersistentSplatsPerFrame;
+    class'KFGoreManager'.default.MaxBodyWoundDecals =
+        Requested.CharacterDetail.MaxBodyWoundDecals;
+}
+
+static function ApplyChangedSettings(
+    GFXSettings Current, GFXSettings Requested, out GFXSettings Observed)
+{
+    local bool bNativeChanged;
+    local bool bScriptChanged;
+
+    bNativeChanged = !NativeReadbackMatches(Current, Requested);
+    bScriptChanged = !ScriptReadbackMatches(Current, Requested);
+    // Pause actual writes through the graphics-menu closing edge. The caller
+    // keeps its existing readback failure/retry path; no false APPLIED receipt.
+    if ((bNativeChanged || bScriptChanged) &&
+        class'KF2OptimizerGraphicsInteraction'.static.
+            IsGraphicsMenuTransactionOpen())
+    {
+        GetCurrentGFXSettings(Observed);
+        return;
+    }
+    // KF2's native setter can refresh render/streaming state. Do not invoke it
+    // for matching native values, even when script-owned budgets changed.
+    if (bNativeChanged)
+    {
+        SetNativeSettings(Requested);
+    }
+    if (bScriptChanged)
+    {
+        ApplyTransientScriptSettings(Requested);
+    }
+    // A skipped write is not a cached acknowledgement: verify actual state.
+    GetCurrentGFXSettings(Observed);
 }
 
 static function SetQualityRestoreDebt(
@@ -1159,9 +1214,7 @@ static function bool ApplyQualityComposition(
     ApplyRam(Requested, RamQuality);
     ApplyOverdraw(Requested, GetEffectiveOverdrawQuality(Snapshot));
     ApplyEffects(Requested, GetEffectiveEffectsQuality(Snapshot));
-    SetNativeSettings(Requested);
-    SetScriptSettings(Requested);
-    GetCurrentGFXSettings(Observed);
+    ApplyChangedSettings(Current, Requested, Observed);
     return ReadbackMatches(Observed, Requested);
 }
 
@@ -1240,9 +1293,7 @@ static function bool ApplyResource(
     ApplyRam(Requested, Snapshot.RamQuality);
     ApplyOverdraw(Requested, GetEffectiveOverdrawQuality(Snapshot));
     ApplyEffects(Requested, GetEffectiveEffectsQuality(Snapshot));
-    SetNativeSettings(Requested);
-    SetScriptSettings(Requested);
-    GetCurrentGFXSettings(Observed);
+    ApplyChangedSettings(Current, Requested, Observed);
     if (ReadbackMatches(Observed, Requested))
     {
         Snapshot.bQualityStateKnown = true;
@@ -1257,7 +1308,8 @@ static function bool ApplyResource(
     Snapshot.EffectsQuality = PreviousEffectsQuality;
     Snapshot.FixedOverdrawQuality = PreviousFixedOverdrawQuality;
     Snapshot.FixedEffectsQuality = PreviousFixedEffectsQuality;
-    Requested = Observed;
+    Current = Observed;
+    Requested = Current;
     RestoreOwnedSettings(Snapshot, Requested);
     ApplyGpu(Requested, Snapshot.GpuQuality);
     ApplyCpu(Requested, Snapshot.CpuQuality);
@@ -1265,9 +1317,7 @@ static function bool ApplyResource(
     ApplyRam(Requested, Snapshot.RamQuality);
     ApplyOverdraw(Requested, GetEffectiveOverdrawQuality(Snapshot));
     ApplyEffects(Requested, GetEffectiveEffectsQuality(Snapshot));
-    SetNativeSettings(Requested);
-    SetScriptSettings(Requested);
-    GetCurrentGFXSettings(Observed);
+    ApplyChangedSettings(Current, Requested, Observed);
     if (ReadbackMatches(Observed, Requested))
     {
         Snapshot.bQualityStateKnown = true;
@@ -1302,9 +1352,7 @@ static function bool RestoreOriginal(KF2OptimizerAdaptiveGraphicsState Snapshot)
     GetCurrentGFXSettings(Current);
     Requested = Current;
     RestoreOwnedSettings(Snapshot, Requested);
-    SetNativeSettings(Requested);
-    SetScriptSettings(Requested);
-    GetCurrentGFXSettings(Observed);
+    ApplyChangedSettings(Current, Requested, Observed);
     if (!ReadbackMatches(Observed, Requested)) return false;
     Snapshot.GpuQuality = 100;
     Snapshot.CpuQuality = 100;

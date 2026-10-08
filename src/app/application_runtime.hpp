@@ -505,6 +505,8 @@ struct UiRuntime {
     void refresh_update_presentation();
     void reload_video_settings();
     VideoSyncDisposition synchronize_video_settings_from_game();
+    void retain_game_menu_graphics_changes(
+        const game::GameMenuGraphicsChanges& changes);
     void refresh_game_configuration_for_process_start(bool settings_restart);
     bool reset_adaptive_frame_window_for_rate_mode_change(
         std::uint64_t now_ns, bool active_gameplay);

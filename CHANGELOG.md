@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Keep motion blur entirely under manual control, like film grain. Adaptive
+  no longer reduces or restores it; both remain available in Game graphics.
+
 - Skip diagnostic particle-template attribution and its detailed reports while
   Runtime diagnostics is off; normal particle measurements and Adaptive inputs
   remain available, without changing the report format or sampling interval.
@@ -167,8 +170,19 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep temporary Adaptive graphics out of saved user settings after travel,
+  mode changes and shutdown. Replay only applied graphics-menu deltas, retain
+  untouched raw INI values, and defer automatic writes while that menu closes.
+  Retain new menu edits when KF2 reuses an older Launch.log, without accepting
+  that file's initial history as current edits.
+
 - Keep retained-log test timestamps deterministic through live appends and file
   recreation, without changing runtime log ownership or freshness checks.
+
+- Adaptive applies temporary script-side graphics budgets without using the
+  menu's config-saving setters. Already-matching native graphics no longer
+  trigger another renderer update; apply, rollback and restore still require
+  fresh readback. Actual native quality changes can still incur engine work.
 
 - Stop passing the Optimizer's own GPU-memory usage and budget to Adaptive as
   KF2/adapter-wide VRAM pressure. Keep KF2's process-bound memory counters and

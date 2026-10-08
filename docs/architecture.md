@@ -152,8 +152,31 @@ Verified standalone gameplay also exposes a session-scoped loopback actuator.
 The optimizer sends a monotonically sequenced command with a random 128-bit
 token and a CPU, GPU, VRAM, RAM, mixed or recovery group. KF2 rebuilds the
 requested group from its current graphics settings, changes only the owned
-fields and returns `APPLIED` only after exact readback. Intervention lowers one
-native tier, emergency may lower two and stable recovery raises one. Missing or
+fields and returns `APPLIED` only after exact readback.
+Film grain and motion blur remain user-owned. Adaptive does not reduce,
+snapshot, rebase or restore either value; each composition starts from current
+graphics, so both pass through unchanged. Menu observation and manual edits
+remain available independently of Adaptive.
+Adaptive writes script-owned defaults transiently rather than invoking KF2's
+disk-persisting menu setters. Native settings are reapplied only when their
+owned values differ; script-only or already-matching requests skip that engine
+update but still receive a fresh readback. The same path handles rollback and
+restoration. Actual native changes may still refresh render or streaming state.
+During a protected session, stable INI writes update the observed runtime only;
+they never establish user intent. The existing graphics-menu observer reports
+bounded before/after applied readbacks after its opening baseline. Only changed
+fields enter user replay; passive reads cannot retain temporary FX or normalize
+an untouched film-grain value. The worker folds multiple edits per field in one
+fixed-size record, including during log catch-up. Automatic graphics writes wait
+until the menu's closing observation, using existing readback/retry handling.
+Reused log files can have creation dates older than the current KF2 process.
+New menu records are accepted after the verified, identity-pinned reader first
+reaches EOF; initial history and partial historical records remain excluded.
+Process/file rebinds and truncation reset that baseline. This uses the existing
+read cursor and EOF timestamp, not another poll or timer. Engine-exit ownership
+and measurement-freshness checks are unchanged.
+Intervention lowers one native tier, emergency may lower two and stable recovery
+raises one. Missing or
 stale telemetry, Zed Time, an online/unknown session, shadow mode, missing bridge
 capability or a readback mismatch prevents the change. Display mode, resolution,
 VSync, variable frame rate, anti-aliasing and FleX are not owned by this path.

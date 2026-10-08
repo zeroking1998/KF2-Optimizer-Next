@@ -61,6 +61,14 @@ struct GameMenuGraphicsReadback {
     bool operator==(const GameMenuGraphicsReadback&) const = default;
 };
 
+// Only fields changed while KF2's graphics menu was open may be persisted.
+// The remaining applied values can still contain temporary Adaptive settings.
+struct GameMenuGraphicsChanges {
+    GameMenuGraphicsReadback applied;
+    std::array<bool, kVideoOptionCount> changed{};
+    bool film_grain_changed{false};
+};
+
 #ifdef KF2_VIDEO_SETTINGS_TESTING
 using VideoReadHook = void (*)(const std::filesystem::path&);
 void set_video_read_hook_for_testing(VideoReadHook hook) noexcept;
@@ -68,6 +76,13 @@ void set_video_read_hook_for_testing(VideoReadHook hook) noexcept;
 
 [[nodiscard]] std::optional<GameMenuGraphicsReadback>
 parse_game_menu_graphics_readback(std::string_view line);
+[[nodiscard]] std::optional<GameMenuGraphicsChanges>
+parse_game_menu_graphics_changes(std::string_view line);
+void merge_game_menu_graphics_changes(
+    std::optional<GameMenuGraphicsChanges>& pending,
+    const GameMenuGraphicsChanges& incoming);
+[[nodiscard]] VideoSettings apply_game_menu_graphics_changes(
+    const VideoSettings& baseline, const GameMenuGraphicsChanges& changes);
 [[nodiscard]] VideoSettings present_game_menu_graphics_readback(
     const VideoSettings& baseline,
     const GameMenuGraphicsReadback& readback);

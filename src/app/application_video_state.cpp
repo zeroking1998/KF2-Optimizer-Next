@@ -266,9 +266,8 @@ VideoSyncDisposition UiRuntime::synchronize_video_settings_from_game() {
     if (!installation || !video_saved || !video_pending) {
         return VideoSyncDisposition::hard_failure;
     }
-    // During a protected session, compare only with the already observed
-    // temporary runtime profile. The original personal graphics remain
-    // untouched until the snapshot has been restored.
+    // Stable INI generations are still required for safe teardown. An INI
+    // write alone is not user intent: KF2 can save temporary Adaptive values.
     if (session_config_snapshot && !session_video_runtime) {
         return VideoSyncDisposition::unchanged;
     }
@@ -292,16 +291,11 @@ VideoSyncDisposition UiRuntime::synchronize_video_settings_from_game() {
         return VideoSyncDisposition::retryable_unstable;
     }
     if (session_config_snapshot) {
-        const auto rebased = game::rebase_video_changes(
-            session_video_native_changes.value_or(*video_saved),
-            *session_video_runtime, current.value());
-        if (!rebased.has_value()) return VideoSyncDisposition::hard_failure;
-        session_video_native_changes = rebased.value();
         session_video_runtime = current.value();
         video_config_write_times = *write_times;
         events->append({0, diagnostics::Severity::info,
             "KF2_RUNTIME_GRAPHICS_INI_CHANGED",
-            L"KF2's live graphics INI changed; its confirmed delta will be retained separately from temporary session changes",
+            L"KF2's live graphics INI changed; only confirmed graphics-menu edits are retained as user settings",
             L"graphics"});
         return VideoSyncDisposition::synchronized;
     }
@@ -314,6 +308,14 @@ VideoSyncDisposition UiRuntime::synchronize_video_settings_from_game() {
     refresh_video_presentation();
     invalidate();
     return VideoSyncDisposition::synchronized;
+}
+
+void UiRuntime::retain_game_menu_graphics_changes(
+    const game::GameMenuGraphicsChanges& changes) {
+    if (session_config_snapshot && video_saved) {
+        session_video_native_changes = game::apply_game_menu_graphics_changes(
+            session_video_native_changes.value_or(*video_saved), changes);
+    }
 }
 
 void UiRuntime::refresh_game_configuration_for_process_start(
@@ -334,17 +336,9 @@ void UiRuntime::refresh_game_configuration_for_process_start(
     }
 
     // A protected launch stages temporary runtime/session values. Never
-    // display those values as the user's saved graphics. Only a confirmed KF2
-    // settings restart may contribute a native delta to the personal config.
+    // display those values as the user's saved graphics. A settings restart
+    // is not proof that every live INI value was chosen by the user either.
     if (session_config_snapshot) {
-        if (settings_restart && session_video_runtime && video_saved) {
-            const auto rebased = game::rebase_video_changes(
-                session_video_native_changes.value_or(*video_saved),
-                *session_video_runtime, live.value());
-            if (rebased.has_value()) {
-                session_video_native_changes = rebased.value();
-            }
-        }
         session_video_runtime = live.value();
         video_config_write_times = read_video_config_write_times(
             installation->config_root);
