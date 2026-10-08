@@ -169,8 +169,12 @@ EventLog::EventLog(std::size_t capacity,
                 record_persistence_failure_locked();
             }
             // A validated path may be temporarily locked even at startup.
-            persistence_worker_ = std::jthread(
-                [this](std::stop_token stop) { persist_worker(stop); });
+            try {
+                persistence_worker_ = std::jthread(
+                    [this](std::stop_token stop) { persist_worker(stop); });
+            } catch (...) {
+                record_persistence_failure_locked();
+            }
         }
     }
 }

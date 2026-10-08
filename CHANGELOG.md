@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep the Optimizer usable in memory if its optional event-log worker cannot
+  start, reporting persistence unavailable without claiming a successful flush.
+
 - Keep optional prewarming unavailable instead of terminating the Optimizer if
   storage detection runs out of memory; release its volume handle on failure.
 

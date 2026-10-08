@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <new>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -17,6 +18,18 @@
 
 #include "kf2/diagnostics/event_log.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
+
+namespace {
+thread_local bool fail_next_allocation = false;
+}
+
+void* operator new(std::size_t size) {
+    if (std::exchange(fail_next_allocation, false)) throw std::bad_alloc{};
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -214,6 +227,31 @@ int main() {
     const auto persistent_root = std::filesystem::temp_directory_path() /
         (L"kf2-event-log-" + std::to_wstring(GetCurrentProcessId()));
     std::filesystem::create_directories(persistent_root);
+    // Fail the real jthread's first allocation after the initial write.
+    bool worker_failure_escaped = false;
+    int initial_writes = 0;
+    try {
+        EventLog unavailable{4, persistent_root / L"worker-unavailable.json",
+            [&](const std::filesystem::path&, std::string_view) {
+                ++initial_writes;
+                fail_next_allocation = true;
+                return kf2::Result<bool>::success(true);
+            }};
+        CHECK(!fail_next_allocation);
+        CHECK(!unavailable.persistence_ready());
+        CHECK(unavailable.stats().persistence_failures == 1);
+        unavailable.append(Event{0, Severity::warning, "MEMORY_ONLY",
+                                 L"still available", L"test"});
+        CHECK(unavailable.snapshot().size() == 1);
+        CHECK(!unavailable.flush(std::chrono::milliseconds{0}));
+        unavailable.clear();
+        CHECK(unavailable.snapshot().empty());
+        CHECK(initial_writes == 1);
+    } catch (const std::bad_alloc&) {
+        worker_failure_escaped = true;
+    }
+    fail_next_allocation = false;
+    CHECK(!worker_failure_escaped);
     const auto persistent_path = persistent_root / L"events.json";
     EventLog persistent{4, persistent_path};
     CHECK(persistent.persistence_ready());
