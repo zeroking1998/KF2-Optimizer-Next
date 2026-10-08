@@ -251,6 +251,7 @@ Result<GameProcessIdentity> find_running_game_process(
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return Result<GameProcessIdentity>::failure(
         {ErrorCode::platform_failure, L"Process list cannot be inspected", GetLastError()});
+    std::unique_ptr<void, decltype(&CloseHandle)> owned{snapshot, &CloseHandle};
     PROCESSENTRY32W entry{sizeof(entry)};
     std::optional<Error> inspection_error;
     if (Process32FirstW(snapshot, &entry)) {
@@ -266,7 +267,6 @@ Result<GameProcessIdentity> find_running_game_process(
             }
             auto candidate = bind_game_process(entry.th32ProcessID, expected_executable);
             if (candidate.has_value()) {
-                CloseHandle(snapshot);
                 return candidate;
             }
             // Only a verified exit or different executable proves that this
@@ -279,7 +279,6 @@ Result<GameProcessIdentity> find_running_game_process(
         } while (Process32NextW(snapshot, &entry));
     }
     const auto enumeration_error = GetLastError();
-    CloseHandle(snapshot);
     if (inspection_error) {
         return Result<GameProcessIdentity>::failure(std::move(*inspection_error));
     }
