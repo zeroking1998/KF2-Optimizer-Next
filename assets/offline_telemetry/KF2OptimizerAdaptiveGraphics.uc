@@ -1298,14 +1298,23 @@ static function bool RestoreOriginal(KF2OptimizerAdaptiveGraphicsState Snapshot)
     local GFXSettings Requested;
     local GFXSettings Observed;
 
-    if (Snapshot == None || !Snapshot.bOriginalCaptured) return true;
+    if (Snapshot == None) return true;
+    if (!Snapshot.bOriginalCaptured)
+    {
+        Snapshot.bOriginalRestorePending = false;
+        return true;
+    }
     GetCurrentGFXSettings(Current);
     Requested = Current;
     RestoreOwnedSettings(Snapshot, Requested);
     SetNativeSettings(Requested);
     SetScriptSettings(Requested);
     GetCurrentGFXSettings(Observed);
-    if (!ReadbackMatches(Observed, Requested)) return false;
+    if (!ReadbackMatches(Observed, Requested))
+    {
+        Snapshot.bOriginalRestorePending = true;
+        return false;
+    }
     Snapshot.GpuQuality = 100;
     Snapshot.CpuQuality = 100;
     Snapshot.VramQuality = 100;
@@ -1315,6 +1324,7 @@ static function bool RestoreOriginal(KF2OptimizerAdaptiveGraphicsState Snapshot)
     Snapshot.FixedOverdrawQuality = 100;
     Snapshot.FixedEffectsQuality = 100;
     Snapshot.bOriginalCaptured = false;
+    Snapshot.bOriginalRestorePending = false;
     ClearQualityRestoreDebt(Snapshot);
     return true;
 }
