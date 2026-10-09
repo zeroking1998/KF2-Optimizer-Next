@@ -3352,8 +3352,36 @@ int main() {
     // actor-correlated receipts; the isolated living offscreen animation
     // policy adds two distance receipts.
     CHECK(count_occurrences(telemetry_source, "corpse_id=") == 24);
-    CHECK(count_occurrences(telemetry_source, " distance_units=") == 14);
-    CHECK(count_occurrences(telemetry_source, " distance_m=") == 14);
+    const auto distance_fields_start = telemetry_source.find(
+        "function string FormatAdaptiveCorpseDistanceLogFields(");
+    CHECK(distance_fields_start != std::string::npos);
+    const auto distance_fields_end = telemetry_source.find(
+        "\nfunction ", distance_fields_start + 1);
+    CHECK(distance_fields_end != std::string::npos);
+    const auto distance_fields = telemetry_source.substr(
+        distance_fields_start, distance_fields_end - distance_fields_start);
+    CHECK(count_occurrences(distance_fields,
+        "GetAdaptiveCorpseDistanceUnits(Candidate)") == 1);
+    CHECK(distance_fields.find(
+        "return \" distance_units=\"$DistanceUnits$\" distance_m=\"$\n"
+        "        FormatAdaptiveCorpseDistanceMeters(DistanceUnits, false);") !=
+          std::string::npos);
+    const auto shared_distance_receipts = count_occurrences(telemetry_source,
+        "FormatAdaptiveCorpseDistanceLogFields(Candidate)");
+    CHECK(shared_distance_receipts == 11);
+    CHECK(count_occurrences(telemetry_source, " distance_units=") - 1 +
+        shared_distance_receipts == 14);
+    CHECK(count_occurrences(telemetry_source, " distance_m=") - 1 +
+        shared_distance_receipts == 14);
+    for (auto log_start = telemetry_source.find("`log(");
+         log_start != std::string::npos;
+         log_start = telemetry_source.find("`log(", log_start + 1)) {
+        const auto log_end = telemetry_source.find(");", log_start);
+        CHECK(log_end != std::string::npos);
+        CHECK(count_occurrences(telemetry_source.substr(
+            log_start, log_end - log_start),
+            "GetAdaptiveCorpseDistanceUnits(Candidate)") <= 1);
+    }
     const auto distance_marker = telemetry_source.find(
         "FormatAdaptiveDebugMarkerAction(");
     CHECK(distance_marker != std::string::npos);
