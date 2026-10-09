@@ -583,10 +583,11 @@ std::wstring lower(std::wstring value) {
     return value;
 }
 
-std::wstring serialize_real(double value) {
+std::optional<std::wstring> serialize_real(double value) {
     std::wostringstream output;
     output.imbue(std::locale::classic());
     output << std::fixed << std::setprecision(6) << value;
+    if (!output) return std::nullopt;
     auto text = output.str();
     while (text.size() > 2 && text.back() == L'0') text.pop_back();
     if (!text.empty() && text.back() == L'.') text.push_back(L'0');

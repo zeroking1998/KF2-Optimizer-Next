@@ -177,6 +177,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Reject failed numeric setting formatting before building an INI update,
+  preserving the previous configuration and allowing an exact retry.
+
 - Reject incomplete diagnostic inventories before export, preserving an existing
   inventory file when serialization fails.
 
