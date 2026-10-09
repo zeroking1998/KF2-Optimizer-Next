@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Pace online corpse visual and freeze scans even when no candidate is eligible,
+  preserving their bounded cursors, readbacks and restoration timing.
+
 - Skip diagnostic particle-template attribution and its detailed reports while
   Runtime diagnostics is off; normal particle measurements and Adaptive inputs
   remain available, without changing the report format or sampling interval.

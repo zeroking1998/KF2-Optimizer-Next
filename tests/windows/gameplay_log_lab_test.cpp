@@ -181,6 +181,35 @@ bool advances_online_attempt(std::string_view body, std::string_view cursor,
     return true;
 }
 
+bool online_scan_reserves_admission(std::string_view body,
+                                   std::string_view clock,
+                                   std::string_view interval,
+                                   std::string_view first_support) {
+    const auto guard = body.find("WorldInfo.RealTimeSeconds - " +
+                                std::string{clock} + " < " + std::string{interval});
+    const auto reject = body.find("return false;", guard);
+    const auto stamp = body.find(std::string{clock} +
+                                " = WorldInfo.RealTimeSeconds;");
+    const auto support = body.find(first_support);
+    return guard != std::string_view::npos && reject < stamp && stamp < support &&
+        count_occurrences(body, std::string{clock} + " =") == 1;
+}
+
+// Counts admitted scans over 30 seconds, not engine CPU time. The source
+// contract binds whether a miss reserves the same cadence as an action.
+int online_scan_attempts(int fps, std::int64_t interval_ns,
+                         bool reserve_misses, bool action) {
+    std::int64_t last_scan = 0;
+    int scans = 0;
+    for (int frame = 1; frame <= 30 * fps; ++frame) {
+        const auto now = std::int64_t{frame} * 1'000'000'000 / fps;
+        if (now - last_scan < interval_ns) continue;
+        ++scans;
+        if (reserve_misses || action) last_scan = now;
+    }
+    return scans;
+}
+
 bool online_freeze_progress_after_rollback(int length) {
     std::vector<bool> completed(static_cast<std::size_t>(length));
     int cursor = 0;
@@ -1926,6 +1955,8 @@ int main() {
         online_lod_start, online_skeleton_start - online_lod_start);
     const auto online_skeleton_body = online_corpse_controller_source.substr(
         online_skeleton_start, online_visual_start - online_skeleton_start);
+    const auto online_visual_body = online_corpse_controller_source.substr(
+        online_visual_start, online_tick_start - online_visual_start);
     const auto lod_cursor = online_visual_cursor(online_lod_body);
     const auto skeleton_cursor = online_visual_cursor(online_skeleton_body);
     CHECK(!lod_cursor.empty());
@@ -1974,17 +2005,75 @@ int main() {
               ";") != std::string::npos);
     }
     CHECK(lod_cursor != skeleton_cursor);
+    const bool freeze_paced = online_scan_reserves_admission(
+        online_freeze_body, "LastFreezeScanRealTime", "0.45",
+        "GoreManager = KFGoreManager(");
+    const bool visual_paced = online_scan_reserves_admission(
+        online_visual_body, "LastVisualScanRealTime", "0.20",
+        "if (VisualControlPhase == 0)");
+    for (const int fps : {4, 30, 60, 120, 240}) {
+        const auto freeze_misses = online_scan_attempts(
+            fps, 450'000'000, freeze_paced, false);
+        const auto visual_misses = online_scan_attempts(
+            fps, 200'000'000, visual_paced, false);
+        if (freeze_misses > 66 || visual_misses > 150) {
+            std::cerr << fps << " FPS: no-candidate freeze/visual scans="
+                      << freeze_misses << '/' << visual_misses << '\n';
+        }
+        CHECK(freeze_misses > 0 && freeze_misses <= 66);
+        CHECK(visual_misses > 0 && visual_misses <= 150);
+        CHECK(freeze_misses == online_scan_attempts(
+            fps, 450'000'000, true, true));
+        CHECK(visual_misses == online_scan_attempts(
+            fps, 200'000'000, true, true));
+        const auto legacy_freeze = online_scan_attempts(
+            fps, 450'000'000, false, false);
+        const auto legacy_visual = online_scan_attempts(
+            fps, 200'000'000, false, false);
+        CHECK(legacy_freeze > 66);
+        if (fps >= 30) CHECK(legacy_visual > 150);
+    }
+    CHECK(freeze_paced && visual_paced);
+    CHECK(count_occurrences(online_corpse_controller_source,
+        "LastVisualScanRealTime = WorldInfo.RealTimeSeconds;") == 1);
+    CHECK(online_corpse_controller_source.find("LastVisualMutationRealTime") ==
+          std::string::npos);
+    // Separate scan admission cannot consume restoration's mutation budget.
+    CHECK(online_corpse_controller_source.find(
+        "var float LastFreezeScanRealTime;") != std::string::npos);
+    CHECK(online_release_body.find("LastFreezeScanRealTime") ==
+          std::string::npos);
+    CHECK(online_restore_body.find("LastFreezeScanRealTime") ==
+          std::string::npos);
+    CHECK(online_corpse_controller_source.find(
+        "LastFreezeScanRealTime", online_tick_start) == std::string::npos);
+    for (auto body : {online_freeze_body, online_visual_body}) {
+        const auto clock = body.find("LastFreezeScanRealTime =") !=
+                std::string::npos ? "LastFreezeScanRealTime" : "LastVisualScanRealTime";
+        const auto interval = std::string_view{clock} == "LastFreezeScanRealTime" ?
+            "0.45" : "0.20";
+        const auto support = std::string_view{clock} == "LastFreezeScanRealTime" ?
+            "GoreManager = KFGoreManager(" : "if (VisualControlPhase == 0)";
+        const std::string stamp = std::string{clock} +
+            " = WorldInfo.RealTimeSeconds;";
+        const auto position = body.find(stamp);
+        CHECK(position != std::string::npos);
+        body.erase(position, stamp.size());
+        CHECK(!online_scan_reserves_admission(body, clock, interval, support));
+        body += stamp; // Reserving after support/miss returns is also rejected.
+        CHECK(!online_scan_reserves_admission(body, clock, interval, support));
+    }
     bool mismatch_progress = advances_online_attempt(
         online_freeze_body, "FreezeScanCursor", "Candidate.SetCollision(",
         "LastPhysicsMutationRealTime");
     mismatch_progress = advances_online_attempt(
-        online_lod_body, lod_cursor,
+        online_visual_body + online_lod_body, lod_cursor,
         "Candidate.Mesh.MinLodModel = TargetMinLod;",
-        "LastVisualMutationRealTime") && mismatch_progress;
+        "LastVisualScanRealTime") && mismatch_progress;
     mismatch_progress = advances_online_attempt(
-        online_skeleton_body, skeleton_cursor,
+        online_visual_body + online_skeleton_body, skeleton_cursor,
         "Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;",
-        "LastVisualMutationRealTime") && mismatch_progress;
+        "LastVisualScanRealTime") && mismatch_progress;
     CHECK(mismatch_progress);
     CHECK(online_freeze_body.find(
         "WorldInfo.RealTimeSeconds - LastPhysicsMutationRealTime < 0.45") !=
@@ -2000,10 +2089,8 @@ int main() {
         CHECK(covers_online_visual_pool(model, pool, true, true));
         CHECK(online_freeze_progress_after_rollback(length));
     }
-    const auto online_visual_body = online_corpse_controller_source.substr(
-        online_visual_start, online_tick_start - online_visual_start);
     CHECK(online_visual_body.find(
-        "WorldInfo.RealTimeSeconds - LastVisualMutationRealTime < 0.20") !=
+        "WorldInfo.RealTimeSeconds - LastVisualScanRealTime < 0.20") !=
           std::string::npos);
     CHECK(online_visual_body.find(
         "VisualControlPhase = (VisualControlPhase + 1) % 2;") !=
