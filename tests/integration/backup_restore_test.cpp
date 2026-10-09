@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <new>
 #include <set>
 
 #include "kf2/backup/restore_transaction.hpp"
@@ -13,6 +14,24 @@
 #include "kf2/config/apply_transaction.hpp"
 #include "kf2/config/setting_catalog.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
+
+namespace {
+thread_local bool fail_manifest_growth{};
+thread_local unsigned int manifest_growth_failures{};
+std::string_view manifest_fault_payload;
+}
+
+void* operator new(std::size_t size) {
+    if (fail_manifest_growth && size >= 512) {
+        fail_manifest_growth = false;
+        ++manifest_growth_failures;
+        throw std::bad_alloc{};
+    }
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -107,6 +126,72 @@ std::string replace_manifest_file_field(std::string manifest,
     return manifest;
 }
 
+void fail_manifest_buffer_growth(std::ostream& output) {
+    // Force a changed partial suffix, then fail real stream-buffer growth.
+    output.write(manifest_fault_payload.data(), 4096);
+    fail_manifest_growth = true;
+    output.write(manifest_fault_payload.data() + 4096,
+        static_cast<std::streamsize>(manifest_fault_payload.size() - 4096));
+    fail_manifest_growth = false;
+}
+
+int test_manifest_serialization_failure(const std::filesystem::path& root) {
+    kf2::config::ConfigPreview preview;
+    preview.config_root = root / L"ManifestFailureConfig";
+    preview.files.push_back({L"KFEngine.ini", "engine original", "engine desired"});
+    preview.files.push_back({L"KFGame.ini", "game original", "game desired"});
+    for (const auto& file : preview.files)
+        write_bytes(preview.config_root / file.relative_path, file.original_bytes);
+    kf2::backup::BackupStore store{root / L"ManifestFailureState"};
+    const auto baseline = store.create_standalone(preview);
+    CHECK(baseline.has_value() && baseline.value().snapshots.size() == 2);
+    CHECK(store.verify(baseline.value()).has_value());
+    const auto& backup = baseline.value();
+    const auto manifest = read_bytes(backup.manifest_path);
+    const auto journal = read_bytes(backup.journal_path);
+    const std::array blobs{read_bytes(backup.snapshots[0].object_path),
+                          read_bytes(backup.snapshots[1].object_path)};
+    const std::string payload(65536, '#');
+    manifest_fault_payload = payload;
+    const auto failed = [&] {
+        struct FaultGuard {
+            ~FaultGuard() {
+                kf2::backup::set_backup_manifest_write_hook_for_testing(nullptr);
+                fail_manifest_growth = false;
+                manifest_fault_payload = {};
+            }
+        } guard;
+        kf2::backup::set_backup_manifest_write_hook_for_testing(&fail_manifest_buffer_growth);
+        return store.create_standalone(preview);
+    }();
+    CHECK(manifest_growth_failures == 1);
+    CHECK(!failed.has_value());
+    CHECK(failed.error().code == kf2::ErrorCode::io_failure);
+    if (read_bytes(backup.manifest_path) != manifest ||
+        read_bytes(backup.journal_path) != journal)
+        std::cerr << "Failed retry replaced healthy backup: manifest="
+                  << (read_bytes(backup.manifest_path) == manifest)
+                  << ", journal=" << (read_bytes(backup.journal_path) == journal) << '\n';
+    CHECK(read_bytes(backup.manifest_path) == manifest);
+    CHECK(read_bytes(backup.journal_path) == journal);
+    for (std::size_t index = 0; index < blobs.size(); ++index) {
+        CHECK(read_bytes(backup.snapshots[index].object_path) == blobs[index]);
+        CHECK(read_bytes(preview.config_root / preview.files[index].relative_path) ==
+              preview.files[index].original_bytes);
+    }
+    CHECK(store.verify(backup).has_value());
+    const auto listed = store.list_backups();
+    CHECK(listed.has_value() && listed.value().size() == 1);
+    const auto pruned = store.prune_verified({.keep_latest = 1});
+    CHECK(pruned.has_value() && pruned.value() == 0);
+    const auto retry = store.create_standalone(preview);
+    CHECK(retry.has_value() && retry.value().id == backup.id);
+    CHECK(store.verify(retry.value()).has_value());
+    CHECK(read_bytes(backup.manifest_path) == manifest);
+    CHECK(read_bytes(backup.journal_path) == journal);
+    return EXIT_SUCCESS;
+}
+
 }  // namespace
 
 int main() {
@@ -135,6 +220,7 @@ int main() {
     namespace fs = std::filesystem;
     const fs::path root{KF2_TEST_ROOT};
     fs::remove_all(root);
+    CHECK(test_manifest_serialization_failure(root) == EXIT_SUCCESS);
     const auto config_root = root / L"Config-\u00e4\u4e2d";
     const auto target = config_root / L"KFEngine.ini";
     const std::string original = "[Engine.Engine]\r\nMaxSmoothedFrameRate=62\r\n";
