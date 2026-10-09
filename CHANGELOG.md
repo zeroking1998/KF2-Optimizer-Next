@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Reuse the diagnostic frame-interval buffer for percentile calculation instead
+  of copying it, preserving chronological averages and all measured values.
+
 - Reuse one completed DXGI Present pairing allocation instead of allocating
   again for each sequential frame, preserving pending-pair bounds and loss checks.
 

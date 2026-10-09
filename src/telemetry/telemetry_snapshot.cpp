@@ -61,22 +61,21 @@ FrameMetrics aggregate_presents(
     }
     const double total = std::accumulate(intervals.begin(), intervals.end(), 0.0);
     const double average = total / static_cast<double>(intervals.size());
-    auto sorted = intervals;
-    std::sort(sorted.begin(), sorted.end());
+    std::sort(intervals.begin(), intervals.end());
     const std::size_t slow_count = std::max<std::size_t>(
-        1, static_cast<std::size_t>(std::ceil(sorted.size() * 0.01)));
+        1, static_cast<std::size_t>(std::ceil(intervals.size() * 0.01)));
     const double slow_average = std::accumulate(
-        sorted.end() - static_cast<std::ptrdiff_t>(slow_count), sorted.end(), 0.0) /
+        intervals.end() - static_cast<std::ptrdiff_t>(slow_count), intervals.end(), 0.0) /
         static_cast<double>(slow_count);
-    const double median = percentile(sorted, 0.5);
+    const double median = percentile(intervals, 0.5);
     const double stutter_limit = std::max(50.0, median * 2.0);
 
     FrameMetrics result;
     result.fps = 1000.0 / average;
     result.average_fps = result.fps;
     result.frame_time_ms = average;
-    result.p95_ms = percentile(sorted, 0.95);
-    result.p99_ms = percentile(sorted, 0.99);
+    result.p95_ms = percentile(intervals, 0.95);
+    result.p99_ms = percentile(intervals, 0.99);
     result.one_percent_low_fps = 1000.0 / slow_average;
     result.stutter_count = static_cast<std::size_t>(std::count_if(
         intervals.begin(), intervals.end(),
