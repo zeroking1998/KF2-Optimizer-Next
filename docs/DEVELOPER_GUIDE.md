@@ -138,6 +138,10 @@ CPU-time measurements still use the same cached thread handles every 500 ms,
 with membership refreshed every five seconds. No new worker, timer or retained
 cache is introduced.
 
+Process-affinity capacity uses the same monotonic clock and five-second cadence,
+independently of thread-discovery success. Failed capacity queries publish
+unavailable values until the next scheduled retry, not stale observations.
+
 ### Launch.log handle ownership
 
 The resource worker retains one shared read handle per verified Launch.log
