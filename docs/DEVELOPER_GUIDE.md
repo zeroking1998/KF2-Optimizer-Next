@@ -189,6 +189,11 @@ aggregator's exact values. All metrics retain their existing cadence and
 freshness checks without an additional mutable cache. Fixed diagnostic windows
 still use the generic aggregator independently.
 
+The generic diagnostic aggregator also sorts its owned interval buffer in place,
+after calculating the chronological total and average. No second interval copy
+is needed; percentiles, ascending slow-tail sums and order-independent stutter
+counts preserve their original values without modifying input Presents.
+
 Frame metrics carry the actual newest Present timestamp, selected swapchain
 and source generation. An asynchronous UI read must not derive a new Present
 time from its own clock and a cached age. Adaptive accepts each increasing
