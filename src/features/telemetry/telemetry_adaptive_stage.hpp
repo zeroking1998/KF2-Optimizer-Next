@@ -159,9 +159,6 @@ struct AdaptiveRuntimeControlInput final {
         optimizer::AdaptiveDataQuality::not_available};
     optimizer::ResourceKind primary_resource{optimizer::ResourceKind::unknown};
     double primary_confidence{0.0};
-    optimizer::AdaptiveBottleneck bottleneck{
-        optimizer::AdaptiveBottleneck::unknown};
-    double bottleneck_confidence{0.0};
     int current_quality{100};
     int minimum_quality{10};
     int maximum_quality{100};
@@ -181,8 +178,6 @@ struct AdaptiveRuntimeControlInput final {
     bool bridge_available{false};
     bool zed_time_active{false};
     bool shadow_mode{false};
-    bool overdraw_minimum_reached{false};
-    bool effects_control_available{false};
     std::uint64_t now_ns{0};
     std::uint64_t map_ready_ns{0};
     std::uint64_t last_dispatch_ns{0};
@@ -230,16 +225,7 @@ struct AdaptiveRuntimeControlSelection final {
 };
 
 [[nodiscard]] inline game::AdaptiveResourceControl adaptive_runtime_resource(
-    optimizer::ResourceKind resource, double confidence,
-    optimizer::AdaptiveBottleneck bottleneck =
-        optimizer::AdaptiveBottleneck::unknown,
-    double bottleneck_confidence = 0.0,
-    bool overdraw_minimum_reached = false,
-    bool effects_control_available = false) noexcept {
-    static_cast<void>(bottleneck);
-    static_cast<void>(bottleneck_confidence);
-    static_cast<void>(overdraw_minimum_reached);
-    static_cast<void>(effects_control_available);
+    optimizer::ResourceKind resource, double confidence) noexcept {
     // Effects and pixel-overdraw budgets use a fixed, reversible session
     // baseline.  The Governor no longer changes them in response to transient
     // frame-pressure attribution.
@@ -374,10 +360,7 @@ select_adaptive_runtime_control(
     const auto resource = recovery
         ? game::AdaptiveResourceControl::recover
         : adaptive_runtime_resource(
-              input.primary_resource, input.primary_confidence,
-              input.bottleneck, input.bottleneck_confidence,
-              input.overdraw_minimum_reached,
-              input.effects_control_available);
+              input.primary_resource, input.primary_confidence);
     // A broad mixed reduction has no attributed bottleneck. Give the fresh
     // ten-second percentile window one additional clean cycle after the
     // general post-map guard, otherwise its retained loading tail can trigger
