@@ -173,6 +173,9 @@ are visible immediately.
 - Recheck process discovery once when a captured PID has already disappeared,
   avoiding unnecessary restoration deferrals while retaining fail-closed checks.
 
+- Refresh observed CPU affinity capacity every five seconds, so runtime changes
+  and recovery from failed queries no longer require restarting the sampler.
+
 - Preserve existing backups when manifest serialization fails before replacing
   their manifest or journal, and transfer completed buffers without copying.
 

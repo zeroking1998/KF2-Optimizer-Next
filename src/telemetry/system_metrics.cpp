@@ -17,6 +17,8 @@ std::atomic_uint32_t process_metric_opens{0};
 std::atomic_bool fail_next_thread_snapshot_walk{false};
 std::atomic_int fail_next_toolhelp_thread_walk{-1};
 detail::ThreadCacheAllocationHook thread_cache_allocation_hook{};
+detail::CpuCapacityQueryHook cpu_capacity_query_hook{};
+detail::ProcessMetricsClock process_metrics_clock = &GetTickCount64;
 #endif
 std::uint64_t value(FILETIME time) {
     return (static_cast<std::uint64_t>(time.dwHighDateTime) << 32U) |
@@ -169,6 +171,9 @@ CpuSetMaskQuery query_process_default_cpu_set_masks(HANDLE process) {
 }
 
 std::optional<ProcessCpuCapacity> query_process_cpu_capacity(HANDLE process) {
+#ifdef KF2_PROCESS_METRICS_TESTING
+    if (cpu_capacity_query_hook && !cpu_capacity_query_hook()) return std::nullopt;
+#endif
     const auto& system_masks = processor_group_masks();
     const auto process_groups = query_process_groups(process);
     if (system_masks.empty() || !process_groups) return std::nullopt;
@@ -674,19 +679,31 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
         return Result<ProcessMetrics>::failure(
             {ErrorCode::stale_data, L"Metric process identity changed", 0});
     }
-    if (ok && !cpu_capacity_sampled_) {
-        if (const auto capacity = query_process_cpu_capacity(process)) {
-            cached_affinity_logical_processors_ =
-                capacity->affinity_logical_processors;
-            cached_affinity_physical_cores_ = capacity->affinity_physical_cores;
-            cached_system_logical_processors_ =
-                capacity->system_logical_processors;
-        }
-        cpu_capacity_sampled_ = true;
-    }
     const DWORD native = ok ? ERROR_SUCCESS : GetLastError();
     if (!ok) return Result<ProcessMetrics>::failure(
         {ErrorCode::platform_failure, L"Process metric query failed", native});
+    constexpr std::uint64_t kThreadSampleIntervalMs = 500;
+    constexpr std::uint64_t kThreadRefreshIntervalMs = 5'000;
+#ifdef KF2_PROCESS_METRICS_TESTING
+    const std::uint64_t thread_now_ms = process_metrics_clock();
+#else
+    const std::uint64_t thread_now_ms = GetTickCount64();
+#endif
+    // Affinity can change without a process restart. Reuse this sampling clock
+    // and cadence, independently of thread-discovery success or empty lists.
+    if (!previous_capacity_sample_ms_ || thread_now_ms < *previous_capacity_sample_ms_ ||
+        thread_now_ms - *previous_capacity_sample_ms_ >= kThreadRefreshIntervalMs) {
+        if (const auto capacity = query_process_cpu_capacity(process)) {
+            cached_affinity_logical_processors_ = capacity->affinity_logical_processors;
+            cached_affinity_physical_cores_ = capacity->affinity_physical_cores;
+            cached_system_logical_processors_ = capacity->system_logical_processors;
+        } else {
+            cached_affinity_logical_processors_.reset();
+            cached_affinity_physical_cores_.reset();
+            cached_system_logical_processors_.reset();
+        }
+        previous_capacity_sample_ms_ = thread_now_ms;
+    }
     CpuTimes current{value(system_kernel) + value(system_user),
                      value(process_kernel) + value(process_user),
                      value(idle)};
@@ -702,9 +719,6 @@ Result<ProcessMetrics> ProcessMetricSampler::sample() {
     // membership separately. A process-scoped snapshot avoids enumerating all
     // Windows threads when query rights permit; restricted sessions retain
     // Toolhelp. New threads still become visible within five seconds.
-    constexpr std::uint64_t kThreadSampleIntervalMs = 500;
-    constexpr std::uint64_t kThreadRefreshIntervalMs = 5'000;
-    const std::uint64_t thread_now_ms = GetTickCount64();
     if (!previous_thread_sample_ms_ ||
         thread_now_ms < *previous_thread_sample_ms_ ||
         thread_now_ms - *previous_thread_sample_ms_ >=
@@ -765,6 +779,12 @@ void detail::fail_next_toolhelp_thread_walk_for_testing(
 void detail::set_thread_cache_allocation_hook_for_testing(
     ThreadCacheAllocationHook hook) noexcept {
     thread_cache_allocation_hook = hook;
+}
+void detail::set_cpu_capacity_query_hook_for_testing(CpuCapacityQueryHook hook) noexcept {
+    cpu_capacity_query_hook = hook;
+}
+void detail::set_process_metrics_clock_for_testing(ProcessMetricsClock clock) noexcept {
+    process_metrics_clock = clock ? clock : &GetTickCount64;
 }
 #endif
 }  // namespace kf2::telemetry
