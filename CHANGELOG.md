@@ -180,6 +180,9 @@ are visible immediately.
 - Stabilize the native event-persistence regression when its lock acquisition
   overlaps an asynchronous write; application behavior is unchanged.
 
+- Reject incomplete application session markers before writing, preserving
+  interrupted-session evidence and allowing clean-shutdown retry.
+
 - Preserve the last valid FleX diagnostic report if serialization fails; transfer
   a completed report to the writer without copying its full text.
 

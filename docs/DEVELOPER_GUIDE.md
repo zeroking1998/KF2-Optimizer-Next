@@ -154,6 +154,13 @@ on the same worker even without a new sample; adapter-only changes and map
 travel retain the handle. A raced read still uses its inspected file, and the
 next poll detects replacement. Existing catch-up/freshness limits remain intact.
 
+### Application session markers
+
+Startup and clean shutdown use one marker writer. Failed serialization returns
+an I/O failure before replacing any marker; completed text transfers directly
+to atomic replacement. Marker format, corruption quarantine, startup commit
+ordering and clean-shutdown retry remain unchanged.
+
 ### Adaptive Present observations
 
 Explicit FleX report export and session finalization reject a failed report
