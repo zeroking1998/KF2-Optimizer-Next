@@ -33,6 +33,8 @@ public:
     static void test_cleanup_stale_sessions(
         decltype(&QueryAllTracesW) query_traces,
         decltype(&ControlTraceW) control_trace);
+    [[nodiscard]] static ULONG test_enable_present_provider(
+        TRACEHANDLE session, DWORD pid, decltype(&EnableTraceEx2) enable_provider);
     [[nodiscard]] static bool test_event_callback_exception_boundary() noexcept;
     static void test_fail_next_event_callback() noexcept;
     static void test_fail_worker_creation(unsigned int ordinal) noexcept;

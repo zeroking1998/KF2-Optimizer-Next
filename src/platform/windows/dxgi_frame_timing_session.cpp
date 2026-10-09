@@ -93,6 +93,48 @@ bool process_is_alive(DWORD pid, std::uint64_t creation_time = 0) {
     return alive;
 }
 
+ULONG enable_present_provider(TRACEHANDLE session, DWORD pid
+#ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+    , decltype(&EnableTraceEx2) enable_provider = &EnableTraceEx2
+#endif
+) {
+#ifndef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
+    constexpr auto enable_provider = &EnableTraceEx2;
+#endif
+    alignas(EVENT_FILTER_EVENT_ID) std::array<
+        std::byte, offsetof(EVENT_FILTER_EVENT_ID, Events) +
+                       2 * sizeof(USHORT)> event_filter_storage{};
+    auto* event_filter = reinterpret_cast<EVENT_FILTER_EVENT_ID*>(
+        event_filter_storage.data());
+    event_filter->FilterIn = TRUE;
+    event_filter->Count = 2;
+    event_filter->Events[0] = kPresentStartEvent;
+    event_filter->Events[1] = kPresentStopEvent;
+    std::array<EVENT_FILTER_DESCRIPTOR, 2> filters{};
+    filters[0].Ptr = reinterpret_cast<ULONGLONG>(event_filter);
+    filters[0].Size = static_cast<ULONG>(event_filter_storage.size());
+    filters[0].Type = EVENT_FILTER_TYPE_EVENT_ID;
+    filters[1].Ptr = reinterpret_cast<ULONGLONG>(&pid);
+    filters[1].Size = sizeof(pid);
+    filters[1].Type = EVENT_FILTER_TYPE_PID;
+    ENABLE_TRACE_PARAMETERS parameters{};
+    parameters.Version = ENABLE_TRACE_PARAMETERS_VERSION_2;
+    parameters.EnableFilterDesc = filters.data();
+    parameters.FilterDescCount = static_cast<ULONG>(filters.size());
+    auto status = enable_provider(session, &kDxgiProvider,
+        EVENT_CONTROL_CODE_ENABLE_PROVIDER, TRACE_LEVEL_VERBOSE,
+        0, 0, 0, &parameters);
+    if (status == ERROR_INVALID_PARAMETER || status == ERROR_NOT_SUPPORTED) {
+        // Retain the original event-ID-only path on filter rejection. Access,
+        // resource and other failures still fail startup without another call.
+        parameters.FilterDescCount = 1;
+        status = enable_provider(session, &kDxgiProvider,
+            EVENT_CONTROL_CODE_ENABLE_PROVIDER, TRACE_LEVEL_VERBOSE,
+            0, 0, 0, &parameters);
+    }
+    return status;
+}
+
 void stop_stale_sessions(
 #ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
     decltype(&QueryAllTracesW) query_traces = &QueryAllTracesW,
@@ -401,28 +443,7 @@ struct DxgiFrameTimingSession::Impl {
         if (status != ERROR_SUCCESS) return status;
         session_handle = started_session;
 
-        alignas(EVENT_FILTER_EVENT_ID) std::array<
-            std::byte, offsetof(EVENT_FILTER_EVENT_ID, Events) +
-                           2 * sizeof(USHORT)> event_filter_storage{};
-        auto* event_filter = reinterpret_cast<EVENT_FILTER_EVENT_ID*>(
-            event_filter_storage.data());
-        event_filter->FilterIn = TRUE;
-        event_filter->Count = 2;
-        event_filter->Events[0] = kPresentStartEvent;
-        event_filter->Events[1] = kPresentStopEvent;
-        EVENT_FILTER_DESCRIPTOR filter_descriptor{};
-        filter_descriptor.Ptr = reinterpret_cast<ULONGLONG>(event_filter);
-        filter_descriptor.Size =
-            static_cast<ULONG>(event_filter_storage.size());
-        filter_descriptor.Type = EVENT_FILTER_TYPE_EVENT_ID;
-        ENABLE_TRACE_PARAMETERS enable_parameters{};
-        enable_parameters.Version = ENABLE_TRACE_PARAMETERS_VERSION_2;
-        enable_parameters.EnableFilterDesc = &filter_descriptor;
-        enable_parameters.FilterDescCount = 1;
-        status = EnableTraceEx2(
-            session_handle, &kDxgiProvider,
-            EVENT_CONTROL_CODE_ENABLE_PROVIDER, TRACE_LEVEL_VERBOSE,
-            0, 0, 0, &enable_parameters);
+        status = enable_present_provider(session_handle, identity.pid);
         if (status != ERROR_SUCCESS) return status;
 
         trace_log = {};
@@ -466,6 +487,11 @@ void DxgiFrameTimingSession::test_cleanup_stale_sessions(
     decltype(&QueryAllTracesW) query_traces,
     decltype(&ControlTraceW) control_trace) {
     stop_stale_sessions(query_traces, control_trace);
+}
+
+ULONG DxgiFrameTimingSession::test_enable_present_provider(
+    TRACEHANDLE session, DWORD pid, decltype(&EnableTraceEx2) enable_provider) {
+    return enable_present_provider(session, pid, enable_provider);
 }
 
 void DxgiFrameTimingSession::test_fail_worker_creation(

@@ -1,9 +1,11 @@
 #include <Windows.h>
 #include <evntrace.h>
+#include <evntprov.h>
 
 #include <cstdlib>
 #include <algorithm>
 #include <cstring>
+#include <cstddef>
 #include <iostream>
 #include <limits>
 #include <new>
@@ -62,6 +64,68 @@ int test_exact_clock_conversion() {
             CHECK(source.measure_window(0, UINT64_MAX).count == 0);
         } else {
             CHECK(source.measure_window(expected_ns, expected_ns + 1).count == 1);
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
+ULONG first_enable_status{ERROR_SUCCESS};
+ULONG fallback_enable_status{ERROR_SUCCESS};
+DWORD expected_enable_pid{};
+unsigned int enable_calls{};
+bool enable_arguments_valid{};
+
+ULONG WINAPI enable_scoped_provider(TRACEHANDLE session, LPCGUID provider,
+    ULONG control, UCHAR level, ULONGLONG any, ULONGLONG all, ULONG timeout,
+    ENABLE_TRACE_PARAMETERS* parameters) {
+    ++enable_calls;
+    const ULONG expected_filters = enable_calls == 1 ? 2 : 1;
+    enable_arguments_valid = enable_arguments_valid && session == 456 &&
+        provider && provider->Data1 == 0xca11c036 &&
+        control == EVENT_CONTROL_CODE_ENABLE_PROVIDER && level == TRACE_LEVEL_VERBOSE &&
+        any == 0 && all == 0 && timeout == 0 && parameters &&
+        parameters->Version == ENABLE_TRACE_PARAMETERS_VERSION_2 &&
+        parameters->FilterDescCount == expected_filters && parameters->EnableFilterDesc;
+    if (!enable_arguments_valid) return ERROR_INVALID_DATA;
+    const auto& events = parameters->EnableFilterDesc[0];
+    enable_arguments_valid = events.Type == EVENT_FILTER_TYPE_EVENT_ID && events.Ptr &&
+        events.Size == offsetof(EVENT_FILTER_EVENT_ID, Events) + 2 * sizeof(USHORT);
+    if (!enable_arguments_valid) return ERROR_INVALID_DATA;
+    const auto* ids = reinterpret_cast<const EVENT_FILTER_EVENT_ID*>(events.Ptr);
+    enable_arguments_valid = ids->FilterIn == TRUE && ids->Count == 2 &&
+        ids->Events[0] == 178 && ids->Events[1] == 179;
+    if (enable_calls == 1) {
+        const auto& process = parameters->EnableFilterDesc[1];
+        enable_arguments_valid = enable_arguments_valid &&
+            process.Type == EVENT_FILTER_TYPE_PID && process.Ptr &&
+            process.Size == sizeof(DWORD);
+        if (enable_arguments_valid)
+            enable_arguments_valid = *reinterpret_cast<const DWORD*>(process.Ptr) ==
+                expected_enable_pid;
+    }
+    if (!enable_arguments_valid) return ERROR_INVALID_DATA;
+    return enable_calls == 1 ? first_enable_status : fallback_enable_status;
+}
+
+int test_provider_pid_scope() {
+    for (const DWORD pid : {1UL, 123UL, MAXDWORD - 1UL}) {
+        for (const ULONG first : {ERROR_SUCCESS, ERROR_INVALID_PARAMETER,
+                ERROR_NOT_SUPPORTED, ERROR_ACCESS_DENIED, ERROR_TIMEOUT,
+                ERROR_INVALID_FUNCTION, ERROR_NOT_ENOUGH_MEMORY}) {
+            for (const ULONG fallback : {ERROR_SUCCESS, ERROR_ACCESS_DENIED}) {
+                expected_enable_pid = pid;
+                first_enable_status = first;
+                fallback_enable_status = fallback;
+                enable_calls = 0;
+                enable_arguments_valid = true;
+                const auto status = DxgiFrameTimingSession::test_enable_present_provider(
+                    456, pid, enable_scoped_provider);
+                const bool retry = first == ERROR_INVALID_PARAMETER ||
+                    first == ERROR_NOT_SUPPORTED;
+                CHECK(enable_arguments_valid);
+                CHECK(enable_calls == (retry ? 2U : 1U));
+                CHECK(status == (retry ? fallback : first));
+            }
         }
     }
     return EXIT_SUCCESS;
@@ -680,9 +744,11 @@ int main(int argc, char** argv) {
         if (scenario == "--partial-loss-commit") return test_partial_loss_commit();
         if (scenario == "--loss-acknowledgment") return test_loss_acknowledgment();
         if (scenario == "--session-loss-statistics") return test_session_loss_statistics();
+        if (scenario == "--provider-pid-scope") return test_provider_pid_scope();
         return EXIT_FAILURE;
     }
     CHECK(test_exact_clock_conversion() == EXIT_SUCCESS);
+    CHECK(test_provider_pid_scope() == EXIT_SUCCESS);
     CHECK(test_stale_cleanup_overflow() == EXIT_SUCCESS);
     CHECK(test_stale_cleanup_pid_reuse() == EXIT_SUCCESS);
     CHECK(test_real_orphan_startup() == EXIT_SUCCESS);
