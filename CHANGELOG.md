@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Preserve saved preferences and UI state when serializing settings fails;
+  complete settings buffers are transferred directly to the atomic writer.
+
 - Close protected-session read handles even if allocating their file buffer
   fails, without changing byte limits, sharing rules or identity checks.
 

@@ -105,9 +105,6 @@ using PendingPolicyRestageOperation = std::function<Result<bool>(
     const std::filesystem::path&, bool, int, int, bool, int,
     std::string_view, bool, bool, bool)>;
 
-using GpuProfileSettingsWriteOperation = Result<bool> (*)(
-    const std::filesystem::path&, std::string_view);
-
 enum class VideoSyncDisposition {
     unchanged,
     synchronized,
@@ -185,9 +182,6 @@ struct UiRuntime {
     std::filesystem::path settings_path;
     std::filesystem::path executable_root;
     config::Settings optimizer_settings;
-#if defined(KF2_APPLICATION_VIDEO_TESTING)
-    GpuProfileSettingsWriteOperation gpu_profile_settings_write_for_testing{};
-#endif
     backup::BackupStore backups;
     std::optional<game::GameDiscoveryInput> discovery_input;
     std::optional<game::GameInstallation> installation;

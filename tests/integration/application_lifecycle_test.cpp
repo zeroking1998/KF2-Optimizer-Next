@@ -54,11 +54,28 @@
 
 namespace {
 thread_local bool fail_flex_text_allocation{};
+thread_local bool fail_settings_growth{};
+thread_local bool settings_growth_failed{};
+thread_local bool keep_settings_allocation_failure{};
 }
 
 void* operator new(std::size_t size) {
+#if _ITERATOR_DEBUG_LEVEL != 0
+    // Debug STL moves allocate tiny iterator proxies even for empty strings.
+    constexpr std::size_t persistent_failure_minimum = 64;
+#else
+    constexpr std::size_t persistent_failure_minimum = 0;
+#endif
+    if (settings_growth_failed && keep_settings_allocation_failure &&
+        size >= persistent_failure_minimum)
+        throw std::bad_alloc{};
     if (fail_flex_text_allocation) {
         fail_flex_text_allocation = false;
+        throw std::bad_alloc{};
+    }
+    if (fail_settings_growth && size >= 16 * 1024) {
+        fail_settings_growth = false;
+        settings_growth_failed = true;
         throw std::bad_alloc{};
     }
     for (;;) {
@@ -105,13 +122,6 @@ void throw_update_controller_allocation_failure() {
     kf2::update::detail::set_update_controller_allocation_hook_for_testing(
         nullptr);
     throw std::bad_alloc{};
-}
-
-kf2::Result<bool> fail_gpu_profile_settings_write(
-    const std::filesystem::path&, std::string_view) {
-    return kf2::Result<bool>::failure({
-        kf2::ErrorCode::io_failure,
-        L"Injected confirmed GPU profile persistence failure", 0});
 }
 
 #if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
@@ -2319,6 +2329,59 @@ int test_stopped_target_fps_transaction() {
     return EXIT_SUCCESS;
 }
 
+int test_settings_serialization_rollback() {
+    const auto root = std::filesystem::path{KF2_TEST_ROOT} / L"settings-stream-failure";
+    std::filesystem::remove_all(root);
+    kf2::diagnostics::EventLog events{32};
+    kf2::config::Settings initial;
+    initial.extras["preserved_extra"] = std::string(32 * 1024, 'x');
+    kf2::app::UiRuntime runtime{
+        root / L"Data", false, initial, events, std::nullopt,
+        kf2::app::StartMode::normal, root / L"portable"};
+    const auto original = kf2::config::serialize_settings(initial);
+    CHECK(kf2::config::parse_settings(original).has_value());
+    write_bytes(runtime.settings_path, original);
+    settings_growth_failed = false;
+    fail_settings_growth = true;
+    const auto result = kf2::features::diagnostics::toggle_corpse_markers(runtime, {});
+    fail_settings_growth = false;
+    CHECK(settings_growth_failed);
+    CHECK(result == kf2::app::runtime::DispatchResult::handled);
+    const auto after = read_bytes(runtime.settings_path);
+    if (after != original)
+        std::cerr << "Settings allocation failure replaced " << original.size()
+                  << " bytes with " << after.size() << " bytes\n";
+    CHECK(after == original);
+    CHECK(!runtime.optimizer_settings.debug_corpse_markers);
+    CHECK(!runtime.model.status().debug_corpse_markers);
+    CHECK(runtime.model.notice() && runtime.model.notice()->code == L"SETTINGS_SAVE_FAILED");
+    CHECK(kf2::config::parse_settings(after).has_value());
+    CHECK(kf2::features::diagnostics::toggle_corpse_markers(runtime, {}) ==
+          kf2::app::runtime::DispatchResult::handled);
+    CHECK(runtime.optimizer_settings.debug_corpse_markers);
+    CHECK(runtime.model.status().debug_corpse_markers);
+    CHECK(read_bytes(runtime.settings_path) ==
+          kf2::config::serialize_settings(runtime.optimizer_settings));
+    settings_growth_failed = false;
+    fail_settings_growth = true;
+    keep_settings_allocation_failure = true;
+    std::optional<kf2::Result<bool>> persistent_failure;
+    try {
+        persistent_failure.emplace(kf2::config::save_settings(
+            runtime.settings_path, runtime.optimizer_settings));
+    } catch (const std::bad_alloc&) {
+        // A failure Result must not require a second allocation.
+    }
+    keep_settings_allocation_failure = false;
+    fail_settings_growth = false;
+    CHECK(settings_growth_failed);
+    CHECK(persistent_failure && !persistent_failure->has_value());
+    CHECK(persistent_failure->error().code == kf2::ErrorCode::io_failure);
+    CHECK(read_bytes(runtime.settings_path) ==
+          kf2::config::serialize_settings(runtime.optimizer_settings));
+    return EXIT_SUCCESS;
+}
+
 int test_gpu_profile_persistence_rollback() {
     namespace fs = std::filesystem;
     const fs::path root = fs::path{KF2_TEST_ROOT} /
@@ -2335,19 +2398,23 @@ int test_gpu_profile_persistence_rollback() {
         root / L"Data", false, initial, events, std::nullopt,
         kf2::app::StartMode::normal, root / L"portable"};
     runtime.confirmed_game_adapter_luid = 22;
-    runtime.gpu_profile_settings_write_for_testing =
-        fail_gpu_profile_settings_write;
     const auto durable_before =
         kf2::config::serialize_settings(runtime.optimizer_settings);
-
-    CHECK(!runtime.remember_confirmed_gpu_profile(
+    write_bytes(runtime.settings_path, durable_before);
+    const HANDLE locked = CreateFileW(runtime.settings_path.c_str(), GENERIC_READ,
+        0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(locked != INVALID_HANDLE_VALUE);
+    std::unique_ptr<void, decltype(&CloseHandle)> owner{locked, &CloseHandle};
+    const bool remembered = runtime.remember_confirmed_gpu_profile(
         "PCI\\VEN_NEW",
         kf2::telemetry::ProcessGpuPreference::minimum_power,
-        8ULL * 1024ULL * 1024ULL * 1024ULL));
+        8ULL * 1024ULL * 1024ULL * 1024ULL);
+    owner.reset();
+    CHECK(!remembered);
     CHECK(runtime.confirmed_game_adapter_luid == 22);
     CHECK(kf2::config::serialize_settings(runtime.optimizer_settings) ==
           durable_before);
-    CHECK(!fs::exists(runtime.settings_path));
+    CHECK(read_bytes(runtime.settings_path) == durable_before);
 
     const std::vector<kf2::telemetry::GpuAdapter> adapters{
         {.luid = 11,
@@ -5573,6 +5640,7 @@ int main(int argc, char** argv) {
     } catch (const std::filesystem::filesystem_error&) {
         return EXIT_FAILURE;
     }
+    CHECK(test_settings_serialization_rollback() == EXIT_SUCCESS);
     CHECK(test_telemetry_status_publication() == EXIT_SUCCESS);
     CHECK(test_flex_report_boundaries() == EXIT_SUCCESS);
     CHECK(test_pending_policy_restage_failure_rollback() == EXIT_SUCCESS);

@@ -19,9 +19,8 @@ app::runtime::DispatchResult toggle_debug_marker(
     app::UiRuntime& runtime, bool& setting, bool corpse_marker) {
     const bool previous = setting;
     setting = !setting;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        runtime.settings_path,
-        config::serialize_settings(runtime.optimizer_settings));
+    const auto saved = config::save_settings(
+        runtime.settings_path, runtime.optimizer_settings);
     if (!saved.has_value()) {
         setting = previous;
         show_notice(runtime, ui::NoticeSeverity::error,
@@ -318,9 +317,8 @@ app::runtime::DispatchResult toggle_corpse_physics_control(
     const bool previous =
         runtime.optimizer_settings.debug_corpse_physics_control;
     runtime.optimizer_settings.debug_corpse_physics_control = !previous;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        runtime.settings_path,
-        config::serialize_settings(runtime.optimizer_settings));
+    const auto saved = config::save_settings(
+        runtime.settings_path, runtime.optimizer_settings);
     if (!saved.has_value()) {
         runtime.optimizer_settings.debug_corpse_physics_control = previous;
         show_notice(runtime, ui::NoticeSeverity::error,
@@ -388,9 +386,8 @@ app::runtime::DispatchResult toggle_flex_diagnostics(
     app::UiRuntime& runtime, const app::runtime::NoPayload&) {
     const bool previous = runtime.optimizer_settings.debug_flex_diagnostics;
     runtime.optimizer_settings.debug_flex_diagnostics = !previous;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        runtime.settings_path,
-        config::serialize_settings(runtime.optimizer_settings));
+    const auto saved = config::save_settings(
+        runtime.settings_path, runtime.optimizer_settings);
     if (!saved.has_value()) {
         runtime.optimizer_settings.debug_flex_diagnostics = previous;
         show_notice(runtime, ui::NoticeSeverity::error,
@@ -439,9 +436,8 @@ app::runtime::DispatchResult toggle_runtime_diagnostics(
     const bool previous =
         runtime.optimizer_settings.debug_runtime_diagnostics;
     runtime.optimizer_settings.debug_runtime_diagnostics = !previous;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        runtime.settings_path,
-        config::serialize_settings(runtime.optimizer_settings));
+    const auto saved = config::save_settings(
+        runtime.settings_path, runtime.optimizer_settings);
     if (!saved.has_value()) {
         runtime.optimizer_settings.debug_runtime_diagnostics = previous;
         show_notice(runtime, ui::NoticeSeverity::error,
