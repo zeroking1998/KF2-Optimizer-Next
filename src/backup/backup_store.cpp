@@ -24,6 +24,7 @@ constexpr std::size_t max_snapshot_count = 3;
 #if defined(KF2_BACKUP_RECOVERY_TESTING)
 BackupStatusHook backup_status_hook{};
 BackupReadHook backup_read_hook{};
+BackupManifestWriteHook backup_manifest_write_hook{};
 #endif
 
 bool path_exists(const std::filesystem::path& path,
@@ -253,8 +254,15 @@ Result<BackupSet> BackupStore::create(const config::ConfigPreview& preview) {
                  << snapshot.size << '|' << snapshot.sha256 << '|'
                  << snapshot.desired_size << '|' << snapshot.desired_sha256 << '\n';
     }
+#if defined(KF2_BACKUP_RECOVERY_TESTING)
+    if (backup_manifest_write_hook) backup_manifest_write_hook(manifest);
+#endif
+    if (!manifest.good()) {
+        return Result<BackupSet>::failure(
+            {ErrorCode::io_failure, L"Backup manifest serialization failed", 0});
+    }
     auto manifest_written = platform::windows::atomic_replace_utf8(
-        backup.manifest_path, manifest.str());
+        backup.manifest_path, std::move(manifest).str());
     if (!manifest_written.has_value()) {
         return Result<BackupSet>::failure(manifest_written.error());
     }
@@ -541,6 +549,9 @@ void set_backup_status_hook_for_testing(BackupStatusHook hook) noexcept {
 
 void set_backup_read_hook_for_testing(BackupReadHook hook) noexcept {
     backup_read_hook = hook;
+}
+void set_backup_manifest_write_hook_for_testing(BackupManifestWriteHook hook) noexcept {
+    backup_manifest_write_hook = hook;
 }
 #endif
 
