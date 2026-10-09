@@ -3238,6 +3238,40 @@ int main() {
     CHECK(telemetry_source.find(
         "function bool RememberAdaptiveDistanceSleepTransition(") !=
           std::string::npos);
+    const auto remember_transition_start = telemetry_source.find(
+        "function bool RememberAdaptiveDistanceSleepTransition(");
+    const auto remember_transition_end = telemetry_source.find(
+        "\nfunction ", remember_transition_start + 1);
+    CHECK(remember_transition_start != std::string::npos);
+    CHECK(remember_transition_end != std::string::npos);
+    const auto remember_transition_body = telemetry_source.substr(
+        remember_transition_start,
+        remember_transition_end - remember_transition_start);
+    CHECK(remember_transition_body.find("DistanceUnits") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "RememberAdaptiveDistanceSleepTransition(\n"
+        "            CorpseId, RemovalReason);") != std::string::npos);
+    const auto distance_sleep_remove_start = telemetry_source.find(
+        "function RemoveAdaptiveDistanceSleptCorpseEntry(");
+    const auto distance_sleep_remove_end = telemetry_source.find(
+        "\nfunction ", distance_sleep_remove_start + 1);
+    CHECK(distance_sleep_remove_start != std::string::npos);
+    CHECK(distance_sleep_remove_end != std::string::npos);
+    const auto distance_sleep_remove_body = telemetry_source.substr(
+        distance_sleep_remove_start,
+        distance_sleep_remove_end - distance_sleep_remove_start);
+    CHECK(distance_sleep_remove_body.find(
+        "if (bDetailedRuntimeDiagnostics)\n"
+        "        {\n"
+        "            DistanceUnits = "
+        "GetAdaptiveCorpseDistanceUnits(Candidate);\n"
+        "            EffectiveAwake = "
+        "GetAdaptiveCorpseEffectiveAwake(Candidate);") !=
+          std::string::npos);
+    CHECK(distance_sleep_remove_body.find(
+        "RememberAdaptiveDistanceSleepTransition(\n"
+        "            CorpseId, RemovalReason);") != std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveDistanceSleepTransitions.Length = 8192") !=
           std::string::npos);
