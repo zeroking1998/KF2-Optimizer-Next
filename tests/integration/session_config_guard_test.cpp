@@ -2,9 +2,48 @@
 
 #include <filesystem>
 #include <fstream>
+#include <cstdlib>
 #include <iostream>
 #include <iterator>
+#include <new>
+#include <string_view>
 #include <Windows.h>
+
+namespace {
+thread_local int large_allocations_before_failure = -1;
+thread_local bool allocation_failure_seen = false;
+std::filesystem::path parser_fault_manifest;
+unsigned parser_manifest_reads{};
+std::string_view writer_fault_tail;
+
+void fail_parser_line_allocation(const std::filesystem::path& path) {
+    // Resume validates the tree before parsing the same manifest again.
+    if (path == parser_fault_manifest && ++parser_manifest_reads == 2)
+        large_allocations_before_failure = 2;
+}
+
+void fail_manifest_growth(std::ostream& output) {
+    kf2::config::set_session_manifest_write_hook_for_testing(nullptr);
+    large_allocations_before_failure = 0;
+    output.write(writer_fault_tail.data(), writer_fault_tail.size());
+}
+}
+
+void* operator new(std::size_t size) {
+    if (large_allocations_before_failure >= 0 && size >= 512 &&
+        large_allocations_before_failure-- == 0) {
+        allocation_failure_seen = true;
+        throw std::bad_alloc{};
+    }
+    for (;;) {
+        if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+        const auto handler = std::get_new_handler();
+        if (!handler) throw std::bad_alloc{};
+        handler();
+    }
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(x) do { if (!(x)) { std::cerr << "failed line " << __LINE__ << '\n'; return __LINE__; } } while (0)
 
@@ -155,8 +194,72 @@ int main() {
 
     const auto manifest_path = snapshot.value().snapshot_root / L"manifest.txt";
     const auto original_manifest = read(manifest_path);
-    const auto path_begin = original_manifest.find("file=");
-    CHECK(path_begin != std::string::npos);
+    const auto record_marker = original_manifest.find("\nfile=");
+    CHECK(record_marker != std::string::npos);
+    const auto path_begin = record_marker + 1;
+    const auto first_record_end = original_manifest.find('\n', path_begin);
+    CHECK(first_record_end != std::string::npos);
+    const auto valid_prefix = original_manifest.substr(0, first_record_end + 1);
+    const std::string invalid_tail(64 * 1024, 'x');
+    write(manifest_path, (valid_prefix + invalid_tail).c_str());
+    parser_fault_manifest = manifest_path;
+    parser_manifest_reads = 0;
+    allocation_failure_seen = false;
+    kf2::config::set_session_read_hook_for_testing(&fail_parser_line_allocation);
+    const auto rejected_tail = kf2::config::resume_session_config(config, root / L"State");
+    kf2::config::set_session_read_hook_for_testing(nullptr);
+    const auto parser_large_allocations = 2 - large_allocations_before_failure;
+    large_allocations_before_failure = -1;
+    if (rejected_tail.has_value()) {
+        std::cerr << "Parser accepted incomplete manifest; allocation fault="
+                  << allocation_failure_seen << '\n';
+    }
+    CHECK(parser_manifest_reads == 2);
+    CHECK(!allocation_failure_seen && parser_large_allocations == 1);
+    CHECK(fs::exists(manifest_path));
+    write(manifest_path, original_manifest.c_str());
+
+    writer_fault_tail = invalid_tail;
+    allocation_failure_seen = false;
+    kf2::config::set_session_manifest_write_hook_for_testing(&fail_manifest_growth);
+    const auto failed_capture = kf2::config::capture_session_config(config, root / L"WriterFault");
+    kf2::config::set_session_manifest_write_hook_for_testing(nullptr);
+    large_allocations_before_failure = -1;
+    CHECK(allocation_failure_seen);
+    if (failed_capture.has_value())
+        std::cerr << "Capture committed a manifest after stream allocation failure\n";
+    CHECK(!rejected_tail.has_value() && !failed_capture.has_value());
+    CHECK(!fs::exists(root / L"WriterFault/session-config/active/manifest.txt"));
+    CHECK(read(config / L"KFEngine.ini") == "engine-original");
+    CHECK(read(config / L"Nested-\u00e4\u4e2d/KFGame.ini") == "game-original");
+    const auto capture_retry = kf2::config::capture_session_config(config, root / L"WriterFault");
+    CHECK(capture_retry.has_value() && capture_retry.value().file_count == 3);
+    CHECK(kf2::config::complete_session_config(capture_retry.value()).has_value());
+
+    // A known snapshot count must reject even a syntactically valid prefix.
+    write(manifest_path, valid_prefix.c_str());
+    write(config / L"KFEngine.ini", "must-not-change");
+    CHECK(!kf2::config::restore_session_config(snapshot.value(), true).has_value());
+    CHECK(read(config / L"KFEngine.ini") == "must-not-change");
+    CHECK(!kf2::config::complete_session_config(snapshot.value()).has_value());
+    CHECK(fs::exists(manifest_path));
+    CHECK(fs::exists(snapshot.value().snapshot_root / L"files/KFEngine.ini"));
+    CHECK(fs::exists(snapshot.value().snapshot_root / L"files/Nested-\u00e4\u4e2d/KFGame.ini"));
+    CHECK(fs::exists(snapshot.value().snapshot_root / L"files/KFSystemSettings.ini"));
+    write(config / L"KFEngine.ini", "engine-original");
+    write(manifest_path, original_manifest.c_str());
+
+    std::string crlf_manifest;
+    for (const char character : original_manifest) {
+        if (character == '\n') crlf_manifest += '\r';
+        crlf_manifest += character;
+    }
+    crlf_manifest.resize(crlf_manifest.size() - 2);
+    write(manifest_path, ("\r\n" + crlf_manifest).c_str());
+    const auto compatible = kf2::config::resume_session_config(config, root / L"State");
+    CHECK(compatible.has_value() && compatible.value()->file_count == 3);
+    write(manifest_path, original_manifest.c_str());
+
     const auto path_end = original_manifest.find('|', path_begin + 5);
     CHECK(path_end != std::string::npos);
     for (const std::string malformed_path :

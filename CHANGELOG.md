@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Reject incomplete session manifests before restore or cleanup, and avoid
+  stream/line copies while parsing the already verified manifest bytes.
+
 - Use the shared Windows SHA-256 algorithm handle instead of repeatedly opening
   providers, eliminating their allocation-failure leak without changing digests.
 
