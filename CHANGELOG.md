@@ -90,6 +90,8 @@ are visible immediately.
   map diagnostic labels; worker behavior, budgets and progress rules are unchanged.
 - Publish optional overlay diagnostic text without copying unrelated UI,
   graphics or Adaptive state; diagnostic timing and displayed text are unchanged.
+- Validate the immutable UI action registry once; caller-provided registries,
+  payload checks and handler failures remain checked on each dispatch.
 - Escape shared JSON string contents directly into the returned owned string,
   avoiding stream/buffer-copy work while preserving exact serialized bytes.
 - Validate typed settings without formatting discarded text; actual INI writes

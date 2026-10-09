@@ -352,8 +352,7 @@ void UiRuntime::execute_action(std::string_view action) {
     const auto dispatched = runtime::dispatch_action(
         *this,
         runtime::ActionRequest{
-            resolved->id, action, runtime::NoPayload{}},
-        runtime::feature_definitions());
+            resolved->id, action, runtime::NoPayload{}});
     if (dispatched == runtime::DispatchResult::handler_failure) {
         model.set_notice({
             ui::NoticeSeverity::error, L"ACTION_FAILED",
