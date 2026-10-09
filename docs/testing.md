@@ -44,6 +44,14 @@ verify pixel-identical output without committing baseline images or benchmarks.
 
 ## CI failure diagnosis
 
+Final graphics capture and replay run inside the existing headless session-cap
+finalization check, including late, overlapping and incomplete INI writes.
+Fixtures use valid `Config` directories and do not prepare a new launch.
+Unexpected recovery state prints the existing event log before teardown can
+retry restoration. This adds no application logging or test registration.
+The historical intermittent failure in #806 remains unresolved until its
+actual failing boundary is captured.
+
 The existing resource-worker test records its last log discovery/read and
 publication boundaries only in test builds. Failed assertions print the
 boundary, inspected timestamps/metadata, raw Windows last-error, request/current
