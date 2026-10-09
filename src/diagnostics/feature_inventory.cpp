@@ -633,6 +633,7 @@ std::string serialize_feature_inventory_json(
         }
     }
     std::ostringstream output;
+    output.exceptions(std::ios::badbit | std::ios::failbit);
     output << "{\"schema\":\"KF2_ISSUE72_INVENTORY_V3\",\"build_identity\":\""
            << json_escape(build_identity) << "\",\"issue\":72,\"function_count\":"
            << records.size() << ",\"status_counts\":{\"present\":"

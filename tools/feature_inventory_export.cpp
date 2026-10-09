@@ -41,17 +41,17 @@ int wmain(int argc, wchar_t** argv) {
         std::wcerr << L"Output path must be an absolute file path\n";
         return EXIT_FAILURE;
     }
-    std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
-    if (!output) {
-        std::wcerr << L"Inventory output cannot be opened\n";
-        return EXIT_FAILURE;
-    }
     std::string document;
     try {
         document = kf2::diagnostics::serialize_feature_inventory_json(
             identity, records);
     } catch (...) {
         std::wcerr << L"Issue 72 inventory could not be serialized\n";
+        return EXIT_FAILURE;
+    }
+    std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        std::wcerr << L"Inventory output cannot be opened\n";
         return EXIT_FAILURE;
     }
     output.write(document.data(), static_cast<std::streamsize>(document.size()));

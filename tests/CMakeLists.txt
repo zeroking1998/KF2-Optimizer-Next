@@ -306,9 +306,13 @@ add_test(NAME kf2_event_log_test COMMAND kf2_event_log_test)
 add_executable(kf2_feature_inventory_test
     unit/feature_inventory_test.cpp
     "${PROJECT_SOURCE_DIR}/src/diagnostics/feature_inventory.cpp"
+    "${PROJECT_SOURCE_DIR}/tools/feature_inventory_export.cpp"
 )
 target_include_directories(kf2_feature_inventory_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_feature_inventory_test PRIVATE
+    wmain=inventory_export_for_testing
+    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/feature-inventory")
 add_test(NAME kf2_feature_inventory_test COMMAND kf2_feature_inventory_test)
 
 add_executable(kf2_crash_recorder_test
