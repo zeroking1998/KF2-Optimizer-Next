@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Use the shared Windows SHA-256 algorithm handle instead of repeatedly opening
+  providers, eliminating their allocation-failure leak without changing digests.
+
 - Keep valid cached thread measurements after an incomplete Toolhelp traversal
   and retry on the next sample instead of accepting partial membership.
 

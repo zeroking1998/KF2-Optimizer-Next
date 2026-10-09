@@ -1,7 +1,10 @@
+#include <Windows.h>
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <new>
 #include <optional>
 #include <string>
 #include <vector>
@@ -9,6 +12,24 @@
 #include "kf2/security/package_integrity.hpp"
 #include "kf2/security/sha256.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
+
+namespace {
+thread_local int fail_hash_allocation_after = -1;
+}
+
+void* operator new(std::size_t size) {
+    if (size >= 32 && fail_hash_allocation_after >= 0 &&
+        fail_hash_allocation_after-- == 0) throw std::bad_alloc{};
+    for (;;) {
+        if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+        const auto handler = std::get_new_handler();
+        if (!handler) throw std::bad_alloc{};
+        handler();
+    }
+}
+
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(condition) do { if (!(condition)) {                              \
     std::cerr << __FILE__ << ':' << __LINE__ << ": check failed: "            \
@@ -136,6 +157,62 @@ int main() {
     std::error_code error;
     fs::remove_all(root, error);
     fs::create_directories(root);
+
+    // Published SHA-256 test vectors, independent of either helper's output.
+    const std::pair<std::string, std::string_view> hash_vectors[]{
+        {"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+        {"abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
+        {"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+         "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"},
+        {std::string(1'000'000, 'a'),
+         "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"},
+    };
+    const auto hash_input = root / L"hash-input.bin";
+    for (const auto& [bytes, expected] : hash_vectors) {
+        const auto memory_hash = kf2::security::sha256_hex(bytes);
+        CHECK(memory_hash.has_value() && memory_hash.value() == expected);
+        write_file(hash_input, bytes);
+        const auto file_hash = kf2::security::sha256_file_hex(hash_input);
+        CHECK(file_hash.has_value() && file_hash.value() == expected);
+    }
+    write_file(hash_input, "abc");
+    CHECK(!kf2::security::sha256_file_hex(hash_input, 2).has_value());
+    CHECK(!kf2::security::sha256_file_hex(root / L"missing.bin").has_value());
+
+    // Sweep actual buffer allocations; tiny checked-STL proxies are excluded.
+    for (bool from_file : {false, true}) {
+        int injected_failures = 0;
+        bool completed = false;
+        for (int index = 0; index < 32; ++index) {
+            DWORD handles_before = 0;
+            CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_before));
+            bool threw = false;
+            bool correct = false;
+            fail_hash_allocation_after = index;
+            try {
+                const auto hash = from_file
+                    ? kf2::security::sha256_file_hex(hash_input)
+                    : kf2::security::sha256_hex("abc");
+                correct = hash.has_value() && hash.value() == hash_vectors[1].second;
+            } catch (const std::bad_alloc&) {
+                threw = true;
+            }
+            const bool injected = fail_hash_allocation_after < 0;
+            fail_hash_allocation_after = -1;
+            DWORD handles_after = 0;
+            CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after));
+            CHECK(handles_after == handles_before);  // Includes file ownership.
+            if (injected) {
+                CHECK(threw);
+                ++injected_failures;
+            } else {
+                CHECK(!threw && correct);
+                completed = true;
+                break;
+            }
+        }
+        CHECK(completed && injected_failures >= 2);
+    }
 
     const auto development =
         kf2::security::audit_package_integrity(root, "test-build");
