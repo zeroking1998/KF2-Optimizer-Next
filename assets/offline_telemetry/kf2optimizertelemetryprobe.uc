@@ -1690,9 +1690,7 @@ function bool RestoreLivingOffscreenAnimation(int Index, string Reason)
     {
         ++FixedMinimumLivingOffscreenAnimRestores;
         `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=restored reason="$Reason$
-             " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
              " readback=verified");
     }
     return true;
@@ -1877,9 +1875,7 @@ function bool ApplyLivingEnemyMinimumVisuals()
             `log("KF2OPT_LIVING_VISUAL state=fixed_minimum min_lod="$
                  TargetMinLod$" anim_factor="$
                  TargetAnimDistance$" anim_rate="$TargetAnimRate$
-                 " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
-                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                 FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                  " readback=verified");
         }
         bOffscreenChanged = false;
@@ -1906,10 +1902,7 @@ function bool ApplyLivingEnemyMinimumVisuals()
                 {
                     ++FixedMinimumLivingOffscreenAnimReductions;
                     `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=reduced"$
-                         " distance_units="$
-                         GetAdaptiveCorpseDistanceUnits(Candidate)$
-                         " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                             GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                         FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                          " readback=verified");
                 }
             }
@@ -2344,9 +2337,7 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
                  " angular_speed_units="$int(AngularSpeed)$
                  " position_change_units="$int(PositionChange)$
                  " corpse_id="$GetAdaptiveCorpseActionId(Candidate)$
-                 " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
-                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                 FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                  " effective_awake=0");
         }
         // Keep physics mutations bounded to one actor per scheduler callback.
@@ -2831,6 +2822,15 @@ function string FormatAdaptiveCorpseDistanceMeters(
         Result $= " m";
     }
     return Result;
+}
+
+function string FormatAdaptiveCorpseDistanceLogFields(KFPawn Candidate)
+{
+    local int DistanceUnits;
+
+    DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
+    return " distance_units="$DistanceUnits$" distance_m="$
+        FormatAdaptiveCorpseDistanceMeters(DistanceUnits, false);
 }
 
 function PruneAdaptiveCorpseDebugMarkers()
@@ -4027,10 +4027,8 @@ function int WakeNearAdaptiveDistanceSleptCorpses()
                 `log("KF2OPT_CORPSE_DISTANCE state=wake woken="$
                      AdaptiveDistancePhysicsWakes$" tracked="$
                      AdaptiveDistanceSleptCorpses.Length$" corpse_id="$
-                     GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-                     GetAdaptiveCorpseDistanceUnits(Candidate)$
-                     " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                         GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                     GetAdaptiveCorpseActionId(Candidate)$
+                     FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                      " effective_awake=1");
             }
             // A nearby body has priority, but never wake a second rigid body
@@ -4346,10 +4344,8 @@ function bool SleepOneDistantMonsterCorpse(
         {
             `log("KF2OPT_CORPSE_DISTANCE state=removed"$
                  " previous_state=sleep removal_reason=tracking_lost"$
-                 " corpse_id="$CorpseId$" distance_units="$
-                 GetAdaptiveCorpseDistanceUnits(Candidate)$
-                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                 " corpse_id="$CorpseId$
+                 FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                  " effective_awake="$
                  GetAdaptiveCorpseEffectiveAwake(Candidate));
         }
@@ -4388,10 +4384,8 @@ function bool SleepOneDistantMonsterCorpse(
              AdaptiveDistancePhysicsSleeps$" tracked="$
              AdaptiveDistanceSleptCorpses.Length$" visible_living="$
              VisibleLivingZeds$" visible_corpses="$VisibleCorpses$
-             " corpse_id="$CorpseId$" distance_units="$
-             GetAdaptiveCorpseDistanceUnits(Candidate)$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             " corpse_id="$CorpseId$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
              " effective_awake=0");
     }
     else if (bDetailedRuntimeDiagnostics)
@@ -4403,10 +4397,8 @@ function bool SleepOneDistantMonsterCorpse(
              AdaptiveDistancePhysicsSleeps$" tracked="$
              AdaptiveDistanceSleptCorpses.Length$" visible_living="$
              VisibleLivingZeds$" visible_corpses="$VisibleCorpses$
-             " corpse_id="$CorpseId$" distance_units="$
-             GetAdaptiveCorpseDistanceUnits(Candidate)$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             " corpse_id="$CorpseId$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
              " effective_awake=0");
     }
     return true;
@@ -4533,10 +4525,8 @@ function bool ApplyOneFixedMinimumCorpseLod(KFGoreManager GoreManager)
          " target_lod="$
          TargetMinLod$" reduced="$FixedMinimumCorpseLodReductions$" tracked="$
          FixedMinimumCorpseLodCorpses.Length$" corpse_id="$
-         GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-         GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
-         FormatAdaptiveCorpseDistanceMeters(
-             GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+         GetAdaptiveCorpseActionId(Candidate)$
+         FormatAdaptiveCorpseDistanceLogFields(Candidate)$
          " readback=verified");
     return true;
 }
@@ -4705,10 +4695,8 @@ function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(
                 AdaptiveLastNearRagdollRejectRealTime =
                     WorldInfo.RealTimeSeconds;
                 `log("KF2OPT_CORPSE_RAGDOLL state=rejected_near corpse_id="$
-                     GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-                     GetAdaptiveCorpseDistanceUnits(Candidate)$
-                     " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                         GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                     GetAdaptiveCorpseActionId(Candidate)$
+                     FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                      " minimum_distance_units=800 minimum_distance_m=8.0"$
                      " scene_level="$
                      ScenePressureLevel$" enemy_level="$EnemyPressureLevel$
@@ -4788,10 +4776,8 @@ function bool SleepOneVisibleMonsterCorpse(
              VisibleAwakeBefore$" distance_tracked="$
              AdaptiveDistanceSleptCorpses.Length$" ownership_tracked="$
              AdaptiveCorpsePhysicsActionIdCount$" corpse_id="$
-             GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-             GetAdaptiveCorpseDistanceUnits(Candidate)$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             GetAdaptiveCorpseActionId(Candidate)$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
              " minimum_distance_units=800 minimum_distance_m=8.0"$
              " scene_level="$ScenePressureLevel$
              " enemy_level="$EnemyPressureLevel$

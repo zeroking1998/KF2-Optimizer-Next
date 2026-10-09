@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Reuse one distance query for both corpse and living-Zed log fields,
+  preserving receipt text, diagnostic gates and all runtime actions.
+
 - Skip unchanged Direct2D target resize and DPI updates during repaint,
   preserving real size/DPI changes, resize retries and target recreation.
 
