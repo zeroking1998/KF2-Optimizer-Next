@@ -111,7 +111,7 @@ foreach ($buildRoot in $buildRoots) {
         '--clean-first',
         '--parallel', '4'
     )
-    Invoke-Native 'ctest' @('--test-dir', $buildRoot, '-C', 'Release', '--output-on-failure')
+    Invoke-Native (Join-Path $PSScriptRoot 'run_ctest.ps1') @('--test-dir', $buildRoot, '-C', 'Release', '--output-on-failure')
 
     $releaseRoot = Join-Path $buildRoot 'Release'
     $productExecutables = @(Get-ChildItem -LiteralPath $releaseRoot -Filter '*.exe' -File)
