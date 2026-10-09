@@ -2,8 +2,25 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <new>
+#include <string>
 
 #include "kf2/app/session.hpp"
+
+namespace {
+thread_local bool fail_marker_growth{}, marker_growth_failed{};
+}
+void* operator new(std::size_t size) {
+    if (fail_marker_growth && size >= 64) {
+        fail_marker_growth = false;
+        marker_growth_failed = true;
+        throw std::bad_alloc{};
+    }
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -20,6 +37,62 @@ static bool deny_status(const std::filesystem::path&,
     return false;
 }
 
+static bool arm_missing_marker(const std::filesystem::path& path,
+                               std::error_code& error) {
+    const bool exists = std::filesystem::exists(path, error);
+    if (!error && !exists) fail_marker_growth = true;
+    return exists;
+}
+
+static std::string read_bytes(const std::filesystem::path& path) {
+    std::ifstream input{path, std::ios::binary};
+    return {std::istreambuf_iterator<char>{input}, {}};
+}
+
+static int test_serialization_failure(const std::filesystem::path& root) {
+    using kf2::app::SessionGuard;
+    constexpr kf2::app::SessionIdentity identity{4294967295U, 18446744073709551615ULL};
+    const auto clean_marker = root / L"growth-clean.marker";
+    auto session = SessionGuard::start(clean_marker, identity);
+    CHECK(session.has_value());
+    const auto before = read_bytes(clean_marker);
+    CHECK(before == "version=1\npid=4294967295\nprocess_start_id=18446744073709551615\n"
+                    "clean_shutdown=false\n");
+    fail_marker_growth = true;
+    const auto failed_clean = session.value().mark_clean();
+    fail_marker_growth = false;
+    const bool clean_failure_injected = marker_growth_failed;
+    const auto after = read_bytes(clean_marker);
+    // Restore only the owned fixture before reporting an unfixed Main failure.
+    CHECK(SessionGuard::start(clean_marker, identity).has_value());
+    CHECK(read_bytes(clean_marker) == before);
+    const auto missing_marker = root / L"growth-start.marker";
+    marker_growth_failed = false;
+    kf2::app::set_session_status_hook_for_testing(&arm_missing_marker);
+    const auto failed_start = SessionGuard::start(missing_marker, identity);
+    kf2::app::set_session_status_hook_for_testing(nullptr);
+    fail_marker_growth = false;
+    const bool created = std::filesystem::exists(missing_marker);
+    if (created) CHECK(std::filesystem::remove(missing_marker));
+    std::cout << "Marker growth failure: clean injected=" << clean_failure_injected
+              << "; acknowledged=" << failed_clean.has_value()
+              << "; before=" << before.size() << "; after=" << after.size()
+              << "; start injected=" << marker_growth_failed
+              << "; acknowledged=" << failed_start.has_value()
+              << "; created=" << created << '\n';
+    CHECK(clean_failure_injected && marker_growth_failed);
+    CHECK(!failed_clean.has_value() && !failed_start.has_value());
+    CHECK(failed_clean.error().code == kf2::ErrorCode::io_failure);
+    CHECK(failed_start.error().code == kf2::ErrorCode::io_failure);
+    CHECK(after == before && !created);
+    const auto retry = SessionGuard::start(missing_marker, identity);
+    CHECK(retry.has_value() && !retry.value().previous_session_unclean());
+    CHECK(read_bytes(missing_marker) == before);
+    CHECK(session.value().mark_clean().has_value());
+    CHECK(read_bytes(clean_marker).ends_with("clean_shutdown=true\n"));
+    return EXIT_SUCCESS;
+}
+
 int main() {
     namespace fs = std::filesystem;
     using kf2::app::SessionGuard;
@@ -28,6 +101,7 @@ int main() {
     const fs::path root{KF2_TEST_ROOT};
     fs::remove_all(root);
     fs::create_directories(root);
+    CHECK(test_serialization_failure(root) == EXIT_SUCCESS);
 
     const auto marker = root / L"session.marker";
 
