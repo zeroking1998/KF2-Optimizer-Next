@@ -156,6 +156,12 @@ next poll detects replacement. Existing catch-up/freshness limits remain intact.
 
 ### Adaptive Present observations
 
+DXGI acknowledges known loss through the allocation-free `record_loss` path
+before admitting its completed sample. Rejected source state retains parser
+debt; a later frame-allocation failure cannot replay already committed loss.
+Loss-free presents still take only the existing ingestion lock. Counted loss
+denotes observed event/pair/callback markers, not inferred missing Presents.
+
 The live worker computes its overlapping 1/3/5/10-second metrics from one
 interval array and one sort. Window membership excludes each boundary-crossing
 pair; chronological averages and ascending slow-tail sums preserve the generic

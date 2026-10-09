@@ -6,6 +6,7 @@
 #include <cstring>
 #include <iostream>
 #include <limits>
+#include <new>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -14,6 +15,22 @@
 
 #include "kf2/platform/windows/dxgi_frame_timing_session.hpp"
 #include "../support/process_inspection_denial.hpp"
+
+namespace {
+thread_local bool fail_next_allocation{};
+thread_local unsigned int allocation_failures{};
+}
+
+void* operator new(std::size_t size) {
+    if (std::exchange(fail_next_allocation, false)) {
+        ++allocation_failures;
+        throw std::bad_alloc{};
+    }
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
@@ -471,6 +488,72 @@ int test_callback_loss() {
     return EXIT_SUCCESS;
 }
 
+int test_partial_loss_commit() {
+    PresentSource source{kIdentity, 120};
+    CHECK(source.start().has_value());
+    auto parser = DxgiFrameTimingSession::test_parser(kIdentity, source, kFrequency);
+    parser->test_events_lost(3);
+    parser->test_present_event(true, 1, 1'000, 7);
+    parser->test_present_event(true, 2, 31'001, 7);
+    CHECK(parser->test_pending_count() == 1);
+    allocation_failures = 0;
+    fail_next_allocation = true;
+    parser->test_present_event(false, 2, 31'002);
+    CHECK(allocation_failures == 1 && !fail_next_allocation);
+    CHECK(parser->test_pending_count() == 0);
+    parser->test_present_event(true, 3, 31'020, 7);
+    parser->test_present_event(false, 3, 31'021);
+    parser->test_present_event(true, 3, 31'036, 7);
+    parser->test_present_event(false, 3, 31'037);
+    const auto measured = source.drain(31'037'000'000ULL, 1'000'000'000ULL);
+    CHECK(measured.fps && *measured.fps == 62.5);
+    // Three observed OS losses, one expired pair, one callback failure;
+    // this is not an estimate of the number of missing Presents.
+    CHECK(measured.loss_count == 5);
+    CHECK(measured.quality == SampleQuality::degraded);
+    return EXIT_SUCCESS;
+}
+
+int test_loss_acknowledgment() {
+    PresentSource source{kIdentity, 120};
+    CHECK(!source.record_loss(kIdentity, 1'000'000'000ULL, 3));
+    CHECK(source.start().has_value());
+    CHECK(!source.record_loss({999, 2}, 1'000'000'000ULL, 3));
+    CHECK(!source.record_loss(kIdentity, 1'000'000'000ULL, 0));
+    CHECK(source.ingest({kIdentity, 1'000'000'000ULL, 1, true, 0, 7}));
+    CHECK(source.ingest({kIdentity, 1'016'000'000ULL, 1, true, 0, 7}));
+    CHECK(source.drain(1'017'000'000ULL, 1'000'000'000ULL).loss_count == 0);
+    allocation_failures = 0;
+    fail_next_allocation = true;
+    const auto committed = source.record_loss(kIdentity, 1'017'000'000ULL, 4);
+    const auto no_allocation = fail_next_allocation;
+    fail_next_allocation = false;
+    CHECK(committed && no_allocation && allocation_failures == 0);
+    // Loss acknowledgment is independent of duplicate sample rejection.
+    CHECK(!source.ingest({kIdentity, 1'016'000'000ULL, 1, true, 0, 7}));
+    const auto marked = source.drain(1'017'000'000ULL, 1'000'000'000ULL);
+    CHECK(marked.loss_count == 4 && marked.quality == SampleQuality::degraded);
+    CHECK(!source.ingest({kIdentity, 1'032'000'000ULL, 0, true, 0, 7}));
+    CHECK(!source.record_loss(kIdentity, 1'032'000'000ULL, 3));
+
+    // A rejected loss transfer retains parser debt until the source is ready.
+    CHECK(source.start().has_value());
+    CHECK(source.stop().has_value());
+    auto parser = DxgiFrameTimingSession::test_parser(kIdentity, source, kFrequency);
+    parser->test_events_lost(3);
+    parser->test_present_event(true, 1, 1'000, 7);
+    parser->test_present_event(false, 1, 1'001);
+    CHECK(source.start().has_value());
+    parser->test_present_event(true, 1, 1'020, 7);
+    parser->test_present_event(false, 1, 1'021);
+    parser->test_present_event(true, 1, 1'036, 7);
+    parser->test_present_event(false, 1, 1'037);
+    const auto ready = source.drain(1'037'000'000ULL, 1'000'000'000ULL);
+    CHECK(ready.fps && *ready.fps == 62.5);
+    CHECK(ready.loss_count == 3 && ready.quality == SampleQuality::degraded);
+    return EXIT_SUCCESS;
+}
+
 int test_active_pairing() {
     PresentSource source{kIdentity, 120};
     CHECK(source.start().has_value());
@@ -511,6 +594,8 @@ int main(int argc, char** argv) {
         if (scenario == "--pending-loss") return test_event_loss();
         if (scenario == "--filtered-starts") return test_filtered_starts();
         if (scenario == "--callback-loss") return test_callback_loss();
+        if (scenario == "--partial-loss-commit") return test_partial_loss_commit();
+        if (scenario == "--loss-acknowledgment") return test_loss_acknowledgment();
         return EXIT_FAILURE;
     }
     CHECK(test_exact_clock_conversion() == EXIT_SUCCESS);
@@ -522,6 +607,8 @@ int main(int argc, char** argv) {
     CHECK(test_expiry() == EXIT_SUCCESS);
     CHECK(test_event_loss() == EXIT_SUCCESS);
     CHECK(test_callback_loss() == EXIT_SUCCESS);
+    CHECK(test_partial_loss_commit() == EXIT_SUCCESS);
+    CHECK(test_loss_acknowledgment() == EXIT_SUCCESS);
     CHECK(test_active_pairing() == EXIT_SUCCESS);
     using namespace kf2::telemetry;
     using kf2::platform::windows::DxgiFrameTimingSession;

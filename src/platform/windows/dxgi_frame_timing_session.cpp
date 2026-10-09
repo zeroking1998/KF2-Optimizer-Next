@@ -328,11 +328,16 @@ struct DxgiFrameTimingSession::Impl {
 
         const auto new_loss = total_loss >= reported_events_lost
             ? total_loss - reported_events_lost : total_loss;
+        if ((new_loss != 0 || unreported_pending_loss != 0) &&
+            !sink->record_loss(identity, timestamp_ns,
+                               new_loss + unreported_pending_loss)) {
+            return;
+        }
         reported_events_lost = total_loss;
+        unreported_pending_loss = 0;
         static_cast<void>(sink->ingest(
             {identity, timestamp_ns,
-             1, true, new_loss + unreported_pending_loss, present.swap_chain}));
-        unreported_pending_loss = 0;
+             1, true, 0, present.swap_chain}));
     }
 
     void process_trace() {

@@ -175,6 +175,33 @@ void PresentSource::reset_statistics() {
     ++diagnostic_generation_; last_stream_.reset();
     invalidate_drain_locked();
 }
+bool PresentSource::record_loss(SampleIdentity identity,
+                               std::uint64_t timestamp_ns, std::uint64_t count) {
+    std::scoped_lock lock{mutex_};
+    if (!running_ || schema_failure_ || identity != identity_ || count == 0)
+        return false;
+    record_loss_locked(timestamp_ns, count, false);
+    return true;
+}
+
+void PresentSource::record_loss_locked(std::uint64_t timestamp_ns,
+                                      std::uint64_t count, bool incomplete) {
+    constexpr auto maximum_loss = std::numeric_limits<std::uint64_t>::max();
+    reported_loss_ += std::min(count, maximum_loss - reported_loss_);
+    if (incomplete && reported_loss_ < maximum_loss) ++reported_loss_;
+    loss_boundary_ns_ = std::max(loss_boundary_ns_, timestamp_ns);
+    // A late or untimed loss must not certify already admitted data.
+    // This bounded stream walk runs only on loss, never on clean presents.
+    ++diagnostic_generation_;
+    for (auto& [stream_id, stream] : streams_) {
+        const auto& presents = stream.presents;
+        if (!presents.empty()) loss_boundary_ns_ = std::max(
+            loss_boundary_ns_, presents.back().monotonic_ns);
+        stream.diagnostic_generation = diagnostic_generation_;
+    }
+    invalidate_drain_locked();
+}
+
 bool PresentSource::ingest(const PresentEvent& event) {
     std::scoped_lock lock{mutex_};
     if (!running_ || event.identity != identity_) return false;
@@ -185,20 +212,7 @@ bool PresentSource::ingest(const PresentEvent& event) {
         return false;
     }
     if (!event.completed || event.events_lost != 0) {
-        constexpr auto maximum_loss = std::numeric_limits<std::uint64_t>::max();
-        reported_loss_ += std::min(event.events_lost, maximum_loss - reported_loss_);
-        if (!event.completed && reported_loss_ < maximum_loss) ++reported_loss_;
-        loss_boundary_ns_ = std::max(loss_boundary_ns_, event.monotonic_ns);
-        // A late or untimed loss must not certify already admitted data.
-        // This bounded stream walk runs only on loss, never on clean presents.
-        ++diagnostic_generation_;
-        for (auto& [stream_id, stream] : streams_) {
-            const auto& presents = stream.presents;
-            if (!presents.empty()) loss_boundary_ns_ = std::max(
-                loss_boundary_ns_, presents.back().monotonic_ns);
-            stream.diagnostic_generation = diagnostic_generation_;
-        }
-        invalidate_drain_locked();
+        record_loss_locked(event.monotonic_ns, event.events_lost, !event.completed);
         if (!event.completed) return false;
     }
     constexpr std::size_t kMaximumStreams = 16;

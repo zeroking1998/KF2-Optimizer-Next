@@ -169,6 +169,8 @@ are visible immediately.
 
 - Preserve known DXGI callback failures across later buffer callbacks, so the
   next frame window remains marked degraded instead of hiding capture loss.
+- Commit DXGI capture-loss metadata before allocating frame storage, so an
+  allocation failure cannot submit already recorded pending loss a second time.
 
 - Correct developer overlay cadence checks to allow legitimate elapsed-time
   redraws without changing rendering or its idle-rate limit.
