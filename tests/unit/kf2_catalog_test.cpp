@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <new>
 #include <set>
 
@@ -74,12 +75,17 @@ int main() {
             high = setting.maximum;
         }
         for (const auto& value : {low, high}) {
+            CHECK(is_valid_setting_value(setting, value));
             const auto serialized = serialize_setting_value(setting, value);
             CHECK(serialized.has_value());
             const auto parsed = parse_setting_value(setting, *serialized);
             CHECK(parsed.has_value());
             CHECK(*parsed == value);
         }
+        const SettingValue wrong_type = setting.type == SettingType::boolean
+            ? SettingValue{0} : SettingValue{false};
+        CHECK(!is_valid_setting_value(setting, wrong_type));
+        CHECK(!serialize_setting_value(setting, wrong_type));
     }
     const auto* anisotropy = find_setting(SettingId::max_anisotropy);
     CHECK(anisotropy != nullptr);
@@ -89,6 +95,7 @@ int main() {
         CHECK(parse_setting_value(*anisotropy, std::to_wstring(value)).has_value());
     }
     for (const int value : {0, 3, 6, 11, 17}) {
+        CHECK(!is_valid_setting_value(*anisotropy, value));
         CHECK(!serialize_setting_value(*anisotropy, value).has_value());
         CHECK(!parse_setting_value(*anisotropy, std::to_wstring(value)).has_value());
     }
@@ -180,9 +187,22 @@ int main() {
     CHECK(!parse_setting_value(*shadow_resolution, L"768").has_value());
     const auto* lifetime = find_setting(SettingId::gore_lifetime_multiplier);
     CHECK(lifetime != nullptr);
+    CHECK(!is_valid_setting_value(
+        *lifetime, std::numeric_limits<double>::quiet_NaN()));
+    CHECK(!is_valid_setting_value(
+        *lifetime, std::numeric_limits<double>::infinity()));
     const SettingValue fractional_lifetime{1.234567};
     CHECK(serialize_setting_value(*lifetime, fractional_lifetime) == L"1.234567");
+    // In-memory stepping must not allocate a discarded formatting buffer.
+    real_buffer_failed = false;
+    fail_real_buffer = true;
+    const auto staged_lifetime = step_setting_value(*lifetime, 1.0, 1);
+    fail_real_buffer = false;
+    CHECK(staged_lifetime.has_value());
+    CHECK(!real_buffer_failed);
+    CHECK(std::abs(std::get<double>(*staged_lifetime) - 1.05) < 0.000001);
     // MSVC's wide-stream buffer allocation fails once; ordinary retry stays usable.
+    real_buffer_failed = false;
     fail_real_buffer = true;
     const auto incomplete = serialize_setting_value(*lifetime, fractional_lifetime);
     fail_real_buffer = false;

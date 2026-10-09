@@ -88,6 +88,8 @@ are visible immediately.
   graphics or Adaptive state; diagnostic timing and displayed text are unchanged.
 - Escape shared JSON string contents directly into the returned owned string,
   avoiding stream/buffer-copy work while preserving exact serialized bytes.
+- Validate typed settings without formatting discarded text; actual INI writes
+  still require complete, checked serialization.
 - Remove the unused internal Adaptive profile recommendation; user settings,
   real quality budgets, decisions and restoration remain unchanged.
 - Borrow constant telemetry limit-explanation labels instead of allocating

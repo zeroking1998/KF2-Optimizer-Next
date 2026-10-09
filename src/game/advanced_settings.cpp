@@ -145,7 +145,7 @@ bool set_advanced_slider_value(
 #ifdef KF2_ADVANCED_SETTINGS_TESTING
     if (!mutation_helper_available()) return false;
 #endif
-    if (!config::serialize_setting_value(*definition, candidate)) {
+    if (!config::is_valid_setting_value(*definition, candidate)) {
         return false;
     }
     settings.values[selected] = std::move(candidate);

@@ -636,34 +636,39 @@ std::optional<SettingValue> parse_setting_value(
     }
 }
 
-std::optional<std::wstring> serialize_setting_value(
-    const SettingDefinition& definition, const SettingValue& value) {
+bool is_valid_setting_value(
+    const SettingDefinition& definition, const SettingValue& value) noexcept {
     if (definition.type == SettingType::boolean) {
-        const auto* boolean = std::get_if<bool>(&value);
-        return boolean ? std::optional<std::wstring>{*boolean ? L"True" : L"False"}
-                       : std::nullopt;
+        return std::holds_alternative<bool>(value);
     }
     if (definition.type == SettingType::real) {
         const auto* real = std::get_if<double>(&value);
-        if (!real || !std::isfinite(*real) || *real < definition.minimum ||
-            *real > definition.maximum) {
-            return std::nullopt;
-        }
-        return serialize_real(*real);
+        return real && std::isfinite(*real) &&
+            !(*real < definition.minimum || *real > definition.maximum);
     }
     const auto* integer = std::get_if<int>(&value);
-    if (!integer || *integer < definition.minimum ||
-        *integer > definition.maximum || !allowed_integer(definition, *integer)) {
-        return std::nullopt;
+    return integer &&
+        !(*integer < definition.minimum || *integer > definition.maximum) &&
+        allowed_integer(definition, *integer);
+}
+
+std::optional<std::wstring> serialize_setting_value(
+    const SettingDefinition& definition, const SettingValue& value) {
+    if (!is_valid_setting_value(definition, value)) return std::nullopt;
+    if (definition.type == SettingType::boolean) {
+        return std::get<bool>(value) ? L"True" : L"False";
     }
-    return std::to_wstring(*integer);
+    if (definition.type == SettingType::real) {
+        return serialize_real(std::get<double>(value));
+    }
+    return std::to_wstring(std::get<int>(value));
 }
 
 std::optional<SettingValue> step_setting_value(
     const SettingDefinition& definition, const SettingValue& value,
     int direction) {
     if (direction != -1 && direction != 1) return std::nullopt;
-    if (!serialize_setting_value(definition, value)) return std::nullopt;
+    if (!is_valid_setting_value(definition, value)) return std::nullopt;
     if (definition.type == SettingType::boolean) {
         return SettingValue{!std::get<bool>(value)};
     }
@@ -697,7 +702,7 @@ std::optional<SettingValue> step_setting_value(
             scale,
         definition.minimum, definition.maximum);
     SettingValue result{next};
-    return serialize_setting_value(definition, result)
+    return is_valid_setting_value(definition, result)
         ? std::optional<SettingValue>{result} : std::nullopt;
 }
 
