@@ -338,6 +338,7 @@ struct DxgiFrameTimingSession::Impl {
     void process_trace() {
         TRACEHANDLE handle = trace_handle;
         static_cast<void>(ProcessTrace(&handle, 1, nullptr, nullptr));
+        running.store(false, std::memory_order_release);
     }
 
     void flush_trace() {
@@ -463,6 +464,7 @@ std::unique_ptr<DxgiFrameTimingSession> DxgiFrameTimingSession::test_parser(
     impl->identity = identity;
     impl->sink = &sink;
     impl->qpc_frequency = qpc_frequency;
+    impl->running.store(true, std::memory_order_release);
     impl->nanoseconds_per_tick = qpc_frequency != 0 &&
         1'000'000'000ULL % qpc_frequency == 0
         ? 1'000'000'000ULL / qpc_frequency : 0;
@@ -580,6 +582,10 @@ DxgiFrameTimingSession::start(telemetry::SampleIdentity identity,
 Result<bool> DxgiFrameTimingSession::stop() {
     if (implementation_) implementation_->shutdown();
     return Result<bool>::success(true);
+}
+
+bool DxgiFrameTimingSession::is_running() const noexcept {
+    return implementation_->running.load(std::memory_order_acquire);
 }
 
 }  // namespace kf2::platform::windows

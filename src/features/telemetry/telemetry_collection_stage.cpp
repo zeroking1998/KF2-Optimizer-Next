@@ -75,10 +75,12 @@ PresentDrainResult drain_present_stage(app::UiRuntime& runtime,
         ::kf2::telemetry::FrameMetrics{});
     // A stale Launch.log can make the startup gate look ready before KF2's
     // new DX11 swap chain begins presenting. Failed starts and completely
-    // silent sessions share one bounded retry; healthy or merely stale
-    // streams are never churned.
+    // silent startups and terminated consumers share the bounded retry;
+    // healthy or merely stale streams are never churned.
     if (should_reconnect_silent_present({
             .scene_ready = runtime.overlay_scene_ready,
+            .session_terminated = runtime.present_session &&
+                !runtime.present_session->is_running(),
             .fps = frames.fps,
             .reason = frames.reason,
             .session_started_ns = runtime.present_session_started_ns,
@@ -100,7 +102,7 @@ PresentDrainResult drain_present_stage(app::UiRuntime& runtime,
                 L"Reconnecting KF2 frame telemetry";
             runtime.events->append(
                 {0, diagnostics::Severity::info, "DXGI_FRAME_TIMING_RECONNECTED",
-                 L"KF2 frame telemetry was reconnected after a failed start or missing startup samples",
+                 L"KF2 frame telemetry was reconnected after a failed start, missing startup samples or an ended ETW session",
                  L"telemetry"});
         } else {
             runtime.telemetry_failure = L"DXGI frame timing reconnect failed: " +
