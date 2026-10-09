@@ -42,13 +42,14 @@ public:
             requested - context_since_ < window_ns)
             pending_->invalid = "unstable_baseline_context";
         for (const auto& entry : scene_history_) {
-            if (requested >= window_ns && entry.first < requested - window_ns) continue;
+            if (requested >= window_ns &&
+                entry.timestamp_ns < requested - window_ns) continue;
             const auto similar = [](auto a, auto b) {
                 return a && b && std::abs(static_cast<double>(*a) - *b) <=
                     std::max(2.0, static_cast<double>(*a) * 0.20);
             };
-            if (!similar(pending_->context.living, entry.second.living) ||
-                !similar(pending_->context.corpses, entry.second.corpses))
+            if (!similar(pending_->context.living, entry.living) ||
+                !similar(pending_->context.corpses, entry.corpses))
                 pending_->invalid = "unstable_baseline_scene";
         }
     }
@@ -104,9 +105,11 @@ public:
         const bool sampling_gap = last_observed_ &&
             (now < last_observed_ || now - last_observed_ > 500'000'000ULL);
         last_observed_ = now;
-        scene_history_.emplace_back(now, current);
+        scene_history_.push_back(
+            {now, current.living, current.corpses});
         while (scene_history_.size() > 1 && now >= window_ns &&
-               scene_history_[1].first < now - window_ns) scene_history_.pop_front();
+               scene_history_[1].timestamp_ns < now - window_ns)
+            scene_history_.pop_front();
         if (scene_history_.size() > 256) {
             scene_history_.pop_front();
             context_since_ = now; // Do not accept a truncated baseline.
@@ -165,6 +168,11 @@ public:
         return report;
     }
 private:
+    struct SceneSample {
+        std::uint64_t timestamp_ns{0};
+        std::optional<int> living;
+        std::optional<int> corpses;
+    };
     struct Pending {
         Report report;
         Context context;
@@ -173,7 +181,7 @@ private:
     };
     std::optional<Pending> pending_;
     Context baseline_context_;
-    std::deque<std::pair<std::uint64_t, Context>> scene_history_;
+    std::deque<SceneSample> scene_history_;
     std::uint64_t context_since_{0}, last_observed_{0};
 };
 } // namespace kf2::optimizer
