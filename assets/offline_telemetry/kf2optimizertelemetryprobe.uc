@@ -21,6 +21,9 @@ const AdaptiveCorpseControlUrgentInterval=0.125;
 const AdaptiveCorpseControlSliceInterval=0.05;
 const AdaptiveCorpseControlPhaseCount=8;
 const AdaptiveCorpseScanBudget=64;
+// Reuse the existing settle/action-table ceiling for tracked actor history.
+// Saturation skips new work; existing originals are never discarded for space.
+const MaxTrackedActorEntries=8192;
 // A 2000-entry pool needs 32 bounded category visits. Even the slowest
 // supported split/burst schedule revisits an entry within 40 seconds.
 const AdaptiveCorpseSettleTrackingTimeout=60.0;
@@ -1817,6 +1820,11 @@ function bool ApplyLivingEnemyMinimumVisuals()
         TargetAnimRate = 6;
         if (EntryIndex < 0)
         {
+            if (FixedMinimumLivingVisualZeds.Length >= MaxTrackedActorEntries)
+            {
+                ScanPawn = FixedMinimumLivingScanPawn;
+                continue;
+            }
             EntryIndex = FixedMinimumLivingVisualZeds.Length;
             FixedMinimumLivingVisualZeds.AddItem(Candidate);
             FixedMinimumLivingAppliedMinLods.AddItem(TargetMinLod);
@@ -2158,7 +2166,7 @@ function bool IsAdaptiveCorpseSettled(
     CurrentRealTime = WorldInfo.RealTimeSeconds;
     if (EntryIndex == -1)
     {
-        if (AdaptiveBaselineSettleEntries.Length >= 8192)
+        if (AdaptiveBaselineSettleEntries.Length >= MaxTrackedActorEntries)
         {
             RejectReason = "tracking_full";
             return false;
@@ -3744,6 +3752,11 @@ function bool FreezeOnePressureEligibleCorpse(
     {
         return false;
     }
+    if (AdaptiveFrozenCorpses.Length + AdaptiveRetiredFrozenCorpses.Length >=
+        MaxTrackedActorEntries)
+    {
+        return false;
+    }
     CorpseId = GetAdaptiveCorpseActionId(Candidate);
     DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
     // Reserve table capacity before touching PhysX. Registration is then
@@ -4315,6 +4328,11 @@ function bool SleepOneDistantMonsterCorpse(
     {
         return false;
     }
+    if (AdaptiveDistanceSleptCorpses.Length +
+        AdaptiveRetiredDistanceSleptCorpses.Length >= MaxTrackedActorEntries)
+    {
+        return false;
+    }
     if (!IsAdaptiveCorpseSettled(Candidate, LinearSpeed, AngularSpeed,
             PositionChange, StableMilliseconds, RejectReason))
     {
@@ -4499,6 +4517,18 @@ function bool ApplyOneFixedMinimumCorpseLod(KFGoreManager GoreManager)
     EntryIndex = FindFixedMinimumCorpseLodEntry(Candidate);
     if (EntryIndex < 0)
     {
+        if (FixedMinimumCorpseLodCorpses.Length >= MaxTrackedActorEntries)
+        {
+            // Fixed LOD is permanent: this is readback history, not originals
+            // needed by Restore. Retire one oldest receipt, not the new action.
+            RemoveFixedMinimumCorpseLodEntry(0);
+            FixedMinimumCorpseLodPruneCursor =
+                Max(0, FixedMinimumCorpseLodPruneCursor - 1);
+            if (FixedMinimumCorpseLodCorpses.Length >= MaxTrackedActorEntries)
+            {
+                return false;
+            }
+        }
         ApplyReason = "new_actor";
         EntryIndex = FixedMinimumCorpseLodCorpses.Length;
         FixedMinimumCorpseLodCorpses.AddItem(Candidate);

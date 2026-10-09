@@ -343,6 +343,11 @@ function bool FreezeOneOnlineCorpse()
         {
             continue;
         }
+        if (FrozenCorpses.Length >=
+            class'KF2OptimizerTelemetryProbe'.const.MaxTrackedActorEntries)
+        {
+            continue;
+        }
         Original.Corpse = Candidate;
         Original.CorpseId = GetOnlineCorpseId(Candidate);
         Original.bOriginalTickDisabled = Candidate.bTickIsDisabled;
