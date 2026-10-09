@@ -162,6 +162,11 @@ Rejected PID filtering (`ERROR_INVALID_PARAMETER` or `ERROR_NOT_SUPPORTED`)
 gets one startup-only event-ID-only fallback; all other failures remain errors.
 No extra polling, worker, cache or per-frame allocation is introduced.
 
+Completed Present pairs retain at most one unlinked map node for reuse. Every
+new Start overwrites its thread ID, timestamp and swapchain; retained storage
+is never a pending pair. Active-pair capacity, expiry, invalidation and loss
+checks stay unchanged. Overlapping bursts and hash growth can still allocate.
+
 The existing 100-ms DXGI flush uses a reusable, adequately sized properties
 buffer and publishes loss statistics only on successful API responses.
 `EventsLost` deltas use independent 32-bit wrap semantics; changed

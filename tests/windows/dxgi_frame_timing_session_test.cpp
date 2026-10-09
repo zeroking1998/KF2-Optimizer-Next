@@ -21,9 +21,12 @@
 namespace {
 thread_local bool fail_next_allocation{};
 thread_local unsigned int allocation_failures{};
+thread_local bool count_start_allocations{};
+thread_local unsigned int start_allocations{};
 }
 
 void* operator new(std::size_t size) {
+    if (count_start_allocations) ++start_allocations;
     if (std::exchange(fail_next_allocation, false)) {
         ++allocation_failures;
         throw std::bad_alloc{};
@@ -363,6 +366,43 @@ int test_real_orphan_startup() {
     CHECK(retry.value()->stop().has_value());
     CHECK(!retry.value()->is_running());
     CHECK(legacy.query() == ERROR_SUCCESS);
+    return EXIT_SUCCESS;
+}
+
+int test_pending_node_reuse() {
+    for (unsigned int lane = 0; lane < 3; ++lane) {
+        PresentSource source{kIdentity, 400};
+        CHECK(source.start().has_value());
+        auto parser = DxgiFrameTimingSession::test_parser(kIdentity, source, kFrequency);
+        parser->test_present_event(true, 1, 1'000, 7);
+        parser->test_present_event(false, 1, 1'001);
+        CHECK(parser->test_pending_count() == 0);
+        start_allocations = 0;
+        std::uint32_t last_thread{};
+        std::uint64_t last_at{};
+        for (unsigned int index = 0; index < 300; ++index) {
+            last_thread = lane == 0 ? 1U : lane == 1 ? index % 8 + 1 : index + 1;
+            last_at = 1'016ULL + index * 16ULL;
+            count_start_allocations = true;
+            parser->test_present_event(true, last_thread, last_at, 7);
+            count_start_allocations = false;
+            CHECK(parser->test_pending_count() == 1);
+            parser->test_present_event(false, last_thread, last_at + 1);
+            CHECK(parser->test_pending_count() == 0);
+        }
+        // A retained allocation is not a pending Present, even for reused IDs.
+        parser->test_present_event(false, last_thread, last_at + 2);
+        CHECK(source.measure_window(1'000'000'000ULL,
+            (last_at + 2) * 1'000'000ULL).count == 301);
+        const auto metrics = source.drain(
+            (last_at + 2) * 1'000'000ULL, 1'000'000'000ULL);
+        CHECK(metrics.fps && *metrics.fps == 62.5);
+        CHECK(metrics.quality == SampleQuality::good && metrics.loss_count == 0);
+        std::cout << "node-reuse lane=" << lane
+                  << " steady_starts=300 ordinary_start_allocations="
+                  << start_allocations << '\n';
+        CHECK(start_allocations == 0);
+    }
     return EXIT_SUCCESS;
 }
 
@@ -737,6 +777,7 @@ int main(int argc, char** argv) {
         if (scenario == "--pid-reuse") return test_stale_cleanup_pid_reuse();
         if (scenario == "--orphan-startup") return test_real_orphan_startup();
         if (scenario == "--pending-capacity") return test_capacity();
+        if (scenario == "--pending-node-reuse") return test_pending_node_reuse();
         if (scenario == "--pending-expiry") return test_expiry();
         if (scenario == "--pending-loss") return test_event_loss();
         if (scenario == "--filtered-starts") return test_filtered_starts();
@@ -753,6 +794,7 @@ int main(int argc, char** argv) {
     CHECK(test_stale_cleanup_pid_reuse() == EXIT_SUCCESS);
     CHECK(test_real_orphan_startup() == EXIT_SUCCESS);
     CHECK(test_capacity() == EXIT_SUCCESS);
+    CHECK(test_pending_node_reuse() == EXIT_SUCCESS);
     CHECK(test_filtered_starts() == EXIT_SUCCESS);
     CHECK(test_expiry() == EXIT_SUCCESS);
     CHECK(test_event_loss() == EXIT_SUCCESS);

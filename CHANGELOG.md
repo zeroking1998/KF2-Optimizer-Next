@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Reuse one completed DXGI Present pairing allocation instead of allocating
+  again for each sequential frame, preserving pending-pair bounds and loss checks.
+
 - Filter DXGI Present events by the bound game process before callback delivery,
   preserving the original event-only startup path if PID scoping is rejected.
   Existing process identity, loss handling and frame measurements remain active.
