@@ -4357,7 +4357,6 @@ int main() {
     for (const auto* old_manager_state : {
              "AdaptiveBaselineSettleEntries.Length = 0",
              "FixedMinimumCorpseLodCorpses.Length = 0",
-             "FixedMinimumLivingVisualZeds.Length = 0",
              "AdaptiveDistanceSleepTransitions.Length = 0",
              "AdaptiveCorpsePhysicsActionIds.Length = 0",
              "FixedMinimumLivingScanPawn = None"}) {
@@ -4731,6 +4730,84 @@ int main() {
     CHECK(living_apply_end != std::string::npos);
     const auto living_apply_body = telemetry_source.substr(
         living_apply_start, living_apply_end - living_apply_start);
+    // Original animation flags are actor-owned, not GoreManager-owned. Every
+    // retirement path must verify restore before removing their only copy.
+    const auto living_remove_start = telemetry_source.find(
+        "RemoveFixedMinimumLivingVisualEntry(");
+    const auto living_remove_end = telemetry_source.find(
+        "function bool RestoreLivingOffscreenAnimation(", living_remove_start);
+    CHECK(living_remove_start != std::string::npos);
+    CHECK(living_remove_end != std::string::npos);
+    const auto living_remove_body = telemetry_source.substr(
+        living_remove_start, living_remove_end - living_remove_start);
+    const auto restore_before_remove = living_remove_body.find(
+        "!RestoreLivingOffscreenAnimation(Index, Reason)");
+    const auto remove_original = living_remove_body.find(
+        "FixedMinimumLivingOriginalTickAnimOffscreen.Remove(Index, 1)");
+    CHECK(restore_before_remove != std::string::npos);
+    CHECK(remove_original != std::string::npos);
+    CHECK(restore_before_remove < remove_original);
+    CHECK(living_remove_body.find("Candidate != None && !Candidate.bDeleteMe") <
+          restore_before_remove);
+    CHECK(living_remove_body.find("FixedMinimumLivingOffscreenAnimReduced[Index]") <
+          restore_before_remove);
+    CHECK(living_remove_body.find("Candidate.Mesh == None") == std::string::npos);
+    CHECK(living_remove_body.find("return false;", restore_before_remove) <
+          remove_original);
+    CHECK(manager_retire_body.find("FixedMinimumLivingVisualZeds.Length = 0") ==
+          std::string::npos);
+    CHECK(manager_retire_body.find(
+        "FixedMinimumLivingOriginalTickAnimOffscreen.Length = 0") ==
+          std::string::npos);
+    CHECK(manager_retire_body.find(
+        "FixedMinimumLivingOriginalUpdateSkelOffscreen.Length = 0") ==
+          std::string::npos);
+    CHECK(manager_retire_body.find(
+        "FixedMinimumLivingOffscreenAnimReduced.Length = 0") ==
+          std::string::npos);
+    const auto living_prune_start = telemetry_source.find(
+        "function PruneFixedMinimumLivingVisualEntries()");
+    const auto living_prune_end = telemetry_source.find(
+        "function bool LivingOffscreenAnimationRequiresNativeTick(",
+        living_prune_start);
+    CHECK(living_prune_start != std::string::npos);
+    CHECK(living_prune_end != std::string::npos);
+    const auto living_prune_body = telemetry_source.substr(
+        living_prune_start, living_prune_end - living_prune_start);
+    CHECK(living_prune_body.find(
+        "bRemoved = RemoveFixedMinimumLivingVisualEntry(Index, \"not_alive\")") !=
+          std::string::npos);
+    CHECK(living_prune_body.find(
+        "bRemoved = RemoveFixedMinimumLivingVisualEntry(Index, \"native_visual_state\")") !=
+          std::string::npos);
+    const auto prune_advance = living_prune_body.find("if (!bRemoved)");
+    CHECK(prune_advance != std::string::npos);
+    CHECK(living_prune_body.find(
+        "(Index + 1) % FixedMinimumLivingVisualZeds.Length", prune_advance) !=
+          std::string::npos);
+    CHECK(living_prune_body.find(
+        "ScanBudget = Min(AdaptiveCorpseScanBudget, FixedMinimumLivingVisualZeds.Length)") !=
+          std::string::npos);
+    CHECK(living_prune_body.find("Scanned < ScanBudget") !=
+          std::string::npos);
+    CHECK(living_prune_body.find(
+        "Index = FixedMinimumLivingPruneCursor % FixedMinimumLivingVisualZeds.Length") !=
+          std::string::npos);
+    CHECK(living_apply_body.find(
+        "RemoveFixedMinimumLivingVisualEntry(EntryIndex, \"visual_readback\")") !=
+          std::string::npos);
+    for (const auto* reason : {"visible_or_gameplay", "native_override"}) {
+        const auto retry = living_apply_body.find(
+            "RestoreLivingOffscreenAnimation(EntryIndex, \"" +
+            std::string{reason} + "\")");
+        const auto skip_failed_restore = living_apply_body.find(
+            "ScanPawn = FixedMinimumLivingScanPawn;\n            continue;",
+            retry);
+        CHECK(retry != std::string::npos);
+        CHECK(skip_failed_restore != std::string::npos);
+        CHECK(skip_failed_restore < living_apply_body.find(
+            "bVisualChanged =", retry));
+    }
     CHECK(living_apply_body.find("WorldInfo.AllPawns") == std::string::npos);
     CHECK(living_apply_body.find(
         "FixedMinimumLivingScanPawn = ScanPawn.NextPawn") !=
