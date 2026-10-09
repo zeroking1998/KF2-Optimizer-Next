@@ -39,6 +39,9 @@ percentiles and stutters count only confirmed gameplay, independently of
 Adaptive. Escape, open trader menus and loading reset that history; closing
 the trader menu during trader time resumes it. Missing history shows `—`.
 The boundary is the observed context receipt, not the exact keypress.
+Offline menu observation runs before the provider-maintenance cadence, including
+paused ticks. Both providers flush the existing local log only on a UI-context
+transition; ordinary telemetry logging and its buffering remain unchanged.
 
 ## 3. Performance pressure
 

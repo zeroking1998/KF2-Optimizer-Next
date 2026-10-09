@@ -631,7 +631,9 @@ are visible immediately.
   same map are prepared again without retaining the previous world.
 - Exclude confirmed loading, Escape and open trader menus from gameplay
   averages, 1% lows and percentiles. Live FPS remains visible; history starts
-  fresh on gameplay return, including when Adaptive is off.
+  fresh on gameplay return, including when Adaptive is off. Observe offline
+  menu changes independently of paused maintenance and flush context receipts
+  only on transitions so quiet online matches do not wait for later log writes.
 - Preserved one native graphics baseline across consecutive maps so recovery
   never treats a previously reduced value as the user's new 100% setting.
 - Restored the exact server- or mod-provided online corpse limit when Adaptive
