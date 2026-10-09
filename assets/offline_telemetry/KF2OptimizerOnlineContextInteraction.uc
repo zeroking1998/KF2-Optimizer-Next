@@ -35,7 +35,9 @@ var string OnlineMainMenuRestoreRetryStatus;
 var bool bOnlineMainMenuRestoreComplete;
 var bool bOnlineCorpseCapabilityReported;
 var bool bOnlineCorpseUnavailableReported;
-var bool bOnlineCorpsePoolObserved;
+var int LastReportedOnlineCorpsePool;
+var int LastReportedOnlineCorpseMaximum;
+var float OnlineCorpseLastPoolReportRealTime;
 var bool bOnlineCorpseSleepArmed;
 var bool bOnlineCorpseSleepApplied;
 var int OnlineCorpseSleepScanCursor;
@@ -726,6 +728,8 @@ function EnsureOnlineGraphicsListener(
 function ReportOnlineCorpseCapability(WorldInfo CurrentWorld)
 {
     local KFGoreManager GoreManager;
+    local int PoolLength, Maximum;
+    local float Now, SinceLastReport;
 
     if (CurrentWorld == None)
     {
@@ -742,6 +746,9 @@ function ReportOnlineCorpseCapability(WorldInfo CurrentWorld)
         }
         return;
     }
+    PoolLength = GoreManager.CorpsePool.Length;
+    Maximum = GoreManager.MaxDeadBodies;
+    Now = CurrentWorld.RealTimeSeconds;
     if (bOnlineCorpseUnavailableReported)
     {
         bOnlineCorpseUnavailableReported = false;
@@ -751,16 +758,26 @@ function ReportOnlineCorpseCapability(WorldInfo CurrentWorld)
     {
         bOnlineCorpseCapabilityReported = true;
         `log("KF2OPT_ONLINE_CORPSE state=available pool="$
-             GoreManager.CorpsePool.Length$" maximum="$GoreManager.MaxDeadBodies$
+             PoolLength$" maximum="$Maximum$
              " local_only=true readback=verified");
+        LastReportedOnlineCorpsePool = PoolLength;
+        LastReportedOnlineCorpseMaximum = Maximum;
+        OnlineCorpseLastPoolReportRealTime = Now;
+        return;
     }
-    if (!bOnlineCorpsePoolObserved && GoreManager.CorpsePool.Length > 0)
+    SinceLastReport = Now - OnlineCorpseLastPoolReportRealTime;
+    if (SinceLastReport < 0.5 ||
+        (LastReportedOnlineCorpsePool == PoolLength &&
+         LastReportedOnlineCorpseMaximum == Maximum && SinceLastReport < 5.0))
     {
-        bOnlineCorpsePoolObserved = true;
-        `log("KF2OPT_ONLINE_CORPSE state=populated pool="$
-             GoreManager.CorpsePool.Length$" maximum="$GoreManager.MaxDeadBodies$
-             " local_only=true readback=verified");
+        return;
     }
+    LastReportedOnlineCorpsePool = PoolLength;
+    LastReportedOnlineCorpseMaximum = Maximum;
+    OnlineCorpseLastPoolReportRealTime = Now;
+    `log("KF2OPT_ONLINE_CORPSE state=pool pool="$LastReportedOnlineCorpsePool$
+         " maximum="$LastReportedOnlineCorpseMaximum$
+         " local_only=true readback=verified");
 }
 
 function bool RestoreOnlineSessionState(
@@ -798,7 +815,9 @@ function bool RestoreOnlineSessionState(
     ResetOnlineGraphicsListenerHealth("");
     bOnlineCorpseCapabilityReported = false;
     bOnlineCorpseUnavailableReported = false;
-    bOnlineCorpsePoolObserved = false;
+    LastReportedOnlineCorpsePool = 0;
+    LastReportedOnlineCorpseMaximum = 0;
+    OnlineCorpseLastPoolReportRealTime = 0.0;
     bOnlineCorpseSleepArmed = false;
     bOnlineCorpseSleepApplied = false;
     OnlineCorpseSleepScanCursor = 0;
@@ -983,7 +1002,9 @@ event Tick(float DeltaTime)
         ResetOnlineGraphicsListenerHealth("");
         bOnlineCorpseCapabilityReported = false;
         bOnlineCorpseUnavailableReported = false;
-        bOnlineCorpsePoolObserved = false;
+        LastReportedOnlineCorpsePool = 0;
+        LastReportedOnlineCorpseMaximum = 0;
+        OnlineCorpseLastPoolReportRealTime = 0.0;
         bOnlineCorpseSleepArmed = bOnlineGraphicsEnabled;
         bOnlineCorpseSleepApplied = false;
         OnlineCorpseSleepScanCursor = 0;

@@ -1263,9 +1263,8 @@ int main(int argc, char** argv) {
             CHECK(chunks.front().parsed_session->online_corpse_pool == 0);
             CHECK(chunks.front().parsed_session->online_corpse_maximum == 20);
 
-            // An identical one-shot receipt refreshes its timestamp without
-            // changing the parser model. The worker must still publish the
-            // current authenticated snapshot to the UI boundary.
+            // Equal-count receipts still refresh measurement age and must
+            // cross the immutable worker-to-UI publication boundary.
             {
                 std::ofstream output(log, std::ios::binary | std::ios::app);
                 output << "[0061.02] ScriptLog: KF2OPT_ONLINE_CORPSE "
@@ -1279,6 +1278,24 @@ int main(int argc, char** argv) {
             CHECK(chunks.front().parsed_session);
             CHECK(chunks.front().parsed_session->online_corpse_pool == 0);
             CHECK(chunks.front().parsed_session->online_corpse_maximum == 20);
+
+            for (const auto observed_ns : {32'350'000'000ULL, 32'360'000'000ULL}) {
+                {
+                    std::ofstream output(log, std::ios::binary | std::ios::app);
+                    output << "ScriptLog: KF2OPT_ONLINE_CORPSE state=pool "
+                              "pool=45 maximum=20 local_only=true readback=verified\n";
+                }
+                worker.request(observed_ns);
+                CHECK(worker.wait_until_idle(2s));
+                chunks = worker.take_game_log_chunks(log_binding.identity);
+                CHECK(chunks.size() == 1);
+                CHECK(chunks.front().parsed_session);
+                CHECK(chunks.front().parsed_session->online_corpse_pool == 45);
+                CHECK(chunks.front().parsed_session->online_corpse_pool_observed_ns ==
+                      observed_ns);
+                CHECK(chunks.front().parsed_session->online_corpse_capability_observed_ns ==
+                      32'300'000'000ULL);
+            }
 
             {
                 std::ofstream output(log, std::ios::binary | std::ios::app);

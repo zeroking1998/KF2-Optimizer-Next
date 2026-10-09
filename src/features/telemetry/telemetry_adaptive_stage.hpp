@@ -583,21 +583,24 @@ select_adaptive_runtime_control(
         const bool connection_known = net_mode &&
             (*net_mode == "NM_Standalone" || *net_mode == "NM_Client" ||
              *net_mode == "NM_ListenServer" || *net_mode == "NM_DedicatedServer");
+        const auto observation_fresh = [&](std::uint64_t observed_ns) {
+            return observed_ns != 0 && frame.observed_at_ns >= observed_ns &&
+                frame.observed_at_ns - observed_ns <=
+                    game::kGameLogObservationFreshnessNs;
+        };
         const bool offline_telemetry_fresh =
-            frame.gameplay->telemetry_observed_ns != 0 &&
-            frame.observed_at_ns >= frame.gameplay->telemetry_observed_ns &&
-            frame.observed_at_ns - frame.gameplay->telemetry_observed_ns <=
-                game::kGameLogObservationFreshnessNs;
-        // These receipts are emitted once per verified World. GameLogSession
-        // is replaced at every LoadMap, so their lifetime is the current map
-        // rather than the short periodic-telemetry freshness window.
-        const bool online_corpse_fresh =
+            observation_fresh(frame.gameplay->telemetry_observed_ns);
+        // Capability/readback proof is map-scoped; pool measurements expire
+        // independently and must never acquire that longer lifetime.
+        const bool online_corpse_verified =
             frame.gameplay->optimizer_online_read_only &&
             frame.gameplay->online_corpse_capability_observed_ns != 0 &&
-            frame.gameplay->online_corpse_pool.has_value() &&
             frame.gameplay->online_corpse_maximum.has_value();
+        const bool online_pool_fresh = online_corpse_verified &&
+            frame.gameplay->online_corpse_pool.has_value() &&
+            observation_fresh(frame.gameplay->online_corpse_pool_observed_ns);
         sample.gameplay_context_fresh =
-            offline_telemetry_fresh || online_corpse_fresh;
+            offline_telemetry_fresh || online_corpse_verified;
         bool telemetry_restarted = false;
         if (frame.gameplay->telemetry_sample) {
             result.telemetry_sample = *frame.gameplay->telemetry_sample;
@@ -651,12 +654,12 @@ select_adaptive_runtime_control(
                     optimizer::AdaptiveCapabilityState::available;
             }
         }
-        if (online_corpse_fresh && frame.gameplay->online_corpse_pool &&
-            frame.gameplay->online_corpse_maximum) {
+        if (online_corpse_verified) {
             sample.capabilities.corpse_telemetry =
                 optimizer::AdaptiveCapabilityState::available;
-            sample.live_corpse_burden =
-                frame.gameplay->online_corpse_pool;
+            if (online_pool_fresh) {
+                sample.live_corpse_burden = frame.gameplay->online_corpse_pool;
+            }
             sample.adaptive_corpse_runtime_limit =
                 frame.gameplay->online_corpse_maximum;
             sample.user_max_dead_bodies = context.user_max_dead_bodies;
