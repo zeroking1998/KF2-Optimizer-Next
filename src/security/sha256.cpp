@@ -50,18 +50,14 @@ void set_sha256_file_read_hook_for_testing(
 #endif
 
 Result<std::string> sha256_hex(std::string_view bytes) {
-    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    const BCRYPT_ALG_HANDLE algorithm = BCRYPT_SHA256_ALG_HANDLE;
     BCRYPT_HASH_HANDLE hash = nullptr;
     DWORD object_size = 0;
     DWORD hash_size = 0;
     DWORD returned = 0;
-    NTSTATUS status = BCryptOpenAlgorithmProvider(
-        &algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
-    if (status >= 0) {
-        status = BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH,
-                                   reinterpret_cast<PUCHAR>(&object_size),
-                                   sizeof(object_size), &returned, 0);
-    }
+    NTSTATUS status = BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH,
+                                       reinterpret_cast<PUCHAR>(&object_size),
+                                       sizeof(object_size), &returned, 0);
     if (status >= 0) {
         status = BCryptGetProperty(algorithm, BCRYPT_HASH_LENGTH,
                                    reinterpret_cast<PUCHAR>(&hash_size),
@@ -80,7 +76,6 @@ Result<std::string> sha256_hex(std::string_view bytes) {
     }
     if (status >= 0) status = BCryptFinishHash(hash, digest.data(), hash_size, 0);
     if (hash) BCryptDestroyHash(hash);
-    if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
     if (status < 0 || digest.size() != 32) {
         return Result<std::string>::failure(
             {ErrorCode::platform_failure, L"SHA-256 operation failed",
@@ -133,18 +128,14 @@ Result<std::string> sha256_file_hex(const std::filesystem::path& path,
     if (sha256_file_read_hook != nullptr) sha256_file_read_hook(path);
 #endif
 
-    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    const BCRYPT_ALG_HANDLE algorithm = BCRYPT_SHA256_ALG_HANDLE;
     BCRYPT_HASH_HANDLE hash = nullptr;
     DWORD object_size = 0;
     DWORD hash_size = 0;
     DWORD returned = 0;
-    NTSTATUS status = BCryptOpenAlgorithmProvider(
-        &algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
-    if (status >= 0) {
-        status = BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH,
-                                   reinterpret_cast<PUCHAR>(&object_size),
-                                   sizeof(object_size), &returned, 0);
-    }
+    NTSTATUS status = BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH,
+                                       reinterpret_cast<PUCHAR>(&object_size),
+                                       sizeof(object_size), &returned, 0);
     if (status >= 0) {
         status = BCryptGetProperty(algorithm, BCRYPT_HASH_LENGTH,
                                    reinterpret_cast<PUCHAR>(&hash_size),
@@ -179,7 +170,6 @@ Result<std::string> sha256_file_hex(const std::filesystem::path& path,
         status = static_cast<NTSTATUS>(0xC0000001L);
     }
     if (hash) BCryptDestroyHash(hash);
-    if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
 
     BY_HANDLE_FILE_INFORMATION after{};
     if (status < 0 || digest.size() != 32 ||
