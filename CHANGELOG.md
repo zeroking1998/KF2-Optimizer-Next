@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Remove retired effect-control inputs from Adaptive resource selection;
+  quality decisions, safety gates, diagnostics and restoration are unchanged.
+
 - Reuse one distance query for both corpse and living-Zed log fields,
   preserving receipt text, diagnostic gates and all runtime actions.
 
