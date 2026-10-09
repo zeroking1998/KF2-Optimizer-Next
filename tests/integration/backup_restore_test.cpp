@@ -12,6 +12,7 @@
 #include "kf2/core/hex_codec.hpp"
 #include "kf2/config/apply_transaction.hpp"
 #include "kf2/config/setting_catalog.hpp"
+#include "kf2/platform/windows/atomic_file.hpp"
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -55,6 +56,21 @@ HANDLE lock_without_read_sharing(const std::filesystem::path& path) {
 bool deny_status(const std::filesystem::path&, std::error_code& error) {
     error = std::make_error_code(std::errc::permission_denied);
     return false;
+}
+
+std::filesystem::path transient_read_target;
+bool transient_read_seen{};
+
+kf2::Result<std::string> fail_one_backup_read(
+    const std::filesystem::path& path, std::uintmax_t maximum_size) {
+    if (path == transient_read_target) {
+        kf2::backup::set_backup_read_hook_for_testing(nullptr);
+        transient_read_seen = true;
+        return kf2::Result<std::string>::failure(
+            {kf2::ErrorCode::io_failure, L"Transient backup read failure",
+             ERROR_READ_FAULT});
+    }
+    return kf2::platform::windows::read_bounded_verified_file(path, maximum_size);
 }
 
 bool has_quarantined_copy(const std::filesystem::path& source,
@@ -137,6 +153,54 @@ int main() {
     CHECK(!inaccessible_backup.has_value());
     CHECK(inaccessible_backup.error().code == kf2::ErrorCode::io_failure);
     CHECK(inaccessible_backup.error().native_code != 0);
+    kf2::backup::BackupStore transient_store{root / L"TransientReadState"};
+    const auto transient_backup = transient_store.create_standalone(preview);
+    CHECK(transient_backup.has_value());
+    const auto transient_manifest = transient_backup.value().manifest_path;
+    const auto transient_blob = transient_backup.value().snapshots.front().object_path;
+    const auto transient_manifest_bytes = read_bytes(transient_manifest);
+    transient_read_target = transient_manifest;
+    kf2::backup::set_backup_read_hook_for_testing(&fail_one_backup_read);
+    const auto transient_prune = transient_store.prune_verified({.keep_latest = 1});
+    kf2::backup::set_backup_read_hook_for_testing(nullptr);
+    if (transient_prune.has_value()) {
+        std::cerr << "Transient read was treated as corruption: manifest="
+                  << fs::exists(transient_manifest) << ", blob="
+                  << fs::exists(transient_blob) << '\n';
+    }
+    CHECK(transient_read_seen);
+    CHECK(!transient_prune.has_value());
+    CHECK(transient_prune.error().code == kf2::ErrorCode::io_failure);
+    CHECK(transient_prune.error().native_code == ERROR_READ_FAULT);
+    CHECK(transient_prune.error().message == L"Transient backup read failure");
+    CHECK(read_bytes(transient_manifest) == transient_manifest_bytes);
+    CHECK(!has_quarantined_copy(transient_manifest, transient_manifest_bytes));
+    CHECK(read_bytes(transient_blob) == original);
+    CHECK(transient_store.verify(transient_backup.value()).has_value());
+    CHECK(transient_store.list_backups().value().size() == 1);
+    CHECK(transient_store.prune_verified({.keep_latest = 1}).has_value());
+    CHECK(fs::exists(transient_manifest));
+    CHECK(fs::exists(transient_blob));
+    transient_read_seen = false;
+    kf2::backup::set_backup_read_hook_for_testing(&fail_one_backup_read);
+    const auto transient_listing = transient_store.list_backups();
+    kf2::backup::set_backup_read_hook_for_testing(nullptr);
+    CHECK(transient_read_seen);
+    CHECK(!transient_listing.has_value());
+    CHECK(transient_listing.error().native_code == ERROR_READ_FAULT);
+    CHECK(transient_listing.error().message == L"Transient backup read failure");
+    CHECK(read_bytes(transient_manifest) == transient_manifest_bytes);
+    CHECK(!has_quarantined_copy(transient_manifest, transient_manifest_bytes));
+    std::string crlf_manifest{"\r\n"};
+    for (const char byte : transient_manifest_bytes) {
+        if (byte == '\n') crlf_manifest += '\r';
+        crlf_manifest += byte;
+    }
+    crlf_manifest.resize(crlf_manifest.size() - 2); // final record without newline
+    write_bytes(transient_manifest, crlf_manifest);
+    CHECK(transient_store.verify(transient_backup.value()).has_value());
+    CHECK(transient_store.list_backups().value().size() == 1);
+    write_bytes(transient_manifest, transient_manifest_bytes);
     kf2::backup::BackupStore store{root / L"State"};
     const auto standalone = store.create_standalone(preview);
     CHECK(standalone.has_value());
@@ -545,8 +609,9 @@ int main() {
     CHECK(locked_manifest != INVALID_HANDLE_VALUE);
     const auto blocked_listing = store.list_backups();
     CHECK(!blocked_listing.has_value());
-    CHECK(blocked_listing.error().message.find(L"cannot be safely quarantined") !=
-          std::wstring::npos);
+    CHECK(blocked_listing.error().native_code == ERROR_SHARING_VIOLATION);
+    CHECK(fs::exists(unreadable_manifest));
+    CHECK(!has_quarantined_copy(unreadable_manifest, "version=2\nid="));
 
     const auto orphan_object = store.state_root() / L"backups/objects" /
         (std::wstring(64, L'e') + L".blob");
