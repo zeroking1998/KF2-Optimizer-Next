@@ -21,6 +21,7 @@
 #include <system_error>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace kf2::platform::windows {
@@ -237,6 +238,7 @@ struct DxgiFrameTimingSession::Impl {
     std::uint64_t qpc_frequency{};
     std::uint64_t nanoseconds_per_tick{};
     std::unordered_map<ULONG, PendingPresent> pending_by_thread;
+    decltype(pending_by_thread)::node_type reusable_pending;
 
     ~Impl() { shutdown(); }
 
@@ -344,8 +346,14 @@ struct DxgiFrameTimingSession::Impl {
                 pending_by_thread.erase(oldest);
                 ++unreported_pending_loss;
             }
-            pending_by_thread.emplace(header.ThreadId,
-                PendingPresent{now_qpc, payload.swap_chain});
+            if (reusable_pending.empty()) {
+                pending_by_thread.emplace(header.ThreadId,
+                    PendingPresent{now_qpc, payload.swap_chain});
+            } else {
+                reusable_pending.key() = header.ThreadId;
+                reusable_pending.mapped() = {now_qpc, payload.swap_chain};
+                pending_by_thread.insert(std::move(reusable_pending));
+            }
             return;
         }
         if (header.EventDescriptor.Id != kPresentStopEvent ||
@@ -355,7 +363,8 @@ struct DxgiFrameTimingSession::Impl {
         const auto pending = pending_by_thread.find(header.ThreadId);
         if (pending == pending_by_thread.end()) return;
         const PendingPresent present = pending->second;
-        pending_by_thread.erase(pending);
+        // Retain only one unlinked allocation, never an outstanding pair.
+        reusable_pending = pending_by_thread.extract(pending);
         if (now_qpc < present.timestamp_qpc || expired(present)) {
             ++unreported_pending_loss;
             return;
