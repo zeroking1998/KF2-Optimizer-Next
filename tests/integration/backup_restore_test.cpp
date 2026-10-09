@@ -1,17 +1,47 @@
 #include <Windows.h>
 
 #include <array>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <map>
+#include <new>
 #include <set>
 
 #include "kf2/backup/restore_transaction.hpp"
 #include "kf2/core/hex_codec.hpp"
 #include "kf2/config/apply_transaction.hpp"
 #include "kf2/config/setting_catalog.hpp"
+#include "kf2/platform/windows/atomic_file.hpp"
+
+namespace {
+thread_local bool fail_manifest_growth{};
+thread_local unsigned int manifest_growth_failures{};
+thread_local bool fail_journal_buffer{};
+thread_local std::size_t journal_buffer_minimum_size{};
+thread_local unsigned int journal_buffer_failures{};
+std::string_view manifest_fault_payload;
+}
+
+void* operator new(std::size_t size) {
+    if (fail_journal_buffer && size >= journal_buffer_minimum_size) {
+        fail_journal_buffer = false;
+        ++journal_buffer_failures;
+        throw std::bad_alloc{};
+    }
+    if (fail_manifest_growth && size >= 512) {
+        fail_manifest_growth = false;
+        ++manifest_growth_failures;
+        throw std::bad_alloc{};
+    }
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -57,6 +87,21 @@ bool deny_status(const std::filesystem::path&, std::error_code& error) {
     return false;
 }
 
+std::filesystem::path transient_read_target;
+bool transient_read_seen{};
+
+kf2::Result<std::string> fail_one_backup_read(
+    const std::filesystem::path& path, std::uintmax_t maximum_size) {
+    if (path == transient_read_target) {
+        kf2::backup::set_backup_read_hook_for_testing(nullptr);
+        transient_read_seen = true;
+        return kf2::Result<std::string>::failure(
+            {kf2::ErrorCode::io_failure, L"Transient backup read failure",
+             ERROR_READ_FAULT});
+    }
+    return kf2::platform::windows::read_bounded_verified_file(path, maximum_size);
+}
+
 bool has_quarantined_copy(const std::filesystem::path& source,
                           std::string_view expected_bytes) {
     const auto prefix = source.filename().wstring() + L".corrupt";
@@ -70,6 +115,63 @@ bool has_quarantined_copy(const std::filesystem::path& source,
         }
     }
     return false;
+}
+
+std::filesystem::path journal_allocation_target;
+
+void fail_journal_read_buffer(const std::filesystem::path& path) {
+    if (path == journal_allocation_target) {
+        kf2::platform::windows::set_bounded_read_hook_for_testing(nullptr);
+        fail_journal_buffer = true;
+    }
+}
+
+int test_operational_journal_read_failure(const std::filesystem::path& root) {
+    for (const bool allocation_failure : {true, false}) {
+        const auto case_root = root /
+            (allocation_failure ? L"JournalAllocation" : L"JournalSharing");
+        kf2::config::ConfigPreview preview;
+        preview.config_root = case_root / L"Config";
+        preview.files.push_back({L"KFEngine.ini", "original", "replacement"});
+        const auto target = preview.config_root / L"KFEngine.ini";
+        write_bytes(target, "original");
+        kf2::backup::BackupStore store{case_root / L"State"};
+        const auto applied = kf2::config::apply_preview(
+            preview, store, {.game_running = false});
+        CHECK(applied.has_value());
+        const auto& backup = applied.value().backup;
+        write_journal(backup, "replacement_started");
+        const auto journal_bytes = read_bytes(backup.journal_path);
+        HANDLE blocker = INVALID_HANDLE_VALUE;
+        if (allocation_failure) {
+            journal_allocation_target = backup.journal_path;
+            journal_buffer_minimum_size = journal_bytes.size();
+            journal_buffer_failures = 0;
+            kf2::platform::windows::set_bounded_read_hook_for_testing(
+                &fail_journal_read_buffer);
+        } else {
+            blocker = lock_without_read_sharing(backup.journal_path);
+            CHECK(blocker != INVALID_HANDLE_VALUE);
+        }
+        const auto failed = kf2::backup::recover_transactions(store, preview.config_root);
+        if (blocker != INVALID_HANDLE_VALUE) CHECK(CloseHandle(blocker) != FALSE);
+        kf2::platform::windows::set_bounded_read_hook_for_testing(nullptr);
+        fail_journal_buffer = false;
+        CHECK(!failed.has_value());
+        CHECK(failed.error().native_code == static_cast<std::uint32_t>(allocation_failure
+            ? ERROR_NOT_ENOUGH_MEMORY : ERROR_SHARING_VIOLATION));
+        CHECK(!allocation_failure || journal_buffer_failures == 1);
+        CHECK(read_bytes(backup.journal_path) == journal_bytes);
+        CHECK(!has_quarantined_copy(backup.journal_path, journal_bytes));
+        CHECK(read_bytes(target) == "replacement");
+        const auto retried = kf2::backup::recover_transactions(store, preview.config_root);
+        CHECK(retried.has_value());
+        CHECK(retried.value().transactions_recovered == 1);
+        CHECK(retried.value().outcome == kf2::backup::RecoveryOutcome::rolled_back);
+        CHECK(read_bytes(target) == "original");
+        CHECK(read_bytes(backup.journal_path).find("state=complete") != std::string::npos);
+    }
+    return EXIT_SUCCESS;
 }
 
 std::string replace_manifest_file_field(std::string manifest,
@@ -89,6 +191,158 @@ std::string replace_manifest_file_field(std::string manifest,
     if (end == std::string::npos) return {};
     manifest.replace(begin, end - begin, replacement);
     return manifest;
+}
+
+void fail_manifest_buffer_growth(std::ostream& output) {
+    // Force a changed partial suffix, then fail real stream-buffer growth.
+    output.write(manifest_fault_payload.data(), 4096);
+    fail_manifest_growth = true;
+    output.write(manifest_fault_payload.data() + 4096,
+        static_cast<std::streamsize>(manifest_fault_payload.size() - 4096));
+    fail_manifest_growth = false;
+}
+
+std::map<std::filesystem::path, unsigned> write_time_reads;
+std::filesystem::path write_time_failure;
+
+std::filesystem::file_time_type observe_write_time(
+    const std::filesystem::path& path, std::error_code& error) {
+    ++write_time_reads[path];
+    if (path == write_time_failure) {
+        error = std::make_error_code(std::errc::permission_denied);
+        return std::filesystem::file_time_type::min();
+    }
+    return std::filesystem::last_write_time(path, error);
+}
+
+int test_backup_ordering(const std::filesystem::path& root) {
+    namespace fs = std::filesystem;
+    kf2::backup::BackupStore store{root / L"OrderingState"};
+    write_time_reads.clear();
+    kf2::backup::set_backup_write_time_hook_for_testing(&observe_write_time);
+    const auto empty = store.list_backups();
+    kf2::backup::set_backup_write_time_hook_for_testing(nullptr);
+    CHECK(empty.has_value() && empty.value().empty());
+    CHECK(write_time_reads.empty());
+
+    std::vector<kf2::backup::BackupSet> backups;
+    const auto base_time = fs::file_time_type::clock::now();
+    for (unsigned index = 0; index < 8; ++index) {
+        kf2::config::ConfigPreview preview;
+        preview.config_root = root / L"OrderingConfig";
+        const auto original = "original " + std::to_string(index);
+        preview.files.push_back({L"KFEngine.ini", original, "replacement"});
+        write_bytes(preview.config_root / L"KFEngine.ini", original);
+        auto created = store.create_standalone(preview);
+        CHECK(created.has_value());
+        fs::last_write_time(created.value().manifest_path,
+            base_time + std::chrono::seconds(index));
+        backups.push_back(std::move(created.value()));
+    }
+    kf2::backup::set_backup_write_time_hook_for_testing(&observe_write_time);
+    const auto listed = store.list_backups();
+    kf2::backup::set_backup_write_time_hook_for_testing(nullptr);
+    CHECK(listed.has_value() && listed.value().size() == backups.size());
+    CHECK(write_time_reads.size() == backups.size());
+    for (std::size_t index = 0; index < backups.size(); ++index) {
+        CHECK(listed.value()[index].id == backups[backups.size() - 1 - index].id);
+        CHECK(write_time_reads.at(backups[index].manifest_path) == 1);
+    }
+
+    write_time_failure = backups[3].manifest_path;
+    kf2::backup::set_backup_write_time_hook_for_testing(&observe_write_time);
+    const auto failed = store.prune_verified({.keep_latest = 1});
+    kf2::backup::set_backup_write_time_hook_for_testing(nullptr);
+    write_time_failure.clear();
+    CHECK(!failed.has_value());
+    CHECK(failed.error().code == kf2::ErrorCode::io_failure);
+    CHECK(failed.error().native_code ==
+          static_cast<std::uint32_t>(
+              std::make_error_code(std::errc::permission_denied).value()));
+    for (const auto& backup : backups) {
+        CHECK(fs::exists(backup.manifest_path));
+        CHECK(fs::exists(backup.journal_path));
+        CHECK(store.verify(backup).has_value());
+    }
+
+    for (const auto& backup : backups)
+        fs::last_write_time(backup.manifest_path, base_time);
+    const auto tied = store.list_backups();
+    CHECK(tied.has_value() && tied.value().size() == backups.size());
+    std::set<std::string> tied_ids;
+    for (const auto& backup : tied.value()) tied_ids.insert(backup.id);
+    CHECK(tied_ids.size() == backups.size());
+    for (std::size_t index = 0; index < backups.size(); ++index)
+        fs::last_write_time(backups[index].manifest_path,
+            base_time + std::chrono::seconds(index));
+    const auto pruned = store.prune_verified({.keep_latest = 1});
+    CHECK(pruned.has_value() && pruned.value() == backups.size() - 1);
+    write_time_reads.clear();
+    kf2::backup::set_backup_write_time_hook_for_testing(&observe_write_time);
+    const auto retained = store.list_backups();
+    kf2::backup::set_backup_write_time_hook_for_testing(nullptr);
+    CHECK(retained.has_value() && retained.value().size() == 1);
+    CHECK(retained.value().front().id == backups.back().id);
+    CHECK(write_time_reads.empty());
+    CHECK(store.verify(retained.value().front()).has_value());
+    return EXIT_SUCCESS;
+}
+
+int test_manifest_serialization_failure(const std::filesystem::path& root) {
+    kf2::config::ConfigPreview preview;
+    preview.config_root = root / L"ManifestFailureConfig";
+    preview.files.push_back({L"KFEngine.ini", "engine original", "engine desired"});
+    preview.files.push_back({L"KFGame.ini", "game original", "game desired"});
+    for (const auto& file : preview.files)
+        write_bytes(preview.config_root / file.relative_path, file.original_bytes);
+    kf2::backup::BackupStore store{root / L"ManifestFailureState"};
+    const auto baseline = store.create_standalone(preview);
+    CHECK(baseline.has_value() && baseline.value().snapshots.size() == 2);
+    CHECK(store.verify(baseline.value()).has_value());
+    const auto& backup = baseline.value();
+    const auto manifest = read_bytes(backup.manifest_path);
+    const auto journal = read_bytes(backup.journal_path);
+    const std::array blobs{read_bytes(backup.snapshots[0].object_path),
+                          read_bytes(backup.snapshots[1].object_path)};
+    const std::string payload(65536, '#');
+    manifest_fault_payload = payload;
+    const auto failed = [&] {
+        struct FaultGuard {
+            ~FaultGuard() {
+                kf2::backup::set_backup_manifest_write_hook_for_testing(nullptr);
+                fail_manifest_growth = false;
+                manifest_fault_payload = {};
+            }
+        } guard;
+        kf2::backup::set_backup_manifest_write_hook_for_testing(&fail_manifest_buffer_growth);
+        return store.create_standalone(preview);
+    }();
+    CHECK(manifest_growth_failures == 1);
+    CHECK(!failed.has_value());
+    CHECK(failed.error().code == kf2::ErrorCode::io_failure);
+    if (read_bytes(backup.manifest_path) != manifest ||
+        read_bytes(backup.journal_path) != journal)
+        std::cerr << "Failed retry replaced healthy backup: manifest="
+                  << (read_bytes(backup.manifest_path) == manifest)
+                  << ", journal=" << (read_bytes(backup.journal_path) == journal) << '\n';
+    CHECK(read_bytes(backup.manifest_path) == manifest);
+    CHECK(read_bytes(backup.journal_path) == journal);
+    for (std::size_t index = 0; index < blobs.size(); ++index) {
+        CHECK(read_bytes(backup.snapshots[index].object_path) == blobs[index]);
+        CHECK(read_bytes(preview.config_root / preview.files[index].relative_path) ==
+              preview.files[index].original_bytes);
+    }
+    CHECK(store.verify(backup).has_value());
+    const auto listed = store.list_backups();
+    CHECK(listed.has_value() && listed.value().size() == 1);
+    const auto pruned = store.prune_verified({.keep_latest = 1});
+    CHECK(pruned.has_value() && pruned.value() == 0);
+    const auto retry = store.create_standalone(preview);
+    CHECK(retry.has_value() && retry.value().id == backup.id);
+    CHECK(store.verify(retry.value()).has_value());
+    CHECK(read_bytes(backup.manifest_path) == manifest);
+    CHECK(read_bytes(backup.journal_path) == journal);
+    return EXIT_SUCCESS;
 }
 
 }  // namespace
@@ -119,6 +373,9 @@ int main() {
     namespace fs = std::filesystem;
     const fs::path root{KF2_TEST_ROOT};
     fs::remove_all(root);
+    CHECK(test_manifest_serialization_failure(root) == EXIT_SUCCESS);
+    CHECK(test_operational_journal_read_failure(root) == EXIT_SUCCESS);
+    CHECK(test_backup_ordering(root) == EXIT_SUCCESS);
     const auto config_root = root / L"Config-\u00e4\u4e2d";
     const auto target = config_root / L"KFEngine.ini";
     const std::string original = "[Engine.Engine]\r\nMaxSmoothedFrameRate=62\r\n";
@@ -137,6 +394,54 @@ int main() {
     CHECK(!inaccessible_backup.has_value());
     CHECK(inaccessible_backup.error().code == kf2::ErrorCode::io_failure);
     CHECK(inaccessible_backup.error().native_code != 0);
+    kf2::backup::BackupStore transient_store{root / L"TransientReadState"};
+    const auto transient_backup = transient_store.create_standalone(preview);
+    CHECK(transient_backup.has_value());
+    const auto transient_manifest = transient_backup.value().manifest_path;
+    const auto transient_blob = transient_backup.value().snapshots.front().object_path;
+    const auto transient_manifest_bytes = read_bytes(transient_manifest);
+    transient_read_target = transient_manifest;
+    kf2::backup::set_backup_read_hook_for_testing(&fail_one_backup_read);
+    const auto transient_prune = transient_store.prune_verified({.keep_latest = 1});
+    kf2::backup::set_backup_read_hook_for_testing(nullptr);
+    if (transient_prune.has_value()) {
+        std::cerr << "Transient read was treated as corruption: manifest="
+                  << fs::exists(transient_manifest) << ", blob="
+                  << fs::exists(transient_blob) << '\n';
+    }
+    CHECK(transient_read_seen);
+    CHECK(!transient_prune.has_value());
+    CHECK(transient_prune.error().code == kf2::ErrorCode::io_failure);
+    CHECK(transient_prune.error().native_code == ERROR_READ_FAULT);
+    CHECK(transient_prune.error().message == L"Transient backup read failure");
+    CHECK(read_bytes(transient_manifest) == transient_manifest_bytes);
+    CHECK(!has_quarantined_copy(transient_manifest, transient_manifest_bytes));
+    CHECK(read_bytes(transient_blob) == original);
+    CHECK(transient_store.verify(transient_backup.value()).has_value());
+    CHECK(transient_store.list_backups().value().size() == 1);
+    CHECK(transient_store.prune_verified({.keep_latest = 1}).has_value());
+    CHECK(fs::exists(transient_manifest));
+    CHECK(fs::exists(transient_blob));
+    transient_read_seen = false;
+    kf2::backup::set_backup_read_hook_for_testing(&fail_one_backup_read);
+    const auto transient_listing = transient_store.list_backups();
+    kf2::backup::set_backup_read_hook_for_testing(nullptr);
+    CHECK(transient_read_seen);
+    CHECK(!transient_listing.has_value());
+    CHECK(transient_listing.error().native_code == ERROR_READ_FAULT);
+    CHECK(transient_listing.error().message == L"Transient backup read failure");
+    CHECK(read_bytes(transient_manifest) == transient_manifest_bytes);
+    CHECK(!has_quarantined_copy(transient_manifest, transient_manifest_bytes));
+    std::string crlf_manifest{"\r\n"};
+    for (const char byte : transient_manifest_bytes) {
+        if (byte == '\n') crlf_manifest += '\r';
+        crlf_manifest += byte;
+    }
+    crlf_manifest.resize(crlf_manifest.size() - 2); // final record without newline
+    write_bytes(transient_manifest, crlf_manifest);
+    CHECK(transient_store.verify(transient_backup.value()).has_value());
+    CHECK(transient_store.list_backups().value().size() == 1);
+    write_bytes(transient_manifest, transient_manifest_bytes);
     kf2::backup::BackupStore store{root / L"State"};
     const auto standalone = store.create_standalone(preview);
     CHECK(standalone.has_value());
@@ -545,8 +850,9 @@ int main() {
     CHECK(locked_manifest != INVALID_HANDLE_VALUE);
     const auto blocked_listing = store.list_backups();
     CHECK(!blocked_listing.has_value());
-    CHECK(blocked_listing.error().message.find(L"cannot be safely quarantined") !=
-          std::wstring::npos);
+    CHECK(blocked_listing.error().native_code == ERROR_SHARING_VIOLATION);
+    CHECK(fs::exists(unreadable_manifest));
+    CHECK(!has_quarantined_copy(unreadable_manifest, "version=2\nid="));
 
     const auto orphan_object = store.state_root() / L"backups/objects" /
         (std::wstring(64, L'e') + L".blob");

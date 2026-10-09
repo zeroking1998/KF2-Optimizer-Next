@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <iosfwd>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -21,8 +22,10 @@ struct SessionConfigSnapshot {
 using SessionReadHook = void (*)(const std::filesystem::path&);
 using SessionStatusHook = bool (*)(const std::filesystem::path&,
                                    std::error_code&);
+using SessionManifestWriteHook = void (*)(std::ostream&);
 void set_session_read_hook_for_testing(SessionReadHook hook) noexcept;
 void set_session_status_hook_for_testing(SessionStatusHook hook) noexcept;
+void set_session_manifest_write_hook_for_testing(SessionManifestWriteHook hook) noexcept;
 #endif
 
 [[nodiscard]] Result<SessionConfigSnapshot> capture_session_config(

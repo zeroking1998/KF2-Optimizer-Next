@@ -223,12 +223,10 @@ int main() {
     CHECK(overlay.render_count() > 1);
     RECT bounds{}; CHECK(GetWindowRect(window, &bounds));
     CHECK(bounds.left == 100 && bounds.top == 120);
-    const auto settled_render_count = overlay.render_count();
     CHECK(overlay.update(shown).has_value());
-    CHECK(overlay.render_count() == settled_render_count);
-    CHECK(overlay.diagnostics().skipped_redraws > 0);
-    // Debug rendering can itself cross one cadence boundary. Allow enough
-    // wall time for the next idle frame without depending on scheduler jitter.
+    // Rendering or scheduling may already have crossed an idle deadline.
+    // Anchor after this update; the rate bound below checks duplicate work.
+    const auto settled_render_count = overlay.render_count();
     Sleep(100);
     CHECK(overlay.update(shown).has_value());
     CHECK(overlay.render_count() > settled_render_count);
@@ -242,7 +240,8 @@ int main() {
         Sleep(5);
         CHECK(overlay.update(shown).has_value());
     }
-    CHECK(overlay.render_count() - idle_cadence_start <= 6);
+    const auto idle_elapsed_ms = GetTickCount64() - idle_cadence_started_ms;
+    CHECK(overlay.render_count() - idle_cadence_start <= 1 + idle_elapsed_ms / 50);
     ShowWindow(window, SW_MINIMIZE);
     CHECK(IsIconic(window));
     CHECK(overlay.update(shown).has_value());
@@ -263,6 +262,7 @@ int main() {
     shown.one_percent_low_fps += 0.1;
     CHECK(overlay.update(shown).has_value());
     CHECK(overlay.render_count() == subpixel_metric_render_count);
+    CHECK(overlay.diagnostics().skipped_redraws > 0);
     // The graph is sampled independently, but its Direct2D path must be built
     // only when the history or its vertical layout changes. Other overlay
     // renders reuse the same geometry instead of issuing every line again.

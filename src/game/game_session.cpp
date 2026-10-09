@@ -16,6 +16,8 @@ namespace {
 #ifdef KF2_GAME_PROCESS_TESTING
 std::atomic_uint32_t process_opens{0};
 std::atomic_uint32_t process_creation_queries{0};
+detail::ProcessSnapshotFunction process_snapshot_for_testing =
+    &CreateToolhelp32Snapshot;
 #endif
 
 std::uint64_t file_time_value(const FILETIME& value) {
@@ -165,6 +167,11 @@ bool is_game_process_current(const GameProcessIdentity& process) noexcept {
 detail::ProcessQueryCounts detail::process_query_counts_for_testing() noexcept {
     return {process_opens.load(), process_creation_queries.load()};
 }
+
+void detail::set_process_snapshot_for_testing(
+    ProcessSnapshotFunction function) noexcept {
+    process_snapshot_for_testing = function ? function : &CreateToolhelp32Snapshot;
+}
 #endif
 
 Result<GameWindowState> inspect_game_window(
@@ -240,7 +247,8 @@ bool is_game_area_covered(const GameWindowState& state, const RECT& area) {
     return false;
 }
 
-Result<GameProcessIdentity> find_running_game_process(
+namespace {
+Result<GameProcessIdentity> find_running_game_process_once(
     const std::filesystem::path& expected_executable) {
     const auto expected_name = expected_executable.filename().native();
     if (expected_name.empty()) {
@@ -248,9 +256,14 @@ Result<GameProcessIdentity> find_running_game_process(
             {ErrorCode::invalid_argument,
              L"Game executable name is unavailable", 0});
     }
+#ifdef KF2_GAME_PROCESS_TESTING
+    HANDLE snapshot = process_snapshot_for_testing(TH32CS_SNAPPROCESS, 0);
+#else
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+#endif
     if (snapshot == INVALID_HANDLE_VALUE) return Result<GameProcessIdentity>::failure(
         {ErrorCode::platform_failure, L"Process list cannot be inspected", GetLastError()});
+    std::unique_ptr<void, decltype(&CloseHandle)> owned{snapshot, &CloseHandle};
     PROCESSENTRY32W entry{sizeof(entry)};
     std::optional<Error> inspection_error;
     if (Process32FirstW(snapshot, &entry)) {
@@ -266,7 +279,6 @@ Result<GameProcessIdentity> find_running_game_process(
             }
             auto candidate = bind_game_process(entry.th32ProcessID, expected_executable);
             if (candidate.has_value()) {
-                CloseHandle(snapshot);
                 return candidate;
             }
             // Only a verified exit or different executable proves that this
@@ -279,7 +291,6 @@ Result<GameProcessIdentity> find_running_game_process(
         } while (Process32NextW(snapshot, &entry));
     }
     const auto enumeration_error = GetLastError();
-    CloseHandle(snapshot);
     if (inspection_error) {
         return Result<GameProcessIdentity>::failure(std::move(*inspection_error));
     }
@@ -290,6 +301,20 @@ Result<GameProcessIdentity> find_running_game_process(
     }
     return Result<GameProcessIdentity>::failure(
         {ErrorCode::not_found, L"KF2 process is not running", 0});
+}
+
+}  // namespace
+
+Result<GameProcessIdentity> find_running_game_process(
+    const std::filesystem::path& expected_executable) {
+    auto process = find_running_game_process_once(expected_executable);
+    // A PID from the captured list may already have exited. Only a fresh,
+    // complete inspection can prove absence; other failures stay fail-closed.
+    if (!process.has_value() && process.error().code == ErrorCode::access_denied &&
+        process.error().native_code == ERROR_INVALID_PARAMETER) {
+        return find_running_game_process_once(expected_executable);
+    }
+    return process;
 }
 
 bool game_process_may_be_running(

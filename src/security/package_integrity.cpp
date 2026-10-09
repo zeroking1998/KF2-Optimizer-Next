@@ -366,26 +366,15 @@ RepairRollbackResult rollback_repair_changes(
             continue;
         }
 #endif
-        const auto current = read_optional_repair_file(change.target);
-        if (!current.has_value() || !current.value().has_value() ||
-            current.value().value() != change.replacement) {
-            failed(L"A repaired file changed before it could be restored");
-            continue;
-        }
         if (change.original.has_value()) {
-            const auto restored = platform::windows::atomic_replace_utf8(
-                change.target, change.original.value());
+            const auto restored = platform::windows::atomic_replace_utf8_if_unchanged(
+                change.target, change.replacement, change.original.value());
             if (!restored.has_value()) failed(restored.error().message);
             continue;
         }
-        if (!DeleteFileW(platform::windows::extended_length_path(
-                             change.target).c_str())) {
-            const DWORD native_error = GetLastError();
-            if (native_error != ERROR_FILE_NOT_FOUND &&
-                native_error != ERROR_PATH_NOT_FOUND) {
-                failed(L"A newly repaired file could not be removed");
-            }
-        }
+        const auto removed = platform::windows::remove_file_if_unchanged(
+            change.target, change.replacement);
+        if (!removed.has_value()) failed(removed.error().message);
     }
 
     for (std::size_t index = 0; index < committed_changes; ++index) {
@@ -649,15 +638,11 @@ Result<PackageRepairResult> repair_package_from_directory(
     };
 
     for (const auto& change : changes) {
-        const auto current = read_optional_repair_file(change.target);
-        if (!current.has_value() ||
-            !same_repair_file(current.value(), change.original)) {
-            return fail_after_mutation(
-                {ErrorCode::stale_data,
-                 L"An installed package file changed during repair", 0});
-        }
-        const auto written = platform::windows::atomic_replace_utf8(
-            change.target, change.replacement);
+        const auto expected = change.original.has_value()
+            ? std::optional<std::string_view>{change.original.value()}
+            : std::nullopt;
+        const auto written = platform::windows::atomic_replace_utf8_if_unchanged(
+            change.target, expected, change.replacement);
         if (!written.has_value()) {
             return fail_after_mutation(written.error());
         }

@@ -2,10 +2,13 @@
 
 #include <algorithm>
 #include <charconv>
+#include <new>
 #include <set>
 #include <sstream>
+#include <utility>
 
 #include "kf2/optimizer/adaptive_stability.hpp"
+#include "kf2/platform/windows/atomic_file.hpp"
 
 namespace kf2::config {
 namespace {
@@ -410,6 +413,7 @@ Result<Settings> parse_settings(std::string_view text) {
 
 std::string serialize_settings(const Settings& settings) {
     std::ostringstream output;
+    output.exceptions(std::ios::badbit | std::ios::failbit);
     output << "schema_version=" << settings.schema_version << '\n'
            << "optimizer_mode=adaptive\n"
            << "adaptive_optimization_enabled="
@@ -462,7 +466,21 @@ std::string serialize_settings(const Settings& settings) {
     for (const auto& [key, value] : settings.extras) {
         output << key << '=' << value << '\n';
     }
-    return output.str();
+    return std::move(output).str();
+}
+
+Result<bool> save_settings(
+    const std::filesystem::path& path, const Settings& settings) {
+    try {
+        return platform::windows::atomic_replace_utf8(path, serialize_settings(settings));
+    } catch (const std::bad_alloc&) {
+        // Do not allocate error text before callers can roll back.
+        return Result<bool>::failure(
+            {ErrorCode::io_failure, {}, 0});
+    } catch (const std::ios_base::failure&) {
+        return Result<bool>::failure(
+            {ErrorCode::io_failure, L"Settings serialization failed", 0});
+    }
 }
 
 }  // namespace kf2::config

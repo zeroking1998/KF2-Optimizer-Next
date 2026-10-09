@@ -37,8 +37,8 @@ struct ProcessMetrics {
     std::optional<double> dominant_thread_share_percent;
     // Threads which performed measurable CPU work during the interval.
     std::optional<std::uint32_t> active_cpu_threads;
-    // Current process-affinity capacity. These values are observations only;
-    // the optimizer never changes another process' affinity.
+    // Process-affinity capacity, refreshed every five seconds and unavailable
+    // after a failed query. The optimizer never changes another process' affinity.
     std::optional<std::uint32_t> affinity_logical_processors;
     std::optional<std::uint32_t> affinity_physical_cores;
     std::optional<std::uint32_t> system_logical_processors;
@@ -117,6 +117,14 @@ private:
 namespace detail {
 [[nodiscard]] std::uint32_t process_metric_opens_for_testing() noexcept;
 void fail_next_process_thread_snapshot_walk_for_testing() noexcept;
+void fail_next_toolhelp_thread_walk_for_testing(bool after_matching_entry) noexcept;
+enum class ThreadCacheAllocationStage { snapshot_ids, cached_thread };
+using ThreadCacheAllocationHook = void (*)(ThreadCacheAllocationStage);
+void set_thread_cache_allocation_hook_for_testing(ThreadCacheAllocationHook hook) noexcept;
+using CpuCapacityQueryHook = bool (*)();
+void set_cpu_capacity_query_hook_for_testing(CpuCapacityQueryHook hook) noexcept;
+using ProcessMetricsClock = ULONGLONG (WINAPI*)();
+void set_process_metrics_clock_for_testing(ProcessMetricsClock clock) noexcept;
 }
 #endif
 class ProcessMetricSampler final {
@@ -136,7 +144,7 @@ private:
     std::optional<std::uint64_t> previous_thread_refresh_ms_;
     std::unique_ptr<NativeHandles> native_handles_;
     detail::ThreadPressureCache thread_pressure_cache_;
-    bool cpu_capacity_sampled_{false};
+    std::optional<std::uint64_t> previous_capacity_sample_ms_;
     std::optional<std::uint32_t> cached_affinity_logical_processors_;
     std::optional<std::uint32_t> cached_affinity_physical_cores_;
     std::optional<std::uint32_t> cached_system_logical_processors_;

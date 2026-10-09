@@ -1,9 +1,25 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <new>
 #include <vector>
 
 #include "kf2/telemetry/telemetry_snapshot.hpp"
+
+namespace {
+thread_local bool count_allocations{};
+thread_local std::size_t allocations{};
+thread_local std::size_t interval_buffer_bytes{};
+}
+
+void* operator new(std::size_t size) {
+    // Exclude the Debug STL's separate iterator bookkeeping allocations.
+    if (count_allocations && size == interval_buffer_bytes) ++allocations;
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -21,9 +37,14 @@ int main() {
     for (std::uint64_t index = 0; index <= 120; ++index) {
         presents.push_back({game, 1'000'000'000ULL + index * 16'666'667ULL});
     }
+    interval_buffer_bytes = (presents.size() - 1) * sizeof(double);
+    count_allocations = true;
     const auto sixty = aggregate_presents(
         presents, game, presents.back().monotonic_ns + 1'000'000ULL,
         500'000'000ULL);
+    count_allocations = false;
+    std::cout << "Interval buffers allocated: " << allocations << '\n';
+    CHECK(allocations == 1);
     CHECK(sixty.fps.has_value());
     CHECK(std::abs(*sixty.fps - 60.0) < 0.01);
     CHECK(sixty.frame_time_ms.has_value());
@@ -33,6 +54,26 @@ int main() {
     CHECK(sixty.one_percent_low_fps.has_value());
     CHECK(sixty.quality == SampleQuality::good);
     CHECK(sixty.loss_count == 0);
+
+    const std::vector<PresentTimestamp> spike{
+        {game, 1'000'000'000ULL}, {game, 1'995'000'000ULL},
+        {game, 1'996'000'000ULL}, {game, 1'997'000'000ULL},
+        {game, 1'998'000'000ULL}, {game, 1'999'000'000ULL},
+        {game, 2'000'000'000ULL}};
+    const auto original_spike = spike;
+    const auto slow = aggregate_presents(spike, game, 2'000'000'000ULL,
+                                         500'000'000ULL);
+    CHECK(slow.fps == 6.0);
+    CHECK(slow.frame_time_ms == 1000.0 / 6.0);
+    CHECK(slow.p95_ms == 995.0);
+    CHECK(slow.p99_ms == 995.0);
+    CHECK(slow.one_percent_low_fps == 1000.0 / 995.0);
+    CHECK(slow.stutter_count == 1);
+    CHECK(slow.quality == SampleQuality::good);
+    for (std::size_t index = 0; index < spike.size(); ++index) {
+        CHECK(spike[index].identity == original_spike[index].identity);
+        CHECK(spike[index].monotonic_ns == original_spike[index].monotonic_ns);
+    }
 
     auto imperfect = presents;
     imperfect.insert(imperfect.begin() + 10, imperfect[9]);

@@ -9,6 +9,37 @@
 #include <vector>
 
 namespace kf2::platform::windows {
+namespace {
+
+using TempPathFunction = DWORD(WINAPI*)(DWORD, LPWSTR);
+
+#if defined(KF2_STATE_ENVIRONMENT_TESTING)
+const TemporaryDirectoryTestHooks* temporary_directory_test_hooks = nullptr;
+#endif
+
+DWORD WINAPI legacy_temp_path(DWORD capacity, LPWSTR buffer) {
+    struct {
+        TOKEN_USER user;
+        BYTE sid[SECURITY_MAX_SID_SIZE];
+    } identity{};
+    DWORD required = 0;
+    auto query_token = GetTokenInformation;
+#if defined(KF2_STATE_ENVIRONMENT_TESTING)
+    if (temporary_directory_test_hooks != nullptr) {
+        query_token = temporary_directory_test_hooks->query_token;
+    }
+#endif
+    if (!query_token(GetCurrentProcessToken(), TokenUser, &identity,
+                     sizeof(identity), &required)) return 0;
+    // GetTempPathW lacks GetTempPath2W's SYSTEM-only directory isolation.
+    if (IsWellKnownSid(identity.user.User.Sid, WinLocalSystemSid)) {
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return 0;
+    }
+    return GetTempPathW(capacity, buffer);
+}
+
+}  // namespace
 
 Result<std::filesystem::path> executable_path() {
     std::vector<wchar_t> buffer(32768);
@@ -33,18 +64,31 @@ Result<std::filesystem::path> executable_directory() {
 }
 
 Result<std::filesystem::path> temporary_directory() {
+    auto get_path = reinterpret_cast<TempPathFunction>(
+        GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetTempPath2W"));
+#if defined(KF2_STATE_ENVIRONMENT_TESTING)
+    if (temporary_directory_test_hooks != nullptr) {
+        get_path = temporary_directory_test_hooks->temp_path2;
+    }
+#endif
+    if (get_path == nullptr) get_path = legacy_temp_path;
     std::vector<wchar_t> buffer(32768);
-    const DWORD length = GetTempPath2W(static_cast<DWORD>(buffer.size()),
-                                       buffer.data());
+    const DWORD length = get_path(static_cast<DWORD>(buffer.size()), buffer.data());
     if (length == 0 || length >= buffer.size()) {
         return Result<std::filesystem::path>::failure(
-            {ErrorCode::platform_failure,
-             L"Temporary directory discovery failed",
+            {ErrorCode::platform_failure, L"Temporary directory discovery failed",
              static_cast<std::uint32_t>(GetLastError())});
     }
     return Result<std::filesystem::path>::success(
         std::filesystem::path{std::wstring{buffer.data(), length}});
 }
+
+#if defined(KF2_STATE_ENVIRONMENT_TESTING)
+void set_temporary_directory_test_hooks(
+    const TemporaryDirectoryTestHooks* hooks) noexcept {
+    temporary_directory_test_hooks = hooks;
+}
+#endif
 
 Result<std::filesystem::path> local_app_data_directory() {
     PWSTR raw_path = nullptr;

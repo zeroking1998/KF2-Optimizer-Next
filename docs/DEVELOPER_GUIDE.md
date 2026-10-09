@@ -138,6 +138,10 @@ CPU-time measurements still use the same cached thread handles every 500 ms,
 with membership refreshed every five seconds. No new worker, timer or retained
 cache is introduced.
 
+Process-affinity capacity uses the same monotonic clock and five-second cadence,
+independently of thread-discovery success. Failed capacity queries publish
+unavailable values until the next scheduled retry, not stale observations.
+
 ### Launch.log handle ownership
 
 The resource worker retains one shared read handle per verified Launch.log
@@ -150,7 +154,45 @@ on the same worker even without a new sample; adapter-only changes and map
 travel retain the handle. A raced read still uses its inspected file, and the
 next poll detects replacement. Existing catch-up/freshness limits remain intact.
 
+### Application session markers
+
+Startup and clean shutdown use one marker writer. Failed serialization returns
+an I/O failure before replacing any marker; completed text transfers directly
+to atomic replacement. Marker format, corruption quarantine, startup commit
+ordering and clean-shutdown retry remain unchanged.
+
 ### Adaptive Present observations
+
+Explicit FleX report export and session finalization reject a failed report
+stream before submitting any file write. A completed stream transfers its
+owned text to the existing asynchronous writer; diagnostic gates, JSON fields,
+atomic replacement and the existing completion timeout remain unchanged.
+
+DXGI startup combines the Present event-ID filter with the bound process PID
+scope filter. The consumer PID/creation-identity guard remains authoritative.
+Rejected PID filtering (`ERROR_INVALID_PARAMETER` or `ERROR_NOT_SUPPORTED`)
+gets one startup-only event-ID-only fallback; all other failures remain errors.
+No extra polling, worker, cache or per-frame allocation is introduced.
+
+Completed Present pairs retain at most one unlinked map node for reuse. Every
+new Start overwrites its thread ID, timestamp and swapchain; retained storage
+is never a pending pair. Active-pair capacity, expiry, invalidation and loss
+checks stay unchanged. Overlapping bursts and hash growth can still allocate.
+
+The existing 100-ms DXGI flush uses a reusable, adequately sized properties
+buffer and publishes loss statistics only on successful API responses.
+`EventsLost` deltas use independent 32-bit wrap semantics; changed
+`RealTimeBuffersLost` invalidates capture quality without supplying an invented
+event or Present count. `EVENT_TRACE_LOGFILEW::EventsLost` is unused and cannot
+replace these statistics. Counted and uncounted loss share source boundaries,
+diagnostic invalidation and fresh-window recovery; degraded quality also sets
+Adaptive's existing sample-loss flag when the known marker count is zero.
+
+DXGI acknowledges known loss through the allocation-free `record_loss` path
+before admitting its completed sample. Rejected source state retains parser
+debt; a later frame-allocation failure cannot replay already committed loss.
+Loss-free presents still take only the existing ingestion lock. Counted loss
+denotes observed event/pair/callback markers, not inferred missing Presents.
 
 The live worker computes its overlapping 1/3/5/10-second metrics from one
 interval array and one sort. Window membership excludes each boundary-crossing
@@ -158,6 +200,11 @@ pair; chronological averages and ascending slow-tail sums preserve the generic
 aggregator's exact values. All metrics retain their existing cadence and
 freshness checks without an additional mutable cache. Fixed diagnostic windows
 still use the generic aggregator independently.
+
+The generic diagnostic aggregator also sorts its owned interval buffer in place,
+after calculating the chronological total and average. No second interval copy
+is needed; percentiles, ascending slow-tail sums and order-independent stutter
+counts preserve their original values without modifying input Presents.
 
 Frame metrics carry the actual newest Present timestamp, selected swapchain
 and source generation. An asynchronous UI read must not derive a new Present
@@ -171,6 +218,12 @@ limit (two seconds by default); it does not imply a quality reduction. A fresh
 Present resumes evaluation. Process/session/map/discontinuity resets and
 confirmed quality actions clear duplicate ownership; pre-action frames remain
 excluded by the applied-receipt timestamp.
+
+Actual ETW consumer termination ends its existing flush worker and uses the
+same three-second reconnect interval and two-attempt process budget as silent
+startup recovery. Missing or stale frames alone do not imply termination.
+Reconnection retains the bound process and resets the Present source generation
+before new data can be published; it does not reset Adaptive graphics ownership.
 
 Preserve the permanent boundary in [Safety](SAFETY.md), the target-FPS range of
 30 through 240 in one-FPS steps, the corpse ceiling of 4 through 2000, bounded

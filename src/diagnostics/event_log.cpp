@@ -169,8 +169,12 @@ EventLog::EventLog(std::size_t capacity,
                 record_persistence_failure_locked();
             }
             // A validated path may be temporarily locked even at startup.
-            persistence_worker_ = std::jthread(
-                [this](std::stop_token stop) { persist_worker(stop); });
+            try {
+                persistence_worker_ = std::jthread(
+                    [this](std::stop_token stop) { persist_worker(stop); });
+            } catch (...) {
+                record_persistence_failure_locked();
+            }
         }
     }
 }
@@ -363,6 +367,7 @@ void EventLog::record_persistence_failure_locked() noexcept {
 
 std::string serialize_events_json(const std::vector<Event>& events) {
     std::ostringstream output;
+    output.exceptions(std::ios::badbit | std::ios::failbit);
     output << "{\"version\":1,\"events\":[";
     write_events(output, events);
     output << "]}";
@@ -615,6 +620,7 @@ void write_product_report(std::ostringstream& output, const ProductReport& repor
 
 std::string serialize_product_report_json(const ProductReport& report) {
     std::ostringstream output;
+    output.exceptions(std::ios::badbit | std::ios::failbit);
     write_product_report(output, report);
     return std::move(output).str();
 }
@@ -625,6 +631,7 @@ std::string serialize_support_bundle_json(
         issue72_inventory_json.front() == '{' &&
         issue72_inventory_json.back() == '}';
     std::ostringstream output;
+    output.exceptions(std::ios::badbit | std::ios::failbit);
     output << "{\"schema\":\"KF2_OPTIMIZER_SUPPORT_BUNDLE_V1\""
            << ",\"privacy\":\"Local only; no dump, command line, user files or uploaded data\""
            << ",\"diagnostics\":";

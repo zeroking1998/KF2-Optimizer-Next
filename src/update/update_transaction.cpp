@@ -31,6 +31,7 @@ constexpr std::array<std::string_view, 2> kManifestPaths{
 
 #if defined(KF2_UPDATE_TRANSACTION_TESTING)
 ManagedReadHook managed_read_hook{};
+UpdateOwnerQueryFault owner_query_fault{};
 #endif
 
 struct ManagedPackageSnapshot {
@@ -264,20 +265,60 @@ Result<UpdateJournal> read_bound_journal(
     return journal;
 }
 
-bool owner_is_active(const UpdateJournal& journal) noexcept {
+Result<bool> owner_is_active(const UpdateJournal& journal) {
     if (journal.owner_process_id == GetCurrentProcessId() &&
         journal.owner_process_start_id == process_start_id(GetCurrentProcess())) {
-        return false;
+        return Result<bool>::success(false);
     }
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
                                  FALSE, journal.owner_process_id);
-    if (!process) return false;
-    DWORD exit_code = 0;
-    const bool active = GetExitCodeProcess(process, &exit_code) &&
-        exit_code == STILL_ACTIVE &&
-        process_start_id(process) == journal.owner_process_start_id;
+#if defined(KF2_UPDATE_TRANSACTION_TESTING)
+    if (owner_query_fault == UpdateOwnerQueryFault::open_failure) {
+        if (process) CloseHandle(process);
+        process = nullptr;
+        SetLastError(ERROR_ACCESS_DENIED);
+    }
+#endif
+    if (!process) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_INVALID_PARAMETER) return Result<bool>::success(false);
+        return Result<bool>::failure(
+            {ErrorCode::platform_failure,
+             L"Update owner process cannot be opened safely", error});
+    }
+    DWORD waited = WaitForSingleObject(process, 0);
+#if defined(KF2_UPDATE_TRANSACTION_TESTING)
+    if (owner_query_fault == UpdateOwnerQueryFault::wait_failure) {
+        waited = WAIT_FAILED;
+        SetLastError(ERROR_INVALID_HANDLE);
+    }
+#endif
+    if (waited == WAIT_OBJECT_0) {
+        CloseHandle(process);
+        return Result<bool>::success(false);
+    }
+    if (waited != WAIT_TIMEOUT) {
+        const DWORD error = GetLastError();
+        CloseHandle(process);
+        return Result<bool>::failure(
+            {ErrorCode::platform_failure,
+             L"Update owner process exit cannot be verified", error});
+    }
+    auto start_id = process_start_id(process);
+#if defined(KF2_UPDATE_TRANSACTION_TESTING)
+    if (owner_query_fault == UpdateOwnerQueryFault::identity_failure) {
+        start_id = 0;
+        SetLastError(ERROR_ACCESS_DENIED);
+    }
+#endif
+    const DWORD error = GetLastError();
     CloseHandle(process);
-    return active;
+    if (start_id == 0) {
+        return Result<bool>::failure(
+            {ErrorCode::platform_failure,
+             L"Update owner process identity cannot be verified", error});
+    }
+    return Result<bool>::success(start_id == journal.owner_process_start_id);
 }
 
 std::vector<std::string_view> managed_paths() {
@@ -609,6 +650,10 @@ Result<UpdateTransactionResult> fail_with_rollback(
 }  // namespace
 
 #if defined(KF2_UPDATE_TRANSACTION_TESTING)
+void set_update_owner_query_fault_for_testing(UpdateOwnerQueryFault fault) noexcept {
+    owner_query_fault = fault;
+}
+
 void set_managed_read_hook_for_testing(ManagedReadHook hook) noexcept {
     managed_read_hook = hook;
 }
@@ -933,7 +978,11 @@ Result<UpdateRecoveryResult> recover_update_transaction(
     if (!backup.has_value()) {
         return Result<UpdateRecoveryResult>::failure(backup.error());
     }
-    if (owner_is_active(journal.value())) {
+    const auto owner_active = owner_is_active(journal.value());
+    if (!owner_active.has_value()) {
+        return Result<UpdateRecoveryResult>::failure(owner_active.error());
+    }
+    if (owner_active.value()) {
         return Result<UpdateRecoveryResult>::success(
             {UpdateRecoveryState::owner_active,
              journal.value().replaced_files});

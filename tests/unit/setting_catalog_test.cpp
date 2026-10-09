@@ -3,12 +3,26 @@
 #include <set>
 #include <filesystem>
 #include <fstream>
+#include <new>
 #include <Windows.h>
 
 #include "kf2/config/setting_catalog.hpp"
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
+
+namespace {
+bool count_lookup_allocations{};
+std::size_t lookup_allocations{};
+}
+
+void* operator new(std::size_t size) {
+    if (count_lookup_allocations) ++lookup_allocations;
+    if (void* value = std::malloc(size == 0 ? 1 : size)) return value;
+    throw std::bad_alloc{};
+}
+void operator delete(void* value) noexcept { std::free(value); }
+void operator delete(void* value, std::size_t) noexcept { std::free(value); }
 
 int main() {
     using namespace kf2::config;
@@ -107,9 +121,22 @@ int main() {
     CHECK(find_setting_by_token(
         "bOverrideMapWholeSceneDominantShadowSetting") != nullptr);
     CHECK(find_setting_by_token("Unknown") == nullptr);
+    CHECK(find_setting_by_token("") == nullptr);
+    CHECK(find_setting_by_token("maxdeadbodies") == nullptr);
+    CHECK(find_setting_by_token(std::string(97, 'x')) == nullptr);
+    CHECK(find_setting_by_token(std::string_view{"\xff", 1}) == nullptr);
+    CHECK(find_setting_by_token(std::string_view{"MaxDeadBodies\0suffix", 20}) == nullptr);
     std::size_t adaptive_protected_count = 0;
     std::set<SettingCategory> categories;
     for (const auto& setting : all_settings()) {
+        const auto token = setting_token(setting.id);
+        count_lookup_allocations = true;
+        const auto* found = find_setting_by_token(token);
+        const auto* missing = find_setting_by_token("Unknown");
+        count_lookup_allocations = false;
+        CHECK(found && found->key == setting.key);
+        CHECK(missing == nullptr);
+        CHECK(lookup_allocations == 0);
         if (!setting.adaptive_allowed) ++adaptive_protected_count;
         categories.insert(setting_category(setting.id));
         CHECK(!setting_category_label(setting.id).empty());

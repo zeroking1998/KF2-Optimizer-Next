@@ -2,11 +2,14 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <iostream>
 #include <limits>
 #include <new>
 #include "kf2/telemetry/gpu_metrics.hpp"
 #include <pdhmsg.h>
+#include <dxgi1_6.h>
+#include <wrl/implements.h>
 
 namespace {
 thread_local bool count_allocations = false;
@@ -32,6 +35,197 @@ void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 namespace {
 using namespace kf2::telemetry;
+HRESULT adapter_result = S_OK;
+HRESULT output_result = DXGI_ERROR_NOT_FOUND;
+UINT adapter_calls = 0;
+UINT output_calls = 0;
+
+template <typename Interface>
+struct DxgiObject : Microsoft::WRL::RuntimeClass<
+    Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>, Interface> {
+    HRESULT STDMETHODCALLTYPE SetPrivateData(REFGUID, UINT, const void*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE SetPrivateDataInterface(REFGUID, const IUnknown*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetPrivateData(REFGUID, UINT*, void*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetParent(REFIID, void**) override { return E_NOTIMPL; }
+};
+
+struct ProbeAdapter final : DxgiObject<IDXGIAdapter1> {
+    bool software{false};
+    HRESULT STDMETHODCALLTYPE EnumOutputs(UINT, IDXGIOutput** output) override {
+        ++output_calls;
+        *output = nullptr;
+        return output_result;
+    }
+    HRESULT STDMETHODCALLTYPE GetDesc(DXGI_ADAPTER_DESC*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE CheckInterfaceSupport(REFGUID, LARGE_INTEGER*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetDesc1(DXGI_ADAPTER_DESC1* description) override {
+        *description = {};
+        description->Flags = software ? DXGI_ADAPTER_FLAG_SOFTWARE : 0;
+        description->AdapterLuid = {0x12345678U, static_cast<LONG>(0xABCDEF00U)};
+        return S_OK;
+    }
+};
+
+template <typename Interface>
+struct ProbeFactoryBase : DxgiObject<Interface> {
+    HRESULT STDMETHODCALLTYPE EnumAdapters1(UINT index, IDXGIAdapter1** adapter) override {
+        ++adapter_calls;
+        *adapter = nullptr;
+        if (index != 0) return DXGI_ERROR_NOT_FOUND;
+        if (FAILED(adapter_result)) return adapter_result;
+        return Microsoft::WRL::Make<ProbeAdapter>().CopyTo(adapter);
+    }
+    BOOL STDMETHODCALLTYPE IsCurrent() override { return TRUE; }
+    HRESULT STDMETHODCALLTYPE EnumAdapters(UINT, IDXGIAdapter**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE MakeWindowAssociation(HWND, UINT) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetWindowAssociation(HWND*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE CreateSwapChain(IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE CreateSoftwareAdapter(HMODULE, IDXGIAdapter**) override { return E_NOTIMPL; }
+};
+struct ProbeFactory final : ProbeFactoryBase<IDXGIFactory1> {};
+
+HRESULT WINAPI create_probe_factory(REFIID iid, void** factory) {
+    return Microsoft::WRL::Make<ProbeFactory>().CopyTo(iid, factory);
+}
+
+int test_dxgi_enumeration_failures() {
+    const auto previous_mode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    struct ResetFactory {
+        UINT previous_mode;
+        ~ResetFactory() {
+            detail::set_dxgi_factory_for_testing(nullptr);
+            SetErrorMode(previous_mode);
+        }
+    } reset{previous_mode};
+    const auto window = GetDesktopWindow();
+    CHECK(MonitorFromWindow(window, MONITOR_DEFAULTTONULL) != nullptr);
+    detail::set_dxgi_factory_for_testing(create_probe_factory);
+    // End-of-list remains normal. Other failures must stop before dereferencing
+    // the API's null output and preserve the exact native error.
+    for (const auto status : {DXGI_ERROR_NOT_FOUND, E_FAIL, DXGI_ERROR_DEVICE_REMOVED}) {
+        for (const bool fail_adapter : {false, true}) {
+            adapter_result = fail_adapter ? status : S_OK;
+            output_result = fail_adapter ? DXGI_ERROR_NOT_FOUND : status;
+            adapter_calls = output_calls = 0;
+            std::cerr << "DXGI enumeration probe: " << (fail_adapter ? "adapter" : "output")
+                      << ", HRESULT=" << std::hex << status << std::dec << '\n';
+            const auto result = adapter_luid_for_window(window);
+            CHECK(!result.has_value());
+            CHECK(result.error().code == (status == DXGI_ERROR_NOT_FOUND
+                ? kf2::ErrorCode::not_found : kf2::ErrorCode::platform_failure));
+            CHECK(result.error().native_code == (status == DXGI_ERROR_NOT_FOUND
+                ? 0U : static_cast<std::uint32_t>(status)));
+            CHECK(adapter_calls == (status == DXGI_ERROR_NOT_FOUND && !fail_adapter ? 2U : 1U));
+            CHECK(output_calls == (fail_adapter ? 0U : 1U));
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
+HRESULT preference_result = S_OK;
+UINT preference_calls = 0;
+UINT preference_factories = 0;
+DXGI_GPU_PREFERENCE observed_preference = DXGI_GPU_PREFERENCE_UNSPECIFIED;
+const wchar_t* preference_value = L"GpuPreference=2;";
+bool preference_factory_supported = true;
+
+struct PreferenceFactory final : ProbeFactoryBase<
+    Microsoft::WRL::ChainInterfaces<IDXGIFactory6, IDXGIFactory1>> {
+    BOOL STDMETHODCALLTYPE IsWindowedStereoEnabled() override { return FALSE; }
+    HRESULT STDMETHODCALLTYPE CreateSwapChainForHwnd(IUnknown*, HWND, const DXGI_SWAP_CHAIN_DESC1*, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*, IDXGIOutput*, IDXGISwapChain1**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE CreateSwapChainForCoreWindow(IUnknown*, IUnknown*, const DXGI_SWAP_CHAIN_DESC1*, IDXGIOutput*, IDXGISwapChain1**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetSharedResourceAdapterLuid(HANDLE, LUID*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE RegisterStereoStatusWindow(HWND, UINT, DWORD*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE RegisterStereoStatusEvent(HANDLE, DWORD*) override { return E_NOTIMPL; }
+    void STDMETHODCALLTYPE UnregisterStereoStatus(DWORD) override {}
+    HRESULT STDMETHODCALLTYPE RegisterOcclusionStatusWindow(HWND, UINT, DWORD*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE RegisterOcclusionStatusEvent(HANDLE, DWORD*) override { return E_NOTIMPL; }
+    void STDMETHODCALLTYPE UnregisterOcclusionStatus(DWORD) override {}
+    HRESULT STDMETHODCALLTYPE CreateSwapChainForComposition(IUnknown*, const DXGI_SWAP_CHAIN_DESC1*, IDXGIOutput*, IDXGISwapChain1**) override { return E_NOTIMPL; }
+    UINT STDMETHODCALLTYPE GetCreationFlags() override { return 0; }
+    HRESULT STDMETHODCALLTYPE EnumAdapterByLuid(LUID, REFIID, void**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE EnumWarpAdapter(REFIID, void**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE CheckFeatureSupport(DXGI_FEATURE, void*, UINT) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE EnumAdapterByGpuPreference(UINT index, DXGI_GPU_PREFERENCE preference,
+        REFIID iid, void** result) override {
+        *result = nullptr;
+        observed_preference = preference;
+        ++preference_calls;
+        // Bound a regressed implementation instead of letting the test hang.
+        if (preference_calls > 100) return DXGI_ERROR_NOT_FOUND;
+        if (FAILED(preference_result)) return preference_result;
+        if (index > 1) return DXGI_ERROR_NOT_FOUND;
+        auto adapter = Microsoft::WRL::Make<ProbeAdapter>();
+        adapter->software = index == 0;
+        return adapter.CopyTo(iid, result);
+    }
+};
+
+HRESULT WINAPI create_preference_factory(REFIID iid, void** factory) {
+    ++preference_factories;
+    if (!preference_factory_supported) return create_probe_factory(iid, factory);
+    return Microsoft::WRL::Make<PreferenceFactory>().CopyTo(iid, factory);
+}
+LSTATUS WINAPI read_gpu_preference(HKEY, LPCWSTR, LPCWSTR, DWORD, LPDWORD,
+    void* data, LPDWORD bytes) {
+    const auto required = static_cast<DWORD>((std::wcslen(preference_value) + 1) * sizeof(wchar_t));
+    if (data && *bytes < required) return ERROR_MORE_DATA;
+    if (data) std::memcpy(data, preference_value, required);
+    *bytes = required;
+    return ERROR_SUCCESS;
+}
+
+int test_gpu_preference_enumeration() {
+    struct ResetApi {
+        ~ResetApi() {
+            detail::set_dxgi_factory_for_testing(nullptr);
+            detail::set_gpu_preference_reader_for_testing(nullptr);
+        }
+    } reset;
+    detail::set_dxgi_factory_for_testing(create_preference_factory);
+    detail::set_gpu_preference_reader_for_testing(read_gpu_preference);
+    for (const bool minimum_power : {false, true}) {
+        preference_value = minimum_power ? L"GpuPreference=1;" : L"GpuPreference=2;";
+        const auto expected = minimum_power ? ProcessGpuPreference::minimum_power
+                                           : ProcessGpuPreference::high_performance;
+        for (const auto status : {S_OK, DXGI_ERROR_NOT_FOUND, E_FAIL, DXGI_ERROR_DEVICE_REMOVED}) {
+            preference_result = status;
+            preference_calls = preference_factories = 0;
+            const auto result = configured_gpu_adapter_for_process(L"D:/private-gpu-test.exe");
+            CHECK(preference_factories == 1);
+            CHECK(observed_preference == (minimum_power ? DXGI_GPU_PREFERENCE_MINIMUM_POWER
+                                                        : DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE));
+            CHECK(preference_calls == (status == S_OK ? 2U : 1U));
+            if (status == S_OK || status == DXGI_ERROR_NOT_FOUND) {
+                CHECK(result.has_value());
+                CHECK(result.value().preference == expected);
+                CHECK(result.value().adapter_luid == (status == S_OK
+                    ? std::optional<std::uint64_t>{0xABCDEF0012345678ULL} : std::nullopt));
+            } else {
+                CHECK(!result.has_value());
+                CHECK(result.error().code == kf2::ErrorCode::platform_failure);
+                CHECK(result.error().native_code == static_cast<std::uint32_t>(status));
+            }
+        }
+        preference_factory_supported = false;
+        preference_calls = 0;
+        const auto unsupported = configured_gpu_adapter_for_process(L"D:/private-gpu-test.exe");
+        CHECK(unsupported.has_value());
+        CHECK(unsupported.value().preference == expected);
+        CHECK(!unsupported.value().adapter_luid);
+        CHECK(preference_calls == 0);
+        preference_factory_supported = true;
+    }
+    preference_value = L"GpuPreference=0;";
+    preference_factories = 0;
+    const auto unspecified = configured_gpu_adapter_for_process(L"D:/private-gpu-test.exe");
+    CHECK(unspecified.has_value());
+    CHECK(unspecified.value().preference == ProcessGpuPreference::unspecified);
+    CHECK(!unspecified.value().adapter_luid);
+    CHECK(preference_factories == 0);
+    return EXIT_SUCCESS;
+}
+
 struct CounterEntry {
     std::wstring name;
     double utilization{0};
@@ -298,6 +492,8 @@ int wmain(int argc, wchar_t** argv) {
         return EXIT_SUCCESS;
     }
     CHECK(test_reused_pdh_samples() == EXIT_SUCCESS);
+    CHECK(test_dxgi_enumeration_failures() == EXIT_SUCCESS);
+    CHECK(test_gpu_preference_enumeration() == EXIT_SUCCESS);
     const auto adapters = enumerate_gpu_adapters();
     CHECK(adapters.has_value());
     CHECK(!adapters.value().empty());

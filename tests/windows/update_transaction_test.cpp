@@ -104,12 +104,111 @@ void truncate_managed_read(const std::filesystem::path& path) {
     if (path == partial_read_target) write_file(path, "short");
 }
 
+struct SuspendedChild {
+    PROCESS_INFORMATION process{};
+
+    ~SuspendedChild() {
+        if (process.hProcess) {
+            TerminateProcess(process.hProcess, EXIT_SUCCESS);
+            WaitForSingleObject(process.hProcess, 5'000);
+            CloseHandle(process.hProcess);
+        }
+        if (process.hThread) CloseHandle(process.hThread);
+    }
+};
+
+int check_owner_recovery(const std::filesystem::path& root) {
+    std::wstring executable(32'768, L'\0');
+    const DWORD length = GetModuleFileNameW(
+        nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+    CHECK(length > 0 && length < executable.size());
+    executable.resize(length);
+    auto command = L"\"" + executable + L"\"";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    SuspendedChild child;
+    CHECK(CreateProcessW(executable.c_str(), command.data(), nullptr,
+                         nullptr, FALSE, CREATE_SUSPENDED | CREATE_NO_WINDOW,
+                         nullptr, nullptr, &startup, &child.process));
+    FILETIME created{}, exited{}, kernel{}, user{};
+    CHECK(GetProcessTimes(child.process.hProcess, &created, &exited, &kernel,
+                          &user));
+    const auto start_id =
+        (static_cast<std::uint64_t>(created.dwHighDateTime) << 32U) |
+        created.dwLowDateTime;
+
+    const auto target = root / L"target";
+    const auto staged = root / L"staged";
+    const auto backup = root / L"backup";
+    write_package(target, "old-build", "0.0.2-alpha", "old");
+    write_package(staged, "new-build", "0.0.3-alpha", "new");
+    write_user_data(target);
+    const kf2::update::UpdateTransactionRequest request{
+        .target_root = target,
+        .staged_root = staged,
+        .backup_root = backup,
+        .expected_new_version = "0.0.3-alpha",
+        .fault = kf2::update::UpdateFaultInjection::interrupt_after_replacement,
+        .fault_after_replacements = 1U,
+    };
+    CHECK(!kf2::update::apply_update_transaction(request).has_value());
+    const auto journal_path = root / L"update-transaction.ini";
+    auto journal = read_file(journal_path);
+    const auto replace_owner = [&](std::string_view key, std::uint64_t value) {
+        const auto begin = journal.find(std::string{key} + '=') + key.size() + 1;
+        journal.replace(begin, journal.find('\n', begin) - begin,
+                        std::to_string(value));
+    };
+    replace_owner("owner_process_id", child.process.dwProcessId);
+    replace_owner("owner_process_start_id", start_id);
+    write_file(journal_path, journal);
+    const auto target_before = read_file(target / L"KF2Optimizer.exe");
+    const auto active = kf2::update::recover_update_transaction(request);
+    CHECK(active.has_value());
+    CHECK(active.value().state == kf2::update::UpdateRecoveryState::owner_active);
+    CHECK(read_file(target / L"KF2Optimizer.exe") == target_before);
+    CHECK(read_file(journal_path) == journal);
+
+    using kf2::update::UpdateOwnerQueryFault;
+    // Inject failures instead of relying on a DACL: SeDebugPrivilege can
+    // bypass that ACL on elevated runners. The owner is still a real process.
+    for (const auto fault : {UpdateOwnerQueryFault::open_failure,
+                             UpdateOwnerQueryFault::identity_failure,
+                             UpdateOwnerQueryFault::wait_failure}) {
+        kf2::update::set_update_owner_query_fault_for_testing(fault);
+        const auto failed_query = kf2::update::recover_update_transaction(request);
+        kf2::update::set_update_owner_query_fault_for_testing(
+            UpdateOwnerQueryFault::none);
+        CHECK(!failed_query.has_value());
+        const DWORD expected_error = fault == UpdateOwnerQueryFault::wait_failure
+            ? ERROR_INVALID_HANDLE : ERROR_ACCESS_DENIED;
+        CHECK(failed_query.error().native_code == expected_error);
+        CHECK(WaitForSingleObject(child.process.hProcess, 0) == WAIT_TIMEOUT);
+        CHECK(read_file(target / L"KF2Optimizer.exe") == target_before);
+        CHECK(read_file(journal_path) == journal);
+        CHECK(user_data_unchanged(target));
+    }
+
+    // A terminated process can use STILL_ACTIVE as its exit code. Its handle
+    // is signaled nonetheless, so recovery must not treat it as a live owner.
+    CHECK(TerminateProcess(child.process.hProcess, STILL_ACTIVE));
+    CHECK(WaitForSingleObject(child.process.hProcess, 5'000) == WAIT_OBJECT_0);
+    const auto stopped = kf2::update::recover_update_transaction(request);
+    CHECK(stopped.has_value());
+    CHECK(stopped.value().state ==
+          kf2::update::UpdateRecoveryState::rollback_verified);
+    CHECK(read_file(target / L"KF2Optimizer.exe") == "old executable");
+    CHECK(user_data_unchanged(target));
+    return EXIT_SUCCESS;
+}
+
 }  // namespace
 
 int main() {
     namespace fs = std::filesystem;
     const fs::path root{KF2_TEST_ROOT};
     reset_root(root);
+    CHECK(check_owner_recovery(root / L"owner-recovery") == EXIT_SUCCESS);
 
     const auto target = root / L"target";
     const auto staged = root / L"staged";

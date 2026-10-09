@@ -794,9 +794,10 @@ void ShellController::commit_slider(std::string_view node_id, int value) {
     callbacks_.set_slider_value(action, committed);
     // The callback may reject the write (read-only mode, a running game, or
     // an I/O error). Only the authoritative model can confirm the value.
-    if (node_id == "settings-target-slider") {
+    // Use the owned action ID: the callback can rebuild layout_ and its IDs.
+    if (action == "settings-target-slider") {
         model_.commit_target_fps_presentation(model_.status().target_fps);
-    } else if (node_id == "settings-corpses-slider") {
+    } else if (action == "settings-corpses-slider") {
         model_.commit_corpse_limit_presentation(model_.status().corpse_limit);
     }
     rebuild_layout();

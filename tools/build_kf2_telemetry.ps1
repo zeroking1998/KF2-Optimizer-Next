@@ -178,6 +178,7 @@ if ($hadShippingSeed) {
 }
 
 $buildSucceeded = $false
+$buildFailure = $null
 try {
     New-Item -ItemType Directory -Path $classesRoot -Force | Out-Null
     Copy-Item -LiteralPath $probeSource -Destination `
@@ -295,39 +296,71 @@ try {
     Copy-Item -LiteralPath $publishedPath -Destination $resolvedOutput -Force
     $buildSucceeded = $true
 }
+catch {
+    $buildFailure = $_.Exception
+    throw
+}
 finally {
-    Copy-Item -LiteralPath $configBackup -Destination $configPath -Force
-    if ($hadSdkConfig) {
-        Copy-Item -LiteralPath $sdkConfigBackup -Destination $sdkConfigPath -Force
+    $restoreFailures = [Collections.Generic.List[Exception]]::new()
+    # These restores are independent: one locked file must not strand the rest.
+    foreach ($restore in @(
+        { Copy-Item -LiteralPath $configBackup -Destination $configPath -Force },
+        {
+            if ($hadSdkConfig) {
+                Copy-Item -LiteralPath $sdkConfigBackup -Destination $sdkConfigPath -Force
+            }
+            elseif (Test-Path -LiteralPath $sdkConfigPath -PathType Leaf) {
+                Remove-Item -LiteralPath $sdkConfigPath -Force
+            }
+        },
+        {
+            if (Test-Path -LiteralPath $packageRoot) {
+                Remove-Item -LiteralPath $packageRoot -Recurse -Force
+            }
+        },
+        {
+            if ($hadCompiledPackage) {
+                Copy-Item -LiteralPath $compiledBackup -Destination $compiledPath -Force
+            }
+            elseif (Test-Path -LiteralPath $compiledPath -PathType Leaf) {
+                Remove-Item -LiteralPath $compiledPath -Force
+            }
+        },
+        {
+            if ($hadPublishedPackage) {
+                New-Item -ItemType Directory -Path (Split-Path -Parent $publishedPath) `
+                    -Force | Out-Null
+                Copy-Item -LiteralPath $publishedBackup -Destination $publishedPath -Force
+            }
+            elseif (Test-Path -LiteralPath $publishedPath -PathType Leaf) {
+                Remove-Item -LiteralPath $publishedPath -Force
+            }
+        },
+        {
+            if ($hadShippingSeed) {
+                Copy-Item -LiteralPath $shippingSeedBackup -Destination $shippingSeedPath -Force
+            }
+            elseif (Test-Path -LiteralPath $shippingSeedPath -PathType Leaf) {
+                Remove-Item -LiteralPath $shippingSeedPath -Force
+            }
+        }
+    )) {
+        try { & $restore }
+        catch { $restoreFailures.Add($_.Exception) }
     }
-    elseif (Test-Path -LiteralPath $sdkConfigPath -PathType Leaf) {
-        Remove-Item -LiteralPath $sdkConfigPath -Force
+    if (-not $restoreFailures.Count) {
+        try {
+            if (Test-Path -LiteralPath $temporaryRoot) {
+                Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
+            }
+        }
+        catch { $restoreFailures.Add($_.Exception) }
     }
-    if (Test-Path -LiteralPath $packageRoot) {
-        Remove-Item -LiteralPath $packageRoot -Recurse -Force
-    }
-    if ($hadCompiledPackage) {
-        Copy-Item -LiteralPath $compiledBackup -Destination $compiledPath -Force
-    }
-    elseif (Test-Path -LiteralPath $compiledPath -PathType Leaf) {
-        Remove-Item -LiteralPath $compiledPath -Force
-    }
-    if ($hadPublishedPackage) {
-        New-Item -ItemType Directory -Path (Split-Path -Parent $publishedPath) `
-            -Force | Out-Null
-        Copy-Item -LiteralPath $publishedBackup -Destination $publishedPath -Force
-    }
-    elseif (Test-Path -LiteralPath $publishedPath -PathType Leaf) {
-        Remove-Item -LiteralPath $publishedPath -Force
-    }
-    if ($hadShippingSeed) {
-        Copy-Item -LiteralPath $shippingSeedBackup -Destination $shippingSeedPath -Force
-    }
-    elseif (Test-Path -LiteralPath $shippingSeedPath -PathType Leaf) {
-        Remove-Item -LiteralPath $shippingSeedPath -Force
-    }
-    if (Test-Path -LiteralPath $temporaryRoot) {
-        Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
+    if ($restoreFailures.Count) {
+        if ($buildFailure) { $restoreFailures.Insert(0, $buildFailure) }
+        throw [AggregateException]::new(
+            "KF2 telemetry cleanup is incomplete. Check recovery backups at: $temporaryRoot",
+            [Exception[]] $restoreFailures)
     }
 }
 

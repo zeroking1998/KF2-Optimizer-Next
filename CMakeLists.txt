@@ -223,7 +223,7 @@ set_property(SOURCE src/app/build_identity.cpp APPEND PROPERTY
     KF2_BUILD_COMMIT="${KF2_BUILD_COMMIT}"
     KF2_BUILD_CHANNEL="${KF2_BUILD_CHANNEL}"
 )
-set_property(SOURCE src/security/release_package_repair.cpp APPEND PROPERTY
+set_property(SOURCE src/update/github_release_client.cpp APPEND PROPERTY
     COMPILE_DEFINITIONS
     KF2_RELEASE_REPOSITORY="${KF2_RELEASE_REPOSITORY}"
 )

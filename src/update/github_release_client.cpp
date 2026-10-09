@@ -17,7 +17,7 @@
 #include "kf2/update/semantic_version.hpp"
 
 #ifndef KF2_RELEASE_REPOSITORY
-#define KF2_RELEASE_REPOSITORY ""
+#error KF2_RELEASE_REPOSITORY must be supplied by the build
 #endif
 
 namespace kf2::update {
@@ -123,7 +123,9 @@ public:
     Result<std::uint64_t> unsigned_number() {
         whitespace();
         if (offset_ >= text_.size() || !std::isdigit(
-                static_cast<unsigned char>(text_[offset_]))) {
+                static_cast<unsigned char>(text_[offset_])) ||
+            (text_[offset_] == '0' && offset_ + 1 < text_.size() &&
+             std::isdigit(static_cast<unsigned char>(text_[offset_ + 1])))) {
             return Result<std::uint64_t>::failure(
                 {ErrorCode::invalid_argument, L"GitHub JSON number is invalid", 0});
         }
@@ -384,16 +386,17 @@ Result<std::vector<ParsedRelease>> parse_release_array(std::string_view json) {
     if (!reader.consume('[')) return Result<std::vector<ParsedRelease>>::failure(
         {ErrorCode::invalid_argument, L"GitHub release response is malformed", 0});
     std::vector<ParsedRelease> releases;
-    if (reader.consume(']')) return Result<std::vector<ParsedRelease>>::success(std::move(releases));
-    for (;;) {
-        if (releases.size() >= 100) return Result<std::vector<ParsedRelease>>::failure(
-            {ErrorCode::access_denied, L"GitHub returned too many releases", 0});
-        auto release = parse_release(reader);
-        if (!release.has_value()) return Result<std::vector<ParsedRelease>>::failure(release.error());
-        releases.push_back(std::move(release.value()));
-        if (reader.consume(']')) break;
-        if (!reader.consume(',')) return Result<std::vector<ParsedRelease>>::failure(
-            {ErrorCode::invalid_argument, L"GitHub release response is malformed", 0});
+    if (!reader.consume(']')) {
+        for (;;) {
+            if (releases.size() >= 100) return Result<std::vector<ParsedRelease>>::failure(
+                {ErrorCode::access_denied, L"GitHub returned too many releases", 0});
+            auto release = parse_release(reader);
+            if (!release.has_value()) return Result<std::vector<ParsedRelease>>::failure(release.error());
+            releases.push_back(std::move(release.value()));
+            if (reader.consume(']')) break;
+            if (!reader.consume(',')) return Result<std::vector<ParsedRelease>>::failure(
+                {ErrorCode::invalid_argument, L"GitHub release response is malformed", 0});
+        }
     }
     if (!reader.at_end()) return Result<std::vector<ParsedRelease>>::failure(
         {ErrorCode::invalid_argument, L"GitHub release response has trailing data", 0});

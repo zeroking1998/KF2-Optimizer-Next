@@ -359,15 +359,7 @@ void UiRuntime::update_adaptive_controller(
     const auto pressure_resource =
         telemetry_pipeline::adaptive_runtime_resource(
             adaptive_decision.resources.primary,
-            adaptive_decision.resources.primary_confidence,
-            adaptive_decision.bottleneck.type,
-            adaptive_decision.bottleneck.confidence,
-            adaptive_resource_quality.overdraw <=
-                optimizer_settings.adaptive_minimum_quality,
-            sample.capabilities.gore_control ==
-                optimizer::AdaptiveCapabilityState::available &&
-                sample.capabilities.particle_control ==
-                    optimizer::AdaptiveCapabilityState::available);
+            adaptive_decision.resources.primary_confidence);
     const int selected_runtime_quality =
         adaptive_decision.state ==
                     optimizer::AdaptiveControllerState::stable
@@ -380,9 +372,6 @@ void UiRuntime::update_adaptive_controller(
             .primary_resource = adaptive_decision.resources.primary,
             .primary_confidence =
                 adaptive_decision.resources.primary_confidence,
-            .bottleneck = adaptive_decision.bottleneck.type,
-            .bottleneck_confidence =
-                adaptive_decision.bottleneck.confidence,
             .current_quality = selected_runtime_quality,
             .minimum_quality =
                 optimizer_settings.adaptive_minimum_quality,
@@ -394,6 +383,10 @@ void UiRuntime::update_adaptive_controller(
                     pressure_resource),
             .rollback_quality = adaptive_quality_rollback_target,
             .rollback_resource = adaptive_quality_rollback_resource,
+            .rollback_current_quality = adaptive_quality_rollback_resource
+                ? std::optional<int>{adaptive_resource_quality.control_quality(
+                      *adaptive_quality_rollback_resource)}
+                : std::nullopt,
             .quality_state_known = adaptive_quality_state_known,
             .current_frame_pressure =
                 adaptive_decision.current_frame_pressure,
@@ -413,14 +406,6 @@ void UiRuntime::update_adaptive_controller(
             .bridge_available = bridge_available,
             .zed_time_active = sample.zed_time_protected,
             .shadow_mode = optimizer_settings.adaptive_shadow_mode,
-            .overdraw_minimum_reached =
-                adaptive_resource_quality.overdraw <=
-                    optimizer_settings.adaptive_minimum_quality,
-            .effects_control_available =
-                sample.capabilities.gore_control ==
-                    optimizer::AdaptiveCapabilityState::available &&
-                sample.capabilities.particle_control ==
-                    optimizer::AdaptiveCapabilityState::available,
             .now_ns = now_ns,
             .map_ready_ns = adaptive_map_ready_ns,
             .last_dispatch_ns = adaptive_quality_last_dispatch_ns,
@@ -436,7 +421,8 @@ void UiRuntime::update_adaptive_controller(
             L"optimizer"});
     }
     if (runtime_selection && next_sequence) {
-        const auto previous_quality = selected_runtime_quality;
+        const auto previous_quality = adaptive_resource_quality.control_quality(
+            runtime_selection->resource);
         const auto& proposed = adaptive_actuation.propose(
             runtime_control,
             static_cast<double>(runtime_selection->quality),

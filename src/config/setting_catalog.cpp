@@ -294,7 +294,10 @@ std::string setting_token(SettingId id) {
 const SettingDefinition* find_setting_by_token(std::string_view token) noexcept {
     if (token.empty() || token.size() > 96) return nullptr;
     for (const auto& definition : all_settings()) {
-        if (setting_token(definition.id) == token) return &definition;
+        if (std::equal(definition.key.begin(), definition.key.end(),
+                token.begin(), token.end(), [](wchar_t key, char value) {
+                    return key <= 0x7F && key == static_cast<unsigned char>(value);
+                })) return &definition;
     }
     return nullptr;
 }

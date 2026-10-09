@@ -209,15 +209,14 @@ void UiRuntime::start_update_check(update::CheckTrigger trigger) {
 
 void UiRuntime::poll_update_check() {
     if (!updates.check) return;
-    std::optional<Result<std::optional<update::ReleaseInfo>>> outcome;
+    bool succeeded = false;
     {
         std::scoped_lock lock{updates.check->mutex};
         if (!updates.check->outcome) return;
-        outcome.emplace(std::move(*updates.check->outcome));
+        succeeded = updates.check->outcome->has_value();
+        updates.controller.complete_check(std::move(*updates.check->outcome));
     }
     updates.check.reset();
-    const bool succeeded = outcome->has_value();
-    updates.controller.complete_check(std::move(*outcome));
     if (succeeded) {
         static_cast<void>(persist_update_snapshot(*this, updates.controller.snapshot()));
     }
@@ -230,8 +229,7 @@ void UiRuntime::toggle_automatic_update_checks() {
     }
     const bool previous = optimizer_settings.automatic_update_checks;
     optimizer_settings.automatic_update_checks = !previous;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        settings_path, config::serialize_settings(optimizer_settings));
+    const auto saved = config::save_settings(settings_path, optimizer_settings);
     if (!saved.has_value()) {
         optimizer_settings.automatic_update_checks = previous;
         model.set_notice({ui::NoticeSeverity::error,
@@ -253,8 +251,7 @@ void UiRuntime::toggle_adaptive_optimization() {
     // could apply, and must not disturb an already confirmed/in-flight mode.
     auto proposed_settings = optimizer_settings;
     proposed_settings.adaptive_optimization_enabled = requested;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        settings_path, config::serialize_settings(proposed_settings));
+    const auto saved = config::save_settings(settings_path, proposed_settings);
     if (!saved.has_value()) {
         model.set_notice({ui::NoticeSeverity::error,
                           L"ADAPTIVE_SETTING_SAVE_FAILED",
@@ -299,10 +296,8 @@ void UiRuntime::toggle_adaptive_optimization() {
                 L"The previous protected session could not be restored", 0});
         if (!rebuilt.has_value()) {
             optimizer_settings.adaptive_optimization_enabled = previous;
-            const auto setting_rolled_back =
-                platform::windows::atomic_replace_utf8(
-                    settings_path,
-                    config::serialize_settings(optimizer_settings));
+            const auto setting_rolled_back = config::save_settings(
+                settings_path, optimizer_settings);
             const bool staged_state_restored =
                 restore_protected_session_config(
                     L"Adaptive mode rebuild rolled back");

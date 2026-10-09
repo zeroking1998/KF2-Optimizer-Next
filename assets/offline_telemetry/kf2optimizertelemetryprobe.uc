@@ -1275,9 +1275,9 @@ function RetireAdaptiveCorpseManagerOwnership(KFGoreManager NewManager)
         ++RetiredSleptCount;
     }
 
-    // Everything below belongs to the old manager generation. Keep only the
-    // two state-bearing physics ledgers above; their actors are released by a
-    // separate fair cursor after the new manager has initialized.
+    // Retire manager-owned caches, but keep living-Zed animation originals:
+    // those pawns can survive a GoreManager replacement in the same World.
+    // The two physics ledgers above use a separate fair release cursor.
     AdaptiveCorpseManager = None;
     bAdaptiveCorpseStaggerInitialized = false;
     AdaptiveFrozenCorpses.Length = 0;
@@ -1286,13 +1286,6 @@ function RetireAdaptiveCorpseManagerOwnership(KFGoreManager NewManager)
     AdaptiveBaselineSettleEntries.Length = 0;
     FixedMinimumCorpseLodCorpses.Length = 0;
     FixedMinimumCorpseLodAppliedMinModels.Length = 0;
-    FixedMinimumLivingVisualZeds.Length = 0;
-    FixedMinimumLivingAppliedMinLods.Length = 0;
-    FixedMinimumLivingAppliedAnimDistances.Length = 0;
-    FixedMinimumLivingAppliedAnimRates.Length = 0;
-    FixedMinimumLivingOriginalTickAnimOffscreen.Length = 0;
-    FixedMinimumLivingOriginalUpdateSkelOffscreen.Length = 0;
-    FixedMinimumLivingOffscreenAnimReduced.Length = 0;
     AdaptiveDistanceSleepTransitions.Length = 0;
     AdaptiveDistanceSleepTransitionCount = 0;
     AdaptiveDistanceSleepTransitionPruneCursor = 0;
@@ -1636,8 +1629,10 @@ function int FindFixedMinimumLivingVisualEntry(KFPawn_Monster Candidate)
     return FixedMinimumLivingVisualZeds.Find(Candidate);
 }
 
-function RemoveFixedMinimumLivingVisualEntry(int Index)
+function bool RemoveFixedMinimumLivingVisualEntry(int Index, string Reason)
 {
+    local KFPawn_Monster Candidate;
+
     if (Index < 0 || Index >= FixedMinimumLivingVisualZeds.Length ||
         Index >= FixedMinimumLivingAppliedMinLods.Length ||
         Index >= FixedMinimumLivingAppliedAnimDistances.Length ||
@@ -1646,7 +1641,16 @@ function RemoveFixedMinimumLivingVisualEntry(int Index)
         Index >= FixedMinimumLivingOriginalUpdateSkelOffscreen.Length ||
         Index >= FixedMinimumLivingOffscreenAnimReduced.Length)
     {
-        return;
+        return false;
+    }
+    Candidate = FixedMinimumLivingVisualZeds[Index];
+    // Missing mesh is not proof that the pawn is gone. Keep ownership until
+    // both flags read back correctly, or the actor is definitively deleted.
+    if (Candidate != None && !Candidate.bDeleteMe &&
+        FixedMinimumLivingOffscreenAnimReduced[Index] &&
+        !RestoreLivingOffscreenAnimation(Index, Reason))
+    {
+        return false;
     }
     FixedMinimumLivingVisualZeds.Remove(Index, 1);
     FixedMinimumLivingAppliedMinLods.Remove(Index, 1);
@@ -1655,6 +1659,7 @@ function RemoveFixedMinimumLivingVisualEntry(int Index)
     FixedMinimumLivingOriginalTickAnimOffscreen.Remove(Index, 1);
     FixedMinimumLivingOriginalUpdateSkelOffscreen.Remove(Index, 1);
     FixedMinimumLivingOffscreenAnimReduced.Remove(Index, 1);
+    return true;
 }
 
 function bool RestoreLivingOffscreenAnimation(int Index, string Reason)
@@ -1690,9 +1695,7 @@ function bool RestoreLivingOffscreenAnimation(int Index, string Reason)
     {
         ++FixedMinimumLivingOffscreenAnimRestores;
         `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=restored reason="$Reason$
-             " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
              " readback=verified");
     }
     return true;
@@ -1700,7 +1703,9 @@ function bool RestoreLivingOffscreenAnimation(int Index, string Reason)
 
 function PruneFixedMinimumLivingVisualEntries()
 {
+    local bool bRemoved;
     local int Index;
+    local int ScanBudget;
     local int Scanned;
     local KFPawn_Monster Candidate;
 
@@ -1712,22 +1717,18 @@ function PruneFixedMinimumLivingVisualEntries()
     FixedMinimumLivingPruneCursor = Clamp(
         FixedMinimumLivingPruneCursor, 0,
         FixedMinimumLivingVisualZeds.Length - 1);
+    // One bounded pass: do not retry a failed restore repeatedly in this tick.
+    ScanBudget = Min(AdaptiveCorpseScanBudget, FixedMinimumLivingVisualZeds.Length);
     while (FixedMinimumLivingVisualZeds.Length > 0 &&
-           Scanned < AdaptiveCorpseScanBudget)
+           Scanned < ScanBudget)
     {
-        Index = Clamp(
-            FixedMinimumLivingPruneCursor, 0,
-            FixedMinimumLivingVisualZeds.Length - 1);
+        Index = FixedMinimumLivingPruneCursor % FixedMinimumLivingVisualZeds.Length;
         Candidate = FixedMinimumLivingVisualZeds[Index];
+        bRemoved = false;
         if (Candidate == None || Candidate.bDeleteMe ||
             !Candidate.IsAliveAndWell() || Candidate.Mesh == None)
         {
-            if (Candidate != None && !Candidate.bDeleteMe &&
-                Candidate.Mesh != None)
-            {
-                RestoreLivingOffscreenAnimation(Index, "not_alive");
-            }
-            RemoveFixedMinimumLivingVisualEntry(Index);
+            bRemoved = RemoveFixedMinimumLivingVisualEntry(Index, "not_alive");
         }
         else if (Candidate.Mesh.MinLodModel !=
                      FixedMinimumLivingAppliedMinLods[Index] ||
@@ -1736,12 +1737,11 @@ function PruneFixedMinimumLivingVisualEntries()
                  Candidate.Mesh.AnimationLODFrameRate !=
                       FixedMinimumLivingAppliedAnimRates[Index])
         {
-            // Another KF2 system changed the mesh. Drop the stale readback;
-            // the fixed controller will verify and reapply it on a later scan.
-            RestoreLivingOffscreenAnimation(Index, "native_visual_state");
-            RemoveFixedMinimumLivingVisualEntry(Index);
+            // Discard stale visual readbacks only after animation ownership
+            // has been released. Failed restores must retain the originals.
+            bRemoved = RemoveFixedMinimumLivingVisualEntry(Index, "native_visual_state");
         }
-        else
+        if (!bRemoved)
         {
             FixedMinimumLivingPruneCursor =
                 (Index + 1) % FixedMinimumLivingVisualZeds.Length;
@@ -1842,6 +1842,8 @@ function bool ApplyLivingEnemyMinimumVisuals()
             {
                 return true;
             }
+            ScanPawn = FixedMinimumLivingScanPawn;
+            continue;
         }
         if (FixedMinimumLivingOffscreenAnimReduced[EntryIndex] &&
             (Candidate.Mesh.bTickAnimNodesWhenNotRendered ||
@@ -1853,6 +1855,8 @@ function bool ApplyLivingEnemyMinimumVisuals()
             {
                 return true;
             }
+            ScanPawn = FixedMinimumLivingScanPawn;
+            continue;
         }
         bVisualChanged =
             Candidate.Mesh.MinLodModel != TargetMinLod ||
@@ -1868,8 +1872,7 @@ function bool ApplyLivingEnemyMinimumVisuals()
                     TargetAnimDistance ||
                 Candidate.Mesh.AnimationLODFrameRate != TargetAnimRate)
             {
-                RestoreLivingOffscreenAnimation(EntryIndex, "visual_readback");
-                RemoveFixedMinimumLivingVisualEntry(EntryIndex);
+                RemoveFixedMinimumLivingVisualEntry(EntryIndex, "visual_readback");
                 ScanPawn = FixedMinimumLivingScanPawn;
                 continue;
             }
@@ -1877,9 +1880,7 @@ function bool ApplyLivingEnemyMinimumVisuals()
             `log("KF2OPT_LIVING_VISUAL state=fixed_minimum min_lod="$
                  TargetMinLod$" anim_factor="$
                  TargetAnimDistance$" anim_rate="$TargetAnimRate$
-                 " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
-                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                 FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                  " readback=verified");
         }
         bOffscreenChanged = false;
@@ -1906,10 +1907,7 @@ function bool ApplyLivingEnemyMinimumVisuals()
                 {
                     ++FixedMinimumLivingOffscreenAnimReductions;
                     `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=reduced"$
-                         " distance_units="$
-                         GetAdaptiveCorpseDistanceUnits(Candidate)$
-                         " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                             GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                         FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                          " readback=verified");
                 }
             }
@@ -2344,9 +2342,7 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
                  " angular_speed_units="$int(AngularSpeed)$
                  " position_change_units="$int(PositionChange)$
                  " corpse_id="$GetAdaptiveCorpseActionId(Candidate)$
-                 " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
-                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                 FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                  " effective_awake=0");
         }
         // Keep physics mutations bounded to one actor per scheduler callback.
@@ -2592,7 +2588,7 @@ function string GetAdaptiveDistanceSleepTransitionReason(string CorpseId)
 }
 
 function bool RememberAdaptiveDistanceSleepTransition(
-    string CorpseId, string RemovalReason, int DistanceUnits)
+    string CorpseId, string RemovalReason)
 {
     local float BackoffSeconds;
     local int Index;
@@ -2831,6 +2827,15 @@ function string FormatAdaptiveCorpseDistanceMeters(
         Result $= " m";
     }
     return Result;
+}
+
+function string FormatAdaptiveCorpseDistanceLogFields(KFPawn Candidate)
+{
+    local int DistanceUnits;
+
+    DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
+    return " distance_units="$DistanceUnits$" distance_m="$
+        FormatAdaptiveCorpseDistanceMeters(DistanceUnits, false);
 }
 
 function PruneAdaptiveCorpseDebugMarkers()
@@ -3845,16 +3850,13 @@ function RemoveAdaptiveDistanceSleptCorpseEntry(
     {
         Candidate = AdaptiveDistanceSleptCorpses[Index].Corpse;
         CorpseId = AdaptiveDistanceSleptCorpses[Index].CorpseId;
-        // The transition ledger uses distance for native-wake backoff even
-        // when diagnostics are disabled; only the readback formatting below
-        // is optional.
-        DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
         if (bDetailedRuntimeDiagnostics)
         {
+            DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
             EffectiveAwake = GetAdaptiveCorpseEffectiveAwake(Candidate);
         }
         RememberAdaptiveDistanceSleepTransition(
-            CorpseId, RemovalReason, DistanceUnits);
+            CorpseId, RemovalReason);
         if (bDetailedRuntimeDiagnostics && RemovalReason == "native_wake")
         {
             TransitionIndex = FindAdaptiveDistanceSleepTransition(CorpseId);
@@ -4030,10 +4032,8 @@ function int WakeNearAdaptiveDistanceSleptCorpses()
                 `log("KF2OPT_CORPSE_DISTANCE state=wake woken="$
                      AdaptiveDistancePhysicsWakes$" tracked="$
                      AdaptiveDistanceSleptCorpses.Length$" corpse_id="$
-                     GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-                     GetAdaptiveCorpseDistanceUnits(Candidate)$
-                     " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                         GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                     GetAdaptiveCorpseActionId(Candidate)$
+                     FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                      " effective_awake=1");
             }
             // A nearby body has priority, but never wake a second rigid body
@@ -4349,10 +4349,8 @@ function bool SleepOneDistantMonsterCorpse(
         {
             `log("KF2OPT_CORPSE_DISTANCE state=removed"$
                  " previous_state=sleep removal_reason=tracking_lost"$
-                 " corpse_id="$CorpseId$" distance_units="$
-                 GetAdaptiveCorpseDistanceUnits(Candidate)$
-                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                 " corpse_id="$CorpseId$
+                 FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                  " effective_awake="$
                  GetAdaptiveCorpseEffectiveAwake(Candidate));
         }
@@ -4391,10 +4389,8 @@ function bool SleepOneDistantMonsterCorpse(
              AdaptiveDistancePhysicsSleeps$" tracked="$
              AdaptiveDistanceSleptCorpses.Length$" visible_living="$
              VisibleLivingZeds$" visible_corpses="$VisibleCorpses$
-             " corpse_id="$CorpseId$" distance_units="$
-             GetAdaptiveCorpseDistanceUnits(Candidate)$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             " corpse_id="$CorpseId$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
              " effective_awake=0");
     }
     else if (bDetailedRuntimeDiagnostics)
@@ -4406,10 +4402,8 @@ function bool SleepOneDistantMonsterCorpse(
              AdaptiveDistancePhysicsSleeps$" tracked="$
              AdaptiveDistanceSleptCorpses.Length$" visible_living="$
              VisibleLivingZeds$" visible_corpses="$VisibleCorpses$
-             " corpse_id="$CorpseId$" distance_units="$
-             GetAdaptiveCorpseDistanceUnits(Candidate)$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             " corpse_id="$CorpseId$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
              " effective_awake=0");
     }
     return true;
@@ -4536,10 +4530,8 @@ function bool ApplyOneFixedMinimumCorpseLod(KFGoreManager GoreManager)
          " target_lod="$
          TargetMinLod$" reduced="$FixedMinimumCorpseLodReductions$" tracked="$
          FixedMinimumCorpseLodCorpses.Length$" corpse_id="$
-         GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-         GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
-         FormatAdaptiveCorpseDistanceMeters(
-             GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+         GetAdaptiveCorpseActionId(Candidate)$
+         FormatAdaptiveCorpseDistanceLogFields(Candidate)$
          " readback=verified");
     return true;
 }
@@ -4708,10 +4700,8 @@ function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(
                 AdaptiveLastNearRagdollRejectRealTime =
                     WorldInfo.RealTimeSeconds;
                 `log("KF2OPT_CORPSE_RAGDOLL state=rejected_near corpse_id="$
-                     GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-                     GetAdaptiveCorpseDistanceUnits(Candidate)$
-                     " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                         GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                     GetAdaptiveCorpseActionId(Candidate)$
+                     FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                      " minimum_distance_units=800 minimum_distance_m=8.0"$
                      " scene_level="$
                      ScenePressureLevel$" enemy_level="$EnemyPressureLevel$
@@ -4791,10 +4781,8 @@ function bool SleepOneVisibleMonsterCorpse(
              VisibleAwakeBefore$" distance_tracked="$
              AdaptiveDistanceSleptCorpses.Length$" ownership_tracked="$
              AdaptiveCorpsePhysicsActionIdCount$" corpse_id="$
-             GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-             GetAdaptiveCorpseDistanceUnits(Candidate)$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             GetAdaptiveCorpseActionId(Candidate)$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
              " minimum_distance_units=800 minimum_distance_m=8.0"$
              " scene_level="$ScenePressureLevel$
              " enemy_level="$EnemyPressureLevel$
@@ -5606,15 +5594,21 @@ function AdaptiveCorpseLoadControl()
     local int ProfileElapsedMilliseconds;
     local bool bActionTaken;
 
-    ProfileStartMilliseconds = GetProfileSystemMilliseconds();
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileStartMilliseconds = GetProfileSystemMilliseconds();
+    }
     bActionTaken = RunAdaptiveCorpseLoadControl();
-    ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
-        ProfileStartMilliseconds, GetProfileSystemMilliseconds());
-    ++ProfileAdaptiveControllerSamples;
-    ProfileAdaptiveControllerMilliseconds += ProfileElapsedMilliseconds;
-    ProfileMaxAdaptiveControllerMilliseconds = Max(
-        ProfileMaxAdaptiveControllerMilliseconds,
-        ProfileElapsedMilliseconds);
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
+            ProfileStartMilliseconds, GetProfileSystemMilliseconds());
+        ++ProfileAdaptiveControllerSamples;
+        ProfileAdaptiveControllerMilliseconds += ProfileElapsedMilliseconds;
+        ProfileMaxAdaptiveControllerMilliseconds = Max(
+            ProfileMaxAdaptiveControllerMilliseconds,
+            ProfileElapsedMilliseconds);
+    }
     ScheduleAdaptiveCorpseControlTimer(
         GetAdaptiveCorpseControlDelay(bActionTaken));
 }

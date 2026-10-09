@@ -28,8 +28,7 @@ Result<bool> UiRuntime::set_overlay(bool enabled) {
     }
     telemetry_tick();
     optimizer_settings.overlay_enabled = overlay_enabled;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        settings_path, config::serialize_settings(optimizer_settings));
+    const auto saved = config::save_settings(settings_path, optimizer_settings);
     if (!saved.has_value()) {
         overlay_enabled = previous;
         optimizer_settings.overlay_enabled = previous;
@@ -139,8 +138,7 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
         return;
     }
 
-    const auto saved = platform::windows::atomic_replace_utf8(
-        settings_path, config::serialize_settings(optimizer_settings));
+    const auto saved = config::save_settings(settings_path, optimizer_settings);
     if (!saved.has_value()) {
         optimizer_settings = previous;
         overlay_scale = static_cast<float>(
@@ -178,8 +176,8 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
                 "TARGET_FPS_PERSIST_FAILED",
                 synchronized.error().message, L"config"});
             optimizer_settings = previous;
-            const auto settings_rollback = platform::windows::atomic_replace_utf8(
-                settings_path, config::serialize_settings(optimizer_settings));
+            const auto settings_rollback = config::save_settings(
+                settings_path, optimizer_settings);
             // The native writer may have changed one file before failing.
             // Reapply and verify the previous cap rather than trusting rollback.
             const auto cap_rollback = synchronize_frame_rate_cap();
@@ -260,10 +258,8 @@ void UiRuntime::set_slider_value(std::string_view id, int requested_value) {
             optimizer_settings = previous;
             overlay_scale = static_cast<float>(
                 optimizer_settings.overlay_scale_percent) / 100.0F;
-            const auto settings_rollback =
-                platform::windows::atomic_replace_utf8(
-                    settings_path,
-                    config::serialize_settings(optimizer_settings));
+            const auto settings_rollback = config::save_settings(
+                settings_path, optimizer_settings);
             const bool protected_state_restored =
                 restore_protected_session_config(
                     L"Pending Adaptive policy update failed");
@@ -356,8 +352,7 @@ void UiRuntime::execute_action(std::string_view action) {
     const auto dispatched = runtime::dispatch_action(
         *this,
         runtime::ActionRequest{
-            resolved->id, action, runtime::NoPayload{}},
-        runtime::feature_definitions());
+            resolved->id, action, runtime::NoPayload{}});
     if (dispatched == runtime::DispatchResult::handler_failure) {
         model.set_notice({
             ui::NoticeSeverity::error, L"ACTION_FAILED",

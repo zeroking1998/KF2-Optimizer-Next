@@ -105,7 +105,7 @@ int main() {
           L" GPU total 36.00%, system RAM 75%, FleX 4 steps");
     CHECK(projection.performance_analysis ==
           L"Measurement degraded | p95 18.5 ms | p99 22.0 ms | stutters 3"
-          L" | lost events 2 | analysis: GPU limited"
+          L" | loss markers 2 | analysis: GPU limited"
           L" | Adaptive: balanced (Stable evidence)");
     CHECK(projection.live_fps == frame.frames.fps);
     CHECK(projection.live_frame_time_ms == frame.frames.frame_time_ms);
@@ -157,7 +157,7 @@ int main() {
     CHECK(!contains(partial.telemetry, L"CPU 0.0%"));
     CHECK(!contains(partial.telemetry, L"GPU total 0.0%"));
     CHECK(partial.performance_analysis ==
-          L"Measurement good | stutters 0 | lost events 0 | analysis: Stable "
+          L"Measurement good | stutters 0 | loss markers 0 | analysis: Stable "
           L"| Adaptive: quality (Holding)");
     missing.frames.fps = 0.0;
     const auto zero = telemetry_pipeline::build_status_projection(
@@ -173,7 +173,7 @@ int main() {
     CHECK(!no_fps.live_fps && no_fps.live_frame_time_ms == 16.7);
     const auto saved_locale = std::locale::global(std::locale::classic());
     const std::wstring prefix =
-        L"Measurement unavailable | stutters 0 | lost events 0 | analysis: ";
+        L"Measurement unavailable | stutters 0 | loss markers 0 | analysis: ";
     const std::wstring suffix = L" | Adaptive: User settings (Holding)";
     for (const std::size_t length : {127U, 128U, 129U, 255U, 256U, 257U,
                                    511U, 512U, 513U, 4096U}) {
@@ -208,7 +208,7 @@ int main() {
           L" GPU total 36,00%, system RAM 75%, FleX 4 steps");
     CHECK(comma_projection.performance_analysis ==
           L"Measurement degraded | p95 18,5 ms | p99 22,0 ms | stutters 3"
-          L" | lost events 2 | analysis: GPU limited"
+          L" | loss markers 2 | analysis: GPU limited"
           L" | Adaptive: balanced (Stable evidence)");
     CHECK(telemetry_pipeline::format_gib(53'687'092) == L"0,1 GiB");
     CHECK(telemetry_pipeline::format_gib(6ULL << 30) == L"6,0 GiB");

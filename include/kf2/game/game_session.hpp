@@ -78,6 +78,8 @@ struct ProcessQueryCounts {
     std::uint32_t creation_queries{0};
 };
 [[nodiscard]] ProcessQueryCounts process_query_counts_for_testing() noexcept;
+using ProcessSnapshotFunction = HANDLE (WINAPI*)(DWORD, DWORD);
+void set_process_snapshot_for_testing(ProcessSnapshotFunction function) noexcept;
 }
 #endif
 

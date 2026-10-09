@@ -81,9 +81,7 @@ Result<config::Settings> load_or_create_settings(
                 parsed.value().legacy_quality_policy_migrated ||
                 parsed.value().adaptive_quality_range_migrated;
             if (canonicalization_needed) {
-                const auto migrated =
-                    platform::windows::atomic_replace_utf8(
-                        path, config::serialize_settings(parsed.value()));
+                const auto migrated = config::save_settings(path, parsed.value());
                 if (!migrated.has_value()) {
                     return Result<config::Settings>::failure(
                         migrated.error());
@@ -103,8 +101,7 @@ Result<config::Settings> load_or_create_settings(
     }
 
     if (must_write) {
-        const auto written = platform::windows::atomic_replace_utf8(
-            path, config::serialize_settings(settings));
+        const auto written = config::save_settings(path, settings);
         if (!written.has_value()) {
             return Result<config::Settings>::failure(written.error());
         }

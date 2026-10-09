@@ -1,11 +1,14 @@
 #include <Windows.h>
 #include <evntrace.h>
+#include <evntprov.h>
 
 #include <cstdlib>
 #include <algorithm>
 #include <cstring>
+#include <cstddef>
 #include <iostream>
 #include <limits>
+#include <new>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -14,6 +17,25 @@
 
 #include "kf2/platform/windows/dxgi_frame_timing_session.hpp"
 #include "../support/process_inspection_denial.hpp"
+
+namespace {
+thread_local bool fail_next_allocation{};
+thread_local unsigned int allocation_failures{};
+thread_local bool count_start_allocations{};
+thread_local unsigned int start_allocations{};
+}
+
+void* operator new(std::size_t size) {
+    if (count_start_allocations) ++start_allocations;
+    if (std::exchange(fail_next_allocation, false)) {
+        ++allocation_failures;
+        throw std::bad_alloc{};
+    }
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
@@ -45,6 +67,68 @@ int test_exact_clock_conversion() {
             CHECK(source.measure_window(0, UINT64_MAX).count == 0);
         } else {
             CHECK(source.measure_window(expected_ns, expected_ns + 1).count == 1);
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
+ULONG first_enable_status{ERROR_SUCCESS};
+ULONG fallback_enable_status{ERROR_SUCCESS};
+DWORD expected_enable_pid{};
+unsigned int enable_calls{};
+bool enable_arguments_valid{};
+
+ULONG WINAPI enable_scoped_provider(TRACEHANDLE session, LPCGUID provider,
+    ULONG control, UCHAR level, ULONGLONG any, ULONGLONG all, ULONG timeout,
+    ENABLE_TRACE_PARAMETERS* parameters) {
+    ++enable_calls;
+    const ULONG expected_filters = enable_calls == 1 ? 2 : 1;
+    enable_arguments_valid = enable_arguments_valid && session == 456 &&
+        provider && provider->Data1 == 0xca11c036 &&
+        control == EVENT_CONTROL_CODE_ENABLE_PROVIDER && level == TRACE_LEVEL_VERBOSE &&
+        any == 0 && all == 0 && timeout == 0 && parameters &&
+        parameters->Version == ENABLE_TRACE_PARAMETERS_VERSION_2 &&
+        parameters->FilterDescCount == expected_filters && parameters->EnableFilterDesc;
+    if (!enable_arguments_valid) return ERROR_INVALID_DATA;
+    const auto& events = parameters->EnableFilterDesc[0];
+    enable_arguments_valid = events.Type == EVENT_FILTER_TYPE_EVENT_ID && events.Ptr &&
+        events.Size == offsetof(EVENT_FILTER_EVENT_ID, Events) + 2 * sizeof(USHORT);
+    if (!enable_arguments_valid) return ERROR_INVALID_DATA;
+    const auto* ids = reinterpret_cast<const EVENT_FILTER_EVENT_ID*>(events.Ptr);
+    enable_arguments_valid = ids->FilterIn == TRUE && ids->Count == 2 &&
+        ids->Events[0] == 178 && ids->Events[1] == 179;
+    if (enable_calls == 1) {
+        const auto& process = parameters->EnableFilterDesc[1];
+        enable_arguments_valid = enable_arguments_valid &&
+            process.Type == EVENT_FILTER_TYPE_PID && process.Ptr &&
+            process.Size == sizeof(DWORD);
+        if (enable_arguments_valid)
+            enable_arguments_valid = *reinterpret_cast<const DWORD*>(process.Ptr) ==
+                expected_enable_pid;
+    }
+    if (!enable_arguments_valid) return ERROR_INVALID_DATA;
+    return enable_calls == 1 ? first_enable_status : fallback_enable_status;
+}
+
+int test_provider_pid_scope() {
+    for (const DWORD pid : {1UL, 123UL, MAXDWORD - 1UL}) {
+        for (const ULONG first : {ERROR_SUCCESS, ERROR_INVALID_PARAMETER,
+                ERROR_NOT_SUPPORTED, ERROR_ACCESS_DENIED, ERROR_TIMEOUT,
+                ERROR_INVALID_FUNCTION, ERROR_NOT_ENOUGH_MEMORY}) {
+            for (const ULONG fallback : {ERROR_SUCCESS, ERROR_ACCESS_DENIED}) {
+                expected_enable_pid = pid;
+                first_enable_status = first;
+                fallback_enable_status = fallback;
+                enable_calls = 0;
+                enable_arguments_valid = true;
+                const auto status = DxgiFrameTimingSession::test_enable_present_provider(
+                    456, pid, enable_scoped_provider);
+                const bool retry = first == ERROR_INVALID_PARAMETER ||
+                    first == ERROR_NOT_SUPPORTED;
+                CHECK(enable_arguments_valid);
+                CHECK(enable_calls == (retry ? 2U : 1U));
+                CHECK(status == (retry ? fallback : first));
+            }
         }
     }
     return EXIT_SUCCESS;
@@ -271,8 +355,54 @@ int test_real_orphan_startup() {
     CHECK(live.query() == ERROR_WMI_INSTANCE_NOT_FOUND);
     auto retry = DxgiFrameTimingSession::start(identity, source);
     CHECK(retry.has_value());
+    CHECK(retry.value()->is_running());
+    CHECK(live.query() == ERROR_SUCCESS);
+    CHECK(ControlTraceW(0, live.name.c_str(), &live.properties.header,
+        EVENT_TRACE_CONTROL_STOP) == ERROR_SUCCESS);
+    const auto stopped_at = GetTickCount64();
+    while (retry.value()->is_running() && GetTickCount64() - stopped_at < 2'000)
+        Sleep(1);
+    CHECK(!retry.value()->is_running());
     CHECK(retry.value()->stop().has_value());
+    CHECK(!retry.value()->is_running());
     CHECK(legacy.query() == ERROR_SUCCESS);
+    return EXIT_SUCCESS;
+}
+
+int test_pending_node_reuse() {
+    for (unsigned int lane = 0; lane < 3; ++lane) {
+        PresentSource source{kIdentity, 400};
+        CHECK(source.start().has_value());
+        auto parser = DxgiFrameTimingSession::test_parser(kIdentity, source, kFrequency);
+        parser->test_present_event(true, 1, 1'000, 7);
+        parser->test_present_event(false, 1, 1'001);
+        CHECK(parser->test_pending_count() == 0);
+        start_allocations = 0;
+        std::uint32_t last_thread{};
+        std::uint64_t last_at{};
+        for (unsigned int index = 0; index < 300; ++index) {
+            last_thread = lane == 0 ? 1U : lane == 1 ? index % 8 + 1 : index + 1;
+            last_at = 1'016ULL + index * 16ULL;
+            count_start_allocations = true;
+            parser->test_present_event(true, last_thread, last_at, 7);
+            count_start_allocations = false;
+            CHECK(parser->test_pending_count() == 1);
+            parser->test_present_event(false, last_thread, last_at + 1);
+            CHECK(parser->test_pending_count() == 0);
+        }
+        // A retained allocation is not a pending Present, even for reused IDs.
+        parser->test_present_event(false, last_thread, last_at + 2);
+        CHECK(source.measure_window(1'000'000'000ULL,
+            (last_at + 2) * 1'000'000ULL).count == 301);
+        const auto metrics = source.drain(
+            (last_at + 2) * 1'000'000ULL, 1'000'000'000ULL);
+        CHECK(metrics.fps && *metrics.fps == 62.5);
+        CHECK(metrics.quality == SampleQuality::good && metrics.loss_count == 0);
+        std::cout << "node-reuse lane=" << lane
+                  << " steady_starts=300 ordinary_start_allocations="
+                  << start_allocations << '\n';
+        CHECK(start_allocations == 0);
+    }
     return EXIT_SUCCESS;
 }
 
@@ -298,10 +428,53 @@ int test_capacity() {
     parser->test_present_event(false, 2'000, 3'027);
     const auto metrics = source.drain(3'027'000'000ULL, 1'000'000'000ULL);
     CHECK(metrics.fps && *metrics.fps == 62.5);
-    CHECK(metrics.loss_count == 1'744);
+    CHECK(metrics.loss_count == 1'745);
     // Admission evicts only the oldest pending start, preserving fresh pairs.
     parser->test_present_event(false, 1'746, 3'028);
     CHECK(parser->test_pending_count() == 254);
+    return EXIT_SUCCESS;
+}
+
+int test_filtered_starts() {
+    for (const auto [swap_chain, flags] : {
+            std::pair{7ULL, 1U}, std::pair{0ULL, 0U}}) {
+        for (const bool outstanding : {false, true}) {
+            PresentSource source{kIdentity, 120};
+            CHECK(source.start().has_value());
+            auto parser = DxgiFrameTimingSession::test_parser(
+                kIdentity, source, kFrequency);
+            if (outstanding) parser->test_present_event(true, 1, 1'000, 9);
+            parser->test_present_event(true, 1, 1'001, swap_chain, flags);
+            const auto pending = parser->test_pending_count();
+            parser->test_present_event(false, 1, 1'002);
+            parser->test_present_event(false, 1, 1'003);
+            // A filtered call's Stop cannot complete a previous real Start.
+            CHECK(source.measure_window(1, 1'003'000'000ULL).count == 0);
+            CHECK(pending == 0);
+            for (const auto at : {1'010ULL, 1'026ULL}) {
+                parser->test_present_event(true, 1, at, 7);
+                parser->test_present_event(false, 1, at + 1);
+            }
+            const auto metrics = source.drain(1'027'000'000ULL, 1'000'000'000ULL);
+            CHECK(metrics.fps && *metrics.fps == 62.5);
+            CHECK(metrics.loss_count == (outstanding ? 1U : 0U));
+            CHECK(metrics.quality == (outstanding
+                ? SampleQuality::degraded : SampleQuality::good));
+            parser->test_present_event(true, 1, 1'042, 7);
+            parser->test_present_event(false, 1, 1'043);
+            CHECK(source.drain(1'043'000'000ULL, 1'000'000'000ULL).loss_count ==
+                  (outstanding ? 1U : 0U));
+            // A fresh post-loss window recovers without another reset.
+            for (const auto at : {12'010ULL, 12'026ULL}) {
+                parser->test_present_event(true, 1, at, 7);
+                parser->test_present_event(false, 1, at + 1);
+            }
+            const auto recovered = source.drain(
+                12'027'000'000ULL, 1'000'000'000ULL);
+            CHECK(recovered.loss_count == 0);
+            CHECK(recovered.quality == SampleQuality::good);
+        }
+    }
     return EXIT_SUCCESS;
 }
 
@@ -381,6 +554,122 @@ int test_event_loss() {
     return EXIT_SUCCESS;
 }
 
+int test_callback_loss() {
+    PresentSource source{kIdentity, 120};
+    CHECK(source.start().has_value());
+    auto parser = DxgiFrameTimingSession::test_parser(kIdentity, source, kFrequency);
+    parser->test_present_event(true, 1, 1'000, 7);
+    parser->test_present_event(true, 2, 1'000, 8);
+    DxgiFrameTimingSession::test_fail_next_event_callback();
+    parser->test_present_event(false, 1, 1'001);
+    CHECK(parser->test_pending_count() == 0);
+    parser->test_present_event(false, 2, 1'002);
+    CHECK(source.measure_window(0, 1'002'000'000ULL).count == 0);
+    // ETW invokes the buffer callback after its event callbacks. Its unused
+    // EventsLost field must not erase a locally observed callback failure.
+    parser->test_unused_buffer_loss(0);
+    parser->test_present_event(true, 1, 1'020, 7);
+    parser->test_present_event(false, 1, 1'021);
+    parser->test_present_event(true, 1, 1'036, 7);
+    parser->test_present_event(false, 1, 1'037);
+    const auto metrics = source.drain(1'037'000'000ULL, 1'000'000'000ULL);
+    CHECK(metrics.fps && *metrics.fps == 62.5);
+    // One observed callback failure, not an estimate of lost Present events.
+    CHECK(metrics.loss_count == 1);
+    CHECK(metrics.quality == SampleQuality::degraded);
+    parser->test_unused_buffer_loss(0);
+    parser->test_present_event(true, 1, 1'052, 7);
+    parser->test_present_event(false, 1, 1'053);
+    CHECK(source.drain(1'053'000'000ULL, 1'000'000'000ULL).loss_count == 1);
+    parser->test_present_event(true, 1, 12'000, 7);
+    parser->test_present_event(false, 1, 12'001);
+    parser->test_present_event(true, 1, 12'016, 7);
+    parser->test_present_event(false, 1, 12'017);
+    const auto recovered = source.drain(12'017'000'000ULL, 1'000'000'000ULL);
+    CHECK(recovered.fps && *recovered.fps == 62.5);
+    CHECK(recovered.loss_count == 0);
+    CHECK(recovered.quality == SampleQuality::good);
+    return EXIT_SUCCESS;
+}
+
+int test_partial_loss_commit() {
+    PresentSource source{kIdentity, 120};
+    CHECK(source.start().has_value());
+    auto parser = DxgiFrameTimingSession::test_parser(kIdentity, source, kFrequency);
+    parser->test_events_lost(3);
+    parser->test_present_event(true, 1, 1'000, 7);
+    parser->test_present_event(true, 2, 31'001, 7);
+    CHECK(parser->test_pending_count() == 1);
+    allocation_failures = 0;
+    fail_next_allocation = true;
+    parser->test_present_event(false, 2, 31'002);
+    CHECK(allocation_failures == 1 && !fail_next_allocation);
+    CHECK(parser->test_pending_count() == 0);
+    parser->test_present_event(true, 3, 31'020, 7);
+    parser->test_present_event(false, 3, 31'021);
+    parser->test_present_event(true, 3, 31'036, 7);
+    parser->test_present_event(false, 3, 31'037);
+    const auto measured = source.drain(31'037'000'000ULL, 1'000'000'000ULL);
+    CHECK(measured.fps && *measured.fps == 62.5);
+    // Three observed OS losses, one expired pair, one callback failure;
+    // this is not an estimate of the number of missing Presents.
+    CHECK(measured.loss_count == 5);
+    CHECK(measured.quality == SampleQuality::degraded);
+    return EXIT_SUCCESS;
+}
+
+int test_loss_acknowledgment() {
+    PresentSource source{kIdentity, 120};
+    CHECK(!source.record_loss(kIdentity, 1'000'000'000ULL, 3));
+    CHECK(source.start().has_value());
+    CHECK(!source.record_loss({999, 2}, 1'000'000'000ULL, 3));
+    CHECK(!source.record_loss(kIdentity, 1'000'000'000ULL, 0));
+    CHECK(source.ingest({kIdentity, 1'000'000'000ULL, 1, true, 0, 7}));
+    CHECK(source.ingest({kIdentity, 1'016'000'000ULL, 1, true, 0, 7}));
+    CHECK(source.drain(1'017'000'000ULL, 1'000'000'000ULL).loss_count == 0);
+    allocation_failures = 0;
+    fail_next_allocation = true;
+    const auto committed = source.record_loss(kIdentity, 1'017'000'000ULL, 4);
+    const auto no_allocation = fail_next_allocation;
+    fail_next_allocation = false;
+    CHECK(committed && no_allocation && allocation_failures == 0);
+    // Loss acknowledgment is independent of duplicate sample rejection.
+    CHECK(!source.ingest({kIdentity, 1'016'000'000ULL, 1, true, 0, 7}));
+    const auto marked = source.drain(1'017'000'000ULL, 1'000'000'000ULL);
+    CHECK(marked.loss_count == 4 && marked.quality == SampleQuality::degraded);
+    CHECK(!source.ingest({kIdentity, 1'032'000'000ULL, 0, true, 0, 7}));
+    CHECK(!source.record_loss(kIdentity, 1'032'000'000ULL, 3));
+
+    // A rejected loss transfer retains parser debt until the source is ready.
+    CHECK(source.start().has_value());
+    CHECK(source.stop().has_value());
+    auto parser = DxgiFrameTimingSession::test_parser(kIdentity, source, kFrequency);
+    parser->test_events_lost(3);
+    parser->test_present_event(true, 1, 1'000, 7);
+    parser->test_present_event(false, 1, 1'001);
+    CHECK(source.start().has_value());
+    parser->test_present_event(true, 1, 1'020, 7);
+    parser->test_present_event(false, 1, 1'021);
+    parser->test_present_event(true, 1, 1'036, 7);
+    parser->test_present_event(false, 1, 1'037);
+    const auto ready = source.drain(1'037'000'000ULL, 1'000'000'000ULL);
+    CHECK(ready.fps && *ready.fps == 62.5);
+    CHECK(ready.loss_count == 3 && ready.quality == SampleQuality::degraded);
+    CHECK(source.stop().has_value());
+    parser->test_session_statistics(ERROR_SUCCESS, 3, 1);
+    parser->test_present_event(true, 1, 1'050, 7);
+    parser->test_present_event(false, 1, 1'051);
+    CHECK(source.start().has_value());
+    for (const auto at : {1'064ULL, 1'080ULL}) {
+        parser->test_present_event(true, 1, at, 7);
+        parser->test_present_event(false, 1, at + 1);
+    }
+    const auto buffer_debt = source.drain(1'081'000'000ULL, 1'000'000'000ULL);
+    CHECK(buffer_debt.fps && *buffer_debt.fps == 62.5);
+    CHECK(buffer_debt.loss_count == 0 && buffer_debt.quality == SampleQuality::degraded);
+    return EXIT_SUCCESS;
+}
+
 int test_active_pairing() {
     PresentSource source{kIdentity, 120};
     CHECK(source.start().has_value());
@@ -408,6 +697,77 @@ int test_active_pairing() {
     CHECK(parser->test_pending_count() == 0);
     return EXIT_SUCCESS;
 }
+
+int test_session_loss_statistics() {
+    for (const bool buffer_only : {false, true}) {
+        PresentSource source{kIdentity, 128};
+        CHECK(source.start().has_value());
+        auto parser = DxgiFrameTimingSession::test_parser(kIdentity, source, kFrequency);
+        parser->test_present_event(true, 1, 1'000, 7);
+        parser->test_present_event(false, 1, 1'001);
+        parser->test_present_event(true, 1, 1'016, 7);
+        parser->test_present_event(false, 1, 1'017);
+        const auto before = source.measure_window(1'000'000'000ULL, 1'016'000'000ULL);
+        CHECK(before.complete);
+        parser->test_present_event(true, 2, 1'018, 7);
+        parser->test_session_statistics(ERROR_SUCCESS, buffer_only ? 0 : 3,
+                                         buffer_only ? 1 : 0);
+        // Failed output and the callback's unused field cannot erase statistics.
+        parser->test_session_statistics(ERROR_MORE_DATA, 0, 0);
+        parser->test_session_statistics(ERROR_ACCESS_DENIED, 99, 99);
+        parser->test_unused_buffer_loss(0);
+        parser->test_unused_buffer_loss(99);
+        parser->test_present_event(false, 2, 1'019);
+        CHECK(parser->test_pending_count() == 0);
+        CHECK(source.measure_window(1'018'000'000ULL, 1'019'000'000ULL).count == 0);
+        for (const auto at : {1'032ULL, 1'048ULL}) {
+            parser->test_present_event(true, 1, at, 7);
+            parser->test_present_event(false, 1, at + 1);
+        }
+        const auto marked = source.drain(1'049'000'000ULL, 1'000'000'000ULL);
+        CHECK(marked.fps && *marked.fps == 62.5);
+        CHECK(marked.quality == SampleQuality::degraded);
+        CHECK(marked.loss_count == (buffer_only ? 0 : 3));
+        const auto crossed = source.measure_window(1'000'000'000ULL, 1'048'000'000ULL);
+        CHECK(crossed.count == 0 && !crossed.complete);
+        CHECK(crossed.generation != before.generation);
+        parser->test_present_event(true, 1, 1'064, 7);
+        parser->test_present_event(false, 1, 1'065);
+        const auto unchanged = source.drain(1'065'000'000ULL, 1'000'000'000ULL);
+        CHECK(unchanged.loss_count == marked.loss_count);
+        CHECK(unchanged.source_generation == marked.source_generation);
+        for (const auto at : {12'000ULL, 12'016ULL}) {
+            parser->test_present_event(true, 1, at, 7);
+            parser->test_present_event(false, 1, at + 1);
+        }
+        const auto recovered = source.drain(12'017'000'000ULL, 1'000'000'000ULL);
+        CHECK(recovered.fps && *recovered.fps == 62.5);
+        CHECK(recovered.loss_count == 0 && recovered.quality == SampleQuality::good);
+        CHECK(source.measure_window(12'000'000'000ULL, 12'016'000'000ULL).complete);
+    }
+    PresentSource source{kIdentity, 128};
+    CHECK(source.start().has_value());
+    auto parser = DxgiFrameTimingSession::test_parser(kIdentity, source, kFrequency);
+    struct Counters { std::uint32_t events, buffers; std::uint64_t expected; };
+    std::uint64_t at = 1'000;
+    for (const auto [events, buffers, expected] : {
+            Counters{UINT32_MAX, 0, UINT32_MAX},
+            Counters{0, 0, 1ULL + UINT32_MAX},
+            Counters{0, UINT32_MAX, 1ULL + UINT32_MAX},
+            Counters{0, 0, 1ULL + UINT32_MAX},
+            Counters{1, 1, 2ULL + UINT32_MAX}}) {
+        parser->test_session_statistics(ERROR_SUCCESS, events, buffers);
+        for (unsigned int frame = 0; frame < 2; ++frame, at += 16) {
+            parser->test_present_event(true, 1, at, 7);
+            parser->test_present_event(false, 1, at + 1);
+        }
+        const auto marked = source.drain((at - 15) * 1'000'000ULL, 1'000'000'000ULL);
+        CHECK(marked.fps && *marked.fps == 62.5);
+        CHECK(marked.loss_count == expected);
+        CHECK(marked.quality == SampleQuality::degraded);
+    }
+    return EXIT_SUCCESS;
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -417,17 +777,31 @@ int main(int argc, char** argv) {
         if (scenario == "--pid-reuse") return test_stale_cleanup_pid_reuse();
         if (scenario == "--orphan-startup") return test_real_orphan_startup();
         if (scenario == "--pending-capacity") return test_capacity();
+        if (scenario == "--pending-node-reuse") return test_pending_node_reuse();
         if (scenario == "--pending-expiry") return test_expiry();
         if (scenario == "--pending-loss") return test_event_loss();
+        if (scenario == "--filtered-starts") return test_filtered_starts();
+        if (scenario == "--callback-loss") return test_callback_loss();
+        if (scenario == "--partial-loss-commit") return test_partial_loss_commit();
+        if (scenario == "--loss-acknowledgment") return test_loss_acknowledgment();
+        if (scenario == "--session-loss-statistics") return test_session_loss_statistics();
+        if (scenario == "--provider-pid-scope") return test_provider_pid_scope();
         return EXIT_FAILURE;
     }
     CHECK(test_exact_clock_conversion() == EXIT_SUCCESS);
+    CHECK(test_provider_pid_scope() == EXIT_SUCCESS);
     CHECK(test_stale_cleanup_overflow() == EXIT_SUCCESS);
     CHECK(test_stale_cleanup_pid_reuse() == EXIT_SUCCESS);
     CHECK(test_real_orphan_startup() == EXIT_SUCCESS);
     CHECK(test_capacity() == EXIT_SUCCESS);
+    CHECK(test_pending_node_reuse() == EXIT_SUCCESS);
+    CHECK(test_filtered_starts() == EXIT_SUCCESS);
     CHECK(test_expiry() == EXIT_SUCCESS);
     CHECK(test_event_loss() == EXIT_SUCCESS);
+    CHECK(test_callback_loss() == EXIT_SUCCESS);
+    CHECK(test_partial_loss_commit() == EXIT_SUCCESS);
+    CHECK(test_loss_acknowledgment() == EXIT_SUCCESS);
+    CHECK(test_session_loss_statistics() == EXIT_SUCCESS);
     CHECK(test_active_pairing() == EXIT_SUCCESS);
     using namespace kf2::telemetry;
     using kf2::platform::windows::DxgiFrameTimingSession;
@@ -478,6 +852,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     Sleep(20);
+    CHECK(session.value()->test_flush_statistics() == ERROR_SUCCESS);
     CHECK(session.value()->stop().has_value());
     CHECK(session.value()->stop().has_value());
     CHECK(source.stop().has_value());

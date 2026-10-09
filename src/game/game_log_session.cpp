@@ -293,7 +293,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
 }
 
 std::optional<GameLogSession> GameLogSessionParser::expire_observations(
-    std::uint64_t now_ns, std::uint64_t maximum_age_ns) noexcept {
+    std::uint64_t now_ns, std::uint64_t maximum_age_ns) {
     if (!current_ || now_ns == 0) return std::nullopt;
     bool changed = false;
     const auto expire = [&](std::optional<int>& value,

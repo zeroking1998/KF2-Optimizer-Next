@@ -3,11 +3,63 @@
 #include <bit>
 #include <cstdlib>
 #include <iostream>
+#include <new>
 #include <thread>
 #include <vector>
 #include "kf2/game/game_session.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
 #include "../support/process_inspection_denial.hpp"
+
+namespace {
+thread_local bool fail_next_cache_allocation = false;
+bool cache_fault_stage_seen = false;
+kf2::telemetry::detail::ThreadCacheAllocationStage selected_fault_stage{};
+ULONGLONG metric_clock_ms{};
+unsigned capacity_queries{};
+bool capacity_query_allowed{true};
+ULONGLONG WINAPI metric_clock() { return metric_clock_ms; }
+bool observe_capacity_query() { ++capacity_queries; return capacity_query_allowed; }
+
+struct CapacityFixture {
+    DWORD_PTR original;
+    explicit CapacityFixture(DWORD_PTR mask) : original{mask} {
+        metric_clock_ms = 10'000;
+        capacity_queries = 0;
+        capacity_query_allowed = true;
+        kf2::telemetry::detail::set_process_metrics_clock_for_testing(&metric_clock);
+        kf2::telemetry::detail::set_cpu_capacity_query_hook_for_testing(&observe_capacity_query);
+    }
+    ~CapacityFixture() {
+        kf2::telemetry::detail::set_process_metrics_clock_for_testing(nullptr);
+        kf2::telemetry::detail::set_cpu_capacity_query_hook_for_testing(nullptr);
+        if (!SetProcessAffinityMask(GetCurrentProcess(), original)) std::abort();
+    }
+};
+
+void arm_cache_allocation_failure(
+    kf2::telemetry::detail::ThreadCacheAllocationStage stage) {
+    if (stage != selected_fault_stage) return;
+    kf2::telemetry::detail::set_thread_cache_allocation_hook_for_testing(nullptr);
+    cache_fault_stage_seen = true;
+    fail_next_cache_allocation = true;
+}
+}
+
+void* operator new(std::size_t size) {
+    if (fail_next_cache_allocation && size >= 32) {
+        fail_next_cache_allocation = false;
+        throw std::bad_alloc{};
+    }
+    for (;;) {
+        if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+        const auto handler = std::get_new_handler();
+        if (!handler) throw std::bad_alloc{};
+        handler();
+    }
+}
+
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
@@ -168,6 +220,69 @@ int main() {
     CHECK(GetModuleFileNameW(nullptr, path, MAX_PATH) > 0);
     const auto identity = kf2::game::bind_game_process(GetCurrentProcessId(), path);
     CHECK(identity.has_value());
+    {
+        DWORD_PTR original{}, system{};
+        CHECK(GetProcessAffinityMask(GetCurrentProcess(), &original, &system));
+        CHECK(original != 0);
+        CapacityFixture fixture{original};
+        ProcessMetricSampler live_capacity{identity.value()};
+        const auto initial = live_capacity.sample();
+        CHECK(initial.has_value() && initial.value().affinity_logical_processors);
+        CHECK(capacity_queries == 1);
+        const auto original_capacity = *initial.value().affinity_logical_processors;
+        const DWORD_PTR one = original & (DWORD_PTR{0} - original);
+        CHECK(SetProcessAffinityMask(GetCurrentProcess(), one));
+        metric_clock_ms += 4'999;
+        const auto held = live_capacity.sample();
+        CHECK(held.has_value() && held.value().affinity_logical_processors == original_capacity);
+        CHECK(capacity_queries == 1);
+        ++metric_clock_ms;
+        const auto restricted = live_capacity.sample();
+        CHECK(restricted.has_value() && restricted.value().affinity_logical_processors == 1U);
+        CHECK(capacity_queries == 2);
+        CHECK(SetProcessAffinityMask(GetCurrentProcess(), original));
+        metric_clock_ms += 5'000;
+        const auto expanded = live_capacity.sample();
+        CHECK(expanded.has_value() && expanded.value().affinity_logical_processors == original_capacity);
+        CHECK(capacity_queries == 3);
+
+        capacity_query_allowed = false;
+        metric_clock_ms += 5'000;
+        const auto failed = live_capacity.sample();
+        CHECK(failed.has_value() && !failed.value().affinity_logical_processors &&
+              !failed.value().affinity_physical_cores && !failed.value().system_logical_processors);
+        CHECK(capacity_queries == 4);
+        capacity_query_allowed = true;
+        metric_clock_ms += 4'999;
+        const auto still_unavailable = live_capacity.sample();
+        CHECK(still_unavailable.has_value() && !still_unavailable.value().affinity_logical_processors);
+        CHECK(capacity_queries == 4);
+        ++metric_clock_ms;
+        const auto recovered = live_capacity.sample();
+        CHECK(recovered.has_value() && recovered.value().affinity_logical_processors == original_capacity);
+        CHECK(capacity_queries == 5);
+
+        ProcessMetricSampler initially_unavailable{identity.value()};
+        capacity_query_allowed = false;
+        const auto first_failure = initially_unavailable.sample();
+        CHECK(first_failure.has_value() && !first_failure.value().affinity_logical_processors);
+        CHECK(capacity_queries == 6);
+        capacity_query_allowed = true;
+        metric_clock_ms += 4'999;
+        const auto deferred = initially_unavailable.sample();
+        CHECK(deferred.has_value() && !deferred.value().affinity_logical_processors);
+        CHECK(capacity_queries == 6);
+        ++metric_clock_ms;
+        const auto first_recovery = initially_unavailable.sample();
+        CHECK(first_recovery.has_value() && first_recovery.value().affinity_logical_processors == original_capacity);
+        CHECK(capacity_queries == 7);
+        metric_clock_ms = 1;
+        CHECK(initially_unavailable.sample().has_value());
+        CHECK(capacity_queries == 8);
+        DWORD_PTR restored{}, restored_system{};
+        CHECK(GetProcessAffinityMask(GetCurrentProcess(), &restored, &restored_system));
+        CHECK(restored == original);
+    }
     const auto own_threads = detail::query_process_thread_ids(identity.value());
     CHECK(own_threads.has_value());
     CHECK(std::find(own_threads.value().begin(), own_threads.value().end(),
@@ -191,6 +306,42 @@ int main() {
         CHECK(sampled.value().critical_core_percent.has_value());
         CHECK(sampled.value().effective_core_usage.has_value());
     }
+    bool cache_handles_leaked = false;
+    for (const auto stage : {detail::ThreadCacheAllocationStage::snapshot_ids,
+                            detail::ThreadCacheAllocationStage::cached_thread}) {
+        DWORD before = 0;
+        CHECK(GetProcessHandleCount(GetCurrentProcess(), &before));
+        // Repeat beyond ambient handle noise; retries must not accumulate leaks.
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            ProcessMetricSampler faulted{identity.value()};
+            selected_fault_stage = stage;
+            cache_fault_stage_seen = false;
+            detail::fail_next_process_thread_snapshot_walk_for_testing();
+            detail::set_thread_cache_allocation_hook_for_testing(
+                &arm_cache_allocation_failure);
+            bool threw = false;
+            try {
+                static_cast<void>(faulted.sample());
+            } catch (const std::bad_alloc&) {
+                threw = true;
+            }
+            detail::set_thread_cache_allocation_hook_for_testing(nullptr);
+            const bool injected = cache_fault_stage_seen &&
+                !fail_next_cache_allocation;
+            fail_next_cache_allocation = false;
+            CHECK(injected && threw);
+            CHECK(faulted.sample().has_value());
+        }
+        DWORD after = 0;
+        CHECK(GetProcessHandleCount(GetCurrentProcess(), &after));
+        if (after > before + 2) {
+            std::cerr << "Cache allocation stage " << static_cast<int>(stage)
+                      << " leaked " << after - before << " handles\n";
+            cache_handles_leaked = true;
+        }
+    }
+    CHECK(!cache_handles_leaked);
+
     ProcessMetricSampler sampler{identity.value()};
     const auto opens_before = detail::process_metric_opens_for_testing();
     const auto first = sampler.sample();
@@ -312,13 +463,26 @@ int main() {
         CHECK(handles_while_tracked >=
               handles_before + static_cast<DWORD>(workers.size()));
 
+        // A failed first entry or partial fallback must preserve all cached
+        // workers and leave membership refresh due for the next sample.
+        Sleep(5'050);
+        for (const bool after_matching_entry : {true, false}) {
+            detail::fail_next_process_thread_snapshot_walk_for_testing();
+            detail::fail_next_toolhelp_thread_walk_for_testing(after_matching_entry);
+            CHECK(tracked.sample().has_value());
+            DWORD handles_after_failure = 0;
+            CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after_failure));
+            CHECK(handles_after_failure + kAmbientHandleAllowance >=
+                  handles_while_tracked);
+            Sleep(520);
+        }
+
         for (auto& worker : workers) worker.request_stop();
         for (auto& worker : workers) worker.join();
         DWORD handles_after_exit = 0;
         CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after_exit));
-        // Exercise the real five-second membership refresh: exited workers'
-        // cached handles must be released while the sampler remains alive.
-        Sleep(5'050);
+        // Failed refreshes must not delay retry for another five seconds.
+        // A complete refresh still releases exited workers' cached handles.
         CHECK(tracked.sample().has_value());
         DWORD handles_after_refresh = 0;
         CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after_refresh));

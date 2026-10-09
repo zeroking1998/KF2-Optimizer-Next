@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cwctype>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string_view>
@@ -29,6 +30,7 @@ constexpr std::uintmax_t maximum_manifest_bytes = 1024U * 1024U;
 #if defined(KF2_SESSION_GUARD_TESTING)
 SessionReadHook session_read_hook{};
 SessionStatusHook session_status_hook{};
+SessionManifestWriteHook session_manifest_write_hook{};
 #endif
 
 bool path_exists(const std::filesystem::path& path,
@@ -198,6 +200,7 @@ Result<std::string> read_verified_file(const std::filesystem::path& path,
             {ErrorCode::not_found, L"Session configuration file is missing",
              GetLastError()});
     }
+    const std::unique_ptr<void, decltype(&CloseHandle)> owner{file, &CloseHandle};
     BY_HANDLE_FILE_INFORMATION information{};
     LARGE_INTEGER size{};
     if (!GetFileInformationByHandle(file, &information) ||
@@ -207,7 +210,6 @@ Result<std::string> read_verified_file(const std::filesystem::path& path,
         information.nNumberOfLinks != 1 ||
         static_cast<std::uintmax_t>(size.QuadPart) > maximum_size) {
         const DWORD native = GetLastError();
-        CloseHandle(file);
         return Result<std::string>::failure(
             {ErrorCode::access_denied,
              L"Session configuration file identity or size is unsafe", native});
@@ -224,7 +226,6 @@ Result<std::string> read_verified_file(const std::filesystem::path& path,
         if (!ReadFile(file, bytes.data() + offset, request, &read, nullptr) ||
             read == 0) {
             const DWORD native = GetLastError();
-            CloseHandle(file);
             return Result<std::string>::failure(
                 {ErrorCode::io_failure,
                  L"Session configuration file cannot be read", native});
@@ -245,7 +246,6 @@ Result<std::string> read_verified_file(const std::filesystem::path& path,
     const DWORD native = stable
         ? ERROR_SUCCESS
         : inspected_after ? ERROR_FILE_INVALID : GetLastError();
-    CloseHandle(file);
     if (!stable) {
         return Result<std::string>::failure(
             {ErrorCode::stale_data,
@@ -311,14 +311,18 @@ Result<ParsedManifest> parse_manifest(const std::filesystem::path& path) {
     if (!document.has_value()) {
         return Result<ParsedManifest>::failure(document.error());
     }
-    std::istringstream lines{document.value()};
-    std::string line;
+    std::string_view remaining{document.value()};
     ParsedManifest manifest;
     bool schema_seen = false, volume_seen = false, file_id_seen = false;
+    std::optional<std::size_t> expected_files;
     std::set<std::filesystem::path> unique;
     std::uintmax_t total_size = 0;
-    while (std::getline(lines, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
+    while (!remaining.empty()) {
+        const auto newline = remaining.find('\n');
+        auto line = remaining.substr(0, newline);
+        remaining.remove_prefix(newline == std::string_view::npos
+            ? remaining.size() : newline + 1);
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
         if (line.empty()) continue;
         if (line == "schema=1" || line == "schema=2") {
             if (schema_seen) return Result<ParsedManifest>::failure(
@@ -329,7 +333,7 @@ Result<ParsedManifest> parse_manifest(const std::filesystem::path& path) {
         }
         if (line.starts_with("root_volume=")) {
             if (volume_seen ||
-                !parse_integer(std::string_view{line}.substr(12),
+                !parse_integer(line.substr(12),
                                manifest.root_volume)) {
                 return Result<ParsedManifest>::failure(
                     {ErrorCode::io_failure, L"Session root volume is invalid", 0});
@@ -339,12 +343,24 @@ Result<ParsedManifest> parse_manifest(const std::filesystem::path& path) {
         }
         if (line.starts_with("root_file=")) {
             if (file_id_seen ||
-                !parse_integer(std::string_view{line}.substr(10),
+                !parse_integer(line.substr(10),
                                manifest.root_file)) {
                 return Result<ParsedManifest>::failure(
                     {ErrorCode::io_failure, L"Session root identity is invalid", 0});
             }
             file_id_seen = true;
+            continue;
+        }
+        if (line.starts_with("file_count=")) {
+            const auto text = line.substr(11);
+            std::size_t count{};
+            if (manifest.schema != 2 || expected_files || !manifest.files.empty() ||
+                text.empty() || text.front() == '0' ||
+                !parse_integer(text, count) || count > maximum_files) {
+                return Result<ParsedManifest>::failure(
+                    {ErrorCode::io_failure, L"Session file count is invalid", 0});
+            }
+            expected_files = count;
             continue;
         }
         if (!line.starts_with("file=") || manifest.files.size() >= maximum_files) {
@@ -354,18 +370,18 @@ Result<ParsedManifest> parse_manifest(const std::filesystem::path& path) {
         FileRecord record;
         if (manifest.schema == 2) {
             const auto first = line.find('|', 5);
-            const auto second = first == std::string::npos
-                ? std::string::npos : line.find('|', first + 1);
-            if (first == std::string::npos || second == std::string::npos ||
-                line.find('|', second + 1) != std::string::npos) {
+            const auto second = first == std::string_view::npos
+                ? std::string_view::npos : line.find('|', first + 1);
+            if (first == std::string_view::npos || second == std::string_view::npos ||
+                line.find('|', second + 1) != std::string_view::npos) {
                 return Result<ParsedManifest>::failure(
                     {ErrorCode::io_failure, L"Session file record is malformed", 0});
             }
             const auto decoded = hex_decode(
-                std::string_view{line}.substr(5, first - 5));
+                line.substr(5, first - 5));
             const auto relative = decoded ? path_from_bytes(*decoded) : std::nullopt;
             if (!relative || !parse_integer(
-                    std::string_view{line}.substr(first + 1, second - first - 1),
+                    line.substr(first + 1, second - first - 1),
                     record.size)) {
                 return Result<ParsedManifest>::failure(
                     {ErrorCode::io_failure, L"Session file record is malformed", 0});
@@ -374,12 +390,12 @@ Result<ParsedManifest> parse_manifest(const std::filesystem::path& path) {
             record.hash = line.substr(second + 1);
         } else if (manifest.schema == 1) {
             const auto separator = line.rfind('|');
-            if (separator == std::string::npos || separator <= 5) {
+            if (separator == std::string_view::npos || separator <= 5) {
                 return Result<ParsedManifest>::failure(
                     {ErrorCode::io_failure, L"Legacy session record is malformed", 0});
             }
             const auto relative = path_from_bytes(
-                std::string_view{line}.substr(5, separator - 5));
+                line.substr(5, separator - 5));
             if (!relative) return Result<ParsedManifest>::failure(
                 {ErrorCode::io_failure, L"Legacy session path is invalid", 0});
             record.relative = *relative;
@@ -400,6 +416,7 @@ Result<ParsedManifest> parse_manifest(const std::filesystem::path& path) {
         manifest.files.push_back(std::move(record));
     }
     if (!schema_seen || manifest.files.empty() ||
+        (expected_files && *expected_files != manifest.files.size()) ||
         (manifest.schema == 2 && (!volume_seen || !file_id_seen)) ||
         (manifest.schema == 1 && (volume_seen || file_id_seen))) {
         return Result<ParsedManifest>::failure(
@@ -452,6 +469,11 @@ void set_session_read_hook_for_testing(SessionReadHook hook) noexcept {
 
 void set_session_status_hook_for_testing(SessionStatusHook hook) noexcept {
     session_status_hook = hook;
+}
+
+void set_session_manifest_write_hook_for_testing(
+    SessionManifestWriteHook hook) noexcept {
+    session_manifest_write_hook = hook;
 }
 #endif
 
@@ -571,13 +593,21 @@ Result<SessionConfigSnapshot> capture_session_config(
 
     std::ostringstream manifest;
     manifest << "schema=2\nroot_volume=" << root_identity.value().first
-             << "\nroot_file=" << root_identity.value().second << '\n';
+             << "\nroot_file=" << root_identity.value().second
+             << "\nfile_count=" << records.size() << '\n';
     for (const auto& record : records) {
         manifest << "file=" << hex_encode(path_bytes(record.relative)) << '|'
                  << record.size << '|' << record.hash << '\n';
+#if defined(KF2_SESSION_GUARD_TESTING)
+        if (session_manifest_write_hook) session_manifest_write_hook(manifest);
+#endif
+    }
+    if (!manifest.good()) {
+        return Result<SessionConfigSnapshot>::failure(
+            {ErrorCode::io_failure, L"Session manifest serialization failed", 0});
     }
     auto marked = platform::windows::atomic_replace_utf8(
-        snapshot_root / L"manifest.txt", manifest.str());
+        snapshot_root / L"manifest.txt", std::move(manifest).str());
     if (!marked.has_value()) {
         return Result<SessionConfigSnapshot>::failure(marked.error());
     }
@@ -594,6 +624,10 @@ Result<std::size_t> restore_session_config(const SessionConfigSnapshot& snapshot
     }
     auto manifest = parse_manifest(snapshot.snapshot_root / L"manifest.txt");
     if (!manifest.has_value()) return Result<std::size_t>::failure(manifest.error());
+    if (manifest.value().files.size() != snapshot.file_count) {
+        return Result<std::size_t>::failure(
+            {ErrorCode::io_failure, L"Session manifest file count changed", 0});
+    }
     auto root_bound = validate_root_binding(snapshot.config_root, manifest.value());
     if (!root_bound.has_value()) return Result<std::size_t>::failure(root_bound.error());
     if ((snapshot.root_volume != 0 &&
@@ -663,6 +697,10 @@ Result<std::size_t> restore_session_config(const SessionConfigSnapshot& snapshot
 Result<bool> complete_session_config(const SessionConfigSnapshot& snapshot) {
     auto manifest = parse_manifest(snapshot.snapshot_root / L"manifest.txt");
     if (!manifest.has_value()) return Result<bool>::failure(manifest.error());
+    if (manifest.value().files.size() != snapshot.file_count) {
+        return Result<bool>::failure(
+            {ErrorCode::io_failure, L"Session manifest file count changed", 0});
+    }
     auto bound = validate_root_binding(snapshot.config_root, manifest.value());
     if (!bound.has_value()) return bound;
     if (snapshot.root_volume != manifest.value().root_volume ||

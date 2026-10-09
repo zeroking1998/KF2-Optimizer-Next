@@ -54,7 +54,7 @@ endif()
 # Exercise the real helper in a tiny configure/build project without MSVC
 # compilation. Each run owns a new sandbox; no real SDK artifact is changed.
 if(NOT DEFINED TEST_ROOT OR NOT DEFINED TEST_BINARY_ROOT OR
-   NOT DEFINED TEST_GENERATOR)
+   NOT DEFINED TEST_GENERATOR OR NOT DEFINED TEST_POWERSHELL)
     message(FATAL_ERROR "Missing telemetry binding test sandbox or generator")
 endif()
 cmake_path(ABSOLUTE_PATH TEST_ROOT NORMALIZE OUTPUT_VARIABLE sandbox_root)
@@ -161,4 +161,13 @@ if(package_source_fingerprint EQUAL -1 OR package_stale_guard EQUAL -1 OR
    package_telemetry_rebuild EQUAL -1)
     message(FATAL_ERROR
         "Packaging must rebuild telemetry when its source fingerprint is stale")
+endif()
+
+execute_process(COMMAND "${TEST_POWERSHELL}" -NoProfile -File
+    "${PROJECT_SOURCE_DIR}/tests/tools/telemetry_restore_test.ps1"
+    -BuildScript "${PROJECT_SOURCE_DIR}/tools/build_kf2_telemetry.ps1"
+    -TestRoot "${sandbox_root}/${nonce}/restore"
+    RESULT_VARIABLE restore_result OUTPUT_VARIABLE restore_output ERROR_VARIABLE restore_error)
+if(NOT restore_result EQUAL 0)
+    message(FATAL_ERROR "Telemetry cleanup regression failed: ${restore_output}${restore_error}")
 endif()

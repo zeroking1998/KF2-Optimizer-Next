@@ -1140,15 +1140,7 @@ bool UiRuntime::remember_confirmed_gpu_profile(
         telemetry::process_gpu_preference_token(preference);
     staged.extras["confirmed_gpu_dedicated_bytes"] =
         std::to_string(dedicated_memory_bytes);
-    const auto serialized = config::serialize_settings(staged);
-#if defined(KF2_APPLICATION_VIDEO_TESTING)
-    const auto saved = gpu_profile_settings_write_for_testing
-        ? gpu_profile_settings_write_for_testing(settings_path, serialized)
-        : platform::windows::atomic_replace_utf8(settings_path, serialized);
-#else
-    const auto saved = platform::windows::atomic_replace_utf8(
-        settings_path, serialized);
-#endif
+    const auto saved = config::save_settings(settings_path, staged);
     if (!saved.has_value()) {
         events->append({0, diagnostics::Severity::warning,
             "GAME_GPU_PROFILE_REMEMBER_FAILED",

@@ -150,9 +150,8 @@ app::runtime::DispatchResult select_install(
             validated.value().executable)) return reject_busy();
     const auto previous = runtime.optimizer_settings.manual_game_path;
     runtime.optimizer_settings.manual_game_path = *encoded;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        runtime.settings_path,
-        config::serialize_settings(runtime.optimizer_settings));
+    const auto saved = config::save_settings(
+        runtime.settings_path, runtime.optimizer_settings);
     if (!saved.has_value()) {
         runtime.optimizer_settings.manual_game_path = previous;
         show_notice(runtime, ui::NoticeSeverity::error,

@@ -3250,6 +3250,40 @@ int main() {
     CHECK(telemetry_source.find(
         "function bool RememberAdaptiveDistanceSleepTransition(") !=
           std::string::npos);
+    const auto remember_transition_start = telemetry_source.find(
+        "function bool RememberAdaptiveDistanceSleepTransition(");
+    const auto remember_transition_end = telemetry_source.find(
+        "\nfunction ", remember_transition_start + 1);
+    CHECK(remember_transition_start != std::string::npos);
+    CHECK(remember_transition_end != std::string::npos);
+    const auto remember_transition_body = telemetry_source.substr(
+        remember_transition_start,
+        remember_transition_end - remember_transition_start);
+    CHECK(remember_transition_body.find("DistanceUnits") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "RememberAdaptiveDistanceSleepTransition(\n"
+        "            CorpseId, RemovalReason);") != std::string::npos);
+    const auto distance_sleep_remove_start = telemetry_source.find(
+        "function RemoveAdaptiveDistanceSleptCorpseEntry(");
+    const auto distance_sleep_remove_end = telemetry_source.find(
+        "\nfunction ", distance_sleep_remove_start + 1);
+    CHECK(distance_sleep_remove_start != std::string::npos);
+    CHECK(distance_sleep_remove_end != std::string::npos);
+    const auto distance_sleep_remove_body = telemetry_source.substr(
+        distance_sleep_remove_start,
+        distance_sleep_remove_end - distance_sleep_remove_start);
+    CHECK(distance_sleep_remove_body.find(
+        "if (bDetailedRuntimeDiagnostics)\n"
+        "        {\n"
+        "            DistanceUnits = "
+        "GetAdaptiveCorpseDistanceUnits(Candidate);\n"
+        "            EffectiveAwake = "
+        "GetAdaptiveCorpseEffectiveAwake(Candidate);") !=
+          std::string::npos);
+    CHECK(distance_sleep_remove_body.find(
+        "RememberAdaptiveDistanceSleepTransition(\n"
+        "            CorpseId, RemovalReason);") != std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveDistanceSleepTransitions.Length = 8192") !=
           std::string::npos);
@@ -3330,8 +3364,36 @@ int main() {
     // actor-correlated receipts; the isolated living offscreen animation
     // policy adds two distance receipts.
     CHECK(count_occurrences(telemetry_source, "corpse_id=") == 24);
-    CHECK(count_occurrences(telemetry_source, " distance_units=") == 14);
-    CHECK(count_occurrences(telemetry_source, " distance_m=") == 14);
+    const auto distance_fields_start = telemetry_source.find(
+        "function string FormatAdaptiveCorpseDistanceLogFields(");
+    CHECK(distance_fields_start != std::string::npos);
+    const auto distance_fields_end = telemetry_source.find(
+        "\nfunction ", distance_fields_start + 1);
+    CHECK(distance_fields_end != std::string::npos);
+    const auto distance_fields = telemetry_source.substr(
+        distance_fields_start, distance_fields_end - distance_fields_start);
+    CHECK(count_occurrences(distance_fields,
+        "GetAdaptiveCorpseDistanceUnits(Candidate)") == 1);
+    CHECK(distance_fields.find(
+        "return \" distance_units=\"$DistanceUnits$\" distance_m=\"$\n"
+        "        FormatAdaptiveCorpseDistanceMeters(DistanceUnits, false);") !=
+          std::string::npos);
+    const auto shared_distance_receipts = count_occurrences(telemetry_source,
+        "FormatAdaptiveCorpseDistanceLogFields(Candidate)");
+    CHECK(shared_distance_receipts == 11);
+    CHECK(count_occurrences(telemetry_source, " distance_units=") - 1 +
+        shared_distance_receipts == 14);
+    CHECK(count_occurrences(telemetry_source, " distance_m=") - 1 +
+        shared_distance_receipts == 14);
+    for (auto log_start = telemetry_source.find("`log(");
+         log_start != std::string::npos;
+         log_start = telemetry_source.find("`log(", log_start + 1)) {
+        const auto log_end = telemetry_source.find(");", log_start);
+        CHECK(log_end != std::string::npos);
+        CHECK(count_occurrences(telemetry_source.substr(
+            log_start, log_end - log_start),
+            "GetAdaptiveCorpseDistanceUnits(Candidate)") <= 1);
+    }
     const auto distance_marker = telemetry_source.find(
         "FormatAdaptiveDebugMarkerAction(");
     CHECK(distance_marker != std::string::npos);
@@ -4307,7 +4369,6 @@ int main() {
     for (const auto* old_manager_state : {
              "AdaptiveBaselineSettleEntries.Length = 0",
              "FixedMinimumCorpseLodCorpses.Length = 0",
-             "FixedMinimumLivingVisualZeds.Length = 0",
              "AdaptiveDistanceSleepTransitions.Length = 0",
              "AdaptiveCorpsePhysicsActionIds.Length = 0",
              "FixedMinimumLivingScanPawn = None"}) {
@@ -4681,6 +4742,84 @@ int main() {
     CHECK(living_apply_end != std::string::npos);
     const auto living_apply_body = telemetry_source.substr(
         living_apply_start, living_apply_end - living_apply_start);
+    // Original animation flags are actor-owned, not GoreManager-owned. Every
+    // retirement path must verify restore before removing their only copy.
+    const auto living_remove_start = telemetry_source.find(
+        "RemoveFixedMinimumLivingVisualEntry(");
+    const auto living_remove_end = telemetry_source.find(
+        "function bool RestoreLivingOffscreenAnimation(", living_remove_start);
+    CHECK(living_remove_start != std::string::npos);
+    CHECK(living_remove_end != std::string::npos);
+    const auto living_remove_body = telemetry_source.substr(
+        living_remove_start, living_remove_end - living_remove_start);
+    const auto restore_before_remove = living_remove_body.find(
+        "!RestoreLivingOffscreenAnimation(Index, Reason)");
+    const auto remove_original = living_remove_body.find(
+        "FixedMinimumLivingOriginalTickAnimOffscreen.Remove(Index, 1)");
+    CHECK(restore_before_remove != std::string::npos);
+    CHECK(remove_original != std::string::npos);
+    CHECK(restore_before_remove < remove_original);
+    CHECK(living_remove_body.find("Candidate != None && !Candidate.bDeleteMe") <
+          restore_before_remove);
+    CHECK(living_remove_body.find("FixedMinimumLivingOffscreenAnimReduced[Index]") <
+          restore_before_remove);
+    CHECK(living_remove_body.find("Candidate.Mesh == None") == std::string::npos);
+    CHECK(living_remove_body.find("return false;", restore_before_remove) <
+          remove_original);
+    CHECK(manager_retire_body.find("FixedMinimumLivingVisualZeds.Length = 0") ==
+          std::string::npos);
+    CHECK(manager_retire_body.find(
+        "FixedMinimumLivingOriginalTickAnimOffscreen.Length = 0") ==
+          std::string::npos);
+    CHECK(manager_retire_body.find(
+        "FixedMinimumLivingOriginalUpdateSkelOffscreen.Length = 0") ==
+          std::string::npos);
+    CHECK(manager_retire_body.find(
+        "FixedMinimumLivingOffscreenAnimReduced.Length = 0") ==
+          std::string::npos);
+    const auto living_prune_start = telemetry_source.find(
+        "function PruneFixedMinimumLivingVisualEntries()");
+    const auto living_prune_end = telemetry_source.find(
+        "function bool LivingOffscreenAnimationRequiresNativeTick(",
+        living_prune_start);
+    CHECK(living_prune_start != std::string::npos);
+    CHECK(living_prune_end != std::string::npos);
+    const auto living_prune_body = telemetry_source.substr(
+        living_prune_start, living_prune_end - living_prune_start);
+    CHECK(living_prune_body.find(
+        "bRemoved = RemoveFixedMinimumLivingVisualEntry(Index, \"not_alive\")") !=
+          std::string::npos);
+    CHECK(living_prune_body.find(
+        "bRemoved = RemoveFixedMinimumLivingVisualEntry(Index, \"native_visual_state\")") !=
+          std::string::npos);
+    const auto prune_advance = living_prune_body.find("if (!bRemoved)");
+    CHECK(prune_advance != std::string::npos);
+    CHECK(living_prune_body.find(
+        "(Index + 1) % FixedMinimumLivingVisualZeds.Length", prune_advance) !=
+          std::string::npos);
+    CHECK(living_prune_body.find(
+        "ScanBudget = Min(AdaptiveCorpseScanBudget, FixedMinimumLivingVisualZeds.Length)") !=
+          std::string::npos);
+    CHECK(living_prune_body.find("Scanned < ScanBudget") !=
+          std::string::npos);
+    CHECK(living_prune_body.find(
+        "Index = FixedMinimumLivingPruneCursor % FixedMinimumLivingVisualZeds.Length") !=
+          std::string::npos);
+    CHECK(living_apply_body.find(
+        "RemoveFixedMinimumLivingVisualEntry(EntryIndex, \"visual_readback\")") !=
+          std::string::npos);
+    for (const auto* reason : {"visible_or_gameplay", "native_override"}) {
+        const auto retry = living_apply_body.find(
+            "RestoreLivingOffscreenAnimation(EntryIndex, \"" +
+            std::string{reason} + "\")");
+        const auto skip_failed_restore = living_apply_body.find(
+            "ScanPawn = FixedMinimumLivingScanPawn;\n            continue;",
+            retry);
+        CHECK(retry != std::string::npos);
+        CHECK(skip_failed_restore != std::string::npos);
+        CHECK(skip_failed_restore < living_apply_body.find(
+            "bVisualChanged =", retry));
+    }
     CHECK(living_apply_body.find("WorldInfo.AllPawns") == std::string::npos);
     CHECK(living_apply_body.find(
         "FixedMinimumLivingScanPawn = ScanPawn.NextPawn") !=

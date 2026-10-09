@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <type_traits>
 
 #include "features/telemetry/telemetry_adaptive_stage.hpp"
 #include "features/telemetry/corpse_telemetry_state.hpp"
@@ -15,6 +16,10 @@
     } while (false)
 
 namespace {
+
+static_assert(std::is_invocable_r_v<kf2::game::AdaptiveResourceControl,
+    decltype(&kf2::telemetry_pipeline::adaptive_runtime_resource),
+    kf2::optimizer::ResourceKind, double>);
 
 bool approximately_equal(double left, double right) {
     return std::abs(left - right) < 0.0001;
@@ -725,8 +730,6 @@ int main() {
     post_map_quality.state = optimizer::AdaptiveControllerState::emergency;
     post_map_quality.primary_resource = optimizer::ResourceKind::unknown;
     post_map_quality.primary_confidence = 0.0;
-    post_map_quality.bottleneck = optimizer::AdaptiveBottleneck::unknown;
-    post_map_quality.bottleneck_confidence = 0.0;
     post_map_quality.map_ready_ns = 1'000'000'000ULL;
     CHECK(!select_adaptive_runtime_control(post_map_quality));
     post_map_quality.now_ns = 16'000'000'000ULL;
@@ -788,22 +791,53 @@ int main() {
     rollback.reduction_floor_quality = 20;
     rollback.rollback_quality = 20;
     rollback.rollback_resource = game::AdaptiveResourceControl::mixed;
+    rollback.rollback_current_quality = 10;
     rollback.current_frame_pressure = true;
     rollback.current_resource_pressure = false;
     selected = select_adaptive_runtime_control(rollback);
     CHECK(selected);
     CHECK(selected->resource == game::AdaptiveResourceControl::mixed);
     CHECK(selected->quality == 20);
+    // CPU rollback must not be blocked when pressure moves to an unchanged GPU.
+    auto changed_pressure = rollback;
+    changed_pressure.primary_resource = optimizer::ResourceKind::gpu;
+    changed_pressure.current_quality = 100;
+    changed_pressure.reduction_floor_quality = 100;
+    changed_pressure.rollback_quality = 100;
+    changed_pressure.rollback_resource = game::AdaptiveResourceControl::cpu;
+    changed_pressure.rollback_current_quality = 80;
+    selected = select_adaptive_runtime_control(changed_pressure);
+    CHECK(selected);
+    CHECK(selected->resource == game::AdaptiveResourceControl::cpu);
+    CHECK(selected->quality == 100);
+    // The inverse mismatch must not retry a resource that is already restored.
+    changed_pressure.current_quality = 80;
+    changed_pressure.reduction_floor_quality = 80;
+    changed_pressure.rollback_current_quality = 100;
+    CHECK(!select_adaptive_runtime_control(changed_pressure));
+    for (const auto invalid : {std::optional<int>{}, std::optional<int>{0},
+                               std::optional<int>{101}}) {
+        changed_pressure.rollback_current_quality = invalid;
+        CHECK(!select_adaptive_runtime_control(changed_pressure));
+    }
+    // Origin quality describes confirmed state, not a policy-constrained value.
+    changed_pressure.current_quality = 100;
+    changed_pressure.minimum_quality = 40;
+    changed_pressure.rollback_current_quality = 20;
+    selected = select_adaptive_runtime_control(changed_pressure);
+    CHECK(selected && selected->quality == 100);
     // Inject a runtime-readback failure followed by one composite rollback
     // readback failure for every quality group. Native must re-verify the exact
     // previous value even though it equals the last confirmed value.
     auto unknown_composition = rollback;
     unknown_composition.current_quality = 70;
     unknown_composition.rollback_quality = 70;
+    unknown_composition.rollback_current_quality.reset();
     unknown_composition.quality_state_known = false;
     unknown_composition.map_ready_ns = unknown_composition.now_ns;
     unknown_composition.last_applied_ns = unknown_composition.now_ns;
-    for (const auto resource : {game::AdaptiveResourceControl::gpu,
+    for (const auto resource : {game::AdaptiveResourceControl::mixed,
+             game::AdaptiveResourceControl::gpu,
              game::AdaptiveResourceControl::cpu,
              game::AdaptiveResourceControl::vram,
              game::AdaptiveResourceControl::ram,
@@ -858,50 +892,29 @@ int main() {
     CHECK(fresh_sample.one_percent_low_fps == 60.0);
     CHECK(fresh_sample.stutter_count == 0);
     CHECK(!fresh_sample.sample_loss);
+    auto buffer_loss_context = fresh_context;
+    buffer_loss_context.decision_frames->quality = telemetry::SampleQuality::degraded;
+    CHECK(buffer_loss_context.decision_frames->loss_count == 0);
+    const auto buffer_loss_sample = build_adaptive_sample(frame, buffer_loss_context).sample;
+    CHECK(buffer_loss_sample.sample_loss);
+    CHECK(buffer_loss_sample.fps == fresh_sample.fps);
+    CHECK(buffer_loss_sample.capabilities.frame_timing ==
+          fresh_sample.capabilities.frame_timing);
     CHECK(!fresh_sample.discontinuity);
     CHECK(fresh_sample.timestamp_ns == frame.observed_at_ns);
     CHECK(frame.frames.one_percent_low_fps == 45.0);
 
-    control.bottleneck = optimizer::AdaptiveBottleneck::rendering;
-    control.bottleneck_confidence = 0.74;
     control.primary_resource = optimizer::ResourceKind::gpu;
     selected = select_adaptive_runtime_control(control);
     CHECK(selected.has_value());
     CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
     CHECK(selected->quality == 90);
-    control.overdraw_minimum_reached = true;
-    control.effects_control_available = true;
-    selected = select_adaptive_runtime_control(control);
-    CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
-    control.effects_control_available = false;
-    selected = select_adaptive_runtime_control(control);
-    CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
-    control.effects_control_available = true;
-    CHECK(selected->quality == 90);
-    control.overdraw_minimum_reached = false;
-    control.bottleneck = optimizer::AdaptiveBottleneck::gore;
-    control.bottleneck_confidence = 0.60;
-    selected = select_adaptive_runtime_control(control);
-    CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
-    control.bottleneck = optimizer::AdaptiveBottleneck::particles;
-    control.bottleneck_confidence = 0.64;
-    selected = select_adaptive_runtime_control(control);
-    CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
-    control.effects_control_available = false;
-    selected = select_adaptive_runtime_control(control);
-    CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
-    control.effects_control_available = true;
-    control.bottleneck_confidence = 0.50;
-    selected = select_adaptive_runtime_control(control);
-    CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
-    control.bottleneck = optimizer::AdaptiveBottleneck::unknown;
-    control.bottleneck_confidence = 0.0;
+    CHECK(adaptive_runtime_resource(optimizer::ResourceKind::gpu,
+        std::nextafter(0.55, 0.0)) == game::AdaptiveResourceControl::mixed);
+    CHECK(adaptive_runtime_resource(optimizer::ResourceKind::gpu, 0.55) ==
+          game::AdaptiveResourceControl::gpu);
+    CHECK(adaptive_runtime_resource(optimizer::ResourceKind::gpu,
+        std::nextafter(0.55, 1.0)) == game::AdaptiveResourceControl::gpu);
     control.primary_resource = optimizer::ResourceKind::cpu;
 
     control.current_frame_pressure = false;
@@ -993,8 +1006,6 @@ int main() {
     control.verified_online_graphics = true;
     control.local_graphics_only = true;
     control.data_quality = optimizer::AdaptiveDataQuality::valid;
-    control.bottleneck = optimizer::AdaptiveBottleneck::unknown;
-    control.bottleneck_confidence = 0.0;
     control.state = optimizer::AdaptiveControllerState::intervention;
     control.current_quality = 100;
     control.recovery_eligible = false;

@@ -147,6 +147,7 @@ PresentSource::~PresentSource() {
 Result<bool> PresentSource::start() {
     std::scoped_lock lock{mutex_};
     streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
+    uncounted_loss_ = false;
     schema_failure_ = false;
     ++diagnostic_generation_; last_stream_.reset();
     invalidate_drain_locked();
@@ -156,6 +157,7 @@ Result<bool> PresentSource::start() {
 Result<bool> PresentSource::stop() {
     std::scoped_lock lock{mutex_};
     running_ = false; streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
+    uncounted_loss_ = false;
     ++diagnostic_generation_; last_stream_.reset();
     invalidate_drain_locked();
     return Result<bool>::success(true);
@@ -163,6 +165,7 @@ Result<bool> PresentSource::stop() {
 void PresentSource::bind(SampleIdentity identity) {
     std::scoped_lock lock{mutex_};
     identity_ = identity; streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
+    uncounted_loss_ = false;
     ++diagnostic_generation_; last_stream_.reset();
     schema_failure_ = false;
     invalidate_drain_locked();
@@ -172,9 +175,40 @@ void PresentSource::reset_statistics() {
     streams_.clear();
     reported_loss_ = 0;
     loss_boundary_ns_ = 0;
+    uncounted_loss_ = false;
     ++diagnostic_generation_; last_stream_.reset();
     invalidate_drain_locked();
 }
+bool PresentSource::record_loss(SampleIdentity identity,
+                               std::uint64_t timestamp_ns, std::uint64_t count,
+                               bool uncounted) {
+    std::scoped_lock lock{mutex_};
+    if (!running_ || schema_failure_ || identity != identity_ ||
+        (count == 0 && !uncounted))
+        return false;
+    uncounted_loss_ |= uncounted;
+    record_loss_locked(timestamp_ns, count, false);
+    return true;
+}
+
+void PresentSource::record_loss_locked(std::uint64_t timestamp_ns,
+                                      std::uint64_t count, bool incomplete) {
+    constexpr auto maximum_loss = std::numeric_limits<std::uint64_t>::max();
+    reported_loss_ += std::min(count, maximum_loss - reported_loss_);
+    if (incomplete && reported_loss_ < maximum_loss) ++reported_loss_;
+    loss_boundary_ns_ = std::max(loss_boundary_ns_, timestamp_ns);
+    // A late or untimed loss must not certify already admitted data.
+    // This bounded stream walk runs only on loss, never on clean presents.
+    ++diagnostic_generation_;
+    for (auto& [stream_id, stream] : streams_) {
+        const auto& presents = stream.presents;
+        if (!presents.empty()) loss_boundary_ns_ = std::max(
+            loss_boundary_ns_, presents.back().monotonic_ns);
+        stream.diagnostic_generation = diagnostic_generation_;
+    }
+    invalidate_drain_locked();
+}
+
 bool PresentSource::ingest(const PresentEvent& event) {
     std::scoped_lock lock{mutex_};
     if (!running_ || event.identity != identity_) return false;
@@ -185,20 +219,7 @@ bool PresentSource::ingest(const PresentEvent& event) {
         return false;
     }
     if (!event.completed || event.events_lost != 0) {
-        constexpr auto maximum_loss = std::numeric_limits<std::uint64_t>::max();
-        reported_loss_ += std::min(event.events_lost, maximum_loss - reported_loss_);
-        if (!event.completed && reported_loss_ < maximum_loss) ++reported_loss_;
-        loss_boundary_ns_ = std::max(loss_boundary_ns_, event.monotonic_ns);
-        // A late or untimed loss must not certify already admitted data.
-        // This bounded stream walk runs only on loss, never on clean presents.
-        ++diagnostic_generation_;
-        for (auto& [stream_id, stream] : streams_) {
-            const auto& presents = stream.presents;
-            if (!presents.empty()) loss_boundary_ns_ = std::max(
-                loss_boundary_ns_, presents.back().monotonic_ns);
-            stream.diagnostic_generation = diagnostic_generation_;
-        }
-        invalidate_drain_locked();
+        record_loss_locked(event.monotonic_ns, event.events_lost, !event.completed);
         if (!event.completed) return false;
     }
     constexpr std::size_t kMaximumStreams = 16;
@@ -228,7 +249,9 @@ bool PresentSource::ingest(const PresentEvent& event) {
     }
     last_stream_ = event.stream_id;
     auto& presents = stream->second.presents;
-    const auto position = std::lower_bound(
+    const auto position = presents.empty() ||
+        event.monotonic_ns > presents.back().monotonic_ns
+        ? presents.end() : std::lower_bound(
         presents.begin(), presents.end(), event.monotonic_ns,
         [](const PresentTimestamp& present, std::uint64_t timestamp) {
             return present.monotonic_ns < timestamp;
@@ -246,6 +269,7 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
                                   std::uint64_t not_before_ns) const {
     std::vector<PresentTimestamp> long_term;
     std::uint64_t reported_loss = 0;
+    bool uncounted_loss = false;
     std::uint64_t source_generation = 0;
     std::uint64_t selected_stream_id = 0;
     {
@@ -256,6 +280,7 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
             return unavailable;
         }
         reported_loss = reported_loss_;
+        uncounted_loss = uncounted_loss_;
         source_generation = drain_generation_;
         const std::deque<PresentTimestamp>* selected = nullptr;
         bool selected_fresh = false;
@@ -299,7 +324,10 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
                     ? newest - PresentSource::longest_window_ns : 0);
             // The shared quality covers every returned statistic, including
             // the longest tail. A fully post-loss window needs no reset.
-            if (cutoff > loss_boundary_ns_) reported_loss = 0;
+            if (cutoff > loss_boundary_ns_) {
+                reported_loss = 0;
+                uncounted_loss = false;
+            }
             const auto first = std::lower_bound(
                 selected->begin(), selected->end(), cutoff,
                 [](const PresentTimestamp& present,
@@ -314,7 +342,8 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
     result.loss_count += reported_loss;
     result.source_generation = source_generation;
     result.stream_id = selected_stream_id;
-    if (result.fps && result.loss_count > 0) result.quality = SampleQuality::degraded;
+    if (result.fps && (result.loss_count > 0 || uncounted_loss))
+        result.quality = SampleQuality::degraded;
     return result;
 }
 
@@ -470,7 +499,7 @@ PresentSource::Window PresentSource::measure_window(
     Window result;
     result.generation = diagnostic_generation_;
     if (!running_ || schema_failure_ || end_ns <= begin_ns ||
-        (reported_loss_ != 0 && begin_ns <= loss_boundary_ns_))
+        ((reported_loss_ != 0 || uncounted_loss_) && begin_ns <= loss_boundary_ns_))
         return result;
     const Stream* selected_stream = nullptr;
     std::deque<PresentTimestamp>::const_iterator selected_first, selected_end;

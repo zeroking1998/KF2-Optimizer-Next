@@ -126,6 +126,16 @@ int main() {
     silent.reason = kf2::telemetry::UnavailableReason::no_samples;
     silent.scene_ready = false;
     CHECK(!should_reconnect_silent_present(silent));
+    silent.session_terminated = true;
+    CHECK(!should_reconnect_silent_present(silent));
+    silent.scene_ready = true;
+    silent.fps = 100.0; // An old good publication cannot keep a dead consumer alive.
+    CHECK(should_reconnect_silent_present(silent));
+    silent.restart_count = kMaximumPresentRestarts;
+    CHECK(!should_reconnect_silent_present(silent));
+    silent.restart_count = 0;
+    silent.now_ns--;
+    CHECK(!should_reconnect_silent_present(silent));
 
     RestartHandoffInput restart;
     CHECK(classify_restart_handoff(restart) ==

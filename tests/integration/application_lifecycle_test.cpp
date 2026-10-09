@@ -54,11 +54,39 @@
 
 namespace {
 thread_local bool fail_flex_text_allocation{};
+thread_local bool fail_settings_growth{};
+thread_local bool settings_growth_failed{};
+thread_local bool keep_settings_allocation_failure{};
+thread_local bool fail_flex_report_growth{};
+thread_local bool flex_report_growth_failed{};
+thread_local std::size_t flex_report_copy_bytes{};
+thread_local std::size_t flex_report_copies{};
 }
 
 void* operator new(std::size_t size) {
+    if (flex_report_copy_bytes && size == flex_report_copy_bytes)
+        ++flex_report_copies;
+    if (fail_flex_report_growth && size >= 1024) {
+        fail_flex_report_growth = false;
+        flex_report_growth_failed = true;
+        throw std::bad_alloc{};
+    }
+#if _ITERATOR_DEBUG_LEVEL != 0
+    // Debug STL moves allocate tiny iterator proxies even for empty strings.
+    constexpr std::size_t persistent_failure_minimum = 64;
+#else
+    constexpr std::size_t persistent_failure_minimum = 0;
+#endif
+    if (settings_growth_failed && keep_settings_allocation_failure &&
+        size >= persistent_failure_minimum)
+        throw std::bad_alloc{};
     if (fail_flex_text_allocation) {
         fail_flex_text_allocation = false;
+        throw std::bad_alloc{};
+    }
+    if (fail_settings_growth && size >= 16 * 1024) {
+        fail_settings_growth = false;
+        settings_growth_failed = true;
         throw std::bad_alloc{};
     }
     for (;;) {
@@ -105,13 +133,6 @@ void throw_update_controller_allocation_failure() {
     kf2::update::detail::set_update_controller_allocation_hook_for_testing(
         nullptr);
     throw std::bad_alloc{};
-}
-
-kf2::Result<bool> fail_gpu_profile_settings_write(
-    const std::filesystem::path&, std::string_view) {
-    return kf2::Result<bool>::failure({
-        kf2::ErrorCode::io_failure,
-        L"Injected confirmed GPU profile persistence failure", 0});
 }
 
 #if defined(KF2_APPLICATION_SHUTDOWN_TESTING)
@@ -617,6 +638,30 @@ int test_flex_report_boundaries() {
     CHECK(runtime.model.notice()->code == L"SUPPORT_BUNDLE_EXPORTED");
     CHECK(read_bytes(report).find("\"update_calls\":181") != std::string::npos);
     const auto bytes = read_bytes(report);
+    const auto checkpoint = *runtime.last_flex_observation;
+    fail_flex_report_growth = true;
+    const bool partial_saved = runtime.save_flex_report(checkpoint);
+    fail_flex_report_growth = false;
+    const auto after_growth_failure = read_bytes(report);
+    // Restore this owned fixture before reporting an unfixed Main failure.
+    CHECK(runtime.save_flex_report(checkpoint));
+    CHECK(read_bytes(report) == bytes);
+    std::cout << "FleX report growth failure: injected="
+              << flex_report_growth_failed << "; saved=" << partial_saved
+              << "; before=" << bytes.size()
+              << "; after=" << after_growth_failure.size() << '\n';
+    CHECK(flex_report_growth_failed);
+    CHECK(!partial_saved);
+    CHECK(after_growth_failure == bytes);
+    const std::string expected_copy{bytes};
+    flex_report_copy_bytes = expected_copy.capacity() + 1;
+    const bool copied_saved = runtime.save_flex_report(checkpoint);
+    flex_report_copy_bytes = 0;
+    CHECK(copied_saved);
+    CHECK(read_bytes(report) == bytes);
+    std::cout << "FleX report payload-copy allocations: "
+              << flex_report_copies << '\n';
+    CHECK(flex_report_copies == 0);
     const auto stamp = fs::last_write_time(report);
     publish(182);
     runtime.observe_flex_process();
@@ -1622,6 +1667,37 @@ int test_update_worker_exception_boundaries() {
     CHECK(runtime.updates.controller.snapshot().status ==
           L"Update check could not start its background worker");
 
+    runtime.updates.worker_launcher = [](std::function<void()> worker) { worker(); };
+    int completion_requests = 0;
+    runtime.updates.check_operation = [&](std::string_view) {
+        ++completion_requests;
+        kf2::update::ReleaseInfo found;
+        found.version = std::string(64, 'v');
+        return kf2::Result<std::optional<kf2::update::ReleaseInfo>>::success(
+            std::move(found));
+    };
+    runtime.start_update_check(kf2::update::CheckTrigger::manual);
+    const auto pending_check = runtime.updates.check;
+    CHECK(pending_check);
+    const auto completion_before = runtime.updates.controller.snapshot();
+    bool completion_threw = false;
+    fail_flex_text_allocation = true;
+    try { runtime.poll_update_check(); }
+    catch (const std::bad_alloc&) { completion_threw = true; }
+    fail_flex_text_allocation = false;
+    CHECK(completion_threw);
+    CHECK(runtime.updates.check == pending_check);
+    const auto& completion_after = runtime.updates.controller.snapshot();
+    CHECK(completion_after.phase == completion_before.phase);
+    CHECK(completion_after.last_check_unix_seconds == completion_before.last_check_unix_seconds);
+    CHECK(completion_after.cached_available_version == completion_before.cached_available_version);
+    CHECK(completion_after.status == completion_before.status);
+    runtime.poll_update_check();
+    CHECK(!runtime.updates.check);
+    CHECK(runtime.updates.controller.snapshot().phase == kf2::update::UpdatePhase::available);
+    CHECK(runtime.updates.controller.snapshot().cached_available_version == std::string(64, 'v'));
+    CHECK(completion_requests == 1);
+
     fs::remove_all(test_root);
     return EXIT_SUCCESS;
 }
@@ -1827,6 +1903,59 @@ int test_prewarm_incomplete_publication(bool map_job, bool diagnostics) {
     CHECK(runtime.map_prewarm_retry_not_before_ns == 0);
     CHECK(worker.snapshot().bytes_read == 2048);
     worker.stop_and_wait();
+    fs::remove_all(test_root);
+    return EXIT_SUCCESS;
+}
+
+int test_startup_prewarm_skips_clear_progress() {
+    namespace fs = std::filesystem;
+    using kf2::game::StorageKind;
+    using kf2::game::StartupPrewarmState;
+    const auto test_root = fs::path{KF2_TEST_ROOT} / L"startup-prewarm-skips";
+    fs::create_directories(test_root);
+    kf2::diagnostics::EventLog events{128};
+    kf2::app::UiRuntime runtime{test_root / L"Data", false,
+        kf2::config::Settings{}, events, std::nullopt,
+        kf2::app::StartMode::read_only, test_root / L"portable"};
+    auto status = runtime.model.status();
+    status.game_detected = true;
+    runtime.model.set_status(std::move(status));
+    runtime.controller.on_resize({1440, 900});
+    const auto shows_warmup = [&] {
+        const auto& nodes = runtime.controller.layout().nodes;
+        return std::any_of(nodes.begin(), nodes.end(), [](const auto& node) {
+            return node.role == kf2::ui::SemanticRole::status &&
+                node.text.find(L"Warm-up") != std::wstring::npos;
+        });
+    };
+    for (const auto expected : {StartupPrewarmState::skipped_unknown_storage,
+                                StartupPrewarmState::skipped_low_memory,
+                                StartupPrewarmState::skipped_no_files}) {
+        runtime.startup_prewarm_announced = false;
+        runtime.model.set_prewarm_progress(true, 0, L"");
+        runtime.invalidate();
+        CHECK(shows_warmup());
+        runtime.startup_prewarmer.start(test_root, {
+            .idle_delay = std::chrono::milliseconds{0},
+            .storage_override = expected == StartupPrewarmState::skipped_unknown_storage
+                ? StorageKind::unknown : StorageKind::solid_state,
+            .available_memory_override = expected == StartupPrewarmState::skipped_low_memory
+                ? 2ULL * 1024 * 1024 * 1024 : 4ULL * 1024 * 1024 * 1024,
+            .include_common_startup_files = false,
+        });
+        for (int attempt = 0; attempt < 200 &&
+             runtime.startup_prewarmer.snapshot().state == StartupPrewarmState::waiting;
+             ++attempt) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        }
+        CHECK(runtime.startup_prewarmer.snapshot().state == expected);
+        runtime.poll_startup_prewarm();
+        CHECK(runtime.startup_prewarm_announced);
+        CHECK(!runtime.model.status().prewarm_active);
+        CHECK(runtime.model.status().prewarm_percent == 0);
+        CHECK(!shows_warmup());
+        runtime.startup_prewarmer.stop_and_wait();
+    }
     fs::remove_all(test_root);
     return EXIT_SUCCESS;
 }
@@ -2235,6 +2364,59 @@ int test_stopped_target_fps_transaction() {
     return EXIT_SUCCESS;
 }
 
+int test_settings_serialization_rollback() {
+    const auto root = std::filesystem::path{KF2_TEST_ROOT} / L"settings-stream-failure";
+    std::filesystem::remove_all(root);
+    kf2::diagnostics::EventLog events{32};
+    kf2::config::Settings initial;
+    initial.extras["preserved_extra"] = std::string(32 * 1024, 'x');
+    kf2::app::UiRuntime runtime{
+        root / L"Data", false, initial, events, std::nullopt,
+        kf2::app::StartMode::normal, root / L"portable"};
+    const auto original = kf2::config::serialize_settings(initial);
+    CHECK(kf2::config::parse_settings(original).has_value());
+    write_bytes(runtime.settings_path, original);
+    settings_growth_failed = false;
+    fail_settings_growth = true;
+    const auto result = kf2::features::diagnostics::toggle_corpse_markers(runtime, {});
+    fail_settings_growth = false;
+    CHECK(settings_growth_failed);
+    CHECK(result == kf2::app::runtime::DispatchResult::handled);
+    const auto after = read_bytes(runtime.settings_path);
+    if (after != original)
+        std::cerr << "Settings allocation failure replaced " << original.size()
+                  << " bytes with " << after.size() << " bytes\n";
+    CHECK(after == original);
+    CHECK(!runtime.optimizer_settings.debug_corpse_markers);
+    CHECK(!runtime.model.status().debug_corpse_markers);
+    CHECK(runtime.model.notice() && runtime.model.notice()->code == L"SETTINGS_SAVE_FAILED");
+    CHECK(kf2::config::parse_settings(after).has_value());
+    CHECK(kf2::features::diagnostics::toggle_corpse_markers(runtime, {}) ==
+          kf2::app::runtime::DispatchResult::handled);
+    CHECK(runtime.optimizer_settings.debug_corpse_markers);
+    CHECK(runtime.model.status().debug_corpse_markers);
+    CHECK(read_bytes(runtime.settings_path) ==
+          kf2::config::serialize_settings(runtime.optimizer_settings));
+    settings_growth_failed = false;
+    fail_settings_growth = true;
+    keep_settings_allocation_failure = true;
+    std::optional<kf2::Result<bool>> persistent_failure;
+    try {
+        persistent_failure.emplace(kf2::config::save_settings(
+            runtime.settings_path, runtime.optimizer_settings));
+    } catch (const std::bad_alloc&) {
+        // A failure Result must not require a second allocation.
+    }
+    keep_settings_allocation_failure = false;
+    fail_settings_growth = false;
+    CHECK(settings_growth_failed);
+    CHECK(persistent_failure && !persistent_failure->has_value());
+    CHECK(persistent_failure->error().code == kf2::ErrorCode::io_failure);
+    CHECK(read_bytes(runtime.settings_path) ==
+          kf2::config::serialize_settings(runtime.optimizer_settings));
+    return EXIT_SUCCESS;
+}
+
 int test_gpu_profile_persistence_rollback() {
     namespace fs = std::filesystem;
     const fs::path root = fs::path{KF2_TEST_ROOT} /
@@ -2251,19 +2433,23 @@ int test_gpu_profile_persistence_rollback() {
         root / L"Data", false, initial, events, std::nullopt,
         kf2::app::StartMode::normal, root / L"portable"};
     runtime.confirmed_game_adapter_luid = 22;
-    runtime.gpu_profile_settings_write_for_testing =
-        fail_gpu_profile_settings_write;
     const auto durable_before =
         kf2::config::serialize_settings(runtime.optimizer_settings);
-
-    CHECK(!runtime.remember_confirmed_gpu_profile(
+    write_bytes(runtime.settings_path, durable_before);
+    const HANDLE locked = CreateFileW(runtime.settings_path.c_str(), GENERIC_READ,
+        0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(locked != INVALID_HANDLE_VALUE);
+    std::unique_ptr<void, decltype(&CloseHandle)> owner{locked, &CloseHandle};
+    const bool remembered = runtime.remember_confirmed_gpu_profile(
         "PCI\\VEN_NEW",
         kf2::telemetry::ProcessGpuPreference::minimum_power,
-        8ULL * 1024ULL * 1024ULL * 1024ULL));
+        8ULL * 1024ULL * 1024ULL * 1024ULL);
+    owner.reset();
+    CHECK(!remembered);
     CHECK(runtime.confirmed_game_adapter_luid == 22);
     CHECK(kf2::config::serialize_settings(runtime.optimizer_settings) ==
           durable_before);
-    CHECK(!fs::exists(runtime.settings_path));
+    CHECK(read_bytes(runtime.settings_path) == durable_before);
 
     const std::vector<kf2::telemetry::GpuAdapter> adapters{
         {.luid = 11,
@@ -2390,6 +2576,209 @@ int test_restore_cap_sync_failure() {
     fs::remove_all(root);
     return EXIT_SUCCESS;
 #endif
+}
+
+int test_final_graphics_capture() {
+    namespace fs = std::filesystem;
+    const auto root = fs::path{KF2_TEST_ROOT} / L"fg" /
+        (std::to_wstring(GetCurrentProcessId()) + L"-" +
+         std::to_wstring(GetTickCount64()));
+    const auto install = root / L"game";
+    const auto config_root = root / L"Documents/Config";
+    write_test_pe(install / L"Binaries/Win64/KFGame.exe");
+    write_bytes(install / L"Engine/Config/ConsoleVariables.ini", "[Startup]\r\n");
+    CHECK(write_complete_config_catalog(config_root));
+    const kf2::game::GameDiscoveryInput discovery{
+        .manual_candidates = {install}, .config_root = config_root,
+        .allowed_config_parent = root / L"Documents"};
+    const auto finalize = [](kf2::app::UiRuntime& runtime, bool capture_pending) {
+        runtime.finalize_ended_game_session();
+        runtime.video_sync_before_verification_for_testing = {};
+        if (runtime.final_graphics_capture_pending == capture_pending &&
+            runtime.session_config_snapshot.has_value() == capture_pending &&
+            runtime.model.recovery_required() == capture_pending) {
+            return true;
+        }
+        std::cerr << "Final graphics: capture_pending="
+                  << runtime.final_graphics_capture_pending
+                  << ", snapshot_retained=" << runtime.session_config_snapshot.has_value()
+                  << ", recovery_required=" << runtime.model.recovery_required() << '\n'
+                  << kf2::diagnostics::serialize_events_json(
+                         runtime.events->snapshot()) << '\n';
+        return false;
+    };
+
+    // Protected teardown must capture one stable final KF2 graphics
+    // generation before restoring the personal INI snapshot. A late native
+    // write is replayed, an overlapping write is retried, and an incomplete
+    // generation leaves both sources untouched with verified evidence.
+    std::vector<std::unique_ptr<kf2::diagnostics::EventLog>>
+        final_graphics_events;
+    const auto make_final_graphics_runtime = [&](std::wstring_view suffix) {
+        const auto final_config =
+            root / (std::wstring{L"final-graphics-config-"} +
+                    std::wstring{suffix}) / L"Config";
+        const auto final_state =
+            root / (std::wstring{L"Data-final-graphics-"} +
+                    std::wstring{suffix});
+        fs::create_directories(final_config);
+        for (const auto* graphics_ini : {L"KFSystemSettings.ini",
+                                         L"KFGame.ini", L"KFEngine.ini"}) {
+            write_bytes(final_config / graphics_ini,
+                        read_bytes(config_root / graphics_ini));
+        }
+        auto event_log = std::make_unique<kf2::diagnostics::EventLog>(
+            128, final_state / L"logs/session-events.json");
+        auto* event_log_pointer = event_log.get();
+        final_graphics_events.push_back(std::move(event_log));
+        // Read-only mode skips preparing the next launch, without bypassing
+        // final graphics capture or protected restoration.
+        auto runtime = std::make_unique<kf2::app::UiRuntime>(
+            final_state, false, kf2::config::Settings{}, *event_log_pointer,
+            discovery, kf2::app::StartMode::read_only,
+            root / L"portable");
+        if (!runtime->installation) {
+            return std::unique_ptr<kf2::app::UiRuntime>{};
+        }
+        runtime->installation->config_root = final_config;
+        runtime->reload_video_settings();
+        if (!runtime->video_saved) {
+            return std::unique_ptr<kf2::app::UiRuntime>{};
+        }
+        const auto captured =
+            kf2::config::capture_session_config(final_config, final_state);
+        if (!captured.has_value()) {
+            return std::unique_ptr<kf2::app::UiRuntime>{};
+        }
+        runtime->session_config_snapshot = captured.value();
+        runtime->session_video_runtime =
+            kf2::game::read_video_settings(final_config).value();
+        runtime->session_config_waiting_for_launch = false;
+        runtime->model.set_recovery_required(false);
+        return runtime;
+    };
+    const auto write_final_motion_change = [&](kf2::app::UiRuntime& runtime)
+        -> std::optional<int> {
+        const auto motion_index = static_cast<std::size_t>(
+            kf2::game::VideoOption::motion_blur);
+        const int previous =
+            runtime.session_video_runtime->choices[motion_index];
+        const int desired = previous == 0 ? 1 : 0;
+        const auto system_path =
+            runtime.installation->config_root / L"KFSystemSettings.ini";
+        auto bytes = read_bytes(system_path);
+        const auto old_setting = previous == 0
+            ? std::string_view{"MotionBlur=False"}
+            : std::string_view{"MotionBlur=True"};
+        const auto new_setting = desired == 0
+            ? std::string_view{"MotionBlur=False"}
+            : std::string_view{"MotionBlur=True"};
+        const auto setting_at = bytes.find(old_setting);
+        if (setting_at == std::string::npos) return std::nullopt;
+        bytes.replace(setting_at, old_setting.size(), new_setting);
+        const auto previous_time = fs::last_write_time(system_path);
+        write_bytes(system_path, bytes);
+        fs::last_write_time(system_path,
+                            previous_time + std::chrono::seconds{2});
+        return std::optional{desired};
+    };
+
+    {
+        auto runtime = make_final_graphics_runtime(L"unchanged");
+        CHECK(runtime);
+        const auto original = *runtime->video_saved;
+        CHECK(finalize(*runtime, false));
+        CHECK(!runtime->session_config_snapshot.has_value());
+        const auto restored = kf2::game::read_video_settings(
+            runtime->installation->config_root);
+        CHECK(restored.has_value());
+        CHECK(restored.value().choices == original.choices);
+        CHECK(restored.value().film_grain_percent ==
+              original.film_grain_percent);
+    }
+
+    {
+        auto runtime = make_final_graphics_runtime(L"late-write");
+        CHECK(runtime);
+        const auto desired = write_final_motion_change(*runtime);
+        CHECK(desired.has_value());
+        CHECK(finalize(*runtime, false));
+        CHECK(!runtime->session_config_snapshot.has_value());
+        const auto restored = kf2::game::read_video_settings(
+            runtime->installation->config_root);
+        CHECK(restored.has_value());
+        CHECK(restored.value().choices[static_cast<std::size_t>(
+                  kf2::game::VideoOption::motion_blur)] == *desired);
+    }
+
+    {
+        auto runtime = make_final_graphics_runtime(L"overlap");
+        CHECK(runtime);
+        const auto desired = write_final_motion_change(*runtime);
+        CHECK(desired.has_value());
+        const auto system_path =
+            runtime->installation->config_root / L"KFSystemSettings.ini";
+        bool overlapped = false;
+        runtime->video_sync_before_verification_for_testing = [&] {
+            if (overlapped) return;
+            fs::last_write_time(system_path,
+                fs::last_write_time(system_path) +
+                    std::chrono::seconds{2});
+            overlapped = true;
+        };
+        CHECK(finalize(*runtime, false));
+        CHECK(overlapped);
+        CHECK(!runtime->session_config_snapshot.has_value());
+        const auto restored = kf2::game::read_video_settings(
+            runtime->installation->config_root);
+        CHECK(restored.has_value());
+        CHECK(restored.value().choices[static_cast<std::size_t>(
+                  kf2::game::VideoOption::motion_blur)] == *desired);
+    }
+
+    {
+        auto runtime = make_final_graphics_runtime(L"incomplete");
+        CHECK(runtime);
+        const auto game_path =
+            runtime->installation->config_root / L"KFGame.ini";
+        const auto complete_game = read_bytes(game_path);
+        std::string incomplete{"[Engine.GameInfo]\nBroken="};
+        incomplete.push_back('\0');
+        incomplete += "partial";
+        const auto previous_time = fs::last_write_time(game_path);
+        write_bytes(game_path, incomplete);
+        fs::last_write_time(game_path,
+                            previous_time + std::chrono::seconds{2});
+        CHECK(finalize(*runtime, true));
+        CHECK(runtime->session_config_snapshot.has_value());
+        CHECK(runtime->final_graphics_capture_pending);
+        CHECK(runtime->model.recovery_required());
+        CHECK(read_bytes(game_path) == incomplete);
+        CHECK(!runtime->last_backup_id.empty());
+        const auto evidence =
+            runtime->backups.load_backup(runtime->last_backup_id);
+        CHECK(evidence.has_value());
+        CHECK(runtime->backups.verify(evidence.value()).has_value());
+        CHECK(!runtime->restore_protected_session_config(
+            L"must remain blocked while final graphics are unstable"));
+        CHECK(read_bytes(game_path) == incomplete);
+        CHECK(runtime->model.notice().has_value());
+        CHECK(runtime->model.notice()->code ==
+              L"FINAL_GRAPHICS_CAPTURE_PENDING");
+
+        write_bytes(game_path, complete_game);
+        fs::last_write_time(game_path,
+                            previous_time + std::chrono::seconds{4});
+        runtime->final_graphics_retry_after_ns = 0;
+        runtime->try_attach_telemetry();
+        CHECK(!runtime->final_graphics_capture_pending);
+        CHECK(!runtime->session_config_snapshot.has_value());
+        CHECK(!runtime->model.recovery_required());
+    }
+
+    final_graphics_events.clear();
+    fs::remove_all(root);
+    return EXIT_SUCCESS;
 }
 
 int test_session_cap_finalization_failure() {
@@ -5120,6 +5509,71 @@ int test_initial_dxgi_retry() {
         CHECK(runtime.present_session_restart_count == 0);
         CHECK(!fs::exists(root / L"Config"));
     }
+    {
+        dxgi_start_probe = {0, 0,
+            {process.value().pid, process.value().process_start_id}};
+        diagnostics::EventLog events{32};
+        app::UiRuntime runtime{root / L"terminated", false,
+            config::Settings{}, events, std::nullopt, app::StartMode::read_only,
+            root / L"portable"};
+        runtime.installation = game::GameInstallation{
+            .executable = self, .config_root = root / L"Config"};
+        runtime.game_process = process.value();
+        runtime.overlay_scene_ready = true;
+        runtime.try_attach_telemetry();
+        CHECK(dxgi_start_probe.calls == 1 && runtime.present_session);
+        auto* const source = runtime.present_source.get();
+        CHECK(source);
+        bool drains_completed = true;
+        const auto drain = [&](std::uint64_t now) {
+            source->request_drain(now, 2'000'000'000ULL);
+            drains_completed &= source->wait_for_drain(std::chrono::seconds{2});
+            return drain_present_stage(runtime, now);
+        };
+        const auto first = runtime.present_session_started_ns;
+        runtime.present_session->test_present_event(true, 17, first);
+        runtime.present_session->test_present_event(false, 17, first + 1);
+        runtime.present_session->test_present_event(true, 17, first + 16'000'000ULL);
+        runtime.present_session->test_present_event(false, 17, first + 16'000'001ULL);
+        const auto original = drain(first + 16'000'001ULL);
+        CHECK(original.frames() && original.frames()->fps == 62.5);
+        const auto due = first + kSilentPresentRestartNs;
+        CHECK(runtime.present_session->stop().has_value());
+        CHECK(!runtime.present_session->is_running());
+        CHECK(drain(due - 1).disposition() == PresentDrainDisposition::frames_ready);
+        runtime.overlay_scene_ready = false;
+        CHECK(drain(due).disposition() == PresentDrainDisposition::frames_ready);
+        CHECK(dxgi_start_probe.calls == 1);
+        runtime.overlay_scene_ready = true;
+        runtime.adaptive_quality_state_known = false;
+        CHECK(drain(due).disposition() == PresentDrainDisposition::reconnecting);
+        CHECK(dxgi_start_probe.calls == 2 && runtime.present_session);
+        CHECK(runtime.present_source.get() == source);
+        CHECK(!source->latest_drain()); // Old asynchronous data cannot survive restart.
+        CHECK(!runtime.adaptive_quality_state_known);
+        for (const auto offset : {10'000'000ULL, 26'000'000ULL}) {
+            runtime.present_session->test_present_event(true, 17, due + offset);
+            runtime.present_session->test_present_event(false, 17, due + offset + 1);
+        }
+        const auto recovered = drain(due + 26'000'001ULL);
+        CHECK(recovered.frames() && recovered.frames()->fps == 62.5);
+        CHECK(recovered.frames()->source_generation != original.frames()->source_generation);
+        CHECK(runtime.present_session->stop().has_value());
+        dxgi_start_probe.failures = 3;
+        const auto failed_at = due + kSilentPresentRestartNs;
+        CHECK(drain(failed_at).disposition() == PresentDrainDisposition::reconnecting);
+        CHECK(dxgi_start_probe.calls == 3 && !runtime.present_session);
+        CHECK(runtime.present_session_restart_count == kMaximumPresentRestarts);
+        for (unsigned int tick = 1; tick <= 4; ++tick) {
+            const auto unavailable = drain(failed_at + tick * kSilentPresentRestartNs);
+            CHECK(unavailable.frames() && !unavailable.frames()->fps);
+        }
+        CHECK(dxgi_start_probe.calls == 3 && dxgi_start_probe.identity_matches);
+        CHECK(drains_completed);
+        CHECK(!runtime.adaptive_quality_state_known);
+        CHECK(!fs::exists(root / L"Config"));
+        runtime.detach_telemetry();
+    }
     fs::remove_all(root);
     return EXIT_SUCCESS;
 }
@@ -5377,6 +5831,7 @@ int main(int argc, char** argv) {
         return test_frame_rate_cap_recovery_startup();
     }
     if (argc == 2 && std::string_view{argv[1]} == "--session-cap-finalization-failure") {
+        CHECK(test_final_graphics_capture() == EXIT_SUCCESS);
         return test_session_cap_finalization_failure();
     }
     if (argc == 2 && std::string_view{argv[1]} == "--protected-shutdown-running-game-module") {
@@ -5486,6 +5941,7 @@ int main(int argc, char** argv) {
     if (argc == 2 &&
         std::string_view{argv[1]} ==
             "--map-prewarm-start-visibility") {
+        CHECK(test_startup_prewarm_skips_clear_progress() == EXIT_SUCCESS);
         for (const bool map_job : {false, true}) {
             for (const bool diagnostics : {false, true}) {
                 CHECK(test_prewarm_incomplete_publication(
@@ -5515,6 +5971,7 @@ int main(int argc, char** argv) {
     } catch (const std::filesystem::filesystem_error&) {
         return EXIT_FAILURE;
     }
+    CHECK(test_settings_serialization_rollback() == EXIT_SUCCESS);
     CHECK(test_telemetry_status_publication() == EXIT_SUCCESS);
     CHECK(test_flex_report_boundaries() == EXIT_SUCCESS);
     CHECK(test_pending_policy_restage_failure_rollback() == EXIT_SUCCESS);
@@ -6205,11 +6662,33 @@ int main(int argc, char** argv) {
     {
         graphical.value().telemetry_tick_for_testing();
         CHECK(graphical.value().ui_model().status().event_persistence_available == true);
-        std::unique_ptr<void, decltype(&CloseHandle)> blocked{
-            CreateFileW((options.state_root / L"logs/session-events.json").c_str(),
-                GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr),
-            &CloseHandle};
-        CHECK(blocked.get() != INVALID_HANDLE_VALUE);
+        std::unique_ptr<void, decltype(&CloseHandle)> blocked{nullptr, &CloseHandle};
+        DWORD lock_error = ERROR_SUCCESS;
+        std::size_t lock_attempts = 0;
+        const auto event_file = options.state_root / L"logs/session-events.json";
+        const auto lock_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{4};
+        // A successful prior write does not mean the asynchronous writer is
+        // idle. Acquiring this same exclusive handle is the test boundary.
+        do {
+            ++lock_attempts;
+            const auto handle = CreateFileW(
+                event_file.c_str(),
+                GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (handle != INVALID_HANDLE_VALUE) {
+                blocked.reset(handle);
+                break;
+            }
+            lock_error = GetLastError();
+            if (lock_error != ERROR_SHARING_VIOLATION ||
+                std::chrono::steady_clock::now() >= lock_deadline) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        } while (true);
+        if (!blocked)
+            std::cerr << "Event file lock acquisition native error=" << lock_error << '\n';
+        if (lock_attempts > 1)
+            std::cout << "Event file lock attempts=" << lock_attempts
+                      << "; prior native error=" << lock_error << '\n';
+        CHECK(blocked != nullptr);
         const auto backup = node_center(
             hwnd, graphical.value().ui_model(), "diagnostics-backup");
         CHECK(backup.has_value());
@@ -6955,170 +7434,7 @@ int main(int argc, char** argv) {
         graphics_runtime.video_pending = graphics_runtime.video_saved;
     }
 
-    // Protected teardown must capture one stable final KF2 graphics
-    // generation before restoring the personal INI snapshot. A late native
-    // write is replayed, an overlapping write is retried, and an incomplete
-    // generation leaves both sources untouched with verified evidence.
-    std::vector<std::unique_ptr<kf2::diagnostics::EventLog>>
-        final_graphics_events;
-    const auto make_final_graphics_runtime = [&](std::wstring_view suffix) {
-        const auto final_config =
-            root / (std::wstring{L"final-graphics-config-"} +
-                    std::wstring{suffix});
-        const auto final_state =
-            root / (std::wstring{L"Data-final-graphics-"} +
-                    std::wstring{suffix});
-        fs::create_directories(final_config);
-        for (const auto* graphics_ini : {L"KFSystemSettings.ini",
-                                         L"KFGame.ini", L"KFEngine.ini"}) {
-            write_bytes(final_config / graphics_ini,
-                        read_bytes(config_root / graphics_ini));
-        }
-        auto event_log = std::make_unique<kf2::diagnostics::EventLog>(
-            128, final_state / L"logs/session-events.json");
-        auto* event_log_pointer = event_log.get();
-        final_graphics_events.push_back(std::move(event_log));
-        auto runtime = std::make_unique<kf2::app::UiRuntime>(
-            final_state, false, kf2::config::Settings{}, *event_log_pointer,
-            options.game_discovery, kf2::app::StartMode::normal,
-            root / L"portable");
-        if (!runtime->installation) {
-            return std::unique_ptr<kf2::app::UiRuntime>{};
-        }
-        runtime->installation->config_root = final_config;
-        runtime->reload_video_settings();
-        if (!runtime->video_saved) {
-            return std::unique_ptr<kf2::app::UiRuntime>{};
-        }
-        const auto captured =
-            kf2::config::capture_session_config(final_config, final_state);
-        if (!captured.has_value()) {
-            return std::unique_ptr<kf2::app::UiRuntime>{};
-        }
-        runtime->session_config_snapshot = captured.value();
-        runtime->session_video_runtime =
-            kf2::game::read_video_settings(final_config).value();
-        runtime->session_config_waiting_for_launch = false;
-        runtime->model.set_recovery_required(false);
-        return runtime;
-    };
-    const auto write_final_motion_change = [&](kf2::app::UiRuntime& runtime)
-        -> std::optional<int> {
-        const auto motion_index = static_cast<std::size_t>(
-            kf2::game::VideoOption::motion_blur);
-        const int previous =
-            runtime.session_video_runtime->choices[motion_index];
-        const int desired = previous == 0 ? 1 : 0;
-        const auto system_path =
-            runtime.installation->config_root / L"KFSystemSettings.ini";
-        auto bytes = read_bytes(system_path);
-        const auto old_setting = previous == 0
-            ? std::string_view{"MotionBlur=False"}
-            : std::string_view{"MotionBlur=True"};
-        const auto new_setting = desired == 0
-            ? std::string_view{"MotionBlur=False"}
-            : std::string_view{"MotionBlur=True"};
-        const auto setting_at = bytes.find(old_setting);
-        if (setting_at == std::string::npos) return std::nullopt;
-        bytes.replace(setting_at, old_setting.size(), new_setting);
-        const auto previous_time = fs::last_write_time(system_path);
-        write_bytes(system_path, bytes);
-        fs::last_write_time(system_path,
-                            previous_time + std::chrono::seconds{2});
-        return std::optional{desired};
-    };
-
-    {
-        auto runtime = make_final_graphics_runtime(L"unchanged");
-        CHECK(runtime);
-        const auto original = *runtime->video_saved;
-        runtime->finalize_ended_game_session();
-        CHECK(!runtime->session_config_snapshot.has_value());
-        const auto restored = kf2::game::read_video_settings(
-            runtime->installation->config_root);
-        CHECK(restored.has_value());
-        CHECK(restored.value().choices == original.choices);
-        CHECK(restored.value().film_grain_percent ==
-              original.film_grain_percent);
-    }
-
-    {
-        auto runtime = make_final_graphics_runtime(L"late-write");
-        CHECK(runtime);
-        const auto desired = write_final_motion_change(*runtime);
-        CHECK(desired.has_value());
-        runtime->finalize_ended_game_session();
-        CHECK(!runtime->session_config_snapshot.has_value());
-        const auto restored = kf2::game::read_video_settings(
-            runtime->installation->config_root);
-        CHECK(restored.has_value());
-        CHECK(restored.value().choices[static_cast<std::size_t>(
-                  kf2::game::VideoOption::motion_blur)] == *desired);
-    }
-
-    {
-        auto runtime = make_final_graphics_runtime(L"overlap");
-        CHECK(runtime);
-        const auto desired = write_final_motion_change(*runtime);
-        CHECK(desired.has_value());
-        const auto system_path =
-            runtime->installation->config_root / L"KFSystemSettings.ini";
-        bool overlapped = false;
-        runtime->video_sync_before_verification_for_testing = [&] {
-            if (overlapped) return;
-            fs::last_write_time(system_path,
-                fs::last_write_time(system_path) +
-                    std::chrono::seconds{2});
-            overlapped = true;
-        };
-        runtime->finalize_ended_game_session();
-        CHECK(overlapped);
-        CHECK(!runtime->session_config_snapshot.has_value());
-        const auto restored = kf2::game::read_video_settings(
-            runtime->installation->config_root);
-        CHECK(restored.has_value());
-        CHECK(restored.value().choices[static_cast<std::size_t>(
-                  kf2::game::VideoOption::motion_blur)] == *desired);
-    }
-
-    {
-        auto runtime = make_final_graphics_runtime(L"incomplete");
-        CHECK(runtime);
-        const auto game_path =
-            runtime->installation->config_root / L"KFGame.ini";
-        const auto complete_game = read_bytes(game_path);
-        std::string incomplete{"[Engine.GameInfo]\nBroken="};
-        incomplete.push_back('\0');
-        incomplete += "partial";
-        const auto previous_time = fs::last_write_time(game_path);
-        write_bytes(game_path, incomplete);
-        fs::last_write_time(game_path,
-                            previous_time + std::chrono::seconds{2});
-        runtime->finalize_ended_game_session();
-        CHECK(runtime->session_config_snapshot.has_value());
-        CHECK(runtime->final_graphics_capture_pending);
-        CHECK(runtime->model.recovery_required());
-        CHECK(read_bytes(game_path) == incomplete);
-        CHECK(!runtime->last_backup_id.empty());
-        const auto evidence =
-            runtime->backups.load_backup(runtime->last_backup_id);
-        CHECK(evidence.has_value());
-        CHECK(runtime->backups.verify(evidence.value()).has_value());
-        CHECK(!runtime->restore_protected_session_config(
-            L"must remain blocked while final graphics are unstable"));
-        CHECK(read_bytes(game_path) == incomplete);
-        CHECK(runtime->model.notice().has_value());
-        CHECK(runtime->model.notice()->code ==
-              L"FINAL_GRAPHICS_CAPTURE_PENDING");
-
-        write_bytes(game_path, complete_game);
-        fs::last_write_time(game_path,
-                            previous_time + std::chrono::seconds{4});
-        runtime->final_graphics_retry_after_ns = 0;
-        runtime->try_attach_telemetry();
-        CHECK(!runtime->final_graphics_capture_pending);
-        CHECK(!runtime->session_config_snapshot.has_value());
-    }
+    CHECK(test_final_graphics_capture() == EXIT_SUCCESS);
 
     // Releasing a graphics slider and selecting Reset both save directly to
     // KF2's INIs; neither workflow needs a separate Apply action.

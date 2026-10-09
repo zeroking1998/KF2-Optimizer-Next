@@ -189,6 +189,7 @@ add_executable(kf2_package_integrity_test
 target_include_directories(kf2_package_integrity_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_package_integrity_test PRIVATE
+    KF2_ATOMIC_FILE_TESTING
     KF2_PACKAGE_INTEGRITY_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/package-integrity")
 target_link_libraries(kf2_package_integrity_test PRIVATE bcrypt)
@@ -305,9 +306,13 @@ add_test(NAME kf2_event_log_test COMMAND kf2_event_log_test)
 add_executable(kf2_feature_inventory_test
     unit/feature_inventory_test.cpp
     "${PROJECT_SOURCE_DIR}/src/diagnostics/feature_inventory.cpp"
+    "${PROJECT_SOURCE_DIR}/tools/feature_inventory_export.cpp"
 )
 target_include_directories(kf2_feature_inventory_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
+target_compile_definitions(kf2_feature_inventory_test PRIVATE
+    wmain=inventory_export_for_testing
+    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/feature-inventory")
 add_test(NAME kf2_feature_inventory_test COMMAND kf2_feature_inventory_test)
 
 add_executable(kf2_crash_recorder_test
@@ -550,9 +555,10 @@ add_executable(kf2_state_environment_test
 )
 target_include_directories(kf2_state_environment_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_state_environment_test PRIVATE
+    KF2_STATE_ENVIRONMENT_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/state-environment"
 )
-target_link_libraries(kf2_state_environment_test PRIVATE shell32 ole32)
+target_link_libraries(kf2_state_environment_test PRIVATE shell32 ole32 advapi32)
 add_test(NAME kf2_state_environment_test COMMAND kf2_state_environment_test)
 
 add_executable(kf2_numeric_presentation_test
@@ -765,6 +771,7 @@ add_executable(kf2_backup_restore_test
 target_include_directories(kf2_backup_restore_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_backup_restore_test PRIVATE
     KF2_BACKUP_RECOVERY_TESTING
+    KF2_ATOMIC_FILE_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/backup-restore"
 )
 target_link_libraries(kf2_backup_restore_test PRIVATE bcrypt)
@@ -891,6 +898,7 @@ add_test(NAME kf2_telemetry_build_binding_test
         "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
         "-DTEST_BINARY_ROOT=${CMAKE_CURRENT_BINARY_DIR}"
         "-DTEST_ROOT=${KF2_TEST_SANDBOX_ROOT}/telemetry-build-binding"
+        "-DTEST_POWERSHELL=${KF2_POWERSHELL_EXECUTABLE}"
         "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
         "-DTEST_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
         "-DTEST_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
@@ -1119,6 +1127,7 @@ set(KF2_CONFIG_CORE_TEST_TARGETS
     kf2_adaptive_locks_test
     kf2_application_lifecycle_test
     kf2_backup_restore_test
+    kf2_catalog_test
     kf2_config_apply_test
     kf2_config_preview_test
     kf2_session_config_guard_test

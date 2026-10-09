@@ -23,6 +23,8 @@ public:
     [[nodiscard]] static Result<std::unique_ptr<DxgiFrameTimingSession>> start(
         telemetry::SampleIdentity identity, telemetry::PresentSource& sink);
     [[nodiscard]] Result<bool> stop();
+    // Consumer lifetime, not recent frame availability.
+    [[nodiscard]] bool is_running() const noexcept;
 
 #ifdef KF2_DXGI_FRAME_TIMING_SESSION_TESTING
     using TestStartOperation = Result<std::unique_ptr<DxgiFrameTimingSession>> (*)(
@@ -31,7 +33,10 @@ public:
     static void test_cleanup_stale_sessions(
         decltype(&QueryAllTracesW) query_traces,
         decltype(&ControlTraceW) control_trace);
+    [[nodiscard]] static ULONG test_enable_present_provider(
+        TRACEHANDLE session, DWORD pid, decltype(&EnableTraceEx2) enable_provider);
     [[nodiscard]] static bool test_event_callback_exception_boundary() noexcept;
+    static void test_fail_next_event_callback() noexcept;
     static void test_fail_worker_creation(unsigned int ordinal) noexcept;
     [[nodiscard]] static std::unique_ptr<DxgiFrameTimingSession> test_parser(
         telemetry::SampleIdentity identity, telemetry::PresentSource& sink,
@@ -42,6 +47,10 @@ public:
                             std::uint32_t flags = 0,
                             std::int32_t result = 0);
     void test_events_lost(std::uint32_t count) noexcept;
+    void test_session_statistics(ULONG status, std::uint32_t events,
+                                 std::uint32_t buffers = 0) noexcept;
+    void test_unused_buffer_loss(std::uint32_t count) noexcept;
+    [[nodiscard]] ULONG test_flush_statistics();
     [[nodiscard]] std::size_t test_pending_count() const noexcept;
 #endif
 

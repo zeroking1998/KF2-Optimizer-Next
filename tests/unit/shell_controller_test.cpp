@@ -2,6 +2,10 @@
 #include <cstdlib>
 #include <iostream>
 
+#if defined(_DEBUG)
+#include <crtdbg.h>
+#endif
+
 #include "kf2/ui/shell_controller.hpp"
 #include "kf2/ui/ui_cadence.hpp"
 
@@ -15,6 +19,11 @@
     } while (false)
 
 int main() {
+#if defined(_DEBUG)
+    // Keep freed layout strings poisoned so reentrant lifetime errors cannot
+    // accidentally pass when an allocation reuses their former address.
+    _CrtSetDbgFlag(_CrtSetDbgFlag(_CRTDBG_REPORT_FLAG) | _CRTDBG_DELAY_FREE_MEM_DF);
+#endif
     using namespace kf2::platform::windows;
     using namespace kf2::ui;
 
@@ -624,12 +633,15 @@ int main() {
 
     // A rejected persistence request must not leave a preview looking saved.
     UiModel rejected_model;
+    rejected_model.commit_target_fps_presentation(60);
+    rejected_model.commit_corpse_limit_presentation(20);
     int rejected_requests = 0;
     ShellController rejected_controller{
         rejected_model,
         {.set_slider_value = [&](std::string_view, int) {
              ++rejected_requests;
              // A failed write leaves the authoritative model unchanged.
+             rejected_controller.synchronize_model();
          }}};
     rejected_controller.on_resize({1440, 900});
     rejected_controller.focus_target(Destination::dashboard,
@@ -672,6 +684,8 @@ int main() {
     CHECK(rejected_model.presented_target_fps() == 60);
 
     UiModel saved_model;
+    saved_model.commit_target_fps_presentation(60);
+    saved_model.commit_corpse_limit_presentation(20);
     int saved_requests = 0;
     ShellController saved_controller{
         saved_model,
@@ -681,6 +695,7 @@ int main() {
              if (id == "settings-target-slider") status.target_fps = value;
              if (id == "settings-corpses-slider") status.corpse_limit = value;
              saved_model.set_status(std::move(status));
+             saved_controller.synchronize_model();
          }}};
     saved_controller.on_resize({1440, 900});
     saved_controller.focus_target(Destination::dashboard,

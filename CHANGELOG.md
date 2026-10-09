@@ -8,9 +8,35 @@ are visible immediately.
 
 ### What's new
 
+- Remove retired effect-control inputs from Adaptive resource selection;
+  quality decisions, safety gates, diagnostics and restoration are unchanged.
+
+- Reuse one distance query for both corpse and living-Zed log fields,
+  preserving receipt text, diagnostic gates and all runtime actions.
+
+- Skip unchanged Direct2D target resize and DPI updates during repaint,
+  preserving real size/DPI changes, resize retries and target recreation.
+
+- Skip timestamp searches for ordered frame appends, retaining late-event
+  sorting, duplicate checks and exact frame statistics without a cache.
+
+- Reuse the diagnostic frame-interval buffer for percentile calculation instead
+  of copying it, preserving chronological averages and all measured values.
+
+- Reuse one completed DXGI Present pairing allocation instead of allocating
+  again for each sequential frame, preserving pending-pair bounds and loss checks.
+
+- Filter DXGI Present events by the bound game process before callback delivery,
+  preserving the original event-only startup path if PID scoping is rejected.
+  Existing process identity, loss handling and frame measurements remain active.
+
 - Skip diagnostic particle-template attribution and its detailed reports while
   Runtime diagnostics is off; normal particle measurements and Adaptive inputs
   remain available, without changing the report format or sampling interval.
+- Skip corpse-controller profiling clocks and counters while Runtime diagnostics
+  is off, preserving controller actions and their scheduling.
+- Skip unused distance queries during corpse transition bookkeeping while
+  diagnostics is off; native-wake cooldowns and diagnostic values are unchanged.
 
 - Discover KF2 thread membership with a process-scoped snapshot instead of
   walking every Windows thread when query rights permit. Keep the original
@@ -32,6 +58,8 @@ are visible immediately.
 - Transfer completed Adaptive performance-sample and quality-response diagnostic
   buffers instead of copying them; exact text, logging gates, sample cadence and
   retained-event bounds are unchanged.
+- Keep only timestamps and scene counts in quality-response history, preserving
+  full current-context checks without repeatedly copying map names.
 
 - Transfer completed Adaptive diagnostic buffers instead of copying them;
   log text, bounds, diagnostic gates and controller behavior are unchanged.
@@ -39,6 +67,9 @@ are visible immediately.
   cannot silently reuse an older module; no gameplay logic is changed.
 - Reuse completed payload hashes across both package manifests, avoiding a second
   full payload read while preserving independent release validation.
+- Read each backup's ordering timestamp once before sorting; timestamp read
+  failures stop retention before deletion, with no persistent metadata cache.
+  Empty and single-backup lists skip ordering metadata entirely.
 - Preserve existing packages when the required FleX build artifact is missing,
   checking it before cleanup, copying or unnecessary exporter work.
 - Reject linked package destinations and managed paths before cleanup or writes,
@@ -73,8 +104,12 @@ are visible immediately.
   map diagnostic labels; worker behavior, budgets and progress rules are unchanged.
 - Publish optional overlay diagnostic text without copying unrelated UI,
   graphics or Adaptive state; diagnostic timing and displayed text are unchanged.
+- Validate the immutable UI action registry once; caller-provided registries,
+  payload checks and handler failures remain checked on each dispatch.
 - Escape shared JSON string contents directly into the returned owned string,
   avoiding stream/buffer-copy work while preserving exact serialized bytes.
+- Validate typed settings without formatting discarded text; actual INI writes
+  still require complete, checked serialization.
 - Remove the unused internal Adaptive profile recommendation; user settings,
   real quality budgets, decisions and restoration remain unchanged.
 - Borrow constant telemetry limit-explanation labels instead of allocating
@@ -95,6 +130,8 @@ are visible immediately.
   CPU, GPU, VRAM, RAM, overdraw, effects, physics, LOD, and corpse-pressure
   paths. Confirmed pressure changes only its matching group, and stable
   headroom restores quality gradually.
+- Serialize each asynchronous Adaptive command once and transfer its owned
+  bytes to the sender, preserving request validation and receipt matching.
 - Expanded Adaptive coverage to verified KF2 shadow distance and fade,
   post-processing, lighting, shadow-map textures, wound decals, blood, gore,
   destruction lifetimes, particle LOD, emitter capacity, and cosmetic corpse
@@ -171,6 +208,140 @@ are visible immediately.
   effects or the corpse limit fail readback, instead of falsely confirming
   success from the corpse limit alone. Physics release remains independent.
 
+- Preserve pending INI recovery journals after temporary read or buffer-allocation
+  failures, allowing verified recovery on retry instead of quarantining valid state.
+
+- Reject failed numeric setting formatting before building an INI update,
+  preserving the previous configuration and allowing an exact retry.
+
+- Reject incomplete diagnostic inventories before export, preserving an existing
+  inventory file when serialization fails.
+
+- Stabilize the native event-persistence regression when its lock acquisition
+  overlaps an asynchronous write; application behavior is unchanged.
+
+- Reject incomplete application session markers before writing, preserving
+  interrupted-session evidence and allowing clean-shutdown retry.
+
+- Preserve the last valid FleX diagnostic report if serialization fails; transfer
+  a completed report to the writer without copying its full text.
+
+- Read DXGI event and real-time buffer loss from supported session statistics.
+  Preserve degraded measurement quality without inventing missing-frame counts,
+  including when only a lost buffer is known, and keep Adaptive from treating
+  those samples as valid.
+
+- Preserve known DXGI callback failures across later buffer callbacks, so the
+  next frame window remains marked degraded instead of hiding capture loss.
+- Commit DXGI capture-loss metadata before allocating frame storage, so an
+  allocation failure cannot submit already recorded pending loss a second time.
+
+- Correct developer overlay cadence checks to allow legitimate elapsed-time
+  redraws without changing rendering or its idle-rate limit.
+
+- Count displaced DXGI Present starts and prevent filtered test calls from
+  completing an older real call, preserving honest FPS loss and recovery data.
+
+- Recover frame telemetry after an active ETW consumer ends, using the existing
+  bounded reconnect path without restarting healthy but temporarily stale streams.
+
+- Recheck process discovery once when a captured PID has already disappeared,
+  avoiding unnecessary restoration deferrals while retaining fail-closed checks.
+
+- Refresh observed CPU affinity capacity every five seconds, so runtime changes
+  and recovery from failed queries no longer require restarting the sampler.
+
+- Preserve existing backups when manifest serialization fails before replacing
+  their manifest or journal, and transfer completed buffers without copying.
+
+- Preserve saved preferences and UI state when serializing settings fails;
+  complete settings buffers are transferred directly to the atomic writer.
+
+- Close protected-session read handles even if allocating their file buffer
+  fails, without changing byte limits, sharing rules or identity checks.
+
+- Detect truncated new session manifests after an optimizer restart before
+  changing INIs or deleting original snapshots; keep older snapshots readable.
+
+- Reject incomplete session manifests before restore or cleanup, and avoid
+  stream/line copies while parsing the already verified manifest bytes.
+
+- Preserve healthy backups when verification encounters a transient read or
+  hashing failure; only proven manifest corruption is quarantined before pruning.
+
+- Use the shared Windows SHA-256 algorithm handle instead of repeatedly opening
+  providers, eliminating their allocation-failure leak without changing digests.
+
+- Release thread-discovery snapshots and newly opened thread handles if cache
+  allocation fails, preserving bounded retries and the existing sampling cadence.
+
+- Keep valid cached thread measurements after an incomplete Toolhelp traversal
+  and retry on the next sample instead of accepting partial membership.
+
+- Close the game-discovery snapshot even if candidate inspection throws,
+  preserving process identity checks without adding queries or allocations.
+
+- Continue independent SDK cleanup after a file-restoration error, retaining
+  recovery backups and reporting failures without hiding the original build error.
+
+- Reject incomplete diagnostic JSON on serialization failure instead of
+  overwriting a valid log or reporting a partial support export as successful.
+
+- Restore queued Adaptive quality changes against the originating resource,
+  keeping rollback selection and command previous values consistent when pressure shifts.
+
+- Keep the Optimizer usable in memory if its optional event-log worker cannot
+  start, reporting persistence unavailable without claiming a successful flush.
+
+- Keep optional prewarming unavailable instead of terminating the Optimizer if
+  storage detection runs out of memory; release its volume handle on failure.
+
+- Keep startup compatible with older Windows 10 installations lacking
+  GetTempPath2W, without falling back to an unisolated temporary directory for SYSTEM.
+
+- Stop configured-GPU lookup on DXGI errors instead of repeatedly querying or
+  reporting an unresolved selection as successful.
+
+- Handle GPU monitor-enumeration failures without crashing the Optimizer;
+  preserve the native error and existing telemetry fallback.
+
+- Preserve coherent update-check state and its completed background result if
+  completion runs out of memory, allowing a later retry without repeating the request.
+
+- Report GPU startup-profile allocation failures through the existing launch
+  rollback instead of terminating; avoid a redundant selected-adapter copy.
+
+- Keep wrapped changelog bullet text intact in the in-app update notes.
+
+- Restore the configured update and Auto Repair repository in the shipped app.
+
+- Let telemetry snapshot allocation failures reach the existing worker recovery
+  path instead of terminating the Optimizer when old log measurements expire.
+
+- Avoid temporary allocations in recovery-setting lookup, preventing process
+  termination if memory allocation fails during backup-manifest recovery.
+
+- Preserve concurrent file edits during portable-package repair and rollback;
+  require the expected original content or absence before committing a repair.
+
+- Clear startup Warm-up progress when preparation is skipped for unknown storage,
+  insufficient memory or no eligible files, instead of leaving it stuck at 0%.
+
+- Reject malformed leading-zero file sizes in GitHub release metadata while
+  preserving valid sizes and the existing installation limits.
+
+- Reject trailing data after empty GitHub release lists instead of reporting
+  a successful update check with no newer release.
+
+- Exclude ignored build trees before repository validation, avoiding unnecessary
+  traversal and interference from changing test fixtures without skipping source checks.
+
+- Keep Target FPS and corpse-limit slider values correct when a settings
+  callback rebuilds the UI during keyboard changes.
+
+- Preserve update files and recovery records when the owner process cannot be
+  queried, instead of treating an unknown process state as permission to roll back.
+
 - Preserve bounded diagnostic text when a UTF-16 character crosses the message
   or source limit, instead of exporting an empty field.
 
@@ -184,6 +355,9 @@ are visible immediately.
   KF2/adapter-wide VRAM pressure. Keep KF2's process-bound memory counters and
   remove the unnecessary recurring DXGI adapter lookup and budget query.
 
+- Living Zeds retain their original offscreen animation flags when restoration
+  fails. Bounded scans retry without blocking other Zeds or recording reduced
+  flags as originals, including after a corpse-manager replacement.
 - Convert the raw Adaptive decision reason once for its two presentation fields
   while retaining distinct queued-restoration warnings.
 - Reuse the existing Adaptive stability, bottleneck and no-setting action labels

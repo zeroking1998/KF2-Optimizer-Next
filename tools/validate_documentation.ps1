@@ -105,12 +105,15 @@ foreach ($relative in @('docs/PROJECT_STATUS.md', 'docs/ISSUE_72_PRODUCT_MATRIX.
     }
 }
 
-$markdownFiles = Get-ChildItem -LiteralPath $repositoryRoot -Recurse -File -Filter '*.md' |
-    Where-Object {
-        $_.FullName -notlike (Join-Path $repositoryRoot 'out\*') -and
-        $_.FullName -notlike (Join-Path $repositoryRoot 'third_party\*') -and
-        $_.FullName -notlike (Join-Path $repositoryRoot '.git\*')
-    }
+# Exclude build trees before recursion; their test fixtures can change mid-scan.
+$markdownFiles = @(Get-ChildItem -LiteralPath $repositoryRoot | ForEach-Object {
+    if ($_.PSIsContainer) {
+        if ($_.Name -notin @('out', 'third_party', '.git') -and
+            -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Filter '*.md'
+        }
+    } elseif ($_.Extension -eq '.md') { $_ }
+})
 
 foreach ($markdownFile in $markdownFiles) {
     $content = Get-Content -LiteralPath $markdownFile.FullName -Raw -Encoding UTF8

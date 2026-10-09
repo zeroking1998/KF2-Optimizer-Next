@@ -405,6 +405,15 @@ int main() {
     Sleep(250);
     CHECK(!dispatcher.poll().has_value());
     CHECK(dispatcher.busy());
+    auto malformed_while_busy = AdaptiveControlRequest{
+        .port = ntohs(address.sin_port),
+        .token = "invalid",
+        .sequence = 79,
+        .resource = AdaptiveResourceControl::gpu,
+        .quality = 50};
+    const auto malformed_parallel = dispatcher.start(malformed_while_busy);
+    CHECK(!malformed_parallel.has_value());
+    CHECK(malformed_parallel.error().code == kf2::ErrorCode::invalid_argument);
     const auto parallel = dispatcher.start({
         .port = ntohs(address.sin_port),
         .token = token,

@@ -13,6 +13,17 @@ pwsh -NoProfile -File ./tools/validate_documentation.ps1
 `test.ps1` builds before running the tests. GitHub CI runs the same Debug and
 Release suites with desktop-only checks excluded.
 
+Run local Debug and Release suites sequentially, including across worktrees.
+The test and validation scripts share `run_ctest.ps1`, which rejects a second
+concurrent test phase on the same Windows host. Independent builds can still
+run in parallel. Tests run one at a time, regardless of `CTEST_PARALLEL_LEVEL`.
+Some tests deliberately make an inert `KFGame.exe` child uninspectable; another
+suite cannot distinguish it from a real protected game process and must defer
+restoration. Separate fixture folders do not isolate the process list.
+Direct `ctest` or test-executable invocations bypass this guard: never overlap
+them with another process-sensitive test run. Separate CI runner VMs remain
+independent and can run in parallel.
+
 Test and catalog sizes are recorded once in the
 [validation inventory](ISSUE_72_PRODUCT_MATRIX.md#current-validation-inventory).
 Documentation validation checks them against source registrations/definitions
@@ -43,6 +54,16 @@ set and repeated-image determinism; private before/after hashes can additionally
 verify pixel-identical output without committing baseline images or benchmarks.
 
 ## CI failure diagnosis
+
+Final graphics capture and replay run inside the existing headless session-cap
+finalization check, including late, overlapping and incomplete INI writes.
+Fixtures use valid `Config` directories and do not prepare a new launch.
+Unexpected recovery state prints the existing event log before teardown can
+retry restoration. This adds no application logging or test registration.
+Issue #806 reproduced `PROTECTED_SESSION_RESTORE_DEFERRED` by overlapping
+finalization with the inaccessible-process test. Sequential execution and a
+readable-child counterprobe pass. The original failure's approximate timing
+matches this collision, but its first-call error was not retained.
 
 The existing resource-worker test records its last log discovery/read and
 publication boundaries only in test builds. Failed assertions print the

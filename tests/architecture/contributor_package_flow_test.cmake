@@ -87,3 +87,12 @@ if(NOT result EQUAL 0)
     message(FATAL_ERROR "Release source identity regression failed: ${output}${error}")
 endif()
 message(STATUS "${output}")
+
+execute_process(COMMAND "${TEST_POWERSHELL}" -NoProfile -File
+    "${PROJECT_SOURCE_DIR}/tests/tools/repository_validation_test.ps1"
+    -TestRoot "${TEST_BINARY_ROOT}/test-sandbox"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Repository validation regression failed: ${output}${error}")
+endif()
+message(STATUS "${output}")

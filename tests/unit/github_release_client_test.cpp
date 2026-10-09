@@ -12,6 +12,7 @@
 int main() {
     constexpr std::string_view repository =
         "https://github.com/example/KF2-Optimizer-Next";
+    CHECK(kf2::update::official_release_repository() == repository);
     const std::string releases = R"json([
       {
         "tag_name":"v0.0.2-alpha",
@@ -75,6 +76,15 @@ int main() {
 
     CHECK(!kf2::update::parse_github_releases(
         "not-json", repository, "0.0.2-alpha").has_value());
+    for (const auto* json : {"[]junk", "[][]", "[] {}", "[{}]junk"}) {
+        CHECK(!kf2::update::parse_github_releases(
+            json, repository, "0.0.2-alpha").has_value());
+    }
+    for (const auto* json : {"[]", "[] \r\n\t"}) {
+        const auto empty = kf2::update::parse_github_releases(
+            json, repository, "0.0.2-alpha");
+        CHECK(empty.has_value() && !empty.value().has_value());
+    }
     CHECK(!kf2::update::parse_github_releases(
         "[]", "https://evil.example/repo", "0.0.2-alpha").has_value());
 
@@ -120,6 +130,27 @@ int main() {
     CHECK(exact.has_value() && exact.value().asset.has_value());
     CHECK(exact.value().version == "1.0.0");
     CHECK(exact.value().asset->sha256 == std::string(64, 'a'));
+    const auto release_with_asset_size = [&](std::string_view value) {
+        auto json = exact_json;
+        json.replace(json.find("\"size\":12") + 7, 2, value);
+        return json;
+    };
+    for (const auto* value : {"012", "0012", "00", "-1", "1.2", "1e2",
+                              "18446744073709551616"}) {
+        const auto json = release_with_asset_size(value);
+        CHECK(!kf2::update::parse_exact_github_release(
+            json, repository, "1.0.0").has_value());
+        CHECK(!kf2::update::parse_github_releases(
+            "[" + json + "]", repository, "0.0.2-alpha").has_value());
+    }
+    // Canonical unsigned boundaries still parse; unusable sizes block only installation.
+    for (const auto* value : {"0", "1", "67108864", "18446744073709551615"}) {
+        const auto parsed = kf2::update::parse_github_releases(
+            "[" + release_with_asset_size(value) + "]", repository, "0.0.2-alpha");
+        CHECK(parsed.has_value() && parsed.value().has_value());
+        CHECK(parsed.value()->asset.has_value() ==
+              (std::string_view{value} == "1" || std::string_view{value} == "67108864"));
+    }
     CHECK(!kf2::update::parse_exact_github_release(
         exact_json, repository, "0.0.2-alpha").has_value());
     CHECK(!kf2::update::parse_exact_github_release(

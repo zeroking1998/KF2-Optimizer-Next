@@ -50,13 +50,17 @@ if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($gitRootText)) {
     }
 }
 
-$files = @(Get-ChildItem -LiteralPath $projectRoot -Recurse -File -Force |
-    Where-Object {
-        $relativePath = $_.FullName.Substring($projectRoot.Length + 1)
-        $relativePath -notlike 'out\*' -and
-        $relativePath -notlike '.git\*' -and
-        $relativePath -ne 'assets\offline_telemetry\KF2OptimizerTelemetry.u'
-    })
+# Do not traverse excluded build trees, including changing test fixtures.
+$files = @(Get-ChildItem -LiteralPath $projectRoot -Force | ForEach-Object {
+    if ($_.PSIsContainer) {
+        if ($_.Name -notin @('out', '.git') -and
+            -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Force
+        }
+    } else { $_ }
+} | Where-Object {
+    $_.FullName -ne (Join-Path $projectRoot 'assets/offline_telemetry/KF2OptimizerTelemetry.u')
+})
 
 $forbiddenExtensions = @('.exe', '.dll', '.pdb', '.lib', '.zip', '.7z',
                          '.rar', '.pfx', '.p12', '.pem', '.key')

@@ -253,6 +253,8 @@ struct SettingDefinition {
 [[nodiscard]] std::span<const SettingDefinition> all_settings() noexcept;
 [[nodiscard]] std::optional<SettingValue> parse_setting_value(
     const SettingDefinition& definition, std::wstring_view text);
+[[nodiscard]] bool is_valid_setting_value(
+    const SettingDefinition& definition, const SettingValue& value) noexcept;
 [[nodiscard]] std::optional<std::wstring> serialize_setting_value(
     const SettingDefinition& definition, const SettingValue& value);
 [[nodiscard]] std::optional<SettingValue> step_setting_value(
