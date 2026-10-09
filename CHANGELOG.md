@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Preserve known DXGI callback failures across later buffer callbacks, so the
+  next frame window remains marked degraded instead of hiding capture loss.
+
 - Correct developer overlay cadence checks to allow legitimate elapsed-time
   redraws without changing rendering or its idle-rate limit.
 

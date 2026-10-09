@@ -433,6 +433,44 @@ int test_event_loss() {
     return EXIT_SUCCESS;
 }
 
+int test_callback_loss() {
+    PresentSource source{kIdentity, 120};
+    CHECK(source.start().has_value());
+    auto parser = DxgiFrameTimingSession::test_parser(kIdentity, source, kFrequency);
+    parser->test_present_event(true, 1, 1'000, 7);
+    parser->test_present_event(true, 2, 1'000, 8);
+    DxgiFrameTimingSession::test_fail_next_event_callback();
+    parser->test_present_event(false, 1, 1'001);
+    CHECK(parser->test_pending_count() == 0);
+    parser->test_present_event(false, 2, 1'002);
+    CHECK(source.measure_window(0, 1'002'000'000ULL).count == 0);
+    // ETW invokes the buffer callback after its event callbacks. Its unused
+    // EventsLost field must not erase a locally observed callback failure.
+    parser->test_events_lost(0);
+    parser->test_present_event(true, 1, 1'020, 7);
+    parser->test_present_event(false, 1, 1'021);
+    parser->test_present_event(true, 1, 1'036, 7);
+    parser->test_present_event(false, 1, 1'037);
+    const auto metrics = source.drain(1'037'000'000ULL, 1'000'000'000ULL);
+    CHECK(metrics.fps && *metrics.fps == 62.5);
+    // One observed callback failure, not an estimate of lost Present events.
+    CHECK(metrics.loss_count == 1);
+    CHECK(metrics.quality == SampleQuality::degraded);
+    parser->test_events_lost(0);
+    parser->test_present_event(true, 1, 1'052, 7);
+    parser->test_present_event(false, 1, 1'053);
+    CHECK(source.drain(1'053'000'000ULL, 1'000'000'000ULL).loss_count == 1);
+    parser->test_present_event(true, 1, 12'000, 7);
+    parser->test_present_event(false, 1, 12'001);
+    parser->test_present_event(true, 1, 12'016, 7);
+    parser->test_present_event(false, 1, 12'017);
+    const auto recovered = source.drain(12'017'000'000ULL, 1'000'000'000ULL);
+    CHECK(recovered.fps && *recovered.fps == 62.5);
+    CHECK(recovered.loss_count == 0);
+    CHECK(recovered.quality == SampleQuality::good);
+    return EXIT_SUCCESS;
+}
+
 int test_active_pairing() {
     PresentSource source{kIdentity, 120};
     CHECK(source.start().has_value());
@@ -472,6 +510,7 @@ int main(int argc, char** argv) {
         if (scenario == "--pending-expiry") return test_expiry();
         if (scenario == "--pending-loss") return test_event_loss();
         if (scenario == "--filtered-starts") return test_filtered_starts();
+        if (scenario == "--callback-loss") return test_callback_loss();
         return EXIT_FAILURE;
     }
     CHECK(test_exact_clock_conversion() == EXIT_SUCCESS);
@@ -482,6 +521,7 @@ int main(int argc, char** argv) {
     CHECK(test_filtered_starts() == EXIT_SUCCESS);
     CHECK(test_expiry() == EXIT_SUCCESS);
     CHECK(test_event_loss() == EXIT_SUCCESS);
+    CHECK(test_callback_loss() == EXIT_SUCCESS);
     CHECK(test_active_pairing() == EXIT_SUCCESS);
     using namespace kf2::telemetry;
     using kf2::platform::windows::DxgiFrameTimingSession;
