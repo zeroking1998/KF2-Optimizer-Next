@@ -176,6 +176,12 @@ Present resumes evaluation. Process/session/map/discontinuity resets and
 confirmed quality actions clear duplicate ownership; pre-action frames remain
 excluded by the applied-receipt timestamp.
 
+Actual ETW consumer termination ends its existing flush worker and uses the
+same three-second reconnect interval and two-attempt process budget as silent
+startup recovery. Missing or stale frames alone do not imply termination.
+Reconnection retains the bound process and resets the Present source generation
+before new data can be published; it does not reset Adaptive graphics ownership.
+
 Preserve the permanent boundary in [Safety](SAFETY.md), the target-FPS range of
 30 through 240 in one-FPS steps, the corpse ceiling of 4 through 2000, bounded
 work, protected restoration, and explicit Unavailable states.

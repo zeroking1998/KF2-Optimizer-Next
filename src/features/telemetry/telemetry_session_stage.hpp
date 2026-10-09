@@ -113,6 +113,7 @@ struct RestartHandoffInput final {
 
 struct SilentPresentInput final {
     bool scene_ready{false};
+    bool session_terminated{false};
     std::optional<double> fps;
     ::kf2::telemetry::UnavailableReason reason{
         ::kf2::telemetry::UnavailableReason::no_samples};
@@ -123,8 +124,9 @@ struct SilentPresentInput final {
 
 [[nodiscard]] constexpr bool should_reconnect_silent_present(
     const SilentPresentInput& input) noexcept {
-    return input.scene_ready && !input.fps &&
-        input.reason == ::kf2::telemetry::UnavailableReason::no_samples &&
+    return input.scene_ready && (input.session_terminated ||
+        (!input.fps && input.reason ==
+            ::kf2::telemetry::UnavailableReason::no_samples)) &&
         input.session_started_ns != 0 &&
         input.now_ns >= input.session_started_ns &&
         input.now_ns - input.session_started_ns >= kSilentPresentRestartNs &&

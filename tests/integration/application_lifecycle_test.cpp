@@ -5244,6 +5244,71 @@ int test_initial_dxgi_retry() {
         CHECK(runtime.present_session_restart_count == 0);
         CHECK(!fs::exists(root / L"Config"));
     }
+    {
+        dxgi_start_probe = {0, 0,
+            {process.value().pid, process.value().process_start_id}};
+        diagnostics::EventLog events{32};
+        app::UiRuntime runtime{root / L"terminated", false,
+            config::Settings{}, events, std::nullopt, app::StartMode::read_only,
+            root / L"portable"};
+        runtime.installation = game::GameInstallation{
+            .executable = self, .config_root = root / L"Config"};
+        runtime.game_process = process.value();
+        runtime.overlay_scene_ready = true;
+        runtime.try_attach_telemetry();
+        CHECK(dxgi_start_probe.calls == 1 && runtime.present_session);
+        auto* const source = runtime.present_source.get();
+        CHECK(source);
+        bool drains_completed = true;
+        const auto drain = [&](std::uint64_t now) {
+            source->request_drain(now, 2'000'000'000ULL);
+            drains_completed &= source->wait_for_drain(std::chrono::seconds{2});
+            return drain_present_stage(runtime, now);
+        };
+        const auto first = runtime.present_session_started_ns;
+        runtime.present_session->test_present_event(true, 17, first);
+        runtime.present_session->test_present_event(false, 17, first + 1);
+        runtime.present_session->test_present_event(true, 17, first + 16'000'000ULL);
+        runtime.present_session->test_present_event(false, 17, first + 16'000'001ULL);
+        const auto original = drain(first + 16'000'001ULL);
+        CHECK(original.frames() && original.frames()->fps == 62.5);
+        const auto due = first + kSilentPresentRestartNs;
+        CHECK(runtime.present_session->stop().has_value());
+        CHECK(!runtime.present_session->is_running());
+        CHECK(drain(due - 1).disposition() == PresentDrainDisposition::frames_ready);
+        runtime.overlay_scene_ready = false;
+        CHECK(drain(due).disposition() == PresentDrainDisposition::frames_ready);
+        CHECK(dxgi_start_probe.calls == 1);
+        runtime.overlay_scene_ready = true;
+        runtime.adaptive_quality_state_known = false;
+        CHECK(drain(due).disposition() == PresentDrainDisposition::reconnecting);
+        CHECK(dxgi_start_probe.calls == 2 && runtime.present_session);
+        CHECK(runtime.present_source.get() == source);
+        CHECK(!source->latest_drain()); // Old asynchronous data cannot survive restart.
+        CHECK(!runtime.adaptive_quality_state_known);
+        for (const auto offset : {10'000'000ULL, 26'000'000ULL}) {
+            runtime.present_session->test_present_event(true, 17, due + offset);
+            runtime.present_session->test_present_event(false, 17, due + offset + 1);
+        }
+        const auto recovered = drain(due + 26'000'001ULL);
+        CHECK(recovered.frames() && recovered.frames()->fps == 62.5);
+        CHECK(recovered.frames()->source_generation != original.frames()->source_generation);
+        CHECK(runtime.present_session->stop().has_value());
+        dxgi_start_probe.failures = 3;
+        const auto failed_at = due + kSilentPresentRestartNs;
+        CHECK(drain(failed_at).disposition() == PresentDrainDisposition::reconnecting);
+        CHECK(dxgi_start_probe.calls == 3 && !runtime.present_session);
+        CHECK(runtime.present_session_restart_count == kMaximumPresentRestarts);
+        for (unsigned int tick = 1; tick <= 4; ++tick) {
+            const auto unavailable = drain(failed_at + tick * kSilentPresentRestartNs);
+            CHECK(unavailable.frames() && !unavailable.frames()->fps);
+        }
+        CHECK(dxgi_start_probe.calls == 3 && dxgi_start_probe.identity_matches);
+        CHECK(drains_completed);
+        CHECK(!runtime.adaptive_quality_state_known);
+        CHECK(!fs::exists(root / L"Config"));
+        runtime.detach_telemetry();
+    }
     fs::remove_all(root);
     return EXIT_SUCCESS;
 }

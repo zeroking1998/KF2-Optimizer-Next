@@ -173,6 +173,9 @@ are visible immediately.
 - Count displaced DXGI Present starts and prevent filtered test calls from
   completing an older real call, preserving honest FPS loss and recovery data.
 
+- Recover frame telemetry after an active ETW consumer ends, using the existing
+  bounded reconnect path without restarting healthy but temporarily stale streams.
+
 - Recheck process discovery once when a captured PID has already disappeared,
   avoiding unnecessary restoration deferrals while retaining fail-closed checks.
 

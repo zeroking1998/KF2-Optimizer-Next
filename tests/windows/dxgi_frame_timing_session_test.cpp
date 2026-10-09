@@ -271,7 +271,16 @@ int test_real_orphan_startup() {
     CHECK(live.query() == ERROR_WMI_INSTANCE_NOT_FOUND);
     auto retry = DxgiFrameTimingSession::start(identity, source);
     CHECK(retry.has_value());
+    CHECK(retry.value()->is_running());
+    CHECK(live.query() == ERROR_SUCCESS);
+    CHECK(ControlTraceW(0, live.name.c_str(), &live.properties.header,
+        EVENT_TRACE_CONTROL_STOP) == ERROR_SUCCESS);
+    const auto stopped_at = GetTickCount64();
+    while (retry.value()->is_running() && GetTickCount64() - stopped_at < 2'000)
+        Sleep(1);
+    CHECK(!retry.value()->is_running());
     CHECK(retry.value()->stop().has_value());
+    CHECK(!retry.value()->is_running());
     CHECK(legacy.query() == ERROR_SUCCESS);
     return EXIT_SUCCESS;
 }
