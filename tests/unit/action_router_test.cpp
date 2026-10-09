@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "app/runtime/action_router.hpp"
+#include "app/runtime/feature_composition.hpp"
 
 #define CHECK(condition)                                                        \
     do {                                                                        \
@@ -25,6 +26,7 @@ struct UiRuntime {
 namespace {
 
 using namespace kf2::app::runtime;
+int fixed_registry_reads{};
 
 DispatchResult handled(kf2::app::UiRuntime& runtime, const ActionPayload&) {
     ++runtime.calls;
@@ -74,6 +76,16 @@ ActionRequest request(ActionId id, std::string_view received_name,
 
 }  // namespace
 
+namespace kf2::app::runtime {
+
+std::span<const FeatureDefinition> feature_definitions() noexcept {
+    ++fixed_registry_reads;
+    static const CompleteRegistryFixture fixed_registry;
+    return fixed_registry.features;
+}
+
+}  // namespace kf2::app::runtime
+
 int main() {
     using namespace kf2::app::runtime;
 
@@ -84,12 +96,22 @@ int main() {
     CHECK(valid_feature_registry(complete.features));
 
     kf2::app::UiRuntime runtime;
+    CHECK(dispatch_action(
+              runtime, request(ActionId::game_launch, "dashboard-launch"),
+              complete.features) == DispatchResult::handled);
+    CHECK(fixed_registry_reads == 0);
     for (const auto& definition : action_definitions()) {
         runtime = {};
         CHECK(dispatch_action(
                   runtime,
                   request(definition.id, definition.canonical_name),
                   complete.features) == DispatchResult::handled);
+        CHECK(runtime.calls == 1);
+        runtime = {};
+        CHECK(dispatch_action(
+                  runtime,
+                  request(definition.id, definition.canonical_name)) ==
+              DispatchResult::handled);
         CHECK(runtime.calls == 1);
     }
 
@@ -118,6 +140,9 @@ int main() {
         CHECK(dispatch_action(runtime, *parsed, complete.features) ==
               DispatchResult::handled);
         CHECK(runtime.calls == 1);
+        runtime = {};
+        CHECK(dispatch_action(runtime, *parsed) == DispatchResult::handled);
+        CHECK(runtime.calls == 1);
     }
 
     runtime = {};
@@ -126,6 +151,10 @@ int main() {
               request(static_cast<ActionId>(999), "unknown"),
               complete.features) == DispatchResult::unknown_action);
     CHECK(runtime.calls == 0);
+    CHECK(dispatch_action(
+              runtime, request(static_cast<ActionId>(999), "unknown")) ==
+          DispatchResult::unknown_action);
+    CHECK(runtime.calls == 0);
 
     runtime = {};
     CHECK(dispatch_action(
@@ -133,6 +162,11 @@ int main() {
               request(ActionId::game_launch, "dashboard-launch",
                       std::monostate{}),
               complete.features) == DispatchResult::invalid_payload);
+    CHECK(runtime.calls == 0);
+    CHECK(dispatch_action(
+              runtime,
+              request(ActionId::game_launch, "dashboard-launch",
+                      std::monostate{})) == DispatchResult::invalid_payload);
     CHECK(runtime.calls == 0);
 
     runtime = {};
