@@ -284,6 +284,7 @@ bool UiRuntime::set_live_adaptive_enabled(
     adaptive_runtime_mode_provider_generation =
         provider_session->optimizer_session_generation;
     adaptive_runtime_mode_port = port;
+    adaptive_runtime_mode_load_map_ns = provider_session->load_map_observed_ns;
     adaptive_runtime_mode_last_attempt_ns = monotonic_ns();
     adaptive_runtime_mode_confirmed = true;
     adaptive_runtime_mode_pending.reset();
@@ -367,6 +368,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
         adaptive_runtime_mode_process_start_id = 0;
         adaptive_runtime_mode_provider_generation.reset();
         adaptive_runtime_mode_port.reset();
+        adaptive_runtime_mode_load_map_ns = 0;
         adaptive_runtime_mode_last_attempt_ns = 0;
     }
     adaptive_runtime_mode_confirmed = false;
