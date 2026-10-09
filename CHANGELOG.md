@@ -259,6 +259,9 @@ are visible immediately.
 - Refresh observed CPU affinity capacity every five seconds, so runtime changes
   and recovery from failed queries no longer require restarting the sampler.
 
+- Keep pending online corpse restoration ahead of fixed visual reductions when
+  Adaptive is off, preserving the existing per-action cadence and readbacks.
+
 - Preserve existing backups when manifest serialization fails before replacing
   their manifest or journal, and transfer completed buffers without copying.
 
