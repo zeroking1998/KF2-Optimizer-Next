@@ -204,6 +204,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep online Adaptive-off restoration pending if original graphics, fixed
+  effects or the corpse limit fail readback, instead of falsely confirming
+  success from the corpse limit alone. Physics release remains independent.
+
 - Preserve pending INI recovery journals after temporary read or buffer-allocation
   failures, allowing verified recovery on retry instead of quarantining valid state.
 

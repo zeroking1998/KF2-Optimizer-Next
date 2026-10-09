@@ -421,10 +421,9 @@ function bool ApplyOnlineGraphicsControl(
         {
             `log("KF2OPT_ONLINE_GRAPHICS state=disabled"$
                  " readback=deferred local_only=true");
-            // A failed corpse-limit restore needs another authenticated
-            // request. Graphics/fixed effects already have an internal
-            // backoff retry and must not keep Adaptive physics enabled.
-            return bCorpseMaximumRestored;
+            // Mode-off is committed independently. Keep confirmation pending
+            // so the app's existing bounded retry restores every obligation.
+            return false;
         }
         `log("KF2OPT_ONLINE_GRAPHICS state=disabled fixed_effect_quality="$
              class'KF2OptimizerAdaptiveGraphics'.static.

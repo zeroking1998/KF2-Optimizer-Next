@@ -2937,8 +2937,10 @@ public:
             if (status == "timeout") {
                 Sleep(650);
             } else {
-                const auto reply = "KF2OPT_ACK " + sequence + " " + status +
-                    " " + resource + " " + quality + "\r\n";
+                const auto reply = status == "failed"
+                    ? "KF2OPT_ACK " + sequence + " failed rejected\r\n"
+                    : "KF2OPT_ACK " + sequence + " " + status +
+                        " " + resource + " " + quality + "\r\n";
                 send(connection, reply.data(), static_cast<int>(reply.size()), 0);
             }
             closesocket(connection);
@@ -3358,7 +3360,29 @@ int test_adaptive_restore_debt() {
     runtime.adaptive_control_token = "0123456789abcdef0123456789abcdef";
     runtime.adaptive_resource_quality.gpu = 70;
     runtime.adaptive_resource_quality.effects = 80;
-    runtime.adaptive_quality_state_known = false;
+    runtime.adaptive_quality_state_known = true;
+    WSADATA winsock{};
+    CHECK(WSAStartup(MAKEWORD(2, 2), &winsock) == 0);
+    // A first rejected user disable must create debt before local reset; do not
+    // test only a rejection after detach has already created the obligation.
+    {
+        AdaptiveTestReceiver receiver{"failed"};
+        CHECK(receiver.port != 0);
+        replace_runtime_gameplay(runtime, [&](auto& session) {
+            session.telemetry_control_port = receiver.port;
+        });
+        CHECK(!runtime.set_live_adaptive_enabled(false, L"test first disable"));
+        receiver.finish();
+        CHECK(runtime.adaptive_restore_debt.has_value());
+        CHECK(runtime.adaptive_restore_debt->process_start_id ==
+              bound.value().process_start_id);
+        CHECK(!runtime.adaptive_quality_state_known);
+        runtime.reset_local_adaptive_controller_for_mode(false);
+        CHECK(runtime.adaptive_resource_quality.gpu == 70);
+        CHECK(runtime.adaptive_resource_quality.effects == 80);
+    }
+    runtime.game_log_session.reset();
+    runtime.last_report_gameplay_session.reset();
     // A rejected frame takes this same path. The endpoint is unavailable,
     // but the verified game process is still alive.
     runtime.detach_telemetry();
@@ -3393,10 +3417,9 @@ int test_adaptive_restore_debt() {
         CHECK(runtime.model.status().adaptive_quality_score == 70);
         CHECK(!runtime.adaptive_runtime_mode_confirmed);
     }
-    WSADATA winsock{};
-    CHECK(WSAStartup(MAKEWORD(2, 2), &winsock) == 0);
-    // A timeout and a syntactically valid non-APPLIED receipt both retain debt.
-    for (const auto status : {"timeout", "unknown", "restored", "unsupported"}) {
+    // Repeated exact SDK failure replies and other non-APPLIED outcomes keep debt.
+    for (const auto status : {
+            "failed", "failed", "timeout", "unknown", "restored", "unsupported"}) {
         AdaptiveTestReceiver receiver{status};
         CHECK(receiver.port != 0);
         replace_runtime_gameplay(runtime, [&](auto& session) {
@@ -3406,6 +3429,7 @@ int test_adaptive_restore_debt() {
         receiver.finish();
         CHECK(runtime.adaptive_restore_debt.has_value());
         CHECK(runtime.adaptive_resource_quality.gpu == 70);
+        CHECK(!runtime.adaptive_quality_state_known);
     }
     auto poll_worker = [&] {
         const auto deadline = std::chrono::steady_clock::now() +
@@ -3416,7 +3440,7 @@ int test_adaptive_restore_debt() {
     };
     // Reattach retries in the existing background worker, with its 5s backoff.
     {
-        AdaptiveTestReceiver receiver{"unknown"};
+        AdaptiveTestReceiver receiver{"failed"};
         CHECK(receiver.port != 0);
         replace_frame_gameplay(frame, [&](auto& session) {
             session.telemetry_control_port = receiver.port;
@@ -3427,6 +3451,9 @@ int test_adaptive_restore_debt() {
         receiver.finish();
         CHECK(receiver.command.find(" disable 100\n") != std::string::npos);
         CHECK(runtime.adaptive_restore_debt.has_value());
+        CHECK(!runtime.adaptive_runtime_mode_confirmed);
+        CHECK(runtime.adaptive_resource_quality.gpu == 70);
+        CHECK(!runtime.adaptive_quality_state_known);
         frame.observed_at_ns += 4'999'999'999ULL;
         runtime.reconcile_adaptive_runtime_mode(frame);
         CHECK(runtime.adaptive_control_sequence == sequence);
