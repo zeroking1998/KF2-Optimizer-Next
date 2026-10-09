@@ -16,6 +16,7 @@ namespace {
 std::atomic_uint32_t process_metric_opens{0};
 std::atomic_bool fail_next_thread_snapshot_walk{false};
 std::atomic_int fail_next_toolhelp_thread_walk{-1};
+detail::ThreadCacheAllocationHook thread_cache_allocation_hook{};
 #endif
 std::uint64_t value(FILETIME time) {
     return (static_cast<std::uint64_t>(time.dwHighDateTime) << 32U) |
@@ -438,6 +439,8 @@ public:
             // or a failed snapshot. A partial PSS walk never replaces handles.
             const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
             if (snapshot == INVALID_HANDLE_VALUE) return false;
+            std::unique_ptr<void, decltype(&CloseHandle)> owned_snapshot{
+                snapshot, &CloseHandle};
             THREADENTRY32 entry{sizeof(entry)};
             BOOL has_entry = Thread32First(snapshot, &entry);
 #ifdef KF2_PROCESS_METRICS_TESTING
@@ -450,6 +453,11 @@ public:
             if (has_entry) {
                 do {
                     if (entry.th32OwnerProcessID == pid) {
+#ifdef KF2_PROCESS_METRICS_TESTING
+                        if (thread_cache_allocation_hook)
+                            thread_cache_allocation_hook(
+                                detail::ThreadCacheAllocationStage::snapshot_ids);
+#endif
                         current.insert(entry.th32ThreadID);
 #ifdef KF2_PROCESS_METRICS_TESTING
                         if (injected_failure == 1) {
@@ -461,7 +469,6 @@ public:
                 } while (Thread32Next(snapshot, &entry));
             }
             const DWORD traversal_error = GetLastError();
-            CloseHandle(snapshot);
             if (traversal_error != ERROR_NO_MORE_FILES) return false;
         }
 
@@ -476,17 +483,24 @@ public:
         }
         for (const auto thread_id : current) {
             if (handles_.contains(thread_id)) continue;
-            const HANDLE thread = OpenThread(
-                THREAD_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, thread_id);
+            std::unique_ptr<void, decltype(&CloseHandle)> thread{
+                OpenThread(THREAD_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+                           FALSE, thread_id), &CloseHandle};
             if (!thread) continue;
             // The snapshot can outlive a thread. Check both lifetime and owner
             // before accepting a handle opened by a potentially reused ID.
-            if (GetProcessIdOfThread(thread) != pid ||
-                WaitForSingleObject(thread, 0) != WAIT_TIMEOUT) {
-                CloseHandle(thread);
+            if (GetProcessIdOfThread(thread.get()) != pid ||
+                WaitForSingleObject(thread.get(), 0) != WAIT_TIMEOUT) {
                 continue;
             }
-            handles_.emplace(thread_id, Thread{thread, std::nullopt});
+#ifdef KF2_PROCESS_METRICS_TESTING
+            if (thread_cache_allocation_hook)
+                thread_cache_allocation_hook(
+                    detail::ThreadCacheAllocationStage::cached_thread);
+#endif
+            if (handles_.try_emplace(
+                    thread_id, Thread{thread.get(), std::nullopt}).second)
+                static_cast<void>(thread.release());
         }
         return true;
     }
@@ -747,6 +761,10 @@ void detail::fail_next_process_thread_snapshot_walk_for_testing() noexcept {
 void detail::fail_next_toolhelp_thread_walk_for_testing(
     bool after_matching_entry) noexcept {
     fail_next_toolhelp_thread_walk.store(after_matching_entry ? 1 : 0);
+}
+void detail::set_thread_cache_allocation_hook_for_testing(
+    ThreadCacheAllocationHook hook) noexcept {
+    thread_cache_allocation_hook = hook;
 }
 #endif
 }  // namespace kf2::telemetry

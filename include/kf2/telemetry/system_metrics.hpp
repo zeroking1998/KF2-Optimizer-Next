@@ -118,6 +118,9 @@ namespace detail {
 [[nodiscard]] std::uint32_t process_metric_opens_for_testing() noexcept;
 void fail_next_process_thread_snapshot_walk_for_testing() noexcept;
 void fail_next_toolhelp_thread_walk_for_testing(bool after_matching_entry) noexcept;
+enum class ThreadCacheAllocationStage { snapshot_ids, cached_thread };
+using ThreadCacheAllocationHook = void (*)(ThreadCacheAllocationStage);
+void set_thread_cache_allocation_hook_for_testing(ThreadCacheAllocationHook hook) noexcept;
 }
 #endif
 class ProcessMetricSampler final {

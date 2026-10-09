@@ -3,11 +3,42 @@
 #include <bit>
 #include <cstdlib>
 #include <iostream>
+#include <new>
 #include <thread>
 #include <vector>
 #include "kf2/game/game_session.hpp"
 #include "kf2/telemetry/system_metrics.hpp"
 #include "../support/process_inspection_denial.hpp"
+
+namespace {
+thread_local bool fail_next_cache_allocation = false;
+bool cache_fault_stage_seen = false;
+kf2::telemetry::detail::ThreadCacheAllocationStage selected_fault_stage{};
+
+void arm_cache_allocation_failure(
+    kf2::telemetry::detail::ThreadCacheAllocationStage stage) {
+    if (stage != selected_fault_stage) return;
+    kf2::telemetry::detail::set_thread_cache_allocation_hook_for_testing(nullptr);
+    cache_fault_stage_seen = true;
+    fail_next_cache_allocation = true;
+}
+}
+
+void* operator new(std::size_t size) {
+    if (fail_next_cache_allocation && size >= 32) {
+        fail_next_cache_allocation = false;
+        throw std::bad_alloc{};
+    }
+    for (;;) {
+        if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+        const auto handler = std::get_new_handler();
+        if (!handler) throw std::bad_alloc{};
+        handler();
+    }
+}
+
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
@@ -191,6 +222,42 @@ int main() {
         CHECK(sampled.value().critical_core_percent.has_value());
         CHECK(sampled.value().effective_core_usage.has_value());
     }
+    bool cache_handles_leaked = false;
+    for (const auto stage : {detail::ThreadCacheAllocationStage::snapshot_ids,
+                            detail::ThreadCacheAllocationStage::cached_thread}) {
+        DWORD before = 0;
+        CHECK(GetProcessHandleCount(GetCurrentProcess(), &before));
+        // Repeat beyond ambient handle noise; retries must not accumulate leaks.
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            ProcessMetricSampler faulted{identity.value()};
+            selected_fault_stage = stage;
+            cache_fault_stage_seen = false;
+            detail::fail_next_process_thread_snapshot_walk_for_testing();
+            detail::set_thread_cache_allocation_hook_for_testing(
+                &arm_cache_allocation_failure);
+            bool threw = false;
+            try {
+                static_cast<void>(faulted.sample());
+            } catch (const std::bad_alloc&) {
+                threw = true;
+            }
+            detail::set_thread_cache_allocation_hook_for_testing(nullptr);
+            const bool injected = cache_fault_stage_seen &&
+                !fail_next_cache_allocation;
+            fail_next_cache_allocation = false;
+            CHECK(injected && threw);
+            CHECK(faulted.sample().has_value());
+        }
+        DWORD after = 0;
+        CHECK(GetProcessHandleCount(GetCurrentProcess(), &after));
+        if (after > before + 2) {
+            std::cerr << "Cache allocation stage " << static_cast<int>(stage)
+                      << " leaked " << after - before << " handles\n";
+            cache_handles_leaked = true;
+        }
+    }
+    CHECK(!cache_handles_leaked);
+
     ProcessMetricSampler sampler{identity.value()};
     const auto opens_before = detail::process_metric_opens_for_testing();
     const auto first = sampler.sample();
