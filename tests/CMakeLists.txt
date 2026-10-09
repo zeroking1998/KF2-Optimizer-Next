@@ -1126,6 +1126,7 @@ set(KF2_CONFIG_CORE_TEST_TARGETS
     kf2_adaptive_locks_test
     kf2_application_lifecycle_test
     kf2_backup_restore_test
+    kf2_catalog_test
     kf2_config_apply_test
     kf2_config_preview_test
     kf2_session_config_guard_test
