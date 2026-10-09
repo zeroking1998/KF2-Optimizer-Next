@@ -61,6 +61,9 @@ are visible immediately.
   cannot silently reuse an older module; no gameplay logic is changed.
 - Reuse completed payload hashes across both package manifests, avoiding a second
   full payload read while preserving independent release validation.
+- Read each backup's ordering timestamp once before sorting; timestamp read
+  failures stop retention before deletion, with no persistent metadata cache.
+  Empty and single-backup lists skip ordering metadata entirely.
 - Preserve existing packages when the required FleX build artifact is missing,
   checking it before cleanup, copying or unnecessary exporter work.
 - Reject linked package destinations and managed paths before cleanup or writes,
