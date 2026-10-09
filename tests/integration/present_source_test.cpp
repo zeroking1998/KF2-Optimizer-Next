@@ -152,6 +152,23 @@ int test_shared_window_statistics() {
     constexpr std::size_t budget = _ITERATOR_DEBUG_LEVEL == 0 ? 2 : 4;
     if (allocations > budget) std::cerr << "Drain allocations: " << allocations << '\n';
     CHECK(allocations <= budget);
+
+    PresentSource mixed{identity, 4};
+    CHECK(mixed.start().has_value());
+    constexpr std::uint64_t mixed_origin = 20'000'000'000ULL;
+    for (const auto offset : {0ULL, 32ULL, 16ULL, 64ULL, 48ULL, 80ULL, 112ULL, 96ULL})
+        CHECK(mixed.ingest({identity, mixed_origin + offset * 1'000'000ULL, 1, true, 0, 41}));
+    CHECK(!mixed.ingest({identity, mixed_origin + 80'000'000ULL, 1, true, 0, 41}));
+    CHECK(!mixed.ingest({identity, mixed_origin + 112'000'000ULL, 1, true, 0, 41}));
+    CHECK(mixed.ingest({identity, mixed_origin + 128'000'000ULL, 1, true, 0, 41}));
+    std::vector<PresentTimestamp> retained;
+    for (const auto offset : {80ULL, 96ULL, 112ULL, 128ULL})
+        retained.push_back({identity, mixed_origin + offset * 1'000'000ULL});
+    const auto mixed_now = mixed_origin + 128'000'001ULL;
+    const auto mixed_metrics = mixed.drain(mixed_now, stale);
+    CHECK(equal_metrics(mixed_metrics,
+        reference_windows(retained, identity, mixed_now, stale, 0)));
+    CHECK(mixed_metrics.stream_id == 41);
     return EXIT_SUCCESS;
 }
 

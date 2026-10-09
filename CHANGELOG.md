@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Skip timestamp searches for ordered frame appends, retaining late-event
+  sorting, duplicate checks and exact frame statistics without a cache.
+
 - Reuse the diagnostic frame-interval buffer for percentile calculation instead
   of copying it, preserving chronological averages and all measured values.
 
