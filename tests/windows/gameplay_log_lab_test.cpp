@@ -2121,90 +2121,154 @@ int main() {
     CHECK(interaction_source.find(
         "ResetTelemetryMaintenanceCadence();", prepare_for_world) <
           session_ended);
-    const auto achievement_prewarm = interaction_source.find(
+    // The viewport's menu monitor exists before an offline map or online join.
+    // Achievement preparation must not depend on the standalone mutator.
+    CHECK(graphics_interaction_source.find(
+        "function TryPrewarmAchievements(") != std::string::npos);
+    CHECK(interaction_source.find("AchievementPrewarm") == std::string::npos);
+    const auto achievement_prewarm = graphics_interaction_source.find(
         "function TryPrewarmAchievements(");
-    const auto achievement_complete = interaction_source.find(
+    const auto achievement_complete = graphics_interaction_source.find(
         "function OnAchievementPrewarmComplete(");
+    const auto achievement_teardown = graphics_interaction_source.find(
+        "function NotifyGameSessionEnded()");
+    const auto graphics_tick = graphics_interaction_source.find(
+        "event Tick(float DeltaTime)");
     CHECK(achievement_prewarm != std::string::npos);
     CHECK(achievement_complete != std::string::npos);
-    CHECK(interaction_source.find(
+    CHECK(achievement_teardown != std::string::npos);
+    CHECK(graphics_tick != std::string::npos);
+    CHECK(graphics_interaction_source.find(
         "const AchievementPrewarmRequestTimeoutSeconds=10.0;") !=
           std::string::npos);
-    CHECK(interaction_source.find(
-        "var float AchievementPrewarmRequestStartedRealTime;") !=
+    CHECK(graphics_interaction_source.find(
+        "const AchievementPrewarmRetrySeconds=1.0;") !=
           std::string::npos);
-    const auto prewarm_read = interaction_source.find(
+    CHECK(graphics_interaction_source.find(
+        "const AchievementPrewarmMaxAttempts=3;") !=
+          std::string::npos);
+    const auto prewarm_body = graphics_interaction_source.substr(
+        achievement_prewarm, achievement_teardown - achievement_prewarm);
+    CHECK(prewarm_body.find("NM_Standalone") == std::string::npos);
+    CHECK(prewarm_body.find("RealTimeSeconds") == std::string::npos);
+    const auto prewarm_read = graphics_interaction_source.find(
         "ReadAchievements(", achievement_prewarm);
     CHECK(prewarm_read != std::string::npos);
-    const auto pending_prewarm_guard = interaction_source.find(
+    const auto pending_prewarm_guard = graphics_interaction_source.find(
         "if (bAchievementPrewarmRequested)", achievement_prewarm);
     CHECK(pending_prewarm_guard != std::string::npos);
-    const auto timed_out_prewarm = interaction_source.find(
+    const auto timed_out_prewarm = graphics_interaction_source.find(
         "AchievementPrewarmRequestTimeoutSeconds", pending_prewarm_guard);
     CHECK(timed_out_prewarm != std::string::npos);
-    const auto timeout_delegate_clear = interaction_source.find(
+    const auto timeout_delegate_clear = graphics_interaction_source.find(
         "ClearAchievementPrewarmDelegate();", timed_out_prewarm);
-    const auto timeout_pending_clear = interaction_source.find(
+    const auto timeout_pending_clear = graphics_interaction_source.find(
         "bAchievementPrewarmRequested = false", timed_out_prewarm);
-    const auto timeout_retry = interaction_source.find(
-        "AchievementPrewarmNextAttemptRealTime =", timed_out_prewarm);
-    const auto timeout_log = interaction_source.find(
+    const auto timeout_retry = graphics_interaction_source.find(
+        "AchievementPrewarmNextAttemptSeconds =", timed_out_prewarm);
+    const auto timeout_log = graphics_interaction_source.find(
         "state=timeout", timed_out_prewarm);
     CHECK(timeout_delegate_clear < timeout_pending_clear);
     CHECK(timeout_pending_clear < timeout_retry);
     CHECK(timeout_retry < timeout_log);
     CHECK(timeout_log < prewarm_read);
-    CHECK(interaction_source.find(
+    CHECK(graphics_interaction_source.find(
         "PlayerControllerId, 0, true, true)", prewarm_read) !=
         std::string::npos);
-    const auto prewarm_started = interaction_source.rfind(
-        "AchievementPrewarmRequestStartedRealTime =", prewarm_read);
+    const auto prewarm_started = graphics_interaction_source.rfind(
+        "AchievementPrewarmRequestStartedSeconds =", prewarm_read);
     CHECK(prewarm_started != std::string::npos);
     CHECK(pending_prewarm_guard < prewarm_started &&
           prewarm_started < prewarm_read);
-    const auto failed_prewarm = interaction_source.find(
+    const auto failed_prewarm = graphics_interaction_source.find(
         "if (!OnlineSub.PlayerInterface.ReadAchievements(",
         achievement_prewarm);
     CHECK(failed_prewarm != std::string::npos);
-    CHECK(interaction_source.find(
-        "AchievementPrewarmRequestStartedRealTime = 0.0;",
-        failed_prewarm) != std::string::npos);
-    const auto login_guard = interaction_source.find(
+    CHECK(graphics_interaction_source.find(
+        "AchievementPrewarmRequestStartedSeconds = 0.0;",
+        failed_prewarm) < achievement_teardown);
+    const auto login_guard = graphics_interaction_source.find(
         "GetLoginStatus(PlayerControllerId)", achievement_prewarm);
     CHECK(login_guard != std::string::npos);
-    CHECK(interaction_source.find("LS_NotLoggedIn", login_guard) !=
+    CHECK(graphics_interaction_source.find("LS_NotLoggedIn", login_guard) !=
           std::string::npos);
-    CHECK(interaction_source.find(
+    CHECK(graphics_interaction_source.find(
         "IsGuestLogin(PlayerControllerId)", achievement_prewarm) !=
         std::string::npos);
-    const auto prewarm_requested = interaction_source.find(
+    const auto prewarm_requested = graphics_interaction_source.find(
         "state=requested", achievement_prewarm);
     CHECK(prewarm_requested != std::string::npos);
     CHECK(prewarm_requested < prewarm_read);
-    CHECK(interaction_source.find(
+    CHECK(graphics_interaction_source.find(
         "text=true images=true", prewarm_requested) != std::string::npos);
-    CHECK(interaction_source.find(
-        "state=complete", achievement_complete) != std::string::npos);
-    CHECK(interaction_source.find(
-        "AchievementPrewarmRequestStartedRealTime = 0.0;",
-        achievement_complete) < achievement_prewarm);
-    CHECK(interaction_source.find(
-        "TryPrewarmAchievements(PrimaryController);", interaction_tick) <
-        interaction_source.find("UpdateGameplayUiState(", interaction_tick));
-    CHECK(interaction_source.find(
-        "bAchievementPrewarmRequested = false", prepare_for_world) <
-        session_ended);
-    CHECK(interaction_source.find(
-        "bAchievementPrewarmComplete = false", prepare_for_world) <
-        session_ended);
-    CHECK(interaction_source.find(
-        "ClearAchievementPrewarmDelegate();", session_ended) < player_added);
-    CHECK(interaction_source.find(
-        "AchievementPrewarmRequestStartedRealTime = 0.0;",
-        prepare_for_world) < session_ended);
-    CHECK(interaction_source.find(
-        "AchievementPrewarmRequestStartedRealTime = 0.0;",
-        session_ended) < player_added);
+    const auto complete_body = graphics_interaction_source.substr(
+        achievement_complete, achievement_prewarm - achievement_complete);
+    CHECK(complete_body.find("if (!bAchievementPrewarmRequested)") !=
+          std::string::npos);
+    CHECK(complete_body.find("bAchievementPrewarmReadbackPending = true") !=
+          std::string::npos);
+    CHECK(complete_body.find("GetAchievements(") == std::string::npos);
+    CHECK(complete_body.find("bAchievementPrewarmComplete = true") ==
+          std::string::npos);
+    CHECK(complete_body.find("state=read_complete") != std::string::npos);
+    const auto main_menu_guard = prewarm_body.find(
+        "!(CurrentMapName ~= \"KFMainMenu\")");
+    const auto prewarm_readback = prewarm_body.find("GetAchievements(");
+    CHECK(main_menu_guard != std::string::npos);
+    CHECK(prewarm_readback != std::string::npos);
+    CHECK(main_menu_guard < prewarm_body.find("GetOnlineSubsystem()"));
+    CHECK(main_menu_guard < prewarm_readback);
+    CHECK(prewarm_readback < prewarm_body.find("ReadAchievements("));
+    CHECK(prewarm_body.find("++AchievementPrewarmReadbacks;") <
+          prewarm_readback);
+    const auto image_check = prewarm_body.find(
+        "Achievements[AchievementIndex].Image == None");
+    const auto verified_images = prewarm_body.find(
+        "ReadState == OERS_Done && Achievements.Length > 0 &&");
+    const auto verified_complete = prewarm_body.find(
+        "bAchievementPrewarmComplete = true");
+    CHECK(image_check != std::string::npos);
+    CHECK(verified_images != std::string::npos);
+    CHECK(image_check < verified_images && verified_images < verified_complete);
+    CHECK(prewarm_body.find("MissingImages == 0") < verified_complete);
+    CHECK(prewarm_body.find("readback=verified") != std::string::npos);
+    CHECK(prewarm_body.find("readback=verified") > verified_complete);
+    CHECK(prewarm_body.find("state=unverified") != std::string::npos);
+    CHECK(graphics_interaction_source.find("var array<AchievementDetails>") ==
+          std::string::npos);
+    const auto graphics_prewarm_call = graphics_interaction_source.find(
+        "TryPrewarmAchievements(PrimaryController, CurrentMapName);", graphics_tick);
+    const auto online_menu_return = graphics_interaction_source.find(
+        "if (CurrentWorld.NetMode != NM_Standalone &&", graphics_tick);
+    CHECK(graphics_prewarm_call < online_menu_return);
+    CHECK(graphics_interaction_source.find(
+        "(CurrentMapName ~= \"KFMainMenu\"))", graphics_tick) <
+          graphics_prewarm_call);
+    CHECK(graphics_interaction_source.find(
+        "if (!bAchievementPrewarmComplete &&", graphics_tick) <
+          graphics_prewarm_call);
+    CHECK(graphics_interaction_source.find(
+        "AchievementPrewarmElapsedSeconds += FMax(0.0, DeltaTime)",
+        graphics_tick) < graphics_prewarm_call);
+    CHECK(graphics_interaction_source.find(
+        "bAchievementPrewarmSessionEnding = false", graphics_tick) <
+          graphics_prewarm_call);
+    const auto achievement_teardown_body = graphics_interaction_source.substr(
+        achievement_teardown, graphics_interaction_source.find(
+            "function bool EnsureTurretWeaponMaterial", achievement_teardown) -
+            achievement_teardown);
+    CHECK(achievement_teardown_body.find(
+        "ClearAchievementPrewarmDelegate();") != std::string::npos);
+    CHECK(achievement_teardown_body.find(
+        "bAchievementPrewarmRequested = false") != std::string::npos);
+    CHECK(achievement_teardown_body.find(
+        "bAchievementPrewarmComplete = false") == std::string::npos);
+    CHECK(achievement_teardown_body.find(
+        "AchievementPrewarmAttempts = 0") == std::string::npos);
+    CHECK(graphics_interaction_source.find("ClearAchievements(") ==
+          std::string::npos);
+    CHECK(graphics_interaction_source.find("UnlockAchievement(") ==
+          std::string::npos);
     CHECK(interaction_source.find("EnableSteamStats") == std::string::npos);
     CHECK(interaction_source.find("ClearAchievements(") ==
           std::string::npos);
