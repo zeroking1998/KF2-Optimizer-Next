@@ -170,6 +170,9 @@ are visible immediately.
 - Correct developer overlay cadence checks to allow legitimate elapsed-time
   redraws without changing rendering or its idle-rate limit.
 
+- Count displaced DXGI Present starts and prevent filtered test calls from
+  completing an older real call, preserving honest FPS loss and recovery data.
+
 - Recheck process discovery once when a captured PID has already disappeared,
   avoiding unnecessary restoration deferrals while retaining fail-closed checks.
 
