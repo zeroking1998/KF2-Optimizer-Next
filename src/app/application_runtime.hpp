@@ -250,6 +250,7 @@ struct UiRuntime {
     bool game_log_startup_exit_announced{false};
     bool game_log_new_settings_restart_requested{false};
     game::GameLogSessionSnapshot game_log_session;
+    game::GameLogSessionSnapshot fps_statistics_session;
     game::GameLogParserStats game_log_parser_stats;
     bool overlay_scene_ready{false};
     HWND game_window{};

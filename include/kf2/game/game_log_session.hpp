@@ -160,6 +160,8 @@ struct GameLogSession {
     std::optional<std::uint16_t> telemetry_control_port;
     std::optional<int> telemetry_sample;
     std::optional<GameplayUiContext> gameplay_ui_context;
+    // Preserve transitions even when one log chunk ends back in gameplay.
+    std::uint64_t gameplay_ui_context_revision{0};
     std::optional<std::string> gameplay_ui_context_map;
     std::optional<std::uint64_t> gameplay_ui_context_generation;
     std::optional<double> level_load_seconds;

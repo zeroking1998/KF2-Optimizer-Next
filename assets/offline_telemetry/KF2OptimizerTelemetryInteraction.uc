@@ -101,7 +101,7 @@ function ReportOptimizerProbeState(string State)
     `log("KF2OPT_INTERACTION schema=1 probe="$State);
 }
 
-function ReportGameplayUiState(string State)
+function ReportGameplayUiState(string State, PlayerController PrimaryController)
 {
     if (OptimizerGameplayUiState ~= State)
     {
@@ -109,6 +109,12 @@ function ReportGameplayUiState(string State)
     }
     OptimizerGameplayUiState = State;
     `log("KF2OPT_GAMEPLAY_CONTEXT schema=1 state="$State);
+    // Menu receipts must reach the native reader even in a quiet/paused world.
+    // Do not force-flush ordinary telemetry or unchanged UI states.
+    if (PrimaryController != None)
+    {
+        PrimaryController.ConsoleCommand("FLUSHLOG", false);
+    }
 }
 
 function ResetFixedEffectsBaselineRetry()
@@ -248,20 +254,20 @@ function UpdateGameplayUiState(PlayerController PrimaryController)
     KFPC = KFPlayerController(PrimaryController);
     if (KFPC == None || KFPC.MyGFxManager == None)
     {
-        ReportGameplayUiState("unavailable");
+        ReportGameplayUiState("unavailable", PrimaryController);
         return;
     }
     if (!KFPC.MyGFxManager.bMenusOpen)
     {
-        ReportGameplayUiState("gameplay");
+        ReportGameplayUiState("gameplay", PrimaryController);
     }
     else if (KFPC.MyGFxManager.CurrentMenu == KFPC.MyGFxManager.TraderMenu)
     {
-        ReportGameplayUiState("trader");
+        ReportGameplayUiState("trader", PrimaryController);
     }
     else
     {
-        ReportGameplayUiState("menu");
+        ReportGameplayUiState("menu", PrimaryController);
     }
 }
 
@@ -476,15 +482,18 @@ event Tick(float DeltaTime)
     {
         return;
     }
+    if (!GetStandaloneGameplayContext(PrimaryController, CurrentWorld))
+    {
+        ScheduleTelemetryMaintenance(false);
+        return;
+    }
+    // UI observation is cheap and must still run when paused DeltaTime is zero.
+    // Keep provider scans and repairs on their existing backoff below.
+    UpdateGameplayUiState(PrimaryController);
     TelemetryMaintenanceElapsedSeconds += FMax(0.0, DeltaTime);
     if (TelemetryMaintenanceElapsedSeconds <
         TelemetryMaintenanceIntervalSeconds)
     {
-        return;
-    }
-    if (!GetStandaloneGameplayContext(PrimaryController, CurrentWorld))
-    {
-        ScheduleTelemetryMaintenance(false);
         return;
     }
     CurrentMapName = CurrentWorld.GetMapName(true);
@@ -505,7 +514,6 @@ event Tick(float DeltaTime)
         return;
     }
     TryPrewarmAchievements(PrimaryController);
-    UpdateGameplayUiState(PrimaryController);
 
     foreach CurrentWorld.DynamicActors(
         class'KF2OptimizerTelemetryProbe', CurrentProbe)

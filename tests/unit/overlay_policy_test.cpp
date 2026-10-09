@@ -29,6 +29,12 @@ int main() {
     CHECK(shown.average_fps == 58.8);
     CHECK(shown.one_percent_low_fps == 49.3);
     CHECK(shown.frame_time_ms == 16.6);
+    input.frames.average_fps.reset();
+    input.frames.one_percent_low_fps.reset();
+    const auto menu = overlay::evaluate_overlay(input);
+    CHECK(menu.visible && menu.fps == shown.fps);
+    CHECK(menu.average_fps == 0.0 && menu.one_percent_low_fps == 0.0);
+    input.frames = frames;
     input.process_ram_bytes = 3ULL * 1024 * 1024 * 1024;
     input.dedicated_vram_bytes = 8ULL * 1024 * 1024 * 1024;
     input.show_memory = true;

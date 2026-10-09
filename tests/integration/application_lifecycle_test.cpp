@@ -5274,7 +5274,126 @@ int test_gpu_provider_diagnostics() {
     return EXIT_SUCCESS;
 }
 
+int test_gameplay_fps_statistics() {
+    using namespace kf2;
+    using namespace kf2::telemetry_pipeline;
+    const auto root = std::filesystem::path{KF2_TEST_ROOT} / L"gameplay-fps";
+    wchar_t self[32768]{};
+    CHECK(GetModuleFileNameW(nullptr, self, 32768) != 0);
+    const auto process = game::bind_game_process(GetCurrentProcessId(), self);
+    CHECK(process.has_value());
+    const telemetry::SampleIdentity identity{
+        process.value().pid, process.value().process_start_id};
+    diagnostics::EventLog events{32};
+    config::Settings settings;
+    settings.adaptive_optimization_enabled = false;
+    app::UiRuntime runtime{root, false, settings, events, std::nullopt,
+        app::StartMode::read_only, root / L"portable"};
+    runtime.game_process = process.value();
+    runtime.present_source = std::make_unique<telemetry::PresentSource>(identity, 2400);
+    auto& source = *runtime.present_source;
+    CHECK(source.start().has_value());
+    game::GameLogSession gameplay;
+    gameplay.map = "KF-Outpost";
+    gameplay.net_mode = "NM_Standalone";
+    gameplay.phase = game::GameLogPhase::map_loaded;
+    gameplay.gameplay_ui_context = game::GameplayUiContext::gameplay;
+    gameplay.load_map_observed_ns = 20'000'000'000ULL;
+    runtime.game_log_session = std::make_shared<const game::GameLogSession>(gameplay);
+    bool completed = true;
+    const auto drain = [&](std::uint64_t now) {
+        static_cast<void>(drain_present_stage(runtime, now));
+        completed &= source.wait_for_drain(std::chrono::seconds{2});
+        return drain_present_stage(runtime, now).frames().value_or(telemetry::FrameMetrics{});
+    };
+    constexpr std::uint64_t start = 20'000'000'000ULL;
+    static_cast<void>(drain(start));
+    for (std::uint64_t frame = 0; frame <= 60; ++frame)
+        CHECK(source.ingest({identity, start + frame * 16'666'667ULL, 1, true, 0}));
+    const auto before = drain(start + 60 * 16'666'667ULL);
+    CHECK(completed);
+    CHECK(before.fps && before.average_fps && before.one_percent_low_fps);
+    CHECK(*before.average_fps > 59.0);
+
+    // Real collection with Adaptive disabled must not substitute menu FPS
+    // for gameplay average/lows. Raw live timing remains available.
+    gameplay.gameplay_ui_context = game::GameplayUiContext::menu;
+    runtime.game_log_session = std::make_shared<const game::GameLogSession>(gameplay);
+    const auto menu = drain(start + 60 * 16'666'667ULL);
+    CHECK(completed);
+    CHECK(menu.fps == before.fps);
+    CHECK(menu.frame_time_ms == before.frame_time_ms);
+    CHECK(!menu.average_fps);
+    CHECK(!menu.one_percent_low_fps);
+    CHECK(!menu.sustained_one_percent_low_fps);
+    CHECK(!menu.p95_ms && !menu.p99_ms && menu.stutter_count == 0);
+
+    // A slow open trader menu is excluded; trader time with the menu closed
+    // is ordinary gameplay. No new samples or intervals cross the boundary.
+    gameplay.gameplay_ui_context = game::GameplayUiContext::trader;
+    runtime.game_log_session = std::make_shared<const game::GameLogSession>(gameplay);
+    for (auto at = start + 2'000'000'000ULL;
+         at <= start + 4'000'000'000ULL; at += 125'000'000ULL)
+        CHECK(source.ingest({identity, at, 1, true, 0}));
+    const auto trader = drain(start + 4'000'000'000ULL);
+    CHECK(trader.fps == 8.0 && !trader.average_fps);
+    gameplay.gameplay_ui_context = game::GameplayUiContext::gameplay;
+    runtime.game_log_session = std::make_shared<const game::GameLogSession>(gameplay);
+    CHECK(!drain(start + 4'000'000'000ULL).one_percent_low_fps);
+    for (std::uint64_t frame = 1; frame <= 60; ++frame)
+        CHECK(source.ingest({identity, start + 4'000'000'000ULL +
+            frame * 16'666'667ULL, 1, true, 0}));
+    const auto now = start + 4'000'000'000ULL + 60 * 16'666'667ULL;
+    const auto resumed = drain(now);
+    CHECK(resumed.average_fps && *resumed.average_fps > 59.0);
+    CHECK(resumed.one_percent_low_fps && *resumed.one_percent_low_fps > 59.0);
+
+    // Ordinary telemetry updates and expiration of a transient load marker
+    // must not restart valid history on every immutable snapshot publication.
+    gameplay.telemetry_sample = 1;
+    gameplay.load_map_observed_ns = 0;
+    runtime.game_log_session = std::make_shared<const game::GameLogSession>(gameplay);
+    const auto ordinary = drain(now);
+    CHECK(ordinary.average_fps == resumed.average_fps);
+    CHECK(ordinary.source_generation == resumed.source_generation);
+    gameplay.gameplay_ui_context_revision += 2; // menu -> gameplay in one chunk
+    runtime.game_log_session = std::make_shared<const game::GameLogSession>(gameplay);
+    CHECK(!drain(now + 1).average_fps);
+
+    // Unknown UI context, lost parser state and an invalid clock fail closed.
+    gameplay.gameplay_ui_context.reset();
+    runtime.game_log_session = std::make_shared<const game::GameLogSession>(gameplay);
+    CHECK(!drain(now + 2).average_fps);
+    runtime.game_log_session.reset();
+    CHECK(!drain(now + 3).average_fps);
+    gameplay.gameplay_ui_context = game::GameplayUiContext::gameplay;
+    runtime.game_log_session = std::make_shared<const game::GameLogSession>(gameplay);
+    static_cast<void>(drain(0));
+    CHECK(!runtime.fps_statistics_session);
+    CHECK(!drain(now + 4).average_fps);
+    CHECK(runtime.fps_statistics_session == runtime.game_log_session);
+
+    // Online receipts use the existing map/generation validation predicate.
+    gameplay.optimizer_online_read_only = true;
+    gameplay.net_mode = "NM_Client";
+    gameplay.optimizer_session_generation = 7;
+    gameplay.gameplay_ui_context_map = gameplay.map;
+    gameplay.gameplay_ui_context_generation = 6;
+    runtime.game_log_session = std::make_shared<const game::GameLogSession>(gameplay);
+    CHECK(!drain(now + 5).average_fps);
+    gameplay.gameplay_ui_context_generation = 7;
+    runtime.game_log_session = std::make_shared<const game::GameLogSession>(gameplay);
+    static_cast<void>(drain(now + 6));
+    CHECK(source.ingest({identity, now + 6 + 16'666'667ULL, 1, true, 0}));
+    CHECK(source.ingest({identity, now + 6 + 2 * 16'666'667ULL, 1, true, 0}));
+    const auto online = drain(now + 6 + 2 * 16'666'667ULL);
+    CHECK(online.average_fps && *online.average_fps > 59.0);
+    CHECK(completed);
+    return EXIT_SUCCESS;
+}
+
 int test_initial_dxgi_retry() {
+    CHECK(test_gameplay_fps_statistics() == EXIT_SUCCESS);
     CHECK(test_gpu_provider_diagnostics() == EXIT_SUCCESS);
     using namespace kf2;
     using namespace kf2::telemetry_pipeline;
