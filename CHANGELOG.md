@@ -8,6 +8,10 @@ are visible immediately.
 
 ### What's new
 
+- Filter DXGI Present events by the bound game process before callback delivery,
+  preserving the original event-only startup path if PID scoping is rejected.
+  Existing process identity, loss handling and frame measurements remain active.
+
 - Skip diagnostic particle-template attribution and its detailed reports while
   Runtime diagnostics is off; normal particle measurements and Adaptive inputs
   remain available, without changing the report format or sampling interval.

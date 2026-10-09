@@ -156,6 +156,12 @@ next poll detects replacement. Existing catch-up/freshness limits remain intact.
 
 ### Adaptive Present observations
 
+DXGI startup combines the Present event-ID filter with the bound process PID
+scope filter. The consumer PID/creation-identity guard remains authoritative.
+Rejected PID filtering (`ERROR_INVALID_PARAMETER` or `ERROR_NOT_SUPPORTED`)
+gets one startup-only event-ID-only fallback; all other failures remain errors.
+No extra polling, worker, cache or per-frame allocation is introduced.
+
 The existing 100-ms DXGI flush uses a reusable, adequately sized properties
 buffer and publishes loss statistics only on successful API responses.
 `EventsLost` deltas use independent 32-bit wrap semantics; changed
