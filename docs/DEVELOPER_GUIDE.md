@@ -156,6 +156,15 @@ next poll detects replacement. Existing catch-up/freshness limits remain intact.
 
 ### Adaptive Present observations
 
+The existing 100-ms DXGI flush uses a reusable, adequately sized properties
+buffer and publishes loss statistics only on successful API responses.
+`EventsLost` deltas use independent 32-bit wrap semantics; changed
+`RealTimeBuffersLost` invalidates capture quality without supplying an invented
+event or Present count. `EVENT_TRACE_LOGFILEW::EventsLost` is unused and cannot
+replace these statistics. Counted and uncounted loss share source boundaries,
+diagnostic invalidation and fresh-window recovery; degraded quality also sets
+Adaptive's existing sample-loss flag when the known marker count is zero.
+
 DXGI acknowledges known loss through the allocation-free `record_loss` path
 before admitting its completed sample. Rejected source state retains parser
 debt; a later frame-allocation failure cannot replay already committed loss.

@@ -463,7 +463,7 @@ int test_callback_loss() {
     CHECK(source.measure_window(0, 1'002'000'000ULL).count == 0);
     // ETW invokes the buffer callback after its event callbacks. Its unused
     // EventsLost field must not erase a locally observed callback failure.
-    parser->test_events_lost(0);
+    parser->test_unused_buffer_loss(0);
     parser->test_present_event(true, 1, 1'020, 7);
     parser->test_present_event(false, 1, 1'021);
     parser->test_present_event(true, 1, 1'036, 7);
@@ -473,7 +473,7 @@ int test_callback_loss() {
     // One observed callback failure, not an estimate of lost Present events.
     CHECK(metrics.loss_count == 1);
     CHECK(metrics.quality == SampleQuality::degraded);
-    parser->test_events_lost(0);
+    parser->test_unused_buffer_loss(0);
     parser->test_present_event(true, 1, 1'052, 7);
     parser->test_present_event(false, 1, 1'053);
     CHECK(source.drain(1'053'000'000ULL, 1'000'000'000ULL).loss_count == 1);
@@ -551,6 +551,18 @@ int test_loss_acknowledgment() {
     const auto ready = source.drain(1'037'000'000ULL, 1'000'000'000ULL);
     CHECK(ready.fps && *ready.fps == 62.5);
     CHECK(ready.loss_count == 3 && ready.quality == SampleQuality::degraded);
+    CHECK(source.stop().has_value());
+    parser->test_session_statistics(ERROR_SUCCESS, 3, 1);
+    parser->test_present_event(true, 1, 1'050, 7);
+    parser->test_present_event(false, 1, 1'051);
+    CHECK(source.start().has_value());
+    for (const auto at : {1'064ULL, 1'080ULL}) {
+        parser->test_present_event(true, 1, at, 7);
+        parser->test_present_event(false, 1, at + 1);
+    }
+    const auto buffer_debt = source.drain(1'081'000'000ULL, 1'000'000'000ULL);
+    CHECK(buffer_debt.fps && *buffer_debt.fps == 62.5);
+    CHECK(buffer_debt.loss_count == 0 && buffer_debt.quality == SampleQuality::degraded);
     return EXIT_SUCCESS;
 }
 
@@ -581,6 +593,77 @@ int test_active_pairing() {
     CHECK(parser->test_pending_count() == 0);
     return EXIT_SUCCESS;
 }
+
+int test_session_loss_statistics() {
+    for (const bool buffer_only : {false, true}) {
+        PresentSource source{kIdentity, 128};
+        CHECK(source.start().has_value());
+        auto parser = DxgiFrameTimingSession::test_parser(kIdentity, source, kFrequency);
+        parser->test_present_event(true, 1, 1'000, 7);
+        parser->test_present_event(false, 1, 1'001);
+        parser->test_present_event(true, 1, 1'016, 7);
+        parser->test_present_event(false, 1, 1'017);
+        const auto before = source.measure_window(1'000'000'000ULL, 1'016'000'000ULL);
+        CHECK(before.complete);
+        parser->test_present_event(true, 2, 1'018, 7);
+        parser->test_session_statistics(ERROR_SUCCESS, buffer_only ? 0 : 3,
+                                         buffer_only ? 1 : 0);
+        // Failed output and the callback's unused field cannot erase statistics.
+        parser->test_session_statistics(ERROR_MORE_DATA, 0, 0);
+        parser->test_session_statistics(ERROR_ACCESS_DENIED, 99, 99);
+        parser->test_unused_buffer_loss(0);
+        parser->test_unused_buffer_loss(99);
+        parser->test_present_event(false, 2, 1'019);
+        CHECK(parser->test_pending_count() == 0);
+        CHECK(source.measure_window(1'018'000'000ULL, 1'019'000'000ULL).count == 0);
+        for (const auto at : {1'032ULL, 1'048ULL}) {
+            parser->test_present_event(true, 1, at, 7);
+            parser->test_present_event(false, 1, at + 1);
+        }
+        const auto marked = source.drain(1'049'000'000ULL, 1'000'000'000ULL);
+        CHECK(marked.fps && *marked.fps == 62.5);
+        CHECK(marked.quality == SampleQuality::degraded);
+        CHECK(marked.loss_count == (buffer_only ? 0 : 3));
+        const auto crossed = source.measure_window(1'000'000'000ULL, 1'048'000'000ULL);
+        CHECK(crossed.count == 0 && !crossed.complete);
+        CHECK(crossed.generation != before.generation);
+        parser->test_present_event(true, 1, 1'064, 7);
+        parser->test_present_event(false, 1, 1'065);
+        const auto unchanged = source.drain(1'065'000'000ULL, 1'000'000'000ULL);
+        CHECK(unchanged.loss_count == marked.loss_count);
+        CHECK(unchanged.source_generation == marked.source_generation);
+        for (const auto at : {12'000ULL, 12'016ULL}) {
+            parser->test_present_event(true, 1, at, 7);
+            parser->test_present_event(false, 1, at + 1);
+        }
+        const auto recovered = source.drain(12'017'000'000ULL, 1'000'000'000ULL);
+        CHECK(recovered.fps && *recovered.fps == 62.5);
+        CHECK(recovered.loss_count == 0 && recovered.quality == SampleQuality::good);
+        CHECK(source.measure_window(12'000'000'000ULL, 12'016'000'000ULL).complete);
+    }
+    PresentSource source{kIdentity, 128};
+    CHECK(source.start().has_value());
+    auto parser = DxgiFrameTimingSession::test_parser(kIdentity, source, kFrequency);
+    struct Counters { std::uint32_t events, buffers; std::uint64_t expected; };
+    std::uint64_t at = 1'000;
+    for (const auto [events, buffers, expected] : {
+            Counters{UINT32_MAX, 0, UINT32_MAX},
+            Counters{0, 0, 1ULL + UINT32_MAX},
+            Counters{0, UINT32_MAX, 1ULL + UINT32_MAX},
+            Counters{0, 0, 1ULL + UINT32_MAX},
+            Counters{1, 1, 2ULL + UINT32_MAX}}) {
+        parser->test_session_statistics(ERROR_SUCCESS, events, buffers);
+        for (unsigned int frame = 0; frame < 2; ++frame, at += 16) {
+            parser->test_present_event(true, 1, at, 7);
+            parser->test_present_event(false, 1, at + 1);
+        }
+        const auto marked = source.drain((at - 15) * 1'000'000ULL, 1'000'000'000ULL);
+        CHECK(marked.fps && *marked.fps == 62.5);
+        CHECK(marked.loss_count == expected);
+        CHECK(marked.quality == SampleQuality::degraded);
+    }
+    return EXIT_SUCCESS;
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -596,6 +679,7 @@ int main(int argc, char** argv) {
         if (scenario == "--callback-loss") return test_callback_loss();
         if (scenario == "--partial-loss-commit") return test_partial_loss_commit();
         if (scenario == "--loss-acknowledgment") return test_loss_acknowledgment();
+        if (scenario == "--session-loss-statistics") return test_session_loss_statistics();
         return EXIT_FAILURE;
     }
     CHECK(test_exact_clock_conversion() == EXIT_SUCCESS);
@@ -609,6 +693,7 @@ int main(int argc, char** argv) {
     CHECK(test_callback_loss() == EXIT_SUCCESS);
     CHECK(test_partial_loss_commit() == EXIT_SUCCESS);
     CHECK(test_loss_acknowledgment() == EXIT_SUCCESS);
+    CHECK(test_session_loss_statistics() == EXIT_SUCCESS);
     CHECK(test_active_pairing() == EXIT_SUCCESS);
     using namespace kf2::telemetry;
     using kf2::platform::windows::DxgiFrameTimingSession;
@@ -659,6 +744,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     Sleep(20);
+    CHECK(session.value()->test_flush_statistics() == ERROR_SUCCESS);
     CHECK(session.value()->stop().has_value());
     CHECK(session.value()->stop().has_value());
     CHECK(source.stop().has_value());

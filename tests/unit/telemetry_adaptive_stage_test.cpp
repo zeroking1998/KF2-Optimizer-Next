@@ -889,6 +889,14 @@ int main() {
     CHECK(fresh_sample.one_percent_low_fps == 60.0);
     CHECK(fresh_sample.stutter_count == 0);
     CHECK(!fresh_sample.sample_loss);
+    auto buffer_loss_context = fresh_context;
+    buffer_loss_context.decision_frames->quality = telemetry::SampleQuality::degraded;
+    CHECK(buffer_loss_context.decision_frames->loss_count == 0);
+    const auto buffer_loss_sample = build_adaptive_sample(frame, buffer_loss_context).sample;
+    CHECK(buffer_loss_sample.sample_loss);
+    CHECK(buffer_loss_sample.fps == fresh_sample.fps);
+    CHECK(buffer_loss_sample.capabilities.frame_timing ==
+          fresh_sample.capabilities.frame_timing);
     CHECK(!fresh_sample.discontinuity);
     CHECK(fresh_sample.timestamp_ns == frame.observed_at_ns);
     CHECK(frame.frames.one_percent_low_fps == 45.0);

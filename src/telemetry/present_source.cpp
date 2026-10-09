@@ -147,6 +147,7 @@ PresentSource::~PresentSource() {
 Result<bool> PresentSource::start() {
     std::scoped_lock lock{mutex_};
     streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
+    uncounted_loss_ = false;
     schema_failure_ = false;
     ++diagnostic_generation_; last_stream_.reset();
     invalidate_drain_locked();
@@ -156,6 +157,7 @@ Result<bool> PresentSource::start() {
 Result<bool> PresentSource::stop() {
     std::scoped_lock lock{mutex_};
     running_ = false; streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
+    uncounted_loss_ = false;
     ++diagnostic_generation_; last_stream_.reset();
     invalidate_drain_locked();
     return Result<bool>::success(true);
@@ -163,6 +165,7 @@ Result<bool> PresentSource::stop() {
 void PresentSource::bind(SampleIdentity identity) {
     std::scoped_lock lock{mutex_};
     identity_ = identity; streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
+    uncounted_loss_ = false;
     ++diagnostic_generation_; last_stream_.reset();
     schema_failure_ = false;
     invalidate_drain_locked();
@@ -172,14 +175,18 @@ void PresentSource::reset_statistics() {
     streams_.clear();
     reported_loss_ = 0;
     loss_boundary_ns_ = 0;
+    uncounted_loss_ = false;
     ++diagnostic_generation_; last_stream_.reset();
     invalidate_drain_locked();
 }
 bool PresentSource::record_loss(SampleIdentity identity,
-                               std::uint64_t timestamp_ns, std::uint64_t count) {
+                               std::uint64_t timestamp_ns, std::uint64_t count,
+                               bool uncounted) {
     std::scoped_lock lock{mutex_};
-    if (!running_ || schema_failure_ || identity != identity_ || count == 0)
+    if (!running_ || schema_failure_ || identity != identity_ ||
+        (count == 0 && !uncounted))
         return false;
+    uncounted_loss_ |= uncounted;
     record_loss_locked(timestamp_ns, count, false);
     return true;
 }
@@ -260,6 +267,7 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
                                   std::uint64_t not_before_ns) const {
     std::vector<PresentTimestamp> long_term;
     std::uint64_t reported_loss = 0;
+    bool uncounted_loss = false;
     std::uint64_t source_generation = 0;
     std::uint64_t selected_stream_id = 0;
     {
@@ -270,6 +278,7 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
             return unavailable;
         }
         reported_loss = reported_loss_;
+        uncounted_loss = uncounted_loss_;
         source_generation = drain_generation_;
         const std::deque<PresentTimestamp>* selected = nullptr;
         bool selected_fresh = false;
@@ -313,7 +322,10 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
                     ? newest - PresentSource::longest_window_ns : 0);
             // The shared quality covers every returned statistic, including
             // the longest tail. A fully post-loss window needs no reset.
-            if (cutoff > loss_boundary_ns_) reported_loss = 0;
+            if (cutoff > loss_boundary_ns_) {
+                reported_loss = 0;
+                uncounted_loss = false;
+            }
             const auto first = std::lower_bound(
                 selected->begin(), selected->end(), cutoff,
                 [](const PresentTimestamp& present,
@@ -328,7 +340,8 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
     result.loss_count += reported_loss;
     result.source_generation = source_generation;
     result.stream_id = selected_stream_id;
-    if (result.fps && result.loss_count > 0) result.quality = SampleQuality::degraded;
+    if (result.fps && (result.loss_count > 0 || uncounted_loss))
+        result.quality = SampleQuality::degraded;
     return result;
 }
 
@@ -484,7 +497,7 @@ PresentSource::Window PresentSource::measure_window(
     Window result;
     result.generation = diagnostic_generation_;
     if (!running_ || schema_failure_ || end_ns <= begin_ns ||
-        (reported_loss_ != 0 && begin_ns <= loss_boundary_ns_))
+        ((reported_loss_ != 0 || uncounted_loss_) && begin_ns <= loss_boundary_ns_))
         return result;
     const Stream* selected_stream = nullptr;
     std::deque<PresentTimestamp>::const_iterator selected_first, selected_end;

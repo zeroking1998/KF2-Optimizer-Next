@@ -47,7 +47,8 @@ public:
     // Commit known loss without fallible stream/sample allocation.
     [[nodiscard]] bool record_loss(SampleIdentity identity,
                                    std::uint64_t timestamp_ns,
-                                   std::uint64_t count);
+                                   std::uint64_t count,
+                                   bool uncounted = false);
     [[nodiscard]] bool ingest(const PresentEvent& event);
     [[nodiscard]] FrameMetrics drain(std::uint64_t now_ns,
                                      std::uint64_t stale_after_ns,
@@ -80,6 +81,7 @@ private:
     std::size_t capacity_;
     bool running_{false};
     bool schema_failure_{false};
+    bool uncounted_loss_{false};
     std::uint64_t reported_loss_{0};
     std::uint64_t loss_boundary_ns_{0};
     std::uint64_t diagnostic_generation_{0};

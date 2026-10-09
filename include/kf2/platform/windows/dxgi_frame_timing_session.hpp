@@ -45,6 +45,10 @@ public:
                             std::uint32_t flags = 0,
                             std::int32_t result = 0);
     void test_events_lost(std::uint32_t count) noexcept;
+    void test_session_statistics(ULONG status, std::uint32_t events,
+                                 std::uint32_t buffers = 0) noexcept;
+    void test_unused_buffer_loss(std::uint32_t count) noexcept;
+    [[nodiscard]] ULONG test_flush_statistics();
     [[nodiscard]] std::size_t test_pending_count() const noexcept;
 #endif
 
