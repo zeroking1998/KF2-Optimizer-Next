@@ -279,10 +279,17 @@ struct DxgiFrameTimingSession::Impl {
             if (record.UserDataLength < sizeof(PresentStartPayload)) return;
             PresentStartPayload payload{};
             std::memcpy(&payload, record.UserData, sizeof(payload));
-            if ((payload.flags & kPresentTest) != 0 || payload.swap_chain == 0)
-                return;
             const auto existing = pending_by_thread.find(header.ThreadId);
+            if ((payload.flags & kPresentTest) != 0 || payload.swap_chain == 0) {
+                // Its Stop has no token that could distinguish the old call.
+                if (existing != pending_by_thread.end()) {
+                    pending_by_thread.erase(existing);
+                    ++unreported_pending_loss;
+                }
+                return;
+            }
             if (existing != pending_by_thread.end()) {
+                ++unreported_pending_loss;
                 existing->second = {now_qpc, payload.swap_chain};
                 return;
             }

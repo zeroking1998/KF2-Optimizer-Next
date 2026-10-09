@@ -298,10 +298,53 @@ int test_capacity() {
     parser->test_present_event(false, 2'000, 3'027);
     const auto metrics = source.drain(3'027'000'000ULL, 1'000'000'000ULL);
     CHECK(metrics.fps && *metrics.fps == 62.5);
-    CHECK(metrics.loss_count == 1'744);
+    CHECK(metrics.loss_count == 1'745);
     // Admission evicts only the oldest pending start, preserving fresh pairs.
     parser->test_present_event(false, 1'746, 3'028);
     CHECK(parser->test_pending_count() == 254);
+    return EXIT_SUCCESS;
+}
+
+int test_filtered_starts() {
+    for (const auto [swap_chain, flags] : {
+            std::pair{7ULL, 1U}, std::pair{0ULL, 0U}}) {
+        for (const bool outstanding : {false, true}) {
+            PresentSource source{kIdentity, 120};
+            CHECK(source.start().has_value());
+            auto parser = DxgiFrameTimingSession::test_parser(
+                kIdentity, source, kFrequency);
+            if (outstanding) parser->test_present_event(true, 1, 1'000, 9);
+            parser->test_present_event(true, 1, 1'001, swap_chain, flags);
+            const auto pending = parser->test_pending_count();
+            parser->test_present_event(false, 1, 1'002);
+            parser->test_present_event(false, 1, 1'003);
+            // A filtered call's Stop cannot complete a previous real Start.
+            CHECK(source.measure_window(1, 1'003'000'000ULL).count == 0);
+            CHECK(pending == 0);
+            for (const auto at : {1'010ULL, 1'026ULL}) {
+                parser->test_present_event(true, 1, at, 7);
+                parser->test_present_event(false, 1, at + 1);
+            }
+            const auto metrics = source.drain(1'027'000'000ULL, 1'000'000'000ULL);
+            CHECK(metrics.fps && *metrics.fps == 62.5);
+            CHECK(metrics.loss_count == (outstanding ? 1U : 0U));
+            CHECK(metrics.quality == (outstanding
+                ? SampleQuality::degraded : SampleQuality::good));
+            parser->test_present_event(true, 1, 1'042, 7);
+            parser->test_present_event(false, 1, 1'043);
+            CHECK(source.drain(1'043'000'000ULL, 1'000'000'000ULL).loss_count ==
+                  (outstanding ? 1U : 0U));
+            // A fresh post-loss window recovers without another reset.
+            for (const auto at : {12'010ULL, 12'026ULL}) {
+                parser->test_present_event(true, 1, at, 7);
+                parser->test_present_event(false, 1, at + 1);
+            }
+            const auto recovered = source.drain(
+                12'027'000'000ULL, 1'000'000'000ULL);
+            CHECK(recovered.loss_count == 0);
+            CHECK(recovered.quality == SampleQuality::good);
+        }
+    }
     return EXIT_SUCCESS;
 }
 
@@ -419,6 +462,7 @@ int main(int argc, char** argv) {
         if (scenario == "--pending-capacity") return test_capacity();
         if (scenario == "--pending-expiry") return test_expiry();
         if (scenario == "--pending-loss") return test_event_loss();
+        if (scenario == "--filtered-starts") return test_filtered_starts();
         return EXIT_FAILURE;
     }
     CHECK(test_exact_clock_conversion() == EXIT_SUCCESS);
@@ -426,6 +470,7 @@ int main(int argc, char** argv) {
     CHECK(test_stale_cleanup_pid_reuse() == EXIT_SUCCESS);
     CHECK(test_real_orphan_startup() == EXIT_SUCCESS);
     CHECK(test_capacity() == EXIT_SUCCESS);
+    CHECK(test_filtered_starts() == EXIT_SUCCESS);
     CHECK(test_expiry() == EXIT_SUCCESS);
     CHECK(test_event_loss() == EXIT_SUCCESS);
     CHECK(test_active_pairing() == EXIT_SUCCESS);
