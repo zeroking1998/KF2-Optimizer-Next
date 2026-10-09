@@ -26,9 +26,8 @@ app::runtime::DispatchResult toggle_metric(app::UiRuntime& runtime,
                     L"At least one overlay metric must remain enabled.");
         return app::runtime::DispatchResult::handled;
     }
-    const auto saved = platform::windows::atomic_replace_utf8(
-        runtime.settings_path,
-        config::serialize_settings(runtime.optimizer_settings));
+    const auto saved = config::save_settings(
+        runtime.settings_path, runtime.optimizer_settings);
     if (!saved.has_value()) {
         value = !value;
         show_notice(runtime, ui::NoticeSeverity::error,
@@ -63,9 +62,8 @@ app::runtime::DispatchResult set_scale(app::UiRuntime& runtime,
               60, 200);
     runtime.overlay_scale = static_cast<float>(
         runtime.optimizer_settings.overlay_scale_percent) / 100.0F;
-    const auto saved = platform::windows::atomic_replace_utf8(
-        runtime.settings_path,
-        config::serialize_settings(runtime.optimizer_settings));
+    const auto saved = config::save_settings(
+        runtime.settings_path, runtime.optimizer_settings);
     if (!saved.has_value()) {
         runtime.optimizer_settings.overlay_scale_percent = previous_percent;
         runtime.overlay_scale = previous_scale;
@@ -122,9 +120,8 @@ app::runtime::DispatchResult position(
             runtime.optimizer_settings.overlay_position = "bottom_right";
             break;
     }
-    const auto saved = platform::windows::atomic_replace_utf8(
-        runtime.settings_path,
-        config::serialize_settings(runtime.optimizer_settings));
+    const auto saved = config::save_settings(
+        runtime.settings_path, runtime.optimizer_settings);
     if (!saved.has_value()) {
         runtime.overlay_corner = previous_corner;
         runtime.optimizer_settings.overlay_position = previous_position;

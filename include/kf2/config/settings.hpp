@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <map>
 #include <string>
 #include <string_view>
@@ -49,5 +50,7 @@ struct Settings {
 
 [[nodiscard]] Result<Settings> parse_settings(std::string_view text);
 [[nodiscard]] std::string serialize_settings(const Settings& settings);
+[[nodiscard]] Result<bool> save_settings(
+    const std::filesystem::path& path, const Settings& settings);
 
 }  // namespace kf2::config
