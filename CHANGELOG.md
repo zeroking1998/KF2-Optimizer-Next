@@ -177,6 +177,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Stabilize the native event-persistence regression when its lock acquisition
+  overlaps an asynchronous write; application behavior is unchanged.
+
 - Preserve the last valid FleX diagnostic report if serialization fails; transfer
   a completed report to the writer without copying its full text.
 

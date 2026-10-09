@@ -6431,11 +6431,33 @@ int main(int argc, char** argv) {
     {
         graphical.value().telemetry_tick_for_testing();
         CHECK(graphical.value().ui_model().status().event_persistence_available == true);
-        std::unique_ptr<void, decltype(&CloseHandle)> blocked{
-            CreateFileW((options.state_root / L"logs/session-events.json").c_str(),
-                GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr),
-            &CloseHandle};
-        CHECK(blocked.get() != INVALID_HANDLE_VALUE);
+        std::unique_ptr<void, decltype(&CloseHandle)> blocked{nullptr, &CloseHandle};
+        DWORD lock_error = ERROR_SUCCESS;
+        std::size_t lock_attempts = 0;
+        const auto event_file = options.state_root / L"logs/session-events.json";
+        const auto lock_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{4};
+        // A successful prior write does not mean the asynchronous writer is
+        // idle. Acquiring this same exclusive handle is the test boundary.
+        do {
+            ++lock_attempts;
+            const auto handle = CreateFileW(
+                event_file.c_str(),
+                GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (handle != INVALID_HANDLE_VALUE) {
+                blocked.reset(handle);
+                break;
+            }
+            lock_error = GetLastError();
+            if (lock_error != ERROR_SHARING_VIOLATION ||
+                std::chrono::steady_clock::now() >= lock_deadline) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        } while (true);
+        if (!blocked)
+            std::cerr << "Event file lock acquisition native error=" << lock_error << '\n';
+        if (lock_attempts > 1)
+            std::cout << "Event file lock attempts=" << lock_attempts
+                      << "; prior native error=" << lock_error << '\n';
+        CHECK(blocked != nullptr);
         const auto backup = node_center(
             hwnd, graphical.value().ui_model(), "diagnostics-backup");
         CHECK(backup.has_value());
