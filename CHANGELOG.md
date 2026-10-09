@@ -190,6 +190,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Preserve pending INI recovery journals after temporary read or buffer-allocation
+  failures, allowing verified recovery on retry instead of quarantining valid state.
+
 - Reject failed numeric setting formatting before building an INI update,
   preserving the previous configuration and allowing an exact retry.
 
