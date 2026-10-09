@@ -170,6 +170,9 @@ are visible immediately.
 - Reject incomplete session manifests before restore or cleanup, and avoid
   stream/line copies while parsing the already verified manifest bytes.
 
+- Preserve healthy backups when verification encounters a transient read or
+  hashing failure; only proven manifest corruption is quarantined before pruning.
+
 - Use the shared Windows SHA-256 algorithm handle instead of repeatedly opening
   providers, eliminating their allocation-failure leak without changing digests.
 

@@ -23,6 +23,7 @@ constexpr std::size_t max_snapshot_count = 3;
 
 #if defined(KF2_BACKUP_RECOVERY_TESTING)
 BackupStatusHook backup_status_hook{};
+BackupReadHook backup_read_hook{};
 #endif
 
 bool path_exists(const std::filesystem::path& path,
@@ -37,6 +38,9 @@ bool path_exists(const std::filesystem::path& path,
 
 Result<std::string> read_bounded_regular_file(
     const std::filesystem::path& path, std::uintmax_t maximum_size) {
+#if defined(KF2_BACKUP_RECOVERY_TESTING)
+    if (backup_read_hook) return backup_read_hook(path, maximum_size);
+#endif
     return platform::windows::read_bounded_verified_file(
         path, maximum_size);
 }
@@ -310,8 +314,19 @@ Result<bool> BackupStore::verify(const BackupSet& backup) const {
 }
 
 Result<BackupSet> BackupStore::load_backup(std::string_view id) const {
+    LoadFailure failure{};
+    return load_backup(id, failure);
+}
+
+Result<BackupSet> BackupStore::load_backup(
+    std::string_view id, LoadFailure& failure) const {
+    failure = LoadFailure::operational;
+    const auto corrupt = [&failure](Error error) {
+        failure = LoadFailure::corrupt;
+        return Result<BackupSet>::failure(std::move(error));
+    };
     if (id.size() != 64 || id.find_first_not_of("0123456789abcdef") != std::string_view::npos) {
-        return Result<BackupSet>::failure(
+        return corrupt(
             {ErrorCode::invalid_argument, L"Backup identifier is invalid", 0});
     }
     BackupSet backup;
@@ -322,54 +337,57 @@ Result<BackupSet> BackupStore::load_backup(std::string_view id) const {
     const auto manifest = read_bounded_regular_file(
         backup.manifest_path, max_manifest_bytes);
     if (!manifest.has_value()) return Result<BackupSet>::failure(manifest.error());
-    if (manifest.value().empty()) return Result<BackupSet>::failure(
+    if (manifest.value().empty()) return corrupt(
         {ErrorCode::io_failure, L"Backup manifest is empty", 0});
-    std::istringstream lines{manifest.value()};
-    std::string line;
+    std::string_view remaining{manifest.value()};
     bool version_ok = false, id_ok = false, root_ok = false;
     std::set<std::filesystem::path> unique_paths;
-    while (std::getline(lines, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
+    while (!remaining.empty()) {
+        const auto newline = remaining.find('\n');
+        auto line = remaining.substr(0, newline);
+        remaining.remove_prefix(newline == std::string_view::npos
+            ? remaining.size() : newline + 1);
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
         if (line == "version=2" && !version_ok) version_ok = true;
-        else if (line == "id=" + backup.id && !id_ok) id_ok = true;
+        else if (line.starts_with("id=") && line.substr(3) == backup.id && !id_ok) id_ok = true;
         else if (line.starts_with("root=")) {
-            if (root_ok) return Result<BackupSet>::failure(
+            if (root_ok) return corrupt(
                 {ErrorCode::io_failure, L"Backup root record is duplicated", 0});
-            const auto decoded = hex_decode(std::string_view{line}.substr(5));
+            const auto decoded = hex_decode(line.substr(5));
             if (!decoded || decoded->empty() || decoded->size() > 65534 ||
                 decoded->find('\0') != std::string::npos) {
-                return Result<BackupSet>::failure(
+                return corrupt(
                 {ErrorCode::io_failure, L"Backup root encoding is corrupt", 0});
             }
             backup.config_root = path_from_bytes(*decoded);
-            if (!backup.config_root.is_absolute()) return Result<BackupSet>::failure(
+            if (!backup.config_root.is_absolute()) return corrupt(
                 {ErrorCode::access_denied, L"Backup root is not absolute", 0});
             root_ok = true;
         } else if (line.starts_with("file=")) {
             if (backup.snapshots.size() >= max_snapshot_count) {
-                return Result<BackupSet>::failure(
+                return corrupt(
                     {ErrorCode::access_denied, L"Backup file count exceeds the allowlist", 0});
             }
-            const auto fields = split(std::string_view{line}.substr(5), '|');
-            if (fields.size() != 5) return Result<BackupSet>::failure(
+            const auto fields = split(line.substr(5), '|');
+            if (fields.size() != 5) return corrupt(
                 {ErrorCode::io_failure, L"Backup file record is corrupt", 0});
             const auto decoded = hex_decode(fields[0]);
             if (!decoded || decoded->empty() || decoded->find('\0') != std::string::npos) {
-                return Result<BackupSet>::failure(
+                return corrupt(
                 {ErrorCode::io_failure, L"Backup path encoding is corrupt", 0});
             }
             FileSnapshot snapshot;
             snapshot.relative_path = path_from_bytes(*decoded);
             if (!allowed_relative_path(snapshot.relative_path) ||
                 !unique_paths.insert(snapshot.relative_path).second) {
-                return Result<BackupSet>::failure(
+                return corrupt(
                     {ErrorCode::access_denied,
                      L"Backup file path is outside the strict allowlist", 0});
             }
             const auto size = parse_canonical_size(fields[1]);
             const auto desired_size = parse_canonical_size(fields[3]);
             if (!size.has_value() || !desired_size.has_value()) {
-                return Result<BackupSet>::failure(
+                return corrupt(
                     {ErrorCode::io_failure, L"Backup size record is corrupt", 0});
             }
             snapshot.size = size.value();
@@ -380,26 +398,26 @@ Result<BackupSet> BackupStore::load_backup(std::string_view id) const {
                 snapshot.desired_size > max_object_bytes ||
                 !valid_hash(snapshot.sha256) ||
                 !valid_hash(snapshot.desired_sha256)) {
-                return Result<BackupSet>::failure(
+                return corrupt(
                     {ErrorCode::io_failure, L"Backup hash or size record is corrupt", 0});
             }
             snapshot.object_path = state_root_ / L"backups/objects" /
                 (std::wstring{snapshot.sha256.begin(), snapshot.sha256.end()} + L".blob");
             backup.snapshots.push_back(std::move(snapshot));
         } else if (!line.empty()) {
-            return Result<BackupSet>::failure(
+            return corrupt(
                 {ErrorCode::io_failure, L"Backup manifest contains an unknown record", 0});
         }
     }
     if (!version_ok || !id_ok || !root_ok || backup.snapshots.empty()) {
-        return Result<BackupSet>::failure(
+        return corrupt(
             {ErrorCode::io_failure, L"Backup manifest is incomplete", 0});
     }
     auto recomputed = security::sha256_hex(
         identity_material(backup.config_root, backup.snapshots));
     if (!recomputed.has_value()) return Result<BackupSet>::failure(recomputed.error());
     if (recomputed.value() != backup.id) {
-        return Result<BackupSet>::failure(
+        return corrupt(
             {ErrorCode::io_failure, L"Backup manifest identity does not match its content", 0});
     }
     return Result<BackupSet>::success(std::move(backup));
@@ -425,8 +443,12 @@ Result<std::vector<BackupSet>> BackupStore::list_backups() const {
                  static_cast<std::uint32_t>(type_error.value())});
         }
         if (!regular_file || entry.path().extension() != L".manifest") continue;
-        auto loaded = load_backup(entry.path().stem().string());
+        LoadFailure failure{};
+        auto loaded = load_backup(entry.path().stem().string(), failure);
         if (!loaded.has_value()) {
+            if (failure == LoadFailure::operational) {
+                return Result<std::vector<BackupSet>>::failure(loaded.error());
+            }
             const auto load_error = loaded.error();
             auto quarantined = platform::windows::quarantine_regular_file(entry.path());
             if (!quarantined.has_value()) {
@@ -515,6 +537,10 @@ Result<std::size_t> BackupStore::prune_verified(RetentionPolicy policy) {
 #if defined(KF2_BACKUP_RECOVERY_TESTING)
 void set_backup_status_hook_for_testing(BackupStatusHook hook) noexcept {
     backup_status_hook = hook;
+}
+
+void set_backup_read_hook_for_testing(BackupReadHook hook) noexcept {
+    backup_read_hook = hook;
 }
 #endif
 

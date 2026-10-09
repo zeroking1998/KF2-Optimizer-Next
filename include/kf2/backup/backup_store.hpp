@@ -14,7 +14,10 @@ namespace kf2::backup {
 #if defined(KF2_BACKUP_RECOVERY_TESTING)
 using BackupStatusHook = bool (*)(const std::filesystem::path&,
                                   std::error_code&);
+using BackupReadHook = Result<std::string> (*)(const std::filesystem::path&,
+                                             std::uintmax_t);
 void set_backup_status_hook_for_testing(BackupStatusHook hook) noexcept;
+void set_backup_read_hook_for_testing(BackupReadHook hook) noexcept;
 #endif
 
 struct FileSnapshot {
@@ -50,6 +53,9 @@ public:
     [[nodiscard]] const std::filesystem::path& state_root() const noexcept;
 
 private:
+    enum class LoadFailure { operational, corrupt };
+    [[nodiscard]] Result<BackupSet> load_backup(
+        std::string_view id, LoadFailure& failure) const;
     std::filesystem::path state_root_;
 };
 
