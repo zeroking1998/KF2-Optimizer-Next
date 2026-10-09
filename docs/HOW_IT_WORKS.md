@@ -76,6 +76,10 @@ Configuration changes are transactional: preview, backup, write, verify, and
 restore. Locked or unknown settings are filtered out. The exact pre-session
 snapshot is the restoration source of truth.
 
+Offline Adaptive-off commits mode release independently of graphics readback.
+Failed original restoration remains process-owned and unconfirmed; the existing
+baseline backoff retries originals before fixed effects can be composed again.
+
 The protected startup plan uses KF2's native configuration keys. It enables
 `bPhysicsAsyncScene`, `bEnableAsyncScene`, and `OneFrameThreadLag`; it does not
 add similarly named `r.*` console variables. The most recent KF2 launch log

@@ -167,6 +167,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep offline Adaptive-off graphics restoration unconfirmed after a failed
+  original readback. Release mode/corpse ownership immediately and retry originals
+  through the existing baseline backoff before applying fixed effects.
+
 - Preserve existing backups when manifest serialization fails before replacing
   their manifest or journal, and transfer completed buffers without copying.
 

@@ -61,7 +61,7 @@ bool adaptive_mode_preserves_graphics_receipt(std::string_view body) {
         count_occurrences(body, "AdaptiveGraphicsQuality =") == 1 &&
         count_occurrences(body, "AdaptiveGraphicsResource =") == 1 &&
         body.find("SetAdaptiveRuntimeEnabled") < body.find(reset) &&
-        body.find(reset) < body.find("AdaptiveLastControlSequence = Sequence;");
+        body.find(reset) < body.rfind("AdaptiveLastControlSequence = Sequence;");
 }
 
 bool online_enable_is_transactional(std::string_view body) {
@@ -820,7 +820,7 @@ int main() {
         "class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(",
         offline_disable_commit);
     const auto offline_disable_fixed = adaptive_disable_body.find(
-        "bFixedEffectsApplied = EnsureFixedSessionEffects();",
+        "bFixedEffectsApplied = bGraphicsRestored && EnsureFixedSessionEffects();",
         offline_disable_commit);
     const auto offline_disable_deferred = adaptive_disable_body.find(
         "readback=deferred", offline_disable_commit);
@@ -832,8 +832,57 @@ int main() {
     CHECK(offline_disable_commit < offline_disable_release);
     CHECK(offline_disable_release < offline_disable_restore);
     CHECK(offline_disable_restore < offline_disable_fixed);
+    // Mode-off and fixed-baseline success are not original-restore receipts.
+    // Bound this check to the deferred branch, not a later helper's return.
+    const auto offline_disable_verified = adaptive_disable_body.find(
+        "readback=verified", offline_disable_deferred);
+    CHECK(offline_disable_verified != std::string::npos);
     CHECK(adaptive_disable_body.find(
-        "return true;", offline_disable_deferred) != std::string::npos);
+        "return false;", offline_disable_deferred) < offline_disable_verified);
+    CHECK(adaptive_disable_body.find(
+        "return true;", offline_disable_deferred) > offline_disable_verified);
+    const auto disable_committed = adaptive_disable_body.find(
+        "bAdaptiveDisableCommittedForLastCommand = true;");
+    CHECK(offline_disable_release < disable_committed);
+    CHECK(disable_committed < offline_disable_restore);
+    const auto clear_disable_commit = adaptive_control_body.find(
+        "bAdaptiveDisableCommittedForLastCommand = false;");
+    CHECK(clear_disable_commit < adaptive_control_body.find(
+        "if (!ValidAdaptiveControlToken(Token)"));
+    CHECK(adaptive_control_body.find(
+        "if (!(Resource ~= \"disable\") && AdaptiveGraphicsState != None &&\n"
+        "        AdaptiveGraphicsState.bQualityRestorePending)") != std::string::npos);
+    const auto consume_disable = mode_body.find(
+        "if (bAdaptiveDisableCommittedForLastCommand)");
+    CHECK(mode_body.find("SetAdaptiveRuntimeEnabled(") < consume_disable);
+    CHECK(consume_disable < mode_body.find("AdaptiveLastControlSequence = Sequence;"));
+    CHECK(mode_body.find("AdaptiveLastControlSequence = Sequence;") <
+        mode_body.find("if (!bModeApplied)"));
+    CHECK(connection_source.find(
+        "if (Applied || (Resource ~= \"disable\" && Probe != None &&\n"
+        "        Probe.bAdaptiveDisableCommittedForLastCommand &&\n"
+        "        Probe.AdaptiveLastControlSequence == Sequence))") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "(!AdaptiveGraphicsState.bOriginalRestorePending &&\n"
+        "         AdaptiveGraphicsState.bQualityStateKnown)") != std::string::npos);
+    const auto original_restore_start = graphics_source.find(
+        "static function bool RestoreOriginal(");
+    const auto original_restore_end = graphics_source.find(
+        "static function string MenuReadback(", original_restore_start);
+    CHECK(original_restore_start != std::string::npos &&
+        original_restore_end != std::string::npos);
+    const auto original_restore_body = graphics_source.substr(
+        original_restore_start, original_restore_end - original_restore_start);
+    // Every failed original rollback, including the fixed-runtime failure
+    // path below, must retain this same process-owned obligation.
+    const auto original_mismatch = original_restore_body.find(
+        "if (!ReadbackMatches(Observed, Requested))");
+    const auto original_debt = original_restore_body.find(
+        "Snapshot.bOriginalRestorePending = true;", original_mismatch);
+    CHECK(original_mismatch < original_debt);
+    CHECK(original_debt < original_restore_body.find("return false;", original_mismatch));
+    CHECK(original_restore_body.find("return false;", original_mismatch) <
+        original_restore_body.rfind("Snapshot.bOriginalRestorePending = false;"));
     const auto fixed_effects_start = telemetry_source.find(
         "function bool EnsureFixedSessionEffects()");
     const auto restore_world_runtime_start = telemetry_source.find(
@@ -843,6 +892,15 @@ int main() {
     const auto fixed_effects_body = telemetry_source.substr(
         fixed_effects_start,
         restore_world_runtime_start - fixed_effects_start);
+    const auto retry_original = fixed_effects_body.find(
+        "AdaptiveGraphicsState.bOriginalRestorePending)");
+    const auto retry_original_readback = fixed_effects_body.find(
+        "RestoreOriginal(AdaptiveGraphicsState)", retry_original);
+    CHECK(retry_original < retry_original_readback);
+    CHECK(retry_original_readback < fixed_effects_body.find(
+        "if (bFixedSessionEffectsApplied)"));
+    CHECK(fixed_effects_body.find("return false;", retry_original_readback) <
+        fixed_effects_body.find("ApplyFixedSessionEffects("));
     CHECK(fixed_effects_body.find(
         "bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.\n"
         "            RestoreOriginal(AdaptiveGraphicsState)") !=
