@@ -116,6 +116,8 @@ are visible immediately.
   CPU, GPU, VRAM, RAM, overdraw, effects, physics, LOD, and corpse-pressure
   paths. Confirmed pressure changes only its matching group, and stable
   headroom restores quality gradually.
+- Serialize each asynchronous Adaptive command once and transfer its owned
+  bytes to the sender, preserving request validation and receipt matching.
 - Expanded Adaptive coverage to verified KF2 shadow distance and fade,
   post-processing, lighting, shadow-map textures, wound decals, blood, gore,
   destruction lifetimes, particle LOD, emitter capacity, and cosmetic corpse
