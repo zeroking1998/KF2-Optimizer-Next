@@ -188,6 +188,24 @@ int main() {
     for (auto at = 10 * second + second / 4; at <= 16 * second; at += second / 4)
         if (auto r = baseline_scene.observe(changing, at, complete)) scene_report = r;
     CHECK(scene_report && scene_report->result == "inconclusive:unstable_baseline_scene");
+    QualityResponse missing_baseline_scene;
+    for (auto at = second; at <= 10 * second; at += second / 4) {
+        auto sample = context;
+        if (at == 8 * second) sample.corpses.reset();
+        CHECK(!missing_baseline_scene.observe(sample, at));
+    }
+    missing_baseline_scene.begin(6, "mixed", 100, 90,
+                                 10 * second, context, complete);
+    missing_baseline_scene.confirm(6, 10 * second);
+    std::optional<QualityResponse::Report> missing_scene_report;
+    for (auto at = 10 * second + second / 4; at <= 16 * second;
+         at += second / 4) {
+        if (auto report = missing_baseline_scene.observe(context, at, complete))
+            missing_scene_report = report;
+    }
+    CHECK(missing_scene_report &&
+          missing_scene_report->result ==
+              "inconclusive:unstable_baseline_scene");
     for (const bool mixed : {false, true}) {
         QualityResponse delayed;
         for (auto at = second; at <= 10 * second; at += second / 4)

@@ -47,6 +47,8 @@ are visible immediately.
 - Transfer completed Adaptive performance-sample and quality-response diagnostic
   buffers instead of copying them; exact text, logging gates, sample cadence and
   retained-event bounds are unchanged.
+- Keep only timestamps and scene counts in quality-response history, preserving
+  full current-context checks without repeatedly copying map names.
 
 - Transfer completed Adaptive diagnostic buffers instead of copying them;
   log text, bounds, diagnostic gates and controller behavior are unchanged.
