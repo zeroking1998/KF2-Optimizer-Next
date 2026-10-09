@@ -167,6 +167,11 @@ are visible immediately.
 
 ### Bug fixes
 
+- Read DXGI event and real-time buffer loss from supported session statistics.
+  Preserve degraded measurement quality without inventing missing-frame counts,
+  including when only a lost buffer is known, and keep Adaptive from treating
+  those samples as valid.
+
 - Preserve known DXGI callback failures across later buffer callbacks, so the
   next frame window remains marked degraded instead of hiding capture loss.
 - Commit DXGI capture-loss metadata before allocating frame storage, so an

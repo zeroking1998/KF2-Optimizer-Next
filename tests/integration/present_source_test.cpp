@@ -165,6 +165,62 @@ void pause_before_wait(std::stop_token stop) noexcept {
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
 }
 
+int test_uncounted_capture_loss() {
+    constexpr SampleIdentity identity{42, 123};
+    PresentSource source{identity, 128};
+    CHECK(!source.record_loss(identity, 1'017'000'000ULL, 0, true));
+    for (unsigned int reset = 0; reset < 4; ++reset) {
+        CHECK(source.start().has_value());
+        for (const auto at : {1'000'000'000ULL, 1'016'000'000ULL})
+            CHECK(source.ingest({identity, at, 1, true, 0, 7}));
+        CHECK(!source.record_loss(identity, 1'017'000'000ULL, 0));
+        CHECK(!source.record_loss({99, 1}, 1'017'000'000ULL, 0, true));
+        source.request_drain(1'017'000'000ULL, 1'000'000'000ULL);
+        CHECK(source.wait_for_drain(std::chrono::seconds{2}));
+        CHECK(source.latest_drain()->quality == SampleQuality::good);
+        const auto before = source.measure_window(1'000'000'000ULL, 1'016'000'000ULL);
+        CHECK(before.complete);
+        std::size_t allocations = 0;
+        allocation_counter = &allocations;
+        const auto committed = source.record_loss(identity, 1'017'000'000ULL, 0, true);
+        allocation_counter = nullptr;
+        CHECK(committed && allocations == 0);
+        CHECK(!source.latest_drain());
+        for (const auto at : {1'032'000'000ULL, 1'048'000'000ULL})
+            CHECK(source.ingest({identity, at, 1, true, 0, 7}));
+        const auto marked = source.drain(1'049'000'000ULL, 1'000'000'000ULL);
+        CHECK(marked.fps && *marked.fps == 62.5);
+        CHECK(marked.quality == SampleQuality::degraded && marked.loss_count == 0);
+        const auto crossed = source.measure_window(1'000'000'000ULL, 1'048'000'000ULL);
+        CHECK(!crossed.complete && crossed.count == 0);
+        CHECK(crossed.generation != before.generation);
+        CHECK(source.measure_window(1'032'000'000ULL, 1'048'000'000ULL).complete);
+        CHECK(source.drain(1'049'000'000ULL, 1'000'000'000ULL,
+                            1'032'000'000ULL).quality == SampleQuality::good);
+        for (const auto at : {12'000'000'000ULL, 12'016'000'000ULL})
+            CHECK(source.ingest({identity, at, 1, true, 0, 7}));
+        const auto recovered = source.drain(12'017'000'000ULL, 1'000'000'000ULL);
+        CHECK(recovered.fps && recovered.quality == SampleQuality::good);
+        CHECK(recovered.loss_count == 0);
+        // Each lifecycle boundary must also discard a still-active marker.
+        CHECK(source.record_loss(identity, 12'017'000'000ULL, 0, true));
+        if (reset == 0) source.reset_statistics();
+        if (reset == 1) source.bind(identity);
+        if (reset == 2) CHECK(source.start().has_value());
+        if (reset == 3) {
+            CHECK(source.stop().has_value());
+            CHECK(!source.record_loss(identity, 13'000'000'000ULL, 0, true));
+            CHECK(source.start().has_value());
+        }
+        for (const auto at : {13'000'000'000ULL, 13'016'000'000ULL})
+            CHECK(source.ingest({identity, at, 1, true, 0, 7}));
+        CHECK(source.drain(13'017'000'000ULL, 1'000'000'000ULL).quality == SampleQuality::good);
+    }
+    CHECK(!source.ingest({identity, 14'000'000'000ULL, 99, true, 0, 7}));
+    CHECK(!source.record_loss(identity, 14'017'000'000ULL, 0, true));
+    return EXIT_SUCCESS;
+}
+
 int test_shutdown_before_wait() {
     kf2::telemetry::detail::set_present_drain_wait_hook(&pause_before_wait);
     auto source = std::make_unique<kf2::telemetry::PresentSource>(
@@ -184,6 +240,7 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string_view{argv[1]} == "--shutdown-before-wait")
         return test_shutdown_before_wait();
     CHECK(test_shared_window_statistics() == EXIT_SUCCESS);
+    CHECK(test_uncounted_capture_loss() == EXIT_SUCCESS);
     using namespace kf2::telemetry;
     const SampleIdentity game{1234, 5678};
     PresentSource source{game, 256};

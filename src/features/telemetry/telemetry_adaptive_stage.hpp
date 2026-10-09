@@ -568,7 +568,8 @@ select_adaptive_runtime_control(
         sample.process_private_bytes = static_cast<double>(
             *frame.evidence.process_private_bytes);
     }
-    sample.sample_loss = frames.loss_count > 0;
+    sample.sample_loss = frames.loss_count > 0 ||
+        frames.quality == ::kf2::telemetry::SampleQuality::degraded;
     sample.discontinuity = frames.reason ==
         ::kf2::telemetry::UnavailableReason::discontinuity;
     if (context.current_quality >= 0) {

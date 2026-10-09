@@ -136,7 +136,7 @@ inline constexpr std::uint64_t kOverlayDiagnosticsPublishIntervalNs =
             details << L" | p99 " << *frame.frames.p99_ms << L" ms";
         }
         details << L" | stutters " << frame.frames.stutter_count
-                << L" | lost events " << frame.frames.loss_count
+                << L" | loss markers " << frame.frames.loss_count
                 << L" | analysis: " << optimizer_reason
                 << L" | Adaptive: " << adaptive_profile << L" ("
                 << adaptive_reason << L")";

@@ -186,9 +186,10 @@ struct DxgiFrameTimingSession::Impl {
     std::thread trace_worker;
     std::thread flush_worker;
     std::atomic<bool> running{false};
-    std::atomic<std::uint64_t> observed_events_lost{0};
-    std::uint64_t reported_events_lost{};
-    std::uint64_t invalidated_events_lost{};
+    // One coherent snapshot: event cardinality and uncounted buffer loss.
+    std::atomic<std::uint64_t> observed_capture_loss{0};
+    std::uint64_t reported_capture_loss{};
+    std::uint64_t invalidated_capture_loss{};
     std::uint64_t unreported_pending_loss{};
     std::uint64_t last_pending_cleanup_qpc{};
     std::uint64_t qpc_frequency{};
@@ -212,8 +213,7 @@ struct DxgiFrameTimingSession::Impl {
 
     static ULONG WINAPI buffer_callback(EVENT_TRACE_LOGFILEW* log) {
         auto* self = static_cast<Impl*>(log->Context);
-        self->observed_events_lost.store(log->EventsLost,
-                                         std::memory_order_release);
+        // EVENT_TRACE_LOGFILEW::EventsLost is documented as unused.
         return self->running.load(std::memory_order_acquire) ? TRUE : FALSE;
     }
 
@@ -248,12 +248,12 @@ struct DxgiFrameTimingSession::Impl {
             return;
         }
         const auto now_qpc = static_cast<std::uint64_t>(header.TimeStamp.QuadPart);
-        const auto total_loss = observed_events_lost.load(
+        const auto total_loss = observed_capture_loss.load(
             std::memory_order_acquire);
-        if (total_loss != invalidated_events_lost) {
+        if (total_loss != invalidated_capture_loss) {
             // A lost Stop must never match a reused thread's later Stop.
             pending_by_thread.clear();
-            invalidated_events_lost = total_loss;
+            invalidated_capture_loss = total_loss;
         }
         const auto expired = [&](const PendingPresent& present) {
             return now_qpc >= present.timestamp_qpc &&
@@ -326,14 +326,17 @@ struct DxgiFrameTimingSession::Impl {
                                             nanoseconds_per_tick);
         if (timestamp_ns == 0) return;
 
-        const auto new_loss = total_loss >= reported_events_lost
-            ? total_loss - reported_events_lost : total_loss;
-        if ((new_loss != 0 || unreported_pending_loss != 0) &&
+        // Windows counters are independently wrapping ULONGs. Buffer loss
+        // invalidates quality, but cannot supply an event/Present count.
+        const auto new_loss = static_cast<std::uint32_t>(total_loss) -
+            static_cast<std::uint32_t>(reported_capture_loss);
+        const bool buffer_loss = (total_loss >> 32) != (reported_capture_loss >> 32);
+        if ((new_loss != 0 || unreported_pending_loss != 0 || buffer_loss) &&
             !sink->record_loss(identity, timestamp_ns,
-                               new_loss + unreported_pending_loss)) {
+                               new_loss + unreported_pending_loss, buffer_loss)) {
             return;
         }
-        reported_events_lost = total_loss;
+        reported_capture_loss = total_loss;
         unreported_pending_loss = 0;
         static_cast<void>(sink->ingest(
             {identity, timestamp_ns,
@@ -346,12 +349,32 @@ struct DxgiFrameTimingSession::Impl {
         running.store(false, std::memory_order_release);
     }
 
+    struct FlushProperties {
+        EVENT_TRACE_PROPERTIES header{};
+        wchar_t logger_name[128]{};
+    };
+
+    void observe_session_statistics(
+        ULONG status, const EVENT_TRACE_PROPERTIES& properties) noexcept {
+        if (status != ERROR_SUCCESS) return;
+        const auto snapshot = static_cast<std::uint64_t>(properties.EventsLost) |
+            (static_cast<std::uint64_t>(properties.RealTimeBuffersLost) << 32);
+        if (observed_capture_loss.load(std::memory_order_relaxed) != snapshot)
+            observed_capture_loss.store(snapshot, std::memory_order_release);
+    }
+
+    ULONG flush_once(FlushProperties& properties) {
+        properties.header.Wnode.BufferSize = sizeof(properties);
+        properties.header.LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
+        const auto status = FlushTraceW(session_handle, nullptr, &properties.header);
+        observe_session_statistics(status, properties.header);
+        return status;
+    }
+
     void flush_trace() {
+        FlushProperties properties;
         while (running.load(std::memory_order_acquire)) {
-            EVENT_TRACE_PROPERTIES flush_properties{};
-            flush_properties.Wnode.BufferSize = sizeof(flush_properties);
-            static_cast<void>(FlushTraceW(
-                session_handle, nullptr, &flush_properties));
+            static_cast<void>(flush_once(properties));
             std::this_thread::sleep_for(std::chrono::milliseconds{100});
         }
     }
@@ -458,7 +481,7 @@ bool DxgiFrameTimingSession::test_event_callback_exception_boundary() noexcept {
     fail_next_event_callback.store(true, std::memory_order_release);
     Impl::event_callback(&event);
     return implementation.unreported_pending_loss == 1 &&
-           implementation.observed_events_lost.load(
+           implementation.observed_capture_loss.load(
                std::memory_order_acquire) == 0 &&
            implementation.pending_by_thread.empty();
 }
@@ -502,10 +525,27 @@ void DxgiFrameTimingSession::test_present_event(
 }
 
 void DxgiFrameTimingSession::test_events_lost(std::uint32_t count) noexcept {
+    test_session_statistics(ERROR_SUCCESS, count);
+}
+
+void DxgiFrameTimingSession::test_session_statistics(
+    ULONG status, std::uint32_t events, std::uint32_t buffers) noexcept {
+    EVENT_TRACE_PROPERTIES properties{};
+    properties.EventsLost = events;
+    properties.RealTimeBuffersLost = buffers;
+    implementation_->observe_session_statistics(status, properties);
+}
+
+void DxgiFrameTimingSession::test_unused_buffer_loss(std::uint32_t count) noexcept {
     EVENT_TRACE_LOGFILEW log{};
     log.Context = implementation_.get();
     log.EventsLost = count;
     static_cast<void>(Impl::buffer_callback(&log));
+}
+
+ULONG DxgiFrameTimingSession::test_flush_statistics() {
+    Impl::FlushProperties properties;
+    return implementation_->flush_once(properties);
 }
 
 std::size_t DxgiFrameTimingSession::test_pending_count() const noexcept {
