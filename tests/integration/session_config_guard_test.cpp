@@ -199,6 +199,64 @@ int main() {
         allocation_config, allocation_state);
     CHECK(allocation_retry.has_value());
     CHECK(kf2::config::complete_session_config(allocation_retry.value()).has_value());
+
+    const auto restart_config = root / L"RestartConfig";
+    const auto restart_state = root / L"RestartState";
+    for (const auto* name : {L"KFEngine.ini", L"KFGame.ini", L"Nested/KFTest.ini"})
+        write(restart_config / name, "original");
+    const auto restart_snapshot = kf2::config::capture_session_config(
+        restart_config, restart_state);
+    CHECK(restart_snapshot.has_value() && restart_snapshot.value().file_count == 3);
+    const auto restart_manifest = restart_snapshot.value().snapshot_root / L"manifest.txt";
+    const auto restart_bytes = read(restart_manifest);
+    const auto restart_record = restart_bytes.find("\nfile=");
+    CHECK(restart_record != std::string::npos);
+    const auto restart_record_end = restart_bytes.find('\n', restart_record + 1);
+    CHECK(restart_record_end != std::string::npos);
+    write(restart_manifest, restart_bytes.substr(0, restart_record_end + 1).c_str());
+    for (const auto* name : {L"KFEngine.ini", L"KFGame.ini", L"Nested/KFTest.ini"})
+        write(restart_config / name, "live-must-not-change");
+    // Recovery after process restart has no original in-memory snapshot count.
+    const auto restart_resume = kf2::config::resume_session_config(
+        restart_config, restart_state);
+    const auto restart_recovery = kf2::config::recover_session_config(
+        restart_config, restart_state, false);
+    if (restart_recovery.has_value()) {
+        std::cerr << "Truncated recovery restored " << restart_recovery.value()
+                  << " files; snapshot retained=" << fs::exists(restart_manifest) << '\n';
+    }
+    CHECK(!restart_resume.has_value() && !restart_recovery.has_value());
+    CHECK(fs::exists(restart_manifest));
+    for (const auto* name : {L"KFEngine.ini", L"KFGame.ini", L"Nested/KFTest.ini"}) {
+        CHECK(read(restart_config / name) == "live-must-not-change");
+        CHECK(read(restart_snapshot.value().snapshot_root / L"files" / name) == "original");
+    }
+    write(restart_manifest, restart_bytes.c_str());
+    const auto restart_retry = kf2::config::recover_session_config(
+        restart_config, restart_state, false);
+    CHECK(restart_retry.has_value() && restart_retry.value() == 3);
+    for (const auto* name : {L"KFEngine.ini", L"KFGame.ini", L"Nested/KFTest.ini"})
+        CHECK(read(restart_config / name) == "original");
+    CHECK(!fs::exists(restart_snapshot.value().snapshot_root));
+
+    // Schema 1 snapshots remain recoverable; the count belongs to schema 2 only.
+    const auto legacy_config = root / L"LegacyConfig";
+    const auto legacy_state = root / L"LegacyState";
+    write(legacy_config / L"KFEngine.ini", "abc");
+    const auto legacy_snapshot = kf2::config::capture_session_config(
+        legacy_config, legacy_state);
+    CHECK(legacy_snapshot.has_value());
+    const auto legacy_manifest = legacy_snapshot.value().snapshot_root / L"manifest.txt";
+    const std::string legacy_bytes = "schema=1\nfile=KFEngine.ini|"
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n";
+    write(legacy_manifest, ("schema=1\nfile_count=1\n" + legacy_bytes.substr(9)).c_str());
+    CHECK(!kf2::config::resume_session_config(legacy_config, legacy_state).has_value());
+    write(legacy_manifest, legacy_bytes.c_str());
+    write(legacy_config / L"KFEngine.ini", "changed");
+    const auto legacy_recovery = kf2::config::recover_session_config(
+        legacy_config, legacy_state, false);
+    CHECK(legacy_recovery.has_value() && legacy_recovery.value() == 1);
+    CHECK(read(legacy_config / L"KFEngine.ini") == "abc");
     for (const auto kind : {MutationKind::truncate, MutationKind::grow,
                             MutationKind::rewrite, MutationKind::replace}) {
         const auto suffix = std::to_wstring(static_cast<int>(kind));
@@ -245,6 +303,35 @@ int main() {
     const auto first_record_end = original_manifest.find('\n', path_begin);
     CHECK(first_record_end != std::string::npos);
     const auto valid_prefix = original_manifest.substr(0, first_record_end + 1);
+    const auto count_begin = original_manifest.find("file_count=");
+    CHECK(count_begin != std::string::npos);
+    const auto count_end = original_manifest.find('\n', count_begin);
+    CHECK(count_end != std::string::npos);
+    CHECK(original_manifest.substr(count_begin, count_end - count_begin) == "file_count=3");
+    for (const auto* invalid_count : {"0", "1", "4", "257", "03", "-3", "+3", "3x", "",
+                                     "999999999999999999999999999999999999"}) {
+        auto malformed = original_manifest;
+        malformed.replace(count_begin + 11, count_end - count_begin - 11, invalid_count);
+        write(manifest_path, malformed.c_str());
+        CHECK(!kf2::config::resume_session_config(config, root / L"State").has_value());
+    }
+    for (const auto position : {std::size_t{0}, path_begin, first_record_end + 1}) {
+        auto malformed = original_manifest;
+        malformed.insert(position, "file_count=3\n");
+        write(manifest_path, malformed.c_str());
+        CHECK(!kf2::config::resume_session_config(config, root / L"State").has_value());
+    }
+    auto legacy_schema_two = original_manifest;
+    legacy_schema_two.erase(count_begin, count_end - count_begin + 1);
+    auto misplaced_count = legacy_schema_two;
+    const auto first_legacy_end = misplaced_count.find(
+        '\n', misplaced_count.find("\nfile=") + 1);
+    misplaced_count.insert(first_legacy_end + 1, "file_count=3\n");
+    write(manifest_path, misplaced_count.c_str());
+    CHECK(!kf2::config::resume_session_config(config, root / L"State").has_value());
+    write(manifest_path, legacy_schema_two.c_str());
+    const auto legacy_resumed = kf2::config::resume_session_config(config, root / L"State");
+    CHECK(legacy_resumed.has_value() && legacy_resumed.value()->file_count == 3);
     const std::string invalid_tail(64 * 1024, 'x');
     write(manifest_path, (valid_prefix + invalid_tail).c_str());
     parser_fault_manifest = manifest_path;

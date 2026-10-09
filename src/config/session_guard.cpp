@@ -314,6 +314,7 @@ Result<ParsedManifest> parse_manifest(const std::filesystem::path& path) {
     std::string_view remaining{document.value()};
     ParsedManifest manifest;
     bool schema_seen = false, volume_seen = false, file_id_seen = false;
+    std::optional<std::size_t> expected_files;
     std::set<std::filesystem::path> unique;
     std::uintmax_t total_size = 0;
     while (!remaining.empty()) {
@@ -348,6 +349,18 @@ Result<ParsedManifest> parse_manifest(const std::filesystem::path& path) {
                     {ErrorCode::io_failure, L"Session root identity is invalid", 0});
             }
             file_id_seen = true;
+            continue;
+        }
+        if (line.starts_with("file_count=")) {
+            const auto text = line.substr(11);
+            std::size_t count{};
+            if (manifest.schema != 2 || expected_files || !manifest.files.empty() ||
+                text.empty() || text.front() == '0' ||
+                !parse_integer(text, count) || count > maximum_files) {
+                return Result<ParsedManifest>::failure(
+                    {ErrorCode::io_failure, L"Session file count is invalid", 0});
+            }
+            expected_files = count;
             continue;
         }
         if (!line.starts_with("file=") || manifest.files.size() >= maximum_files) {
@@ -403,6 +416,7 @@ Result<ParsedManifest> parse_manifest(const std::filesystem::path& path) {
         manifest.files.push_back(std::move(record));
     }
     if (!schema_seen || manifest.files.empty() ||
+        (expected_files && *expected_files != manifest.files.size()) ||
         (manifest.schema == 2 && (!volume_seen || !file_id_seen)) ||
         (manifest.schema == 1 && (volume_seen || file_id_seen))) {
         return Result<ParsedManifest>::failure(
@@ -579,7 +593,8 @@ Result<SessionConfigSnapshot> capture_session_config(
 
     std::ostringstream manifest;
     manifest << "schema=2\nroot_volume=" << root_identity.value().first
-             << "\nroot_file=" << root_identity.value().second << '\n';
+             << "\nroot_file=" << root_identity.value().second
+             << "\nfile_count=" << records.size() << '\n';
     for (const auto& record : records) {
         manifest << "file=" << hex_encode(path_bytes(record.relative)) << '|'
                  << record.size << '|' << record.hash << '\n';

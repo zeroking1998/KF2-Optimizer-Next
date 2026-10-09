@@ -170,6 +170,9 @@ are visible immediately.
 - Close protected-session read handles even if allocating their file buffer
   fails, without changing byte limits, sharing rules or identity checks.
 
+- Detect truncated new session manifests after an optimizer restart before
+  changing INIs or deleting original snapshots; keep older snapshots readable.
+
 - Reject incomplete session manifests before restore or cleanup, and avoid
   stream/line copies while parsing the already verified manifest bytes.
 
