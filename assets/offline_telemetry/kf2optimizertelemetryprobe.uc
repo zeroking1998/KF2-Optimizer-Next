@@ -5606,15 +5606,21 @@ function AdaptiveCorpseLoadControl()
     local int ProfileElapsedMilliseconds;
     local bool bActionTaken;
 
-    ProfileStartMilliseconds = GetProfileSystemMilliseconds();
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileStartMilliseconds = GetProfileSystemMilliseconds();
+    }
     bActionTaken = RunAdaptiveCorpseLoadControl();
-    ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
-        ProfileStartMilliseconds, GetProfileSystemMilliseconds());
-    ++ProfileAdaptiveControllerSamples;
-    ProfileAdaptiveControllerMilliseconds += ProfileElapsedMilliseconds;
-    ProfileMaxAdaptiveControllerMilliseconds = Max(
-        ProfileMaxAdaptiveControllerMilliseconds,
-        ProfileElapsedMilliseconds);
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
+            ProfileStartMilliseconds, GetProfileSystemMilliseconds());
+        ++ProfileAdaptiveControllerSamples;
+        ProfileAdaptiveControllerMilliseconds += ProfileElapsedMilliseconds;
+        ProfileMaxAdaptiveControllerMilliseconds = Max(
+            ProfileMaxAdaptiveControllerMilliseconds,
+            ProfileElapsedMilliseconds);
+    }
     ScheduleAdaptiveCorpseControlTimer(
         GetAdaptiveCorpseControlDelay(bActionTaken));
 }
