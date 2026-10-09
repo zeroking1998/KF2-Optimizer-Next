@@ -643,6 +643,9 @@ struct Direct2DShellRenderer::Impl {
     ComPtr<ID2D1SolidColorBrush> window_brush;
 #ifdef KF2_DIRECT2D_RENDERER_TESTING
     unsigned window_brush_creation_count{0};
+    unsigned target_dpi_update_count{0};
+    unsigned target_resize_count{0};
+    bool fail_next_target_resize{false};
 #endif
 
     HRESULT ensure_window_target() {
@@ -719,19 +722,56 @@ Result<bool> Direct2DShellRenderer::resize(PixelSize size, float dpi) {
         return Result<bool>::failure(
             {ErrorCode::invalid_argument, L"DPI must be positive", 0});
     }
-    implementation_->pixel_size = size;
-    implementation_->dpi = dpi;
-    if (!implementation_->window_target) return Result<bool>::success(true);
-    implementation_->window_target->SetDpi(dpi, dpi);
-    if (size.width == 0 || size.height == 0) return Result<bool>::success(true);
-    const HRESULT result = implementation_->window_target->Resize(
-        D2D1::SizeU(size.width, size.height));
+    auto& implementation = *implementation_;
+    if (!implementation.window_target) {
+        implementation.pixel_size = size;
+        implementation.dpi = dpi;
+        return Result<bool>::success(true);
+    }
+
+    if (implementation.dpi != dpi) {
+        implementation.window_target->SetDpi(dpi, dpi);
+        implementation.dpi = dpi;
+#ifdef KF2_DIRECT2D_RENDERER_TESTING
+        ++implementation.target_dpi_update_count;
+#endif
+    }
+
+    if (size.width == 0 || size.height == 0) {
+        implementation.pixel_size = size;
+        return Result<bool>::success(true);
+    }
+
+    const auto target_size = implementation.window_target->GetPixelSize();
+    const bool size_changed = target_size.width != size.width ||
+        target_size.height != size.height;
+    if (!size_changed) {
+        implementation.pixel_size = size;
+        return Result<bool>::success(true);
+    }
+
+    HRESULT result = S_OK;
+#ifdef KF2_DIRECT2D_RENDERER_TESTING
+    ++implementation.target_resize_count;
+    if (implementation.fail_next_target_resize) {
+        implementation.fail_next_target_resize = false;
+        result = E_FAIL;
+    } else
+#endif
+    {
+        result = implementation.window_target->Resize(
+            D2D1::SizeU(size.width, size.height));
+    }
     if (result == D2DERR_RECREATE_TARGET) {
+        implementation.pixel_size = size;
         discard_device_resources();
         return Result<bool>::success(true);
     }
-    return FAILED(result) ? platform_failure(L"Cannot resize render target", result)
-                          : Result<bool>::success(true);
+    if (FAILED(result)) {
+        return platform_failure(L"Cannot resize render target", result);
+    }
+    implementation.pixel_size = size;
+    return Result<bool>::success(true);
 }
 
 Result<bool> Direct2DShellRenderer::render(const ShellLayoutResult& layout,
@@ -765,6 +805,18 @@ unsigned Direct2DShellRenderer::text_format_creations_for_testing() const noexce
 
 unsigned Direct2DShellRenderer::window_brush_creations_for_testing() const noexcept {
     return implementation_->window_brush_creation_count;
+}
+
+unsigned Direct2DShellRenderer::target_dpi_updates_for_testing() const noexcept {
+    return implementation_->target_dpi_update_count;
+}
+
+unsigned Direct2DShellRenderer::target_resizes_for_testing() const noexcept {
+    return implementation_->target_resize_count;
+}
+
+void Direct2DShellRenderer::fail_next_target_resize_for_testing() noexcept {
+    implementation_->fail_next_target_resize = true;
 }
 #endif
 
