@@ -225,7 +225,7 @@ struct DxgiFrameTimingSession::Impl {
             self->on_event(*record);
         } catch (...) {
             self->pending_by_thread.clear();
-            self->observed_events_lost.fetch_add(1, std::memory_order_acq_rel);
+            ++self->unreported_pending_loss;
         }
     }
 
@@ -452,9 +452,14 @@ bool DxgiFrameTimingSession::test_event_callback_exception_boundary() noexcept {
     event.UserContext = &implementation;
     fail_next_event_callback.store(true, std::memory_order_release);
     Impl::event_callback(&event);
-    return implementation.observed_events_lost.load(
-               std::memory_order_acquire) == 1 &&
+    return implementation.unreported_pending_loss == 1 &&
+           implementation.observed_events_lost.load(
+               std::memory_order_acquire) == 0 &&
            implementation.pending_by_thread.empty();
+}
+
+void DxgiFrameTimingSession::test_fail_next_event_callback() noexcept {
+    fail_next_event_callback.store(true, std::memory_order_release);
 }
 
 std::unique_ptr<DxgiFrameTimingSession> DxgiFrameTimingSession::test_parser(

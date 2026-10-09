@@ -34,6 +34,7 @@ public:
         decltype(&QueryAllTracesW) query_traces,
         decltype(&ControlTraceW) control_trace);
     [[nodiscard]] static bool test_event_callback_exception_boundary() noexcept;
+    static void test_fail_next_event_callback() noexcept;
     static void test_fail_worker_creation(unsigned int ordinal) noexcept;
     [[nodiscard]] static std::unique_ptr<DxgiFrameTimingSession> test_parser(
         telemetry::SampleIdentity identity, telemetry::PresentSource& sink,
