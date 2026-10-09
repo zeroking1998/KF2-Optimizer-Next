@@ -23,7 +23,7 @@ try {
     if ($PublicCI) {
         $ctestArguments += @('--label-exclude', 'requires-desktop')
     }
-    & ctest @ctestArguments
+    & (Join-Path $PSScriptRoot 'run_ctest.ps1') @ctestArguments
     exit $LASTEXITCODE
 }
 finally {
