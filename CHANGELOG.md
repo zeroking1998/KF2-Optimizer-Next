@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Close protected-session read handles even if allocating their file buffer
+  fails, without changing byte limits, sharing rules or identity checks.
+
 - Reject incomplete session manifests before restore or cleanup, and avoid
   stream/line copies while parsing the already verified manifest bytes.
 

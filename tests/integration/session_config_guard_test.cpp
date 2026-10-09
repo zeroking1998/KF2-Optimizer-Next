@@ -15,6 +15,13 @@ thread_local bool allocation_failure_seen = false;
 std::filesystem::path parser_fault_manifest;
 unsigned parser_manifest_reads{};
 std::string_view writer_fault_tail;
+std::filesystem::path read_fault_target;
+
+void fail_session_buffer_allocation(const std::filesystem::path& path) {
+    if (path != read_fault_target) return;
+    kf2::config::set_session_read_hook_for_testing(nullptr);
+    large_allocations_before_failure = 0;
+}
 
 void fail_parser_line_allocation(const std::filesystem::path& path) {
     // Resume validates the tree before parsing the same manifest again.
@@ -154,6 +161,44 @@ int main() {
     namespace fs = std::filesystem;
     const fs::path root{KF2_TEST_ROOT};
     std::error_code ec; fs::remove_all(root, ec);
+    const auto allocation_config = root / L"ReadAllocationConfig";
+    const auto allocation_state = root / L"ReadAllocationState";
+    read_fault_target = allocation_config / L"KFEngine.ini";
+    const std::string allocation_bytes(4096, 'A');
+    write(read_fault_target, allocation_bytes.c_str());
+    const auto allocation_warmup = kf2::config::capture_session_config(
+        allocation_config, allocation_state);
+    CHECK(allocation_warmup.has_value());
+    CHECK(kf2::config::complete_session_config(allocation_warmup.value()).has_value());
+    DWORD handles_before{};
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_before));
+    for (unsigned attempt = 0; attempt < 8; ++attempt) {
+        allocation_failure_seen = false;
+        kf2::config::set_session_read_hook_for_testing(&fail_session_buffer_allocation);
+        bool threw = false;
+        try {
+            const auto captured = kf2::config::capture_session_config(
+                allocation_config, allocation_state);
+            (void)captured;
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        large_allocations_before_failure = -1;
+        kf2::config::set_session_read_hook_for_testing(nullptr);
+        CHECK(threw && allocation_failure_seen);
+    }
+    DWORD handles_after{};
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &handles_after));
+    if (handles_after > handles_before + 2) {
+        std::cerr << "Session buffer allocation leaked "
+                  << handles_after - handles_before << " handles\n";
+    }
+    CHECK(handles_after <= handles_before + 2);
+    CHECK(read(read_fault_target) == allocation_bytes);
+    const auto allocation_retry = kf2::config::capture_session_config(
+        allocation_config, allocation_state);
+    CHECK(allocation_retry.has_value());
+    CHECK(kf2::config::complete_session_config(allocation_retry.value()).has_value());
     for (const auto kind : {MutationKind::truncate, MutationKind::grow,
                             MutationKind::rewrite, MutationKind::replace}) {
         const auto suffix = std::to_wstring(static_cast<int>(kind));
