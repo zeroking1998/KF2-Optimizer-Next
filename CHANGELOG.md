@@ -26,6 +26,8 @@ are visible immediately.
   remain available, without changing the report format or sampling interval.
 - Skip corpse-controller profiling clocks and counters while Runtime diagnostics
   is off, preserving controller actions and their scheduling.
+- Skip unused distance queries during corpse transition bookkeeping while
+  diagnostics is off; native-wake cooldowns and diagnostic values are unchanged.
 
 - Discover KF2 thread membership with a process-scoped snapshot instead of
   walking every Windows thread when query rights permit. Keep the original
