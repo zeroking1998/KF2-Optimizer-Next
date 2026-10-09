@@ -244,6 +244,7 @@ var int AdaptiveGraphicsQuality;
 var string AdaptiveGraphicsResource;
 var int AdaptiveLastControlSequence;
 var transient bool bAdaptiveQualityRestoreCompletedForLastCommand;
+var transient bool bAdaptiveDisableCommittedForLastCommand;
 var bool bAdaptiveCorpseStaggerInitialized;
 var int AdaptiveCorpseTarget;
 var int AdaptiveCorpseOriginalLimit;
@@ -455,6 +456,7 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
     ClearTimer(nameof(StaggerCorpseCleanup), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
     BeginAdaptiveCorpsePhysicsRelease();
+    bAdaptiveDisableCommittedForLastCommand = true;
     if (AdaptiveCorpseManager != None)
     {
         AdaptiveCorpseRuntimeLimit = AdaptiveCorpseTarget;
@@ -492,7 +494,8 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
         class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
             AdaptiveGraphicsState);
     bFixedSessionEffectsApplied = false;
-    bFixedEffectsApplied = EnsureFixedSessionEffects();
+    // Never compose fixed effects with an unverified old resource quality.
+    bFixedEffectsApplied = bGraphicsRestored && EnsureFixedSessionEffects();
     if (!bGraphicsRestored || !bFixedEffectsApplied)
     {
         `log("KF2OPT_ADAPTIVE_MODE state=disabled fixed_effect_quality="$
@@ -500,7 +503,7 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
                 GetFixedSessionEffectsQuality()$" readback=deferred"$
              " corpse_limit="$AdaptiveCorpseRuntimeLimit$
              " telemetry=active");
-        return true;
+        return false;
     }
     `log("KF2OPT_ADAPTIVE_MODE state=disabled fixed_effect_quality="$
          class'KF2OptimizerAdaptiveGraphics'.static.
@@ -515,6 +518,17 @@ function bool EnsureFixedSessionEffects()
     local bool bGraphicsRestored;
     local bool bEffectRuntimeRestored;
 
+    // The existing baseline backoff also retries process-owned originals.
+    if (AdaptiveGraphicsState != None &&
+        AdaptiveGraphicsState.bOriginalRestorePending)
+    {
+        if (!class'KF2OptimizerAdaptiveGraphics'.static.
+                RestoreOriginal(AdaptiveGraphicsState))
+        {
+            return false;
+        }
+        bFixedSessionEffectsApplied = false;
+    }
     if (bFixedSessionEffectsApplied)
     {
         return true;
@@ -582,8 +596,10 @@ function bool ApplyAdaptiveResourceControl(
     local int PreviousRamQuality;
     local int PreviousOverdrawQuality;
     local int PreviousEffectsQuality;
+    local bool bModeApplied;
 
     bAdaptiveQualityRestoreCompletedForLastCommand = false;
+    bAdaptiveDisableCommittedForLastCommand = false;
     if (!ValidAdaptiveControlToken(Token) || Sequence <= 0 ||
         Sequence <= AdaptiveLastControlSequence ||
         !class'KF2OptimizerAdaptiveGraphics'.static.
@@ -596,7 +612,7 @@ function bool ApplyAdaptiveResourceControl(
     {
         return false;
     }
-    if (AdaptiveGraphicsState != None &&
+    if (!(Resource ~= "disable") && AdaptiveGraphicsState != None &&
         AdaptiveGraphicsState.bQualityRestorePending)
     {
         if (!ResolveAdaptiveQualityRestoreDebt())
@@ -615,7 +631,13 @@ function bool ApplyAdaptiveResourceControl(
     }
     if ((Resource ~= "enable") || (Resource ~= "disable"))
     {
-        if (!SetAdaptiveRuntimeEnabled(Resource ~= "enable"))
+        bModeApplied = SetAdaptiveRuntimeEnabled(Resource ~= "enable");
+        if (bAdaptiveDisableCommittedForLastCommand)
+        {
+            // Consume committed mode-off even while restoration is pending.
+            AdaptiveLastControlSequence = Sequence;
+        }
+        if (!bModeApplied)
         {
             return false;
         }
@@ -731,7 +753,8 @@ function bool ResolveAdaptiveQualityRestoreDebt()
 function bool IsAdaptiveQualityStateKnown()
 {
     return AdaptiveGraphicsState == None ||
-        AdaptiveGraphicsState.bQualityStateKnown;
+        (!AdaptiveGraphicsState.bOriginalRestorePending &&
+         AdaptiveGraphicsState.bQualityStateKnown);
 }
 
 function bool WasAdaptiveQualityRestoreCompletedForLastCommand()

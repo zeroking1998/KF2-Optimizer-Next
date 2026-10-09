@@ -204,6 +204,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Keep offline Adaptive-off graphics restoration unconfirmed after a failed
+  original readback. Release mode/corpse ownership immediately and retry originals
+  through the existing baseline backoff before applying fixed effects.
+
 - Keep online Adaptive-off restoration pending if original graphics, fixed
   effects or the corpse limit fail readback, instead of falsely confirming
   success from the corpse limit alone. Physics release remains independent.
