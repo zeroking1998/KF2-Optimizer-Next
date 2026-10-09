@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Skip unchanged Direct2D target resize and DPI updates during repaint,
+  preserving real size/DPI changes, resize retries and target recreation.
+
 - Skip timestamp searches for ordered frame appends, retaining late-event
   sorting, duplicate checks and exact frame statistics without a cache.
 
@@ -26,6 +29,8 @@ are visible immediately.
   remain available, without changing the report format or sampling interval.
 - Skip corpse-controller profiling clocks and counters while Runtime diagnostics
   is off, preserving controller actions and their scheduling.
+- Skip unused distance queries during corpse transition bookkeeping while
+  diagnostics is off; native-wake cooldowns and diagnostic values are unchanged.
 
 - Discover KF2 thread membership with a process-scoped snapshot instead of
   walking every Windows thread when query rights permit. Keep the original

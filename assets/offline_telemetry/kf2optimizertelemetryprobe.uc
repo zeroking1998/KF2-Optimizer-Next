@@ -2592,7 +2592,7 @@ function string GetAdaptiveDistanceSleepTransitionReason(string CorpseId)
 }
 
 function bool RememberAdaptiveDistanceSleepTransition(
-    string CorpseId, string RemovalReason, int DistanceUnits)
+    string CorpseId, string RemovalReason)
 {
     local float BackoffSeconds;
     local int Index;
@@ -3845,16 +3845,13 @@ function RemoveAdaptiveDistanceSleptCorpseEntry(
     {
         Candidate = AdaptiveDistanceSleptCorpses[Index].Corpse;
         CorpseId = AdaptiveDistanceSleptCorpses[Index].CorpseId;
-        // The transition ledger uses distance for native-wake backoff even
-        // when diagnostics are disabled; only the readback formatting below
-        // is optional.
-        DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
         if (bDetailedRuntimeDiagnostics)
         {
+            DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
             EffectiveAwake = GetAdaptiveCorpseEffectiveAwake(Candidate);
         }
         RememberAdaptiveDistanceSleepTransition(
-            CorpseId, RemovalReason, DistanceUnits);
+            CorpseId, RemovalReason);
         if (bDetailedRuntimeDiagnostics && RemovalReason == "native_wake")
         {
             TransitionIndex = FindAdaptiveDistanceSleepTransition(CorpseId);

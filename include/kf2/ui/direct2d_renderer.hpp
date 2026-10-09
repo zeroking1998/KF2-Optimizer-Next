@@ -33,6 +33,9 @@ public:
 #ifdef KF2_DIRECT2D_RENDERER_TESTING
     [[nodiscard]] unsigned text_format_creations_for_testing() const noexcept;
     [[nodiscard]] unsigned window_brush_creations_for_testing() const noexcept;
+    [[nodiscard]] unsigned target_dpi_updates_for_testing() const noexcept;
+    [[nodiscard]] unsigned target_resizes_for_testing() const noexcept;
+    void fail_next_target_resize_for_testing() noexcept;
 #endif
     [[nodiscard]] Result<bool> capture_wic_png(
         const std::filesystem::path& path, const ShellLayoutResult& layout,
