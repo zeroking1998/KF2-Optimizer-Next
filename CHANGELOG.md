@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Skip unchanged Direct2D target resize and DPI updates during repaint,
+  preserving real size/DPI changes, resize retries and target recreation.
+
 - Skip timestamp searches for ordered frame appends, retaining late-event
   sorting, duplicate checks and exact frame statistics without a cache.
 
