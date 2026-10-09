@@ -167,6 +167,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Recheck process discovery once when a captured PID has already disappeared,
+  avoiding unnecessary restoration deferrals while retaining fail-closed checks.
+
 - Preserve existing backups when manifest serialization fails before replacing
   their manifest or journal, and transfer completed buffers without copying.
 
