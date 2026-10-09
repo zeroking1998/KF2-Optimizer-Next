@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cwctype>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string_view>
@@ -199,6 +200,7 @@ Result<std::string> read_verified_file(const std::filesystem::path& path,
             {ErrorCode::not_found, L"Session configuration file is missing",
              GetLastError()});
     }
+    const std::unique_ptr<void, decltype(&CloseHandle)> owner{file, &CloseHandle};
     BY_HANDLE_FILE_INFORMATION information{};
     LARGE_INTEGER size{};
     if (!GetFileInformationByHandle(file, &information) ||
@@ -208,7 +210,6 @@ Result<std::string> read_verified_file(const std::filesystem::path& path,
         information.nNumberOfLinks != 1 ||
         static_cast<std::uintmax_t>(size.QuadPart) > maximum_size) {
         const DWORD native = GetLastError();
-        CloseHandle(file);
         return Result<std::string>::failure(
             {ErrorCode::access_denied,
              L"Session configuration file identity or size is unsafe", native});
@@ -225,7 +226,6 @@ Result<std::string> read_verified_file(const std::filesystem::path& path,
         if (!ReadFile(file, bytes.data() + offset, request, &read, nullptr) ||
             read == 0) {
             const DWORD native = GetLastError();
-            CloseHandle(file);
             return Result<std::string>::failure(
                 {ErrorCode::io_failure,
                  L"Session configuration file cannot be read", native});
@@ -246,7 +246,6 @@ Result<std::string> read_verified_file(const std::filesystem::path& path,
     const DWORD native = stable
         ? ERROR_SUCCESS
         : inspected_after ? ERROR_FILE_INVALID : GetLastError();
-    CloseHandle(file);
     if (!stable) {
         return Result<std::string>::failure(
             {ErrorCode::stale_data,
