@@ -44,6 +44,10 @@ public:
     [[nodiscard]] Result<bool> stop();
     void bind(SampleIdentity identity);
     void reset_statistics();
+    // Commit known loss without fallible stream/sample allocation.
+    [[nodiscard]] bool record_loss(SampleIdentity identity,
+                                   std::uint64_t timestamp_ns,
+                                   std::uint64_t count);
     [[nodiscard]] bool ingest(const PresentEvent& event);
     [[nodiscard]] FrameMetrics drain(std::uint64_t now_ns,
                                      std::uint64_t stale_after_ns,
@@ -68,6 +72,8 @@ private:
     };
 
     void invalidate_drain_locked();
+    void record_loss_locked(std::uint64_t timestamp_ns, std::uint64_t count,
+                            bool incomplete);
     void drain_worker(std::stop_token stop) noexcept;
 
     SampleIdentity identity_;
