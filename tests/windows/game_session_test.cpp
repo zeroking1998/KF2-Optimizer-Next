@@ -5,12 +5,103 @@
 #include <filesystem>
 #include <iostream>
 #include <new>
+#include <utility>
+#include <TlHelp32.h>
 
 #include "kf2/game/game_session.hpp"
 #include "../support/process_inspection_denial.hpp"
 
 namespace {
 thread_local bool fail_inspection_buffer_allocation = false;
+
+// Real OS snapshots, with only this fixture's suspended child exiting between
+// capture and inspection. It never executes test code or opens a window.
+struct SnapshotRace {
+    enum class Retry { fresh, denied, stale } retry{Retry::fresh};
+    inline static SnapshotRace* active{};
+    std::filesystem::path root, executable;
+    HANDLE child{};
+    HANDLE stale_retry{INVALID_HANDLE_VALUE};
+    unsigned calls{};
+    bool exit_confirmed{};
+
+    ~SnapshotRace() {
+        kf2::game::detail::set_process_snapshot_for_testing(nullptr);
+        active = nullptr;
+        stop_child();
+        if (stale_retry != INVALID_HANDLE_VALUE) CloseHandle(stale_retry);
+        if (!root.empty()) {
+            std::error_code error;
+            std::filesystem::remove_all(root, error);
+        }
+    }
+
+    bool start(const std::filesystem::path& source) {
+        const auto unique = std::to_wstring(GetCurrentProcessId()) + L"-" +
+                            std::to_wstring(GetTickCount64());
+        root = std::filesystem::temp_directory_path() / (L"KF2ExitRace-" + unique);
+        std::filesystem::create_directory(root);
+        executable = root / (L"KF2ExitRaceChild-" + unique + L".exe");
+        std::filesystem::copy_file(source, executable);
+        STARTUPINFOW startup{sizeof(startup)};
+        PROCESS_INFORMATION process{};
+        if (!CreateProcessW(executable.c_str(), nullptr, nullptr, nullptr, FALSE,
+                CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr, nullptr,
+                &startup, &process)) return false;
+        CloseHandle(process.hThread);
+        child = process.hProcess;
+        return true;
+    }
+
+    bool stop_child() {
+        if (!child) return true;
+        const DWORD pid = GetProcessId(child);
+        const bool stopped = WaitForSingleObject(child, 0) == WAIT_OBJECT_0 ||
+            (TerminateProcess(child, 0) &&
+             WaitForSingleObject(child, 5'000) == WAIT_OBJECT_0);
+        if (!stopped) return false;
+        CloseHandle(std::exchange(child, nullptr));
+        // A signaled process object may remain openable briefly. Wait until
+        // this owned PID really disappears; never inject an OpenProcess error.
+        for (unsigned attempt = 0; attempt != 1'000; ++attempt) {
+            HANDLE remaining = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            if (!remaining) return GetLastError() == ERROR_INVALID_PARAMETER;
+            CloseHandle(remaining);
+            Sleep(1);
+        }
+        return false;
+    }
+
+    void arm() {
+        active = this;
+        kf2::game::detail::set_process_snapshot_for_testing(&capture);
+    }
+
+    static HANDLE WINAPI capture(DWORD flags, DWORD pid) {
+        auto& fixture = *active;
+        if (++fixture.calls == 2) {
+            if (fixture.retry == Retry::denied) {
+                SetLastError(ERROR_ACCESS_DENIED);
+                return INVALID_HANDLE_VALUE;
+            }
+            if (fixture.retry == Retry::stale)
+                return std::exchange(fixture.stale_retry, INVALID_HANDLE_VALUE);
+        }
+        const HANDLE snapshot = CreateToolhelp32Snapshot(flags, pid);
+        if (snapshot != INVALID_HANDLE_VALUE && fixture.child) {
+            if (fixture.retry == Retry::stale)
+                fixture.stale_retry = CreateToolhelp32Snapshot(flags, pid);
+            fixture.exit_confirmed = fixture.stop_child();
+            if (!fixture.exit_confirmed || (fixture.retry == Retry::stale &&
+                    fixture.stale_retry == INVALID_HANDLE_VALUE)) {
+                CloseHandle(snapshot);
+                SetLastError(ERROR_GEN_FAILURE);
+                return INVALID_HANDLE_VALUE;
+            }
+        }
+        return snapshot;
+    }
+};
 }
 
 void* operator new(std::size_t size) {
@@ -84,6 +175,45 @@ int wmain(int argc, wchar_t** argv) {
     CHECK(wrong.error().code == kf2::ErrorCode::stale_data);
 
     {
+        SnapshotRace ordinary;
+        ordinary.arm();
+        CHECK(kf2::game::find_running_game_process(executable).has_value());
+        CHECK(ordinary.calls == 1);
+        const auto absent = kf2::game::find_running_game_process(
+            std::filesystem::path{executable}.parent_path() /
+            (L"KF2Absent-" + std::to_wstring(GetCurrentProcessId()) + L".exe"));
+        CHECK(!absent.has_value() && absent.error().code == kf2::ErrorCode::not_found);
+        CHECK(ordinary.calls == 2);
+    }
+    {
+        SnapshotRace race;
+        CHECK(race.start(executable));
+        auto alive = kf2::game::find_running_game_process(race.executable);
+        CHECK(alive.has_value());
+        alive.value().native_process.reset(); // Release the child's last binding.
+        race.arm();
+        const auto exited = kf2::game::find_running_game_process(race.executable);
+        CHECK(race.exit_confirmed && !exited.has_value());
+        if (exited.error().code != kf2::ErrorCode::not_found)
+            std::cerr << "exit-after-snapshot native=" << exited.error().native_code << '\n';
+        CHECK(exited.error().code == kf2::ErrorCode::not_found);
+        CHECK(race.calls == 2);
+    }
+    for (const auto retry : {SnapshotRace::Retry::denied, SnapshotRace::Retry::stale}) {
+        SnapshotRace race;
+        race.retry = retry;
+        CHECK(race.start(executable));
+        race.arm();
+        const auto uncertain = kf2::game::find_running_game_process(race.executable);
+        CHECK(race.exit_confirmed && !uncertain.has_value() && race.calls == 2);
+        CHECK(uncertain.error().code == (retry == SnapshotRace::Retry::denied
+            ? kf2::ErrorCode::platform_failure : kf2::ErrorCode::access_denied));
+        const DWORD expected_error = retry == SnapshotRace::Retry::denied
+            ? ERROR_ACCESS_DENIED : ERROR_INVALID_PARAMETER;
+        CHECK(uncertain.error().native_code == expected_error);
+    }
+
+    {
         const std::filesystem::path expected_executable{executable};
         CHECK(kf2::game::find_running_game_process(expected_executable).has_value());
         DWORD handles_before = 0;
@@ -124,11 +254,15 @@ int wmain(int argc, wchar_t** argv) {
     {
         kf2::test::ProcessInspectionDenial denied;
         CHECK(denied.deny(GetCurrentProcess()));
+        SnapshotRace inspection;
+        inspection.arm();
         const auto ambiguous = kf2::game::find_running_game_process(executable);
         CHECK(!ambiguous.has_value());
         CHECK(ambiguous.error().code == kf2::ErrorCode::access_denied);
         CHECK(ambiguous.error().native_code == ERROR_ACCESS_DENIED);
+        CHECK(inspection.calls == 1);
         CHECK(kf2::game::game_process_may_be_running(executable));
+        CHECK(inspection.calls == 2);
         CHECK(denied.restore());
     }
     CHECK(kf2::game::find_running_game_process(executable).has_value());
