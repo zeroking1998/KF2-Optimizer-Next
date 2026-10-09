@@ -249,7 +249,9 @@ bool PresentSource::ingest(const PresentEvent& event) {
     }
     last_stream_ = event.stream_id;
     auto& presents = stream->second.presents;
-    const auto position = std::lower_bound(
+    const auto position = presents.empty() ||
+        event.monotonic_ns > presents.back().monotonic_ns
+        ? presents.end() : std::lower_bound(
         presents.begin(), presents.end(), event.monotonic_ns,
         [](const PresentTimestamp& present, std::uint64_t timestamp) {
             return present.monotonic_ns < timestamp;
