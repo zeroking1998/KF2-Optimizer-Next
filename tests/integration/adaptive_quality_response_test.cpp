@@ -458,8 +458,8 @@ int main(int argc, char** argv) {
             }
         }
     }
-    // Escape/Trader transition frames remain available to the overlay, while
-    // Adaptive resumes from a bounded gameplay-only window. A real stall that
+    // Escape/Trader transition frames remain available to live FPS, while
+    // history and Adaptive resume from gameplay-only windows. A real stall that
     // occurs after that boundary must still be actionable.
     {
         telemetry::PresentSource source{identity, 2048};
@@ -480,11 +480,16 @@ int main(int argc, char** argv) {
             CHECK(source.ingest({identity, at, 1, true, 0}));
         }
         const auto now = gameplay_return_ns + 2'000'000'000ULL;
+        const auto raw_menu_frames = source.drain(now, 2'000'000'000ULL);
+        CHECK(raw_menu_frames.one_percent_low_fps &&
+              *raw_menu_frames.one_percent_low_fps < 10.0);
+        source.set_statistics_boundary(gameplay_return_ns);
         const auto overlay_frames = source.drain(now, 2'000'000'000ULL);
         const auto adaptive_frames = source.drain(
             now, 2'000'000'000ULL, gameplay_return_ns);
         CHECK(overlay_frames.one_percent_low_fps.has_value());
-        CHECK(*overlay_frames.one_percent_low_fps < 10.0);
+        CHECK(*overlay_frames.one_percent_low_fps > 59.0);
+        CHECK(overlay_frames.fps == raw_menu_frames.fps);
         CHECK(adaptive_frames.one_percent_low_fps.has_value());
         CHECK(*adaptive_frames.one_percent_low_fps > 59.0);
 
