@@ -177,6 +177,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Reject incomplete diagnostic inventories before export, preserving an existing
+  inventory file when serialization fails.
+
 - Stabilize the native event-persistence regression when its lock acquisition
   overlaps an asynchronous write; application behavior is unchanged.
 
