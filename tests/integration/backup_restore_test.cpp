@@ -18,10 +18,18 @@
 namespace {
 thread_local bool fail_manifest_growth{};
 thread_local unsigned int manifest_growth_failures{};
+thread_local bool fail_journal_buffer{};
+thread_local std::size_t journal_buffer_minimum_size{};
+thread_local unsigned int journal_buffer_failures{};
 std::string_view manifest_fault_payload;
 }
 
 void* operator new(std::size_t size) {
+    if (fail_journal_buffer && size >= journal_buffer_minimum_size) {
+        fail_journal_buffer = false;
+        ++journal_buffer_failures;
+        throw std::bad_alloc{};
+    }
     if (fail_manifest_growth && size >= 512) {
         fail_manifest_growth = false;
         ++manifest_growth_failures;
@@ -105,6 +113,63 @@ bool has_quarantined_copy(const std::filesystem::path& source,
         }
     }
     return false;
+}
+
+std::filesystem::path journal_allocation_target;
+
+void fail_journal_read_buffer(const std::filesystem::path& path) {
+    if (path == journal_allocation_target) {
+        kf2::platform::windows::set_bounded_read_hook_for_testing(nullptr);
+        fail_journal_buffer = true;
+    }
+}
+
+int test_operational_journal_read_failure(const std::filesystem::path& root) {
+    for (const bool allocation_failure : {true, false}) {
+        const auto case_root = root /
+            (allocation_failure ? L"JournalAllocation" : L"JournalSharing");
+        kf2::config::ConfigPreview preview;
+        preview.config_root = case_root / L"Config";
+        preview.files.push_back({L"KFEngine.ini", "original", "replacement"});
+        const auto target = preview.config_root / L"KFEngine.ini";
+        write_bytes(target, "original");
+        kf2::backup::BackupStore store{case_root / L"State"};
+        const auto applied = kf2::config::apply_preview(
+            preview, store, {.game_running = false});
+        CHECK(applied.has_value());
+        const auto& backup = applied.value().backup;
+        write_journal(backup, "replacement_started");
+        const auto journal_bytes = read_bytes(backup.journal_path);
+        HANDLE blocker = INVALID_HANDLE_VALUE;
+        if (allocation_failure) {
+            journal_allocation_target = backup.journal_path;
+            journal_buffer_minimum_size = journal_bytes.size();
+            journal_buffer_failures = 0;
+            kf2::platform::windows::set_bounded_read_hook_for_testing(
+                &fail_journal_read_buffer);
+        } else {
+            blocker = lock_without_read_sharing(backup.journal_path);
+            CHECK(blocker != INVALID_HANDLE_VALUE);
+        }
+        const auto failed = kf2::backup::recover_transactions(store, preview.config_root);
+        if (blocker != INVALID_HANDLE_VALUE) CHECK(CloseHandle(blocker) != FALSE);
+        kf2::platform::windows::set_bounded_read_hook_for_testing(nullptr);
+        fail_journal_buffer = false;
+        CHECK(!failed.has_value());
+        CHECK(failed.error().native_code == static_cast<std::uint32_t>(allocation_failure
+            ? ERROR_NOT_ENOUGH_MEMORY : ERROR_SHARING_VIOLATION));
+        CHECK(!allocation_failure || journal_buffer_failures == 1);
+        CHECK(read_bytes(backup.journal_path) == journal_bytes);
+        CHECK(!has_quarantined_copy(backup.journal_path, journal_bytes));
+        CHECK(read_bytes(target) == "replacement");
+        const auto retried = kf2::backup::recover_transactions(store, preview.config_root);
+        CHECK(retried.has_value());
+        CHECK(retried.value().transactions_recovered == 1);
+        CHECK(retried.value().outcome == kf2::backup::RecoveryOutcome::rolled_back);
+        CHECK(read_bytes(target) == "original");
+        CHECK(read_bytes(backup.journal_path).find("state=complete") != std::string::npos);
+    }
+    return EXIT_SUCCESS;
 }
 
 std::string replace_manifest_file_field(std::string manifest,
@@ -221,6 +286,7 @@ int main() {
     const fs::path root{KF2_TEST_ROOT};
     fs::remove_all(root);
     CHECK(test_manifest_serialization_failure(root) == EXIT_SUCCESS);
+    CHECK(test_operational_journal_read_failure(root) == EXIT_SUCCESS);
     const auto config_root = root / L"Config-\u00e4\u4e2d";
     const auto target = config_root / L"KFEngine.ini";
     const std::string original = "[Engine.Engine]\r\nMaxSmoothedFrameRate=62\r\n";
