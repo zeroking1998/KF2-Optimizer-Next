@@ -167,6 +167,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Preserve Adaptive's confirmed graphics composition, recovery obligations and
+  timing through Escape/trader pauses; reconcile world changes through verified
+  restoration before resuming the saved mode, without trusting old-world replies.
+
 - Preserve existing backups when manifest serialization fails before replacing
   their manifest or journal, and transfer completed buffers without copying.
 
