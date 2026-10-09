@@ -3,6 +3,7 @@
 #include <array>
 #include <format>
 #include <string_view>
+#include <utility>
 
 #include "app/application_runtime.hpp"
 #include "features/telemetry/telemetry_effect_stage.hpp"
@@ -167,8 +168,10 @@ bool UiRuntime::save_flex_report(const flex::ObservationSnapshot& observed) {
                << (observed.solver_tracking_quarantined ? "true" : "false")
                << ",\"relay_healthy\":"
                << (observed.pass_through_healthy ? "true" : "false") << '}';
+    if (!report) return false;
     const auto ticket = file_writer.submit(
-        settings_path.parent_path() / L"flex-session-last.json", report.str());
+        settings_path.parent_path() / L"flex-session-last.json",
+        std::move(report).str());
     if (ticket == 0) return false;
     return file_writer.wait(ticket, std::chrono::seconds{5});
 }

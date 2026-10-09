@@ -177,6 +177,9 @@ are visible immediately.
 
 ### Bug fixes
 
+- Preserve the last valid FleX diagnostic report if serialization fails; transfer
+  a completed report to the writer without copying its full text.
+
 - Read DXGI event and real-time buffer loss from supported session statistics.
   Preserve degraded measurement quality without inventing missing-frame counts,
   including when only a lost buffer is known, and keep Adaptive from treating

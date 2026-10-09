@@ -156,6 +156,11 @@ next poll detects replacement. Existing catch-up/freshness limits remain intact.
 
 ### Adaptive Present observations
 
+Explicit FleX report export and session finalization reject a failed report
+stream before submitting any file write. A completed stream transfers its
+owned text to the existing asynchronous writer; diagnostic gates, JSON fields,
+atomic replacement and the existing completion timeout remain unchanged.
+
 DXGI startup combines the Present event-ID filter with the bound process PID
 scope filter. The consumer PID/creation-identity guard remains authoritative.
 Rejected PID filtering (`ERROR_INVALID_PARAMETER` or `ERROR_NOT_SUPPORTED`)

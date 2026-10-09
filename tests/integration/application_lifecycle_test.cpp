@@ -57,9 +57,20 @@ thread_local bool fail_flex_text_allocation{};
 thread_local bool fail_settings_growth{};
 thread_local bool settings_growth_failed{};
 thread_local bool keep_settings_allocation_failure{};
+thread_local bool fail_flex_report_growth{};
+thread_local bool flex_report_growth_failed{};
+thread_local std::size_t flex_report_copy_bytes{};
+thread_local std::size_t flex_report_copies{};
 }
 
 void* operator new(std::size_t size) {
+    if (flex_report_copy_bytes && size == flex_report_copy_bytes)
+        ++flex_report_copies;
+    if (fail_flex_report_growth && size >= 1024) {
+        fail_flex_report_growth = false;
+        flex_report_growth_failed = true;
+        throw std::bad_alloc{};
+    }
 #if _ITERATOR_DEBUG_LEVEL != 0
     // Debug STL moves allocate tiny iterator proxies even for empty strings.
     constexpr std::size_t persistent_failure_minimum = 64;
@@ -627,6 +638,30 @@ int test_flex_report_boundaries() {
     CHECK(runtime.model.notice()->code == L"SUPPORT_BUNDLE_EXPORTED");
     CHECK(read_bytes(report).find("\"update_calls\":181") != std::string::npos);
     const auto bytes = read_bytes(report);
+    const auto checkpoint = *runtime.last_flex_observation;
+    fail_flex_report_growth = true;
+    const bool partial_saved = runtime.save_flex_report(checkpoint);
+    fail_flex_report_growth = false;
+    const auto after_growth_failure = read_bytes(report);
+    // Restore this owned fixture before reporting an unfixed Main failure.
+    CHECK(runtime.save_flex_report(checkpoint));
+    CHECK(read_bytes(report) == bytes);
+    std::cout << "FleX report growth failure: injected="
+              << flex_report_growth_failed << "; saved=" << partial_saved
+              << "; before=" << bytes.size()
+              << "; after=" << after_growth_failure.size() << '\n';
+    CHECK(flex_report_growth_failed);
+    CHECK(!partial_saved);
+    CHECK(after_growth_failure == bytes);
+    const std::string expected_copy{bytes};
+    flex_report_copy_bytes = expected_copy.capacity() + 1;
+    const bool copied_saved = runtime.save_flex_report(checkpoint);
+    flex_report_copy_bytes = 0;
+    CHECK(copied_saved);
+    CHECK(read_bytes(report) == bytes);
+    std::cout << "FleX report payload-copy allocations: "
+              << flex_report_copies << '\n';
+    CHECK(flex_report_copies == 0);
     const auto stamp = fs::last_write_time(report);
     publish(182);
     runtime.observe_flex_process();
