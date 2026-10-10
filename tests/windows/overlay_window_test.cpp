@@ -81,6 +81,38 @@ struct OverlayWindowTestAccess {
 }  // namespace kf2::overlay
 
 int main() {
+    {
+        using namespace kf2::overlay;
+        long cached = std::numeric_limits<long>::min();
+        std::wstring text;
+        CHECK(detail::rounded_metric_text(0.0, cached, text) == L"—");
+        CHECK(detail::rounded_metric_text(0.0, cached, text) == L"—");
+        CHECK(detail::rounded_metric_text(0.4, cached, text) == L"0");
+        CHECK(detail::rounded_metric_text(0.0, cached, text) == L"—");
+        CHECK(detail::rounded_metric_text(55.6, cached, text) == L"56");
+
+        OverlayWindowState state;
+        state.metrics_initialized = true;
+        state.target.visible = true;
+        state.target.fps = 60.0;
+        state.target.average_fps = 60.0;
+        state.target.one_percent_low_fps = 55.0;
+        state.average_bounce_started_ms = state.low_bounce_started_ms = 1500;
+        state.average_trend_started_ms = state.low_trend_started_ms = 1500;
+        auto menu = state.target;
+        menu.average_fps = menu.one_percent_low_fps = 0.0;
+        static_cast<void>(detail::update_overlay_metrics(state, menu, 2000, true));
+        CHECK(state.average_bounce_started_ms == 0 && state.low_bounce_started_ms == 0);
+        CHECK(state.average_trend_started_ms == 0 && state.low_trend_started_ms == 0);
+        menu.average_fps = 60.0;
+        menu.one_percent_low_fps = 55.0;
+        static_cast<void>(detail::update_overlay_metrics(state, menu, 4000, true));
+        CHECK(state.average_bounce_started_ms == 0 && state.low_bounce_started_ms == 0);
+        CHECK(state.average_trend_started_ms == 0 && state.low_trend_started_ms == 0);
+        menu.fps = 50.0;
+        static_cast<void>(detail::update_overlay_metrics(state, menu, 6000, true));
+        CHECK(state.fps_bounce_started_ms == 6000);
+    }
     const auto module = GetModuleHandleW(nullptr);
     const auto png_resource = FindResourceW(module, MAKEINTRESOURCEW(202),
                                                RT_RCDATA);
@@ -249,6 +281,8 @@ int main() {
     CHECK(GetForegroundWindow() != window);
     shown.animations_enabled = false;
     shown.fps = 120.0;
+    shown.average_fps = 120.0;
+    shown.one_percent_low_fps = 100.0;
     shown.frame_time_ms = 0.0;
     shown.bounds = {110, 130, 350, 220};
     CHECK(overlay.update(shown).has_value());
@@ -263,6 +297,16 @@ int main() {
     CHECK(overlay.update(shown).has_value());
     CHECK(overlay.render_count() == subpixel_metric_render_count);
     CHECK(overlay.diagnostics().skipped_redraws > 0);
+    // Availability changes are visible, even below the one-FPS threshold.
+    shown.average_fps = 0.0;
+    shown.one_percent_low_fps = 0.0;
+    CHECK(overlay.update(shown).has_value());
+    const auto unavailable_render_count = overlay.render_count();
+    CHECK(unavailable_render_count > subpixel_metric_render_count);
+    shown.average_fps = 0.1;
+    shown.one_percent_low_fps = 0.1;
+    CHECK(overlay.update(shown).has_value());
+    CHECK(overlay.render_count() > unavailable_render_count);
     // The graph is sampled independently, but its Direct2D path must be built
     // only when the history or its vertical layout changes. Other overlay
     // renders reuse the same geometry instead of issuing every line again.

@@ -720,8 +720,11 @@ are visible immediately.
   changes. One persistent interaction stops and rearms for each gameplay world.
 - Re-armed selected-map warming after travel so consecutive rotations to the
   same map are prepared again without retaining the previous world.
-- Prevented transient loading, menu, trader, and early post-map frames from
-  entering Adaptive decisions or depressing the displayed 1% low window.
+- Exclude confirmed loading, Escape and open trader menus from gameplay
+  averages, 1% lows and percentiles. Live FPS remains visible; history starts
+  fresh on gameplay return, including when Adaptive is off. Observe offline
+  menu changes independently of paused maintenance and flush context receipts
+  only on transitions so quiet online matches do not wait for later log writes.
 - Preserved one native graphics baseline across consecutive maps so recovery
   never treats a previously reduced value as the user's new 100% setting.
 - Restored the exact server- or mod-provided online corpse limit when Adaptive

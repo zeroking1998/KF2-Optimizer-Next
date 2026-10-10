@@ -1280,6 +1280,54 @@ int main(int argc, char** argv) {
             CHECK(chunks.front().parsed_session->online_corpse_pool == 0);
             CHECK(chunks.front().parsed_session->online_corpse_maximum == 20);
 
+            // A quiet online match provides no unrelated writes to flush a
+            // buffered UI receipt. Exercise the actual retained-handle reader:
+            // it can observe the transition on the next sample only after flush.
+            {
+                char context_buffer[4096]{};
+                std::ofstream context;
+                context.rdbuf()->pubsetbuf(context_buffer, sizeof(context_buffer));
+                context.open(log, std::ios::binary | std::ios::app);
+                context << "ScriptLog: KF2OPT_SESSION_CONTEXT schema=2 "
+                           "state=online_client_read_only net_mode=NM_Client "
+                           "map=KF-BioticsLab generation=5\n"
+                           "ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=2 "
+                           "state=gameplay net_mode=NM_Client "
+                           "map=KF-BioticsLab generation=5\n";
+                context.flush();
+                CHECK(context.good());
+                worker.request(32'310'000'000ULL);
+                CHECK(worker.wait_until_idle(2s));
+                chunks = worker.take_game_log_chunks(log_binding.identity);
+                CHECK(chunks.size() == 1 && chunks.front().parsed_session);
+                CHECK(kf2::game::game_log_is_active_gameplay(
+                    *chunks.front().parsed_session));
+                const auto gameplay_revision =
+                    chunks.front().parsed_session->gameplay_ui_context_revision;
+
+                const auto visible_size = fs::file_size(log);
+                context << "ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=2 "
+                           "state=menu net_mode=NM_Client "
+                           "map=KF-BioticsLab generation=5\n";
+                CHECK(fs::file_size(log) == visible_size);
+                worker.request(32'320'000'000ULL);
+                CHECK(worker.wait_until_idle(2s));
+                CHECK(worker.take_game_log_chunks(log_binding.identity).empty());
+
+                context.flush();
+                CHECK(context.good());
+                worker.request(32'330'000'000ULL);
+                CHECK(worker.wait_until_idle(2s));
+                chunks = worker.take_game_log_chunks(log_binding.identity);
+                CHECK(chunks.size() == 1 && chunks.front().parsed_session);
+                CHECK(!chunks.front().catching_up);
+                CHECK(chunks.front().parser_stats.backlog_bytes == 0);
+                CHECK(!kf2::game::game_log_is_active_gameplay(
+                    *chunks.front().parsed_session));
+                CHECK(chunks.front().parsed_session->gameplay_ui_context_revision ==
+                    gameplay_revision + 1);
+            }
+
             {
                 std::ofstream output(log, std::ios::binary | std::ios::app);
                 output << "ScriptLog: KF2OPT_MAP_SELECTION schema=1 "

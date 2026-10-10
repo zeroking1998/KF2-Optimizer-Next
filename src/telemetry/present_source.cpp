@@ -17,21 +17,26 @@ constexpr std::uint64_t kTailWindowNs = 5'000'000'000ULL;
 
 FrameMetrics aggregate_windows(std::span<const PresentTimestamp> presents,
                                std::uint64_t now_ns, std::uint64_t stale_after_ns,
-                               std::uint64_t not_before_ns) {
+                               std::uint64_t not_before_ns,
+                               std::optional<std::uint64_t> statistics_boundary) {
     FrameMetrics result;
     if (presents.size() < 2) return result;
     const auto newest = presents.back().monotonic_ns;
-    const auto first_index = [&](std::uint64_t duration) {
-        const auto cutoff = std::max(not_before_ns,
-            newest > duration ? newest - duration : 0);
-        return static_cast<std::size_t>(std::lower_bound(
-            presents.begin(), presents.end(), cutoff,
-            [](const auto& present, auto at) { return present.monotonic_ns < at; }) - presents.begin());
-    };
-    const auto live_first = first_index(kLiveWindowNs);
-    const auto sustained_first = first_index(kSustainedWindowNs);
-    const auto tail_first = first_index(kTailWindowNs);
     const auto interval_count = presents.size() - 1;
+    const auto first_index = [&](std::uint64_t duration, std::uint64_t boundary) {
+        const auto cutoff = std::max(boundary,
+            newest > duration ? newest - duration : 0);
+        return std::min(interval_count, static_cast<std::size_t>(std::lower_bound(
+            presents.begin(), presents.end(), cutoff,
+            [](const auto& present, auto at) { return present.monotonic_ns < at; }) - presents.begin()));
+    };
+    const auto live_first = first_index(kLiveWindowNs, not_before_ns);
+    const auto history_boundary = std::max(not_before_ns,
+        statistics_boundary.value_or(std::numeric_limits<std::uint64_t>::max()));
+    const auto long_first = first_index(PresentSource::longest_window_ns, history_boundary);
+    const auto sustained_first = first_index(kSustainedWindowNs, history_boundary);
+    const auto tail_first = first_index(kTailWindowNs, history_boundary);
+    const auto long_count = interval_count - long_first;
     const auto live_count = interval_count - live_first;
     const auto sustained_count = interval_count - sustained_first;
     const auto tail_count = interval_count - tail_first;
@@ -47,18 +52,38 @@ FrameMetrics aggregate_windows(std::span<const PresentTimestamp> presents,
         return result;
     }
 
+    const auto publish_live = [&](double total) {
+        if (live_count == 0) return;
+        result.frame_time_ms = total / static_cast<double>(live_count);
+        result.fps = 1000.0 / *result.frame_time_ms;
+        result.quality = SampleQuality::good;
+        result.reason = UnavailableReason::none;
+        result.age_ns = age;
+        result.newest_present_ns = newest;
+    };
+    if (long_count == 0) {
+        // Menu/unavailable phases need no historical buffer or percentile sort.
+        double total = 0.0;
+        for (auto index = live_first + 1; index < presents.size(); ++index)
+            total += static_cast<double>(presents[index].monotonic_ns -
+                presents[index - 1].monotonic_ns) / 1'000'000.0;
+        publish_live(total);
+        return result;
+    }
+
     // Ingest has already validated identity and deduplicated/sorted timestamps.
     // Keep each interval's position so one sort serves all overlapping windows,
     // excluding the pair that crosses each window's first retained timestamp.
     struct Interval { double ms; std::size_t index; };
     std::vector<Interval> sorted;
-    sorted.reserve(interval_count);
+    sorted.reserve(long_count);
     double live_total = 0.0;
     double sustained_total = 0.0;
-    for (std::size_t index = 1; index < presents.size(); ++index) {
+    for (auto index = std::min(live_first, long_first) + 1;
+         index < presents.size(); ++index) {
         const auto ms = static_cast<double>(presents[index].monotonic_ns -
             presents[index - 1].monotonic_ns) / 1'000'000.0;
-        sorted.push_back({ms, index});
+        if (index > long_first) sorted.push_back({ms, index});
         if (index > live_first) live_total += ms;
         if (index > sustained_first) sustained_total += ms;
     }
@@ -67,7 +92,7 @@ FrameMetrics aggregate_windows(std::span<const PresentTimestamp> presents,
     const auto rank = [](std::size_t count, double fraction) {
         return static_cast<std::size_t>(std::ceil(static_cast<double>(count) * fraction));
     };
-    const auto long_slow_count = rank(interval_count, 0.01);
+    const auto long_slow_count = rank(long_count, 0.01);
     const auto sustained_slow_count = rank(sustained_count, 0.01);
     const auto median_rank = rank(tail_count, 0.5);
     const auto p95_rank = rank(tail_count, 0.95);
@@ -77,7 +102,7 @@ FrameMetrics aggregate_windows(std::span<const PresentTimestamp> presents,
     for (const auto& interval : sorted) {
         // Sum slow tails in ascending order, just like aggregate_presents(),
         // so FPS, nearest-rank percentiles and 1% lows remain bit-identical.
-        if (++long_rank > interval_count - long_slow_count)
+        if (++long_rank > long_count - long_slow_count)
             long_slow_total += interval.ms;
         if (interval.index > sustained_first &&
             ++sustained_rank > sustained_count - sustained_slow_count)
@@ -89,14 +114,7 @@ FrameMetrics aggregate_windows(std::span<const PresentTimestamp> presents,
             if (tail_rank == p99_rank) result.p99_ms = interval.ms;
         }
     }
-    if (live_count != 0) {
-        result.frame_time_ms = live_total / static_cast<double>(live_count);
-        result.fps = 1000.0 / *result.frame_time_ms;
-        result.quality = SampleQuality::good;
-        result.reason = UnavailableReason::none;
-        result.age_ns = age;
-        result.newest_present_ns = newest;
-    }
+    publish_live(live_total);
     if (sustained_count != 0) {
         result.average_fps = 1000.0 / (sustained_total / static_cast<double>(sustained_count));
         result.sustained_one_percent_low_fps =
@@ -116,6 +134,7 @@ FrameMetrics aggregate_windows(std::span<const PresentTimestamp> presents,
 #ifdef KF2_PRESENT_SOURCE_TESTING
 std::atomic_bool fail_next_drain_publication{false};
 std::atomic<detail::PresentDrainWaitHook> drain_wait_hook{nullptr};
+std::atomic<detail::PresentDrainWaitHook> drain_publication_hook{nullptr};
 #endif
 }
 
@@ -125,6 +144,9 @@ void detail::fail_next_present_drain_publication() noexcept {
 }
 void detail::set_present_drain_wait_hook(PresentDrainWaitHook hook) noexcept {
     drain_wait_hook.store(hook, std::memory_order_release);
+}
+void detail::set_present_drain_publication_hook(PresentDrainWaitHook hook) noexcept {
+    drain_publication_hook.store(hook, std::memory_order_release);
 }
 #endif
 
@@ -209,6 +231,23 @@ void PresentSource::record_loss_locked(std::uint64_t timestamp_ns,
     invalidate_drain_locked();
 }
 
+void PresentSource::set_statistics_boundary(
+    std::optional<std::uint64_t> not_before_ns) {
+    std::scoped_lock lock{mutex_};
+    if (statistics_not_before_ns_ == not_before_ns) return;
+    statistics_not_before_ns_ = not_before_ns;
+    auto live = latest_default_drain_;
+    invalidate_drain_locked();
+    if (live) {
+        live->average_fps.reset();
+        live->sustained_one_percent_low_fps.reset();
+        live->one_percent_low_fps.reset();
+        live->p95_ms.reset();
+        live->p99_ms.reset();
+        live->stutter_count = 0;
+        latest_default_drain_ = std::move(live);
+    }
+}
 bool PresentSource::ingest(const PresentEvent& event) {
     std::scoped_lock lock{mutex_};
     if (!running_ || event.identity != identity_) return false;
@@ -272,6 +311,7 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
     bool uncounted_loss = false;
     std::uint64_t source_generation = 0;
     std::uint64_t selected_stream_id = 0;
+    std::optional<std::uint64_t> statistics_boundary;
     {
         std::scoped_lock lock{mutex_};
         if (!running_ || schema_failure_) {
@@ -282,6 +322,7 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
         reported_loss = reported_loss_;
         uncounted_loss = uncounted_loss_;
         source_generation = drain_generation_;
+        statistics_boundary = statistics_not_before_ns_;
         const std::deque<PresentTimestamp>* selected = nullptr;
         bool selected_fresh = false;
         std::size_t selected_fast_count = 0;
@@ -328,8 +369,12 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
                 reported_loss = 0;
                 uncounted_loss = false;
             }
+            const auto live_cutoff = std::max(not_before_ns,
+                newest > kLiveWindowNs ? newest - kLiveWindowNs : 0);
+            const auto copy_cutoff = std::min(live_cutoff, std::max(cutoff,
+                statistics_boundary.value_or(std::numeric_limits<std::uint64_t>::max())));
             const auto first = std::lower_bound(
-                selected->begin(), selected->end(), cutoff,
+                selected->begin(), selected->end(), copy_cutoff,
                 [](const PresentTimestamp& present,
                    std::uint64_t timestamp) {
                     return present.monotonic_ns < timestamp;
@@ -338,7 +383,8 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
         }
     }
 
-    auto result = aggregate_windows(long_term, now_ns, stale_after_ns, not_before_ns);
+    auto result = aggregate_windows(long_term, now_ns, stale_after_ns,
+        not_before_ns, statistics_boundary);
     result.loss_count += reported_loss;
     result.source_generation = source_generation;
     result.stream_id = selected_stream_id;
@@ -435,6 +481,8 @@ void PresentSource::drain_worker(std::stop_token stop) noexcept {
                 auto metrics = drain(request.now_ns, request.stale_after_ns,
                                      request.not_before_ns);
 #ifdef KF2_PRESENT_SOURCE_TESTING
+                if (auto hook = drain_publication_hook.load(std::memory_order_acquire))
+                    hook(stop);
                 if (fail_next_drain_publication.exchange(
                         false, std::memory_order_acq_rel)) {
                     throw std::bad_alloc{};
