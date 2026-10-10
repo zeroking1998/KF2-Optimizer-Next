@@ -7144,7 +7144,32 @@ int main(int argc, char** argv) {
     Microsoft::WRL::ComPtr<IUIAutomationElement> root_element;
     CHECK(SUCCEEDED(automation->ElementFromHandle(hwnd, &root_element)));
     BSTR name = nullptr;
-    CHECK(SUCCEEDED(root_element->get_CurrentName(&name)));
+    const HRESULT name_result = root_element->get_CurrentName(&name);
+    if (FAILED(name_result)) {
+        wchar_t title[256]{};
+        GetWindowTextW(hwnd, title, static_cast<int>(std::size(title)));
+        VARIANT property{};
+        const HRESULT property_result = root_element->GetCurrentPropertyValue(
+            UIA_NamePropertyId, &property);
+        std::wcerr << L"UIA root-name failure: name HRESULT=0x" << std::hex
+                   << static_cast<unsigned long>(name_result)
+                   << L"; property HRESULT=0x"
+                   << static_cast<unsigned long>(property_result) << std::dec
+                   << L"; property type=" << property.vt
+                   << L"; window valid=" << IsWindow(hwnd)
+                   << L"; current window matches="
+                   << (graphical.value().native_window_handle() == hwnd)
+                   << L"; title=" << title
+                   << L"; allocation faults=" << fail_flex_text_allocation
+                   << L'/' << fail_settings_growth
+                   << L'/' << keep_settings_allocation_failure
+                   << L'/' << fail_flex_report_growth << L'\n';
+        if (SUCCEEDED(property_result) && property.vt == VT_BSTR)
+            std::wcerr << L"UIA root-name property="
+                       << (property.bstrVal ? property.bstrVal : L"<null>") << L'\n';
+        VariantClear(&property);
+    }
+    CHECK(SUCCEEDED(name_result));
     CHECK(std::wstring_view{name} == L"KF2 Optimizer Next");
     SysFreeString(name);
     SendMessageW(hwnd, WM_CLOSE, 0, 0);
