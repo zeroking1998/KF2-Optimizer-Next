@@ -204,6 +204,10 @@ are visible immediately.
 
 ### Bug fixes
 
+- Preserve Adaptive's confirmed graphics composition, recovery obligations and
+  timing through Escape/trader pauses; reconcile world changes through verified
+  restoration before resuming the saved mode, without trusting old-world replies.
+
 - Keep offline Adaptive-off graphics restoration unconfirmed after a failed
   original readback. Release mode/corpse ownership immediately and retry originals
   through the existing baseline backoff before applying fixed effects.

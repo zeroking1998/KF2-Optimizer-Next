@@ -79,6 +79,12 @@ confirmed capped/variable mode change discards every mixed frame statistic and
 quality-response window before Adaptive can act again. The configured target
 FPS is preserved.
 
+Escape/trader pauses reset measurement windows, not confirmed live graphics,
+reduction floors or queued rollback. On a provider/world change, existing
+restoration debt protects any owned or uncertain composition until the current
+provider confirms an authenticated disable/APPLIED; only then may the saved
+Adaptive mode resume. Old-world replies cannot confirm the new provider.
+
 ## 5. Configuration actions
 
 Configuration changes are transactional: preview, backup, write, verify, and

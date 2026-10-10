@@ -28,6 +28,7 @@ struct AdaptiveRuntimeProviderIdentity final {
     std::uint64_t process_start_id{0};
     std::optional<std::uint64_t> session_generation;
     std::optional<std::uint16_t> port;
+    std::uint64_t load_map_observed_ns{0};
 };
 
 [[nodiscard]] inline constexpr bool adaptive_runtime_provider_changed(
@@ -35,7 +36,9 @@ struct AdaptiveRuntimeProviderIdentity final {
     const AdaptiveRuntimeProviderIdentity& current) noexcept {
     return previous.process_start_id != current.process_start_id ||
            previous.session_generation != current.session_generation ||
-           previous.port != current.port;
+           previous.port != current.port ||
+           (current.load_map_observed_ns != 0 &&
+            previous.load_map_observed_ns != current.load_map_observed_ns);
 }
 
 [[nodiscard]] inline constexpr bool detailed_adaptive_diagnostics_enabled(

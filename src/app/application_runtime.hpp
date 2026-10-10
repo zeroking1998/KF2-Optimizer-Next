@@ -288,6 +288,7 @@ struct UiRuntime {
     std::uint64_t adaptive_runtime_mode_process_start_id{0};
     std::optional<std::uint64_t> adaptive_runtime_mode_provider_generation;
     std::optional<std::uint16_t> adaptive_runtime_mode_port;
+    std::uint64_t adaptive_runtime_mode_load_map_ns{0};
     std::uint64_t adaptive_runtime_mode_last_attempt_ns{0};
     bool adaptive_runtime_mode_confirmed{false};
     bool adaptive_quality_state_known{true};

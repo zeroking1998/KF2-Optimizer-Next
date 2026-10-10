@@ -3289,8 +3289,23 @@ int test_adaptive_toggle_save_failure() {
             runtime.reconcile_adaptive_runtime_mode(frame);
             fresh.finish();
             CHECK(finish_mode(runtime));
-            CHECK(runtime.adaptive_runtime_mode_confirmed);
-            CHECK(fresh.command.find(previous ? " enable " : " disable ") != std::string::npos);
+            CHECK(fresh.command.find(" disable 100\n") != std::string::npos);
+            CHECK(!runtime.adaptive_restore_debt);
+            CHECK(runtime.adaptive_resource_quality.effective_quality() == 100);
+            CHECK(runtime.adaptive_quality_state_known);
+            CHECK(runtime.adaptive_runtime_mode_confirmed == !previous);
+            if (previous) {
+                AdaptiveTestReceiver enabled{"applied"};
+                CHECK(enabled.port != 0);
+                replace_frame_gameplay(frame, [&](auto& session) {
+                    session.telemetry_control_port = enabled.port;
+                });
+                runtime.reconcile_adaptive_runtime_mode(frame);
+                enabled.finish();
+                CHECK(finish_mode(runtime));
+                CHECK(runtime.adaptive_runtime_mode_confirmed);
+                CHECK(enabled.command.find(" enable ") != std::string::npos);
+            }
             CHECK(read_bytes(runtime.settings_path) == original);
 
             // Successful deferred saves retain the existing immediate preference
@@ -3358,6 +3373,88 @@ int test_adaptive_restore_debt() {
     CHECK(bound.has_value());
     runtime.game_process = bound.value();
     runtime.adaptive_control_token = "0123456789abcdef0123456789abcdef";
+    // Menu/trader boundaries do not restore live graphics. Exercise the real
+    // controller with both offline and online context, not a copied state model.
+    for (const bool offline : {true, false}) {
+        kf2::telemetry_pipeline::TelemetryFrame pause;
+        pause.identity = {bound.value().pid, bound.value().process_start_id};
+        pause.observed_at_ns = runtime.monotonic_ns();
+        pause.offline_gameplay = offline;
+        replace_frame_gameplay(pause, [&](auto& session) {
+            session.map = "KF-Ownership";
+            session.net_mode = offline ? "NM_Standalone" : "NM_Client";
+            session.optimizer_session_generation = 42;
+        });
+        runtime.adaptive_runtime_mode_process_start_id = bound.value().process_start_id;
+        runtime.adaptive_runtime_mode_provider_generation = 42;
+        runtime.adaptive_runtime_mode_confirmed = true;
+        runtime.adaptive_gameplay_active = true;
+        runtime.adaptive_map = "KF-Ownership";
+        runtime.adaptive_resource_quality.cpu = 80;
+        runtime.adaptive_resource_quality.gpu = 70;
+        runtime.adaptive_resource_quality.vram = 90;
+        runtime.adaptive_resource_quality.ram = 85;
+        runtime.adaptive_resource_quality.overdraw = 75;
+        runtime.adaptive_resource_quality.effects = 60;
+        runtime.adaptive_quality_state_known = false;
+        runtime.adaptive_quality_reduction_floor.cpu = 90;
+        runtime.adaptive_quality_reduction_floor.effects = 80;
+        runtime.adaptive_quality_rollback_target = 90;
+        runtime.adaptive_quality_rollback_resource =
+            kf2::game::AdaptiveResourceControl::cpu;
+        runtime.adaptive_quality_last_dispatch_ns = 11;
+        runtime.adaptive_quality_last_applied_ns = 12;
+        const auto sequence = runtime.adaptive_control_sequence;
+        runtime.update_adaptive_controller(pause);
+        CHECK(runtime.model.status().adaptive_quality_score == 60);
+        pause.active_gameplay = true;
+        ++pause.observed_at_ns;
+        runtime.update_adaptive_controller(pause);
+        CHECK(runtime.adaptive_resource_quality.cpu == 80);
+        CHECK(runtime.adaptive_resource_quality.gpu == 70);
+        CHECK(runtime.adaptive_resource_quality.vram == 90);
+        CHECK(runtime.adaptive_resource_quality.ram == 85);
+        CHECK(runtime.adaptive_resource_quality.overdraw == 75);
+        CHECK(runtime.adaptive_resource_quality.effects == 60);
+        CHECK(!runtime.adaptive_quality_state_known);
+        CHECK(runtime.adaptive_quality_reduction_floor.cpu == 90);
+        CHECK(runtime.adaptive_quality_reduction_floor.effects == 80);
+        CHECK(runtime.adaptive_quality_rollback_target == 90);
+        CHECK(runtime.adaptive_quality_rollback_resource ==
+              kf2::game::AdaptiveResourceControl::cpu);
+        CHECK(runtime.adaptive_quality_last_dispatch_ns == 11);
+        CHECK(runtime.adaptive_quality_last_applied_ns == 12);
+        CHECK(runtime.adaptive_control_sequence == sequence);
+        CHECK(!runtime.adaptive_restore_debt);
+    }
+    runtime.adaptive_resource_quality.reset(100);
+    runtime.adaptive_quality_reduction_floor.reset(10);
+    runtime.adaptive_quality_rollback_target.reset();
+    runtime.adaptive_quality_rollback_resource.reset();
+    // A configured ceiling is not itself evidence of a live reduction. An
+    // applied reduction at that same ceiling still owns its native composition.
+    runtime.optimizer_settings.adaptive_maximum_quality = 90;
+    for (const auto scenario : {std::tuple{90, 0ULL, false},
+                                std::tuple{80, 0ULL, true},
+                                std::tuple{90, 12ULL, true}}) {
+        const auto [quality, applied_at, owns_restore] = scenario;
+        runtime.adaptive_resource_quality.reset(quality);
+        runtime.adaptive_quality_state_known = true;
+        runtime.adaptive_quality_last_applied_ns = applied_at;
+        runtime.adaptive_runtime_mode_provider_generation = 42;
+        runtime.adaptive_restore_debt.reset();
+        kf2::telemetry_pipeline::TelemetryFrame changed;
+        changed.observed_at_ns = runtime.monotonic_ns();
+        replace_frame_gameplay(changed, [](auto& session) {
+            session.optimizer_session_generation = 43;
+        });
+        runtime.reconcile_adaptive_runtime_mode(changed);
+        CHECK(runtime.adaptive_restore_debt.has_value() == owns_restore);
+        CHECK(runtime.adaptive_resource_quality.effective_quality() == quality);
+    }
+    runtime.optimizer_settings.adaptive_maximum_quality = 100;
+    runtime.adaptive_restore_debt.reset();
+    runtime.adaptive_resource_quality.reset(100);
     runtime.adaptive_resource_quality.gpu = 70;
     runtime.adaptive_resource_quality.effects = 80;
     runtime.adaptive_quality_state_known = true;
@@ -3435,7 +3532,10 @@ int test_adaptive_restore_debt() {
         const auto deadline = std::chrono::steady_clock::now() +
             std::chrono::seconds{3};
         while (runtime.adaptive_mode_dispatcher.busy() &&
-               std::chrono::steady_clock::now() < deadline) Sleep(2);
+               std::chrono::steady_clock::now() < deadline) {
+            runtime.poll_adaptive_runtime_mode();
+            Sleep(2);
+        }
         runtime.poll_adaptive_runtime_mode();
     };
     // Reattach retries in the existing background worker, with its 5s backoff.
@@ -3491,6 +3591,77 @@ int test_adaptive_restore_debt() {
         receiver.finish();
         CHECK(receiver.command.find(" enable ") != std::string::npos);
         CHECK(runtime.adaptive_runtime_mode_confirmed);
+    }
+    // A new World invalidates a mode receipt from the old listener even when
+    // that old APPLIED disable is already waiting in the worker's result slot.
+    runtime.adaptive_restore_debt = bound.value();
+    runtime.adaptive_resource_quality.gpu = 65;
+    runtime.adaptive_quality_state_known = false;
+    {
+        AdaptiveTestReceiver old_world{"applied"};
+        CHECK(old_world.port != 0);
+        replace_frame_gameplay(frame, [&](auto& session) {
+            session.telemetry_control_port = old_world.port;
+        });
+        runtime.reconcile_adaptive_runtime_mode(frame);
+        old_world.finish();
+        replace_frame_gameplay(frame, [](auto& session) {
+            session.optimizer_session_generation = 43;
+            session.telemetry_control_port.reset();
+        });
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.adaptive_restore_debt.has_value());
+        CHECK(runtime.adaptive_resource_quality.gpu == 65);
+        CHECK(!runtime.adaptive_quality_state_known);
+        CHECK(!runtime.adaptive_runtime_mode_confirmed);
+        CHECK(!runtime.adaptive_runtime_mode_pending);
+    }
+    // Preserve the restoration obligation before consuming a failed in-flight
+    // quality result: a lost reply cannot prove that KF2 kept quality at 100.
+    runtime.adaptive_restore_debt.reset();
+    runtime.adaptive_resource_quality.reset(100);
+    runtime.adaptive_quality_state_known = true;
+    runtime.adaptive_runtime_mode_process_start_id = bound.value().process_start_id;
+    runtime.adaptive_runtime_mode_provider_generation = 43;
+    runtime.adaptive_runtime_mode_port.reset();
+    runtime.adaptive_runtime_mode_confirmed = true;
+    {
+        AdaptiveTestReceiver quality{"invalid"};
+        CHECK(quality.port != 0);
+        runtime.adaptive_control_pending = kf2::app::AdaptiveRuntimePendingRequest{
+            .sequence = 77, .action_id = 77, .generation = {},
+            .previous_quality = 100, .requested_quality = 90,
+            .resource = kf2::game::AdaptiveResourceControl::gpu};
+        const auto started = runtime.adaptive_control_dispatcher.start({
+            quality.port, runtime.adaptive_control_token, 77,
+            kf2::game::AdaptiveResourceControl::gpu, 90});
+        CHECK(started.has_value() && started.value());
+        quality.finish();
+        replace_frame_gameplay(frame, [](auto& session) {
+            session.load_map_observed_ns = 123; // same-name travel, same generation
+        });
+        runtime.update_adaptive_controller(frame);
+        CHECK(runtime.adaptive_restore_debt.has_value());
+        CHECK(!runtime.adaptive_control_pending);
+        CHECK(!runtime.adaptive_control_dispatcher.busy());
+        CHECK(!runtime.adaptive_runtime_mode_confirmed);
+    }
+    // The existing dispatcher must not deadlock behind debt: after the quality
+    // outcome was consumed, the new endpoint receives disable before enable.
+    {
+        AdaptiveTestReceiver restored{"applied"};
+        CHECK(restored.port != 0);
+        replace_frame_gameplay(frame, [&](auto& session) {
+            session.telemetry_control_port = restored.port;
+        });
+        runtime.reconcile_adaptive_runtime_mode(frame);
+        poll_worker();
+        restored.finish();
+        CHECK(restored.command.find(" disable 100\n") != std::string::npos);
+        CHECK(!runtime.adaptive_restore_debt);
+        CHECK(runtime.adaptive_resource_quality.effective_quality() == 100);
+        CHECK(runtime.adaptive_quality_state_known);
+        CHECK(!runtime.adaptive_runtime_mode_confirmed);
     }
     // An acknowledgement invalidated by detach cannot clear the obligation.
     runtime.adaptive_restore_debt = bound.value();
@@ -6991,6 +7162,9 @@ int main(int argc, char** argv) {
             kf2::config::Settings{}, transition_events, options.game_discovery,
             kf2::app::StartMode::read_only, root / L"portable"};
         runtime.game_process = kf2::game::GameProcessIdentity{424242, 9001, {}};
+        // This scenario changes corpse availability/labels, not the provider.
+        runtime.adaptive_runtime_mode_process_start_id = 9001;
+        runtime.adaptive_runtime_mode_confirmed = true;
         kf2::telemetry_pipeline::TelemetryFrame frame;
         frame.identity = {424242, 9001};
         frame.active_gameplay = true;

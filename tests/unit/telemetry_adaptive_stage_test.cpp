@@ -321,6 +321,12 @@ int main() {
         provider_generation_7, provider_generation_8));
     CHECK(!adaptive_runtime_provider_changed(
         provider_generation_8, provider_generation_8));
+    auto same_name_travel = provider_generation_8;
+    same_name_travel.load_map_observed_ns = 123;
+    CHECK(adaptive_runtime_provider_changed(
+        provider_generation_8, same_name_travel));
+    CHECK(!adaptive_runtime_provider_changed(same_name_travel, same_name_travel));
+    CHECK(!adaptive_runtime_provider_changed(same_name_travel, provider_generation_8));
     CHECK(should_log_adaptive_decision(
         true, false, 1'000'000'000ULL, 900'000'000ULL));
     CHECK(should_log_adaptive_decision(

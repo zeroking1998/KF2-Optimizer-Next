@@ -11,8 +11,11 @@ void UiRuntime::update_adaptive_controller(
     const auto now_ns = frame.observed_at_ns;
     const bool active_gameplay = frame.active_gameplay;
     auto status = model.adaptive_status();
-    poll_adaptive_runtime_mode();
+    // Capture World ownership before consuming possibly lost old replies.
     reconcile_adaptive_runtime_mode(frame);
+    // Consume both workers before the debt gate: busy remains true until poll.
+    poll_adaptive_quality_dispatcher();
+    poll_adaptive_runtime_mode();
     if (adaptive_restore_debt) {
         // Do not rebase on gameplay/menu entry or issue reductions while the
         // previous live composition has not been restored by KF2.
@@ -21,7 +24,7 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_state = L"recovering";
         status.adaptive_action = L"verify queued restore";
         status.adaptive_reason =
-            L"Waiting for KF2 to confirm restoration after telemetry detached";
+            L"Waiting for KF2 to confirm the previous live graphics are restored";
         status.adaptive_quality_score =
             adaptive_resource_quality.effective_quality();
         status.adaptive_data_quality = L"DEGRADED";
@@ -78,7 +81,6 @@ void UiRuntime::update_adaptive_controller(
         return;
     }
     const auto response_context = observe_adaptive_quality_response(frame);
-    poll_adaptive_quality_dispatcher();
     if (!game_process || !adaptive_locks_valid || adaptive_overhead_frozen) {
         status.adaptive_state = adaptive_locks_valid && !adaptive_overhead_frozen
                 ? L"ready" : L"frozen";
@@ -93,7 +95,7 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_confidence_percent = 0;
         status.adaptive_drop_risk_percent = 0;
         status.adaptive_quality_score =
-            optimizer_settings.adaptive_maximum_quality;
+            adaptive_resource_quality.effective_quality();
         status.adaptive_headroom_available_percent = 0;
         status.adaptive_data_quality = L"NOT_AVAILABLE";
         status.adaptive_prediction = L"not available";
@@ -133,7 +135,7 @@ void UiRuntime::update_adaptive_controller(
         status.adaptive_confidence_percent = 0;
         status.adaptive_drop_risk_percent = 0;
         status.adaptive_quality_score =
-            optimizer_settings.adaptive_maximum_quality;
+            adaptive_resource_quality.effective_quality();
         status.adaptive_headroom_available_percent = 0;
         status.adaptive_data_quality = L"NOT_AVAILABLE";
         status.adaptive_prediction = L"not available";
@@ -157,15 +159,6 @@ void UiRuntime::update_adaptive_controller(
         adaptive_gameplay_active = true;
         adaptive_governor.reset();
         adaptive_decision = {};
-        adaptive_resource_quality.reset(
-            optimizer_settings.adaptive_maximum_quality);
-        adaptive_quality_state_known = true;
-        adaptive_quality_reduction_floor.reset(
-            optimizer_settings.adaptive_minimum_quality);
-        adaptive_quality_rollback_target.reset();
-        adaptive_quality_rollback_resource.reset();
-        adaptive_quality_last_dispatch_ns = 0;
-        adaptive_quality_last_applied_ns = 0;
         adaptive_frame_not_before_ns = now_ns;
         adaptive_map_ready_ns = now_ns;
         events->append({0, diagnostics::Severity::info,
@@ -227,10 +220,6 @@ void UiRuntime::update_adaptive_controller(
         adaptive_decision = {};
         if (sample_build.sample.map_changed) {
             adaptive_map_ready_ns = now_ns;
-            adaptive_quality_reduction_floor.reset(
-                optimizer_settings.adaptive_minimum_quality);
-            adaptive_quality_rollback_target.reset();
-            adaptive_quality_rollback_resource.reset();
         }
         if (sample_build.waiting_for_gameplay_telemetry || waiting_for_corpse_readback) {
             // Keep advancing the controller boundary while loading, without
