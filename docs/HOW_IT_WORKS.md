@@ -34,6 +34,15 @@ live FPS, average FPS, 1% low FPS, frame time, CPU/GPU load, visible living
 actors, visible corpses, active corpses, distance, and Zed Time state. Every
 decision records the evidence window it used.
 
+Live FPS and frame time remain visible in menus. Rolling averages, 1% lows,
+percentiles and stutters count only confirmed gameplay, independently of
+Adaptive. Escape, open trader menus and loading reset that history; closing
+the trader menu during trader time resumes it. Missing history shows `—`.
+The boundary is the observed context receipt, not the exact keypress.
+Offline menu observation runs before the provider-maintenance cadence, including
+paused ticks. Both providers flush the existing local log only on a UI-context
+transition; ordinary telemetry logging and its buffering remain unchanged.
+
 ## 3. Performance pressure
 
 The controller combines complementary signals:

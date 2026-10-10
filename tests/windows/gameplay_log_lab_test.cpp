@@ -1013,8 +1013,13 @@ int main() {
     CHECK(telemetry_context_lookup != std::string::npos);
     CHECK(telemetry_probe_scan != std::string::npos);
     CHECK(telemetry_listener_scan != std::string::npos);
-    CHECK(telemetry_cadence_guard < telemetry_context_lookup);
-    CHECK(telemetry_context_lookup < telemetry_probe_scan);
+    const auto telemetry_ui_observation = interaction_tick_body.find(
+        "UpdateGameplayUiState(PrimaryController);");
+    CHECK(telemetry_context_lookup < telemetry_ui_observation);
+    CHECK(telemetry_ui_observation < telemetry_cadence_guard);
+    CHECK(telemetry_cadence_guard < telemetry_probe_scan);
+    CHECK(count_occurrences(interaction_tick_body,
+        "UpdateGameplayUiState(PrimaryController);") == 1);
     CHECK(telemetry_probe_scan < telemetry_listener_scan);
     CHECK(interaction_tick_body.find(
         "ScheduleTelemetryMaintenance(true);") != std::string::npos);
@@ -1675,7 +1680,10 @@ int main() {
         "            class'KF2OptimizerAdaptiveControlListener'") !=
           std::string::npos);
     CHECK(online_context_source.find("SetTimer(") == std::string::npos);
-    CHECK(online_context_source.find("ConsoleCommand(") == std::string::npos);
+    CHECK(count_occurrences(online_context_source, "ConsoleCommand(") == 1);
+    CHECK(online_context_source.find(
+        "PrimaryController.ConsoleCommand(\"FLUSHLOG\", false);") !=
+          std::string::npos);
     CHECK(online_context_source.find(
         "function bool ApplyOnlineGraphicsControl(") != std::string::npos);
     CHECK(online_context_source.find(
@@ -2140,7 +2148,7 @@ int main() {
         "KFPC.MyGFxManager.CurrentMenu == KFPC.MyGFxManager.TraderMenu") !=
         std::string::npos);
     CHECK(interaction_source.find(
-        "ReportGameplayUiState(\"unavailable\")") != std::string::npos);
+        "ReportGameplayUiState(\"unavailable\", PrimaryController)") != std::string::npos);
     CHECK(online_context_source.find(
         "KF2OPT_GAMEPLAY_CONTEXT schema=2 state=") != std::string::npos);
     CHECK(online_context_source.find(
@@ -2158,6 +2166,26 @@ int main() {
     CHECK(online_context_source.find(
         "!(MapName ~= LastOnlineContextMapName)") != std::string::npos);
     CHECK(online_context_source.find("replication") == std::string::npos);
+    // Log emission alone cannot make a menu receipt visible to the tailer.
+    // Flush only after a deduplicated transition, never on unchanged ticks.
+    for (const auto& source : {interaction_source, online_context_source}) {
+        const auto report_start = source.find(
+            source == interaction_source
+                ? "function ReportGameplayUiState("
+                : "function ReportOnlineGameplayUiState(");
+        const auto report_end = source.find("\nfunction ", report_start + 1);
+        CHECK(report_start != std::string::npos);
+        CHECK(report_end != std::string::npos);
+        const auto report = source.substr(report_start, report_end - report_start);
+        const auto unchanged_return = report.find("return;");
+        const auto receipt = report.find("`log(\"KF2OPT_GAMEPLAY_CONTEXT");
+        const auto flush = report.find(
+            "PrimaryController.ConsoleCommand(\"FLUSHLOG\", false);");
+        CHECK(unchanged_return < receipt);
+        CHECK(receipt < flush && flush != std::string::npos);
+        CHECK(count_occurrences(source, "ConsoleCommand(\"FLUSHLOG\"") == 1);
+        CHECK(report.find("if (PrimaryController != None)", receipt) < flush);
+    }
     const auto online_tick = online_context_source.find(
         "event Tick(float DeltaTime)");
     const auto client_context = online_context_source.find(
@@ -2258,9 +2286,9 @@ int main() {
     CHECK(interaction_source.find(
         "AchievementPrewarmRequestStartedRealTime = 0.0;",
         achievement_complete) < achievement_prewarm);
-    CHECK(interaction_source.find(
-        "TryPrewarmAchievements(PrimaryController);", interaction_tick) <
-        interaction_source.find("UpdateGameplayUiState(", interaction_tick));
+    CHECK(interaction_source.find("UpdateGameplayUiState(", interaction_tick) <
+        interaction_source.find(
+            "TryPrewarmAchievements(PrimaryController);", interaction_tick));
     CHECK(interaction_source.find(
         "bAchievementPrewarmRequested = false", prepare_for_world) <
         session_ended);

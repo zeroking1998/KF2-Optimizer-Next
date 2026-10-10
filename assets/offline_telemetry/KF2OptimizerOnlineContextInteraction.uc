@@ -1,7 +1,7 @@
 // Process-local session classifier installed by the protected viewport. Its
 // context receipt remains read-only. A separate authenticated loopback actor
 // applies reversible local GFXSettings and bounded local corpse-pool actions;
-// it performs no console command or replicated write.
+// it performs no replicated write. UI transitions only flush the local log.
 class KF2OptimizerOnlineContextInteraction extends Interaction
     within GameViewportClient;
 
@@ -895,7 +895,8 @@ function ReportSessionContext(
 }
 
 function ReportOnlineGameplayUiState(
-    string State, string NetModeName, string MapName)
+    string State, string NetModeName, string MapName,
+    PlayerController PrimaryController)
 {
     if (State ~= LastReportedGameplayUiState &&
         NetModeName ~= LastReportedGameplayUiNetMode &&
@@ -909,6 +910,11 @@ function ReportOnlineGameplayUiState(
     `log("KF2OPT_GAMEPLAY_CONTEXT schema=2 state="$State$
          " net_mode="$NetModeName$" map="$MapName$
          " generation="$OnlineContextGeneration);
+    // A quiet online match must not buffer menu transitions until later logs.
+    if (PrimaryController != None)
+    {
+        PrimaryController.ConsoleCommand("FLUSHLOG", false);
+    }
 }
 
 function UpdateOnlineGameplayUiState(
@@ -920,19 +926,22 @@ function UpdateOnlineGameplayUiState(
     if (KFPC == None || KFPC.MyGFxManager == None)
     {
         ReportOnlineGameplayUiState(
-            "unavailable", NetModeName, MapName);
+            "unavailable", NetModeName, MapName, PrimaryController);
     }
     else if (!KFPC.MyGFxManager.bMenusOpen)
     {
-        ReportOnlineGameplayUiState("gameplay", NetModeName, MapName);
+        ReportOnlineGameplayUiState(
+            "gameplay", NetModeName, MapName, PrimaryController);
     }
     else if (KFPC.MyGFxManager.CurrentMenu == KFPC.MyGFxManager.TraderMenu)
     {
-        ReportOnlineGameplayUiState("trader", NetModeName, MapName);
+        ReportOnlineGameplayUiState(
+            "trader", NetModeName, MapName, PrimaryController);
     }
     else
     {
-        ReportOnlineGameplayUiState("menu", NetModeName, MapName);
+        ReportOnlineGameplayUiState(
+            "menu", NetModeName, MapName, PrimaryController);
     }
 }
 
@@ -1006,12 +1015,12 @@ event Tick(float DeltaTime)
         if (CurrentWorld.NetMode == NM_Client)
         {
             ReportOnlineGameplayUiState(
-                "unavailable", "NM_Client", MapName);
+                "unavailable", "NM_Client", MapName, PrimaryController);
         }
         else if (CurrentWorld.NetMode == NM_ListenServer)
         {
             ReportOnlineGameplayUiState(
-                "unavailable", "NM_ListenServer", MapName);
+                "unavailable", "NM_ListenServer", MapName, PrimaryController);
         }
         return;
     }

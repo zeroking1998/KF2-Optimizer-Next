@@ -338,6 +338,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     present_session_restart_count = 0;
     if (present_source) static_cast<void>(present_source->stop());
     present_source.reset();
+    fps_statistics_session.reset();
     resource_telemetry_worker.clear();
     resource_telemetry_generation = 0;
     resource_telemetry_publication_sequence = 0;
@@ -647,6 +648,7 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
     for (auto& chunk : chunks) {
         game_log_parser_stats = chunk.parser_stats;
         if (chunk.reset_parser) {
+            fps_statistics_session.reset();
             corpse_telemetry_tracker.reset();
             game_menu_graphics_readback.reset();
             overlay_scene_ready = false;
@@ -656,6 +658,7 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
             game_log_session.reset();
         }
         if (chunk.catching_up) {
+            fps_statistics_session.reset();
             // Neither the previous publication nor a partially replayed map
             // can authorize Adaptive actions while the log reader is behind.
             game_log_session.reset();
@@ -1040,6 +1043,8 @@ void UiRuntime::try_attach_telemetry() {
     const telemetry::SampleIdentity identity{
         game_process->pid, game_process->process_start_id};
     present_source = std::make_unique<telemetry::PresentSource>(identity, 2400);
+    fps_statistics_session.reset();
+    present_source->set_statistics_boundary(std::nullopt);
     static_cast<void>(present_source->start());
     // Failed starts share the existing bounded silent-session retry clock.
     present_session_started_ns = monotonic_ns();

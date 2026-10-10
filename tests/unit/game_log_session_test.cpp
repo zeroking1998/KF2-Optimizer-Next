@@ -462,11 +462,15 @@ int main() {
         "[0048.425] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=menu\n");
     CHECK(escape_menu.has_value());
     CHECK(escape_menu->gameplay_ui_context == GameplayUiContext::menu);
+    CHECK(escape_menu->gameplay_ui_context_revision ==
+          offline->gameplay_ui_context_revision + 1);
     CHECK(!game_log_is_active_gameplay(*escape_menu));
     CHECK(!game_log_is_offline_gameplay(*escape_menu));
     CHECK(!stream.feed(
         "[0048.426] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=menu\n")
                .has_value());
+    CHECK(stream.current()->gameplay_ui_context_revision ==
+          escape_menu->gameplay_ui_context_revision);
     const auto trader_menu = stream.feed(
         "[0048.427] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=trader\n");
     CHECK(trader_menu.has_value());
@@ -478,6 +482,17 @@ int main() {
     CHECK(gameplay_returned->gameplay_ui_context == GameplayUiContext::gameplay);
     CHECK(game_log_is_active_gameplay(*gameplay_returned));
     CHECK(game_log_is_offline_gameplay(*gameplay_returned));
+    CHECK(gameplay_returned->gameplay_ui_context_revision ==
+          escape_menu->gameplay_ui_context_revision + 2);
+    // A worker may publish only the final state of an entire log chunk.
+    const auto batched_menus = stream.feed(
+        "[0048.4281] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=menu\n"
+        "[0048.4282] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=gameplay\n"
+        "[0048.4283] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=trader\n"
+        "[0048.4284] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=gameplay\n");
+    CHECK(batched_menus && game_log_is_active_gameplay(*batched_menus));
+    CHECK(batched_menus->gameplay_ui_context_revision ==
+          gameplay_returned->gameplay_ui_context_revision + 4);
     CHECK(!stream.feed(
         "[0048.429] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=1 state=unknown\n")
                .has_value());
@@ -573,6 +588,8 @@ int main() {
         "[0040.95] ScriptLog: KF2OPT_GAMEPLAY_CONTEXT schema=2 "
         "state=gameplay net_mode=NM_Client map=KF-Outpost generation=7\n")
                .has_value());
+    CHECK(online_ui_stream.current()->gameplay_ui_context_revision ==
+          missing_gfx->gameplay_ui_context_revision);
     CHECK(!game_log_is_active_gameplay(*online_ui_stream.current()));
 
     // A same-map travel is still a new World. Until the UI receipt carries

@@ -171,8 +171,8 @@ void UiRuntime::update_adaptive_controller(
         adaptive_resource_quality.effective_quality(),
         optimizer_settings.adaptive_minimum_quality,
         optimizer_settings.adaptive_maximum_quality);
-    // Keep the overlay's historical statistics intact. Only the controller
-    // excludes presents from before its latest gameplay/action boundary.
+    // Quality actions reset only the controller's window, not the overlay's
+    // independently gated gameplay history.
     const bool bounded_frames_required = present_source &&
         telemetry_pipeline::adaptive_frame_boundary_requires_drain(
             frame, adaptive_frame_not_before_ns);
