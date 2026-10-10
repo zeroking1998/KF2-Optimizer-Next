@@ -232,7 +232,69 @@ bool online_restore_yields_after_failed_attempt(std::string_view body) {
         advance);
     return advance != std::string_view::npos &&
         yield != std::string_view::npos &&
-        body.substr(yield).find("return false;") != std::string_view::npos;
+            body.substr(yield).find("return false;") != std::string_view::npos;
+}
+
+bool online_tick_prioritizes_off_restore(std::string_view body) {
+    const auto mode = body.find("bAdaptiveEnabled = CurrentInteraction != None &&");
+    const auto due = body.find("if (!bAdaptiveEnabled && WorldInfo != None &&\n"
+        "        WorldInfo.RealTimeSeconds - LastPhysicsMutationRealTime >= 0.45)");
+    const auto restore = body.find("RestoreOneOnlineCorpse();");
+    const auto yield = body.find("if (WorldInfo.RealTimeSeconds -\n"
+        "            LastPhysicsMutationRealTime < 0.45) return;", restore);
+    const auto visual = body.find("if (RunOneFixedMinimumVisualAction())");
+    const auto enabled = body.find("if (bAdaptiveEnabled)", visual);
+    return mode != std::string_view::npos && mode < due && due < restore &&
+        restore < yield && yield < visual && visual < enabled &&
+        enabled < body.find("PruneOneOnlineFrozenCorpse()") &&
+        count_occurrences(body, "RestoreOneOnlineCorpse();") == 1 &&
+        count_occurrences(body, "RunOneFixedMinimumVisualAction()") == 1 &&
+        count_occurrences(body, "GetOnlineInteraction()") == 1;
+}
+
+enum class OnlineOffRestore { success, readback_failure, empty, stale_only };
+struct OnlineOffTickCounts {
+    int attempts{};
+    int visuals{};
+    int mixed_frames{};
+    int owned{8};
+};
+
+// Source-bound scheduling model, not execution of UnrealScript/native setters.
+OnlineOffTickCounts online_off_tick_counts(int fps, bool restore_first,
+    OnlineOffRestore outcome, bool yield_after_attempt = true) {
+    OnlineOffTickCounts counts;
+    if (outcome == OnlineOffRestore::empty) counts.owned = 0;
+    std::int64_t last_physics = -450'000'000;
+    std::int64_t last_visual = -200'000'000;
+    for (int frame = 0; frame < 10 * fps; ++frame) {
+        const auto now = static_cast<std::int64_t>(frame) * 1'000'000'000 / fps;
+        int actions = 0;
+        const auto restore = [&] {
+            if (now - last_physics < 450'000'000 || counts.owned == 0) return false;
+            if (outcome == OnlineOffRestore::stale_only) {
+                counts.owned = 0;
+                return false; // Ledger cleanup did not write native state.
+            }
+            last_physics = now; // Failed readbacks reserve the same budget.
+            ++counts.attempts;
+            ++actions;
+            if (outcome == OnlineOffRestore::success) --counts.owned;
+            return true;
+        };
+        const bool yielded = restore_first && restore() && yield_after_attempt;
+        if (!yielded) {
+            if (now - last_visual >= 200'000'000) {
+                last_visual = now; // Continuous eligible visual backlog.
+                ++counts.visuals;
+                ++actions;
+            } else if (!restore_first) {
+                restore();
+            }
+        }
+        if (actions > 1) ++counts.mixed_frames;
+    }
+    return counts;
 }
 
 constexpr std::string_view online_restore_readback_fields[] = {
@@ -1828,6 +1890,42 @@ int main() {
     CHECK(online_tick_prune != std::string::npos);
     CHECK(online_tick_freeze != std::string::npos);
     CHECK(online_tick_prune < online_tick_freeze);
+    const auto online_tick_end = online_corpse_controller_source.find(
+        "event Destroyed()", online_tick_start);
+    CHECK(online_tick_end != std::string::npos);
+    const auto online_tick_body = online_corpse_controller_source.substr(
+        online_tick_start, online_tick_end - online_tick_start);
+    const bool restore_first = online_tick_prioritizes_off_restore(online_tick_body);
+    const auto starved = online_off_tick_counts(4, false, OnlineOffRestore::success);
+    CHECK(starved.attempts == 0 && starved.owned == 8 && starved.visuals == 40);
+    const auto restored = online_off_tick_counts(4, restore_first, OnlineOffRestore::success);
+    if (restored.owned != 0)
+        std::cerr << "4 FPS visual backlog starves restore: attempts="
+                  << restored.attempts << ", remaining=" << restored.owned << '\n';
+    CHECK(restored.owned == 0);
+    CHECK(restore_first);
+    for (const auto fps : {4, 30, 60, 120, 240}) {
+        const auto success = online_off_tick_counts(fps, restore_first, OnlineOffRestore::success);
+        CHECK(success.attempts == 8 && success.owned == 0 && success.visuals > 0);
+        CHECK(success.mixed_frames == 0);
+        const auto failure = online_off_tick_counts(fps, restore_first, OnlineOffRestore::readback_failure);
+        CHECK(failure.attempts > 0 && failure.attempts <= 23 && failure.owned == 8);
+        CHECK(failure.visuals > 0 && failure.mixed_frames == 0);
+        for (const auto outcome : {OnlineOffRestore::empty, OnlineOffRestore::stale_only}) {
+            const auto no_mutation = online_off_tick_counts(fps, restore_first, outcome);
+            CHECK(no_mutation.attempts == 0 && no_mutation.owned == 0);
+            CHECK(no_mutation.visuals >= 40 && no_mutation.visuals <= 50);
+        }
+    }
+    CHECK(online_off_tick_counts(4, true, OnlineOffRestore::readback_failure, false)
+              .mixed_frames > 0);
+    for (const auto token : {"!bAdaptiveEnabled", ">= 0.45", "< 0.45) return;"}) {
+        auto missing_guard = online_tick_body;
+        const auto position = missing_guard.find(token);
+        CHECK(position != std::string::npos);
+        missing_guard.erase(position, std::string_view{token}.size());
+        CHECK(!online_tick_prioritizes_off_restore(missing_guard));
+    }
     CHECK(online_corpse_controller_source.find(
         "reason=world_teardown count=") != std::string::npos);
     CHECK(online_corpse_controller_source.find(

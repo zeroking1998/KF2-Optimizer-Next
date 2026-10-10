@@ -559,15 +559,25 @@ function bool RunOneFixedMinimumVisualAction()
 event Tick(float DeltaTime)
 {
     local KF2OptimizerOnlineContextInteraction CurrentInteraction;
+    local bool bAdaptiveEnabled;
 
     Super.Tick(DeltaTime);
+    CurrentInteraction = GetOnlineInteraction();
+    bAdaptiveEnabled = CurrentInteraction != None &&
+        CurrentInteraction.IsOnlineAdaptiveEnabled();
+    // Restore owns its due frame, including a rejected native readback.
+    if (!bAdaptiveEnabled && WorldInfo != None &&
+        WorldInfo.RealTimeSeconds - LastPhysicsMutationRealTime >= 0.45)
+    {
+        RestoreOneOnlineCorpse();
+        if (WorldInfo.RealTimeSeconds -
+            LastPhysicsMutationRealTime < 0.45) return;
+    }
     if (RunOneFixedMinimumVisualAction())
     {
         return;
     }
-    CurrentInteraction = GetOnlineInteraction();
-    if (CurrentInteraction != None &&
-        CurrentInteraction.IsOnlineAdaptiveEnabled())
+    if (bAdaptiveEnabled)
     {
         bRestoreReceiptReported = false;
         if (PruneOneOnlineFrozenCorpse())
@@ -575,11 +585,6 @@ event Tick(float DeltaTime)
             return;
         }
         FreezeOneOnlineCorpse();
-    }
-    else if (WorldInfo != None &&
-             WorldInfo.RealTimeSeconds - LastPhysicsMutationRealTime >= 0.45)
-    {
-        RestoreOneOnlineCorpse();
     }
 }
 
