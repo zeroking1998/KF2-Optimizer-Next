@@ -93,4 +93,3 @@ Prefer extensions to existing tests over a new framework. Standalone timing is
 not gameplay FPS, and byte reconstruction is not a gameplay stability pass.
 This planning PR must remain draft until integration and required boundary
 checks are complete; documentation alone must not close issue #939.
-
