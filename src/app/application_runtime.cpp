@@ -662,21 +662,21 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
                            L"FleX recovery status cannot be inspected",
                            static_cast<std::uint32_t>(flex_status_error.value())})
                     : (!game_running && flex_transaction_exists
-                           ? flex::restore_offline_lab(
+                           ? flex::restore_optimized_runtime_transaction(
                                  flex_directory, flex_state, false,
                                  &flex_recovery_details)
-                           : flex::recover_offline_lab(
+                           : flex::recover_optimized_runtime_transaction(
                                  flex_directory, flex_state, game_running,
                                  &flex_recovery_details));
                 if (!recovered.has_value()) {
                     event_log.append({0, diagnostics::Severity::error,
-                                      "FLEX_LAB_RECOVERY_BLOCKED",
+                                      "FLEX_RUNTIME_RECOVERY_BLOCKED",
                                       recovered.error().message, L"flex"});
                     recovery_required = true;
                 } else if (recovered.value()) {
                     event_log.append({0, diagnostics::Severity::warning,
-                                      "FLEX_LAB_RECOVERED",
-                                      L"Interrupted offline FleX laboratory state was restored and verified. " +
+                                      "FLEX_RUNTIME_RECOVERED",
+                                      L"Interrupted optimized FleX runtime state was restored and verified. " +
                                           flex_recovery_details,
                                       L"flex"});
                 }

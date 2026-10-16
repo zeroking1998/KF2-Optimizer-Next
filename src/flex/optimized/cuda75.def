@@ -1,0 +1,15 @@
+LIBRARY cudart64_75.dll
+EXPORTS
+ cudaStreamCreateWithFlags
+ cudaStreamDestroy
+ cudaStreamSynchronize_ptsz
+ cudaStreamWaitEvent_ptsz
+ cudaEventCreateWithFlags
+ cudaEventDestroy
+ cudaEventRecord_ptsz
+ cudaEventSynchronize
+ cudaPeekAtLastError
+ cudaMemcpy_ptds
+ cudaMemcpyAsync_ptsz
+
+

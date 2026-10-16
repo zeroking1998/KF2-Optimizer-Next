@@ -1,95 +1,83 @@
-# Optimized original FleX integration (draft)
+# Optimized original FleX integration
 
 Tracking: [issue #939](https://github.com/zeroking1998/KF2-Optimizer-Next/issues/939).
-Planning baseline: main `07a853ac94979bf64ed39302a1e29195d603b640`.
+Implementation baseline: main `07a853ac94979bf64ed39302a1e29195d603b640`.
 
-This is an integration plan, not a shipped feature. No runtime, game DLL,
-configuration or Windows behavior changes in this draft.
+KF2 Optimizer Next reconstructs the accepted optimized runtime locally from the
+user's exact stock FleX files. NVIDIA and game DLLs are not stored in the source
+tree or portable package.
 
-## Already verified together
+## Accepted runtime
 
-The cumulative original-FleX candidate contains the earlier P4 base and all
-six intended additions below. Fresh read-only reconstruction reproduces both
-images byte-for-byte. Its Core/Extension identities are:
+The integrated Core/Extension pair is the last private offline variant that
+completed the native checks and a visible-effect gameplay smoke test:
 
-- Core: `EC0065DAEF13C53A449D6FD9A07739F230B2B2DFE64DC2A4EC2DFBF19E06C4B0`.
-- Extension: `1FDA92BFA883BC7C98A6EF4634E43019830DA4EE297A06A1AB20B2DDFCFA7FE7`.
+- Core: `DDE8343CF0226D25CD10610F41E2FC3E0C4795B8ECB98399668FE834AEE340E5`.
+- Extension: `5ADDDFBD8FDBB7F98413936CAB6ECC9EF631BB39021144A277400C1A3987FC8A`.
 
-Existing CPU contract checks and real native GPU comparisons used this combined
-pair, not just isolated source changes. The two sort comparisons contain
-128 scene rows / 64 output-matched pairs in total, with the complete cumulative
-candidate loaded as B. Selected solid/fluid scenes and native sorting were
-exercised. This does not cover every specialized branch, KFGame rendering,
-indirect buffer consumers, asynchronous lifetime or packaged gameplay.
+It contains the established P4 buffer/transfer/collision work, the accepted P3
+fixed-time cadence with two native substeps and one constraint iteration, and
+rigid presentation interpolation. Fluid particles and normals remain canonical.
+The helper source is the same source used by that private variant and is built
+reproducibly as part of the project.
 
-The most recent gameplay capture used the earlier P4 pair
-(`F696AE...` / `ECA8A2...`), not the cumulative pair above. Keep that distinction:
-the prior combined checks remain valid and do not need to be discarded.
+The earlier cumulative candidate (`EC0065DA...` / `1FDA92BF...`) remains useful
+historical evidence for its isolated optimizations, but it is not the runtime
+installed by this integration. Mixing either pair is rejected.
 
-## Intended stack
+The private gameplay smoke on 16 October 2026 loaded the accepted pair, showed
+Gib/fluid FleX effects and produced no new KFGame crash dump. It was not a
+controlled FPS comparison. The final packaged helper still requires one visual
+gameplay check before release promotion.
 
-| Layer | Included work |
-| --- | --- |
-| P4 base | Seven rigid-buffer capacity reuse; reduced solver cadence and iteration count; gated transfers and collision refresh; density caching; positive-phase particle-pair filtering |
-| Lifecycle commits | Coalesce pending changes on the existing cadence; preserve uncommitted host slots |
-| Idle uploads | Suppress clean-empty Push work |
-| Upload prefixes | Transfer the bounded required prefix without truncating sparse allocated slots |
-| Uniform contacts | Use the owner-bound identical-positive-phase specialization only when certified |
-| Fluid grid reset | Remove the duplicate selected grid clear |
-| Particle sorting | Sort the actual 21-bit keys without discarding valid key bits |
+## Runtime boundary
 
-P4 intentionally changes physics cadence/convergence and some particle collision
-behavior. Visible effects and particle counts are retained; identical per-frame
-physics is not promised. Required completion fences and readback ownership
-remain intact.
+- FleX activation remains owned by the user. `PhysXLevel=0` is never enabled or
+  replaced by the optimizer.
+- The optimized runtime is independent of Adaptive state and pressure. The
+  observation relay forwards the native substep request unchanged.
+- Both exact stock identities are verified before reconstruction. The rebuilt
+  outputs are hash-verified before installation.
+- Core, Extension, helper and observation relay are installed as one
+  owner-bound transaction while KF2 is stopped.
+- Exact stock Core/Extension files and any pre-existing helper are backed up and
+  restored after the session. Partial installation, interruption and the legacy
+  schema-3 journal recover through the same path.
+- Unknown, mixed or changed files fail closed and are not overwritten.
+- Repeated preparation reuses already verified staged outputs. It performs no
+  per-frame reconstruction, polling, logging or additional worker activity.
+- Detailed FleX counters and reports stay opt-in under Debug.
 
-Do not include the slower readback-tail reorder, unqualified experiments,
-FleX 1.2, speculative wait removal, or the global Windows MPO workaround.
+The optimized helper uses no extra worker thread or host-buffer copy loop. Its
+solver-owned synchronization resources are created once, reused and released
+on teardown. Necessary completion and error checks remain in place.
 
-## Small integration boundary
+## Distribution and proof
 
-Extend the existing FleX preparation and recovery path instead of introducing a
-second loader, solver framework, background service or profile system.
+The deterministic recipes, project helper and transaction code are included in
+the normal build. Follow [Binary Distribution](BINARY_DISTRIBUTION.md) and
+[Third-Party Notices](../THIRD_PARTY_NOTICES.md): do not add reconstructed DLLs,
+raw private captures or private benchmark sources to the repository.
 
-1. Accept only the exact supported user-installed original Core/Extension pair
-   and matching runtime dependencies. Do not merely whitelist arbitrary edited
-   DLLs to bypass the current stock-Core audit.
-2. Prepare the matching optimized pair locally using one deterministic,
-   versioned recipe; verify the final hashes before any installation.
-3. Reuse the existing relay and Debug facilities without adding another proxy
-   layer or duplicate actuation. Extend the existing installation-bound
-   transaction to cover both files and their exact pre-session recovery copies.
-4. Stage both files first. If either replacement or final verification fails,
-   prevent launch and recover the previous pair. A file replacement is atomic;
-   two separate DLL replacements are not collectively atomic.
-5. Recover interrupted transactions before another protected Steam launch.
-   Never patch a running KF2 process or reprepare images in a per-frame loop.
-6. Keep the initial optimized mode explicitly experimental and offline opt-in,
-   independent of Adaptive. FleX remains off when the user selected Off.
-7. Preserve default-off detailed Debug counters. Distinguish verified preparation,
-   loaded identities, forwarded update calls and completed solver steps; do not
-   turn a request or skipped update into a falsely confirmed applied result.
+Fresh local verification covers:
 
-One manifest must bind the recipe version, original identities, resulting pair
-and portable build. Package/update validation must not mix artifacts from two
-builds. Follow [Binary Distribution](BINARY_DISTRIBUTION.md) and
-[Third-Party Notices](../THIRD_PARTY_NOTICES.md): no game/NVIDIA DLLs, raw private
-captures or private benchmark sources in this PR or its source history.
+- byte-exact reconstruction of both accepted outputs from the exact stock pair;
+- pass-through behavior and all 52 Core exports;
+- unsupported/mixed input, partial replacement, rollback, owner-bound recovery,
+  legacy-journal recovery and byte-exact restore;
+- Debug and Release suites plus two independent deterministic Release builds;
+- clean portable-package shape, source identity and managed payload hashes.
 
 ## Remaining acceptance
 
-- [x] Current-main seams and missing Extension ownership identified.
-- [x] Cumulative candidate identities and reconstruction freshly verified.
-- [x] Prior combined CPU/native-GPU evidence identified, with its scope retained.
-- [ ] Local recipe and matched-pair installation implemented.
-- [ ] Existing tests extended for ABI/exports, mixed or unsupported input,
-      interruption between replacements, process-running rejection and exact restore.
-- [ ] Portable package identity, update/recovery and Debug receipts verified.
-- [ ] One complete packaged offline session confirms loaded identities, effects,
-      map changes, teardown and byte-exact restoration.
-- [ ] Online compatibility qualified separately before enabling this mode online.
+- [x] Exact recipe and matched-pair installation implemented.
+- [x] ABI/exports, mixed or unsupported input, interrupted replacement,
+      running-process rejection and exact restore tested.
+- [x] Portable package identity, update/recovery and Debug receipts verified.
+- [x] Private accepted pair exercised offline with visible FleX effects.
+- [ ] Final portable build exercised once offline with its freshly built helper.
+- [ ] Online behavior qualified separately before it is claimed as verified.
 
-Prefer extensions to existing tests over a new framework. Standalone timing is
-not gameplay FPS, and byte reconstruction is not a gameplay stability pass.
-This planning PR must remain draft until integration and required boundary
-checks are complete; documentation alone must not close issue #939.
+Standalone timing is not gameplay FPS, and byte reconstruction alone is not a
+gameplay stability pass. Keep the pull request in draft until the final package
+gate is completed.

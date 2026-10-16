@@ -101,7 +101,7 @@ public:
     }
 
     void control_flex() {
-        telemetry_pipeline::run_flex_control_stage(runtime_, *frame_);
+        telemetry_pipeline::run_flex_diagnostics_stage(runtime_, *frame_);
     }
 
     void evaluate_adaptive() {

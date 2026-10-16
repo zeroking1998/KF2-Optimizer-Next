@@ -98,7 +98,7 @@ Use **Adaptive optimization** on Home to enable or disable those automatic
 adjustments. The choice is saved. Turning Adaptive off during a supported
 offline session requires a confirmed runtime receipt before the app saves the
 new state. Monitoring, the overlay, Target FPS, Maximum corpses, graphics
-settings selected by the user, user-selected FleX minimum and fixed-minimum
+settings selected by the user, user-selected FleX mode and fixed-minimum
 Zed/corpse visual controls remain available while Adaptive is off. The saved
 state is also reapplied after a map change.
 
@@ -109,8 +109,8 @@ of an ineffective change or restoration when Adaptive is disabled or KF2 closes.
 
 The optimizer never enables FleX. If FleX is off in KF2, it remains off and no
 FleX runtime hook is installed. If the user enabled FleX in KF2, the protected
-session requests the fixed minimum solver work independently of Adaptive mode.
-may use only the verified controls available for that existing setting.
+session prepares the verified optimized FleX runtime independently of Adaptive mode.
+It uses only the verified components available for that existing setting.
 
 ## 5. Game graphics
 
@@ -173,8 +173,8 @@ Advanced settings from Adaptive controls.
 ## 7. Start a protected session
 
 Start KF2 through the optimizer when you want session-scoped telemetry,
-restoration, and optional protected corpse-physics or FleX controls. Controls
-appear only when their provider and acknowledgement path are available.
+restoration, protected corpse-physics controls, or the optimized FleX runtime.
+Controls appear only when their provider and acknowledgement path are available.
 When KF2's native log confirms a new-settings restart, the optimizer keeps the
 protected session intact for up to five minutes and rebinds only to the verified
 KF2 executable. A normal game exit uses only a short replacement check before
@@ -213,7 +213,7 @@ snapshot is limited to 64 visible Zeds and refreshes at most every 100 ms.
 page shows incoming and forwarded min/max substeps, solver and particle
 statistics, shared-memory readback health, and report/log state. It can be
 changed during a protected session. Leave it off for the cheapest normal path;
-the fixed one-substep safety limit remains active for user-enabled FleX.
+the protected optimized FleX runtime remains active for user-enabled FleX.
 Live FleX observations remain in memory; there are no periodic report writes,
 even with diagnostics enabled. `flex-session-last.json` is saved only on
 session detach or an explicit support export, using the latest verified

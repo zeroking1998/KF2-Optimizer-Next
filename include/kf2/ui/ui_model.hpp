@@ -110,9 +110,6 @@ struct UiStatus : AdaptiveUiStatus {
     bool prewarm_active{false};
     int prewarm_percent{0};
     std::wstring prewarm_map;
-    std::optional<int> flex_requested_substeps;
-    std::optional<int> flex_effective_substeps;
-    std::wstring flex_action_status{L"NONE"};
     std::wstring flex_capability{L"UNAVAILABLE"};
     int adaptive_minimum_quality{10};
     int adaptive_maximum_quality{100};
@@ -186,9 +183,8 @@ public:
         std::optional<double> cpu_percent, std::optional<double> gpu_percent,
         std::optional<int> active_corpses, std::optional<int> sleeping_corpses) noexcept;
     void set_flex_observation_status(
-        std::wstring telemetry, std::optional<int> requested_substeps,
-        std::optional<int> effective_substeps, std::wstring action_status,
-        std::wstring substep_diagnostics, std::wstring readback_diagnostics) noexcept;
+        std::wstring telemetry, std::wstring substep_diagnostics,
+        std::wstring readback_diagnostics) noexcept;
     void set_flex_capability(std::wstring capability) noexcept;
     void set_overlay_diagnostics(std::wstring diagnostics) noexcept;
     void set_prewarm_progress(bool active, int percent, std::wstring map) noexcept;

@@ -74,6 +74,38 @@ endif()
 
 include(CTest)
 
+if(MSVC)
+    set(KF2_FLEX_OPTIMIZED_DIRECTORY
+        "${PROJECT_SOURCE_DIR}/src/flex/optimized")
+    foreach(import_name IN ITEMS cuda75 driver)
+        set(import_library
+            "${CMAKE_CURRENT_BINARY_DIR}/${import_name}.flex-optimized.lib")
+        add_custom_command(OUTPUT "${import_library}"
+            COMMAND "${CMAKE_AR}" /nologo /machine:x64
+                "/def:${KF2_FLEX_OPTIMIZED_DIRECTORY}/${import_name}.def"
+                "/out:${import_library}"
+            DEPENDS
+                "${KF2_FLEX_OPTIMIZED_DIRECTORY}/${import_name}.def"
+            VERBATIM)
+        list(APPEND KF2_FLEX_OPTIMIZED_IMPORT_LIBRARIES "${import_library}")
+    endforeach()
+
+    add_library(KF2FlexOptimizedHelper SHARED
+        src/flex/optimized/overlap.cpp
+        src/flex/optimized/overlap.hpp
+        src/flex/optimized/presentation.cpp
+        src/flex/optimized/presentation.hpp
+        ${KF2_FLEX_OPTIMIZED_IMPORT_LIBRARIES})
+    target_compile_definitions(KF2FlexOptimizedHelper PRIVATE
+        P4_TIME_ACCUMULATOR)
+    target_compile_features(KF2FlexOptimizedHelper PRIVATE cxx_std_20)
+    target_link_libraries(KF2FlexOptimizedHelper PRIVATE
+        ${KF2_FLEX_OPTIMIZED_IMPORT_LIBRARIES})
+    target_link_options(KF2FlexOptimizedHelper PRIVATE /guard:cf)
+    set_target_properties(KF2FlexOptimizedHelper PROPERTIES
+        OUTPUT_NAME "kf2_p4_overlap")
+endif()
+
 set(KF2_FEATURE_ACTION_SOURCES
     "${PROJECT_SOURCE_DIR}/src/features/advanced/advanced_actions.cpp"
     "${PROJECT_SOURCE_DIR}/src/features/backup/backup_actions.cpp"
@@ -150,6 +182,9 @@ add_executable(KF2Optimizer WIN32
     src/diagnostics/crash_recorder.cpp
     src/diagnostics/feature_inventory.cpp
     src/flex/flex_audit.cpp
+    src/flex/binary_delta.cpp
+    src/flex/optimized_runtime.cpp
+    src/flex/optimized_runtime_recipe.cpp
     src/flex/flex_lab.cpp
     src/flex/flex_observation.cpp
     src/game/adaptive_control_client.cpp
@@ -213,6 +248,9 @@ add_executable(KF2Optimizer WIN32
     src/ui/numeric_presentation.cpp
     src/ui/ui_model.cpp
 )
+if(TARGET KF2FlexOptimizedHelper)
+    add_dependencies(KF2Optimizer KF2FlexOptimizedHelper)
+endif()
 target_include_directories(KF2Optimizer PRIVATE
     "${PROJECT_SOURCE_DIR}/include"
     "${PROJECT_SOURCE_DIR}/src"

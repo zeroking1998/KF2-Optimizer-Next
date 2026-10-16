@@ -216,7 +216,7 @@ int wmain(int argc, wchar_t** argv) {
     const auto minimal_readback = kf2::flex::read_observation(identity);
     if (!minimal_readback || !minimal_readback->fresh ||
         !minimal_readback->pass_through_healthy ||
-        minimal_readback->last_forwarded_substeps != 1 ||
+        minimal_readback->last_forwarded_substeps != 2 ||
         !minimal_readback->particle_capacity_available ||
         minimal_readback->particle_capacity != 1280 ||
         minimal_readback->aggregate_particles_fresh ||
@@ -247,7 +247,7 @@ int wmain(int argc, wchar_t** argv) {
     }
 
     // flexUpdateSolver must remain completely independent of the solver lock.
-    // Holding the lock cannot delay an update or weaken the fixed clamp.
+    // Holding the lock cannot delay an update or alter its arguments.
     acquire_solver_lock();
     std::atomic<bool> update_returned{false};
     std::thread contended_update([&] {
@@ -259,7 +259,7 @@ int wmain(int argc, wchar_t** argv) {
     });
     release_solver_lock();
     contended_update.join();
-    if (!update_completed || calls() != 2 || last() != 1 ||
+    if (!update_completed || calls() != 2 || last() != 2 ||
         shared->tracking_drop_calls != 0 ||
         shared->solver_tracking_quarantined != 0)
         return fail(23, "solver lock delayed or weakened an update");
@@ -367,33 +367,25 @@ int wmain(int argc, wchar_t** argv) {
         upper[0] != 1.0F || upper[2] != 3.0F)
         return fail(22, "bounds or parameter calls were not relayed exactly");
 
-    if (calls() != 2 || last() != 1 || shared->last_substeps != 2 ||
-        shared->last_forwarded_substeps != 1 || shared->constrained_updates != 2)
-        return fail(10, "the fixed minimum was not applied immediately");
+    if (calls() != 2 || last() != 2 || shared->last_substeps != 2 ||
+        shared->last_forwarded_substeps != 2)
+        return fail(10, "solver updates were not forwarded exactly");
 
-    InterlockedExchange(&shared->desired_substeps, 5);
-    InterlockedExchange64(&shared->control_heartbeat_tick,
-        static_cast<LONGLONG>(GetTickCount64()));
     update(solver, 1.0F / 60.0F, 4, nullptr);
-    if (calls() != 3 || last() != 1 || shared->last_substeps != 4 ||
-        shared->last_forwarded_substeps != 1 || shared->constrained_updates != 3)
-        return fail(11, "legacy adaptive control overrode the fixed minimum");
+    if (calls() != 3 || last() != 4 || shared->last_substeps != 4 ||
+        shared->last_forwarded_substeps != 4)
+        return fail(11, "the relay rewrote a four-substep update");
 
-    InterlockedExchange64(&shared->control_heartbeat_tick,
-        static_cast<LONGLONG>(GetTickCount64() - 1600));
     update(solver, 1.0F / 60.0F, 2, nullptr);
-    if (calls() != 4 || last() != 1 || shared->last_forwarded_substeps != 1 ||
-        shared->constrained_updates != 4)
-        return fail(12, "stale control released the fixed minimum");
+    if (calls() != 4 || last() != 2 || shared->last_forwarded_substeps != 2)
+        return fail(12, "the relay changed a repeated update");
 
-    InterlockedExchange(&shared->desired_substeps, 0);
     update(solver, 1.0F / 60.0F, 3, nullptr);
     update(solver, 1.0F / 60.0F, 1, nullptr);
     update(solver, 1.0F / 60.0F, 0, nullptr);
     if (calls() != 7 || last() != 0 || shared->last_forwarded_substeps != 0 ||
-        shared->constrained_updates != 5 ||
         shared->successful_updates != shared->update_calls)
-        return fail(13, "the fixed minimum did not preserve values at or below one");
+        return fail(13, "the relay changed the native substep sequence");
 
     destroy(second_solver);
     if (destroy_calls() != 2 || shared->destroy_calls != 2 ||
@@ -423,7 +415,7 @@ int wmain(int argc, wchar_t** argv) {
         set_fence(); wait_fence();
         update(solver, 1.0F / 60.0F, 4, nullptr);
     }
-    if (lookups() != lookups_before || last() != 1 ||
+    if (lookups() != lookups_before || last() != 4 ||
         particle_upload_calls() != 258 || phase_upload_calls() != 257 ||
         velocity_upload_calls() != 257 || particle_download_calls() != 257 ||
         phase_download_calls() != 257 || velocity_download_calls() != 257 ||
@@ -456,7 +448,7 @@ int wmain(int argc, wchar_t** argv) {
         return in_flight && shared->last_forwarded_substeps == after &&
             shared->update_calls == shared->successful_updates;
     };
-    if (!completed_publication(0, 1, 0) || !completed_publication(4, 0, 1))
+    if (!completed_publication(0, 4, 0) || !completed_publication(4, 0, 4))
         return fail(65, "forwarded value was published before native completion");
     destroy(solver);
     if (destroy_calls() != 3 || shared->destroy_calls != 3 ||

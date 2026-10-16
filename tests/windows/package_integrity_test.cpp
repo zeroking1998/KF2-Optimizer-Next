@@ -40,6 +40,7 @@ namespace {
 constexpr std::pair<const wchar_t*, const char*> kFiles[]{
     {L"KF2Optimizer.exe", "test executable"},
     {L"Data/Lab/flexRelease_x64.forwarder-lab.dll", "test forwarder"},
+    {L"Data/Lab/kf2_p4_overlap.dll", "test optimized FleX helper"},
     {L"Data/Lab/KF2OptimizerTelemetry.u", "test telemetry module"},
     {L"Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md", "test matrix"},
     {L"Data/Documentation/README.md", "test documentation index"},
@@ -69,7 +70,7 @@ void write_package(const std::filesystem::path& root,
                    std::string_view identity) {
     std::string manifest =
         "schema_version=1\r\nproduct=KF2OptimizerNext\r\nsource_identity=" +
-        std::string{identity} + "\r\nfile_count=13\r\n";
+        std::string{identity} + "\r\nfile_count=14\r\n";
     for (const auto& [relative, content] : kFiles) {
         const auto path = root / relative;
         write_file(path, content);
@@ -221,7 +222,7 @@ int main() {
     CHECK(development.value().verified);
 
     write_package(root, "test-build");
-    CHECK(kf2::security::managed_package_payload_paths().size() == 13);
+    CHECK(kf2::security::managed_package_payload_paths().size() == 14);
     const auto source_identity = kf2::security::package_source_identity(root);
     CHECK(source_identity.has_value());
     CHECK(source_identity.value() == "test-build");
@@ -239,7 +240,7 @@ int main() {
     CHECK(verified.has_value());
     CHECK(verified.value().managed_package);
     CHECK(verified.value().verified);
-    CHECK(verified.value().verified_files == 13);
+    CHECK(verified.value().verified_files == 14);
 
     write_file(root / L"Data/Documentation/FEATURE_REFERENCE.md", "damaged");
     const auto damaged =
@@ -266,7 +267,7 @@ int main() {
         repair_target, repair_source, "test-build");
     CHECK(repaired.has_value());
     CHECK(repaired.value().repaired_files == 3);
-    CHECK(repaired.value().already_valid_files == 11);
+    CHECK(repaired.value().already_valid_files == 12);
     CHECK(repaired.value().restart_required);
     const auto repaired_audit =
         kf2::security::audit_package_integrity(repair_target, "test-build");
@@ -277,7 +278,7 @@ int main() {
         repair_target, repair_source, "test-build");
     CHECK(unchanged.has_value());
     CHECK(unchanged.value().repaired_files == 0);
-    CHECK(unchanged.value().already_valid_files == 13);
+    CHECK(unchanged.value().already_valid_files == 14);
     CHECK(!unchanged.value().restart_required);
 
     for (int scenario = 0; scenario < 4; ++scenario) {

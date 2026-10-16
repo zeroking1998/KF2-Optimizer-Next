@@ -24,6 +24,7 @@ New-Item -ItemType Directory -Path $root -Force | Out-Null
 $manifestPath = Join-Path $root 'Data/package-manifest.json'
 $integrityPath = Join-Path $root 'Data/package-integrity.ini'
 $payload = @('KF2Optimizer.exe', 'Data/Lab/flexRelease_x64.forwarder-lab.dll',
+    'Data/Lab/kf2_p4_overlap.dll',
     'Data/Lab/KF2OptimizerTelemetry.u', 'Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md',
     'Data/Documentation/README.md', 'Data/Documentation/USER_GUIDE.md',
     'Data/Documentation/UPDATES.md', 'Data/Documentation/FEATURE_REFERENCE.md',
@@ -33,7 +34,7 @@ $payload = @('KF2Optimizer.exe', 'Data/Lab/flexRelease_x64.forwarder-lab.dll',
 
 function Write-Manifest([string] $Source, [string] $IntegritySource = $Source) {
     $lines = @('schema_version=1', 'product=KF2OptimizerNext',
-        "source_identity=$IntegritySource", 'file_count=13')
+        "source_identity=$IntegritySource", 'file_count=14')
     $lines += @($payload | ForEach-Object {
         "file=$_|$((Get-FileHash -LiteralPath (Join-Path $root $_)).Hash)"
     })
@@ -113,6 +114,10 @@ try {
     # Only the forwarder's PE prefix is relevant to the release script fixture.
     Copy-Item -LiteralPath $Executable -Destination `
         (Join-Path $root 'Data/Lab/flexRelease_x64.forwarder-lab.dll') -Force
+    # The helper has the same x64 PE packaging contract. Its exports and runtime
+    # behavior are covered by the native helper/FleX tests.
+    Copy-Item -LiteralPath $Executable -Destination `
+        (Join-Path $root 'Data/Lab/kf2_p4_overlap.dll') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination `
         (Join-Path $root 'Data/Documentation/LICENSE') -Force
     @{ schema = 'KF2_ISSUE72_INVENTORY_V3'; function_count = 149; records = @(1..149) } |

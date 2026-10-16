@@ -88,7 +88,7 @@ the transaction owner's process state or identity cannot be verified.
 Only the fixed managed program-file list from the package manifest is updated.
 Portable user state is not part of that list. In particular, the updater keeps
 settings, update-check state, logs, backups, benchmarks, profiles, session
-recovery data, FleX lab state and offline telemetry lab state.
+recovery data, protected FleX runtime state and offline telemetry provider state.
 
 ## Developer boundaries
 

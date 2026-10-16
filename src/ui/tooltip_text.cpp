@@ -20,7 +20,7 @@ constexpr TooltipEntry kTooltips[]{
     {"header-update-install", L"Downloads and verifies the displayed portable Windows x64 release, then asks the update helper to install it with rollback protection."},
     {"settings-updates-install", L"Downloads and verifies the displayed portable Windows x64 release, then asks the update helper to install it with rollback protection."},
     {"settings-updates-automatic", L"Turns the once-per-24-hours startup update check on or off. Downloads and installation still always require your approval."},
-    {"settings-adaptive-toggle", L"Turns automatic quality, physics, LOD, FleX and corpse adjustments on or off. Target FPS, maximum corpses, telemetry, overlay and user-selected Game graphics remain active."},
+    {"settings-adaptive-toggle", L"Turns automatic quality, physics, LOD and corpse adjustments on or off. Target FPS, maximum corpses, telemetry, overlay, user-selected Game graphics and user-enabled FleX remain independent."},
     {"settings-updates-later", L"Hides the current update reminder without downloading or changing anything. You can check again at any time."},
     {"settings-updates-ignore", L"Hides this update dialog permanently for the displayed version. A later, newer version will still show a new dialog."},
     {"header-repair", L"Downloads the official release matching this exact installed version and repairs only missing or damaged managed files after SHA-256 verification."},
@@ -37,7 +37,7 @@ constexpr TooltipEntry kTooltips[]{
     {"debug-corpse-markers", L"Shows the Optimizer action, distance in metres, and Actor ID above recently changed corpses. It is off by default, adds debug rendering work, and applies on the next protected KF2 start."},
     {"debug-zed-markers", L"Shows distance in metres and Actor ID for up to 64 recently visible living Zeds. It is off by default, refreshes at most every 100 ms, and applies on the next protected KF2 start."},
     {"debug-corpse-physics-control", L"Switches the next protected offline test between Candidate and Control. Control keeps telemetry active but disables all Optimizer-owned corpse cleanup, sleep, freeze, collision, tick, animation, and LOD reductions. It does not change living-Zed gameplay physics."},
-    {"debug-flex-diagnostics", L"Collects detailed FleX min/max substeps, solver and particle statistics, shared-memory readbacks, reports, and extra logs. Leave it off for the cheapest normal runtime path; the fixed one-substep limit remains active."},
+    {"debug-flex-diagnostics", L"Collects detailed FleX min/max substeps, solver and particle statistics, shared-memory readbacks, reports, and extra logs. Leave it off for the cheapest normal runtime path; the protected optimized runtime remains active."},
     {"debug-runtime-diagnostics", L"Collects detailed corpse/Zed scans, Adaptive decisions, overlay render/redraw/window checks, and prewarm file/cache evidence. Leave it off for the cheapest normal path; control logic, errors, and required safety readbacks remain active."},
 
     {"settings-target-slider", L"Sets KF2's native FPS limit from 30 to 240. Adaptive uses the same target. An external driver limit or a screen refresh limit can still keep displayed FPS below it."},

@@ -20,33 +20,8 @@ struct RuntimeAudit {
     bool exact_known_runtime{false};
 };
 
-enum class HookGateState {
-    blocked_abi,
-    blocked_online_uncertain,
-    blocked_game_running,
-    blocked_stability_quarantine,
-    eligible_offline_lab,
-};
-
-struct HookGateEvidence {
-    bool abi_compatible{false};
-    bool exact_runtime_identity{false};
-    bool game_running{false};
-    bool explicit_offline_opt_in{false};
-    bool platform_offline_confirmed{false};
-    bool replacement_stability_qualified{false};
-};
-
-struct HookGateDecision {
-    HookGateState state{HookGateState::blocked_abi};
-    bool writable{false};
-    std::wstring reason;
-};
-
 [[nodiscard]] Result<RuntimeAudit> audit_runtime(
     const std::filesystem::path& path,
     bool allow_transaction_original_name = false);
-[[nodiscard]] HookGateDecision evaluate_hook_gate(
-    const HookGateEvidence& evidence);
 
 }  // namespace kf2::flex

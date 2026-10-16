@@ -1,0 +1,8 @@
+LIBRARY nvcuda.dll
+EXPORTS
+ cuCtxGetCurrent
+ cuCtxPushCurrent_v2
+ cuCtxPopCurrent_v2
+ cuCtxSynchronize
+
+

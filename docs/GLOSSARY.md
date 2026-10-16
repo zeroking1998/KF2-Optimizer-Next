@@ -24,8 +24,9 @@ runtime budget may be lower, never higher.
 **Distance Sleep** — A confirmed request to stop expensive cosmetic simulation
 for a corpse sufficiently far from the relevant view/player context.
 
-**FleX** — NVIDIA particle/physics technology used by an optional, protected
-laboratory path in this project.
+**FleX** — NVIDIA particle/physics technology used by KF2. If the user enables
+it, the optimizer can prepare a verified, protected optimized runtime for that
+session and restore the exact stock files afterward.
 
 **Near Wake** — A confirmed request to resume a previously slept corpse when it
 returns to the near range.

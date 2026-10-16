@@ -26,6 +26,7 @@ namespace {
 constexpr std::pair<const wchar_t*, const char*> kFiles[]{
     {L"KF2Optimizer.exe", "executable"},
     {L"Data/Lab/flexRelease_x64.forwarder-lab.dll", "forwarder"},
+    {L"Data/Lab/kf2_p4_overlap.dll", "optimized FleX helper"},
     {L"Data/Lab/KF2OptimizerTelemetry.u", "telemetry"},
     {L"Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md", "matrix"},
     {L"Data/Documentation/README.md", "index"},
@@ -50,7 +51,7 @@ void write_file(const std::filesystem::path& path, std::string_view bytes) {
 void write_package(const std::filesystem::path& root) {
     std::string integrity =
         "schema_version=1\r\nproduct=KF2OptimizerNext\r\n"
-        "source_identity=new-build\r\nfile_count=13\r\n";
+        "source_identity=new-build\r\nfile_count=14\r\n";
     for (const auto& [relative, bytes] : kFiles) {
         const auto path = root / relative;
         write_file(path, bytes);

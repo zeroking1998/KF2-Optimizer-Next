@@ -26,6 +26,7 @@ $knownManagedPaths = [Collections.Generic.HashSet[string]]::new(
 @(
     'KF2Optimizer.exe',
     'Data/Lab/flexRelease_x64.forwarder-lab.dll',
+    'Data/Lab/kf2_p4_overlap.dll',
     'Data/Lab/KF2OptimizerTelemetry.u',
     'Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md',
     'Data/Documentation/README.md',
@@ -149,7 +150,12 @@ if ($executableIdentity.source_identity -cne $commit -or
 }
 $forwarder = Join-Path $projectRoot 'out\build\windows-x64-release\flexRelease_x64.forwarder-lab.dll'
 if (-not (Test-Path -LiteralPath $forwarder -PathType Leaf)) {
-    throw "Offline FleX laboratory forwarder is missing: $forwarder"
+    throw "FleX observation relay is missing: $forwarder"
+}
+$flexHelper = Join-Path $projectRoot `
+    'out\build\windows-x64-release\Release\kf2_p4_overlap.dll'
+if (-not (Test-Path -LiteralPath $flexHelper -PathType Leaf)) {
+    throw "Optimized FleX helper is missing: $flexHelper"
 }
 # The exporter is excluded from normal app builds; refresh it even with SkipBuild.
 & cmake --build (Join-Path $projectRoot 'out\build\windows-x64-release') `
@@ -205,6 +211,8 @@ Copy-Item -LiteralPath $source -Destination (Join-Path $destinationRoot 'KF2Opti
 $labDirectory = Join-Path $destinationRoot 'Data\Lab'
 New-Item -ItemType Directory -Path $labDirectory -Force | Out-Null
 Copy-Item -LiteralPath $forwarder -Destination (Join-Path $labDirectory 'flexRelease_x64.forwarder-lab.dll') -Force
+Copy-Item -LiteralPath $flexHelper -Destination `
+    (Join-Path $labDirectory 'kf2_p4_overlap.dll') -Force
 Copy-Item -LiteralPath $telemetryModule -Destination `
     (Join-Path $labDirectory 'KF2OptimizerTelemetry.u') -Force
 $documentationDirectory = Join-Path $destinationRoot 'Data\Documentation'
@@ -239,6 +247,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $integrityPayloadFiles = @(
     'KF2Optimizer.exe',
     'Data/Lab/flexRelease_x64.forwarder-lab.dll',
+    'Data/Lab/kf2_p4_overlap.dll',
     'Data/Lab/KF2OptimizerTelemetry.u',
     'Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md',
     'Data/Documentation/README.md',

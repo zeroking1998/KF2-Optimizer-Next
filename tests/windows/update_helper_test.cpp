@@ -27,6 +27,7 @@ std::string read_file(const std::filesystem::path& path) {
 constexpr std::pair<const wchar_t*, const char*> kFiles[]{
     {L"KF2Optimizer.exe", "executable"},
     {L"Data/Lab/flexRelease_x64.forwarder-lab.dll", "forwarder"},
+    {L"Data/Lab/kf2_p4_overlap.dll", "optimized FleX helper"},
     {L"Data/Lab/KF2OptimizerTelemetry.u", "telemetry"},
     {L"Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md", "matrix"},
     {L"Data/Documentation/README.md", "documentation index"},
@@ -84,7 +85,7 @@ void write_package(const std::filesystem::path& root,
                    std::string_view generation) {
     std::string integrity =
         "schema_version=1\r\nproduct=KF2OptimizerNext\r\nsource_identity=" +
-        std::string{identity} + "\r\nfile_count=13\r\n";
+        std::string{identity} + "\r\nfile_count=14\r\n";
     for (const auto& [relative, base] : kFiles) {
         const std::string bytes = std::string{generation} + " " + base;
         const auto path = root / relative;

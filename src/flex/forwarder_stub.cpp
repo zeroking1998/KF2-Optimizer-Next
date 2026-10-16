@@ -506,13 +506,12 @@ extern "C" void flexUpdateSolver(void* solver, float delta_time,
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && (!solver || substeps < 0 || substeps > 64))
         saturated_increment(&shared->invalid_argument_calls);
-    const int forwarded_substeps =
-        kf2::flex::fixed_minimum_substeps(substeps);
+    // The relay observes the call only. The optimized runtime owns its tested
+    // cadence; changing the caller's value here would create a second,
+    // conflicting solver controller.
+    const int forwarded_substeps = substeps;
     const bool diagnostics = detailed_diagnostics(shared);
     if (shared) {
-        if (forwarded_substeps != substeps) {
-            saturated_increment(&shared->constrained_updates);
-        }
         if (diagnostics) {
             LONG forwarded_minimum = InterlockedCompareExchange(
                 &shared->min_forwarded_substeps, 0, 0);

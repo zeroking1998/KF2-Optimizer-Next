@@ -71,6 +71,7 @@ int main() {
     CHECK(physx_level != nullptr);
     CHECK(physx_level->relative_path == L"KFEngine.ini");
     CHECK(physx_level->section == L"Engine.Engine");
+    CHECK(!physx_level->adaptive_allowed);
     CHECK(parse_setting_value(*physx_level, L"0").has_value());
     CHECK(parse_setting_value(*physx_level, L"2").has_value());
     CHECK(!parse_setting_value(*physx_level, L"3").has_value());
@@ -141,7 +142,7 @@ int main() {
         categories.insert(setting_category(setting.id));
         CHECK(!setting_category_label(setting.id).empty());
     }
-    CHECK(adaptive_protected_count == 146);
+    CHECK(adaptive_protected_count == 147);
     CHECK(categories.size() == all_setting_categories().size());
     CHECK(all_settings().size() == 217);
     const auto* physics_substeps = find_setting_by_token("MaxPhysicsSubsteps");

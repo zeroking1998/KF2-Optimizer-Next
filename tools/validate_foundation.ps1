@@ -102,7 +102,7 @@ foreach ($buildRoot in $buildRoots) {
         '-DBUILD_TESTING=ON',
         '-DKF2_VERSION=0.0.4-alpha',
         '-DKF2_BUILD_COMMIT=validation',
-        '-DKF2_BUILD_CHANNEL=validation',
+        '-DKF2_BUILD_CHANNEL=release',
         '-DKF2_OFFLINE_TELEMETRY_SHA256=AUTO'
     )
     Invoke-Native 'cmake' @(
@@ -120,12 +120,14 @@ foreach ($buildRoot in $buildRoots) {
     Assert-True ($productExecutables[0].Name -ceq 'KF2Optimizer.exe') `
         "Unexpected product executable: $($productExecutables[0].Name)"
     $productDlls = @(Get-ChildItem -LiteralPath $releaseRoot -Filter '*.dll' -File)
-    Assert-True ($productDlls.Count -eq 0) 'Foundation produced an unexpected root product DLL'
+    Assert-True ($productDlls.Count -eq 1 -and
+        $productDlls[0].Name -ceq 'kf2_p4_overlap.dll') `
+        'Foundation produced an unexpected root product DLL'
     $labForwarder = Join-Path $buildRoot 'flexRelease_x64.forwarder-lab.dll'
     Assert-True (Test-Path -LiteralPath $labForwarder -PathType Leaf) `
-        'Offline laboratory forwarder was not reproducibly built'
+        'FleX observation relay was not reproducibly built'
 }
-Write-Pass 'release shape contains one user-facing executable and one isolated laboratory DLL'
+Write-Pass 'release shape contains one user-facing executable and two isolated FleX runtime components'
 
 $firstExecutable = Join-Path $buildRoots[0] 'Release\KF2Optimizer.exe'
 $headers = (& $dumpbin /headers $firstExecutable | Out-String)
@@ -148,5 +150,12 @@ $firstForwarderHash = (Get-FileHash -Algorithm SHA256 -LiteralPath `
 $secondForwarderHash = (Get-FileHash -Algorithm SHA256 -LiteralPath `
     (Join-Path $buildRoots[1] 'flexRelease_x64.forwarder-lab.dll')).Hash
 Assert-True ($firstForwarderHash -ceq $secondForwarderHash) `
-    "FleX laboratory forwarder is not reproducible: $firstForwarderHash != $secondForwarderHash"
-Write-Pass "two clean FleX laboratory forwarders are identical ($firstForwarderHash)"
+    "FleX observation relay is not reproducible: $firstForwarderHash != $secondForwarderHash"
+Write-Pass "two clean FleX observation relays are identical ($firstForwarderHash)"
+$firstHelper = Join-Path $buildRoots[0] 'Release\kf2_p4_overlap.dll'
+$secondHelper = Join-Path $buildRoots[1] 'Release\kf2_p4_overlap.dll'
+$firstHelperHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $firstHelper).Hash
+$secondHelperHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $secondHelper).Hash
+Assert-True ($firstHelperHash -ceq $secondHelperHash) `
+    "Optimized FleX helper is not reproducible: $firstHelperHash != $secondHelperHash"
+Write-Pass "two clean optimized FleX helpers are identical ($firstHelperHash)"

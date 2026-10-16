@@ -221,7 +221,7 @@ const std::array<SettingDefinition, kVerifiedSettingCount> kSettings{{
      L"SystemSettings", L"VolumetricLightingMode", SettingType::integer,
      0, 2, false, kQualityLevels},
     {SettingId::physx_level, L"KFEngine.ini", L"Engine.Engine",
-     L"PhysXLevel", SettingType::integer, 0, 2, true, kGoreLevels},
+     L"PhysXLevel", SettingType::integer, 0, 2, false, kGoreLevels},
     {SettingId::physics_async_scene, L"KFEngine.ini", L"Engine.Physics",
      L"bPhysicsAsyncScene", SettingType::boolean, 0, 1, false, {}, 0, true},
     {SettingId::enable_async_scene, L"KFEngine.ini", L"Engine.Physics",

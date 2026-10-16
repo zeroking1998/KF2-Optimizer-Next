@@ -339,17 +339,29 @@ target_link_libraries(kf2_flex_audit_test PRIVATE bcrypt version)
 add_test(NAME kf2_flex_audit_test COMMAND kf2_flex_audit_test)
 set_tests_properties(kf2_flex_audit_test PROPERTIES SKIP_RETURN_CODE 77)
 
+add_executable(kf2_binary_delta_test
+    unit/binary_delta_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/flex/binary_delta.cpp"
+    "${PROJECT_SOURCE_DIR}/src/flex/optimized_runtime_recipe.cpp"
+)
+target_include_directories(kf2_binary_delta_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+add_test(NAME kf2_binary_delta_test COMMAND kf2_binary_delta_test)
+
 add_executable(kf2_flex_lab_test
     integration/flex_lab_test.cpp
     "${PROJECT_SOURCE_DIR}/src/flex/flex_lab.cpp"
+    "${PROJECT_SOURCE_DIR}/src/flex/binary_delta.cpp"
     "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp"
+    "${PROJECT_SOURCE_DIR}/src/flex/optimized_runtime.cpp"
+    "${PROJECT_SOURCE_DIR}/src/flex/optimized_runtime_recipe.cpp"
 )
 target_include_directories(kf2_flex_lab_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_flex_lab_test PRIVATE
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/flex-lab"
     KF2_ATOMIC_FILE_TESTING
     KF2_SHA256_TESTING
-    KF2_FLEX_LAB_TEST_HOOKS)
+    KF2_FLEX_RUNTIME_TEST_HOOKS)
 target_link_libraries(kf2_flex_lab_test PRIVATE
     bcrypt KF2TestGameCore user32 dwmapi)
 add_test(NAME kf2_flex_lab_test COMMAND kf2_flex_lab_test)
@@ -393,18 +405,18 @@ if(TARGET KF2FlexForwarder)
     set_tests_properties(kf2_flex_forwarder_loader_test PROPERTIES
         SKIP_RETURN_CODE 77)
 
-    add_executable(kf2_flex_forwarder_fixed_minimum_test
-        windows/flex_forwarder_fixed_minimum_test.cpp
+    add_executable(kf2_flex_forwarder_passthrough_test
+        windows/flex_forwarder_passthrough_test.cpp
         "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp")
-    target_include_directories(kf2_flex_forwarder_fixed_minimum_test PRIVATE
+    target_include_directories(kf2_flex_forwarder_passthrough_test PRIVATE
         "${PROJECT_SOURCE_DIR}/include")
-    target_link_libraries(kf2_flex_forwarder_fixed_minimum_test PRIVATE
+    target_link_libraries(kf2_flex_forwarder_passthrough_test PRIVATE
         KF2TestGameCore user32 dwmapi)
-    add_dependencies(kf2_flex_forwarder_fixed_minimum_test
+    add_dependencies(kf2_flex_forwarder_passthrough_test
         KF2FlexForwarderTest kf2_flex_original_test_double)
-    add_test(NAME kf2_flex_forwarder_fixed_minimum_test
-        COMMAND kf2_flex_forwarder_fixed_minimum_test
-        "${PROJECT_SOURCE_DIR}/out/tests/flex-forwarder-fixed-minimum"
+    add_test(NAME kf2_flex_forwarder_passthrough_test
+        COMMAND kf2_flex_forwarder_passthrough_test
+        "${PROJECT_SOURCE_DIR}/out/tests/flex-forwarder-passthrough"
         "${KF2_FLEX_TEST_FORWARDER}"
         "$<TARGET_FILE:kf2_flex_original_test_double>")
 endif()
@@ -434,7 +446,10 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/diagnostics/feature_inventory.cpp"
     "${PROJECT_SOURCE_DIR}/src/flex/flex_audit.cpp"
     "${PROJECT_SOURCE_DIR}/src/flex/flex_lab.cpp"
+    "${PROJECT_SOURCE_DIR}/src/flex/binary_delta.cpp"
     "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp"
+    "${PROJECT_SOURCE_DIR}/src/flex/optimized_runtime.cpp"
+    "${PROJECT_SOURCE_DIR}/src/flex/optimized_runtime_recipe.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/frame_rate_cap.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_discovery.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/gameplay_log_lab.cpp"
@@ -469,7 +484,7 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_VERSION="0.0.4-alpha"
     KF2_BUILD_COMMIT="unknown"
     KF2_BUILD_CHANNEL="dev"
-    KF2_RELEASE_REPOSITORY="${KF2_RELEASE_REPOSITORY}"
+    KF2_RELEASE_REPOSITORY="https://github.com/example/KF2-Optimizer-Next"
     KF2_TELEMETRY_ASSET=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetry.u"
     KF2_APPLICATION_VIDEO_TESTING
     KF2_APPLICATION_SHUTDOWN_TESTING
@@ -477,6 +492,7 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_PACKAGE_INTEGRITY_TESTING
     KF2_APPLICATION_RESTORE_TESTING
     KF2_APPLICATION_LAUNCH_TESTING
+    KF2_FLEX_RUNTIME_TEST_HOOKS
     KF2_STARTUP_PREWARMER_TESTING
     KF2_DXGI_FRAME_TIMING_SESSION_TESTING
     KF2_RESOURCE_TELEMETRY_WORKER_TESTING
@@ -803,16 +819,6 @@ target_include_directories(kf2_telemetry_session_stage_test PRIVATE
 )
 add_test(NAME kf2_telemetry_session_stage_test
     COMMAND kf2_telemetry_session_stage_test)
-
-add_executable(kf2_telemetry_flex_stage_test
-    unit/telemetry_flex_stage_test.cpp
-)
-target_include_directories(kf2_telemetry_flex_stage_test PRIVATE
-    "${PROJECT_SOURCE_DIR}/include"
-    "${PROJECT_SOURCE_DIR}/src"
-)
-add_test(NAME kf2_telemetry_flex_stage_test
-    COMMAND kf2_telemetry_flex_stage_test)
 
 add_executable(kf2_telemetry_collection_stage_test
     unit/telemetry_collection_stage_test.cpp
