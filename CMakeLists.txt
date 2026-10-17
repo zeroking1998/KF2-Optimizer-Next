@@ -95,6 +95,12 @@ if(MSVC)
     endforeach()
 
     add_library(KF2FlexOptimizedHelper SHARED
+        src/flex/optimized/anchor_fast_fallback.cpp
+        src/flex/optimized/anchor_fast_fallback.hpp
+        src/flex/optimized/anchor_reachable_cache.cpp
+        src/flex/optimized/anchor_reachable_cache.hpp
+        src/flex/optimized/anchor_walk_cycle.cpp
+        src/flex/optimized/anchor_walk_cycle.hpp
         src/flex/optimized/overlap.cpp
         src/flex/optimized/overlap.hpp
         src/flex/optimized/presentation.cpp
@@ -277,6 +283,10 @@ check_ipo_supported(RESULT KF2_IPO_SUPPORTED OUTPUT KF2_IPO_ERROR
 if(KF2_IPO_SUPPORTED)
     set_property(TARGET KF2Optimizer PROPERTY
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    if(TARGET KF2FlexOptimizedHelper)
+        set_property(TARGET KF2FlexOptimizedHelper PROPERTY
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
 else()
     message(FATAL_ERROR
         "Release IPO is required but unsupported: ${KF2_IPO_ERROR}")
