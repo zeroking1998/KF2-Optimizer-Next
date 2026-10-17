@@ -12,7 +12,7 @@
 namespace {
 
 std::string telemetry_line(int sample, int corpse_awake = 2) {
-    return "ScriptLog: KF2OPT_TELEMETRY schema=7 sample=" +
+    return "ScriptLog: KF2OPT_TELEMETRY schema=8 sample=" +
         std::to_string(sample) + " scan_diagnostics=1" +
         " living=23 living_classes=7 living_bosses=1 living_visible=18"
         " living_offscreen=5 living_lod_total=31"
@@ -59,7 +59,9 @@ std::string telemetry_line(int sample, int corpse_awake = 2) {
         " world_particle_bounded_components=18"
         " ground_fire_particle_components=4 ground_fire_particles=222"
         " impact_particle_components=5 impact_particles=333"
-        " gore_particle_pool_capacity=30 world_particle_pool_capacity=200"
+        " gore_particle_peak_capacity=512 world_particle_peak_capacity=1536"
+        " gore_particle_peak_covered_components=6"
+        " world_particle_peak_covered_components=18"
         " ground_fire_particle_pool_capacity=100"
         " impact_particle_pool_capacity=60"
         " particle_constant_spawn_emitters=14"
@@ -75,7 +77,7 @@ std::string telemetry_line(int sample, int corpse_awake = 2) {
 
 std::string empty_telemetry_line() {
     return
-        "ScriptLog: KF2OPT_TELEMETRY schema=7 sample=1 scan_diagnostics=1"
+        "ScriptLog: KF2OPT_TELEMETRY schema=8 sample=1 scan_diagnostics=1"
         " living=1 living_classes=1 living_bosses=0 living_visible=1"
         " living_offscreen=0 living_lod_total=0 living_anim_rate_total=60"
         " living_injured_zones=0"
@@ -117,7 +119,9 @@ std::string empty_telemetry_line() {
         " world_particle_lod_total=0 world_particle_bounded_components=0"
         " ground_fire_particle_components=0 ground_fire_particles=0"
         " impact_particle_components=0 impact_particles=0"
-        " gore_particle_pool_capacity=30 world_particle_pool_capacity=200"
+        " gore_particle_peak_capacity=0 world_particle_peak_capacity=0"
+        " gore_particle_peak_covered_components=0"
+        " world_particle_peak_covered_components=0"
         " ground_fire_particle_pool_capacity=100"
         " impact_particle_pool_capacity=60"
         " particle_constant_spawn_emitters=0"
@@ -992,8 +996,6 @@ int main() {
     CHECK(probe->telemetry_ground_fire_particles == 222);
     CHECK(probe->telemetry_impact_particle_components == 5);
     CHECK(probe->telemetry_impact_particles == 333);
-    CHECK(probe->telemetry_gore_particle_pool_capacity == 30);
-    CHECK(probe->telemetry_world_particle_pool_capacity == 200);
     CHECK(probe->telemetry_ground_fire_particle_pool_capacity == 100);
     CHECK(probe->telemetry_impact_particle_pool_capacity == 60);
     CHECK(probe->telemetry_particle_constant_spawn_emitters == 14);
@@ -1001,6 +1003,10 @@ int main() {
     CHECK(probe->telemetry_particle_constant_spawn_rate_milli == 125500);
     CHECK(probe->telemetry_particle_burst_entries == 19);
     CHECK(probe->telemetry_particle_peak_capacity == 2048);
+    CHECK(probe->telemetry_gore_particle_peak_capacity == 512);
+    CHECK(probe->telemetry_world_particle_peak_capacity == 1536);
+    CHECK(probe->telemetry_gore_particle_peak_covered_components == 6);
+    CHECK(probe->telemetry_world_particle_peak_covered_components == 18);
     CHECK(probe->telemetry_particle_flex_components == 5);
     CHECK(probe->telemetry_particle_flex_fluid_components == 3);
     CHECK(probe->telemetry_particle_flex_nonfluid_components == 1);
@@ -1056,6 +1062,10 @@ int main() {
     CHECK(!diagnostics_off->telemetry_bloat_king_puke_mine_projectiles.has_value());
     CHECK(diagnostics_off->telemetry_world_particles == 987);
     CHECK(diagnostics_off->telemetry_particle_peak_capacity == 2048);
+    CHECK(diagnostics_off->telemetry_gore_particle_peak_capacity == 512);
+    CHECK(diagnostics_off->telemetry_world_particle_peak_capacity == 1536);
+    CHECK(diagnostics_off->telemetry_gore_particle_peak_covered_components == 6);
+    CHECK(diagnostics_off->telemetry_world_particle_peak_covered_components == 18);
     CHECK(diagnostics_off->telemetry_wound_decals == 12);
     const auto diagnostics_on = diagnostics_off_stream.feed(telemetry_line(3));
     CHECK(diagnostics_on.has_value());
@@ -1072,10 +1082,25 @@ int main() {
     CHECK(diagnostics_zero->telemetry_explosion_actors == 0);
     CHECK(diagnostics_zero->telemetry_smoke_grenade_projectiles == 0);
     CHECK(diagnostics_zero->telemetry_puke_mine_projectiles == 0);
+    CHECK(!stream.feed(
+        replace_once(telemetry_line(8),
+                     " particle_peak_capacity=2048",
+                     " particle_peak_capacity=2047"),
+        4'600'000'000ULL).has_value());
+    CHECK(rejects_offline_telemetry(replace_once(
+        telemetry_line(10),
+        " gore_particle_peak_covered_components=6",
+        " gore_particle_peak_covered_components=7")));
+    CHECK(rejects_offline_telemetry(replace_once(
+        telemetry_line(10),
+        " ground_fire_particle_components=4 ground_fire_particles=222"
+        " impact_particle_components=5 impact_particles=333",
+        " ground_fire_particle_components=4 ground_fire_particles=700"
+        " impact_particle_components=5 impact_particles=400")));
     CHECK(!stream.feed(telemetry_line(8, 4),
                        4'600'000'000ULL).has_value());
     // Previous telemetry schemas remain unsupported rather than being parsed
-    // as the exact positional schema 7 contract.
+    // as the exact positional schema 8 contract.
     CHECK(!stream.feed(
         "ScriptLog: KF2OPT_TELEMETRY schema=1 sample=9 living=23\n",
         4'700'000'000ULL).has_value());
@@ -1099,6 +1124,10 @@ int main() {
     CHECK(!probe_expired->telemetry_corpse_collide_living_after_sleep.has_value());
     CHECK(!probe_expired->telemetry_world_particles.has_value());
     CHECK(!probe_expired->telemetry_particle_peak_capacity.has_value());
+    CHECK(!probe_expired->telemetry_gore_particle_peak_capacity.has_value());
+    CHECK(!probe_expired->telemetry_world_particle_peak_capacity.has_value());
+    CHECK(!probe_expired->telemetry_gore_particle_peak_covered_components.has_value());
+    CHECK(!probe_expired->telemetry_world_particle_peak_covered_components.has_value());
     CHECK(!probe_expired->telemetry_flex_surrogate_active.has_value());
     CHECK(!stream.expire_observations(20'000'000'000ULL).has_value());
 

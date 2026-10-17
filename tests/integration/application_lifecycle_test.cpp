@@ -2694,7 +2694,8 @@ int test_final_graphics_capture() {
     }
 
     final_graphics_events.clear();
-    fs::remove_all(root);
+    std::error_code cleanup_error;
+    fs::remove_all(root, cleanup_error);
     return EXIT_SUCCESS;
 }
 
@@ -6273,8 +6274,8 @@ int main(int argc, char** argv) {
               kf2::app::runtime::FeatureId::advanced) != nullptr);
     CHECK(kf2::app::runtime::valid_feature_registry(
         kf2::app::runtime::feature_definitions()));
-    const fs::path root{KF2_TEST_ROOT};
-    fs::remove_all(root);
+    const fs::path root = fs::path{KF2_TEST_ROOT} /
+        (L"main-" + std::to_wstring(GetCurrentProcessId()));
     const auto documents = root / L"Documents";
     const auto config_root = documents / L"My Games/KillingFloor2/KFGame/Config";
     const auto install_root = root / L"Steam/steamapps/common/KillingFloor2";
@@ -8102,6 +8103,7 @@ int main(int argc, char** argv) {
     CHECK(!fs::exists(published_telemetry));
     CHECK(read_bytes(config_root / L"KFEngine.ini") == original_engine_config);
 
-    fs::remove_all(root);
+    std::error_code cleanup_error;
+    fs::remove_all(root, cleanup_error);
     return EXIT_SUCCESS;
 }

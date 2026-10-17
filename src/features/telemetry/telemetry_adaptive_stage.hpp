@@ -392,8 +392,12 @@ select_adaptive_runtime_control(
     auto value = values.begin();
     auto capacity = capacities.begin();
     for (; value != values.end(); ++value, ++capacity) {
-        if (!*value || !*capacity || **value < 0 || **capacity <= 0) {
+        if (!*value || !*capacity || **value < 0 || **capacity < 0) {
             return std::nullopt;
+        }
+        if (**capacity == 0) {
+            if (**value != 0) return std::nullopt;
+            continue;
         }
         value_sum += **value;
         capacity_sum += **capacity;
@@ -405,21 +409,48 @@ select_adaptive_runtime_control(
         0.0, 1.0);
 }
 
-[[nodiscard]] inline std::optional<double> normalized_required_total(
-    std::initializer_list<std::optional<int>> values,
-    const std::optional<int>& capacity) noexcept {
-    if (values.size() == 0 || !capacity || *capacity <= 0) {
+[[nodiscard]] inline std::optional<double> normalized_particle_domain(
+    const std::optional<int>& particles,
+    const std::optional<int>& capacity,
+    const std::optional<int>& components,
+    const std::optional<int>& covered_components) noexcept {
+    if (!particles || !capacity || !components || !covered_components ||
+        *particles < 0 || *capacity < 0 || *components < 0 ||
+        *covered_components < 0 || *covered_components != *components) {
         return std::nullopt;
     }
-    std::int64_t value_sum = 0;
-    for (const auto& value : values) {
-        if (!value || *value < 0) return std::nullopt;
-        value_sum += *value;
+    if (*components == 0) {
+        return *particles == 0 && *capacity == 0
+            ? std::optional<double>{0.0} : std::nullopt;
     }
-    return std::clamp(
-        static_cast<double>(value_sum) /
-            static_cast<double>(*capacity),
-        0.0, 1.0);
+    if (*capacity <= 0 || *particles > *capacity) return std::nullopt;
+    return static_cast<double>(*particles) /
+        static_cast<double>(*capacity);
+}
+
+[[nodiscard]] inline std::optional<double> normalized_particle_total(
+    const game::GameLogSession& gameplay) noexcept {
+    const auto gore = normalized_particle_domain(
+        gameplay.telemetry_gore_particles,
+        gameplay.telemetry_gore_particle_peak_capacity,
+        gameplay.telemetry_gore_particle_components,
+        gameplay.telemetry_gore_particle_peak_covered_components);
+    const auto world = normalized_particle_domain(
+        gameplay.telemetry_world_particles,
+        gameplay.telemetry_world_particle_peak_capacity,
+        gameplay.telemetry_world_particle_components,
+        gameplay.telemetry_world_particle_peak_covered_components);
+    if (!gore || !world) return std::nullopt;
+    const auto capacity = gameplay.telemetry_particle_peak_capacity;
+    if (!capacity || *capacity < 0) return std::nullopt;
+    if (*capacity == 0) return *gore == 0.0 && *world == 0.0
+        ? std::optional<double>{0.0} : std::nullopt;
+    const auto particles = static_cast<std::int64_t>(
+        *gameplay.telemetry_gore_particles) +
+        *gameplay.telemetry_world_particles;
+    if (particles > *capacity) return std::nullopt;
+    return static_cast<double>(particles) /
+        static_cast<double>(*capacity);
 }
 
 // KF2 does not expose per-pixel overdraw. This estimate therefore uses only
@@ -440,12 +471,7 @@ select_adaptive_runtime_control(
          gameplay.telemetry_pool_decal_limit,
          gameplay.telemetry_impact_decal_limit,
          gameplay.telemetry_explosion_decal_limit});
-    const auto particle_occupancy = normalized_required_total(
-        {gameplay.telemetry_gore_particles,
-         gameplay.telemetry_world_particles,
-         gameplay.telemetry_ground_fire_particles,
-         gameplay.telemetry_impact_particles},
-        gameplay.telemetry_particle_peak_capacity);
+    const auto particle_occupancy = normalized_particle_total(gameplay);
     const auto visible_particle_ratio = normalized_required_sum(
         {gameplay.telemetry_gore_particle_visible_components,
          gameplay.telemetry_world_particle_visible_components},
@@ -677,12 +703,16 @@ select_adaptive_runtime_control(
             sample.ragdoll_pressure = normalized(
                 frame.gameplay->telemetry_corpse_awake,
                 frame.gameplay->telemetry_corpse_limit);
-            sample.gore_pressure = normalized(
+            sample.gore_pressure = normalized_particle_domain(
                 frame.gameplay->telemetry_gore_particles,
-                frame.gameplay->telemetry_gore_particle_pool_capacity);
-            sample.particle_pressure = normalized(
+                frame.gameplay->telemetry_gore_particle_peak_capacity,
+                frame.gameplay->telemetry_gore_particle_components,
+                frame.gameplay->telemetry_gore_particle_peak_covered_components);
+            sample.particle_pressure = normalized_particle_domain(
                 frame.gameplay->telemetry_world_particles,
-                frame.gameplay->telemetry_world_particle_pool_capacity);
+                frame.gameplay->telemetry_world_particle_peak_capacity,
+                frame.gameplay->telemetry_world_particle_components,
+                frame.gameplay->telemetry_world_particle_peak_covered_components);
             sample.rendering_pressure = estimate_overdraw_pressure(
                 *frame.gameplay);
             if (frame.offline_gameplay &&

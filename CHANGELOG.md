@@ -216,6 +216,11 @@ are visible immediately.
 
 ### Bug fixes
 
+- Derive Adaptive particle and gore pressure from particle-count capacities,
+  count ground-fire and impact particles exactly once, and keep valid empty
+  particle groups from suppressing the remaining scene evidence. Partial or
+  zero-capacity emitter coverage now fails closed instead of overstating load.
+
 - Preserve Adaptive's confirmed graphics composition, recovery obligations and
   timing through Escape/trader pauses; reconcile world changes through verified
   restoration before resuming the saved mode, without trusting old-world replies.
