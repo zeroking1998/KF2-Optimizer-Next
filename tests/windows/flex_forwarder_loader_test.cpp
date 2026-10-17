@@ -5,7 +5,7 @@
 #include "kf2/flex/flex_observation_shared.hpp"
 
 int wmain(int argc, wchar_t** argv) {
-    if (argc != 4) return 2;
+    if (argc != 3) return 2;
     const auto sandbox = std::filesystem::absolute(std::filesystem::path{argv[1]});
     std::error_code ec;
     std::filesystem::remove_all(sandbox, ec);
@@ -39,10 +39,6 @@ int wmain(int argc, wchar_t** argv) {
                                sandbox / L"flexRelease_x64.dll",
                                std::filesystem::copy_options::overwrite_existing, ec);
     if (ec) return 5;
-    std::filesystem::copy_file(std::filesystem::absolute(std::filesystem::path{argv[3]}),
-                               sandbox / L"kf2_anchor_runtime.dll",
-                               std::filesystem::copy_options::overwrite_existing, ec);
-    if (ec) return 21;
     FILETIME created{}, exited{}, kernel{}, user{};
     if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user))
         return 13;

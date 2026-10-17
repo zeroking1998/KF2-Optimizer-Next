@@ -385,16 +385,17 @@ add_test(NAME kf2_offline_telemetry_lab_test
 set_tests_properties(kf2_offline_telemetry_lab_test PROPERTIES
     SKIP_RETURN_CODE 77)
 
-add_executable(kf2_anchor_runtime_lab_test
-    windows/anchor_runtime_lab_test.cpp
-    "${PROJECT_SOURCE_DIR}/src/game/anchor_runtime_lab.cpp")
-target_include_directories(kf2_anchor_runtime_lab_test PRIVATE
+add_executable(kf2_anchor_runtime_loader_test
+    windows/anchor_runtime_loader_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/game/anchor_runtime_loader.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/game_session.cpp")
+target_include_directories(kf2_anchor_runtime_loader_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
-target_compile_definitions(kf2_anchor_runtime_lab_test PRIVATE
-    KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/anchor-runtime-lab")
-target_link_libraries(kf2_anchor_runtime_lab_test PRIVATE KF2TestFoundation)
-add_test(NAME kf2_anchor_runtime_lab_test
-    COMMAND kf2_anchor_runtime_lab_test)
+target_link_libraries(kf2_anchor_runtime_loader_test PRIVATE
+    dwmapi user32)
+add_dependencies(kf2_anchor_runtime_loader_test KF2AnchorRuntime)
+add_test(NAME kf2_anchor_runtime_loader_test
+    COMMAND kf2_anchor_runtime_loader_test "$<TARGET_FILE:KF2AnchorRuntime>")
 
 if(TARGET KF2FlexForwarder)
     add_library(kf2_flex_original_test_double SHARED
@@ -416,7 +417,7 @@ if(TARGET KF2FlexForwarder)
     add_test(NAME kf2_flex_forwarder_loader_test COMMAND kf2_flex_forwarder_loader_test
         "${KF2_TEST_SANDBOX_ROOT}/flex-forwarder"
         "${KF2_FLEX_FORWARDER}"
-        "$<TARGET_FILE:KF2AnchorRuntime>")
+        )
     set_tests_properties(kf2_flex_forwarder_loader_test PROPERTIES
         SKIP_RETURN_CODE 77)
 
@@ -465,7 +466,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp"
     "${PROJECT_SOURCE_DIR}/src/flex/optimized_runtime.cpp"
     "${PROJECT_SOURCE_DIR}/src/flex/optimized_runtime_recipe.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/anchor_runtime_lab.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/anchor_runtime_loader.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/frame_rate_cap.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_discovery.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/gameplay_log_lab.cpp"

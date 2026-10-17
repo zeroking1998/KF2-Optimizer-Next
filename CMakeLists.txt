@@ -212,7 +212,7 @@ add_executable(KF2Optimizer WIN32
     src/flex/flex_lab.cpp
     src/flex/flex_observation.cpp
     src/game/adaptive_control_client.cpp
-    src/game/anchor_runtime_lab.cpp
+    src/game/anchor_runtime_loader.cpp
     src/game/frame_rate_cap.cpp
     src/game/game_discovery.cpp
     src/game/gameplay_log_lab.cpp
@@ -483,7 +483,6 @@ if(BUILD_TESTING)
         set(KF2_FLEX_ANCHOR "${CMAKE_BINARY_DIR}/flex_forwarder_anchor.obj")
         add_custom_command(OUTPUT "${KF2_FLEX_FORWARDER}"
             COMMAND "${CMAKE_CXX_COMPILER}" /nologo /c /O2 /Oi- /GS- /GR- /EHs-c- /std:c++20
-                /DKF2_ANCHOR_RUNTIME_LINKED
                 "/Fo${KF2_FLEX_ANCHOR}"
                 "/I${PROJECT_SOURCE_DIR}/include"
                 "/I${CMAKE_BINARY_DIR}/generated"
@@ -491,7 +490,6 @@ if(BUILD_TESTING)
             COMMAND "${KF2_LLD_LINK}" /dll /entry:DllMain
                 "/def:${PROJECT_SOURCE_DIR}/src/flex/flex_forwarder.def"
                 "${KF2_FLEX_ANCHOR}"
-                "$<TARGET_LINKER_FILE:KF2AnchorRuntime>"
                 "/out:${KF2_FLEX_FORWARDER}" /machine:x64 /nodefaultlib
                 kernel32.lib
                 /subsystem:windows /opt:ref /opt:icf /brepro
@@ -499,7 +497,6 @@ if(BUILD_TESTING)
                 "${PROJECT_SOURCE_DIR}/src/flex/forwarder_stub.cpp"
                 "${CMAKE_BINARY_DIR}/generated/kf2/flex/flex_build_identity.hpp"
                 "${PROJECT_SOURCE_DIR}/include/kf2/flex/flex_observation_shared.hpp"
-                KF2AnchorRuntime
             VERBATIM)
         add_custom_target(KF2FlexForwarder DEPENDS "${KF2_FLEX_FORWARDER}")
         add_dependencies(KF2Optimizer KF2FlexForwarder)

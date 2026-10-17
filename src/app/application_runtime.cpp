@@ -1,7 +1,6 @@
 #include "application_runtime.hpp"
 
 #include "features/telemetry/telemetry_presentation_stage.hpp"
-#include "kf2/game/anchor_runtime_lab.hpp"
 #include "kf2/update/update_state.hpp"
 
 #include <system_error>
@@ -680,21 +679,6 @@ UiRuntime::UiRuntime(const std::filesystem::path& state_root, bool recovery_requ
                                       L"Interrupted optimized FleX runtime state was restored and verified. " +
                                           flex_recovery_details,
                                       L"flex"});
-                }
-                const auto anchor_recovered =
-                    game::recover_anchor_runtime_lab(
-                        flex_directory, state_root / L"anchor-runtime",
-                        game_running);
-                if (!anchor_recovered.has_value()) {
-                    event_log.append({0, diagnostics::Severity::error,
-                        "ANCHOR_RUNTIME_RECOVERY_BLOCKED",
-                        anchor_recovered.error().message, L"game"});
-                    recovery_required = true;
-                } else if (anchor_recovered.value()) {
-                    event_log.append({0, diagnostics::Severity::warning,
-                        "ANCHOR_RUNTIME_RECOVERED",
-                        L"Interrupted native anchor helper state was restored and verified",
-                        L"game"});
                 }
                 if (game_running) {
                     auto resumed = config::resume_session_config(

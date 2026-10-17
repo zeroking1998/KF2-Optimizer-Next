@@ -5,11 +5,6 @@
 #include "kf2/flex/flex_build_identity.hpp"
 #include "kf2/flex/flex_observation_shared.hpp"
 
-#if defined(KF2_ANCHOR_RUNTIME_LINKED)
-extern "C" __declspec(dllimport) LONG
-kf2_anchor_runtime_status() noexcept;
-#endif
-
 extern "C" int _fltused = 0;
 extern "C" void* memcpy(void* destination, const void* source, size_t count) {
     auto* out = static_cast<unsigned char*>(destination);
@@ -569,12 +564,7 @@ extern "C" void flexUpdateSolver(void* solver, float delta_time,
 }
 
 extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) noexcept {
-    if (reason == DLL_PROCESS_ATTACH) {
-        forwarder_module = instance;
-#if defined(KF2_ANCHOR_RUNTIME_LINKED)
-        static_cast<void>(kf2_anchor_runtime_status());
-#endif
-    }
+    if (reason == DLL_PROCESS_ATTACH) forwarder_module = instance;
     if (reason == DLL_PROCESS_DETACH) {
         if (observation) {
             // A reader can retain the mapping after this producer unloads.

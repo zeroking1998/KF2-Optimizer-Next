@@ -91,9 +91,9 @@ $metadata = [ordered]@{
         optimized_helper_sha256 = $flexHelperHash
     }
     anchor_runtime = [ordered]@{
-        mode = 'protected-native-helper'
-        activation = 'protected-flex-enabled-session'
-        restoration = 'exact-preexisting-or-absence'
+        mode = 'verified-process-loader'
+        activation = 'normal-session-independent-of-flex'
+        restoration = 'automatic-at-game-process-exit'
         helper_sha256 = $anchorHelperHash
     }
     offline_gameplay_telemetry = [ordered]@{

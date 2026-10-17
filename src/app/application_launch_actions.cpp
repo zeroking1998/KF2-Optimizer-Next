@@ -166,7 +166,7 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile(
             events->append({0, diagnostics::Severity::info,
                 "ADAPTIVE_LAUNCH_SKIPPED",
                 optimized_flex_launch
-                    ? L"Adaptive launch changes were skipped; the selected maximum corpse count, independent native FPS cap, native anchor helper and protected optimized FleX runtime remain active"
+                    ? L"Adaptive launch changes were skipped; the selected maximum corpse count, independent native FPS cap and protected optimized FleX runtime remain active"
                     : L"Adaptive launch changes were skipped; only the selected maximum corpse count and independent native FPS cap remain active",
                 L"optimizer"});
         }
@@ -358,10 +358,6 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities(
     }
 
     if (optimized_flex_launch) {
-        const auto anchor = ensure_anchor_runtime();
-        if (!anchor.has_value()) {
-            return Result<bool>::failure(anchor.error());
-        }
         const auto prepared = ensure_optimized_flex_runtime();
         if (!prepared.has_value()) {
             return Result<bool>::failure(prepared.error());

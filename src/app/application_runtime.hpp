@@ -34,6 +34,7 @@
 #include "kf2/diagnostics/feature_inventory.hpp"
 #include "kf2/diagnostics/crash_recorder.hpp"
 #include "kf2/game/game_session.hpp"
+#include "kf2/game/anchor_runtime_loader.hpp"
 #include "kf2/game/startup_prewarmer.hpp"
 #include "kf2/game/advanced_settings.hpp"
 #include "kf2/game/frame_rate_cap.hpp"
@@ -522,10 +523,6 @@ struct UiRuntime {
     Result<bool> ensure_optimized_flex_runtime();
 
     bool restore_optimized_flex_runtime(std::wstring_view reason);
-
-    Result<bool> ensure_anchor_runtime();
-
-    bool restore_anchor_runtime(std::wstring_view reason);
 
     Result<game::FrameRateCapResult> synchronize_frame_rate_cap();
 

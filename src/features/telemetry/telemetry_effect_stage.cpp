@@ -2,8 +2,6 @@
 
 #include "app/application_runtime.hpp"
 
-#include "kf2/game/anchor_runtime_lab.hpp"
-
 namespace kf2::app {
 namespace {
 
@@ -37,98 +35,6 @@ Result<FlexTransactionState> inspect_flex_transaction_state(
 }
 
 }  // namespace
-
-Result<bool> UiRuntime::ensure_anchor_runtime() {
-    if (!installation) {
-        return Result<bool>::failure(
-            {ErrorCode::not_found,
-             L"A verified KF2 installation was not found", 0});
-    }
-    const auto game_directory = installation->install_root /
-        L"Binaries" / L"Win64";
-    const auto state_directory = settings_path.parent_path() /
-        L"anchor-runtime";
-    const auto marker = state_directory /
-        L"anchor-runtime-transaction.marker";
-    std::error_code error;
-    if (std::filesystem::exists(marker, error)) {
-        if (error) {
-            return Result<bool>::failure(
-                {ErrorCode::io_failure,
-                 L"Anchor runtime recovery status cannot be inspected",
-                 static_cast<std::uint32_t>(error.value())});
-        }
-        const auto recovered = game::recover_anchor_runtime_lab(
-            game_directory, state_directory, false);
-        if (!recovered.has_value()) {
-            return Result<bool>::failure(recovered.error());
-        }
-        if (recovered.value()) {
-            events->append({0, diagnostics::Severity::info,
-                "ANCHOR_RUNTIME_RECOVERED",
-                L"Interrupted anchor runtime state was restored and verified",
-                L"game"});
-        }
-    } else if (error) {
-        return Result<bool>::failure(
-            {ErrorCode::io_failure,
-             L"Anchor runtime recovery status cannot be inspected",
-             static_cast<std::uint32_t>(error.value())});
-    }
-    const auto installed = game::install_anchor_runtime_lab({
-        .game_directory = game_directory,
-        .state_directory = state_directory,
-        .helper_asset = settings_path.parent_path() / L"Lab" /
-            L"kf2_anchor_runtime.dll",
-        .game_running = false});
-    if (!installed.has_value()) {
-        return Result<bool>::failure(installed.error());
-    }
-    events->append({0, diagnostics::Severity::info,
-        "ANCHOR_RUNTIME_READY",
-        L"The verified native anchor helper was prepared independently from FleX physics",
-        L"game"});
-    return Result<bool>::success(true);
-}
-
-bool UiRuntime::restore_anchor_runtime(std::wstring_view reason) {
-    if (!installation) return true;
-    const auto game_directory = installation->install_root /
-        L"Binaries" / L"Win64";
-    const auto state_directory = settings_path.parent_path() /
-        L"anchor-runtime";
-    const auto marker = state_directory /
-        L"anchor-runtime-transaction.marker";
-    std::error_code error;
-    if (!std::filesystem::exists(marker, error)) {
-        if (!error) return true;
-        events->append({0, diagnostics::Severity::error,
-            "ANCHOR_RUNTIME_RESTORE_FAILED",
-            L"Anchor runtime recovery status cannot be inspected", L"game"});
-        model.set_recovery_required(true);
-        invalidate();
-        return false;
-    }
-    const auto restored = game::restore_anchor_runtime_lab(
-        game_directory, state_directory, false);
-    if (!restored.has_value()) {
-        events->append({0, diagnostics::Severity::error,
-            "ANCHOR_RUNTIME_RESTORE_FAILED", restored.error().message,
-            L"game"});
-        model.set_recovery_required(true);
-        model.set_notice({ui::NoticeSeverity::error,
-            L"ANCHOR_RUNTIME_RESTORE_FAILED", restored.error().message,
-            L"Do not start KF2 again until the native helper is restored."});
-        invalidate();
-        return false;
-    }
-    events->append({0, diagnostics::Severity::info,
-        "ANCHOR_RUNTIME_RESTORED",
-        std::wstring{reason} +
-            L"; the native anchor helper was restored and verified",
-        L"game"});
-    return true;
-}
 
 Result<bool> UiRuntime::ensure_optimized_flex_runtime() {
     if (!installation) {
@@ -345,7 +251,6 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
         }
     }
     if (!restore_optimized_flex_runtime(reason)) complete = false;
-    if (!restore_anchor_runtime(reason)) complete = false;
     if (installation) {
         const auto capped = synchronize_frame_rate_cap();
         if (!capped.has_value()) {
