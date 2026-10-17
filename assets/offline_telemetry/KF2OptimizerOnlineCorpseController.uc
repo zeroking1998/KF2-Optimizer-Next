@@ -202,6 +202,7 @@ function bool ReleaseOneOnlineCorpse(bool bRestoreAll)
 {
     local bool bRemoved;
     local int Index;
+    local int ScanCount;
     local int Scanned;
     local string CurrentId;
     local KFGoreManager GoreManager;
@@ -225,9 +226,10 @@ function bool ReleaseOneOnlineCorpse(bool bRestoreAll)
             return false;
         }
     }
+    ScanCount = Min(8, FrozenCorpses.Length);
     ReleaseScanCursor = Clamp(
         ReleaseScanCursor, 0, FrozenCorpses.Length - 1);
-    while (FrozenCorpses.Length > 0 && Scanned < 8)
+    while (FrozenCorpses.Length > 0 && Scanned < ScanCount)
     {
         Index = Clamp(ReleaseScanCursor, 0, FrozenCorpses.Length - 1);
         Candidate = FrozenCorpses[Index].Corpse;
