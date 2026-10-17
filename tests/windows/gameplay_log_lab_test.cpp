@@ -651,9 +651,9 @@ int main() {
     const auto telemetry_session_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_SESSION_SOURCE));
     const auto producer_schema_fields = telemetry_schema_fields(
-        telemetry_source, "KF2OPT_TELEMETRY schema=7 sample=", ");\n}");
+        telemetry_source, "KF2OPT_TELEMETRY schema=8 sample=", ");\n}");
     const auto parser_schema_fields = telemetry_schema_fields(
-        telemetry_parser_source, "KF2OPT_TELEMETRY schema=7 sample=",
+        telemetry_parser_source, "KF2OPT_TELEMETRY schema=8 sample=",
         "if (!sample");
     CHECK(!producer_schema_fields.empty());
     CHECK(producer_schema_fields == parser_schema_fields);
@@ -3945,7 +3945,7 @@ int main() {
     const auto profile_window_start = telemetry_source.find(
         "if (bDetailedRuntimeDiagnostics && SampleSequence % 10 == 0)");
     const auto profile_window_end = telemetry_source.find(
-        "`log(\"KF2OPT_TELEMETRY schema=7 sample=", profile_window_start);
+        "`log(\"KF2OPT_TELEMETRY schema=8 sample=", profile_window_start);
     CHECK(profile_window_start != std::string::npos);
     CHECK(profile_window_end != std::string::npos);
     const auto profile_window = telemetry_source.substr(
@@ -4142,6 +4142,20 @@ int main() {
     CHECK(count_occurrences(
         particle_inspection, "ParticleComponent.Template.Emitters.Length") ==
           1);
+    CHECK(particle_inspection.find(
+        "++PeakCapacityCoveredComponents;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "WorldParticles += GroundFireParticles;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "WorldParticles += ImpactParticles;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "WorldParticles += CachedWorldEmitters.Particles;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "ParticlePeakCapacity = GoreParticlePeakCapacity + Min(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "ParticlePeakCapacity = Max(") == std::string::npos);
     CHECK(telemetry_source.find(
         "adaptive_controller_samples=") != std::string::npos);
     CHECK(telemetry_source.find(

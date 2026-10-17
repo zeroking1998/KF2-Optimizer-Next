@@ -75,6 +75,7 @@ struct WorldEmitterTelemetrySnapshot
     var int ConstantSpawnRateMilli;
     var int BurstEntries;
     var int PeakCapacity;
+    var int PeakCapacityCoveredComponents;
 };
 
 // Template paths and aggregate values avoid retaining ParticleSystem,
@@ -93,6 +94,7 @@ struct WorldEmitterTemplateTelemetrySnapshot
     var int ConstantSpawnRateMilli;
     var int BurstEntries;
     var int PeakCapacity;
+    var int PeakCapacityCoveredComponents;
 };
 
 // A short-lived, value-only attribution table. Source and template path make
@@ -5194,12 +5196,14 @@ function InspectParticleComponent(
     out int DynamicSpawnEmitters,
     out int ConstantSpawnRateMilli,
     out int BurstEntries,
-    out int PeakParticleCapacity)
+    out int PeakParticleCapacity,
+    out int PeakCapacityCoveredComponents)
 {
     local int Index;
     local int LODIndex;
     local int CurrentLODIndex;
     local int AddedRateMilli;
+    local int EmitterCount;
     local float ConstantRatePerSecond;
     local ParticleEmitter EmitterTemplate;
     local ParticleLODLevel LODTemplate;
@@ -5207,16 +5211,18 @@ function InspectParticleComponent(
     local DistributionFloatConstant ConstantScale;
     local bool HasFlexFluid;
     local bool HasFlexNonFluid;
+    local bool bPeakCapacityComplete;
+    local int ComponentPeakCapacity;
 
     if (ParticleComponent == None || ParticleComponent.Template == None)
     {
         ++UnclassifiedComponentCount;
         return;
     }
+    EmitterCount = ParticleComponent.Template.Emitters.Length;
+    bPeakCapacityComplete = EmitterCount > 0;
     CurrentLODIndex = ParticleComponent.GetLODLevel();
-    for (Index = 0;
-         Index < ParticleComponent.Template.Emitters.Length;
-         ++Index)
+    for (Index = 0; Index < EmitterCount; ++Index)
     {
         EmitterTemplate = ParticleComponent.Template.Emitters[Index];
         if (EmitterTemplate != None &&
@@ -5233,21 +5239,29 @@ function InspectParticleComponent(
         }
         if (EmitterTemplate == None || EmitterTemplate.LODLevels.Length == 0)
         {
+            bPeakCapacityComplete = false;
             ++DynamicSpawnEmitters;
             continue;
         }
         LODIndex = Clamp(CurrentLODIndex, 0,
                          EmitterTemplate.LODLevels.Length - 1);
         LODTemplate = EmitterTemplate.LODLevels[LODIndex];
-        if (LODTemplate == None || LODTemplate.SpawnModule == None)
+        if (LODTemplate == None)
+        {
+            bPeakCapacityComplete = false;
+            ++DynamicSpawnEmitters;
+            continue;
+        }
+        ComponentPeakCapacity += Min(
+            1000000000 - ComponentPeakCapacity,
+            Max(0, LODTemplate.PeakActiveParticles));
+        if (LODTemplate.SpawnModule == None)
         {
             ++DynamicSpawnEmitters;
             continue;
         }
         BurstEntries += Min(1000000000 - BurstEntries,
             LODTemplate.SpawnModule.BurstList.Length);
-        PeakParticleCapacity += Min(1000000000 - PeakParticleCapacity,
-            Max(0, LODTemplate.PeakActiveParticles));
         ConstantRate = DistributionFloatConstant(
             LODTemplate.SpawnModule.Rate.Distribution);
         ConstantScale = DistributionFloatConstant(
@@ -5290,6 +5304,12 @@ function InspectParticleComponent(
         {
             ++FlexNonFluidComponentCount;
         }
+    }
+    PeakParticleCapacity += Min(
+        1000000000 - PeakParticleCapacity, ComponentPeakCapacity);
+    if (bPeakCapacityComplete)
+    {
+        ++PeakCapacityCoveredComponents;
     }
 }
 
@@ -5336,7 +5356,8 @@ function InspectWorldEmitterParticleComponentCached(
     out int DynamicSpawnEmitters,
     out int ConstantSpawnRateMilli,
     out int BurstEntries,
-    out int PeakParticleCapacity)
+    out int PeakParticleCapacity,
+    out int PeakCapacityCoveredComponents)
 {
     local int CacheIndex;
     local int NewCacheIndex;
@@ -5381,7 +5402,8 @@ function InspectWorldEmitterParticleComponentCached(
                 Snapshot.DynamicSpawnEmitters,
                 Snapshot.ConstantSpawnRateMilli,
                 Snapshot.BurstEntries,
-                Snapshot.PeakCapacity);
+                Snapshot.PeakCapacity,
+                Snapshot.PeakCapacityCoveredComponents);
             ++ProfileWorldEmitterTemplateCacheMisses;
             if (CachedWorldEmitterTemplates.Length <
                 MaxWorldEmitterTemplateSnapshots)
@@ -5417,6 +5439,8 @@ function InspectWorldEmitterParticleComponentCached(
         1000000000 - BurstEntries, Snapshot.BurstEntries);
     PeakParticleCapacity += Min(
         1000000000 - PeakParticleCapacity, Snapshot.PeakCapacity);
+    PeakCapacityCoveredComponents +=
+        Snapshot.PeakCapacityCoveredComponents;
 }
 
 function int FindWorldParticleGroupSnapshot(
@@ -5465,6 +5489,7 @@ function AccumulateWorldParticleGroup(
     local int ConstantSpawnRateMilli;
     local int BurstEntries;
     local int PeakCapacity;
+    local int PeakCapacityCoveredComponents;
     local string TemplatePath;
     local string GroupKey;
     local WorldParticleGroupTelemetrySnapshot Group;
@@ -5500,7 +5525,8 @@ function AccumulateWorldParticleGroup(
         FlexComponents, FlexFluidComponents, FlexNonFluidComponents,
         FlexMixedComponents, NonFlexComponents, UnclassifiedComponents,
         ConstantSpawnEmitters, DynamicSpawnEmitters,
-        ConstantSpawnRateMilli, BurstEntries, PeakCapacity);
+        ConstantSpawnRateMilli, BurstEntries, PeakCapacity,
+        PeakCapacityCoveredComponents);
     ++ScannedWorldParticleGroups[GroupIndex].Components;
     ScannedWorldParticleGroups[GroupIndex].Particles +=
         ParticleComponent.NumActiveParticles;
@@ -5665,7 +5691,8 @@ function CountParticlePool(
     out int DynamicSpawnEmitters,
     out int ConstantSpawnRateMilli,
     out int BurstEntries,
-    out int PeakParticleCapacity)
+    out int PeakParticleCapacity,
+    out int PeakCapacityCoveredComponents)
 {
     local int Index;
     local ParticleSystemComponent ParticleComponent;
@@ -5689,7 +5716,8 @@ function CountParticlePool(
             FlexMixedComponentCount, NonFlexComponentCount,
             UnclassifiedComponentCount,
             ConstantSpawnEmitters, DynamicSpawnEmitters,
-            ConstantSpawnRateMilli, BurstEntries, PeakParticleCapacity);
+            ConstantSpawnRateMilli, BurstEntries, PeakParticleCapacity,
+            PeakCapacityCoveredComponents);
         LODLevelTotal += ParticleComponent.GetLODLevel();
         if (ParticleComponent.LastRenderTime > WorldInfo.TimeSeconds - 0.3)
         {
@@ -5711,12 +5739,12 @@ event PreBeginPlay()
 
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
     {
-        `log("KF2OPT_TELEMETRY schema=7 state=blocked reason=not_standalone");
+        `log("KF2OPT_TELEMETRY schema=8 state=blocked reason=not_standalone");
         Destroy();
         return;
     }
 
-    `log("KF2OPT_TELEMETRY schema=7 state=started net=standalone");
+    `log("KF2OPT_TELEMETRY schema=8 state=started net=standalone");
     SetTimer(1.0, true, nameof(SampleTelemetry), self);
     if (bAdaptiveCorpseStagger)
     {
@@ -6186,6 +6214,7 @@ function RefreshWorldEmitterCache(bool bCollectWorldParticleGroups)
     local int ScannedWorldEmitterConstantSpawnRateMilli;
     local int ScannedWorldEmitterBurstEntries;
     local int ScannedWorldEmitterPeakCapacity;
+    local int ScannedWorldEmitterPeakCapacityCoveredComponents;
 
     foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
     {
@@ -6216,7 +6245,8 @@ function RefreshWorldEmitterCache(bool bCollectWorldParticleGroups)
             ScannedWorldEmitterDynamicSpawnEmitters,
             ScannedWorldEmitterConstantSpawnRateMilli,
             ScannedWorldEmitterBurstEntries,
-            ScannedWorldEmitterPeakCapacity);
+            ScannedWorldEmitterPeakCapacity,
+            ScannedWorldEmitterPeakCapacityCoveredComponents);
         ScannedWorldEmitterLodTotal +=
             WorldEmitter.ParticleSystemComponent.GetLODLevel();
         if (WorldEmitter.ParticleSystemComponent.LastRenderTime >
@@ -6256,6 +6286,8 @@ function RefreshWorldEmitterCache(bool bCollectWorldParticleGroups)
         ScannedWorldEmitterConstantSpawnRateMilli;
     CachedWorldEmitters.BurstEntries = ScannedWorldEmitterBurstEntries;
     CachedWorldEmitters.PeakCapacity = ScannedWorldEmitterPeakCapacity;
+    CachedWorldEmitters.PeakCapacityCoveredComponents =
+        ScannedWorldEmitterPeakCapacityCoveredComponents;
 }
 
 function SampleTelemetry()
@@ -6369,8 +6401,6 @@ function SampleTelemetry()
     local int ImpactParticleVisibleComponents;
     local int ImpactParticleLodTotal;
     local int ImpactParticleBoundedComponents;
-    local int GoreParticlePoolCapacity;
-    local int WorldParticlePoolCapacity;
     local int GroundFireParticlePoolCapacity;
     local int ImpactParticlePoolCapacity;
     local int ParticleConstantSpawnEmitters;
@@ -6378,7 +6408,10 @@ function SampleTelemetry()
     local int ParticleConstantSpawnRateMilli;
     local int ParticleBurstEntries;
     local int ParticlePeakCapacity;
-    local bool GoreParticlePoolUnbounded;
+    local int GoreParticlePeakCapacity;
+    local int WorldParticlePeakCapacity;
+    local int GoreParticlePeakCoveredComponents;
+    local int WorldParticlePeakCoveredComponents;
     local int FlexSurrogateActive;
     local int FlexSurrogateParticles;
     local int FlexSurrogateVisible;
@@ -6404,7 +6437,7 @@ function SampleTelemetry()
 
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
     {
-        `log("KF2OPT_TELEMETRY schema=7 state=stopped reason=netmode_changed");
+        `log("KF2OPT_TELEMETRY schema=8 state=stopped reason=netmode_changed");
         Destroy();
         return;
     }
@@ -6714,25 +6747,6 @@ function SampleTelemetry()
         RuntimeSplatterLifetimeMs = int(GoreManager.BloodSplatterLifetime * 1000.0);
         RuntimePoolLifetimeMs = int(GoreManager.BloodPoolLifetime * 1000.0);
         RuntimeGibLifetimeMs = int(GoreManager.GibletLifetime * 1000.0);
-        if (GoreManager.BloodFXEmitterPool != None)
-        {
-            if (GoreManager.BloodFXEmitterPool.MaxActiveEffects <= 0)
-            {
-                GoreParticlePoolUnbounded = true;
-            }
-            GoreParticlePoolCapacity += Max(
-                0, GoreManager.BloodFXEmitterPool.MaxActiveEffects);
-        }
-        if (GoreManager.MiscGoreFXEmitterPool != None)
-        {
-            if (GoreManager.MiscGoreFXEmitterPool.MaxActiveEffects <= 0)
-            {
-                GoreParticlePoolUnbounded = true;
-            }
-            GoreParticlePoolCapacity += Min(
-                1000000000 - GoreParticlePoolCapacity,
-                Max(0, GoreManager.MiscGoreFXEmitterPool.MaxActiveEffects));
-        }
         CountParticlePool(GoreManager.BloodFXEmitterPool,
                           GoreParticleComponents, GoreParticles,
                           GoreParticleVisibleComponents,
@@ -6748,11 +6762,8 @@ function SampleTelemetry()
                           ParticleDynamicSpawnEmitters,
                           ParticleConstantSpawnRateMilli,
                           ParticleBurstEntries,
-                          ParticlePeakCapacity);
-        if (GoreParticlePoolUnbounded)
-        {
-            GoreParticlePoolCapacity = 0;
-        }
+                          GoreParticlePeakCapacity,
+                          GoreParticlePeakCoveredComponents);
         CountParticlePool(GoreManager.MiscGoreFXEmitterPool,
                           GoreParticleComponents, GoreParticles,
                           GoreParticleVisibleComponents,
@@ -6768,7 +6779,8 @@ function SampleTelemetry()
                           ParticleDynamicSpawnEmitters,
                           ParticleConstantSpawnRateMilli,
                           ParticleBurstEntries,
-                           ParticlePeakCapacity);
+                          GoreParticlePeakCapacity,
+                          GoreParticlePeakCoveredComponents);
     }
     if (bDetailedRuntimeDiagnostics)
     {
@@ -6825,11 +6837,6 @@ function SampleTelemetry()
     {
         ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
     }
-    if (WorldInfo.MyEmitterPool != None)
-    {
-        WorldParticlePoolCapacity = Max(
-            0, WorldInfo.MyEmitterPool.MaxActiveEffects);
-    }
     if (WorldInfo.GroundFireEmitterPool != None)
     {
         GroundFireParticlePoolCapacity = Max(
@@ -6855,7 +6862,8 @@ function SampleTelemetry()
                       ParticleDynamicSpawnEmitters,
                       ParticleConstantSpawnRateMilli,
                       ParticleBurstEntries,
-                      ParticlePeakCapacity);
+                      WorldParticlePeakCapacity,
+                      WorldParticlePeakCoveredComponents);
     CountParticlePool(WorldInfo.GroundFireEmitterPool,
                       GroundFireParticleComponents, GroundFireParticles,
                       GroundFireParticleVisibleComponents,
@@ -6871,7 +6879,8 @@ function SampleTelemetry()
                       ParticleDynamicSpawnEmitters,
                       ParticleConstantSpawnRateMilli,
                       ParticleBurstEntries,
-                      ParticlePeakCapacity);
+                      WorldParticlePeakCapacity,
+                      WorldParticlePeakCoveredComponents);
     WorldParticleComponents += GroundFireParticleComponents;
     WorldParticles += GroundFireParticles;
     WorldParticleVisibleComponents += GroundFireParticleVisibleComponents;
@@ -6892,7 +6901,8 @@ function SampleTelemetry()
                       ParticleDynamicSpawnEmitters,
                       ParticleConstantSpawnRateMilli,
                       ParticleBurstEntries,
-                      ParticlePeakCapacity);
+                      WorldParticlePeakCapacity,
+                      WorldParticlePeakCoveredComponents);
     WorldParticleComponents += ImpactParticleComponents;
     WorldParticles += ImpactParticles;
     WorldParticleVisibleComponents += ImpactParticleVisibleComponents;
@@ -7055,8 +7065,14 @@ function SampleTelemetry()
     ParticleConstantSpawnRateMilli +=
         CachedWorldEmitters.ConstantSpawnRateMilli;
     ParticleBurstEntries += CachedWorldEmitters.BurstEntries;
-    ParticlePeakCapacity = Max(
-        ParticlePeakCapacity, CachedWorldEmitters.PeakCapacity);
+    WorldParticlePeakCapacity += Min(
+        1000000000 - WorldParticlePeakCapacity,
+        CachedWorldEmitters.PeakCapacity);
+    WorldParticlePeakCoveredComponents +=
+        CachedWorldEmitters.PeakCapacityCoveredComponents;
+    ParticlePeakCapacity = GoreParticlePeakCapacity + Min(
+        1000000000 - GoreParticlePeakCapacity,
+        WorldParticlePeakCapacity);
     if (bDetailedRuntimeDiagnostics)
     {
         ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
@@ -7174,7 +7190,7 @@ function SampleTelemetry()
         ProfileMaxZedDebugMilliseconds = 0;
         ProfileClockAnomalies = 0;
     }
-    `log("KF2OPT_TELEMETRY schema=7 sample="$SampleSequence$
+    `log("KF2OPT_TELEMETRY schema=8 sample="$SampleSequence$
          " scan_diagnostics="$(bDetailedRuntimeDiagnostics ? 1 : 0)$
          " living="$LivingZeds$
          " living_classes="$LivingClasses.Length$
@@ -7269,8 +7285,10 @@ function SampleTelemetry()
          " ground_fire_particles="$GroundFireParticles$
          " impact_particle_components="$ImpactParticleComponents$
          " impact_particles="$ImpactParticles$
-         " gore_particle_pool_capacity="$GoreParticlePoolCapacity$
-         " world_particle_pool_capacity="$WorldParticlePoolCapacity$
+         " gore_particle_peak_capacity="$GoreParticlePeakCapacity$
+         " world_particle_peak_capacity="$WorldParticlePeakCapacity$
+         " gore_particle_peak_covered_components="$GoreParticlePeakCoveredComponents$
+         " world_particle_peak_covered_components="$WorldParticlePeakCoveredComponents$
          " ground_fire_particle_pool_capacity="$GroundFireParticlePoolCapacity$
          " impact_particle_pool_capacity="$ImpactParticlePoolCapacity$
          " particle_constant_spawn_emitters="$ParticleConstantSpawnEmitters$
@@ -7426,7 +7444,7 @@ function QuiesceForWorldTeardown()
     bAdaptiveDebugMarkerRenderConfirmed = false;
     AdaptiveCorpsePhysicsActionIds.Length = 0;
     AdaptiveCorpsePhysicsActionIdCount = 0;
-    `log("KF2OPT_TELEMETRY schema=7 state=stopped reason=world_teardown");
+    `log("KF2OPT_TELEMETRY schema=8 state=stopped reason=world_teardown");
 }
 
 event Destroyed()

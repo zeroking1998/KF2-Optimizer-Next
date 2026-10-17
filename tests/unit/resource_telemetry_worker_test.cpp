@@ -337,7 +337,7 @@ int test_gpu_provider_binding_boundaries() {
 
 std::string offline_telemetry_line() {
     return
-        "ScriptLog: KF2OPT_TELEMETRY schema=7 sample=1 scan_diagnostics=1"
+        "ScriptLog: KF2OPT_TELEMETRY schema=8 sample=1 scan_diagnostics=1"
         " living=1 living_classes=1 living_bosses=0 living_visible=1"
         " living_offscreen=0 living_lod_total=0 living_anim_rate_total=60"
         " living_injured_zones=0 living_required_bones=80"
@@ -376,7 +376,9 @@ std::string offline_telemetry_line() {
         " world_particle_lod_total=0 world_particle_bounded_components=0"
         " ground_fire_particle_components=0 ground_fire_particles=0"
         " impact_particle_components=0 impact_particles=0"
-        " gore_particle_pool_capacity=30 world_particle_pool_capacity=200"
+        " gore_particle_peak_capacity=0 world_particle_peak_capacity=0"
+        " gore_particle_peak_covered_components=0"
+        " world_particle_peak_covered_components=0"
         " ground_fire_particle_pool_capacity=100"
         " impact_particle_pool_capacity=60 particle_constant_spawn_emitters=0"
         " particle_dynamic_spawn_emitters=0"

@@ -137,8 +137,10 @@ struct GameLogSession {
     std::optional<int> telemetry_ground_fire_particles;
     std::optional<int> telemetry_impact_particle_components;
     std::optional<int> telemetry_impact_particles;
-    std::optional<int> telemetry_gore_particle_pool_capacity;
-    std::optional<int> telemetry_world_particle_pool_capacity;
+    std::optional<int> telemetry_gore_particle_peak_capacity;
+    std::optional<int> telemetry_world_particle_peak_capacity;
+    std::optional<int> telemetry_gore_particle_peak_covered_components;
+    std::optional<int> telemetry_world_particle_peak_covered_components;
     std::optional<int> telemetry_ground_fire_particle_pool_capacity;
     std::optional<int> telemetry_impact_particle_pool_capacity;
     std::optional<int> telemetry_particle_constant_spawn_emitters;
