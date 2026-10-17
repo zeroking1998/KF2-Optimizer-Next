@@ -36,6 +36,11 @@ int main() {
             CHECK(!adaptive_setting_active_ready(
                 record, AdaptiveCapabilityState::available));
         }
+        if (record.name.find("Flex") != std::string::npos) {
+            CHECK(record.role != AdaptiveRole::adaptive_knob);
+            CHECK(!adaptive_setting_active_ready(
+                record, AdaptiveCapabilityState::available));
+        }
     }
     for (const bool present : roles) CHECK(present);
 
@@ -54,6 +59,26 @@ int main() {
     CHECK(find_adaptive_setting("injection") &&
           find_adaptive_setting("injection")->role ==
               AdaptiveRole::permanently_protected);
+    for (const std::string_view user_owned_flex_setting :
+         {"PhysXLevel", "GoreLevel", "MaxPhysicsSubsteps",
+          "FlexInvisibleFramesBeforeSleep", "FlexDistanceBeforeSleep",
+          "AllowSPHFluidMipmap", "FlexRigidBodiesCollisionAtHighLevel"}) {
+        const auto* setting = find_adaptive_setting(user_owned_flex_setting);
+        CHECK(setting != nullptr);
+        CHECK(setting->role == AdaptiveRole::permanently_protected);
+        CHECK(setting->actuation_class ==
+              ActuationClass::permanent_blocked);
+        CHECK(!adaptive_setting_active_ready(
+            *setting, AdaptiveCapabilityState::available));
+    }
+    for (const std::string_view retired_flex_control :
+         {"FlexAdaptiveEnabled", "FlexTargetSubsteps",
+          "FlexActiveParticleBudget", "FlexFluidQuality",
+          "FlexSyncPolicy"}) {
+        CHECK(find_adaptive_setting(retired_flex_control) == nullptr);
+    }
+    CHECK(find_adaptive_setting("MissingFlexTelemetry") != nullptr);
+    CHECK(find_adaptive_setting("FlexRuntimeIdentity") != nullptr);
     const auto* target = find_adaptive_setting("TargetFPS");
     CHECK(target && target->evidence_state == AdaptiveEvidenceState::proven);
     CHECK(target->actuation_class == ActuationClass::config_only);
@@ -120,9 +145,9 @@ int main() {
     CHECK(adaptive_actuation_class_name(ActuationClass::config_only) ==
           "CONFIG_ONLY");
 
-    // Every setting that the verified 213-entry KF2 catalog can edit must also
-    // be present in the target model, but it remains TEST_REQUIRED for runtime
-    // Adaptive use until a separate reversible A/B proof exists.
+    // Every editable KF2 catalog setting remains represented. User-owned
+    // FleX/physics choices stay permanently outside Adaptive;
+    // every other catalog candidate remains TEST_REQUIRED until proven.
     for (const auto& definition : kf2::config::all_settings()) {
         std::string name;
         for (const wchar_t character : definition.key) {
@@ -131,6 +156,19 @@ int main() {
         }
         const auto* record = find_adaptive_setting(name);
         CHECK(record);
+        if (name == "PhysXLevel" || name == "GoreLevel" ||
+            name == "MaxPhysicsSubsteps" ||
+            name == "FlexInvisibleFramesBeforeSleep" ||
+            name == "FlexDistanceBeforeSleep" ||
+            name == "AllowSPHFluidMipmap" ||
+            name == "FlexRigidBodiesCollisionAtHighLevel") {
+            CHECK(record->role == AdaptiveRole::permanently_protected);
+            CHECK(record->actuation_class ==
+                  ActuationClass::permanent_blocked);
+            CHECK(!adaptive_setting_active_ready(
+                *record, AdaptiveCapabilityState::available));
+            continue;
+        }
         CHECK(record->role == AdaptiveRole::adaptive_knob);
         CHECK(record->source_trust == SourceTrustClass::verified);
         CHECK(record->evidence_state == AdaptiveEvidenceState::test_required);

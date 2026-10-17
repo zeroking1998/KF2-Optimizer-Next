@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
 #include <string_view>
 
@@ -23,6 +24,16 @@ void write(const fs::path& path, std::string_view bytes) {
 std::string read(const fs::path& path) {
     std::ifstream input(path, std::ios::binary);
     return {std::istreambuf_iterator<char>{input}, {}};
+}
+
+std::map<fs::path, std::string> snapshot_files(const fs::path& root) {
+    std::map<fs::path, std::string> files;
+    for (const auto& entry : fs::recursive_directory_iterator(root)) {
+        if (entry.is_regular_file()) {
+            files.emplace(entry.path().lexically_relative(root), read(entry.path()));
+        }
+    }
+    return files;
 }
 
 std::string field(std::string_view bytes, std::string_view key) {
@@ -194,8 +205,7 @@ bool check_owner_binding(const fs::path& root) {
     return true;
 }
 
-bool check_legacy_recovery(const fs::path& root) {
-    Fixture fixture(root, "legacy-recovery");
+bool prepare_legacy_recovery(Fixture& fixture, std::string_view state) {
     CHECK(kf2::flex::install_optimized_runtime_transaction(
         fixture.options).has_value());
     const auto current_marker = read(
@@ -211,17 +221,63 @@ bool check_legacy_recovery(const fs::path& root) {
     write(fixture.game / L"flexRelease_original.dll", "stock-core");
     write(fixture.game / L"flexRelease_x64.dll", "relay");
     write(fixture.state / L"flex-lab-transaction.marker",
-        "schema=3\nstate=installed\noriginal_sha256=" + original +
+        "schema=3\nstate=" + std::string{state} + "\noriginal_sha256=" + original +
         "\nforwarder_sha256=" + forwarder +
         "\nowner_sha256=" + owner + "\n");
-    std::wstring details;
-    const auto recovered = kf2::flex::recover_optimized_runtime_transaction(
-        fixture.game, fixture.state, false, &details);
-    CHECK(recovered.has_value() && recovered.value());
-    CHECK(read(fixture.game / L"flexRelease_x64.dll") == "stock-core");
-    CHECK(!fs::exists(fixture.game / L"flexRelease_original.dll"));
-    CHECK(!fs::exists(fixture.state / L"flex-lab-transaction.marker"));
-    CHECK(!details.empty());
+    return true;
+}
+
+bool check_legacy_recovery(const fs::path& root) {
+    for (unsigned index = 0; index < 4; ++index) {
+        Fixture fixture(root, "legacy-recovery-" + std::to_string(index));
+        CHECK(prepare_legacy_recovery(fixture,
+            index % 2 == 0 ? "installed" : "installing"));
+        if (index == 1) write(fixture.game / L"flexRelease_x64.dll", "stock-core");
+        if (index == 2) fs::remove(fixture.game / L"flexRelease_original.dll");
+        if (index == 3) {
+            fs::remove(fixture.state / L"flexRelease_x64.pre-lab.dll");
+            fs::remove(fixture.game / L"flexRelease_x64.dll");
+        }
+        std::wstring details;
+        const auto recovered = kf2::flex::recover_optimized_runtime_transaction(
+            fixture.game, fixture.state, false, &details);
+        CHECK(recovered.has_value() && recovered.value());
+        CHECK(restored(fixture, false));
+        CHECK(!details.empty());
+    }
+    return true;
+}
+
+bool check_unknown_legacy_runtime_preserved(const fs::path& root) {
+    constexpr std::array<std::pair<std::wstring_view, std::string_view>, 5> cases{{
+        {L"game/flexRelease_x64.dll", "unknown"},
+        {L"game/flexRelease_original.dll", "unknown"},
+        {L"state/flexRelease_x64.pre-lab.dll", "unknown"},
+        {L"game/flexRelease_original.dll", "relay"},
+        {L"state/flexRelease_x64.pre-lab.dll", "relay"},
+    }};
+    for (const auto state : {"installing", "installed"}) {
+        for (const bool recover : {false, true}) {
+            for (std::size_t index = 0; index < cases.size(); ++index) {
+                Fixture fixture(root, "unknown-legacy-" + std::string{state} +
+                    (recover ? "-recover-" : "-restore-") + std::to_string(index));
+                CHECK(prepare_legacy_recovery(fixture, state));
+                const auto& [name, bytes] = cases[index];
+                write(fixture.root / fs::path{name}, bytes);
+                const auto before = snapshot_files(fixture.root);
+                std::wstring details{L"previous recovery"};
+                const auto result = recover
+                    ? kf2::flex::recover_optimized_runtime_transaction(
+                        fixture.game, fixture.state, false, &details)
+                    : kf2::flex::restore_optimized_runtime_transaction(
+                        fixture.game, fixture.state, false, &details);
+                CHECK(!result.has_value());
+                CHECK(result.error().code == kf2::ErrorCode::stale_data);
+                CHECK(snapshot_files(fixture.root) == before);
+                CHECK(details.empty());
+            }
+        }
+    }
     return true;
 }
 
@@ -237,7 +293,8 @@ int main() {
         check_round_trip(root, true) && check_rollback(root) &&
         check_unknown_helper_preserved(root) &&
         check_unknown_runtime_preserved(root) && check_gates(root) &&
-        check_owner_binding(root) && check_legacy_recovery(root);
+        check_owner_binding(root) && check_legacy_recovery(root) &&
+        check_unknown_legacy_runtime_preserved(root);
     kf2::flex::set_runtime_install_test_hook(nullptr);
     kf2::flex::set_runtime_status_hook_for_testing(nullptr);
     fs::remove_all(root, error);

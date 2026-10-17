@@ -74,7 +74,7 @@ constexpr std::array area02_items{
     ItemSpec{FeatureStatus::present, "persistent mode", "Legacy modes migrate to the canonical Adaptive settings document."},
     ItemSpec{FeatureStatus::present, "atomic migration", "A normalized Adaptive settings document is atomically replaced."},
     ItemSpec{FeatureStatus::present, "preview and effective values", "Preview rows expose before, after, source and reason before mutation."},
-    ItemSpec{FeatureStatus::present, "safe bounds", "Target FPS, profiles, catalog values and FleX levels are bounded."},
+    ItemSpec{FeatureStatus::present, "safe bounds", "Target FPS, profiles, catalog values and user-owned FleX selections are bounded."},
     ItemSpec{FeatureStatus::present, "hardware-, FPS-, and frame-time-driven adaptation", "Fresh identity-bound metrics feed recommendations with confidence and reasons."},
     ItemSpec{FeatureStatus::present, "future use of verified gameplay data", "Fresh official protected-provider living-enemy, corpse and particle-component counts feed the Adaptive evidence model; each unavailable capability remains explicit and can never silently lower quality."},
     ItemSpec{FeatureStatus::present, "user limits without silent side paths", "Explicit safety locks have strict priority; automatic config writes occur only in the protected pre-launch transaction."},

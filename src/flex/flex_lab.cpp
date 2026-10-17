@@ -346,8 +346,17 @@ Result<bool> restore_legacy_lab(const std::filesystem::path& game,
              L"Legacy FleX recovery belongs to a different KF2 installation", 0});
     }
 
+    const auto active_core = game / active_core_name;
     const auto state_backup = state / core_backup_name;
     const auto in_game_copy = game / relayed_core_name;
+    auto known = require_known_current(active_core,
+        {marker.value().original, marker.value().forwarder}, true);
+    if (!known.has_value()) return known;
+    known = require_known_current(state_backup, {marker.value().original}, true);
+    if (!known.has_value()) return known;
+    known = require_known_current(in_game_copy, {marker.value().original}, true);
+    if (!known.has_value()) return known;
+
     const auto backup_valid = verified_source(
         state_backup, marker.value().original);
     const auto in_game_valid = verified_source(
@@ -361,7 +370,7 @@ Result<bool> restore_legacy_lab(const std::filesystem::path& game,
              L"No verified legacy FleX recovery copy is available", 0});
     }
     auto restored = replace_verified(
-        *source, game / active_core_name, marker.value().original);
+        *source, active_core, marker.value().original);
     if (!restored.has_value()) return restored;
     const auto relay_exists = inspected_exists(in_game_copy);
     if (!relay_exists.has_value()) return relay_exists;

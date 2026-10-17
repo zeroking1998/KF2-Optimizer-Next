@@ -15,7 +15,8 @@ are visible immediately.
   An already verified staged runtime is reused instead of rebuilding and
   rewriting identical binaries on every later launch.
 - Remove the retired fixed-minimum-substep controller, its Adaptive actions,
-  stale UI fields and control telemetry. FleX diagnostics remain read-only, and
+  stale UI fields, control telemetry and registry candidates. FleX diagnostics
+  remain read-only, and
   failed preparation, installation or restoration rolls the complete transaction
   back instead of leaving a mixed runtime behind.
 
