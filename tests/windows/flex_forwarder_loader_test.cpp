@@ -27,6 +27,14 @@ int wmain(int argc, wchar_t** argv) {
                                sandbox / L"cudart64_75.dll",
                                std::filesystem::copy_options::overwrite_existing, ec);
     if (ec) return 9;
+    const auto optimized_helper = runtime_dir / L"kf2_p4_overlap.dll";
+    if (std::filesystem::exists(optimized_helper)) {
+        std::filesystem::copy_file(optimized_helper,
+                                   sandbox / L"kf2_p4_overlap.dll",
+                                   std::filesystem::copy_options::overwrite_existing,
+                                   ec);
+        if (ec) return 20;
+    }
     std::filesystem::copy_file(std::filesystem::absolute(std::filesystem::path{argv[2]}),
                                sandbox / L"flexRelease_x64.dll",
                                std::filesystem::copy_options::overwrite_existing, ec);
@@ -75,7 +83,7 @@ int wmain(int argc, wchar_t** argv) {
         if (shared->magic != 0 || shared->state != 0 ||
             kf2::flex::read_observation(identity) ||
             reader.read(identity) ||
-            kf2::flex::write_fixed_control(identity, true)) return 15;
+            kf2::flex::write_diagnostics_control(identity, true)) return 15;
         if ((cycle % 2) == 0) {
             module = LoadLibraryExW((sandbox / L"flexRelease_x64.dll").c_str(),
                 nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);

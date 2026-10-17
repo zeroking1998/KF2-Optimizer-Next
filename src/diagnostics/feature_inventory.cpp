@@ -74,7 +74,7 @@ constexpr std::array area02_items{
     ItemSpec{FeatureStatus::present, "persistent mode", "Legacy modes migrate to the canonical Adaptive settings document."},
     ItemSpec{FeatureStatus::present, "atomic migration", "A normalized Adaptive settings document is atomically replaced."},
     ItemSpec{FeatureStatus::present, "preview and effective values", "Preview rows expose before, after, source and reason before mutation."},
-    ItemSpec{FeatureStatus::present, "safe bounds", "Target FPS, profiles, catalog values and FleX levels are bounded."},
+    ItemSpec{FeatureStatus::present, "safe bounds", "Target FPS, profiles, catalog values and user-owned FleX selections are bounded."},
     ItemSpec{FeatureStatus::present, "hardware-, FPS-, and frame-time-driven adaptation", "Fresh identity-bound metrics feed recommendations with confidence and reasons."},
     ItemSpec{FeatureStatus::present, "future use of verified gameplay data", "Fresh official protected-provider living-enemy, corpse and particle-component counts feed the Adaptive evidence model; each unavailable capability remains explicit and can never silently lower quality."},
     ItemSpec{FeatureStatus::present, "user limits without silent side paths", "Explicit safety locks have strict priority; automatic config writes occur only in the protected pre-launch transaction."},
@@ -254,9 +254,9 @@ constexpr AreaContract area11{
     "A official SDK/B partial", "Known controls plus actual gore/world, ground-fire and impact component/particle aggregates, pool capacities, constant/dynamic spawn-source envelopes, bursts, visibility, LOD and bounds are available; unsupported semantics stay unavailable.",
     "Lower effects cost and clearer capacity diagnostics.",
     "Solver counts do not prove fluid, gore, enemy or corpse meaning.",
-    "Explicit verified config; aggregate observation only.", "INI restore and FleX stale-control pass-through.",
+    "Explicit verified config; aggregate observation only.", "INI restore and exact FleX pass-through.",
     "KF2 config and known FleX ABI.", "Capacity, multisolver, stale, loader-soak and visual gameplay tests.",
-    "kf2_flex_observation_test; kf2_flex_forwarder_fixed_minimum_test; catalog tests"};
+    "kf2_flex_observation_test; kf2_flex_forwarder_passthrough_test; kf2_binary_delta_test; catalog tests"};
 
 constexpr std::array area11_items{
     ItemSpec{FeatureStatus::partial, "spawn rate, lifetime, and capacity", "Verified cosmetic lifetimes, FleX aggregate capacity and official emitter-pool capacities are reported. Active emitter templates expose a bounded constant spawn-rate sum, dynamic/unknown source count, burst entries and peak-particle capacity; dynamic distributions and unspawned content remain explicitly unknown."},
@@ -270,26 +270,26 @@ constexpr std::array area11_items{
 
 constexpr AreaContract area12{
     "NVIDIA FleX and safe hook", "src/flex; include/kf2/flex", "Pinned KF2 FleX 1.0.5 identity, export table and shared observation",
-    "A/B verified laboratory", "All 52 exports preserve the pinned ABI: 37 are direct PE forwarders and fifteen local relays validate version, solver lifecycle, active count, update policy, exact fence synchronization, bounds, parameter calls and six bulk buffer-transfer entry points.",
-    "Offline FleX diagnostics and reversible controlled experiments.",
-    "Unknown DLL/version/ABI, stale owner or online state must remain blocked or pass-through.",
-    "Adaptive owns the hysteresis-stabilized 1-5 policy; the verified hook is prepared automatically for the protected offline app start.",
+    "A/B verified protected runtime", "All 52 exports preserve the pinned ABI: 37 are direct PE forwarders and fifteen local relays validate version, solver lifecycle, active count, native update cadence, exact fence synchronization, bounds, parameter calls and six bulk buffer-transfer entry points.",
+    "Optimized FleX execution, bounded diagnostics and exact reversible restore.",
+    "Unknown DLL/version/ABI, stale ownership or a running game blocks installation or restoration.",
+    "The user owns the KF2 FleX choice; the optimized runtime is prepared only when FleX is already enabled, and Adaptive has no FleX policy.",
     "Stopped-game install, hash backup, atomic marker and exact original restore.",
-    "Pinned original runtime and locally built laboratory DLL.",
+    "Exact stock runtime, deterministic optimized recipes, observation relay and project helper.",
     "Export/ABI/load/soak/multisolver/stale/restore and real offline gameplay tests.",
-    "FleX audit, loader, adaptive, observation and real offline session evidence"};
+    "FleX audit, loader, pass-through, observation and real offline session evidence"};
 
 constexpr std::array area12_items{
     ItemSpec{FeatureStatus::present, "exact KF2 FleX version, export table, ABI, and original DLL", "Pinned version, SHA-256, PE identity and complete export table are audited."},
     ItemSpec{FeatureStatus::present, "solver creation, update, synchronization, destroy, and recreate", "Create/update/destroy/recreate generations and KF2-requested set/wait fence synchronization are observed by exact ABI relays; unrelated exports remain direct pass-through."},
-    ItemSpec{FeatureStatus::partial, "substeps, iterations, time delta, stability, and timers", "Substeps and delta are observed/controlled; iterations and internal timers are not semantically exposed."},
+    ItemSpec{FeatureStatus::partial, "substeps, iterations, time delta, stability, and timers", "Substeps and delta are observed without relay rewriting; optimized internal scheduling is hash-bound, while internal timers are not semantically exposed."},
     ItemSpec{FeatureStatus::present, "particles, active/free particles, capacities, and buffers", "Aggregate active/free/capacity values are identity-bound and freshness checked; buffer contents are untouched."},
     ItemSpec{FeatureStatus::partial, "fluid/non-fluid phases and flags", "KF2's shipped SPH fluid-mipmap switch is catalogued but protected from Adaptive writes; no verified solver-to-game phase mapping exists."},
     ItemSpec{FeatureStatus::partial, "rigid bodies, shapes, shape matching, and collision shapes", "KF2's shipped high-level rigid-body collision switch is catalogued but protected from Adaptive writes; per-shape gameplay-neutral mutation remains unavailable."},
     ItemSpec{FeatureStatus::partial, "filters, containers, multiple solvers, and generations", "Multiple solver lifecycles and generations are tracked; filter/container semantics are not."},
-    ItemSpec{FeatureStatus::partial, "neighbor, contact, and timer data when exported", "The pinned 1.0.5 runtime exports flexGetContacts at ordinal 16 and the laboratory DLL preserves it as an exact direct PE forwarder. No timer export exists, and no ABI-proven non-invasive semantic observation is added."},
-    ItemSpec{FeatureStatus::partial, "feature modes and selective functions", "FleX remains user-controlled through KF2. When already enabled, the verified runtime requests one fixed solver substep independently of Adaptive mode or pressure; PhysXLevel and unproved global FleX sleep/fluid/rigid controls remain protected from automatic mutation."},
-    ItemSpec{FeatureStatus::partial, "asynchronous computation and synchronization points", "The exported set/wait fence calls are counted after exact relay; no wait or synchronization is added by the optimizer."},
+    ItemSpec{FeatureStatus::partial, "neighbor, contact, and timer data when exported", "The pinned 1.0.5 runtime exports flexGetContacts at ordinal 16 and the observation relay preserves it as an exact direct PE forwarder. No timer export exists, and no ABI-proven non-invasive semantic observation is added."},
+    ItemSpec{FeatureStatus::partial, "feature modes and selective functions", "FleX remains user-controlled through KF2. The verified optimized runtime is independent of Adaptive mode or pressure; PhysXLevel and unproved global FleX sleep/fluid/rigid controls remain protected from automatic mutation."},
+    ItemSpec{FeatureStatus::partial, "asynchronous computation and synchronization points", "The optimized runtime uses its verified scheduling path; exported set/wait fence calls remain observable and the relay adds no wait or synchronization."},
     ItemSpec{FeatureStatus::partial, "subrange updates, mapping, and memory transfers", "All six full-buffer particle/phase/velocity upload and download entry points are relayed exactly and measured; the pinned 1.0.5 ABI exposes no verified subrange or mapping entry point, so none is invented."},
     ItemSpec{FeatureStatus::partial, "GPU context loss, TDR, driver changes, and error states", "Stale/failed observations fall back; physical TDR/driver matrices remain target-system tests."},
     ItemSpec{FeatureStatus::partial, "safe solver/particle LOD only with a proven KF2 contract", "Official ParticleSystemComponent and FleX-surrogate LOD values are observed. The verified offline graphics actuator can use KF2's global ParticleLODBias, but no semantic FleX solver-to-effect write contract is invented."},

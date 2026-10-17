@@ -52,11 +52,20 @@ if ($bytes.Length -lt 512 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
 }
 $forwarder = Join-Path $root 'Data\Lab\flexRelease_x64.forwarder-lab.dll'
 if (-not (Test-Path -LiteralPath $forwarder -PathType Leaf)) {
-    throw 'Portable offline FleX laboratory forwarder is missing'
+    throw 'Portable FleX observation relay is missing'
 }
 $forwarderBytes = [IO.File]::ReadAllBytes($forwarder)
 if ($forwarderBytes.Length -lt 512 -or $forwarderBytes[0] -ne 0x4D -or $forwarderBytes[1] -ne 0x5A) {
-    throw 'Offline FleX laboratory forwarder is not a valid PE image'
+    throw 'FleX observation relay is not a valid PE image'
+}
+$flexHelper = Join-Path $root 'Data\Lab\kf2_p4_overlap.dll'
+if (-not (Test-Path -LiteralPath $flexHelper -PathType Leaf)) {
+    throw 'Portable optimized FleX helper is missing'
+}
+$flexHelperBytes = [IO.File]::ReadAllBytes($flexHelper)
+if ($flexHelperBytes.Length -lt 512 -or $flexHelperBytes[0] -ne 0x4D -or
+    $flexHelperBytes[1] -ne 0x5A) {
+    throw 'Optimized FleX helper is not a valid PE image'
 }
 $inventory = Join-Path $root 'Data\Documentation\ISSUE_72_PRODUCT_MATRIX.md'
 if (-not (Test-Path -LiteralPath $inventory -PathType Leaf)) {
@@ -107,7 +116,7 @@ $packageManifest = Get-Content -LiteralPath $packageManifestPath -Raw |
 if ($packageManifest.schema_version -ne 2 -or
     $packageManifest.package_version -cne '0.0.4-alpha' -or
     $packageManifest.license -cne 'GPL-3.0-only' -or
-    @($packageManifest.managed_files).Count -ne 15) {
+    @($packageManifest.managed_files).Count -ne 16) {
     throw 'Portable package manifest is incomplete or incompatible'
 }
 $packageIdentity = [string]$packageManifest.source_identity
@@ -124,6 +133,16 @@ if ($executableIdentity.source_identity -cne $expectedIdentity -or
     (-not $DevelopmentPackage -and $executableIdentity.channel -cne 'release')) {
     throw 'Executable build identity does not match the requested release; rebuild the package'
 }
+$flexIdentityReader = Join-Path $PSScriptRoot `
+    'get_flex_artifact_source_identity.ps1'
+$forwarderIdentity = (& $flexIdentityReader -Artifact $forwarder).Trim()
+if ($forwarderIdentity -cne $expectedIdentity) {
+    throw 'FleX observation relay source identity does not match the requested release'
+}
+$flexHelperIdentity = (& $flexIdentityReader -Artifact $flexHelper).Trim()
+if ($flexHelperIdentity -cne $expectedIdentity) {
+    throw 'Optimized FleX helper source identity does not match the requested release'
+}
 foreach ($relative in @($packageManifest.managed_files)) {
     $managed = Join-Path $root $relative
     if (-not (Test-Path -LiteralPath $managed -PathType Leaf)) {
@@ -131,8 +150,8 @@ foreach ($relative in @($packageManifest.managed_files)) {
     }
 }
 $payloadHashes = @($packageManifest.payload_hashes)
-if ($payloadHashes.Count -ne 14) {
-    throw 'Portable package hash manifest must cover all fourteen payload files'
+if ($payloadHashes.Count -ne 15) {
+    throw 'Portable package hash manifest must cover all fifteen payload files'
 }
 $seenPayload = @{}
 foreach ($entry in $payloadHashes) {
@@ -164,12 +183,12 @@ foreach ($entry in $payloadHashes) {
 }
 $integrityPath = Join-Path $root 'Data\package-integrity.ini'
 $integrityLines = @(Get-Content -LiteralPath $integrityPath)
-if ($integrityLines.Count -ne 17 -or
+if ($integrityLines.Count -ne 18 -or
     $integrityLines[0] -cne 'schema_version=1' -or
     $integrityLines[1] -cne 'product=KF2OptimizerNext' -or
     $integrityLines[2] -notmatch '^source_identity=[A-Za-z0-9._-]{1,128}$' -or
-    $integrityLines[3] -cne 'file_count=13' -or
-    @($integrityLines | Where-Object { $_ -match '^file=' }).Count -ne 13) {
+    $integrityLines[3] -cne 'file_count=14' -or
+    @($integrityLines | Where-Object { $_ -match '^file=' }).Count -ne 14) {
     throw 'Runtime package integrity document is invalid'
 }
 if ($integrityLines[2] -cne "source_identity=$expectedIdentity") {
@@ -180,6 +199,8 @@ if ($DevelopmentPackage) {
     Write-Host 'DEVELOPMENT ONLY: this check does not certify a release candidate'
 }
 Write-Host "PASS: package has exactly one portable executable"
-Write-Host "PASS: all fourteen managed payload hashes match"
-Write-Host "SHA256: $((Get-FileHash -LiteralPath $executables[0].FullName -Algorithm SHA256).Hash)"
+Write-Host "PASS: all fifteen managed payload hashes match"
+Write-Host "PACKAGE EXE SHA256: $((Get-FileHash -LiteralPath $executables[0].FullName -Algorithm SHA256).Hash)"
+Write-Host "FLEX RELAY SHA256: $((Get-FileHash -LiteralPath $forwarder -Algorithm SHA256).Hash)"
+Write-Host "FLEX HELPER SHA256: $((Get-FileHash -LiteralPath $flexHelper -Algorithm SHA256).Hash)"
 & (Join-Path $PSScriptRoot 'validate_acceptance_ledger.ps1')

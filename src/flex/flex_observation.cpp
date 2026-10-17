@@ -68,16 +68,12 @@ std::optional<ObservationSnapshot> ObservationReader::read(
         result.successful_updates = static_cast<std::uint64_t>(shared->successful_updates);
         result.destroy_calls = static_cast<std::uint64_t>(shared->destroy_calls);
         result.last_update_tick = static_cast<std::uint64_t>(shared->last_update_tick);
-        result.constrained_updates = static_cast<std::uint64_t>(shared->constrained_updates);
-        result.control_heartbeat_tick =
-            static_cast<std::uint64_t>(shared->control_heartbeat_tick);
         result.active_count_calls =
             static_cast<std::uint64_t>(shared->active_count_calls);
         result.last_active_count_tick =
             static_cast<std::uint64_t>(shared->last_active_count_tick);
         result.create_calls = static_cast<std::uint64_t>(shared->create_calls);
         result.last_create_tick = static_cast<std::uint64_t>(shared->last_create_tick);
-        result.requested_substeps = shared->desired_substeps;
         result.last_substeps = shared->last_substeps;
         result.min_substeps = shared->min_substeps == LONG_MAX ? 0 : shared->min_substeps;
         result.max_substeps = shared->max_substeps;
@@ -172,9 +168,6 @@ std::optional<ObservationSnapshot> ObservationReader::read(
             (!result.diagnostics_enabled ||
              (result.tracking_drop_calls == 0 &&
               !result.solver_tracking_quarantined));
-        result.control_fresh = result.control_heartbeat_tick != 0 &&
-            now >= result.control_heartbeat_tick &&
-            now - result.control_heartbeat_tick <= 1500;
         result.active_particles_fresh = shared->active_particles_valid != 0 &&
             result.active_count_calls > 0 && result.last_active_count_tick != 0 &&
             now >= result.last_active_count_tick &&
@@ -194,7 +187,6 @@ std::optional<ObservationSnapshot> ObservationReader::read(
              result.min_forwarded_substeps < 0 || result.min_forwarded_substeps > 5 ||
              result.max_forwarded_substeps < result.min_forwarded_substeps ||
              result.max_forwarded_substeps > 5 ||
-             result.requested_substeps < 0 || result.requested_substeps > 5 ||
              result.active_particles < 0 || result.min_active_particles < 0 ||
              result.max_active_particles < result.min_active_particles ||
              result.active_particles > result.max_active_particles ||
@@ -231,8 +223,8 @@ std::optional<ObservationSnapshot> read_observation(
     return reader.read(process);
 }
 
-bool write_fixed_control(const game::GameProcessIdentity& process,
-                         bool diagnostics_enabled) noexcept {
+bool write_diagnostics_control(const game::GameProcessIdentity& process,
+                               bool diagnostics_enabled) noexcept {
     if (!game::is_game_process_current(process)) return false;
     std::array<wchar_t, observation_mapping_name_capacity> name{};
     if (!make_observation_mapping_name(process.pid, name)) return false;
@@ -249,11 +241,8 @@ bool write_fixed_control(const game::GameProcessIdentity& process,
         shared->version == observation_version && shared->size == sizeof(*shared) &&
         shared->pid == process.pid && start == process.process_start_id;
     if (valid) {
-        InterlockedExchange(&shared->desired_substeps, 1);
         InterlockedExchange(&shared->diagnostics_enabled,
                             diagnostics_enabled ? 1 : 0);
-        InterlockedExchange64(&shared->control_heartbeat_tick,
-                              static_cast<LONGLONG>(GetTickCount64()));
     }
     UnmapViewOfFile(shared);
     CloseHandle(mapping);

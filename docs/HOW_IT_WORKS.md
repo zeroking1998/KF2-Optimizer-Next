@@ -116,12 +116,14 @@ the fixed 800-unit player safety radius; pressure can change timing and
 eligibility outside that radius but cannot bypass it. Zed Time uses protected behavior so
 normal-speed thresholds are not applied blindly during slow motion.
 
-## 7. FleX actions
+## 7. FleX runtime
 
-FleX control is an optional, identity-gated laboratory feature. It begins in
-passthrough, uses bounded levels 1 through 5 when capability is confirmed, and
-reports an applied level only after matching readback. Releasing control returns
-to passthrough.
+FleX remains a user-owned KF2 choice. If it is disabled, the optimizer does
+nothing to FleX. If it is enabled, a protected launch reconstructs the verified
+optimized Core/Extension pair from the exact stock files, installs it with the
+project helper and observation-only relay, and restores the stock files after
+the session. The relay forwards substeps unchanged; Adaptive has no FleX level
+or solver-control policy.
 
 ## 8. Evidence and restoration
 

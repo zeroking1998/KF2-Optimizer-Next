@@ -12,8 +12,6 @@ struct ObservationSnapshot {
     std::uint64_t successful_updates{0};
     std::uint64_t destroy_calls{0};
     std::uint64_t last_update_tick{0};
-    std::uint64_t constrained_updates{0};
-    std::uint64_t control_heartbeat_tick{0};
     std::uint64_t active_count_calls{0};
     std::uint64_t last_active_count_tick{0};
     std::uint64_t create_calls{0};
@@ -36,7 +34,6 @@ struct ObservationSnapshot {
     std::uint64_t download_elements{0};
     std::uint64_t bounds_calls{0};
     std::uint64_t params_calls{0};
-    int requested_substeps{0};
     int last_substeps{0};
     int min_substeps{0};
     int max_substeps{0};
@@ -58,7 +55,6 @@ struct ObservationSnapshot {
     float last_delta_time{0.0F};
     bool fresh{false};
     bool pass_through_healthy{false};
-    bool control_fresh{false};
     bool active_particles_fresh{false};
     bool particle_capacity_available{false};
     bool aggregate_particles_fresh{false};
@@ -90,7 +86,7 @@ private:
 
 [[nodiscard]] std::optional<ObservationSnapshot> read_observation(
     const game::GameProcessIdentity& process) noexcept;
-[[nodiscard]] bool write_fixed_control(
+[[nodiscard]] bool write_diagnostics_control(
     const game::GameProcessIdentity& process,
     bool diagnostics_enabled) noexcept;
 

@@ -308,12 +308,9 @@ int main() {
     model.preview_target_fps(119);
     model.set_notice({NoticeSeverity::warning, L"UNCHANGED", L"Keep this notice", L""});
     const auto before_flex = model.status();
-    model.set_flex_observation_status(L"Current FleX observation", 3, 1,
-        L"APPLIED", L"Current substep counters", L"Current readback counters");
+    model.set_flex_observation_status(L"Current FleX observation",
+        L"Current substep counters", L"Current readback counters");
     CHECK(model.status().flex_telemetry == L"Current FleX observation");
-    CHECK(model.status().flex_requested_substeps == 3);
-    CHECK(model.status().flex_effective_substeps == 1);
-    CHECK(model.status().flex_action_status == L"APPLIED");
     CHECK(model.status().flex_substep_diagnostics == L"Current substep counters");
     CHECK(model.status().flex_readback_diagnostics == L"Current readback counters");
     CHECK(model.status().mode == before_flex.mode);
@@ -329,20 +326,13 @@ int main() {
     CHECK(model.notice() && model.notice()->code == L"UNCHANGED");
     const auto& observed = model.status();
     model.set_flex_observation_status(observed.flex_telemetry,
-        observed.flex_requested_substeps, observed.flex_effective_substeps,
-        observed.flex_action_status, observed.flex_substep_diagnostics,
+        observed.flex_substep_diagnostics,
         observed.flex_readback_diagnostics);
     CHECK(model.status().flex_telemetry == L"Current FleX observation");
-    CHECK(model.status().flex_requested_substeps == 3);
-    CHECK(model.status().flex_effective_substeps == 1);
-    CHECK(model.status().flex_action_status == L"APPLIED");
     CHECK(model.status().flex_substep_diagnostics == L"Current substep counters");
     CHECK(model.status().flex_readback_diagnostics == L"Current readback counters");
-    model.set_flex_observation_status(L"", std::nullopt, std::nullopt, L"", L"", L"");
+    model.set_flex_observation_status(L"", L"", L"");
     CHECK(model.status().flex_telemetry.empty());
-    CHECK(!model.status().flex_requested_substeps);
-    CHECK(!model.status().flex_effective_substeps);
-    CHECK(model.status().flex_action_status.empty());
     CHECK(model.status().flex_substep_diagnostics.empty());
     CHECK(model.status().flex_readback_diagnostics.empty());
     CHECK(model.status().graphics_values == before_flex.graphics_values);

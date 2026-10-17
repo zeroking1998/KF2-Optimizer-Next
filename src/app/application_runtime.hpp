@@ -44,6 +44,7 @@
 #include "kf2/flex/flex_audit.hpp"
 #include "kf2/flex/flex_lab.hpp"
 #include "kf2/flex/flex_observation.hpp"
+#include "kf2/flex/optimized_runtime.hpp"
 #include "kf2/overlay/overlay_policy.hpp"
 #include "kf2/overlay/overlay_window.hpp"
 #include "kf2/optimizer/adaptive_governor.hpp"
@@ -345,9 +346,6 @@ struct UiRuntime {
     bool flex_particle_text_current{false};
     std::optional<flex::ObservationSnapshot> last_flex_observation;
     flex::ObservationReader flex_observation_reader;
-    std::optional<optimizer::AdaptiveCapabilityState>
-        adaptive_flex_capability;
-    bool flex_minimum_limited{false};
     StartMode start_mode{StartMode::normal};
     std::shared_ptr<PackageRepairAsyncState> package_repair_state;
     std::jthread package_repair_worker;
@@ -521,9 +519,9 @@ struct UiRuntime {
 
     void observe_flex_process();
 
-    Result<bool> ensure_fixed_flex_runtime();
+    Result<bool> ensure_optimized_flex_runtime();
 
-    bool restore_fixed_flex_runtime(std::wstring_view reason);
+    bool restore_optimized_flex_runtime(std::wstring_view reason);
 
     Result<game::FrameRateCapResult> synchronize_frame_rate_cap();
 
@@ -570,12 +568,12 @@ struct UiRuntime {
         std::wstring context = L"Verified configuration changes");
 
     Result<config::ApplyResult> apply_adaptive_launch_profile(
-        bool fixed_flex_launch);
+        bool optimized_flex_launch);
 
     Result<bool> apply_overlay_compatible_display_mode();
 
     Result<bool> prepare_automatic_protected_launch_capabilities(
-        bool fixed_flex_launch);
+        bool optimized_flex_launch);
 
     Result<bool> revalidate_game_installation();
     Result<bool> prepare_automatic_external_launch_profile();

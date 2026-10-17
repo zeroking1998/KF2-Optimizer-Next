@@ -2,72 +2,6 @@
 
 #include "app/application_runtime.hpp"
 
-namespace kf2::telemetry_pipeline {
-
-void apply_flex_control_effect(app::UiRuntime& runtime,
-                               const FlexControlEffect& effect) {
-    if (!runtime.game_process) return;
-    const auto now_ns = runtime.monotonic_ns();
-    const std::optional<double> observed = runtime.last_flex_observation
-        ? std::optional<double>{static_cast<double>(
-              runtime.last_flex_observation->last_forwarded_substeps)}
-        : runtime.adaptive_actuation.effective_value(
-              optimizer::AdaptiveControlId::flex_solver_substeps);
-    const auto& proposed = runtime.adaptive_actuation.propose(
-        optimizer::AdaptiveControlId::flex_solver_substeps,
-        static_cast<double>(effect.requested_substeps), observed,
-        effect.capability, now_ns, "flex_shared_memory");
-    if (proposed.status == optimizer::AdaptiveActionStatus::proposed) {
-        static_cast<void>(runtime.adaptive_actuation.dispatch(
-            optimizer::AdaptiveControlId::flex_solver_substeps, now_ns));
-    }
-    const auto* action = runtime.adaptive_actuation.current(
-        optimizer::AdaptiveControlId::flex_solver_substeps);
-    if (!action ||
-        (action->status != optimizer::AdaptiveActionStatus::pending &&
-         action->status != optimizer::AdaptiveActionStatus::applied)) {
-        return;
-    }
-    const bool diagnostics_match = runtime.last_flex_observation &&
-        runtime.last_flex_observation->diagnostics_enabled ==
-            runtime.optimizer_settings.debug_flex_diagnostics;
-    if (action->status == optimizer::AdaptiveActionStatus::applied &&
-        diagnostics_match) {
-        return;
-    }
-    const bool write_succeeded = flex::write_fixed_control(
-        *runtime.game_process,
-        runtime.optimizer_settings.debug_flex_diagnostics);
-    if (!write_succeeded &&
-        action->status == optimizer::AdaptiveActionStatus::pending) {
-        static_cast<void>(runtime.adaptive_actuation.receive({
-            action->action_id,
-            action->control,
-            optimizer::AdaptiveActionStatus::failed,
-            action->requested_value,
-            {},
-            action->generation,
-            now_ns,
-            "flex_shared_memory",
-            "control_write_failed"}));
-        return;
-    }
-    if (write_succeeded &&
-        effect.constrained != runtime.flex_minimum_limited) {
-        runtime.flex_minimum_limited = effect.constrained;
-        runtime.events->append(
-            {0, diagnostics::Severity::info,
-             effect.constrained ? "FLEX_MINIMUM_LIMIT_REQUESTED"
-                                : "FLEX_MINIMUM_LIMIT_RELEASED",
-             effect.constrained
-                 ? L"User-enabled FleX requested the fixed minimum solver level of one; applied status waits for shared-memory readback"
-                 : L"The fixed FleX minimum limit was released; applied status waits for shared-memory readback",
-             L"flex"});
-    }
-}
-
-}  // namespace kf2::telemetry_pipeline
-
 namespace kf2::app {
 namespace {
 
@@ -102,7 +36,7 @@ Result<FlexTransactionState> inspect_flex_transaction_state(
 
 }  // namespace
 
-Result<bool> UiRuntime::ensure_fixed_flex_runtime() {
+Result<bool> UiRuntime::ensure_optimized_flex_runtime() {
     if (!installation) {
         return Result<bool>::failure(
             {ErrorCode::not_found,
@@ -112,9 +46,6 @@ Result<bool> UiRuntime::ensure_fixed_flex_runtime() {
         L"Binaries" / L"Win64";
     const auto state_directory =
         settings_path.parent_path() / L"flex-lab";
-    const auto preserved_original = game_directory /
-        L"flexRelease_original.dll";
-
     const auto transaction = inspect_flex_transaction_state(
         game_directory, state_directory);
     if (!transaction.has_value()) {
@@ -123,31 +54,16 @@ Result<bool> UiRuntime::ensure_fixed_flex_runtime() {
     if (transaction.value().marker_exists ||
         transaction.value().original_exists) {
         std::wstring recovery_details;
-        const auto recovered = flex::recover_offline_lab(
+        const auto recovered = flex::recover_optimized_runtime_transaction(
             game_directory, state_directory, false, &recovery_details);
         if (!recovered.has_value()) {
             return Result<bool>::failure(recovered.error());
         }
         if (recovered.value()) {
             events->append({0, diagnostics::Severity::info,
-                "FLEX_LAB_RECOVERED", recovery_details, L"flex"});
-        }
-        const auto retained = inspect_flex_transaction_state(
-            game_directory, state_directory);
-        if (!retained.has_value()) {
-            return Result<bool>::failure(retained.error());
-        }
-        if (retained.value().marker_exists &&
-            retained.value().original_exists) {
-            const auto audit =
-                flex::audit_runtime(preserved_original, true);
-            if (audit.has_value() && audit.value().exact_known_runtime) {
-                return Result<bool>::success(false);
-            }
-            return Result<bool>::failure(
-                {ErrorCode::stale_data,
-                 L"The existing FleX hook transaction is not verified",
-                 0});
+                "FLEX_RUNTIME_RECOVERED", recovery_details, L"flex"});
+        } else {
+            return Result<bool>::success(false);
         }
     }
 
@@ -163,25 +79,35 @@ Result<bool> UiRuntime::ensure_fixed_flex_runtime() {
              0});
     }
 
-    const auto installed = flex::install_offline_lab({
+    const auto prepared = flex::prepare_optimized_runtime(
+        game_directory / L"flexRelease_x64.dll",
+        game_directory / L"flexExtRelease_x64.dll",
+        state_directory);
+    if (!prepared.has_value()) {
+        return Result<bool>::failure(prepared.error());
+    }
+    const auto installed = flex::install_optimized_runtime_transaction({
         .game_directory = game_directory,
         .state_directory = state_directory,
         .forwarder_dll = settings_path.parent_path() / L"Lab" /
             L"flexRelease_x64.forwarder-lab.dll",
+        .optimized_core_dll = prepared.value().core,
+        .optimized_extension_dll = prepared.value().extension,
+        .optimized_helper_dll = settings_path.parent_path() / L"Lab" /
+            L"kf2_p4_overlap.dll",
         .game_running = false,
-        .exact_runtime_verified = true,
-        .offline_confirmed = true});
+        .exact_runtime_verified = true});
     if (!installed.has_value()) {
         return Result<bool>::failure(installed.error());
     }
     events->append({0, diagnostics::Severity::info,
-        "FLEX_MINIMUM_HOOK_READY",
-        L"The verified offline FleX hook was prepared for the fixed minimum solver level",
+        "FLEX_OPTIMIZED_RUNTIME_READY",
+        L"The verified optimized FleX Core/Extension pair and helper were prepared as one protected transaction",
         L"flex"});
     return Result<bool>::success(true);
 }
 
-bool UiRuntime::restore_fixed_flex_runtime(std::wstring_view reason) {
+bool UiRuntime::restore_optimized_flex_runtime(std::wstring_view reason) {
     if (!installation) return true;
     const auto game_directory = installation->install_root /
         L"Binaries" / L"Win64";
@@ -191,11 +117,11 @@ bool UiRuntime::restore_fixed_flex_runtime(std::wstring_view reason) {
         game_directory, state_directory);
     if (!transaction.has_value()) {
         events->append({0, diagnostics::Severity::error,
-            "FLEX_FIXED_RESTORE_FAILED", transaction.error().message,
+            "FLEX_OPTIMIZED_RESTORE_FAILED", transaction.error().message,
             L"flex"});
         model.set_recovery_required(true);
         model.set_notice({ui::NoticeSeverity::error,
-            L"FLEX_FIXED_RESTORE_FAILED", transaction.error().message,
+            L"FLEX_OPTIMIZED_RESTORE_FAILED", transaction.error().message,
             L"Do not start KF2 again until the original FleX runtime is restored."});
         invalidate();
         return false;
@@ -207,21 +133,21 @@ bool UiRuntime::restore_fixed_flex_runtime(std::wstring_view reason) {
     const bool running = game::game_process_may_be_running(
         installation->executable);
     std::wstring recovery_details;
-    const auto restored = flex::restore_offline_lab(
+    const auto restored = flex::restore_optimized_runtime_transaction(
         game_directory, state_directory, running, &recovery_details);
     if (!restored.has_value()) {
         events->append({0, diagnostics::Severity::error,
-            "FLEX_FIXED_RESTORE_FAILED", restored.error().message,
+            "FLEX_OPTIMIZED_RESTORE_FAILED", restored.error().message,
             L"flex"});
         model.set_recovery_required(true);
         model.set_notice({ui::NoticeSeverity::error,
-            L"FLEX_FIXED_RESTORE_FAILED", restored.error().message,
+            L"FLEX_OPTIMIZED_RESTORE_FAILED", restored.error().message,
             L"Do not start KF2 again until the original FleX runtime is restored."});
         invalidate();
         return false;
     }
     events->append({0, diagnostics::Severity::info,
-        "FLEX_FIXED_RESTORED",
+        "FLEX_OPTIMIZED_RESTORED",
         std::wstring{reason} +
             L"; the original FleX runtime was restored and verified. " +
             recovery_details,
@@ -324,7 +250,7 @@ bool UiRuntime::restore_protected_session_config(std::wstring_view reason) {
             }
         }
     }
-    if (!restore_fixed_flex_runtime(reason)) complete = false;
+    if (!restore_optimized_flex_runtime(reason)) complete = false;
     if (installation) {
         const auto capped = synchronize_frame_rate_cap();
         if (!capped.has_value()) {

@@ -74,6 +74,44 @@ endif()
 
 include(CTest)
 
+configure_file(src/flex/flex_build_identity.hpp.in
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/kf2/flex/flex_build_identity.hpp"
+    @ONLY)
+
+if(MSVC)
+    set(KF2_FLEX_OPTIMIZED_DIRECTORY
+        "${PROJECT_SOURCE_DIR}/src/flex/optimized")
+    foreach(import_name IN ITEMS cuda75 driver)
+        set(import_library
+            "${CMAKE_CURRENT_BINARY_DIR}/${import_name}.flex-optimized.lib")
+        add_custom_command(OUTPUT "${import_library}"
+            COMMAND "${CMAKE_AR}" /nologo /machine:x64
+                "/def:${KF2_FLEX_OPTIMIZED_DIRECTORY}/${import_name}.def"
+                "/out:${import_library}"
+            DEPENDS
+                "${KF2_FLEX_OPTIMIZED_DIRECTORY}/${import_name}.def"
+            VERBATIM)
+        list(APPEND KF2_FLEX_OPTIMIZED_IMPORT_LIBRARIES "${import_library}")
+    endforeach()
+
+    add_library(KF2FlexOptimizedHelper SHARED
+        src/flex/optimized/overlap.cpp
+        src/flex/optimized/overlap.hpp
+        src/flex/optimized/presentation.cpp
+        src/flex/optimized/presentation.hpp
+        ${KF2_FLEX_OPTIMIZED_IMPORT_LIBRARIES})
+    target_compile_definitions(KF2FlexOptimizedHelper PRIVATE
+        P4_TIME_ACCUMULATOR)
+    target_compile_features(KF2FlexOptimizedHelper PRIVATE cxx_std_20)
+    target_include_directories(KF2FlexOptimizedHelper PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_link_libraries(KF2FlexOptimizedHelper PRIVATE
+        ${KF2_FLEX_OPTIMIZED_IMPORT_LIBRARIES})
+    target_link_options(KF2FlexOptimizedHelper PRIVATE /guard:cf)
+    set_target_properties(KF2FlexOptimizedHelper PROPERTIES
+        OUTPUT_NAME "kf2_p4_overlap")
+endif()
+
 set(KF2_FEATURE_ACTION_SOURCES
     "${PROJECT_SOURCE_DIR}/src/features/advanced/advanced_actions.cpp"
     "${PROJECT_SOURCE_DIR}/src/features/backup/backup_actions.cpp"
@@ -150,6 +188,9 @@ add_executable(KF2Optimizer WIN32
     src/diagnostics/crash_recorder.cpp
     src/diagnostics/feature_inventory.cpp
     src/flex/flex_audit.cpp
+    src/flex/binary_delta.cpp
+    src/flex/optimized_runtime.cpp
+    src/flex/optimized_runtime_recipe.cpp
     src/flex/flex_lab.cpp
     src/flex/flex_observation.cpp
     src/game/adaptive_control_client.cpp
@@ -213,6 +254,9 @@ add_executable(KF2Optimizer WIN32
     src/ui/numeric_presentation.cpp
     src/ui/ui_model.cpp
 )
+if(TARGET KF2FlexOptimizedHelper)
+    add_dependencies(KF2Optimizer KF2FlexOptimizedHelper)
+endif()
 target_include_directories(KF2Optimizer PRIVATE
     "${PROJECT_SOURCE_DIR}/include"
     "${PROJECT_SOURCE_DIR}/src"
@@ -411,6 +455,7 @@ if(BUILD_TESTING)
             COMMAND "${CMAKE_CXX_COMPILER}" /nologo /c /O2 /Oi- /GS- /GR- /EHs-c- /std:c++20
                 "/Fo${KF2_FLEX_ANCHOR}"
                 "/I${PROJECT_SOURCE_DIR}/include"
+                "/I${CMAKE_BINARY_DIR}/generated"
                 "${PROJECT_SOURCE_DIR}/src/flex/forwarder_stub.cpp"
             COMMAND "${KF2_LLD_LINK}" /dll /entry:DllMain
                 "/def:${PROJECT_SOURCE_DIR}/src/flex/flex_forwarder.def"
@@ -420,6 +465,7 @@ if(BUILD_TESTING)
                 /subsystem:windows /opt:ref /opt:icf /brepro
             DEPENDS "${PROJECT_SOURCE_DIR}/src/flex/flex_forwarder.def"
                 "${PROJECT_SOURCE_DIR}/src/flex/forwarder_stub.cpp"
+                "${CMAKE_BINARY_DIR}/generated/kf2/flex/flex_build_identity.hpp"
                 "${PROJECT_SOURCE_DIR}/include/kf2/flex/flex_observation_shared.hpp"
             VERBATIM)
         add_custom_target(KF2FlexForwarder DEPENDS "${KF2_FLEX_FORWARDER}")
@@ -434,6 +480,7 @@ if(BUILD_TESTING)
                 /DKF2_FLEX_FORWARDER_TESTING
                 "/Fo${KF2_FLEX_TEST_ANCHOR}"
                 "/I${PROJECT_SOURCE_DIR}/include"
+                "/I${CMAKE_BINARY_DIR}/generated"
                 "${PROJECT_SOURCE_DIR}/src/flex/forwarder_stub.cpp"
             COMMAND "${KF2_LLD_LINK}" /dll /entry:DllMain
                 "/def:${PROJECT_SOURCE_DIR}/src/flex/flex_forwarder.def"
@@ -443,6 +490,7 @@ if(BUILD_TESTING)
                 /subsystem:windows /opt:ref /opt:icf /brepro
             DEPENDS "${PROJECT_SOURCE_DIR}/src/flex/flex_forwarder.def"
                 "${PROJECT_SOURCE_DIR}/src/flex/forwarder_stub.cpp"
+                "${CMAKE_BINARY_DIR}/generated/kf2/flex/flex_build_identity.hpp"
                 "${PROJECT_SOURCE_DIR}/include/kf2/flex/flex_observation_shared.hpp"
             VERBATIM)
         add_custom_target(KF2FlexForwarderTest

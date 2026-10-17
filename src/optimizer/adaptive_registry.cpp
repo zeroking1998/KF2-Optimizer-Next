@@ -114,7 +114,6 @@ std::string category_for(int section) {
     if (section >= 30 && section <= 39) return "physics-corpses-ragdolls-gibs";
     if (section >= 40 && section <= 53) return "gore-decals-and-effects";
     if (section >= 54 && section <= 65) return "particles";
-    if (section >= 66 && section <= 78) return "flex";
     if (section >= 79 && section <= 80) return "profiles-and-view-distance";
     if (section >= 81 && section <= 90) return "adaptive-control-quality";
     if (section >= 91 && section <= 99) return "safety-recovery-and-trust";
@@ -190,7 +189,7 @@ bool ascii_iequals(std::string_view left, std::string_view right) noexcept {
 
 bool protected_name(std::string_view value) noexcept;
 
-constexpr std::array<std::string_view, 33> kPermanentProtected{
+constexpr std::array<std::string_view, 40> kPermanentProtected{
     "EnemyCount", "SpawnCount", "SpawnRate", "SpawnLogic", "Difficulty",
     "AI", "Perception", "Navigation", "RealMovement", "AttackTiming",
     "DamageTruth", "HitTruth", "HitZones", "GameplayCollision",
@@ -200,6 +199,9 @@ constexpr std::array<std::string_view, 33> kPermanentProtected{
     "GameplayRelevantSound", "UnknownProcessMemoryAddresses",
     "ReadProcessMemory", "WriteProcessMemory", "RemoteThreads", "Detours",
     "Injection", "AntiCheatBypass", "KernelDriverSecurityBypass",
+    "PhysXLevel", "GoreLevel", "MaxPhysicsSubsteps",
+    "FlexInvisibleFramesBeforeSleep", "FlexDistanceBeforeSleep",
+    "AllowSPHFluidMipmap", "FlexRigidBodiesCollisionAtHighLevel",
 };
 
 bool protected_name(std::string_view value) noexcept {
@@ -217,10 +219,10 @@ constexpr std::array<std::string_view, 15> kSafeControllerSettings{
     "CalibrationEnabled", "AdaptiveLogging",
 };
 
-constexpr std::array<std::string_view, 15> kVerifiedConfigOnly{
+constexpr std::array<std::string_view, 14> kVerifiedConfigOnly{
     "MaxDeadBodies", "DynamicDecals", "StaticDecals",
     "DecalCullDistanceScale", "ParticleLODBias", "SkeletalMeshLODBias",
-    "MaxPhysicsSubsteps", "MaxBloodDecals", "MaxWoundDecals",
+    "MaxBloodDecals", "MaxWoundDecals",
     "BloodDecalLifetime", "WoundDecalLifetime", "GibLifetime",
     "CorpseLifetime", "ShadowResolution", "TextureMemoryBudget",
 };
@@ -364,8 +366,7 @@ std::vector<AdaptiveSettingRecord> build_registry(
         auto found = std::ranges::find(records, name,
             &AdaptiveSettingRecord::name);
         if (found == records.end()) {
-            AdaptiveSettingRecord record;
-            record.name = name;
+            auto record = make_record(SpecItem{"0", name});
             record.category = "verified-kf2-config";
             records.push_back(std::move(record));
             found = std::prev(records.end());

@@ -27,7 +27,7 @@ void write_file(const fs::path& path, std::string_view bytes) {
 
 void write_package(const fs::path& root) {
     std::string manifest = "schema_version=1\r\nproduct=KF2OptimizerNext\r\n"
-        "source_identity=repair-build\r\nfile_count=13\r\n";
+        "source_identity=repair-build\r\nfile_count=14\r\n";
     for (const auto relative : kf2::security::managed_package_payload_paths()) {
         write_file(root / relative, "payload:" + std::string{relative});
         const auto hash = kf2::security::sha256_file_hex(root / relative);

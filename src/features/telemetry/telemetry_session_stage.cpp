@@ -57,9 +57,6 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
             status.adaptive_runtime_corpse_limit.reset();
             status.adaptive_corpse_capability = L"UNAVAILABLE";
             status.adaptive_corpse_action_status = L"NONE";
-            status.flex_requested_substeps.reset();
-            status.flex_effective_substeps.reset();
-            status.flex_action_status = L"NONE";
             status.flex_capability = L"UNAVAILABLE";
             status.adaptive_particle_capability = L"UNAVAILABLE";
             runtime.model.set_status(std::move(status));
@@ -296,7 +293,7 @@ bool UiRuntime::set_live_adaptive_enabled(
         std::wstring{reason} +
             (enabled
                 ? L"; KF2 confirmed that adaptive runtime control resumed"
-                : L"; KF2 confirmed release of adaptive graphics, Zed LOD and reversible corpse control; the independent fixed FleX limit is unchanged"),
+                : L"; KF2 confirmed release of adaptive graphics, Zed LOD and reversible corpse control; the protected optimized FleX runtime is unchanged"),
         L"optimizer"});
     return true;
 }
@@ -321,9 +318,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
             saved ? "FLEX_SESSION_SUMMARY" : "FLEX_SESSION_SAVE_FAILED",
             saved
                 ? L"FleX session completed: " + std::to_wstring(observed.update_calls) +
-                      L" successfully relayed solver updates, " +
-                      std::to_wstring(observed.constrained_updates) +
-                      L" materially changed; original substeps " +
+                      L" successfully relayed solver updates without substep rewriting; original substeps " +
                       std::to_wstring(observed.min_substeps) + L"-" +
                       std::to_wstring(observed.max_substeps) +
                       L", forwarded substeps " +
@@ -416,7 +411,6 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     flex_particle_text_current = false;
     last_flex_observation.reset();
     flex_observation_reader.reset();
-    flex_minimum_limited = false;
     game_process.reset();
     reset_game_process_discovery();
     game_log_startup_exited = false;

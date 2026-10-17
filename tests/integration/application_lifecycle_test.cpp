@@ -73,14 +73,15 @@ void* operator new(std::size_t size) {
     }
 #if _ITERATOR_DEBUG_LEVEL != 0
     // Debug STL moves allocate tiny iterator proxies even for empty strings.
-    constexpr std::size_t persistent_failure_minimum = 64;
+    constexpr std::size_t allocation_failure_minimum = 64;
 #else
-    constexpr std::size_t persistent_failure_minimum = 0;
+    constexpr std::size_t allocation_failure_minimum = 0;
 #endif
     if (settings_growth_failed && keep_settings_allocation_failure &&
-        size >= persistent_failure_minimum)
+        size >= allocation_failure_minimum)
         throw std::bad_alloc{};
-    if (fail_flex_text_allocation) {
+    if (fail_flex_text_allocation &&
+        size >= allocation_failure_minimum) {
         fail_flex_text_allocation = false;
         throw std::bad_alloc{};
     }
@@ -279,7 +280,7 @@ int test_flex_report_boundaries() {
     const auto unchanged_update_status = runtime.model.status().update_status;
     const auto verify_capability = [&](std::wstring_view expected) {
         for (int repeat = 0; repeat < 4; ++repeat) {
-            kf2::telemetry_pipeline::run_flex_control_stage(runtime, frame);
+            kf2::telemetry_pipeline::run_flex_diagnostics_stage(runtime, frame);
             if (runtime.model.status().flex_capability != expected ||
                 runtime.model.status().telemetry != unchanged_telemetry ||
                 runtime.model.status().update_status != unchanged_update_status ||
@@ -313,7 +314,7 @@ int test_flex_report_boundaries() {
     CHECK(verify_capability(L"UNAVAILABLE"));
     frame.flex->pass_through_healthy = true;
     frame.flex->last_forwarded_substeps = 0;
-    CHECK(verify_capability(L"UNAVAILABLE"));
+    CHECK(verify_capability(L"AVAILABLE"));
     frame.flex->last_forwarded_substeps = 1;
     CHECK(verify_capability(L"AVAILABLE"));
     runtime.game_process = kf2::game::GameProcessIdentity{pid, start, {}};
@@ -321,61 +322,12 @@ int test_flex_report_boundaries() {
     publish(60, false);
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_telemetry ==
-        L"FleX fixed one-substep relay active; detailed diagnostics off");
+        L"Optimized FleX runtime active; detailed diagnostics off");
     CHECK(runtime.model.status().flex_substep_diagnostics ==
-        L"Detailed substep counters are off; fixed one-substep limit is active");
+        L"Detailed substep counters are off; optimized runtime cadence is active");
     CHECK(runtime.model.status().flex_readback_diagnostics ==
         L"Minimal safety readback active; reports and extra logs are off");
 
-    // Fresh intended values do not acknowledge an in-flight or failed native
-    // relay. Keep the action pending until healthy completed readback.
-    const auto requested_at = runtime.monotonic_ns();
-    constexpr auto flex_control =
-        kf2::optimizer::AdaptiveControlId::flex_solver_substeps;
-    CHECK(runtime.adaptive_actuation.propose(flex_control, 1.0, std::nullopt,
-        kf2::optimizer::AdaptiveCapabilityState::available, requested_at,
-        "flex_shared_memory").status ==
-        kf2::optimizer::AdaptiveActionStatus::proposed);
-    CHECK(runtime.adaptive_actuation.dispatch(flex_control, requested_at));
-    shared.desired_substeps = 1;
-    shared.control_heartbeat_tick = GetTickCount64();
-    shared.successful_updates = 59;
-    shared.last_forwarded_substeps = 0;
-    runtime.observe_flex_process();
-    CHECK(runtime.last_flex_observation &&
-        runtime.last_flex_observation->pass_through_healthy);
-    CHECK(runtime.adaptive_actuation.current(flex_control)->status ==
-        kf2::optimizer::AdaptiveActionStatus::pending);
-    CHECK(runtime.model.status().flex_action_status == L"PENDING");
-    CHECK(!runtime.model.status().flex_effective_substeps);
-    shared.last_forwarded_substeps = 1;
-    shared.missing_original_calls = 1;
-    runtime.observe_flex_process();
-    CHECK(runtime.last_flex_observation &&
-        runtime.last_flex_observation->fresh &&
-        runtime.last_flex_observation->control_fresh &&
-        !runtime.last_flex_observation->pass_through_healthy);
-    CHECK(runtime.adaptive_actuation.current(flex_control)->status ==
-        kf2::optimizer::AdaptiveActionStatus::pending);
-    CHECK(runtime.model.status().flex_action_status == L"PENDING");
-    CHECK(runtime.model.status().flex_requested_substeps == 1);
-    CHECK(!runtime.model.status().flex_effective_substeps);
-    const auto failed_readback_events = events.snapshot();
-    CHECK(std::none_of(failed_readback_events.begin(), failed_readback_events.end(),
-        [](const auto& event) { return event.code == "FLEX_MINIMUM_APPLIED"; }));
-    shared.successful_updates = 60;
-    shared.missing_original_calls = 0;
-    runtime.observe_flex_process();
-    CHECK(runtime.adaptive_actuation.current(flex_control)->status ==
-        kf2::optimizer::AdaptiveActionStatus::applied);
-    CHECK(runtime.model.status().flex_action_status == L"APPLIED");
-    CHECK(runtime.model.status().flex_effective_substeps == 1);
-    const auto healthy_readback_events = events.snapshot();
-    CHECK(std::count_if(healthy_readback_events.begin(), healthy_readback_events.end(),
-        [](const auto& event) { return event.code == "FLEX_MINIMUM_APPLIED"; }) == 1);
-    runtime.adaptive_actuation.invalidate_control(flex_control);
-    shared.desired_substeps = 0;
-    shared.control_heartbeat_tick = 0;
     shared.live_solvers = shared.max_live_solvers = 1;
     shared.aggregate_capacity_valid = 1;
     shared.aggregate_particle_capacity = 1024;
@@ -387,13 +339,6 @@ int test_flex_report_boundaries() {
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_telemetry == capacity_label);
     CHECK(runtime.last_flex_observation->update_calls == 61);
-    CHECK(runtime.adaptive_actuation.propose(flex_control, 1.0, std::nullopt,
-        kf2::optimizer::AdaptiveCapabilityState::available, runtime.monotonic_ns(),
-        "flex_shared_memory").status ==
-        kf2::optimizer::AdaptiveActionStatus::proposed);
-    CHECK(runtime.adaptive_actuation.dispatch(flex_control, runtime.monotonic_ns()));
-    shared.desired_substeps = 1;
-    shared.control_heartbeat_tick = GetTickCount64();
     shared.aggregate_particle_capacity = 4096;
     const auto before_text_failure = runtime.model.status();
     bool text_failed = false;
@@ -403,15 +348,7 @@ int test_flex_report_boundaries() {
     fail_flex_text_allocation = false;
     CHECK(text_failed);
     CHECK(runtime.last_flex_observation->particle_capacity == 4096);
-    CHECK(runtime.adaptive_actuation.current(flex_control)->status ==
-        kf2::optimizer::AdaptiveActionStatus::applied);
     CHECK(runtime.model.status().flex_telemetry == before_text_failure.flex_telemetry);
-    CHECK(runtime.model.status().flex_requested_substeps ==
-        before_text_failure.flex_requested_substeps);
-    CHECK(runtime.model.status().flex_effective_substeps ==
-        before_text_failure.flex_effective_substeps);
-    CHECK(runtime.model.status().flex_action_status ==
-        before_text_failure.flex_action_status);
     CHECK(runtime.model.status().flex_substep_diagnostics ==
         before_text_failure.flex_substep_diagnostics);
     CHECK(runtime.model.status().flex_readback_diagnostics ==
@@ -419,10 +356,6 @@ int test_flex_report_boundaries() {
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_telemetry ==
         L"FleX solvers: 1 | particle capacity: 4096 | active/free awaiting a fresh count");
-    CHECK(runtime.model.status().flex_action_status == L"APPLIED");
-    runtime.adaptive_actuation.invalidate_control(flex_control);
-    shared.desired_substeps = 0;
-    shared.control_heartbeat_tick = 0;
     shared.aggregate_particle_capacity = 2048;
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_telemetry ==
@@ -474,21 +407,19 @@ int test_flex_report_boundaries() {
     shared.max_substeps = shared.last_substeps = 64;
     shared.max_forwarded_substeps = shared.last_forwarded_substeps = 5;
     shared.successful_updates = 0;
-    shared.update_calls = shared.constrained_updates =
-        std::numeric_limits<LONGLONG>::max();
+    shared.update_calls = std::numeric_limits<LONGLONG>::max();
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_substep_diagnostics ==
         L"input min/max 0/64  •  forwarded min/max 0/5  •  latest 64 → 5");
     CHECK(runtime.model.status().flex_readback_diagnostics ==
         L"shared memory unhealthy  •  updates 0/9223372036854775807"
-        L"  •  constrained 9223372036854775807  •  reports and extra logs on");
+        L"  •  observation only");
     shared = diagnostic_shared;
     runtime.observe_flex_process();
     CHECK(runtime.model.status().flex_substep_diagnostics ==
         L"input min/max 1/1  •  forwarded min/max 1/1  •  latest 1 → 1");
     CHECK(runtime.model.status().flex_readback_diagnostics ==
-        L"shared memory healthy  •  updates 61/61  •  constrained 0"
-        L"  •  reports and extra logs on");
+        L"shared memory healthy  •  updates 61/61  •  observation only");
 
     // A diagnostics action can replace labels with waiting text independently
     // of observation values. The next read must replace it without a cache hit.
@@ -502,8 +433,7 @@ int test_flex_report_boundaries() {
     CHECK(runtime.model.status().flex_substep_diagnostics ==
         L"input min/max 1/1  •  forwarded min/max 1/1  •  latest 1 → 1");
     CHECK(runtime.model.status().flex_readback_diagnostics ==
-        L"shared memory healthy  •  updates 61/61  •  constrained 0"
-        L"  •  reports and extra logs on");
+        L"shared memory healthy  •  updates 61/61  •  observation only");
     shared.aggregate_capacity_valid = shared.aggregate_counts_valid = 1;
     shared.aggregate_active_particles = 37;
     shared.aggregate_free_particles = 987;
@@ -554,23 +484,6 @@ int test_flex_report_boundaries() {
     CHECK(runtime.model.status().flex_telemetry == aggregate_label);
     CHECK(runtime.model.status().flex_readback_diagnostics.find(
         L"updates 63/63") != std::wstring::npos);
-
-    // An unchanged particle label never skips action receipt processing.
-    const auto numeric_request_at = runtime.monotonic_ns();
-    CHECK(runtime.adaptive_actuation.propose(flex_control, 1.0, std::nullopt,
-        kf2::optimizer::AdaptiveCapabilityState::available, numeric_request_at,
-        "flex_shared_memory").status ==
-        kf2::optimizer::AdaptiveActionStatus::proposed);
-    CHECK(runtime.adaptive_actuation.dispatch(flex_control, numeric_request_at));
-    shared.desired_substeps = 1;
-    shared.control_heartbeat_tick = GetTickCount64();
-    runtime.observe_flex_process();
-    CHECK(runtime.model.status().flex_telemetry == aggregate_label);
-    CHECK(runtime.model.status().flex_action_status == L"APPLIED");
-    CHECK(runtime.model.status().flex_effective_substeps == 1);
-    runtime.adaptive_actuation.invalidate_control(flex_control);
-    shared.desired_substeps = 0;
-    shared.control_heartbeat_tick = 0;
 
     for (const auto& [counter, expected] : std::array{
              std::pair{&shared.particle_upload_calls, L"transfers up/down: 7/5"},
@@ -882,8 +795,10 @@ int test_package_repair_worker_start_failure() {
     fs::remove_all(test_root);
 
     kf2::diagnostics::EventLog repair_events{128};
+    kf2::config::Settings repair_settings;
+    repair_settings.automatic_update_checks = false;
     kf2::app::UiRuntime runtime{test_root / L"Data", false,
-        kf2::config::Settings{}, repair_events, std::nullopt,
+        repair_settings, repair_events, std::nullopt,
         kf2::app::StartMode::read_only, test_root / L"portable"};
     int launch_attempts = 0;
     runtime.package_repair_worker_launcher =
@@ -1004,8 +919,10 @@ int test_package_operation_exclusion() {
     write_bytes(second, "damaged second");
     RepairTestHooks hooks{scenario};
     kf2::diagnostics::EventLog events{128};
+    kf2::config::Settings repair_settings;
+    repair_settings.automatic_update_checks = false;
     kf2::app::UiRuntime runtime{root / L"state", false,
-        kf2::config::Settings{}, events, std::nullopt,
+        repair_settings, events, std::nullopt,
         kf2::app::StartMode::read_only, scenario.target};
     fs::create_directories(runtime.updates.state_path.parent_path());
     auto release_pause = std::unique_ptr<RepairPause, void (*)(RepairPause*)>{
@@ -3788,14 +3705,12 @@ int test_launch_profile_allocation_failures() {
         .streaming_hysteresis_limit = 40};
     CHECK(!noexcept(kf2::app::enforce_temporal_aa_disabled(changes)));
     CHECK(!noexcept(kf2::app::enforce_async_physics_enabled(changes)));
-    CHECK(!noexcept(kf2::app::enforce_fixed_flex_substeps(changes, true)));
     CHECK(!noexcept(kf2::app::enforce_one_frame_thread_lag(changes)));
     CHECK(!noexcept(kf2::app::enforce_startup_memory_profile(changes, memory_profile)));
 
     // Every allocating helper must propagate failure, including a partially
     // assembled multi-setting helper. Existing success tests cover its values.
     for (const auto id : {SettingId::temporal_aa, SettingId::enable_async_scene,
-                         SettingId::max_physics_substeps,
                          SettingId::one_frame_thread_lag,
                          SettingId::texture_streaming_memory_margin}) {
         changes.clear();
@@ -3808,8 +3723,6 @@ int test_launch_profile_allocation_failures() {
                 kf2::app::enforce_temporal_aa_disabled(changes); break;
             case SettingId::enable_async_scene:
                 kf2::app::enforce_async_physics_enabled(changes); break;
-            case SettingId::max_physics_substeps:
-                kf2::app::enforce_fixed_flex_substeps(changes, true); break;
             case SettingId::one_frame_thread_lag:
                 kf2::app::enforce_one_frame_thread_lag(changes); break;
             default:
@@ -3841,9 +3754,8 @@ int test_launch_profile_allocation_failures() {
     for (const bool adaptive : {true, false}) {
         runtime.optimizer_settings.adaptive_optimization_enabled = adaptive;
         for (const auto id : {SettingId::temporal_aa, SettingId::enable_async_scene,
-                             SettingId::max_physics_substeps,
                              SettingId::one_frame_thread_lag}) {
-            if (!adaptive && id != SettingId::max_physics_substeps) continue;
+            if (!adaptive) continue;
             // A stale preview must never become a fallback for a failed build.
             runtime.preview = kf2::config::ConfigPreview{};
             launch_failure_setting = id;
@@ -3907,11 +3819,26 @@ int test_flex_recovery_installation_owner() {
     const auto old_flex = old_install / L"Binaries/Win64";
     const auto new_flex = new_install / L"Binaries/Win64";
     const auto forwarder = root / L"flexRelease_x64.forwarder-lab.dll";
+    const auto optimized_core = root / L"flexRelease_x64.optimized.dll";
+    const auto optimized_extension = root / L"flexExtRelease_x64.optimized.dll";
+    const auto optimized_helper = root / L"kf2_p4_overlap.dll";
     write_bytes(old_flex / L"flexRelease_x64.dll", "original-runtime");
+    write_bytes(old_flex / L"flexExtRelease_x64.dll", "original-extension");
     write_bytes(new_flex / L"flexRelease_x64.dll", "original-runtime");
+    write_bytes(new_flex / L"flexExtRelease_x64.dll", "original-extension");
     write_bytes(forwarder, "forwarder");
-    CHECK(flex::install_offline_lab({old_flex, recovery_state / L"flex-lab",
-        forwarder, false, true, true, false}).has_value());
+    write_bytes(optimized_core, "optimized-runtime");
+    write_bytes(optimized_extension, "optimized-extension");
+    write_bytes(optimized_helper, "optimized-helper");
+    CHECK(flex::install_optimized_runtime_transaction({
+        .game_directory = old_flex,
+        .state_directory = recovery_state / L"flex-lab",
+        .forwarder_dll = forwarder,
+        .optimized_core_dll = optimized_core,
+        .optimized_extension_dll = optimized_extension,
+        .optimized_helper_dll = optimized_helper,
+        .game_running = false,
+        .exact_runtime_verified = true}).has_value());
     const auto recovery_marker = recovery_state / L"flex-lab/flex-lab-transaction.marker";
     const auto recovery_before = read_bytes(recovery_marker);
     auto fallback_discovery = discovery;
@@ -3929,21 +3856,23 @@ int test_flex_recovery_installation_owner() {
         CHECK(read_bytes(new_flex / L"flexRelease_x64.dll") == "original-runtime");
         CHECK(!fs::exists(new_flex / L"flexRelease_original.dll"));
         CHECK(read_bytes(old_flex / L"flexRelease_x64.dll") == "forwarder");
-        CHECK(read_bytes(old_flex / L"flexRelease_original.dll") == "original-runtime");
+        CHECK(read_bytes(old_flex / L"flexRelease_original.dll") == "optimized-runtime");
         CHECK(read_bytes(recovery_marker) == recovery_before);
     }
     const auto recovery_log = recovery_events.snapshot();
     CHECK(std::any_of(recovery_log.begin(), recovery_log.end(), [](const auto& event) {
-        return event.code == "FLEX_LAB_RECOVERY_BLOCKED";
+        return event.code == "FLEX_RUNTIME_RECOVERY_BLOCKED";
     }));
     {
         app::UiRuntime runtime{recovery_state, false, recovery_settings,
             recovery_events, discovery, app::StartMode::read_only, portable};
         CHECK(!runtime.model.recovery_required());
         CHECK(read_bytes(old_flex / L"flexRelease_x64.dll") == "original-runtime");
+        CHECK(read_bytes(old_flex / L"flexExtRelease_x64.dll") == "original-extension");
         CHECK(read_bytes(new_flex / L"flexRelease_x64.dll") == "original-runtime");
         CHECK(!fs::exists(recovery_marker));
         CHECK(!fs::exists(old_flex / L"flexRelease_original.dll"));
+        CHECK(!fs::exists(old_flex / L"kf2_p4_overlap.dll"));
     }
     return EXIT_SUCCESS;
 }
@@ -6274,11 +6203,11 @@ int main(int argc, char** argv) {
         kf2::app::StartMode::normal));
     CHECK(!kf2::app::should_prepare_protected_gameplay_provider(
         kf2::app::StartMode::read_only));
-    CHECK(!kf2::app::should_prepare_fixed_flex_runtime(
+    CHECK(!kf2::app::should_prepare_optimized_flex_runtime(
         kf2::app::StartMode::normal, 0));
-    CHECK(kf2::app::should_prepare_fixed_flex_runtime(
+    CHECK(kf2::app::should_prepare_optimized_flex_runtime(
         kf2::app::StartMode::normal, 1));
-    CHECK(kf2::app::should_prepare_fixed_flex_runtime(
+    CHECK(kf2::app::should_prepare_optimized_flex_runtime(
         kf2::app::StartMode::normal, 2));
     std::vector<kf2::config::RequestedChange> flex_preservation_changes{
         {kf2::config::SettingId::target_fps, 120,
@@ -6312,35 +6241,21 @@ int main(int argc, char** argv) {
     CHECK(flex_preservation_changes.size() == 4);
     CHECK(std::get<bool>(flex_preservation_changes[2].value));
     CHECK(std::get<bool>(flex_preservation_changes[3].value));
-    kf2::app::enforce_fixed_flex_substeps(
-        flex_preservation_changes, false);
-    CHECK(flex_preservation_changes.size() == 4);
-    kf2::app::enforce_fixed_flex_substeps(
-        flex_preservation_changes, true);
+    kf2::app::enforce_one_frame_thread_lag(flex_preservation_changes);
     CHECK(flex_preservation_changes.size() == 5);
     CHECK(flex_preservation_changes[4].id ==
-          kf2::config::SettingId::max_physics_substeps);
-    CHECK(std::get<int>(flex_preservation_changes[4].value) == 1);
-    flex_preservation_changes[4].value = 5;
-    kf2::app::enforce_fixed_flex_substeps(
-        flex_preservation_changes, true);
-    CHECK(flex_preservation_changes.size() == 5);
-    CHECK(std::get<int>(flex_preservation_changes[4].value) == 1);
-    kf2::app::enforce_one_frame_thread_lag(flex_preservation_changes);
-    CHECK(flex_preservation_changes.size() == 6);
-    CHECK(flex_preservation_changes[5].id ==
           kf2::config::SettingId::one_frame_thread_lag);
-    CHECK(std::get<bool>(flex_preservation_changes[5].value));
+    CHECK(std::get<bool>(flex_preservation_changes[4].value));
     const kf2::optimizer::StartupMemoryProfile startup_memory{
         .texture_pool_size_mb = 6000,
         .memory_margin_mb = 128,
         .streaming_hysteresis_limit = 40};
     kf2::app::enforce_startup_memory_profile(
         flex_preservation_changes, startup_memory);
-    CHECK(flex_preservation_changes.size() == 9);
-    CHECK(std::get<int>(flex_preservation_changes[6].value) == 6000);
-    CHECK(std::get<int>(flex_preservation_changes[7].value) == 128);
-    CHECK(std::get<int>(flex_preservation_changes[8].value) == 40);
+    CHECK(flex_preservation_changes.size() == 8);
+    CHECK(std::get<int>(flex_preservation_changes[5].value) == 6000);
+    CHECK(std::get<int>(flex_preservation_changes[6].value) == 128);
+    CHECK(std::get<int>(flex_preservation_changes[7].value) == 40);
     namespace fs = std::filesystem;
     CHECK(kf2::app::runtime::feature_definitions().size() == 7);
     CHECK(kf2::app::runtime::find_feature(
@@ -8165,9 +8080,7 @@ int main(int argc, char** argv) {
             }));
 
         // Applying an explicit graphics change after automatic preparation
-        // must rebuild the protected snapshot and launch capabilities. This
-        // is the orchestration path used when the dedicated FleX control is
-        // changed before KF2 starts.
+        // must rebuild the protected snapshot and launch capabilities.
         const auto effect_index = static_cast<std::size_t>(
             kf2::game::VideoOption::motion_blur);
         const int original_effect =

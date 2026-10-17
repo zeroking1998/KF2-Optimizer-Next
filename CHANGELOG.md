@@ -8,6 +8,18 @@ are visible immediately.
 
 ### What's new
 
+- Run user-enabled NVIDIA FleX through the verified optimized Core, Extension
+  and project helper as one protected session. Exact stock DLLs are reconstructed
+  locally, the observation relay now forwards the game's requested substeps
+  unchanged, and every installed component is restored after the session.
+  An already verified staged runtime is reused instead of rebuilding and
+  rewriting identical binaries on every later launch.
+- Remove the retired fixed-minimum-substep controller, its Adaptive actions,
+  stale UI fields, control telemetry and registry candidates. FleX diagnostics
+  remain read-only, and
+  failed preparation, installation or restoration rolls the complete transaction
+  back instead of leaving a mixed runtime behind.
+
 - Remove retired effect-control inputs from Adaptive resource selection;
   quality decisions, safety gates, diagnostics and restoration are unchanged.
 

@@ -209,6 +209,14 @@ int main() {
     CHECK(!blocked_sensitive_smart.has_value());
     CHECK(blocked_sensitive_smart.error().code == kf2::ErrorCode::access_denied);
 
+    const auto blocked_adaptive_flex = build_preview(
+        installation,
+        {{SettingId::physx_level, SettingValue{2}, ChangeSource::adaptive,
+          L"Adaptive must not control user-owned FleX"}},
+        documents);
+    CHECK(!blocked_adaptive_flex.has_value());
+    CHECK(blocked_adaptive_flex.error().code == kf2::ErrorCode::access_denied);
+
     const auto allowed_sensitive_manual = build_preview(
         installation,
         {{SettingId::max_draw_distance_scale, SettingValue{1.1}, ChangeSource::explicit_user,
