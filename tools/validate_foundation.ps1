@@ -120,14 +120,16 @@ foreach ($buildRoot in $buildRoots) {
     Assert-True ($productExecutables[0].Name -ceq 'KF2Optimizer.exe') `
         "Unexpected product executable: $($productExecutables[0].Name)"
     $productDlls = @(Get-ChildItem -LiteralPath $releaseRoot -Filter '*.dll' -File)
-    Assert-True ($productDlls.Count -eq 1 -and
-        $productDlls[0].Name -ceq 'kf2_p4_overlap.dll') `
+    $productDllNames = @($productDlls.Name | Sort-Object)
+    Assert-True ($productDlls.Count -eq 2 -and
+        $productDllNames[0] -ceq 'kf2_anchor_runtime.dll' -and
+        $productDllNames[1] -ceq 'kf2_p4_overlap.dll') `
         'Foundation produced an unexpected root product DLL'
     $labForwarder = Join-Path $buildRoot 'flexRelease_x64.forwarder-lab.dll'
     Assert-True (Test-Path -LiteralPath $labForwarder -PathType Leaf) `
         'FleX observation relay was not reproducibly built'
 }
-Write-Pass 'release shape contains one user-facing executable and two isolated FleX runtime components'
+Write-Pass 'release shape contains one user-facing executable plus isolated anchor and FleX runtime components'
 
 $firstExecutable = Join-Path $buildRoots[0] 'Release\KF2Optimizer.exe'
 $headers = (& $dumpbin /headers $firstExecutable | Out-String)
@@ -159,3 +161,12 @@ $secondHelperHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $secondHelper).
 Assert-True ($firstHelperHash -ceq $secondHelperHash) `
     "Optimized FleX helper is not reproducible: $firstHelperHash != $secondHelperHash"
 Write-Pass "two clean optimized FleX helpers are identical ($firstHelperHash)"
+$firstAnchorHelper = Join-Path $buildRoots[0] 'Release\kf2_anchor_runtime.dll'
+$secondAnchorHelper = Join-Path $buildRoots[1] 'Release\kf2_anchor_runtime.dll'
+$firstAnchorHelperHash = (Get-FileHash -Algorithm SHA256 -LiteralPath `
+    $firstAnchorHelper).Hash
+$secondAnchorHelperHash = (Get-FileHash -Algorithm SHA256 -LiteralPath `
+    $secondAnchorHelper).Hash
+Assert-True ($firstAnchorHelperHash -ceq $secondAnchorHelperHash) `
+    "Native anchor helper is not reproducible: $firstAnchorHelperHash != $secondAnchorHelperHash"
+Write-Pass "two clean native anchor helpers are identical ($firstAnchorHelperHash)"

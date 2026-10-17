@@ -523,6 +523,10 @@ struct UiRuntime {
 
     bool restore_optimized_flex_runtime(std::wstring_view reason);
 
+    Result<bool> ensure_anchor_runtime();
+
+    bool restore_anchor_runtime(std::wstring_view reason);
+
     Result<game::FrameRateCapResult> synchronize_frame_rate_cap();
 
     bool restore_protected_session_config(std::wstring_view reason);

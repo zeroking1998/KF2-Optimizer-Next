@@ -19,7 +19,7 @@ if(path_preflight EQUAL -1 OR first_destination_mutation EQUAL -1 OR
 endif()
 
 string(FIND "${package_script}"
-    "KF2FlexOptimizedHelper KF2FlexForwarder KF2InventoryExport"
+    "KF2AnchorRuntime KF2FlexOptimizedHelper KF2FlexForwarder KF2InventoryExport"
     flex_package_targets)
 string(FIND "${package_script}"
     "Copy-Item -LiteralPath $forwarder -Destination" forwarder_copy)
@@ -38,7 +38,7 @@ if(exporter_build EQUAL -1)
         "Packaging must incrementally build the exporter outside SkipBuild")
 endif()
 string(FIND "${package_script}"
-    "KF2FlexOptimizedHelper KF2FlexForwarder KF2InventoryExport"
+    "KF2AnchorRuntime KF2FlexOptimizedHelper KF2FlexForwarder KF2InventoryExport"
     exporter_target)
 string(FIND "${package_script}"
     "if (-not (Test-Path -LiteralPath $destinationRoot))"
@@ -77,6 +77,7 @@ execute_process(COMMAND "${TEST_POWERSHELL}" -NoProfile -File
     "${PROJECT_SOURCE_DIR}/tests/tools/release_source_identity_test.ps1"
     -Executable "${TEST_EXECUTABLE}" -Forwarder "${TEST_FLEX_FORWARDER}"
     -FlexHelper "${TEST_FLEX_HELPER}"
+    -AnchorHelper "${TEST_ANCHOR_HELPER}"
     -TestRoot "${TEST_BINARY_ROOT}/test-sandbox"
     -ExpectedBuildIdentity "${EXPECTED_BUILD_IDENTITY}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)

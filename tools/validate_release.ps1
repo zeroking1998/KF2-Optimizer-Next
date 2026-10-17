@@ -67,6 +67,15 @@ if ($flexHelperBytes.Length -lt 512 -or $flexHelperBytes[0] -ne 0x4D -or
     $flexHelperBytes[1] -ne 0x5A) {
     throw 'Optimized FleX helper is not a valid PE image'
 }
+$anchorHelper = Join-Path $root 'Data\Lab\kf2_anchor_runtime.dll'
+if (-not (Test-Path -LiteralPath $anchorHelper -PathType Leaf)) {
+    throw 'Portable native anchor helper is missing'
+}
+$anchorHelperBytes = [IO.File]::ReadAllBytes($anchorHelper)
+if ($anchorHelperBytes.Length -lt 512 -or $anchorHelperBytes[0] -ne 0x4D -or
+    $anchorHelperBytes[1] -ne 0x5A) {
+    throw 'Native anchor helper is not a valid PE image'
+}
 $inventory = Join-Path $root 'Data\Documentation\ISSUE_72_PRODUCT_MATRIX.md'
 if (-not (Test-Path -LiteralPath $inventory -PathType Leaf)) {
     throw 'Issue 72 product inventory documentation is missing from the portable package'
@@ -116,7 +125,7 @@ $packageManifest = Get-Content -LiteralPath $packageManifestPath -Raw |
 if ($packageManifest.schema_version -ne 2 -or
     $packageManifest.package_version -cne '0.0.4-alpha' -or
     $packageManifest.license -cne 'GPL-3.0-only' -or
-    @($packageManifest.managed_files).Count -ne 16) {
+    @($packageManifest.managed_files).Count -ne 17) {
     throw 'Portable package manifest is incomplete or incompatible'
 }
 $packageIdentity = [string]$packageManifest.source_identity
@@ -143,6 +152,12 @@ $flexHelperIdentity = (& $flexIdentityReader -Artifact $flexHelper).Trim()
 if ($flexHelperIdentity -cne $expectedIdentity) {
     throw 'Optimized FleX helper source identity does not match the requested release'
 }
+$anchorIdentityReader = Join-Path $PSScriptRoot `
+    'get_anchor_artifact_source_identity.ps1'
+$anchorHelperIdentity = (& $anchorIdentityReader -Artifact $anchorHelper).Trim()
+if ($anchorHelperIdentity -cne $expectedIdentity) {
+    throw 'Native anchor helper source identity does not match the requested release'
+}
 foreach ($relative in @($packageManifest.managed_files)) {
     $managed = Join-Path $root $relative
     if (-not (Test-Path -LiteralPath $managed -PathType Leaf)) {
@@ -150,8 +165,8 @@ foreach ($relative in @($packageManifest.managed_files)) {
     }
 }
 $payloadHashes = @($packageManifest.payload_hashes)
-if ($payloadHashes.Count -ne 15) {
-    throw 'Portable package hash manifest must cover all fifteen payload files'
+if ($payloadHashes.Count -ne 16) {
+    throw 'Portable package hash manifest must cover all sixteen payload files'
 }
 $seenPayload = @{}
 foreach ($entry in $payloadHashes) {
@@ -183,12 +198,12 @@ foreach ($entry in $payloadHashes) {
 }
 $integrityPath = Join-Path $root 'Data\package-integrity.ini'
 $integrityLines = @(Get-Content -LiteralPath $integrityPath)
-if ($integrityLines.Count -ne 18 -or
+if ($integrityLines.Count -ne 19 -or
     $integrityLines[0] -cne 'schema_version=1' -or
     $integrityLines[1] -cne 'product=KF2OptimizerNext' -or
     $integrityLines[2] -notmatch '^source_identity=[A-Za-z0-9._-]{1,128}$' -or
-    $integrityLines[3] -cne 'file_count=14' -or
-    @($integrityLines | Where-Object { $_ -match '^file=' }).Count -ne 14) {
+    $integrityLines[3] -cne 'file_count=15' -or
+    @($integrityLines | Where-Object { $_ -match '^file=' }).Count -ne 15) {
     throw 'Runtime package integrity document is invalid'
 }
 if ($integrityLines[2] -cne "source_identity=$expectedIdentity") {
@@ -199,8 +214,9 @@ if ($DevelopmentPackage) {
     Write-Host 'DEVELOPMENT ONLY: this check does not certify a release candidate'
 }
 Write-Host "PASS: package has exactly one portable executable"
-Write-Host "PASS: all fifteen managed payload hashes match"
+Write-Host "PASS: all sixteen managed payload hashes match"
 Write-Host "PACKAGE EXE SHA256: $((Get-FileHash -LiteralPath $executables[0].FullName -Algorithm SHA256).Hash)"
 Write-Host "FLEX RELAY SHA256: $((Get-FileHash -LiteralPath $forwarder -Algorithm SHA256).Hash)"
 Write-Host "FLEX HELPER SHA256: $((Get-FileHash -LiteralPath $flexHelper -Algorithm SHA256).Hash)"
+Write-Host "ANCHOR HELPER SHA256: $((Get-FileHash -LiteralPath $anchorHelper -Algorithm SHA256).Hash)"
 & (Join-Path $PSScriptRoot 'validate_acceptance_ledger.ps1')

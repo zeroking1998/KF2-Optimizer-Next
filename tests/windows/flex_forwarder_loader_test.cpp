@@ -5,7 +5,7 @@
 #include "kf2/flex/flex_observation_shared.hpp"
 
 int wmain(int argc, wchar_t** argv) {
-    if (argc != 3) return 2;
+    if (argc != 4) return 2;
     const auto sandbox = std::filesystem::absolute(std::filesystem::path{argv[1]});
     std::error_code ec;
     std::filesystem::remove_all(sandbox, ec);
@@ -39,6 +39,10 @@ int wmain(int argc, wchar_t** argv) {
                                sandbox / L"flexRelease_x64.dll",
                                std::filesystem::copy_options::overwrite_existing, ec);
     if (ec) return 5;
+    std::filesystem::copy_file(std::filesystem::absolute(std::filesystem::path{argv[3]}),
+                               sandbox / L"kf2_anchor_runtime.dll",
+                               std::filesystem::copy_options::overwrite_existing, ec);
+    if (ec) return 21;
     FILETIME created{}, exited{}, kernel{}, user{};
     if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user))
         return 13;
@@ -80,6 +84,7 @@ int wmain(int argc, wchar_t** argv) {
         // It must not keep a valid producer publication alive with it.
         if (!FreeLibrary(module)) return 10;
         if (GetModuleHandleW(L"flexRelease_original.dll")) return 19;
+        if (GetModuleHandleW(L"kf2_anchor_runtime.dll")) return 22;
         if (shared->magic != 0 || shared->state != 0 ||
             kf2::flex::read_observation(identity) ||
             reader.read(identity) ||
@@ -97,6 +102,7 @@ int wmain(int argc, wchar_t** argv) {
                 !reader.read(identity)) return 17;
             if (!FreeLibrary(module)) return 10;
             if (GetModuleHandleW(L"flexRelease_original.dll")) return 19;
+            if (GetModuleHandleW(L"kf2_anchor_runtime.dll")) return 22;
             if (shared->magic != 0 || shared->state != 0 ||
                 reader.read(identity)) return 18;
         }

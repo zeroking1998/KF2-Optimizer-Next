@@ -359,7 +359,7 @@ app::runtime::DispatchResult launch(
     show_notice(
         runtime, ui::NoticeSeverity::info, L"GAME_LAUNCH_STARTED",
         optimized_flex_launch
-            ? L"Killing Floor 2 start was requested with the protected Adaptive plan, corpse provider and verified optimized FleX runtime. The verified providers, original FleX files and exact original INIs will be restored after the session."
+            ? L"Killing Floor 2 start was requested with the protected Adaptive plan, corpse provider, native anchor helper and verified optimized FleX runtime. The verified providers, original runtime files and exact original INIs will be restored after the session."
             : L"Killing Floor 2 start was requested with the protected Adaptive plan and corpse provider. FleX remains off because the user did not enable it in KF2. The verified provider and exact original INIs will be restored after the session.");
     return app::runtime::DispatchResult::handled;
 }

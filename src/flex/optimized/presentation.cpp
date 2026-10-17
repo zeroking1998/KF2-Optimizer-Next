@@ -1,8 +1,5 @@
 #include "overlap.hpp"
 #include "presentation.hpp"
-#include "anchor_fast_fallback.hpp"
-#include "anchor_reachable_cache.hpp"
-#include "anchor_walk_cycle.hpp"
 #include <windows.h>
 #include <cmath>
 #include <cstring>
@@ -313,9 +310,6 @@ BOOL CALLBACK install_once(PINIT_ONCE, PVOID, PVOID*) {
             }
         }
     }
-    anchor_fast_fallback_install(base,nt->OptionalHeader.SizeOfImage);
-    if(anchor_reachable_cache_install(base,nt->OptionalHeader.SizeOfImage))
-        anchor_walk_cycle_install(base,nt->OptionalHeader.SizeOfImage);
     return TRUE;
 }
 #endif
