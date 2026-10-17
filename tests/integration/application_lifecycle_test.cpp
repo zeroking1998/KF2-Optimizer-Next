@@ -2777,7 +2777,8 @@ int test_final_graphics_capture() {
     }
 
     final_graphics_events.clear();
-    fs::remove_all(root);
+    std::error_code cleanup_error;
+    fs::remove_all(root, cleanup_error);
     return EXIT_SUCCESS;
 }
 
