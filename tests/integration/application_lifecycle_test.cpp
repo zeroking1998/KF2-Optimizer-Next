@@ -6359,8 +6359,8 @@ int main(int argc, char** argv) {
               kf2::app::runtime::FeatureId::advanced) != nullptr);
     CHECK(kf2::app::runtime::valid_feature_registry(
         kf2::app::runtime::feature_definitions()));
-    const fs::path root{KF2_TEST_ROOT};
-    fs::remove_all(root);
+    const fs::path root = fs::path{KF2_TEST_ROOT} /
+        (L"main-" + std::to_wstring(GetCurrentProcessId()));
     const auto documents = root / L"Documents";
     const auto config_root = documents / L"My Games/KillingFloor2/KFGame/Config";
     const auto install_root = root / L"Steam/steamapps/common/KillingFloor2";
