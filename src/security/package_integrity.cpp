@@ -18,10 +18,11 @@
 namespace kf2::security {
 namespace {
 
-constexpr std::array<std::string_view, 14> kPayloadPaths{
+constexpr std::array<std::string_view, 15> kPayloadPaths{
     "KF2Optimizer.exe",
     "Data/Lab/flexRelease_x64.forwarder-lab.dll",
     "Data/Lab/kf2_p4_overlap.dll",
+    "Data/Lab/kf2_anchor_runtime.dll",
     "Data/Lab/KF2OptimizerTelemetry.u",
     "Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md",
     "Data/Documentation/README.md",

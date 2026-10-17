@@ -77,6 +77,9 @@ include(CTest)
 configure_file(src/flex/flex_build_identity.hpp.in
     "${CMAKE_CURRENT_BINARY_DIR}/generated/kf2/flex/flex_build_identity.hpp"
     @ONLY)
+configure_file(src/game/anchor_build_identity.hpp.in
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/kf2/game/anchor_build_identity.hpp"
+    @ONLY)
 
 if(MSVC)
     set(KF2_FLEX_OPTIMIZED_DIRECTORY
@@ -93,6 +96,21 @@ if(MSVC)
             VERBATIM)
         list(APPEND KF2_FLEX_OPTIMIZED_IMPORT_LIBRARIES "${import_library}")
     endforeach()
+
+    add_library(KF2AnchorRuntime SHARED
+        src/game/optimized/anchor_fast_fallback.cpp
+        src/game/optimized/anchor_fast_fallback.hpp
+        src/game/optimized/anchor_reachable_cache.cpp
+        src/game/optimized/anchor_reachable_cache.hpp
+        src/game/optimized/anchor_runtime.cpp
+        src/game/optimized/anchor_walk_cycle.cpp
+        src/game/optimized/anchor_walk_cycle.hpp)
+    target_compile_features(KF2AnchorRuntime PRIVATE cxx_std_20)
+    target_include_directories(KF2AnchorRuntime PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_link_options(KF2AnchorRuntime PRIVATE /guard:cf)
+    set_target_properties(KF2AnchorRuntime PROPERTIES
+        OUTPUT_NAME "kf2_anchor_runtime")
 
     add_library(KF2FlexOptimizedHelper SHARED
         src/flex/optimized/overlap.cpp
@@ -194,6 +212,7 @@ add_executable(KF2Optimizer WIN32
     src/flex/flex_lab.cpp
     src/flex/flex_observation.cpp
     src/game/adaptive_control_client.cpp
+    src/game/anchor_runtime_loader.cpp
     src/game/frame_rate_cap.cpp
     src/game/game_discovery.cpp
     src/game/gameplay_log_lab.cpp
@@ -257,6 +276,9 @@ add_executable(KF2Optimizer WIN32
 if(TARGET KF2FlexOptimizedHelper)
     add_dependencies(KF2Optimizer KF2FlexOptimizedHelper)
 endif()
+if(TARGET KF2AnchorRuntime)
+    add_dependencies(KF2Optimizer KF2AnchorRuntime)
+endif()
 target_include_directories(KF2Optimizer PRIVATE
     "${PROJECT_SOURCE_DIR}/include"
     "${PROJECT_SOURCE_DIR}/src"
@@ -277,6 +299,14 @@ check_ipo_supported(RESULT KF2_IPO_SUPPORTED OUTPUT KF2_IPO_ERROR
 if(KF2_IPO_SUPPORTED)
     set_property(TARGET KF2Optimizer PROPERTY
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    if(TARGET KF2FlexOptimizedHelper)
+        set_property(TARGET KF2FlexOptimizedHelper PROPERTY
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+    if(TARGET KF2AnchorRuntime)
+        set_property(TARGET KF2AnchorRuntime PROPERTY
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
 else()
     message(FATAL_ERROR
         "Release IPO is required but unsupported: ${KF2_IPO_ERROR}")

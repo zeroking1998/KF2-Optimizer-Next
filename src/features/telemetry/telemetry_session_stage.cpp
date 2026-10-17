@@ -946,6 +946,23 @@ void UiRuntime::try_attach_telemetry() {
         game_process->pid != process.value().pid ||
         game_process->process_start_id != process.value().process_start_id;
     if (new_process) {
+        if (start_mode == StartMode::normal) {
+            const auto anchor = game::load_anchor_runtime(
+                process.value(), executable_root / L"Data" / L"Lab" /
+                    L"kf2_anchor_runtime.dll");
+            if (!anchor.has_value()) {
+                events->append({0, diagnostics::Severity::warning,
+                    "ANCHOR_RUNTIME_LOAD_FAILED", anchor.error().message,
+                    L"game"});
+            } else {
+                events->append({0, diagnostics::Severity::info,
+                    "ANCHOR_RUNTIME_LOADED",
+                    anchor.value() == game::AnchorRuntimeLoadState::loaded
+                        ? L"The independent native anchor runtime was loaded into the verified KF2 process"
+                        : L"The verified KF2 process already owns the independent native anchor runtime",
+                    L"game"});
+            }
+        }
         if (adaptive_restore_debt &&
             (adaptive_restore_debt->pid != process->pid ||
              adaptive_restore_debt->process_start_id != process->process_start_id)) {

@@ -385,6 +385,18 @@ add_test(NAME kf2_offline_telemetry_lab_test
 set_tests_properties(kf2_offline_telemetry_lab_test PROPERTIES
     SKIP_RETURN_CODE 77)
 
+add_executable(kf2_anchor_runtime_loader_test
+    windows/anchor_runtime_loader_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/game/anchor_runtime_loader.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/game_session.cpp")
+target_include_directories(kf2_anchor_runtime_loader_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(kf2_anchor_runtime_loader_test PRIVATE
+    dwmapi user32)
+add_dependencies(kf2_anchor_runtime_loader_test KF2AnchorRuntime)
+add_test(NAME kf2_anchor_runtime_loader_test
+    COMMAND kf2_anchor_runtime_loader_test "$<TARGET_FILE:KF2AnchorRuntime>")
+
 if(TARGET KF2FlexForwarder)
     add_library(kf2_flex_original_test_double SHARED
         windows/flex_original_test_double.cpp)
@@ -404,7 +416,8 @@ if(TARGET KF2FlexForwarder)
     add_dependencies(kf2_flex_forwarder_loader_test KF2FlexForwarder)
     add_test(NAME kf2_flex_forwarder_loader_test COMMAND kf2_flex_forwarder_loader_test
         "${KF2_TEST_SANDBOX_ROOT}/flex-forwarder"
-        "${KF2_FLEX_FORWARDER}")
+        "${KF2_FLEX_FORWARDER}"
+        )
     set_tests_properties(kf2_flex_forwarder_loader_test PROPERTIES
         SKIP_RETURN_CODE 77)
 
@@ -453,6 +466,7 @@ add_executable(kf2_application_lifecycle_test
     "${PROJECT_SOURCE_DIR}/src/flex/flex_observation.cpp"
     "${PROJECT_SOURCE_DIR}/src/flex/optimized_runtime.cpp"
     "${PROJECT_SOURCE_DIR}/src/flex/optimized_runtime_recipe.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/anchor_runtime_loader.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/frame_rate_cap.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/game_discovery.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/gameplay_log_lab.cpp"
@@ -921,6 +935,7 @@ add_test(NAME kf2_contributor_package_flow_test
         "-DTEST_EXECUTABLE=$<TARGET_FILE:KF2Optimizer>"
         "-DTEST_FLEX_FORWARDER=${KF2_FLEX_FORWARDER}"
         "-DTEST_FLEX_HELPER=$<TARGET_FILE:KF2FlexOptimizedHelper>"
+        "-DTEST_ANCHOR_HELPER=$<TARGET_FILE:KF2AnchorRuntime>"
         "-DTEST_BINARY_ROOT=${CMAKE_BINARY_DIR}"
         "-DTEST_POWERSHELL=${KF2_POWERSHELL_EXECUTABLE}"
         "-DEXPECTED_BUILD_IDENTITY=${KF2_VERSION}+${KF2_BUILD_COMMIT} (${KF2_BUILD_CHANNEL})"
