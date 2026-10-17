@@ -8190,6 +8190,7 @@ int main(int argc, char** argv) {
     CHECK(!fs::exists(published_telemetry));
     CHECK(read_bytes(config_root / L"KFEngine.ini") == original_engine_config);
 
-    fs::remove_all(root);
+    std::error_code cleanup_error;
+    fs::remove_all(root, cleanup_error);
     return EXIT_SUCCESS;
 }
