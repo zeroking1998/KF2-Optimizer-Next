@@ -2026,6 +2026,7 @@ function RemoveAdaptiveBaselineSettleEntry(int Index)
 function PruneAdaptiveBaselineSettleEntries()
 {
     local int Index;
+    local int ScanCount;
     local int Scanned;
     local KFPawn Candidate;
 
@@ -2034,11 +2035,13 @@ function PruneAdaptiveBaselineSettleEntries()
         AdaptiveBaselinePruneCursor = 0;
         return;
     }
+    ScanCount = Min(AdaptiveCorpseScanBudget,
+        AdaptiveBaselineSettleEntries.Length);
     AdaptiveBaselinePruneCursor = Clamp(
         AdaptiveBaselinePruneCursor, 0,
         AdaptiveBaselineSettleEntries.Length - 1);
     while (AdaptiveBaselineSettleEntries.Length > 0 &&
-           Scanned < AdaptiveCorpseScanBudget)
+           Scanned < ScanCount)
     {
         Index = Clamp(AdaptiveBaselinePruneCursor, 0,
             AdaptiveBaselineSettleEntries.Length - 1);
@@ -2048,6 +2051,9 @@ function PruneAdaptiveBaselineSettleEntries()
             !Candidate.Mesh.RigidBodyIsAwake())
         {
             AdaptiveBaselineSettleEntries.Remove(Index, 1);
+            AdaptiveBaselinePruneCursor =
+                AdaptiveBaselineSettleEntries.Length > 0 ?
+                Index % AdaptiveBaselineSettleEntries.Length : 0;
         }
         else
         {
@@ -2396,6 +2402,8 @@ function RemoveFixedMinimumCorpseLodEntry(int Index)
 function PruneFixedMinimumCorpseLodEntries()
 {
     local int Index;
+    local int PreviousLength;
+    local int ScanCount;
     local int Scanned;
     local KFPawn Candidate;
 
@@ -2404,14 +2412,17 @@ function PruneFixedMinimumCorpseLodEntries()
         FixedMinimumCorpseLodPruneCursor = 0;
         return;
     }
+    ScanCount = Min(AdaptiveCorpseScanBudget,
+        FixedMinimumCorpseLodCorpses.Length);
     FixedMinimumCorpseLodPruneCursor = Clamp(
         FixedMinimumCorpseLodPruneCursor, 0,
         FixedMinimumCorpseLodCorpses.Length - 1);
     while (FixedMinimumCorpseLodCorpses.Length > 0 &&
-           Scanned < AdaptiveCorpseScanBudget)
+           Scanned < ScanCount)
     {
         Index = Clamp(FixedMinimumCorpseLodPruneCursor, 0,
             FixedMinimumCorpseLodCorpses.Length - 1);
+        PreviousLength = FixedMinimumCorpseLodCorpses.Length;
         Candidate = FixedMinimumCorpseLodCorpses[Index];
         if (Candidate == None || Candidate.bDeleteMe ||
             KFPawn_Monster(Candidate) == None || Candidate.Mesh == None)
@@ -2434,7 +2445,8 @@ function PruneFixedMinimumCorpseLodEntries()
         }
         FixedMinimumCorpseLodPruneCursor =
             FixedMinimumCorpseLodCorpses.Length > 0 ?
-            (Index + 1) % FixedMinimumCorpseLodCorpses.Length : 0;
+            (FixedMinimumCorpseLodCorpses.Length < PreviousLength ?
+             Index : Index + 1) % FixedMinimumCorpseLodCorpses.Length : 0;
         ++Scanned;
     }
 }
@@ -3385,6 +3397,7 @@ function int ReleaseOneAdaptiveCorpseFreeze(bool bRestoreAll)
     local bool bRemoved;
     local bool bRestoreAttempted;
     local int Index;
+    local int ScanCount;
     local int Scanned;
     local string CurrentId;
     local KFPawn Candidate;
@@ -3394,10 +3407,11 @@ function int ReleaseOneAdaptiveCorpseFreeze(bool bRestoreAll)
         AdaptiveFreezePruneCursor = 0;
         return 0;
     }
+    ScanCount = Min(AdaptiveCorpseScanBudget, AdaptiveFrozenCorpses.Length);
     AdaptiveFreezePruneCursor = Clamp(
         AdaptiveFreezePruneCursor, 0, AdaptiveFrozenCorpses.Length - 1);
     while (AdaptiveFrozenCorpses.Length > 0 &&
-           Scanned < AdaptiveCorpseScanBudget)
+           Scanned < ScanCount)
     {
         Index = Clamp(AdaptiveFreezePruneCursor, 0,
             AdaptiveFrozenCorpses.Length - 1);
@@ -3477,6 +3491,7 @@ function int ReleaseOneRetiredAdaptiveCorpseFreeze()
     local bool bRemoved;
     local bool bRestoreAttempted;
     local int Index;
+    local int ScanCount;
     local int Scanned;
     local string CurrentId;
     local KFPawn Candidate;
@@ -3486,11 +3501,13 @@ function int ReleaseOneRetiredAdaptiveCorpseFreeze()
         AdaptiveRetiredFreezeCursor = 0;
         return 0;
     }
+    ScanCount = Min(AdaptiveCorpseScanBudget,
+        AdaptiveRetiredFrozenCorpses.Length);
     AdaptiveRetiredFreezeCursor = Clamp(
         AdaptiveRetiredFreezeCursor, 0,
         AdaptiveRetiredFrozenCorpses.Length - 1);
     while (AdaptiveRetiredFrozenCorpses.Length > 0 &&
-           Scanned < AdaptiveCorpseScanBudget)
+           Scanned < ScanCount)
     {
         Index = Clamp(AdaptiveRetiredFreezeCursor, 0,
             AdaptiveRetiredFrozenCorpses.Length - 1);
@@ -3909,6 +3926,8 @@ function RemoveAdaptiveDistanceSleptCorpseEntry(
 function PruneAdaptiveDistanceSleptCorpses()
 {
     local int Index;
+    local int PreviousLength;
+    local int ScanCount;
     local int Scanned;
     local KFPawn Candidate;
 
@@ -3918,14 +3937,17 @@ function PruneAdaptiveDistanceSleptCorpses()
         AdaptiveDistancePruneCursor = 0;
         return;
     }
+    ScanCount = Min(AdaptiveCorpseScanBudget,
+        AdaptiveDistanceSleptCorpses.Length);
     AdaptiveDistancePruneCursor = Clamp(
         AdaptiveDistancePruneCursor, 0,
         AdaptiveDistanceSleptCorpses.Length - 1);
     while (AdaptiveDistanceSleptCorpses.Length > 0 &&
-           Scanned < AdaptiveCorpseScanBudget)
+           Scanned < ScanCount)
     {
         Index = Clamp(AdaptiveDistancePruneCursor, 0,
             AdaptiveDistanceSleptCorpses.Length - 1);
+        PreviousLength = AdaptiveDistanceSleptCorpses.Length;
         Candidate = AdaptiveDistanceSleptCorpses[Index].Corpse;
         if (Candidate == None || Candidate.bDeleteMe)
         {
@@ -3957,7 +3979,8 @@ function PruneAdaptiveDistanceSleptCorpses()
         }
         AdaptiveDistancePruneCursor =
             AdaptiveDistanceSleptCorpses.Length > 0 ?
-            (Index + 1) % AdaptiveDistanceSleptCorpses.Length : 0;
+            (AdaptiveDistanceSleptCorpses.Length < PreviousLength ?
+             Index : Index + 1) % AdaptiveDistanceSleptCorpses.Length : 0;
         ++Scanned;
     }
 }
@@ -3965,6 +3988,7 @@ function PruneAdaptiveDistanceSleptCorpses()
 function int WakeNearAdaptiveDistanceSleptCorpses()
 {
     local int Index;
+    local int ScanCount;
     local int Scanned;
     local int WakeCount;
     local float DistanceSquared;
@@ -3982,11 +4006,13 @@ function int WakeNearAdaptiveDistanceSleptCorpses()
         AdaptiveDistanceWakeScanCursor = 0;
         return 0;
     }
+    ScanCount = Min(AdaptiveCorpseScanBudget,
+        AdaptiveDistanceSleptCorpses.Length);
     AdaptiveDistanceWakeScanCursor = Clamp(
         AdaptiveDistanceWakeScanCursor, 0,
         AdaptiveDistanceSleptCorpses.Length - 1);
     while (AdaptiveDistanceSleptCorpses.Length > 0 &&
-           Scanned < AdaptiveCorpseScanBudget)
+           Scanned < ScanCount)
     {
         Index = Clamp(AdaptiveDistanceWakeScanCursor, 0,
             AdaptiveDistanceSleptCorpses.Length - 1);
@@ -4000,12 +4026,18 @@ function int WakeNearAdaptiveDistanceSleptCorpses()
             Candidate.Physics != PHYS_RigidBody)
         {
             RemoveAdaptiveDistanceSleptCorpseEntry(Index, "invalidated");
+            AdaptiveDistanceWakeScanCursor =
+                AdaptiveDistanceSleptCorpses.Length > 0 ?
+                Index % AdaptiveDistanceSleptCorpses.Length : 0;
             ++Scanned;
             continue;
         }
         if (Candidate.Mesh.RigidBodyIsAwake())
         {
             RemoveAdaptiveDistanceSleptCorpseEntry(Index, "native_wake");
+            AdaptiveDistanceWakeScanCursor =
+                AdaptiveDistanceSleptCorpses.Length > 0 ?
+                Index % AdaptiveDistanceSleptCorpses.Length : 0;
             ++Scanned;
             continue;
         }
@@ -4048,6 +4080,9 @@ function int WakeNearAdaptiveDistanceSleptCorpses()
             RegisterAdaptiveCorpseDebugMarker(Candidate, "WAKE");
         }
         RemoveAdaptiveDistanceSleptCorpseEntry(Index, "optimizer_wake");
+        AdaptiveDistanceWakeScanCursor =
+            AdaptiveDistanceSleptCorpses.Length > 0 ?
+            Index % AdaptiveDistanceSleptCorpses.Length : 0;
         if (bWasSleeping)
         {
             if (bDetailedRuntimeDiagnostics)

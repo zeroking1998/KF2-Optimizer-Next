@@ -8,6 +8,10 @@ are visible immediately.
 
 ### What's new
 
+- Bound corpse cleanup, restore and wake passes to the entries present when
+  each pass starts, avoiding repeated work on small ledgers without changing
+  action budgets or restoration priority.
+
 - Remove retired effect-control inputs from Adaptive resource selection;
   quality decisions, safety gates, diagnostics and restoration are unchanged.
 

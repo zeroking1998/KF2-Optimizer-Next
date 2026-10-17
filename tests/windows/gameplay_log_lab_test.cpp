@@ -52,6 +52,162 @@ std::size_t count_occurrences(std::string_view text, std::string_view needle) {
     return count;
 }
 
+std::string compact_source(std::string_view source) {
+    std::string result;
+    for (const auto character : source) {
+        if (character != ' ' && character != '\t' && character != '\n' &&
+            character != '\r') result += character;
+    }
+    return result;
+}
+
+std::string_view function_source(std::string_view source,
+                                 std::string_view signature) {
+    const auto start = source.find(signature);
+    if (start == std::string_view::npos) return {};
+    const auto end = source.find("\nfunction ", start + signature.size());
+    return source.substr(start, end == std::string_view::npos
+        ? source.size() - start : end - start);
+}
+
+enum class ScanRemovalRule { explicit_cursor, previous_length, removed_flag };
+
+bool unique_scan_source_contract(std::string_view source,
+                                 std::string_view signature,
+                                 std::string_view array,
+                                 std::string_view cursor,
+                                 std::string_view budget,
+                                 ScanRemovalRule removal_rule,
+                                 std::string_view remove_call = {}) {
+    const auto body = compact_source(function_source(source, signature));
+    const auto length = std::string{array} + ".Length";
+    const auto position = std::string{cursor};
+    const auto snapshot = body.find("ScanCount=Min(" + std::string{budget} +
+                                    "," + length + ");");
+    const auto loop = body.find("while(" + length + ">0&&Scanned<ScanCount)");
+    if (snapshot == std::string::npos || loop == std::string::npos ||
+        snapshot >= loop || count_occurrences(body, "ScanCount=") != 1 ||
+        body.find("localintScanCount;") == std::string::npos ||
+        body.find("++Scanned;", loop) == std::string::npos ||
+        body.find(position + "=0;") >= snapshot ||
+        body.find("Index=Clamp(" + position + ",0," + length + "-1);", loop) ==
+            std::string::npos) return false;
+
+    for (auto next = body.find("continue;", loop); next != std::string::npos;
+         next = body.find("continue;", next + 1)) {
+        constexpr std::string_view increment = "++Scanned;";
+        if (next < increment.size() ||
+            std::string_view{body}.substr(next - increment.size(),
+                                          increment.size()) != increment) {
+            return false;
+        }
+    }
+
+    const auto removed_cursor = position + "=" + length +
+        ">0?Index%" + length + ":0;";
+    const auto advance = "(Index+1)%" + length;
+    if (removal_rule == ScanRemovalRule::previous_length) {
+        const auto previous = body.find("PreviousLength=" + length + ";", loop);
+        return previous != std::string::npos &&
+            previous < body.find("Candidate=", loop) &&
+            body.find(position + "=" + length + ">0?(" + length +
+                "<PreviousLength?Index:Index+1)%" + length + ":0;", loop) !=
+                std::string::npos;
+    }
+    if (removal_rule == ScanRemovalRule::removed_flag) {
+        if (body.find("bRemoved=false;", loop) == std::string::npos ||
+            body.find(position + "=" + length + ">0?(bRemoved?Index%" +
+                length + ":" + advance + "):0;", loop) ==
+                std::string::npos) return false;
+        remove_call = {};  // Every direct removal must mark or update the cursor.
+    } else if (body.find(position + "=" + advance + ";", loop) ==
+               std::string::npos) {
+        return false;
+    }
+    const auto removal = remove_call.empty()
+        ? std::string{array} + ".Remove(Index,1)"
+        : std::string{remove_call};
+    bool found_removal = false;
+    for (auto offset = body.find(removal, loop); offset != std::string::npos;
+         offset = body.find(removal, offset + removal.size())) {
+        found_removal = true;
+        const auto semicolon = body.find(';', offset);
+        if (semicolon == std::string::npos) return false;
+        const auto after = std::string_view{body}.substr(semicolon + 1);
+        if (!after.starts_with(removed_cursor) &&
+            !(removal_rule == ScanRemovalRule::removed_flag &&
+              after.starts_with("bRemoved=true;"))) return false;
+    }
+    return found_removal;
+}
+
+enum class ScanModelPolicy {
+    unique, fixed_budget, unconditional_advance, clamp_after_removal
+};
+
+// Stable IDs give an independent oracle: the callback must inspect a prefix
+// of the original circular order, even as erasure shifts the live indices.
+// Source contracts bind this model to UC; it does not execute UnrealScript.
+bool unique_scan_model(int length, int start, int budget, int pattern,
+                       ScanModelPolicy policy = ScanModelPolicy::unique) {
+    std::vector<int> entries;
+    for (int id = 0; id < length; ++id) entries.push_back(id);
+    const auto removes = [=](int id) {
+        switch (pattern) {
+        case 0: return false;
+        case 1: return true;
+        case 2: return id % 2 == 0;
+        case 3: return id % 3 == 1;
+        case 4: return id == length - 1;
+        default: return id == start || id == (start + 1) % length;
+        }
+    };
+    const auto scan_count = std::min(budget, length);
+    std::vector<int> expected_visits;
+    std::vector<int> expected_remaining;
+    for (int offset = 0; offset < scan_count; ++offset) {
+        expected_visits.push_back((start + offset) % length);
+    }
+    for (const auto id : entries) {
+        if (!removes(id) || std::find(expected_visits.begin(),
+                expected_visits.end(), id) == expected_visits.end()) {
+            expected_remaining.push_back(id);
+        }
+    }
+    int cursor = start;
+    std::vector<int> visits;
+    const auto limit = policy == ScanModelPolicy::fixed_budget
+        ? budget : scan_count;
+    for (int scanned = 0; scanned < limit && !entries.empty(); ++scanned) {
+        if (cursor < 0 || cursor >= static_cast<int>(entries.size())) return false;
+        const auto index = cursor;
+        const auto id = entries[index];
+        if (std::find(visits.begin(), visits.end(), id) != visits.end()) return false;
+        visits.push_back(id);
+        const auto removed = removes(id);
+        if (removed) entries.erase(entries.begin() + index);
+        if (entries.empty()) {
+            cursor = 0;
+        } else if (removed && policy == ScanModelPolicy::clamp_after_removal) {
+            cursor = std::min(index, static_cast<int>(entries.size()) - 1);
+        } else {
+            cursor = (index + (!removed ||
+                policy == ScanModelPolicy::unconditional_advance ? 1 : 0)) %
+                static_cast<int>(entries.size());
+        }
+    }
+    if (visits != expected_visits || entries != expected_remaining) return false;
+    if (entries.empty()) return cursor == 0;
+    if (cursor < 0 || cursor >= static_cast<int>(entries.size())) return false;
+    // The next survivor after the inspected prefix owns the next callback.
+    for (int offset = scan_count; offset < scan_count + length; ++offset) {
+        const auto next = (start + offset) % length;
+        if (std::find(expected_remaining.begin(), expected_remaining.end(), next) !=
+            expected_remaining.end()) return entries[cursor] == next;
+    }
+    return false;
+}
+
 bool adaptive_mode_preserves_graphics_receipt(std::string_view body) {
     constexpr std::string_view reset =
         "if (Resource ~= \"disable\")\n        {\n"
@@ -623,6 +779,71 @@ int main() {
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto online_corpse_controller_source = normalize_newlines(
         read_bytes(KF2_ONLINE_CORPSE_CONTROLLER_SOURCE));
+    struct UniqueScanContract {
+        std::string_view signature;
+        std::string_view array;
+        std::string_view cursor;
+        ScanRemovalRule removal;
+        std::string_view remove_call;
+    };
+    const UniqueScanContract offline_unique_scans[] = {
+        {"function PruneAdaptiveBaselineSettleEntries()",
+         "AdaptiveBaselineSettleEntries", "AdaptiveBaselinePruneCursor",
+         ScanRemovalRule::explicit_cursor, {}},
+        {"function PruneFixedMinimumCorpseLodEntries()",
+         "FixedMinimumCorpseLodCorpses", "FixedMinimumCorpseLodPruneCursor",
+         ScanRemovalRule::previous_length, {}},
+        {"function int ReleaseOneAdaptiveCorpseFreeze(bool bRestoreAll)",
+         "AdaptiveFrozenCorpses", "AdaptiveFreezePruneCursor",
+         ScanRemovalRule::removed_flag, {}},
+        {"function int ReleaseOneRetiredAdaptiveCorpseFreeze()",
+         "AdaptiveRetiredFrozenCorpses", "AdaptiveRetiredFreezeCursor",
+         ScanRemovalRule::removed_flag, {}},
+        {"function PruneAdaptiveDistanceSleptCorpses()",
+         "AdaptiveDistanceSleptCorpses", "AdaptiveDistancePruneCursor",
+         ScanRemovalRule::previous_length, {}},
+        {"function int WakeNearAdaptiveDistanceSleptCorpses()",
+         "AdaptiveDistanceSleptCorpses", "AdaptiveDistanceWakeScanCursor",
+         ScanRemovalRule::explicit_cursor,
+         "RemoveAdaptiveDistanceSleptCorpseEntry(Index,"},
+    };
+    for (const auto& contract : offline_unique_scans) {
+        CHECK(unique_scan_source_contract(telemetry_source, contract.signature,
+            contract.array, contract.cursor, "AdaptiveCorpseScanBudget",
+            contract.removal, contract.remove_call));
+    }
+    auto wake_without_distant_scan = std::string{function_source(
+        telemetry_source, "function int WakeNearAdaptiveDistanceSleptCorpses()")};
+    const auto distant_branch = wake_without_distant_scan.find(
+        "if (DistanceSquared >= 640000.0)");
+    const auto distant_increment = wake_without_distant_scan.find(
+        "++Scanned;", distant_branch);
+    CHECK(distant_increment != std::string::npos);
+    wake_without_distant_scan.erase(distant_increment,
+                                    std::string_view{"++Scanned;"}.size());
+    CHECK(!unique_scan_source_contract(wake_without_distant_scan,
+        "function int WakeNearAdaptiveDistanceSleptCorpses()",
+        "AdaptiveDistanceSleptCorpses", "AdaptiveDistanceWakeScanCursor",
+        "AdaptiveCorpseScanBudget", ScanRemovalRule::explicit_cursor,
+        "RemoveAdaptiveDistanceSleptCorpseEntry(Index,"));
+    CHECK(unique_scan_source_contract(online_corpse_controller_source,
+        "function bool ReleaseOneOnlineCorpse(bool bRestoreAll)",
+        "FrozenCorpses", "ReleaseScanCursor", "8",
+        ScanRemovalRule::removed_flag));
+    for (const auto budget : {8, 64}) {
+        for (const auto length : {1, 2, 8, 64, 65}) {
+            for (int start = 0; start < length; ++start) {
+                for (int pattern = 0; pattern < 6; ++pattern) {
+                    CHECK(unique_scan_model(length, start, budget, pattern));
+                }
+            }
+        }
+    }
+    CHECK(!unique_scan_model(1, 0, 64, 0, ScanModelPolicy::fixed_budget));
+    CHECK(!unique_scan_model(8, 0, 64, 2,
+                            ScanModelPolicy::unconditional_advance));
+    CHECK(!unique_scan_model(8, 6, 64, 4,
+                            ScanModelPolicy::clamp_after_removal));
     // UE3 Find preserves first Actor-identity match / absent=-1 semantics.
     // Require the exact native intrinsic, not another interpreted lookup loop.
     for (const auto expected : {
@@ -1771,9 +1992,6 @@ int main() {
     CHECK(online_release_end != std::string::npos);
     const auto online_release_body = online_corpse_controller_source.substr(
         online_release_start, online_release_end - online_release_start);
-    CHECK(online_release_body.find(
-        "while (FrozenCorpses.Length > 0 && Scanned < 8)") !=
-          std::string::npos);
     CHECK(online_release_body.find(
         "Candidate == None || Candidate.bDeleteMe") != std::string::npos);
     CHECK(online_release_body.find(
@@ -4206,10 +4424,6 @@ int main() {
     CHECK(telemetry_source.find(
         "AdaptiveCorpseControlPhase + 1", stagger_start) !=
           std::string::npos);
-    CHECK(count_occurrences(
-        telemetry_source, "ScanCount = Min(AdaptiveCorpseScanBudget,") >= 6);
-    CHECK(count_occurrences(
-        telemetry_source, "Scanned < AdaptiveCorpseScanBudget") >= 7);
     CHECK(telemetry_source.find(
         "var float AdaptiveLastPhysicsMutationWorldTime") !=
           std::string::npos);
