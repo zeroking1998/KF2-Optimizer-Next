@@ -220,8 +220,10 @@ struct ProductReport {
     std::optional<int> ground_fire_particles;
     std::optional<int> impact_particle_components;
     std::optional<int> impact_particles;
-    std::optional<int> gore_particle_pool_capacity;
-    std::optional<int> world_particle_pool_capacity;
+    std::optional<int> gore_particle_peak_capacity;
+    std::optional<int> world_particle_peak_capacity;
+    std::optional<int> gore_particle_peak_covered_components;
+    std::optional<int> world_particle_peak_covered_components;
     std::optional<int> ground_fire_particle_pool_capacity;
     std::optional<int> impact_particle_pool_capacity;
     std::optional<int> particle_constant_spawn_emitters;

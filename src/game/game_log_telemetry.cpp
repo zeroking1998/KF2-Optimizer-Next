@@ -1,5 +1,6 @@
 #include "game_log_session_internal.hpp"
 
+#include <algorithm>
 #include <charconv>
 
 namespace kf2::game {
@@ -100,8 +101,10 @@ struct OfflineTelemetrySnapshot {
     int ground_fire_particles{0};
     int impact_particle_components{0};
     int impact_particles{0};
-    int gore_particle_pool_capacity{0};
-    int world_particle_pool_capacity{0};
+    int gore_particle_peak_capacity{0};
+    int world_particle_peak_capacity{0};
+    int gore_particle_peak_covered_components{0};
+    int world_particle_peak_covered_components{0};
     int ground_fire_particle_pool_capacity{0};
     int impact_particle_pool_capacity{0};
     int particle_constant_spawn_emitters{0};
@@ -124,11 +127,11 @@ struct OfflineTelemetrySnapshot {
 
 std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
     std::string_view line) {
-    // Schema 7 is an exact positional contract. Older schemas remain ignored;
+    // Schema 8 is an exact positional contract. Older schemas remain ignored;
     // adding or reordering a required field needs a new schema or synchronized
     // producer, parser and contract-test updates.
     constexpr std::string_view marker =
-        "KF2OPT_TELEMETRY schema=7 sample=";
+        "KF2OPT_TELEMETRY schema=8 sample=";
     const auto marker_position = line.find(marker);
     if (marker_position == std::string_view::npos) return std::nullopt;
     auto payload = line.substr(marker_position + marker.size());
@@ -267,11 +270,15 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
     const auto ground_fire_components = take(" ground_fire_particles=", entity_max);
     const auto ground_fire_particles = take(" impact_particle_components=", aggregate_max);
     const auto impact_components = take(" impact_particles=", entity_max);
-    const auto impact_particles = take(" gore_particle_pool_capacity=", aggregate_max);
-    const auto gore_pool_capacity = take(
-        " world_particle_pool_capacity=", runtime_max);
-    const auto world_pool_capacity = take(
-        " ground_fire_particle_pool_capacity=", runtime_max);
+    const auto impact_particles = take(" gore_particle_peak_capacity=", aggregate_max);
+    const auto gore_peak_capacity = take(
+        " world_particle_peak_capacity=", runtime_max);
+    const auto world_peak_capacity = take(
+        " gore_particle_peak_covered_components=", runtime_max);
+    const auto gore_peak_covered_components = take(
+        " world_particle_peak_covered_components=", entity_max);
+    const auto world_peak_covered_components = take(
+        " ground_fire_particle_pool_capacity=", entity_max);
     const auto ground_fire_pool_capacity = take(
         " impact_particle_pool_capacity=", runtime_max);
     const auto impact_pool_capacity = take(
@@ -332,8 +339,9 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
         !gore_lod_total || !gore_bounded || !world_components ||
         !world_particles || !world_visible || !world_lod_total ||
         !world_bounded || !ground_fire_components || !ground_fire_particles ||
-        !impact_components || !impact_particles || !gore_pool_capacity ||
-        !world_pool_capacity || !ground_fire_pool_capacity ||
+        !impact_components || !impact_particles || !gore_peak_capacity ||
+        !world_peak_capacity || !gore_peak_covered_components ||
+        !world_peak_covered_components || !ground_fire_pool_capacity ||
         !impact_pool_capacity || !constant_spawn_emitters ||
         !dynamic_spawn_emitters || !constant_spawn_rate_milli ||
         !burst_entries || !peak_capacity || !particle_flex ||
@@ -379,14 +387,20 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
         *ground_fire_particles > *world_particles ||
         *impact_components > *world_components ||
         *impact_particles > *world_particles ||
+        static_cast<std::int64_t>(*ground_fire_particles) +
+            *impact_particles > *world_particles ||
+        *gore_peak_covered_components > *gore_components ||
+        *world_peak_covered_components > *world_components ||
         static_cast<std::int64_t>(*ground_fire_components) +
             *impact_components > *world_components ||
-        (*gore_pool_capacity > 0 &&
-         *gore_components > *gore_pool_capacity) ||
         (*ground_fire_pool_capacity > 0 &&
          *ground_fire_components > *ground_fire_pool_capacity) ||
         (*impact_pool_capacity > 0 &&
          *impact_components > *impact_pool_capacity) ||
+        *peak_capacity != std::min<std::int64_t>(
+            runtime_max,
+            static_cast<std::int64_t>(*gore_peak_capacity) +
+                *world_peak_capacity) ||
         static_cast<std::int64_t>(*particle_flex_fluid) +
             *particle_flex_nonfluid + *particle_flex_mixed != *particle_flex ||
         static_cast<std::int64_t>(*particle_flex) + *particle_nonflex +
@@ -496,8 +510,12 @@ std::optional<OfflineTelemetrySnapshot> parse_offline_telemetry_line(
     result.ground_fire_particles = *ground_fire_particles;
     result.impact_particle_components = *impact_components;
     result.impact_particles = *impact_particles;
-    result.gore_particle_pool_capacity = *gore_pool_capacity;
-    result.world_particle_pool_capacity = *world_pool_capacity;
+    result.gore_particle_peak_capacity = *gore_peak_capacity;
+    result.world_particle_peak_capacity = *world_peak_capacity;
+    result.gore_particle_peak_covered_components =
+        *gore_peak_covered_components;
+    result.world_particle_peak_covered_components =
+        *world_peak_covered_components;
     result.ground_fire_particle_pool_capacity = *ground_fire_pool_capacity;
     result.impact_particle_pool_capacity = *impact_pool_capacity;
     result.particle_constant_spawn_emitters = *constant_spawn_emitters;
@@ -725,11 +743,17 @@ bool apply_offline_telemetry_snapshot(
         telemetry.impact_particle_components);
     update(session.telemetry_impact_particles, telemetry.impact_particles);
     update(
-        session.telemetry_gore_particle_pool_capacity,
-        telemetry.gore_particle_pool_capacity);
+        session.telemetry_gore_particle_peak_capacity,
+        telemetry.gore_particle_peak_capacity);
     update(
-        session.telemetry_world_particle_pool_capacity,
-        telemetry.world_particle_pool_capacity);
+        session.telemetry_world_particle_peak_capacity,
+        telemetry.world_particle_peak_capacity);
+    update(
+        session.telemetry_gore_particle_peak_covered_components,
+        telemetry.gore_particle_peak_covered_components);
+    update(
+        session.telemetry_world_particle_peak_covered_components,
+        telemetry.world_particle_peak_covered_components);
     update(
         session.telemetry_ground_fire_particle_pool_capacity,
         telemetry.ground_fire_particle_pool_capacity);
@@ -886,8 +910,10 @@ void clear_offline_telemetry_snapshot(GameLogSession& session) noexcept {
     session.telemetry_ground_fire_particles.reset();
     session.telemetry_impact_particle_components.reset();
     session.telemetry_impact_particles.reset();
-    session.telemetry_gore_particle_pool_capacity.reset();
-    session.telemetry_world_particle_pool_capacity.reset();
+    session.telemetry_gore_particle_peak_capacity.reset();
+    session.telemetry_world_particle_peak_capacity.reset();
+    session.telemetry_gore_particle_peak_covered_components.reset();
+    session.telemetry_world_particle_peak_covered_components.reset();
     session.telemetry_ground_fire_particle_pool_capacity.reset();
     session.telemetry_impact_particle_pool_capacity.reset();
     session.telemetry_particle_constant_spawn_emitters.reset();

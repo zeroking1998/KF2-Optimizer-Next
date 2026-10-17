@@ -727,8 +727,10 @@ int main() {
         .ground_fire_particles = 222,
         .impact_particle_components = 5,
         .impact_particles = 333,
-        .gore_particle_pool_capacity = 30,
-        .world_particle_pool_capacity = 200,
+        .gore_particle_peak_capacity = 512,
+        .world_particle_peak_capacity = 1536,
+        .gore_particle_peak_covered_components = 6,
+        .world_particle_peak_covered_components = 18,
         .ground_fire_particle_pool_capacity = 100,
         .impact_particle_pool_capacity = 60,
         .particle_constant_spawn_emitters = 14,
@@ -832,8 +834,10 @@ int main() {
                        "\"ground_fire_particles\":222,"
                        "\"impact_particle_components\":5,"
                        "\"impact_particles\":333,"
-                       "\"gore_particle_pool_capacity\":30,"
-                       "\"world_particle_pool_capacity\":200,"
+                       "\"gore_particle_peak_capacity\":512,"
+                       "\"world_particle_peak_capacity\":1536,"
+                       "\"gore_particle_peak_covered_components\":6,"
+                       "\"world_particle_peak_covered_components\":18,"
                        "\"ground_fire_particle_pool_capacity\":100,"
                        "\"impact_particle_pool_capacity\":60,"
                        "\"particle_constant_spawn_emitters\":14,"
