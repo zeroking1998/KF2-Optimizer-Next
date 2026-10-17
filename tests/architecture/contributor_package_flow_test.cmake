@@ -19,31 +19,26 @@ if(path_preflight EQUAL -1 OR first_destination_mutation EQUAL -1 OR
 endif()
 
 string(FIND "${package_script}"
-    "if (-not (Test-Path -LiteralPath $forwarder -PathType Leaf))"
-    forwarder_check)
+    "KF2FlexOptimizedHelper KF2FlexForwarder KF2InventoryExport"
+    flex_package_targets)
 string(FIND "${package_script}"
     "Copy-Item -LiteralPath $forwarder -Destination" forwarder_copy)
-if(forwarder_check EQUAL -1 OR forwarder_copy EQUAL -1 OR
-   forwarder_check GREATER first_destination_mutation OR
-   forwarder_check GREATER forwarder_copy)
+if(flex_package_targets EQUAL -1 OR forwarder_copy EQUAL -1 OR
+   flex_package_targets GREATER first_destination_mutation OR
+   flex_package_targets GREATER forwarder_copy)
     message(FATAL_ERROR
-        "Check the required FleX build artifact before changing the package destination")
+        "Refresh the current FleX helper, relay and exporter before changing the package destination")
 endif()
 
 string(FIND "${package_script}"
-    "\n& cmake --build (Join-Path $projectRoot 'out\\build\\windows-x64-release')"
+    "\n& cmake --build $releaseBuild --config Release --target"
     exporter_build)
 if(exporter_build EQUAL -1)
     message(FATAL_ERROR
         "Packaging must incrementally build the exporter outside SkipBuild")
 endif()
-if(forwarder_check GREATER exporter_build)
-    message(FATAL_ERROR
-        "Reject a missing FleX artifact before unnecessary exporter work")
-endif()
-
 string(FIND "${package_script}"
-    "--config Release --target KF2InventoryExport"
+    "KF2FlexOptimizedHelper KF2FlexForwarder KF2InventoryExport"
     exporter_target)
 string(FIND "${package_script}"
     "if (-not (Test-Path -LiteralPath $destinationRoot))"
@@ -80,7 +75,9 @@ endif()
 
 execute_process(COMMAND "${TEST_POWERSHELL}" -NoProfile -File
     "${PROJECT_SOURCE_DIR}/tests/tools/release_source_identity_test.ps1"
-    -Executable "${TEST_EXECUTABLE}" -TestRoot "${TEST_BINARY_ROOT}/test-sandbox"
+    -Executable "${TEST_EXECUTABLE}" -Forwarder "${TEST_FLEX_FORWARDER}"
+    -FlexHelper "${TEST_FLEX_HELPER}"
+    -TestRoot "${TEST_BINARY_ROOT}/test-sandbox"
     -ExpectedBuildIdentity "${EXPECTED_BUILD_IDENTITY}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT result EQUAL 0)

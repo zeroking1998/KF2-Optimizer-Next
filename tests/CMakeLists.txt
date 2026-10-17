@@ -1,5 +1,8 @@
 set(KF2_TEST_SANDBOX_ROOT
     "${CMAKE_CURRENT_BINARY_DIR}/runtime/$<CONFIG>")
+set(KF2_TEST_TELEMETRY_ASSET
+    "${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetry.u"
+    CACHE FILEPATH "Compiled telemetry asset used by integration tests")
 
 add_executable(kf2_result_test unit/result_test.cpp)
 target_include_directories(kf2_result_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
@@ -375,7 +378,7 @@ target_include_directories(kf2_offline_telemetry_lab_test PRIVATE
 target_compile_definitions(kf2_offline_telemetry_lab_test PRIVATE
     KF2_OFFLINE_TELEMETRY_LAB_TESTING
     KF2_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/offline-telemetry-lab"
-    KF2_TELEMETRY_ASSET=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetry.u")
+    KF2_TELEMETRY_ASSET=L"${KF2_TEST_TELEMETRY_ASSET}")
 target_link_libraries(kf2_offline_telemetry_lab_test PRIVATE bcrypt)
 add_test(NAME kf2_offline_telemetry_lab_test
     COMMAND kf2_offline_telemetry_lab_test)
@@ -400,7 +403,7 @@ if(TARGET KF2FlexForwarder)
     )
     add_dependencies(kf2_flex_forwarder_loader_test KF2FlexForwarder)
     add_test(NAME kf2_flex_forwarder_loader_test COMMAND kf2_flex_forwarder_loader_test
-        "${PROJECT_SOURCE_DIR}/out/tests/flex-forwarder"
+        "${KF2_TEST_SANDBOX_ROOT}/flex-forwarder"
         "${KF2_FLEX_FORWARDER}")
     set_tests_properties(kf2_flex_forwarder_loader_test PROPERTIES
         SKIP_RETURN_CODE 77)
@@ -416,7 +419,7 @@ if(TARGET KF2FlexForwarder)
         KF2FlexForwarderTest kf2_flex_original_test_double)
     add_test(NAME kf2_flex_forwarder_passthrough_test
         COMMAND kf2_flex_forwarder_passthrough_test
-        "${PROJECT_SOURCE_DIR}/out/tests/flex-forwarder-passthrough"
+        "${KF2_TEST_SANDBOX_ROOT}/flex-forwarder-passthrough"
         "${KF2_FLEX_TEST_FORWARDER}"
         "$<TARGET_FILE:kf2_flex_original_test_double>")
 endif()
@@ -485,7 +488,7 @@ target_compile_definitions(kf2_application_lifecycle_test PRIVATE
     KF2_BUILD_COMMIT="unknown"
     KF2_BUILD_CHANNEL="dev"
     KF2_RELEASE_REPOSITORY="https://github.com/example/KF2-Optimizer-Next"
-    KF2_TELEMETRY_ASSET=L"${PROJECT_SOURCE_DIR}/assets/offline_telemetry/KF2OptimizerTelemetry.u"
+    KF2_TELEMETRY_ASSET=L"${KF2_TEST_TELEMETRY_ASSET}"
     KF2_APPLICATION_VIDEO_TESTING
     KF2_APPLICATION_SHUTDOWN_TESTING
     KF2_ATOMIC_FILE_TESTING
@@ -622,7 +625,7 @@ add_executable(kf2_direct2d_renderer_test
 target_include_directories(kf2_direct2d_renderer_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_definitions(kf2_direct2d_renderer_test PRIVATE
     KF2_DIRECT2D_RENDERER_TESTING
-    KF2_GUI_TEST_ROOT=L"${PROJECT_SOURCE_DIR}/out/tests/gui"
+    KF2_GUI_TEST_ROOT=L"${KF2_TEST_SANDBOX_ROOT}/gui"
 )
 target_link_libraries(kf2_direct2d_renderer_test PRIVATE
     user32 ole32 d2d1 dwrite windowscodecs
@@ -916,6 +919,8 @@ add_test(NAME kf2_contributor_package_flow_test
     COMMAND "${CMAKE_COMMAND}"
         "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
         "-DTEST_EXECUTABLE=$<TARGET_FILE:KF2Optimizer>"
+        "-DTEST_FLEX_FORWARDER=${KF2_FLEX_FORWARDER}"
+        "-DTEST_FLEX_HELPER=$<TARGET_FILE:KF2FlexOptimizedHelper>"
         "-DTEST_BINARY_ROOT=${CMAKE_BINARY_DIR}"
         "-DTEST_POWERSHELL=${KF2_POWERSHELL_EXECUTABLE}"
         "-DEXPECTED_BUILD_IDENTITY=${KF2_VERSION}+${KF2_BUILD_COMMIT} (${KF2_BUILD_CHANNEL})"

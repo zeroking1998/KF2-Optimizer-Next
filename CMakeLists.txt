@@ -74,6 +74,10 @@ endif()
 
 include(CTest)
 
+configure_file(src/flex/flex_build_identity.hpp.in
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/kf2/flex/flex_build_identity.hpp"
+    @ONLY)
+
 if(MSVC)
     set(KF2_FLEX_OPTIMIZED_DIRECTORY
         "${PROJECT_SOURCE_DIR}/src/flex/optimized")
@@ -99,6 +103,8 @@ if(MSVC)
     target_compile_definitions(KF2FlexOptimizedHelper PRIVATE
         P4_TIME_ACCUMULATOR)
     target_compile_features(KF2FlexOptimizedHelper PRIVATE cxx_std_20)
+    target_include_directories(KF2FlexOptimizedHelper PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(KF2FlexOptimizedHelper PRIVATE
         ${KF2_FLEX_OPTIMIZED_IMPORT_LIBRARIES})
     target_link_options(KF2FlexOptimizedHelper PRIVATE /guard:cf)
@@ -449,6 +455,7 @@ if(BUILD_TESTING)
             COMMAND "${CMAKE_CXX_COMPILER}" /nologo /c /O2 /Oi- /GS- /GR- /EHs-c- /std:c++20
                 "/Fo${KF2_FLEX_ANCHOR}"
                 "/I${PROJECT_SOURCE_DIR}/include"
+                "/I${CMAKE_BINARY_DIR}/generated"
                 "${PROJECT_SOURCE_DIR}/src/flex/forwarder_stub.cpp"
             COMMAND "${KF2_LLD_LINK}" /dll /entry:DllMain
                 "/def:${PROJECT_SOURCE_DIR}/src/flex/flex_forwarder.def"
@@ -458,6 +465,7 @@ if(BUILD_TESTING)
                 /subsystem:windows /opt:ref /opt:icf /brepro
             DEPENDS "${PROJECT_SOURCE_DIR}/src/flex/flex_forwarder.def"
                 "${PROJECT_SOURCE_DIR}/src/flex/forwarder_stub.cpp"
+                "${CMAKE_BINARY_DIR}/generated/kf2/flex/flex_build_identity.hpp"
                 "${PROJECT_SOURCE_DIR}/include/kf2/flex/flex_observation_shared.hpp"
             VERBATIM)
         add_custom_target(KF2FlexForwarder DEPENDS "${KF2_FLEX_FORWARDER}")
@@ -472,6 +480,7 @@ if(BUILD_TESTING)
                 /DKF2_FLEX_FORWARDER_TESTING
                 "/Fo${KF2_FLEX_TEST_ANCHOR}"
                 "/I${PROJECT_SOURCE_DIR}/include"
+                "/I${CMAKE_BINARY_DIR}/generated"
                 "${PROJECT_SOURCE_DIR}/src/flex/forwarder_stub.cpp"
             COMMAND "${KF2_LLD_LINK}" /dll /entry:DllMain
                 "/def:${PROJECT_SOURCE_DIR}/src/flex/flex_forwarder.def"
@@ -481,6 +490,7 @@ if(BUILD_TESTING)
                 /subsystem:windows /opt:ref /opt:icf /brepro
             DEPENDS "${PROJECT_SOURCE_DIR}/src/flex/flex_forwarder.def"
                 "${PROJECT_SOURCE_DIR}/src/flex/forwarder_stub.cpp"
+                "${CMAKE_BINARY_DIR}/generated/kf2/flex/flex_build_identity.hpp"
                 "${PROJECT_SOURCE_DIR}/include/kf2/flex/flex_observation_shared.hpp"
             VERBATIM)
         add_custom_target(KF2FlexForwarderTest

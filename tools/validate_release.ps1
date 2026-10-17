@@ -133,6 +133,16 @@ if ($executableIdentity.source_identity -cne $expectedIdentity -or
     (-not $DevelopmentPackage -and $executableIdentity.channel -cne 'release')) {
     throw 'Executable build identity does not match the requested release; rebuild the package'
 }
+$flexIdentityReader = Join-Path $PSScriptRoot `
+    'get_flex_artifact_source_identity.ps1'
+$forwarderIdentity = (& $flexIdentityReader -Artifact $forwarder).Trim()
+if ($forwarderIdentity -cne $expectedIdentity) {
+    throw 'FleX observation relay source identity does not match the requested release'
+}
+$flexHelperIdentity = (& $flexIdentityReader -Artifact $flexHelper).Trim()
+if ($flexHelperIdentity -cne $expectedIdentity) {
+    throw 'Optimized FleX helper source identity does not match the requested release'
+}
 foreach ($relative in @($packageManifest.managed_files)) {
     $managed = Join-Path $root $relative
     if (-not (Test-Path -LiteralPath $managed -PathType Leaf)) {
@@ -190,5 +200,7 @@ if ($DevelopmentPackage) {
 }
 Write-Host "PASS: package has exactly one portable executable"
 Write-Host "PASS: all fifteen managed payload hashes match"
-Write-Host "SHA256: $((Get-FileHash -LiteralPath $executables[0].FullName -Algorithm SHA256).Hash)"
+Write-Host "PACKAGE EXE SHA256: $((Get-FileHash -LiteralPath $executables[0].FullName -Algorithm SHA256).Hash)"
+Write-Host "FLEX RELAY SHA256: $((Get-FileHash -LiteralPath $forwarder -Algorithm SHA256).Hash)"
+Write-Host "FLEX HELPER SHA256: $((Get-FileHash -LiteralPath $flexHelper -Algorithm SHA256).Hash)"
 & (Join-Path $PSScriptRoot 'validate_acceptance_ledger.ps1')

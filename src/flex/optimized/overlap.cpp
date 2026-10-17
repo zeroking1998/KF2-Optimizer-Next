@@ -1,5 +1,8 @@
 #include "overlap.hpp"
 #include "presentation.hpp"
+#if !defined(P4_CPU_MODEL)
+#include "kf2/flex/flex_build_identity.hpp"
+#endif
 #include <windows.h>
 #include <cstring>
 #include <limits>

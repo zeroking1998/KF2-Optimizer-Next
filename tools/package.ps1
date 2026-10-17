@@ -148,6 +148,12 @@ if ($executableIdentity.source_identity -cne $commit -or
     $executableIdentity.channel -cne 'release') {
     throw 'Release executable source identity does not match the package; rebuild without -SkipBuild'
 }
+$releaseBuild = Join-Path $projectRoot 'out\build\windows-x64-release'
+# These three artifacts are package-owned prerequisites. Refresh them even
+# with -SkipBuild so an older helper or relay cannot accompany a current EXE.
+& cmake --build $releaseBuild --config Release --target `
+    KF2FlexOptimizedHelper KF2FlexForwarder KF2InventoryExport
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $forwarder = Join-Path $projectRoot 'out\build\windows-x64-release\flexRelease_x64.forwarder-lab.dll'
 if (-not (Test-Path -LiteralPath $forwarder -PathType Leaf)) {
     throw "FleX observation relay is missing: $forwarder"
@@ -157,10 +163,16 @@ $flexHelper = Join-Path $projectRoot `
 if (-not (Test-Path -LiteralPath $flexHelper -PathType Leaf)) {
     throw "Optimized FleX helper is missing: $flexHelper"
 }
-# The exporter is excluded from normal app builds; refresh it even with SkipBuild.
-& cmake --build (Join-Path $projectRoot 'out\build\windows-x64-release') `
-    --config Release --target KF2InventoryExport
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$flexIdentityReader = Join-Path $PSScriptRoot `
+    'get_flex_artifact_source_identity.ps1'
+$forwarderIdentity = (& $flexIdentityReader -Artifact $forwarder).Trim()
+if ($forwarderIdentity -cne $commit) {
+    throw 'FleX observation relay source identity does not match the package; rebuild without -SkipBuild'
+}
+$flexHelperIdentity = (& $flexIdentityReader -Artifact $flexHelper).Trim()
+if ($flexHelperIdentity -cne $commit) {
+    throw 'Optimized FleX helper source identity does not match the package; rebuild without -SkipBuild'
+}
 $inventoryExporter = Join-Path $projectRoot `
     'out\build\windows-x64-release\Release\KF2InventoryExport.exe'
 if (-not (Test-Path -LiteralPath $inventoryExporter -PathType Leaf)) {
@@ -304,7 +316,13 @@ New-Item -ItemType Directory -Path (Split-Path -Parent $manifestPath) -Force |
 $packageManifest | ConvertTo-Json -Depth 4 |
     Set-Content -LiteralPath $manifestPath -Encoding utf8
 $hash = (Get-FileHash -LiteralPath (Join-Path $destinationRoot 'KF2Optimizer.exe') -Algorithm SHA256).Hash
+$forwarderHash = (Get-FileHash -LiteralPath (Join-Path $labDirectory `
+    'flexRelease_x64.forwarder-lab.dll') -Algorithm SHA256).Hash
+$flexHelperHash = (Get-FileHash -LiteralPath (Join-Path $labDirectory `
+    'kf2_p4_overlap.dll') -Algorithm SHA256).Hash
 Write-Host "PASS: portable package created at $destinationRoot"
-Write-Host "SHA256: $hash"
+Write-Host "PACKAGE EXE SHA256: $hash"
+Write-Host "FLEX RELAY SHA256: $forwarderHash"
+Write-Host "FLEX HELPER SHA256: $flexHelperHash"
 & (Join-Path $PSScriptRoot 'generate_release_evidence.ps1') -PackageRoot $destinationRoot
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

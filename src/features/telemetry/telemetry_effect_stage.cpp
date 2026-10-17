@@ -97,10 +97,6 @@ Result<bool> UiRuntime::ensure_optimized_flex_runtime() {
             L"kf2_p4_overlap.dll",
         .game_running = false,
         .exact_runtime_verified = true});
-    std::error_code cleanup_error;
-    std::filesystem::remove(prepared.value().core, cleanup_error);
-    cleanup_error.clear();
-    std::filesystem::remove(prepared.value().extension, cleanup_error);
     if (!installed.has_value()) {
         return Result<bool>::failure(installed.error());
     }

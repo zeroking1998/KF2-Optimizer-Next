@@ -214,6 +214,22 @@ reject_literals("${stage_root}/telemetry_effect_stage.cpp"
     "PdhGpuSampler"
     "NvidiaGpuSampler"
     "->drain(")
+reject_literals("${stage_root}/telemetry_effect_stage.cpp"
+    "Optimized FleX cache retention"
+    "remove(prepared.value().core"
+    "remove(prepared.value().extension")
+file(READ "${PROJECT_SOURCE_DIR}/src/flex/optimized_runtime.cpp"
+    optimized_runtime_text)
+foreach(cache_contract
+        "const auto cached_hash = security::sha256_file_hex("
+        "cached_hash.value() == recipe.target_sha256"
+        "return Result<std::filesystem::path>::success(target);")
+    string(FIND "${optimized_runtime_text}" "${cache_contract}" cache_step)
+    if(cache_step EQUAL -1)
+        message(FATAL_ERROR
+            "Optimized FleX runtime must reuse an exact verified staged artifact")
+    endif()
+endforeach()
 
 file(READ "${stage_root}/telemetry_session_stage.cpp" session_stage_text)
 string(FIND "${session_stage_text}"

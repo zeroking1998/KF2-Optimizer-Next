@@ -2,6 +2,7 @@
 #include <atomic>
 #include <limits.h>
 
+#include "kf2/flex/flex_build_identity.hpp"
 #include "kf2/flex/flex_observation_shared.hpp"
 
 extern "C" int _fltused = 0;

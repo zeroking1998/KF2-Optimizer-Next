@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string] $Executable,
+    [Parameter(Mandatory)][string] $Forwarder,
+    [Parameter(Mandatory)][string] $FlexHelper,
     [Parameter(Mandatory)][string] $TestRoot,
     [Parameter(Mandatory)][string] $ExpectedBuildIdentity
 )
@@ -111,12 +113,9 @@ try {
         Set-Content -LiteralPath $path -Value 'fixture' -Encoding ascii
     }
     Copy-Item -LiteralPath $Executable -Destination (Join-Path $root 'KF2Optimizer.exe') -Force
-    # Only the forwarder's PE prefix is relevant to the release script fixture.
-    Copy-Item -LiteralPath $Executable -Destination `
+    Copy-Item -LiteralPath $Forwarder -Destination `
         (Join-Path $root 'Data/Lab/flexRelease_x64.forwarder-lab.dll') -Force
-    # The helper has the same x64 PE packaging contract. Its exports and runtime
-    # behavior are covered by the native helper/FleX tests.
-    Copy-Item -LiteralPath $Executable -Destination `
+    Copy-Item -LiteralPath $FlexHelper -Destination `
         (Join-Path $root 'Data/Lab/kf2_p4_overlap.dll') -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination `
         (Join-Path $root 'Data/Documentation/LICENSE') -Force
@@ -166,6 +165,21 @@ try {
     Check-Validation '' $matchingArguments
     if (-not $development) { Check-Validation '' @('-ExpectedRevision', $current) }
     if ($dirty) { Check-Validation 'Release candidates must not have a dirty' }
+
+    $packagedForwarder = Join-Path $root `
+        'Data/Lab/flexRelease_x64.forwarder-lab.dll'
+    Copy-Item -LiteralPath $Executable -Destination $packagedForwarder -Force
+    Write-Manifest $identity.source_identity
+    Check-Validation 'FleX artifact source identity is missing' $matchingArguments
+    Copy-Item -LiteralPath $Forwarder -Destination $packagedForwarder -Force
+    $packagedHelper = Join-Path $root 'Data/Lab/kf2_p4_overlap.dll'
+    Copy-Item -LiteralPath $Executable -Destination $packagedHelper -Force
+    Write-Manifest $identity.source_identity
+    Check-Validation 'FleX artifact source identity is missing' $matchingArguments
+    Copy-Item -LiteralPath $FlexHelper -Destination $packagedHelper -Force
+    Write-Manifest $identity.source_identity
+    Check-Validation '' $matchingArguments
+    Write-Host 'PASS: substituted FleX relay/helper artifacts are rejected by source identity'
 
     Write-Manifest $stale
     Check-Validation 'Stale package source identity'

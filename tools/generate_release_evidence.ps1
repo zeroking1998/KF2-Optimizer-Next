@@ -53,7 +53,7 @@ $metadata = [ordered]@{
     commit = $commit
     working_tree_clean = $workingTreeClean
     source_identity = if ($workingTreeClean) { $commit } else { "$commit.dirty" }
-    package_sha256 = $hash
+    package_executable_sha256 = $hash
     generated_utc = [DateTime]::UtcNow.ToString('o')
     runtime_files = @(
         'KF2Optimizer.exe',
