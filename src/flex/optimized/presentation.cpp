@@ -6,7 +6,6 @@
 #include <intrin.h>
 #include <limits>
 #include <new>
-#include <utility>
 
 namespace {
 constexpr unsigned P3Commit = 0x80000002U;
@@ -31,7 +30,7 @@ struct PresentationState {
     void* allocation{};
     std::size_t allocation_bytes{};
     int capacity{}, rigid_count{}, samples{};
-    int* rigid_ids{};
+    int *rigid_ids{}, *rigid_work{};
     float *rotation_previous{}, *rotation_current{}, *rotation_view{};
     float *translation_previous{}, *translation_current{}, *translation_view{};
     Quaternion *quaternion_previous{}, *quaternion_current{};
@@ -70,7 +69,7 @@ PresentationState* allocate_state(void* solver, int capacity) {
     if(capacity <= 0 || capacity > 0x1000000) return nullptr;
     const auto count = static_cast<std::size_t>(capacity);
     std::size_t bytes = sizeof(PresentationState);
-    constexpr std::size_t widths[]{sizeof(int), sizeof(float) * 27U,
+    constexpr std::size_t widths[]{sizeof(int) * 2U, sizeof(float) * 27U,
                                    sizeof(float) * 9U, sizeof(Quaternion) * 2U};
     for(const auto width : widths)
         if(!add_bytes(bytes, count, width)) return nullptr;
@@ -83,6 +82,7 @@ PresentationState* allocate_state(void* solver, int capacity) {
     state->solver = solver;
     char* cursor = static_cast<char*>(memory) + sizeof(PresentationState);
     state->rigid_ids = take<int>(cursor, count);
+    state->rigid_work = take<int>(cursor, count);
     state->rotation_previous = take<float>(cursor, count * 9U);
     state->rotation_current = take<float>(cursor, count * 9U);
     state->rotation_view = take<float>(cursor, count * 9U);
@@ -157,22 +157,27 @@ int rigid_ids(void* container, int capacity, const int** ids) {
     return count <= static_cast<std::size_t>(capacity) ? static_cast<int>(count) : -1;
 }
 
-bool same_topology(PresentationState& state, const int* ids, int rigid) {
+bool same_topology(PresentationState& state, int rigid) {
     return state.samples && state.rigid_count == rigid &&
-           !std::memcmp(state.rigid_ids, ids, static_cast<std::size_t>(rigid) * sizeof(int));
+           !std::memcmp(state.rigid_ids, state.rigid_work, static_cast<std::size_t>(rigid) * sizeof(int));
 }
 
 void copy_rigid_snapshot(PresentationState& state, const float* rotations, const float* translations, bool shift) {
     const auto rigid = static_cast<std::size_t>(state.rigid_count);
     if(!rigid) return;
     if(shift) {
-        std::swap(state.rotation_previous, state.rotation_current);
-        std::swap(state.translation_previous, state.translation_current);
-        std::swap(state.quaternion_previous, state.quaternion_current);
+        std::memcpy(state.rotation_previous, state.rotation_current, rigid*9U*sizeof(float));
+        std::memcpy(state.translation_previous, state.translation_current, rigid*3U*sizeof(float));
+        std::memcpy(state.quaternion_previous, state.quaternion_current, rigid*sizeof(Quaternion));
     }
     std::memcpy(state.rotation_current, rotations, rigid*9U*sizeof(float));
     std::memcpy(state.translation_current, translations, rigid*3U*sizeof(float));
     for(std::size_t i=0; i<rigid; ++i) state.quaternion_current[i] = matrix_to_quaternion(rotations+i*9U);
+    if(!shift) {
+        std::memcpy(state.rotation_previous, rotations, rigid*9U*sizeof(float));
+        std::memcpy(state.translation_previous, translations, rigid*3U*sizeof(float));
+        std::memcpy(state.quaternion_previous, state.quaternion_current, rigid*sizeof(Quaternion));
+    }
 }
 
 void interpolate(PresentationState& state, float alpha) {
@@ -203,14 +208,15 @@ PresentationState* prepare_view(void* instance) {
         if(rigids<=0 || !ids) { reset(); return nullptr; }
         auto* state=slot ? slot : allocate_state(solver,capacity);
         if(!state) return nullptr;
-        const bool shift=same_topology(*state,ids,rigids);
-        if(!shift) {
-            state->rigid_count=rigids;
-            std::memcpy(state->rigid_ids,ids,static_cast<std::size_t>(rigids)*sizeof(int));
-        }
+        std::memcpy(state->rigid_work,ids,static_cast<std::size_t>(rigids)*sizeof(int));
         float *rotations{}, *translations{};
         g_rigid(container,&rotations,&translations);
         if(!rotations || !translations) { state->samples=0; return nullptr; }
+        const bool shift=same_topology(*state,rigids);
+        if(!shift) {
+            state->rigid_count=rigids;
+            std::memcpy(state->rigid_ids,state->rigid_work,static_cast<std::size_t>(rigids)*sizeof(int));
+        }
         copy_rigid_snapshot(*state,rotations,translations,shift);
         state->samples=shift ? 2 : 1;
         if(!shift) return nullptr;
@@ -359,5 +365,3 @@ void p4_test_bind_presentation(P4Synchronize synchronize, P4RigidData rigid) {
     g_synchronize=synchronize; g_rigid=rigid;
 }
 #endif
-
-
