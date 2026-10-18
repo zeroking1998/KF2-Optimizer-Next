@@ -224,6 +224,7 @@ var bool bDiagnosticEffectCacheInitialized;
 var WorldEmitterTelemetrySnapshot CachedWorldEmitters;
 var array<WorldEmitterTemplateTelemetrySnapshot> CachedWorldEmitterTemplates;
 var array<WorldEmitterTemplateTelemetrySnapshot> CachedWorldEmitterTraversalSnapshots;
+var bool bWorldEmitterCacheDiagnostics;
 var array<WorldParticleGroupTelemetrySnapshot> ScannedWorldParticleGroups;
 var int ScannedWorldParticleGroupOverflow;
 var array<AdaptiveWorldParticleIdleSnapshot> AdaptiveWorldParticleIdleStates;
@@ -5186,6 +5187,7 @@ function int CountBits(int Value)
 
 function InspectParticleComponent(
     ParticleSystemComponent ParticleComponent,
+    bool bCollectDiagnostics,
     out int FlexComponentCount,
     out int FlexFluidComponentCount,
     out int FlexNonFluidComponentCount,
@@ -5216,7 +5218,10 @@ function InspectParticleComponent(
 
     if (ParticleComponent == None || ParticleComponent.Template == None)
     {
-        ++UnclassifiedComponentCount;
+        if (bCollectDiagnostics)
+        {
+            ++UnclassifiedComponentCount;
+        }
         return;
     }
     EmitterCount = ParticleComponent.Template.Emitters.Length;
@@ -5225,7 +5230,7 @@ function InspectParticleComponent(
     for (Index = 0; Index < EmitterCount; ++Index)
     {
         EmitterTemplate = ParticleComponent.Template.Emitters[Index];
-        if (EmitterTemplate != None &&
+        if (bCollectDiagnostics && EmitterTemplate != None &&
             EmitterTemplate.FlexContainerTemplate != None)
         {
             if (EmitterTemplate.FlexContainerTemplate.bFluid)
@@ -5240,7 +5245,10 @@ function InspectParticleComponent(
         if (EmitterTemplate == None || EmitterTemplate.LODLevels.Length == 0)
         {
             bPeakCapacityComplete = false;
-            ++DynamicSpawnEmitters;
+            if (bCollectDiagnostics)
+            {
+                ++DynamicSpawnEmitters;
+            }
             continue;
         }
         LODIndex = Clamp(CurrentLODIndex, 0,
@@ -5249,12 +5257,19 @@ function InspectParticleComponent(
         if (LODTemplate == None)
         {
             bPeakCapacityComplete = false;
-            ++DynamicSpawnEmitters;
+            if (bCollectDiagnostics)
+            {
+                ++DynamicSpawnEmitters;
+            }
             continue;
         }
         ComponentPeakCapacity += Min(
             1000000000 - ComponentPeakCapacity,
             Max(0, LODTemplate.PeakActiveParticles));
+        if (!bCollectDiagnostics)
+        {
+            continue;
+        }
         if (LODTemplate.SpawnModule == None)
         {
             ++DynamicSpawnEmitters;
@@ -5285,11 +5300,11 @@ function InspectParticleComponent(
             1000000000 - ConstantSpawnRateMilli, AddedRateMilli);
         ++ConstantSpawnEmitters;
     }
-    if (!HasFlexFluid && !HasFlexNonFluid)
+    if (bCollectDiagnostics && !HasFlexFluid && !HasFlexNonFluid)
     {
         ++NonFlexComponentCount;
     }
-    else
+    else if (bCollectDiagnostics)
     {
         ++FlexComponentCount;
         if (HasFlexFluid && HasFlexNonFluid)
@@ -5346,6 +5361,7 @@ function int FindWorldEmitterTemplateSnapshot(
 function InspectWorldEmitterParticleComponentCached(
     ParticleSystemComponent ParticleComponent,
     int TraversalIndex,
+    bool bCollectDiagnostics,
     out int FlexComponentCount,
     out int FlexFluidComponentCount,
     out int FlexNonFluidComponentCount,
@@ -5366,7 +5382,10 @@ function InspectWorldEmitterParticleComponentCached(
 
     if (ParticleComponent == None || ParticleComponent.Template == None)
     {
-        ++UnclassifiedComponentCount;
+        if (bCollectDiagnostics)
+        {
+            ++UnclassifiedComponentCount;
+        }
         return;
     }
     CacheKey = PathName(ParticleComponent.Template)$"#"$
@@ -5376,8 +5395,11 @@ function InspectWorldEmitterParticleComponentCached(
         CachedWorldEmitterTraversalSnapshots[TraversalIndex].Key == CacheKey)
     {
         Snapshot = CachedWorldEmitterTraversalSnapshots[TraversalIndex];
-        ++ProfileWorldEmitterTemplateCacheHits;
-        ++ProfileWorldEmitterTemplatePositionHits;
+        if (bCollectDiagnostics)
+        {
+            ++ProfileWorldEmitterTemplateCacheHits;
+            ++ProfileWorldEmitterTemplatePositionHits;
+        }
     }
     else
     {
@@ -5385,13 +5407,16 @@ function InspectWorldEmitterParticleComponentCached(
         if (CacheIndex >= 0)
         {
             Snapshot = CachedWorldEmitterTemplates[CacheIndex];
-            ++ProfileWorldEmitterTemplateCacheHits;
+            if (bCollectDiagnostics)
+            {
+                ++ProfileWorldEmitterTemplateCacheHits;
+            }
         }
         else
         {
             Snapshot.Key = CacheKey;
             InspectParticleComponent(
-                ParticleComponent,
+                ParticleComponent, bCollectDiagnostics,
                 Snapshot.FlexComponents,
                 Snapshot.FlexFluidComponents,
                 Snapshot.FlexNonFluidComponents,
@@ -5404,7 +5429,10 @@ function InspectWorldEmitterParticleComponentCached(
                 Snapshot.BurstEntries,
                 Snapshot.PeakCapacity,
                 Snapshot.PeakCapacityCoveredComponents);
-            ++ProfileWorldEmitterTemplateCacheMisses;
+            if (bCollectDiagnostics)
+            {
+                ++ProfileWorldEmitterTemplateCacheMisses;
+            }
             if (CachedWorldEmitterTemplates.Length <
                 MaxWorldEmitterTemplateSnapshots)
             {
@@ -5424,19 +5452,22 @@ function InspectWorldEmitterParticleComponentCached(
             CachedWorldEmitterTraversalSnapshots[TraversalIndex] = Snapshot;
         }
     }
-    FlexComponentCount += Snapshot.FlexComponents;
-    FlexFluidComponentCount += Snapshot.FlexFluidComponents;
-    FlexNonFluidComponentCount += Snapshot.FlexNonFluidComponents;
-    FlexMixedComponentCount += Snapshot.FlexMixedComponents;
-    NonFlexComponentCount += Snapshot.NonFlexComponents;
-    UnclassifiedComponentCount += Snapshot.UnclassifiedComponents;
-    ConstantSpawnEmitters += Snapshot.ConstantSpawnEmitters;
-    DynamicSpawnEmitters += Snapshot.DynamicSpawnEmitters;
-    ConstantSpawnRateMilli += Min(
-        1000000000 - ConstantSpawnRateMilli,
-        Snapshot.ConstantSpawnRateMilli);
-    BurstEntries += Min(
-        1000000000 - BurstEntries, Snapshot.BurstEntries);
+    if (bCollectDiagnostics)
+    {
+        FlexComponentCount += Snapshot.FlexComponents;
+        FlexFluidComponentCount += Snapshot.FlexFluidComponents;
+        FlexNonFluidComponentCount += Snapshot.FlexNonFluidComponents;
+        FlexMixedComponentCount += Snapshot.FlexMixedComponents;
+        NonFlexComponentCount += Snapshot.NonFlexComponents;
+        UnclassifiedComponentCount += Snapshot.UnclassifiedComponents;
+        ConstantSpawnEmitters += Snapshot.ConstantSpawnEmitters;
+        DynamicSpawnEmitters += Snapshot.DynamicSpawnEmitters;
+        ConstantSpawnRateMilli += Min(
+            1000000000 - ConstantSpawnRateMilli,
+            Snapshot.ConstantSpawnRateMilli);
+        BurstEntries += Min(
+            1000000000 - BurstEntries, Snapshot.BurstEntries);
+    }
     PeakParticleCapacity += Min(
         1000000000 - PeakParticleCapacity, Snapshot.PeakCapacity);
     PeakCapacityCoveredComponents +=
@@ -5521,7 +5552,7 @@ function AccumulateWorldParticleGroup(
     }
 
     InspectWorldEmitterParticleComponentCached(
-        ParticleComponent, -1,
+        ParticleComponent, -1, true,
         FlexComponents, FlexFluidComponents, FlexNonFluidComponents,
         FlexMixedComponents, NonFlexComponents, UnclassifiedComponents,
         ConstantSpawnEmitters, DynamicSpawnEmitters,
@@ -5676,6 +5707,7 @@ function FixedMinimumVisualControl()
 
 function CountParticlePool(
     EmitterPool ParticlePool,
+    bool bCollectDiagnostics,
     out int ComponentCount,
     out int ParticleCount,
     out int VisibleComponentCount,
@@ -5711,14 +5743,17 @@ function CountParticlePool(
         ++ComponentCount;
         ParticleCount += ParticleComponent.NumActiveParticles;
         InspectParticleComponent(
-            ParticleComponent, FlexComponentCount,
+            ParticleComponent, bCollectDiagnostics, FlexComponentCount,
             FlexFluidComponentCount, FlexNonFluidComponentCount,
             FlexMixedComponentCount, NonFlexComponentCount,
             UnclassifiedComponentCount,
             ConstantSpawnEmitters, DynamicSpawnEmitters,
             ConstantSpawnRateMilli, BurstEntries, PeakParticleCapacity,
             PeakCapacityCoveredComponents);
-        LODLevelTotal += ParticleComponent.GetLODLevel();
+        if (bCollectDiagnostics)
+        {
+            LODLevelTotal += ParticleComponent.GetLODLevel();
+        }
         if (ParticleComponent.LastRenderTime > WorldInfo.TimeSeconds - 0.3)
         {
             ++VisibleComponentCount;
@@ -6195,7 +6230,8 @@ function RefreshDiagnosticEffectCache()
     bDiagnosticEffectCacheInitialized = true;
 }
 
-function RefreshWorldEmitterCache(bool bCollectWorldParticleGroups)
+function RefreshWorldEmitterCache(
+    bool bCollectWorldParticleGroups, bool bCollectDiagnostics)
 {
     local Emitter WorldEmitter;
     local int WorldEmitterComponents;
@@ -6234,7 +6270,7 @@ function RefreshWorldEmitterCache(bool bCollectWorldParticleGroups)
             WorldEmitter.ParticleSystemComponent.NumActiveParticles;
         InspectWorldEmitterParticleComponentCached(
             WorldEmitter.ParticleSystemComponent,
-            WorldEmitterComponents - 1,
+            WorldEmitterComponents - 1, bCollectDiagnostics,
             ScannedWorldEmitterFlexComponents,
             ScannedWorldEmitterFlexFluidComponents,
             ScannedWorldEmitterFlexNonFluidComponents,
@@ -6247,8 +6283,11 @@ function RefreshWorldEmitterCache(bool bCollectWorldParticleGroups)
             ScannedWorldEmitterBurstEntries,
             ScannedWorldEmitterPeakCapacity,
             ScannedWorldEmitterPeakCapacityCoveredComponents);
-        ScannedWorldEmitterLodTotal +=
-            WorldEmitter.ParticleSystemComponent.GetLODLevel();
+        if (bCollectDiagnostics)
+        {
+            ScannedWorldEmitterLodTotal +=
+                WorldEmitter.ParticleSystemComponent.GetLODLevel();
+        }
         if (WorldEmitter.ParticleSystemComponent.LastRenderTime >
             WorldInfo.TimeSeconds - 0.3)
         {
@@ -6433,6 +6472,7 @@ function SampleTelemetry()
     local PlayerController AdaptiveLocalPC;
     local bool bSubmitNativeProfileNodes;
     local bool bCollectWorldParticleGroups;
+    local bool bWorldEmitterCacheModeChanged;
     local string ProfileState;
 
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
@@ -6442,6 +6482,16 @@ function SampleTelemetry()
         return;
     }
     EnsureAdaptiveDebugMarkerPostRender();
+
+    bWorldEmitterCacheModeChanged =
+        bWorldEmitterCacheDiagnostics != bDetailedRuntimeDiagnostics;
+    if (bWorldEmitterCacheModeChanged)
+    {
+        CachedWorldEmitters = default.CachedWorldEmitters;
+        CachedWorldEmitterTemplates.Length = 0;
+        CachedWorldEmitterTraversalSnapshots.Length = 0;
+        bWorldEmitterCacheDiagnostics = bDetailedRuntimeDiagnostics;
+    }
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=sample_begin");
 
@@ -6633,15 +6683,12 @@ function SampleTelemetry()
             {
                 CollisionProbeCorpse = Corpse;
             }
-            if (Corpse.Mesh != None)
+            if (bDetailedRuntimeDiagnostics && Corpse.Mesh != None)
             {
-                if (bDetailedRuntimeDiagnostics)
+                CorpseLodTotal += Corpse.Mesh.PredictedLODLevel;
+                if (Corpse.Mesh.bNoSkeletonUpdate)
                 {
-                    CorpseLodTotal += Corpse.Mesh.PredictedLODLevel;
-                    if (Corpse.Mesh.bNoSkeletonUpdate)
-                    {
-                        ++CorpseFinalPose;
-                    }
+                    ++CorpseFinalPose;
                 }
                 if (Corpse.Mesh.LastRenderTime > WorldInfo.TimeSeconds - 0.3)
                 {
@@ -6734,20 +6781,27 @@ function SampleTelemetry()
         }
         RuntimeCorpseLimit = bAdaptiveCorpseStaggerInitialized
             ? AdaptiveCorpseRuntimeLimit : GoreManager.MaxDeadBodies;
-        RuntimeCorpseOffscreenTimeMs =
-            int(GoreManager.MaxCorpseOffscreenTime * 1000.0);
-        RuntimeCorpseOffscreenDistance =
-            int(GoreManager.MaxCorpseOffscreenDistance);
         RuntimeWoundDecalLimit = GoreManager.MaxBodyWoundDecals;
         RuntimeSplatterDecalLimit = GoreManager.MaxBloodSplatterDecals;
         RuntimePoolDecalLimit = GoreManager.MaxBloodPoolDecals;
-        RuntimeBloodEffectLimit = GoreManager.MaxBloodEffects;
-        RuntimeGoreEffectLimit = GoreManager.MaxGoreEffects;
-        RuntimeWoundLifetimeMs = int(GoreManager.BodyWoundDecalLifetime * 1000.0);
-        RuntimeSplatterLifetimeMs = int(GoreManager.BloodSplatterLifetime * 1000.0);
-        RuntimePoolLifetimeMs = int(GoreManager.BloodPoolLifetime * 1000.0);
-        RuntimeGibLifetimeMs = int(GoreManager.GibletLifetime * 1000.0);
+        if (bDetailedRuntimeDiagnostics)
+        {
+            RuntimeCorpseOffscreenTimeMs =
+                int(GoreManager.MaxCorpseOffscreenTime * 1000.0);
+            RuntimeCorpseOffscreenDistance =
+                int(GoreManager.MaxCorpseOffscreenDistance);
+            RuntimeBloodEffectLimit = GoreManager.MaxBloodEffects;
+            RuntimeGoreEffectLimit = GoreManager.MaxGoreEffects;
+            RuntimeWoundLifetimeMs =
+                int(GoreManager.BodyWoundDecalLifetime * 1000.0);
+            RuntimeSplatterLifetimeMs =
+                int(GoreManager.BloodSplatterLifetime * 1000.0);
+            RuntimePoolLifetimeMs =
+                int(GoreManager.BloodPoolLifetime * 1000.0);
+            RuntimeGibLifetimeMs = int(GoreManager.GibletLifetime * 1000.0);
+        }
         CountParticlePool(GoreManager.BloodFXEmitterPool,
+                          bDetailedRuntimeDiagnostics,
                           GoreParticleComponents, GoreParticles,
                           GoreParticleVisibleComponents,
                           GoreParticleLodTotal,
@@ -6765,6 +6819,7 @@ function SampleTelemetry()
                           GoreParticlePeakCapacity,
                           GoreParticlePeakCoveredComponents);
         CountParticlePool(GoreManager.MiscGoreFXEmitterPool,
+                          bDetailedRuntimeDiagnostics,
                           GoreParticleComponents, GoreParticles,
                           GoreParticleVisibleComponents,
                           GoreParticleLodTotal,
@@ -6848,6 +6903,7 @@ function SampleTelemetry()
             0, WorldInfo.ImpactFXEmitterPool.MaxActiveEffects);
     }
     CountParticlePool(WorldInfo.MyEmitterPool,
+                      bDetailedRuntimeDiagnostics,
                       WorldParticleComponents, WorldParticles,
                       WorldParticleVisibleComponents,
                       WorldParticleLodTotal,
@@ -6865,6 +6921,7 @@ function SampleTelemetry()
                       WorldParticlePeakCapacity,
                       WorldParticlePeakCoveredComponents);
     CountParticlePool(WorldInfo.GroundFireEmitterPool,
+                      bDetailedRuntimeDiagnostics,
                       GroundFireParticleComponents, GroundFireParticles,
                       GroundFireParticleVisibleComponents,
                       GroundFireParticleLodTotal,
@@ -6887,6 +6944,7 @@ function SampleTelemetry()
     WorldParticleLodTotal += GroundFireParticleLodTotal;
     WorldParticleBoundedComponents += GroundFireParticleBoundedComponents;
     CountParticlePool(WorldInfo.ImpactFXEmitterPool,
+                      bDetailedRuntimeDiagnostics,
                       ImpactParticleComponents, ImpactParticles,
                       ImpactParticleVisibleComponents,
                       ImpactParticleLodTotal,
@@ -6953,34 +7011,37 @@ function SampleTelemetry()
     // rotate one typed iterator per sample so their costs cannot stack in the
     // same game-thread frame. Unscanned groups reuse their last complete value.
     RefreshDiagnosticEffectCache();
-    SprayActors = CachedDiagnosticEffects.SprayActors;
-    FireSprayActors = CachedDiagnosticEffects.FireSprayActors;
-    ToxicSprayActors = CachedDiagnosticEffects.ToxicSprayActors;
-    OtherSprayActors = CachedDiagnosticEffects.OtherSprayActors;
-    ExplosionActors = CachedDiagnosticEffects.ExplosionActors;
-    DamagingExplosionActors =
-        CachedDiagnosticEffects.DamagingExplosionActors;
-    FireExplosionActors = CachedDiagnosticEffects.FireExplosionActors;
-    ToxicExplosionActors = CachedDiagnosticEffects.ToxicExplosionActors;
-    OtherDamagingExplosionActors =
-        CachedDiagnosticEffects.OtherDamagingExplosionActors;
-    UnclassifiedExplosionActors =
-        CachedDiagnosticEffects.UnclassifiedExplosionActors;
-    LingeringExplosionActors =
-        CachedDiagnosticEffects.LingeringExplosionActors;
-    SmokeExplosionActors = CachedDiagnosticEffects.SmokeExplosionActors;
-    BloatKingFartExplosionActors =
-        CachedDiagnosticEffects.BloatKingFartExplosionActors;
-    SmokeGrenadeProjectiles =
-        CachedDiagnosticEffects.SmokeGrenadeProjectiles;
-    PukeMineProjectiles = CachedDiagnosticEffects.PukeMineProjectiles;
-    BloatKingPukeMineProjectiles =
-        CachedDiagnosticEffects.BloatKingPukeMineProjectiles;
-    VisibleGibs = CachedDiagnosticEffects.VisibleGibs;
+    if (bDetailedRuntimeDiagnostics)
+    {
+        SprayActors = CachedDiagnosticEffects.SprayActors;
+        FireSprayActors = CachedDiagnosticEffects.FireSprayActors;
+        ToxicSprayActors = CachedDiagnosticEffects.ToxicSprayActors;
+        OtherSprayActors = CachedDiagnosticEffects.OtherSprayActors;
+        ExplosionActors = CachedDiagnosticEffects.ExplosionActors;
+        DamagingExplosionActors =
+            CachedDiagnosticEffects.DamagingExplosionActors;
+        FireExplosionActors = CachedDiagnosticEffects.FireExplosionActors;
+        ToxicExplosionActors = CachedDiagnosticEffects.ToxicExplosionActors;
+        OtherDamagingExplosionActors =
+            CachedDiagnosticEffects.OtherDamagingExplosionActors;
+        UnclassifiedExplosionActors =
+            CachedDiagnosticEffects.UnclassifiedExplosionActors;
+        LingeringExplosionActors =
+            CachedDiagnosticEffects.LingeringExplosionActors;
+        SmokeExplosionActors = CachedDiagnosticEffects.SmokeExplosionActors;
+        BloatKingFartExplosionActors =
+            CachedDiagnosticEffects.BloatKingFartExplosionActors;
+        SmokeGrenadeProjectiles =
+            CachedDiagnosticEffects.SmokeGrenadeProjectiles;
+        PukeMineProjectiles = CachedDiagnosticEffects.PukeMineProjectiles;
+        BloatKingPukeMineProjectiles =
+            CachedDiagnosticEffects.BloatKingPukeMineProjectiles;
+        VisibleGibs = CachedDiagnosticEffects.VisibleGibs;
+    }
 
     if (SampleSequence == 0) `log("KF2OPT_TRACE stage=effect_actors_done");
 
-    if (WorldInfo.MyEmitterPool != None &&
+    if (bDetailedRuntimeDiagnostics && WorldInfo.MyEmitterPool != None &&
         WorldInfo.MyEmitterPool.FlexSurrogateComponent != None)
     {
         FlexSurrogateParticles =
@@ -7036,10 +7097,11 @@ function SampleTelemetry()
     // The five typed diagnostic iterators occupy phases 0-4. Refresh this
     // complete value-only snapshot in phase 5 so no two global actor
     // iterators share a normal one-second telemetry sample.
-    if (SampleSequence == 0 ||
+    if (SampleSequence == 0 || bWorldEmitterCacheModeChanged ||
         SampleSequence % DiagnosticEffectScanInterval == 5)
     {
-        RefreshWorldEmitterCache(bCollectWorldParticleGroups);
+        RefreshWorldEmitterCache(
+            bCollectWorldParticleGroups, bDetailedRuntimeDiagnostics);
         if (bCollectWorldParticleGroups)
         {
             LogWorldParticleGroupAttribution();
@@ -7049,22 +7111,28 @@ function SampleTelemetry()
     WorldParticleComponents += CachedWorldEmitters.Components;
     WorldParticles += CachedWorldEmitters.Particles;
     WorldParticleVisibleComponents += CachedWorldEmitters.VisibleComponents;
-    WorldParticleLodTotal += CachedWorldEmitters.LodTotal;
+    if (bDetailedRuntimeDiagnostics)
+    {
+        WorldParticleLodTotal += CachedWorldEmitters.LodTotal;
+    }
     WorldParticleBoundedComponents += CachedWorldEmitters.BoundedComponents;
-    ParticleFlexComponents += CachedWorldEmitters.FlexComponents;
-    ParticleFlexFluidComponents += CachedWorldEmitters.FlexFluidComponents;
-    ParticleFlexNonFluidComponents +=
-        CachedWorldEmitters.FlexNonFluidComponents;
-    ParticleFlexMixedComponents += CachedWorldEmitters.FlexMixedComponents;
-    ParticleNonFlexComponents += CachedWorldEmitters.NonFlexComponents;
-    ParticleUnclassifiedComponents +=
-        CachedWorldEmitters.UnclassifiedComponents;
-    ParticleConstantSpawnEmitters +=
-        CachedWorldEmitters.ConstantSpawnEmitters;
-    ParticleDynamicSpawnEmitters += CachedWorldEmitters.DynamicSpawnEmitters;
-    ParticleConstantSpawnRateMilli +=
-        CachedWorldEmitters.ConstantSpawnRateMilli;
-    ParticleBurstEntries += CachedWorldEmitters.BurstEntries;
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ParticleFlexComponents += CachedWorldEmitters.FlexComponents;
+        ParticleFlexFluidComponents += CachedWorldEmitters.FlexFluidComponents;
+        ParticleFlexNonFluidComponents +=
+            CachedWorldEmitters.FlexNonFluidComponents;
+        ParticleFlexMixedComponents += CachedWorldEmitters.FlexMixedComponents;
+        ParticleNonFlexComponents += CachedWorldEmitters.NonFlexComponents;
+        ParticleUnclassifiedComponents +=
+            CachedWorldEmitters.UnclassifiedComponents;
+        ParticleConstantSpawnEmitters +=
+            CachedWorldEmitters.ConstantSpawnEmitters;
+        ParticleDynamicSpawnEmitters += CachedWorldEmitters.DynamicSpawnEmitters;
+        ParticleConstantSpawnRateMilli +=
+            CachedWorldEmitters.ConstantSpawnRateMilli;
+        ParticleBurstEntries += CachedWorldEmitters.BurstEntries;
+    }
     WorldParticlePeakCapacity += Min(
         1000000000 - WorldParticlePeakCapacity,
         CachedWorldEmitters.PeakCapacity);
@@ -7190,7 +7258,9 @@ function SampleTelemetry()
         ProfileMaxZedDebugMilliseconds = 0;
         ProfileClockAnomalies = 0;
     }
-    `log("KF2OPT_TELEMETRY schema=8 sample="$SampleSequence$
+    if (bDetailedRuntimeDiagnostics)
+    {
+        `log("KF2OPT_TELEMETRY schema=8 sample="$SampleSequence$
          " scan_diagnostics="$(bDetailedRuntimeDiagnostics ? 1 : 0)$
          " living="$LivingZeds$
          " living_classes="$LivingClasses.Length$
@@ -7305,7 +7375,51 @@ function SampleTelemetry()
          " flex_surrogate_active="$FlexSurrogateActive$
          " flex_surrogate_particles="$FlexSurrogateParticles$
          " flex_surrogate_visible="$FlexSurrogateVisible$
-         " flex_surrogate_lod="$FlexSurrogateLod);
+             " flex_surrogate_lod="$FlexSurrogateLod);
+    }
+    else
+    {
+        `log("KF2OPT_TELEMETRY schema=9 sample="$SampleSequence$
+             " scan_diagnostics=0"$
+             " living="$LivingZeds$
+             " living_visible="$LivingRecentlyRendered$
+             " living_offscreen="$LivingOffscreen$
+             " corpse_total="$CorpseTotal$
+             " corpse_awake="$CorpseAwake$
+             " corpse_sleeping="$CorpseSleeping$
+             " corpse_other="$CorpseOther$
+             " corpse_limit="$RuntimeCorpseLimit$
+             " zed_time="$ZedTimeActive$
+             " wound_decals="$BodyWoundDecals$
+             " splatter_decals="$BloodSplatterDecals$
+             " pool_decals="$BloodPoolDecals$
+             " impact_decals="$ImpactDecals$
+             " explosion_decals="$ExplosionDecals$
+             " wound_decal_limit="$RuntimeWoundDecalLimit$
+             " splatter_decal_limit="$RuntimeSplatterDecalLimit$
+             " pool_decal_limit="$RuntimePoolDecalLimit$
+             " impact_decal_limit="$RuntimeImpactDecalLimit$
+             " explosion_decal_limit="$RuntimeExplosionDecalLimit$
+             " gore_particle_components="$GoreParticleComponents$
+             " gore_particles="$GoreParticles$
+             " gore_particle_visible_components="$GoreParticleVisibleComponents$
+             " gore_particle_bounded_components="$GoreParticleBoundedComponents$
+             " world_particle_components="$WorldParticleComponents$
+             " world_particles="$WorldParticles$
+             " world_particle_visible_components="$WorldParticleVisibleComponents$
+             " world_particle_bounded_components="$WorldParticleBoundedComponents$
+             " ground_fire_particle_components="$GroundFireParticleComponents$
+             " ground_fire_particles="$GroundFireParticles$
+             " impact_particle_components="$ImpactParticleComponents$
+             " impact_particles="$ImpactParticles$
+             " gore_particle_peak_capacity="$GoreParticlePeakCapacity$
+             " world_particle_peak_capacity="$WorldParticlePeakCapacity$
+             " gore_particle_peak_covered_components="$GoreParticlePeakCoveredComponents$
+             " world_particle_peak_covered_components="$WorldParticlePeakCoveredComponents$
+             " ground_fire_particle_pool_capacity="$GroundFireParticlePoolCapacity$
+             " impact_particle_pool_capacity="$ImpactParticlePoolCapacity$
+             " particle_peak_capacity="$ParticlePeakCapacity);
+    }
 }
 
 function QuiesceForWorldTeardown()
