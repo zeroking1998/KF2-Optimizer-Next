@@ -6302,10 +6302,14 @@ int main(int argc, char** argv) {
                     "[Engine.Engine]\r\n"
                     "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n");
     const fs::path telemetry_asset{KF2_TELEMETRY_ASSET};
-    CHECK(fs::exists(telemetry_asset));
+    const bool telemetry_available = fs::is_regular_file(telemetry_asset);
     const auto portable_telemetry = root / L"portable" / L"Data" / L"Lab" /
         L"KF2OptimizerTelemetry.u";
-    write_bytes(portable_telemetry, read_bytes(telemetry_asset));
+    if (telemetry_available) {
+        write_bytes(portable_telemetry, read_bytes(telemetry_asset));
+    } else {
+        std::cout << "SKIP: optional KF2 SDK telemetry provider scenarios\n";
+    }
     const std::wstring instance_name = L"Local\\KF2OptimizerNext-AppTest-" +
                                        std::to_wstring(GetCurrentProcessId());
 
@@ -6371,55 +6375,64 @@ int main(int argc, char** argv) {
     {
         auto first = kf2::app::Application::start(options);
         CHECK(first.has_value());
-        CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
-                  "UseVsync=False") != std::string::npos);
+        if (telemetry_available) {
+            CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
+                      "UseVsync=False") != std::string::npos);
+            const auto automatically_prepared =
+                read_bytes(config_root / L"KFGame.ini");
+            CHECK(automatically_prepared.find(
+                      "MaxSmoothedFrameRate=60") != std::string::npos);
+            CHECK(automatically_prepared.find(
+                      "MinSmoothedFrameRate=22") != std::string::npos);
+            CHECK(automatically_prepared.find(
+                      "bSmoothFrameRate=True") != std::string::npos);
+            const auto automatically_prepared_engine =
+                read_bytes(config_root / L"KFEngine.ini");
+            CHECK(automatically_prepared_engine.find(
+                      "[Engine.Physics]") != std::string::npos);
+            CHECK(automatically_prepared_engine.find(
+                      "bPhysicsAsyncScene=True") != std::string::npos);
+            CHECK(automatically_prepared_engine.find(
+                      "bEnableAsyncScene=True") != std::string::npos);
+            if (expected_startup_memory) {
+                // Adapter preference can change while this desktop integration
+                // test runs. Exact profile selection is covered by the isolated
+                // startup GPU tests; this boundary verifies that a safe profile
+                // was actually staged without coupling to live registry state.
+                CHECK(automatically_prepared_engine.find("PoolSize=") !=
+                      std::string::npos);
+                CHECK(automatically_prepared_engine.find("MemoryMargin=") !=
+                      std::string::npos);
+                CHECK(automatically_prepared_engine.find("HysteresisLimit=") !=
+                      std::string::npos);
+            }
+            CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
+                      "OneFrameThreadLag=True") != std::string::npos);
+            CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
+                      "Fullscreen=False") != std::string::npos);
+            CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
+                      "Borderless=True") != std::string::npos);
+            CHECK(fs::exists(published_telemetry));
+            CHECK(read_bytes(published_telemetry) == read_bytes(telemetry_asset));
+            CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                      "GameViewportClientClassName=KF2OptimizerTelemetry."
+                      "KF2OptimizerGraphicsViewport") !=
+                  std::string::npos);
+            CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                      "LocalOptions=?Mutator=KF2OptimizerTelemetry."
+                      "KF2OptimizerTelemetryMutator") != std::string::npos);
+            CHECK(read_bytes(config_root / L"KFEngine.ini").find(
+                      "Package=KF2OptimizerTelemetry") == std::string::npos);
+        } else {
+            CHECK(!fs::exists(published_telemetry));
+            const auto native_engine = read_bytes(config_root / L"KFEngine.ini");
+            CHECK(native_engine.find(
+                      "GameViewportClientClassName=KFGame.KFGameViewportClient") !=
+                  std::string::npos);
+            CHECK(native_engine.find("LocalOptions=\r\n") != std::string::npos);
+        }
         CHECK(read_bytes(options.state_root / L"settings.ini").find(
                   "adaptive_shadow_mode") == std::string::npos);
-        const auto automatically_prepared =
-            read_bytes(config_root / L"KFGame.ini");
-        CHECK(automatically_prepared.find(
-                  "MaxSmoothedFrameRate=60") != std::string::npos);
-        CHECK(automatically_prepared.find(
-                  "MinSmoothedFrameRate=22") != std::string::npos);
-        CHECK(automatically_prepared.find(
-                  "bSmoothFrameRate=True") != std::string::npos);
-        const auto automatically_prepared_engine =
-            read_bytes(config_root / L"KFEngine.ini");
-        CHECK(automatically_prepared_engine.find(
-                  "[Engine.Physics]") != std::string::npos);
-        CHECK(automatically_prepared_engine.find(
-                  "bPhysicsAsyncScene=True") != std::string::npos);
-        CHECK(automatically_prepared_engine.find(
-                  "bEnableAsyncScene=True") != std::string::npos);
-        if (expected_startup_memory) {
-            // Adapter preference can change while this desktop integration
-            // test runs. Exact profile selection is covered by the isolated
-            // startup GPU tests; this boundary verifies that a safe profile
-            // was actually staged without coupling to live registry state.
-            CHECK(automatically_prepared_engine.find("PoolSize=") !=
-                  std::string::npos);
-            CHECK(automatically_prepared_engine.find("MemoryMargin=") !=
-                  std::string::npos);
-            CHECK(automatically_prepared_engine.find("HysteresisLimit=") !=
-                  std::string::npos);
-        }
-        CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
-                  "OneFrameThreadLag=True") != std::string::npos);
-        CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
-                  "Fullscreen=False") != std::string::npos);
-        CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
-                  "Borderless=True") != std::string::npos);
-        CHECK(fs::exists(published_telemetry));
-        CHECK(read_bytes(published_telemetry) == read_bytes(telemetry_asset));
-        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
-                  "GameViewportClientClassName=KF2OptimizerTelemetry."
-                  "KF2OptimizerGraphicsViewport") !=
-              std::string::npos);
-        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
-                  "LocalOptions=?Mutator=KF2OptimizerTelemetry."
-                  "KF2OptimizerTelemetryMutator") != std::string::npos);
-        CHECK(read_bytes(config_root / L"KFEngine.ini").find(
-                  "Package=KF2OptimizerTelemetry") == std::string::npos);
         CHECK(fs::exists(options.state_root / L"settings.ini"));
         CHECK(fs::exists(options.state_root / L"session.marker"));
         CHECK(fs::is_directory(options.state_root / L"logs"));
@@ -6789,13 +6802,20 @@ int main(int argc, char** argv) {
     CHECK(graphical.value().ui_model().status().advanced_values[0] == L"Off");
     const auto advanced_snapshot = kf2::config::resume_session_config(
         config_root, options.state_root);
-    CHECK(advanced_snapshot.has_value() && advanced_snapshot.value().has_value());
-    CHECK(read_bytes(advanced_snapshot.value()->snapshot_root / L"files" /
-              L"KFSystemSettings.ini").find("OneFrameThreadLag=False") !=
-          std::string::npos);
-    // The personal selection is separate from the existing protected override.
-    CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
-              "OneFrameThreadLag=True") != std::string::npos);
+    CHECK(advanced_snapshot.has_value());
+    if (telemetry_available) {
+        CHECK(advanced_snapshot.value().has_value());
+        CHECK(read_bytes(advanced_snapshot.value()->snapshot_root / L"files" /
+                  L"KFSystemSettings.ini").find("OneFrameThreadLag=False") !=
+              std::string::npos);
+        // The personal selection is separate from the existing protected override.
+        CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
+                  "OneFrameThreadLag=True") != std::string::npos);
+    } else {
+        CHECK(!advanced_snapshot.value().has_value());
+        CHECK(read_bytes(config_root / L"KFSystemSettings.ini").find(
+                  "OneFrameThreadLag=False") != std::string::npos);
+    }
     const auto debug_navigation =
         node_center(hwnd, graphical.value().ui_model(), "nav-4");
     CHECK(debug_navigation.has_value());
@@ -6847,14 +6867,26 @@ int main(int argc, char** argv) {
               "debug_flex_diagnostics=true\n") != std::string::npos);
     CHECK(debug_settings_bytes.find(
               "debug_runtime_diagnostics=true\n") != std::string::npos);
-    CHECK(read_bytes(config_root / L"KFEngine.ini").find(
-              "bAdaptiveCorpseDebugMarkers=True") != std::string::npos);
-    CHECK(read_bytes(config_root / L"KFEngine.ini").find(
-              "bAdaptiveZedDebugMarkers=True") != std::string::npos);
-    CHECK(read_bytes(config_root / L"KFEngine.ini").find(
-              "bDetailedRuntimeDiagnostics=True") != std::string::npos);
-    CHECK(read_bytes(config_root / L"KFEngine.ini").find(
-              "bAdaptiveCorpseStagger=False") != std::string::npos);
+    const auto debug_engine = read_bytes(config_root / L"KFEngine.ini");
+    if (telemetry_available) {
+        CHECK(debug_engine.find("bAdaptiveCorpseDebugMarkers=True") !=
+              std::string::npos);
+        CHECK(debug_engine.find("bAdaptiveZedDebugMarkers=True") !=
+              std::string::npos);
+        CHECK(debug_engine.find("bDetailedRuntimeDiagnostics=True") !=
+              std::string::npos);
+        CHECK(debug_engine.find("bAdaptiveCorpseStagger=False") !=
+              std::string::npos);
+    } else {
+        CHECK(debug_engine.find("bAdaptiveCorpseDebugMarkers=") ==
+              std::string::npos);
+        CHECK(debug_engine.find("bAdaptiveZedDebugMarkers=") ==
+              std::string::npos);
+        CHECK(debug_engine.find("bDetailedRuntimeDiagnostics=") ==
+              std::string::npos);
+        CHECK(debug_engine.find("bAdaptiveCorpseStagger=") ==
+              std::string::npos);
+    }
     const auto diagnostics_navigation =
         node_center(hwnd, graphical.value().ui_model(), "nav-5");
     CHECK(diagnostics_navigation.has_value());
@@ -7664,12 +7696,14 @@ int main(int argc, char** argv) {
             kf2::app::StartMode::normal, root / L"portable"};
         CHECK(direct_runtime.installation.has_value());
         direct_runtime.installation->config_root = direct_config;
-        auto vsync_ini = read_bytes(direct_config / L"KFSystemSettings.ini");
-        const auto vsync_false = vsync_ini.find("UseVsync=False");
-        CHECK(vsync_false != std::string::npos);
-        vsync_ini.replace(vsync_false, std::strlen("UseVsync=False"),
-                          "UseVsync=True");
-        write_bytes(direct_config / L"KFSystemSettings.ini", vsync_ini);
+        auto vsync_ini = kf2::config::IniDocument::parse(
+            read_bytes(direct_config / L"KFSystemSettings.ini"));
+        CHECK(vsync_ini.has_value());
+        CHECK(vsync_ini.value().upsert(
+                  L"SystemSettings", L"UseVsync", L"True")
+                  .shadowed_occurrences == 0);
+        write_bytes(direct_config / L"KFSystemSettings.ini",
+                    vsync_ini.value().serialize());
         auto variable_ini = read_bytes(direct_config / L"KFGame.ini");
         const auto smoothing_on = variable_ini.find("bSmoothFrameRate=True");
         CHECK(smoothing_on != std::string::npos);
@@ -7887,7 +7921,7 @@ int main(int argc, char** argv) {
     // A single optimizer process can supervise multiple KF2 launches. After
     // one protected session is restored, the next Steam/shortcut launch must
     // receive the provider bootstrap and fixed session policy again.
-    {
+    if (telemetry_available) {
         const auto rearm_state = root / L"Data-rearm";
         kf2::diagnostics::EventLog rearm_events{
             128, rearm_state / L"logs/session-events.json"};
