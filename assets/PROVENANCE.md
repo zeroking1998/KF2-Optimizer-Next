@@ -11,7 +11,7 @@ Floor 2 or other third-party content.
 | `offline_telemetry/kf2optimizertelemetryprobe.uc` | Project-authored UnrealScript source | GPL-3.0-only with the project |
 | `offline_telemetry/KF2OptimizerTelemetryMutator.uc` | Project-authored Published-package bootstrap source | GPL-3.0-only with the project |
 | `offline_telemetry/KF2OptimizerTelemetryInteraction.uc` | Project-authored viewport interaction source | GPL-3.0-only with the project |
-| `offline_telemetry/KF2OptimizerSpray*.uc` | Project-authored spray-audio pacing and class-redirect sources; no KF2 source or content is copied | GPL-3.0-only with the project |
+| `offline_telemetry/KF2OptimizerSpray*.uc` | Project-authored spray-audio bypass and class-redirect sources; no KF2 source or content is copied | GPL-3.0-only with the project |
 | `offline_telemetry/KF2OptimizerTelemetry.u` | Generated locally from the project UnrealScript sources with the separately installed official KF2 SDK | Intentionally excluded from the public source repository and public releases pending independent binary-distribution review |
 
 No asset in this directory is intended to grant rights to KF2, its SDK, NVIDIA

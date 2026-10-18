@@ -119,27 +119,6 @@ struct OnlineVisualScanModel {
     int phase{};
 };
 
-struct SprayAudioPacingModel {
-    int last_update_bucket{-1};
-    float last_value{};
-    int boundary_calls{};
-
-    void update(double real_time_ms, float value) {
-        if (last_update_bucket >= 0 && value == last_value) return;
-        const int bucket = static_cast<int>(real_time_ms * 30.0 / 1000.0);
-        if (bucket == last_update_bucket) return;
-        last_update_bucket = bucket;
-        last_value = value;
-        ++boundary_calls;
-    }
-
-    void reset() {
-        if (last_update_bucket >= 0) ++boundary_calls;
-        last_update_bucket = -1;
-        last_value = 0.0f;
-    }
-};
-
 bool covers_online_visual_pool(OnlineVisualScanModel& model,
                               const std::vector<int>& pool,
                               bool intermittent_actions,
@@ -638,11 +617,20 @@ int main() {
         read_bytes(KF2_FIRE_AFFLICTION_SOURCE));
     const auto weapon_fallback_source = normalize_newlines(
         read_bytes(KF2_WEAPON_FALLBACK_SOURCE));
-    const std::array<std::pair<std::string, std::string>, 4> spray_sources{{
-        {"SprayActor_Flame", normalize_newlines(read_bytes(KF2_SPRAY_FLAME_SOURCE))},
-        {"SprayActor_Heal", normalize_newlines(read_bytes(KF2_SPRAY_HEAL_SOURCE))},
-        {"KFSprayActor_ArcGenerator", normalize_newlines(read_bytes(KF2_SPRAY_ARC_SOURCE))},
-        {"KFSprayActor_HRG_Vampire", normalize_newlines(read_bytes(KF2_SPRAY_VAMPIRE_SOURCE))},
+    struct SpraySource {
+        std::string wrapper_class;
+        std::string stock_class;
+        std::string source;
+    };
+    const std::array<SpraySource, 4> spray_sources{{
+        {"KF2OptimizerSprayActorFlame", "SprayActor_Flame",
+         normalize_newlines(read_bytes(KF2_SPRAY_FLAME_SOURCE))},
+        {"KF2OptimizerSprayActorHeal", "SprayActor_Heal",
+         normalize_newlines(read_bytes(KF2_SPRAY_HEAL_SOURCE))},
+        {"KF2OptimizerSprayActorArcGenerator", "KFSprayActor_ArcGenerator",
+         normalize_newlines(read_bytes(KF2_SPRAY_ARC_SOURCE))},
+        {"KF2OptimizerSprayActorHrgVampire", "KFSprayActor_HRG_Vampire",
+         normalize_newlines(read_bytes(KF2_SPRAY_VAMPIRE_SOURCE))},
     }};
     const auto online_context_source = normalize_newlines(
         read_bytes(KF2_ONLINE_CONTEXT_INTERACTION_SOURCE));
@@ -651,78 +639,18 @@ int main() {
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto online_corpse_controller_source = normalize_newlines(
         read_bytes(KF2_ONLINE_CORPSE_CONTROLLER_SOURCE));
-    for (const auto& [stock_class, source] : spray_sources) {
-        CHECK(source.find("extends " + stock_class) != std::string::npos);
-        CHECK(source.find("const RotationAudioUpdatesPerSecond=30;") !=
-              std::string::npos);
-        CHECK(source.find("super(KFSprayActor).Tick(DeltaTime);") !=
-              std::string::npos);
-        CHECK(source.find("super.Tick(DeltaTime);") == std::string::npos);
-        CHECK(source.find("WorldInfo.RealTimeSeconds") !=
-              std::string::npos);
-        CHECK(source.find("WorldInfo.NetMode == NM_DedicatedServer") !=
-              std::string::npos);
-        const auto unchanged_guard = source.find(
-            "RotationSpeed == LastRotationAudioValue");
-        const auto bucket_calculation = source.find("CurrentBucket = int(");
-        CHECK(unchanged_guard != std::string::npos);
-        CHECK(bucket_calculation != std::string::npos);
-        CHECK(unchanged_guard < bucket_calculation);
-        CHECK(count_occurrences(source,
-            "SetWeaponComponentRTPCValue(\"FlamethrowerRotation\"") == 2);
-        CHECK(count_occurrences(source, "\"FlamethrowerRotation\"") == 3);
-        const auto begin_spray = source.find(
-            "simulated function BeginSpray()");
-        const auto detach_spray = source.find(
-            "simulated function DetachAndFinish()", begin_spray);
-        CHECK(begin_spray != std::string::npos);
-        CHECK(detach_spray != std::string::npos);
-        const auto begin_body = source.substr(
-            begin_spray, detach_spray - begin_spray);
-        const auto begin_super = begin_body.find("super.BeginSpray();");
-        const auto begin_guard = begin_body.find(
-            "!bDeleteMe && !bDetached && Base != None && !Base.bHidden");
-        const auto begin_zero = begin_body.find(
-            "\"FlamethrowerRotation\", 0.0");
-        CHECK(begin_super != std::string::npos);
-        CHECK(begin_guard != std::string::npos);
-        CHECK(begin_zero != std::string::npos);
-        CHECK(begin_super < begin_guard);
-        CHECK(begin_guard < begin_zero);
-        CHECK(source.find("simulated function DetachAndFinish()") !=
-              std::string::npos);
-        CHECK(source.find("simulated function CleanupEndFire()") !=
-              std::string::npos);
-        CHECK(source.find("simulated function Destroyed()") !=
-              std::string::npos);
-        CHECK(source.find("RotationAudioUpdateBucket=-1") !=
-              std::string::npos);
-        for (const auto forbidden : {"SetTimer(", "DynamicActors(",
-                                     "AllActors(", "while (", "`log("}) {
-            CHECK(source.find(forbidden) == std::string::npos);
-        }
+    for (const auto& [wrapper_class, stock_class, source] : spray_sources) {
+        const auto expected =
+            "class " + wrapper_class + " extends " + stock_class + ";\n\n"
+            "simulated event Tick(float DeltaTime)\n"
+            "{\n"
+            "    super(KFSprayActor).Tick(DeltaTime);\n"
+            "}\n";
+        CHECK(source == expected);
+        CHECK(source.find("SetWeaponComponentRTPCValue") == std::string::npos);
+        CHECK(source.find("FlamethrowerRotation") == std::string::npos);
+        CHECK(source.find("RotationAudio") == std::string::npos);
     }
-    for (const int fps : {30, 60, 120, 240}) {
-        SprayAudioPacingModel model;
-        for (int frame = 0; frame < fps; ++frame) {
-            model.update(frame * 1000.0 / fps, static_cast<float>(frame));
-        }
-        CHECK(model.boundary_calls >= 28);
-        CHECK(model.boundary_calls <= 30);
-        if (fps > 30) CHECK(model.boundary_calls < fps);
-        const int before_reset = model.boundary_calls;
-        model.reset();
-        CHECK(model.boundary_calls == before_reset + 1);
-        model.reset();
-        CHECK(model.boundary_calls == before_reset + 1);
-        model.update(1000.0, 1.0f);
-        CHECK(model.boundary_calls == before_reset + 2);
-    }
-    SprayAudioPacingModel steady_spray;
-    for (int frame = 0; frame < 240; ++frame) {
-        steady_spray.update(frame * 1000.0 / 240.0, 42.0f);
-    }
-    CHECK(steady_spray.boundary_calls == 1);
     // UE3 Find preserves first Actor-identity match / absent=-1 semantics.
     // Require the exact native intrinsic, not another interpreted lookup loop.
     for (const auto expected : {
