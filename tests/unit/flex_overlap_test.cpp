@@ -25,14 +25,15 @@ T read(const std::byte* source) {
 }
 
 struct PullFixture {
-    static constexpr int capacity = 16;
+    int capacity;
     std::array<std::byte,P4ExtendedSolverBytes> solver{};
     std::array<std::byte,0x1E0> container{};
     std::array<std::vector<std::byte>,4> buffers;
     std::vector<int> active_ids;
     std::array<int,4> observed{};
 
-    explicit PullFixture(std::vector<int> ids) : active_ids(std::move(ids)) {
+    explicit PullFixture(std::vector<int> ids, int maximum = 16)
+        : capacity(maximum), active_ids(std::move(ids)) {
         write(container.data()+8,static_cast<void*>(solver.data()));
         write(container.data()+0x10,active_ids.data());
         write(solver.data()+0x1A0,capacity);
@@ -107,6 +108,15 @@ extern "C" int cuCtxPopCurrent_v2(void**) { return 0; }
 extern "C" int cuCtxSynchronize() { return 0; }
 void p4_install_presentation() {}
 void p4_release_presentation(void*) {}
+void p4_install_render_interop() {}
+void p4_render_generation(void*,std::uint64_t) {}
+int p4_render_snapshot(void*,void*,void*,std::uint64_t,int,int,
+                       const void*,const void*,bool& copy_enqueued) {
+    copy_enqueued=false;
+    return -1;
+}
+void p4_render_publish(void*,std::uint64_t,int) {}
+void p4_release_render_interop(void*) {}
 
 int main() {
     {
@@ -119,6 +129,32 @@ int main() {
         PullFixture fixture{{0,7,15}}; current=&fixture;
         p4_pull(fixture.container.data(),observe);
         CHECK((fixture.observed == std::array<int,4>{16,16,16,16}));
+        CHECK(fixture.restored());
+    }
+    {
+        constexpr int capacity = 26746;
+        std::vector<int> low_ids(512);
+        for(int index = 0; index < 512; ++index) low_ids[index] = index;
+        PullFixture fixture{std::move(low_ids),capacity}; current=&fixture;
+        p4_pull(fixture.container.data(),observe);
+        CHECK((fixture.observed == std::array<int,4>{512,512,512,512}));
+        CHECK(fixture.restored());
+        const auto optimized_bytes =
+            static_cast<long long>(fixture.observed[0]) * (48 + 44);
+        const auto full_bytes =
+            static_cast<long long>(fixture.capacity) * (48 + 48);
+        CHECK(optimized_bytes == 47104);
+        CHECK(full_bytes == 2567616);
+    }
+    {
+        constexpr int capacity = 26746;
+        std::vector<int> high_ids(512);
+        for(int index = 0; index < 511; ++index) high_ids[index] = index;
+        high_ids.back() = capacity-1;
+        PullFixture fixture{std::move(high_ids),capacity}; current=&fixture;
+        p4_pull(fixture.container.data(),observe);
+        CHECK((fixture.observed ==
+               std::array<int,4>{capacity,capacity,capacity,capacity}));
         CHECK(fixture.restored());
     }
     {

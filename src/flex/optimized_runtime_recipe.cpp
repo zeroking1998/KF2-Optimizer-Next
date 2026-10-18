@@ -452,7 +452,7 @@ constexpr BinaryDeltaRecipe core_recipe{
     "dde8343cf0226d25cd10610f41e2fc3e0c4795b8ecb98399668fe834aee340e5",
     1467904U, core_literals, core_operations};
 
-constexpr std::array<std::uint8_t, 1491> extension_literals{{
+constexpr std::array<std::uint8_t, 1508> extension_literals{{
     0x0b, 0xfc, 0x02, 0x00, 0x00, 0x5a, 0xe0, 0x04, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0xd0, 0x04, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x20, 0x04, 0x00, 0x50, 0x05, 0x00, 0x00,
     0x50, 0xa0, 0x04, 0x00, 0x78, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2e, 0x66,
@@ -547,8 +547,11 @@ constexpr std::array<std::uint8_t, 1491> extension_literals{{
     0x64, 0xd0, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7c, 0xd0, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0xd0, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x7c, 0xd0, 0x04,
+    0x8b, 0xde,
+    0x33, 0xc9, 0x90, 0xff, 0xcb, 0x90, 0x90, 0x90, 0x90,
+    0xff, 0xcb, 0x85, 0xdb, 0x7d, 0xee,
 }};
-constexpr std::array<BinaryDeltaOperation, 97> extension_operations{{
+constexpr std::array<BinaryDeltaOperation, 103> extension_operations{{
     {BinaryDeltaSource::original, 0U, 262U},
     {BinaryDeltaSource::literal, 0U, 1U},
     {BinaryDeltaSource::original, 263U, 22U},
@@ -583,7 +586,13 @@ constexpr std::array<BinaryDeltaOperation, 97> extension_operations{{
     {BinaryDeltaSource::literal, 161U, 6U},
     {BinaryDeltaSource::original, 60158U, 394U},
     {BinaryDeltaSource::literal, 167U, 6U},
-    {BinaryDeltaSource::original, 60558U, 11234U},
+    {BinaryDeltaSource::original, 60558U, 4620U},
+    {BinaryDeltaSource::literal, 1491U, 2U},
+    {BinaryDeltaSource::original, 65180U, 43U},
+    {BinaryDeltaSource::literal, 1493U, 9U},
+    {BinaryDeltaSource::original, 65232U, 12U},
+    {BinaryDeltaSource::literal, 1502U, 6U},
+    {BinaryDeltaSource::original, 65250U, 6542U},
     {BinaryDeltaSource::literal, 173U, 6U},
     {BinaryDeltaSource::original, 71798U, 127U},
     {BinaryDeltaSource::original, 71965U, 21U},
@@ -649,7 +658,7 @@ constexpr std::array<BinaryDeltaOperation, 97> extension_operations{{
 }};
 constexpr BinaryDeltaRecipe extension_recipe{
     "ca586d0fb5c85cbdea06b45e9f3e85354145520c5ecbc83036c77e759f4d20a0",
-    "5adddfbd8fdbb7f98413936cab6ecc9ef631bb39021144a277400c1a3987fc8a",
+    "cf5a98b007cac5dd3fd5e198ab373f152957b79ac5acc9e101378c329752c325",
     280576U, extension_literals, extension_operations};
 
 }  // namespace

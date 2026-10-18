@@ -4,5 +4,17 @@ EXPORTS
  cuCtxPushCurrent_v2
  cuCtxPopCurrent_v2
  cuCtxSynchronize
+ cuGraphicsD3D11RegisterResource
+ cuGraphicsMapResources
+ cuGraphicsResourceGetMappedPointer_v2
+ cuGraphicsUnmapResources
+ cuGraphicsUnregisterResource
+ cuModuleLoadDataEx
+ cuModuleGetFunction
+ cuModuleUnload
+ cuLaunchKernel
+ cuMemAlloc_v2
+ cuMemFree_v2
+ cuMemcpyHtoD_v2
 
 

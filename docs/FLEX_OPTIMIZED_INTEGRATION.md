@@ -1,7 +1,7 @@
 # Optimized original FleX integration
 
 Tracking: [issue #939](https://github.com/zeroking1998/KF2-Optimizer-Next/issues/939).
-Implementation baseline: main `07a853ac94979bf64ed39302a1e29195d603b640`.
+Implementation baseline: main `1db568139e5a8da2343a2b8c45873d5858455633`.
 
 KF2 Optimizer Next reconstructs the accepted optimized runtime locally from the
 user's exact stock FleX files. NVIDIA and game DLLs are not stored in the source
@@ -9,26 +9,37 @@ tree or portable package.
 
 ## Accepted runtime
 
-The integrated Core/Extension pair is the last private offline variant that
-completed the native checks and a visible-effect gameplay smoke test:
+The current Core/Extension pair derives from the last private offline variant
+that completed the native checks and a visible-effect gameplay smoke test:
 
 - Core: `DDE8343CF0226D25CD10610F41E2FC3E0C4795B8ECB98399668FE834AEE340E5`.
-- Extension: `5ADDDFBD8FDBB7F98413936CAB6ECC9EF631BB39021144A277400C1A3987FC8A`.
+- Extension: `CF5A98B007CAC5DD3FD5E198AB373F152957B79AC5ACC9E101378C329752C325`.
 
 It contains the established P4 buffer/transfer/collision work, the accepted P3
 fixed-time cadence with two native substeps and one constraint iteration, and
 rigid presentation interpolation. Fluid particles and normals remain canonical.
-The helper source is the same source used by that private variant and is built
-reproducibly as part of the project.
+The project helper additionally contains the exact-image DX11/CUDA render
+bridge described below. It builds reproducibly, but this newer helper and the
+current Extension still require fresh packaged gameplay validation.
+
+The Extension initializes its opaque particle free list so the unchanged
+last-in-first-out allocator assigns low contiguous IDs first. NVIDIA's API does
+not promise an allocation order, and the Extension maps each asset particle
+through the returned ID, so this changes neither particle identity nor visible
+simulation behavior. For favorable allocation histories it lets the existing
+highest-active-ID transfer boundary cover a small active prefix instead of
+almost the entire reserved capacity. A retained high ID still requires the
+full prefix; live-particle count alone does not determine transfer size.
 
 The earlier cumulative candidate (`EC0065DA...` / `1FDA92BF...`) remains useful
 historical evidence for its isolated optimizations, but it is not the runtime
 installed by this integration. Mixing either pair is rejected.
 
-The private gameplay smoke on 16 October 2026 loaded the accepted pair, showed
-Gib/fluid FleX effects and produced no new KFGame crash dump. It was not a
-controlled FPS comparison. The final packaged helper still requires one visual
-gameplay check before release promotion.
+The private gameplay smoke on 16 October 2026 loaded the predecessor Extension,
+showed Gib/fluid FleX effects and produced no new KFGame crash dump. It was not
+a controlled FPS comparison. The low-ID allocation update has CPU-level binary
+and allocator proof but still requires one visual packaged gameplay check before
+release promotion.
 
 ## Runtime boundary
 
@@ -61,6 +72,25 @@ from the solver; direct phase queries remain unchanged. Invalid or unfamiliar
 layouts retain the original full transfer.
 Necessary completion and error checks remain in place.
 
+For the exact supported KFGame image, an optional DX11/CUDA bridge snapshots
+canonical solver positions and normals on the GPU and packs the existing
+dynamic vertex buffer there instead of repeating KF2's per-vertex CPU gather
+and normal conversion. Mesh-local indices are composed once with the owning
+FleX instance's particle IDs. Attachments, unfamiliar layouts, missing or stale
+snapshots, unsupported mappings and every API error keep KF2's original upload.
+The bridge registers and caches only resources that pass exact identity and
+bounds checks, and releases them before the matching RHI resource or scene
+proxy is destroyed.
+
+For the explicitly modelled sparse path of 512 live particles in the observed
+26,746-slot container, low contiguous IDs reduce Push bytes by 98.0857%, Pull
+bytes by 98.2452%, and combined Push/Pull bytes by 98.1655% versus full-capacity
+copies. This is transfer-byte accounting, not a gameplay-FPS claim. The
+percentages cover host/device Push/Pull particle payload only. They exclude
+the render bridge's prefix-sized device-to-device snapshot, GPU vertex-buffer
+writes, one-time index upload, reserved snapshot memory and all other engine or
+driver work.
+
 ## Distribution and proof
 
 The deterministic recipes, project helper and transaction code are included in
@@ -83,7 +113,11 @@ Fresh local verification covers:
 - [x] ABI/exports, mixed or unsupported input, interrupted replacement,
       running-process rejection and exact restore tested.
 - [x] Portable package identity, update/recovery and Debug receipts verified.
-- [x] Private accepted pair exercised offline with visible FleX effects.
+- [x] Predecessor pair exercised offline with visible FleX effects.
+- [x] Current low-ID allocator, representative high-ID counterexample and exact
+      binary reconstruction verified on CPU.
+- [x] GPU vertex pack matched KF2's SSE result bit-for-bit for 65,549 indexed
+      finite and exceptional test vertices on the current RTX driver.
 - [ ] Final portable build exercised once offline with its freshly built helper.
 - [ ] Online behavior qualified separately before it is claimed as verified.
 

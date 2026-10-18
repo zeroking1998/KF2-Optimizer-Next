@@ -8,6 +8,7 @@ EXPORTS
  cudaEventDestroy
  cudaEventRecord_ptsz
  cudaEventSynchronize
+ cudaEventQuery
  cudaPeekAtLastError
  cudaMemcpy_ptds
  cudaMemcpyAsync_ptsz

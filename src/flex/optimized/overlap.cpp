@@ -1,5 +1,6 @@
 #include "overlap.hpp"
 #include "presentation.hpp"
+#include "render_interop.hpp"
 #if !defined(P4_CPU_MODEL)
 #include "kf2/flex/flex_build_identity.hpp"
 #endif
@@ -127,7 +128,8 @@ struct PullEnd {
     void* full;
     void* prefix;
 };
-bool active_pull_prefix(void* container, PullEnd (&ends)[4]) {
+bool active_pull_prefix(void* container, PullEnd (&ends)[4],
+                        std::size_t& prefix) {
     void* solver = field<void*>(container, 8);
     const int capacity = field<int>(solver, 0x1A0);
     const int active = field<int>(solver, 0x198);
@@ -139,7 +141,7 @@ bool active_pull_prefix(void* container, PullEnd (&ends)[4]) {
     // the same last-ID contract. A clean empty container needs no particle
     // data, but one inactive slot keeps all four calls and the synchronous
     // normal completion boundary intact. Pending births/changes stay full.
-    std::size_t prefix = 1;
+    prefix = 1;
     if(active) {
         if(!active_ids) return false;
         const int last = active_ids[active-1];
@@ -185,14 +187,22 @@ P4_API void p4_before(void* solver, const int* error) {
     if(s.depth) { drain(s); s.initialized = 2; return; }
     const bool eligible = field<unsigned>(solver,0x53C) == 0x80000002U && field<unsigned char>(solver,0x220) && native_ok(s);
     clear_ready(s); s.flags &= ~P4StepEligible;
-    if(eligible && !s.initialized) { p4_install_presentation(); initialize(s); }
+    if(eligible && !s.initialized) {
+        p4_install_presentation();
+        p4_install_render_interop();
+        initialize(s);
+    }
     if(!s.context) return; // Non-fluid scenes allocate no overlap resources.
     void* context{}; must(cuCtxGetCurrent(&context));
     if(context != s.context || GetCurrentThreadId() != s.thread) {
         drain(s); s.initialized = 2; // Unsupported issuing domain: no routing.
     }
     finish_copies(s); clear_ready(s);
-    if(++s.generation == 0) { drain(s); s.initialized = 2; s.flags=P4ComputePending; return; }
+    if(++s.generation == 0) {
+        p4_render_generation(solver, 0);
+        drain(s); s.initialized = 2; s.flags=P4ComputePending; return;
+    }
+    p4_render_generation(solver, s.generation);
     s.flags = P4ComputePending | ((eligible && s.initialized == 1) ? P4StepEligible : 0U);
     s.tail_generation = 0;
 }
@@ -212,6 +222,7 @@ P4_API void p4_invalidate(void* solver) {
     auto& s=state(solver);
     if(s.depth) p4_fail_closed();
     drain(s); // Before mutation/rebinding, never merely clear a token.
+    p4_render_generation(solver, 0);
 }
 P4_API int p4_copy(void* out, const void* in, std::size_t bytes, int kind, void* solver, unsigned asynchronous) {
     auto& s = state(solver);
@@ -246,15 +257,35 @@ P4_API int p4_copy(void* out, const void* in, std::size_t bytes, int kind, void*
 P4_API void p4_pull(void* container, P4Unary original) {
     void* solver = field<void*>(container,8); enter_scope(solver);
     state(solver).flags |= P4PullScope;
+    const auto generation = state(solver).generation;
+    int snapshot = -1;
     PullEnd ends[4]{};
+    std::size_t prefix{};
     const bool narrowed = state(solver).depth == 1 &&
-        active_pull_prefix(container,ends);
+        active_pull_prefix(container,ends,prefix);
     if(narrowed) for(const auto& end:ends) put(container,end.offset,end.prefix);
     __try { original(container); }
     __finally {
+        const bool abnormal = AbnormalTermination()!=0;
+        if(!abnormal) {
+            auto& s = state(solver);
+            void* context{};
+            bool copy_enqueued = false;
+            if(s.depth == 1 && scope_eligible(solver,s) &&
+               !cuCtxGetCurrent(&context) && context == s.context)
+                snapshot = p4_render_snapshot(
+                    solver, s.context, s.stream, generation,
+                    field<int>(solver,0x1A0),
+                    narrowed ? static_cast<int>(prefix) : field<int>(solver,0x1A0),
+                    field<void*>(solver,0), field<void*>(solver,0x48),
+                    copy_enqueued);
+            if(copy_enqueued) s.flags |= P4CopyPending;
+        }
         state(solver).flags &= ~P4PullScope;
         if(narrowed) for(const auto& end:ends) put(container,end.offset,end.full);
-        leave_scope(solver,AbnormalTermination()!=0);
+        leave_scope(solver,abnormal);
+        if(!abnormal && snapshot >= 0)
+            p4_render_publish(solver,generation,snapshot);
     }
 }
 P4_API void p4_density(void* solver, void* target, P4Density original) {
@@ -272,6 +303,7 @@ P4_API void p4_destroy_container(void* container, P4Unary original) {
 #endif
     put(solver,0x548,0U);put(solver,0x540,static_cast<void*>(nullptr));put(solver,0x54C,0U);
     put(solver,0x550,0U);put(solver,0x558,static_cast<void*>(nullptr));put(solver,0x53C,0U);
+    p4_release_render_interop(solver);
     p4_release_presentation(solver);
     original(container); // No state/buffer use after destruction.
 }
@@ -279,6 +311,7 @@ P4_API void p4_destroy_solver(void* solver, P4Unary original) {
     auto& s = state(solver);
     if(s.depth) p4_fail_closed();
     drain(s);
+    p4_release_render_interop(solver);
     if(s.context) {
         must(cuCtxPushCurrent_v2(s.context)); release_handles(s);
         void* popped{}; must(cuCtxPopCurrent_v2(&popped)); if(popped != s.context) p4_fail_closed();

@@ -117,6 +117,9 @@ if(MSVC)
         src/flex/optimized/overlap.hpp
         src/flex/optimized/presentation.cpp
         src/flex/optimized/presentation.hpp
+        src/flex/optimized/render_interop.cpp
+        src/flex/optimized/render_interop.hpp
+        src/flex/optimized/render_contract.hpp
         ${KF2_FLEX_OPTIMIZED_IMPORT_LIBRARIES})
     target_compile_definitions(KF2FlexOptimizedHelper PRIVATE
         P4_TIME_ACCUMULATOR)

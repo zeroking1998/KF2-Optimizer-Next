@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
     CHECK(extension.original_sha256 ==
         "ca586d0fb5c85cbdea06b45e9f3e85354145520c5ecbc83036c77e759f4d20a0");
     CHECK(extension.target_sha256 ==
-        "5adddfbd8fdbb7f98413936cab6ecc9ef631bb39021144a277400c1a3987fc8a");
+        "cf5a98b007cac5dd3fd5e198ab373f152957b79ac5acc9e101378c329752c325");
     CHECK(!core.operations.empty() && !core.literals.empty());
     CHECK(!extension.operations.empty() && !extension.literals.empty());
 
