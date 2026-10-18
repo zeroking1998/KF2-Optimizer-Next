@@ -89,10 +89,12 @@ from seven executions to one. A native error immediately returns subsequent
 payloads to the original stream, and the token is cleared on every normal,
 abnormal and readiness-invalidating exit.
 
-For the exact supported KFGame image, an optional DX11/CUDA bridge snapshots
-canonical solver positions and packs each solver normal once into KF2's exact
-32-bit vertex format on the GPU. The existing dynamic vertex buffer then reuses
-those packed normals instead of repeating KF2's per-resource conversion.
+For the exact supported KFGame image, an optional DX11/CUDA bridge builds one
+16-byte GPU snapshot record per required solver particle: the canonical XYZ
+position plus KF2's exact packed 32-bit normal. One kernel now reads both
+canonical inputs and writes the complete record, removing the predecessor's
+separate position copy. The existing dynamic vertex buffer gathers these
+records instead of repeating KF2's per-resource normal conversion.
 Mesh-local indices are composed once with the owning
 FleX instance's particle IDs. Attachments, unfamiliar layouts, missing or stale
 snapshots, unsupported mappings and every API error keep KF2's original upload.
@@ -100,7 +102,7 @@ The bridge registers and caches only resources that pass exact identity and
 bounds checks, and releases them before the matching RHI resource or scene
 proxy is destroyed. Snapshot readiness and source-buffer reuse are ordered with
 CUDA events between the solver and render streams. The normal path therefore
-does not append the device-to-device snapshot to KF2's host-waited readback
+does not append the packed snapshot to KF2's host-waited readback
 stream or add a CPU synchronization. API errors, an unexpected CUDA context
 and teardown still drain the relevant GPU work synchronously before any source
 or registered resource can be changed or released. If a render upload is already
@@ -125,7 +127,7 @@ For the explicitly modelled sparse path of 512 live particles in the observed
 bytes by 98.2452%, and combined Push/Pull bytes by 98.1655% versus full-capacity
 copies. This is transfer-byte accounting, not a gameplay-FPS claim. The
 percentages cover host/device Push/Pull particle payload only. They exclude
-the render bridge's render-bounded position and packed-normal snapshots, GPU
+the render bridge's render-bounded packed-vertex snapshots, GPU
 vertex-buffer writes, one-time index upload, reserved snapshot memory and all
 other engine or driver work.
 
