@@ -7458,10 +7458,6 @@ defaultproperties
     bAlwaysRelevant=false
     bHidden=true
     RemoteRole=ROLE_None
-    bAdaptiveCorpseDebugMarkers=false
-    bAdaptiveZedDebugMarkers=false
-    bDetailedRuntimeDiagnostics=false
     AdaptiveLivingEnemyPendingPressureLevel=-1
     AdaptiveLastPhysicsMutationWorldTime=-1.0
-    bAdaptiveRuntimeEnabled=true
 }

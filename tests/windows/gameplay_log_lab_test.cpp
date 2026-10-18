@@ -706,6 +706,19 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find("var globalconfig bool bAdaptiveRuntimeEnabled") !=
           std::string::npos);
+    const auto telemetry_defaults_start =
+        telemetry_source.find("defaultproperties");
+    CHECK(telemetry_defaults_start != std::string::npos);
+    const auto telemetry_defaults =
+        telemetry_source.substr(telemetry_defaults_start);
+    for (const auto ignored_config_default : {
+             "bAdaptiveCorpseDebugMarkers=",
+             "bAdaptiveZedDebugMarkers=",
+             "bDetailedRuntimeDiagnostics=",
+             "bAdaptiveRuntimeEnabled="}) {
+        CHECK(telemetry_defaults.find(ignored_config_default) ==
+              std::string::npos);
+    }
     CHECK(telemetry_source.find("function bool SetAdaptiveRuntimeEnabled") !=
           std::string::npos);
     CHECK(telemetry_source.find("function int WakeAdaptiveDistanceSleptCorpseBatch") !=
