@@ -1478,11 +1478,14 @@ function AdjustAdaptiveCorpseCapacity(
     {
         AdaptiveCorpseRuntimeLimit = NewLimit;
         AdaptiveLastCorpseCapacityRealTime = WorldInfo.RealTimeSeconds;
-        `log("KF2OPT_CORPSE_CAPACITY runtime_limit="$
-             AdaptiveCorpseRuntimeLimit$" selected_max="$AdaptiveCorpseTarget$
-             " pressure="$ConfirmedPressureLevel$" quality_steps="$
-             AttackScale$" pool="$
-             GoreManager.CorpsePool.Length);
+        if (bDetailedRuntimeDiagnostics)
+        {
+            `log("KF2OPT_CORPSE_CAPACITY runtime_limit="$
+                 AdaptiveCorpseRuntimeLimit$" selected_max="$AdaptiveCorpseTarget$
+                 " pressure="$ConfirmedPressureLevel$" quality_steps="$
+                 AttackScale$" pool="$
+                 GoreManager.CorpsePool.Length);
+        }
     }
 }
 
@@ -1530,7 +1533,8 @@ function bool StaggerCorpseCleanup()
         GoreManager.RemoveAndDeleteCorpse(SelectedIndex))
     {
         ++AdaptiveCorpsesRemoved;
-        if (AdaptiveCorpsesRemoved == 1 || AdaptiveCorpsesRemoved % 8 == 0)
+        if (bDetailedRuntimeDiagnostics &&
+            (AdaptiveCorpsesRemoved == 1 || AdaptiveCorpsesRemoved % 8 == 0))
         {
             `log("KF2OPT_CORPSE_STAGGER state=active removed="$
                  AdaptiveCorpsesRemoved$" remaining="$
@@ -1656,6 +1660,7 @@ function int FindFixedMinimumLivingVisualEntry(KFPawn_Monster Candidate)
 
 function bool RemoveFixedMinimumLivingVisualEntry(int Index, string Reason)
 {
+    local int LastIndex;
     local KFPawn_Monster Candidate;
 
     if (Index < 0 || Index >= FixedMinimumLivingVisualZeds.Length ||
@@ -1677,13 +1682,33 @@ function bool RemoveFixedMinimumLivingVisualEntry(int Index, string Reason)
     {
         return false;
     }
-    FixedMinimumLivingVisualZeds.Remove(Index, 1);
-    FixedMinimumLivingAppliedMinLods.Remove(Index, 1);
-    FixedMinimumLivingAppliedAnimDistances.Remove(Index, 1);
-    FixedMinimumLivingAppliedAnimRates.Remove(Index, 1);
-    FixedMinimumLivingOriginalTickAnimOffscreen.Remove(Index, 1);
-    FixedMinimumLivingOriginalUpdateSkelOffscreen.Remove(Index, 1);
-    FixedMinimumLivingOffscreenAnimReduced.Remove(Index, 1);
+    // Tracking order has no meaning. Move the last complete entry into the
+    // retired slot so a death burst cannot shift seven arrays repeatedly.
+    LastIndex = FixedMinimumLivingVisualZeds.Length - 1;
+    if (Index != LastIndex)
+    {
+        FixedMinimumLivingVisualZeds[Index] =
+            FixedMinimumLivingVisualZeds[LastIndex];
+        FixedMinimumLivingAppliedMinLods[Index] =
+            FixedMinimumLivingAppliedMinLods[LastIndex];
+        FixedMinimumLivingAppliedAnimDistances[Index] =
+            FixedMinimumLivingAppliedAnimDistances[LastIndex];
+        FixedMinimumLivingAppliedAnimRates[Index] =
+            FixedMinimumLivingAppliedAnimRates[LastIndex];
+        FixedMinimumLivingOriginalTickAnimOffscreen[Index] =
+            FixedMinimumLivingOriginalTickAnimOffscreen[LastIndex];
+        FixedMinimumLivingOriginalUpdateSkelOffscreen[Index] =
+            FixedMinimumLivingOriginalUpdateSkelOffscreen[LastIndex];
+        FixedMinimumLivingOffscreenAnimReduced[Index] =
+            FixedMinimumLivingOffscreenAnimReduced[LastIndex];
+    }
+    FixedMinimumLivingVisualZeds.Remove(LastIndex, 1);
+    FixedMinimumLivingAppliedMinLods.Remove(LastIndex, 1);
+    FixedMinimumLivingAppliedAnimDistances.Remove(LastIndex, 1);
+    FixedMinimumLivingAppliedAnimRates.Remove(LastIndex, 1);
+    FixedMinimumLivingOriginalTickAnimOffscreen.Remove(LastIndex, 1);
+    FixedMinimumLivingOriginalUpdateSkelOffscreen.Remove(LastIndex, 1);
+    FixedMinimumLivingOffscreenAnimReduced.Remove(LastIndex, 1);
     return true;
 }
 
@@ -1902,11 +1927,14 @@ function bool ApplyLivingEnemyMinimumVisuals()
                 continue;
             }
             ++FixedMinimumLivingVisualReductions;
-            `log("KF2OPT_LIVING_VISUAL state=fixed_minimum min_lod="$
-                 TargetMinLod$" anim_factor="$
-                 TargetAnimDistance$" anim_rate="$TargetAnimRate$
-                 FormatAdaptiveCorpseDistanceLogFields(Candidate)$
-                 " readback=verified");
+            if (bDetailedRuntimeDiagnostics)
+            {
+                `log("KF2OPT_LIVING_VISUAL state=fixed_minimum min_lod="$
+                     TargetMinLod$" anim_factor="$
+                     TargetAnimDistance$" anim_rate="$TargetAnimRate$
+                     FormatAdaptiveCorpseDistanceLogFields(Candidate)$
+                     " readback=verified");
+            }
         }
         bOffscreenChanged = false;
         if (!FixedMinimumLivingOffscreenAnimReduced[EntryIndex] &&
@@ -2427,11 +2455,14 @@ function PruneFixedMinimumCorpseLodEntries()
             // Preserve the entry as an unowned tombstone. A later reapply can
             // now identify the same actor, explain the native reset, and take
             // a fresh restore snapshot without overwriting the new value.
-            `log("KF2OPT_CORPSE_LOD state=native_reset previous_applied="$
-                 FixedMinimumCorpseLodAppliedMinModels[Index]$" observed_lod="$
-                 Candidate.Mesh.MinLodModel$" corpse_id="$
-                 GetAdaptiveCorpseActionId(Candidate)$
-                 " readback=verified");
+            if (bDetailedRuntimeDiagnostics)
+            {
+                `log("KF2OPT_CORPSE_LOD state=native_reset previous_applied="$
+                     FixedMinimumCorpseLodAppliedMinModels[Index]$
+                     " observed_lod="$Candidate.Mesh.MinLodModel$" corpse_id="$
+                     GetAdaptiveCorpseActionId(Candidate)$
+                     " readback=verified");
+            }
             FixedMinimumCorpseLodAppliedMinModels[Index] = -1;
         }
         FixedMinimumCorpseLodPruneCursor =
@@ -4550,14 +4581,16 @@ function bool ApplyOneFixedMinimumCorpseLod(KFGoreManager GoreManager)
     }
     ++FixedMinimumCorpseLodReductions;
     RegisterAdaptiveCorpseDebugMarker(Candidate, "LOD_"$TargetMinLod);
-    `log("KF2OPT_CORPSE_LOD state=fixed_minimum reason="$ApplyReason$
-         " previous_lod="$PreviousMinLod$
-         " target_lod="$
-         TargetMinLod$" reduced="$FixedMinimumCorpseLodReductions$" tracked="$
-         FixedMinimumCorpseLodCorpses.Length$" corpse_id="$
-         GetAdaptiveCorpseActionId(Candidate)$
-         FormatAdaptiveCorpseDistanceLogFields(Candidate)$
-         " readback=verified");
+    if (bDetailedRuntimeDiagnostics)
+    {
+        `log("KF2OPT_CORPSE_LOD state=fixed_minimum reason="$ApplyReason$
+             " previous_lod="$PreviousMinLod$" target_lod="$TargetMinLod$
+             " reduced="$FixedMinimumCorpseLodReductions$" tracked="$
+             FixedMinimumCorpseLodCorpses.Length$" corpse_id="$
+             GetAdaptiveCorpseActionId(Candidate)$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
+             " readback=verified");
+    }
     return true;
 }
 
@@ -5710,8 +5743,10 @@ function CountParticlePool(
         }
         ++ComponentCount;
         ParticleCount += ParticleComponent.NumActiveParticles;
-        InspectParticleComponent(
-            ParticleComponent, FlexComponentCount,
+        // Template and LOD metadata does not change per component instance.
+        // Reuse its snapshot while live counts and bounds stay sampled here.
+        InspectWorldEmitterParticleComponentCached(
+            ParticleComponent, -1, FlexComponentCount,
             FlexFluidComponentCount, FlexNonFluidComponentCount,
             FlexMixedComponentCount, NonFlexComponentCount,
             UnclassifiedComponentCount,
