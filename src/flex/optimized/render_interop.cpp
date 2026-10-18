@@ -94,14 +94,9 @@ constexpr char PackVerticesPtx[] = R"ptx(
     add.s64 %rd5, %rd2, %rd3;
     add.s64 %rd6, %rd1, %rd3;
 
-    ld.global.u32 %r11, [%rd5];
-    ld.global.u32 %r12, [%rd5+4];
-    ld.global.u32 %r13, [%rd5+8];
-    st.global.u32 [%rd6], %r11;
-    st.global.u32 [%rd6+4], %r12;
-    st.global.u32 [%rd6+8], %r13;
+    ld.global.v4.u32 {%r11, %r12, %r13, %r14}, [%rd5];
+    ld.global.v4.u32 {%r10, %r14, %r15, %r6}, [%rd4];
 
-    ld.global.u32 %r10, [%rd4];
     xor.b32 %r10, %r10, 0x80000000;
     mov.b32 %f4, %r10;
     add.rn.f32 %f4, %f4, 0f3F800000;
@@ -114,8 +109,7 @@ constexpr char PackVerticesPtx[] = R"ptx(
     or.pred %p2, %p2, %p3;
     selp.s32 %r7, 0, %r7, %p2;
 
-    ld.global.u32 %r10, [%rd4+4];
-    xor.b32 %r10, %r10, 0x80000000;
+    xor.b32 %r10, %r14, 0x80000000;
     mov.b32 %f5, %r10;
     add.rn.f32 %f5, %f5, 0f3F800000;
     mul.rn.f32 %f5, %f5, 0f42FF0000;
@@ -129,8 +123,7 @@ constexpr char PackVerticesPtx[] = R"ptx(
     shl.b32 %r8, %r8, 8;
     or.b32 %r7, %r7, %r8;
 
-    ld.global.u32 %r10, [%rd4+8];
-    xor.b32 %r10, %r10, 0x80000000;
+    xor.b32 %r10, %r15, 0x80000000;
     mov.b32 %f6, %r10;
     add.rn.f32 %f6, %f6, 0f3F800000;
     mul.rn.f32 %f6, %f6, 0f42FF0000;
@@ -144,7 +137,7 @@ constexpr char PackVerticesPtx[] = R"ptx(
     shl.b32 %r9, %r9, 16;
     or.b32 %r7, %r7, %r9;
     or.b32 %r7, %r7, 0xff000000;
-    st.global.u32 [%rd6+12], %r7;
+    st.global.v4.u32 [%rd6], {%r11, %r12, %r13, %r7};
 normals_done:
     ret;
 }
@@ -178,14 +171,8 @@ normals_done:
     mul.wide.s32 %rd11, %r5, 16;
     add.s64 %rd12, %rd1, %rd11;
 
-    ld.global.u32 %r10, [%rd8];
-    ld.global.u32 %r11, [%rd8+4];
-    ld.global.u32 %r12, [%rd8+8];
-    ld.global.u32 %r7, [%rd8+12];
-    st.global.u32 [%rd12], %r10;
-    st.global.u32 [%rd12+4], %r11;
-    st.global.u32 [%rd12+8], %r12;
-    st.global.u32 [%rd12+12], %r7;
+    ld.global.v4.u32 {%r10, %r11, %r12, %r7}, [%rd8];
+    st.global.v4.u32 [%rd12], {%r10, %r11, %r12, %r7};
 done:
     ret;
 }
@@ -196,6 +183,7 @@ struct SnapshotSlot {
     void* completion{};
     std::atomic<bool> busy{};
     std::atomic<int> prefix{};
+    std::atomic<std::uint64_t> waited_generation{};
 };
 
 struct ResourceState {
@@ -311,6 +299,7 @@ void destroy_solver_contents(SolverRenderState& state) {
         slot.completion = nullptr;
         slot.busy.store(false, std::memory_order_relaxed);
         slot.prefix.store(0, std::memory_order_relaxed);
+        slot.waited_generation.store(0, std::memory_order_relaxed);
     }
 }
 
@@ -560,9 +549,15 @@ extern "C" void p4_render_upload(void* resource, const void* positions,
         bool mapped = false;
         int error = cuCtxPushCurrent_v2(state->context);
         const bool pushed = !error;
-        if(pushed)
+        // One wait orders every later upload in this render stream.
+        if(pushed && slot.waited_generation.load(std::memory_order_acquire) !=
+                         published_generation) {
             error = cudaStreamWaitEvent_ptsz(
                 state->render_stream, slot.completion, 0U);
+            if(!error)
+                slot.waited_generation.store(published_generation,
+                                             std::memory_order_release);
+        }
         if(!error) {
             error = cuGraphicsMapResources(1U, &cached->graphics,
                                            state->render_stream);
@@ -809,6 +804,7 @@ int p4_render_snapshot(void* solver, void* context, std::uint64_t generation,
     auto count_argument = static_cast<unsigned>(snapshot_prefix);
     void* arguments[]{&output_argument, &position_argument, &normal_argument,
                       &count_argument};
+    slot.waited_generation.store(0, std::memory_order_release);
     const auto blocks = (count_argument + ThreadsPerBlock - 1U) /
                         ThreadsPerBlock;
     int error = cuLaunchKernel(state->pack_snapshot, blocks, 1U, 1U,

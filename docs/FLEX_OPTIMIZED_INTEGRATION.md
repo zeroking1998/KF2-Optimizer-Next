@@ -94,7 +94,9 @@ For the exact supported KFGame image, an optional DX11/CUDA bridge builds one
 position plus KF2's exact packed 32-bit normal. One kernel now reads both
 canonical inputs and writes the complete record, removing the predecessor's
 separate position copy. The existing dynamic vertex buffer gathers these
-records instead of repeating KF2's per-resource normal conversion.
+records instead of repeating KF2's per-resource normal conversion. Both stages
+move each aligned 16-byte record with one 128-bit GPU load/store pair instead
+of scalar component traffic.
 Mesh-local indices are composed once with the owning
 FleX instance's particle IDs. Attachments, unfamiliar layouts, missing or stale
 snapshots, unsupported mappings and every API error keep KF2's original upload.
@@ -110,7 +112,9 @@ using a snapshot slot, the non-blocking handoff keeps KF2's original upload for
 that generation instead of stalling the solver thread or reusing the slot. The
 snapshot covers only the highest particle ID required by a registered render
 resource, and optional registration, publication and upload lock handoffs never
-wait behind concurrent bridge work.
+wait behind concurrent bridge work. The first consumer queues the snapshot
+dependency once per slot and generation; later resources are already ordered
+by the same render stream and do not submit the identical wait again.
 
 Rigid presentation keeps two owned history buffers. Their pointers rotate
 instead of copying the old current transforms into the previous buffers. A
