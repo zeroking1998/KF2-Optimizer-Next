@@ -25,6 +25,10 @@ $sourceNames = @(
     'KF2OptimizerOnlineGraphicsControlConnection.uc'
     'KF2OptimizerAdaptiveGraphics.uc'
     'KF2OptimizerAdaptiveGraphicsState.uc'
+    'KF2OptimizerSprayActorFlame.uc'
+    'KF2OptimizerSprayActorHeal.uc'
+    'KF2OptimizerSprayActorArcGenerator.uc'
+    'KF2OptimizerSprayActorHrgVampire.uc'
 )
 
 $manifestLines = foreach ($sourceName in $sourceNames) {

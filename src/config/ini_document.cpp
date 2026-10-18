@@ -151,6 +151,21 @@ std::optional<std::wstring> IniDocument::find(std::wstring_view section,
         match->value_start, match->value_end - match->value_start));
 }
 
+std::vector<std::wstring> IniDocument::find_all(
+    std::wstring_view section, std::wstring_view key) const {
+    const auto wanted_section = normalized(section);
+    const auto wanted_key = normalized(key);
+    std::vector<std::wstring> values;
+    for (const auto& line : lines_) {
+        if (line.assignment && line.section == wanted_section &&
+            line.key == wanted_key) {
+            values.push_back(utf8_to_wide(std::string_view{line.bytes}.substr(
+                line.value_start, line.value_end - line.value_start)));
+        }
+    }
+    return values;
+}
+
 ReplaceResult IniDocument::replace(std::wstring_view section,
                                    std::wstring_view key,
                                    std::wstring_view value) {
