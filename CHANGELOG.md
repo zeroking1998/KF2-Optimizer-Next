@@ -8,6 +8,12 @@ are visible immediately.
 
 ### What's new
 
+- Decouple flame, healing, Arc Generator and HRG Vampire spray-rotation audio
+  from render FPS. The stock spray simulation and visuals still tick normally,
+  while the Wwise RTPC is published at most 30 times per real-time second with
+  immediate start and stop values; unchanged rotation values are not
+  republished.
+
 - Run user-enabled NVIDIA FleX through the verified optimized Core, Extension
   and project helper as one protected session. Exact stock DLLs are reconstructed
   locally, the observation relay now forwards the game's requested substeps

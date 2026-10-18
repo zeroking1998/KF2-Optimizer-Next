@@ -109,6 +109,14 @@ $adaptiveGraphicsSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerAdaptiveGraphics.uc'
 $adaptiveGraphicsStateSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerAdaptiveGraphicsState.uc'
+$sprayFlameSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerSprayActorFlame.uc'
+$sprayHealSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerSprayActorHeal.uc'
+$sprayArcSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerSprayActorArcGenerator.uc'
+$sprayVampireSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerSprayActorHrgVampire.uc'
 
 foreach ($required in @($editorPath, $configPath,
                          $probeSource,
@@ -121,7 +129,9 @@ foreach ($required in @($editorPath, $configPath,
                          $adaptiveConnectionSource,
                          $onlineGraphicsConnectionSource,
                          $adaptiveGraphicsSource,
-                         $adaptiveGraphicsStateSource)) {
+                         $adaptiveGraphicsStateSource,
+                         $sprayFlameSource, $sprayHealSource,
+                         $sprayArcSource, $sprayVampireSource)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Required KF2 telemetry build input is missing: $required"
     }
@@ -209,6 +219,14 @@ try {
         (Join-Path $classesRoot 'KF2OptimizerAdaptiveControlConnection.uc')
     Copy-Item -LiteralPath $onlineGraphicsConnectionSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerOnlineGraphicsControlConnection.uc')
+    Copy-Item -LiteralPath $sprayFlameSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerSprayActorFlame.uc')
+    Copy-Item -LiteralPath $sprayHealSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerSprayActorHeal.uc')
+    Copy-Item -LiteralPath $sprayArcSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerSprayActorArcGenerator.uc')
+    Copy-Item -LiteralPath $sprayVampireSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerSprayActorHrgVampire.uc')
     # KFEditor uses source timestamps for its incremental make decision. Touch
     # only the disposable staging copies so a missing output is really rebuilt.
     # Copying the bootstrap package can give it the current timestamp on some

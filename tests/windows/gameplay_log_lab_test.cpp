@@ -11,6 +11,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "kf2/game/gameplay_log_lab.hpp"
@@ -616,6 +617,21 @@ int main() {
         read_bytes(KF2_FIRE_AFFLICTION_SOURCE));
     const auto weapon_fallback_source = normalize_newlines(
         read_bytes(KF2_WEAPON_FALLBACK_SOURCE));
+    struct SpraySource {
+        std::string wrapper_class;
+        std::string stock_class;
+        std::string source;
+    };
+    const std::array<SpraySource, 4> spray_sources{{
+        {"KF2OptimizerSprayActorFlame", "SprayActor_Flame",
+         normalize_newlines(read_bytes(KF2_SPRAY_FLAME_SOURCE))},
+        {"KF2OptimizerSprayActorHeal", "SprayActor_Heal",
+         normalize_newlines(read_bytes(KF2_SPRAY_HEAL_SOURCE))},
+        {"KF2OptimizerSprayActorArcGenerator", "KFSprayActor_ArcGenerator",
+         normalize_newlines(read_bytes(KF2_SPRAY_ARC_SOURCE))},
+        {"KF2OptimizerSprayActorHrgVampire", "KFSprayActor_HRG_Vampire",
+         normalize_newlines(read_bytes(KF2_SPRAY_VAMPIRE_SOURCE))},
+    }};
     const auto online_context_source = normalize_newlines(
         read_bytes(KF2_ONLINE_CONTEXT_INTERACTION_SOURCE));
     const auto graphics_viewport_source = normalize_newlines(
@@ -623,6 +639,18 @@ int main() {
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto online_corpse_controller_source = normalize_newlines(
         read_bytes(KF2_ONLINE_CORPSE_CONTROLLER_SOURCE));
+    for (const auto& [wrapper_class, stock_class, source] : spray_sources) {
+        const auto expected =
+            "class " + wrapper_class + " extends " + stock_class + ";\n\n"
+            "simulated event Tick(float DeltaTime)\n"
+            "{\n"
+            "    super(KFSprayActor).Tick(DeltaTime);\n"
+            "}\n";
+        CHECK(source == expected);
+        CHECK(source.find("SetWeaponComponentRTPCValue") == std::string::npos);
+        CHECK(source.find("FlamethrowerRotation") == std::string::npos);
+        CHECK(source.find("RotationAudio") == std::string::npos);
+    }
     // UE3 Find preserves first Actor-identity match / absent=-1 semantics.
     // Require the exact native intrinsic, not another interpreted lookup loop.
     for (const auto expected : {
@@ -5293,6 +5321,8 @@ int main() {
         "\r\n[Core.System]\r\n"
         "ScriptPaths=..\\..\\KFGame\\Script\r\n"
         "\r\n[Engine.Engine]\r\n"
+        "+ActiveClassRedirects=(OldClassName=\"Example.Old\","
+        "NewClassName=\"Example.New\",InstanceOnly=true)\r\n"
         "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n"
         "\r\n[Engine.GameEngine]\r\n"
         "ServerActors=IpDrv.WebServer\r\n"
@@ -5323,6 +5353,17 @@ int main() {
         "GameViewportClientClassName=KF2OptimizerTelemetry."
         "KF2OptimizerGraphicsViewport\r\n") !=
           std::string::npos);
+    for (const auto redirect : {
+             "(OldClassName=\"SprayActor_Flame\",NewClassName=\"KF2OptimizerTelemetry.KF2OptimizerSprayActorFlame\",InstanceOnly=true)",
+             "(OldClassName=\"SprayActor_Heal\",NewClassName=\"KF2OptimizerTelemetry.KF2OptimizerSprayActorHeal\",InstanceOnly=true)",
+             "(OldClassName=\"KFSprayActor_ArcGenerator\",NewClassName=\"KF2OptimizerTelemetry.KF2OptimizerSprayActorArcGenerator\",InstanceOnly=true)",
+             "(OldClassName=\"KFSprayActor_HRG_Vampire\",NewClassName=\"KF2OptimizerTelemetry.KF2OptimizerSprayActorHrgVampire\",InstanceOnly=true)"}) {
+        CHECK(changed_engine.find(
+            "+ActiveClassRedirects=" + std::string{redirect} + "\r\n") !=
+              std::string::npos);
+    }
+    CHECK(count_occurrences(changed_engine,
+        "+ActiveClassRedirects=(OldClassName=\"") == 5);
     CHECK(changed_engine.find(
         "LocalOptions=?Mutator=KF2OptimizerTelemetry."
         "KF2OptimizerTelemetryMutator\r\n") != std::string::npos);
@@ -5461,11 +5502,52 @@ int main() {
     CHECK(cleaned_engine.find("[KF2OptimizerTelemetry.") ==
           std::string::npos);
     CHECK(cleaned_engine.find("AdaptiveControlToken=") == std::string::npos);
+    CHECK(cleaned_engine.find("KF2OptimizerSprayActor") == std::string::npos);
+    CHECK(cleaned_engine.find(
+        "+ActiveClassRedirects=(OldClassName=\"Example.Old\","
+        "NewClassName=\"Example.New\",InstanceOnly=true)\r\n") !=
+          std::string::npos);
     CHECK(read_bytes(game_ini) == original);
     const auto already_clean =
         kf2::game::cleanup_stale_offline_gameplay_configuration(root, false);
     CHECK(already_clean.has_value());
     CHECK(!already_clean.value());
+
+    std::string conflicting_redirect_engine{original_engine};
+    const auto redirect_insert = conflicting_redirect_engine.find(
+        "GameViewportClientClassName=");
+    CHECK(redirect_insert != std::string::npos);
+    conflicting_redirect_engine.insert(
+        redirect_insert,
+        "+ActiveClassRedirects=(OldClassName=\"SprayActor_Flame\","
+        "NewClassName=\"Example.CustomSpray\",InstanceOnly=true)\r\n");
+    write_bytes(engine_ini, conflicting_redirect_engine);
+    CHECK(!kf2::game::enable_offline_gameplay_logging(root).has_value());
+    CHECK(read_bytes(engine_ini) == conflicting_redirect_engine);
+
+    std::string duplicate_redirect_engine{original_engine};
+    const auto duplicate_insert = duplicate_redirect_engine.find(
+        "GameViewportClientClassName=");
+    CHECK(duplicate_insert != std::string::npos);
+    constexpr std::string_view duplicate_redirect =
+        "+ActiveClassRedirects=(OldClassName=\"SprayActor_Flame\","
+        "NewClassName=\"KF2OptimizerTelemetry.KF2OptimizerSprayActorFlame\","
+        "InstanceOnly=true)\r\n";
+    duplicate_redirect_engine.insert(duplicate_insert, duplicate_redirect);
+    duplicate_redirect_engine.insert(duplicate_insert, duplicate_redirect);
+    write_bytes(engine_ini, duplicate_redirect_engine);
+    CHECK(!kf2::game::enable_offline_gameplay_logging(root).has_value());
+    CHECK(read_bytes(engine_ini) == duplicate_redirect_engine);
+
+    constexpr std::string_view duplicate_native_engine_sections =
+        "[Engine.Engine]\r\nbUseTextureStreaming=True\r\n"
+        "[Engine.Engine]\r\nbCheckParticleRenderSize=True\r\n";
+    write_bytes(engine_ini, duplicate_native_engine_sections);
+    const auto untouched_duplicate_sections =
+        kf2::game::cleanup_stale_offline_gameplay_configuration(root, false);
+    CHECK(untouched_duplicate_sections.has_value());
+    CHECK(!untouched_duplicate_sections.value());
+    CHECK(read_bytes(engine_ini) == duplicate_native_engine_sections);
 
     constexpr std::string_view unowned_game =
         "[KFGameContent.KFGameInfo_Survival]\r\n"
