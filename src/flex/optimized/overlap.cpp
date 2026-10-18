@@ -1,5 +1,6 @@
 #include "overlap.hpp"
 #include "presentation.hpp"
+#include "render_interop.hpp"
 #if !defined(P4_CPU_MODEL)
 #include "kf2/flex/flex_build_identity.hpp"
 #endif
@@ -42,7 +43,10 @@ template<class T> void put(void* solver, std::size_t offset, T value) {
 P4State& state(void* solver) { return *reinterpret_cast<P4State*>(static_cast<char*>(solver)+P4StateOffset); }
 void must(int error) { if(error) p4_fail_closed(); }
 bool native_ok(const P4State& s) { return s.native_error && !*s.native_error; }
-void clear_ready(P4State& s) { s.flags &= ~P4Ready; s.ready_generation = 0; }
+void clear_ready(P4State& s) {
+    s.flags &= ~(P4Ready | P4PullEligible);
+    s.ready_generation = 0;
+}
 
 void finish_copies(P4State& s) {
     if(s.flags & P4CopyPending) { must(cudaStreamSynchronize_ptsz(s.stream)); s.flags &= ~P4CopyPending; }
@@ -113,6 +117,12 @@ bool scope_eligible(void* solver, const P4State& s) {
            (s.flags & P4Ready) && s.ready_generation == s.generation &&
            field<unsigned>(solver, 0x53C) == 0x80000002U;
 }
+bool pull_eligible(const P4State& s) {
+    return s.initialized == 1 && native_ok(s) &&
+           (s.flags & (P4Ready | P4PullEligible)) ==
+               (P4Ready | P4PullEligible) &&
+           s.ready_generation == s.generation;
+}
 bool supported(void* solver, const void* in, std::size_t bytes) {
     constexpr std::size_t source[] = {0,0x10,0x20,0x30,0x48,0x128,0x130};
     constexpr unsigned stride[] = {16,12,4,4,16,36,12};
@@ -121,6 +131,47 @@ bool supported(void* solver, const void* in, std::size_t bytes) {
         return count > 0 && bytes && bytes <= static_cast<std::size_t>(count)*stride[i] && bytes%stride[i] == 0;
     }
     return false;
+}
+struct PullEnd {
+    std::size_t offset;
+    void* full;
+    void* prefix;
+};
+bool active_pull_prefix(void* container, PullEnd (&ends)[4],
+                        std::size_t& prefix) {
+    void* solver = field<void*>(container, 8);
+    const int capacity = field<int>(solver, 0x1A0);
+    const int active = field<int>(solver, 0x198);
+    const int* active_ids = field<int*>(container, 0x10);
+    if(capacity <= 0 || capacity > 0x1000000 || active < 0 ||
+       active > capacity) return false;
+
+    // The extension keeps active IDs sorted; its accepted Push fast path uses
+    // the same last-ID contract. A clean empty container needs no particle
+    // data, but one inactive slot keeps all four calls and the synchronous
+    // normal completion boundary intact. Pending births/changes stay full.
+    prefix = 1;
+    if(active) {
+        if(!active_ids) return false;
+        const int last = active_ids[active-1];
+        if(last < 0 || last >= capacity || last == capacity-1) return false;
+        prefix = static_cast<std::size_t>(last)+1;
+    } else if(field<unsigned short>(container,0x1D8)) return false;
+    constexpr std::size_t begin_offsets[] = {0x58,0x70,0x88,0xA0};
+    constexpr std::size_t end_offsets[] = {0x60,0x78,0x90,0xA8};
+    constexpr std::size_t strides[] = {16,12,4,16};
+    for(unsigned i=0;i<4;++i) {
+        auto* begin = field<unsigned char*>(container,begin_offsets[i]);
+        auto* end = field<unsigned char*>(container,end_offsets[i]);
+        const auto begin_address = reinterpret_cast<std::uintptr_t>(begin);
+        const auto end_address = reinterpret_cast<std::uintptr_t>(end);
+        if(!begin_address || end_address < begin_address ||
+           end_address-begin_address !=
+               static_cast<std::size_t>(capacity)*strides[i]) return false;
+        ends[i] = {end_offsets[i],end,reinterpret_cast<void*>(
+            begin_address+prefix*strides[i])};
+    }
+    return true;
 }
 void enter_scope(void* solver) {
     auto& s = state(solver);
@@ -145,14 +196,22 @@ P4_API void p4_before(void* solver, const int* error) {
     if(s.depth) { drain(s); s.initialized = 2; return; }
     const bool eligible = field<unsigned>(solver,0x53C) == 0x80000002U && field<unsigned char>(solver,0x220) && native_ok(s);
     clear_ready(s); s.flags &= ~P4StepEligible;
-    if(eligible && !s.initialized) { p4_install_presentation(); initialize(s); }
+    if(eligible && !s.initialized) {
+        p4_install_presentation();
+        p4_install_render_interop();
+        initialize(s);
+    }
     if(!s.context) return; // Non-fluid scenes allocate no overlap resources.
     void* context{}; must(cuCtxGetCurrent(&context));
     if(context != s.context || GetCurrentThreadId() != s.thread) {
         drain(s); s.initialized = 2; // Unsupported issuing domain: no routing.
     }
     finish_copies(s); clear_ready(s);
-    if(++s.generation == 0) { drain(s); s.initialized = 2; s.flags=P4ComputePending; return; }
+    if(++s.generation == 0) {
+        p4_render_generation(solver, 0);
+        drain(s); s.initialized = 2; s.flags=P4ComputePending; return;
+    }
+    p4_render_generation(solver, s.generation);
     s.flags = P4ComputePending | ((eligible && s.initialized == 1) ? P4StepEligible : 0U);
     s.tail_generation = 0;
 }
@@ -172,15 +231,28 @@ P4_API void p4_invalidate(void* solver) {
     auto& s=state(solver);
     if(s.depth) p4_fail_closed();
     drain(s); // Before mutation/rebinding, never merely clear a token.
+    p4_render_generation(solver, 0);
 }
 P4_API int p4_copy(void* out, const void* in, std::size_t bytes, int kind, void* solver, unsigned asynchronous) {
     auto& s = state(solver);
     void* context{};
-    if(!s.depth || !scope_eligible(solver,s) || kind != 2 || !out || !supported(solver,in,bytes)) {
+    if(!s.depth || kind != 2 || !out || !supported(solver,in,bytes)) {
         if(s.depth) finish_copies(s);
         return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);
     }
-    if(cuCtxGetCurrent(&context) || context != s.context) {
+    // Phase IDs are immutable solver inputs. Pull targets the same host vector
+    // that Push supplied, so copying it back cannot change the result.
+    // Keep direct API reads and every non-Pull copy on the original path.
+    if((s.flags & P4PullScope) && asynchronous &&
+       in == field<void*>(solver,0x20)) return 0;
+    const bool eligible = (s.flags & P4PullScope) ?
+        pull_eligible(s) : scope_eligible(solver,s);
+    if(!eligible) {
+        finish_copies(s);
+        return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);
+    }
+    if(!(s.flags & P4PullContextStable) &&
+       (cuCtxGetCurrent(&context) || context != s.context)) {
         drain(s); s.initialized = 2;
         return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);
     }
@@ -196,8 +268,45 @@ P4_API int p4_copy(void* out, const void* in, std::size_t bytes, int kind, void*
 }
 P4_API void p4_pull(void* container, P4Unary original) {
     void* solver = field<void*>(container,8); enter_scope(solver);
+    auto& pull_state = state(solver);
+    pull_state.flags = (pull_state.flags | P4PullScope) &
+                       ~(P4PullContextStable | P4PullEligible);
+    const bool eligible = pull_state.depth == 1 &&
+                          scope_eligible(solver,pull_state);
+    if(eligible) pull_state.flags |= P4PullEligible;
+    void* pull_context{};
+    if(eligible &&
+       !cuCtxGetCurrent(&pull_context) && pull_context == pull_state.context)
+        pull_state.flags |= P4PullContextStable;
+    const auto generation = pull_state.generation;
+    int snapshot = -1;
+    PullEnd ends[4]{};
+    std::size_t prefix{};
+    const bool narrowed = state(solver).depth == 1 &&
+        active_pull_prefix(container,ends,prefix);
+    if(narrowed) for(const auto& end:ends) put(container,end.offset,end.prefix);
     __try { original(container); }
-    __finally { leave_scope(solver,AbnormalTermination()!=0); }
+    __finally {
+        const bool abnormal = AbnormalTermination()!=0;
+        if(!abnormal) {
+            auto& s = state(solver);
+            void* context{};
+            if(s.depth == 1 && pull_eligible(s) &&
+               ((s.flags & P4PullContextStable) ||
+                (!cuCtxGetCurrent(&context) && context == s.context)))
+                snapshot = p4_render_snapshot(
+                    solver, s.context, generation,
+                    field<int>(solver,0x1A0),
+                    narrowed ? static_cast<int>(prefix) : field<int>(solver,0x1A0),
+                    field<void*>(solver,0), field<void*>(solver,0x48));
+        }
+        state(solver).flags &= ~(P4PullScope | P4PullContextStable |
+                                 P4PullEligible);
+        if(narrowed) for(const auto& end:ends) put(container,end.offset,end.full);
+        leave_scope(solver,abnormal);
+        if(!abnormal && snapshot >= 0)
+            p4_render_publish(solver,generation,snapshot);
+    }
 }
 P4_API void p4_density(void* solver, void* target, P4Density original) {
     enter_scope(solver);
@@ -214,6 +323,7 @@ P4_API void p4_destroy_container(void* container, P4Unary original) {
 #endif
     put(solver,0x548,0U);put(solver,0x540,static_cast<void*>(nullptr));put(solver,0x54C,0U);
     put(solver,0x550,0U);put(solver,0x558,static_cast<void*>(nullptr));put(solver,0x53C,0U);
+    p4_release_render_interop(solver);
     p4_release_presentation(solver);
     original(container); // No state/buffer use after destruction.
 }
@@ -221,6 +331,7 @@ P4_API void p4_destroy_solver(void* solver, P4Unary original) {
     auto& s = state(solver);
     if(s.depth) p4_fail_closed();
     drain(s);
+    p4_release_render_interop(solver);
     if(s.context) {
         must(cuCtxPushCurrent_v2(s.context)); release_handles(s);
         void* popped{}; must(cuCtxPopCurrent_v2(&popped)); if(popped != s.context) p4_fail_closed();

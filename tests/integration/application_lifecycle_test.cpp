@@ -678,14 +678,9 @@ std::string utf8(std::wstring_view value) {
 
 bool write_complete_config_catalog(const std::filesystem::path& root) {
     using namespace kf2::config;
-    std::map<std::filesystem::path, std::string> files;
+    std::map<std::filesystem::path, std::map<std::wstring, std::string>> files;
     for (const auto& definition : all_settings()) {
-        auto& bytes = files[definition.relative_path];
-        bytes += "[";
-        for (const wchar_t character : definition.section) {
-            bytes.push_back(static_cast<char>(character));
-        }
-        bytes += "]\r\n";
+        auto& bytes = files[definition.relative_path][definition.section];
         for (const wchar_t character : definition.key) {
             bytes.push_back(static_cast<char>(character));
         }
@@ -711,9 +706,33 @@ bool write_complete_config_catalog(const std::filesystem::path& root) {
         }
         bytes += "\r\n";
     }
-    for (const auto& [path, bytes] : files) {
+    for (const auto& [path, sections] : files) {
+        std::string bytes;
+        for (const auto& [section, settings] : sections) {
+            bytes += "[";
+            for (const wchar_t character : section) {
+                bytes.push_back(static_cast<char>(character));
+            }
+            bytes += "]\r\n" + settings;
+        }
         write_bytes(root / path, bytes);
     }
+    return true;
+}
+
+bool write_native_engine_routing(const std::filesystem::path& root) {
+    const auto path = root / L"KFEngine.ini";
+    auto document = kf2::config::IniDocument::parse(read_bytes(path));
+    if (!document.has_value() ||
+        document.value().upsert(L"URL", L"LocalOptions", L"")
+                .shadowed_occurrences != 0 ||
+        document.value().upsert(L"Engine.Engine",
+                                L"GameViewportClientClassName",
+                                L"KFGame.KFGameViewportClient")
+                .shadowed_occurrences != 0) {
+        return false;
+    }
+    write_bytes(path, document.value().serialize());
     return true;
 }
 
@@ -4122,9 +4141,7 @@ int test_executable_identity_boundaries() {
     const auto config = root / L"Documents/Config";
     const auto portable = root / L"portable";
     CHECK(write_complete_config_catalog(config));
-    write_bytes(config / L"KFEngine.ini", read_bytes(config / L"KFEngine.ini") +
-        "[URL]\r\nLocalOptions=\r\n[Engine.Engine]\r\n"
-        "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n");
+    CHECK(write_native_engine_routing(config));
     write_bytes(install / L"Engine/Config/ConsoleVariables.ini",
         "[Startup]\r\n");
     fs::create_directories(portable);
@@ -4364,9 +4381,7 @@ int test_protected_launch_rollback() {
     CHECK(system.value().upsert(L"SystemSettings", L"Borderless",
                                L"False").shadowed_occurrences == 0);
     write_bytes(config / L"KFSystemSettings.ini", system.value().serialize());
-    write_bytes(config / L"KFEngine.ini", read_bytes(config / L"KFEngine.ini") +
-        "[URL]\r\nLocalOptions=\r\n[Engine.Engine]\r\n"
-        "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n");
+    CHECK(write_native_engine_routing(config));
     write_bytes(install / L"Engine/Config/ConsoleVariables.ini", "[Startup]\r\n");
     fs::create_directories(portable); // Missing provider is a real preparation failure.
     fs::create_directories(executable.parent_path());
@@ -4781,9 +4796,7 @@ int test_protected_shutdown_running_game(bool with_module = false,
         CHECK(CopyFileW(self, executable.c_str(), TRUE));
         CHECK(write_complete_config_catalog(config));
         write_bytes(install / L"Engine/Config/ConsoleVariables.ini", "[Startup]\r\n");
-        write_bytes(config / L"KFEngine.ini", read_bytes(config / L"KFEngine.ini") +
-            "[URL]\r\nLocalOptions=\r\n[Engine.Engine]\r\n"
-            "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n");
+        CHECK(write_native_engine_routing(config));
         auto system = kf2::config::IniDocument::parse(
             read_bytes(config / L"KFSystemSettings.ini"));
         CHECK(system.has_value());
@@ -4979,9 +4992,7 @@ int test_staged_advanced_settings(bool use_provider) {
     CHECK(system.value().upsert(L"SystemSettings", L"OneFrameThreadLag",
         L"False").shadowed_occurrences == 0);
     write_bytes(config / L"KFSystemSettings.ini", system.value().serialize());
-    write_bytes(config / L"KFEngine.ini", read_bytes(config / L"KFEngine.ini") +
-        "[URL]\r\nLocalOptions=\r\n[Engine.Engine]\r\n"
-        "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n");
+    CHECK(write_native_engine_routing(config));
     fs::create_directories(portable);
     if (provider_available)
         write_bytes(provider, read_bytes(fs::path{KF2_TELEMETRY_ASSET}));
@@ -6304,12 +6315,7 @@ int main(int argc, char** argv) {
                 read_bytes(config_root / L"KFGame.ini") +
                     "[KFGameContent.KFGameInfo_Survival]\r\n"
                     "bLogAICount=False\r\n");
-    write_bytes(config_root / L"KFEngine.ini",
-                read_bytes(config_root / L"KFEngine.ini") +
-                    "[URL]\r\n"
-                    "LocalOptions=\r\n"
-                    "[Engine.Engine]\r\n"
-                    "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n");
+    CHECK(write_native_engine_routing(config_root));
     const fs::path telemetry_asset{KF2_TELEMETRY_ASSET};
     const bool telemetry_available = fs::is_regular_file(telemetry_asset);
     const auto portable_telemetry = root / L"portable" / L"Data" / L"Lab" /
