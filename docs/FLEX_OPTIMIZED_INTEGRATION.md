@@ -90,9 +90,10 @@ payloads to the original stream, and the token is cleared on every normal,
 abnormal and readiness-invalidating exit.
 
 For the exact supported KFGame image, an optional DX11/CUDA bridge snapshots
-canonical solver positions and normals on the GPU and packs the existing
-dynamic vertex buffer there instead of repeating KF2's per-vertex CPU gather
-and normal conversion. Mesh-local indices are composed once with the owning
+canonical solver positions and packs each solver normal once into KF2's exact
+32-bit vertex format on the GPU. The existing dynamic vertex buffer then reuses
+those packed normals instead of repeating KF2's per-resource conversion.
+Mesh-local indices are composed once with the owning
 FleX instance's particle IDs. Attachments, unfamiliar layouts, missing or stale
 snapshots, unsupported mappings and every API error keep KF2's original upload.
 The bridge registers and caches only resources that pass exact identity and
@@ -104,7 +105,10 @@ stream or add a CPU synchronization. API errors, an unexpected CUDA context
 and teardown still drain the relevant GPU work synchronously before any source
 or registered resource can be changed or released. If a render upload is already
 using a snapshot slot, the non-blocking handoff keeps KF2's original upload for
-that generation instead of stalling the solver thread or reusing the slot.
+that generation instead of stalling the solver thread or reusing the slot. The
+snapshot covers only the highest particle ID required by a registered render
+resource, and optional registration, publication and upload lock handoffs never
+wait behind concurrent bridge work.
 
 Rigid presentation keeps two owned history buffers. Their pointers rotate
 instead of copying the old current transforms into the previous buffers. A
@@ -121,9 +125,9 @@ For the explicitly modelled sparse path of 512 live particles in the observed
 bytes by 98.2452%, and combined Push/Pull bytes by 98.1655% versus full-capacity
 copies. This is transfer-byte accounting, not a gameplay-FPS claim. The
 percentages cover host/device Push/Pull particle payload only. They exclude
-the render bridge's prefix-sized device-to-device snapshot, GPU vertex-buffer
-writes, one-time index upload, reserved snapshot memory and all other engine or
-driver work.
+the render bridge's render-bounded position and packed-normal snapshots, GPU
+vertex-buffer writes, one-time index upload, reserved snapshot memory and all
+other engine or driver work.
 
 ## Distribution and proof
 

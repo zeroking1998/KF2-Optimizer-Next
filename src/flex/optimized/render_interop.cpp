@@ -71,48 +71,32 @@ constexpr char PackVerticesPtx[] = R"ptx(
 .target sm_50
 .address_size 64
 
-.visible .entry kf2_pack_vertices(
+.visible .entry kf2_pack_normals(
     .param .u64 output,
-    .param .u64 positions,
     .param .u64 normals,
-    .param .u64 indices,
     .param .u32 count)
 {
     .reg .pred %p<4>;
     .reg .b32 %r<16>;
-    .reg .b64 %rd<16>;
+    .reg .b64 %rd<8>;
     .reg .f32 %f<7>;
 
     ld.param.u64 %rd1, [output];
-    ld.param.u64 %rd2, [positions];
-    ld.param.u64 %rd3, [normals];
-    ld.param.u64 %rd4, [indices];
+    ld.param.u64 %rd2, [normals];
     ld.param.u32 %r1, [count];
     mov.u32 %r2, %ctaid.x;
     mov.u32 %r3, %ntid.x;
     mov.u32 %r4, %tid.x;
     mad.lo.s32 %r5, %r2, %r3, %r4;
     setp.ge.s32 %p1, %r5, %r1;
-    @%p1 bra done;
+    @%p1 bra normals_done;
 
+    mul.wide.s32 %rd3, %r5, 16;
+    add.s64 %rd4, %rd2, %rd3;
     mul.wide.s32 %rd5, %r5, 4;
-    add.s64 %rd6, %rd4, %rd5;
-    ld.global.s32 %r6, [%rd6];
-    mul.wide.s32 %rd7, %r6, 16;
-    add.s64 %rd8, %rd2, %rd7;
-    mul.wide.s32 %rd9, %r6, 16;
-    add.s64 %rd10, %rd3, %rd9;
-    mul.wide.s32 %rd11, %r5, 16;
-    add.s64 %rd12, %rd1, %rd11;
+    add.s64 %rd6, %rd1, %rd5;
 
-    ld.global.u32 %r10, [%rd8];
-    ld.global.u32 %r11, [%rd8+4];
-    ld.global.u32 %r12, [%rd8+8];
-    st.global.u32 [%rd12], %r10;
-    st.global.u32 [%rd12+4], %r11;
-    st.global.u32 [%rd12+8], %r12;
-
-    ld.global.u32 %r10, [%rd10];
+    ld.global.u32 %r10, [%rd4];
     xor.b32 %r10, %r10, 0x80000000;
     mov.b32 %f4, %r10;
     add.rn.f32 %f4, %f4, 0f3F800000;
@@ -125,7 +109,7 @@ constexpr char PackVerticesPtx[] = R"ptx(
     or.pred %p2, %p2, %p3;
     selp.s32 %r7, 0, %r7, %p2;
 
-    ld.global.u32 %r10, [%rd10+4];
+    ld.global.u32 %r10, [%rd4+4];
     xor.b32 %r10, %r10, 0x80000000;
     mov.b32 %f5, %r10;
     add.rn.f32 %f5, %f5, 0f3F800000;
@@ -140,7 +124,7 @@ constexpr char PackVerticesPtx[] = R"ptx(
     shl.b32 %r8, %r8, 8;
     or.b32 %r7, %r7, %r8;
 
-    ld.global.u32 %r10, [%rd10+8];
+    ld.global.u32 %r10, [%rd4+8];
     xor.b32 %r10, %r10, 0x80000000;
     mov.b32 %f6, %r10;
     add.rn.f32 %f6, %f6, 0f3F800000;
@@ -155,6 +139,52 @@ constexpr char PackVerticesPtx[] = R"ptx(
     shl.b32 %r9, %r9, 16;
     or.b32 %r7, %r7, %r9;
     or.b32 %r7, %r7, 0xff000000;
+    st.global.u32 [%rd6], %r7;
+normals_done:
+    ret;
+}
+
+.visible .entry kf2_pack_vertices(
+    .param .u64 output,
+    .param .u64 positions,
+    .param .u64 packed_normals,
+    .param .u64 indices,
+    .param .u32 count)
+{
+    .reg .pred %p<2>;
+    .reg .b32 %r<16>;
+    .reg .b64 %rd<16>;
+
+    ld.param.u64 %rd1, [output];
+    ld.param.u64 %rd2, [positions];
+    ld.param.u64 %rd3, [packed_normals];
+    ld.param.u64 %rd4, [indices];
+    ld.param.u32 %r1, [count];
+    mov.u32 %r2, %ctaid.x;
+    mov.u32 %r3, %ntid.x;
+    mov.u32 %r4, %tid.x;
+    mad.lo.s32 %r5, %r2, %r3, %r4;
+    setp.ge.s32 %p1, %r5, %r1;
+    @%p1 bra done;
+
+    mul.wide.s32 %rd5, %r5, 4;
+    add.s64 %rd6, %rd4, %rd5;
+    ld.global.s32 %r6, [%rd6];
+    mul.wide.s32 %rd7, %r6, 16;
+    add.s64 %rd8, %rd2, %rd7;
+    mul.wide.s32 %rd9, %r6, 4;
+    add.s64 %rd10, %rd3, %rd9;
+    mul.wide.s32 %rd11, %r5, 16;
+    add.s64 %rd12, %rd1, %rd11;
+
+    ld.global.u32 %r10, [%rd8];
+    ld.global.u32 %r11, [%rd8+4];
+    ld.global.u32 %r12, [%rd8+8];
+    st.global.u32 [%rd12], %r10;
+    st.global.u32 [%rd12+4], %r11;
+    st.global.u32 [%rd12+8], %r12;
+
+    ld.global.u32 %r7, [%rd10];
     st.global.u32 [%rd12+12], %r7;
 done:
     ret;
@@ -163,7 +193,7 @@ done:
 
 struct SnapshotSlot {
     CuDevicePointer positions{};
-    CuDevicePointer normals{};
+    CuDevicePointer packed_normals{};
     void* completion{};
     std::atomic<bool> busy{};
     std::atomic<int> prefix{};
@@ -191,6 +221,7 @@ struct SolverRenderState {
     void* context{};
     void* render_stream{};
     void* module{};
+    void* pack_normals{};
     void* pack{};
     CuDevicePointer snapshot_allocation{};
     int capacity{};
@@ -273,11 +304,12 @@ void destroy_solver_contents(SolverRenderState& state) {
     state.resources = nullptr;
     state.snapshot_allocation = 0;
     state.module = nullptr;
+    state.pack_normals = nullptr;
     state.pack = nullptr;
     state.render_stream = nullptr;
     for(auto& slot : state.slots) {
         slot.positions = 0;
-        slot.normals = 0;
+        slot.packed_normals = 0;
         slot.completion = nullptr;
         slot.busy.store(false, std::memory_order_relaxed);
         slot.prefix.store(0, std::memory_order_relaxed);
@@ -288,7 +320,7 @@ bool initialize_solver(SolverRenderState& state) {
     std::size_t position_bytes{}, normal_bytes{};
     const auto capacity = static_cast<std::size_t>(state.capacity);
     if(!multiply(capacity, 16U, position_bytes) ||
-       !multiply(capacity, 16U, normal_bytes) ||
+       !multiply(capacity, sizeof(std::uint32_t), normal_bytes) ||
        position_bytes > (std::numeric_limits<std::size_t>::max)() - normal_bytes)
         return false;
     const auto slot_bytes = position_bytes + normal_bytes;
@@ -301,9 +333,11 @@ bool initialize_solver(SolverRenderState& state) {
     for(unsigned index = 0; index < 2; ++index) {
         const auto begin = state.snapshot_allocation + slot_bytes * index;
         state.slots[index].positions = begin;
-        state.slots[index].normals = begin + position_bytes;
+        state.slots[index].packed_normals = begin + position_bytes;
     }
     if(cuModuleLoadDataEx(&state.module, PackVerticesPtx, 0, nullptr, nullptr)) return false;
+    if(cuModuleGetFunction(&state.pack_normals, state.module,
+                           "kf2_pack_normals")) return false;
     if(cuModuleGetFunction(&state.pack, state.module, "kf2_pack_vertices")) return false;
     return true;
 }
@@ -367,7 +401,10 @@ bool same_resource(const ResourceState& state, ID3D11Buffer* buffer,
 void ensure_resource(void* solver, void* resource, ID3D11Buffer* buffer,
                      const int* indices, int count, void* instance,
                      const int* particle_indices, int particle_count) {
-    AcquireSRWLockExclusive(&g_lock);
+    // Registration is optional and rare. Never make the render thread wait
+    // behind an in-flight snapshot or upload; the original upload is safe and
+    // a later frame can retry registration.
+    if(!TryAcquireSRWLockExclusive(&g_lock)) return;
     auto* state = find_solver(solver);
     if(!state || !state->usable.load(std::memory_order_acquire) ||
        count <= 0 || count > state->capacity) {
@@ -476,7 +513,10 @@ extern "C" void p4_render_upload(void* resource, const void* positions,
     }
 
     for(unsigned attempt = 0; attempt < 2; ++attempt) {
-        AcquireSRWLockShared(&g_lock);
+        if(!TryAcquireSRWLockShared(&g_lock)) {
+            fallback_upload(resource, positions, normals, indices);
+            return;
+        }
         auto* state = find_solver(solver);
         auto* cached = state ? find_resource(*state, resource) : nullptr;
         if(!state || !state->usable.load(std::memory_order_acquire) || !cached ||
@@ -549,7 +589,7 @@ extern "C" void p4_render_upload(void* resource, const void* positions,
         if(!error) {
             auto output_argument = output;
             auto position_argument = slot.positions;
-            auto normal_argument = slot.normals;
+            auto normal_argument = slot.packed_normals;
             auto index_argument = cached->device_indices;
             auto count_argument = static_cast<unsigned>(count);
             void* arguments[]{&output_argument, &position_argument, &normal_argument,
@@ -709,7 +749,7 @@ void p4_install_render_interop() {
 }
 
 void p4_render_generation(void* solver, std::uint64_t generation) {
-    AcquireSRWLockShared(&g_lock);
+    if(!TryAcquireSRWLockShared(&g_lock)) return;
     if(auto* state = find_solver(solver))
         state->current_generation.store(generation, std::memory_order_release);
     ReleaseSRWLockShared(&g_lock);
@@ -769,11 +809,10 @@ int p4_render_snapshot(void* solver, void* context, std::uint64_t generation,
         }
     }
 
-    std::size_t position_bytes{}, normal_bytes{};
+    std::size_t position_bytes{};
     const int snapshot_prefix = render_prefix < prefix ? render_prefix : prefix;
     const auto count = static_cast<std::size_t>(snapshot_prefix);
-    if(!multiply(count, 16U, position_bytes) ||
-       !multiply(count, 16U, normal_bytes)) {
+    if(!multiply(count, 16U, position_bytes)) {
         release_lock();
         return -1;
     }
@@ -783,10 +822,18 @@ int p4_render_snapshot(void* solver, void* context, std::uint64_t generation,
     int error = cudaMemcpyAsync_ptsz(
         reinterpret_cast<void*>(slot.positions), positions, position_bytes,
         CudaMemoryDeviceToDevice, nullptr);
-    if(!error)
-        error = cudaMemcpyAsync_ptsz(
-            reinterpret_cast<void*>(slot.normals), normals, normal_bytes,
-            CudaMemoryDeviceToDevice, nullptr);
+    if(!error) {
+        auto output_argument = slot.packed_normals;
+        auto normal_argument =
+            reinterpret_cast<CuDevicePointer>(normals);
+        auto count_argument = static_cast<unsigned>(snapshot_prefix);
+        void* arguments[]{&output_argument, &normal_argument, &count_argument};
+        const auto blocks = (count_argument + ThreadsPerBlock - 1U) /
+                            ThreadsPerBlock;
+        error = cuLaunchKernel(state->pack_normals, blocks, 1U, 1U,
+                               ThreadsPerBlock, 1U, 1U, 0U,
+                               nullptr, arguments, nullptr);
+    }
     if(!error)
         error = cudaEventRecord_ptsz(slot.completion, nullptr);
     if(error) {
@@ -799,7 +846,7 @@ int p4_render_snapshot(void* solver, void* context, std::uint64_t generation,
 
 void p4_render_publish(void* solver, std::uint64_t generation, int slot) {
     if(slot < 0 || slot > 1) return;
-    AcquireSRWLockShared(&g_lock);
+    if(!TryAcquireSRWLockShared(&g_lock)) return;
     if(auto* state = find_solver(solver); state &&
        state->usable.load(std::memory_order_acquire) &&
        state->current_generation.load(std::memory_order_acquire) == generation) {
