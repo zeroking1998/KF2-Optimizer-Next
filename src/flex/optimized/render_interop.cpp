@@ -50,9 +50,6 @@ extern "C" __declspec(dllimport) int cudaEventDestroy(void*);
 extern "C" __declspec(dllimport) int cudaEventRecord_ptsz(void*, void*);
 extern "C" __declspec(dllimport) int cudaEventSynchronize(void*);
 extern "C" __declspec(dllimport) int cudaEventQuery(void*);
-extern "C" __declspec(dllimport) int cudaMemcpyAsync_ptsz(
-    void*, const void*, std::size_t, int, void*);
-
 constexpr std::size_t UploadCallRva = 0x4F3F61;
 constexpr std::size_t UploadFunctionRva = 0x4F2A20;
 constexpr std::size_t VertexBufferVtableRva = 0x17DC9E0;
@@ -62,7 +59,6 @@ constexpr std::size_t ProxyVtableRva = 0x17E2620;
 constexpr std::size_t ProxyDestroyRva = 0x4DA610;
 constexpr unsigned KfGameTimestamp = 0x65B94562U;
 constexpr unsigned KfGameImageSize = 0x2481000U;
-constexpr int CudaMemoryDeviceToDevice = 3;
 constexpr int CudaNotReady = 34;
 constexpr unsigned ThreadsPerBlock = 256;
 
@@ -71,8 +67,9 @@ constexpr char PackVerticesPtx[] = R"ptx(
 .target sm_50
 .address_size 64
 
-.visible .entry kf2_pack_normals(
+.visible .entry kf2_pack_snapshot(
     .param .u64 output,
+    .param .u64 positions,
     .param .u64 normals,
     .param .u32 count)
 {
@@ -82,7 +79,8 @@ constexpr char PackVerticesPtx[] = R"ptx(
     .reg .f32 %f<7>;
 
     ld.param.u64 %rd1, [output];
-    ld.param.u64 %rd2, [normals];
+    ld.param.u64 %rd2, [positions];
+    ld.param.u64 %rd7, [normals];
     ld.param.u32 %r1, [count];
     mov.u32 %r2, %ctaid.x;
     mov.u32 %r3, %ntid.x;
@@ -92,11 +90,13 @@ constexpr char PackVerticesPtx[] = R"ptx(
     @%p1 bra normals_done;
 
     mul.wide.s32 %rd3, %r5, 16;
-    add.s64 %rd4, %rd2, %rd3;
-    mul.wide.s32 %rd5, %r5, 4;
-    add.s64 %rd6, %rd1, %rd5;
+    add.s64 %rd4, %rd7, %rd3;
+    add.s64 %rd5, %rd2, %rd3;
+    add.s64 %rd6, %rd1, %rd3;
 
-    ld.global.u32 %r10, [%rd4];
+    ld.global.v4.u32 {%r11, %r12, %r13, %r14}, [%rd5];
+    ld.global.v4.u32 {%r10, %r14, %r15, %r6}, [%rd4];
+
     xor.b32 %r10, %r10, 0x80000000;
     mov.b32 %f4, %r10;
     add.rn.f32 %f4, %f4, 0f3F800000;
@@ -109,8 +109,7 @@ constexpr char PackVerticesPtx[] = R"ptx(
     or.pred %p2, %p2, %p3;
     selp.s32 %r7, 0, %r7, %p2;
 
-    ld.global.u32 %r10, [%rd4+4];
-    xor.b32 %r10, %r10, 0x80000000;
+    xor.b32 %r10, %r14, 0x80000000;
     mov.b32 %f5, %r10;
     add.rn.f32 %f5, %f5, 0f3F800000;
     mul.rn.f32 %f5, %f5, 0f42FF0000;
@@ -124,8 +123,7 @@ constexpr char PackVerticesPtx[] = R"ptx(
     shl.b32 %r8, %r8, 8;
     or.b32 %r7, %r7, %r8;
 
-    ld.global.u32 %r10, [%rd4+8];
-    xor.b32 %r10, %r10, 0x80000000;
+    xor.b32 %r10, %r15, 0x80000000;
     mov.b32 %f6, %r10;
     add.rn.f32 %f6, %f6, 0f3F800000;
     mul.rn.f32 %f6, %f6, 0f42FF0000;
@@ -139,15 +137,14 @@ constexpr char PackVerticesPtx[] = R"ptx(
     shl.b32 %r9, %r9, 16;
     or.b32 %r7, %r7, %r9;
     or.b32 %r7, %r7, 0xff000000;
-    st.global.u32 [%rd6], %r7;
+    st.global.v4.u32 [%rd6], {%r11, %r12, %r13, %r7};
 normals_done:
     ret;
 }
 
 .visible .entry kf2_pack_vertices(
     .param .u64 output,
-    .param .u64 positions,
-    .param .u64 packed_normals,
+    .param .u64 snapshot,
     .param .u64 indices,
     .param .u32 count)
 {
@@ -156,8 +153,7 @@ normals_done:
     .reg .b64 %rd<16>;
 
     ld.param.u64 %rd1, [output];
-    ld.param.u64 %rd2, [positions];
-    ld.param.u64 %rd3, [packed_normals];
+    ld.param.u64 %rd2, [snapshot];
     ld.param.u64 %rd4, [indices];
     ld.param.u32 %r1, [count];
     mov.u32 %r2, %ctaid.x;
@@ -172,31 +168,22 @@ normals_done:
     ld.global.s32 %r6, [%rd6];
     mul.wide.s32 %rd7, %r6, 16;
     add.s64 %rd8, %rd2, %rd7;
-    mul.wide.s32 %rd9, %r6, 4;
-    add.s64 %rd10, %rd3, %rd9;
     mul.wide.s32 %rd11, %r5, 16;
     add.s64 %rd12, %rd1, %rd11;
 
-    ld.global.u32 %r10, [%rd8];
-    ld.global.u32 %r11, [%rd8+4];
-    ld.global.u32 %r12, [%rd8+8];
-    st.global.u32 [%rd12], %r10;
-    st.global.u32 [%rd12+4], %r11;
-    st.global.u32 [%rd12+8], %r12;
-
-    ld.global.u32 %r7, [%rd10];
-    st.global.u32 [%rd12+12], %r7;
+    ld.global.v4.u32 {%r10, %r11, %r12, %r7}, [%rd8];
+    st.global.v4.u32 [%rd12], {%r10, %r11, %r12, %r7};
 done:
     ret;
 }
 )ptx";
 
 struct SnapshotSlot {
-    CuDevicePointer positions{};
-    CuDevicePointer packed_normals{};
+    CuDevicePointer vertices{};
     void* completion{};
     std::atomic<bool> busy{};
     std::atomic<int> prefix{};
+    std::atomic<std::uint64_t> waited_generation{};
 };
 
 struct ResourceState {
@@ -221,7 +208,7 @@ struct SolverRenderState {
     void* context{};
     void* render_stream{};
     void* module{};
-    void* pack_normals{};
+    void* pack_snapshot{};
     void* pack{};
     CuDevicePointer snapshot_allocation{};
     int capacity{};
@@ -304,40 +291,33 @@ void destroy_solver_contents(SolverRenderState& state) {
     state.resources = nullptr;
     state.snapshot_allocation = 0;
     state.module = nullptr;
-    state.pack_normals = nullptr;
+    state.pack_snapshot = nullptr;
     state.pack = nullptr;
     state.render_stream = nullptr;
     for(auto& slot : state.slots) {
-        slot.positions = 0;
-        slot.packed_normals = 0;
+        slot.vertices = 0;
         slot.completion = nullptr;
         slot.busy.store(false, std::memory_order_relaxed);
         slot.prefix.store(0, std::memory_order_relaxed);
+        slot.waited_generation.store(0, std::memory_order_relaxed);
     }
 }
 
 bool initialize_solver(SolverRenderState& state) {
-    std::size_t position_bytes{}, normal_bytes{};
+    std::size_t slot_bytes{};
     const auto capacity = static_cast<std::size_t>(state.capacity);
-    if(!multiply(capacity, 16U, position_bytes) ||
-       !multiply(capacity, sizeof(std::uint32_t), normal_bytes) ||
-       position_bytes > (std::numeric_limits<std::size_t>::max)() - normal_bytes)
-        return false;
-    const auto slot_bytes = position_bytes + normal_bytes;
+    if(!multiply(capacity, 16U, slot_bytes)) return false;
     if(slot_bytes > (std::numeric_limits<std::size_t>::max)() / 2U) return false;
 
     if(cudaStreamCreateWithFlags(&state.render_stream, 1U)) return false;
     for(auto& slot : state.slots)
         if(cudaEventCreateWithFlags(&slot.completion, 2U)) return false;
     if(cuMemAlloc_v2(&state.snapshot_allocation, slot_bytes * 2U)) return false;
-    for(unsigned index = 0; index < 2; ++index) {
-        const auto begin = state.snapshot_allocation + slot_bytes * index;
-        state.slots[index].positions = begin;
-        state.slots[index].packed_normals = begin + position_bytes;
-    }
+    for(unsigned index = 0; index < 2; ++index)
+        state.slots[index].vertices = state.snapshot_allocation + slot_bytes * index;
     if(cuModuleLoadDataEx(&state.module, PackVerticesPtx, 0, nullptr, nullptr)) return false;
-    if(cuModuleGetFunction(&state.pack_normals, state.module,
-                           "kf2_pack_normals")) return false;
+    if(cuModuleGetFunction(&state.pack_snapshot, state.module,
+                           "kf2_pack_snapshot")) return false;
     if(cuModuleGetFunction(&state.pack, state.module, "kf2_pack_vertices")) return false;
     return true;
 }
@@ -569,9 +549,15 @@ extern "C" void p4_render_upload(void* resource, const void* positions,
         bool mapped = false;
         int error = cuCtxPushCurrent_v2(state->context);
         const bool pushed = !error;
-        if(pushed)
+        // One wait orders every later upload in this render stream.
+        if(pushed && slot.waited_generation.load(std::memory_order_acquire) !=
+                         published_generation) {
             error = cudaStreamWaitEvent_ptsz(
                 state->render_stream, slot.completion, 0U);
+            if(!error)
+                slot.waited_generation.store(published_generation,
+                                             std::memory_order_release);
+        }
         if(!error) {
             error = cuGraphicsMapResources(1U, &cached->graphics,
                                            state->render_stream);
@@ -588,11 +574,10 @@ extern "C" void p4_render_upload(void* resource, const void* positions,
             error = 1;
         if(!error) {
             auto output_argument = output;
-            auto position_argument = slot.positions;
-            auto normal_argument = slot.packed_normals;
+            auto snapshot_argument = slot.vertices;
             auto index_argument = cached->device_indices;
             auto count_argument = static_cast<unsigned>(count);
-            void* arguments[]{&output_argument, &position_argument, &normal_argument,
+            void* arguments[]{&output_argument, &snapshot_argument,
                               &index_argument, &count_argument};
             const auto blocks = (count_argument + ThreadsPerBlock - 1U) /
                                 ThreadsPerBlock;
@@ -809,31 +794,22 @@ int p4_render_snapshot(void* solver, void* context, std::uint64_t generation,
         }
     }
 
-    std::size_t position_bytes{};
     const int snapshot_prefix = render_prefix < prefix ? render_prefix : prefix;
-    const auto count = static_cast<std::size_t>(snapshot_prefix);
-    if(!multiply(count, 16U, position_bytes)) {
-        release_lock();
-        return -1;
-    }
-    // This hook runs on the verified solver thread. Its per-thread default
-    // stream is ordered after this solve and before the next one, so the
-    // source lifetime needs no host wait or additional synchronization state.
-    int error = cudaMemcpyAsync_ptsz(
-        reinterpret_cast<void*>(slot.positions), positions, position_bytes,
-        CudaMemoryDeviceToDevice, nullptr);
-    if(!error) {
-        auto output_argument = slot.packed_normals;
-        auto normal_argument =
-            reinterpret_cast<CuDevicePointer>(normals);
-        auto count_argument = static_cast<unsigned>(snapshot_prefix);
-        void* arguments[]{&output_argument, &normal_argument, &count_argument};
-        const auto blocks = (count_argument + ThreadsPerBlock - 1U) /
-                            ThreadsPerBlock;
-        error = cuLaunchKernel(state->pack_normals, blocks, 1U, 1U,
+    // This hook runs on the verified solver thread. Existing CUDA default-
+    // stream ordering keeps this work after the solve and before the next
+    // source mutation; the completion event is the render-stream dependency.
+    auto output_argument = slot.vertices;
+    auto position_argument = reinterpret_cast<CuDevicePointer>(positions);
+    auto normal_argument = reinterpret_cast<CuDevicePointer>(normals);
+    auto count_argument = static_cast<unsigned>(snapshot_prefix);
+    void* arguments[]{&output_argument, &position_argument, &normal_argument,
+                      &count_argument};
+    slot.waited_generation.store(0, std::memory_order_release);
+    const auto blocks = (count_argument + ThreadsPerBlock - 1U) /
+                        ThreadsPerBlock;
+    int error = cuLaunchKernel(state->pack_snapshot, blocks, 1U, 1U,
                                ThreadsPerBlock, 1U, 1U, 0U,
                                nullptr, arguments, nullptr);
-    }
     if(!error)
         error = cudaEventRecord_ptsz(slot.completion, nullptr);
     if(error) {
