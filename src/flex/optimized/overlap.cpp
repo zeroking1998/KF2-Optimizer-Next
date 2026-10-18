@@ -216,7 +216,7 @@ P4_API void p4_invalidate(void* solver) {
 P4_API int p4_copy(void* out, const void* in, std::size_t bytes, int kind, void* solver, unsigned asynchronous) {
     auto& s = state(solver);
     void* context{};
-    if(!s.depth || !scope_eligible(solver,s) || kind != 2 || !out || !supported(solver,in,bytes)) {
+    if(!s.depth || kind != 2 || !out || !supported(solver,in,bytes)) {
         if(s.depth) finish_copies(s);
         return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);
     }
@@ -225,6 +225,10 @@ P4_API int p4_copy(void* out, const void* in, std::size_t bytes, int kind, void*
     // Keep direct API reads and every non-Pull copy on the original path.
     if((s.flags & P4PullScope) && asynchronous &&
        in == field<void*>(solver,0x20)) return 0;
+    if(!scope_eligible(solver,s)) {
+        finish_copies(s);
+        return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);
+    }
     if(cuCtxGetCurrent(&context) || context != s.context) {
         drain(s); s.initialized = 2;
         return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);

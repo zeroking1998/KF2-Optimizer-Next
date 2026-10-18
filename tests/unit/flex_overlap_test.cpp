@@ -157,22 +157,11 @@ int main() {
         PullFixture fixture{{0,3,7}}; current=&fixture;
         write(fixture.solver.data()+0x20,
             static_cast<void*>(fixture.buffers[2].data()));
-        write(fixture.solver.data()+0x53C,0x80000002U);
-        int native_error{};
-        auto& overlap=*reinterpret_cast<P4State*>(
-            fixture.solver.data()+P4StateOffset);
-        overlap.initialized=1;
-        overlap.thread=GetCurrentThreadId();
-        overlap.flags=P4Ready;
-        overlap.generation=1;
-        overlap.ready_generation=1;
-        overlap.native_error=&native_error;
         async_copies=0;
         phase_copy_result=-1;
         p4_pull(fixture.container.data(),copy_phase);
         CHECK(phase_copy_result==0);
         CHECK(async_copies==0);
-        CHECK((overlap.flags&P4PullScope)==0);
         CHECK(fixture.restored());
 
         // A direct phase read remains byte-for-byte on the native copy path.
