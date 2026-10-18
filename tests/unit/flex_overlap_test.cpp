@@ -124,6 +124,14 @@ int main() {
     {
         PullFixture fixture{{}}; current=&fixture;
         p4_pull(fixture.container.data(),observe);
+        CHECK((fixture.observed == std::array<int,4>{1,1,1,1}));
+        CHECK(fixture.restored());
+    }
+    for(unsigned short pending : {static_cast<unsigned short>(1),
+                                  static_cast<unsigned short>(0x100)}) {
+        PullFixture fixture{{}}; current=&fixture;
+        write(fixture.container.data()+0x1D8,pending);
+        p4_pull(fixture.container.data(),observe);
         CHECK((fixture.observed == std::array<int,4>{16,16,16,16}));
         CHECK(fixture.restored());
     }

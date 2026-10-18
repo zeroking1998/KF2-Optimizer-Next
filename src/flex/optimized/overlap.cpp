@@ -132,15 +132,20 @@ bool active_pull_prefix(void* container, PullEnd (&ends)[4]) {
     const int capacity = field<int>(solver, 0x1A0);
     const int active = field<int>(solver, 0x198);
     const int* active_ids = field<int*>(container, 0x10);
-    if(capacity <= 0 || capacity > 0x1000000 || active <= 0 ||
-       active > capacity || !active_ids) return false;
+    if(capacity <= 0 || capacity > 0x1000000 || active < 0 ||
+       active > capacity) return false;
 
     // The extension keeps active IDs sorted; its accepted Push fast path uses
-    // the same last-ID contract. Keep a non-empty synchronous normal copy so
-    // the existing Pull completion boundary remains unchanged.
-    const int last = active_ids[active-1];
-    if(last < 0 || last >= capacity || last == capacity-1) return false;
-    const auto prefix = static_cast<std::size_t>(last)+1;
+    // the same last-ID contract. A clean empty container needs no particle
+    // data, but one inactive slot keeps all four calls and the synchronous
+    // normal completion boundary intact. Pending births/changes stay full.
+    std::size_t prefix = 1;
+    if(active) {
+        if(!active_ids) return false;
+        const int last = active_ids[active-1];
+        if(last < 0 || last >= capacity || last == capacity-1) return false;
+        prefix = static_cast<std::size_t>(last)+1;
+    } else if(field<unsigned short>(container,0x1D8)) return false;
     constexpr std::size_t begin_offsets[] = {0x58,0x70,0x88,0xA0};
     constexpr std::size_t end_offsets[] = {0x60,0x78,0x90,0xA8};
     constexpr std::size_t strides[] = {16,12,4,16};
