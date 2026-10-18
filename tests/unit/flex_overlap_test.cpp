@@ -1,4 +1,5 @@
 #include "overlap.hpp"
+#include "presentation.hpp"
 
 #include <array>
 #include <cstddef>
@@ -88,6 +89,56 @@ bool abnormal_pull_restores(PullFixture* fixture) {
     return caught && fixture->restored();
 }
 
+struct PresentationFixture {
+    std::array<std::byte,P4ExtendedSolverBytes> solver{};
+    std::array<std::byte,0x200> container{};
+    std::array<std::byte,0x20> instance{};
+    std::array<int,2> ids{3,7};
+    std::array<float,18> rotations{};
+    std::array<float,6> translations{};
+    std::array<float,18> observed_rotations{};
+    std::array<float,6> observed_translations{};
+
+    PresentationFixture() {
+        write(instance.data()+0x8,static_cast<void*>(container.data()));
+        write(instance.data()+0x10,static_cast<void*>(solver.data()));
+        write(container.data()+0x8,static_cast<void*>(solver.data()));
+        write(container.data()+0xE8,ids.data());
+        write(container.data()+0xF0,ids.data()+ids.size());
+        write(solver.data()+0x1A0,4);
+        set_sample(0.0F,1.0F,0.0F);
+    }
+
+    void set_sample(float translation, float cosine, float sine) {
+        rotations.fill(0.0F);
+        translations.fill(translation);
+        for(std::size_t rigid=0;rigid<ids.size();++rigid) {
+            auto* matrix=rotations.data()+rigid*9U;
+            matrix[0]=cosine; matrix[1]=-sine;
+            matrix[3]=sine; matrix[4]=cosine; matrix[8]=1.0F;
+        }
+    }
+
+    void present(unsigned marker) {
+        write(solver.data()+0x53C,marker);
+        p4_present_sync(instance.data(),1.0F/60.0F);
+    }
+};
+
+PresentationFixture* presentation{};
+void rigid_data(void*,float** rotations,float** translations) {
+    *rotations=presentation->rotations.data();
+    *translations=presentation->translations.data();
+}
+void synchronize(void*,float) {
+    float *rotations{}, *translations{};
+    p4_present_rigid(presentation->container.data(),&rotations,&translations);
+    std::memcpy(presentation->observed_rotations.data(),rotations,
+                presentation->observed_rotations.size()*sizeof(float));
+    std::memcpy(presentation->observed_translations.data(),translations,
+                presentation->observed_translations.size()*sizeof(float));
+}
+
 } // namespace
 
 void p4_fail_closed() { std::terminate(); }
@@ -106,8 +157,6 @@ extern "C" int cuCtxGetCurrent(void**) { return 0; }
 extern "C" int cuCtxPushCurrent_v2(void*) { return 0; }
 extern "C" int cuCtxPopCurrent_v2(void**) { return 0; }
 extern "C" int cuCtxSynchronize() { return 0; }
-void p4_install_presentation() {}
-void p4_release_presentation(void*) {}
 void p4_install_render_interop() {}
 void p4_render_generation(void*,std::uint64_t) {}
 int p4_render_snapshot(void*,void*,std::uint64_t,int,int,
@@ -118,6 +167,40 @@ void p4_render_publish(void*,std::uint64_t,int) {}
 void p4_release_render_interop(void*) {}
 
 int main() {
+    {
+        constexpr unsigned commit=0x80000002U, middle=0x80000001U;
+        PresentationFixture fixture; presentation=&fixture;
+        p4_test_bind_presentation(synchronize,rigid_data);
+
+        fixture.present(commit);
+        CHECK(fixture.observed_translations[0]==0.0F);
+
+        fixture.set_sample(9.0F,0.0F,1.0F);
+        fixture.present(commit);
+        CHECK(fixture.observed_translations[0]==0.0F);
+        CHECK(fixture.observed_rotations[0]==1.0F);
+        fixture.present(middle);
+        CHECK(fixture.observed_translations[0]==3.0F);
+        CHECK(fixture.observed_rotations[0]>0.8F &&
+              fixture.observed_rotations[0]<0.95F);
+
+        fixture.set_sample(18.0F,-1.0F,0.0F);
+        fixture.present(commit);
+        CHECK(fixture.observed_translations[0]==9.0F);
+        CHECK(fixture.observed_rotations[0]==0.0F);
+
+        fixture.ids[0]=11;
+        fixture.set_sample(27.0F,1.0F,0.0F);
+        fixture.present(commit);
+        fixture.present(middle);
+        CHECK(fixture.observed_translations[0]==27.0F);
+
+        fixture.set_sample(36.0F,0.0F,-1.0F);
+        fixture.present(commit);
+        CHECK(fixture.observed_translations[0]==27.0F);
+        CHECK(fixture.observed_rotations[0]==1.0F);
+        p4_release_presentation(fixture.solver.data());
+    }
     {
         PullFixture fixture{{0,3,7}}; current=&fixture;
         p4_pull(fixture.container.data(),observe);

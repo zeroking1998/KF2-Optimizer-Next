@@ -89,6 +89,16 @@ or registered resource can be changed or released. If a render upload is already
 using a snapshot slot, the non-blocking handoff keeps KF2's original upload for
 that generation instead of stalling the solver thread or reusing the slot.
 
+Rigid presentation keeps two owned history buffers. Their pointers rotate
+instead of copying the old current transforms into the previous buffers. A
+topology reset needs only the current sample because interpolation remains
+disabled until the next commit; that next rotation preserves it before the
+other buffer is overwritten. Topology is compared directly with the stable
+container IDs instead of copying a work array first. This removes four CPU
+copies totalling exactly 68 bytes per active rigid and commit, plus four bytes
+of reserved work storage per capacity slot, without changing the samples,
+interpolation or allocation lifetime.
+
 For the explicitly modelled sparse path of 512 live particles in the observed
 26,746-slot container, low contiguous IDs reduce Push bytes by 98.0857%, Pull
 bytes by 98.2452%, and combined Push/Pull bytes by 98.1655% versus full-capacity

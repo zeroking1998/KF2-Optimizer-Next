@@ -354,6 +354,7 @@ add_test(NAME kf2_binary_delta_test COMMAND kf2_binary_delta_test)
 add_executable(kf2_flex_overlap_test
     unit/flex_overlap_test.cpp
     "${PROJECT_SOURCE_DIR}/src/flex/optimized/overlap.cpp"
+    "${PROJECT_SOURCE_DIR}/src/flex/optimized/presentation.cpp"
 )
 target_include_directories(kf2_flex_overlap_test PRIVATE
     "${PROJECT_SOURCE_DIR}/src/flex/optimized")
