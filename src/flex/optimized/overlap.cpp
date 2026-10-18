@@ -215,6 +215,11 @@ P4_API int p4_copy(void* out, const void* in, std::size_t bytes, int kind, void*
         if(s.depth) finish_copies(s);
         return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);
     }
+    // Phase IDs are immutable solver inputs. Pull targets the same host vector
+    // that Push supplied, so copying it back cannot change the result.
+    // Keep direct API reads and every non-Pull copy on the original path.
+    if((s.flags & P4PullScope) && asynchronous &&
+       in == field<void*>(solver,0x20)) return 0;
     if(cuCtxGetCurrent(&context) || context != s.context) {
         drain(s); s.initialized = 2;
         return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);
@@ -231,12 +236,14 @@ P4_API int p4_copy(void* out, const void* in, std::size_t bytes, int kind, void*
 }
 P4_API void p4_pull(void* container, P4Unary original) {
     void* solver = field<void*>(container,8); enter_scope(solver);
+    state(solver).flags |= P4PullScope;
     PullEnd ends[4]{};
     const bool narrowed = state(solver).depth == 1 &&
         active_pull_prefix(container,ends);
     if(narrowed) for(const auto& end:ends) put(container,end.offset,end.prefix);
     __try { original(container); }
     __finally {
+        state(solver).flags &= ~P4PullScope;
         if(narrowed) for(const auto& end:ends) put(container,end.offset,end.full);
         leave_scope(solver,AbnormalTermination()!=0);
     }

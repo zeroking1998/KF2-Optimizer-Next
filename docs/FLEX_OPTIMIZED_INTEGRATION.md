@@ -54,7 +54,9 @@ on teardown. Push and Pull transfers use the allocated prefix through the
 highest sorted active particle ID instead of copying unused capacity. Pull
 temporarily narrows all four host views together, restores their exact bounds
 on normal and abnormal exit, and keeps the synchronous normals completion
-boundary. Invalid or unfamiliar layouts retain the original full transfer.
+boundary. The known extension Pull also avoids reading immutable phase IDs back
+from the solver; direct phase queries remain unchanged. Invalid or unfamiliar
+layouts retain the original full transfer.
 Necessary completion and error checks remain in place.
 
 ## Distribution and proof

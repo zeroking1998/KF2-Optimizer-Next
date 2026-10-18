@@ -71,6 +71,15 @@ struct PullFixture {
 PullFixture* current{};
 void observe(void*) { current->observe(); }
 void raise(void*) { RaiseException(0xE0421132U,0,0,nullptr); }
+int async_copies{};
+int phase_copy_result{-1};
+void copy_phase(void*) {
+    current->observe();
+    phase_copy_result=p4_copy(current->buffers[2].data(),
+        read<void*>(current->solver.data()+0x20),
+        static_cast<std::size_t>(current->observed[2])*4,2,
+        current->solver.data(),1);
+}
 bool abnormal_pull_restores(PullFixture* fixture) {
     bool caught=false;
     __try { p4_pull(fixture->container.data(),raise); }
@@ -91,7 +100,7 @@ extern "C" int cudaEventRecord_ptsz(void*,void*) { return 0; }
 extern "C" int cudaEventSynchronize(void*) { return 0; }
 extern "C" int cudaPeekAtLastError() { return 0; }
 extern "C" int cudaMemcpy_ptds(void*,const void*,std::size_t,int) { return 0; }
-extern "C" int cudaMemcpyAsync_ptsz(void*,const void*,std::size_t,int,void*) { return 0; }
+extern "C" int cudaMemcpyAsync_ptsz(void*,const void*,std::size_t,int,void*) { ++async_copies; return 0; }
 extern "C" int cuCtxGetCurrent(void**) { return 0; }
 extern "C" int cuCtxPushCurrent_v2(void*) { return 0; }
 extern "C" int cuCtxPopCurrent_v2(void**) { return 0; }
@@ -135,6 +144,34 @@ int main() {
     {
         PullFixture fixture{{0,3,7}}; current=&fixture;
         CHECK(abnormal_pull_restores(&fixture));
+    }
+    {
+        PullFixture fixture{{0,3,7}}; current=&fixture;
+        write(fixture.solver.data()+0x20,
+            static_cast<void*>(fixture.buffers[2].data()));
+        write(fixture.solver.data()+0x53C,0x80000002U);
+        int native_error{};
+        auto& overlap=*reinterpret_cast<P4State*>(
+            fixture.solver.data()+P4StateOffset);
+        overlap.initialized=1;
+        overlap.thread=GetCurrentThreadId();
+        overlap.flags=P4Ready;
+        overlap.generation=1;
+        overlap.ready_generation=1;
+        overlap.native_error=&native_error;
+        async_copies=0;
+        phase_copy_result=-1;
+        p4_pull(fixture.container.data(),copy_phase);
+        CHECK(phase_copy_result==0);
+        CHECK(async_copies==0);
+        CHECK((overlap.flags&P4PullScope)==0);
+        CHECK(fixture.restored());
+
+        // A direct phase read remains byte-for-byte on the native copy path.
+        CHECK(p4_copy(fixture.buffers[2].data(),
+            read<void*>(fixture.solver.data()+0x20),4,2,
+            fixture.solver.data(),1)==0);
+        CHECK(async_copies==1);
     }
     return 0;
 }
