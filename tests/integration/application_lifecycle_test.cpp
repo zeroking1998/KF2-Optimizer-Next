@@ -3528,11 +3528,13 @@ int test_adaptive_restore_debt() {
             session.telemetry_control_port.reset();
         });
         runtime.update_adaptive_controller(frame);
+        poll_worker();
         CHECK(runtime.adaptive_restore_debt.has_value());
         CHECK(runtime.adaptive_resource_quality.gpu == 65);
         CHECK(!runtime.adaptive_quality_state_known);
         CHECK(!runtime.adaptive_runtime_mode_confirmed);
         CHECK(!runtime.adaptive_runtime_mode_pending);
+        CHECK(!runtime.adaptive_mode_dispatcher.busy());
     }
     // Preserve the restoration obligation before consuming a failed in-flight
     // quality result: a lost reply cannot prove that KF2 kept quality at 100.
@@ -3558,7 +3560,14 @@ int test_adaptive_restore_debt() {
         replace_frame_gameplay(frame, [](auto& session) {
             session.load_map_observed_ns = 123; // same-name travel, same generation
         });
-        runtime.update_adaptive_controller(frame);
+        const auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::seconds{3};
+        do {
+            runtime.update_adaptive_controller(frame);
+            if (!runtime.adaptive_control_pending &&
+                !runtime.adaptive_control_dispatcher.busy()) break;
+            Sleep(2);
+        } while (std::chrono::steady_clock::now() < deadline);
         CHECK(runtime.adaptive_restore_debt.has_value());
         CHECK(!runtime.adaptive_control_pending);
         CHECK(!runtime.adaptive_control_dispatcher.busy());
