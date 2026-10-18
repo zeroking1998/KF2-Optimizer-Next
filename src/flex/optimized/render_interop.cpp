@@ -308,9 +308,8 @@ bool initialize_solver(SolverRenderState& state) {
     return true;
 }
 
-SolverRenderState* ensure_solver(void* solver, void* context, int capacity,
-                                 std::uint64_t generation) {
-    AcquireSRWLockExclusive(&g_lock);
+SolverRenderState* ensure_solver_locked(void* solver, void* context, int capacity,
+                                        std::uint64_t generation) {
     auto* state = find_solver(solver);
     if(!state) {
         state = new(std::nothrow) SolverRenderState{};
@@ -326,7 +325,6 @@ SolverRenderState* ensure_solver(void* solver, void* context, int capacity,
             g_solvers = state;
         }
     }
-    ReleaseSRWLockExclusive(&g_lock);
     return state;
 }
 
@@ -724,14 +722,11 @@ int p4_render_snapshot(void* solver, void* context, std::uint64_t generation,
        !positions || !normals || capacity <= 0 ||
        capacity > 0x1000000 || prefix <= 0 || prefix > capacity)
         return -1;
-    auto* created = ensure_solver(solver, context, capacity, generation);
-    if(!created) return -1;
-
-    // Do not block the solver thread behind a concurrent render upload. The
-    // current generation will use KF2's original upload if this brief handoff
-    // cannot be acquired immediately.
+    // Solver-state discovery, first-use initialization and snapshot submission
+    // share one non-blocking handoff. Never wait for a concurrent render upload;
+    // this generation can safely use KF2's original upload instead.
     if(!TryAcquireSRWLockExclusive(&g_lock)) return -1;
-    auto* state = find_solver(solver);
+    auto* state = ensure_solver_locked(solver, context, capacity, generation);
     if(!state || !state->usable.load(std::memory_order_acquire) ||
        state->context != context ||
        state->capacity != capacity) {
