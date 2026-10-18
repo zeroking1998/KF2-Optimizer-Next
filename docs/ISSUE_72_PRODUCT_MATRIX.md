@@ -5,9 +5,9 @@ does not claim compatibility with the historical product architecture.
 
 ## Current validation inventory
 
-- Default full Windows CTest registrations: 122.
+- Default full Windows CTest registrations: 123.
 - Native managed settings catalog definitions: 217.
-- Inventory reviewed: 2026-10-04.
+- Inventory reviewed: 2026-10-18.
 
 These are inventory sizes, not passed-test counts. Documentation validation
 checks the literal CMake test registrations and native catalog definitions;
