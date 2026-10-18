@@ -4185,6 +4185,19 @@ int main() {
           1);
     CHECK(particle_inspection.find(
         "++PeakCapacityCoveredComponents;") != std::string::npos);
+    const auto particle_pool_start = telemetry_source.find(
+        "function CountParticlePool(");
+    const auto particle_pool_end = telemetry_source.find(
+        "event PreBeginPlay()", particle_pool_start);
+    CHECK(particle_pool_start != std::string::npos);
+    CHECK(particle_pool_end != std::string::npos);
+    const auto particle_pool = telemetry_source.substr(
+        particle_pool_start, particle_pool_end - particle_pool_start);
+    CHECK(particle_pool.find(
+        "InspectWorldEmitterParticleComponentCached(\n"
+        "            ParticleComponent, -1,") != std::string::npos);
+    CHECK(particle_pool.find("InspectParticleComponent(") ==
+          std::string::npos);
     CHECK(telemetry_source.find(
         "WorldParticles += GroundFireParticles;") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -4896,7 +4909,7 @@ int main() {
     const auto restore_before_remove = living_remove_body.find(
         "!RestoreLivingOffscreenAnimation(Index, Reason)");
     const auto remove_original = living_remove_body.find(
-        "FixedMinimumLivingOriginalTickAnimOffscreen.Remove(Index, 1)");
+        "FixedMinimumLivingOriginalTickAnimOffscreen.Remove(LastIndex, 1)");
     CHECK(restore_before_remove != std::string::npos);
     CHECK(remove_original != std::string::npos);
     CHECK(restore_before_remove < remove_original);
@@ -4907,6 +4920,28 @@ int main() {
     CHECK(living_remove_body.find("Candidate.Mesh == None") == std::string::npos);
     CHECK(living_remove_body.find("return false;", restore_before_remove) <
           remove_original);
+    CHECK(living_remove_body.find(
+        "LastIndex = FixedMinimumLivingVisualZeds.Length - 1;") !=
+          std::string::npos);
+    CHECK(living_remove_body.find("if (Index != LastIndex)") !=
+          std::string::npos);
+    for (const auto* tracked_array : {
+             "FixedMinimumLivingVisualZeds",
+             "FixedMinimumLivingAppliedMinLods",
+             "FixedMinimumLivingAppliedAnimDistances",
+             "FixedMinimumLivingAppliedAnimRates",
+             "FixedMinimumLivingOriginalTickAnimOffscreen",
+             "FixedMinimumLivingOriginalUpdateSkelOffscreen",
+             "FixedMinimumLivingOffscreenAnimReduced"}) {
+        CHECK(living_remove_body.find(
+            std::string{tracked_array} + "[Index] =") != std::string::npos);
+        CHECK(living_remove_body.find(
+            std::string{tracked_array} + ".Remove(LastIndex, 1)") !=
+              std::string::npos);
+        CHECK(living_remove_body.find(
+            std::string{tracked_array} + ".Remove(Index, 1)") ==
+              std::string::npos);
+    }
     CHECK(manager_retire_body.find("FixedMinimumLivingVisualZeds.Length = 0") ==
           std::string::npos);
     CHECK(manager_retire_body.find(
@@ -5090,8 +5125,19 @@ int main() {
         "PruneFixedMinimumLivingVisualEntries();") != std::string::npos);
     CHECK(telemetry_source.find(
         "readback=verified", lod_apply) != std::string::npos);
+    const auto living_receipt = living_apply_body.find(
+        "KF2OPT_LIVING_VISUAL state=fixed_minimum");
+    CHECK(living_receipt != std::string::npos);
+    CHECK(living_apply_body.rfind(
+        "if (bDetailedRuntimeDiagnostics)", living_receipt) !=
+          std::string::npos);
     const auto lod_prune = telemetry_source.find(
         "function PruneFixedMinimumCorpseLodEntries()");
+    const auto lod_prune_end = telemetry_source.find(
+        "function int FindAdaptiveDistanceSleptCorpse(", lod_prune);
+    CHECK(lod_prune_end != std::string::npos);
+    const auto lod_prune_body = telemetry_source.substr(
+        lod_prune, lod_prune_end - lod_prune);
     const auto lod_native_reset = telemetry_source.find(
         "KF2OPT_CORPSE_LOD state=native_reset", lod_prune);
     const auto lod_unowned_state = telemetry_source.find(
@@ -5105,6 +5151,40 @@ int main() {
     CHECK(lod_unowned_state != std::string::npos);
     CHECK(lod_reapply_reason != std::string::npos);
     CHECK(lod_reason_receipt != std::string::npos);
+    CHECK(lod_prune_body.find(
+        "if (bDetailedRuntimeDiagnostics)\n"
+        "            {\n"
+        "                `log(\"KF2OPT_CORPSE_LOD state=native_reset") !=
+          std::string::npos);
+    const auto lod_apply_body = telemetry_source.substr(
+        lod_apply, telemetry_source.find(
+            "function int GetAdaptiveCorpseFramePressureLevel(", lod_apply) -
+            lod_apply);
+    CHECK(lod_apply_body.find(
+        "if (bDetailedRuntimeDiagnostics)\n"
+        "    {\n"
+        "        `log(\"KF2OPT_CORPSE_LOD state=fixed_minimum") !=
+          std::string::npos);
+    const auto capacity_update = telemetry_source.find(
+        "function AdjustAdaptiveCorpseCapacity(");
+    const auto capacity_update_end = telemetry_source.find(
+        "function bool StaggerCorpseCleanup()", capacity_update);
+    const auto offline_capacity_body = telemetry_source.substr(
+        capacity_update, capacity_update_end - capacity_update);
+    CHECK(offline_capacity_body.find(
+        "if (bDetailedRuntimeDiagnostics)\n"
+        "        {\n"
+        "            `log(\"KF2OPT_CORPSE_CAPACITY") !=
+          std::string::npos);
+    const auto stagger_end = telemetry_source.find(
+        "function int GetAdaptiveCorpseScenePressureLevel(",
+        capacity_update_end);
+    const auto stagger_body = telemetry_source.substr(
+        capacity_update_end, stagger_end - capacity_update_end);
+    CHECK(stagger_body.find(
+        "if (bDetailedRuntimeDiagnostics &&\n"
+        "            (AdaptiveCorpsesRemoved == 1 ||") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "KF2OPT_CORPSE_LOD state=restored reason=near_player") ==
           std::string::npos);
