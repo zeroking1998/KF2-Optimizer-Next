@@ -19,7 +19,8 @@ constexpr std::size_t P4ExtendedSolverBytes = 0x5C0;
 enum : unsigned {
     P4Ready = 1, P4ComputePending = 2, P4TailRecorded = 4,
     P4CopyPending = 8, P4Joining = 16, P4ReadbackLinked = 32,
-    P4StepEligible = 64, P4PullScope = 128, P4PullContextStable = 256
+    P4StepEligible = 64, P4PullScope = 128, P4PullContextStable = 256,
+    P4PullEligible = 512
 };
 using P4Unary = void(*)(void*);
 using P4Density = void(*)(void*, void*, int);

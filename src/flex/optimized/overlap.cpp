@@ -43,7 +43,10 @@ template<class T> void put(void* solver, std::size_t offset, T value) {
 P4State& state(void* solver) { return *reinterpret_cast<P4State*>(static_cast<char*>(solver)+P4StateOffset); }
 void must(int error) { if(error) p4_fail_closed(); }
 bool native_ok(const P4State& s) { return s.native_error && !*s.native_error; }
-void clear_ready(P4State& s) { s.flags &= ~P4Ready; s.ready_generation = 0; }
+void clear_ready(P4State& s) {
+    s.flags &= ~(P4Ready | P4PullEligible);
+    s.ready_generation = 0;
+}
 
 void finish_copies(P4State& s) {
     if(s.flags & P4CopyPending) { must(cudaStreamSynchronize_ptsz(s.stream)); s.flags &= ~P4CopyPending; }
@@ -113,6 +116,12 @@ bool scope_eligible(void* solver, const P4State& s) {
     return s.initialized == 1 && s.thread == GetCurrentThreadId() && native_ok(s) &&
            (s.flags & P4Ready) && s.ready_generation == s.generation &&
            field<unsigned>(solver, 0x53C) == 0x80000002U;
+}
+bool pull_eligible(const P4State& s) {
+    return s.initialized == 1 && native_ok(s) &&
+           (s.flags & (P4Ready | P4PullEligible)) ==
+               (P4Ready | P4PullEligible) &&
+           s.ready_generation == s.generation;
 }
 bool supported(void* solver, const void* in, std::size_t bytes) {
     constexpr std::size_t source[] = {0,0x10,0x20,0x30,0x48,0x128,0x130};
@@ -236,7 +245,9 @@ P4_API int p4_copy(void* out, const void* in, std::size_t bytes, int kind, void*
     // Keep direct API reads and every non-Pull copy on the original path.
     if((s.flags & P4PullScope) && asynchronous &&
        in == field<void*>(solver,0x20)) return 0;
-    if(!scope_eligible(solver,s)) {
+    const bool eligible = (s.flags & P4PullScope) ?
+        pull_eligible(s) : scope_eligible(solver,s);
+    if(!eligible) {
         finish_copies(s);
         return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);
     }
@@ -259,9 +270,12 @@ P4_API void p4_pull(void* container, P4Unary original) {
     void* solver = field<void*>(container,8); enter_scope(solver);
     auto& pull_state = state(solver);
     pull_state.flags = (pull_state.flags | P4PullScope) &
-                       ~P4PullContextStable;
+                       ~(P4PullContextStable | P4PullEligible);
+    const bool eligible = pull_state.depth == 1 &&
+                          scope_eligible(solver,pull_state);
+    if(eligible) pull_state.flags |= P4PullEligible;
     void* pull_context{};
-    if(pull_state.depth == 1 && scope_eligible(solver,pull_state) &&
+    if(eligible &&
        !cuCtxGetCurrent(&pull_context) && pull_context == pull_state.context)
         pull_state.flags |= P4PullContextStable;
     const auto generation = pull_state.generation;
@@ -277,7 +291,7 @@ P4_API void p4_pull(void* container, P4Unary original) {
         if(!abnormal) {
             auto& s = state(solver);
             void* context{};
-            if(s.depth == 1 && scope_eligible(solver,s) &&
+            if(s.depth == 1 && pull_eligible(s) &&
                ((s.flags & P4PullContextStable) ||
                 (!cuCtxGetCurrent(&context) && context == s.context)))
                 snapshot = p4_render_snapshot(
@@ -286,7 +300,8 @@ P4_API void p4_pull(void* container, P4Unary original) {
                     narrowed ? static_cast<int>(prefix) : field<int>(solver,0x1A0),
                     field<void*>(solver,0), field<void*>(solver,0x48));
         }
-        state(solver).flags &= ~(P4PullScope | P4PullContextStable);
+        state(solver).flags &= ~(P4PullScope | P4PullContextStable |
+                                 P4PullEligible);
         if(narrowed) for(const auto& end:ends) put(container,end.offset,end.full);
         leave_scope(solver,abnormal);
         if(!abnormal && snapshot >= 0)

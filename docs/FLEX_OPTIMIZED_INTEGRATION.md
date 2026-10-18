@@ -81,6 +81,14 @@ present (four to one without them). A different issuing context keeps every
 original per-copy validation and disables this shortcut; copy errors,
 completion and teardown behavior are unchanged.
 
+The same exact Pull also validates its immutable thread, commit marker and
+generation contract once. Routed payloads then use the solver-owned token while
+still checking the native error and ready generation before every copy. With
+rigid transforms, this reduces the full pull-invariant eligibility validation
+from seven executions to one. A native error immediately returns subsequent
+payloads to the original stream, and the token is cleared on every normal,
+abnormal and readiness-invalidating exit.
+
 For the exact supported KFGame image, an optional DX11/CUDA bridge snapshots
 canonical solver positions and normals on the GPU and packs the existing
 dynamic vertex buffer there instead of repeating KF2's per-vertex CPU gather

@@ -75,12 +75,15 @@ PullFixture* current{};
 void observe(void*) { current->observe(); }
 void raise(void*) { RaiseException(0xE0421132U,0,0,nullptr); }
 int async_copies{};
+int routed_copies{};
 int context_queries{};
 void* current_context{};
 void* pushed_context{};
 void* solver_context{};
 bool simulate_getter_guards{};
 int phase_copy_result{-1};
+int first_copy_result{-1};
+int second_copy_result{-1};
 void copy_phase(void*) {
     current->observe();
     phase_copy_result=p4_copy(current->buffers[2].data(),
@@ -101,6 +104,16 @@ void copy_pull_payloads(void*) {
         if(simulate_getter_guards) current_context=saved;
         if(index==2) phase_copy_result=result;
     }
+}
+void copy_then_native_error(void*) {
+    current->observe();
+    first_copy_result=p4_copy(current->buffers[0].data(),
+        read<void*>(current->solver.data()),16,2,
+        current->solver.data(),1);
+    current->native_error=1;
+    second_copy_result=p4_copy(current->buffers[1].data(),
+        read<void*>(current->solver.data()+0x10),12,2,
+        current->solver.data(),1);
 }
 void arm_pull(PullFixture& fixture, void* context) {
     auto& overlap=*reinterpret_cast<P4State*>(
@@ -191,7 +204,11 @@ extern "C" int cudaEventRecord_ptsz(void*,void*) { return 0; }
 extern "C" int cudaEventSynchronize(void*) { return 0; }
 extern "C" int cudaPeekAtLastError() { return 0; }
 extern "C" int cudaMemcpy_ptds(void*,const void*,std::size_t,int) { return 0; }
-extern "C" int cudaMemcpyAsync_ptsz(void*,const void*,std::size_t,int,void*) { ++async_copies; return 0; }
+extern "C" int cudaMemcpyAsync_ptsz(void*,const void*,std::size_t,int,void* stream) {
+    ++async_copies;
+    if(stream) ++routed_copies;
+    return 0;
+}
 extern "C" int cuCtxGetCurrent(void** result) {
     ++context_queries;
     *result=current_context;
@@ -349,13 +366,17 @@ int main() {
         simulate_getter_guards=false;
         arm_pull(fixture,solver_context);
         async_copies=0;
+        routed_copies=0;
         context_queries=0;
         phase_copy_result=-1;
         p4_pull(fixture.container.data(),copy_pull_payloads);
         CHECK(context_queries==1);
         CHECK(async_copies==5);
+        CHECK(routed_copies==5);
         CHECK(phase_copy_result==0);
         CHECK(current_context==solver_context);
+        CHECK(!(reinterpret_cast<P4State*>(fixture.solver.data()+
+            P4StateOffset)->flags & P4PullEligible));
         CHECK(fixture.restored());
     }
     {
@@ -367,13 +388,35 @@ int main() {
         simulate_getter_guards=true;
         arm_pull(fixture,solver_context);
         async_copies=0;
+        routed_copies=0;
         context_queries=0;
         phase_copy_result=-1;
         p4_pull(fixture.container.data(),copy_pull_payloads);
         CHECK(context_queries==7);
         CHECK(async_copies==5);
+        CHECK(routed_copies==5);
         CHECK(phase_copy_result==0);
         CHECK(current_context==reinterpret_cast<void*>(0x2244));
+        CHECK(fixture.restored());
+    }
+    {
+        // Pull-wide invariants are cached, but a native failure is still read
+        // before every payload and immediately returns to the original stream.
+        PullFixture fixture{{0,3,7}}; current=&fixture;
+        solver_context=reinterpret_cast<void*>(0x1132);
+        current_context=solver_context;
+        arm_pull(fixture,solver_context);
+        async_copies=0;
+        routed_copies=0;
+        first_copy_result=-1;
+        second_copy_result=-1;
+        p4_pull(fixture.container.data(),copy_then_native_error);
+        CHECK(first_copy_result==0);
+        CHECK(second_copy_result==0);
+        CHECK(async_copies==2);
+        CHECK(routed_copies==1);
+        CHECK(!(reinterpret_cast<P4State*>(fixture.solver.data()+
+            P4StateOffset)->flags & P4PullEligible));
         CHECK(fixture.restored());
     }
     return 0;
