@@ -722,25 +722,36 @@ int p4_render_snapshot(void* solver, void* context, std::uint64_t generation,
        !positions || !normals || capacity <= 0 ||
        capacity > 0x1000000 || prefix <= 0 || prefix > capacity)
         return -1;
-    // Solver-state discovery, first-use initialization and snapshot submission
-    // share one non-blocking handoff. Never wait for a concurrent render upload;
-    // this generation can safely use KF2's original upload instead.
-    if(!TryAcquireSRWLockExclusive(&g_lock)) return -1;
-    auto* state = ensure_solver_locked(solver, context, capacity, generation);
+    // Existing solver state and snapshot slots are atomic, so the normal path
+    // can run beside render uploads under a shared lifetime lock. Only first-use
+    // allocation needs exclusive ownership, and neither handoff may block the
+    // solver thread.
+    if(!TryAcquireSRWLockShared(&g_lock)) return -1;
+    bool exclusive = false;
+    auto* state = find_solver(solver);
+    if(!state) {
+        ReleaseSRWLockShared(&g_lock);
+        if(!TryAcquireSRWLockExclusive(&g_lock)) return -1;
+        exclusive = true;
+        state = ensure_solver_locked(solver, context, capacity, generation);
+    }
+    const auto release_lock = [exclusive] {
+        if(exclusive) ReleaseSRWLockExclusive(&g_lock);
+        else ReleaseSRWLockShared(&g_lock);
+    };
     if(!state || !state->usable.load(std::memory_order_acquire) ||
        state->context != context ||
        state->capacity != capacity) {
-        ReleaseSRWLockExclusive(&g_lock);
+        release_lock();
         return -1;
     }
-    bool has_consumer = false;
+    int render_prefix = 0;
     for(auto* resource = state->resources; resource; resource = resource->next)
-        if(resource->usable.load(std::memory_order_acquire)) {
-            has_consumer = true;
-            break;
-        }
-    if(!has_consumer) {
-        ReleaseSRWLockExclusive(&g_lock);
+        if(resource->usable.load(std::memory_order_acquire) &&
+           resource->maximum_particle + 1 > render_prefix)
+            render_prefix = resource->maximum_particle + 1;
+    if(!render_prefix) {
+        release_lock();
         return -1;
     }
     state->current_generation.store(generation, std::memory_order_release);
@@ -753,16 +764,17 @@ int p4_render_snapshot(void* solver, void* context, std::uint64_t generation,
         else {
             if(query != CudaNotReady)
                 state->usable.store(false, std::memory_order_release);
-            ReleaseSRWLockExclusive(&g_lock);
+            release_lock();
             return -1;
         }
     }
 
     std::size_t position_bytes{}, normal_bytes{};
-    const auto count = static_cast<std::size_t>(prefix);
+    const int snapshot_prefix = render_prefix < prefix ? render_prefix : prefix;
+    const auto count = static_cast<std::size_t>(snapshot_prefix);
     if(!multiply(count, 16U, position_bytes) ||
        !multiply(count, 16U, normal_bytes)) {
-        ReleaseSRWLockExclusive(&g_lock);
+        release_lock();
         return -1;
     }
     // This hook runs on the verified solver thread. Its per-thread default
@@ -780,8 +792,8 @@ int p4_render_snapshot(void* solver, void* context, std::uint64_t generation,
     if(error) {
         must_cleanup(cudaStreamSynchronize_ptsz(nullptr));
         state->usable.store(false, std::memory_order_release);
-    } else slot.prefix.store(prefix, std::memory_order_release);
-    ReleaseSRWLockExclusive(&g_lock);
+    } else slot.prefix.store(snapshot_prefix, std::memory_order_release);
+    release_lock();
     return error ? -1 : candidate;
 }
 
