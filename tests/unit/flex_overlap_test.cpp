@@ -110,9 +110,8 @@ void p4_install_presentation() {}
 void p4_release_presentation(void*) {}
 void p4_install_render_interop() {}
 void p4_render_generation(void*,std::uint64_t) {}
-int p4_render_snapshot(void*,void*,void*,std::uint64_t,int,int,
-                       const void*,const void*,bool& copy_enqueued) {
-    copy_enqueued=false;
+int p4_render_snapshot(void*,void*,std::uint64_t,int,int,
+                       const void*,const void*) {
     return -1;
 }
 void p4_render_publish(void*,std::uint64_t,int) {}

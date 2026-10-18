@@ -43,9 +43,12 @@ extern "C" __declspec(dllimport) int cuMemcpyHtoD_v2(
 extern "C" __declspec(dllimport) int cudaStreamCreateWithFlags(void**, unsigned);
 extern "C" __declspec(dllimport) int cudaStreamDestroy(void*);
 extern "C" __declspec(dllimport) int cudaStreamSynchronize_ptsz(void*);
+extern "C" __declspec(dllimport) int cudaStreamWaitEvent_ptsz(
+    void*, void*, unsigned);
 extern "C" __declspec(dllimport) int cudaEventCreateWithFlags(void**, unsigned);
 extern "C" __declspec(dllimport) int cudaEventDestroy(void*);
 extern "C" __declspec(dllimport) int cudaEventRecord_ptsz(void*, void*);
+extern "C" __declspec(dllimport) int cudaEventSynchronize(void*);
 extern "C" __declspec(dllimport) int cudaEventQuery(void*);
 extern "C" __declspec(dllimport) int cudaMemcpyAsync_ptsz(
     void*, const void*, std::size_t, int, void*);
@@ -252,6 +255,8 @@ void destroy_resource(ResourceState* resource) {
 void destroy_solver_contents(SolverRenderState& state) {
     if(state.render_stream)
         must_cleanup(cudaStreamSynchronize_ptsz(state.render_stream));
+    for(auto& slot : state.slots)
+        if(slot.completion) must_cleanup(cudaEventSynchronize(slot.completion));
     while(state.resources) {
         auto* resource = state.resources;
         state.resources = resource->next;
@@ -526,7 +531,10 @@ extern "C" void p4_render_upload(void* resource, const void* positions,
         bool mapped = false;
         int error = cuCtxPushCurrent_v2(state->context);
         const bool pushed = !error;
-        if(pushed) {
+        if(pushed)
+            error = cudaStreamWaitEvent_ptsz(
+                state->render_stream, slot.completion, 0U);
+        if(!error) {
             error = cuGraphicsMapResources(1U, &cached->graphics,
                                            state->render_stream);
             mapped = !error;
@@ -709,24 +717,25 @@ void p4_render_generation(void* solver, std::uint64_t generation) {
     ReleaseSRWLockShared(&g_lock);
 }
 
-int p4_render_snapshot(void* solver, void* context, void* stream,
-                       std::uint64_t generation, int capacity, int prefix,
-                       const void* positions, const void* normals,
-                       bool& copy_enqueued) {
-    copy_enqueued = false;
+int p4_render_snapshot(void* solver, void* context, std::uint64_t generation,
+                       int capacity, int prefix,
+                       const void* positions, const void* normals) {
     if(!g_installed.load(std::memory_order_acquire) || !solver || !context ||
-       !stream || !positions || !normals || capacity <= 0 ||
+       !positions || !normals || capacity <= 0 ||
        capacity > 0x1000000 || prefix <= 0 || prefix > capacity)
         return -1;
     auto* created = ensure_solver(solver, context, capacity, generation);
     if(!created) return -1;
 
-    AcquireSRWLockShared(&g_lock);
+    // Do not block the solver thread behind a concurrent render upload. The
+    // current generation will use KF2's original upload if this brief handoff
+    // cannot be acquired immediately.
+    if(!TryAcquireSRWLockExclusive(&g_lock)) return -1;
     auto* state = find_solver(solver);
     if(!state || !state->usable.load(std::memory_order_acquire) ||
        state->context != context ||
        state->capacity != capacity) {
-        ReleaseSRWLockShared(&g_lock);
+        ReleaseSRWLockExclusive(&g_lock);
         return -1;
     }
     bool has_consumer = false;
@@ -736,7 +745,7 @@ int p4_render_snapshot(void* solver, void* context, void* stream,
             break;
         }
     if(!has_consumer) {
-        ReleaseSRWLockShared(&g_lock);
+        ReleaseSRWLockExclusive(&g_lock);
         return -1;
     }
     state->current_generation.store(generation, std::memory_order_release);
@@ -749,7 +758,7 @@ int p4_render_snapshot(void* solver, void* context, void* stream,
         else {
             if(query != CudaNotReady)
                 state->usable.store(false, std::memory_order_release);
-            ReleaseSRWLockShared(&g_lock);
+            ReleaseSRWLockExclusive(&g_lock);
             return -1;
         }
     }
@@ -758,21 +767,26 @@ int p4_render_snapshot(void* solver, void* context, void* stream,
     const auto count = static_cast<std::size_t>(prefix);
     if(!multiply(count, 16U, position_bytes) ||
        !multiply(count, 16U, normal_bytes)) {
-        ReleaseSRWLockShared(&g_lock);
+        ReleaseSRWLockExclusive(&g_lock);
         return -1;
     }
+    // This hook runs on the verified solver thread. Its per-thread default
+    // stream is ordered after this solve and before the next one, so the
+    // source lifetime needs no host wait or additional synchronization state.
     int error = cudaMemcpyAsync_ptsz(
         reinterpret_cast<void*>(slot.positions), positions, position_bytes,
-        CudaMemoryDeviceToDevice, stream);
-    if(!error) {
-        copy_enqueued = true;
+        CudaMemoryDeviceToDevice, nullptr);
+    if(!error)
         error = cudaMemcpyAsync_ptsz(
             reinterpret_cast<void*>(slot.normals), normals, normal_bytes,
-            CudaMemoryDeviceToDevice, stream);
-    }
-    if(error) state->usable.store(false, std::memory_order_release);
-    else slot.prefix.store(prefix, std::memory_order_release);
-    ReleaseSRWLockShared(&g_lock);
+            CudaMemoryDeviceToDevice, nullptr);
+    if(!error)
+        error = cudaEventRecord_ptsz(slot.completion, nullptr);
+    if(error) {
+        must_cleanup(cudaStreamSynchronize_ptsz(nullptr));
+        state->usable.store(false, std::memory_order_release);
+    } else slot.prefix.store(prefix, std::memory_order_release);
+    ReleaseSRWLockExclusive(&g_lock);
     return error ? -1 : candidate;
 }
 

@@ -80,7 +80,14 @@ FleX instance's particle IDs. Attachments, unfamiliar layouts, missing or stale
 snapshots, unsupported mappings and every API error keep KF2's original upload.
 The bridge registers and caches only resources that pass exact identity and
 bounds checks, and releases them before the matching RHI resource or scene
-proxy is destroyed.
+proxy is destroyed. Snapshot readiness and source-buffer reuse are ordered with
+CUDA events between the solver and render streams. The normal path therefore
+does not append the device-to-device snapshot to KF2's host-waited readback
+stream or add a CPU synchronization. API errors, an unexpected CUDA context
+and teardown still drain the relevant GPU work synchronously before any source
+or registered resource can be changed or released. If a render upload is already
+using a snapshot slot, the non-blocking handoff keeps KF2's original upload for
+that generation instead of stalling the solver thread or reusing the slot.
 
 For the explicitly modelled sparse path of 512 live particles in the observed
 26,746-slot container, low contiguous IDs reduce Push bytes by 98.0857%, Pull

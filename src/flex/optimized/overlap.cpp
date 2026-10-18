@@ -270,16 +270,13 @@ P4_API void p4_pull(void* container, P4Unary original) {
         if(!abnormal) {
             auto& s = state(solver);
             void* context{};
-            bool copy_enqueued = false;
             if(s.depth == 1 && scope_eligible(solver,s) &&
                !cuCtxGetCurrent(&context) && context == s.context)
                 snapshot = p4_render_snapshot(
-                    solver, s.context, s.stream, generation,
+                    solver, s.context, generation,
                     field<int>(solver,0x1A0),
                     narrowed ? static_cast<int>(prefix) : field<int>(solver,0x1A0),
-                    field<void*>(solver,0), field<void*>(solver,0x48),
-                    copy_enqueued);
-            if(copy_enqueued) s.flags |= P4CopyPending;
+                    field<void*>(solver,0), field<void*>(solver,0x48));
         }
         state(solver).flags &= ~P4PullScope;
         if(narrowed) for(const auto& end:ends) put(container,end.offset,end.full);
