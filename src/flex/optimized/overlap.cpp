@@ -240,7 +240,8 @@ P4_API int p4_copy(void* out, const void* in, std::size_t bytes, int kind, void*
         finish_copies(s);
         return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);
     }
-    if(cuCtxGetCurrent(&context) || context != s.context) {
+    if(!(s.flags & P4PullContextStable) &&
+       (cuCtxGetCurrent(&context) || context != s.context)) {
         drain(s); s.initialized = 2;
         return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);
     }
@@ -256,8 +257,14 @@ P4_API int p4_copy(void* out, const void* in, std::size_t bytes, int kind, void*
 }
 P4_API void p4_pull(void* container, P4Unary original) {
     void* solver = field<void*>(container,8); enter_scope(solver);
-    state(solver).flags |= P4PullScope;
-    const auto generation = state(solver).generation;
+    auto& pull_state = state(solver);
+    pull_state.flags = (pull_state.flags | P4PullScope) &
+                       ~P4PullContextStable;
+    void* pull_context{};
+    if(pull_state.depth == 1 && scope_eligible(solver,pull_state) &&
+       !cuCtxGetCurrent(&pull_context) && pull_context == pull_state.context)
+        pull_state.flags |= P4PullContextStable;
+    const auto generation = pull_state.generation;
     int snapshot = -1;
     PullEnd ends[4]{};
     std::size_t prefix{};
@@ -271,14 +278,15 @@ P4_API void p4_pull(void* container, P4Unary original) {
             auto& s = state(solver);
             void* context{};
             if(s.depth == 1 && scope_eligible(solver,s) &&
-               !cuCtxGetCurrent(&context) && context == s.context)
+               ((s.flags & P4PullContextStable) ||
+                (!cuCtxGetCurrent(&context) && context == s.context)))
                 snapshot = p4_render_snapshot(
                     solver, s.context, generation,
                     field<int>(solver,0x1A0),
                     narrowed ? static_cast<int>(prefix) : field<int>(solver,0x1A0),
                     field<void*>(solver,0), field<void*>(solver,0x48));
         }
-        state(solver).flags &= ~P4PullScope;
+        state(solver).flags &= ~(P4PullScope | P4PullContextStable);
         if(narrowed) for(const auto& end:ends) put(container,end.offset,end.full);
         leave_scope(solver,abnormal);
         if(!abnormal && snapshot >= 0)

@@ -32,6 +32,7 @@ struct PullFixture {
     std::array<std::vector<std::byte>,4> buffers;
     std::vector<int> active_ids;
     std::array<int,4> observed{};
+    int native_error{};
 
     explicit PullFixture(std::vector<int> ids, int maximum = 16)
         : capacity(maximum), active_ids(std::move(ids)) {
@@ -74,6 +75,11 @@ PullFixture* current{};
 void observe(void*) { current->observe(); }
 void raise(void*) { RaiseException(0xE0421132U,0,0,nullptr); }
 int async_copies{};
+int context_queries{};
+void* current_context{};
+void* pushed_context{};
+void* solver_context{};
+bool simulate_getter_guards{};
 int phase_copy_result{-1};
 void copy_phase(void*) {
     current->observe();
@@ -81,6 +87,39 @@ void copy_phase(void*) {
         read<void*>(current->solver.data()+0x20),
         static_cast<std::size_t>(current->observed[2])*4,2,
         current->solver.data(),1);
+}
+void copy_pull_payloads(void*) {
+    current->observe();
+    constexpr std::size_t sources[] = {0,0x10,0x20,0x48,0x128,0x130};
+    constexpr std::size_t sizes[] = {16,12,4,16,36,12};
+    for(unsigned index=0;index<6;++index) {
+        void* saved=current_context;
+        if(simulate_getter_guards) current_context=solver_context;
+        const int result=p4_copy(current->buffers[index%4].data(),
+            read<void*>(current->solver.data()+sources[index]),sizes[index],2,
+            current->solver.data(),1);
+        if(simulate_getter_guards) current_context=saved;
+        if(index==2) phase_copy_result=result;
+    }
+}
+void arm_pull(PullFixture& fixture, void* context) {
+    auto& overlap=*reinterpret_cast<P4State*>(
+        fixture.solver.data()+P4StateOffset);
+    overlap.initialized=1;
+    overlap.thread=GetCurrentThreadId();
+    overlap.context=context;
+    overlap.stream=reinterpret_cast<void*>(2);
+    overlap.ready_event=reinterpret_cast<void*>(3);
+    overlap.flags=P4Ready;
+    overlap.generation=7;
+    overlap.ready_generation=7;
+    overlap.native_error=&fixture.native_error;
+    write(fixture.solver.data()+0x53C,0x80000002U);
+    write(fixture.solver.data()+0x138,2);
+    constexpr std::size_t sources[] = {0,0x10,0x20,0x48,0x128,0x130};
+    for(unsigned index=0;index<6;++index)
+        write(fixture.solver.data()+sources[index],
+            reinterpret_cast<void*>(0x1000ULL*(index+1)));
 }
 bool abnormal_pull_restores(PullFixture* fixture) {
     bool caught=false;
@@ -153,9 +192,21 @@ extern "C" int cudaEventSynchronize(void*) { return 0; }
 extern "C" int cudaPeekAtLastError() { return 0; }
 extern "C" int cudaMemcpy_ptds(void*,const void*,std::size_t,int) { return 0; }
 extern "C" int cudaMemcpyAsync_ptsz(void*,const void*,std::size_t,int,void*) { ++async_copies; return 0; }
-extern "C" int cuCtxGetCurrent(void**) { return 0; }
-extern "C" int cuCtxPushCurrent_v2(void*) { return 0; }
-extern "C" int cuCtxPopCurrent_v2(void**) { return 0; }
+extern "C" int cuCtxGetCurrent(void** result) {
+    ++context_queries;
+    *result=current_context;
+    return 0;
+}
+extern "C" int cuCtxPushCurrent_v2(void* context) {
+    pushed_context=current_context;
+    current_context=context;
+    return 0;
+}
+extern "C" int cuCtxPopCurrent_v2(void** result) {
+    *result=current_context;
+    current_context=pushed_context;
+    return 0;
+}
 extern "C" int cuCtxSynchronize() { return 0; }
 void p4_install_render_interop() {}
 void p4_render_generation(void*,std::uint64_t) {}
@@ -287,6 +338,43 @@ int main() {
             read<void*>(fixture.solver.data()+0x20),4,2,
             fixture.solver.data(),1)==0);
         CHECK(async_copies==1);
+    }
+    {
+        // The exact Pull keeps an already-correct FleX context unchanged across
+        // every getter. Validate it once instead of querying the driver again
+        // for five routed copies and the render snapshot.
+        PullFixture fixture{{0,3,7}}; current=&fixture;
+        solver_context=reinterpret_cast<void*>(0x1132);
+        current_context=solver_context;
+        simulate_getter_guards=false;
+        arm_pull(fixture,solver_context);
+        async_copies=0;
+        context_queries=0;
+        phase_copy_result=-1;
+        p4_pull(fixture.container.data(),copy_pull_payloads);
+        CHECK(context_queries==1);
+        CHECK(async_copies==5);
+        CHECK(phase_copy_result==0);
+        CHECK(current_context==solver_context);
+        CHECK(fixture.restored());
+    }
+    {
+        // A caller with another current context keeps the original per-copy
+        // validation; the synthetic guards model each stock FleX getter.
+        PullFixture fixture{{0,3,7}}; current=&fixture;
+        solver_context=reinterpret_cast<void*>(0x1132);
+        current_context=reinterpret_cast<void*>(0x2244);
+        simulate_getter_guards=true;
+        arm_pull(fixture,solver_context);
+        async_copies=0;
+        context_queries=0;
+        phase_copy_result=-1;
+        p4_pull(fixture.container.data(),copy_pull_payloads);
+        CHECK(context_queries==7);
+        CHECK(async_copies==5);
+        CHECK(phase_copy_result==0);
+        CHECK(current_context==reinterpret_cast<void*>(0x2244));
+        CHECK(fixture.restored());
     }
     return 0;
 }

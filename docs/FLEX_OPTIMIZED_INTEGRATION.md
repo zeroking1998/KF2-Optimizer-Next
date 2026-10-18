@@ -72,6 +72,15 @@ from the solver; direct phase queries remain unchanged. Invalid or unfamiliar
 layouts retain the original full transfer.
 Necessary completion and error checks remain in place.
 
+The exact stock Pull calls only the verified getters in sequence.
+When its issuing thread already owns the solver's CUDA context, the helper
+validates that context once for the complete Pull instead of repeating the same
+driver query for every routed payload and the render snapshot. This reduces the
+helper's duplicate context queries from six to one when rigid transforms are
+present (four to one without them). A different issuing context keeps every
+original per-copy validation and disables this shortcut; copy errors,
+completion and teardown behavior are unchanged.
+
 For the exact supported KFGame image, an optional DX11/CUDA bridge snapshots
 canonical solver positions and normals on the GPU and packs the existing
 dynamic vertex buffer there instead of repeating KF2's per-vertex CPU gather
