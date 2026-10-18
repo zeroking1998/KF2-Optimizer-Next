@@ -50,7 +50,12 @@ gameplay check before release promotion.
 
 The optimized helper uses no extra worker thread or host-buffer copy loop. Its
 solver-owned synchronization resources are created once, reused and released
-on teardown. Necessary completion and error checks remain in place.
+on teardown. Push and Pull transfers use the allocated prefix through the
+highest sorted active particle ID instead of copying unused capacity. Pull
+temporarily narrows all four host views together, restores their exact bounds
+on normal and abnormal exit, and keeps the synchronous normals completion
+boundary. Invalid or unfamiliar layouts retain the original full transfer.
+Necessary completion and error checks remain in place.
 
 ## Distribution and proof
 

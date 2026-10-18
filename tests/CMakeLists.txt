@@ -351,6 +351,15 @@ target_include_directories(kf2_binary_delta_test PRIVATE
     "${PROJECT_SOURCE_DIR}/include")
 add_test(NAME kf2_binary_delta_test COMMAND kf2_binary_delta_test)
 
+add_executable(kf2_flex_overlap_test
+    unit/flex_overlap_test.cpp
+    "${PROJECT_SOURCE_DIR}/src/flex/optimized/overlap.cpp"
+)
+target_include_directories(kf2_flex_overlap_test PRIVATE
+    "${PROJECT_SOURCE_DIR}/src/flex/optimized")
+target_compile_definitions(kf2_flex_overlap_test PRIVATE P4_CPU_MODEL)
+add_test(NAME kf2_flex_overlap_test COMMAND kf2_flex_overlap_test)
+
 add_executable(kf2_flex_lab_test
     integration/flex_lab_test.cpp
     "${PROJECT_SOURCE_DIR}/src/flex/flex_lab.cpp"

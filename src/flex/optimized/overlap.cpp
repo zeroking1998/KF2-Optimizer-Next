@@ -122,6 +122,41 @@ bool supported(void* solver, const void* in, std::size_t bytes) {
     }
     return false;
 }
+struct PullEnd {
+    std::size_t offset;
+    void* full;
+    void* prefix;
+};
+bool active_pull_prefix(void* container, PullEnd (&ends)[4]) {
+    void* solver = field<void*>(container, 8);
+    const int capacity = field<int>(solver, 0x1A0);
+    const int active = field<int>(solver, 0x198);
+    const int* active_ids = field<int*>(container, 0x10);
+    if(capacity <= 0 || capacity > 0x1000000 || active <= 0 ||
+       active > capacity || !active_ids) return false;
+
+    // The extension keeps active IDs sorted; its accepted Push fast path uses
+    // the same last-ID contract. Keep a non-empty synchronous normal copy so
+    // the existing Pull completion boundary remains unchanged.
+    const int last = active_ids[active-1];
+    if(last < 0 || last >= capacity || last == capacity-1) return false;
+    const auto prefix = static_cast<std::size_t>(last)+1;
+    constexpr std::size_t begin_offsets[] = {0x58,0x70,0x88,0xA0};
+    constexpr std::size_t end_offsets[] = {0x60,0x78,0x90,0xA8};
+    constexpr std::size_t strides[] = {16,12,4,16};
+    for(unsigned i=0;i<4;++i) {
+        auto* begin = field<unsigned char*>(container,begin_offsets[i]);
+        auto* end = field<unsigned char*>(container,end_offsets[i]);
+        const auto begin_address = reinterpret_cast<std::uintptr_t>(begin);
+        const auto end_address = reinterpret_cast<std::uintptr_t>(end);
+        if(!begin_address || end_address < begin_address ||
+           end_address-begin_address !=
+               static_cast<std::size_t>(capacity)*strides[i]) return false;
+        ends[i] = {end_offsets[i],end,reinterpret_cast<void*>(
+            begin_address+prefix*strides[i])};
+    }
+    return true;
+}
 void enter_scope(void* solver) {
     auto& s = state(solver);
     if(s.depth) { drain(s); s.initialized = 2; }
@@ -196,8 +231,15 @@ P4_API int p4_copy(void* out, const void* in, std::size_t bytes, int kind, void*
 }
 P4_API void p4_pull(void* container, P4Unary original) {
     void* solver = field<void*>(container,8); enter_scope(solver);
+    PullEnd ends[4]{};
+    const bool narrowed = state(solver).depth == 1 &&
+        active_pull_prefix(container,ends);
+    if(narrowed) for(const auto& end:ends) put(container,end.offset,end.prefix);
     __try { original(container); }
-    __finally { leave_scope(solver,AbnormalTermination()!=0); }
+    __finally {
+        if(narrowed) for(const auto& end:ends) put(container,end.offset,end.full);
+        leave_scope(solver,AbnormalTermination()!=0);
+    }
 }
 P4_API void p4_density(void* solver, void* target, P4Density original) {
     enter_scope(solver);
