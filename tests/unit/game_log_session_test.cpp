@@ -75,6 +75,52 @@ std::string telemetry_line(int sample, int corpse_awake = 2) {
         " flex_surrogate_visible=1 flex_surrogate_lod=2\n";
 }
 
+std::string compact_telemetry_line(int sample, int corpse_awake = 2) {
+    return "ScriptLog: KF2OPT_TELEMETRY schema=9 sample=" +
+        std::to_string(sample) + " scan_diagnostics=0" +
+        " living=23 living_visible=18 living_offscreen=5 corpse_total=8"
+        " corpse_awake=" + std::to_string(corpse_awake) +
+        " corpse_sleeping=5 corpse_other=1 corpse_limit=12 zed_time=1"
+        " wound_decals=12 splatter_decals=9 pool_decals=4 impact_decals=7"
+        " explosion_decals=3 wound_decal_limit=64 splatter_decal_limit=64"
+        " pool_decal_limit=20 impact_decal_limit=40 explosion_decal_limit=20"
+        " gore_particle_components=6 gore_particles=345"
+        " gore_particle_visible_components=4"
+        " gore_particle_bounded_components=6"
+        " world_particle_components=18 world_particles=987"
+        " world_particle_visible_components=12"
+        " world_particle_bounded_components=18"
+        " ground_fire_particle_components=4 ground_fire_particles=222"
+        " impact_particle_components=5 impact_particles=333"
+        " gore_particle_peak_capacity=512 world_particle_peak_capacity=1536"
+        " gore_particle_peak_covered_components=6"
+        " world_particle_peak_covered_components=18"
+        " ground_fire_particle_pool_capacity=100"
+        " impact_particle_pool_capacity=60 particle_peak_capacity=2048\n";
+}
+
+std::string empty_compact_telemetry_line() {
+    return
+        "ScriptLog: KF2OPT_TELEMETRY schema=9 sample=1 scan_diagnostics=0"
+        " living=0 living_visible=0 living_offscreen=0 corpse_total=0"
+        " corpse_awake=0 corpse_sleeping=0 corpse_other=0 corpse_limit=12"
+        " zed_time=0 wound_decals=0 splatter_decals=0 pool_decals=0"
+        " impact_decals=0 explosion_decals=0 wound_decal_limit=64"
+        " splatter_decal_limit=64 pool_decal_limit=20 impact_decal_limit=40"
+        " explosion_decal_limit=20 gore_particle_components=0"
+        " gore_particles=0 gore_particle_visible_components=0"
+        " gore_particle_bounded_components=0 world_particle_components=0"
+        " world_particles=0 world_particle_visible_components=0"
+        " world_particle_bounded_components=0"
+        " ground_fire_particle_components=0 ground_fire_particles=0"
+        " impact_particle_components=0 impact_particles=0"
+        " gore_particle_peak_capacity=0 world_particle_peak_capacity=0"
+        " gore_particle_peak_covered_components=0"
+        " world_particle_peak_covered_components=0"
+        " ground_fire_particle_pool_capacity=100"
+        " impact_particle_pool_capacity=60 particle_peak_capacity=0\n";
+}
+
 std::string empty_telemetry_line() {
     return
         "ScriptLog: KF2OPT_TELEMETRY schema=8 sample=1 scan_diagnostics=1"
@@ -151,6 +197,86 @@ bool rejects_offline_telemetry(std::string line) {
     const auto result = parser.feed(line);
     return !result.has_value() && parser.current().has_value() &&
            !parser.current()->telemetry_sample.has_value();
+}
+
+bool diagnostic_telemetry_is_absent(
+    const kf2::game::GameLogSession& session) {
+    return !session.telemetry_living_classes &&
+           !session.telemetry_living_bosses &&
+           !session.telemetry_living_lod_total &&
+           !session.telemetry_living_anim_rate_total &&
+           !session.telemetry_living_injured_zones &&
+           !session.telemetry_living_required_bones &&
+           !session.telemetry_living_material_slots &&
+           !session.telemetry_living_attachments &&
+           !session.telemetry_living_anim_skipped &&
+           !session.telemetry_living_bone_atoms_skipped &&
+           !session.telemetry_living_bone_interpolation &&
+           !session.telemetry_living_kinematic_distance_skipped &&
+           !session.telemetry_living_ticks_offscreen &&
+           !session.telemetry_living_updates_skeleton_offscreen &&
+           !session.telemetry_living_special_moves &&
+           !session.telemetry_living_attack_moves &&
+           !session.telemetry_living_grapple_moves &&
+           !session.telemetry_living_stumbles &&
+           !session.telemetry_living_knockdowns &&
+           !session.telemetry_living_hit_reactions &&
+           !session.telemetry_living_other_special_moves &&
+           !session.telemetry_corpse_final_pose &&
+           !session.telemetry_corpse_visible &&
+           !session.telemetry_corpse_offscreen &&
+           !session.telemetry_corpse_lod_total &&
+           !session.telemetry_corpse_injured_zones &&
+           !session.telemetry_corpse_max_age_ms &&
+           !session.telemetry_corpse_offscreen_time_ms &&
+           !session.telemetry_corpse_offscreen_distance &&
+           !session.telemetry_dismembered_corpses &&
+           !session.telemetry_dismembered_limbs &&
+           !session.telemetry_ragdoll_warned_corpses &&
+           !session.telemetry_ragdoll_warning_max &&
+           !session.telemetry_corpse_collide_dead &&
+           !session.telemetry_corpse_collide_living &&
+           !session.telemetry_corpse_collide_dead_after_sleep &&
+           !session.telemetry_corpse_collide_living_after_sleep &&
+           !session.telemetry_visible_gibs &&
+           !session.telemetry_spray_actors &&
+           !session.telemetry_fire_spray_actors &&
+           !session.telemetry_toxic_spray_actors &&
+           !session.telemetry_other_spray_actors &&
+           !session.telemetry_explosion_actors &&
+           !session.telemetry_damaging_explosion_actors &&
+           !session.telemetry_fire_explosion_actors &&
+           !session.telemetry_toxic_explosion_actors &&
+           !session.telemetry_other_damaging_explosion_actors &&
+           !session.telemetry_unclassified_explosion_actors &&
+           !session.telemetry_lingering_explosion_actors &&
+           !session.telemetry_smoke_explosion_actors &&
+           !session.telemetry_bloat_king_fart_explosion_actors &&
+           !session.telemetry_smoke_grenade_projectiles &&
+           !session.telemetry_puke_mine_projectiles &&
+           !session.telemetry_bloat_king_puke_mine_projectiles &&
+           !session.telemetry_blood_effect_limit &&
+           !session.telemetry_gore_effect_limit &&
+           !session.telemetry_wound_lifetime_ms &&
+           !session.telemetry_splatter_lifetime_ms &&
+           !session.telemetry_pool_lifetime_ms &&
+           !session.telemetry_gib_lifetime_ms &&
+           !session.telemetry_gore_particle_lod_total &&
+           !session.telemetry_world_particle_lod_total &&
+           !session.telemetry_particle_constant_spawn_emitters &&
+           !session.telemetry_particle_dynamic_spawn_emitters &&
+           !session.telemetry_particle_constant_spawn_rate_milli &&
+           !session.telemetry_particle_burst_entries &&
+           !session.telemetry_particle_flex_components &&
+           !session.telemetry_particle_flex_fluid_components &&
+           !session.telemetry_particle_flex_nonfluid_components &&
+           !session.telemetry_particle_flex_mixed_components &&
+           !session.telemetry_particle_nonflex_components &&
+           !session.telemetry_particle_unclassified_components &&
+           !session.telemetry_flex_surrogate_active &&
+           !session.telemetry_flex_surrogate_particles &&
+           !session.telemetry_flex_surrogate_visible &&
+           !session.telemetry_flex_surrogate_lod;
 }
 
 int test_bridge_capability_lifetime() {
@@ -1028,21 +1154,34 @@ int main() {
     CHECK(diagnostics_off_stream.feed(
         "[2] ScriptLog: WI.NetMode:  NM_Standalone\n").has_value());
     CHECK(diagnostics_off_stream.feed(telemetry_line(1)).has_value());
-    const auto diagnostics_off = diagnostics_off_stream.feed(
-        replace_once(telemetry_line(2), " scan_diagnostics=1",
-                     " scan_diagnostics=0"));
+    const auto diagnostics_off =
+        diagnostics_off_stream.feed(compact_telemetry_line(2),
+                                    4'550'000'000ULL);
     CHECK(diagnostics_off.has_value());
     CHECK(diagnostics_off->telemetry_living_zeds == 23);
     CHECK(diagnostics_off->telemetry_living_visible == 18);
+    CHECK(diagnostics_off->telemetry_living_offscreen ==
+          probe->telemetry_living_offscreen);
     CHECK(diagnostics_off->telemetry_corpse_total == 8);
     CHECK(diagnostics_off->telemetry_corpse_awake == 2);
+    CHECK(diagnostics_off->telemetry_corpse_sleeping ==
+          probe->telemetry_corpse_sleeping);
+    CHECK(diagnostics_off->telemetry_corpse_limit ==
+          probe->telemetry_corpse_limit);
     CHECK(!diagnostics_off->telemetry_living_classes.has_value());
     CHECK(!diagnostics_off->telemetry_living_required_bones.has_value());
     CHECK(!diagnostics_off->telemetry_living_special_moves.has_value());
     CHECK(!diagnostics_off->telemetry_corpse_final_pose.has_value());
     CHECK(!diagnostics_off->telemetry_corpse_lod_total.has_value());
     CHECK(!diagnostics_off->telemetry_dismembered_corpses.has_value());
-    CHECK(diagnostics_off->telemetry_corpse_collide_dead == true);
+    CHECK(!diagnostics_off->telemetry_corpse_visible.has_value());
+    CHECK(!diagnostics_off->telemetry_corpse_offscreen.has_value());
+    CHECK(!diagnostics_off->telemetry_corpse_offscreen_time_ms.has_value());
+    CHECK(!diagnostics_off->telemetry_corpse_offscreen_distance.has_value());
+    CHECK(!diagnostics_off->telemetry_corpse_collide_dead.has_value());
+    CHECK(!diagnostics_off->telemetry_corpse_collide_living.has_value());
+    CHECK(!diagnostics_off->telemetry_corpse_collide_dead_after_sleep.has_value());
+    CHECK(!diagnostics_off->telemetry_corpse_collide_living_after_sleep.has_value());
     CHECK(!diagnostics_off->telemetry_visible_gibs.has_value());
     CHECK(!diagnostics_off->telemetry_spray_actors.has_value());
     CHECK(!diagnostics_off->telemetry_fire_spray_actors.has_value());
@@ -1061,12 +1200,116 @@ int main() {
     CHECK(!diagnostics_off->telemetry_puke_mine_projectiles.has_value());
     CHECK(!diagnostics_off->telemetry_bloat_king_puke_mine_projectiles.has_value());
     CHECK(diagnostics_off->telemetry_world_particles == 987);
+    CHECK(diagnostics_off->telemetry_gore_particle_components ==
+          probe->telemetry_gore_particle_components);
+    CHECK(diagnostics_off->telemetry_gore_particles ==
+          probe->telemetry_gore_particles);
+    CHECK(diagnostics_off->telemetry_gore_particle_visible_components ==
+          probe->telemetry_gore_particle_visible_components);
+    CHECK(diagnostics_off->telemetry_gore_particle_bounded_components ==
+          probe->telemetry_gore_particle_bounded_components);
+    CHECK(diagnostics_off->telemetry_world_particle_components ==
+          probe->telemetry_world_particle_components);
+    CHECK(diagnostics_off->telemetry_world_particle_visible_components ==
+          probe->telemetry_world_particle_visible_components);
+    CHECK(diagnostics_off->telemetry_world_particle_bounded_components ==
+          probe->telemetry_world_particle_bounded_components);
+    CHECK(diagnostics_off->telemetry_ground_fire_particle_components ==
+          probe->telemetry_ground_fire_particle_components);
+    CHECK(diagnostics_off->telemetry_ground_fire_particles ==
+          probe->telemetry_ground_fire_particles);
+    CHECK(diagnostics_off->telemetry_impact_particle_components ==
+          probe->telemetry_impact_particle_components);
+    CHECK(diagnostics_off->telemetry_impact_particles ==
+          probe->telemetry_impact_particles);
+    CHECK(diagnostics_off->telemetry_ground_fire_particle_pool_capacity ==
+          probe->telemetry_ground_fire_particle_pool_capacity);
+    CHECK(diagnostics_off->telemetry_impact_particle_pool_capacity ==
+          probe->telemetry_impact_particle_pool_capacity);
     CHECK(diagnostics_off->telemetry_particle_peak_capacity == 2048);
     CHECK(diagnostics_off->telemetry_gore_particle_peak_capacity == 512);
     CHECK(diagnostics_off->telemetry_world_particle_peak_capacity == 1536);
     CHECK(diagnostics_off->telemetry_gore_particle_peak_covered_components == 6);
     CHECK(diagnostics_off->telemetry_world_particle_peak_covered_components == 18);
     CHECK(diagnostics_off->telemetry_wound_decals == 12);
+    CHECK(diagnostics_off->telemetry_splatter_decals ==
+          probe->telemetry_splatter_decals);
+    CHECK(diagnostics_off->telemetry_pool_decals ==
+          probe->telemetry_pool_decals);
+    CHECK(diagnostics_off->telemetry_impact_decals ==
+          probe->telemetry_impact_decals);
+    CHECK(diagnostics_off->telemetry_explosion_decals ==
+          probe->telemetry_explosion_decals);
+    CHECK(diagnostics_off->telemetry_wound_decal_limit ==
+          probe->telemetry_wound_decal_limit);
+    CHECK(diagnostics_off->telemetry_splatter_decal_limit ==
+          probe->telemetry_splatter_decal_limit);
+    CHECK(diagnostics_off->telemetry_pool_decal_limit ==
+          probe->telemetry_pool_decal_limit);
+    CHECK(diagnostics_off->telemetry_impact_decal_limit ==
+          probe->telemetry_impact_decal_limit);
+    CHECK(diagnostics_off->telemetry_explosion_decal_limit ==
+          probe->telemetry_explosion_decal_limit);
+    CHECK(diagnostics_off->telemetry_zed_time_active ==
+          probe->telemetry_zed_time_active);
+    CHECK(!diagnostics_off->telemetry_blood_effect_limit.has_value());
+    CHECK(!diagnostics_off->telemetry_gore_effect_limit.has_value());
+    CHECK(!diagnostics_off->telemetry_wound_lifetime_ms.has_value());
+    CHECK(!diagnostics_off->telemetry_gore_particle_lod_total.has_value());
+    CHECK(!diagnostics_off->telemetry_world_particle_lod_total.has_value());
+    CHECK(!diagnostics_off->telemetry_particle_constant_spawn_emitters.has_value());
+    CHECK(!diagnostics_off->telemetry_particle_dynamic_spawn_emitters.has_value());
+    CHECK(!diagnostics_off->telemetry_particle_constant_spawn_rate_milli.has_value());
+    CHECK(!diagnostics_off->telemetry_particle_burst_entries.has_value());
+    CHECK(!diagnostics_off->telemetry_particle_flex_components.has_value());
+    CHECK(!diagnostics_off->telemetry_particle_nonflex_components.has_value());
+    CHECK(!diagnostics_off->telemetry_particle_unclassified_components.has_value());
+    CHECK(!diagnostics_off->telemetry_flex_surrogate_active.has_value());
+    CHECK(diagnostic_telemetry_is_absent(*diagnostics_off));
+    const auto diagnostics_off_description =
+        describe_game_log_session(*diagnostics_off);
+    CHECK(diagnostics_off_description.find(
+        L"probe: 23 living, 8 corpses (2 active/5 sleeping), 35 decals, "
+        L"particles 345 gore/987 world (4 ground-fire/5 impact components), "
+        L"Zed Time active") != std::wstring::npos);
+    CHECK(diagnostics_off_description.find(L"detached limbs") ==
+          std::wstring::npos);
+    CHECK(diagnostics_off_description.find(L"effects ") ==
+          std::wstring::npos);
+    CHECK(diagnostics_off->telemetry_observed_ns == 4'550'000'000ULL);
+    CHECK(!diagnostics_off_stream.feed(replace_once(
+        compact_telemetry_line(3), " particle_peak_capacity=2048",
+        " particle_peak_capacity=2047"), 4'560'000'000ULL).has_value());
+    CHECK(diagnostics_off_stream.current()->telemetry_sample == 2);
+    CHECK(diagnostics_off_stream.current()->telemetry_observed_ns ==
+          4'550'000'000ULL);
+
+    GameLogSessionParser legacy_diagnostics_off_stream;
+    CHECK(legacy_diagnostics_off_stream.feed(
+        "[1] Log: LoadMap: KF-BioticsLab\n").has_value());
+    CHECK(legacy_diagnostics_off_stream.feed(
+        "[2] ScriptLog: WI.NetMode:  NM_Standalone\n").has_value());
+    CHECK(legacy_diagnostics_off_stream.feed(telemetry_line(1)).has_value());
+    const auto legacy_diagnostics_off = legacy_diagnostics_off_stream.feed(
+        replace_once(telemetry_line(2), " scan_diagnostics=1",
+                     " scan_diagnostics=0"));
+    CHECK(legacy_diagnostics_off.has_value());
+    CHECK(legacy_diagnostics_off->telemetry_particle_peak_capacity == 2048);
+    CHECK(diagnostic_telemetry_is_absent(*legacy_diagnostics_off));
+
+    GameLogSessionParser compact_empty_stream;
+    CHECK(compact_empty_stream.feed(
+        "[1] Log: LoadMap: KF-BioticsLab\n").has_value());
+    CHECK(compact_empty_stream.feed(
+        "[2] ScriptLog: WI.NetMode:  NM_Standalone\n").has_value());
+    const auto compact_empty =
+        compact_empty_stream.feed(empty_compact_telemetry_line());
+    CHECK(compact_empty.has_value());
+    CHECK(compact_empty->telemetry_living_zeds == 0);
+    CHECK(compact_empty->telemetry_corpse_total == 0);
+    CHECK(compact_empty->telemetry_particle_peak_capacity == 0);
+    CHECK(diagnostic_telemetry_is_absent(*compact_empty));
+
     const auto diagnostics_on = diagnostics_off_stream.feed(telemetry_line(3));
     CHECK(diagnostics_on.has_value());
     CHECK(diagnostics_on->telemetry_visible_gibs == 11);
@@ -1097,6 +1340,26 @@ int main() {
         " impact_particle_components=5 impact_particles=333",
         " ground_fire_particle_components=4 ground_fire_particles=700"
         " impact_particle_components=5 impact_particles=400")));
+    CHECK(rejects_offline_telemetry(replace_once(
+        compact_telemetry_line(10), " scan_diagnostics=0",
+        " scan_diagnostics=1")));
+    CHECK(rejects_offline_telemetry(replace_once(
+        compact_telemetry_line(10),
+        " world_particle_visible_components=12", "")));
+    CHECK(rejects_offline_telemetry(replace_once(
+        compact_telemetry_line(10),
+        " world_particle_visible_components=12"
+        " world_particle_bounded_components=18",
+        " world_particle_bounded_components=18"
+        " world_particle_visible_components=12")));
+    CHECK(rejects_offline_telemetry(replace_once(
+        compact_telemetry_line(10), " particle_peak_capacity=2048",
+        " particle_peak_capacity=2047")));
+    CHECK(rejects_offline_telemetry(
+        compact_telemetry_line(10, 4)));
+    CHECK(rejects_offline_telemetry(replace_once(
+        compact_telemetry_line(10), " particle_peak_capacity=2048\n",
+        " particle_peak_capacity=2048 extra=1\n")));
     CHECK(!stream.feed(telemetry_line(8, 4),
                        4'600'000'000ULL).has_value());
     // Previous telemetry schemas remain unsupported rather than being parsed

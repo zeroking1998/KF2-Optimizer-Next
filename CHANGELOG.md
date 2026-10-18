@@ -43,8 +43,9 @@ are visible immediately.
   Existing process identity, loss handling and frame measurements remain active.
 
 - Skip diagnostic particle-template attribution and its detailed reports while
-  Runtime diagnostics is off; normal particle measurements and Adaptive inputs
-  remain available, without changing the report format or sampling interval.
+  Runtime diagnostics is off. Normal sessions now publish a compact telemetry
+  record with every Adaptive input, while the full diagnostic record remains
+  available on demand at the same sampling interval.
 - Skip corpse-controller profiling clocks and counters while Runtime diagnostics
   is off, preserving controller actions and their scheduling.
 - Skip unused distance queries during corpse transition bookkeeping while

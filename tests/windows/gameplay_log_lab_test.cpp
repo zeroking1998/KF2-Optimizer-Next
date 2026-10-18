@@ -650,13 +650,23 @@ int main() {
         read_bytes(KF2_ADAPTIVE_GRAPHICS_SOURCE));
     const auto telemetry_session_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_SESSION_SOURCE));
-    const auto producer_schema_fields = telemetry_schema_fields(
-        telemetry_source, "KF2OPT_TELEMETRY schema=8 sample=", ");\n}");
-    const auto parser_schema_fields = telemetry_schema_fields(
+    const auto full_producer_schema_fields = telemetry_schema_fields(
+        telemetry_source, "KF2OPT_TELEMETRY schema=8 sample=",
+        "\n    }\n    else");
+    const auto full_parser_schema_fields = telemetry_schema_fields(
         telemetry_parser_source, "KF2OPT_TELEMETRY schema=8 sample=",
         "if (!sample");
-    CHECK(!producer_schema_fields.empty());
-    CHECK(producer_schema_fields == parser_schema_fields);
+    const auto compact_producer_schema_fields = telemetry_schema_fields(
+        telemetry_source, "KF2OPT_TELEMETRY schema=9 sample=", "\n    }\n}");
+    const auto compact_parser_schema_fields = telemetry_schema_fields(
+        telemetry_parser_source, "KF2OPT_TELEMETRY schema=9 sample=",
+        "if (!sample");
+    CHECK(!full_producer_schema_fields.empty());
+    CHECK(full_producer_schema_fields == full_parser_schema_fields);
+    CHECK(!compact_producer_schema_fields.empty());
+    CHECK(compact_producer_schema_fields == compact_parser_schema_fields);
+    CHECK(full_producer_schema_fields.size() == 116);
+    CHECK(compact_producer_schema_fields.size() == 40);
     CHECK(telemetry_source.find("AdaptiveControlToken") != std::string::npos);
     CHECK(telemetry_source.find("ValidAdaptiveControlToken") !=
           std::string::npos);
@@ -3930,7 +3940,7 @@ int main() {
         "function RefreshWorldEmitterCache(");
     CHECK(world_emitter_refresh != std::string::npos);
     CHECK(telemetry_source.find(
-        "RefreshWorldEmitterCache(bCollectWorldParticleGroups);") !=
+        "bCollectWorldParticleGroups, bDetailedRuntimeDiagnostics);") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "InspectWorldEmitterParticleComponentCached(",
@@ -3946,6 +3956,14 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find(
         "CacheKey = PathName(ParticleComponent.Template)") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "bWorldEmitterCacheDiagnostics != bDetailedRuntimeDiagnostics") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "CachedWorldEmitterTemplates.Length = 0;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "CachedWorldEmitterTraversalSnapshots.Length = 0;") !=
           std::string::npos);
     CHECK(telemetry_source.find(
         "world_emitter_template_cache_entries=") != std::string::npos);
@@ -4157,6 +4175,19 @@ int main() {
           1);
     CHECK(particle_inspection.find(
         "++PeakCapacityCoveredComponents;") != std::string::npos);
+    const auto compact_gate = particle_inspection.find(
+        "if (!bCollectDiagnostics)");
+    const auto diagnostic_spawn = particle_inspection.find(
+        "LODTemplate.SpawnModule");
+    CHECK(compact_gate != std::string::npos);
+    CHECK(diagnostic_spawn != std::string::npos);
+    CHECK(compact_gate < diagnostic_spawn);
+    CHECK(particle_inspection.find(
+        "bCollectDiagnostics && EmitterTemplate != None") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "if (bDetailedRuntimeDiagnostics && WorldInfo.MyEmitterPool != None") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "WorldParticles += GroundFireParticles;") != std::string::npos);
     CHECK(telemetry_source.find(
