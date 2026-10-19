@@ -127,7 +127,7 @@ void arm_pull(PullFixture& fixture, void* context) {
     overlap.generation=7;
     overlap.ready_generation=7;
     overlap.native_error=&fixture.native_error;
-    write(fixture.solver.data()+0x53C,0x80000002U);
+    write(fixture.solver.data()+0x53C,0x80000000U);
     write(fixture.solver.data()+0x138,2);
     constexpr std::size_t sources[] = {0,0x10,0x20,0x48,0x128,0x130};
     for(unsigned index=0;index<6;++index)
