@@ -77,6 +77,8 @@ void raise(void*) { RaiseException(0xE0421132U,0,0,nullptr); }
 int async_copies{};
 int routed_copies{};
 int context_queries{};
+int stream_synchronizations{};
+int event_synchronizations{};
 void* current_context{};
 void* pushed_context{};
 void* solver_context{};
@@ -115,6 +117,14 @@ void copy_then_native_error(void*) {
         read<void*>(current->solver.data()+0x10),12,2,
         current->solver.data(),1);
 }
+void copy_then_raise(void*) {
+    copy_pull_payloads(nullptr);
+    RaiseException(0xE0421133U,0,0,nullptr);
+}
+void copy_density(void* solver, void* target, int) {
+    p4_copy(target,read<void*>(static_cast<std::byte*>(solver)+0x30),
+            4,2,solver,1);
+}
 void arm_pull(PullFixture& fixture, void* context) {
     auto& overlap=*reinterpret_cast<P4State*>(
         fixture.solver.data()+P4StateOffset);
@@ -129,14 +139,20 @@ void arm_pull(PullFixture& fixture, void* context) {
     overlap.native_error=&fixture.native_error;
     write(fixture.solver.data()+0x53C,0x80000002U);
     write(fixture.solver.data()+0x138,2);
-    constexpr std::size_t sources[] = {0,0x10,0x20,0x48,0x128,0x130};
-    for(unsigned index=0;index<6;++index)
+    constexpr std::size_t sources[] = {0,0x10,0x20,0x30,0x48,0x128,0x130};
+    for(unsigned index=0;index<7;++index)
         write(fixture.solver.data()+sources[index],
             reinterpret_cast<void*>(0x1000ULL*(index+1)));
 }
 bool abnormal_pull_restores(PullFixture* fixture) {
     bool caught=false;
     __try { p4_pull(fixture->container.data(),raise); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { caught=true; }
+    return caught && fixture->restored();
+}
+bool abnormal_copy_pull_restores(PullFixture* fixture) {
+    bool caught=false;
+    __try { p4_pull(fixture->container.data(),copy_then_raise); }
     __except(EXCEPTION_EXECUTE_HANDLER) { caught=true; }
     return caught && fixture->restored();
 }
@@ -196,12 +212,18 @@ void synchronize(void*,float) {
 void p4_fail_closed() { std::terminate(); }
 extern "C" int cudaStreamCreateWithFlags(void**,unsigned) { return 0; }
 extern "C" int cudaStreamDestroy(void*) { return 0; }
-extern "C" int cudaStreamSynchronize_ptsz(void*) { return 0; }
+extern "C" int cudaStreamSynchronize_ptsz(void*) {
+    ++stream_synchronizations;
+    return 0;
+}
 extern "C" int cudaStreamWaitEvent_ptsz(void*,void*,unsigned) { return 0; }
 extern "C" int cudaEventCreateWithFlags(void**,unsigned) { return 0; }
 extern "C" int cudaEventDestroy(void*) { return 0; }
 extern "C" int cudaEventRecord_ptsz(void*,void*) { return 0; }
-extern "C" int cudaEventSynchronize(void*) { return 0; }
+extern "C" int cudaEventSynchronize(void*) {
+    ++event_synchronizations;
+    return 0;
+}
 extern "C" int cudaPeekAtLastError() { return 0; }
 extern "C" int cudaMemcpy_ptds(void*,const void*,std::size_t,int) { return 0; }
 extern "C" int cudaMemcpyAsync_ptsz(void*,const void*,std::size_t,int,void* stream) {
@@ -368,16 +390,81 @@ int main() {
         async_copies=0;
         routed_copies=0;
         context_queries=0;
+        stream_synchronizations=0;
         phase_copy_result=-1;
         p4_pull(fixture.container.data(),copy_pull_payloads);
         CHECK(context_queries==1);
         CHECK(async_copies==5);
         CHECK(routed_copies==5);
+        CHECK(stream_synchronizations==1);
         CHECK(phase_copy_result==0);
         CHECK(current_context==solver_context);
         CHECK(!(reinterpret_cast<P4State*>(fixture.solver.data()+
             P4StateOffset)->flags & P4PullEligible));
         CHECK(fixture.restored());
+    }
+    {
+        // Only the exact KFGame particle-data boundary may keep Pull and the
+        // optional density copy in flight. Bounds are visible before Pull
+        // returns; host particle vectors become visible at the boundary.
+        PullFixture fixture{{0,3,7}}; current=&fixture;
+        solver_context=reinterpret_cast<void*>(0x1132);
+        current_context=solver_context;
+        arm_pull(fixture,solver_context);
+        p4_test_readback_boundary(1);
+        stream_synchronizations=0;
+        event_synchronizations=0;
+        p4_pull(fixture.container.data(),copy_pull_payloads);
+        auto& overlap=*reinterpret_cast<P4State*>(
+            fixture.solver.data()+P4StateOffset);
+        CHECK(event_synchronizations==1);
+        CHECK(stream_synchronizations==0);
+        CHECK((overlap.flags & (P4CopyPending | P4AwaitingParticleData)) ==
+              (P4CopyPending | P4AwaitingParticleData));
+        p4_density(fixture.solver.data(),fixture.buffers[0].data(),copy_density);
+        CHECK(stream_synchronizations==0);
+        p4_test_finish_particle_data(fixture.container.data());
+        CHECK(stream_synchronizations==1);
+        CHECK(!(overlap.flags &
+                (P4CopyPending | P4AwaitingParticleData)));
+        p4_test_finish_particle_data(fixture.container.data());
+        CHECK(stream_synchronizations==1);
+        p4_test_readback_boundary(0);
+    }
+    {
+        // Lifecycle invalidation is also a hard boundary if KFGame never
+        // reaches GetParticleData for the current step.
+        PullFixture fixture{{0,3,7}}; current=&fixture;
+        solver_context=reinterpret_cast<void*>(0x1132);
+        current_context=solver_context;
+        arm_pull(fixture,solver_context);
+        p4_test_readback_boundary(1);
+        stream_synchronizations=0;
+        p4_pull(fixture.container.data(),copy_pull_payloads);
+        p4_invalidate(fixture.solver.data());
+        const auto& overlap=*reinterpret_cast<const P4State*>(
+            fixture.solver.data()+P4StateOffset);
+        CHECK(stream_synchronizations==1);
+        CHECK(!(overlap.flags &
+                (P4CopyPending | P4AwaitingParticleData)));
+        p4_test_finish_particle_data(fixture.container.data());
+        CHECK(stream_synchronizations==1);
+        p4_test_readback_boundary(0);
+    }
+    {
+        // An exceptional Pull never exports pending work to KFGame.
+        PullFixture fixture{{0,3,7}}; current=&fixture;
+        solver_context=reinterpret_cast<void*>(0x1132);
+        current_context=solver_context;
+        arm_pull(fixture,solver_context);
+        p4_test_readback_boundary(1);
+        stream_synchronizations=0;
+        CHECK(abnormal_copy_pull_restores(&fixture));
+        CHECK(stream_synchronizations==1);
+        CHECK(!(reinterpret_cast<P4State*>(fixture.solver.data()+
+            P4StateOffset)->flags & P4AwaitingParticleData));
+        CHECK(fixture.restored());
+        p4_test_readback_boundary(0);
     }
     {
         // A caller with another current context keeps the original per-copy
@@ -408,6 +495,7 @@ int main() {
         arm_pull(fixture,solver_context);
         async_copies=0;
         routed_copies=0;
+        stream_synchronizations=0;
         first_copy_result=-1;
         second_copy_result=-1;
         p4_pull(fixture.container.data(),copy_then_native_error);
@@ -415,6 +503,9 @@ int main() {
         CHECK(second_copy_result==0);
         CHECK(async_copies==2);
         CHECK(routed_copies==1);
+        CHECK(stream_synchronizations==1);
+        CHECK(!(reinterpret_cast<P4State*>(fixture.solver.data()+
+            P4StateOffset)->flags & P4AwaitingParticleData));
         CHECK(!(reinterpret_cast<P4State*>(fixture.solver.data()+
             P4StateOffset)->flags & P4PullEligible));
         CHECK(fixture.restored());

@@ -20,7 +20,7 @@ enum : unsigned {
     P4Ready = 1, P4ComputePending = 2, P4TailRecorded = 4,
     P4CopyPending = 8, P4Joining = 16, P4ReadbackLinked = 32,
     P4StepEligible = 64, P4PullScope = 128, P4PullContextStable = 256,
-    P4PullEligible = 512
+    P4PullEligible = 512, P4AwaitingParticleData = 1024
 };
 using P4Unary = void(*)(void*);
 using P4Density = void(*)(void*, void*, int);
@@ -38,5 +38,9 @@ P4_API void p4_pull(void* container, P4Unary original);
 P4_API void p4_density(void* solver, void* target, P4Density original);
 P4_API void p4_destroy_solver(void* solver, P4Unary original);
 P4_API void p4_destroy_container(void* container, P4Unary original);
+#ifdef P4_CPU_MODEL
+P4_API void p4_test_readback_boundary(int enabled);
+P4_API void p4_test_finish_particle_data(void* container);
+#endif
 
 
