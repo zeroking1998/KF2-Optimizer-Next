@@ -18,7 +18,7 @@ using Create = void* (*)(int);
 using Destroy = void (*)(void*);
 using Fence = void (*)();
 using BufferTransfer = void (*)(void*, void*, int, int);
-using GetBounds = void (*)(void*, float*, float*);
+using GetBounds = void (*)(void*, float*, float*, int);
 using SetParams = void (*)(void*, const void*);
 using LockHook = void (*)();
 
@@ -169,6 +169,8 @@ int wmain(int argc, wchar_t** argv) {
         GetProcAddress(forwarder_module, "flexSetParams"));
     const auto bounds_calls = reinterpret_cast<UpdateCalls>(
         GetProcAddress(original_module, "flexTestBoundsCalls"));
+    const auto last_bounds_memory = reinterpret_cast<LastSubsteps>(
+        GetProcAddress(original_module, "flexTestLastBoundsMemory"));
     const auto params_calls = reinterpret_cast<UpdateCalls>(
         GetProcAddress(original_module, "flexTestParamsCalls"));
     const auto acquire_solver_lock = reinterpret_cast<LockHook>(
@@ -183,7 +185,7 @@ int wmain(int argc, wchar_t** argv) {
         !particle_download_calls || !phase_upload_calls || !phase_download_calls ||
         !velocity_upload_calls || !velocity_download_calls ||
         !last_transfer_elements || !last_transfer_memory || !get_bounds ||
-        !set_params || !bounds_calls || !params_calls ||
+        !set_params || !bounds_calls || !last_bounds_memory || !params_calls ||
         !acquire_solver_lock || !release_solver_lock)
         return fail(7, "test exports missing");
 
@@ -359,10 +361,11 @@ int wmain(int argc, wchar_t** argv) {
     float lower[3]{};
     float upper[3]{};
     int opaque_params = 42;
-    get_bounds(solver, lower, upper);
+    get_bounds(solver, lower, upper, 2);
     set_params(solver, &opaque_params);
     if (bounds_calls() != 1 || params_calls() != 1 ||
         shared->bounds_calls != 1 || shared->params_calls != 1 ||
+        last_bounds_memory() != 2 ||
         lower[0] != -1.0F || lower[2] != -3.0F ||
         upper[0] != 1.0F || upper[2] != 3.0F)
         return fail(22, "bounds or parameter calls were not relayed exactly");
@@ -404,7 +407,7 @@ int wmain(int argc, wchar_t** argv) {
     for (unsigned call = 0; call < 256; ++call) {
         if (version() != 31 || active_count(solver) != 37)
             return fail(61, "cached return value changed");
-        get_bounds(solver, lower, upper);
+        get_bounds(solver, lower, upper, 2);
         set_params(solver, &opaque_params);
         set_particles(solver, particle_buffer, 4, 1);
         set_phases(solver, phase_buffer, 3, 2);

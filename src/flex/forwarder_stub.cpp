@@ -380,15 +380,16 @@ extern "C" int flexGetActiveCount(void* solver) noexcept {
     return count;
 }
 
-extern "C" void flexGetBounds(void* solver, void* lower, void* upper) noexcept {
-    using Function = void (*)(void*, void*, void*);
+extern "C" void flexGetBounds(
+    void* solver, void* lower, void* upper, int memory) noexcept {
+    using Function = void (*)(void*, void*, void*, int);
     static constinit std::atomic<FARPROC> target{};
     const auto function = original_function<Function>(target, "flexGetBounds");
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && (!solver || !lower || !upper))
         saturated_increment(&shared->invalid_argument_calls);
-    if (function) function(solver, lower, upper);
+    if (function) function(solver, lower, upper, memory);
     if (function && detailed_diagnostics(shared))
         saturated_increment(&shared->bounds_calls);
 }
