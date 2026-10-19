@@ -115,7 +115,7 @@ bool independent(void* solver) {
 bool scope_eligible(void* solver, const P4State& s) {
     return s.initialized == 1 && s.thread == GetCurrentThreadId() && native_ok(s) &&
            (s.flags & P4Ready) && s.ready_generation == s.generation &&
-           field<unsigned>(solver, 0x53C) == 0x80000002U;
+           field<unsigned>(solver, 0x53C) == 0x80000000U;
 }
 bool pull_eligible(const P4State& s) {
     return s.initialized == 1 && native_ok(s) &&
@@ -194,10 +194,9 @@ P4_API void p4_before(void* solver, const int* error) {
     auto& s = state(solver);
     s.native_error = error;
     if(s.depth) { drain(s); s.initialized = 2; return; }
-    const bool eligible = field<unsigned>(solver,0x53C) == 0x80000002U && field<unsigned char>(solver,0x220) && native_ok(s);
+    const bool eligible = field<unsigned>(solver,0x53C) == 0x80000000U && field<unsigned char>(solver,0x220) && native_ok(s);
     clear_ready(s); s.flags &= ~P4StepEligible;
     if(eligible && !s.initialized) {
-        p4_install_presentation();
         p4_install_render_interop();
         initialize(s);
     }

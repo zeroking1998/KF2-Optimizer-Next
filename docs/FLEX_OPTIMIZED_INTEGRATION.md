@@ -9,18 +9,22 @@ tree or portable package.
 
 ## Accepted runtime
 
-The current Core/Extension pair derives from the last private offline variant
-that completed the native checks and a visible-effect gameplay smoke test:
+The current Core/Extension pair completed native checks and ran from a portable
+package in a visible-effect offline gameplay session:
 
-- Core: `DDE8343CF0226D25CD10610F41E2FC3E0C4795B8ECB98399668FE834AEE340E5`.
-- Extension: `CF5A98B007CAC5DD3FD5E198AB373F152957B79AC5ACC9E101378C329752C325`.
+- Core: `78CEA5B65C1CAD623080FE75CA7FEAC13BD3AA646B0ABF6CD09D1700BEB0FFE0`.
+- Extension: `5EB6EB6828FB7C8E1AC24CA9A9986F5EBDFFFA4E0EB90A325B0DA7DDC32342F6`.
 
-It contains the established P4 buffer/transfer/collision work, the accepted P3
-fixed-time cadence with two native substeps and one constraint iteration, and
-rigid presentation interpolation. Fluid particles and normals remain canonical.
+It contains the established P4 buffer/transfer/collision work and a P1 cadence
+with at most two native substeps and one constraint iteration. Each valid render
+call now advances the solver directly instead of accumulating two skipped calls
+and committing their work on the third call as one periodic CPU/readback burst.
+Because P1 has no skipped presentation frame, the rigid interpolation hook is
+not installed; KF2 consumes its canonical current rigid data. Fluid particles
+and normals remain canonical.
 The project helper additionally contains the exact-image DX11/CUDA render
-bridge described below. It builds reproducibly, but this newer helper and the
-current Extension still require fresh packaged gameplay validation.
+bridge described below. It builds reproducibly and was included in the
+validated portable package.
 
 The Extension initializes its opaque particle free list so the unchanged
 last-in-first-out allocator assigns low contiguous IDs first. NVIDIA's API does
@@ -35,11 +39,14 @@ The earlier cumulative candidate (`EC0065DA...` / `1FDA92BF...`) remains useful
 historical evidence for its isolated optimizations, but it is not the runtime
 installed by this integration. Mixing either pair is rejected.
 
-The private gameplay smoke on 16 October 2026 loaded the predecessor Extension,
-showed Gib/fluid FleX effects and produced no new KFGame crash dump. It was not
-a controlled FPS comparison. The low-ID allocation update has CPU-level binary
-and allocator proof but still requires one visual packaged gameplay check before
-release promotion.
+The final P1 package was exercised offline on 19 October 2026 at a 240 FPS
+target with visible Gib/fluid effects and the expected matched DLL pair loaded.
+No new KFGame crash dump was produced. In the stable 36--110 second gameplay
+window, even and odd frames averaged 5.2773 and 5.2817 ms respectively, showing
+that the former alternating burst was removed. The window measured a 7.855 ms
+P99 frame time, 119.867 FPS 1% low and no frame above 16.67 ms. These figures
+validate the pacing change for that captured workload; they are not a universal
+FPS claim.
 
 ## Runtime boundary
 
@@ -116,9 +123,11 @@ wait behind concurrent bridge work. The first consumer queues the snapshot
 dependency once per slot and generation; later resources are already ordered
 by the same render stream and do not submit the identical wait again.
 
-Rigid presentation keeps two owned history buffers. Their pointers rotate
-instead of copying the old current transforms into the previous buffers. A
-topology reset needs only the current sample because interpolation remains
+The retained rigid-presentation implementation keeps two owned history buffers.
+P1 does not install this interpolation path, so it performs no runtime work for
+the accepted cadence. When used by an older compatible cadence, its pointers
+rotate instead of copying the old current transforms into the previous buffers.
+A topology reset needs only the current sample because interpolation remains
 disabled until the next commit; that next rotation preserves it before the
 other buffer is overwritten. Topology is compared directly with the stable
 container IDs instead of copying a work array first. This removes four CPU
@@ -162,9 +171,12 @@ Fresh local verification covers:
       binary reconstruction verified on CPU.
 - [x] GPU vertex pack matched KF2's SSE result bit-for-bit for 65,549 indexed
       finite and exceptional test vertices on the current RTX driver.
-- [ ] Final portable build exercised once offline with its freshly built helper.
+- [ ] Final cleaned portable build exercised once offline. The accepted P1
+      Core/Extension pair and active helper path were already exercised; removing
+      the uninstalled legacy interpolation path changed only the final helper
+      identity.
 - [ ] Online behavior qualified separately before it is claimed as verified.
 
 Standalone timing is not gameplay FPS, and byte reconstruction alone is not a
-gameplay stability pass. Keep the pull request in draft until the final package
-gate is completed.
+gameplay stability pass. Online behavior remains unclaimed until it is exercised
+separately.

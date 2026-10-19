@@ -26,7 +26,7 @@ int main() {
     if (ec) return 78;
     const auto audit = kf2::flex::audit_runtime(runtime);
     constexpr std::string_view private_optimized_runtime =
-        "dde8343cf0226d25cd10610f41e2fc3e0c4795b8ecb98399668fe834aee340e5";
+        "78cea5b65c1cad623080fe75ca7feac13bd3aa646b0abf6cd09d1700beb0ffe0";
     if (audit.has_value() && audit.value().abi_compatible &&
         audit.value().sha256 == private_optimized_runtime) {
         std::cout << "SKIP: installed runtime is the private optimized build; "
