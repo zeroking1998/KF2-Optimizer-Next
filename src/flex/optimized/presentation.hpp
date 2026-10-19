@@ -5,6 +5,11 @@
 void p4_install_presentation();
 void p4_release_presentation(void* solver);
 
+using P4BoundsCallback = void(*)(void*, void*, void*, int);
+bool p4_defer_bounds(void* solver, void* lower, void* upper, int memory,
+                     P4BoundsCallback original);
+bool p4_finish_bounds(void* solver);
+
 using P4Synchronize = void(*)(void*, float);
 using P4RigidData = void(*)(void*, float**, float**);
 

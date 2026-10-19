@@ -37,6 +37,11 @@ struct PresentationState {
     Quaternion *quaternion_previous{}, *quaternion_current{};
     const float *view_rotations{}, *view_translations{};
     void* solver{};
+    void* bounds_lower{};
+    void* bounds_upper{};
+    P4BoundsCallback bounds_original{};
+    int bounds_memory{};
+    bool bounds_pending{};
 };
 
 P4Synchronize g_synchronize{};
@@ -67,7 +72,7 @@ template<class T> T* take(char*& cursor, std::size_t count) {
 }
 
 PresentationState* allocate_state(void* solver, int capacity) {
-    if(capacity <= 0 || capacity > 0x1000000) return nullptr;
+    if(capacity < 0 || capacity > 0x1000000) return nullptr;
     const auto count = static_cast<std::size_t>(capacity);
     std::size_t bytes = sizeof(PresentationState);
     constexpr std::size_t widths[]{sizeof(int), sizeof(float) * 27U,
@@ -97,6 +102,15 @@ PresentationState* allocate_state(void* solver, int capacity) {
     }
     presentation_slot(solver) = state;
     return state;
+}
+
+bool valid_state(void* solver, PresentationState* state) {
+    if(!state) return false;
+    MEMORY_BASIC_INFORMATION region{};
+    return VirtualQuery(state,&region,sizeof region) &&
+           region.State==MEM_COMMIT && region.AllocationBase==state &&
+           region.Type==MEM_PRIVATE && state->allocation==state &&
+           state->solver==solver;
 }
 
 float inverse_length(float x, float y, float z, float w) {
@@ -196,11 +210,11 @@ PresentationState* prepare_view(void* instance) {
     const unsigned marker=field<unsigned>(solver,0x53C);
     if(capacity<=0 || capacity>0x1000000 ||
        (marker!=P3Commit && marker!=P3Middle && marker!=P3Late)) { reset(); return nullptr; }
-    if(slot && slot->capacity!=capacity) p4_release_presentation(solver);
     if(marker==P3Commit) {
         const int* ids{};
         const int rigids=rigid_ids(container,capacity,&ids);
         if(rigids<=0 || !ids) { reset(); return nullptr; }
+        if(slot && slot->capacity!=capacity) p4_release_presentation(solver);
         auto* state=slot ? slot : allocate_state(solver,capacity);
         if(!state) return nullptr;
         const bool shift=same_topology(*state,rigids,ids);
@@ -315,15 +329,42 @@ void p4_install_presentation() {
 #endif
 }
 
+bool p4_defer_bounds(void* solver, void* lower, void* upper, int memory,
+                     P4BoundsCallback original) {
+    if(!solver || !lower || !upper || !original) return false;
+    auto*& state=presentation_slot(solver);
+    if(!state) state=allocate_state(solver,0);
+    if(!state || state->bounds_pending) return false;
+    state->bounds_lower=lower;
+    state->bounds_upper=upper;
+    state->bounds_original=original;
+    state->bounds_memory=memory;
+    state->bounds_pending=true;
+    return true;
+}
+
+bool p4_finish_bounds(void* solver) {
+    auto* state=solver ? presentation_slot(solver) : nullptr;
+    if(!state || !state->bounds_pending || !state->bounds_original)
+        return false;
+    const auto original=state->bounds_original;
+    auto* lower=state->bounds_lower;
+    auto* upper=state->bounds_upper;
+    const int memory=state->bounds_memory;
+    state->bounds_lower=nullptr;
+    state->bounds_upper=nullptr;
+    state->bounds_original=nullptr;
+    state->bounds_memory=0;
+    state->bounds_pending=false;
+    original(solver,lower,upper,memory);
+    return true;
+}
+
 void p4_release_presentation(void* solver) {
     if(!solver) return;
     auto*& state=presentation_slot(solver);
     if(!state) return;
-    MEMORY_BASIC_INFORMATION region{};
-    if(!VirtualQuery(state,&region,sizeof region) || region.State!=MEM_COMMIT || region.AllocationBase!=state ||
-       region.Type!=MEM_PRIVATE || state->allocation!=state || state->solver!=solver) {
-        return;
-    }
+    if(!valid_state(solver,state)) return;
     void* memory=state->allocation;
     state=nullptr;
     VirtualFree(memory,0,MEM_RELEASE);

@@ -64,9 +64,9 @@ solver-owned synchronization resources are created once, reused and released
 on teardown. Push and Pull transfers use the allocated prefix through the
 highest sorted active particle ID instead of copying unused capacity. Pull
 temporarily narrows all four host views together, restores their exact bounds
-on normal and abnormal exit, and keeps the synchronous normals completion
-boundary. A clean empty container reads one inactive slot instead of its full
-reserved capacity; pending births and constraint changes retain the full Pull.
+on normal and abnormal exit. A clean empty container reads one inactive slot
+instead of its full reserved capacity; pending births and constraint changes
+retain the full Pull.
 The known extension Pull also avoids reading immutable phase IDs back
 from the solver; direct phase queries remain unchanged. Invalid or unfamiliar
 layouts retain the original full transfer.
@@ -80,6 +80,17 @@ helper's duplicate context queries from six to one when rigid transforms are
 present (four to one without them). A different issuing context keeps every
 original per-copy validation and disables this shortcut; copy errors,
 completion and teardown behavior are unchanged.
+
+On the exact supported KFGame image, the helper splits the former Pull-wide CPU
+wait at KF2's real host-consumption boundary. It first waits for the solver event
+that makes bounds safe, then leaves the independent particle, normal and optional
+density copies on the existing private CUDA stream while KFGame completes its
+intervening work. The verified `flexExtGetParticleData` import boundary completes
+that stream exactly once before KFGame can consume the exposed host vectors.
+Unknown images, changed call/import identities or an unavailable hook retain the
+original synchronous Pull behavior. Exceptions, invalidation, container/solver
+destruction and a missed boundary synchronously drain pending copies; no
+completion or error check is removed and no previous-frame data is exposed.
 
 The same exact Pull also validates its immutable thread, commit marker and
 generation contract once. Routed payloads then use the solver-owned token while
