@@ -40,6 +40,10 @@ bool g_readback_boundary_available{};
 #else
 constexpr unsigned KfGameTimestamp = 0x65B94562U;
 constexpr unsigned KfGameImageSize = 0x2481000U;
+constexpr std::size_t BoundsIatRva = 0x1FB2E10U;
+constexpr std::size_t BoundsThunkRva = 0x1391F1FU;
+constexpr std::size_t BoundsDelayResolverRva = 0x1391F13U;
+constexpr std::size_t BoundsCallRva = 0x1C2949U;
 constexpr std::size_t ParticleDataIatRva = 0x1FB2D60U;
 constexpr std::size_t ParticleDataThunkRva = 0x1392112U;
 constexpr std::size_t ParticleDataDelayResolverRva = 0x1392106U;
@@ -47,6 +51,7 @@ constexpr std::size_t ParticleDataCallRva = 0x1C2967U;
 using ParticleData = void(*)(void*, void**, void**, void**, void**);
 INIT_ONCE g_boundary_once = INIT_ONCE_STATIC_INIT;
 std::atomic<bool> g_readback_boundary_available{};
+P4Bounds g_bounds{};
 ParticleData g_particle_data{};
 #endif
 
@@ -67,14 +72,22 @@ void clear_ready(P4State& s) {
 void finish_copies(P4State& s) {
     if(s.flags & P4CopyPending) { must(cudaStreamSynchronize_ptsz(s.stream)); s.flags &= ~P4CopyPending; }
 }
+void invoke_deferred_bounds(P4State& s) {
+    auto* solver = reinterpret_cast<char*>(&s) - P4StateOffset;
+    if(!p4_finish_bounds(solver)) p4_fail_closed();
+}
+void drain(P4State& s);
 void finish_deferred(P4State& s) {
+    const bool bounds = (s.flags & P4BoundsDeferred) != 0;
     if(s.flags & P4CopyPending) {
         must(cuCtxPushCurrent_v2(s.context));
         finish_copies(s);
         void* popped{}; must(cuCtxPopCurrent_v2(&popped));
         if(popped != s.context) p4_fail_closed();
     }
-    s.flags &= ~P4AwaitingParticleData;
+    s.flags &= ~(P4AwaitingParticleData | P4AwaitingBounds |
+                 P4BoundsDeferred);
+    if(bounds) invoke_deferred_bounds(s);
 }
 void drain(P4State& s) {
     if(!s.context) return;
@@ -82,7 +95,9 @@ void drain(P4State& s) {
     s.flags |= P4Joining;
     must(cuCtxPushCurrent_v2(s.context));
     // No reliance on another thread's default stream or on implicit cudaFree.
-    if(s.flags & P4ComputePending) {
+    if(s.flags & P4AwaitingBounds) {
+        must(cuCtxSynchronize());
+    } else if(s.flags & P4ComputePending) {
         if((s.flags & P4TailRecorded) && s.tail_generation == s.generation)
             must(cudaEventSynchronize(s.tail_event));
         else must(cuCtxSynchronize()); // Aborted step: no valid final event.
@@ -90,9 +105,12 @@ void drain(P4State& s) {
     finish_copies(s);
     void* popped{}; must(cuCtxPopCurrent_v2(&popped));
     if(popped != s.context) p4_fail_closed();
+    const bool bounds = (s.flags & P4BoundsDeferred) != 0;
     s.flags &= ~(P4ComputePending | P4TailRecorded | P4Joining |
-                 P4AwaitingParticleData);
+                 P4AwaitingParticleData | P4AwaitingBounds |
+                 P4BoundsDeferred);
     clear_ready(s);
+    if(bounds) invoke_deferred_bounds(s);
 }
 void release_handles(P4State& s) {
     if(s.stream) { must(cudaStreamDestroy(s.stream)); s.stream = nullptr; }
@@ -230,50 +248,73 @@ void finish_particle_data(void* container) {
 }
 
 #if !defined(P4_CPU_MODEL)
+void bounds_hook(void* solver, void* lower, void* upper, int memory) {
+    p4_bounds(solver, lower, upper, memory, g_bounds);
+}
+
 void particle_data_hook(void* container, void** positions, void** velocities,
                         void** phases, void** normals) {
-    __try {
-        g_particle_data(container, positions, velocities, phases, normals);
-    }
-    __finally { finish_particle_data(container); }
+    finish_particle_data(container);
+    g_particle_data(container, positions, velocities, phases, normals);
 }
 
 BOOL CALLBACK install_boundary_once(PINIT_ONCE, PVOID, PVOID*) {
     auto* base = reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr));
+    auto* core = GetModuleHandleW(L"flexRelease_x64.dll");
     auto* extension = GetModuleHandleW(L"flexExtRelease_x64.dll");
-    if(!base || !extension) return FALSE;
+    if(!base || !core || !extension) return FALSE;
     const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
     if(dos->e_magic != IMAGE_DOS_SIGNATURE) return TRUE;
     const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
-    constexpr unsigned char ExpectedCall[]{0xE8,0xA6,0xF7,0x1C,0x01};
-    constexpr unsigned char ExpectedThunk[]{0xFF,0x25,0x48,0x0C,0xC2,0x00};
+    constexpr unsigned char ExpectedBoundsCall[]{0xE8,0xD1,0xF5,0x1C,0x01};
+    constexpr unsigned char ExpectedBoundsThunk[]{0xFF,0x25,0xEB,0x0E,0xC2,0x00};
+    constexpr unsigned char ExpectedParticleCall[]{0xE8,0xA6,0xF7,0x1C,0x01};
+    constexpr unsigned char ExpectedParticleThunk[]{0xFF,0x25,0x48,0x0C,0xC2,0x00};
     if(nt->Signature != IMAGE_NT_SIGNATURE ||
        nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 ||
        nt->FileHeader.TimeDateStamp != KfGameTimestamp ||
        nt->OptionalHeader.SizeOfImage != KfGameImageSize ||
-       std::memcmp(base + ParticleDataCallRva, ExpectedCall,
-                   sizeof ExpectedCall) ||
-       std::memcmp(base + ParticleDataThunkRva, ExpectedThunk,
-                   sizeof ExpectedThunk)) return TRUE;
+       std::memcmp(base + BoundsCallRva, ExpectedBoundsCall,
+                   sizeof ExpectedBoundsCall) ||
+       std::memcmp(base + BoundsThunkRva, ExpectedBoundsThunk,
+                   sizeof ExpectedBoundsThunk) ||
+       std::memcmp(base + ParticleDataCallRva, ExpectedParticleCall,
+                   sizeof ExpectedParticleCall) ||
+       std::memcmp(base + ParticleDataThunkRva, ExpectedParticleThunk,
+                   sizeof ExpectedParticleThunk)) return TRUE;
 
+    const auto original_bounds = reinterpret_cast<P4Bounds>(
+        GetProcAddress(core, "flexGetBounds"));
     const auto original = reinterpret_cast<ParticleData>(
         GetProcAddress(extension, "flexExtGetParticleData"));
+    auto** bounds_iat = reinterpret_cast<P4Bounds*>(base + BoundsIatRva);
     auto** iat = reinterpret_cast<ParticleData*>(base + ParticleDataIatRva);
+    const auto bounds_delay = reinterpret_cast<P4Bounds>(
+        base + BoundsDelayResolverRva);
     const auto delay = reinterpret_cast<ParticleData>(
         base + ParticleDataDelayResolverRva);
+    const auto previous_bounds = *bounds_iat;
     const auto previous = *iat;
-    if(!original || (previous != original && previous != delay)) return TRUE;
+    if(!original_bounds || !original ||
+       (previous_bounds != original_bounds && previous_bounds != bounds_delay) ||
+       (previous != original && previous != delay)) return TRUE;
 
+    g_bounds = original_bounds;
     g_particle_data = original;
     DWORD old{};
-    if(!VirtualProtect(iat, sizeof *iat, PAGE_READWRITE, &old)) {
+    const auto span = reinterpret_cast<unsigned char*>(bounds_iat) +
+        sizeof *bounds_iat - reinterpret_cast<unsigned char*>(iat);
+    if(!VirtualProtect(iat, span, PAGE_READWRITE, &old)) {
+        g_bounds = nullptr;
         g_particle_data = nullptr;
         return TRUE;
     }
+    InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(bounds_iat),
+                               reinterpret_cast<PVOID>(&bounds_hook));
     InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(iat),
                                reinterpret_cast<PVOID>(&particle_data_hook));
     DWORD ignored{};
-    if(!VirtualProtect(iat, sizeof *iat, old, &ignored)) p4_fail_closed();
+    if(!VirtualProtect(iat, span, old, &ignored)) p4_fail_closed();
     g_readback_boundary_available.store(true, std::memory_order_release);
     return TRUE;
 }
@@ -402,11 +443,11 @@ P4_API void p4_pull(void* container, P4Unary original) {
         auto& final_state = state(solver);
         if(!abnormal && boundary_available() && pull_eligible(final_state) &&
            (final_state.flags & P4CopyPending)) {
-            // GetBounds immediately reads the default-stream bounds buffers.
-            // Complete that production, while the independent particle copies
-            // continue until GetParticleData exposes their host vectors.
-            must(cudaEventSynchronize(final_state.ready_event));
-            final_state.flags |= P4AwaitingParticleData;
+            // The verified KFGame call sequence is Pull, optional density,
+            // Bounds, then GetParticleData. Defer the immediate CPU Bounds
+            // read so the final private-stream wait makes every host result
+            // visible at one boundary.
+            final_state.flags |= P4AwaitingParticleData | P4AwaitingBounds;
             defer = true;
         }
         final_state.flags &= ~(P4PullScope | P4PullContextStable |
@@ -425,6 +466,31 @@ P4_API void p4_density(void* solver, void* target, P4Density original) {
         leave_scope(solver,abnormal,!abnormal && boundary_available() &&
             (state(solver).flags & P4AwaitingParticleData));
     }
+}
+P4_API void p4_bounds(void* solver, void* lower, void* upper, int memory,
+                       P4Bounds original) {
+    if(!solver) {
+        if(original) original(solver,lower,upper,memory);
+        return;
+    }
+    auto& s = state(solver);
+    const bool awaiting = (s.flags & P4AwaitingBounds) != 0;
+    if(s.flags & P4BoundsDeferred) p4_fail_closed();
+    const bool overlap = awaiting && original && lower && upper &&
+        (s.flags & (P4AwaitingParticleData | P4CopyPending)) ==
+            (P4AwaitingParticleData | P4CopyPending) &&
+        s.thread == GetCurrentThreadId() && native_ok(s);
+    if(overlap) {
+        if(p4_defer_bounds(solver,lower,upper,memory,original)) {
+            s.flags |= P4BoundsDeferred;
+            return;
+        }
+    }
+    if(awaiting) {
+        s.flags &= ~P4AwaitingBounds;
+        finish_deferred(s);
+    }
+    if(original) original(solver,lower,upper,memory);
 }
 P4_API void p4_destroy_container(void* container, P4Unary original) {
     auto& s = state(field<void*>(container,8));
