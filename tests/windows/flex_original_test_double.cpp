@@ -16,6 +16,7 @@ volatile LONGLONG velocity_upload_calls{};
 volatile LONGLONG velocity_download_calls{};
 volatile LONGLONG bounds_calls{};
 volatile LONGLONG params_calls{};
+volatile LONG last_bounds_memory{};
 volatile LONG last_transfer_elements{};
 volatile LONG last_transfer_memory{};
 volatile LONG last_capacity{};
@@ -54,8 +55,9 @@ extern "C" __declspec(dllexport) void flexWaitFence() noexcept {
 }
 
 extern "C" __declspec(dllexport) void flexGetBounds(
-    void*, float* lower, float* upper) noexcept {
+    void*, float* lower, float* upper, int memory) noexcept {
     InterlockedIncrement64(&bounds_calls);
+    InterlockedExchange(&last_bounds_memory, memory);
     if (lower) { lower[0] = -1.0F; lower[1] = -2.0F; lower[2] = -3.0F; }
     if (upper) { upper[0] = 1.0F; upper[1] = 2.0F; upper[2] = 3.0F; }
 }
@@ -170,6 +172,9 @@ extern "C" __declspec(dllexport) int flexTestLastTransferMemory() noexcept {
 }
 extern "C" __declspec(dllexport) long long flexTestBoundsCalls() noexcept {
     return InterlockedCompareExchange64(&bounds_calls, 0, 0);
+}
+extern "C" __declspec(dllexport) int flexTestLastBoundsMemory() noexcept {
+    return InterlockedCompareExchange(&last_bounds_memory, 0, 0);
 }
 extern "C" __declspec(dllexport) long long flexTestParamsCalls() noexcept {
     return InterlockedCompareExchange64(&params_calls, 0, 0);
