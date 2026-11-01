@@ -1291,6 +1291,11 @@ int main() {
         "InsertInteraction(OnlineMonitor)") != std::string::npos);
     CHECK(online_context_source.find(
         "KF2OPT_SESSION_CONTEXT schema=2 state=") != std::string::npos);
+    const auto session_report = online_context_source.find("function ReportSessionContext(");
+    const auto session_return = online_context_source.find("return;", session_report);
+    const auto session_format = online_context_source.find('$', session_report);
+    CHECK(session_return < session_format);
+    CHECK(session_format < online_context_source.find("function ReportOnlineGameplayUiState("));
     CHECK(online_context_source.find("NM_Client") != std::string::npos);
     CHECK(online_context_source.find("online_client_read_only") !=
           std::string::npos);

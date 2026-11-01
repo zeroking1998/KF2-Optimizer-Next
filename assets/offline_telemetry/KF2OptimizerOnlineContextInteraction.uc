@@ -7,7 +7,10 @@ class KF2OptimizerOnlineContextInteraction extends Interaction
 
 const OnlineCorpseScanBudget=64;
 
-var string LastReportedContext;
+var string LastReportedSessionState;
+var string LastReportedSessionNetMode;
+var string LastReportedSessionMap;
+var int LastReportedSessionGeneration;
 var string LastReportedGameplayUiState;
 var string LastReportedGameplayUiNetMode;
 var int LastReportedGameplayUiGeneration;
@@ -880,15 +883,17 @@ function NotifyGameSessionEnded()
 function ReportSessionContext(
     string State, string NetModeName, string MapName)
 {
-    local string Context;
-
-    Context = State$"|"$NetModeName$"|"$MapName$"|"$
-        OnlineContextGeneration;
-    if (Context == LastReportedContext)
+    if (State == LastReportedSessionState &&
+        NetModeName == LastReportedSessionNetMode &&
+        MapName == LastReportedSessionMap &&
+        OnlineContextGeneration == LastReportedSessionGeneration)
     {
         return;
     }
-    LastReportedContext = Context;
+    LastReportedSessionState = State;
+    LastReportedSessionNetMode = NetModeName;
+    LastReportedSessionMap = MapName;
+    LastReportedSessionGeneration = OnlineContextGeneration;
     `log("KF2OPT_SESSION_CONTEXT schema=2 state="$State$
          " net_mode="$NetModeName$" map="$MapName$
          " generation="$OnlineContextGeneration);
@@ -984,7 +989,6 @@ event Tick(float DeltaTime)
     {
         ++OnlineContextGeneration;
         DiscardOnlineCorpseMaximumSnapshot("world_change");
-        LastReportedContext = "";
         LastReportedGameplayUiState = "";
         LastReportedGameplayUiNetMode = "";
         LastReportedGameplayUiGeneration = 0;
@@ -1031,7 +1035,7 @@ event Tick(float DeltaTime)
     if (MapName ~= "KFMainMenu")
     {
         RestoreOnlineGraphicsAtMainMenu(CurrentWorld);
-        LastReportedContext = "";
+        LastReportedSessionState = "";
         LastReportedGameplayUiState = "";
         LastReportedGameplayUiNetMode = "";
         LastReportedGameplayUiGeneration = 0;
