@@ -38,8 +38,7 @@ if(NOT KF2_PGO_MODE STREQUAL "OFF")
     cmake_path(NORMAL_PATH KF2_PGO_PGD)
 endif()
 include("${PROJECT_SOURCE_DIR}/tools/telemetry_binding.cmake")
-set(KF2_RELEASE_REPOSITORY "" CACHE STRING "HTTPS GitHub repository used for exact-version release repair")
-if(KF2_RELEASE_REPOSITORY STREQUAL "")
+if(NOT DEFINED KF2_RELEASE_REPOSITORY)
     execute_process(
         COMMAND git -C "${PROJECT_SOURCE_DIR}" config --get remote.origin.url
         OUTPUT_VARIABLE KF2_ORIGIN_URL
@@ -47,10 +46,11 @@ if(KF2_RELEASE_REPOSITORY STREQUAL "")
         ERROR_QUIET)
     string(REGEX REPLACE "\\.git$" "" KF2_ORIGIN_URL "${KF2_ORIGIN_URL}")
     if(KF2_ORIGIN_URL MATCHES "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-        set(KF2_RELEASE_REPOSITORY "${KF2_ORIGIN_URL}" CACHE STRING
-            "HTTPS GitHub repository used for exact-version release repair" FORCE)
+        set(KF2_RELEASE_REPOSITORY "${KF2_ORIGIN_URL}")
     endif()
 endif()
+set(KF2_RELEASE_REPOSITORY "${KF2_RELEASE_REPOSITORY}" CACHE STRING
+    "HTTPS GitHub repository used for exact-version release repair")
 if(NOT KF2_RELEASE_REPOSITORY STREQUAL "" AND
    NOT KF2_RELEASE_REPOSITORY MATCHES "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
     message(FATAL_ERROR "KF2_RELEASE_REPOSITORY must be an HTTPS GitHub repository URL")
@@ -528,6 +528,16 @@ if(BUILD_TESTING)
             VERBATIM)
         add_custom_target(KF2FlexForwarderTest
             DEPENDS "${KF2_FLEX_TEST_FORWARDER}")
+    endif()
+    if(KF2_RELEASE_REPOSITORY STREQUAL "")
+        add_executable(kf2_empty_release_repair_test
+            tests/windows/empty_release_repair_test.cpp
+            src/security/release_package_repair.cpp
+            src/update/github_release_client.cpp
+            src/update/update_package.cpp)
+        target_link_libraries(kf2_empty_release_repair_test PRIVATE
+            KF2TestFoundation KF2TestUpdateCore bcrypt ole32 oleaut32 shell32 winhttp uuid)
+        add_test(NAME kf2_empty_release_repair_test COMMAND kf2_empty_release_repair_test)
     endif()
     add_subdirectory(tests)
     set_property(SOURCE "${PROJECT_SOURCE_DIR}/src/game/offline_telemetry_lab.cpp"
