@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(KF2OptimizerNext VERSION 0.0.4 LANGUAGES CXX RC)
+project(KF2OptimizerNext VERSION 0.0.5 LANGUAGES CXX RC)
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "KF2 Optimizer Next supports x64 only")

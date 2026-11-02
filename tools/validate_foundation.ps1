@@ -100,7 +100,7 @@ foreach ($buildRoot in $buildRoots) {
         '-G', 'Visual Studio 17 2022',
         '-A', 'x64',
         '-DBUILD_TESTING=ON',
-        '-DKF2_VERSION=0.0.4-alpha',
+        '-DKF2_VERSION=0.0.5-alpha',
         '-DKF2_BUILD_COMMIT=validation',
         '-DKF2_BUILD_CHANNEL=release',
         '-DKF2_OFFLINE_TELEMETRY_SHA256=AUTO'

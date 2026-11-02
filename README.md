@@ -36,8 +36,8 @@ telemetry download.
 - Confirms runtime changes with a matching receipt or exact readback.
 - Restores protected session changes when KF2 closes or after recovery.
 
-It does not change damage, health, weapons, enemy AI, spawning, networking, or
-competitive gameplay.
+On the verified KF2 build, solo play enables eight Zed optimizations. Of these,
+only the local sprint-audio fix runs when joining or hosting a listen server.
 
 ## Quick start
 
