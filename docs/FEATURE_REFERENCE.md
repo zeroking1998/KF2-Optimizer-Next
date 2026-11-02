@@ -3,6 +3,7 @@
 | Feature | Purpose | Confirmation |
 |---|---|---|
 | Game discovery | Finds supported KF2 paths and identity | Unambiguous detected paths |
+| Local damage calculation | On supported KF2 builds, solo and listen hosts handle a hit from a controller whose pawn is gone | One `KF2OPT_DAMAGE_GUARD applied` receipt when installed |
 | Performance telemetry | Measures FPS, averages, 1% lows, frame time, CPU, GPU, and memory | Timestamped samples |
 | Adaptive controller | Selects bounded quality pressure from performance and scene evidence | Decision record, then action receipt if applied |
 | Adaptive on/off | Enables or disables automatic runtime adjustments without disabling monitoring or fixed user goals | Saved state plus exact runtime `APPLIED` receipt while KF2 is running |

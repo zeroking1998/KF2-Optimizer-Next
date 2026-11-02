@@ -91,6 +91,7 @@ $graphicsViewportSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerGraphicsViewport.uc'
 $graphicsInteractionSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerGraphicsInteraction.uc'
+$damageGuardSource = Join-Path $projectRoot 'assets\offline_telemetry\KF2OptimizerDamageGuard.uc'
 $fireAfflictionSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerFireAffliction.uc'
 $weaponFallbackSource = Join-Path $projectRoot `
@@ -122,7 +123,7 @@ foreach ($required in @($editorPath, $configPath,
                          $probeSource,
                          $mutatorSource, $interactionSource,
                          $graphicsViewportSource, $graphicsInteractionSource,
-                         $fireAfflictionSource, $weaponFallbackSource,
+                         $damageGuardSource, $fireAfflictionSource, $weaponFallbackSource,
                          $onlineContextInteractionSource,
                          $adaptiveListenerSource,
                          $onlineCorpseControllerSource,
@@ -201,6 +202,7 @@ try {
         (Join-Path $classesRoot 'KF2OptimizerGraphicsViewport.uc')
     Copy-Item -LiteralPath $graphicsInteractionSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerGraphicsInteraction.uc')
+    Copy-Item -LiteralPath $damageGuardSource -Destination $classesRoot
     Copy-Item -LiteralPath $fireAfflictionSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerFireAffliction.uc')
     Copy-Item -LiteralPath $weaponFallbackSource -Destination `
@@ -285,6 +287,7 @@ try {
         throw ('KFEditor did not recompile the staged telemetry sources; ' +
             'the output still matches the bootstrap seed.')
     }
+    & (Join-Path $PSScriptRoot 'bind_damage_guard.ps1') -CompiledModule $compiledPath
     # `make` produces an Unpublished development package. KF2's normal
     # installed runtime deliberately ignores that package unless it is started
     # with -useunpublished. Brew the freshly compiled package so the portable

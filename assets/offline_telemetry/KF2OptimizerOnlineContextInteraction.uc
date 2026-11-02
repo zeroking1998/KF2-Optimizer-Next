@@ -9,6 +9,7 @@ const OnlineCorpseScanBudget=64;
 
 var string LastReportedSessionState;
 var string LastReportedSessionNetMode;
+var private bool bCheckedLocalDamageGuard;
 var string LastReportedSessionMap;
 var int LastReportedSessionGeneration;
 var string LastReportedGameplayUiState;
@@ -889,6 +890,18 @@ function ReportSessionContext(
         OnlineContextGeneration == LastReportedSessionGeneration)
     {
         return;
+    }
+    // This callback has already deduplicated world/session transitions above.
+    // Remote clients do not execute the authority's damage calculation.
+    if (!bCheckedLocalDamageGuard &&
+        (NetModeName == "NM_Standalone" || NetModeName == "NM_ListenServer"))
+    {
+        bCheckedLocalDamageGuard = true;
+        if (GetEngineVersion() == 10897 && GetBuildChangelistNumber() == 1532151 &&
+            class'KF2OptimizerDamageGuard'.static.Install())
+        {
+            `log("KF2OPT_DAMAGE_GUARD applied");
+        }
     }
     LastReportedSessionState = State;
     LastReportedSessionNetMode = NetModeName;
