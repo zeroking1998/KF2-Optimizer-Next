@@ -16,6 +16,7 @@ $sourceNames = @(
     'KF2OptimizerTelemetryInteraction.uc'
     'KF2OptimizerGraphicsViewport.uc'
     'KF2OptimizerGraphicsInteraction.uc'
+    'KF2OptimizerDamageGuard.uc'
     'KF2OptimizerFireAffliction.uc'
     'KF2OptimizerWeaponFallback.uc'
     'KF2OptimizerOnlineContextInteraction.uc'
@@ -40,6 +41,8 @@ $manifestLines = foreach ($sourceName in $sourceNames) {
         -Algorithm SHA256).Hash.ToLowerInvariant()
     "$sourceName|$sourceHash"
 }
+$bindingHash = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'bind_damage_guard.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+$manifestLines += "bind_damage_guard.ps1|$bindingHash"
 $manifest = ($manifestLines -join "`n") + "`n"
 $manifestBytes = [Text.Encoding]::UTF8.GetBytes($manifest)
 $sha256 = [Security.Cryptography.SHA256]::Create()
