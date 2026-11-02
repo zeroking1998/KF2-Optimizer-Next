@@ -426,7 +426,7 @@ function PrepareForGameplayWorld()
 
 function bool GetStandaloneGameplayContext(
     out PlayerController PrimaryController,
-    out WorldInfo CurrentWorld)
+    out WorldInfo CurrentWorld, out string CurrentMapName)
 {
     local LocalPlayer PrimaryPlayer;
 
@@ -461,7 +461,8 @@ function bool GetStandaloneGameplayContext(
         ReportOptimizerContextState("blocked_net_mode");
         return false;
     }
-    if (CurrentWorld.GetMapName(true) ~= "KFMainMenu")
+    CurrentMapName = CurrentWorld.GetMapName(true);
+    if (CurrentMapName ~= "KFMainMenu")
     {
         ReportOptimizerContextState("main_menu");
         return false;
@@ -482,7 +483,7 @@ event Tick(float DeltaTime)
     {
         return;
     }
-    if (!GetStandaloneGameplayContext(PrimaryController, CurrentWorld))
+    if (!GetStandaloneGameplayContext(PrimaryController, CurrentWorld, CurrentMapName))
     {
         ScheduleTelemetryMaintenance(false);
         return;
@@ -496,7 +497,6 @@ event Tick(float DeltaTime)
     {
         return;
     }
-    CurrentMapName = CurrentWorld.GetMapName(true);
     if (CurrentWorld.RealTimeSeconds <
             TelemetryMaintenanceLastObservedRealTime ||
         (Len(TelemetryMaintenanceMapName) > 0 &&

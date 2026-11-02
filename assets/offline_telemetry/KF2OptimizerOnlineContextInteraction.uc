@@ -660,17 +660,15 @@ function bool FindHealthyOnlineGraphicsListener(
 }
 
 function EnsureOnlineGraphicsListener(
-    WorldInfo CurrentWorld, PlayerController PrimaryController)
+    WorldInfo CurrentWorld, PlayerController PrimaryController, const out string MapName)
 {
     local KF2OptimizerAdaptiveControlListener NewListener;
     local string FailureReason;
-    local string MapName;
 
     if (CurrentWorld == None || PrimaryController == None)
     {
         return;
     }
-    MapName = CurrentWorld.GetMapName(true);
     if (OnlineGraphicsListenerMapName != MapName)
     {
         ResetOnlineGraphicsListenerHealth(MapName);
@@ -1062,7 +1060,7 @@ event Tick(float DeltaTime)
             "online_client_read_only", "NM_Client", MapName);
         UpdateOnlineGameplayUiState(
             PrimaryController, "NM_Client", MapName);
-        EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController);
+        EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController, MapName);
         ReportOnlineCorpseCapability(CurrentWorld);
         TrySleepOneOnlineCorpse(CurrentWorld);
         TryEnforceOnlineCorpseCapacity(CurrentWorld);
@@ -1075,7 +1073,7 @@ event Tick(float DeltaTime)
             "online_host_read_only", "NM_ListenServer", MapName);
         UpdateOnlineGameplayUiState(
             PrimaryController, "NM_ListenServer", MapName);
-        EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController);
+        EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController, MapName);
         ReportOnlineCorpseCapability(CurrentWorld);
         TrySleepOneOnlineCorpse(CurrentWorld);
         TryEnforceOnlineCorpseCapacity(CurrentWorld);
