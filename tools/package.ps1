@@ -145,7 +145,7 @@ if ($workingTreeChanges.Count -ne 0) { $commit = "$commit.dirty" }
 $executableIdentity = & (Join-Path $PSScriptRoot 'get_executable_build_identity.ps1') `
     -Executable $source
 if ($executableIdentity.source_identity -cne $commit -or
-    $executableIdentity.version -cne '0.0.4-alpha' -or
+    $executableIdentity.version -cne '0.0.5-alpha' -or
     $executableIdentity.channel -cne 'release') {
     throw 'Release executable source identity does not match the package; rebuild without -SkipBuild'
 }
@@ -267,7 +267,7 @@ Copy-Item -LiteralPath $projectLicenseSource -Destination `
 
 $inventoryJson = Join-Path $documentationDirectory `
     'issue72-feature-inventory.json'
-& $inventoryExporter $inventoryJson "0.0.4-alpha+$commit (release)"
+& $inventoryExporter $inventoryJson "0.0.5-alpha+$commit (release)"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $integrityPayloadFiles = @(
@@ -316,7 +316,7 @@ $payloadHashes = @($integrityHashes) + [ordered]@{
 $packageManifest = [ordered]@{
     schema_version = 2
     product = 'KF2 Optimizer Next'
-    package_version = '0.0.4-alpha'
+    package_version = '0.0.5-alpha'
     license = 'GPL-3.0-only'
     source_identity = $commit
     managed_files = $managedFiles

@@ -2,7 +2,7 @@
 
 - Updated: 2026-10-04
 - Default branch: `main`
-- Development release line: `0.0.4-alpha`; unreleased changes are in the
+- Release line: `0.0.5-alpha`. See the
   [changelog](../CHANGELOG.md).
 
 ## Current source contracts

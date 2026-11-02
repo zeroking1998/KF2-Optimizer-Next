@@ -14,7 +14,7 @@ body:
     attributes:
       label: KF2 Optimizer version
       description: Shown in the app title bar and Diagnostics.
-      placeholder: 0.0.4-alpha or commit 4f1052d
+      placeholder: 0.0.5-alpha or commit 4f1052d
     validations:
       required: true
 

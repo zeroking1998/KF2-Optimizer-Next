@@ -25,7 +25,7 @@ automatically after repair finishes. Do not force it to stop: a forced exit can
 still interrupt repair, and the next start will detect mismatched package files.
 
 Auto Repair never uses a generic latest-release address. An installation with
-version `0.0.4-alpha` requests only tag `v0.0.4-alpha` and its identically
+version `0.0.5-alpha` requests only tag `v0.0.5-alpha` and its identically
 versioned Windows ZIP. The repair accepts only the same build identity and an
 identical verified executable. Every imported companion file must match the
 package SHA-256 manifest. Writes are atomic and the running executable is

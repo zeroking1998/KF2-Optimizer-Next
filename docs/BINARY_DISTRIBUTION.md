@@ -33,7 +33,7 @@ complete local testing and does not grant permission to publish that binary.
 
 ## Public binary release
 
-The project owner authorized the free public `v0.0.4-alpha` portable package.
+The project owner authorized the free public `v0.0.5-alpha` portable package.
 It contains the project executable, the project-built protected FleX
 observation relay and optimized helper, the hash-pinned telemetry module
 compiled from the published UnrealScript source, integrity metadata, and

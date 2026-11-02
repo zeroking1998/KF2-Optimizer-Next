@@ -66,7 +66,7 @@ $mode = if ($Phase -eq 'Instrument') { 'INSTRUMENT' } else { 'OPTIMIZE' }
 Push-Location -LiteralPath $projectRoot
 try {
     & cmake -S . -B $buildRoot -G 'Visual Studio 17 2022' -A x64 `
-        '-DBUILD_TESTING=OFF' '-DKF2_VERSION=0.0.4-alpha' `
+        '-DBUILD_TESTING=OFF' '-DKF2_VERSION=0.0.5-alpha' `
         "-DKF2_BUILD_COMMIT=$commit" '-DKF2_BUILD_CHANNEL=release' `
         '-DKF2_OFFLINE_TELEMETRY_SHA256=AUTO' `
         "-DKF2_PGO_MODE=$mode" "-DKF2_PGO_PGD=$pgdPath"
