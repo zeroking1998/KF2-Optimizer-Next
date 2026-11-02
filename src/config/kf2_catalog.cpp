@@ -20,10 +20,12 @@ constexpr std::array<int, 6> kWholeSceneShadowResolutionLevels{
     256, 512, 1204, 1280, 2048, 4096};
 constexpr std::array<int, 3> kQualityLevels{0, 1, 2};
 constexpr std::array<int, 4> kDepthOfFieldQualityLevels{0, 1, 2, 3};
-constexpr std::array<int, 8> kMinShadowResolutionLevels{
+constexpr std::array<int, 8> kMinPreShadowResolutionLevels{
     8, 16, 32, 64, 128, 256, 512, 1024};
-constexpr std::array<int, 8> kShadowFadeResolutionLevels{
-    8, 16, 32, 64, 128, 256, 512, 1024};
+constexpr std::array<int, 11> kMinShadowResolutionLevels{
+    8, 16, 32, 48, 64, 80, 112, 128, 256, 512, 1024};
+constexpr std::array<int, 11> kShadowFadeResolutionLevels{
+    8, 16, 32, 64, 96, 128, 160, 224, 256, 512, 1024};
 constexpr std::array<int, 4> kMultiSampleLevels{1, 2, 4, 8};
 constexpr std::array<int, 3> kShadowFilterQualityLevels{-1, 0, 1};
 constexpr std::array<int, 2> kMotionBlurSkinningLevels{0, 1};
@@ -111,7 +113,7 @@ const std::array<SettingDefinition, kVerifiedSettingCount> kSettings{{
     {SettingId::corpse_collision_after_sleep, L"KFSystemSettings.ini", L"SystemSettings",
      L"ShouldCorpseCollideWithDeadAfterSleep", SettingType::boolean, 0, 1, false},
     {SettingId::particle_lod_bias, L"KFSystemSettings.ini", L"SystemSettings",
-     L"ParticleLODBias", SettingType::integer, 0, 1, true},
+     L"ParticleLODBias", SettingType::integer, 0, 5, true},
     {SettingId::skeletal_mesh_lod_bias, L"KFSystemSettings.ini", L"SystemSettings",
      L"SkeletalMeshLODBias", SettingType::integer, 0, 1, true},
     {SettingId::max_draw_distance_scale, L"KFSystemSettings.ini", L"SystemSettings",
@@ -365,7 +367,7 @@ const std::array<SettingDefinition, kVerifiedSettingCount> kSettings{{
      -1, 1, false, kShadowFilterQualityLevels},
     {SettingId::min_pre_shadow_resolution, L"KFSystemSettings.ini",
      L"SystemSettings", L"MinPreShadowResolution", SettingType::integer,
-     8, 1024, false, kMinShadowResolutionLevels},
+     8, 1024, false, kMinPreShadowResolutionLevels},
     {SettingId::pre_shadow_fade_resolution, L"KFSystemSettings.ini",
      L"SystemSettings", L"PreShadowFadeResolution", SettingType::integer,
      1, 1024, false, {}, 1},
