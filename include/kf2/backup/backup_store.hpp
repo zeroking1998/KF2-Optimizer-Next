@@ -18,9 +18,12 @@ using BackupStatusHook = bool (*)(const std::filesystem::path&,
 using BackupReadHook = Result<std::string> (*)(const std::filesystem::path&,
                                              std::uintmax_t);
 using BackupManifestWriteHook = void (*)(std::ostream&);
+using BackupWriteTimeHook = std::filesystem::file_time_type (*)(
+    const std::filesystem::path&, std::error_code&);
 void set_backup_status_hook_for_testing(BackupStatusHook hook) noexcept;
 void set_backup_read_hook_for_testing(BackupReadHook hook) noexcept;
 void set_backup_manifest_write_hook_for_testing(BackupManifestWriteHook hook) noexcept;
+void set_backup_write_time_hook_for_testing(BackupWriteTimeHook hook) noexcept;
 #endif
 
 struct FileSnapshot {

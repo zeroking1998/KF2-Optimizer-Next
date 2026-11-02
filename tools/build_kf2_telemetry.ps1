@@ -91,6 +91,7 @@ $graphicsViewportSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerGraphicsViewport.uc'
 $graphicsInteractionSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerGraphicsInteraction.uc'
+$damageGuardSource = Join-Path $projectRoot 'assets\offline_telemetry\KF2OptimizerDamageGuard.uc'
 $fireAfflictionSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerFireAffliction.uc'
 $weaponFallbackSource = Join-Path $projectRoot `
@@ -109,19 +110,29 @@ $adaptiveGraphicsSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerAdaptiveGraphics.uc'
 $adaptiveGraphicsStateSource = Join-Path $projectRoot `
     'assets\offline_telemetry\KF2OptimizerAdaptiveGraphicsState.uc'
+$sprayFlameSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerSprayActorFlame.uc'
+$sprayHealSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerSprayActorHeal.uc'
+$sprayArcSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerSprayActorArcGenerator.uc'
+$sprayVampireSource = Join-Path $projectRoot `
+    'assets\offline_telemetry\KF2OptimizerSprayActorHrgVampire.uc'
 
 foreach ($required in @($editorPath, $configPath,
                          $probeSource,
                          $mutatorSource, $interactionSource,
                          $graphicsViewportSource, $graphicsInteractionSource,
-                         $fireAfflictionSource, $weaponFallbackSource,
+                         $damageGuardSource, $fireAfflictionSource, $weaponFallbackSource,
                          $onlineContextInteractionSource,
                          $adaptiveListenerSource,
                          $onlineCorpseControllerSource,
                          $adaptiveConnectionSource,
                          $onlineGraphicsConnectionSource,
                          $adaptiveGraphicsSource,
-                         $adaptiveGraphicsStateSource)) {
+                         $adaptiveGraphicsStateSource,
+                         $sprayFlameSource, $sprayHealSource,
+                         $sprayArcSource, $sprayVampireSource)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Required KF2 telemetry build input is missing: $required"
     }
@@ -191,6 +202,7 @@ try {
         (Join-Path $classesRoot 'KF2OptimizerGraphicsViewport.uc')
     Copy-Item -LiteralPath $graphicsInteractionSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerGraphicsInteraction.uc')
+    Copy-Item -LiteralPath $damageGuardSource -Destination $classesRoot
     Copy-Item -LiteralPath $fireAfflictionSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerFireAffliction.uc')
     Copy-Item -LiteralPath $weaponFallbackSource -Destination `
@@ -209,6 +221,14 @@ try {
         (Join-Path $classesRoot 'KF2OptimizerAdaptiveControlConnection.uc')
     Copy-Item -LiteralPath $onlineGraphicsConnectionSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerOnlineGraphicsControlConnection.uc')
+    Copy-Item -LiteralPath $sprayFlameSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerSprayActorFlame.uc')
+    Copy-Item -LiteralPath $sprayHealSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerSprayActorHeal.uc')
+    Copy-Item -LiteralPath $sprayArcSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerSprayActorArcGenerator.uc')
+    Copy-Item -LiteralPath $sprayVampireSource -Destination `
+        (Join-Path $classesRoot 'KF2OptimizerSprayActorHrgVampire.uc')
     # KFEditor uses source timestamps for its incremental make decision. Touch
     # only the disposable staging copies so a missing output is really rebuilt.
     # Copying the bootstrap package can give it the current timestamp on some
@@ -267,6 +287,7 @@ try {
         throw ('KFEditor did not recompile the staged telemetry sources; ' +
             'the output still matches the bootstrap seed.')
     }
+    & (Join-Path $PSScriptRoot 'bind_damage_guard.ps1') -CompiledModule $compiledPath
     # `make` produces an Unpublished development package. KF2's normal
     # installed runtime deliberately ignores that package unless it is started
     # with -useunpublished. Brew the freshly compiled package so the portable

@@ -34,6 +34,8 @@ void UiRuntime::poll_adaptive_runtime_mode() {
             adaptive_quality_state_known = true;
             adaptive_quality_rollback_target.reset();
             adaptive_quality_rollback_resource.reset();
+            adaptive_quality_reduction_floor.reset(
+                optimizer_settings.adaptive_minimum_quality);
             adaptive_restore_debt.reset();
             // Restore first, then reconcile the user's saved mode separately.
             if (optimizer_settings.adaptive_optimization_enabled) {
@@ -58,7 +60,7 @@ void UiRuntime::poll_adaptive_runtime_mode() {
                     : "ADAPTIVE_RUNTIME_MODE_RECONCILE_FAILED",
                 readback_confirmed
                     ? (debt_restored
-                        ? L"KF2 confirmed the detached session's original graphics with an exact APPLIED readback; the saved Adaptive mode will now be reconciled"
+                        ? L"KF2 confirmed the previous live session's original graphics with an exact APPLIED readback; the saved Adaptive mode will now be reconciled"
                         : L"The current KF2 provider confirmed the saved Adaptive mode with an authenticated APPLIED readback")
                     : L"The current KF2 provider did not confirm the saved Adaptive mode; automatic actions remain blocked",
                 L"optimizer"});
@@ -75,17 +77,34 @@ void UiRuntime::reconcile_adaptive_runtime_mode(
     const telemetry_pipeline::AdaptiveRuntimeProviderIdentity previous{
         adaptive_runtime_mode_process_start_id,
         adaptive_runtime_mode_provider_generation,
-        adaptive_runtime_mode_port};
+        adaptive_runtime_mode_port,
+        adaptive_runtime_mode_load_map_ns};
     const telemetry_pipeline::AdaptiveRuntimeProviderIdentity current{
         game_process->process_start_id,
         frame.gameplay->optimizer_session_generation,
-        frame.gameplay->telemetry_control_port};
+        frame.gameplay->telemetry_control_port,
+        frame.gameplay->load_map_observed_ns};
     const bool new_provider =
         telemetry_pipeline::adaptive_runtime_provider_changed(
             previous, current);
     // Fail closed at the World boundary, before a fresh listener has a port
     // or the previous asynchronous request has finished.
-    if (new_provider) adaptive_runtime_mode_confirmed = false;
+    if (new_provider) {
+        adaptive_runtime_mode_confirmed = false;
+        // Like detach, a World transition invalidates the pending receipt,
+        // not its worker. Poll still consumes the stale outcome without proof.
+        adaptive_runtime_mode_pending.reset();
+        const auto quality = adaptive_resource_quality.effective_quality();
+        if (quality < optimizer_settings.adaptive_maximum_quality ||
+            (adaptive_quality_last_applied_ns != 0 && quality < 100) ||
+            !adaptive_quality_state_known || adaptive_quality_rollback_target ||
+            adaptive_control_pending || adaptive_control_dispatcher.busy()) {
+            adaptive_restore_debt = *game_process;
+        } else if (!adaptive_restore_debt) {
+            adaptive_quality_reduction_floor.reset(
+                optimizer_settings.adaptive_minimum_quality);
+        }
+    }
     if (!frame.gameplay->telemetry_control_port ||
         !game::valid_adaptive_control_token(adaptive_control_token)) {
         return;
@@ -104,6 +123,7 @@ void UiRuntime::reconcile_adaptive_runtime_mode(
     adaptive_runtime_mode_provider_generation =
         frame.gameplay->optimizer_session_generation;
     adaptive_runtime_mode_port = port;
+    adaptive_runtime_mode_load_map_ns = frame.gameplay->load_map_observed_ns;
     adaptive_runtime_mode_last_attempt_ns = now_ns;
     adaptive_runtime_mode_confirmed = false;
     const bool desired_enabled =

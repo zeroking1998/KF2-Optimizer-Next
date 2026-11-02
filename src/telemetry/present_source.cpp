@@ -17,21 +17,26 @@ constexpr std::uint64_t kTailWindowNs = 5'000'000'000ULL;
 
 FrameMetrics aggregate_windows(std::span<const PresentTimestamp> presents,
                                std::uint64_t now_ns, std::uint64_t stale_after_ns,
-                               std::uint64_t not_before_ns) {
+                               std::uint64_t not_before_ns,
+                               std::optional<std::uint64_t> statistics_boundary) {
     FrameMetrics result;
     if (presents.size() < 2) return result;
     const auto newest = presents.back().monotonic_ns;
-    const auto first_index = [&](std::uint64_t duration) {
-        const auto cutoff = std::max(not_before_ns,
-            newest > duration ? newest - duration : 0);
-        return static_cast<std::size_t>(std::lower_bound(
-            presents.begin(), presents.end(), cutoff,
-            [](const auto& present, auto at) { return present.monotonic_ns < at; }) - presents.begin());
-    };
-    const auto live_first = first_index(kLiveWindowNs);
-    const auto sustained_first = first_index(kSustainedWindowNs);
-    const auto tail_first = first_index(kTailWindowNs);
     const auto interval_count = presents.size() - 1;
+    const auto first_index = [&](std::uint64_t duration, std::uint64_t boundary) {
+        const auto cutoff = std::max(boundary,
+            newest > duration ? newest - duration : 0);
+        return std::min(interval_count, static_cast<std::size_t>(std::lower_bound(
+            presents.begin(), presents.end(), cutoff,
+            [](const auto& present, auto at) { return present.monotonic_ns < at; }) - presents.begin()));
+    };
+    const auto live_first = first_index(kLiveWindowNs, not_before_ns);
+    const auto history_boundary = std::max(not_before_ns,
+        statistics_boundary.value_or(std::numeric_limits<std::uint64_t>::max()));
+    const auto long_first = first_index(PresentSource::longest_window_ns, history_boundary);
+    const auto sustained_first = first_index(kSustainedWindowNs, history_boundary);
+    const auto tail_first = first_index(kTailWindowNs, history_boundary);
+    const auto long_count = interval_count - long_first;
     const auto live_count = interval_count - live_first;
     const auto sustained_count = interval_count - sustained_first;
     const auto tail_count = interval_count - tail_first;
@@ -47,18 +52,38 @@ FrameMetrics aggregate_windows(std::span<const PresentTimestamp> presents,
         return result;
     }
 
+    const auto publish_live = [&](double total) {
+        if (live_count == 0) return;
+        result.frame_time_ms = total / static_cast<double>(live_count);
+        result.fps = 1000.0 / *result.frame_time_ms;
+        result.quality = SampleQuality::good;
+        result.reason = UnavailableReason::none;
+        result.age_ns = age;
+        result.newest_present_ns = newest;
+    };
+    if (long_count == 0) {
+        // Menu/unavailable phases need no historical buffer or percentile sort.
+        double total = 0.0;
+        for (auto index = live_first + 1; index < presents.size(); ++index)
+            total += static_cast<double>(presents[index].monotonic_ns -
+                presents[index - 1].monotonic_ns) / 1'000'000.0;
+        publish_live(total);
+        return result;
+    }
+
     // Ingest has already validated identity and deduplicated/sorted timestamps.
     // Keep each interval's position so one sort serves all overlapping windows,
     // excluding the pair that crosses each window's first retained timestamp.
     struct Interval { double ms; std::size_t index; };
     std::vector<Interval> sorted;
-    sorted.reserve(interval_count);
+    sorted.reserve(long_count);
     double live_total = 0.0;
     double sustained_total = 0.0;
-    for (std::size_t index = 1; index < presents.size(); ++index) {
+    for (auto index = std::min(live_first, long_first) + 1;
+         index < presents.size(); ++index) {
         const auto ms = static_cast<double>(presents[index].monotonic_ns -
             presents[index - 1].monotonic_ns) / 1'000'000.0;
-        sorted.push_back({ms, index});
+        if (index > long_first) sorted.push_back({ms, index});
         if (index > live_first) live_total += ms;
         if (index > sustained_first) sustained_total += ms;
     }
@@ -67,7 +92,7 @@ FrameMetrics aggregate_windows(std::span<const PresentTimestamp> presents,
     const auto rank = [](std::size_t count, double fraction) {
         return static_cast<std::size_t>(std::ceil(static_cast<double>(count) * fraction));
     };
-    const auto long_slow_count = rank(interval_count, 0.01);
+    const auto long_slow_count = rank(long_count, 0.01);
     const auto sustained_slow_count = rank(sustained_count, 0.01);
     const auto median_rank = rank(tail_count, 0.5);
     const auto p95_rank = rank(tail_count, 0.95);
@@ -77,7 +102,7 @@ FrameMetrics aggregate_windows(std::span<const PresentTimestamp> presents,
     for (const auto& interval : sorted) {
         // Sum slow tails in ascending order, just like aggregate_presents(),
         // so FPS, nearest-rank percentiles and 1% lows remain bit-identical.
-        if (++long_rank > interval_count - long_slow_count)
+        if (++long_rank > long_count - long_slow_count)
             long_slow_total += interval.ms;
         if (interval.index > sustained_first &&
             ++sustained_rank > sustained_count - sustained_slow_count)
@@ -89,14 +114,7 @@ FrameMetrics aggregate_windows(std::span<const PresentTimestamp> presents,
             if (tail_rank == p99_rank) result.p99_ms = interval.ms;
         }
     }
-    if (live_count != 0) {
-        result.frame_time_ms = live_total / static_cast<double>(live_count);
-        result.fps = 1000.0 / *result.frame_time_ms;
-        result.quality = SampleQuality::good;
-        result.reason = UnavailableReason::none;
-        result.age_ns = age;
-        result.newest_present_ns = newest;
-    }
+    publish_live(live_total);
     if (sustained_count != 0) {
         result.average_fps = 1000.0 / (sustained_total / static_cast<double>(sustained_count));
         result.sustained_one_percent_low_fps =
@@ -116,6 +134,7 @@ FrameMetrics aggregate_windows(std::span<const PresentTimestamp> presents,
 #ifdef KF2_PRESENT_SOURCE_TESTING
 std::atomic_bool fail_next_drain_publication{false};
 std::atomic<detail::PresentDrainWaitHook> drain_wait_hook{nullptr};
+std::atomic<detail::PresentDrainWaitHook> drain_publication_hook{nullptr};
 #endif
 }
 
@@ -125,6 +144,9 @@ void detail::fail_next_present_drain_publication() noexcept {
 }
 void detail::set_present_drain_wait_hook(PresentDrainWaitHook hook) noexcept {
     drain_wait_hook.store(hook, std::memory_order_release);
+}
+void detail::set_present_drain_publication_hook(PresentDrainWaitHook hook) noexcept {
+    drain_publication_hook.store(hook, std::memory_order_release);
 }
 #endif
 
@@ -147,6 +169,7 @@ PresentSource::~PresentSource() {
 Result<bool> PresentSource::start() {
     std::scoped_lock lock{mutex_};
     streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
+    uncounted_loss_ = false;
     schema_failure_ = false;
     ++diagnostic_generation_; last_stream_.reset();
     invalidate_drain_locked();
@@ -156,6 +179,7 @@ Result<bool> PresentSource::start() {
 Result<bool> PresentSource::stop() {
     std::scoped_lock lock{mutex_};
     running_ = false; streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
+    uncounted_loss_ = false;
     ++diagnostic_generation_; last_stream_.reset();
     invalidate_drain_locked();
     return Result<bool>::success(true);
@@ -163,6 +187,7 @@ Result<bool> PresentSource::stop() {
 void PresentSource::bind(SampleIdentity identity) {
     std::scoped_lock lock{mutex_};
     identity_ = identity; streams_.clear(); reported_loss_ = 0; loss_boundary_ns_ = 0;
+    uncounted_loss_ = false;
     ++diagnostic_generation_; last_stream_.reset();
     schema_failure_ = false;
     invalidate_drain_locked();
@@ -172,8 +197,56 @@ void PresentSource::reset_statistics() {
     streams_.clear();
     reported_loss_ = 0;
     loss_boundary_ns_ = 0;
+    uncounted_loss_ = false;
     ++diagnostic_generation_; last_stream_.reset();
     invalidate_drain_locked();
+}
+bool PresentSource::record_loss(SampleIdentity identity,
+                               std::uint64_t timestamp_ns, std::uint64_t count,
+                               bool uncounted) {
+    std::scoped_lock lock{mutex_};
+    if (!running_ || schema_failure_ || identity != identity_ ||
+        (count == 0 && !uncounted))
+        return false;
+    uncounted_loss_ |= uncounted;
+    record_loss_locked(timestamp_ns, count, false);
+    return true;
+}
+
+void PresentSource::record_loss_locked(std::uint64_t timestamp_ns,
+                                      std::uint64_t count, bool incomplete) {
+    constexpr auto maximum_loss = std::numeric_limits<std::uint64_t>::max();
+    reported_loss_ += std::min(count, maximum_loss - reported_loss_);
+    if (incomplete && reported_loss_ < maximum_loss) ++reported_loss_;
+    loss_boundary_ns_ = std::max(loss_boundary_ns_, timestamp_ns);
+    // A late or untimed loss must not certify already admitted data.
+    // This bounded stream walk runs only on loss, never on clean presents.
+    ++diagnostic_generation_;
+    for (auto& [stream_id, stream] : streams_) {
+        const auto& presents = stream.presents;
+        if (!presents.empty()) loss_boundary_ns_ = std::max(
+            loss_boundary_ns_, presents.back().monotonic_ns);
+        stream.diagnostic_generation = diagnostic_generation_;
+    }
+    invalidate_drain_locked();
+}
+
+void PresentSource::set_statistics_boundary(
+    std::optional<std::uint64_t> not_before_ns) {
+    std::scoped_lock lock{mutex_};
+    if (statistics_not_before_ns_ == not_before_ns) return;
+    statistics_not_before_ns_ = not_before_ns;
+    auto live = latest_default_drain_;
+    invalidate_drain_locked();
+    if (live) {
+        live->average_fps.reset();
+        live->sustained_one_percent_low_fps.reset();
+        live->one_percent_low_fps.reset();
+        live->p95_ms.reset();
+        live->p99_ms.reset();
+        live->stutter_count = 0;
+        latest_default_drain_ = std::move(live);
+    }
 }
 bool PresentSource::ingest(const PresentEvent& event) {
     std::scoped_lock lock{mutex_};
@@ -185,20 +258,7 @@ bool PresentSource::ingest(const PresentEvent& event) {
         return false;
     }
     if (!event.completed || event.events_lost != 0) {
-        constexpr auto maximum_loss = std::numeric_limits<std::uint64_t>::max();
-        reported_loss_ += std::min(event.events_lost, maximum_loss - reported_loss_);
-        if (!event.completed && reported_loss_ < maximum_loss) ++reported_loss_;
-        loss_boundary_ns_ = std::max(loss_boundary_ns_, event.monotonic_ns);
-        // A late or untimed loss must not certify already admitted data.
-        // This bounded stream walk runs only on loss, never on clean presents.
-        ++diagnostic_generation_;
-        for (auto& [stream_id, stream] : streams_) {
-            const auto& presents = stream.presents;
-            if (!presents.empty()) loss_boundary_ns_ = std::max(
-                loss_boundary_ns_, presents.back().monotonic_ns);
-            stream.diagnostic_generation = diagnostic_generation_;
-        }
-        invalidate_drain_locked();
+        record_loss_locked(event.monotonic_ns, event.events_lost, !event.completed);
         if (!event.completed) return false;
     }
     constexpr std::size_t kMaximumStreams = 16;
@@ -228,7 +288,9 @@ bool PresentSource::ingest(const PresentEvent& event) {
     }
     last_stream_ = event.stream_id;
     auto& presents = stream->second.presents;
-    const auto position = std::lower_bound(
+    const auto position = presents.empty() ||
+        event.monotonic_ns > presents.back().monotonic_ns
+        ? presents.end() : std::lower_bound(
         presents.begin(), presents.end(), event.monotonic_ns,
         [](const PresentTimestamp& present, std::uint64_t timestamp) {
             return present.monotonic_ns < timestamp;
@@ -246,8 +308,10 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
                                   std::uint64_t not_before_ns) const {
     std::vector<PresentTimestamp> long_term;
     std::uint64_t reported_loss = 0;
+    bool uncounted_loss = false;
     std::uint64_t source_generation = 0;
     std::uint64_t selected_stream_id = 0;
+    std::optional<std::uint64_t> statistics_boundary;
     {
         std::scoped_lock lock{mutex_};
         if (!running_ || schema_failure_) {
@@ -256,7 +320,9 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
             return unavailable;
         }
         reported_loss = reported_loss_;
+        uncounted_loss = uncounted_loss_;
         source_generation = drain_generation_;
+        statistics_boundary = statistics_not_before_ns_;
         const std::deque<PresentTimestamp>* selected = nullptr;
         bool selected_fresh = false;
         std::size_t selected_fast_count = 0;
@@ -299,9 +365,16 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
                     ? newest - PresentSource::longest_window_ns : 0);
             // The shared quality covers every returned statistic, including
             // the longest tail. A fully post-loss window needs no reset.
-            if (cutoff > loss_boundary_ns_) reported_loss = 0;
+            if (cutoff > loss_boundary_ns_) {
+                reported_loss = 0;
+                uncounted_loss = false;
+            }
+            const auto live_cutoff = std::max(not_before_ns,
+                newest > kLiveWindowNs ? newest - kLiveWindowNs : 0);
+            const auto copy_cutoff = std::min(live_cutoff, std::max(cutoff,
+                statistics_boundary.value_or(std::numeric_limits<std::uint64_t>::max())));
             const auto first = std::lower_bound(
-                selected->begin(), selected->end(), cutoff,
+                selected->begin(), selected->end(), copy_cutoff,
                 [](const PresentTimestamp& present,
                    std::uint64_t timestamp) {
                     return present.monotonic_ns < timestamp;
@@ -310,11 +383,13 @@ FrameMetrics PresentSource::drain(std::uint64_t now_ns,
         }
     }
 
-    auto result = aggregate_windows(long_term, now_ns, stale_after_ns, not_before_ns);
+    auto result = aggregate_windows(long_term, now_ns, stale_after_ns,
+        not_before_ns, statistics_boundary);
     result.loss_count += reported_loss;
     result.source_generation = source_generation;
     result.stream_id = selected_stream_id;
-    if (result.fps && result.loss_count > 0) result.quality = SampleQuality::degraded;
+    if (result.fps && (result.loss_count > 0 || uncounted_loss))
+        result.quality = SampleQuality::degraded;
     return result;
 }
 
@@ -406,6 +481,8 @@ void PresentSource::drain_worker(std::stop_token stop) noexcept {
                 auto metrics = drain(request.now_ns, request.stale_after_ns,
                                      request.not_before_ns);
 #ifdef KF2_PRESENT_SOURCE_TESTING
+                if (auto hook = drain_publication_hook.load(std::memory_order_acquire))
+                    hook(stop);
                 if (fail_next_drain_publication.exchange(
                         false, std::memory_order_acq_rel)) {
                     throw std::bad_alloc{};
@@ -470,7 +547,7 @@ PresentSource::Window PresentSource::measure_window(
     Window result;
     result.generation = diagnostic_generation_;
     if (!running_ || schema_failure_ || end_ns <= begin_ns ||
-        (reported_loss_ != 0 && begin_ns <= loss_boundary_ns_))
+        ((reported_loss_ != 0 || uncounted_loss_) && begin_ns <= loss_boundary_ns_))
         return result;
     const Stream* selected_stream = nullptr;
     std::deque<PresentTimestamp>::const_iterator selected_first, selected_end;

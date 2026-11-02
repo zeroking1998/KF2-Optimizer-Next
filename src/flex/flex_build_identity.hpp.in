@@ -1,0 +1,12 @@
+#pragma once
+
+// Keep the source identity in both private FleX DLLs without adding a runtime
+// branch or another exported ABI entry. The linker directive retains the
+// marker even in /OPT:REF release builds.
+#pragma section(".rdata$kf2flex", read)
+extern "C" {
+__declspec(allocate(".rdata$kf2flex")) __declspec(selectany)
+extern const char kf2_flex_source_identity[] =
+    "KF2_FLEX_BUILD_COMMIT=@KF2_BUILD_COMMIT@";
+}
+#pragma comment(linker, "/include:kf2_flex_source_identity")

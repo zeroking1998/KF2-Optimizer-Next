@@ -75,6 +75,7 @@ struct WorldEmitterTelemetrySnapshot
     var int ConstantSpawnRateMilli;
     var int BurstEntries;
     var int PeakCapacity;
+    var int PeakCapacityCoveredComponents;
 };
 
 // Template paths and aggregate values avoid retaining ParticleSystem,
@@ -93,6 +94,7 @@ struct WorldEmitterTemplateTelemetrySnapshot
     var int ConstantSpawnRateMilli;
     var int BurstEntries;
     var int PeakCapacity;
+    var int PeakCapacityCoveredComponents;
 };
 
 // A short-lived, value-only attribution table. Source and template path make
@@ -244,6 +246,7 @@ var int AdaptiveGraphicsQuality;
 var string AdaptiveGraphicsResource;
 var int AdaptiveLastControlSequence;
 var transient bool bAdaptiveQualityRestoreCompletedForLastCommand;
+var transient bool bAdaptiveDisableCommittedForLastCommand;
 var bool bAdaptiveCorpseStaggerInitialized;
 var int AdaptiveCorpseTarget;
 var int AdaptiveCorpseOriginalLimit;
@@ -455,6 +458,7 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
     ClearTimer(nameof(StaggerCorpseCleanup), self);
     ClearTimer(nameof(AdaptiveCorpseLoadControl), self);
     BeginAdaptiveCorpsePhysicsRelease();
+    bAdaptiveDisableCommittedForLastCommand = true;
     if (AdaptiveCorpseManager != None)
     {
         AdaptiveCorpseRuntimeLimit = AdaptiveCorpseTarget;
@@ -492,7 +496,8 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
         class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(
             AdaptiveGraphicsState);
     bFixedSessionEffectsApplied = false;
-    bFixedEffectsApplied = EnsureFixedSessionEffects();
+    // Never compose fixed effects with an unverified old resource quality.
+    bFixedEffectsApplied = bGraphicsRestored && EnsureFixedSessionEffects();
     if (!bGraphicsRestored || !bFixedEffectsApplied)
     {
         `log("KF2OPT_ADAPTIVE_MODE state=disabled fixed_effect_quality="$
@@ -500,7 +505,7 @@ function bool SetAdaptiveRuntimeEnabled(bool bEnabled)
                 GetFixedSessionEffectsQuality()$" readback=deferred"$
              " corpse_limit="$AdaptiveCorpseRuntimeLimit$
              " telemetry=active");
-        return true;
+        return false;
     }
     `log("KF2OPT_ADAPTIVE_MODE state=disabled fixed_effect_quality="$
          class'KF2OptimizerAdaptiveGraphics'.static.
@@ -515,6 +520,17 @@ function bool EnsureFixedSessionEffects()
     local bool bGraphicsRestored;
     local bool bEffectRuntimeRestored;
 
+    // The existing baseline backoff also retries process-owned originals.
+    if (AdaptiveGraphicsState != None &&
+        AdaptiveGraphicsState.bOriginalRestorePending)
+    {
+        if (!class'KF2OptimizerAdaptiveGraphics'.static.
+                RestoreOriginal(AdaptiveGraphicsState))
+        {
+            return false;
+        }
+        bFixedSessionEffectsApplied = false;
+    }
     if (bFixedSessionEffectsApplied)
     {
         return true;
@@ -582,8 +598,10 @@ function bool ApplyAdaptiveResourceControl(
     local int PreviousRamQuality;
     local int PreviousOverdrawQuality;
     local int PreviousEffectsQuality;
+    local bool bModeApplied;
 
     bAdaptiveQualityRestoreCompletedForLastCommand = false;
+    bAdaptiveDisableCommittedForLastCommand = false;
     if (!ValidAdaptiveControlToken(Token) || Sequence <= 0 ||
         Sequence <= AdaptiveLastControlSequence ||
         !class'KF2OptimizerAdaptiveGraphics'.static.
@@ -596,7 +614,7 @@ function bool ApplyAdaptiveResourceControl(
     {
         return false;
     }
-    if (AdaptiveGraphicsState != None &&
+    if (!(Resource ~= "disable") && AdaptiveGraphicsState != None &&
         AdaptiveGraphicsState.bQualityRestorePending)
     {
         if (!ResolveAdaptiveQualityRestoreDebt())
@@ -615,7 +633,13 @@ function bool ApplyAdaptiveResourceControl(
     }
     if ((Resource ~= "enable") || (Resource ~= "disable"))
     {
-        if (!SetAdaptiveRuntimeEnabled(Resource ~= "enable"))
+        bModeApplied = SetAdaptiveRuntimeEnabled(Resource ~= "enable");
+        if (bAdaptiveDisableCommittedForLastCommand)
+        {
+            // Consume committed mode-off even while restoration is pending.
+            AdaptiveLastControlSequence = Sequence;
+        }
+        if (!bModeApplied)
         {
             return false;
         }
@@ -731,7 +755,8 @@ function bool ResolveAdaptiveQualityRestoreDebt()
 function bool IsAdaptiveQualityStateKnown()
 {
     return AdaptiveGraphicsState == None ||
-        AdaptiveGraphicsState.bQualityStateKnown;
+        (!AdaptiveGraphicsState.bOriginalRestorePending &&
+         AdaptiveGraphicsState.bQualityStateKnown);
 }
 
 function bool WasAdaptiveQualityRestoreCompletedForLastCommand()
@@ -1275,9 +1300,9 @@ function RetireAdaptiveCorpseManagerOwnership(KFGoreManager NewManager)
         ++RetiredSleptCount;
     }
 
-    // Everything below belongs to the old manager generation. Keep only the
-    // two state-bearing physics ledgers above; their actors are released by a
-    // separate fair cursor after the new manager has initialized.
+    // Retire manager-owned caches, but keep living-Zed animation originals:
+    // those pawns can survive a GoreManager replacement in the same World.
+    // The two physics ledgers above use a separate fair release cursor.
     AdaptiveCorpseManager = None;
     bAdaptiveCorpseStaggerInitialized = false;
     AdaptiveFrozenCorpses.Length = 0;
@@ -1286,13 +1311,6 @@ function RetireAdaptiveCorpseManagerOwnership(KFGoreManager NewManager)
     AdaptiveBaselineSettleEntries.Length = 0;
     FixedMinimumCorpseLodCorpses.Length = 0;
     FixedMinimumCorpseLodAppliedMinModels.Length = 0;
-    FixedMinimumLivingVisualZeds.Length = 0;
-    FixedMinimumLivingAppliedMinLods.Length = 0;
-    FixedMinimumLivingAppliedAnimDistances.Length = 0;
-    FixedMinimumLivingAppliedAnimRates.Length = 0;
-    FixedMinimumLivingOriginalTickAnimOffscreen.Length = 0;
-    FixedMinimumLivingOriginalUpdateSkelOffscreen.Length = 0;
-    FixedMinimumLivingOffscreenAnimReduced.Length = 0;
     AdaptiveDistanceSleepTransitions.Length = 0;
     AdaptiveDistanceSleepTransitionCount = 0;
     AdaptiveDistanceSleepTransitionPruneCursor = 0;
@@ -1460,11 +1478,14 @@ function AdjustAdaptiveCorpseCapacity(
     {
         AdaptiveCorpseRuntimeLimit = NewLimit;
         AdaptiveLastCorpseCapacityRealTime = WorldInfo.RealTimeSeconds;
-        `log("KF2OPT_CORPSE_CAPACITY runtime_limit="$
-             AdaptiveCorpseRuntimeLimit$" selected_max="$AdaptiveCorpseTarget$
-             " pressure="$ConfirmedPressureLevel$" quality_steps="$
-             AttackScale$" pool="$
-             GoreManager.CorpsePool.Length);
+        if (bDetailedRuntimeDiagnostics)
+        {
+            `log("KF2OPT_CORPSE_CAPACITY runtime_limit="$
+                 AdaptiveCorpseRuntimeLimit$" selected_max="$AdaptiveCorpseTarget$
+                 " pressure="$ConfirmedPressureLevel$" quality_steps="$
+                 AttackScale$" pool="$
+                 GoreManager.CorpsePool.Length);
+        }
     }
 }
 
@@ -1512,7 +1533,8 @@ function bool StaggerCorpseCleanup()
         GoreManager.RemoveAndDeleteCorpse(SelectedIndex))
     {
         ++AdaptiveCorpsesRemoved;
-        if (AdaptiveCorpsesRemoved == 1 || AdaptiveCorpsesRemoved % 8 == 0)
+        if (bDetailedRuntimeDiagnostics &&
+            (AdaptiveCorpsesRemoved == 1 || AdaptiveCorpsesRemoved % 8 == 0))
         {
             `log("KF2OPT_CORPSE_STAGGER state=active removed="$
                  AdaptiveCorpsesRemoved$" remaining="$
@@ -1636,8 +1658,11 @@ function int FindFixedMinimumLivingVisualEntry(KFPawn_Monster Candidate)
     return FixedMinimumLivingVisualZeds.Find(Candidate);
 }
 
-function RemoveFixedMinimumLivingVisualEntry(int Index)
+function bool RemoveFixedMinimumLivingVisualEntry(int Index, string Reason)
 {
+    local int LastIndex;
+    local KFPawn_Monster Candidate;
+
     if (Index < 0 || Index >= FixedMinimumLivingVisualZeds.Length ||
         Index >= FixedMinimumLivingAppliedMinLods.Length ||
         Index >= FixedMinimumLivingAppliedAnimDistances.Length ||
@@ -1646,15 +1671,45 @@ function RemoveFixedMinimumLivingVisualEntry(int Index)
         Index >= FixedMinimumLivingOriginalUpdateSkelOffscreen.Length ||
         Index >= FixedMinimumLivingOffscreenAnimReduced.Length)
     {
-        return;
+        return false;
     }
-    FixedMinimumLivingVisualZeds.Remove(Index, 1);
-    FixedMinimumLivingAppliedMinLods.Remove(Index, 1);
-    FixedMinimumLivingAppliedAnimDistances.Remove(Index, 1);
-    FixedMinimumLivingAppliedAnimRates.Remove(Index, 1);
-    FixedMinimumLivingOriginalTickAnimOffscreen.Remove(Index, 1);
-    FixedMinimumLivingOriginalUpdateSkelOffscreen.Remove(Index, 1);
-    FixedMinimumLivingOffscreenAnimReduced.Remove(Index, 1);
+    Candidate = FixedMinimumLivingVisualZeds[Index];
+    // Missing mesh is not proof that the pawn is gone. Keep ownership until
+    // both flags read back correctly, or the actor is definitively deleted.
+    if (Candidate != None && !Candidate.bDeleteMe &&
+        FixedMinimumLivingOffscreenAnimReduced[Index] &&
+        !RestoreLivingOffscreenAnimation(Index, Reason))
+    {
+        return false;
+    }
+    // Tracking order has no meaning. Move the last complete entry into the
+    // retired slot so a death burst cannot shift seven arrays repeatedly.
+    LastIndex = FixedMinimumLivingVisualZeds.Length - 1;
+    if (Index != LastIndex)
+    {
+        FixedMinimumLivingVisualZeds[Index] =
+            FixedMinimumLivingVisualZeds[LastIndex];
+        FixedMinimumLivingAppliedMinLods[Index] =
+            FixedMinimumLivingAppliedMinLods[LastIndex];
+        FixedMinimumLivingAppliedAnimDistances[Index] =
+            FixedMinimumLivingAppliedAnimDistances[LastIndex];
+        FixedMinimumLivingAppliedAnimRates[Index] =
+            FixedMinimumLivingAppliedAnimRates[LastIndex];
+        FixedMinimumLivingOriginalTickAnimOffscreen[Index] =
+            FixedMinimumLivingOriginalTickAnimOffscreen[LastIndex];
+        FixedMinimumLivingOriginalUpdateSkelOffscreen[Index] =
+            FixedMinimumLivingOriginalUpdateSkelOffscreen[LastIndex];
+        FixedMinimumLivingOffscreenAnimReduced[Index] =
+            FixedMinimumLivingOffscreenAnimReduced[LastIndex];
+    }
+    FixedMinimumLivingVisualZeds.Remove(LastIndex, 1);
+    FixedMinimumLivingAppliedMinLods.Remove(LastIndex, 1);
+    FixedMinimumLivingAppliedAnimDistances.Remove(LastIndex, 1);
+    FixedMinimumLivingAppliedAnimRates.Remove(LastIndex, 1);
+    FixedMinimumLivingOriginalTickAnimOffscreen.Remove(LastIndex, 1);
+    FixedMinimumLivingOriginalUpdateSkelOffscreen.Remove(LastIndex, 1);
+    FixedMinimumLivingOffscreenAnimReduced.Remove(LastIndex, 1);
+    return true;
 }
 
 function bool RestoreLivingOffscreenAnimation(int Index, string Reason)
@@ -1690,9 +1745,7 @@ function bool RestoreLivingOffscreenAnimation(int Index, string Reason)
     {
         ++FixedMinimumLivingOffscreenAnimRestores;
         `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=restored reason="$Reason$
-             " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
              " readback=verified");
     }
     return true;
@@ -1700,7 +1753,9 @@ function bool RestoreLivingOffscreenAnimation(int Index, string Reason)
 
 function PruneFixedMinimumLivingVisualEntries()
 {
+    local bool bRemoved;
     local int Index;
+    local int ScanBudget;
     local int Scanned;
     local KFPawn_Monster Candidate;
 
@@ -1712,22 +1767,18 @@ function PruneFixedMinimumLivingVisualEntries()
     FixedMinimumLivingPruneCursor = Clamp(
         FixedMinimumLivingPruneCursor, 0,
         FixedMinimumLivingVisualZeds.Length - 1);
+    // One bounded pass: do not retry a failed restore repeatedly in this tick.
+    ScanBudget = Min(AdaptiveCorpseScanBudget, FixedMinimumLivingVisualZeds.Length);
     while (FixedMinimumLivingVisualZeds.Length > 0 &&
-           Scanned < AdaptiveCorpseScanBudget)
+           Scanned < ScanBudget)
     {
-        Index = Clamp(
-            FixedMinimumLivingPruneCursor, 0,
-            FixedMinimumLivingVisualZeds.Length - 1);
+        Index = FixedMinimumLivingPruneCursor % FixedMinimumLivingVisualZeds.Length;
         Candidate = FixedMinimumLivingVisualZeds[Index];
+        bRemoved = false;
         if (Candidate == None || Candidate.bDeleteMe ||
             !Candidate.IsAliveAndWell() || Candidate.Mesh == None)
         {
-            if (Candidate != None && !Candidate.bDeleteMe &&
-                Candidate.Mesh != None)
-            {
-                RestoreLivingOffscreenAnimation(Index, "not_alive");
-            }
-            RemoveFixedMinimumLivingVisualEntry(Index);
+            bRemoved = RemoveFixedMinimumLivingVisualEntry(Index, "not_alive");
         }
         else if (Candidate.Mesh.MinLodModel !=
                      FixedMinimumLivingAppliedMinLods[Index] ||
@@ -1736,12 +1787,11 @@ function PruneFixedMinimumLivingVisualEntries()
                  Candidate.Mesh.AnimationLODFrameRate !=
                       FixedMinimumLivingAppliedAnimRates[Index])
         {
-            // Another KF2 system changed the mesh. Drop the stale readback;
-            // the fixed controller will verify and reapply it on a later scan.
-            RestoreLivingOffscreenAnimation(Index, "native_visual_state");
-            RemoveFixedMinimumLivingVisualEntry(Index);
+            // Discard stale visual readbacks only after animation ownership
+            // has been released. Failed restores must retain the originals.
+            bRemoved = RemoveFixedMinimumLivingVisualEntry(Index, "native_visual_state");
         }
-        else
+        if (!bRemoved)
         {
             FixedMinimumLivingPruneCursor =
                 (Index + 1) % FixedMinimumLivingVisualZeds.Length;
@@ -1842,6 +1892,8 @@ function bool ApplyLivingEnemyMinimumVisuals()
             {
                 return true;
             }
+            ScanPawn = FixedMinimumLivingScanPawn;
+            continue;
         }
         if (FixedMinimumLivingOffscreenAnimReduced[EntryIndex] &&
             (Candidate.Mesh.bTickAnimNodesWhenNotRendered ||
@@ -1853,6 +1905,8 @@ function bool ApplyLivingEnemyMinimumVisuals()
             {
                 return true;
             }
+            ScanPawn = FixedMinimumLivingScanPawn;
+            continue;
         }
         bVisualChanged =
             Candidate.Mesh.MinLodModel != TargetMinLod ||
@@ -1868,19 +1922,19 @@ function bool ApplyLivingEnemyMinimumVisuals()
                     TargetAnimDistance ||
                 Candidate.Mesh.AnimationLODFrameRate != TargetAnimRate)
             {
-                RestoreLivingOffscreenAnimation(EntryIndex, "visual_readback");
-                RemoveFixedMinimumLivingVisualEntry(EntryIndex);
+                RemoveFixedMinimumLivingVisualEntry(EntryIndex, "visual_readback");
                 ScanPawn = FixedMinimumLivingScanPawn;
                 continue;
             }
             ++FixedMinimumLivingVisualReductions;
-            `log("KF2OPT_LIVING_VISUAL state=fixed_minimum min_lod="$
-                 TargetMinLod$" anim_factor="$
-                 TargetAnimDistance$" anim_rate="$TargetAnimRate$
-                 " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
-                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
-                 " readback=verified");
+            if (bDetailedRuntimeDiagnostics)
+            {
+                `log("KF2OPT_LIVING_VISUAL state=fixed_minimum min_lod="$
+                     TargetMinLod$" anim_factor="$
+                     TargetAnimDistance$" anim_rate="$TargetAnimRate$
+                     FormatAdaptiveCorpseDistanceLogFields(Candidate)$
+                     " readback=verified");
+            }
         }
         bOffscreenChanged = false;
         if (!FixedMinimumLivingOffscreenAnimReduced[EntryIndex] &&
@@ -1906,10 +1960,7 @@ function bool ApplyLivingEnemyMinimumVisuals()
                 {
                     ++FixedMinimumLivingOffscreenAnimReductions;
                     `log("KF2OPT_LIVING_OFFSCREEN_ANIM state=reduced"$
-                         " distance_units="$
-                         GetAdaptiveCorpseDistanceUnits(Candidate)$
-                         " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                             GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                         FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                          " readback=verified");
                 }
             }
@@ -2344,9 +2395,7 @@ function int SleepBaselineAwakeMonsterCorpses(KFGoreManager GoreManager)
                  " angular_speed_units="$int(AngularSpeed)$
                  " position_change_units="$int(PositionChange)$
                  " corpse_id="$GetAdaptiveCorpseActionId(Candidate)$
-                 " distance_units="$GetAdaptiveCorpseDistanceUnits(Candidate)$
-                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                 FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                  " effective_awake=0");
         }
         // Keep physics mutations bounded to one actor per scheduler callback.
@@ -2406,11 +2455,14 @@ function PruneFixedMinimumCorpseLodEntries()
             // Preserve the entry as an unowned tombstone. A later reapply can
             // now identify the same actor, explain the native reset, and take
             // a fresh restore snapshot without overwriting the new value.
-            `log("KF2OPT_CORPSE_LOD state=native_reset previous_applied="$
-                 FixedMinimumCorpseLodAppliedMinModels[Index]$" observed_lod="$
-                 Candidate.Mesh.MinLodModel$" corpse_id="$
-                 GetAdaptiveCorpseActionId(Candidate)$
-                 " readback=verified");
+            if (bDetailedRuntimeDiagnostics)
+            {
+                `log("KF2OPT_CORPSE_LOD state=native_reset previous_applied="$
+                     FixedMinimumCorpseLodAppliedMinModels[Index]$
+                     " observed_lod="$Candidate.Mesh.MinLodModel$" corpse_id="$
+                     GetAdaptiveCorpseActionId(Candidate)$
+                     " readback=verified");
+            }
             FixedMinimumCorpseLodAppliedMinModels[Index] = -1;
         }
         FixedMinimumCorpseLodPruneCursor =
@@ -2592,7 +2644,7 @@ function string GetAdaptiveDistanceSleepTransitionReason(string CorpseId)
 }
 
 function bool RememberAdaptiveDistanceSleepTransition(
-    string CorpseId, string RemovalReason, int DistanceUnits)
+    string CorpseId, string RemovalReason)
 {
     local float BackoffSeconds;
     local int Index;
@@ -2831,6 +2883,15 @@ function string FormatAdaptiveCorpseDistanceMeters(
         Result $= " m";
     }
     return Result;
+}
+
+function string FormatAdaptiveCorpseDistanceLogFields(KFPawn Candidate)
+{
+    local int DistanceUnits;
+
+    DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
+    return " distance_units="$DistanceUnits$" distance_m="$
+        FormatAdaptiveCorpseDistanceMeters(DistanceUnits, false);
 }
 
 function PruneAdaptiveCorpseDebugMarkers()
@@ -3845,16 +3906,13 @@ function RemoveAdaptiveDistanceSleptCorpseEntry(
     {
         Candidate = AdaptiveDistanceSleptCorpses[Index].Corpse;
         CorpseId = AdaptiveDistanceSleptCorpses[Index].CorpseId;
-        // The transition ledger uses distance for native-wake backoff even
-        // when diagnostics are disabled; only the readback formatting below
-        // is optional.
-        DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
         if (bDetailedRuntimeDiagnostics)
         {
+            DistanceUnits = GetAdaptiveCorpseDistanceUnits(Candidate);
             EffectiveAwake = GetAdaptiveCorpseEffectiveAwake(Candidate);
         }
         RememberAdaptiveDistanceSleepTransition(
-            CorpseId, RemovalReason, DistanceUnits);
+            CorpseId, RemovalReason);
         if (bDetailedRuntimeDiagnostics && RemovalReason == "native_wake")
         {
             TransitionIndex = FindAdaptiveDistanceSleepTransition(CorpseId);
@@ -4030,10 +4088,8 @@ function int WakeNearAdaptiveDistanceSleptCorpses()
                 `log("KF2OPT_CORPSE_DISTANCE state=wake woken="$
                      AdaptiveDistancePhysicsWakes$" tracked="$
                      AdaptiveDistanceSleptCorpses.Length$" corpse_id="$
-                     GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-                     GetAdaptiveCorpseDistanceUnits(Candidate)$
-                     " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                         GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                     GetAdaptiveCorpseActionId(Candidate)$
+                     FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                      " effective_awake=1");
             }
             // A nearby body has priority, but never wake a second rigid body
@@ -4349,10 +4405,8 @@ function bool SleepOneDistantMonsterCorpse(
         {
             `log("KF2OPT_CORPSE_DISTANCE state=removed"$
                  " previous_state=sleep removal_reason=tracking_lost"$
-                 " corpse_id="$CorpseId$" distance_units="$
-                 GetAdaptiveCorpseDistanceUnits(Candidate)$
-                 " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                     GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                 " corpse_id="$CorpseId$
+                 FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                  " effective_awake="$
                  GetAdaptiveCorpseEffectiveAwake(Candidate));
         }
@@ -4391,10 +4445,8 @@ function bool SleepOneDistantMonsterCorpse(
              AdaptiveDistancePhysicsSleeps$" tracked="$
              AdaptiveDistanceSleptCorpses.Length$" visible_living="$
              VisibleLivingZeds$" visible_corpses="$VisibleCorpses$
-             " corpse_id="$CorpseId$" distance_units="$
-             GetAdaptiveCorpseDistanceUnits(Candidate)$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             " corpse_id="$CorpseId$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
              " effective_awake=0");
     }
     else if (bDetailedRuntimeDiagnostics)
@@ -4406,10 +4458,8 @@ function bool SleepOneDistantMonsterCorpse(
              AdaptiveDistancePhysicsSleeps$" tracked="$
              AdaptiveDistanceSleptCorpses.Length$" visible_living="$
              VisibleLivingZeds$" visible_corpses="$VisibleCorpses$
-             " corpse_id="$CorpseId$" distance_units="$
-             GetAdaptiveCorpseDistanceUnits(Candidate)$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             " corpse_id="$CorpseId$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
              " effective_awake=0");
     }
     return true;
@@ -4531,16 +4581,16 @@ function bool ApplyOneFixedMinimumCorpseLod(KFGoreManager GoreManager)
     }
     ++FixedMinimumCorpseLodReductions;
     RegisterAdaptiveCorpseDebugMarker(Candidate, "LOD_"$TargetMinLod);
-    `log("KF2OPT_CORPSE_LOD state=fixed_minimum reason="$ApplyReason$
-         " previous_lod="$PreviousMinLod$
-         " target_lod="$
-         TargetMinLod$" reduced="$FixedMinimumCorpseLodReductions$" tracked="$
-         FixedMinimumCorpseLodCorpses.Length$" corpse_id="$
-         GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-         GetAdaptiveCorpseDistanceUnits(Candidate)$" distance_m="$
-         FormatAdaptiveCorpseDistanceMeters(
-             GetAdaptiveCorpseDistanceUnits(Candidate), false)$
-         " readback=verified");
+    if (bDetailedRuntimeDiagnostics)
+    {
+        `log("KF2OPT_CORPSE_LOD state=fixed_minimum reason="$ApplyReason$
+             " previous_lod="$PreviousMinLod$" target_lod="$TargetMinLod$
+             " reduced="$FixedMinimumCorpseLodReductions$" tracked="$
+             FixedMinimumCorpseLodCorpses.Length$" corpse_id="$
+             GetAdaptiveCorpseActionId(Candidate)$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
+             " readback=verified");
+    }
     return true;
 }
 
@@ -4708,10 +4758,8 @@ function KFPawn SelectVisibleAwakeMonsterCorpseForSleep(
                 AdaptiveLastNearRagdollRejectRealTime =
                     WorldInfo.RealTimeSeconds;
                 `log("KF2OPT_CORPSE_RAGDOLL state=rejected_near corpse_id="$
-                     GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-                     GetAdaptiveCorpseDistanceUnits(Candidate)$
-                     " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                         GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+                     GetAdaptiveCorpseActionId(Candidate)$
+                     FormatAdaptiveCorpseDistanceLogFields(Candidate)$
                      " minimum_distance_units=800 minimum_distance_m=8.0"$
                      " scene_level="$
                      ScenePressureLevel$" enemy_level="$EnemyPressureLevel$
@@ -4791,10 +4839,8 @@ function bool SleepOneVisibleMonsterCorpse(
              VisibleAwakeBefore$" distance_tracked="$
              AdaptiveDistanceSleptCorpses.Length$" ownership_tracked="$
              AdaptiveCorpsePhysicsActionIdCount$" corpse_id="$
-             GetAdaptiveCorpseActionId(Candidate)$" distance_units="$
-             GetAdaptiveCorpseDistanceUnits(Candidate)$
-             " distance_m="$FormatAdaptiveCorpseDistanceMeters(
-                 GetAdaptiveCorpseDistanceUnits(Candidate), false)$
+             GetAdaptiveCorpseActionId(Candidate)$
+             FormatAdaptiveCorpseDistanceLogFields(Candidate)$
              " minimum_distance_units=800 minimum_distance_m=8.0"$
              " scene_level="$ScenePressureLevel$
              " enemy_level="$EnemyPressureLevel$
@@ -5183,12 +5229,14 @@ function InspectParticleComponent(
     out int DynamicSpawnEmitters,
     out int ConstantSpawnRateMilli,
     out int BurstEntries,
-    out int PeakParticleCapacity)
+    out int PeakParticleCapacity,
+    out int PeakCapacityCoveredComponents)
 {
     local int Index;
     local int LODIndex;
     local int CurrentLODIndex;
     local int AddedRateMilli;
+    local int EmitterCount;
     local float ConstantRatePerSecond;
     local ParticleEmitter EmitterTemplate;
     local ParticleLODLevel LODTemplate;
@@ -5196,16 +5244,18 @@ function InspectParticleComponent(
     local DistributionFloatConstant ConstantScale;
     local bool HasFlexFluid;
     local bool HasFlexNonFluid;
+    local bool bPeakCapacityComplete;
+    local int ComponentPeakCapacity;
 
     if (ParticleComponent == None || ParticleComponent.Template == None)
     {
         ++UnclassifiedComponentCount;
         return;
     }
+    EmitterCount = ParticleComponent.Template.Emitters.Length;
+    bPeakCapacityComplete = EmitterCount > 0;
     CurrentLODIndex = ParticleComponent.GetLODLevel();
-    for (Index = 0;
-         Index < ParticleComponent.Template.Emitters.Length;
-         ++Index)
+    for (Index = 0; Index < EmitterCount; ++Index)
     {
         EmitterTemplate = ParticleComponent.Template.Emitters[Index];
         if (EmitterTemplate != None &&
@@ -5222,21 +5272,29 @@ function InspectParticleComponent(
         }
         if (EmitterTemplate == None || EmitterTemplate.LODLevels.Length == 0)
         {
+            bPeakCapacityComplete = false;
             ++DynamicSpawnEmitters;
             continue;
         }
         LODIndex = Clamp(CurrentLODIndex, 0,
                          EmitterTemplate.LODLevels.Length - 1);
         LODTemplate = EmitterTemplate.LODLevels[LODIndex];
-        if (LODTemplate == None || LODTemplate.SpawnModule == None)
+        if (LODTemplate == None)
+        {
+            bPeakCapacityComplete = false;
+            ++DynamicSpawnEmitters;
+            continue;
+        }
+        ComponentPeakCapacity += Min(
+            1000000000 - ComponentPeakCapacity,
+            Max(0, LODTemplate.PeakActiveParticles));
+        if (LODTemplate.SpawnModule == None)
         {
             ++DynamicSpawnEmitters;
             continue;
         }
         BurstEntries += Min(1000000000 - BurstEntries,
             LODTemplate.SpawnModule.BurstList.Length);
-        PeakParticleCapacity += Min(1000000000 - PeakParticleCapacity,
-            Max(0, LODTemplate.PeakActiveParticles));
         ConstantRate = DistributionFloatConstant(
             LODTemplate.SpawnModule.Rate.Distribution);
         ConstantScale = DistributionFloatConstant(
@@ -5279,6 +5337,12 @@ function InspectParticleComponent(
         {
             ++FlexNonFluidComponentCount;
         }
+    }
+    PeakParticleCapacity += Min(
+        1000000000 - PeakParticleCapacity, ComponentPeakCapacity);
+    if (bPeakCapacityComplete)
+    {
+        ++PeakCapacityCoveredComponents;
     }
 }
 
@@ -5325,7 +5389,8 @@ function InspectWorldEmitterParticleComponentCached(
     out int DynamicSpawnEmitters,
     out int ConstantSpawnRateMilli,
     out int BurstEntries,
-    out int PeakParticleCapacity)
+    out int PeakParticleCapacity,
+    out int PeakCapacityCoveredComponents)
 {
     local int CacheIndex;
     local int NewCacheIndex;
@@ -5370,7 +5435,8 @@ function InspectWorldEmitterParticleComponentCached(
                 Snapshot.DynamicSpawnEmitters,
                 Snapshot.ConstantSpawnRateMilli,
                 Snapshot.BurstEntries,
-                Snapshot.PeakCapacity);
+                Snapshot.PeakCapacity,
+                Snapshot.PeakCapacityCoveredComponents);
             ++ProfileWorldEmitterTemplateCacheMisses;
             if (CachedWorldEmitterTemplates.Length <
                 MaxWorldEmitterTemplateSnapshots)
@@ -5406,6 +5472,8 @@ function InspectWorldEmitterParticleComponentCached(
         1000000000 - BurstEntries, Snapshot.BurstEntries);
     PeakParticleCapacity += Min(
         1000000000 - PeakParticleCapacity, Snapshot.PeakCapacity);
+    PeakCapacityCoveredComponents +=
+        Snapshot.PeakCapacityCoveredComponents;
 }
 
 function int FindWorldParticleGroupSnapshot(
@@ -5454,6 +5522,7 @@ function AccumulateWorldParticleGroup(
     local int ConstantSpawnRateMilli;
     local int BurstEntries;
     local int PeakCapacity;
+    local int PeakCapacityCoveredComponents;
     local string TemplatePath;
     local string GroupKey;
     local WorldParticleGroupTelemetrySnapshot Group;
@@ -5489,7 +5558,8 @@ function AccumulateWorldParticleGroup(
         FlexComponents, FlexFluidComponents, FlexNonFluidComponents,
         FlexMixedComponents, NonFlexComponents, UnclassifiedComponents,
         ConstantSpawnEmitters, DynamicSpawnEmitters,
-        ConstantSpawnRateMilli, BurstEntries, PeakCapacity);
+        ConstantSpawnRateMilli, BurstEntries, PeakCapacity,
+        PeakCapacityCoveredComponents);
     ++ScannedWorldParticleGroups[GroupIndex].Components;
     ScannedWorldParticleGroups[GroupIndex].Particles +=
         ParticleComponent.NumActiveParticles;
@@ -5606,15 +5676,21 @@ function AdaptiveCorpseLoadControl()
     local int ProfileElapsedMilliseconds;
     local bool bActionTaken;
 
-    ProfileStartMilliseconds = GetProfileSystemMilliseconds();
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileStartMilliseconds = GetProfileSystemMilliseconds();
+    }
     bActionTaken = RunAdaptiveCorpseLoadControl();
-    ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
-        ProfileStartMilliseconds, GetProfileSystemMilliseconds());
-    ++ProfileAdaptiveControllerSamples;
-    ProfileAdaptiveControllerMilliseconds += ProfileElapsedMilliseconds;
-    ProfileMaxAdaptiveControllerMilliseconds = Max(
-        ProfileMaxAdaptiveControllerMilliseconds,
-        ProfileElapsedMilliseconds);
+    if (bDetailedRuntimeDiagnostics)
+    {
+        ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
+            ProfileStartMilliseconds, GetProfileSystemMilliseconds());
+        ++ProfileAdaptiveControllerSamples;
+        ProfileAdaptiveControllerMilliseconds += ProfileElapsedMilliseconds;
+        ProfileMaxAdaptiveControllerMilliseconds = Max(
+            ProfileMaxAdaptiveControllerMilliseconds,
+            ProfileElapsedMilliseconds);
+    }
     ScheduleAdaptiveCorpseControlTimer(
         GetAdaptiveCorpseControlDelay(bActionTaken));
 }
@@ -5648,7 +5724,8 @@ function CountParticlePool(
     out int DynamicSpawnEmitters,
     out int ConstantSpawnRateMilli,
     out int BurstEntries,
-    out int PeakParticleCapacity)
+    out int PeakParticleCapacity,
+    out int PeakCapacityCoveredComponents)
 {
     local int Index;
     local ParticleSystemComponent ParticleComponent;
@@ -5666,13 +5743,16 @@ function CountParticlePool(
         }
         ++ComponentCount;
         ParticleCount += ParticleComponent.NumActiveParticles;
-        InspectParticleComponent(
-            ParticleComponent, FlexComponentCount,
+        // Template and LOD metadata does not change per component instance.
+        // Reuse its snapshot while live counts and bounds stay sampled here.
+        InspectWorldEmitterParticleComponentCached(
+            ParticleComponent, -1, FlexComponentCount,
             FlexFluidComponentCount, FlexNonFluidComponentCount,
             FlexMixedComponentCount, NonFlexComponentCount,
             UnclassifiedComponentCount,
             ConstantSpawnEmitters, DynamicSpawnEmitters,
-            ConstantSpawnRateMilli, BurstEntries, PeakParticleCapacity);
+            ConstantSpawnRateMilli, BurstEntries, PeakParticleCapacity,
+            PeakCapacityCoveredComponents);
         LODLevelTotal += ParticleComponent.GetLODLevel();
         if (ParticleComponent.LastRenderTime > WorldInfo.TimeSeconds - 0.3)
         {
@@ -5694,12 +5774,12 @@ event PreBeginPlay()
 
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
     {
-        `log("KF2OPT_TELEMETRY schema=7 state=blocked reason=not_standalone");
+        `log("KF2OPT_TELEMETRY schema=8 state=blocked reason=not_standalone");
         Destroy();
         return;
     }
 
-    `log("KF2OPT_TELEMETRY schema=7 state=started net=standalone");
+    `log("KF2OPT_TELEMETRY schema=8 state=started net=standalone");
     SetTimer(1.0, true, nameof(SampleTelemetry), self);
     if (bAdaptiveCorpseStagger)
     {
@@ -6169,6 +6249,7 @@ function RefreshWorldEmitterCache(bool bCollectWorldParticleGroups)
     local int ScannedWorldEmitterConstantSpawnRateMilli;
     local int ScannedWorldEmitterBurstEntries;
     local int ScannedWorldEmitterPeakCapacity;
+    local int ScannedWorldEmitterPeakCapacityCoveredComponents;
 
     foreach WorldInfo.AllActors(class'Emitter', WorldEmitter)
     {
@@ -6199,7 +6280,8 @@ function RefreshWorldEmitterCache(bool bCollectWorldParticleGroups)
             ScannedWorldEmitterDynamicSpawnEmitters,
             ScannedWorldEmitterConstantSpawnRateMilli,
             ScannedWorldEmitterBurstEntries,
-            ScannedWorldEmitterPeakCapacity);
+            ScannedWorldEmitterPeakCapacity,
+            ScannedWorldEmitterPeakCapacityCoveredComponents);
         ScannedWorldEmitterLodTotal +=
             WorldEmitter.ParticleSystemComponent.GetLODLevel();
         if (WorldEmitter.ParticleSystemComponent.LastRenderTime >
@@ -6239,6 +6321,8 @@ function RefreshWorldEmitterCache(bool bCollectWorldParticleGroups)
         ScannedWorldEmitterConstantSpawnRateMilli;
     CachedWorldEmitters.BurstEntries = ScannedWorldEmitterBurstEntries;
     CachedWorldEmitters.PeakCapacity = ScannedWorldEmitterPeakCapacity;
+    CachedWorldEmitters.PeakCapacityCoveredComponents =
+        ScannedWorldEmitterPeakCapacityCoveredComponents;
 }
 
 function SampleTelemetry()
@@ -6352,8 +6436,6 @@ function SampleTelemetry()
     local int ImpactParticleVisibleComponents;
     local int ImpactParticleLodTotal;
     local int ImpactParticleBoundedComponents;
-    local int GoreParticlePoolCapacity;
-    local int WorldParticlePoolCapacity;
     local int GroundFireParticlePoolCapacity;
     local int ImpactParticlePoolCapacity;
     local int ParticleConstantSpawnEmitters;
@@ -6361,7 +6443,10 @@ function SampleTelemetry()
     local int ParticleConstantSpawnRateMilli;
     local int ParticleBurstEntries;
     local int ParticlePeakCapacity;
-    local bool GoreParticlePoolUnbounded;
+    local int GoreParticlePeakCapacity;
+    local int WorldParticlePeakCapacity;
+    local int GoreParticlePeakCoveredComponents;
+    local int WorldParticlePeakCoveredComponents;
     local int FlexSurrogateActive;
     local int FlexSurrogateParticles;
     local int FlexSurrogateVisible;
@@ -6387,7 +6472,7 @@ function SampleTelemetry()
 
     if (WorldInfo == None || WorldInfo.NetMode != NM_Standalone)
     {
-        `log("KF2OPT_TELEMETRY schema=7 state=stopped reason=netmode_changed");
+        `log("KF2OPT_TELEMETRY schema=8 state=stopped reason=netmode_changed");
         Destroy();
         return;
     }
@@ -6697,25 +6782,6 @@ function SampleTelemetry()
         RuntimeSplatterLifetimeMs = int(GoreManager.BloodSplatterLifetime * 1000.0);
         RuntimePoolLifetimeMs = int(GoreManager.BloodPoolLifetime * 1000.0);
         RuntimeGibLifetimeMs = int(GoreManager.GibletLifetime * 1000.0);
-        if (GoreManager.BloodFXEmitterPool != None)
-        {
-            if (GoreManager.BloodFXEmitterPool.MaxActiveEffects <= 0)
-            {
-                GoreParticlePoolUnbounded = true;
-            }
-            GoreParticlePoolCapacity += Max(
-                0, GoreManager.BloodFXEmitterPool.MaxActiveEffects);
-        }
-        if (GoreManager.MiscGoreFXEmitterPool != None)
-        {
-            if (GoreManager.MiscGoreFXEmitterPool.MaxActiveEffects <= 0)
-            {
-                GoreParticlePoolUnbounded = true;
-            }
-            GoreParticlePoolCapacity += Min(
-                1000000000 - GoreParticlePoolCapacity,
-                Max(0, GoreManager.MiscGoreFXEmitterPool.MaxActiveEffects));
-        }
         CountParticlePool(GoreManager.BloodFXEmitterPool,
                           GoreParticleComponents, GoreParticles,
                           GoreParticleVisibleComponents,
@@ -6731,11 +6797,8 @@ function SampleTelemetry()
                           ParticleDynamicSpawnEmitters,
                           ParticleConstantSpawnRateMilli,
                           ParticleBurstEntries,
-                          ParticlePeakCapacity);
-        if (GoreParticlePoolUnbounded)
-        {
-            GoreParticlePoolCapacity = 0;
-        }
+                          GoreParticlePeakCapacity,
+                          GoreParticlePeakCoveredComponents);
         CountParticlePool(GoreManager.MiscGoreFXEmitterPool,
                           GoreParticleComponents, GoreParticles,
                           GoreParticleVisibleComponents,
@@ -6751,7 +6814,8 @@ function SampleTelemetry()
                           ParticleDynamicSpawnEmitters,
                           ParticleConstantSpawnRateMilli,
                           ParticleBurstEntries,
-                           ParticlePeakCapacity);
+                          GoreParticlePeakCapacity,
+                          GoreParticlePeakCoveredComponents);
     }
     if (bDetailedRuntimeDiagnostics)
     {
@@ -6808,11 +6872,6 @@ function SampleTelemetry()
     {
         ProfileSectionStartMilliseconds = GetProfileSystemMilliseconds();
     }
-    if (WorldInfo.MyEmitterPool != None)
-    {
-        WorldParticlePoolCapacity = Max(
-            0, WorldInfo.MyEmitterPool.MaxActiveEffects);
-    }
     if (WorldInfo.GroundFireEmitterPool != None)
     {
         GroundFireParticlePoolCapacity = Max(
@@ -6838,7 +6897,8 @@ function SampleTelemetry()
                       ParticleDynamicSpawnEmitters,
                       ParticleConstantSpawnRateMilli,
                       ParticleBurstEntries,
-                      ParticlePeakCapacity);
+                      WorldParticlePeakCapacity,
+                      WorldParticlePeakCoveredComponents);
     CountParticlePool(WorldInfo.GroundFireEmitterPool,
                       GroundFireParticleComponents, GroundFireParticles,
                       GroundFireParticleVisibleComponents,
@@ -6854,7 +6914,8 @@ function SampleTelemetry()
                       ParticleDynamicSpawnEmitters,
                       ParticleConstantSpawnRateMilli,
                       ParticleBurstEntries,
-                      ParticlePeakCapacity);
+                      WorldParticlePeakCapacity,
+                      WorldParticlePeakCoveredComponents);
     WorldParticleComponents += GroundFireParticleComponents;
     WorldParticles += GroundFireParticles;
     WorldParticleVisibleComponents += GroundFireParticleVisibleComponents;
@@ -6875,7 +6936,8 @@ function SampleTelemetry()
                       ParticleDynamicSpawnEmitters,
                       ParticleConstantSpawnRateMilli,
                       ParticleBurstEntries,
-                      ParticlePeakCapacity);
+                      WorldParticlePeakCapacity,
+                      WorldParticlePeakCoveredComponents);
     WorldParticleComponents += ImpactParticleComponents;
     WorldParticles += ImpactParticles;
     WorldParticleVisibleComponents += ImpactParticleVisibleComponents;
@@ -7038,8 +7100,14 @@ function SampleTelemetry()
     ParticleConstantSpawnRateMilli +=
         CachedWorldEmitters.ConstantSpawnRateMilli;
     ParticleBurstEntries += CachedWorldEmitters.BurstEntries;
-    ParticlePeakCapacity = Max(
-        ParticlePeakCapacity, CachedWorldEmitters.PeakCapacity);
+    WorldParticlePeakCapacity += Min(
+        1000000000 - WorldParticlePeakCapacity,
+        CachedWorldEmitters.PeakCapacity);
+    WorldParticlePeakCoveredComponents +=
+        CachedWorldEmitters.PeakCapacityCoveredComponents;
+    ParticlePeakCapacity = GoreParticlePeakCapacity + Min(
+        1000000000 - GoreParticlePeakCapacity,
+        WorldParticlePeakCapacity);
     if (bDetailedRuntimeDiagnostics)
     {
         ProfileElapsedMilliseconds = GetProfileElapsedMilliseconds(
@@ -7157,7 +7225,7 @@ function SampleTelemetry()
         ProfileMaxZedDebugMilliseconds = 0;
         ProfileClockAnomalies = 0;
     }
-    `log("KF2OPT_TELEMETRY schema=7 sample="$SampleSequence$
+    `log("KF2OPT_TELEMETRY schema=8 sample="$SampleSequence$
          " scan_diagnostics="$(bDetailedRuntimeDiagnostics ? 1 : 0)$
          " living="$LivingZeds$
          " living_classes="$LivingClasses.Length$
@@ -7252,8 +7320,10 @@ function SampleTelemetry()
          " ground_fire_particles="$GroundFireParticles$
          " impact_particle_components="$ImpactParticleComponents$
          " impact_particles="$ImpactParticles$
-         " gore_particle_pool_capacity="$GoreParticlePoolCapacity$
-         " world_particle_pool_capacity="$WorldParticlePoolCapacity$
+         " gore_particle_peak_capacity="$GoreParticlePeakCapacity$
+         " world_particle_peak_capacity="$WorldParticlePeakCapacity$
+         " gore_particle_peak_covered_components="$GoreParticlePeakCoveredComponents$
+         " world_particle_peak_covered_components="$WorldParticlePeakCoveredComponents$
          " ground_fire_particle_pool_capacity="$GroundFireParticlePoolCapacity$
          " impact_particle_pool_capacity="$ImpactParticlePoolCapacity$
          " particle_constant_spawn_emitters="$ParticleConstantSpawnEmitters$
@@ -7409,7 +7479,7 @@ function QuiesceForWorldTeardown()
     bAdaptiveDebugMarkerRenderConfirmed = false;
     AdaptiveCorpsePhysicsActionIds.Length = 0;
     AdaptiveCorpsePhysicsActionIdCount = 0;
-    `log("KF2OPT_TELEMETRY schema=7 state=stopped reason=world_teardown");
+    `log("KF2OPT_TELEMETRY schema=8 state=stopped reason=world_teardown");
 }
 
 event Destroyed()
@@ -7423,10 +7493,6 @@ defaultproperties
     bAlwaysRelevant=false
     bHidden=true
     RemoteRole=ROLE_None
-    bAdaptiveCorpseDebugMarkers=false
-    bAdaptiveZedDebugMarkers=false
-    bDetailedRuntimeDiagnostics=false
     AdaptiveLivingEnemyPendingPressureLevel=-1
     AdaptiveLastPhysicsMutationWorldTime=-1.0
-    bAdaptiveRuntimeEnabled=true
 }

@@ -143,7 +143,9 @@ event ReceivedLine(string Line)
             break;
         }
     }
-    if (Applied)
+    if (Applied || (Resource ~= "disable" && Probe != None &&
+        Probe.bAdaptiveDisableCommittedForLastCommand &&
+        Probe.AdaptiveLastControlSequence == Sequence))
     {
         if ((Resource ~= "enable") || (Resource ~= "disable"))
         {

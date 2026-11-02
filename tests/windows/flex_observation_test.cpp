@@ -98,15 +98,13 @@ bool rejects_exited_producer(const kf2::flex::ObservationShared& sample,
     shared->last_update_tick = GetTickCount64();
     kf2::flex::ObservationReader reader;
     if (!reader.read(previous) || !reader.read(identity) ||
-        !kf2::flex::write_fixed_control(identity, false)) return false;
-    const auto heartbeat = shared->control_heartbeat_tick;
+        !kf2::flex::write_diagnostics_control(identity, false)) return false;
     if (!TerminateProcess(owned.get(), 0) ||
         WaitForSingleObject(owned.get(), 2000) != WAIT_OBJECT_0) return false;
     // The retained mapping still has matching identity bytes and a fresh tick.
     return !reader.read(identity) && !kf2::flex::read_observation(identity) &&
-           !kf2::flex::write_fixed_control(identity, true) &&
-           shared->diagnostics_enabled == 0 &&
-           shared->control_heartbeat_tick == heartbeat && reader.read(previous);
+           !kf2::flex::write_diagnostics_control(identity, true) &&
+           shared->diagnostics_enabled == 0 && reader.read(previous);
 }
 
 }  // namespace
@@ -200,7 +198,7 @@ int wmain() {
     auto identity = bound.value();
     if (identity.process_start_id != start) return 23;
     static_assert(noexcept(kf2::flex::read_observation(identity)));
-    static_assert(noexcept(kf2::flex::write_fixed_control(identity, false)));
+    static_assert(noexcept(kf2::flex::write_diagnostics_control(identity, false)));
     const auto result = kf2::flex::read_observation(identity);
     if (!result || !result->fresh || !result->pass_through_healthy ||
         result->last_substeps != 3 || result->min_substeps != 2 ||
@@ -255,7 +253,7 @@ int wmain() {
     shared->oldest_active_count_tick = GetTickCount64();
 
     // Detailed solver tracking is optional. A diagnostics-only tracking failure
-    // must not make the fixed one-substep relay unavailable while diagnostics
+    // must not make the exact pass-through relay unavailable while diagnostics
     // are off, but it remains visible as unhealthy while diagnostics are on.
     shared->tracking_drop_calls = 1;
     shared->diagnostics_enabled = 0;
@@ -291,14 +289,13 @@ int wmain() {
     fail_allocations = true;
     const auto allocation_free_read = kf2::flex::read_observation(identity);
     const bool allocation_free_write =
-        kf2::flex::write_fixed_control(identity, false);
+        kf2::flex::write_diagnostics_control(identity, false);
     fail_allocations = false;
     if (!allocation_free_read || !allocation_free_write ||
-        shared->desired_substeps != 1 || shared->diagnostics_enabled != 0)
+        shared->diagnostics_enabled != 0)
         return 13;
-    if (!kf2::flex::write_fixed_control(identity, true) ||
-        shared->desired_substeps != 1 || shared->diagnostics_enabled != 1 ||
-        shared->control_heartbeat_tick == 0) return 6;
+    if (!kf2::flex::write_diagnostics_control(identity, true) ||
+        shared->diagnostics_enabled != 1) return 6;
     const auto after_queries = kf2::game::detail::process_query_counts_for_testing();
     if (before_queries.opens != after_queries.opens ||
         before_queries.creation_queries != after_queries.creation_queries) return 24;
@@ -306,7 +303,7 @@ int wmain() {
     if (!rejects_exited_producer(*shared, identity)) return 25;
     identity.process_start_id++;
     if (kf2::flex::read_observation(identity)) return 5;
-    if (kf2::flex::write_fixed_control(identity, true)) return 8;
+    if (kf2::flex::write_diagnostics_control(identity, true)) return 8;
     UnmapViewOfFile(shared);
     CloseHandle(mapping);
     return 0;

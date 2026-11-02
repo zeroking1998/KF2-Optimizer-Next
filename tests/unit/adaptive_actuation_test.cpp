@@ -76,23 +76,27 @@ int main() {
     assert(!tracker.effective_value(AdaptiveControlId::corpse_runtime_limit));
 
     // A4: a timeout is FAILED and leaves the old effective value intact.
-    action = tracker.propose(AdaptiveControlId::flex_solver_substeps, 4.0, 5.0,
-        AdaptiveCapabilityState::available, 600, "flex_provider");
-    assert(tracker.dispatch(AdaptiveControlId::flex_solver_substeps, 700));
+    action = tracker.propose(AdaptiveControlId::runtime_quality, 80.0, 100.0,
+        AdaptiveCapabilityState::available, 600, "quality_provider");
+    assert(tracker.dispatch(AdaptiveControlId::runtime_quality, 700));
     tracker.poll(700 + AdaptiveActuationTracker::kAcknowledgementTimeoutNs);
-    assert(tracker.current(AdaptiveControlId::flex_solver_substeps)->status ==
+    assert(tracker.current(AdaptiveControlId::runtime_quality)->status ==
            AdaptiveActionStatus::failed);
-    assert(tracker.effective_value(AdaptiveControlId::flex_solver_substeps) == 5.0);
+    assert(tracker.effective_value(AdaptiveControlId::runtime_quality) == 100.0);
 
     // A6/unavailable/shadow: none can claim a live applied value.
-    assert(tracker.propose(AdaptiveControlId::flex_particle_budget, 3.0, {},
-        AdaptiveCapabilityState::restart_required, 800, "ini", true).status ==
+    AdaptiveActuationTracker restart_state(generation(2));
+    assert(restart_state.propose(AdaptiveControlId::corpse_runtime_limit,
+        3.0, {}, AdaptiveCapabilityState::restart_required, 800, "ini",
+        true).status ==
         AdaptiveActionStatus::restart_required);
-    assert(tracker.propose(AdaptiveControlId::flex_particle_spawn, 3.0, {},
-        AdaptiveCapabilityState::unavailable, 800).status ==
+    AdaptiveActuationTracker unavailable_state(generation(2));
+    assert(unavailable_state.propose(AdaptiveControlId::corpse_runtime_limit,
+        3.0, {}, AdaptiveCapabilityState::unavailable, 800).status ==
         AdaptiveActionStatus::skipped_unavailable);
-    assert(tracker.propose(AdaptiveControlId::flex_particle_lifetime, 3.0, {},
-        AdaptiveCapabilityState::shadow, 800).status ==
+    AdaptiveActuationTracker shadow_state(generation(2));
+    assert(shadow_state.propose(AdaptiveControlId::corpse_runtime_limit,
+        3.0, {}, AdaptiveCapabilityState::shadow, 800).status ==
         AdaptiveActionStatus::shadow);
 
     // One in-flight action per domain; a conflicting proposal cannot replace it.
@@ -114,9 +118,7 @@ int main() {
     assert(tracker.receive(success(capability_pending, 120.0, 904)) ==
            AdaptiveReceiptResult::stale_generation);
 
-    // A transient FleX capability change invalidates only FleX work. A
-    // graphics receipt dispatched in the same process/map/settings generation
-    // remains valid, while the old FleX receipt cannot cross the local rebase.
+    // Invalidating one control leaves independent work intact.
     AdaptiveActuationTracker independent(generation(3, 1));
     auto independent_quality = independent.propose(
         AdaptiveControlId::runtime_quality, 80.0, 100.0,
@@ -124,20 +126,20 @@ int main() {
     assert(independent.dispatch(AdaptiveControlId::runtime_quality, 911));
     independent_quality = *independent.current(
         AdaptiveControlId::runtime_quality);
-    auto independent_flex = independent.propose(
-        AdaptiveControlId::flex_solver_substeps, 1.0, 2.0,
-        AdaptiveCapabilityState::available, 912, "flex_shared_memory");
+    auto independent_corpse = independent.propose(
+        AdaptiveControlId::corpse_runtime_limit, 120.0, 140.0,
+        AdaptiveCapabilityState::available, 912, "corpse_provider");
     assert(independent.dispatch(
-        AdaptiveControlId::flex_solver_substeps, 913));
-    independent_flex = *independent.current(
-        AdaptiveControlId::flex_solver_substeps);
+        AdaptiveControlId::corpse_runtime_limit, 913));
+    independent_corpse = *independent.current(
+        AdaptiveControlId::corpse_runtime_limit);
     independent.invalidate_control(
-        AdaptiveControlId::flex_solver_substeps);
+        AdaptiveControlId::corpse_runtime_limit);
     assert(independent.receive(success(independent_quality, 80.0, 914)) ==
            AdaptiveReceiptResult::accepted);
     assert(independent.effective_value(
         AdaptiveControlId::runtime_quality) == 80.0);
-    assert(independent.receive(success(independent_flex, 1.0, 915)) ==
+    assert(independent.receive(success(independent_corpse, 120.0, 915)) ==
            AdaptiveReceiptResult::unknown_action);
 
     // A10: disabling cancels pending work without changing the user/effective value.
@@ -153,22 +155,22 @@ int main() {
     // generations inside the same process/session.
     AdaptiveActuationTracker breaker(generation(10));
     for (int i = 0; i < 3; ++i) {
-        action = breaker.propose(AdaptiveControlId::flex_solver_substeps,
-            4.0 - i, 5.0, AdaptiveCapabilityState::available,
-            1100 + i * 1'000'000'000ULL);
-        assert(breaker.dispatch(AdaptiveControlId::flex_solver_substeps,
+        action = breaker.propose(AdaptiveControlId::runtime_quality,
+            80.0 - i * 5.0, 100.0, AdaptiveCapabilityState::available,
+            1100 + i * 1'000'000'000ULL, "quality_provider");
+        assert(breaker.dispatch(AdaptiveControlId::runtime_quality,
                                 1101 + i * 1'000'000'000ULL));
         AdaptiveActionReceipt failure{
             action.action_id, action.control, AdaptiveActionStatus::failed,
             action.requested_value, {}, action.generation,
-            1102 + i * 1'000'000'000ULL, "flex_provider", "write_failed"};
+            1102 + i * 1'000'000'000ULL, "quality_provider", "write_failed"};
         assert(breaker.receive(failure) == AdaptiveReceiptResult::accepted);
         if (i == 0) {
             breaker.rebase(generation(11), 500'000'000ULL);
         }
     }
-    assert(breaker.circuit_open(AdaptiveControlId::flex_solver_substeps));
-    assert(breaker.propose(AdaptiveControlId::flex_solver_substeps, 1.0, 5.0,
+    assert(breaker.circuit_open(AdaptiveControlId::runtime_quality));
+    assert(breaker.propose(AdaptiveControlId::runtime_quality, 60.0, 100.0,
         AdaptiveCapabilityState::available, 4'000'000'000ULL).status ==
         AdaptiveActionStatus::skipped_unavailable);
 

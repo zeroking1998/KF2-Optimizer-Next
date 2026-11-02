@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <new>
 #include <string_view>
@@ -27,25 +28,42 @@ void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 namespace {
 std::atomic_bool waiting_to_sleep{false};
+std::atomic_bool publication_paused{false}, release_publication{false};
+
+void pause_before_publication(std::stop_token stop) noexcept {
+    publication_paused.store(true, std::memory_order_release);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while (!release_publication.load(std::memory_order_acquire) &&
+           !stop.stop_requested() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+}
 
 using namespace kf2::telemetry;
 
 FrameMetrics reference_windows(std::span<const PresentTimestamp> presents,
                                SampleIdentity identity, std::uint64_t now,
-                               std::uint64_t stale, std::uint64_t not_before) {
-    const auto window = [&](std::uint64_t duration) {
+                               std::uint64_t stale, std::uint64_t not_before,
+                               std::optional<std::uint64_t> history = 0) {
+    const auto window = [&](std::uint64_t duration, std::uint64_t boundary) {
         if (presents.empty()) return presents;
         const auto newest = presents.back().monotonic_ns;
-        const auto cutoff = std::max(not_before,
+        const auto cutoff = std::max(boundary,
             newest > duration ? newest - duration : 0);
         const auto first = std::lower_bound(presents.begin(), presents.end(),
             cutoff, [](const auto& item, auto at) { return item.monotonic_ns < at; });
         return presents.subspan(static_cast<std::size_t>(first - presents.begin()));
     };
-    auto result = aggregate_presents(window(1'000'000'000ULL), identity, now, stale);
-    const auto sustained = aggregate_presents(window(3'000'000'000ULL), identity, now, stale);
-    const auto tail = aggregate_presents(window(5'000'000'000ULL), identity, now, stale);
-    const auto longest = aggregate_presents(window(10'000'000'000ULL), identity, now, stale);
+    auto result = aggregate_presents(window(1'000'000'000ULL, not_before), identity, now, stale);
+    result.average_fps.reset();
+    result.one_percent_low_fps.reset();
+    result.p95_ms.reset();
+    result.p99_ms.reset();
+    result.stutter_count = 0;
+    const auto boundary = std::max(not_before,
+        history.value_or(std::numeric_limits<std::uint64_t>::max()));
+    const auto sustained = aggregate_presents(window(3'000'000'000ULL, boundary), identity, now, stale);
+    const auto tail = aggregate_presents(window(5'000'000'000ULL, boundary), identity, now, stale);
+    const auto longest = aggregate_presents(window(10'000'000'000ULL, boundary), identity, now, stale);
     if (sustained.fps) result.average_fps = sustained.fps;
     if (sustained.one_percent_low_fps)
         result.sustained_one_percent_low_fps = sustained.one_percent_low_fps;
@@ -152,6 +170,119 @@ int test_shared_window_statistics() {
     constexpr std::size_t budget = _ITERATOR_DEBUG_LEVEL == 0 ? 2 : 4;
     if (allocations > budget) std::cerr << "Drain allocations: " << allocations << '\n';
     CHECK(allocations <= budget);
+
+    PresentSource mixed{identity, 4};
+    CHECK(mixed.start().has_value());
+    constexpr std::uint64_t mixed_origin = 20'000'000'000ULL;
+    for (const auto offset : {0ULL, 32ULL, 16ULL, 64ULL, 48ULL, 80ULL, 112ULL, 96ULL})
+        CHECK(mixed.ingest({identity, mixed_origin + offset * 1'000'000ULL, 1, true, 0, 41}));
+    CHECK(!mixed.ingest({identity, mixed_origin + 80'000'000ULL, 1, true, 0, 41}));
+    CHECK(!mixed.ingest({identity, mixed_origin + 112'000'000ULL, 1, true, 0, 41}));
+    CHECK(mixed.ingest({identity, mixed_origin + 128'000'000ULL, 1, true, 0, 41}));
+    std::vector<PresentTimestamp> retained;
+    for (const auto offset : {80ULL, 96ULL, 112ULL, 128ULL})
+        retained.push_back({identity, mixed_origin + offset * 1'000'000ULL});
+    const auto mixed_now = mixed_origin + 128'000'001ULL;
+    const auto mixed_metrics = mixed.drain(mixed_now, stale);
+    CHECK(equal_metrics(mixed_metrics,
+        reference_windows(retained, identity, mixed_now, stale, 0)));
+    CHECK(mixed_metrics.stream_id == 41);
+    return EXIT_SUCCESS;
+}
+
+int test_gameplay_history_boundary() {
+    const SampleIdentity identity{315, 1};
+    constexpr std::uint64_t start = 20'000'000'000ULL;
+    constexpr std::uint64_t step = 16'000'000ULL;
+    constexpr std::uint64_t stale = 2'000'000'000ULL;
+    PresentSource source{identity, 2400};
+    CHECK(source.start().has_value());
+    std::vector<PresentTimestamp> presents;
+    auto at = start;
+    for (std::size_t index = 0; index < 720; ++index) {
+        at += index == 600 ? 500'000'000ULL : step;
+        presents.push_back({identity, at});
+    }
+    for (auto it = presents.rbegin(); it != presents.rend(); ++it)
+        CHECK(source.ingest({identity, it->monotonic_ns, 1, true, 0, 41}));
+    const auto raw = source.drain(at, stale);
+    CHECK(raw.one_percent_low_fps && *raw.one_percent_low_fps < 20.0);
+    const auto diagnostic = source.measure_window(at - 500'000'000ULL, at);
+    const std::optional<std::uint64_t> history_boundaries[]{
+        0, presents[600].monotonic_ns, at, at + 1, std::nullopt};
+    for (const auto history : history_boundaries) {
+        source.set_statistics_boundary(history);
+        const auto generation = source.drain(at, stale).source_generation;
+        source.set_statistics_boundary(history); // No-op must not churn epochs.
+        for (const auto boundary : {0ULL, presents[650].monotonic_ns, at + 1}) {
+            const auto actual = source.drain(at, stale, boundary);
+            CHECK(equal_metrics(actual,
+                reference_windows(presents, identity, at, stale, boundary, history)));
+            CHECK(actual.source_generation == generation);
+        }
+        const auto unchanged = source.measure_window(at - 500'000'000ULL, at);
+        CHECK(unchanged.generation == diagnostic.generation);
+        CHECK(unchanged.count == diagnostic.count);
+        CHECK(equal_metrics(unchanged.metrics, diagnostic.metrics));
+    }
+    // Menu drains allocate only the live copy, no historical sort buffer.
+    std::size_t allocations = 0;
+    allocation_counter = &allocations;
+    const auto menu = source.drain(at, stale);
+    allocation_counter = nullptr;
+    CHECK(menu.fps == raw.fps && menu.frame_time_ms == raw.frame_time_ms);
+    CHECK(!menu.average_fps && !menu.one_percent_low_fps);
+    CHECK(allocations <= (_ITERATOR_DEBUG_LEVEL == 0 ? 1U : 3U));
+
+    source.set_statistics_boundary(0);
+    source.request_drain(at, stale);
+    source.request_drain(at, stale, presents[650].monotonic_ns);
+    CHECK(source.wait_for_drain(std::chrono::seconds{2}));
+    const auto cached = source.latest_drain();
+    CHECK(cached && cached->one_percent_low_fps);
+    struct PublicationGuard {
+        ~PublicationGuard() {
+            detail::set_present_drain_publication_hook(nullptr);
+            release_publication.store(true, std::memory_order_release);
+        }
+    } publication_guard;
+    detail::set_present_drain_publication_hook(&pause_before_publication);
+    source.request_drain(at, stale);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while (!publication_paused.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    CHECK(publication_paused.load(std::memory_order_acquire));
+    source.set_statistics_boundary(std::nullopt);
+    const auto hidden = source.latest_drain();
+    CHECK(hidden && hidden->fps == cached->fps);
+    CHECK(hidden->source_generation == cached->source_generation);
+    CHECK(hidden->quality == cached->quality && hidden->stream_id == 41);
+    CHECK(!hidden->average_fps && !hidden->one_percent_low_fps);
+    CHECK(!source.latest_drain(presents[650].monotonic_ns));
+    detail::set_present_drain_publication_hook(nullptr);
+    release_publication.store(true, std::memory_order_release);
+    CHECK(source.wait_for_drain(std::chrono::seconds{2}));
+    CHECK(source.latest_drain()->source_generation == cached->source_generation);
+    CHECK(!source.latest_drain()->average_fps); // Old worker result was rejected.
+
+    // Late pre-resume events cannot reintroduce a menu-gap interval.
+    const auto resumed = at + 1'000'000'000ULL;
+    source.set_statistics_boundary(resumed);
+    CHECK(source.ingest({identity, resumed - step, 1, true, 0, 41}));
+    CHECK(source.ingest({identity, resumed, 1, true, 0, 41}));
+    CHECK(!source.drain(resumed, stale).average_fps);
+    CHECK(source.ingest({identity, resumed + step, 1, true, 0, 41}));
+    auto clean = source.drain(resumed + step, stale);
+    CHECK(clean.average_fps == 62.5 && clean.one_percent_low_fps == 62.5);
+    CHECK(source.ingest({identity, resumed + step + 500'000'000ULL, 1, true, 0, 41}));
+    auto stalled = source.drain(resumed + step + 500'000'000ULL, stale);
+    CHECK(stalled.one_percent_low_fps == 2.0); // Real gameplay stalls still count.
+    CHECK(source.ingest({identity, resumed + step + 500'000'001ULL, 1, false, 7, 41}) == false);
+    source.set_statistics_boundary(std::nullopt);
+    const auto lost = source.drain(resumed + step + 500'000'001ULL, stale);
+    CHECK(lost.loss_count == 8 && lost.quality == SampleQuality::degraded);
+    CHECK(!lost.one_percent_low_fps);
     return EXIT_SUCCESS;
 }
 
@@ -163,6 +294,62 @@ void pause_before_wait(std::stop_token stop) noexcept {
     // With the fixed protocol, destruction waits for this mutex to release.
     while (!stop.stop_requested() && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
+}
+
+int test_uncounted_capture_loss() {
+    constexpr SampleIdentity identity{42, 123};
+    PresentSource source{identity, 128};
+    CHECK(!source.record_loss(identity, 1'017'000'000ULL, 0, true));
+    for (unsigned int reset = 0; reset < 4; ++reset) {
+        CHECK(source.start().has_value());
+        for (const auto at : {1'000'000'000ULL, 1'016'000'000ULL})
+            CHECK(source.ingest({identity, at, 1, true, 0, 7}));
+        CHECK(!source.record_loss(identity, 1'017'000'000ULL, 0));
+        CHECK(!source.record_loss({99, 1}, 1'017'000'000ULL, 0, true));
+        source.request_drain(1'017'000'000ULL, 1'000'000'000ULL);
+        CHECK(source.wait_for_drain(std::chrono::seconds{2}));
+        CHECK(source.latest_drain()->quality == SampleQuality::good);
+        const auto before = source.measure_window(1'000'000'000ULL, 1'016'000'000ULL);
+        CHECK(before.complete);
+        std::size_t allocations = 0;
+        allocation_counter = &allocations;
+        const auto committed = source.record_loss(identity, 1'017'000'000ULL, 0, true);
+        allocation_counter = nullptr;
+        CHECK(committed && allocations == 0);
+        CHECK(!source.latest_drain());
+        for (const auto at : {1'032'000'000ULL, 1'048'000'000ULL})
+            CHECK(source.ingest({identity, at, 1, true, 0, 7}));
+        const auto marked = source.drain(1'049'000'000ULL, 1'000'000'000ULL);
+        CHECK(marked.fps && *marked.fps == 62.5);
+        CHECK(marked.quality == SampleQuality::degraded && marked.loss_count == 0);
+        const auto crossed = source.measure_window(1'000'000'000ULL, 1'048'000'000ULL);
+        CHECK(!crossed.complete && crossed.count == 0);
+        CHECK(crossed.generation != before.generation);
+        CHECK(source.measure_window(1'032'000'000ULL, 1'048'000'000ULL).complete);
+        CHECK(source.drain(1'049'000'000ULL, 1'000'000'000ULL,
+                            1'032'000'000ULL).quality == SampleQuality::good);
+        for (const auto at : {12'000'000'000ULL, 12'016'000'000ULL})
+            CHECK(source.ingest({identity, at, 1, true, 0, 7}));
+        const auto recovered = source.drain(12'017'000'000ULL, 1'000'000'000ULL);
+        CHECK(recovered.fps && recovered.quality == SampleQuality::good);
+        CHECK(recovered.loss_count == 0);
+        // Each lifecycle boundary must also discard a still-active marker.
+        CHECK(source.record_loss(identity, 12'017'000'000ULL, 0, true));
+        if (reset == 0) source.reset_statistics();
+        if (reset == 1) source.bind(identity);
+        if (reset == 2) CHECK(source.start().has_value());
+        if (reset == 3) {
+            CHECK(source.stop().has_value());
+            CHECK(!source.record_loss(identity, 13'000'000'000ULL, 0, true));
+            CHECK(source.start().has_value());
+        }
+        for (const auto at : {13'000'000'000ULL, 13'016'000'000ULL})
+            CHECK(source.ingest({identity, at, 1, true, 0, 7}));
+        CHECK(source.drain(13'017'000'000ULL, 1'000'000'000ULL).quality == SampleQuality::good);
+    }
+    CHECK(!source.ingest({identity, 14'000'000'000ULL, 99, true, 0, 7}));
+    CHECK(!source.record_loss(identity, 14'017'000'000ULL, 0, true));
+    return EXIT_SUCCESS;
 }
 
 int test_shutdown_before_wait() {
@@ -184,6 +371,8 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string_view{argv[1]} == "--shutdown-before-wait")
         return test_shutdown_before_wait();
     CHECK(test_shared_window_statistics() == EXIT_SUCCESS);
+    CHECK(test_uncounted_capture_loss() == EXIT_SUCCESS);
+    CHECK(test_gameplay_history_boundary() == EXIT_SUCCESS);
     using namespace kf2::telemetry;
     const SampleIdentity game{1234, 5678};
     PresentSource source{game, 256};

@@ -63,10 +63,10 @@ const std::wstring& rounded_metric_text(
     double value,
     long& cached_value,
     std::wstring& cached_text) {
-    const long rounded = std::lround(value);
+    const long rounded = value <= 0.0 ? -1 : std::lround(value);
     if (rounded != cached_value) {
         cached_value = rounded;
-        cached_text = std::to_wstring(rounded);
+        cached_text = rounded < 0 ? L"—" : std::to_wstring(rounded);
     }
     return cached_text;
 }
@@ -111,8 +111,10 @@ MetricUpdateResult update_overlay_metrics(
     const bool fps_changed = !state.metrics_initialized ||
         std::fabs(state.target.fps - presentation.fps) >= 1.0;
     const bool average_changed = !state.metrics_initialized ||
+        (state.target.average_fps > 0.0) != (presentation.average_fps > 0.0) ||
         std::fabs(state.target.average_fps - presentation.average_fps) >= 1.0;
     const bool low_changed = !state.metrics_initialized ||
+        (state.target.one_percent_low_fps > 0.0) != (presentation.one_percent_low_fps > 0.0) ||
         std::fabs(state.target.one_percent_low_fps -
                   presentation.one_percent_low_fps) >= 1.0;
     const bool frame_time_changed = !state.metrics_initialized ||
@@ -204,7 +206,8 @@ MetricUpdateResult update_overlay_metrics(
                              state.fps_trend_direction,
                              state.fps_trend_intensity, 35.0, 1.0F);
             }
-            if (average_changed) {
+            if (average_changed && presentation.average_fps > 0.0 &&
+                state.target.average_fps > 0.0) {
                 update_bounce(presentation.average_fps, state.target.average_fps,
                               state.average_bounce_started_ms,
                               state.average_bounce_strength);
@@ -212,8 +215,12 @@ MetricUpdateResult update_overlay_metrics(
                              3.0, 0.007, state.average_trend_started_ms,
                              state.average_trend_direction,
                              state.average_trend_intensity, 30.0, 0.82F);
+            } else if (average_changed) {
+                state.average_bounce_started_ms = 0;
+                state.average_trend_started_ms = 0;
             }
-            if (low_changed) {
+            if (low_changed && presentation.one_percent_low_fps > 0.0 &&
+                state.target.one_percent_low_fps > 0.0) {
                 update_bounce(presentation.one_percent_low_fps,
                               state.target.one_percent_low_fps,
                               state.low_bounce_started_ms,
@@ -223,6 +230,9 @@ MetricUpdateResult update_overlay_metrics(
                              4.0, 0.012, state.low_trend_started_ms,
                              state.low_trend_direction,
                              state.low_trend_intensity, 28.0, 0.88F);
+            } else if (low_changed) {
+                state.low_bounce_started_ms = 0;
+                state.low_trend_started_ms = 0;
             }
             if (frame_time_changed) state.frame_time_bounce_started_ms = now_ms;
             const auto changed_digits = [](double previous, double current) {

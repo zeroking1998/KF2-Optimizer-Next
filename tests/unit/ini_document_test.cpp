@@ -72,6 +72,12 @@ int main() {
     CHECK(!array_values.value().append_unique(
         L"Engine.GameEngine", L"ServerActors",
         L"KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe").changed);
+    const auto all_server_actors = array_values.value().find_all(
+        L"Engine.GameEngine", L"ServerActors");
+    CHECK(all_server_actors.size() == 2);
+    CHECK(all_server_actors[0] == L"IpDrv.WebServer");
+    CHECK(all_server_actors[1] ==
+          L"KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe");
     const auto removed_array_value = array_values.value().remove_exact(
         L"Engine.GameEngine", L"ServerActors",
         L"KF2OptimizerTelemetry.KF2OptimizerTelemetryProbe");

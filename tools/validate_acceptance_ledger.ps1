@@ -11,7 +11,7 @@ $required = @(
     'Portable package shape',
     'Fresh GUI start/exit',
     'Installed FleX runtime',
-    'Offline FleX laboratory',
+    'Optimized FleX runtime',
     'Windows DPI 100-200%',
     'Multi-monitor and mixed DPI',
     'No Windows system sounds',
@@ -25,8 +25,8 @@ if ($text -match '(43/43|50/50|58/58)') { throw 'Acceptance ledger contains a st
 if ($text -notmatch 'Debug, Release and Ninja regression.*(PASS|PENDING CURRENT BUILD)') {
     throw 'Current Debug/Release/Ninja regression state is not explicit'
 }
-if ($text -notmatch 'Offline FleX laboratory.*(PASS \(AUTOMATED/(DISABLED-STATE )?LIVE/RESTORE\)|PENDING FINAL GAMEPLAY)') {
-    throw 'Offline FleX validation state is not explicit'
+if ($text -notmatch 'Optimized FleX runtime.*PASS AUTOMATED.*PENDING FRESH PACKAGED GAMEPLAY') {
+    throw 'Optimized FleX validation state is not explicit'
 }
 if ($text -notmatch 'Final gameplay acceptance.*PENDING') {
     throw 'Final gameplay must remain pending until the final package is played'

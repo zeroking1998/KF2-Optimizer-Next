@@ -7,6 +7,9 @@
 namespace kf2::app::runtime {
 
 DispatchResult dispatch_action(
+    ::kf2::app::UiRuntime& runtime, const ActionRequest& request) noexcept;
+
+DispatchResult dispatch_action(
     ::kf2::app::UiRuntime& runtime, const ActionRequest& request,
     std::span<const FeatureDefinition> features) noexcept;
 

@@ -176,26 +176,4 @@ Result<RuntimeAudit> audit_runtime(const std::filesystem::path& path,
     return Result<RuntimeAudit>::success(std::move(audit));
 }
 
-HookGateDecision evaluate_hook_gate(const HookGateEvidence& evidence) {
-    if (!evidence.abi_compatible || !evidence.exact_runtime_identity) {
-        return {HookGateState::blocked_abi, false,
-                L"FleX ABI or exact runtime identity is not verified."};
-    }
-    if (evidence.game_running) {
-        return {HookGateState::blocked_game_running, false,
-                L"The FleX runtime is never replaced while KF2 is running."};
-    }
-    if (!evidence.explicit_offline_opt_in ||
-        !evidence.platform_offline_confirmed) {
-        return {HookGateState::blocked_online_uncertain, false,
-                L"Explicit opt-in and a confirmed offline platform state are required."};
-    }
-    if (!evidence.replacement_stability_qualified) {
-        return {HookGateState::blocked_stability_quarantine, false,
-                L"The replacement proxy is quarantined after documented access-violation crashes."};
-    }
-    return {HookGateState::eligible_offline_lab, true,
-            L"All offline laboratory gates are satisfied."};
-}
-
 }  // namespace kf2::flex

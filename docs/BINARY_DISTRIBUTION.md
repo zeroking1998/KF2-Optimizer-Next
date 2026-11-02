@@ -34,9 +34,10 @@ complete local testing and does not grant permission to publish that binary.
 ## Public binary release
 
 The project owner authorized the free public `v0.0.4-alpha` portable package.
-It contains the project executable, the project-built FleX laboratory
-forwarder, the hash-pinned telemetry module compiled from the published
-UnrealScript source, integrity metadata, and license documentation.
+It contains the project executable, the project-built protected FleX
+observation relay and optimized helper, the hash-pinned telemetry module
+compiled from the published UnrealScript source, integrity metadata, and
+license documentation.
 
 It does not contain the KF2 game or SDK, original KF2 assets or binaries, or
 KF2's original NVIDIA FleX runtime. Users must provide a legitimate installed

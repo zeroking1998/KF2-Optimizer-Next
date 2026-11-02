@@ -1,13 +1,17 @@
 // Process-local session classifier installed by the protected viewport. Its
 // context receipt remains read-only. A separate authenticated loopback actor
 // applies reversible local GFXSettings and bounded local corpse-pool actions;
-// it performs no console command or replicated write.
+// it performs no replicated write. UI transitions only flush the local log.
 class KF2OptimizerOnlineContextInteraction extends Interaction
     within GameViewportClient;
 
 const OnlineCorpseScanBudget=64;
 
-var string LastReportedContext;
+var string LastReportedSessionState;
+var string LastReportedSessionNetMode;
+var private bool bCheckedLocalDamageGuard;
+var string LastReportedSessionMap;
+var int LastReportedSessionGeneration;
 var string LastReportedGameplayUiState;
 var string LastReportedGameplayUiNetMode;
 var int LastReportedGameplayUiGeneration;
@@ -421,10 +425,9 @@ function bool ApplyOnlineGraphicsControl(
         {
             `log("KF2OPT_ONLINE_GRAPHICS state=disabled"$
                  " readback=deferred local_only=true");
-            // A failed corpse-limit restore needs another authenticated
-            // request. Graphics/fixed effects already have an internal
-            // backoff retry and must not keep Adaptive physics enabled.
-            return bCorpseMaximumRestored;
+            // Mode-off is committed independently. Keep confirmation pending
+            // so the app's existing bounded retry restores every obligation.
+            return false;
         }
         `log("KF2OPT_ONLINE_GRAPHICS state=disabled fixed_effect_quality="$
              class'KF2OptimizerAdaptiveGraphics'.static.
@@ -657,17 +660,15 @@ function bool FindHealthyOnlineGraphicsListener(
 }
 
 function EnsureOnlineGraphicsListener(
-    WorldInfo CurrentWorld, PlayerController PrimaryController)
+    WorldInfo CurrentWorld, PlayerController PrimaryController, const out string MapName)
 {
     local KF2OptimizerAdaptiveControlListener NewListener;
     local string FailureReason;
-    local string MapName;
 
     if (CurrentWorld == None || PrimaryController == None)
     {
         return;
     }
-    MapName = CurrentWorld.GetMapName(true);
     if (OnlineGraphicsListenerMapName != MapName)
     {
         ResetOnlineGraphicsListenerHealth(MapName);
@@ -881,22 +882,37 @@ function NotifyGameSessionEnded()
 function ReportSessionContext(
     string State, string NetModeName, string MapName)
 {
-    local string Context;
-
-    Context = State$"|"$NetModeName$"|"$MapName$"|"$
-        OnlineContextGeneration;
-    if (Context == LastReportedContext)
+    if (State == LastReportedSessionState &&
+        NetModeName == LastReportedSessionNetMode &&
+        MapName == LastReportedSessionMap &&
+        OnlineContextGeneration == LastReportedSessionGeneration)
     {
         return;
     }
-    LastReportedContext = Context;
+    // This callback has already deduplicated world/session transitions above.
+    // Remote clients do not execute the authority's damage calculation.
+    if (!bCheckedLocalDamageGuard &&
+        (NetModeName == "NM_Standalone" || NetModeName == "NM_ListenServer"))
+    {
+        bCheckedLocalDamageGuard = true;
+        if (GetEngineVersion() == 10897 && GetBuildChangelistNumber() == 1532151 &&
+            class'KF2OptimizerDamageGuard'.static.Install())
+        {
+            `log("KF2OPT_DAMAGE_GUARD applied");
+        }
+    }
+    LastReportedSessionState = State;
+    LastReportedSessionNetMode = NetModeName;
+    LastReportedSessionMap = MapName;
+    LastReportedSessionGeneration = OnlineContextGeneration;
     `log("KF2OPT_SESSION_CONTEXT schema=2 state="$State$
          " net_mode="$NetModeName$" map="$MapName$
          " generation="$OnlineContextGeneration);
 }
 
 function ReportOnlineGameplayUiState(
-    string State, string NetModeName, string MapName)
+    string State, string NetModeName, string MapName,
+    PlayerController PrimaryController)
 {
     if (State ~= LastReportedGameplayUiState &&
         NetModeName ~= LastReportedGameplayUiNetMode &&
@@ -910,6 +926,11 @@ function ReportOnlineGameplayUiState(
     `log("KF2OPT_GAMEPLAY_CONTEXT schema=2 state="$State$
          " net_mode="$NetModeName$" map="$MapName$
          " generation="$OnlineContextGeneration);
+    // A quiet online match must not buffer menu transitions until later logs.
+    if (PrimaryController != None)
+    {
+        PrimaryController.ConsoleCommand("FLUSHLOG", false);
+    }
 }
 
 function UpdateOnlineGameplayUiState(
@@ -921,19 +942,22 @@ function UpdateOnlineGameplayUiState(
     if (KFPC == None || KFPC.MyGFxManager == None)
     {
         ReportOnlineGameplayUiState(
-            "unavailable", NetModeName, MapName);
+            "unavailable", NetModeName, MapName, PrimaryController);
     }
     else if (!KFPC.MyGFxManager.bMenusOpen)
     {
-        ReportOnlineGameplayUiState("gameplay", NetModeName, MapName);
+        ReportOnlineGameplayUiState(
+            "gameplay", NetModeName, MapName, PrimaryController);
     }
     else if (KFPC.MyGFxManager.CurrentMenu == KFPC.MyGFxManager.TraderMenu)
     {
-        ReportOnlineGameplayUiState("trader", NetModeName, MapName);
+        ReportOnlineGameplayUiState(
+            "trader", NetModeName, MapName, PrimaryController);
     }
     else
     {
-        ReportOnlineGameplayUiState("menu", NetModeName, MapName);
+        ReportOnlineGameplayUiState(
+            "menu", NetModeName, MapName, PrimaryController);
     }
 }
 
@@ -976,7 +1000,6 @@ event Tick(float DeltaTime)
     {
         ++OnlineContextGeneration;
         DiscardOnlineCorpseMaximumSnapshot("world_change");
-        LastReportedContext = "";
         LastReportedGameplayUiState = "";
         LastReportedGameplayUiNetMode = "";
         LastReportedGameplayUiGeneration = 0;
@@ -1007,12 +1030,12 @@ event Tick(float DeltaTime)
         if (CurrentWorld.NetMode == NM_Client)
         {
             ReportOnlineGameplayUiState(
-                "unavailable", "NM_Client", MapName);
+                "unavailable", "NM_Client", MapName, PrimaryController);
         }
         else if (CurrentWorld.NetMode == NM_ListenServer)
         {
             ReportOnlineGameplayUiState(
-                "unavailable", "NM_ListenServer", MapName);
+                "unavailable", "NM_ListenServer", MapName, PrimaryController);
         }
         return;
     }
@@ -1023,7 +1046,7 @@ event Tick(float DeltaTime)
     if (MapName ~= "KFMainMenu")
     {
         RestoreOnlineGraphicsAtMainMenu(CurrentWorld);
-        LastReportedContext = "";
+        LastReportedSessionState = "";
         LastReportedGameplayUiState = "";
         LastReportedGameplayUiNetMode = "";
         LastReportedGameplayUiGeneration = 0;
@@ -1037,7 +1060,7 @@ event Tick(float DeltaTime)
             "online_client_read_only", "NM_Client", MapName);
         UpdateOnlineGameplayUiState(
             PrimaryController, "NM_Client", MapName);
-        EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController);
+        EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController, MapName);
         ReportOnlineCorpseCapability(CurrentWorld);
         TrySleepOneOnlineCorpse(CurrentWorld);
         TryEnforceOnlineCorpseCapacity(CurrentWorld);
@@ -1050,7 +1073,7 @@ event Tick(float DeltaTime)
             "online_host_read_only", "NM_ListenServer", MapName);
         UpdateOnlineGameplayUiState(
             PrimaryController, "NM_ListenServer", MapName);
-        EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController);
+        EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController, MapName);
         ReportOnlineCorpseCapability(CurrentWorld);
         TrySleepOneOnlineCorpse(CurrentWorld);
         TryEnforceOnlineCorpseCapacity(CurrentWorld);

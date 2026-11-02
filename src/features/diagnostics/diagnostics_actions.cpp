@@ -409,7 +409,7 @@ app::runtime::DispatchResult toggle_flex_diagnostics(
 
     bool applied_live = false;
     if (runtime.game_process) {
-        applied_live = flex::write_fixed_control(
+        applied_live = flex::write_diagnostics_control(
             *runtime.game_process,
             runtime.optimizer_settings.debug_flex_diagnostics);
     }
@@ -530,7 +530,7 @@ app::runtime::DispatchResult flex_restore(
     const bool running = game::game_process_may_be_running(
         runtime.installation->executable);
     std::wstring recovery_details;
-    const auto restored = flex::restore_offline_lab(
+    const auto restored = flex::restore_optimized_runtime_transaction(
         runtime.installation->install_root / L"Binaries" / L"Win64",
         runtime.settings_path.parent_path() / L"flex-lab", running,
         &recovery_details);

@@ -101,12 +101,42 @@ int wmain(int argument_count, wchar_t** arguments) {
     }
     CHECK(renderer.value().text_format_creations_for_testing() == 13);
     CHECK(renderer.value().window_brush_creations_for_testing() == 1);
+    CHECK(renderer.value().target_dpi_updates_for_testing() == 0);
+    CHECK(renderer.value().target_resizes_for_testing() == 0);
+    for (int frame = 0; frame < 20; ++frame) {
+        CHECK(renderer.value().resize({800, 520}, 96.0F).has_value());
+    }
+    CHECK(renderer.value().target_dpi_updates_for_testing() == 0);
+    CHECK(renderer.value().target_resizes_for_testing() == 0);
+    renderer.value().fail_next_target_resize_for_testing();
+    CHECK(!renderer.value().resize({801, 520}, 96.0F).has_value());
+    CHECK(renderer.value().target_resizes_for_testing() == 1);
+    CHECK(renderer.value().resize({801, 520}, 96.0F).has_value());
+    CHECK(renderer.value().target_resizes_for_testing() == 2);
+    CHECK(renderer.value().resize({801, 520}, 96.0F).has_value());
+    CHECK(renderer.value().target_resizes_for_testing() == 2);
+    CHECK(renderer.value().resize({800, 520}, 96.0F).has_value());
+    CHECK(renderer.value().target_resizes_for_testing() == 3);
+    CHECK(renderer.value().resize({800, 520}, 144.0F).has_value());
+    CHECK(renderer.value().target_dpi_updates_for_testing() == 1);
+    CHECK(renderer.value().target_resizes_for_testing() == 3);
+    CHECK(renderer.value().resize({800, 520}, 144.0F).has_value());
+    CHECK(renderer.value().target_dpi_updates_for_testing() == 1);
     CHECK(renderer.value().resize({0, 0}, 96.0F).has_value());
+    CHECK(renderer.value().target_resizes_for_testing() == 3);
+    CHECK(renderer.value().resize({800, 520}, 96.0F).has_value());
+    CHECK(renderer.value().target_dpi_updates_for_testing() == 2);
+    CHECK(renderer.value().target_resizes_for_testing() == 3);
     renderer.value().discard_device_resources();
     CHECK(renderer.value().resize({800, 520}, 192.0F).has_value());
+    CHECK(renderer.value().target_dpi_updates_for_testing() == 2);
+    CHECK(renderer.value().target_resizes_for_testing() == 3);
     CHECK(renderer.value().render(layout, theme).has_value());
     CHECK(renderer.value().text_format_creations_for_testing() == 13);
     CHECK(renderer.value().window_brush_creations_for_testing() == 2);
+    CHECK(renderer.value().resize({800, 520}, 192.0F).has_value());
+    CHECK(renderer.value().target_dpi_updates_for_testing() == 2);
+    CHECK(renderer.value().target_resizes_for_testing() == 3);
 
     const auto output = argument_count > 1
                             ? std::filesystem::path{arguments[1]}

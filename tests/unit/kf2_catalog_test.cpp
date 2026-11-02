@@ -1,9 +1,31 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
+#include <new>
 #include <set>
 
-#include "kf2/config/kf2_catalog.hpp"
+#include "kf2/config/config_preview.hpp"
+
+namespace {
+thread_local bool fail_real_buffer{}, real_buffer_failed{};
+thread_local std::size_t buffers_before_failure{};
+}
+void* operator new(std::size_t size) {
+    if (fail_real_buffer && size == 64) {
+        if (buffers_before_failure > 0) {
+            --buffers_before_failure;
+        } else {
+            fail_real_buffer = false;
+            real_buffer_failed = true;
+            throw std::bad_alloc{};
+        }
+    }
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
@@ -53,12 +75,17 @@ int main() {
             high = setting.maximum;
         }
         for (const auto& value : {low, high}) {
+            CHECK(is_valid_setting_value(setting, value));
             const auto serialized = serialize_setting_value(setting, value);
             CHECK(serialized.has_value());
             const auto parsed = parse_setting_value(setting, *serialized);
             CHECK(parsed.has_value());
             CHECK(*parsed == value);
         }
+        const SettingValue wrong_type = setting.type == SettingType::boolean
+            ? SettingValue{0} : SettingValue{false};
+        CHECK(!is_valid_setting_value(setting, wrong_type));
+        CHECK(!serialize_setting_value(setting, wrong_type));
     }
     const auto* anisotropy = find_setting(SettingId::max_anisotropy);
     CHECK(anisotropy != nullptr);
@@ -68,6 +95,7 @@ int main() {
         CHECK(parse_setting_value(*anisotropy, std::to_wstring(value)).has_value());
     }
     for (const int value : {0, 3, 6, 11, 17}) {
+        CHECK(!is_valid_setting_value(*anisotropy, value));
         CHECK(!serialize_setting_value(*anisotropy, value).has_value());
         CHECK(!parse_setting_value(*anisotropy, std::to_wstring(value)).has_value());
     }
@@ -159,6 +187,51 @@ int main() {
     CHECK(!parse_setting_value(*shadow_resolution, L"768").has_value());
     const auto* lifetime = find_setting(SettingId::gore_lifetime_multiplier);
     CHECK(lifetime != nullptr);
+    CHECK(!is_valid_setting_value(
+        *lifetime, std::numeric_limits<double>::quiet_NaN()));
+    CHECK(!is_valid_setting_value(
+        *lifetime, std::numeric_limits<double>::infinity()));
+    const SettingValue fractional_lifetime{1.234567};
+    CHECK(serialize_setting_value(*lifetime, fractional_lifetime) == L"1.234567");
+    // In-memory stepping must not allocate a discarded formatting buffer.
+    real_buffer_failed = false;
+    fail_real_buffer = true;
+    const auto staged_lifetime = step_setting_value(*lifetime, 1.0, 1);
+    fail_real_buffer = false;
+    CHECK(staged_lifetime.has_value());
+    CHECK(!real_buffer_failed);
+    CHECK(std::abs(std::get<double>(*staged_lifetime) - 1.05) < 0.000001);
+    // MSVC's wide-stream buffer allocation fails once; ordinary retry stays usable.
+    real_buffer_failed = false;
+    fail_real_buffer = true;
+    const auto incomplete = serialize_setting_value(*lifetime, fractional_lifetime);
+    fail_real_buffer = false;
+    CHECK(real_buffer_failed);
+    CHECK(serialize_setting_value(*lifetime, fractional_lifetime) == L"1.234567");
+    constexpr auto original =
+        "[KFGame.KFGoreManager]\nGoreFXLifetimeMultiplier=1.0\n";
+    auto document = IniDocument::parse(original);
+    CHECK(document.has_value());
+    std::map<std::filesystem::path, IniDocument> documents;
+    documents.emplace(L"KFGame.ini", std::move(document.value()));
+    const kf2::game::GameInstallation installation{.config_root = L"C:\\CopiedConfig"};
+    const std::vector<RequestedChange> requests{
+        {SettingId::gore_lifetime_multiplier, fractional_lifetime}};
+    real_buffer_failed = false;
+    // The preview allocates one 64-byte buffer before reaching the real formatter.
+    buffers_before_failure = 1;
+    fail_real_buffer = true;
+    const auto incomplete_preview = build_preview(installation, requests, documents);
+    fail_real_buffer = false;
+    CHECK(real_buffer_failed);
+    CHECK(!incomplete_preview.has_value());
+    CHECK(!incomplete.has_value());
+    CHECK(documents.at(L"KFGame.ini").serialize() == original);
+    const auto retry_preview = build_preview(installation, requests, documents);
+    CHECK(retry_preview.has_value());
+    CHECK(retry_preview.value().files.size() == 1);
+    CHECK(retry_preview.value().files.front().proposed_bytes ==
+        "[KFGame.KFGoreManager]\nGoreFXLifetimeMultiplier=1.234567\n");
     CHECK(std::abs(std::get<double>(*step_setting_value(
         *lifetime, 1.0, 1)) - 1.05) < 0.000001);
     const auto* shadows = find_setting(SettingId::dynamic_shadows);

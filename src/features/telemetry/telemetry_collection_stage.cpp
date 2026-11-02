@@ -70,15 +70,37 @@ PresentDrainResult drain_present_stage(app::UiRuntime& runtime,
              L"Telemetry sources are not bound to a current KF2 process", 0});
     }
 
+    const auto& current = runtime.game_log_session;
+    const auto& previous = runtime.fps_statistics_session;
+    if (now_ns == 0) {
+        runtime.present_source->set_statistics_boundary(std::nullopt);
+        runtime.fps_statistics_session.reset();
+    } else if (current != previous || !current) {
+        if (!current || !game::game_log_is_active_gameplay(*current)) {
+            runtime.present_source->set_statistics_boundary(std::nullopt);
+        } else if (!previous || !game::game_log_is_active_gameplay(*previous) ||
+                   current->map != previous->map ||
+                   current->optimizer_session_generation != previous->optimizer_session_generation ||
+                   current->gameplay_ui_context_revision != previous->gameplay_ui_context_revision ||
+                   (current->load_map_observed_ns != 0 &&
+                    current->load_map_observed_ns != previous->load_map_observed_ns) ||
+                   (current->loading_movie_finished_observed_ns != 0 &&
+                    current->loading_movie_finished_observed_ns != previous->loading_movie_finished_observed_ns)) {
+            runtime.present_source->set_statistics_boundary(now_ns);
+        }
+        runtime.fps_statistics_session = current;
+    }
     runtime.present_source->request_drain(now_ns, 2'000'000'000ULL);
     auto frames = runtime.present_source->latest_drain().value_or(
         ::kf2::telemetry::FrameMetrics{});
     // A stale Launch.log can make the startup gate look ready before KF2's
     // new DX11 swap chain begins presenting. Failed starts and completely
-    // silent sessions share one bounded retry; healthy or merely stale
-    // streams are never churned.
+    // silent startups and terminated consumers share the bounded retry;
+    // healthy or merely stale streams are never churned.
     if (should_reconnect_silent_present({
             .scene_ready = runtime.overlay_scene_ready,
+            .session_terminated = runtime.present_session &&
+                !runtime.present_session->is_running(),
             .fps = frames.fps,
             .reason = frames.reason,
             .session_started_ns = runtime.present_session_started_ns,
@@ -100,7 +122,7 @@ PresentDrainResult drain_present_stage(app::UiRuntime& runtime,
                 L"Reconnecting KF2 frame telemetry";
             runtime.events->append(
                 {0, diagnostics::Severity::info, "DXGI_FRAME_TIMING_RECONNECTED",
-                 L"KF2 frame telemetry was reconnected after a failed start or missing startup samples",
+                 L"KF2 frame telemetry was reconnected after a failed start, missing startup samples or an ended ETW session",
                  L"telemetry"});
         } else {
             runtime.telemetry_failure = L"DXGI frame timing reconnect failed: " +

@@ -60,6 +60,10 @@ int main() {
           std::string::npos);
     CHECK(migrated_serialized.find("guide_completed") == std::string::npos);
     CHECK(migrated_serialized.find("guide_step") == std::string::npos);
+    CHECK(migrated_serialized.find("adaptive_flex_enabled") ==
+          std::string::npos);
+    CHECK(migrated_serialized.find("adaptive_flex_auto") ==
+          std::string::npos);
     CHECK(migrated_serialized.find("adaptive_flex_max_substeps") ==
           std::string::npos);
     CHECK(migrated_serialized.find("animations_enabled") == std::string::npos);

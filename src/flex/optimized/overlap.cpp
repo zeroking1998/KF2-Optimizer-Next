@@ -1,0 +1,535 @@
+#include "overlap.hpp"
+#include "presentation.hpp"
+#include "render_interop.hpp"
+#if !defined(P4_CPU_MODEL)
+#include "kf2/flex/flex_build_identity.hpp"
+#endif
+#include <windows.h>
+#include <atomic>
+#include <cstring>
+#include <limits>
+
+// Link to this game's CUDA75 ABI, not a newer SDK. Tests replace these genuine
+// boundaries; they do not load cudart/nvcuda or execute DllMain.
+#ifdef P4_CPU_MODEL
+#define CUDA_API extern "C"
+void p4_fail_closed();
+#else
+#define CUDA_API extern "C" __declspec(dllimport)
+[[noreturn]] static void p4_fail_closed() { RaiseFailFastException(nullptr, nullptr, 0); __assume(0); }
+#endif
+CUDA_API int cudaStreamCreateWithFlags(void**, unsigned);
+CUDA_API int cudaStreamDestroy(void*);
+CUDA_API int cudaStreamSynchronize_ptsz(void*);
+CUDA_API int cudaStreamWaitEvent_ptsz(void*, void*, unsigned);
+CUDA_API int cudaEventCreateWithFlags(void**, unsigned);
+CUDA_API int cudaEventDestroy(void*);
+CUDA_API int cudaEventRecord_ptsz(void*, void*);
+CUDA_API int cudaEventSynchronize(void*);
+CUDA_API int cudaPeekAtLastError();
+CUDA_API int cudaMemcpy_ptds(void*, const void*, std::size_t, int);
+CUDA_API int cudaMemcpyAsync_ptsz(void*, const void*, std::size_t, int, void*);
+CUDA_API int cuCtxGetCurrent(void**);
+CUDA_API int cuCtxPushCurrent_v2(void*);
+CUDA_API int cuCtxPopCurrent_v2(void**);
+CUDA_API int cuCtxSynchronize();
+
+namespace {
+#if defined(P4_CPU_MODEL)
+bool g_readback_boundary_available{};
+#else
+constexpr unsigned KfGameTimestamp = 0x65B94562U;
+constexpr unsigned KfGameImageSize = 0x2481000U;
+constexpr std::size_t BoundsIatRva = 0x1FB2E10U;
+constexpr std::size_t BoundsThunkRva = 0x1391F1FU;
+constexpr std::size_t BoundsDelayResolverRva = 0x1391F13U;
+constexpr std::size_t BoundsCallRva = 0x1C2949U;
+constexpr std::size_t ParticleDataIatRva = 0x1FB2D60U;
+constexpr std::size_t ParticleDataThunkRva = 0x1392112U;
+constexpr std::size_t ParticleDataDelayResolverRva = 0x1392106U;
+constexpr std::size_t ParticleDataCallRva = 0x1C2967U;
+using ParticleData = void(*)(void*, void**, void**, void**, void**);
+INIT_ONCE g_boundary_once = INIT_ONCE_STATIC_INIT;
+std::atomic<bool> g_readback_boundary_available{};
+P4Bounds g_bounds{};
+ParticleData g_particle_data{};
+#endif
+
+template<class T> T field(const void* solver, std::size_t offset) {
+    T value; std::memcpy(&value, static_cast<const char*>(solver)+offset, sizeof value); return value;
+}
+template<class T> void put(void* solver, std::size_t offset, T value) {
+    std::memcpy(static_cast<char*>(solver)+offset,&value,sizeof value);
+}
+P4State& state(void* solver) { return *reinterpret_cast<P4State*>(static_cast<char*>(solver)+P4StateOffset); }
+void must(int error) { if(error) p4_fail_closed(); }
+bool native_ok(const P4State& s) { return s.native_error && !*s.native_error; }
+void clear_ready(P4State& s) {
+    s.flags &= ~(P4Ready | P4PullEligible);
+    s.ready_generation = 0;
+}
+
+void finish_copies(P4State& s) {
+    if(s.flags & P4CopyPending) { must(cudaStreamSynchronize_ptsz(s.stream)); s.flags &= ~P4CopyPending; }
+}
+void invoke_deferred_bounds(P4State& s) {
+    auto* solver = reinterpret_cast<char*>(&s) - P4StateOffset;
+    if(!p4_finish_bounds(solver)) p4_fail_closed();
+}
+void drain(P4State& s);
+void finish_deferred(P4State& s) {
+    const bool bounds = (s.flags & P4BoundsDeferred) != 0;
+    if(s.flags & P4CopyPending) {
+        must(cuCtxPushCurrent_v2(s.context));
+        finish_copies(s);
+        void* popped{}; must(cuCtxPopCurrent_v2(&popped));
+        if(popped != s.context) p4_fail_closed();
+    }
+    s.flags &= ~(P4AwaitingParticleData | P4AwaitingBounds |
+                 P4BoundsDeferred);
+    if(bounds) invoke_deferred_bounds(s);
+}
+void drain(P4State& s) {
+    if(!s.context) return;
+    if(s.flags & P4Joining) { p4_fail_closed(); return; }
+    s.flags |= P4Joining;
+    must(cuCtxPushCurrent_v2(s.context));
+    // No reliance on another thread's default stream or on implicit cudaFree.
+    if(s.flags & P4AwaitingBounds) {
+        must(cuCtxSynchronize());
+    } else if(s.flags & P4ComputePending) {
+        if((s.flags & P4TailRecorded) && s.tail_generation == s.generation)
+            must(cudaEventSynchronize(s.tail_event));
+        else must(cuCtxSynchronize()); // Aborted step: no valid final event.
+    }
+    finish_copies(s);
+    void* popped{}; must(cuCtxPopCurrent_v2(&popped));
+    if(popped != s.context) p4_fail_closed();
+    const bool bounds = (s.flags & P4BoundsDeferred) != 0;
+    s.flags &= ~(P4ComputePending | P4TailRecorded | P4Joining |
+                 P4AwaitingParticleData | P4AwaitingBounds |
+                 P4BoundsDeferred);
+    clear_ready(s);
+    if(bounds) invoke_deferred_bounds(s);
+}
+void release_handles(P4State& s) {
+    if(s.stream) { must(cudaStreamDestroy(s.stream)); s.stream = nullptr; }
+    if(s.ready_event) { must(cudaEventDestroy(s.ready_event)); s.ready_event = nullptr; }
+    if(s.tail_event) { must(cudaEventDestroy(s.tail_event)); s.tail_event = nullptr; }
+}
+bool initialize(P4State& s) {
+    // At most once per solver. Allocation failure keeps the parent's path.
+    if(s.initialized) return s.initialized == 1;
+    s.initialized = 2;
+    if(cuCtxGetCurrent(&s.context) || !s.context) { s.context = nullptr; return false; }
+    void* created{};
+    if(cudaStreamCreateWithFlags(&created,1)) return false;
+    if(!created) p4_fail_closed(); s.stream=created;
+    created=nullptr;
+    if(cudaEventCreateWithFlags(&created,3)) { release_handles(s); return false; }
+    if(!created) p4_fail_closed(); s.ready_event=created; // Blocking sync + no timing.
+    created=nullptr;
+    if(cudaEventCreateWithFlags(&created,3)) { release_handles(s); return false; }
+    if(!created) p4_fail_closed(); s.tail_event=created;
+    s.thread = GetCurrentThreadId(); s.initialized = 1; return true;
+}
+struct Range { std::uintptr_t begin, end; };
+bool range(const void* p, std::size_t size, Range& result) {
+    const auto begin = reinterpret_cast<std::uintptr_t>(p);
+    if(!begin || !size || size > (std::numeric_limits<std::uintptr_t>::max)()-begin) return false;
+    result = {begin, begin+size}; return true;
+}
+bool disjoint(Range a, Range b) { return a.end <= b.begin || b.end <= a.begin; }
+bool independent(void* solver) {
+    const auto capacity = field<int>(solver, 0x1A0), active = field<int>(solver, 0x198), rigid = field<int>(solver, 0x138);
+    if(capacity <= 0 || capacity > 0x1000000 || active <= 0 || active > capacity || rigid < 0 || rigid > capacity) return false;
+    constexpr std::size_t late[] = {0x50, 0x58, 0x60, 0x68, 0x70};
+    constexpr std::size_t source[] = {0, 0x10, 0x20, 0x30, 0x48, 0x128, 0x130};
+    constexpr unsigned stride[] = {16, 12, 4, 4, 16, 36, 12};
+    for(unsigned i = 0; i < 7; ++i) {
+        const auto count = i < 5 ? capacity : rigid;
+        if(!count) continue;
+        Range a{}; if(!range(field<void*>(solver, source[i]), static_cast<std::size_t>(count)*stride[i], a)) return false;
+        for(auto offset : late) {
+            Range b{}; if(!range(field<void*>(solver, offset), static_cast<std::size_t>(capacity)*16, b) || !disjoint(a,b)) return false;
+        }
+    }
+    return true;
+}
+bool scope_eligible(void* solver, const P4State& s) {
+    return s.initialized == 1 && s.thread == GetCurrentThreadId() && native_ok(s) &&
+           (s.flags & P4Ready) && s.ready_generation == s.generation &&
+           field<unsigned>(solver, 0x53C) == 0x80000002U;
+}
+bool pull_eligible(const P4State& s) {
+    return s.initialized == 1 && native_ok(s) &&
+           (s.flags & (P4Ready | P4PullEligible)) ==
+               (P4Ready | P4PullEligible) &&
+           s.ready_generation == s.generation;
+}
+bool supported(void* solver, const void* in, std::size_t bytes) {
+    constexpr std::size_t source[] = {0,0x10,0x20,0x30,0x48,0x128,0x130};
+    constexpr unsigned stride[] = {16,12,4,4,16,36,12};
+    for(unsigned i = 0; i < 7; ++i) if(in == field<void*>(solver,source[i])) {
+        const auto count = field<int>(solver, i < 5 ? 0x1A0 : 0x138);
+        return count > 0 && bytes && bytes <= static_cast<std::size_t>(count)*stride[i] && bytes%stride[i] == 0;
+    }
+    return false;
+}
+struct PullEnd {
+    std::size_t offset;
+    void* full;
+    void* prefix;
+};
+bool active_pull_prefix(void* container, PullEnd (&ends)[4],
+                        std::size_t& prefix) {
+    void* solver = field<void*>(container, 8);
+    const int capacity = field<int>(solver, 0x1A0);
+    const int active = field<int>(solver, 0x198);
+    const int* active_ids = field<int*>(container, 0x10);
+    if(capacity <= 0 || capacity > 0x1000000 || active < 0 ||
+       active > capacity) return false;
+
+    // The extension keeps active IDs sorted; its accepted Push fast path uses
+    // the same last-ID contract. A clean empty container needs no particle
+    // data, but one inactive slot keeps all four calls and the synchronous
+    // normal completion boundary intact. Pending births/changes stay full.
+    prefix = 1;
+    if(active) {
+        if(!active_ids) return false;
+        const int last = active_ids[active-1];
+        if(last < 0 || last >= capacity || last == capacity-1) return false;
+        prefix = static_cast<std::size_t>(last)+1;
+    } else if(field<unsigned short>(container,0x1D8)) return false;
+    constexpr std::size_t begin_offsets[] = {0x58,0x70,0x88,0xA0};
+    constexpr std::size_t end_offsets[] = {0x60,0x78,0x90,0xA8};
+    constexpr std::size_t strides[] = {16,12,4,16};
+    for(unsigned i=0;i<4;++i) {
+        auto* begin = field<unsigned char*>(container,begin_offsets[i]);
+        auto* end = field<unsigned char*>(container,end_offsets[i]);
+        const auto begin_address = reinterpret_cast<std::uintptr_t>(begin);
+        const auto end_address = reinterpret_cast<std::uintptr_t>(end);
+        if(!begin_address || end_address < begin_address ||
+           end_address-begin_address !=
+               static_cast<std::size_t>(capacity)*strides[i]) return false;
+        ends[i] = {end_offsets[i],end,reinterpret_cast<void*>(
+            begin_address+prefix*strides[i])};
+    }
+    return true;
+}
+void enter_scope(void* solver) {
+    auto& s = state(solver);
+    if(s.depth) { drain(s); s.initialized = 2; }
+    ++s.depth;
+}
+bool boundary_available() {
+#if defined(P4_CPU_MODEL)
+    return g_readback_boundary_available;
+#else
+    return g_readback_boundary_available.load(std::memory_order_acquire);
+#endif
+}
+void leave_scope(void* solver, bool abnormal, bool defer = false) {
+    auto& s = state(solver);
+    // Copy failure was drained BEFORE the original error callback can throw.
+    if((s.flags & P4CopyPending) && (!defer || abnormal)) finish_deferred(s);
+    if(s.depth) --s.depth;
+    if(abnormal) drain(s);
+}
+
+void finish_particle_data(void* container) {
+    if(!container) return;
+    auto* solver = field<void*>(container, 8);
+    if(!solver) return;
+    auto& s = state(solver);
+    if((s.flags & P4AwaitingParticleData) &&
+       s.thread == GetCurrentThreadId()) finish_deferred(s);
+    else if(s.flags & P4AwaitingParticleData) drain(s);
+}
+
+#if !defined(P4_CPU_MODEL)
+void bounds_hook(void* solver, void* lower, void* upper, int memory) {
+    p4_bounds(solver, lower, upper, memory, g_bounds);
+}
+
+void particle_data_hook(void* container, void** positions, void** velocities,
+                        void** phases, void** normals) {
+    finish_particle_data(container);
+    g_particle_data(container, positions, velocities, phases, normals);
+}
+
+BOOL CALLBACK install_boundary_once(PINIT_ONCE, PVOID, PVOID*) {
+    auto* base = reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr));
+    auto* core = GetModuleHandleW(L"flexRelease_x64.dll");
+    auto* extension = GetModuleHandleW(L"flexExtRelease_x64.dll");
+    if(!base || !core || !extension) return FALSE;
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if(dos->e_magic != IMAGE_DOS_SIGNATURE) return TRUE;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    constexpr unsigned char ExpectedBoundsCall[]{0xE8,0xD1,0xF5,0x1C,0x01};
+    constexpr unsigned char ExpectedBoundsThunk[]{0xFF,0x25,0xEB,0x0E,0xC2,0x00};
+    constexpr unsigned char ExpectedParticleCall[]{0xE8,0xA6,0xF7,0x1C,0x01};
+    constexpr unsigned char ExpectedParticleThunk[]{0xFF,0x25,0x48,0x0C,0xC2,0x00};
+    if(nt->Signature != IMAGE_NT_SIGNATURE ||
+       nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 ||
+       nt->FileHeader.TimeDateStamp != KfGameTimestamp ||
+       nt->OptionalHeader.SizeOfImage != KfGameImageSize ||
+       std::memcmp(base + BoundsCallRva, ExpectedBoundsCall,
+                   sizeof ExpectedBoundsCall) ||
+       std::memcmp(base + BoundsThunkRva, ExpectedBoundsThunk,
+                   sizeof ExpectedBoundsThunk) ||
+       std::memcmp(base + ParticleDataCallRva, ExpectedParticleCall,
+                   sizeof ExpectedParticleCall) ||
+       std::memcmp(base + ParticleDataThunkRva, ExpectedParticleThunk,
+                   sizeof ExpectedParticleThunk)) return TRUE;
+
+    const auto original_bounds = reinterpret_cast<P4Bounds>(
+        GetProcAddress(core, "flexGetBounds"));
+    const auto original = reinterpret_cast<ParticleData>(
+        GetProcAddress(extension, "flexExtGetParticleData"));
+    auto** bounds_iat = reinterpret_cast<P4Bounds*>(base + BoundsIatRva);
+    auto** iat = reinterpret_cast<ParticleData*>(base + ParticleDataIatRva);
+    const auto bounds_delay = reinterpret_cast<P4Bounds>(
+        base + BoundsDelayResolverRva);
+    const auto delay = reinterpret_cast<ParticleData>(
+        base + ParticleDataDelayResolverRva);
+    const auto previous_bounds = *bounds_iat;
+    const auto previous = *iat;
+    if(!original_bounds || !original ||
+       (previous_bounds != original_bounds && previous_bounds != bounds_delay) ||
+       (previous != original && previous != delay)) return TRUE;
+
+    g_bounds = original_bounds;
+    g_particle_data = original;
+    DWORD old{};
+    const auto span = reinterpret_cast<unsigned char*>(bounds_iat) +
+        sizeof *bounds_iat - reinterpret_cast<unsigned char*>(iat);
+    if(!VirtualProtect(iat, span, PAGE_READWRITE, &old)) {
+        g_bounds = nullptr;
+        g_particle_data = nullptr;
+        return TRUE;
+    }
+    InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(bounds_iat),
+                               reinterpret_cast<PVOID>(&bounds_hook));
+    InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(iat),
+                               reinterpret_cast<PVOID>(&particle_data_hook));
+    DWORD ignored{};
+    if(!VirtualProtect(iat, span, old, &ignored)) p4_fail_closed();
+    g_readback_boundary_available.store(true, std::memory_order_release);
+    return TRUE;
+}
+
+void install_readback_boundary() {
+    InitOnceExecuteOnce(&g_boundary_once, install_boundary_once, nullptr,
+                        nullptr);
+}
+#else
+void install_readback_boundary() {}
+#endif
+}
+
+P4_API void p4_before(void* solver, const int* error) {
+    auto& s = state(solver);
+    s.native_error = error;
+    if(s.depth) { drain(s); s.initialized = 2; return; }
+    const bool eligible = field<unsigned>(solver,0x53C) == 0x80000002U && field<unsigned char>(solver,0x220) && native_ok(s);
+    clear_ready(s); s.flags &= ~P4StepEligible;
+    if(eligible && !s.initialized) {
+        p4_install_presentation();
+        p4_install_render_interop();
+        install_readback_boundary();
+        initialize(s);
+    }
+    if(!s.context) return; // Non-fluid scenes allocate no overlap resources.
+    void* context{}; must(cuCtxGetCurrent(&context));
+    if(context != s.context || GetCurrentThreadId() != s.thread) {
+        drain(s); s.initialized = 2; // Unsupported issuing domain: no routing.
+    }
+    finish_deferred(s); clear_ready(s);
+    if(++s.generation == 0) {
+        p4_render_generation(solver, 0);
+        drain(s); s.initialized = 2; s.flags=P4ComputePending; return;
+    }
+    p4_render_generation(solver, s.generation);
+    s.flags = P4ComputePending | ((eligible && s.initialized == 1) ? P4StepEligible : 0U);
+    s.tail_generation = 0;
+}
+P4_API void p4_ready(void* solver, int status) {
+    auto& s = state(solver); clear_ready(s);
+    if(s.initialized != 1 || !(s.flags & P4StepEligible) || status || !native_ok(s) || cudaPeekAtLastError() || !independent(solver)) return;
+    if(cudaEventRecord_ptsz(s.ready_event,nullptr)) { s.initialized = 2; return; }
+    s.ready_generation = s.generation; s.flags |= P4Ready;
+}
+P4_API void p4_tail(void* solver) {
+    auto& s = state(solver);
+    if(!s.tail_event || !(s.flags & P4ComputePending)) return;
+    if(cudaEventRecord_ptsz(s.tail_event,nullptr)) { clear_ready(s); s.initialized = 2; return; }
+    s.tail_generation = s.generation; s.flags |= P4TailRecorded;
+}
+P4_API void p4_invalidate(void* solver) {
+    auto& s=state(solver);
+    if(s.depth) p4_fail_closed();
+    drain(s); // Before mutation/rebinding, never merely clear a token.
+    p4_render_generation(solver, 0);
+}
+P4_API int p4_copy(void* out, const void* in, std::size_t bytes, int kind, void* solver, unsigned asynchronous) {
+    auto& s = state(solver);
+    void* context{};
+    if(!s.depth || kind != 2 || !out || !supported(solver,in,bytes)) {
+        if(s.depth) finish_copies(s);
+        return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);
+    }
+    // Phase IDs are immutable solver inputs. Pull targets the same host vector
+    // that Push supplied, so copying it back cannot change the result.
+    // Keep direct API reads and every non-Pull copy on the original path.
+    if((s.flags & P4PullScope) && asynchronous &&
+       in == field<void*>(solver,0x20)) return 0;
+    const bool eligible = (s.flags & P4PullScope) ?
+        pull_eligible(s) : scope_eligible(solver,s);
+    if(!eligible) {
+        finish_copies(s);
+        return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);
+    }
+    if(!(s.flags & P4PullContextStable) &&
+       (cuCtxGetCurrent(&context) || context != s.context)) {
+        drain(s); s.initialized = 2;
+        return asynchronous ? cudaMemcpyAsync_ptsz(out,in,bytes,kind,nullptr) : cudaMemcpy_ptds(out,in,bytes,kind);
+    }
+    int error = 0;
+    if(!(s.flags & P4ReadbackLinked)) {
+        error = cudaStreamWaitEvent_ptsz(s.stream,s.ready_event,0);
+        if(!error) s.flags |= P4ReadbackLinked;
+    }
+    if(!error) { s.flags |= P4CopyPending; error = cudaMemcpyAsync_ptsz(out,in,bytes,kind,s.stream); }
+    if(!error && !asynchronous) { error = cudaStreamSynchronize_ptsz(s.stream); if(!error) s.flags &= ~P4CopyPending; }
+    if(error) { clear_ready(s); drain(s); s.initialized = 2; }
+    return error; // Original native copy error-check/callback remains intact.
+}
+P4_API void p4_pull(void* container, P4Unary original) {
+    void* solver = field<void*>(container,8); enter_scope(solver);
+    auto& pull_state = state(solver);
+    pull_state.flags = (pull_state.flags | P4PullScope) &
+                       ~(P4PullContextStable | P4PullEligible);
+    const bool eligible = pull_state.depth == 1 &&
+                          scope_eligible(solver,pull_state);
+    if(eligible) pull_state.flags |= P4PullEligible;
+    void* pull_context{};
+    if(eligible &&
+       !cuCtxGetCurrent(&pull_context) && pull_context == pull_state.context)
+        pull_state.flags |= P4PullContextStable;
+    const auto generation = pull_state.generation;
+    int snapshot = -1;
+    PullEnd ends[4]{};
+    std::size_t prefix{};
+    const bool narrowed = state(solver).depth == 1 &&
+        active_pull_prefix(container,ends,prefix);
+    if(narrowed) for(const auto& end:ends) put(container,end.offset,end.prefix);
+    __try { original(container); }
+    __finally {
+        const bool abnormal = AbnormalTermination()!=0;
+        if(!abnormal) {
+            auto& s = state(solver);
+            void* context{};
+            if(s.depth == 1 && pull_eligible(s) &&
+               ((s.flags & P4PullContextStable) ||
+                (!cuCtxGetCurrent(&context) && context == s.context)))
+                snapshot = p4_render_snapshot(
+                    solver, s.context, generation,
+                    field<int>(solver,0x1A0),
+                    narrowed ? static_cast<int>(prefix) : field<int>(solver,0x1A0),
+                    field<void*>(solver,0), field<void*>(solver,0x48));
+        }
+        bool defer = false;
+        auto& final_state = state(solver);
+        if(!abnormal && boundary_available() && pull_eligible(final_state) &&
+           (final_state.flags & P4CopyPending)) {
+            // The verified KFGame call sequence is Pull, optional density,
+            // Bounds, then GetParticleData. Defer the immediate CPU Bounds
+            // read so the final private-stream wait makes every host result
+            // visible at one boundary.
+            final_state.flags |= P4AwaitingParticleData | P4AwaitingBounds;
+            defer = true;
+        }
+        final_state.flags &= ~(P4PullScope | P4PullContextStable |
+                               P4PullEligible);
+        if(narrowed) for(const auto& end:ends) put(container,end.offset,end.full);
+        leave_scope(solver,abnormal,defer);
+        if(!abnormal && snapshot >= 0)
+            p4_render_publish(solver,generation,snapshot);
+    }
+}
+P4_API void p4_density(void* solver, void* target, P4Density original) {
+    enter_scope(solver);
+    __try { original(solver,target,0); }
+    __finally {
+        const bool abnormal = AbnormalTermination()!=0;
+        leave_scope(solver,abnormal,!abnormal && boundary_available() &&
+            (state(solver).flags & P4AwaitingParticleData));
+    }
+}
+P4_API void p4_bounds(void* solver, void* lower, void* upper, int memory,
+                       P4Bounds original) {
+    if(!solver) {
+        if(original) original(solver,lower,upper,memory);
+        return;
+    }
+    auto& s = state(solver);
+    const bool awaiting = (s.flags & P4AwaitingBounds) != 0;
+    if(s.flags & P4BoundsDeferred) p4_fail_closed();
+    const bool overlap = awaiting && original && lower && upper &&
+        (s.flags & (P4AwaitingParticleData | P4CopyPending)) ==
+            (P4AwaitingParticleData | P4CopyPending) &&
+        s.thread == GetCurrentThreadId() && native_ok(s);
+    if(overlap) {
+        if(p4_defer_bounds(solver,lower,upper,memory,original)) {
+            s.flags |= P4BoundsDeferred;
+            return;
+        }
+    }
+    if(awaiting) {
+        s.flags &= ~P4AwaitingBounds;
+        finish_deferred(s);
+    }
+    if(original) original(solver,lower,upper,memory);
+}
+P4_API void p4_destroy_container(void* container, P4Unary original) {
+    auto& s = state(field<void*>(container,8));
+    if(s.depth) p4_fail_closed();
+    drain(s);
+    void* solver=field<void*>(container,8);
+#ifdef P4_TIME_ACCUMULATOR
+    put(solver,P4SolverBytes,0.0F); // New private time slot, after GPU completion.
+#endif
+    put(solver,0x548,0U);put(solver,0x540,static_cast<void*>(nullptr));put(solver,0x54C,0U);
+    put(solver,0x550,0U);put(solver,0x558,static_cast<void*>(nullptr));put(solver,0x53C,0U);
+    p4_release_render_interop(solver);
+    p4_release_presentation(solver);
+    original(container); // No state/buffer use after destruction.
+}
+P4_API void p4_destroy_solver(void* solver, P4Unary original) {
+    auto& s = state(solver);
+    if(s.depth) p4_fail_closed();
+    drain(s);
+    p4_release_render_interop(solver);
+    if(s.context) {
+        must(cuCtxPushCurrent_v2(s.context)); release_handles(s);
+        void* popped{}; must(cuCtxPopCurrent_v2(&popped)); if(popped != s.context) p4_fail_closed();
+    }
+#ifdef P4_TIME_ACCUMULATOR
+    put(solver,P4SolverBytes,0.0F);
+#endif
+    s = {};
+    p4_release_presentation(solver);
+    original(solver);
+}
+
+#ifdef P4_CPU_MODEL
+P4_API void p4_test_readback_boundary(int enabled) {
+    g_readback_boundary_available = enabled != 0;
+}
+P4_API void p4_test_finish_particle_data(void* container) {
+    finish_particle_data(container);
+}
+#endif
+
+

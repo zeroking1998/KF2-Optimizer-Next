@@ -148,6 +148,7 @@ std::optional<GameLogSession> GameLogSessionParser::feed(
                      current_->gameplay_ui_context_generation !=
                          ui_context->generation)) {
                     current_->gameplay_ui_context = ui_context->context;
+                    ++current_->gameplay_ui_context_revision;
                     current_->gameplay_ui_context_map = ui_context->map
                         ? std::optional<std::string>{*ui_context->map}
                         : std::nullopt;

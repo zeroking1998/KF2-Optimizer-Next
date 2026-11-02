@@ -9,6 +9,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <utility>
 
 #include "kf2/core/hex_codec.hpp"
 #include "kf2/platform/windows/atomic_file.hpp"
@@ -25,6 +26,7 @@ constexpr std::size_t max_snapshot_count = 3;
 BackupStatusHook backup_status_hook{};
 BackupReadHook backup_read_hook{};
 BackupManifestWriteHook backup_manifest_write_hook{};
+BackupWriteTimeHook backup_write_time_hook{};
 #endif
 
 bool path_exists(const std::filesystem::path& path,
@@ -35,6 +37,14 @@ bool path_exists(const std::filesystem::path& path,
     }
 #endif
     return std::filesystem::exists(path, error);
+}
+
+std::filesystem::file_time_type read_write_time(
+    const std::filesystem::path& path, std::error_code& error) {
+#if defined(KF2_BACKUP_RECOVERY_TESTING)
+    if (backup_write_time_hook) return backup_write_time_hook(path, error);
+#endif
+    return std::filesystem::last_write_time(path, error);
 }
 
 Result<std::string> read_bounded_regular_file(
@@ -432,7 +442,7 @@ Result<BackupSet> BackupStore::load_backup(
 }
 
 Result<std::vector<BackupSet>> BackupStore::list_backups() const {
-    std::vector<BackupSet> backups;
+    std::vector<std::pair<std::filesystem::file_time_type, BackupSet>> ordered;
     std::error_code error;
     const auto manifests = state_root_ / L"backups/manifests";
     if (!path_exists(manifests, error)) {
@@ -470,16 +480,28 @@ Result<std::vector<BackupSet>> BackupStore::list_backups() const {
             }
             continue;
         }
-        backups.push_back(std::move(loaded.value()));
+        ordered.emplace_back(std::filesystem::file_time_type{},
+                             std::move(loaded.value()));
     }
     if (error) return Result<std::vector<BackupSet>>::failure(
         {ErrorCode::io_failure, L"Backup list enumeration failed",
          static_cast<std::uint32_t>(error.value())});
-    std::sort(backups.begin(), backups.end(), [](const auto& left, const auto& right) {
-        std::error_code left_error, right_error;
-        return std::filesystem::last_write_time(left.manifest_path, left_error) >
-               std::filesystem::last_write_time(right.manifest_path, right_error);
-    });
+    if (ordered.size() > 1) {
+        for (auto& item : ordered) {
+            item.first = read_write_time(item.second.manifest_path, error);
+            if (error) {
+                return Result<std::vector<BackupSet>>::failure(
+                    {ErrorCode::io_failure, L"Backup timestamp cannot be read",
+                     static_cast<std::uint32_t>(error.value())});
+            }
+        }
+        std::sort(ordered.begin(), ordered.end(), [](const auto& left, const auto& right) {
+            return left.first > right.first;
+        });
+    }
+    std::vector<BackupSet> backups;
+    backups.reserve(ordered.size());
+    for (auto& item : ordered) backups.push_back(std::move(item.second));
     return Result<std::vector<BackupSet>>::success(std::move(backups));
 }
 
@@ -552,6 +574,9 @@ void set_backup_read_hook_for_testing(BackupReadHook hook) noexcept {
 }
 void set_backup_manifest_write_hook_for_testing(BackupManifestWriteHook hook) noexcept {
     backup_manifest_write_hook = hook;
+}
+void set_backup_write_time_hook_for_testing(BackupWriteTimeHook hook) noexcept {
+    backup_write_time_hook = hook;
 }
 #endif
 

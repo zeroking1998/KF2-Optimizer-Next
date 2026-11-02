@@ -11,9 +11,53 @@ are visible immediately.
 - Pace online corpse visual and freeze scans even when no candidate is eligible,
   preserving their bounded cursors, readbacks and restoration timing.
 
+- Decouple flame, healing, Arc Generator and HRG Vampire spray-rotation audio
+  from render FPS. The stock spray simulation and visuals still tick normally,
+  while the Wwise RTPC is published at most 30 times per real-time second with
+  immediate start and stop values; unchanged rotation values are not
+  republished.
+
+- Run user-enabled NVIDIA FleX through the verified optimized Core, Extension
+  and project helper as one protected session. Exact stock DLLs are reconstructed
+  locally, the observation relay now forwards the game's requested substeps
+  unchanged, and every installed component is restored after the session.
+  An already verified staged runtime is reused instead of rebuilding and
+  rewriting identical binaries on every later launch.
+- Remove the retired fixed-minimum-substep controller, its Adaptive actions,
+  stale UI fields, control telemetry and registry candidates. FleX diagnostics
+  remain read-only, and
+  failed preparation, installation or restoration rolls the complete transaction
+  back instead of leaving a mixed runtime behind.
+
+- Remove retired effect-control inputs from Adaptive resource selection;
+  quality decisions, safety gates, diagnostics and restoration are unchanged.
+
+- Reuse one distance query for both corpse and living-Zed log fields,
+  preserving receipt text, diagnostic gates and all runtime actions.
+
+- Skip unchanged Direct2D target resize and DPI updates during repaint,
+  preserving real size/DPI changes, resize retries and target recreation.
+
+- Skip timestamp searches for ordered frame appends, retaining late-event
+  sorting, duplicate checks and exact frame statistics without a cache.
+
+- Reuse the diagnostic frame-interval buffer for percentile calculation instead
+  of copying it, preserving chronological averages and all measured values.
+
+- Reuse one completed DXGI Present pairing allocation instead of allocating
+  again for each sequential frame, preserving pending-pair bounds and loss checks.
+
+- Filter DXGI Present events by the bound game process before callback delivery,
+  preserving the original event-only startup path if PID scoping is rejected.
+  Existing process identity, loss handling and frame measurements remain active.
+
 - Skip diagnostic particle-template attribution and its detailed reports while
   Runtime diagnostics is off; normal particle measurements and Adaptive inputs
   remain available, without changing the report format or sampling interval.
+- Skip corpse-controller profiling clocks and counters while Runtime diagnostics
+  is off, preserving controller actions and their scheduling.
+- Skip unused distance queries during corpse transition bookkeeping while
+  diagnostics is off; native-wake cooldowns and diagnostic values are unchanged.
 
 - Discover KF2 thread membership with a process-scoped snapshot instead of
   walking every Windows thread when query rights permit. Keep the original
@@ -35,6 +79,8 @@ are visible immediately.
 - Transfer completed Adaptive performance-sample and quality-response diagnostic
   buffers instead of copying them; exact text, logging gates, sample cadence and
   retained-event bounds are unchanged.
+- Keep only timestamps and scene counts in quality-response history, preserving
+  full current-context checks without repeatedly copying map names.
 
 - Transfer completed Adaptive diagnostic buffers instead of copying them;
   log text, bounds, diagnostic gates and controller behavior are unchanged.
@@ -42,6 +88,9 @@ are visible immediately.
   cannot silently reuse an older module; no gameplay logic is changed.
 - Reuse completed payload hashes across both package manifests, avoiding a second
   full payload read while preserving independent release validation.
+- Read each backup's ordering timestamp once before sorting; timestamp read
+  failures stop retention before deletion, with no persistent metadata cache.
+  Empty and single-backup lists skip ordering metadata entirely.
 - Preserve existing packages when the required FleX build artifact is missing,
   checking it before cleanup, copying or unnecessary exporter work.
 - Reject linked package destinations and managed paths before cleanup or writes,
@@ -76,8 +125,12 @@ are visible immediately.
   map diagnostic labels; worker behavior, budgets and progress rules are unchanged.
 - Publish optional overlay diagnostic text without copying unrelated UI,
   graphics or Adaptive state; diagnostic timing and displayed text are unchanged.
+- Validate the immutable UI action registry once; caller-provided registries,
+  payload checks and handler failures remain checked on each dispatch.
 - Escape shared JSON string contents directly into the returned owned string,
   avoiding stream/buffer-copy work while preserving exact serialized bytes.
+- Validate typed settings without formatting discarded text; actual INI writes
+  still require complete, checked serialization.
 - Remove the unused internal Adaptive profile recommendation; user settings,
   real quality budgets, decisions and restoration remain unchanged.
 - Borrow constant telemetry limit-explanation labels instead of allocating
@@ -98,6 +151,8 @@ are visible immediately.
   CPU, GPU, VRAM, RAM, overdraw, effects, physics, LOD, and corpse-pressure
   paths. Confirmed pressure changes only its matching group, and stable
   headroom restores quality gradually.
+- Serialize each asynchronous Adaptive command once and transfer its owned
+  bytes to the sender, preserving request validation and receipt matching.
 - Expanded Adaptive coverage to verified KF2 shadow distance and fade,
   post-processing, lighting, shadow-map textures, wound decals, blood, gore,
   destruction lifetimes, particle LOD, emitter capacity, and cosmetic corpse
@@ -169,6 +224,66 @@ are visible immediately.
   included.
 
 ### Bug fixes
+
+- Derive Adaptive particle and gore pressure from particle-count capacities,
+  count ground-fire and impact particles exactly once, and keep valid empty
+  particle groups from suppressing the remaining scene evidence. Partial or
+  zero-capacity emitter coverage now fails closed instead of overstating load.
+
+- Preserve Adaptive's confirmed graphics composition, recovery obligations and
+  timing through Escape/trader pauses; reconcile world changes through verified
+  restoration before resuming the saved mode, without trusting old-world replies.
+
+- Keep offline Adaptive-off graphics restoration unconfirmed after a failed
+  original readback. Release mode/corpse ownership immediately and retry originals
+  through the existing baseline backoff before applying fixed effects.
+
+- Keep online Adaptive-off restoration pending if original graphics, fixed
+  effects or the corpse limit fail readback, instead of falsely confirming
+  success from the corpse limit alone. Physics release remains independent.
+
+- Preserve pending INI recovery journals after temporary read or buffer-allocation
+  failures, allowing verified recovery on retry instead of quarantining valid state.
+
+- Reject failed numeric setting formatting before building an INI update,
+  preserving the previous configuration and allowing an exact retry.
+
+- Reject incomplete diagnostic inventories before export, preserving an existing
+  inventory file when serialization fails.
+
+- Stabilize the native event-persistence regression when its lock acquisition
+  overlaps an asynchronous write; application behavior is unchanged.
+
+- Reject incomplete application session markers before writing, preserving
+  interrupted-session evidence and allowing clean-shutdown retry.
+
+- Preserve the last valid FleX diagnostic report if serialization fails; transfer
+  a completed report to the writer without copying its full text.
+
+- Read DXGI event and real-time buffer loss from supported session statistics.
+  Preserve degraded measurement quality without inventing missing-frame counts,
+  including when only a lost buffer is known, and keep Adaptive from treating
+  those samples as valid.
+
+- Preserve known DXGI callback failures across later buffer callbacks, so the
+  next frame window remains marked degraded instead of hiding capture loss.
+- Commit DXGI capture-loss metadata before allocating frame storage, so an
+  allocation failure cannot submit already recorded pending loss a second time.
+
+- Correct developer overlay cadence checks to allow legitimate elapsed-time
+  redraws without changing rendering or its idle-rate limit.
+
+- Count displaced DXGI Present starts and prevent filtered test calls from
+  completing an older real call, preserving honest FPS loss and recovery data.
+
+- Recover frame telemetry after an active ETW consumer ends, using the existing
+  bounded reconnect path without restarting healthy but temporarily stale streams.
+
+- Recheck process discovery once when a captured PID has already disappeared,
+  avoiding unnecessary restoration deferrals while retaining fail-closed checks.
+
+- Refresh observed CPU affinity capacity every five seconds, so runtime changes
+  and recovery from failed queries no longer require restarting the sampler.
 
 - Preserve existing backups when manifest serialization fails before replacing
   their manifest or journal, and transfer completed buffers without copying.
@@ -274,6 +389,9 @@ are visible immediately.
   KF2/adapter-wide VRAM pressure. Keep KF2's process-bound memory counters and
   remove the unnecessary recurring DXGI adapter lookup and budget query.
 
+- Living Zeds retain their original offscreen animation flags when restoration
+  fails. Bounded scans retry without blocking other Zeds or recording reduced
+  flags as originals, including after a corpse-manager replacement.
 - Convert the raw Adaptive decision reason once for its two presentation fields
   while retaining distinct queued-restoration warnings.
 - Reuse the existing Adaptive stability, bottleneck and no-setting action labels
@@ -632,8 +750,11 @@ are visible immediately.
   changes. One persistent interaction stops and rearms for each gameplay world.
 - Re-armed selected-map warming after travel so consecutive rotations to the
   same map are prepared again without retaining the previous world.
-- Prevented transient loading, menu, trader, and early post-map frames from
-  entering Adaptive decisions or depressing the displayed 1% low window.
+- Exclude confirmed loading, Escape and open trader menus from gameplay
+  averages, 1% lows and percentiles. Live FPS remains visible; history starts
+  fresh on gameplay return, including when Adaptive is off. Observe offline
+  menu changes independently of paused maintenance and flush context receipts
+  only on transitions so quiet online matches do not wait for later log writes.
 - Preserved one native graphics baseline across consecutive maps so recovery
   never treats a previously reduced value as the user's new 100% setting.
 - Restored the exact server- or mod-provided online corpse limit when Adaptive

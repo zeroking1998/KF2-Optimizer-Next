@@ -33,6 +33,7 @@ struct OverlayPresentation {
     HWND target_window{};
     RECT bounds{};
     double fps{0.0};
+    // Zero means unavailable history, rendered as a dash rather than live FPS.
     double average_fps{0.0};
     double one_percent_low_fps{0.0};
     double frame_time_ms{0.0};

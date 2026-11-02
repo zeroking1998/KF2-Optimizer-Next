@@ -314,12 +314,10 @@ std::optional<AdaptiveControlReceipt> parse_adaptive_control_receipt(
     return receipt;
 }
 
-Result<AdaptiveControlReceipt> send_adaptive_control(
-    const AdaptiveControlRequest& request) {
-    const auto command = build_adaptive_control_command(request);
-    if (!command.has_value()) {
-        return Result<AdaptiveControlReceipt>::failure(command.error());
-    }
+namespace {
+
+Result<AdaptiveControlReceipt> send_adaptive_control_command(
+    const AdaptiveControlRequest& request, std::string_view command) {
     WinsockSession winsock;
     if (!winsock.active()) {
         return Result<AdaptiveControlReceipt>::failure({
@@ -357,10 +355,10 @@ Result<AdaptiveControlReceipt> send_adaptive_control(
             static_cast<std::uint32_t>(connect_error)});
     }
     std::size_t sent = 0;
-    while (sent < command.value().size()) {
-        const auto remaining = command.value().size() - sent;
+    while (sent < command.size()) {
+        const auto remaining = command.size() - sent;
         const int amount = send(
-            socket.get(), command.value().data() + sent,
+            socket.get(), command.data() + sent,
             static_cast<int>(std::min<std::size_t>(
                 remaining, static_cast<std::size_t>(
                     std::numeric_limits<int>::max()))), 0);
@@ -402,6 +400,17 @@ Result<AdaptiveControlReceipt> send_adaptive_control(
     return Result<AdaptiveControlReceipt>::success(*receipt);
 }
 
+}  // namespace
+
+Result<AdaptiveControlReceipt> send_adaptive_control(
+    const AdaptiveControlRequest& request) {
+    const auto command = build_adaptive_control_command(request);
+    if (!command.has_value()) {
+        return Result<AdaptiveControlReceipt>::failure(command.error());
+    }
+    return send_adaptive_control_command(request, command.value());
+}
+
 struct AdaptiveControlDispatcher::State final {
     mutable std::mutex mutex;
     bool busy{false};
@@ -429,7 +438,7 @@ bool AdaptiveControlDispatcher::busy() const noexcept {
 }
 
 Result<bool> AdaptiveControlDispatcher::start(AdaptiveControlRequest request) {
-    const auto command = build_adaptive_control_command(request);
+    auto command = build_adaptive_control_command(request);
     if (!command.has_value()) {
         return Result<bool>::failure(command.error());
     }
@@ -442,9 +451,10 @@ Result<bool> AdaptiveControlDispatcher::start(AdaptiveControlRequest request) {
     }
     try {
         const auto state = state_;
-        std::thread{[state, request = std::move(request)]() mutable {
+        std::thread{[state, request = std::move(request),
+                     command = std::move(command.value())]() {
             try {
-                auto outcome = send_adaptive_control(request);
+                auto outcome = send_adaptive_control_command(request, command);
 #ifdef KF2_ADAPTIVE_CONTROL_CLIENT_TESTING
                 if (fail_next_dispatch_publication.exchange(
                         false, std::memory_order_acq_rel)) {

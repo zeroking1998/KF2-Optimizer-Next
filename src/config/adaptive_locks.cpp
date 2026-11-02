@@ -1,5 +1,6 @@
 #include "kf2/config/adaptive_locks.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <optional>
 #include <set>
@@ -26,6 +27,48 @@ std::optional<optimizer::ManualLockState> parse_lock(
     if (value == "LOCK_MAXIMUM") return ManualLockState::lock_maximum;
     if (value == "MANUAL_VALUE") return ManualLockState::manual_value;
     return std::nullopt;
+}
+
+bool retired_flex_lock(std::string_view name) noexcept {
+    // Only formerly lockable schema-1 targets: removed section 14A/66-78
+    // knobs and the seven user settings now permanently protected.
+    constexpr std::string_view names[]{
+        "OccludedFlexParticleLOD", "OccludedFlexParticleBudget",
+        "OccludedFlexFluidQuality", "OccludedFlexNonFluidQuality",
+        "OccludedFlexSolverLOD", "OccludedFlexUpdateBudget",
+        "FlexAdaptiveEnabled", "FlexQuality", "FlexPerformanceBudget",
+        "FlexGPUBudget", "FlexMemoryBudget", "FlexSafetyClass",
+        "FlexSolverLOD", "FlexSolverQuality", "FlexSolverPerformanceBudget",
+        "FlexSolverUpdateBudget", "FlexSolverDistanceLOD",
+        "FlexSolverEmergencyLOD", "FlexMinimumSubsteps", "FlexMaximumSubsteps",
+        "FlexTargetSubsteps", "FlexAdaptiveSubsteps", "FlexEmergencySubsteps",
+        "FlexSubstepChangeRate", "FlexSubstepRecoveryRate",
+        "FlexMinimumIterations", "FlexMaximumIterations", "FlexTargetIterations",
+        "FlexAdaptiveIterations", "FlexIterationChangeRate",
+        "FlexFixedVariableTimePolicy", "FlexMaximumAllowedDelta",
+        "FlexTimeStabilityGuard", "FlexParticleCapacity",
+        "FlexActiveParticleBudget", "FlexFreeParticleReserve", "FlexParticleLOD",
+        "FlexParticleDistance", "FlexParticleEmergencyBudget", "FlexFluidQuality",
+        "FlexFluidParticleBudget", "FlexFluidDistanceLOD", "FlexFluidCapacity",
+        "FlexFluidSolverQuality", "FlexNonFluidQuality", "FlexNonFluidBudget",
+        "FlexNonFluidLOD", "FlexNonFluidCapacity", "FlexRigidQuality",
+        "FlexRigidBudget", "FlexRigidDistanceLOD", "FlexRigidUpdateQuality",
+        "FlexShapeMatchingQuality", "FlexCollisionQuality",
+        "FlexCollisionShapeBudget", "FlexCollisionDistanceLOD",
+        "FlexStaticTrianglePressureLimit", "FlexCollisionDiagnostics",
+        "FlexContainerIdentity", "FlexContainerBudget",
+        "FlexSolverContainerAssociation", "FlexCollisionFilterState",
+        "FlexGenerationIdentity", "FlexAsyncMode", "FlexSyncPolicy",
+        "FlexSynchronizationBudget", "FlexMappingPolicy",
+        "FlexBlockingReadbackPolicy", "FlexTransferPolicy",
+        "FlexGPUContextLossPolicy", "FlexTDRFallback",
+        "FlexDriverChangeRevalidation", "FlexRuntimeRevalidation",
+        "FlexEmergencyPassthrough",
+        "PhysXLevel", "GoreLevel", "MaxPhysicsSubsteps",
+        "FlexInvisibleFramesBeforeSleep", "FlexDistanceBeforeSleep",
+        "AllowSPHFluidMipmap", "FlexRigidBodiesCollisionAtHighLevel",
+    };
+    return std::ranges::find(names, name) != std::end(names);
 }
 
 }  // namespace
@@ -77,14 +120,21 @@ Result<AdaptiveLocks> parse_adaptive_locks(std::string_view text) {
                 schema_seen = true;
             } else {
                 const auto state = parse_lock(value);
-                const auto* setting = optimizer::find_adaptive_setting(name);
-                if (!safe_name(name) || !state || !setting ||
-                    setting->role != optimizer::AdaptiveRole::adaptive_knob) {
+                if (!safe_name(name) || !state) {
                     return Result<AdaptiveLocks>::failure({
                         ErrorCode::invalid_argument,
                         L"Adaptive lock target or state is invalid", 0});
                 }
-                locks.emplace(name, *state);
+                if (!retired_flex_lock(name)) {
+                    const auto* setting = optimizer::find_adaptive_setting(name);
+                    if (!setting ||
+                        setting->role != optimizer::AdaptiveRole::adaptive_knob) {
+                        return Result<AdaptiveLocks>::failure({
+                            ErrorCode::invalid_argument,
+                            L"Adaptive lock target or state is invalid", 0});
+                    }
+                    locks.emplace(name, *state);
+                }
             }
         }
         if (end == std::string_view::npos) break;

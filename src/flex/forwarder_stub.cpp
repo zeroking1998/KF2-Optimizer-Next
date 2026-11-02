@@ -2,6 +2,7 @@
 #include <atomic>
 #include <limits.h>
 
+#include "kf2/flex/flex_build_identity.hpp"
 #include "kf2/flex/flex_observation_shared.hpp"
 
 extern "C" int _fltused = 0;
@@ -379,15 +380,16 @@ extern "C" int flexGetActiveCount(void* solver) noexcept {
     return count;
 }
 
-extern "C" void flexGetBounds(void* solver, void* lower, void* upper) noexcept {
-    using Function = void (*)(void*, void*, void*);
+extern "C" void flexGetBounds(
+    void* solver, void* lower, void* upper, int memory) noexcept {
+    using Function = void (*)(void*, void*, void*, int);
     static constinit std::atomic<FARPROC> target{};
     const auto function = original_function<Function>(target, "flexGetBounds");
     auto* shared = observation_state();
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && (!solver || !lower || !upper))
         saturated_increment(&shared->invalid_argument_calls);
-    if (function) function(solver, lower, upper);
+    if (function) function(solver, lower, upper, memory);
     if (function && detailed_diagnostics(shared))
         saturated_increment(&shared->bounds_calls);
 }
@@ -506,13 +508,12 @@ extern "C" void flexUpdateSolver(void* solver, float delta_time,
     if (shared && !function) saturated_increment(&shared->missing_original_calls);
     if (shared && (!solver || substeps < 0 || substeps > 64))
         saturated_increment(&shared->invalid_argument_calls);
-    const int forwarded_substeps =
-        kf2::flex::fixed_minimum_substeps(substeps);
+    // The relay observes the call only. The optimized runtime owns its tested
+    // cadence; changing the caller's value here would create a second,
+    // conflicting solver controller.
+    const int forwarded_substeps = substeps;
     const bool diagnostics = detailed_diagnostics(shared);
     if (shared) {
-        if (forwarded_substeps != substeps) {
-            saturated_increment(&shared->constrained_updates);
-        }
         if (diagnostics) {
             LONG forwarded_minimum = InterlockedCompareExchange(
                 &shared->min_forwarded_substeps, 0, 0);

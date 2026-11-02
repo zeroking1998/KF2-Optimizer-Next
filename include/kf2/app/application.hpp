@@ -29,7 +29,7 @@ enum class StartMode { normal, read_only };
     return mode == StartMode::normal;
 }
 
-[[nodiscard]] constexpr bool should_prepare_fixed_flex_runtime(
+[[nodiscard]] constexpr bool should_prepare_optimized_flex_runtime(
     StartMode mode, int configured_physx_level) noexcept {
     return mode == StartMode::normal && configured_physx_level > 0;
 }
@@ -40,9 +40,6 @@ void enforce_temporal_aa_disabled(
     std::vector<config::RequestedChange>& changes);
 void enforce_async_physics_enabled(
     std::vector<config::RequestedChange>& changes);
-void enforce_fixed_flex_substeps(
-    std::vector<config::RequestedChange>& changes,
-    bool fixed_flex_launch);
 void enforce_one_frame_thread_lag(
     std::vector<config::RequestedChange>& changes);
 void enforce_startup_memory_profile(

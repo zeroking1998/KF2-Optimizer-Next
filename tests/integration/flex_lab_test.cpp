@@ -1,495 +1,302 @@
 #include "kf2/flex/flex_lab.hpp"
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <string>
+#include <string_view>
 
-#include <Windows.h>
+#define CHECK(value) do { if (!(value)) { \
+    std::cerr << "check failed line " << __LINE__ << '\n'; return false; \
+} } while (false)
 
-#include "kf2/platform/windows/atomic_file.hpp"
-#include "kf2/security/sha256.hpp"
+namespace {
 
-#define CHECK(x) do { if (!(x)) { std::cerr << "check failed line " << __LINE__ << '\n'; return 1; } } while (0)
+namespace fs = std::filesystem;
 
-static std::string read(const std::filesystem::path& p) {
-    std::ifstream f(p, std::ios::binary); return {std::istreambuf_iterator<char>{f}, {}};
-}
-static void write(const std::filesystem::path& p, const char* value) {
-    std::ofstream f(p, std::ios::binary); f << value;
-}
-
-static std::filesystem::path race_active;
-static std::filesystem::path race_forwarder;
-static std::filesystem::path denied_status_path;
-static std::filesystem::path replacement_path;
-static bool mutation_succeeded = false;
-
-static void replace_during_read(const std::filesystem::path& path) {
-    mutation_succeeded = ReplaceFileW(
-        path.c_str(), replacement_path.c_str(), nullptr,
-        REPLACEFILE_WRITE_THROUGH, nullptr, nullptr) != FALSE;
+void write(const fs::path& path, std::string_view bytes) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 }
 
-static bool fail_selected_status(const std::filesystem::path& path,
-                                 std::error_code& error) {
-    if (path == denied_status_path) {
-        error = std::make_error_code(std::errc::permission_denied);
-        return false;
+std::string read(const fs::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>{input}, {}};
+}
+
+std::map<fs::path, std::string> snapshot_files(const fs::path& root) {
+    std::map<fs::path, std::string> files;
+    for (const auto& entry : fs::recursive_directory_iterator(root)) {
+        if (entry.is_regular_file()) {
+            files.emplace(entry.path().lexically_relative(root), read(entry.path()));
+        }
     }
-    return std::filesystem::exists(path, error);
+    return files;
 }
 
-static void replace_source_at_checkpoint(
-    kf2::flex::LabInstallTestCheckpoint checkpoint) {
-    if (checkpoint == kf2::flex::LabInstallTestCheckpoint::sources_hashed &&
-        !race_active.empty()) {
-        write(race_active, "replacement-runtime");
-    }
-    if (checkpoint == kf2::flex::LabInstallTestCheckpoint::marker_written &&
-        !race_forwarder.empty()) {
-        write(race_forwarder, "replacement-forwarder");
-    }
+std::string field(std::string_view bytes, std::string_view key) {
+    const auto start = bytes.find(key);
+    if (start == std::string_view::npos) return {};
+    const auto value = start + key.size();
+    const auto end = bytes.find('\n', value);
+    return end == std::string_view::npos ? std::string{} :
+        std::string{bytes.substr(value, end - value)};
 }
 
-static int check_installation_ownership(const std::filesystem::path& root) {
-    const auto owner = root / L"owner-\u00e4";
-    const auto other = root / "other";
-    const auto state = root / "state";
-    const auto forwarder = root / "flexRelease_x64.forwarder-lab.dll";
-    std::filesystem::create_directories(owner);
-    std::filesystem::create_directories(other);
-    write(owner / "flexRelease_x64.dll", "original-runtime");
-    write(forwarder, "forwarder");
-    CHECK(kf2::flex::install_offline_lab(
-        {owner, state, forwarder, false, true, true, false}).has_value());
-    const auto marker = state / "flex-lab-transaction.marker";
-    const auto marker_before = read(marker);
-    const auto backup = state / "flexRelease_x64.pre-lab.dll";
-    // Even identical original DLL hashes do not identify their installation.
-    for (const bool same_runtime : {false, true}) {
-        write(other / "flexRelease_x64.dll",
-              same_runtime ? "forwarder" : "other-runtime");
-        write(other / "flexRelease_original.dll", "original-runtime");
-        const auto other_before = read(other / "flexRelease_x64.dll");
+struct Fixture {
+    fs::path root;
+    fs::path game;
+    fs::path state;
+    fs::path sources;
+    kf2::flex::OptimizedRuntimeTransactionOptions options;
+
+    explicit Fixture(const fs::path& base, std::string_view name,
+                     bool existing_helper = false)
+        : root(base / name), game(root / L"game"), state(root / L"state"),
+          sources(root / L"sources") {
+        std::error_code error;
+        fs::remove_all(root, error);
+        fs::create_directories(game);
+        fs::create_directories(sources);
+        write(game / L"flexRelease_x64.dll", "stock-core");
+        write(game / L"flexExtRelease_x64.dll", "stock-extension");
+        if (existing_helper) write(game / L"kf2_p4_overlap.dll", "user-helper");
+        write(sources / L"flexRelease_x64.forwarder-lab.dll", "relay");
+        write(sources / L"flexRelease_x64.optimized.dll", "optimized-core");
+        write(sources / L"flexExtRelease_x64.optimized.dll", "optimized-extension");
+        write(sources / L"kf2_p4_overlap.dll", "optimized-helper");
+        options = {
+            .game_directory = game,
+            .state_directory = state,
+            .forwarder_dll = sources / L"flexRelease_x64.forwarder-lab.dll",
+            .optimized_core_dll = sources / L"flexRelease_x64.optimized.dll",
+            .optimized_extension_dll = sources / L"flexExtRelease_x64.optimized.dll",
+            .optimized_helper_dll = sources / L"kf2_p4_overlap.dll",
+            .game_running = false,
+            .exact_runtime_verified = true};
+    }
+};
+
+bool installed(const Fixture& fixture) {
+    return read(fixture.game / L"flexRelease_x64.dll") == "relay" &&
+        read(fixture.game / L"flexRelease_original.dll") == "optimized-core" &&
+        read(fixture.game / L"flexExtRelease_x64.dll") == "optimized-extension" &&
+        read(fixture.game / L"kf2_p4_overlap.dll") == "optimized-helper" &&
+        fs::exists(fixture.state / L"flex-lab-transaction.marker");
+}
+
+bool restored(const Fixture& fixture, bool existing_helper) {
+    return read(fixture.game / L"flexRelease_x64.dll") == "stock-core" &&
+        read(fixture.game / L"flexExtRelease_x64.dll") == "stock-extension" &&
+        !fs::exists(fixture.game / L"flexRelease_original.dll") &&
+        !fs::exists(fixture.state / L"flex-lab-transaction.marker") &&
+        (existing_helper
+            ? read(fixture.game / L"kf2_p4_overlap.dll") == "user-helper"
+            : !fs::exists(fixture.game / L"kf2_p4_overlap.dll"));
+}
+
+bool check_round_trip(const fs::path& root, bool existing_helper) {
+    Fixture fixture(root, existing_helper ? "existing-helper" : "clean", existing_helper);
+    const auto result =
+        kf2::flex::install_optimized_runtime_transaction(fixture.options);
+    CHECK(result.has_value() && result.value().installed);
+    CHECK(installed(fixture));
+    CHECK(!kf2::flex::recover_optimized_runtime_transaction(
+        fixture.game, fixture.state, false).value());
+    std::wstring details;
+    CHECK(kf2::flex::restore_optimized_runtime_transaction(
+        fixture.game, fixture.state, false, &details).has_value());
+    CHECK(!details.empty());
+    CHECK(restored(fixture, existing_helper));
+
+    // Retained backups may be safely refreshed by a later session.
+    CHECK(kf2::flex::install_optimized_runtime_transaction(
+        fixture.options).has_value());
+    CHECK(kf2::flex::restore_optimized_runtime_transaction(
+        fixture.game, fixture.state, false).has_value());
+    CHECK(restored(fixture, existing_helper));
+    return true;
+}
+
+bool check_rollback(const fs::path& root) {
+    Fixture fixture(root, "rollback");
+    fixture.options.simulate_failure_after_install = true;
+    CHECK(!kf2::flex::install_optimized_runtime_transaction(
+        fixture.options).has_value());
+    CHECK(restored(fixture, false));
+    return true;
+}
+
+bool check_unknown_helper_preserved(const fs::path& root) {
+    Fixture fixture(root, "unknown-helper");
+    CHECK(kf2::flex::install_optimized_runtime_transaction(
+        fixture.options).has_value());
+    write(fixture.game / L"kf2_p4_overlap.dll", "unknown");
+    CHECK(!kf2::flex::restore_optimized_runtime_transaction(
+        fixture.game, fixture.state, false).has_value());
+    CHECK(read(fixture.game / L"flexRelease_x64.dll") == "relay");
+    CHECK(read(fixture.game / L"flexRelease_original.dll") == "optimized-core");
+    CHECK(read(fixture.game / L"flexExtRelease_x64.dll") == "optimized-extension");
+    CHECK(read(fixture.game / L"kf2_p4_overlap.dll") == "unknown");
+    CHECK(fs::exists(fixture.state / L"flex-lab-transaction.marker"));
+    write(fixture.game / L"kf2_p4_overlap.dll", "optimized-helper");
+    CHECK(kf2::flex::restore_optimized_runtime_transaction(
+        fixture.game, fixture.state, false).has_value());
+    CHECK(restored(fixture, false));
+    return true;
+}
+
+bool check_unknown_runtime_preserved(const fs::path& root) {
+    constexpr std::array<std::pair<std::wstring_view, std::string_view>, 3> cases{{
+        {L"flexRelease_x64.dll", "relay"},
+        {L"flexRelease_original.dll", "optimized-core"},
+        {L"flexExtRelease_x64.dll", "optimized-extension"},
+    }};
+    for (std::size_t index = 0; index < cases.size(); ++index) {
+        Fixture fixture(root, "unknown-runtime-" + std::to_string(index));
+        CHECK(kf2::flex::install_optimized_runtime_transaction(
+            fixture.options).has_value());
+        const auto& [name, managed] = cases[index];
+        const auto changed = fixture.game / fs::path{name};
+        write(changed, "unknown");
+        CHECK(!kf2::flex::restore_optimized_runtime_transaction(
+            fixture.game, fixture.state, false).has_value());
+        CHECK(read(changed) == "unknown");
+        CHECK(fs::exists(fixture.state / L"flex-lab-transaction.marker"));
+        write(changed, managed);
+        CHECK(kf2::flex::restore_optimized_runtime_transaction(
+            fixture.game, fixture.state, false).has_value());
+        CHECK(restored(fixture, false));
+    }
+    return true;
+}
+
+bool check_gates(const fs::path& root) {
+    Fixture fixture(root, "gates");
+    fixture.options.game_running = true;
+    CHECK(!kf2::flex::install_optimized_runtime_transaction(
+        fixture.options).has_value());
+    fixture.options.game_running = false;
+    fixture.options.exact_runtime_verified = false;
+    CHECK(!kf2::flex::install_optimized_runtime_transaction(
+        fixture.options).has_value());
+    fixture.options.exact_runtime_verified = true;
+    fixture.options.optimized_helper_dll = fixture.sources / L"wrong.dll";
+    write(fixture.options.optimized_helper_dll, "optimized-helper");
+    CHECK(!kf2::flex::install_optimized_runtime_transaction(
+        fixture.options).has_value());
+    CHECK(read(fixture.game / L"flexRelease_x64.dll") == "stock-core");
+    return true;
+}
+
+bool check_owner_binding(const fs::path& root) {
+    Fixture owner(root, "owner");
+    Fixture other(root, "other");
+    CHECK(kf2::flex::install_optimized_runtime_transaction(
+        owner.options).has_value());
+    CHECK(!kf2::flex::restore_optimized_runtime_transaction(
+        other.game, owner.state, false).has_value());
+    CHECK(installed(owner));
+    CHECK(read(other.game / L"flexRelease_x64.dll") == "stock-core");
+    CHECK(kf2::flex::restore_optimized_runtime_transaction(
+        owner.game, owner.state, false).has_value());
+    return true;
+}
+
+bool prepare_legacy_recovery(Fixture& fixture, std::string_view state) {
+    CHECK(kf2::flex::install_optimized_runtime_transaction(
+        fixture.options).has_value());
+    const auto current_marker = read(
+        fixture.state / L"flex-lab-transaction.marker");
+    const auto original = field(current_marker, "stock_core_sha256=");
+    const auto forwarder = field(current_marker, "forwarder_sha256=");
+    const auto owner = field(current_marker, "owner_sha256=");
+    CHECK(original.size() == 64 && forwarder.size() == 64 && owner.size() == 64);
+    CHECK(kf2::flex::restore_optimized_runtime_transaction(
+        fixture.game, fixture.state, false).has_value());
+
+    write(fixture.state / L"flexRelease_x64.pre-lab.dll", "stock-core");
+    write(fixture.game / L"flexRelease_original.dll", "stock-core");
+    write(fixture.game / L"flexRelease_x64.dll", "relay");
+    write(fixture.state / L"flex-lab-transaction.marker",
+        "schema=3\nstate=" + std::string{state} + "\noriginal_sha256=" + original +
+        "\nforwarder_sha256=" + forwarder +
+        "\nowner_sha256=" + owner + "\n");
+    return true;
+}
+
+bool check_legacy_recovery(const fs::path& root) {
+    for (unsigned index = 0; index < 4; ++index) {
+        Fixture fixture(root, "legacy-recovery-" + std::to_string(index));
+        CHECK(prepare_legacy_recovery(fixture,
+            index % 2 == 0 ? "installed" : "installing"));
+        if (index == 1) write(fixture.game / L"flexRelease_x64.dll", "stock-core");
+        if (index == 2) fs::remove(fixture.game / L"flexRelease_original.dll");
+        if (index == 3) {
+            fs::remove(fixture.state / L"flexRelease_x64.pre-lab.dll");
+            fs::remove(fixture.game / L"flexRelease_x64.dll");
+        }
+        std::wstring details;
+        const auto recovered = kf2::flex::recover_optimized_runtime_transaction(
+            fixture.game, fixture.state, false, &details);
+        CHECK(recovered.has_value() && recovered.value());
+        CHECK(restored(fixture, false));
+        CHECK(!details.empty());
+    }
+    return true;
+}
+
+bool check_unknown_legacy_runtime_preserved(const fs::path& root) {
+    constexpr std::array<std::pair<std::wstring_view, std::string_view>, 5> cases{{
+        {L"game/flexRelease_x64.dll", "unknown"},
+        {L"game/flexRelease_original.dll", "unknown"},
+        {L"state/flexRelease_x64.pre-lab.dll", "unknown"},
+        {L"game/flexRelease_original.dll", "relay"},
+        {L"state/flexRelease_x64.pre-lab.dll", "relay"},
+    }};
+    for (const auto state : {"installing", "installed"}) {
         for (const bool recover : {false, true}) {
-            std::wstring details = L"previous details";
-            const auto result = recover
-                ? kf2::flex::recover_offline_lab(other, state, false, &details)
-                : kf2::flex::restore_offline_lab(other, state, false, &details);
-            CHECK(!result.has_value());
-            CHECK(details.empty());
-            CHECK(read(other / "flexRelease_x64.dll") == other_before);
-            CHECK(read(other / "flexRelease_original.dll") == "original-runtime");
-            CHECK(read(owner / "flexRelease_x64.dll") == "forwarder");
-            CHECK(read(owner / "flexRelease_original.dll") == "original-runtime");
-            CHECK(read(marker) == marker_before);
-            CHECK(read(backup) == "original-runtime");
-        }
-    }
-    // Missing and old ownerless markers must retain all recovery evidence.
-    for (const int schema : {0, 1, 2}) {
-        std::string ownerless;
-        if (schema == 1) {
-            ownerless = "schema=1\noriginal_sha256="
-                "aa4b0053991bf30f9c68dc88286c97de92031511ef7a79ae89ea8d7233809b3f\n";
-        } else if (schema == 2) {
-            ownerless = "schema=2\nstate=installed\noriginal_sha256="
-                "aa4b0053991bf30f9c68dc88286c97de92031511ef7a79ae89ea8d7233809b3f\n"
-                "forwarder_sha256=" +
-                kf2::security::sha256_hex("forwarder").value() + "\n";
-        }
-        if (schema == 0) CHECK(std::filesystem::remove(marker));
-        else write(marker, ownerless.c_str());
-        for (const auto& game : {owner, other}) {
-            const auto active_before = read(game / "flexRelease_x64.dll");
-            for (const bool recover : {false, true}) {
+            for (std::size_t index = 0; index < cases.size(); ++index) {
+                Fixture fixture(root, "unknown-legacy-" + std::string{state} +
+                    (recover ? "-recover-" : "-restore-") + std::to_string(index));
+                CHECK(prepare_legacy_recovery(fixture, state));
+                const auto& [name, bytes] = cases[index];
+                write(fixture.root / fs::path{name}, bytes);
+                const auto before = snapshot_files(fixture.root);
+                std::wstring details{L"previous recovery"};
                 const auto result = recover
-                    ? kf2::flex::recover_offline_lab(game, state, false)
-                    : kf2::flex::restore_offline_lab(game, state, false);
+                    ? kf2::flex::recover_optimized_runtime_transaction(
+                        fixture.game, fixture.state, false, &details)
+                    : kf2::flex::restore_optimized_runtime_transaction(
+                        fixture.game, fixture.state, false, &details);
                 CHECK(!result.has_value());
-                CHECK(read(game / "flexRelease_x64.dll") == active_before);
-                CHECK(read(game / "flexRelease_original.dll") == "original-runtime");
-                CHECK(read(marker) == ownerless);
-                CHECK(read(backup) == "original-runtime");
+                CHECK(result.error().code == kf2::ErrorCode::stale_data);
+                CHECK(snapshot_files(fixture.root) == before);
+                CHECK(details.empty());
             }
         }
     }
-    const std::string malformed_markers[] = {
-        marker_before + "owner_sha256=" + std::string(64, '0') + "\n",
-        marker_before.substr(0, marker_before.find("owner_sha256=")),
-        marker_before.substr(0, marker_before.find("owner_sha256=")) +
-            "owner_sha256=" + std::string(64, '0') + "\n",
-    };
-    for (const auto& malformed : malformed_markers) {
-        write(marker, malformed.c_str());
-        CHECK(!kf2::flex::restore_offline_lab(owner, state, false).has_value());
-        CHECK(!kf2::flex::recover_offline_lab(owner, state, false).has_value());
-        CHECK(read(marker) == malformed);
-        CHECK(read(owner / "flexRelease_x64.dll") == "forwarder");
-        CHECK(read(owner / "flexRelease_original.dll") == "original-runtime");
-    }
-    write(marker, marker_before.c_str());
-    // Path casing and Unicode names retain the same owner.
-    auto owner_alias = owner.wstring();
-    for (auto& character : owner_alias) {
-        if (character >= L'a' && character <= L'z') character -= L'a' - L'A';
-    }
-    const auto restored = kf2::flex::restore_offline_lab(owner_alias, state, false);
-    if (!restored.has_value()) std::wcerr << restored.error().message << '\n';
-    CHECK(restored.has_value());
-    CHECK(read(owner / "flexRelease_x64.dll") == "original-runtime");
-    CHECK(!std::filesystem::exists(owner / "flexRelease_original.dll"));
-    CHECK(!std::filesystem::exists(marker));
-    CHECK(read(other / "flexRelease_x64.dll") == "forwarder");
-    CHECK(read(other / "flexRelease_original.dll") == "original-runtime");
-    // Replacing a directory at the same path must not inherit its ownership.
-    CHECK(kf2::flex::install_offline_lab(
-        {owner, state, forwarder, false, true, true, false}).has_value());
-    const auto displaced_owner = root / "displaced-owner";
-    const auto replacement_marker = read(marker);
-    std::filesystem::rename(owner, displaced_owner);
-    std::filesystem::create_directory(owner);
-    write(owner / "flexRelease_x64.dll", "original-runtime");
-    CHECK(!kf2::flex::restore_offline_lab(owner, state, false).has_value());
-    CHECK(!kf2::flex::recover_offline_lab(owner, state, false).has_value());
-    CHECK(read(marker) == replacement_marker);
-    CHECK(read(owner / "flexRelease_x64.dll") == "original-runtime");
-    CHECK(read(displaced_owner / "flexRelease_x64.dll") == "forwarder");
-    CHECK(kf2::flex::restore_offline_lab(displaced_owner, state, false).has_value());
-    CHECK(read(displaced_owner / "flexRelease_x64.dll") == "original-runtime");
-    CHECK(!std::filesystem::exists(marker));
-    return 0;
+    return true;
 }
 
-static int check_redundant_recovery(const std::filesystem::path& root) {
-    struct Case {
-        const char* name;
-        const char* backup;
-        const char* original;
-        bool recover;
-        bool succeeds;
-        bool lock_backup{false};
-        bool deny_backup_status{false};
-        bool lock_active{false};
-        bool remove_marker{false};
-    };
-    const Case cases[] = {
-        {"valid-copies", "original-runtime", "original-runtime", false, true},
-        {"missing-backup", nullptr, "original-runtime", false, true},
-        {"corrupt-backup", "corrupt", "original-runtime", false, true},
-        {"corrupt-original", "original-runtime", "corrupt", false, true},
-        {"missing-original", "original-runtime", nullptr, false, true},
-        {"both-invalid", "corrupt-backup", "corrupt-original", false, false},
-        {"missing-both", nullptr, nullptr, false, false},
-        {"missing-backup-corrupt-original", nullptr, "corrupt", false, false},
-        {"startup-recovery", "corrupt", "original-runtime", true, true},
-        {"startup-both-invalid", "corrupt", "corrupt", true, false},
-        {"locked-backup", "original-runtime", "original-runtime", false, true,
-         true},
-        {"unknown-backup-status", "original-runtime", "original-runtime",
-         false, true, false, true},
-        {"blocked-replacement", "corrupt", "original-runtime", false, false,
-         false, false, true},
-        {"markerless-valid", "original-runtime", "original-runtime", false,
-         false, false, false, false, true},
-        {"markerless-locked-backup", "original-runtime", "original-runtime",
-         false, false, true, false, false, true},
-    };
-    for (const auto& scenario : cases) {
-        const auto directory = root / scenario.name;
-        const auto game = directory / "game";
-        const auto state = directory / "state";
-        const auto forwarder = directory / "flexRelease_x64.forwarder-lab.dll";
-        const auto backup = state / "flexRelease_x64.pre-lab.dll";
-        const auto original = game / "flexRelease_original.dll";
-        const auto marker = state / "flex-lab-transaction.marker";
-        std::filesystem::create_directories(game);
-        write(game / "flexRelease_x64.dll", "original-runtime");
-        write(forwarder, "forwarder");
-        CHECK(kf2::flex::install_offline_lab(
-            {game, state, forwarder, false, true, true, false}).has_value());
-        if (scenario.backup != nullptr) write(backup, scenario.backup);
-        else CHECK(std::filesystem::remove(backup));
-        if (scenario.original != nullptr) write(original, scenario.original);
-        else CHECK(std::filesystem::remove(original));
-        if (scenario.remove_marker) CHECK(std::filesystem::remove(marker));
-        const auto marker_before = read(marker);
-        HANDLE locked = INVALID_HANDLE_VALUE;
-        if (scenario.lock_backup) {
-            locked = CreateFileW(backup.c_str(), GENERIC_READ, 0, nullptr,
-                                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-            CHECK(locked != INVALID_HANDLE_VALUE);
-        }
-        if (scenario.lock_active) {
-            locked = CreateFileW((game / "flexRelease_x64.dll").c_str(),
-                GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL, nullptr);
-            CHECK(locked != INVALID_HANDLE_VALUE);
-        }
-        if (scenario.deny_backup_status) {
-            denied_status_path = backup;
-            kf2::flex::set_lab_status_hook_for_testing(&fail_selected_status);
-        }
-        std::wstring details = L"Previous recovery details";
-        const auto result = scenario.recover
-            ? kf2::flex::recover_offline_lab(game, state, false, &details)
-            : kf2::flex::restore_offline_lab(game, state, false, &details);
-        kf2::flex::set_lab_status_hook_for_testing(nullptr);
-        denied_status_path.clear();
-        if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
-        CHECK(result.has_value() == scenario.succeeds);
-        if (scenario.succeeds) {
-            CHECK(result.value());
-            CHECK(read(game / "flexRelease_x64.dll") == "original-runtime");
-            CHECK(!std::filesystem::exists(marker));
-            CHECK(!std::filesystem::exists(original));
-            const bool backup_used = scenario.backup != nullptr &&
-                std::string{scenario.backup} == "original-runtime" &&
-                !scenario.lock_backup && !scenario.deny_backup_status;
-            CHECK(details.find(backup_used ? L"verified state backup"
-                                          : L"verified in-game original") !=
-                  std::wstring::npos);
-            if (!backup_used) CHECK(details.find(L"State backup rejected:") !=
-                                    std::wstring::npos);
-            if (scenario.original == nullptr ||
-                std::string{scenario.original} != "original-runtime") {
-                CHECK(details.find(L"In-game original rejected:") !=
-                      std::wstring::npos);
-            }
-        } else {
-            CHECK(details.empty());
-            CHECK(read(game / "flexRelease_x64.dll") == "forwarder");
-            CHECK(read(marker) == marker_before);
-            CHECK(read(original) == (scenario.original != nullptr
-                ? scenario.original : ""));
-        }
-        CHECK(read(backup) == (scenario.backup != nullptr
-            ? scenario.backup : ""));
-    }
-    return 0;
-}
+}  // namespace
 
 int main() {
-    const auto root = std::filesystem::path{KF2_TEST_ROOT};
-    std::error_code ec; std::filesystem::remove_all(root, ec);
-    CHECK(check_installation_ownership(root / "ownership") == 0);
-    const auto game = root / "game"; const auto state = root / "state";
-    std::filesystem::create_directories(game); std::filesystem::create_directories(state);
-    const auto forwarder = root / "flexRelease_x64.forwarder-lab.dll";
-    write(game / "flexRelease_x64.dll", "original-runtime"); write(forwarder, "forwarder");
-    denied_status_path = state / "flex-lab-transaction.marker";
-    kf2::flex::set_lab_status_hook_for_testing(&fail_selected_status);
-    const auto inaccessible = kf2::flex::recover_offline_lab(
-        game, state, false);
-    kf2::flex::set_lab_status_hook_for_testing(nullptr);
-    denied_status_path.clear();
-    CHECK(!inaccessible.has_value());
-    CHECK(inaccessible.error().code == kf2::ErrorCode::io_failure);
-    CHECK(inaccessible.error().native_code != 0);
-    kf2::flex::LabTransactionOptions o{game, state, forwarder, false, true, true, false};
-    auto installed = kf2::flex::install_offline_lab(o);
-    CHECK(installed.has_value() && installed.value().installed);
-    CHECK(read(game / "flexRelease_x64.dll") == "forwarder");
-    CHECK(read(game / "flexRelease_original.dll") == "original-runtime");
-    CHECK(read(state / "flexRelease_x64.pre-lab.dll") == "original-runtime");
-    const auto installed_marker = read(state / "flex-lab-transaction.marker");
-    CHECK(installed_marker.find(installed.value().original_sha256) !=
-          std::string::npos);
-    CHECK(installed_marker.find(installed.value().forwarder_sha256) !=
-          std::string::npos);
-    auto retained = kf2::flex::recover_offline_lab(game, state, false);
-    CHECK(retained.has_value() && !retained.value());
-    CHECK(read(game / "flexRelease_x64.dll") == "forwarder");
-    std::wstring blocked_details = L"Previous recovery details";
-    CHECK(!kf2::flex::restore_offline_lab(
-        game, state, true, &blocked_details).has_value());
-    CHECK(blocked_details.empty());
-    CHECK(read(state / "flex-lab-transaction.marker") == installed_marker);
-    CHECK(kf2::flex::restore_offline_lab(game, state, false).has_value());
-    write(state / "flex-lab-transaction.marker",
-          "schema=1\noriginal_sha256="
-          "aa4b0053991bf30f9c68dc88286c97de92031511ef7a79ae89ea8d7233809b3f\n");
-    auto legacy_cleaned = kf2::flex::recover_offline_lab(game, state, false);
-    CHECK(!legacy_cleaned.has_value());
-    CHECK(std::filesystem::exists(state / "flex-lab-transaction.marker"));
-    CHECK(read(game / "flexRelease_x64.dll") == "original-runtime");
-    CHECK(!std::filesystem::exists(game / "flexRelease_original.dll"));
-    CHECK(!kf2::flex::restore_offline_lab(game, state, false).has_value());
-    CHECK(std::filesystem::remove(state / "flex-lab-transaction.marker"));
-    o.simulate_failure_after_install = true;
-    CHECK(!kf2::flex::install_offline_lab(o).has_value());
-    CHECK(read(game / "flexRelease_x64.dll") == "original-runtime");
-    o.simulate_failure_after_install = false; o.game_running = true;
-    CHECK(!kf2::flex::install_offline_lab(o).has_value());
-    o.game_running = false; o.offline_confirmed = false;
-    CHECK(!kf2::flex::install_offline_lab(o).has_value());
-    o.offline_confirmed = true;
-    CHECK(kf2::flex::install_offline_lab(o).has_value());
-    write(state / "flexRelease_x64.pre-lab.dll", "tampered");
-    CHECK(kf2::flex::restore_offline_lab(game, state, false).has_value());
-    CHECK(read(game / "flexRelease_x64.dll") == "original-runtime");
-    CHECK(kf2::flex::install_offline_lab(o).has_value());
-    auto still_installed = kf2::flex::recover_offline_lab(game, state, false);
-    CHECK(still_installed.has_value() && !still_installed.value());
-    CHECK(read(game / "flexRelease_x64.dll") == "forwarder");
-
-    const auto active_race_root = root / "active-race";
-    const auto active_race_game = active_race_root / "game";
-    const auto active_race_state = active_race_root / "state";
-    const auto active_race_forwarder =
-        active_race_root / "flexRelease_x64.forwarder-lab.dll";
-    std::filesystem::create_directories(active_race_game);
-    std::filesystem::create_directories(active_race_state);
-    write(active_race_game / "flexRelease_x64.dll", "original-runtime");
-    write(active_race_forwarder, "forwarder");
-    race_active = active_race_game / "flexRelease_x64.dll";
-    kf2::flex::set_lab_install_test_hook(replace_source_at_checkpoint);
-    const auto active_race = kf2::flex::install_offline_lab(
-        {active_race_game, active_race_state, active_race_forwarder,
-         false, true, true, false});
-    kf2::flex::set_lab_install_test_hook(nullptr);
-    race_active.clear();
-    CHECK(!active_race.has_value());
-    CHECK(read(active_race_game / "flexRelease_x64.dll") ==
-          "replacement-runtime");
-    CHECK(read(active_race_state / "flexRelease_x64.pre-lab.dll") ==
-          "replacement-runtime");
-    CHECK(!std::filesystem::exists(
-        active_race_state / "flex-lab-transaction.marker"));
-    CHECK(!std::filesystem::exists(
-        active_race_game / "flexRelease_original.dll"));
-
-    const auto forwarder_race_root = root / "forwarder-race";
-    const auto forwarder_race_game = forwarder_race_root / "game";
-    const auto forwarder_race_state = forwarder_race_root / "state";
-    const auto forwarder_race_source =
-        forwarder_race_root / "flexRelease_x64.forwarder-lab.dll";
-    std::filesystem::create_directories(forwarder_race_game);
-    std::filesystem::create_directories(forwarder_race_state);
-    write(forwarder_race_game / "flexRelease_x64.dll", "original-runtime");
-    write(forwarder_race_source, "forwarder");
-    race_forwarder = forwarder_race_source;
-    kf2::flex::set_lab_install_test_hook(replace_source_at_checkpoint);
-    const auto forwarder_race = kf2::flex::install_offline_lab(
-        {forwarder_race_game, forwarder_race_state, forwarder_race_source,
-         false, true, true, false});
-    kf2::flex::set_lab_install_test_hook(nullptr);
-    race_forwarder.clear();
-    CHECK(!forwarder_race.has_value());
-    CHECK(read(forwarder_race_game / "flexRelease_x64.dll") ==
-          "original-runtime");
-    CHECK(read(forwarder_race_state / "flexRelease_x64.pre-lab.dll") ==
-          "original-runtime");
-    CHECK(!std::filesystem::exists(
-        forwarder_race_state / "flex-lab-transaction.marker"));
-    CHECK(!std::filesystem::exists(
-        forwarder_race_game / "flexRelease_original.dll"));
-
-    const auto hash_race_root = root / "hash-race";
-    const auto hash_race_input = hash_race_root / "flexRelease_x64.dll";
-    replacement_path = hash_race_root / "replacement.dll";
-    std::filesystem::create_directories(hash_race_root);
-    write(hash_race_input, "original-runtime");
-    write(replacement_path, "replacement-runtime");
-    mutation_succeeded = false;
-    kf2::security::set_sha256_file_read_hook_for_testing(
-        &replace_during_read);
-    const auto replaced_hash = kf2::security::sha256_file_hex(
-        hash_race_input, 16U * 1024U * 1024U);
-    kf2::security::set_sha256_file_read_hook_for_testing(nullptr);
-    CHECK(mutation_succeeded);
-    CHECK(!replaced_hash.has_value());
-    CHECK(replaced_hash.error().code == kf2::ErrorCode::stale_data);
-
-    const auto oversized_root = root / "oversized-runtime";
-    const auto oversized_game = oversized_root / "game";
-    const auto oversized_state = oversized_root / "state";
-    const auto oversized_forwarder =
-        oversized_root / "flexRelease_x64.forwarder-lab.dll";
-    std::filesystem::create_directories(oversized_game);
-    std::filesystem::create_directories(oversized_state);
-    write(oversized_game / "flexRelease_x64.dll", "runtime");
-    std::filesystem::resize_file(
-        oversized_game / "flexRelease_x64.dll", 16U * 1024U * 1024U + 1U);
-    write(oversized_forwarder, "forwarder");
-    const auto oversized_install = kf2::flex::install_offline_lab(
-        {oversized_game, oversized_state, oversized_forwarder,
-         false, true, true, false});
-    CHECK(!oversized_install.has_value());
-    CHECK(oversized_install.error().code == kf2::ErrorCode::access_denied);
-    CHECK(!std::filesystem::exists(
-        oversized_state / "flex-lab-transaction.marker"));
-
-    const auto marker_root = root / "oversized-marker";
-    const auto marker_game = marker_root / "game";
-    const auto marker_state = marker_root / "state";
-    const auto marker_forwarder =
-        marker_root / "flexRelease_x64.forwarder-lab.dll";
-    std::filesystem::create_directories(marker_game);
-    std::filesystem::create_directories(marker_state);
-    write(marker_game / "flexRelease_x64.dll", "original-runtime");
-    write(marker_forwarder, "forwarder");
-    CHECK(kf2::flex::install_offline_lab(
-        {marker_game, marker_state, marker_forwarder,
-         false, true, true, false}).has_value());
-    write(marker_state / "flex-lab-transaction.marker", "x");
-    std::filesystem::resize_file(
-        marker_state / "flex-lab-transaction.marker", 4U * 1024U + 1U);
-    const auto oversized_marker = kf2::flex::restore_offline_lab(
-        marker_game, marker_state, false);
-    CHECK(!oversized_marker.has_value());
-    CHECK(oversized_marker.error().code == kf2::ErrorCode::access_denied);
-    CHECK(read(marker_game / "flexRelease_x64.dll") == "forwarder");
-
-    const auto linked_marker_root = root / "linked-marker";
-    const auto linked_marker_game = linked_marker_root / "game";
-    const auto linked_marker_state = linked_marker_root / "state";
-    const auto linked_marker_forwarder =
-        linked_marker_root / "flexRelease_x64.forwarder-lab.dll";
-    std::filesystem::create_directories(linked_marker_game);
-    std::filesystem::create_directories(linked_marker_state);
-    write(linked_marker_game / "flexRelease_x64.dll", "original-runtime");
-    write(linked_marker_forwarder, "forwarder");
-    CHECK(kf2::flex::install_offline_lab(
-        {linked_marker_game, linked_marker_state, linked_marker_forwarder,
-         false, true, true, false}).has_value());
-    const auto linked_marker =
-        linked_marker_state / "flex-lab-transaction.marker";
-    const auto marker_alias = linked_marker_state / "marker-alias";
-    CHECK(CreateHardLinkW(marker_alias.c_str(), linked_marker.c_str(), nullptr));
-    const auto unsafe_marker = kf2::flex::restore_offline_lab(
-        linked_marker_game, linked_marker_state, false);
-    CHECK(!unsafe_marker.has_value());
-    CHECK(unsafe_marker.error().code == kf2::ErrorCode::access_denied);
-    CHECK(read(linked_marker_game / "flexRelease_x64.dll") == "forwarder");
-
-    const auto marker_race_root = root / "marker-race";
-    const auto marker_race_game = marker_race_root / "game";
-    const auto marker_race_state = marker_race_root / "state";
-    const auto marker_race_forwarder =
-        marker_race_root / "flexRelease_x64.forwarder-lab.dll";
-    std::filesystem::create_directories(marker_race_game);
-    std::filesystem::create_directories(marker_race_state);
-    write(marker_race_game / "flexRelease_x64.dll", "original-runtime");
-    write(marker_race_forwarder, "forwarder");
-    CHECK(kf2::flex::install_offline_lab(
-        {marker_race_game, marker_race_state, marker_race_forwarder,
-         false, true, true, false}).has_value());
-    const auto marker_race_path =
-        marker_race_state / "flex-lab-transaction.marker";
-    replacement_path = marker_race_state / "replacement.marker";
-    const auto marker_race_bytes = read(marker_race_path);
-    write(replacement_path, marker_race_bytes.c_str());
-    mutation_succeeded = false;
-    kf2::platform::windows::set_bounded_read_hook_for_testing(
-        &replace_during_read);
-    const auto replaced_marker = kf2::flex::restore_offline_lab(
-        marker_race_game, marker_race_state, false);
-    kf2::platform::windows::set_bounded_read_hook_for_testing(nullptr);
-    CHECK(mutation_succeeded);
-    CHECK(!replaced_marker.has_value());
-    CHECK(replaced_marker.error().code == kf2::ErrorCode::stale_data);
-    CHECK(read(marker_race_game / "flexRelease_x64.dll") == "forwarder");
-    CHECK(check_redundant_recovery(root / "redundant-recovery") == 0);
-    return 0;
+    const fs::path root{KF2_TEST_ROOT};
+    std::error_code error;
+    fs::remove_all(root, error);
+    fs::create_directories(root, error);
+    if (error) return 2;
+    const bool passed = check_round_trip(root, false) &&
+        check_round_trip(root, true) && check_rollback(root) &&
+        check_unknown_helper_preserved(root) &&
+        check_unknown_runtime_preserved(root) && check_gates(root) &&
+        check_owner_binding(root) && check_legacy_recovery(root) &&
+        check_unknown_legacy_runtime_preserved(root);
+    kf2::flex::set_runtime_install_test_hook(nullptr);
+    kf2::flex::set_runtime_status_hook_for_testing(nullptr);
+    fs::remove_all(root, error);
+    return passed ? 0 : 1;
 }

@@ -101,7 +101,7 @@ $ctestArguments = @('--test-dir', $buildRoot, '--output-on-failure')
 if ($PublicCI) {
     $ctestArguments += @('--label-exclude', 'requires-desktop')
 }
-& ctest @ctestArguments
+& (Join-Path $PSScriptRoot 'run_ctest.ps1') @ctestArguments
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "PASS: Ninja $Configuration build and all tests passed"

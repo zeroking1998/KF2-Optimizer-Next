@@ -1,0 +1,11 @@
+#pragma once
+
+// Retain the source identity in the native anchor DLL without adding a
+// runtime branch or exported ABI solely for package validation.
+#pragma section(".rdata$kf2anchor", read)
+extern "C" {
+__declspec(allocate(".rdata$kf2anchor")) __declspec(selectany)
+extern const char kf2_anchor_source_identity[] =
+    "KF2_ANCHOR_BUILD_COMMIT=@KF2_BUILD_COMMIT@";
+}
+#pragma comment(linker, "/include:kf2_anchor_source_identity")

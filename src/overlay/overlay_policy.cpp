@@ -75,9 +75,9 @@ OverlayPresentation evaluate_overlay(const OverlayPolicyInput& input) {
     output.bounds.bottom = output.bounds.top + height;
     const auto rounded_fps = std::round(*input.frames.fps * 10.0) / 10.0;
     const auto rounded_average = std::round(
-        input.frames.average_fps.value_or(*input.frames.fps) * 10.0) / 10.0;
+        input.frames.average_fps.value_or(0.0) * 10.0) / 10.0;
     const auto rounded_low = std::round(
-        input.frames.one_percent_low_fps.value_or(*input.frames.fps) * 10.0) / 10.0;
+        input.frames.one_percent_low_fps.value_or(0.0) * 10.0) / 10.0;
     const auto rounded_ms = std::round(*input.frames.frame_time_ms * 10.0) / 10.0;
     output.fps = rounded_fps;
     output.average_fps = rounded_average;

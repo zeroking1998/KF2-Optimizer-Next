@@ -102,7 +102,7 @@ foreach ($buildRoot in $buildRoots) {
         '-DBUILD_TESTING=ON',
         '-DKF2_VERSION=0.0.4-alpha',
         '-DKF2_BUILD_COMMIT=validation',
-        '-DKF2_BUILD_CHANNEL=validation',
+        '-DKF2_BUILD_CHANNEL=release',
         '-DKF2_OFFLINE_TELEMETRY_SHA256=AUTO'
     )
     Invoke-Native 'cmake' @(
@@ -111,7 +111,7 @@ foreach ($buildRoot in $buildRoots) {
         '--clean-first',
         '--parallel', '4'
     )
-    Invoke-Native 'ctest' @('--test-dir', $buildRoot, '-C', 'Release', '--output-on-failure')
+    Invoke-Native (Join-Path $PSScriptRoot 'run_ctest.ps1') @('--test-dir', $buildRoot, '-C', 'Release', '--output-on-failure')
 
     $releaseRoot = Join-Path $buildRoot 'Release'
     $productExecutables = @(Get-ChildItem -LiteralPath $releaseRoot -Filter '*.exe' -File)
@@ -120,12 +120,16 @@ foreach ($buildRoot in $buildRoots) {
     Assert-True ($productExecutables[0].Name -ceq 'KF2Optimizer.exe') `
         "Unexpected product executable: $($productExecutables[0].Name)"
     $productDlls = @(Get-ChildItem -LiteralPath $releaseRoot -Filter '*.dll' -File)
-    Assert-True ($productDlls.Count -eq 0) 'Foundation produced an unexpected root product DLL'
+    $productDllNames = @($productDlls.Name | Sort-Object)
+    Assert-True ($productDlls.Count -eq 2 -and
+        $productDllNames[0] -ceq 'kf2_anchor_runtime.dll' -and
+        $productDllNames[1] -ceq 'kf2_p4_overlap.dll') `
+        'Foundation produced an unexpected root product DLL'
     $labForwarder = Join-Path $buildRoot 'flexRelease_x64.forwarder-lab.dll'
     Assert-True (Test-Path -LiteralPath $labForwarder -PathType Leaf) `
-        'Offline laboratory forwarder was not reproducibly built'
+        'FleX observation relay was not reproducibly built'
 }
-Write-Pass 'release shape contains one user-facing executable and one isolated laboratory DLL'
+Write-Pass 'release shape contains one user-facing executable plus isolated anchor and FleX runtime components'
 
 $firstExecutable = Join-Path $buildRoots[0] 'Release\KF2Optimizer.exe'
 $headers = (& $dumpbin /headers $firstExecutable | Out-String)
@@ -148,5 +152,21 @@ $firstForwarderHash = (Get-FileHash -Algorithm SHA256 -LiteralPath `
 $secondForwarderHash = (Get-FileHash -Algorithm SHA256 -LiteralPath `
     (Join-Path $buildRoots[1] 'flexRelease_x64.forwarder-lab.dll')).Hash
 Assert-True ($firstForwarderHash -ceq $secondForwarderHash) `
-    "FleX laboratory forwarder is not reproducible: $firstForwarderHash != $secondForwarderHash"
-Write-Pass "two clean FleX laboratory forwarders are identical ($firstForwarderHash)"
+    "FleX observation relay is not reproducible: $firstForwarderHash != $secondForwarderHash"
+Write-Pass "two clean FleX observation relays are identical ($firstForwarderHash)"
+$firstHelper = Join-Path $buildRoots[0] 'Release\kf2_p4_overlap.dll'
+$secondHelper = Join-Path $buildRoots[1] 'Release\kf2_p4_overlap.dll'
+$firstHelperHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $firstHelper).Hash
+$secondHelperHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $secondHelper).Hash
+Assert-True ($firstHelperHash -ceq $secondHelperHash) `
+    "Optimized FleX helper is not reproducible: $firstHelperHash != $secondHelperHash"
+Write-Pass "two clean optimized FleX helpers are identical ($firstHelperHash)"
+$firstAnchorHelper = Join-Path $buildRoots[0] 'Release\kf2_anchor_runtime.dll'
+$secondAnchorHelper = Join-Path $buildRoots[1] 'Release\kf2_anchor_runtime.dll'
+$firstAnchorHelperHash = (Get-FileHash -Algorithm SHA256 -LiteralPath `
+    $firstAnchorHelper).Hash
+$secondAnchorHelperHash = (Get-FileHash -Algorithm SHA256 -LiteralPath `
+    $secondAnchorHelper).Hash
+Assert-True ($firstAnchorHelperHash -ceq $secondAnchorHelperHash) `
+    "Native anchor helper is not reproducible: $firstAnchorHelperHash != $secondAnchorHelperHash"
+Write-Pass "two clean native anchor helpers are identical ($firstAnchorHelperHash)"

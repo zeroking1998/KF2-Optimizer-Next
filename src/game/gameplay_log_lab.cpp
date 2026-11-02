@@ -56,6 +56,17 @@ constexpr std::wstring_view kStartupPackagesSection =
 constexpr std::wstring_view kStartupPackageKey = L"Package";
 constexpr std::wstring_view kTelemetryPackage = L"KF2OptimizerTelemetry";
 constexpr std::wstring_view kEngineSection = L"Engine.Engine";
+constexpr std::wstring_view kClassRedirectsKey = L"+ActiveClassRedirects";
+// UE3 requires a plain OldClassName and permits a qualified NewClassName.
+constexpr std::array<std::wstring_view, 4> kSprayAudioClassRedirects{
+    LR"((OldClassName="SprayActor_Flame",NewClassName="KF2OptimizerTelemetry.KF2OptimizerSprayActorFlame",InstanceOnly=true))",
+    LR"((OldClassName="SprayActor_Heal",NewClassName="KF2OptimizerTelemetry.KF2OptimizerSprayActorHeal",InstanceOnly=true))",
+    LR"((OldClassName="KFSprayActor_ArcGenerator",NewClassName="KF2OptimizerTelemetry.KF2OptimizerSprayActorArcGenerator",InstanceOnly=true))",
+    LR"((OldClassName="KFSprayActor_HRG_Vampire",NewClassName="KF2OptimizerTelemetry.KF2OptimizerSprayActorHrgVampire",InstanceOnly=true))",
+};
+constexpr std::array<std::wstring_view, 4> kSprayAudioStockClasses{
+    L"SprayActor_Flame", L"SprayActor_Heal",
+    L"KFSprayActor_ArcGenerator", L"KFSprayActor_HRG_Vampire"};
 constexpr std::wstring_view kViewportClientKey = L"GameViewportClientClassName";
 constexpr std::wstring_view kTelemetryViewportClient =
     L"KF2OptimizerTelemetry.KF2OptimizerTelemetryViewport";
@@ -92,6 +103,15 @@ std::wstring normalized_boolean(std::wstring value) {
         [](wchar_t character) { return !std::iswspace(character); }));
     value.erase(std::find_if(value.rbegin(), value.rend(),
         [](wchar_t character) { return !std::iswspace(character); }).base(),
+        value.end());
+    std::transform(value.begin(), value.end(), value.begin(),
+        [](wchar_t character) { return std::towlower(character); });
+    return value;
+}
+
+std::wstring normalized_redirect(std::wstring value) {
+    value.erase(std::remove_if(value.begin(), value.end(),
+        [](wchar_t character) { return std::iswspace(character); }),
         value.end());
     std::transform(value.begin(), value.end(), value.begin(),
         [](wchar_t character) { return std::towlower(character); });
@@ -523,6 +543,44 @@ Result<bool> enable_offline_gameplay_logging(
             {ErrorCode::invalid_argument,
              L"KF2 startup-package configuration is ambiguous", 0});
     }
+    bool spray_redirects_changed = false;
+    const auto existing_redirects = engine.value().find_all(
+        kEngineSection, kClassRedirectsKey);
+    for (std::size_t index = 0; index < kSprayAudioClassRedirects.size();
+         ++index) {
+        const auto redirect = kSprayAudioClassRedirects[index];
+        const auto wanted_redirect = normalized_boolean(
+            std::wstring{redirect});
+        const auto old_class_marker = normalized_redirect(
+            L"OldClassName=\"" + std::wstring{kSprayAudioStockClasses[index]} +
+            L"\"");
+        std::size_t exact_matches = 0;
+        for (const auto& existing : existing_redirects) {
+            if (normalized_boolean(existing) == wanted_redirect) {
+                ++exact_matches;
+            } else if (normalized_redirect(existing).find(old_class_marker) !=
+                       std::wstring::npos) {
+                return Result<bool>::failure(
+                    {ErrorCode::invalid_argument,
+                     L"KF2 spray-audio class redirect is owned by another provider",
+                     0});
+            }
+        }
+        if (exact_matches > 1) {
+            return Result<bool>::failure(
+                {ErrorCode::invalid_argument,
+                 L"KF2 spray-audio class redirect is duplicated", 0});
+        }
+        if (exact_matches == 1) continue;
+        const auto appended = engine.value().append_unique(
+            kEngineSection, kClassRedirectsKey, redirect);
+        if (appended.shadowed_occurrences != 0) {
+            return Result<bool>::failure(
+                {ErrorCode::invalid_argument,
+                 L"KF2 spray-audio class redirects are ambiguous", 0});
+        }
+        spray_redirects_changed = spray_redirects_changed || appended.changed;
+    }
     if (const auto current_stagger = engine.value().find(
             kTelemetrySection, kAdaptiveCorpseStaggerKey);
         current_stagger) {
@@ -652,6 +710,7 @@ Result<bool> enable_offline_gameplay_logging(
     const bool engine_changed = viewport_replaced.changed ||
         local_options_replaced.changed || runtime_path_appended.changed ||
         startup_package_removed.changed || stagger_replaced.changed ||
+        spray_redirects_changed ||
         runtime_enabled_replaced.changed || markers_replaced.changed ||
         zed_markers_replaced.changed || diagnostics_replaced.changed ||
         maximum_replaced.changed ||
@@ -714,6 +773,16 @@ Result<bool> enable_offline_gameplay_logging(
     const auto verified_viewport = verified_engine.has_value()
         ? verified_engine.value().find(kEngineSection, kViewportClientKey)
         : std::optional<std::wstring>{};
+    bool verified_spray_redirects = verified_engine.has_value();
+    if (verified_engine.has_value()) {
+        for (const auto redirect : kSprayAudioClassRedirects) {
+            auto document = verified_engine.value();
+            const auto present = document.remove_exact(
+                kEngineSection, kClassRedirectsKey, redirect);
+            verified_spray_redirects = verified_spray_redirects &&
+                present.changed && present.shadowed_occurrences == 0;
+        }
+    }
     const auto verified_local_options = verified_engine.has_value()
         ? verified_engine.value().find(kUrlSection, kLocalOptionsKey)
         : std::optional<std::wstring>{};
@@ -764,6 +833,7 @@ Result<bool> enable_offline_gameplay_logging(
                L"KF2 gameplay logging recovery baseline is missing", 0});
     if (!verified_engine.has_value() || !verified_viewport ||
         *verified_viewport != kGraphicsViewportClient ||
+        !verified_spray_redirects ||
         !verified_local_options || !verified_mutator_option.has_value() ||
         verified_mutator_option.value() != *verified_local_options ||
         !verified_runtime_path.changed ||
@@ -918,6 +988,29 @@ Result<bool> cleanup_stale_offline_gameplay_configuration(
     }
     changed = changed || legacy_runtime_path_removed.changed;
 
+    const auto existing_spray_redirects = engine.value().find_all(
+        kEngineSection, kClassRedirectsKey);
+    for (const auto redirect : kSprayAudioClassRedirects) {
+        const auto wanted_redirect = normalized_boolean(
+            std::wstring{redirect});
+        if (std::none_of(existing_spray_redirects.begin(),
+                         existing_spray_redirects.end(),
+                         [&wanted_redirect](const auto& existing) {
+                             return normalized_boolean(existing) ==
+                                 wanted_redirect;
+                         })) {
+            continue;
+        }
+        const auto removed_redirect = engine.value().remove_exact(
+            kEngineSection, kClassRedirectsKey, redirect);
+        if (removed_redirect.shadowed_occurrences != 0) {
+            return Result<bool>::failure(
+                {ErrorCode::invalid_argument,
+                 L"KF2 Optimizer spray-audio class redirect is ambiguous", 0});
+        }
+        changed = changed || removed_redirect.changed;
+    }
+
     const auto absolute_optimizer_script_path =
         (config_root.parent_path() / L"Published" / L"BrewedPC")
             .lexically_normal();
@@ -990,6 +1083,20 @@ Result<bool> cleanup_stale_offline_gameplay_configuration(
     if (!verified.has_value()) return Result<bool>::failure(verified.error());
     const auto verified_viewport = verified.value().find(
         kEngineSection, kViewportClientKey);
+    const auto remaining_spray_redirects = verified.value().find_all(
+        kEngineSection, kClassRedirectsKey);
+    const bool spray_redirects_removed = std::none_of(
+        remaining_spray_redirects.begin(), remaining_spray_redirects.end(),
+        [](const auto& existing) {
+            const auto normalized_existing = normalized_boolean(existing);
+            return std::any_of(kSprayAudioClassRedirects.begin(),
+                               kSprayAudioClassRedirects.end(),
+                               [&normalized_existing](const auto redirect) {
+                                   return normalized_boolean(
+                                              std::wstring{redirect}) ==
+                                       normalized_existing;
+                               });
+        });
     const auto verified_local_options = verified.value().find(
         kUrlSection, kLocalOptionsKey);
     const auto verified_cleaned_options = verified_local_options
@@ -1017,6 +1124,7 @@ Result<bool> cleanup_stale_offline_gameplay_configuration(
         (verified_viewport &&
          (*verified_viewport == kTelemetryViewportClient ||
           *verified_viewport == kGraphicsViewportClient)) ||
+        !spray_redirects_removed ||
         !verified_cleaned_options.has_value() ||
         (verified_local_options &&
          verified_cleaned_options.value() != *verified_local_options) ||

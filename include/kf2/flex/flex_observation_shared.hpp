@@ -5,11 +5,7 @@
 namespace kf2::flex {
 
 inline constexpr DWORD observation_magic = 0x314F464B; // KFO1
-inline constexpr DWORD observation_version = 10;
-
-[[nodiscard]] constexpr int fixed_minimum_substeps(int original) noexcept {
-    return original > 1 ? 1 : original;
-}
+inline constexpr DWORD observation_version = 11;
 
 struct alignas(8) ObservationShared {
     DWORD magic;
@@ -23,7 +19,6 @@ struct alignas(8) ObservationShared {
     volatile LONG min_substeps;
     volatile LONG max_substeps;
     volatile LONG last_delta_time_bits;
-    volatile LONG desired_substeps;
     volatile LONG last_forwarded_substeps;
     volatile LONG min_forwarded_substeps;
     volatile LONG max_forwarded_substeps;
@@ -31,8 +26,6 @@ struct alignas(8) ObservationShared {
     volatile LONGLONG destroy_calls;
     volatile LONGLONG successful_updates;
     volatile LONGLONG last_update_tick;
-    volatile LONGLONG control_heartbeat_tick;
-    volatile LONGLONG constrained_updates;
     volatile LONG last_active_particles;
     volatile LONG min_active_particles;
     volatile LONG max_active_particles;
@@ -75,6 +68,6 @@ struct alignas(8) ObservationShared {
     volatile LONG diagnostics_enabled;
 };
 
-static_assert(sizeof(ObservationShared) == 360);
+static_assert(sizeof(ObservationShared) == 336);
 
 }  // namespace kf2::flex

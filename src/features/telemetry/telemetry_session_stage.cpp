@@ -57,9 +57,6 @@ SessionStageResult inspect_bound_session(app::UiRuntime& runtime) {
             status.adaptive_runtime_corpse_limit.reset();
             status.adaptive_corpse_capability = L"UNAVAILABLE";
             status.adaptive_corpse_action_status = L"NONE";
-            status.flex_requested_substeps.reset();
-            status.flex_effective_substeps.reset();
-            status.flex_action_status = L"NONE";
             status.flex_capability = L"UNAVAILABLE";
             status.adaptive_particle_capability = L"UNAVAILABLE";
             runtime.model.set_status(std::move(status));
@@ -232,6 +229,11 @@ bool UiRuntime::set_live_adaptive_enabled(
     if (!installation) return true;
     const auto running = game::find_running_game_process(installation->executable);
     if (!running.has_value()) return running.error().code == ErrorCode::not_found;
+    if (!enabled) {
+        // Reserve the obligation before a failed send can trigger local reset.
+        adaptive_restore_debt = running.value();
+        adaptive_quality_state_known = false;
+    }
     if (!game::valid_adaptive_control_token(adaptive_control_token)) {
         return false;
     }
@@ -279,6 +281,7 @@ bool UiRuntime::set_live_adaptive_enabled(
     adaptive_runtime_mode_provider_generation =
         provider_session->optimizer_session_generation;
     adaptive_runtime_mode_port = port;
+    adaptive_runtime_mode_load_map_ns = provider_session->load_map_observed_ns;
     adaptive_runtime_mode_last_attempt_ns = monotonic_ns();
     adaptive_runtime_mode_confirmed = true;
     adaptive_runtime_mode_pending.reset();
@@ -290,7 +293,7 @@ bool UiRuntime::set_live_adaptive_enabled(
         std::wstring{reason} +
             (enabled
                 ? L"; KF2 confirmed that adaptive runtime control resumed"
-                : L"; KF2 confirmed release of adaptive graphics, Zed LOD and reversible corpse control; the independent fixed FleX limit is unchanged"),
+                : L"; KF2 confirmed release of adaptive graphics, Zed LOD and reversible corpse control; the protected optimized FleX runtime is unchanged"),
         L"optimizer"});
     return true;
 }
@@ -315,9 +318,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
             saved ? "FLEX_SESSION_SUMMARY" : "FLEX_SESSION_SAVE_FAILED",
             saved
                 ? L"FleX session completed: " + std::to_wstring(observed.update_calls) +
-                      L" successfully relayed solver updates, " +
-                      std::to_wstring(observed.constrained_updates) +
-                      L" materially changed; original substeps " +
+                      L" successfully relayed solver updates without substep rewriting; original substeps " +
                       std::to_wstring(observed.min_substeps) + L"-" +
                       std::to_wstring(observed.max_substeps) +
                       L", forwarded substeps " +
@@ -332,6 +333,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     present_session_restart_count = 0;
     if (present_source) static_cast<void>(present_source->stop());
     present_source.reset();
+    fps_statistics_session.reset();
     resource_telemetry_worker.clear();
     resource_telemetry_generation = 0;
     resource_telemetry_publication_sequence = 0;
@@ -362,6 +364,7 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
         adaptive_runtime_mode_process_start_id = 0;
         adaptive_runtime_mode_provider_generation.reset();
         adaptive_runtime_mode_port.reset();
+        adaptive_runtime_mode_load_map_ns = 0;
         adaptive_runtime_mode_last_attempt_ns = 0;
     }
     adaptive_runtime_mode_confirmed = false;
@@ -408,7 +411,6 @@ void UiRuntime::detach_telemetry(bool restore_live_quality) {
     flex_particle_text_current = false;
     last_flex_observation.reset();
     flex_observation_reader.reset();
-    flex_minimum_limited = false;
     game_process.reset();
     reset_game_process_discovery();
     game_log_startup_exited = false;
@@ -640,6 +642,7 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
     for (auto& chunk : chunks) {
         game_log_parser_stats = chunk.parser_stats;
         if (chunk.reset_parser) {
+            fps_statistics_session.reset();
             corpse_telemetry_tracker.reset();
             game_menu_graphics_readback.reset();
             overlay_scene_ready = false;
@@ -649,6 +652,7 @@ void UiRuntime::update_overlay_scene_gate(bool flush) {
             game_log_session.reset();
         }
         if (chunk.catching_up) {
+            fps_statistics_session.reset();
             // Neither the previous publication nor a partially replayed map
             // can authorize Adaptive actions while the log reader is behind.
             game_log_session.reset();
@@ -942,6 +946,23 @@ void UiRuntime::try_attach_telemetry() {
         game_process->pid != process.value().pid ||
         game_process->process_start_id != process.value().process_start_id;
     if (new_process) {
+        if (start_mode == StartMode::normal) {
+            const auto anchor = game::load_anchor_runtime(
+                process.value(), executable_root / L"Data" / L"Lab" /
+                    L"kf2_anchor_runtime.dll");
+            if (!anchor.has_value()) {
+                events->append({0, diagnostics::Severity::warning,
+                    "ANCHOR_RUNTIME_LOAD_FAILED", anchor.error().message,
+                    L"game"});
+            } else {
+                events->append({0, diagnostics::Severity::info,
+                    "ANCHOR_RUNTIME_LOADED",
+                    anchor.value() == game::AnchorRuntimeLoadState::loaded
+                        ? L"The independent native anchor runtime was loaded into the verified KF2 process"
+                        : L"The verified KF2 process already owns the independent native anchor runtime",
+                    L"game"});
+            }
+        }
         if (adaptive_restore_debt &&
             (adaptive_restore_debt->pid != process->pid ||
              adaptive_restore_debt->process_start_id != process->process_start_id)) {
@@ -1033,6 +1054,8 @@ void UiRuntime::try_attach_telemetry() {
     const telemetry::SampleIdentity identity{
         game_process->pid, game_process->process_start_id};
     present_source = std::make_unique<telemetry::PresentSource>(identity, 2400);
+    fps_statistics_session.reset();
+    present_source->set_statistics_boundary(std::nullopt);
     static_cast<void>(present_source->start());
     // Failed starts share the existing bounded silent-session retry clock.
     present_session_started_ns = monotonic_ns();

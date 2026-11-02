@@ -305,8 +305,8 @@ Result<Settings> parse_settings(std::string_view text) {
                 const auto parsed = parse_integer(value);
                 if (!parsed.has_value() || parsed.value() < 1 || parsed.value() > 5)
                     return invalid_settings(L"adaptive_flex_max_substeps is outside 1..5");
-                // Legacy user ceiling is accepted only for migration. The
-                // Adaptive controller owns the complete 1..5 range.
+                // Retired controller input is accepted only for migration.
+                // FleX remains user-owned and this value is not persisted.
             } else if (key == "manual_flex_substeps") {
                 const auto parsed = parse_integer(value);
                 if (!parsed.has_value() || parsed.value() < 1 || parsed.value() > 5)

@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <type_traits>
 
 #include "features/telemetry/telemetry_adaptive_stage.hpp"
 #include "features/telemetry/corpse_telemetry_state.hpp"
@@ -15,6 +16,10 @@
     } while (false)
 
 namespace {
+
+static_assert(std::is_invocable_r_v<kf2::game::AdaptiveResourceControl,
+    decltype(&kf2::telemetry_pipeline::adaptive_runtime_resource),
+    kf2::optimizer::ResourceKind, double>);
 
 bool approximately_equal(double left, double right) {
     return std::abs(left - right) < 0.0001;
@@ -85,16 +90,20 @@ kf2::telemetry_pipeline::TelemetryFrame complete_frame() {
     session.telemetry_corpse_awake = 5;
     session.telemetry_corpse_limit = 10;
     session.telemetry_gore_particles = 20;
-    session.telemetry_gore_particle_pool_capacity = 100;
+    session.telemetry_gore_particle_components = 40;
     session.telemetry_gore_particle_visible_components = 30;
     session.telemetry_gore_particle_bounded_components = 40;
     session.telemetry_world_particles = 30;
-    session.telemetry_world_particle_pool_capacity = 60;
+    session.telemetry_world_particle_components = 60;
     session.telemetry_world_particle_visible_components = 50;
     session.telemetry_world_particle_bounded_components = 60;
-    session.telemetry_ground_fire_particles = 25;
-    session.telemetry_impact_particles = 25;
-    session.telemetry_particle_peak_capacity = 100;
+    session.telemetry_ground_fire_particles = 10;
+    session.telemetry_impact_particles = 10;
+    session.telemetry_gore_particle_peak_capacity = 100;
+    session.telemetry_world_particle_peak_capacity = 60;
+    session.telemetry_gore_particle_peak_covered_components = 40;
+    session.telemetry_world_particle_peak_covered_components = 60;
+    session.telemetry_particle_peak_capacity = 160;
     session.telemetry_wound_decals = 10;
     session.telemetry_splatter_decals = 10;
     session.telemetry_pool_decals = 5;
@@ -316,6 +325,12 @@ int main() {
         provider_generation_7, provider_generation_8));
     CHECK(!adaptive_runtime_provider_changed(
         provider_generation_8, provider_generation_8));
+    auto same_name_travel = provider_generation_8;
+    same_name_travel.load_map_observed_ns = 123;
+    CHECK(adaptive_runtime_provider_changed(
+        provider_generation_8, same_name_travel));
+    CHECK(!adaptive_runtime_provider_changed(same_name_travel, same_name_travel));
+    CHECK(!adaptive_runtime_provider_changed(same_name_travel, provider_generation_8));
     CHECK(should_log_adaptive_decision(
         true, false, 1'000'000'000ULL, 900'000'000ULL));
     CHECK(should_log_adaptive_decision(
@@ -565,24 +580,93 @@ int main() {
     CHECK(approximately_equal(*sample.particle_pressure, 0.5));
     CHECK(sample.rendering_pressure.has_value());
     CHECK(approximately_equal(
-        *sample.rendering_pressure, std::sqrt(0.8)));
+        *sample.rendering_pressure, std::sqrt(0.3125 * 0.8)));
     CHECK(sample.quality_score == 80.0);
     CHECK(!sample.minimum_quality_reached);
 
     game::GameLogSession tiny_visible_particle_load;
     tiny_visible_particle_load.telemetry_gore_particles = 100;
     tiny_visible_particle_load.telemetry_world_particles = 0;
+    tiny_visible_particle_load.telemetry_gore_particle_components = 50;
+    tiny_visible_particle_load.telemetry_world_particle_components = 0;
+    tiny_visible_particle_load.telemetry_gore_particle_peak_capacity = 100;
+    tiny_visible_particle_load.telemetry_world_particle_peak_capacity = 0;
+    tiny_visible_particle_load.telemetry_gore_particle_peak_covered_components = 50;
+    tiny_visible_particle_load.telemetry_world_particle_peak_covered_components = 0;
     tiny_visible_particle_load.telemetry_ground_fire_particles = 0;
     tiny_visible_particle_load.telemetry_impact_particles = 0;
     tiny_visible_particle_load.telemetry_particle_peak_capacity = 100;
     tiny_visible_particle_load.telemetry_gore_particle_visible_components = 1;
     tiny_visible_particle_load.telemetry_world_particle_visible_components = 0;
     tiny_visible_particle_load.telemetry_gore_particle_bounded_components = 50;
-    tiny_visible_particle_load.telemetry_world_particle_bounded_components = 50;
+    tiny_visible_particle_load.telemetry_world_particle_bounded_components = 0;
     const auto tiny_overdraw = estimate_overdraw_pressure(
         tiny_visible_particle_load);
     CHECK(tiny_overdraw.has_value());
-    CHECK(approximately_equal(*tiny_overdraw, 0.1));
+    CHECK(approximately_equal(*tiny_overdraw, std::sqrt(0.02)));
+
+    game::GameLogSession decision_example;
+    decision_example.telemetry_gore_particles = 0;
+    decision_example.telemetry_gore_particle_components = 0;
+    decision_example.telemetry_gore_particle_peak_capacity = 0;
+    decision_example.telemetry_gore_particle_peak_covered_components = 0;
+    decision_example.telemetry_gore_particle_visible_components = 0;
+    decision_example.telemetry_gore_particle_bounded_components = 0;
+    decision_example.telemetry_world_particles = 20;
+    decision_example.telemetry_world_particle_components = 1;
+    decision_example.telemetry_world_particle_peak_capacity = 100;
+    decision_example.telemetry_world_particle_peak_covered_components = 1;
+    decision_example.telemetry_world_particle_visible_components = 1;
+    decision_example.telemetry_world_particle_bounded_components = 1;
+    decision_example.telemetry_ground_fire_particles = 10;
+    decision_example.telemetry_impact_particles = 5;
+    decision_example.telemetry_particle_peak_capacity = 100;
+    const auto corrected_overdraw = estimate_overdraw_pressure(
+        decision_example);
+    CHECK(corrected_overdraw.has_value());
+    CHECK(approximately_equal(*corrected_overdraw, std::sqrt(0.20)));
+
+    auto partial_particle_capacity = decision_example;
+    partial_particle_capacity.telemetry_world_particle_components = 2;
+    CHECK(!estimate_overdraw_pressure(partial_particle_capacity).has_value());
+    auto missing_particle_capacity = decision_example;
+    missing_particle_capacity.telemetry_world_particle_peak_capacity.reset();
+    CHECK(!estimate_overdraw_pressure(missing_particle_capacity).has_value());
+    auto zero_particle_capacity = decision_example;
+    zero_particle_capacity.telemetry_world_particle_peak_capacity = 0;
+    zero_particle_capacity.telemetry_particle_peak_capacity = 0;
+    CHECK(!estimate_overdraw_pressure(zero_particle_capacity).has_value());
+    const auto known_empty_particle_domain = normalized_particle_domain(
+        0, 0, 0, 0);
+    CHECK(known_empty_particle_domain.has_value());
+    CHECK(*known_empty_particle_domain == 0.0);
+
+    game::GameLogSession decal_only;
+    decal_only.telemetry_wound_decals = 5;
+    decal_only.telemetry_splatter_decals = 0;
+    decal_only.telemetry_pool_decals = 0;
+    decal_only.telemetry_impact_decals = 0;
+    decal_only.telemetry_explosion_decals = 0;
+    decal_only.telemetry_wound_decal_limit = 10;
+    decal_only.telemetry_splatter_decal_limit = 10;
+    decal_only.telemetry_pool_decal_limit = 10;
+    decal_only.telemetry_impact_decal_limit = 10;
+    decal_only.telemetry_explosion_decal_limit = 10;
+    const auto decal_fallback = estimate_overdraw_pressure(decal_only);
+    CHECK(decal_fallback.has_value());
+    CHECK(approximately_equal(*decal_fallback, 0.1));
+    auto dominant_decal = decision_example;
+    dominant_decal.telemetry_wound_decals = 10;
+    dominant_decal.telemetry_splatter_decals = 10;
+    dominant_decal.telemetry_pool_decals = 10;
+    dominant_decal.telemetry_impact_decals = 10;
+    dominant_decal.telemetry_explosion_decals = 10;
+    dominant_decal.telemetry_wound_decal_limit = 10;
+    dominant_decal.telemetry_splatter_decal_limit = 10;
+    dominant_decal.telemetry_pool_decal_limit = 10;
+    dominant_decal.telemetry_impact_decal_limit = 10;
+    dominant_decal.telemetry_explosion_decal_limit = 10;
+    CHECK(estimate_overdraw_pressure(dominant_decal) == 1.0);
 
     game::GameLogSession invalid_overdraw;
     invalid_overdraw.telemetry_wound_decals = -1;
@@ -725,8 +809,6 @@ int main() {
     post_map_quality.state = optimizer::AdaptiveControllerState::emergency;
     post_map_quality.primary_resource = optimizer::ResourceKind::unknown;
     post_map_quality.primary_confidence = 0.0;
-    post_map_quality.bottleneck = optimizer::AdaptiveBottleneck::unknown;
-    post_map_quality.bottleneck_confidence = 0.0;
     post_map_quality.map_ready_ns = 1'000'000'000ULL;
     CHECK(!select_adaptive_runtime_control(post_map_quality));
     post_map_quality.now_ns = 16'000'000'000ULL;
@@ -889,50 +971,29 @@ int main() {
     CHECK(fresh_sample.one_percent_low_fps == 60.0);
     CHECK(fresh_sample.stutter_count == 0);
     CHECK(!fresh_sample.sample_loss);
+    auto buffer_loss_context = fresh_context;
+    buffer_loss_context.decision_frames->quality = telemetry::SampleQuality::degraded;
+    CHECK(buffer_loss_context.decision_frames->loss_count == 0);
+    const auto buffer_loss_sample = build_adaptive_sample(frame, buffer_loss_context).sample;
+    CHECK(buffer_loss_sample.sample_loss);
+    CHECK(buffer_loss_sample.fps == fresh_sample.fps);
+    CHECK(buffer_loss_sample.capabilities.frame_timing ==
+          fresh_sample.capabilities.frame_timing);
     CHECK(!fresh_sample.discontinuity);
     CHECK(fresh_sample.timestamp_ns == frame.observed_at_ns);
     CHECK(frame.frames.one_percent_low_fps == 45.0);
 
-    control.bottleneck = optimizer::AdaptiveBottleneck::rendering;
-    control.bottleneck_confidence = 0.74;
     control.primary_resource = optimizer::ResourceKind::gpu;
     selected = select_adaptive_runtime_control(control);
     CHECK(selected.has_value());
     CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
     CHECK(selected->quality == 90);
-    control.overdraw_minimum_reached = true;
-    control.effects_control_available = true;
-    selected = select_adaptive_runtime_control(control);
-    CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
-    control.effects_control_available = false;
-    selected = select_adaptive_runtime_control(control);
-    CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
-    control.effects_control_available = true;
-    CHECK(selected->quality == 90);
-    control.overdraw_minimum_reached = false;
-    control.bottleneck = optimizer::AdaptiveBottleneck::gore;
-    control.bottleneck_confidence = 0.60;
-    selected = select_adaptive_runtime_control(control);
-    CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
-    control.bottleneck = optimizer::AdaptiveBottleneck::particles;
-    control.bottleneck_confidence = 0.64;
-    selected = select_adaptive_runtime_control(control);
-    CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
-    control.effects_control_available = false;
-    selected = select_adaptive_runtime_control(control);
-    CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
-    control.effects_control_available = true;
-    control.bottleneck_confidence = 0.50;
-    selected = select_adaptive_runtime_control(control);
-    CHECK(selected.has_value());
-    CHECK(selected->resource == game::AdaptiveResourceControl::gpu);
-    control.bottleneck = optimizer::AdaptiveBottleneck::unknown;
-    control.bottleneck_confidence = 0.0;
+    CHECK(adaptive_runtime_resource(optimizer::ResourceKind::gpu,
+        std::nextafter(0.55, 0.0)) == game::AdaptiveResourceControl::mixed);
+    CHECK(adaptive_runtime_resource(optimizer::ResourceKind::gpu, 0.55) ==
+          game::AdaptiveResourceControl::gpu);
+    CHECK(adaptive_runtime_resource(optimizer::ResourceKind::gpu,
+        std::nextafter(0.55, 1.0)) == game::AdaptiveResourceControl::gpu);
     control.primary_resource = optimizer::ResourceKind::cpu;
 
     control.current_frame_pressure = false;
@@ -1024,8 +1085,6 @@ int main() {
     control.verified_online_graphics = true;
     control.local_graphics_only = true;
     control.data_quality = optimizer::AdaptiveDataQuality::valid;
-    control.bottleneck = optimizer::AdaptiveBottleneck::unknown;
-    control.bottleneck_confidence = 0.0;
     control.state = optimizer::AdaptiveControllerState::intervention;
     control.current_quality = 100;
     control.recovery_eligible = false;

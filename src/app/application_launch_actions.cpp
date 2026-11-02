@@ -104,15 +104,6 @@ void enforce_async_physics_enabled(
         L"Enable asynchronous scene processing at KF2 startup");
 }
 
-void enforce_fixed_flex_substeps(
-    std::vector<config::RequestedChange>& changes,
-    bool fixed_flex_launch) {
-    if (!fixed_flex_launch) return;
-    upsert_startup_change(
-        changes, config::SettingId::max_physics_substeps, 1,
-        L"Use KF2's native one-substep physics ceiling for user-enabled FleX");
-}
-
 void enforce_one_frame_thread_lag(
     std::vector<config::RequestedChange>& changes) {
     upsert_startup_change(
@@ -138,7 +129,7 @@ void enforce_startup_memory_profile(
 }
 
 Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile(
-    bool fixed_flex_launch) try {
+    bool optimized_flex_launch) try {
     const auto apply_launch_preview = [this]() -> Result<config::ApplyResult> {
         if (!preview) {
             return Result<config::ApplyResult>::failure(
@@ -164,7 +155,6 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile(
             optimizer_settings.corpse_limit,
             config::ChangeSource::explicit_user,
             L"Keep the user-selected maximum corpse count while Adaptive optimization is off"}};
-        enforce_fixed_flex_substeps(changes, fixed_flex_launch);
         auto prepared = prepare(changes,
             L"Fixed user goals with Adaptive optimization off");
         if (!prepared.has_value()) {
@@ -175,8 +165,8 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile(
             last_backup_id = applied.value().backup.id;
             events->append({0, diagnostics::Severity::info,
                 "ADAPTIVE_LAUNCH_SKIPPED",
-                fixed_flex_launch
-                    ? L"Adaptive launch changes were skipped; the selected maximum corpse count, independent native FPS cap and native one-substep FleX ceiling remain active"
+                optimized_flex_launch
+                    ? L"Adaptive launch changes were skipped; the selected maximum corpse count, independent native FPS cap and protected optimized FleX runtime remain active"
                     : L"Adaptive launch changes were skipped; only the selected maximum corpse count and independent native FPS cap remain active",
                 L"optimizer"});
         }
@@ -200,7 +190,6 @@ Result<config::ApplyResult> UiRuntime::apply_adaptive_launch_profile(
         L"provider only reduces it during confirmed pressure"}};
     enforce_temporal_aa_disabled(changes);
     enforce_async_physics_enabled(changes);
-    enforce_fixed_flex_substeps(changes, fixed_flex_launch);
     enforce_one_frame_thread_lag(changes);
     std::optional<optimizer::StartupMemoryProfile> startup_memory_profile;
     std::wstring startup_memory_adapter_name;
@@ -360,7 +349,7 @@ Result<bool> UiRuntime::apply_overlay_compatible_display_mode() {
 }
 
 Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities(
-    bool fixed_flex_launch) {
+    bool optimized_flex_launch) {
     if (!installation || !session_config_snapshot) {
         return Result<bool>::failure({
             ErrorCode::invalid_argument,
@@ -368,8 +357,8 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities(
             0});
     }
 
-    if (fixed_flex_launch) {
-        const auto prepared = ensure_fixed_flex_runtime();
+    if (optimized_flex_launch) {
+        const auto prepared = ensure_optimized_flex_runtime();
         if (!prepared.has_value()) {
             return Result<bool>::failure(prepared.error());
         }
@@ -524,14 +513,14 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
             L"The user's captured KF2 FleX setting could not be verified",
             0}, L"The captured FleX setting was unavailable");
     }
-    const bool fixed_flex_launch = should_prepare_fixed_flex_runtime(
+    const bool optimized_flex_launch = should_prepare_optimized_flex_runtime(
         start_mode, *configured_physx_level);
 
 #if defined(KF2_APPLICATION_LAUNCH_TESTING)
     if (protected_launch_probe) protected_launch_probe(
         *this, ProtectedLaunchPreparationStage::launch_profile);
 #endif
-    const auto applied = apply_adaptive_launch_profile(fixed_flex_launch);
+    const auto applied = apply_adaptive_launch_profile(optimized_flex_launch);
     if (!applied.has_value()) {
         return fail_preparation(applied.error(),
             L"Automatic external-launch preparation failed");
@@ -550,7 +539,7 @@ Result<bool> UiRuntime::prepare_automatic_external_launch_profile() {
         *this, ProtectedLaunchPreparationStage::capabilities);
 #endif
     const auto capabilities =
-        prepare_automatic_protected_launch_capabilities(fixed_flex_launch);
+        prepare_automatic_protected_launch_capabilities(optimized_flex_launch);
     if (!capabilities.has_value()) {
         return fail_preparation(capabilities.error(),
             L"Automatic external-launch capability preparation failed");

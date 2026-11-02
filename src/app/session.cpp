@@ -5,6 +5,7 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <utility>
 
 #include "kf2/platform/windows/atomic_file.hpp"
 
@@ -69,12 +70,15 @@ Result<ParsedMarker> parse_marker(const std::string& text) {
     return Result<ParsedMarker>::success(marker);
 }
 
-std::string serialize_marker(SessionIdentity identity, bool clean) {
+Result<bool> write_marker(const std::filesystem::path& path,
+                          SessionIdentity identity, bool clean) {
     std::ostringstream output;
     output << "version=1\npid=" << identity.pid << "\nprocess_start_id="
            << identity.process_start_id << "\nclean_shutdown="
            << (clean ? "true" : "false") << '\n';
-    return output.str();
+    if (!output) return Result<bool>::failure({
+        ErrorCode::io_failure, L"Application session marker serialization failed", 0});
+    return platform::windows::atomic_replace_utf8(path, std::move(output).str());
 }
 
 }  // namespace
@@ -129,8 +133,7 @@ Result<SessionGuard> SessionGuard::start(
         }
     }
 
-    const auto written = platform::windows::atomic_replace_utf8(
-        marker_path, serialize_marker(identity, false));
+    const auto written = write_marker(marker_path, identity, false);
     if (!written.has_value()) {
         return Result<SessionGuard>::failure(written.error());
     }
@@ -143,8 +146,7 @@ bool SessionGuard::previous_session_unclean() const noexcept {
 }
 
 Result<bool> SessionGuard::mark_clean() {
-    return platform::windows::atomic_replace_utf8(
-        marker_path_, serialize_marker(identity_, true));
+    return write_marker(marker_path_, identity_, true);
 }
 
 }  // namespace kf2::app

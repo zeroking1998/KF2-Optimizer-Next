@@ -136,7 +136,7 @@ Result<Application> Application::start(const StartOptions& options) {
                         L"diagnostics"});
     }
     // An interrupted app process is diagnostic evidence, not by itself a
-    // recovery condition. The banner is reserved for a transaction, FleX lab
+    // recovery condition. The banner is reserved for a transaction, FleX runtime
     // or INI snapshot that cannot be safely verified or restored below.
     bool recovery_required = false;
     backup::BackupStore recovery_store{options.state_root};

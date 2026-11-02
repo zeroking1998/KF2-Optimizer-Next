@@ -11,6 +11,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "kf2/game/gameplay_log_lab.hpp"
@@ -61,7 +62,7 @@ bool adaptive_mode_preserves_graphics_receipt(std::string_view body) {
         count_occurrences(body, "AdaptiveGraphicsQuality =") == 1 &&
         count_occurrences(body, "AdaptiveGraphicsResource =") == 1 &&
         body.find("SetAdaptiveRuntimeEnabled") < body.find(reset) &&
-        body.find(reset) < body.find("AdaptiveLastControlSequence = Sequence;");
+        body.find(reset) < body.rfind("AdaptiveLastControlSequence = Sequence;");
 }
 
 bool online_enable_is_transactional(std::string_view body) {
@@ -645,6 +646,21 @@ int main() {
         read_bytes(KF2_FIRE_AFFLICTION_SOURCE));
     const auto weapon_fallback_source = normalize_newlines(
         read_bytes(KF2_WEAPON_FALLBACK_SOURCE));
+    struct SpraySource {
+        std::string wrapper_class;
+        std::string stock_class;
+        std::string source;
+    };
+    const std::array<SpraySource, 4> spray_sources{{
+        {"KF2OptimizerSprayActorFlame", "SprayActor_Flame",
+         normalize_newlines(read_bytes(KF2_SPRAY_FLAME_SOURCE))},
+        {"KF2OptimizerSprayActorHeal", "SprayActor_Heal",
+         normalize_newlines(read_bytes(KF2_SPRAY_HEAL_SOURCE))},
+        {"KF2OptimizerSprayActorArcGenerator", "KFSprayActor_ArcGenerator",
+         normalize_newlines(read_bytes(KF2_SPRAY_ARC_SOURCE))},
+        {"KF2OptimizerSprayActorHrgVampire", "KFSprayActor_HRG_Vampire",
+         normalize_newlines(read_bytes(KF2_SPRAY_VAMPIRE_SOURCE))},
+    }};
     const auto online_context_source = normalize_newlines(
         read_bytes(KF2_ONLINE_CONTEXT_INTERACTION_SOURCE));
     const auto graphics_viewport_source = normalize_newlines(
@@ -652,6 +668,18 @@ int main() {
     const auto listener_source = read_bytes(KF2_ADAPTIVE_LISTENER_SOURCE);
     const auto online_corpse_controller_source = normalize_newlines(
         read_bytes(KF2_ONLINE_CORPSE_CONTROLLER_SOURCE));
+    for (const auto& [wrapper_class, stock_class, source] : spray_sources) {
+        const auto expected =
+            "class " + wrapper_class + " extends " + stock_class + ";\n\n"
+            "simulated event Tick(float DeltaTime)\n"
+            "{\n"
+            "    super(KFSprayActor).Tick(DeltaTime);\n"
+            "}\n";
+        CHECK(source == expected);
+        CHECK(source.find("SetWeaponComponentRTPCValue") == std::string::npos);
+        CHECK(source.find("FlamethrowerRotation") == std::string::npos);
+        CHECK(source.find("RotationAudio") == std::string::npos);
+    }
     // UE3 Find preserves first Actor-identity match / absent=-1 semantics.
     // Require the exact native intrinsic, not another interpreted lookup loop.
     for (const auto expected : {
@@ -680,9 +708,9 @@ int main() {
     const auto telemetry_session_source = normalize_newlines(
         read_bytes(KF2_TELEMETRY_SESSION_SOURCE));
     const auto producer_schema_fields = telemetry_schema_fields(
-        telemetry_source, "KF2OPT_TELEMETRY schema=7 sample=", ");\n}");
+        telemetry_source, "KF2OPT_TELEMETRY schema=8 sample=", ");\n}");
     const auto parser_schema_fields = telemetry_schema_fields(
-        telemetry_parser_source, "KF2OPT_TELEMETRY schema=7 sample=",
+        telemetry_parser_source, "KF2OPT_TELEMETRY schema=8 sample=",
         "if (!sample");
     CHECK(!producer_schema_fields.empty());
     CHECK(producer_schema_fields == parser_schema_fields);
@@ -735,6 +763,19 @@ int main() {
           std::string::npos);
     CHECK(telemetry_source.find("var globalconfig bool bAdaptiveRuntimeEnabled") !=
           std::string::npos);
+    const auto telemetry_defaults_start =
+        telemetry_source.find("defaultproperties");
+    CHECK(telemetry_defaults_start != std::string::npos);
+    const auto telemetry_defaults =
+        telemetry_source.substr(telemetry_defaults_start);
+    for (const auto ignored_config_default : {
+             "bAdaptiveCorpseDebugMarkers=",
+             "bAdaptiveZedDebugMarkers=",
+             "bDetailedRuntimeDiagnostics=",
+             "bAdaptiveRuntimeEnabled="}) {
+        CHECK(telemetry_defaults.find(ignored_config_default) ==
+              std::string::npos);
+    }
     CHECK(telemetry_source.find("function bool SetAdaptiveRuntimeEnabled") !=
           std::string::npos);
     CHECK(telemetry_source.find("function int WakeAdaptiveDistanceSleptCorpseBatch") !=
@@ -849,7 +890,7 @@ int main() {
         "class'KF2OptimizerAdaptiveGraphics'.static.RestoreOriginal(",
         offline_disable_commit);
     const auto offline_disable_fixed = adaptive_disable_body.find(
-        "bFixedEffectsApplied = EnsureFixedSessionEffects();",
+        "bFixedEffectsApplied = bGraphicsRestored && EnsureFixedSessionEffects();",
         offline_disable_commit);
     const auto offline_disable_deferred = adaptive_disable_body.find(
         "readback=deferred", offline_disable_commit);
@@ -861,8 +902,57 @@ int main() {
     CHECK(offline_disable_commit < offline_disable_release);
     CHECK(offline_disable_release < offline_disable_restore);
     CHECK(offline_disable_restore < offline_disable_fixed);
+    // Mode-off and fixed-baseline success are not original-restore receipts.
+    // Bound this check to the deferred branch, not a later helper's return.
+    const auto offline_disable_verified = adaptive_disable_body.find(
+        "readback=verified", offline_disable_deferred);
+    CHECK(offline_disable_verified != std::string::npos);
     CHECK(adaptive_disable_body.find(
-        "return true;", offline_disable_deferred) != std::string::npos);
+        "return false;", offline_disable_deferred) < offline_disable_verified);
+    CHECK(adaptive_disable_body.find(
+        "return true;", offline_disable_deferred) > offline_disable_verified);
+    const auto disable_committed = adaptive_disable_body.find(
+        "bAdaptiveDisableCommittedForLastCommand = true;");
+    CHECK(offline_disable_release < disable_committed);
+    CHECK(disable_committed < offline_disable_restore);
+    const auto clear_disable_commit = adaptive_control_body.find(
+        "bAdaptiveDisableCommittedForLastCommand = false;");
+    CHECK(clear_disable_commit < adaptive_control_body.find(
+        "if (!ValidAdaptiveControlToken(Token)"));
+    CHECK(adaptive_control_body.find(
+        "if (!(Resource ~= \"disable\") && AdaptiveGraphicsState != None &&\n"
+        "        AdaptiveGraphicsState.bQualityRestorePending)") != std::string::npos);
+    const auto consume_disable = mode_body.find(
+        "if (bAdaptiveDisableCommittedForLastCommand)");
+    CHECK(mode_body.find("SetAdaptiveRuntimeEnabled(") < consume_disable);
+    CHECK(consume_disable < mode_body.find("AdaptiveLastControlSequence = Sequence;"));
+    CHECK(mode_body.find("AdaptiveLastControlSequence = Sequence;") <
+        mode_body.find("if (!bModeApplied)"));
+    CHECK(connection_source.find(
+        "if (Applied || (Resource ~= \"disable\" && Probe != None &&\n"
+        "        Probe.bAdaptiveDisableCommittedForLastCommand &&\n"
+        "        Probe.AdaptiveLastControlSequence == Sequence))") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "(!AdaptiveGraphicsState.bOriginalRestorePending &&\n"
+        "         AdaptiveGraphicsState.bQualityStateKnown)") != std::string::npos);
+    const auto original_restore_start = graphics_source.find(
+        "static function bool RestoreOriginal(");
+    const auto original_restore_end = graphics_source.find(
+        "static function string MenuReadback(", original_restore_start);
+    CHECK(original_restore_start != std::string::npos &&
+        original_restore_end != std::string::npos);
+    const auto original_restore_body = graphics_source.substr(
+        original_restore_start, original_restore_end - original_restore_start);
+    // Every failed original rollback, including the fixed-runtime failure
+    // path below, must retain this same process-owned obligation.
+    const auto original_mismatch = original_restore_body.find(
+        "if (!ReadbackMatches(Observed, Requested))");
+    const auto original_debt = original_restore_body.find(
+        "Snapshot.bOriginalRestorePending = true;", original_mismatch);
+    CHECK(original_mismatch < original_debt);
+    CHECK(original_debt < original_restore_body.find("return false;", original_mismatch));
+    CHECK(original_restore_body.find("return false;", original_mismatch) <
+        original_restore_body.rfind("Snapshot.bOriginalRestorePending = false;"));
     const auto fixed_effects_start = telemetry_source.find(
         "function bool EnsureFixedSessionEffects()");
     const auto restore_world_runtime_start = telemetry_source.find(
@@ -872,6 +962,15 @@ int main() {
     const auto fixed_effects_body = telemetry_source.substr(
         fixed_effects_start,
         restore_world_runtime_start - fixed_effects_start);
+    const auto retry_original = fixed_effects_body.find(
+        "AdaptiveGraphicsState.bOriginalRestorePending)");
+    const auto retry_original_readback = fixed_effects_body.find(
+        "RestoreOriginal(AdaptiveGraphicsState)", retry_original);
+    CHECK(retry_original < retry_original_readback);
+    CHECK(retry_original_readback < fixed_effects_body.find(
+        "if (bFixedSessionEffectsApplied)"));
+    CHECK(fixed_effects_body.find("return false;", retry_original_readback) <
+        fixed_effects_body.find("ApplyFixedSessionEffects("));
     CHECK(fixed_effects_body.find(
         "bGraphicsRestored = class'KF2OptimizerAdaptiveGraphics'.static.\n"
         "            RestoreOriginal(AdaptiveGraphicsState)") !=
@@ -973,7 +1072,7 @@ int main() {
         "TelemetryMaintenanceElapsedSeconds <\n"
         "        TelemetryMaintenanceIntervalSeconds");
     const auto telemetry_context_lookup = interaction_tick_body.find(
-        "GetStandaloneGameplayContext(PrimaryController, CurrentWorld)");
+        "GetStandaloneGameplayContext(PrimaryController, CurrentWorld, CurrentMapName)");
     const auto telemetry_probe_scan = interaction_tick_body.find(
         "CurrentWorld.DynamicActors(\n"
         "        class'KF2OptimizerTelemetryProbe'");
@@ -984,8 +1083,13 @@ int main() {
     CHECK(telemetry_context_lookup != std::string::npos);
     CHECK(telemetry_probe_scan != std::string::npos);
     CHECK(telemetry_listener_scan != std::string::npos);
-    CHECK(telemetry_cadence_guard < telemetry_context_lookup);
-    CHECK(telemetry_context_lookup < telemetry_probe_scan);
+    const auto telemetry_ui_observation = interaction_tick_body.find(
+        "UpdateGameplayUiState(PrimaryController);");
+    CHECK(telemetry_context_lookup < telemetry_ui_observation);
+    CHECK(telemetry_ui_observation < telemetry_cadence_guard);
+    CHECK(telemetry_cadence_guard < telemetry_probe_scan);
+    CHECK(count_occurrences(interaction_tick_body,
+        "UpdateGameplayUiState(PrimaryController);") == 1);
     CHECK(telemetry_probe_scan < telemetry_listener_scan);
     CHECK(interaction_tick_body.find(
         "ScheduleTelemetryMaintenance(true);") != std::string::npos);
@@ -1216,6 +1320,11 @@ int main() {
         "InsertInteraction(OnlineMonitor)") != std::string::npos);
     CHECK(online_context_source.find(
         "KF2OPT_SESSION_CONTEXT schema=2 state=") != std::string::npos);
+    const auto session_report = online_context_source.find("function ReportSessionContext(");
+    const auto session_return = online_context_source.find("return;", session_report);
+    const auto session_format = online_context_source.find('$', session_report);
+    CHECK(session_return < session_format);
+    CHECK(session_format < online_context_source.find("function ReportOnlineGameplayUiState("));
     CHECK(online_context_source.find("NM_Client") != std::string::npos);
     CHECK(online_context_source.find("online_client_read_only") !=
           std::string::npos);
@@ -1607,8 +1716,20 @@ int main() {
     CHECK(online_disable_sequence < online_disable_restore);
     CHECK(online_disable_restore < online_disable_fixed);
     CHECK(online_disable_fixed < online_disable_corpse_limit);
-    CHECK(online_disable_body.find(
-        "return bCorpseMaximumRestored;") != std::string::npos);
+    const auto online_disable_failure = online_disable_body.find(
+        "if (!bGraphicsRestored || !bFixedEffectsApplied ||\n"
+        "            !bCorpseMaximumRestored)");
+    const auto online_disable_verified = online_disable_body.find(
+        "state=disabled fixed_effect_quality=");
+    CHECK(online_disable_failure != std::string::npos);
+    CHECK(online_disable_verified != std::string::npos);
+    CHECK(online_disable_failure < online_disable_verified);
+    const auto online_disable_failure_body = online_disable_body.substr(
+        online_disable_failure, online_disable_verified - online_disable_failure);
+    CHECK(online_disable_failure_body.find("return false;") != std::string::npos);
+    CHECK(online_disable_failure_body.find("return true;") == std::string::npos);
+    CHECK(online_disable_failure_body.find("return bCorpseMaximumRestored;") ==
+          std::string::npos);
     CHECK(online_disable_body.find("readback=deferred") !=
           std::string::npos);
     CHECK(online_context_source.find(
@@ -1634,7 +1755,10 @@ int main() {
         "            class'KF2OptimizerAdaptiveControlListener'") !=
           std::string::npos);
     CHECK(online_context_source.find("SetTimer(") == std::string::npos);
-    CHECK(online_context_source.find("ConsoleCommand(") == std::string::npos);
+    CHECK(count_occurrences(online_context_source, "ConsoleCommand(") == 1);
+    CHECK(online_context_source.find(
+        "PrimaryController.ConsoleCommand(\"FLUSHLOG\", false);") !=
+          std::string::npos);
     CHECK(online_context_source.find(
         "function bool ApplyOnlineGraphicsControl(") != std::string::npos);
     CHECK(online_context_source.find(
@@ -2157,7 +2281,7 @@ int main() {
         "KFPC.MyGFxManager.CurrentMenu == KFPC.MyGFxManager.TraderMenu") !=
         std::string::npos);
     CHECK(interaction_source.find(
-        "ReportGameplayUiState(\"unavailable\")") != std::string::npos);
+        "ReportGameplayUiState(\"unavailable\", PrimaryController)") != std::string::npos);
     CHECK(online_context_source.find(
         "KF2OPT_GAMEPLAY_CONTEXT schema=2 state=") != std::string::npos);
     CHECK(online_context_source.find(
@@ -2175,6 +2299,26 @@ int main() {
     CHECK(online_context_source.find(
         "!(MapName ~= LastOnlineContextMapName)") != std::string::npos);
     CHECK(online_context_source.find("replication") == std::string::npos);
+    // Log emission alone cannot make a menu receipt visible to the tailer.
+    // Flush only after a deduplicated transition, never on unchanged ticks.
+    for (const auto& source : {interaction_source, online_context_source}) {
+        const auto report_start = source.find(
+            source == interaction_source
+                ? "function ReportGameplayUiState("
+                : "function ReportOnlineGameplayUiState(");
+        const auto report_end = source.find("\nfunction ", report_start + 1);
+        CHECK(report_start != std::string::npos);
+        CHECK(report_end != std::string::npos);
+        const auto report = source.substr(report_start, report_end - report_start);
+        const auto unchanged_return = report.find("return;");
+        const auto receipt = report.find("`log(\"KF2OPT_GAMEPLAY_CONTEXT");
+        const auto flush = report.find(
+            "PrimaryController.ConsoleCommand(\"FLUSHLOG\", false);");
+        CHECK(unchanged_return < receipt);
+        CHECK(receipt < flush && flush != std::string::npos);
+        CHECK(count_occurrences(source, "ConsoleCommand(\"FLUSHLOG\"") == 1);
+        CHECK(report.find("if (PrimaryController != None)", receipt) < flush);
+    }
     const auto online_tick = online_context_source.find(
         "event Tick(float DeltaTime)");
     const auto client_context = online_context_source.find(
@@ -2183,7 +2327,7 @@ int main() {
     const auto client_ui = online_context_source.find(
         "PrimaryController, \"NM_Client\", MapName)", client_context);
     const auto client_listener = online_context_source.find(
-        "EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController)",
+        "EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController, MapName)",
         client_ui);
     const auto listen_context = online_context_source.find(
         "\"online_host_read_only\", \"NM_ListenServer\", MapName)",
@@ -2275,9 +2419,9 @@ int main() {
     CHECK(interaction_source.find(
         "AchievementPrewarmRequestStartedRealTime = 0.0;",
         achievement_complete) < achievement_prewarm);
-    CHECK(interaction_source.find(
-        "TryPrewarmAchievements(PrimaryController);", interaction_tick) <
-        interaction_source.find("UpdateGameplayUiState(", interaction_tick));
+    CHECK(interaction_source.find("UpdateGameplayUiState(", interaction_tick) <
+        interaction_source.find(
+            "TryPrewarmAchievements(PrimaryController);", interaction_tick));
     CHECK(interaction_source.find(
         "bAchievementPrewarmRequested = false", prepare_for_world) <
         session_ended);
@@ -3325,6 +3469,40 @@ int main() {
     CHECK(telemetry_source.find(
         "function bool RememberAdaptiveDistanceSleepTransition(") !=
           std::string::npos);
+    const auto remember_transition_start = telemetry_source.find(
+        "function bool RememberAdaptiveDistanceSleepTransition(");
+    const auto remember_transition_end = telemetry_source.find(
+        "\nfunction ", remember_transition_start + 1);
+    CHECK(remember_transition_start != std::string::npos);
+    CHECK(remember_transition_end != std::string::npos);
+    const auto remember_transition_body = telemetry_source.substr(
+        remember_transition_start,
+        remember_transition_end - remember_transition_start);
+    CHECK(remember_transition_body.find("DistanceUnits") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "RememberAdaptiveDistanceSleepTransition(\n"
+        "            CorpseId, RemovalReason);") != std::string::npos);
+    const auto distance_sleep_remove_start = telemetry_source.find(
+        "function RemoveAdaptiveDistanceSleptCorpseEntry(");
+    const auto distance_sleep_remove_end = telemetry_source.find(
+        "\nfunction ", distance_sleep_remove_start + 1);
+    CHECK(distance_sleep_remove_start != std::string::npos);
+    CHECK(distance_sleep_remove_end != std::string::npos);
+    const auto distance_sleep_remove_body = telemetry_source.substr(
+        distance_sleep_remove_start,
+        distance_sleep_remove_end - distance_sleep_remove_start);
+    CHECK(distance_sleep_remove_body.find(
+        "if (bDetailedRuntimeDiagnostics)\n"
+        "        {\n"
+        "            DistanceUnits = "
+        "GetAdaptiveCorpseDistanceUnits(Candidate);\n"
+        "            EffectiveAwake = "
+        "GetAdaptiveCorpseEffectiveAwake(Candidate);") !=
+          std::string::npos);
+    CHECK(distance_sleep_remove_body.find(
+        "RememberAdaptiveDistanceSleepTransition(\n"
+        "            CorpseId, RemovalReason);") != std::string::npos);
     CHECK(telemetry_source.find(
         "AdaptiveDistanceSleepTransitions.Length = 8192") !=
           std::string::npos);
@@ -3405,8 +3583,36 @@ int main() {
     // actor-correlated receipts; the isolated living offscreen animation
     // policy adds two distance receipts.
     CHECK(count_occurrences(telemetry_source, "corpse_id=") == 24);
-    CHECK(count_occurrences(telemetry_source, " distance_units=") == 14);
-    CHECK(count_occurrences(telemetry_source, " distance_m=") == 14);
+    const auto distance_fields_start = telemetry_source.find(
+        "function string FormatAdaptiveCorpseDistanceLogFields(");
+    CHECK(distance_fields_start != std::string::npos);
+    const auto distance_fields_end = telemetry_source.find(
+        "\nfunction ", distance_fields_start + 1);
+    CHECK(distance_fields_end != std::string::npos);
+    const auto distance_fields = telemetry_source.substr(
+        distance_fields_start, distance_fields_end - distance_fields_start);
+    CHECK(count_occurrences(distance_fields,
+        "GetAdaptiveCorpseDistanceUnits(Candidate)") == 1);
+    CHECK(distance_fields.find(
+        "return \" distance_units=\"$DistanceUnits$\" distance_m=\"$\n"
+        "        FormatAdaptiveCorpseDistanceMeters(DistanceUnits, false);") !=
+          std::string::npos);
+    const auto shared_distance_receipts = count_occurrences(telemetry_source,
+        "FormatAdaptiveCorpseDistanceLogFields(Candidate)");
+    CHECK(shared_distance_receipts == 11);
+    CHECK(count_occurrences(telemetry_source, " distance_units=") - 1 +
+        shared_distance_receipts == 14);
+    CHECK(count_occurrences(telemetry_source, " distance_m=") - 1 +
+        shared_distance_receipts == 14);
+    for (auto log_start = telemetry_source.find("`log(");
+         log_start != std::string::npos;
+         log_start = telemetry_source.find("`log(", log_start + 1)) {
+        const auto log_end = telemetry_source.find(");", log_start);
+        CHECK(log_end != std::string::npos);
+        CHECK(count_occurrences(telemetry_source.substr(
+            log_start, log_end - log_start),
+            "GetAdaptiveCorpseDistanceUnits(Candidate)") <= 1);
+    }
     const auto distance_marker = telemetry_source.find(
         "FormatAdaptiveDebugMarkerAction(");
     CHECK(distance_marker != std::string::npos);
@@ -3872,7 +4078,7 @@ int main() {
     const auto profile_window_start = telemetry_source.find(
         "if (bDetailedRuntimeDiagnostics && SampleSequence % 10 == 0)");
     const auto profile_window_end = telemetry_source.find(
-        "`log(\"KF2OPT_TELEMETRY schema=7 sample=", profile_window_start);
+        "`log(\"KF2OPT_TELEMETRY schema=8 sample=", profile_window_start);
     CHECK(profile_window_start != std::string::npos);
     CHECK(profile_window_end != std::string::npos);
     const auto profile_window = telemetry_source.substr(
@@ -4069,6 +4275,33 @@ int main() {
     CHECK(count_occurrences(
         particle_inspection, "ParticleComponent.Template.Emitters.Length") ==
           1);
+    CHECK(particle_inspection.find(
+        "++PeakCapacityCoveredComponents;") != std::string::npos);
+    const auto particle_pool_start = telemetry_source.find(
+        "function CountParticlePool(");
+    const auto particle_pool_end = telemetry_source.find(
+        "event PreBeginPlay()", particle_pool_start);
+    CHECK(particle_pool_start != std::string::npos);
+    CHECK(particle_pool_end != std::string::npos);
+    const auto particle_pool = telemetry_source.substr(
+        particle_pool_start, particle_pool_end - particle_pool_start);
+    CHECK(particle_pool.find(
+        "InspectWorldEmitterParticleComponentCached(\n"
+        "            ParticleComponent, -1,") != std::string::npos);
+    CHECK(particle_pool.find("InspectParticleComponent(") ==
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "WorldParticles += GroundFireParticles;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "WorldParticles += ImpactParticles;") != std::string::npos);
+    CHECK(telemetry_source.find(
+        "WorldParticles += CachedWorldEmitters.Particles;") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "ParticlePeakCapacity = GoreParticlePeakCapacity + Min(") !=
+          std::string::npos);
+    CHECK(telemetry_source.find(
+        "ParticlePeakCapacity = Max(") == std::string::npos);
     CHECK(telemetry_source.find(
         "adaptive_controller_samples=") != std::string::npos);
     CHECK(telemetry_source.find(
@@ -4382,7 +4615,6 @@ int main() {
     for (const auto* old_manager_state : {
              "AdaptiveBaselineSettleEntries.Length = 0",
              "FixedMinimumCorpseLodCorpses.Length = 0",
-             "FixedMinimumLivingVisualZeds.Length = 0",
              "AdaptiveDistanceSleepTransitions.Length = 0",
              "AdaptiveCorpsePhysicsActionIds.Length = 0",
              "FixedMinimumLivingScanPawn = None"}) {
@@ -4756,6 +4988,106 @@ int main() {
     CHECK(living_apply_end != std::string::npos);
     const auto living_apply_body = telemetry_source.substr(
         living_apply_start, living_apply_end - living_apply_start);
+    // Original animation flags are actor-owned, not GoreManager-owned. Every
+    // retirement path must verify restore before removing their only copy.
+    const auto living_remove_start = telemetry_source.find(
+        "RemoveFixedMinimumLivingVisualEntry(");
+    const auto living_remove_end = telemetry_source.find(
+        "function bool RestoreLivingOffscreenAnimation(", living_remove_start);
+    CHECK(living_remove_start != std::string::npos);
+    CHECK(living_remove_end != std::string::npos);
+    const auto living_remove_body = telemetry_source.substr(
+        living_remove_start, living_remove_end - living_remove_start);
+    const auto restore_before_remove = living_remove_body.find(
+        "!RestoreLivingOffscreenAnimation(Index, Reason)");
+    const auto remove_original = living_remove_body.find(
+        "FixedMinimumLivingOriginalTickAnimOffscreen.Remove(LastIndex, 1)");
+    CHECK(restore_before_remove != std::string::npos);
+    CHECK(remove_original != std::string::npos);
+    CHECK(restore_before_remove < remove_original);
+    CHECK(living_remove_body.find("Candidate != None && !Candidate.bDeleteMe") <
+          restore_before_remove);
+    CHECK(living_remove_body.find("FixedMinimumLivingOffscreenAnimReduced[Index]") <
+          restore_before_remove);
+    CHECK(living_remove_body.find("Candidate.Mesh == None") == std::string::npos);
+    CHECK(living_remove_body.find("return false;", restore_before_remove) <
+          remove_original);
+    CHECK(living_remove_body.find(
+        "LastIndex = FixedMinimumLivingVisualZeds.Length - 1;") !=
+          std::string::npos);
+    CHECK(living_remove_body.find("if (Index != LastIndex)") !=
+          std::string::npos);
+    for (const auto* tracked_array : {
+             "FixedMinimumLivingVisualZeds",
+             "FixedMinimumLivingAppliedMinLods",
+             "FixedMinimumLivingAppliedAnimDistances",
+             "FixedMinimumLivingAppliedAnimRates",
+             "FixedMinimumLivingOriginalTickAnimOffscreen",
+             "FixedMinimumLivingOriginalUpdateSkelOffscreen",
+             "FixedMinimumLivingOffscreenAnimReduced"}) {
+        CHECK(living_remove_body.find(
+            std::string{tracked_array} + "[Index] =") != std::string::npos);
+        CHECK(living_remove_body.find(
+            std::string{tracked_array} + ".Remove(LastIndex, 1)") !=
+              std::string::npos);
+        CHECK(living_remove_body.find(
+            std::string{tracked_array} + ".Remove(Index, 1)") ==
+              std::string::npos);
+    }
+    CHECK(manager_retire_body.find("FixedMinimumLivingVisualZeds.Length = 0") ==
+          std::string::npos);
+    CHECK(manager_retire_body.find(
+        "FixedMinimumLivingOriginalTickAnimOffscreen.Length = 0") ==
+          std::string::npos);
+    CHECK(manager_retire_body.find(
+        "FixedMinimumLivingOriginalUpdateSkelOffscreen.Length = 0") ==
+          std::string::npos);
+    CHECK(manager_retire_body.find(
+        "FixedMinimumLivingOffscreenAnimReduced.Length = 0") ==
+          std::string::npos);
+    const auto living_prune_start = telemetry_source.find(
+        "function PruneFixedMinimumLivingVisualEntries()");
+    const auto living_prune_end = telemetry_source.find(
+        "function bool LivingOffscreenAnimationRequiresNativeTick(",
+        living_prune_start);
+    CHECK(living_prune_start != std::string::npos);
+    CHECK(living_prune_end != std::string::npos);
+    const auto living_prune_body = telemetry_source.substr(
+        living_prune_start, living_prune_end - living_prune_start);
+    CHECK(living_prune_body.find(
+        "bRemoved = RemoveFixedMinimumLivingVisualEntry(Index, \"not_alive\")") !=
+          std::string::npos);
+    CHECK(living_prune_body.find(
+        "bRemoved = RemoveFixedMinimumLivingVisualEntry(Index, \"native_visual_state\")") !=
+          std::string::npos);
+    const auto prune_advance = living_prune_body.find("if (!bRemoved)");
+    CHECK(prune_advance != std::string::npos);
+    CHECK(living_prune_body.find(
+        "(Index + 1) % FixedMinimumLivingVisualZeds.Length", prune_advance) !=
+          std::string::npos);
+    CHECK(living_prune_body.find(
+        "ScanBudget = Min(AdaptiveCorpseScanBudget, FixedMinimumLivingVisualZeds.Length)") !=
+          std::string::npos);
+    CHECK(living_prune_body.find("Scanned < ScanBudget") !=
+          std::string::npos);
+    CHECK(living_prune_body.find(
+        "Index = FixedMinimumLivingPruneCursor % FixedMinimumLivingVisualZeds.Length") !=
+          std::string::npos);
+    CHECK(living_apply_body.find(
+        "RemoveFixedMinimumLivingVisualEntry(EntryIndex, \"visual_readback\")") !=
+          std::string::npos);
+    for (const auto* reason : {"visible_or_gameplay", "native_override"}) {
+        const auto retry = living_apply_body.find(
+            "RestoreLivingOffscreenAnimation(EntryIndex, \"" +
+            std::string{reason} + "\")");
+        const auto skip_failed_restore = living_apply_body.find(
+            "ScanPawn = FixedMinimumLivingScanPawn;\n            continue;",
+            retry);
+        CHECK(retry != std::string::npos);
+        CHECK(skip_failed_restore != std::string::npos);
+        CHECK(skip_failed_restore < living_apply_body.find(
+            "bVisualChanged =", retry));
+    }
     CHECK(living_apply_body.find("WorldInfo.AllPawns") == std::string::npos);
     CHECK(living_apply_body.find(
         "FixedMinimumLivingScanPawn = ScanPawn.NextPawn") !=
@@ -4885,8 +5217,19 @@ int main() {
         "PruneFixedMinimumLivingVisualEntries();") != std::string::npos);
     CHECK(telemetry_source.find(
         "readback=verified", lod_apply) != std::string::npos);
+    const auto living_receipt = living_apply_body.find(
+        "KF2OPT_LIVING_VISUAL state=fixed_minimum");
+    CHECK(living_receipt != std::string::npos);
+    CHECK(living_apply_body.rfind(
+        "if (bDetailedRuntimeDiagnostics)", living_receipt) !=
+          std::string::npos);
     const auto lod_prune = telemetry_source.find(
         "function PruneFixedMinimumCorpseLodEntries()");
+    const auto lod_prune_end = telemetry_source.find(
+        "function int FindAdaptiveDistanceSleptCorpse(", lod_prune);
+    CHECK(lod_prune_end != std::string::npos);
+    const auto lod_prune_body = telemetry_source.substr(
+        lod_prune, lod_prune_end - lod_prune);
     const auto lod_native_reset = telemetry_source.find(
         "KF2OPT_CORPSE_LOD state=native_reset", lod_prune);
     const auto lod_unowned_state = telemetry_source.find(
@@ -4900,6 +5243,40 @@ int main() {
     CHECK(lod_unowned_state != std::string::npos);
     CHECK(lod_reapply_reason != std::string::npos);
     CHECK(lod_reason_receipt != std::string::npos);
+    CHECK(lod_prune_body.find(
+        "if (bDetailedRuntimeDiagnostics)\n"
+        "            {\n"
+        "                `log(\"KF2OPT_CORPSE_LOD state=native_reset") !=
+          std::string::npos);
+    const auto lod_apply_body = telemetry_source.substr(
+        lod_apply, telemetry_source.find(
+            "function int GetAdaptiveCorpseFramePressureLevel(", lod_apply) -
+            lod_apply);
+    CHECK(lod_apply_body.find(
+        "if (bDetailedRuntimeDiagnostics)\n"
+        "    {\n"
+        "        `log(\"KF2OPT_CORPSE_LOD state=fixed_minimum") !=
+          std::string::npos);
+    const auto capacity_update = telemetry_source.find(
+        "function AdjustAdaptiveCorpseCapacity(");
+    const auto capacity_update_end = telemetry_source.find(
+        "function bool StaggerCorpseCleanup()", capacity_update);
+    const auto offline_capacity_body = telemetry_source.substr(
+        capacity_update, capacity_update_end - capacity_update);
+    CHECK(offline_capacity_body.find(
+        "if (bDetailedRuntimeDiagnostics)\n"
+        "        {\n"
+        "            `log(\"KF2OPT_CORPSE_CAPACITY") !=
+          std::string::npos);
+    const auto stagger_end = telemetry_source.find(
+        "function int GetAdaptiveCorpseScenePressureLevel(",
+        capacity_update_end);
+    const auto stagger_body = telemetry_source.substr(
+        capacity_update_end, stagger_end - capacity_update_end);
+    CHECK(stagger_body.find(
+        "if (bDetailedRuntimeDiagnostics &&\n"
+        "            (AdaptiveCorpsesRemoved == 1 ||") !=
+          std::string::npos);
     CHECK(telemetry_source.find(
         "KF2OPT_CORPSE_LOD state=restored reason=near_player") ==
           std::string::npos);
@@ -5116,6 +5493,8 @@ int main() {
         "\r\n[Core.System]\r\n"
         "ScriptPaths=..\\..\\KFGame\\Script\r\n"
         "\r\n[Engine.Engine]\r\n"
+        "+ActiveClassRedirects=(OldClassName=\"Example.Old\","
+        "NewClassName=\"Example.New\",InstanceOnly=true)\r\n"
         "GameViewportClientClassName=KFGame.KFGameViewportClient\r\n"
         "\r\n[Engine.GameEngine]\r\n"
         "ServerActors=IpDrv.WebServer\r\n"
@@ -5146,6 +5525,17 @@ int main() {
         "GameViewportClientClassName=KF2OptimizerTelemetry."
         "KF2OptimizerGraphicsViewport\r\n") !=
           std::string::npos);
+    for (const auto redirect : {
+             "(OldClassName=\"SprayActor_Flame\",NewClassName=\"KF2OptimizerTelemetry.KF2OptimizerSprayActorFlame\",InstanceOnly=true)",
+             "(OldClassName=\"SprayActor_Heal\",NewClassName=\"KF2OptimizerTelemetry.KF2OptimizerSprayActorHeal\",InstanceOnly=true)",
+             "(OldClassName=\"KFSprayActor_ArcGenerator\",NewClassName=\"KF2OptimizerTelemetry.KF2OptimizerSprayActorArcGenerator\",InstanceOnly=true)",
+             "(OldClassName=\"KFSprayActor_HRG_Vampire\",NewClassName=\"KF2OptimizerTelemetry.KF2OptimizerSprayActorHrgVampire\",InstanceOnly=true)"}) {
+        CHECK(changed_engine.find(
+            "+ActiveClassRedirects=" + std::string{redirect} + "\r\n") !=
+              std::string::npos);
+    }
+    CHECK(count_occurrences(changed_engine,
+        "+ActiveClassRedirects=(OldClassName=\"") == 5);
     CHECK(changed_engine.find(
         "LocalOptions=?Mutator=KF2OptimizerTelemetry."
         "KF2OptimizerTelemetryMutator\r\n") != std::string::npos);
@@ -5284,11 +5674,52 @@ int main() {
     CHECK(cleaned_engine.find("[KF2OptimizerTelemetry.") ==
           std::string::npos);
     CHECK(cleaned_engine.find("AdaptiveControlToken=") == std::string::npos);
+    CHECK(cleaned_engine.find("KF2OptimizerSprayActor") == std::string::npos);
+    CHECK(cleaned_engine.find(
+        "+ActiveClassRedirects=(OldClassName=\"Example.Old\","
+        "NewClassName=\"Example.New\",InstanceOnly=true)\r\n") !=
+          std::string::npos);
     CHECK(read_bytes(game_ini) == original);
     const auto already_clean =
         kf2::game::cleanup_stale_offline_gameplay_configuration(root, false);
     CHECK(already_clean.has_value());
     CHECK(!already_clean.value());
+
+    std::string conflicting_redirect_engine{original_engine};
+    const auto redirect_insert = conflicting_redirect_engine.find(
+        "GameViewportClientClassName=");
+    CHECK(redirect_insert != std::string::npos);
+    conflicting_redirect_engine.insert(
+        redirect_insert,
+        "+ActiveClassRedirects=(OldClassName=\"SprayActor_Flame\","
+        "NewClassName=\"Example.CustomSpray\",InstanceOnly=true)\r\n");
+    write_bytes(engine_ini, conflicting_redirect_engine);
+    CHECK(!kf2::game::enable_offline_gameplay_logging(root).has_value());
+    CHECK(read_bytes(engine_ini) == conflicting_redirect_engine);
+
+    std::string duplicate_redirect_engine{original_engine};
+    const auto duplicate_insert = duplicate_redirect_engine.find(
+        "GameViewportClientClassName=");
+    CHECK(duplicate_insert != std::string::npos);
+    constexpr std::string_view duplicate_redirect =
+        "+ActiveClassRedirects=(OldClassName=\"SprayActor_Flame\","
+        "NewClassName=\"KF2OptimizerTelemetry.KF2OptimizerSprayActorFlame\","
+        "InstanceOnly=true)\r\n";
+    duplicate_redirect_engine.insert(duplicate_insert, duplicate_redirect);
+    duplicate_redirect_engine.insert(duplicate_insert, duplicate_redirect);
+    write_bytes(engine_ini, duplicate_redirect_engine);
+    CHECK(!kf2::game::enable_offline_gameplay_logging(root).has_value());
+    CHECK(read_bytes(engine_ini) == duplicate_redirect_engine);
+
+    constexpr std::string_view duplicate_native_engine_sections =
+        "[Engine.Engine]\r\nbUseTextureStreaming=True\r\n"
+        "[Engine.Engine]\r\nbCheckParticleRenderSize=True\r\n";
+    write_bytes(engine_ini, duplicate_native_engine_sections);
+    const auto untouched_duplicate_sections =
+        kf2::game::cleanup_stale_offline_gameplay_configuration(root, false);
+    CHECK(untouched_duplicate_sections.has_value());
+    CHECK(!untouched_duplicate_sections.value());
+    CHECK(read_bytes(engine_ini) == duplicate_native_engine_sections);
 
     constexpr std::string_view unowned_game =
         "[KFGameContent.KFGameInfo_Survival]\r\n"

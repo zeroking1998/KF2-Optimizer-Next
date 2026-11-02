@@ -31,7 +31,7 @@ Result<ConfigPreview> build_preview(
         }
         if (const auto request = selected.find(id); request != selected.end()) {
             if (const auto* value = std::get_if<int>(&request->second.value)) {
-                if (serialize_setting_value(*definition, request->second.value)) {
+                if (is_valid_setting_value(*definition, request->second.value)) {
                     return Result<int>::success(*value);
                 }
             }

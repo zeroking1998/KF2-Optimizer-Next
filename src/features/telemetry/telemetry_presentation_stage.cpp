@@ -461,12 +461,18 @@ void UiRuntime::append_gameplay_report_fields(
             report.impact_particle_components);
     include(session->telemetry_impact_particles,
             session->telemetry_observed_ns, report.impact_particles);
-    include(session->telemetry_gore_particle_pool_capacity,
+    include(session->telemetry_gore_particle_peak_capacity,
             session->telemetry_observed_ns,
-            report.gore_particle_pool_capacity);
-    include(session->telemetry_world_particle_pool_capacity,
+            report.gore_particle_peak_capacity);
+    include(session->telemetry_world_particle_peak_capacity,
             session->telemetry_observed_ns,
-            report.world_particle_pool_capacity);
+            report.world_particle_peak_capacity);
+    include(session->telemetry_gore_particle_peak_covered_components,
+            session->telemetry_observed_ns,
+            report.gore_particle_peak_covered_components);
+    include(session->telemetry_world_particle_peak_covered_components,
+            session->telemetry_observed_ns,
+            report.world_particle_peak_covered_components);
     include(session->telemetry_ground_fire_particle_pool_capacity,
             session->telemetry_observed_ns,
             report.ground_fire_particle_pool_capacity);

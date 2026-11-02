@@ -69,7 +69,7 @@ src/features/telemetry/
 The order is fixed: attach sources; refresh the process-bound session gate;
 observe FleX; inspect the exact window/process; drain native DXGI timing;
 capture one
-typed frame; decide/apply FleX control; evaluate Adaptive and its permitted
+typed frame; refresh FleX diagnostics; evaluate Adaptive and its permitted
 persistence; derive presentation; publish the model and overlay. Typed early
 outcomes stop the suffix when the session, Present stream, or completed frame
 is unavailable. FleX observation deliberately precedes every window and
@@ -85,7 +85,7 @@ resample. Only read-only last-completed diagnostic/report projections survive
 the tick, and they never feed a later decision.
 
 Runtime, configuration, and protected-session mutations are restricted to the
-effect stage: process-local FleX control, telemetry-confirmed temporary
+effect stage: the process-local FleX diagnostic switch, telemetry-confirmed temporary
 Adaptive actions with exact readback, and verified protected session
 restoration. Adaptive starts from the user's saved graphics and does not
 persist a named graphics profile for a later start. The FleX observation
@@ -245,9 +245,10 @@ the renderer lifetime; each brush belongs to its render target and is discarded
 with that target. Offscreen captures use their own target-bound brush.
 No legacy implementation is linked or copied.
 
-The optional FleX/runtime laboratory is integrated but default-off. Its
-read-only audit validates the actual x64 PE, full export surface and SHA-256
-without loading the DLL. The legacy writable hook remains discarded; the new
-minimal unchanged offline laboratory wrapper is isolated, transactional and gated because
-historical proxy has documented real `0xc0000005` failures, and is not required
-by telemetry, overlay, configuration safety or the optimizer.
+The optional optimized FleX runtime is prepared only when the user already
+enabled FleX in KF2. Its read-only audit validates the stock x64 PE, full export
+surface and SHA-256 without loading it. Exact stock Core/Extension files are
+transformed locally into the verified optimized pair, then installed with the
+project helper and observation-only relay as one reversible transaction. The
+relay forwards native substeps unchanged; Adaptive does not control FleX.
+Telemetry, overlay and configuration safety do not depend on this runtime.

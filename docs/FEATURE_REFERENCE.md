@@ -3,6 +3,7 @@
 | Feature | Purpose | Confirmation |
 |---|---|---|
 | Game discovery | Finds supported KF2 paths and identity | Unambiguous detected paths |
+| Local damage calculation | On supported KF2 builds, solo and listen hosts handle a hit from a controller whose pawn is gone | One `KF2OPT_DAMAGE_GUARD applied` receipt when installed |
 | Performance telemetry | Measures FPS, averages, 1% lows, frame time, CPU, GPU, and memory | Timestamped samples |
 | Adaptive controller | Selects bounded quality pressure from performance and scene evidence | Decision record, then action receipt if applied |
 | Adaptive on/off | Enables or disables automatic runtime adjustments without disabling monitoring or fixed user goals | Saved state plus exact runtime `APPLIED` receipt while KF2 is running |
@@ -16,10 +17,10 @@
 | Near Wake | Wakes a nearby previously slept corpse actor | Matching actor ID and `state=wake` receipt |
 | Ragdoll Sleep | Stops redundant active ragdoll simulation | Matching actor ID and Ragdoll Sleep receipt |
 | Scene-density control | Reduces active cosmetic work when many relevant actors are visible | Scene level plus confirmed actor/capacity actions |
-| Fixed FleX minimum | Keeps user-enabled FleX at one protected solver substep without Adaptive decisions | `FLEX_MINIMUM_APPLIED` readback |
+| Optimized FleX runtime | Reconstructs and installs the verified optimized Core/Extension/helper only when the user enabled FleX; restores the exact stock files after the session | Component hashes, pass-through health, transaction journal and exact restore |
 | Debug markers | Correlates corpse actions and visible living-Zed distances with metre values and Actor IDs | Optional next-session in-game markers plus session log |
 | FleX runtime diagnostics | Opt-in min/max substeps, solver/particle statistics, shared-memory health, reports, and extra logs without burdening the normal hot path | Debug-page live readback plus `flex-session-last.json` |
-| Runtime diagnostics | Opt-in corpse/Zed scan evidence, Adaptive decision history, overlay timing/redraw/window checks, prewarm file/cache evidence and detailed physics tick/collision/sleep/wake evidence; normal play keeps only control, progress and safety inputs | Debug-page state plus schema-7 samples and bounded native diagnostic summaries/events |
+| Runtime diagnostics | Opt-in corpse/Zed scan evidence, Adaptive decision history, overlay timing/redraw/window checks, prewarm file/cache evidence and detailed physics tick/collision/sleep/wake evidence; normal play keeps only control, progress and safety inputs | Debug-page state plus schema-8 samples and bounded native diagnostic summaries/events |
 | Diagnostics | Explains provider, identity, restore, and evidence status | Explicit checks and exported reports |
 
 ## Important distinctions
@@ -100,7 +101,7 @@ that deadline. Long evaluation pauses are measured against the existing
 The cached limit is display-only. App quality/corpse decisions and fallback selection
 pause during this grace period; cached values never produce an APPLIED receipt.
 This does not stop KF2's own simulation, its already-running provider, or the
-separate FleX controller using its own telemetry.
+separate optimized FleX runtime and its read-only observation telemetry.
 Expiry clears the displayed value to `UNAVAILABLE`. A newer valid readback
 restores `AVAILABLE`; process changes, provider replacement and rejected session
 boundaries discard the old cache. State events are emitted once per transition.

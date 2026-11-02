@@ -41,6 +41,7 @@ contributors do not need them.
 - [Function Matrix](function-matrix.md)
 - [Issue 72 Product Matrix](ISSUE_72_PRODUCT_MATRIX.md)
 - [Fixed FleX Runtime Scope](FLEX_RUNTIME_SCOPE.md)
+- [Optimized Original FleX Integration (draft)](FLEX_OPTIMIZED_INTEGRATION.md)
 - [Open-Source Checklist](OPEN_SOURCE_CHECKLIST.md)
 - [Changelog](../CHANGELOG.md)
 - [Roadmap](../ROADMAP.md)

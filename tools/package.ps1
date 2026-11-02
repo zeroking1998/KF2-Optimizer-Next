@@ -26,6 +26,8 @@ $knownManagedPaths = [Collections.Generic.HashSet[string]]::new(
 @(
     'KF2Optimizer.exe',
     'Data/Lab/flexRelease_x64.forwarder-lab.dll',
+    'Data/Lab/kf2_p4_overlap.dll',
+    'Data/Lab/kf2_anchor_runtime.dll',
     'Data/Lab/KF2OptimizerTelemetry.u',
     'Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md',
     'Data/Documentation/README.md',
@@ -147,14 +149,42 @@ if ($executableIdentity.source_identity -cne $commit -or
     $executableIdentity.channel -cne 'release') {
     throw 'Release executable source identity does not match the package; rebuild without -SkipBuild'
 }
+$releaseBuild = Join-Path $projectRoot 'out\build\windows-x64-release'
+# These four artifacts are package-owned prerequisites. Refresh them even
+# with -SkipBuild so an older helper or relay cannot accompany a current EXE.
+& cmake --build $releaseBuild --config Release --target `
+    KF2AnchorRuntime KF2FlexOptimizedHelper KF2FlexForwarder KF2InventoryExport
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $forwarder = Join-Path $projectRoot 'out\build\windows-x64-release\flexRelease_x64.forwarder-lab.dll'
 if (-not (Test-Path -LiteralPath $forwarder -PathType Leaf)) {
-    throw "Offline FleX laboratory forwarder is missing: $forwarder"
+    throw "FleX observation relay is missing: $forwarder"
 }
-# The exporter is excluded from normal app builds; refresh it even with SkipBuild.
-& cmake --build (Join-Path $projectRoot 'out\build\windows-x64-release') `
-    --config Release --target KF2InventoryExport
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$flexHelper = Join-Path $projectRoot `
+    'out\build\windows-x64-release\Release\kf2_p4_overlap.dll'
+if (-not (Test-Path -LiteralPath $flexHelper -PathType Leaf)) {
+    throw "Optimized FleX helper is missing: $flexHelper"
+}
+$anchorHelper = Join-Path $projectRoot `
+    'out\build\windows-x64-release\Release\kf2_anchor_runtime.dll'
+if (-not (Test-Path -LiteralPath $anchorHelper -PathType Leaf)) {
+    throw "Native anchor helper is missing: $anchorHelper"
+}
+$flexIdentityReader = Join-Path $PSScriptRoot `
+    'get_flex_artifact_source_identity.ps1'
+$forwarderIdentity = (& $flexIdentityReader -Artifact $forwarder).Trim()
+if ($forwarderIdentity -cne $commit) {
+    throw 'FleX observation relay source identity does not match the package; rebuild without -SkipBuild'
+}
+$flexHelperIdentity = (& $flexIdentityReader -Artifact $flexHelper).Trim()
+if ($flexHelperIdentity -cne $commit) {
+    throw 'Optimized FleX helper source identity does not match the package; rebuild without -SkipBuild'
+}
+$anchorIdentityReader = Join-Path $PSScriptRoot `
+    'get_anchor_artifact_source_identity.ps1'
+$anchorHelperIdentity = (& $anchorIdentityReader -Artifact $anchorHelper).Trim()
+if ($anchorHelperIdentity -cne $commit) {
+    throw 'Native anchor helper source identity does not match the package; rebuild without -SkipBuild'
+}
 $inventoryExporter = Join-Path $projectRoot `
     'out\build\windows-x64-release\Release\KF2InventoryExport.exe'
 if (-not (Test-Path -LiteralPath $inventoryExporter -PathType Leaf)) {
@@ -205,6 +235,10 @@ Copy-Item -LiteralPath $source -Destination (Join-Path $destinationRoot 'KF2Opti
 $labDirectory = Join-Path $destinationRoot 'Data\Lab'
 New-Item -ItemType Directory -Path $labDirectory -Force | Out-Null
 Copy-Item -LiteralPath $forwarder -Destination (Join-Path $labDirectory 'flexRelease_x64.forwarder-lab.dll') -Force
+Copy-Item -LiteralPath $flexHelper -Destination `
+    (Join-Path $labDirectory 'kf2_p4_overlap.dll') -Force
+Copy-Item -LiteralPath $anchorHelper -Destination `
+    (Join-Path $labDirectory 'kf2_anchor_runtime.dll') -Force
 Copy-Item -LiteralPath $telemetryModule -Destination `
     (Join-Path $labDirectory 'KF2OptimizerTelemetry.u') -Force
 $documentationDirectory = Join-Path $destinationRoot 'Data\Documentation'
@@ -239,6 +273,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $integrityPayloadFiles = @(
     'KF2Optimizer.exe',
     'Data/Lab/flexRelease_x64.forwarder-lab.dll',
+    'Data/Lab/kf2_p4_overlap.dll',
+    'Data/Lab/kf2_anchor_runtime.dll',
     'Data/Lab/KF2OptimizerTelemetry.u',
     'Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md',
     'Data/Documentation/README.md',
@@ -295,7 +331,16 @@ New-Item -ItemType Directory -Path (Split-Path -Parent $manifestPath) -Force |
 $packageManifest | ConvertTo-Json -Depth 4 |
     Set-Content -LiteralPath $manifestPath -Encoding utf8
 $hash = (Get-FileHash -LiteralPath (Join-Path $destinationRoot 'KF2Optimizer.exe') -Algorithm SHA256).Hash
+$forwarderHash = (Get-FileHash -LiteralPath (Join-Path $labDirectory `
+    'flexRelease_x64.forwarder-lab.dll') -Algorithm SHA256).Hash
+$flexHelperHash = (Get-FileHash -LiteralPath (Join-Path $labDirectory `
+    'kf2_p4_overlap.dll') -Algorithm SHA256).Hash
+$anchorHelperHash = (Get-FileHash -LiteralPath (Join-Path $labDirectory `
+    'kf2_anchor_runtime.dll') -Algorithm SHA256).Hash
 Write-Host "PASS: portable package created at $destinationRoot"
-Write-Host "SHA256: $hash"
+Write-Host "PACKAGE EXE SHA256: $hash"
+Write-Host "FLEX RELAY SHA256: $forwarderHash"
+Write-Host "FLEX HELPER SHA256: $flexHelperHash"
+Write-Host "ANCHOR HELPER SHA256: $anchorHelperHash"
 & (Join-Path $PSScriptRoot 'generate_release_evidence.ps1') -PackageRoot $destinationRoot
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

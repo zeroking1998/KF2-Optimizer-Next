@@ -1,12 +1,33 @@
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
+#include <new>
 #include <sstream>
 #include <set>
 #include <stdexcept>
 #include <string>
 
 #include "kf2/diagnostics/feature_inventory.hpp"
+
+int inventory_export_for_testing(int argc, wchar_t** argv);
+
+namespace {
+thread_local bool fail_inventory_growth{}, inventory_growth_failed{};
+}
+void* operator new(std::size_t size) {
+    if (fail_inventory_growth && size == 1024) {
+        fail_inventory_growth = false;
+        inventory_growth_failed = true;
+        throw std::bad_alloc{};
+    }
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 
 #define CHECK(x) do { if (!(x)) { std::cerr << __FILE__ << ':' << __LINE__      \
  << ": check failed: " #x << '\n'; return EXIT_FAILURE; } } while(false)
@@ -106,6 +127,57 @@ int main() {
     CHECK(json.find("\"linkage\":") != std::string::npos);
     CHECK(json.find("\"remaining_scope\":\"external_validation\"") !=
           std::string::npos);
+    bool serialization_failed = false;
+    std::size_t failed_bytes{};
+    fail_inventory_growth = true;
+    try {
+        failed_bytes = serialize_feature_inventory_json("test+abc", records).size();
+    } catch (...) {
+        serialization_failed = true;
+    }
+    fail_inventory_growth = false;
+    std::cout << "Inventory growth failure: injected=" << inventory_growth_failed
+              << "; rejected=" << serialization_failed
+              << "; returned bytes=" << failed_bytes << '\n';
+    CHECK(inventory_growth_failed && serialization_failed);
+    CHECK(serialize_feature_inventory_json("test+abc", records) == json);
+    namespace fs = std::filesystem;
+    const fs::path root{KF2_TEST_ROOT};
+    fs::create_directories(root);
+    const auto read_bytes = [](const fs::path& path) {
+        std::ifstream input{path, std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{input}, {}};
+    };
+    for (const bool existing : {true, false}) {
+        const auto path = root / (existing ? L"inventory.json" : L"missing.json");
+        if (!existing && fs::exists(path)) CHECK(fs::remove(path));
+        auto output_argument = path.wstring();
+        wchar_t program[] = L"inventory-test";
+        wchar_t identity[] = L"test+abc";
+        wchar_t* arguments[]{program, output_argument.data(), identity};
+        if (existing) CHECK(inventory_export_for_testing(3, arguments) == EXIT_SUCCESS);
+        inventory_growth_failed = false;
+        fail_inventory_growth = true;
+        const int result = inventory_export_for_testing(3, arguments);
+        fail_inventory_growth = false;
+        const bool injected = inventory_growth_failed;
+        const bool created = fs::exists(path);
+        const bool preserved = existing ? read_bytes(path) == json : !created;
+        // Restore the owned fixture before reporting a failed preservation check.
+        if (existing) {
+            CHECK(inventory_export_for_testing(3, arguments) == EXIT_SUCCESS);
+            CHECK(read_bytes(path) == json);
+        } else if (created) {
+            CHECK(fs::remove(path));
+        }
+        std::cout << "Inventory export failure: prior=" << existing
+                  << "; injected=" << injected << "; result=" << result
+                  << "; preserved=" << preserved << '\n';
+        CHECK(injected && result == EXIT_FAILURE && preserved);
+        CHECK(inventory_export_for_testing(3, arguments) == EXIT_SUCCESS);
+        CHECK(read_bytes(path) == json);
+        if (!existing) CHECK(fs::remove(path));
+    }
     const auto escaped = serialize_feature_inventory_json(
         "quote\"\\\nUnicode caf\xc3\xa9", {});
     CHECK(escaped ==

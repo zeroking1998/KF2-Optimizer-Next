@@ -22,6 +22,8 @@ public:
     [[nodiscard]] static Result<IniDocument> parse(std::string_view bytes);
     [[nodiscard]] std::optional<std::wstring> find(
         std::wstring_view section, std::wstring_view key) const;
+    [[nodiscard]] std::vector<std::wstring> find_all(
+        std::wstring_view section, std::wstring_view key) const;
     [[nodiscard]] ReplaceResult replace(std::wstring_view section,
                                         std::wstring_view key,
                                         std::wstring_view value);

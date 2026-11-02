@@ -539,10 +539,14 @@ void write_product_report(std::ostringstream& output, const ProductReport& repor
     optional_integer("impact_particle_components",
                      report.impact_particle_components);
     optional_integer("impact_particles", report.impact_particles);
-    optional_integer("gore_particle_pool_capacity",
-                     report.gore_particle_pool_capacity);
-    optional_integer("world_particle_pool_capacity",
-                     report.world_particle_pool_capacity);
+    optional_integer("gore_particle_peak_capacity",
+                     report.gore_particle_peak_capacity);
+    optional_integer("world_particle_peak_capacity",
+                     report.world_particle_peak_capacity);
+    optional_integer("gore_particle_peak_covered_components",
+                     report.gore_particle_peak_covered_components);
+    optional_integer("world_particle_peak_covered_components",
+                     report.world_particle_peak_covered_components);
     optional_integer("ground_fire_particle_pool_capacity",
                      report.ground_fire_particle_pool_capacity);
     optional_integer("impact_particle_pool_capacity",

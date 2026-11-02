@@ -17,8 +17,14 @@ $evidence = Join-Path $projectRoot 'out\release-evidence'
 New-Item -ItemType Directory -Path $evidence -Force | Out-Null
 $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
 $forwarder = Join-Path $root 'Data\Lab\flexRelease_x64.forwarder-lab.dll'
-if (-not (Test-Path -LiteralPath $forwarder -PathType Leaf)) { throw 'FleX laboratory forwarder missing' }
+if (-not (Test-Path -LiteralPath $forwarder -PathType Leaf)) { throw 'FleX observation relay missing' }
 $forwarderHash = (Get-FileHash -LiteralPath $forwarder -Algorithm SHA256).Hash
+$flexHelper = Join-Path $root 'Data\Lab\kf2_p4_overlap.dll'
+if (-not (Test-Path -LiteralPath $flexHelper -PathType Leaf)) { throw 'Optimized FleX helper missing' }
+$flexHelperHash = (Get-FileHash -LiteralPath $flexHelper -Algorithm SHA256).Hash
+$anchorHelper = Join-Path $root 'Data\Lab\kf2_anchor_runtime.dll'
+if (-not (Test-Path -LiteralPath $anchorHelper -PathType Leaf)) { throw 'Native anchor helper missing' }
+$anchorHelperHash = (Get-FileHash -LiteralPath $anchorHelper -Algorithm SHA256).Hash
 $telemetryModule = Join-Path $root 'Data\Lab\KF2OptimizerTelemetry.u'
 if (-not (Test-Path -LiteralPath $telemetryModule -PathType Leaf)) { throw 'Offline telemetry module missing' }
 $telemetryModuleHash = (Get-FileHash -LiteralPath $telemetryModule -Algorithm SHA256).Hash
@@ -50,11 +56,13 @@ $metadata = [ordered]@{
     commit = $commit
     working_tree_clean = $workingTreeClean
     source_identity = if ($workingTreeClean) { $commit } else { "$commit.dirty" }
-    package_sha256 = $hash
+    package_executable_sha256 = $hash
     generated_utc = [DateTime]::UtcNow.ToString('o')
     runtime_files = @(
         'KF2Optimizer.exe',
         'Data/Lab/flexRelease_x64.forwarder-lab.dll',
+        'Data/Lab/kf2_p4_overlap.dll',
+        'Data/Lab/kf2_anchor_runtime.dll',
         'Data/Lab/KF2OptimizerTelemetry.u',
         'Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md',
         'Data/Documentation/README.md',
@@ -74,10 +82,19 @@ $metadata = [ordered]@{
         machine_readable_sha256 = $inventoryJsonHash
     }
     flex_hook = [ordered]@{
-        mode = 'offline-laboratory-fail-closed'
-        installed_automatically = $false
+        mode = 'protected-optimized-user-enabled'
+        installed_automatically = $true
+        activation = 'only-when-user-enabled-in-kf2'
+        restoration = 'exact-stock-core-extension-and-preexisting-helper'
         abi_audit = '52 exports plus SHA-256'
         forwarder_sha256 = $forwarderHash
+        optimized_helper_sha256 = $flexHelperHash
+    }
+    anchor_runtime = [ordered]@{
+        mode = 'verified-process-loader'
+        activation = 'normal-session-independent-of-flex'
+        restoration = 'automatic-at-game-process-exit'
+        helper_sha256 = $anchorHelperHash
     }
     offline_gameplay_telemetry = [ordered]@{
         mode = 'offline-read-only-session'
@@ -87,6 +104,8 @@ $metadata = [ordered]@{
 }
 $metadata | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence 'RELEASE_METADATA.json') -Encoding utf8
 @("$hash  KF2Optimizer.exe", "$forwarderHash  Data/Lab/flexRelease_x64.forwarder-lab.dll", `
+  "$flexHelperHash  Data/Lab/kf2_p4_overlap.dll", `
+  "$anchorHelperHash  Data/Lab/kf2_anchor_runtime.dll", `
   "$telemetryModuleHash  Data/Lab/KF2OptimizerTelemetry.u", `
   "$inventoryHash  Data/Documentation/ISSUE_72_PRODUCT_MATRIX.md", `
   "$inventoryJsonHash  Data/Documentation/issue72-feature-inventory.json", `
@@ -99,7 +118,9 @@ $sbom = [ordered]@{
         licenses=@([ordered]@{ license=[ordered]@{ id='GPL-3.0-only' } })
     } }
     components = @(
-        [ordered]@{ type='library'; name='KF2 FleX offline laboratory forwarder'; scope='optional'; hashes=@([ordered]@{alg='SHA-256'; content=$forwarderHash}) }
+        [ordered]@{ type='library'; name='KF2 FleX protected observation relay'; scope='optional'; hashes=@([ordered]@{alg='SHA-256'; content=$forwarderHash}) }
+        [ordered]@{ type='library'; name='KF2 optimized FleX helper'; scope='optional'; hashes=@([ordered]@{alg='SHA-256'; content=$flexHelperHash}) }
+        [ordered]@{ type='library'; name='KF2 native anchor helper'; scope='optional'; hashes=@([ordered]@{alg='SHA-256'; content=$anchorHelperHash}) }
         [ordered]@{ type='file'; name='KF2 read-only offline telemetry package'; scope='optional'; hashes=@([ordered]@{alg='SHA-256'; content=$telemetryModuleHash}) }
         [ordered]@{ type='file'; name='Issue 72 function inventory'; scope='required'; hashes=@([ordered]@{alg='SHA-256'; content=$inventoryJsonHash}) }
     )

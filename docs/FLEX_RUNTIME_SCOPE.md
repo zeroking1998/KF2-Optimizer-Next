@@ -1,51 +1,53 @@
-# Native one-substep FleX scope
+# Optimized FleX runtime scope
 
 KF2's FleX choice remains owned by the user:
 
-- **Off:** no runtime hook is installed and FleX stays disabled.
-- **Gibs / Gibs and fluids:** the protected launch sets KF2's native
-  `MaxPhysicsSubsteps=1` ceiling. The verified runtime hook clamps only a rare
-  solver request above one that bypasses the native setting.
+- **Off:** no runtime replacement is prepared and FleX stays disabled.
+- **Gibs / Gibs and fluids:** the protected launch reconstructs the verified
+  optimized Core and Extension from the exact installed KF2 FleX files, then
+  installs the optimized pair and its project-built helper as one reversible
+  transaction.
 
-The fixed request is independent of Adaptive mode, target FPS, frame pressure,
-resource pressure and visible-enemy pressure. Adaptive never enables FleX and
-never raises or lowers its solver level.
+The optimizer never enables FleX, does not write `MaxPhysicsSubsteps`, and no
+longer clamps solver substeps in a relay. Solver cadence, fixed-time stepping,
+presentation interpolation and safe overlap are owned by the verified optimized
+runtime itself. This prevents two independent controllers from rewriting the
+same call.
 
-The hot update path has no warmup, heartbeat, solver-lock lookup or adaptive
-decision. It preserves values at or below one and converts only values above
-one to one before calling the original FleX runtime. The hook is installed only
-for user-enabled FleX and is restored after the protected session. Particle
-counts and capacity remain telemetry only; they do not imply a writable
-particle-budget, spawn, lifetime or fluid/non-fluid actuator.
+The small Core relay is observation-only. It forwards the native arguments
+unchanged, keeps the optimized Core loaded as `flexRelease_original.dll`, and
+publishes bounded health and optional diagnostic counters. The normal hot path
+does not perform Adaptive decisions, heartbeat checks, logging or file I/O.
 
-Solver creation, destruction and diagnostics-only active-count observations
-are rare and serialize in fixed storage so transient lock contention cannot
-drop an exact solver identity. Unknown identities or exhausted fixed storage
-remain permanently quarantined for the session. None of this adds locking to
-the update path.
+The optimized Core/Extension binary recipes are accepted only for the exact
+stock KF2 hashes and their output hashes are verified before installation.
+An already staged output with the exact verified target hash is reused; changed
+or incomplete output is reconstructed and atomically replaced.
+NVIDIA and game DLLs are not stored in the repository. The helper is built from
+project source. Installation requires KF2 to be stopped, verifies every source,
+uses staged atomic replacement, records installation ownership, and retains
+verified stock recovery copies. Game exit restores the exact stock Core and
+Extension and removes the known helper. Existing unknown files are never
+deleted. Startup recovery also understands the previous schema-3 relay journal
+and removes it safely before preparing the optimized runtime.
 
 Detailed FleX diagnostics are off by default and can be enabled from the Debug
-tab. Only that mode records min/max substeps, per-call solver/particle transfer
-statistics, detailed shared-memory readback, the session report and additional
-summary logging. The fixed clamp and minimal failure/readback counters remain
-active independently of diagnostics.
+tab. Only that mode records min/max input and forwarded substeps, solver and
+particle statistics, transfers, bounds, parameters, detailed shared-memory
+readback, the session report and additional summary logging. With diagnostics
+off, the relay retains only the minimal bounded health evidence needed to detect
+a broken native call.
 
 KF2's shipped FleX solver is CUDA/GPU based; the optimizer does not claim or
-provide a CPU solver. CPU-side submission, transfer and synchronization can
-still affect frame time, but those measurements do not change the fixed
-one-substep request.
+provide a CPU solver. CPU submission, transfer, synchronization, presentation
+and GPU scheduling can all affect frame time. The optimized runtime may reduce
+or overlap that work, but it does not infer living-enemy or corpse semantics
+from raw solver pointers. Corpse lifetime/count settings and living-enemy
+gameplay physics remain separate.
 
-`flexUpdateSolver(solver, deltaTime, substeps, timers)` contains no semantic
-label for a living enemy, an active corpse or an inactive corpse. The runtime
-therefore does not guess addresses or assign different values to those groups.
-Corpse lifetime/count settings remain separate and reversible; living-enemy
-gameplay physics is protected.
-
-The release test `kf2_flex_forwarder_fixed_minimum_test` loads the same
-forwarder source with test-only lock-control exports against an isolated
-original-DLL test double. It verifies that updates remain lock-free while rare
-lifecycle and diagnostics observations wait and recover exactly. It also
-verifies immediate one-substep clamping, independence from legacy heartbeat
-and control values, and exact preservation of values at or below one. Exact
-shared-memory readback is
-required before the app reports `FLEX_MINIMUM_APPLIED`.
+The release test `kf2_flex_forwarder_passthrough_test` verifies exact substep
+pass-through, lock-free solver updates, bounded lifecycle observation, optional
+diagnostics, warm export caching and native-completion publication. The FleX
+transaction and binary-delta tests verify exact reconstruction, all-component
+installation, rollback, owner binding, legacy recovery and byte-exact restore.
+A fresh gameplay run is still required for each newly packaged helper binary.

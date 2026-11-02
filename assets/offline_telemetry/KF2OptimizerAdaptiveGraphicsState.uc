@@ -4,6 +4,8 @@
 class KF2OptimizerAdaptiveGraphicsState extends Object;
 
 var bool bOriginalCaptured;
+// Original restoration is distinct from rollback to a previous composition.
+var bool bOriginalRestorePending;
 var int GpuQuality;
 var int CpuQuality;
 var int VramQuality;

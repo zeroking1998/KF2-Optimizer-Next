@@ -468,6 +468,10 @@ Result<RecoveryResult> recover_transactions(
         if (!regular_file || entry.path().extension() != L".journal") continue;
         const auto expected_id = entry.path().stem().string();
         auto journal_bytes = read_recovery_journal(entry.path());
+        if (!journal_bytes.has_value() &&
+            journal_bytes.error().native_code != ERROR_FILE_TOO_LARGE) {
+            return Result<RecoveryResult>::failure(journal_bytes.error());
+        }
         auto journal = journal_bytes.has_value()
             ? parse_journal(journal_bytes.value(), expected_id)
             : Result<RecoveryJournal>::failure(journal_bytes.error());

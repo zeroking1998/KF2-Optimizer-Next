@@ -34,6 +34,15 @@ live FPS, average FPS, 1% low FPS, frame time, CPU/GPU load, visible living
 actors, visible corpses, active corpses, distance, and Zed Time state. Every
 decision records the evidence window it used.
 
+Live FPS and frame time remain visible in menus. Rolling averages, 1% lows,
+percentiles and stutters count only confirmed gameplay, independently of
+Adaptive. Escape, open trader menus and loading reset that history; closing
+the trader menu during trader time resumes it. Missing history shows `—`.
+The boundary is the observed context receipt, not the exact keypress.
+Offline menu observation runs before the provider-maintenance cadence, including
+paused ticks. Both providers flush the existing local log only on a UI-context
+transition; ordinary telemetry logging and its buffering remain unchanged.
+
 ## 3. Performance pressure
 
 The controller combines complementary signals:
@@ -70,11 +79,21 @@ confirmed capped/variable mode change discards every mixed frame statistic and
 quality-response window before Adaptive can act again. The configured target
 FPS is preserved.
 
+Escape/trader pauses reset measurement windows, not confirmed live graphics,
+reduction floors or queued rollback. On a provider/world change, existing
+restoration debt protects any owned or uncertain composition until the current
+provider confirms an authenticated disable/APPLIED; only then may the saved
+Adaptive mode resume. Old-world replies cannot confirm the new provider.
+
 ## 5. Configuration actions
 
 Configuration changes are transactional: preview, backup, write, verify, and
 restore. Locked or unknown settings are filtered out. The exact pre-session
 snapshot is the restoration source of truth.
+
+Offline Adaptive-off commits mode release independently of graphics readback.
+Failed original restoration remains process-owned and unconfirmed; the existing
+baseline backoff retries originals before fixed effects can be composed again.
 
 The protected startup plan uses KF2's native configuration keys. It enables
 `bPhysicsAsyncScene`, `bEnableAsyncScene`, and `OneFrameThreadLag`; it does not
@@ -97,12 +116,14 @@ the fixed 800-unit player safety radius; pressure can change timing and
 eligibility outside that radius but cannot bypass it. Zed Time uses protected behavior so
 normal-speed thresholds are not applied blindly during slow motion.
 
-## 7. FleX actions
+## 7. FleX runtime
 
-FleX control is an optional, identity-gated laboratory feature. It begins in
-passthrough, uses bounded levels 1 through 5 when capability is confirmed, and
-reports an applied level only after matching readback. Releasing control returns
-to passthrough.
+FleX remains a user-owned KF2 choice. If it is disabled, the optimizer does
+nothing to FleX. If it is enabled, a protected launch reconstructs the verified
+optimized Core/Extension pair from the exact stock files, installs it with the
+project helper and observation-only relay, and restores the stock files after
+the session. The relay forwards substeps unchanged; Adaptive has no FleX level
+or solver-control policy.
 
 ## 8. Evidence and restoration
 
