@@ -29,7 +29,24 @@ int main() {
     CHECK(setting_token(SettingId::corpse_limit) == "MaxDeadBodies");
     CHECK(find_setting_by_token("DynamicShadows") != nullptr);
     CHECK(find_setting_by_token("MinSmoothedFrameRate") != nullptr);
-    CHECK(find_setting_by_token("ParticleLODBias") != nullptr);
+    const auto* particle_bias = find_setting_by_token("ParticleLODBias");
+    CHECK(particle_bias != nullptr);
+    for (int bias = 0; bias <= 5; ++bias) {
+        CHECK(parse_setting_value(*particle_bias, std::to_wstring(bias)) == SettingValue{bias});
+    }
+    CHECK(!parse_setting_value(*particle_bias, L"-1"));
+    CHECK(!parse_setting_value(*particle_bias, L"6"));
+    const auto* min_shadow = find_setting_by_token("MinShadowResolution");
+    const auto* shadow_fade = find_setting_by_token("ShadowFadeResolution");
+    CHECK(min_shadow && shadow_fade);
+    for (int value : {48, 80, 112}) {
+        CHECK(parse_setting_value(*min_shadow, std::to_wstring(value)) == SettingValue{value});
+    }
+    for (int value : {96, 160, 224}) {
+        CHECK(parse_setting_value(*shadow_fade, std::to_wstring(value)) == SettingValue{value});
+    }
+    CHECK(!parse_setting_value(*min_shadow, L"49"));
+    CHECK(!parse_setting_value(*shadow_fade, L"97"));
     CHECK(find_setting_by_token("SkeletalMeshLODBias") != nullptr);
     CHECK(find_setting_by_token("MaxDrawDistanceScale") != nullptr);
     CHECK(find_setting_by_token("ShouldCorpseCollideWithLiving") != nullptr);
