@@ -197,7 +197,7 @@ struct UiRuntime {
         frame_rate_cap_sync_for_testing;
 #endif
     PendingPolicyRestageOperation pending_policy_restage_operation{
-        game::enable_offline_gameplay_logging};
+        [](const auto&... args) { return game::enable_offline_gameplay_logging(args...); }};
     std::optional<config::ConfigPreview> preview;
     std::wstring preview_context{L"Verified configuration changes"};
     std::string last_backup_id;

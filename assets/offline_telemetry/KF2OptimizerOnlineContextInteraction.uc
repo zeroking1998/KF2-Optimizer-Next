@@ -10,6 +10,7 @@ const OnlineCorpseScanBudget=64;
 var string LastReportedSessionState;
 var string LastReportedSessionNetMode;
 var private bool bCheckedLocalDamageGuard;
+var private ZedAutoMode ZedFixes;
 var string LastReportedSessionMap;
 var int LastReportedSessionGeneration;
 var string LastReportedGameplayUiState;
@@ -855,6 +856,7 @@ function NotifyGameSessionEnded()
     local KF2OptimizerOnlineCorpseController CurrentController;
     local WorldInfo CurrentWorld;
 
+    ResetZedFixes();
     bOnlineSessionEnding = true;
     OnlineSessionEndingMapName = OnlineGraphicsListenerMapName;
     if (!GetOnlineWorld(CurrentWorld))
@@ -879,6 +881,15 @@ function NotifyGameSessionEnded()
     RestoreOnlineSessionState(CurrentWorld, "session_end");
 }
 
+private function ResetZedFixes()
+{
+    if (ZedFixes != none)
+    {
+        ZedFixes.UpdateMode(NM_Standalone, false);
+        ZedFixes = none;
+    }
+}
+
 function ReportSessionContext(
     string State, string NetModeName, string MapName)
 {
@@ -900,6 +911,13 @@ function ReportSessionContext(
         {
             `log("KF2OPT_DAMAGE_GUARD applied");
         }
+    }
+    if (class'KF2OptimizerTelemetryProbe'.default.bVerifiedZedFixes &&
+        GetEngineVersion() == 10897 && GetBuildChangelistNumber() == 1532151)
+    {
+        if (ZedFixes == none)
+            ZedFixes = new(self) class'ZedAutoMode';
+        ZedFixes.UpdateMode(GamePlayers[0].Actor.WorldInfo.NetMode, true);
     }
     LastReportedSessionState = State;
     LastReportedSessionNetMode = NetModeName;
@@ -1045,6 +1063,7 @@ event Tick(float DeltaTime)
     }
     if (MapName ~= "KFMainMenu")
     {
+        if (ZedFixes != none) ResetZedFixes();
         RestoreOnlineGraphicsAtMainMenu(CurrentWorld);
         LastReportedSessionState = "";
         LastReportedGameplayUiState = "";

@@ -3,6 +3,8 @@
 #include "kf2/config/startup_movies.hpp"
 #include "kf2/optimizer/startup_gpu_profile.hpp"
 
+#include "kf2/security/sha256.hpp"
+
 #include <algorithm>
 #include <new>
 
@@ -13,6 +15,18 @@ namespace {
 void (*launch_change_probe)(config::SettingId, std::size_t){};
 void (*protected_launch_probe)(UiRuntime&, ProtectedLaunchPreparationStage){};
 #endif
+
+// The eight script replacements are bound to the Win64 v1150 function layouts.
+bool supports_zed_fixes(const game::GameInstallation& installation) {
+    const auto matches = [](const std::filesystem::path& path, std::string_view expected) {
+        const auto hash = security::sha256_file_hex(path);
+        return hash.has_value() && hash.value() == expected;
+    };
+    const auto scripts = installation.install_root / L"KFGame" / L"BrewedPC";
+    return matches(installation.executable, "77ab9c2cf43aeaa3038274fff3822064815a3ea02a1b3c81870cdc12a885c994") &&
+        matches(scripts / L"KFGame.u", "861dfe39f554c9ca7037f39a4bc2ed14ef304289abdc55502651434a32dc1755") &&
+        matches(scripts / L"KFGameContent.u", "8877b1f1425301d1a9343ddfb3ff78a7f80d14b603c85a5f61be2ce74cf5c168");
+}
 
 void upsert_startup_change(
     std::vector<config::RequestedChange>& changes, config::SettingId id,
@@ -406,7 +420,7 @@ Result<bool> UiRuntime::prepare_automatic_protected_launch_capabilities(
         optimizer_settings.adaptive_quality_change_budget,
         adaptive_control_token, optimizer_settings.debug_zed_markers,
         optimizer_settings.adaptive_optimization_enabled,
-        optimizer_settings.debug_runtime_diagnostics);
+        optimizer_settings.debug_runtime_diagnostics, supports_zed_fixes(*installation));
     if (!enabled.has_value()) {
         adaptive_control_token.clear();
         return Result<bool>::failure(enabled.error());

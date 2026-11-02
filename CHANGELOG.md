@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Automatically enable eight Zed optimizations in solo play on the verified KF2 build.
+  When joining or hosting a listen server, only the local sprint-audio fix is enabled.
+
 - Decouple flame, healing, Arc Generator and HRG Vampire spray-rotation audio
   from render FPS. The stock spray simulation and visuals still tick normally,
   while the Wwise RTPC is published at most 30 times per real-time second with

@@ -236,6 +236,7 @@ var globalconfig bool bAdaptiveRuntimeEnabled;
 var globalconfig bool bAdaptiveCorpseDebugMarkers;
 var globalconfig bool bAdaptiveZedDebugMarkers;
 var globalconfig bool bDetailedRuntimeDiagnostics;
+var globalconfig bool bVerifiedZedFixes;
 var globalconfig int AdaptiveCorpseMaximum;
 var globalconfig int AdaptiveTargetFPS;
 var globalconfig int AdaptiveQualityChangeBudget;

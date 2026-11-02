@@ -387,7 +387,7 @@ Result<bool> enable_offline_gameplay_logging(
     std::string_view adaptive_control_token,
     bool adaptive_zed_debug_markers,
     bool adaptive_runtime_enabled,
-    bool detailed_runtime_diagnostics) {
+    bool detailed_runtime_diagnostics, std::optional<bool> verified_zed_fixes) {
     if (config_root.empty() || !config_root.is_absolute()) {
         return Result<bool>::failure(
             {ErrorCode::invalid_argument,
@@ -682,6 +682,11 @@ Result<bool> enable_offline_gameplay_logging(
             {ErrorCode::invalid_argument,
              L"Detailed runtime-diagnostics setting is ambiguous", 0});
     }
+    constexpr std::wstring_view zed_fixes_key = L"bVerifiedZedFixes";
+    const std::wstring zed_fixes_value = verified_zed_fixes.value_or(false) ? L"True" : L"False";
+    if (verified_zed_fixes && engine.value().upsert(kTelemetrySection, zed_fixes_key, zed_fixes_value).shadowed_occurrences != 0) {
+        return Result<bool>::failure({ErrorCode::invalid_argument, L"Ambiguous Zed fix setting", 0});
+    }
     const auto target_replaced = engine.value().upsert(
         kTelemetrySection, kAdaptiveTargetFpsKey,
         std::to_wstring(adaptive_target_fps));
@@ -832,6 +837,7 @@ Result<bool> enable_offline_gameplay_logging(
               {ErrorCode::not_found,
                L"KF2 gameplay logging recovery baseline is missing", 0});
     if (!verified_engine.has_value() || !verified_viewport ||
+        (verified_zed_fixes && verified_engine.value().find(kTelemetrySection, zed_fixes_key) != zed_fixes_value) ||
         *verified_viewport != kGraphicsViewportClient ||
         !verified_spray_redirects ||
         !verified_local_options || !verified_mutator_option.has_value() ||

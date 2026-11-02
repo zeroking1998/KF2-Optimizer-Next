@@ -4,13 +4,18 @@ class KF2OptimizerDamageGuard extends Object;
 // KF2 Win64 10897 / CL 1532151. UObject ends at 0x60; the VM reads
 // UStruct.Script at 0x8c (data) and 0x94 (length), with four-byte packing.
 var private byte PaddingToScript[41];
-var private array<byte> script;
+var array<byte> script;
 
 // The SDK build binds the return cast to the same Core.Function type as FindObject.
-// Only these two named functions may be viewed through the layout above.
+// Both accessors use a typed Core.Function lookup.
 static private final function KF2OptimizerDamageGuard ScriptView(bool Target)
 {
     return KF2OptimizerDamageGuard(FindObject(Target ? "KFGame.KFPawn.AdjustDamage" : "KF2OptimizerTelemetry.KF2OptimizerDamageGuard.IsHuman", class'Core.Function'));
+}
+
+static final function KF2OptimizerDamageGuard Resolve(string FunctionPath)
+{
+    return KF2OptimizerDamageGuard(FindObject(FunctionPath, class'Core.Function'));
 }
 
 // Supplies the linked UClass and FName for this process. The game never calls

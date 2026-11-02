@@ -229,6 +229,8 @@ try {
         (Join-Path $classesRoot 'KF2OptimizerSprayActorArcGenerator.uc')
     Copy-Item -LiteralPath $sprayVampireSource -Destination `
         (Join-Path $classesRoot 'KF2OptimizerSprayActorHrgVampire.uc')
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'assets/offline_telemetry/ZedAutoMode.uc') -Destination $classesRoot
+    & (Join-Path $PSScriptRoot 'stage_zed_donors.ps1') -SdkRoot $resolvedSdkRoot -Destination $classesRoot
     # KFEditor uses source timestamps for its incremental make decision. Touch
     # only the disposable staging copies so a missing output is really rebuilt.
     # Copying the bootstrap package can give it the current timestamp on some
