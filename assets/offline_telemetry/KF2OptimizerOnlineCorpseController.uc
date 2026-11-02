@@ -24,7 +24,8 @@ var int FixedMinimumCorpseLodScanCursor;
 var int SleepingCorpseSkeletonScanCursor;
 var int VisualControlPhase;
 var float LastPhysicsMutationRealTime;
-var float LastVisualMutationRealTime;
+var float LastFreezeScanRealTime;
+var float LastVisualScanRealTime;
 var bool bFreezeReceiptReported;
 var bool bRestoreReceiptReported;
 var bool bLodReceiptReported;
@@ -309,10 +310,13 @@ function bool FreezeOneOnlineCorpse()
     local OnlineFrozenCorpseState Original;
 
     if (WorldInfo == None ||
-        WorldInfo.RealTimeSeconds - LastPhysicsMutationRealTime < 0.45)
+        WorldInfo.RealTimeSeconds - LastPhysicsMutationRealTime < 0.45 ||
+        WorldInfo.RealTimeSeconds - LastFreezeScanRealTime < 0.45)
     {
         return false;
     }
+    // Misses consume scan cadence, not restoration's physics budget.
+    LastFreezeScanRealTime = WorldInfo.RealTimeSeconds;
     GoreManager = KFGoreManager(WorldInfo.MyGoreEffectManager);
     LocalPC = GetALocalPlayerController();
     if (GoreManager == None || LocalPC == None || LocalPC.Pawn == None)
@@ -451,7 +455,6 @@ function bool ApplyOneFixedMinimumCorpseLod()
             continue;
         }
         FixedMinimumCorpseLodScanCursor = (Index + 1) % PoolLength;
-        LastVisualMutationRealTime = WorldInfo.RealTimeSeconds;
         Candidate.Mesh.MinLodModel = TargetMinLod;
         if (Candidate.Mesh.MinLodModel != TargetMinLod)
         {
@@ -512,7 +515,6 @@ function bool ApplyOneSleepingCorpseSkeletonMinimum()
             continue;
         }
         SleepingCorpseSkeletonScanCursor = (Index + 1) % PoolLength;
-        LastVisualMutationRealTime = WorldInfo.RealTimeSeconds;
         Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep = true;
         Candidate.Mesh.bNoSkeletonUpdate = true;
         if (!Candidate.Mesh.bSkipAllUpdateWhenPhysicsAsleep ||
@@ -540,10 +542,11 @@ function bool RunOneFixedMinimumVisualAction()
     local bool bActionTaken;
 
     if (WorldInfo == None ||
-        WorldInfo.RealTimeSeconds - LastVisualMutationRealTime < 0.20)
+        WorldInfo.RealTimeSeconds - LastVisualScanRealTime < 0.20)
     {
         return false;
     }
+    LastVisualScanRealTime = WorldInfo.RealTimeSeconds;
     if (VisualControlPhase == 0)
     {
         bActionTaken = ApplyOneFixedMinimumCorpseLod();

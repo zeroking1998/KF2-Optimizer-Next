@@ -8,6 +8,9 @@ are visible immediately.
 
 ### What's new
 
+- Pace online corpse visual and freeze scans even when no candidate is eligible,
+  preserving their bounded cursors, readbacks and restoration timing.
+
 - Decouple flame, healing, Arc Generator and HRG Vampire spray-rotation audio
   from render FPS. The stock spray simulation and visuals still tick normally,
   while the Wwise RTPC is published at most 30 times per real-time second with
