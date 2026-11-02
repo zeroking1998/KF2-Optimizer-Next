@@ -1043,7 +1043,7 @@ int main() {
         "TelemetryMaintenanceElapsedSeconds <\n"
         "        TelemetryMaintenanceIntervalSeconds");
     const auto telemetry_context_lookup = interaction_tick_body.find(
-        "GetStandaloneGameplayContext(PrimaryController, CurrentWorld)");
+        "GetStandaloneGameplayContext(PrimaryController, CurrentWorld, CurrentMapName)");
     const auto telemetry_probe_scan = interaction_tick_body.find(
         "CurrentWorld.DynamicActors(\n"
         "        class'KF2OptimizerTelemetryProbe'");
@@ -2240,7 +2240,7 @@ int main() {
     const auto client_ui = online_context_source.find(
         "PrimaryController, \"NM_Client\", MapName)", client_context);
     const auto client_listener = online_context_source.find(
-        "EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController)",
+        "EnsureOnlineGraphicsListener(CurrentWorld, PrimaryController, MapName)",
         client_ui);
     const auto listen_context = online_context_source.find(
         "\"online_host_read_only\", \"NM_ListenServer\", MapName)",
