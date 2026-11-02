@@ -30,6 +30,7 @@ $sourceNames = @(
     'KF2OptimizerSprayActorHeal.uc'
     'KF2OptimizerSprayActorArcGenerator.uc'
     'KF2OptimizerSprayActorHrgVampire.uc'
+    'ZedAutoMode.uc'
 )
 
 $manifestLines = foreach ($sourceName in $sourceNames) {
@@ -43,6 +44,8 @@ $manifestLines = foreach ($sourceName in $sourceNames) {
 }
 $bindingHash = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'bind_damage_guard.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
 $manifestLines += "bind_damage_guard.ps1|$bindingHash"
+$donorHash = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'stage_zed_donors.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+$manifestLines += "stage_zed_donors.ps1|$donorHash"
 $manifest = ($manifestLines -join "`n") + "`n"
 $manifestBytes = [Text.Encoding]::UTF8.GetBytes($manifest)
 $sha256 = [Security.Cryptography.SHA256]::Create()

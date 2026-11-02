@@ -21,4 +21,12 @@ if ([BitConverter]::ToInt32($bytes, $source) -ge 0 -or
     throw 'Expected a Core.Function import and a local guard class export.'
 }
 [Array]::Copy($bytes, $source, $bytes, $destination, 4)
+# Resolve(string) uses the same FindObject function and the same Core.Function import.
+$lookup = [Regex]::Escape($binary.Substring($sites[0].Index + 7, 4))
+$guard = [Regex]::Escape($binary.Substring($destination, 4))
+$functionImport = [Regex]::Escape($binary.Substring($source, 4))
+$resolve = [Regex]::Matches($binary, '(?s)\x04\x2e(?<view>' + $guard +
+    ')\x1c' + $lookup + '\x00.{4}\x20' + $functionImport + '\x16\x04\x3a.{4}\x53')
+if ($resolve.Count -ne 1) { throw 'Unrecognized SDK output for the Zed function lookup.' }
+[Array]::Copy($bytes, $source, $bytes, $resolve[0].Groups['view'].Index, 4)
 [IO.File]::WriteAllBytes($CompiledModule, $bytes)
