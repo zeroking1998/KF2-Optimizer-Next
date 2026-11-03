@@ -4,8 +4,11 @@ This roadmap describes direction, not promised dates.
 
 ## Publication
 
-- Select the project license and complete the redistribution audit.
-- Publish the first reproducible signed package and evidence bundle.
+The project uses GPL-3.0-only and distributes an unsigned Windows x64 alpha
+through [GitHub Releases](https://github.com/zeroking1998/KF2-Optimizer-Next/releases).
+
+- Complete the independent binary redistribution review.
+- Obtain a trusted code-signing certificate and publish the first signed package.
 - Add public discussion and private vulnerability-reporting channels.
 
 ## Clarity
@@ -27,5 +30,5 @@ This roadmap describes direction, not promised dates.
 
 - Continue tuning live, average, 1% low, and frame-time evidence without rapid
   quality oscillation.
-- Refine distance- and visibility-first LOD, corpse, and FleX policies only when
-  the game exposes a verifiable and restorable capability.
+- Refine distance- and visibility-based LOD and corpse controls against repeatable gameplay captures.
+- Measure the optimized FleX runtime separately with visible gibs and fluids.

@@ -1,9 +1,8 @@
 # KF2 Optimizer Next - current project status
 
-- Updated: 2026-10-04
 - Default branch: `main`
-- Release line: `0.0.5-alpha`. See the
-  [changelog](../CHANGELOG.md).
+- Published Windows x64 pre-release: [0.0.5-alpha, 2 November 2026](https://github.com/zeroking1998/KF2-Optimizer-Next/releases/tag/v0.0.5-alpha).
+- [Changes in KF2 and in the Optimizer](../CHANGELOG.md).
 
 ## Current source contracts
 
