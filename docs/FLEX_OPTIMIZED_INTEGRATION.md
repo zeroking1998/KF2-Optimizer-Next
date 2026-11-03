@@ -177,5 +177,4 @@ Fresh local verification covers:
 - [ ] Online behavior qualified separately before it is claimed as verified.
 
 Standalone timing is not gameplay FPS, and byte reconstruction alone is not a
-gameplay stability pass. Keep the pull request in draft until the final package
-gate is completed.
+gameplay stability pass. The integration shipped in [0.0.5-alpha](https://github.com/zeroking1998/KF2-Optimizer-Next/releases/tag/v0.0.5-alpha). The checklist above records the tests documented for this integration.

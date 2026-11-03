@@ -5,18 +5,20 @@
 [![Platform: Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D4.svg)](#build-from-source)
 
 KF2 Optimizer Next is a free, portable Windows companion for Killing Floor 2.
-It watches game performance and safely adjusts supported graphics, LOD, corpse
-physics, effects, and optional FleX quality to help keep FPS stable.
+It measures frame times and adjusts graphics, effects and corpse physics when
+Adaptive detects sustained pressure. If you enable NVIDIA FleX in KF2, the
+Optimizer can run it with an optimized runtime for that session.
 
 > This is an unofficial community project and is not affiliated with or
 > endorsed by Tripwire Interactive. The project is alpha software.
 
 ## Download
 
-1. Open [GitHub Releases](https://github.com/zeroking1998/KF2-Optimizer-Next/releases).
-2. Download the portable Windows x64 ZIP.
-3. Extract the complete `KF2OptimizerNext` folder.
-4. Run `KF2Optimizer.exe`.
+1. Download the [0.0.5-alpha Windows x64 ZIP](https://github.com/zeroking1998/KF2-Optimizer-Next/releases/download/v0.0.5-alpha/KF2OptimizerNext-v0.0.5-alpha-win64.zip).
+2. Extract the entire ZIP to a folder you can write to.
+3. Run `KF2Optimizer.exe` from that folder.
+
+[Changes in 0.0.5-alpha](https://github.com/zeroking1998/KF2-Optimizer-Next/releases/tag/v0.0.5-alpha) · [All releases](https://github.com/zeroking1998/KF2-Optimizer-Next/releases)
 
 No installer, Windows service, scheduled task, or account is required. Keep the
 executable beside its `Data` folder. The app is currently unsigned, so Windows
@@ -28,16 +30,26 @@ telemetry download.
 
 ## What it does
 
-- Measures live, average, and 1% low FPS, frame time, CPU, GPU, RAM, and VRAM.
-- Uses a target from 30 to 240 FPS and adapts only when verified pressure exists.
-- Adjusts supported graphics, LOD, effects, corpse load, physics, and collision.
-- Leaves FleX off unless the user explicitly enables it in KF2.
-- Provides a separate overlay, graphics controls, backups, updates, and repair.
-- Confirms runtime changes with a matching receipt or exact readback.
-- Restores protected session changes when KF2 closes or after recovery.
+### Changes in Killing Floor 2
 
-On the verified KF2 build, solo play enables eight Zed optimizations. Of these,
-only the local sprint-audio fix runs when joining or hosting a listen server.
+- Zed AI reuses reachability checks during navigation. Solo play also enables
+  eight Zed optimizations covering sprint audio, targeting, bump handling,
+  grabs, King Fleshpound beam targeting and AI registration. Of these eight,
+  only sprint audio also runs on joined and listen servers.
+- Adaptive starts from your graphics settings and adjusts individual controls
+  when it detects pressure. Eligible corpses can sleep after their ragdolls
+  settle. Graphics and corpse settings are restored after the session.
+- With FleX enabled, eligible render draws avoid CPU vertex packing and
+  readbacks can overlap other work. The original DLLs are restored after play.
+
+### What the Optimizer provides
+
+- Set Target FPS (30–240) and Maximum corpses on Home.
+- Monitor live FPS, frame time, average FPS, 1% lows and resource usage.
+  Loading screens and confirmed Escape/trader menus are excluded from gameplay
+  statistics while live FPS continues.
+- Manage graphics settings, backups, updates and repair from the portable app.
+  Detailed runtime diagnostics are optional.
 
 ## Quick start
 
@@ -45,7 +57,7 @@ only the local sprint-audio fix runs when joining or hosting a listen server.
 2. Confirm the detected Killing Floor 2 folder.
 3. Choose **Target FPS** and **Maximum corpses** on Home.
 4. Leave **Adaptive optimization** on for automatic adjustments, or turn it
-   off to keep only monitoring and your fixed goals.
+   off to keep your saved graphics settings and continue monitoring.
 5. Start or continue KF2. Steam and desktop-shortcut launches are supported.
 
 The [User Guide](docs/USER_GUIDE.md) explains every screen and recovery option.
