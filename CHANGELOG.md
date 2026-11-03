@@ -8,28 +8,49 @@ are visible immediately.
 
 ### What's new
 
-- Reworked Adaptive optimization with separate responses to CPU, GPU, memory, effects, physics and corpse pressure, plus gradual quality recovery. A persistent Home switch lets you turn Adaptive on or off.
-- Added bounded corpse management, including distance sleep, settled-ragdoll freezing and reduced visual work for eligible Zeds and old corpses. Joined servers use verified client-local controls.
-- Added a protected startup profile and storage-aware warming for frequently used game files and selected maps. The four vendor startup logos are skipped.
-- Replaced the overlay's frame-timing backend with native DXGI capture while retaining live FPS, frame time, averages, 1% lows and stutter information.
-- Integrated a verified optimized NVIDIA FleX runtime for players who enable FleX. The render path reduces transfers and CPU-side vertex packing, readbacks can overlap other work, and original components are restored after the session.
-- Automatically select eight Zed optimizations in solo play on the verified KF2 build. Joined and listen-server sessions enable only the local sprint-audio fix.
-- Decoupled spray-rotation audio updates from render FPS for flame, healing, Arc Generator and HRG Vampire sprays. Detailed runtime diagnostics are now opt-in. Death-heavy waves also require less telemetry bookkeeping.
+**Killing Floor 2**
+
+- KF2's Zed AI does less repeated work when looking for a reachable navigation point. Solo also optimizes sprint audio, enemy selection and attacker counts, bump and grab checks, King Fleshpound beam targeting and AI registration. Of those eight solo changes, only sprint audio also runs when joining or hosting a listen server.
+- Flame, healing, Arc Generator and HRG Vampire sprays update their rotation sound at most 30 times per second. Starting or stopping a spray updates the sound immediately. The spray simulation and visuals keep their normal timing.
+- With NVIDIA FleX enabled, particle data can go from the GPU to the render buffers without CPU vertex packing on eligible draws. Render resources reuse a packed snapshot, and eligible readbacks overlap other work until the CPU needs the result. The session restores the original DLLs afterward.
+- Adaptive starts from your graphics settings. It can reduce the work behind a confirmed bottleneck, such as particle effects under effects pressure, and gradually restore quality when headroom returns. Moving corpses finish their death animation before becoming eligible for sleep.
+- Startup skips four vendor logos and warms frequently used files according to storage type. Selected maps can be warmed again after travel. Target FPS uses KF2's native startup cap, including when launching via Steam or a shortcut.
+
+**KF2 Optimizer Next**
+
+- The Optimizer's Home page has a persistent Adaptive switch. Debug lets you enable detailed runtime diagnostics separately, including FleX solver statistics when available. Routine play skips diagnostic-only actor scans and bookkeeping.
+- The overlay now uses native Windows DXGI frame timing. Live FPS, frame time, averages, 1% lows and stutter information remain available without a separate capture program.
 
 ### Bug fixes
 
-- Fixed map-transition world retention and duplicate telemetry interactions that could cause later map-loading failures.
-- Improved Adaptive recovery and exact restoration when disabling it, pausing in Escape/trader menus, changing maps or recovering an interrupted session.
-- Excluded loading and Escape/trader menus from gameplay averages, 1% lows and percentiles while keeping live FPS visible.
-- Fixed stale or inconsistent overlay FPS, hybrid-GPU adapter selection and isolated GPU readings affecting Adaptive decisions.
-- Corrected particle-pressure calculations and startup validation of supported particle and shadow settings.
-- Preserved user graphics and FleX selections across settings restarts and Steam handoffs, and improved slider saving and update-check retries.
-- Guarded local damage handling when an attacker's pawn no longer exists.
+**Killing Floor 2**
+
+- Map changes in KF2 could retain the previous world and accumulate duplicate viewport interactions. The telemetry module now releases old world references and removes duplicate interactions so they cannot build up over successive loads.
+- HRG Warthog and Auto Turret ammo indicators could be left without their material. The runtime repairs the missing material state.
+- A replicated weapon-fire notification can reach the client before its weapon class is available. The runtime checks the class before using it.
+- Active fire afflictions could flood the KF2 log with repeated FIRE warnings. The fix preserves the effect and its timer.
+- In solo and on listen hosts, an attacker can lose its pawn before damage is resolved. Damage handling now checks the pawn before reading it, avoiding repeated Accessed None warnings.
+- Moving ragdolls could go to sleep too early or immediately be put back to sleep after KF2 woke them. Sleep now checks for settled motion and respects recent wakes. Failed wake or readback attempts on one corpse no longer prevent later corpses from being processed.
+- Adaptive could lose track of graphics it had changed when the Escape or trader menu opened. It keeps the original values across pauses and map changes, retries unconfirmed restores, and returns the online corpse limit to the value supplied by the server or mod.
+- Adaptive compared particle counts with a capacity in different units. It now uses particle-count limits for pressure decisions.
+- Changes in a manager or emitter could leave an old quality setting attached to its replacement. Adaptive now tracks emitter lifetimes and rechecks ownership before it changes or restores effects.
+
+**KF2 Optimizer Next**
+
+- The Optimizer could block launch after KF2 or Adaptive saved a valid graphics value. Startup validation accepts the native whole-scene shadow resolution of 1204, intermediate shadow thresholds and particle LOD bias from 0 through 5.
+- Loading screens and confirmed Escape or trader menus no longer feed gameplay averages, 1% lows or percentiles. Live FPS continues to update. Frames from unrelated swap chains and previously lost capture sessions no longer contaminate the displayed values.
+- The overlay can reconnect when KF2 replaces its window. Frame capture recovers after a transient interruption, and closing the Optimizer while its capture worker is stopping no longer leaves shutdown waiting indefinitely.
+- On hybrid-GPU systems, telemetry could select the adapter with the most VRAM instead of the one running KF2. Adapter selection now uses process activity, and stale or isolated GPU readings cannot trigger a quality reduction on their own.
+- Clicking the slider track now saves Target FPS and Maximum corpses just like dragging the thumb. Failed saves restore the previous value. Changing the saved FPS target during a match keeps the current session target until the next launch.
+- The Game graphics page now reads KF2's saved menu settings, including film grain and the user's FleX choice. Failed writes or inconsistent readbacks are reported. Settings restarts and Steam process handoffs retain the protected session.
+- Closing the Optimizer while KF2 is still running keeps the protected files and recovery record available. Restoration verifies the original installation and retains pending work if a write fails. Concurrent user edits are preserved during configuration updates and package repair.
+- Interrupted portable updates can recover on the next startup. Update, repair and package import can no longer modify the package concurrently. A failed automatic update check retains the last successful result and retries.
+- Updates and repairs support long Windows paths. Startup also works on older Windows 10 installations that lack the newer temporary-directory API.
 
 ### Important notes
 
-- This is an unsigned Windows x64 alpha; Windows SmartScreen may show a warning on first launch.
-- FleX remains off unless you enable it. Protected sessions preserve your settings, and updates preserve portable user data.
+- FleX stays off unless you enable it. Its observation relay forwards the game's requested solver substeps. Portable updates preserve user settings, logs and backups.
+- This is an unsigned Windows x64 alpha. Windows SmartScreen may show a warning on first launch.
 
 [Detailed development changelog](docs/CHANGELOG_0.0.5-alpha.md)
 
