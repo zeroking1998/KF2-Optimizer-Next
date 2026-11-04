@@ -30,26 +30,40 @@ telemetry download.
 
 ## What it does
 
+The overview below covers the main features in **0.0.5-alpha**.
+The [Feature Reference](docs/FEATURE_REFERENCE.md) explains individual controls
+and their requirements. The [detailed changelog](docs/CHANGELOG_0.0.5-alpha.md)
+covers the fixes and smaller improvements included in this release.
+
 ### Changes in Killing Floor 2
 
-- Zed AI reuses reachability checks during navigation. Solo play also enables
-  eight Zed optimizations covering sprint audio, targeting, bump handling,
-  grabs, King Fleshpound beam targeting and AI registration. Of these eight,
-  only sprint audio also runs on joined and listen servers.
-- Adaptive starts from your graphics settings and adjusts individual controls
-  when it detects pressure. Eligible corpses can sleep after their ragdolls
-  settle. Graphics and corpse settings are restored after the session.
-- With FleX enabled, eligible render draws avoid CPU vertex packing and
-  readbacks can overlap other work. The original DLLs are restored after play.
+| Area | What the Optimizer does |
+|---|---|
+| Adaptive graphics | Starts from your graphics settings, responds to measured CPU, GPU, memory and effects pressure, and gradually restores quality when headroom returns. You can switch Adaptive on or off. |
+| Effects and visual detail | Adjusts supported shadows, lighting, post-processing, particle LOD and capacity, blood, decals, gore and cosmetic lifetimes according to the active pressure. |
+| Corpse physics | Applies your corpse limit, lets eligible distant or settled ragdolls sleep, wakes them when needed, and reduces LOD and skeleton work for eligible bodies. Settled corpses can be removed from active physics simulation. |
+| Living-Zed detail | Reduces eligible LOD and offscreen animation work while preserving attacks, hits and the close-range view. |
+| Zed navigation and AI | Reuses repeated navigation reachability checks. Solo optimizations also reduce work in sprint audio, enemy selection, attacker counts, bump handling, grab checks, King Fleshpound beam targeting and AI registration. |
+| Weapon audio | Limits repeated spray-rotation sound updates for flame, healing, Arc Generator and HRG Vampire weapons while updating start and stop values immediately. |
+| NVIDIA FleX | Runs the optimized FleX runtime when you enable FleX. Eligible draws use GPU render transfers instead of CPU vertex packing, reuse render snapshots, and overlap readbacks with other work. |
+| Startup and map preparation | Skips four vendor logos, applies the native target-FPS cap and startup settings, and warms frequently used files and selected-map data according to storage type. |
+| Runtime bug fixes | Repairs missing weapon-indicator materials, guards incomplete replicated weapon-fire context, removes repeated fire-affliction warnings, and guards damage handling when the attacker's pawn has disappeared. |
+
+Availability depends on the session. Of the eight solo Zed optimizations,
+sprint audio also runs on joined and listen servers. The damage guard runs in
+solo and on listen hosts. Online Adaptive uses verified client-local controls.
 
 ### What the Optimizer provides
 
-- Set Target FPS (30–240) and Maximum corpses on Home.
-- Monitor live FPS, frame time, average FPS, 1% lows and resource usage.
-  Loading screens and confirmed Escape/trader menus are excluded from gameplay
-  statistics while live FPS continues.
-- Manage graphics settings, backups, updates and repair from the portable app.
-  Detailed runtime diagnostics are optional.
+| Area | What you can use |
+|---|---|
+| Performance goals | Set Target FPS from 30 to 240 and choose Maximum corpses. |
+| FPS and hardware monitoring | View live FPS, frame time, average FPS, 1% lows, CPU, GPU, RAM and VRAM readings. Confirmed loading, Escape and trader menus are excluded from gameplay statistics while live FPS continues. |
+| In-game overlay | Choose the performance information displayed while playing. The overlay uses native DXGI frame timing and follows the KF2 window. |
+| Manual graphics controls | Read and change KF2 graphics and Advanced settings, with saved preferences and checked writes. |
+| Backups and restoration | Back up protected settings, restore session changes, and recover pending work after an interrupted session. FleX sessions also restore the original runtime DLLs. |
+| Portable updates and repair | Check for updates, repair the matching package and preserve portable user data. |
+| Optional diagnostics | Enable detailed Adaptive, corpse/Zed, physics, FleX, overlay and prewarm diagnostics from Debug, then export information for troubleshooting. |
 
 ## Quick start
 
